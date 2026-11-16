@@ -2405,4 +2405,19 @@ clock moves them and the 50 ms ticks): red in both engines without the deferred 
 written, pending, origin) and `applyLive` (ER-27) showed the sequence in a failing run: two `end` arrivals reached the end (read = max), then the
 total grew once more (spacer 24 px taller) with no arrival: a page fetched outside the round answered with a larger total, `PagedRows` stored it and
 nothing scrolled. That is a third shape of the same class (a total that grows without the view following), not the deferred write failing. Fix through
-ADR 0072 (`onGrow`, one pending-write slot, `classifyScroll`, user take-over from input events, stored `pinned`); e2e green 12 of 12 in WebKit and in Chromium.
+ADR 0072 (`onGrow`, one pending-write slot, `classifyScroll`, user take-over from input events, stored `pinned`); the e2e looked green 12 of 12 per engine at 69e230d15, but a 20-repeat run of the whole matrix with 4 workers (460 runs per engine) failed 4 to 5 times in WebKit and 3 in Chromium; see the next entry for what that found and the final counts.
+
+**Review of 69e230d15, and the final measurements (2026-11-17).** The reviewer's probes found three real faults, each fixed with a failing test first:
+(1) the deferred re-pin after the next render fought a user whose wheel scroll was applied after the render: removed; a wheel or key takes the view over only
+when it moves **away** from the newest end (xterm's rule), re-pinning comes only from a position event (a scroll that is not ours, a key that lands there, the
+release of the scrollbar, never while it is held); (2) `arriveLive` consumed the first answer of any page, so an unowned fill page could start the round and a
+take-over did not stop a round that had not answered: the arrival now starts from an owned page, a take-over downgrades a pending `end` to `keep`, a failed first
+owned page ends the hold; (3) the follow and hold rules were not in the reducer alone (`setTop` re-derived `pinned`, the holding effect and `applyGrowth` decided
+themselves): the reducer now has `positioned{atNewest, byUser}`, `grew`, `released` and `followOn`, `setTop` is a pure writer, `liveMode` is gone. Re-measuring
+the matrix at 20 repeats with 4 workers found three more browser behaviours, each seen in the grid log first: Chromium and WebKit reset or shift `scrollTop` with
+no input while the viewport or the spacer changes size (a scroll event the grid took for the user: `classifyScroll` now returns `spurious` when the layout changed
+since its last write, or it wrote within 300 ms, and no input came since; the grid writes its own position back); a key move to the end written before the render caught up with
+the total was clamped (such a write now waits for the render too); a headless-WebKit wheel gesture is sometimes dropped (the e2e sends it again while the view has not
+moved; that is a test-infrastructure miss, not a product behaviour). **Final counts, quoted from the runs:** the whole matrix plus the reveal case, 23 tests
+x 20 repeats = 460 runs per engine, `--workers 4`: Chromium 460 of 460, WebKit 460 of 460; before the last two fixes the same run failed 3 (Chromium) and 4 to 5 (WebKit) times.
+A WebKit scrollbar press sometimes misses the thumb (the overlay scrollbar is drawn under the pointer: the test hovers first); it is a test precondition, not measured by the grid.

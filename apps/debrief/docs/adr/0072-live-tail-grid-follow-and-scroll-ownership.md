@@ -70,17 +70,23 @@ Debrief keep live updates on and only stop sticking to the end.
 ## Decision
 
 1. **A live-refresh round owns the pages it asked for.** A round starts at `liveRefresh(mode, ...)`; it owns the set of pages
-   it requested and the mode (`end`, `shift`, `keep`). Only answers to those pages may move the view. Each later answer with a
-   larger total re-applies the mode: `end` scrolls to the new end, `shift` moves down by the extra rows. The round's hold on the
-   view ends at the first of: the last owned page answered, an owned page failed, the user took over (2), a new round or a reset.
-   Pages fetched for any other reason never move the view.
+   it requested and the mode (`end`, `shift`, `keep`). Only answers to those pages may move the view, and the round's arrival starts
+   with an answer to one of them (a page fetched for another reason does not start it). Each later owned answer with a larger total
+   re-applies the mode: `end` scrolls to the new end, `shift` moves down by the extra rows. The round's hold on the view ends at the first
+   of: the last owned page answered, an owned page failed (a round whose first owned page failed never starts), the user took over (2:
+   a round that has not answered yet downgrades `end` to `keep`; `shift` stays, it only keeps the same events in view), a new round or a
+   reset. **Growth outside a round (G9):** a page fetched for another reason that reports a larger total than the cache had is reported
+   (`onGrow`); the reducer (3) decides what it does to the view.
 2. **One owner of scroll writes, and two signals for the user.** `EventsGrid.setTop` is the only code that writes `scrollTop`
    (true today; a lint keeps it so). The user has taken over when either:
-   - an input event arrives on the grid: `wheel`, `pointerdown` (this covers the scrollbar), `touchstart`, or a `keydown` that
-     moves the view (arrows, Page Up/Down, Home, End, Space). This is the DevTools signal, and it is the only one that sees a
+   - an input event arrives on the grid that moves the view **away from the newest end**: `wheel`, `pointerdown` on the scroller itself
+     (the scrollbar; the view is not re-pinned until it is released), `touchstart` on the scroller, or a `keydown` that moves away (arrows, Page
+     Up/Down, Home, End). An input toward the newest end, or one that cannot move the view, takes nothing over (xterm does the same). This is the DevTools signal, and it is the only one that sees a
      wheel in the scaled-scrollbar mode or a keyboard move, because there the grid writes the scroll itself;
-   - a `scroll` event that is not an echo of our write. A pure `classifyScroll(read, pendingWrite, lastWrite, maxScroll)` returns
-     `own` (within 1 px of the last write, or clamped at the current maximum after our write) or `user`. This is the TanStack
+   - a `scroll` event that is not an echo of our write. A pure `classifyScroll(read, pendingWrite, lastWrite, maxScroll, recentInput,
+     layoutChanged)` returns `own` (within 1 px of the last write, or clamped at the current maximum after our write), `spurious` (the
+     layout changed since our last write and no input moved the view since: the browser adjusted the position itself, as WebKit does while
+     the spacer or the viewport changes size; the grid writes its own position back) or `user`. This is the TanStack
      signal; it covers scrolls with no input event (assistive tech, find-in-page).
    I keep both because each misses cases the other sees. I don't use `scrollend`: it cannot tell who scrolled, and WebKit before
    Safari 26.2 lacks it.
@@ -99,6 +105,12 @@ Debrief keep live updates on and only stop sticking to the end.
    | Holding | new data | count only |
    | Holding | reveal (pill click) | round in `end` mode (newest first: back to the top); pinned until the user takes over; still holding |
    | Holding | Follow on, or Resume | Following, pinned; round in `end` mode |
+   | any | the user moved the view (a position event, `byUser`) | pinned is whether it is on the newest end; the round lets go |
+   | any | the grid moved the view itself (`byUser` false) | landing on the newest end pins; anything else leaves `pinned` |
+   | Following, pinned | a page outside a round reported a larger total (`grew`) | oldest first: write the new end after the render; newest first: stays at the top |
+   | Following, not pinned | `grew` | oldest first: nothing (rows are added below); newest first: shift by the extra rows |
+   | Holding | `grew` | pinned (a revealed view): as following; not pinned: nothing (the held rows stay) |
+   | Holding | released without Follow on (live tail back, a pause cleared) | following; `pinned` unchanged |
    | any | new query or sort order | reset to the top (unchanged) |
 4. **Writes happen after the render when the size changes.** A write for a new total or a new viewport height waits for
    `afterNextRender`; its position signal is set at once. At most one write is pending; a newer one replaces it, and a user
@@ -106,7 +118,7 @@ Debrief keep live updates on and only stop sticking to the end.
 
 ## Check
 
-- **Real-browser e2e matrix**, `apps/debrief/app/e2e/live-tail.e2e.ts`, projects `chromium` and `webkit`
+- **Real-browser e2e matrix**, `apps/debrief/app/e2e/live-tail-follow.e2e.ts` (and the reveal case in `live-tail.e2e.ts`), projects `chromium` and `webkit`
   (`playwright.config.ts`), with `?mockPageStaggerMs` and the pinned clock (`page.clock.install`, `runFor`). Each case asserts
   that the last row is the newest event, or that the top row is unchanged:
 
@@ -162,16 +174,23 @@ No single gap costs more than 1 agent-day beyond common practice, so none needs 
 - Real-browser clamping is handled in one tested place, not by write timing alone.
 - WebKit coverage depends on a local run or a full CI run until branch CI runs it.
 
-## Implementation (2026-11-16)
+## Implementation (2026-11-16, amended 2026-11-17 after the review)
 
-- `follow-reducer.ts` (`followStep`, G8) and `scroll-classify.ts` (`classifyScroll`, G3) are pure, each with its table test.
-- `EventsGrid`: one pending-write slot dropped by `userTookOver()` (G2); `userTookOver()` from `wheel`, `pointerdown` on the scroller (the
-  scrollbar), `touchstart` and moving keys (G1), plus any scroll event `classifyScroll` calls `user`; a stored `pinned` flag, re-applied
-  on resize (G4); `setTop` is the single writer (through `scroll-writer.ts`), logging the scheduled, dropped and written writes, scroll events and
-  arrivals (ER-27).
-- `PagedRowsStore`: the round's follow-up covers `shift` as well as `end` (G5), a failed owned page ends it (G6), `onGrow` (G9).
-- Real-browser e2e matrix `e2e/live-tail-follow.e2e.ts` (both sort orders; Chromium and WebKit, run locally for WebKit): on the code before this
-  change 3 of 14 failed in each engine (a key or wheel during a reveal, resize while pinned and not pinned, following with a key away).
-- Lint, report-only (ER-41): `no-restricted-syntax` on assignments to `scrollTop` in `src/app/grid/`, in `npm run lint:report`
-  (`DEBRIEF_LINT_REPORT=1`); first run on the real tree 2026-11-16: no findings, and a probe writer is reported. It moves to the normal lint after
-  its first green run in CI (run id to be recorded here).
+- `follow-reducer.ts` (`followStep`, G8) and `scroll-classify.ts` (`classifyScroll`, G3) are pure, each with its table test. The reducer owns every change
+  of `holding` and `pinned`: events `data`, `resize`, `userTookOver`, `positioned{atNewest, byUser}`, `grew`, `hold`, `released`, `reveal`, `followOn`, `reset`.
+  `setTop` is a pure writer (it does not touch the follow state); `go` writes and reports the landing as `positioned`.
+- `EventsGrid`: one pending-write slot dropped on a take-over (G2), also used for a write the rendered spacer cannot reach yet; `userTookOver()` from a
+  `wheel` or key that moves **away** from the newest end, a press on the scrollbar (not re-pinned until it is released) and a touch on the scroller (G1), and
+  a position event for any scroll the classifier calls `user`; a stored `pinned` flag re-applied on resize (G4); `setTop` is the single writer (through
+  `scroll-writer.ts`). Scroll events the browser causes itself while the layout changes, with no input, are `spurious`: the grid writes its own position back.
+  Logs (ER-27): scheduled, dropped and written writes, take-overs with their input, scroll-origin changes (not every event), arrivals and growth.
+- `PagedRowsStore`: the round's follow-up covers `shift` as well as `end` (G5); the arrival starts from an owned page; a take-over downgrades a pending `end` to
+  `keep`; a failed owned page ends the hold (G6); `onGrow` reports a larger total from a page outside a round (G9).
+- Real-browser e2e matrix `e2e/live-tail-follow.e2e.ts` (both sort orders; Chromium and WebKit, WebKit run locally): reveal with pushes between its pages,
+  following over 20 pushes, a wheel, a key and a real-mouse scrollbar drag during a reveal, a wheel at once after the reveal click, a wheel toward the newest end,
+  a wheel in the scaled mode, resize while pinned and not pinned, Follow off and on. Top-row checks compare event ids. Final measurement: 23 tests x 20 repeats
+  = 460 runs per engine with 4 workers: Chromium 460 of 460, WebKit 460 of 460. The first matrix (14 tests, 69e230d15) failed 3 of 14 in each engine on the
+  code before this ADR and was green 14 of 14 afterwards, but the 20-repeat runs of the first implementation failed 3 to 5 times per engine (see lessons.md).
+- Lint, report-only (ER-41): `no-restricted-syntax` on assignments to `scrollTop`, `scrollTo`, `scrollBy`, `scrollIntoView` and `Object.assign(el, { scrollTop })`
+  in `src/app/grid/`, and `no-restricted-imports` of `scroll-writer` outside `events-grid.ts`, in `npm run lint:report` (`DEBRIEF_LINT_REPORT=1`); first run on the
+  real tree 2026-11-17: no findings, and a probe file with each shape is reported. It moves to the normal lint after its first green run in CI (run id to be recorded here).

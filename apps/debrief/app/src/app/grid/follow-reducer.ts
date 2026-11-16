@@ -13,16 +13,24 @@ export type FollowEvent =
   | { type: 'data' }
   /** The viewport changed size. */
   | { type: 'resize' }
-  /** An input event (wheel, scrollbar, touch, a moving key) or a scroll that was not the grid's own. */
+  /** An input event that moves the view away from the newest end (wheel, scrollbar press, touch, a key away). */
   | { type: 'userTookOver' }
-  /** The user scrolled back to the newest end. */
-  | { type: 'userAtNewest' }
+  /**
+   * The view is at a new position. `byUser`: the user moved it (a scroll event that was not the grid's own write, a key, a jump):
+   * `pinned` becomes whether it is on the newest end, and the round lets go. Otherwise the grid moved it itself (a live write, a resize):
+   * landing on the newest end pins, anything else leaves `pinned` alone.
+   */
+  | { type: 'positioned'; atNewest: boolean; byUser: boolean }
+  /** A page outside a live round reported a larger total (the end moved). */
+  | { type: 'grew' }
+  /** Holding ended without Follow on or Resume (live tail came back, a pause was cleared). */
+  | { type: 'released' }
   /** Follow off, or a manual zoom or pan. */
   | { type: 'hold' }
   /** The pill: show the newest events; still holding. */
   | { type: 'reveal' }
   /** Follow on or Resume. */
-  | { type: 'follow' }
+  | { type: 'followOn' }
   /** A new query or sort order: the view goes to the top. */
   | { type: 'reset' };
 
@@ -40,9 +48,11 @@ export interface FollowAction {
   count: boolean;
   /** The round's hold on the view ends now, and a pending scroll write is dropped. */
   endHold: boolean;
+  /** What a total that grew outside a round does to the view: scroll to the new end, shift by the extra rows, or nothing. */
+  growth: 'end' | 'shift' | 'none';
 }
 
-const NONE: FollowAction = { round: 'none', goNewest: false, writeNewest: false, keepTopRow: false, count: false, endHold: false };
+const NONE: FollowAction = { round: 'none', goNewest: false, writeNewest: false, keepTopRow: false, count: false, endHold: false, growth: 'none' };
 
 /** The next state and the action for `event`; `descending` is the sort order (newest first puts the newest end at the top). */
 export function followStep(state: FollowState, event: FollowEvent, descending: boolean): { state: FollowState; action: FollowAction } {
@@ -56,13 +66,24 @@ export function followStep(state: FollowState, event: FollowEvent, descending: b
       return { state, action: state.pinned ? { ...NONE, writeNewest: true } : { ...NONE, keepTopRow: true } };
     case 'userTookOver':
       return { state: { ...state, pinned: false }, action: { ...NONE, endHold: true } };
-    case 'userAtNewest':
-      return { state: { ...state, pinned: true }, action: NONE };
+    case 'positioned':
+      if (event.byUser) return { state: { ...state, pinned: event.atNewest }, action: { ...NONE, endHold: true } };
+      return { state: event.atNewest ? { ...state, pinned: true } : state, action: NONE };
+    case 'grew': {
+      // Pinned: the end moved, so the view follows (oldest first; newest first the newest rows are at the top and stay there). A held
+      // view that is not pinned keeps its rows. A following view that is not pinned oldest first has rows added below it: nothing;
+      // newest first they are inserted above it: shift.
+      if (state.pinned) return { state, action: { ...NONE, growth: descending ? 'none' : 'end' } };
+      if (state.holding) return { state, action: NONE };
+      return { state, action: { ...NONE, growth: descending ? 'shift' : 'none' } };
+    }
+    case 'released':
+      return { state: { ...state, holding: false }, action: NONE };
     case 'hold':
       return { state: { ...state, holding: true }, action: NONE };
     case 'reveal':
       return { state: { ...state, pinned: true }, action: { ...NONE, round: newest, goNewest: true } };
-    case 'follow':
+    case 'followOn':
       return { state: { holding: false, pinned: true }, action: { ...NONE, round: newest, goNewest: true } };
     case 'reset':
       return { state: { ...state, pinned: descending }, action: NONE };

@@ -124,7 +124,23 @@ module.exports = defineConfig(
           selector: "AssignmentExpression[left.type='MemberExpression'][left.property.name='scrollTop']",
           message: 'Write scrollTop only in EventsGrid.setTop (ADR 0072): a second writer breaks the single pending write and the scroll classification.',
         },
+        {
+          selector: "CallExpression[callee.property.name=/^(scrollTo|scrollBy|scrollIntoView)$/]",
+          message: 'scrollTo, scrollBy and scrollIntoView write the scroll position too: only EventsGrid.setTop does (ADR 0072).',
+        },
+        {
+          selector: "CallExpression[callee.object.name='Object'][callee.property.name='assign'] Property[key.name='scrollTop']",
+          message: 'Object.assign(el, { scrollTop }) is a scrollTop write: only EventsGrid.setTop writes it (ADR 0072).',
+        },
       ],
+    },
+  },
+  {
+    // ADR 0072: `writeScrollTop` is for EventsGrid.setTop only. Report-only (ER-41), like the writer rule above.
+    files: ['src/**/*.ts'],
+    ignores: ['src/**/*.spec.ts', 'src/app/grid/events-grid.ts', 'src/app/grid/scroll-writer.ts'],
+    rules: {
+      'no-restricted-imports': [REPORT, { patterns: [{ group: ['**/scroll-writer'], message: 'Only EventsGrid.setTop writes the grid scroll position (ADR 0072).' }] }],
     },
   },
   {

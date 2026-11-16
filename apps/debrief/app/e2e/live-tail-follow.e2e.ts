@@ -8,10 +8,22 @@ import { viewport } from './mock-url';
 const URL = '?mockTotal=5000&mockLive=1&mockLiveRate=20&mockLiveMs=50&mockLiveRotateMs=0&mockLiveAlertMs=0&mockPageStaggerMs=10';
 const SCALED = '?mockTotal=3000000&mockLive=1&mockLiveRate=20&mockLiveMs=50&mockLiveRotateMs=0&mockLiveAlertMs=0&mockPageStaggerMs=10';
 
+// Headless browsers hide the scrollbar: the real-mouse scrollbar drag needs it drawn (`--hide-scrollbars` is a default argument of headless Chromium).
+test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
+
 type Order = 'oldest first' | 'newest first';
 const ORDERS: Order[] = ['oldest first', 'newest first'];
 
+// The grid's log (ER-27, category ui.grid: scroll writes, origins, arrivals, growth) is attached when a test fails.
+const gridLogs = new WeakMap<Page, string[]>();
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status !== testInfo.expectedStatus) await testInfo.attach('grid-log', { body: (gridLogs.get(page) ?? []).join('\n'), contentType: 'text/plain' });
+});
+
 async function open(page: Page, order: Order, search = URL): Promise<void> {
+  const log: string[] = [];
+  gridLogs.set(page, log);
+  page.on('console', (m) => void (m.text().startsWith('[ui.grid]') && log.push(m.text())));
   await page.clock.install();
   await openAppWith(page, search);
   if (order === 'newest first') await page.getByRole('button', { name: /Oldest first/ }).click();
@@ -31,6 +43,49 @@ async function runUntil(page: Page, done: () => Promise<boolean>, maxMs: number)
   return done();
 }
 
+/** The event id of the row at the top of the view (null while a placeholder is there). */
+const topEventId = (page: Page) =>
+  viewport(page).evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const header = el.querySelector('.header')?.getBoundingClientRect().height ?? 0;
+    const row = document.elementFromPoint(r.left + 60, r.top + header + 6)?.closest('.row');
+    const m = /Synthetic event (\d+)/.exec(row?.textContent ?? '');
+    return m ? Number(m[1]) : null;
+  });
+
+/** The top event id once two reads in a row agree (rows are replaced while pages load: one read can catch a placeholder). */
+async function stableTopEventId(page: Page): Promise<number> {
+  let last: number | null = null;
+  let id: number | null = null;
+  const ok = await runUntil(
+    page,
+    async () => {
+      id = await topEventId(page);
+      const same = id !== null && id === last;
+      last = id;
+      return same;
+    },
+    2_000,
+  );
+  expect(ok, 'the top row settles on an event').toBe(true);
+  return id as unknown as number;
+}
+
+/** Presses the scrollbar thumb with the real mouse and drags it by `dy` px (a user scroll that no script produces). */
+async function dragScrollbar(page: Page, dy: number): Promise<void> {
+  const box = await viewport(page).boundingBox();
+  const m = await viewport(page).evaluate((el) => ({ top: el.scrollTop, height: el.scrollHeight, client: el.clientHeight, bar: el.offsetWidth - el.clientWidth }));
+  const thumb = Math.max(20, (m.client / m.height) * m.client);
+  const x = (box?.x ?? 0) + (box?.width ?? 0) - Math.max(4, m.bar / 2);
+  const y = (box?.y ?? 0) + (m.top / Math.max(1, m.height - m.client)) * (m.client - thumb) + thumb / 2;
+  await page.mouse.move(x - 2, y - 2); // hover first: an overlay scrollbar is only drawn (and pressable) under the pointer
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y + dy / 2, { steps: 5 });
+  await page.mouse.move(x, y + dy, { steps: 5 });
+  await page.mouse.up();
+}
+
 /** On the newest end: the last row oldest first, the first row newest first. */
 async function onNewest(page: Page, order: Order): Promise<boolean> {
   const m = await metrics(page);
@@ -42,6 +97,47 @@ async function goNewest(page: Page, order: Order): Promise<void> {
   await viewport(page).focus();
   await page.keyboard.press(order === 'oldest first' ? 'End' : 'Home');
   expect(await runUntil(page, () => onNewest(page, order), 2_000), 'the view reaches the newest end').toBe(true);
+}
+
+/** The user moves the view away from the newest end: with the wheel, a key or by dragging the real scrollbar. */
+async function leaveNewest(page: Page, order: Order, how: 'wheel' | 'key' | 'scrollbar drag'): Promise<void> {
+  const box = await viewport(page).boundingBox();
+  if (how === 'wheel') {
+    await page.mouse.move((box?.x ?? 0) + 200, (box?.y ?? 0) + 150);
+    await page.mouse.wheel(0, order === 'oldest first' ? -900 : 900);
+  } else if (how === 'key') {
+    await viewport(page).focus();
+    await page.keyboard.press(order === 'oldest first' ? 'PageUp' : 'PageDown');
+    await page.keyboard.press(order === 'oldest first' ? 'PageUp' : 'PageDown');
+  } else {
+    await dragScrollbar(page, order === 'oldest first' ? -300 : 300);
+  }
+}
+
+/**
+ * The view left the newest end. A wheel or scrollbar scroll is applied by the browser's scrolling machinery in real time, not in page
+ * time (the pinned clock does not move it), and headless WebKit sometimes drops a wheel gesture altogether (measured: 4 of about 150
+ * wheel cases; the grid's log shows no take-over). This waits on the condition, polling in real time with page time moving beside it,
+ * and sends the input again while the view has not moved: the property under test is that a user scroll is not pulled back, not that the
+ * browser delivers the first gesture. The number of repeats is attached to the test.
+ */
+async function expectLeftNewest(page: Page, order: Order, how: 'wheel' | 'key' | 'scrollbar drag' | 'wheel (scaled)'): Promise<void> {
+  let repeats = 0;
+  await expect
+    .poll(
+      async () => {
+        await page.clock.runFor(20);
+        if (!(await onNewest(page, order))) return true;
+        if (how !== 'key') {
+          repeats += 1;
+          await leaveNewest(page, order, how === 'wheel (scaled)' ? 'wheel' : how);
+        }
+        return false;
+      },
+      { message: `${how}: the view left the newest end` },
+    )
+    .toBe(true);
+  if (repeats > 0) test.info().annotations.push({ type: 'input-repeats', description: `${how}: ${repeats} repeat(s)` });
 }
 
 async function holdWithEvents(page: Page): Promise<void> {
@@ -62,56 +158,57 @@ for (const order of ORDERS) {
       expect(await runUntil(page, () => onNewest(page, order), 1_000), 'and stays there').toBe(true);
     });
 
-    test('following over 20 pushes: pinned stays on the newest; not pinned keeps its position', async ({ page }) => {
+    test('following over 20 pushes: pinned stays on the newest; not pinned keeps its events in view', async ({ page }) => {
       await open(page, order);
       await goNewest(page, order);
       await page.clock.runFor(1_000);
       expect(await runUntil(page, () => onNewest(page, order), 1_000), 'pinned: stays on the newest end').toBe(true);
-      // Away from the newest end (a user key move): the position is kept while events arrive.
+      // Away from the newest end (a user key move): the same events stay in view while others arrive.
       await viewport(page).focus();
       await page.keyboard.press(order === 'oldest first' ? 'PageUp' : 'PageDown');
       await page.keyboard.press(order === 'oldest first' ? 'PageUp' : 'PageDown');
       await page.clock.runFor(200);
-      const before = await metrics(page);
       expect(await onNewest(page, order)).toBe(false);
-      await page.clock.runFor(1_000);
-      await page.clock.runFor(200);
-      const after = await metrics(page);
-      // Oldest first the rows stay where they are; newest first they are inserted above, so the same events stay in view (the top moves down).
-      if (order === 'oldest first') expect(Math.abs(after.top - before.top)).toBeLessThanOrEqual(24);
-      else expect(after.top).toBeGreaterThanOrEqual(before.top - 24);
+      const before = await stableTopEventId(page);
+      await page.clock.runFor(1_200);
+      expect(await runUntil(page, async () => (await topEventId(page)) === before, 1_000), `the top row is the same event (${before})`).toBe(true);
     });
 
-    test('a wheel, the scrollbar or a key during a reveal leave the view where the user put it', async ({ page }) => {
-      for (const how of ['wheel', 'key', 'scrollbar'] as const) {
+    // Each way the user can scroll away, in the middle of a reveal (the first page of its round has been answered, later ones not yet).
+    for (const how of ['wheel', 'key', 'scrollbar drag'] as const) {
+      test(`${how} during a reveal leaves the view where the user put it`, async ({ page }) => {
         await open(page, order);
         await holdWithEvents(page);
         await page.getByTestId('new-events').click();
-        // The first page of the reveal has been answered, a later one not yet.
         await page.clock.runFor(40);
-        const box = await viewport(page).boundingBox();
-        if (how === 'wheel') {
-          await page.mouse.move((box?.x ?? 0) + 200, (box?.y ?? 0) + 150);
-          await page.mouse.wheel(0, order === 'oldest first' ? -900 : 900);
-        } else if (how === 'key') {
-          await viewport(page).focus();
-          await page.keyboard.press(order === 'oldest first' ? 'PageUp' : 'PageDown');
-          await page.keyboard.press(order === 'oldest first' ? 'PageUp' : 'PageDown');
-        } else {
-          await viewport(page).evaluate((el, newestFirst) => {
-            el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-            el.scrollTop = newestFirst ? el.scrollTop + 900 : Math.max(0, el.scrollTop - 900);
-          }, order === 'newest first');
-        }
-        await page.clock.runFor(100);
-        const left = await metrics(page);
-        expect(await onNewest(page, order), `${how}: the view left the newest end`).toBe(false);
+        await leaveNewest(page, order, how);
+        await expectLeftNewest(page, order, how);
+        const left = await stableTopEventId(page);
         await page.clock.runFor(1_500);
-        const settled = await metrics(page);
         expect(await onNewest(page, order), `${how}: and was not pulled back`).toBe(false);
-        expect(Math.abs(settled.top - left.top), `${how}: and stays where it was put`).toBeLessThanOrEqual(order === 'oldest first' ? 24 : 24 * 80);
-        await page.reload();
-      }
+        expect(await runUntil(page, async () => (await topEventId(page)) === left, 1_000), `${how}: and the same event (${left}) is at the top`).toBe(true);
+      });
+    }
+
+    test('a wheel at once after the reveal click (before its first page answers) is not pulled back', async ({ page }) => {
+      await open(page, order);
+      await holdWithEvents(page);
+      // Away from the newest end first, then the reveal, then a wheel away without waiting.
+      await page.getByTestId('new-events').click();
+      await leaveNewest(page, order, 'wheel');
+      await expectLeftNewest(page, order, 'wheel');
+      await page.clock.runFor(1_500);
+      expect(await onNewest(page, order), 'not pulled back to the newest end').toBe(false);
+    });
+
+    test('a wheel toward the newest end while on it is a no-op: following goes on', async ({ page }) => {
+      await open(page, order);
+      await goNewest(page, order);
+      const box = await viewport(page).boundingBox();
+      await page.mouse.move((box?.x ?? 0) + 200, (box?.y ?? 0) + 150);
+      await page.mouse.wheel(0, order === 'oldest first' ? 600 : -600);
+      await page.clock.runFor(1_200);
+      expect(await runUntil(page, () => onNewest(page, order), 1_000), 'still following').toBe(true);
     });
 
     test('a wheel in the scaled scrollbar mode leaves the view where the user put it', async ({ page }) => {
@@ -122,8 +219,7 @@ for (const order of ORDERS) {
       const box = await viewport(page).boundingBox();
       await page.mouse.move((box?.x ?? 0) + 200, (box?.y ?? 0) + 150);
       await page.mouse.wheel(0, order === 'oldest first' ? -1_200 : 1_200);
-      await page.clock.runFor(100);
-      expect(await onNewest(page, order)).toBe(false);
+      await expectLeftNewest(page, order, 'wheel (scaled)');
       await page.clock.runFor(1_500);
       expect(await onNewest(page, order), 'not pulled back to the newest end').toBe(false);
     });
@@ -146,12 +242,11 @@ for (const order of ORDERS) {
       await viewport(page).focus();
       for (let i = 0; i < 4; i++) await page.keyboard.press(order === 'oldest first' ? 'PageUp' : 'PageDown');
       await page.clock.runFor(200);
-      const before = await metrics(page);
+      const before = await stableTopEventId(page);
       for (const height of [620, 900]) {
         await page.setViewportSize({ width: 1440, height });
         await page.clock.runFor(300);
-        const after = await metrics(page);
-        expect(Math.abs(after.top - before.top), `${height} px: the top row is kept`).toBeLessThanOrEqual(order === 'oldest first' ? 24 : 24 * 80);
+        expect(await runUntil(page, async () => (await topEventId(page)) === before, 1_000), `${height} px: the top row is kept (${before})`).toBe(true);
       }
     });
 

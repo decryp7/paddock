@@ -19,17 +19,6 @@ export const SCROLL_IDLE_MS = 50;
  */
 export type LiveMode = 'end' | 'shift' | 'keep';
 
-/**
- * The live-follow policy: what a refresh does, given the sort order, where the view is and whether the user asked
- * to reveal the newest events ("N new events" or resumed following).
- */
-export function liveMode(descending: boolean, atStart: boolean, atEnd: boolean, reveal?: 'start' | 'end'): LiveMode {
-  if (reveal === 'end') return 'end';
-  if (reveal === 'start') return 'keep';
-  if (descending) return atStart ? 'keep' : 'shift';
-  return atEnd ? 'end' : 'keep';
-}
-
 /** The first response of a live refresh: how many rows were added and what to do with the view. */
 export interface LiveArrival {
   mode: LiveMode;
@@ -173,6 +162,8 @@ export class PagedRowsStore {
   /** The user took the view over (a scroll the grid did not write itself): the reveal is no longer followed. */
   endReveal(): void {
     this.followUp = null;
+    // A round that has not answered yet must not take the view to the end any more; a shift only keeps the same events in view.
+    if (this.pendingLive?.mode === 'end') this.pendingLive.mode = 'keep';
   }
 
   /** The user scrolled: page fetches wait until scrolling pauses. */
@@ -254,8 +245,12 @@ export class PagedRowsStore {
     if (answer.status === 'failed') {
       this.inflight.delete(page);
       this.failed.add(page);
-      // A failed page of the round ends its hold on the view (ADR 0072): later answers of the round no longer move it.
-      if (this.followUp?.pages.has(page) || this.pendingLive?.pages.has(page)) this.followUp = null;
+      // A failed page of the round ends its hold on the view (ADR 0072): later answers of the round no longer move it, and a round
+      // whose first owned page failed never starts.
+      if (this.followUp?.pages.has(page) || this.pendingLive?.pages.has(page)) {
+        this.followUp = null;
+        this.pendingLive = null;
+      }
       this.error.set(describeError(answer.error));
       return;
     }
@@ -272,7 +267,7 @@ export class PagedRowsStore {
     this.error.set(null);
     this.options.onTotal?.(res.total);
     const reported = this.arriveLive(res.total, round, page);
-    if (!reported && before.loaded && res.total > before.total) this.options.onGrow?.({ newTotal: res.total, delta: res.total - before.total });
+    if (!reported && !this.pendingLive && before.loaded && res.total > before.total) this.options.onGrow?.({ newTotal: res.total, delta: res.total - before.total });
     this.bump();
     this.options.onPage?.();
   }
@@ -280,6 +275,8 @@ export class PagedRowsStore {
   /** Reports the arrival of an owned page to the grid; true when it did (the round reports the growth, so `onGrow` must not). */
   private arriveLive(newTotal: number, round: unknown, page: number): boolean {
     const live = this.pendingLive;
+    // The round starts with an answer to one of its own pages; a page fetched for another reason (a fill, the user's scroll) is not it.
+    if (live && !live.pages.has(page)) return false;
     if (live) {
       this.pendingLive = null;
       live.pages.delete(page);

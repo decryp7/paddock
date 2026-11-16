@@ -20,6 +20,12 @@ import { at } from '../../testing/must';
 
 const VIEWPORT_H = 260;
 
+/** A scroll by the user: a real one always comes with an input event (the grid tells it from the browser's own scroll adjustments by that). */
+function userScroll(vp: HTMLElement): void {
+  vp.dispatchEvent(new WheelEvent('wheel', { deltaY: 0, bubbles: true }));
+  vp.dispatchEvent(new Event('scroll'));
+}
+
 /** Pages are fetched once scrolling has paused: waits on that condition (the store's idle timer is no longer pending), not on a fixed time. */
 async function scrollIdle(f: { componentInstance: unknown; whenStable(): Promise<unknown> }): Promise<void> {
   const rowsOf = (f.componentInstance as { rows: { scrollIdlePending: boolean } }).rows;
@@ -556,7 +562,7 @@ describe('EventsGrid', () => {
     expect(parseFloat(spacer.style.height)).toBeLessThanOrEqual(10_000_000);
     expect(rows(fixture).length).toBeLessThan(40);
     vp.scrollTop = parseFloat(spacer.style.height);
-    vp.dispatchEvent(new Event('scroll'));
+    userScroll(vp);
     await scrollIdle(fixture);
     const last = rows(fixture).at(-1)!;
     expect(last.textContent).toContain('row 1999999');
@@ -636,7 +642,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
   it('jumps to the end with the scrollbar and shows the very last rows', async () => {
     const { fixture, grid, vp } = await render(synthetic());
     vp.scrollTop = grid.geometry().maxScroll;
-    vp.dispatchEvent(new Event('scroll'));
+    userScroll(vp);
     await flush(fixture);
     expect(grid.virtualTop()).toBe(grid.geometry().maxTop);
     const ids = visibleIds(fixture);
@@ -646,7 +652,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
   it('moves the scrollbar thumb proportionally', async () => {
     const { fixture, grid, vp } = await render(synthetic());
     vp.scrollTop = grid.geometry().maxScroll / 2;
-    vp.dispatchEvent(new Event('scroll'));
+    userScroll(vp);
     await flush(fixture);
     expect(Math.abs(grid.virtualTop() / ROW - BIG / 2)).toBeLessThan(VIEWPORT_H / ROW + 1);
     expect(visibleIds(fixture).some((i) => Math.abs(i - BIG / 2) < 40)).toBe(true);
@@ -742,11 +748,11 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     const e = new WheelEvent('wheel', { deltaY: 30, cancelable: true });
     vp.dispatchEvent(e);
     const top = grid.virtualTop();
-    vp.dispatchEvent(new Event('scroll'));
+    userScroll(vp);
     expect(grid.virtualTop()).toBe(top);
     // A scroll the user caused (somewhere else) is followed.
     vp.scrollTop = 5_000_000;
-    vp.dispatchEvent(new Event('scroll'));
+    userScroll(vp);
     await flush(fixture);
     expect(grid.virtualTop()).toBeGreaterThan(1e8);
   });
@@ -755,7 +761,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     const { fixture, grid, vp } = await render(synthetic());
     for (let i = 1; i <= 50; i++) {
       vp.scrollTop = i * 150_000;
-      vp.dispatchEvent(new Event('scroll'));
+      userScroll(vp);
       await settle(fixture, 2);
     }
     await flush(fixture);
@@ -795,7 +801,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     try {
       for (let i = 1; i <= 20; i++) {
         vp.scrollTop = i * 150_000;
-        vp.dispatchEvent(new Event('scroll'));
+        userScroll(vp);
         fixture.detectChanges();
         await vi.advanceTimersByTimeAsync(10);
       }
@@ -816,13 +822,13 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     const { fixture, vp } = await render(backend);
     const query = vi.spyOn(backend, 'queryPage').mockRejectedValue('engine down');
     vp.scrollTop = 4_000_000;
-    vp.dispatchEvent(new Event('scroll'));
+    userScroll(vp);
     await flush(fixture);
     expect(el(fixture, '.err-card').textContent).toContain('engine down');
     const failedCalls = query.mock.calls.length;
     for (const top of [4_000_010, 4_000_020, 4_000_030]) {
       vp.scrollTop = top;
-      vp.dispatchEvent(new Event('scroll'));
+      userScroll(vp);
       await flush(fixture);
     }
     expect(query.mock.calls.length).toBe(failedCalls);
@@ -838,7 +844,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     const { fixture, grid, vp } = await render(backend);
     vi.spyOn(backend, 'queryPage').mockRejectedValueOnce('far page failed');
     vp.scrollTop = 4_000_000;
-    vp.dispatchEvent(new Event('scroll'));
+    userScroll(vp);
     await flush(fixture);
     expect(el(fixture, '.err-card').textContent).toContain('far page failed');
     buttonByText(fixture, 'Retry').click();
@@ -857,7 +863,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       if (scrollRows === 'end') key(vp, 'End');
       else if (scrollRows > 0) {
         vp.scrollTop = scrollRows * ROW;
-        vp.dispatchEvent(new Event('scroll'));
+        userScroll(vp);
       }
       await flush(fixture);
       const before = { total: grid.total(), top: grid.virtualTop(), ids: visibleIds(fixture) };
@@ -979,11 +985,11 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       await clock.advance(100);
       await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(0));
       vp.scrollTop = 0;
-      vp.dispatchEvent(new Event('scroll'));
+      userScroll(vp);
       await flush(fixture);
       await clock.advance(100);
       vp.scrollTop = 60_000;
-      vp.dispatchEvent(new Event('scroll'));
+      userScroll(vp);
       await flush(fixture);
       await settle(fixture);
       expect(grid.virtualTop()).toBeLessThan(70_000);
@@ -1032,7 +1038,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       vp.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
       vp.dispatchEvent(new WheelEvent('wheel', { deltaY: -480, cancelable: true, bubbles: true }));
       vp.scrollTop = Math.max(0, vp.scrollTop - 480);
-      vp.dispatchEvent(new Event('scroll'));
+      userScroll(vp);
       await settle(fixture);
       await release();
       expect(grid.virtualTop()).toBeLessThan(grid.geometry().maxTop - 5 * ROW);
@@ -1061,6 +1067,8 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
 
     // ADR 0072, G4: `pinned` is stored; a resize keeps a pinned view on the newest row and a following grid keeps following.
     it('G4: a smaller viewport while pinned keeps the view on the newest row, and the next push still follows', async () => {
+      // `vi.stubGlobal` is not undone by `restoreMocks`: put the real ResizeObserver back when the test ends, pass or fail.
+      onTestFinished(() => void vi.unstubAllGlobals());
       TestBed.resetTestingModule();
       let height = VIEWPORT_H;
       vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
@@ -1101,7 +1109,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       store.toggleSort();
       await flush(fixture);
       vp.scrollTop = 1000 * ROW;
-      vp.dispatchEvent(new Event('scroll'));
+      userScroll(vp);
       await flush(fixture);
       const visible = all<HTMLElement>(fixture, '.row:not(.placeholder)');
       at(visible, 3).click();
