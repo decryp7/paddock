@@ -4,6 +4,16 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-e2e`: `axeViolations` holds the page still while axe reads it
+- Before its scan, `axeViolations` holds the page still: a constructed stylesheet sets `transition: none !important;
+  animation-duration: 0s !important; animation-delay: -1ms !important` on `*, *::before, *::after` (finite animations jump to
+  their end, fill kept, so an overlay that fades in with `forwards`, such as Material's tooltip, is read open) and
+  `prefers-reduced-motion: reduce` is emulated; two animation frames pass, axe scans once, and both are undone, the media
+  setting first; an error while undoing never replaces axe's own. Colours read mid-change are no longer reported (Pitwall run
+  8134, WebKit: Benchmarks' cells on a row half-way into the dark theme).
+- `axeInThemes` and `axeTargets` wait until the emulated colour scheme is live (`matchMedia` and two animation frames).
+- Selftest `selftest/axe-themes.spec.ts`, run in CI (ui's e2e job in Chromium, e2e-webkit in WebKit).
+
 ### `@decryp7/paddock-ui`: `shell/contributions`, the contribution registry without the root or Material
 - New entry `@decryp7/paddock-ui/shell/contributions`: `define*`, `provideContributions`, `provideContributionKinds`, `SHELL_CONTRIBUTIONS`, the
   registry, `ShellContext`, the command service, the keys, `msg` and the lazy parts. It imports neither `@decryp7/paddock-ui` nor

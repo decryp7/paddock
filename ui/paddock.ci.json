@@ -42,6 +42,7 @@
   ],
   "e2e": [
     "cd ui",
-    "npx playwright test --shard=$E2E_SHARD"
+    "npx playwright test --shard=$E2E_SHARD",
+    "npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=chromium --shard=$E2E_SHARD"
   ]
 }

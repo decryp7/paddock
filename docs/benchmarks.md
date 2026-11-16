@@ -1502,3 +1502,9 @@ caches went).
 - **Reading:** one pass costs about 70 times `du` on macOS, so the script now runs it once (four times faster than ffe91b1ac).
   Not measured: GNU `find -printf` on the Linux runners (no `stat` per file), Windows (Git Bash) and a cold file cache.
 
+## axe scans per screen (2026-11-15, fix/main-webkit-e2e): superseded
+
+Superseded on 2026-11-16 before it landed: `axeViolations` no longer detects motion and scans again (the `MAX_SCANS` this
+measured is gone). It turns transitions and animations off for a single scan instead (the user's decision after the fourth
+instance of the class; lessons.md, "axe read a table row half-way into the dark theme"). The measurement (at most 3 scans per
+screen over ui, Dyno and Pitwall, 409 tests) is in this branch's history, commit b661502f0.

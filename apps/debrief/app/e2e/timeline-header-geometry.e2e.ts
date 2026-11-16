@@ -1,4 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
+import { pauseAhead } from './app';
 import { openAppWith } from './mock-url';
 
 /** Live tail at 40 events/s: the timeline reloads (loading indicator), the health headline counts, the hint changes. */
@@ -37,7 +38,7 @@ for (const width of [1100, 760]) {
       await page.getByRole('combobox', { name: 'Live window' }).selectOption('5m');
       await expect(page.getByTestId('follow-toggle')).toBeVisible();
       // Freeze time a little ahead (time keeps running until the pause lands, so leave room): from here only `runFor` moves it.
-      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 5000));
+      await pauseAhead(page);
 
       const following = await edgesOver(page, 40, 100);
       for (const n of BUTTONS) expect(following[n], `${n} while following`).toHaveLength(1);

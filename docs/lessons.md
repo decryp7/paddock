@@ -2295,3 +2295,50 @@ update, green 15 of 15 with one `clock.runFor(1000)` after the swap. Fix in the 
 and its comment no longer says the clock stands still. **Open (product):** the redraw is real for a user too (a row menu opened in
 the first second after a list swap closes on the next update); a fix needs a workaround in `pd-table` around the CDK table. **Class:
 a test assumed a quiet page while live updates ran (earlier: Debrief's Stop-button probe, 2026-11-15; this file's Escape fix, 0315ca827).**
+## The AI browsing chip's Stop moved when the jobs pill appeared, and the click was lost (Debrief, 2026-11-15, CI run 8136)
+WebKit `browser.e2e.ts:71` flaked on main (2 of 147 runs): after "Stop the AI's browser" the chip was still there. The trace
+had no "Stop pressed on the AI browsing chip" log, so `stop()` never ran: the click did not reach the button. Its DOM
+snapshots show the jobs pill (`status-jobs`, "1 job running or waiting") inserted between the click's resolve and its end;
+the pill sits to the right of the chip in the right-anchored status bar and appears 2 s after the question is queued (the
+engine's and the mock's `visibleMs`, emitted on a 400 ms tick), as does the problems badge after its scan. Hypotheses: the
+chip re-created by the status bar (refuted: items are tracked by id), Stop disabled while `stopping` (refuted: no log at
+all), the mock dropping Stop (refuted: nothing called it). Measured in the CI image (WebKit): pressing Stop, letting the
+pill appear and releasing lost the click 10 of 10 times, Stop moved from x 1140.5 to 1092.9 (the failing trace's box is at
+1140.5). **Fix (spec):** `clickWithTimePaused` (`e2e/app.ts`) clicks with the page clock paused (`pauseAhead`, which
+`live-tail`, `resilience-context-live` and `timeline-header-geometry` now use too), so no timer can move the bar during the
+click. Proof that matches the rate: a probe that forces the pill to fall due during the click (clock running: `runFor(3000)`
+between press and release; paused: `pauseAhead`'s 5 s jump inside the helper) lost the click 6 of 6 times with the clock running
+(Stop from x 1140.5 or 1180.2 to 1092.9) and landed it 6 of 6 times through `clickWithTimePaused`; the two Stop tests were then
+60 of 60 green (`--repeat-each=30`), all in the CI image on WebKit. At CI's rate (2 in 147) 60 runs alone would not prove it.
+The probe, to rerun it: a spec that installs the clock, opens with `openAiApp`, switches the chat's browser to Agent, asks,
+waits for the chip and for no `status-jobs`, then either presses the Stop button with `page.mouse.down()`, runs
+`page.clock.runFor(3000)`, waits for `status-jobs` and releases (expect the chip to stay: the lost click), or calls
+`clickWithTimePaused(page, stop)` (expect the chip gone); run it with
+`npx playwright test <probe> --project=webkit --repeat-each=6` in `apps/debrief/app` (CI image, `DEBRIEF_E2E_PREBUILT=1`).
+The product still moves Stop when a status item to its right appears: the user approved ADR 0061 for the status bar and the
+toast stack (2026-11-15), which will replace the helper. Why the logs did not show it: the app logs Stop, so its absence named
+the lost click; the click's target is not logged. **Class: a control that moves under the pointer during a click (third instance after the
+timeline header, run 7697, and the toast stack, run 8004).**
+
+## axe read a table row half-way into the dark theme although the transitions had been settled (Pitwall, 2026-11-15, CI run 8134)
+WebKit `a11y.e2e.ts` "benchmarks" failed on main with `dark: color-contrast` on every row's muted cells: #a0a7b2 on #5c5d60,
+a background 70 % of the way from white to the dark surface; the cells' `transition: background 100ms` was running while axe
+read them. Train 11 changed nothing in Pitwall's styles or the tokens (refuted by the diff). The trace: the DOM did not change
+from the theme switch until after the dark scan, the screencast still showed the light theme 80 ms after `emulateMedia` and
+the grey rows 375 ms after it, during the scan, so the transition began after `settleTransitions` had looked. Not reproduced:
+0 of 20 runs in the CI image, and probes of emulate plus settle (40 switches, with the page kept busy 0 to 450 ms) always
+found the transition and finished it; with six CPU burners the runs timed out instead. So why the transition started late
+on the runner is open; the likeliest cause is that WebKit applies an emulated scheme only at its next rendering update, which a
+loaded runner delays past settling. **Fix (helper), after three rounds:** first a detect-and-rescan (record colour transitions
+and animations that start during a scan, scan again); its review found partial name matches (`stroke-dashoffset` read as
+`stroke`) and unreadable keyframes counted as colour, and the next check found short animations (30 to 90 ms) and `::before`
+ones that its lookup after `animationstart` never saw, so false contrast failures came back in both engines. The user then
+chose common practice: `axeViolations` holds the page still for the scan (a constructed stylesheet with `transition: none`
+and finite animations jumped to their end, `animation-duration: 0s; animation-delay: -1ms`, on `*, *::before, *::after`, so a
+tooltip that fades in with `forwards` is read open where `animation: none` left it invisible; plus `prefers-reduced-motion:
+reduce`), waits two frames, scans once and undoes both; `axeInThemes` and `axeTargets` also wait until the switched scheme is live (`matchMedia`, two
+frames; ER-33). Selftest `selftest/axe-themes.spec.ts`, run in CI (ui's e2e job, Chromium; e2e-webkit, WebKit), starts motion
+from inside axe's scan: a 90 ms colour animation, the same on `::before`, and a `fill-opacity` transition were red against the
+rescan version in both engines and are green now. **Rule:** a check that reads a moving page stops the motion; it does not try
+to detect every kind of motion. **Class: axe read colours that were still changing (fourth instance: the theme switch transition that `settleTransitions`
+was made for, the hover tooltip fading in, run 7872, this run, and the rescan's own misses).**

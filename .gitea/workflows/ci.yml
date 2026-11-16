@@ -366,6 +366,7 @@ jobs:
           port=$(bash ../conformance/ci/kit.sh isolation port webkit)
           export PW_PORT=$port SHELL_DEMO_PORT=$((port + 1)) WORKBENCH_DEMO_PORT=$((port + 2))
           npx playwright test --project=gallery-webkit --project=shell-demo-webkit --project=workbench-demo-webkit
+          npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=webkit
 
       - uses: ./.gitea/actions/job-isolation
         if: always()
