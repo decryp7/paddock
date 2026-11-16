@@ -159,6 +159,37 @@ describe('LeakDetector (the checks, driven by hand)', () => {
     }
   });
 
+  it('does not blame a test for work an earlier test left stuck in a tracked source', () => {
+    const remove = registerInFlight({ name: 'stuck loads', pending: () => 1 });
+    try {
+      detector.begin();
+      detector.snapshot(vi);
+      expect(detector.finish(false)).toEqual([]);
+    } finally {
+      remove();
+    }
+  });
+
+  it('keeps checking the rest when one check throws', () => {
+    let held: string | null = null;
+    const removeBroken = registerInFlight({
+      name: 'broken source',
+      pending: () => {
+        throw new Error('cannot read');
+      },
+    });
+    const removeSingleton = registerSingleton({ name: 'later singleton', leftover: () => held, reset: () => void (held = null) });
+    try {
+      held = 'state';
+      detector.snapshot(vi);
+      const found = detector.finish(false);
+      expect(found.map((f) => f.message)).toEqual([expect.stringContaining('the detector failed while checking "broken source"'), 'left "later singleton" holding state: state']);
+    } finally {
+      removeBroken();
+      removeSingleton();
+    }
+  });
+
   it('skips the kinds it is told to skip', () => {
     const skipping = new LeakDetector(['timer', 'fake-timers']);
     skipping.begin();
@@ -190,7 +221,7 @@ describe('LeakDetector (the checks, driven by hand)', () => {
       reset: () => undefined,
     });
     try {
-      expect(detector.finish(false).map((f) => f.message)).toEqual([expect.stringContaining('the detector failed while checking: Error: cannot read')]);
+      expect(detector.finish(false).map((f) => f.message)).toEqual([expect.stringContaining('the detector failed while checking "broken singleton": Error: cannot read')]);
     } finally {
       remove();
     }

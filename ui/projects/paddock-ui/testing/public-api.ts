@@ -7,6 +7,7 @@
 export { installTestKit, type TestKitOptions } from './src/setup';
 export {
   installLeakDetector,
+  leakDetectorInstalled,
   LeakDetector,
   registerInFlight,
   registerSingleton,

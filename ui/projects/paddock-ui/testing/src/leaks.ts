@@ -107,18 +107,23 @@ export function registerInFlight(source: InFlightSource): () => void {
 }
 
 /** Registers (or replaces, by name) a page-wide singleton whose leftover state fails the test that left it. Returns its remover. */
+/** Whether `installLeakDetector` ran in this worker (the kit then leaves the body for the detector to read). */
+export function leakDetectorInstalled(): boolean {
+  return (globalThis as unknown as Record<symbol, unknown>)[SHARED] !== undefined;
+}
+
 export function registerSingleton(singleton: ResettableSingleton): () => void {
   shared().singletons.set(singleton.name, singleton);
   return () => void shared().singletons.delete(singleton.name);
 }
 
 /** Stack frames of code that owns its own timers: the framework, the test runner and the third-party dock library (its blur and drag-end timers are out of a test's reach), not the code under test. */
-const FRAMEWORK_FRAME = /node_modules[\\/](?:@angular|zone\.js|vitest|@vitest|jsdom|tinyrainbow|chai|dockview-core)[\\/]|[\\/]@angular[\\/]|[\\/]vitest[\\/]/;
+const FRAMEWORK_FRAME = /node_modules[\\/](?:@angular|zone\.js|vitest|@vitest|jsdom|tinyrainbow|chai|dockview-core)[\\/]/;
 /** Frames the owner search skips (libraries that only forward the call). */
 const FORWARDING_FRAME = /node_modules[\\/](?:rxjs|tslib)[\\/]/;
 
 /** Vitest's spy wrapper: a `vi.spyOn(globalThis, 'setTimeout')` forwarding to the real one sits between the caller and us. */
-const SPY_FRAME = /[\\/]vitest[\\/]dist[\\/]chunks[\\/]spy\.|@vitest[\\/]spy/;
+const SPY_FRAME = /node_modules[\\/](?:vitest[\\/]dist[\\/]chunks[\\/]spy\.|@vitest[\\/]spy)/;
 
 /**
  * Where a timer was started, from the stack of the call, or `null` when the framework or the runner owns it or no frame names an owner (not
@@ -198,6 +203,8 @@ export class LeakDetector {
   private baseline = new Set<unknown>();
   private fake = false;
   private domBaseline = new Set<Element>();
+  /** What each in-flight source already held when the test began: a stuck item of an earlier test is that test's, not this one's. */
+  private sourceBaseline = new Map<string, number>();
 
   constructor(private readonly skip: readonly LeakKind[] = []) {}
 
@@ -208,6 +215,14 @@ export class LeakDetector {
         singleton.reset();
       } catch {
         /* a singleton that cannot reset is found by `finish` */
+      }
+    }
+    this.sourceBaseline = new Map();
+    for (const source of shared().sources.values()) {
+      try {
+        this.sourceBaseline.set(source.name, source.pending());
+      } catch {
+        /* a source that cannot be read is found by `finish` */
       }
     }
     this.baseline = timerBaseline();
@@ -233,40 +248,51 @@ export class LeakDetector {
     const add = (kind: LeakKind, message: string): void => {
       if (!this.skip.includes(kind)) found.push({ kind, message });
     };
-    try {
+    // Each check, and each singleton, has its own try: one that throws is reported and does not skip the rest.
+    const guarded = (what: string, check: () => void): void => {
+      try {
+        check();
+      } catch (error) {
+        found.push({ kind: 'singleton', message: `the detector failed while checking ${what}: ${String(error)}` });
+      }
+    };
+    guarded('fake timers', () => {
       if (this.fake) add('fake-timers', 'left fake timers installed (vi.useFakeTimers without vi.useRealTimers)');
-      // After every afterEach: what TestBed and the components' own clean-up removed is not a leak. TestBed's roots (`ng-version`)
-      // and the CDK containers go with its module. (The kit empties the body in its own afterEach, so a suite that uses it is
-      // clean here by construction.)
-      if (typeof document !== 'undefined' && document.body) {
-        for (const node of Array.from(document.body.children)) {
-          if (this.domBaseline.has(node) || node.hasAttribute('ng-version') || /^cdk-/.test(node.className?.toString() ?? '')) continue;
-          add('dom', `left ${describeNode(node)} in document.body`);
-          if (clearTimers) node.remove();
-        }
+    });
+    // After every afterEach: what TestBed and the components' own clean-up removed is not a leak. TestBed's roots (`ng-version`)
+    // and the CDK containers go with its module. The kit leaves the body to this check while a detector is installed.
+    guarded('the page', () => {
+      if (typeof document === 'undefined' || !document.body) return;
+      for (const node of Array.from(document.body.children)) {
+        if (this.domBaseline.has(node) || node.hasAttribute('ng-version') || /^cdk-/.test(node.className?.toString() ?? '')) continue;
+        add('dom', `left ${describeNode(node)} in document.body`);
+        if (clearTimers) node.remove();
       }
-      for (const source of s.sources.values()) {
-        const pending = source.pending();
-        if (pending > 0) add('in-flight', `left ${pending} item(s) of "${source.name}" still in flight`);
-      }
-      for (const singleton of s.singletons.values()) {
+    });
+    for (const source of s.sources.values()) {
+      guarded(`"${source.name}"`, () => {
+        const grown = source.pending() - (this.sourceBaseline.get(source.name) ?? 0);
+        if (grown > 0) add('in-flight', `left ${grown} item(s) of "${source.name}" still in flight`);
+      });
+    }
+    for (const singleton of s.singletons.values()) {
+      guarded(`"${singleton.name}"`, () => {
         const left = singleton.leftover();
         if (left !== null) add('singleton', `left "${singleton.name}" holding state: ${left}`);
         singleton.reset();
-      }
+      });
+    }
+    guarded('timers', () => {
       for (const [id, timer] of [...s.timers]) {
         if (this.baseline.has(id) || timer.reported) continue;
         timer.reported = true;
         add('timer', `left a live ${timer.kind}(${timer.ms}) started at ${timer.where}`);
         if (clearTimers) {
-          const clear = s.real[timer.kind === 'setTimeout' ? 'clearTimeout' : 'clearInterval'];
-          clear?.call(globalThis, id);
+          s.real[timer.kind === 'setTimeout' ? 'clearTimeout' : 'clearInterval']?.call(globalThis, id);
           s.timers.delete(id);
         }
       }
-    } catch (error) {
-      found.push({ kind: 'singleton', message: `the detector failed while checking: ${String(error)}` });
-    }
+    });
     return found;
   }
 }
@@ -288,8 +314,8 @@ function describeNode(node: Element): string {
 }
 
 /**
- * Installs the detector for the tests of the current file (call it from `test-setup.ts`, after any `installTestKit()`
- * so its `afterEach` runs first: it records what the kit's own clean-up would hide). Safe to call twice. A suite that installs its own detector replaces the outer one for its tests.
+ * Installs the detector for the tests of the current file (call it from `test-setup.ts`, after any `installTestKit()`:
+ * `afterEach` hooks run in reverse order, so its snapshot of the fake timers runs before the kit uninstalls them). Safe to call twice. A suite that installs its own detector replaces the outer one for its tests.
  */
 export function installLeakDetector(options: LeakDetectorOptions = {}): void {
   const mode = options.mode ?? 'report';

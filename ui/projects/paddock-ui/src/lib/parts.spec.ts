@@ -129,6 +129,25 @@ describe('PdPathText', () => {
     expect(button.getAttribute('aria-label')).toBe('Copied');
   });
 
+  it('leaves no label-reset timer running once the component is destroyed', async () => {
+    vi.useFakeTimers();
+    try {
+      stubClipboard(async () => undefined);
+      const f = TestBed.createComponent(PdPathText);
+      f.componentRef.setInput('value', 'system.log');
+      f.componentRef.setInput('full', '/var/log/app/system.log');
+      f.componentRef.setInput('copy', true);
+      f.detectChanges();
+      (f.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('.pd-copy')!.click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(vi.getTimerCount()).toBe(1);
+      f.destroy();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   describe('measured', () => {
     let measure: ((cb: () => void) => void) | undefined;
     class RO {

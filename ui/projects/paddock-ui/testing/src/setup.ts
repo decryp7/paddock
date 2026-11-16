@@ -1,7 +1,4 @@
-/** Whether `installLeakDetector` ran in this worker (its state is on the shared window). */
-function leakDetectorInstalled(): boolean {
-  return (globalThis as unknown as Record<symbol, unknown>)[Symbol.for('@decryp7/paddock-ui/testing:leaks')] !== undefined;
-}
+import { leakDetectorInstalled } from './leaks';
 
 /** The test globals the kit uses when a test runner defines them (Vitest through the Angular unit-test builder does). */
 interface HookGlobals {

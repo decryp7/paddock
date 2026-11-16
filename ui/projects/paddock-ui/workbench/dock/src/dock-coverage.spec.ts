@@ -228,6 +228,10 @@ describe('panels: width flag, failures and the missing view', () => {
     copy.click();
     await settle(rendered.fixture);
     expect(copy.textContent).toBe('Copy failed');
+    // The label's reset timer ends with the panel.
+    const clear = vi.spyOn(globalThis, 'clearTimeout');
+    TestBed.resetTestingModule();
+    expect(clear).toHaveBeenCalledWith(expect.anything());
   });
 
   it('puts a placeholder where the view of a saved panel no longer exists', () => {
