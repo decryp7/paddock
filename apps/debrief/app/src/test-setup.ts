@@ -23,6 +23,8 @@ afterEach(testEnded);
 
 // A test that booted the app's lazy registrations waits for their chunks before TestBed tears the module down (testing/startup.ts).
 afterEach(settleBootedStartup);
+// ... and a load started after the last test's hook, before the file's environment is torn down.
+afterAll(settleBootedStartup);
 
 // The mock jobs service and notification centre are page-wide singletons, and spec files share the page (the Angular
 // builder runs Vitest with `isolate: false`). A job one test left running held its kind's slot (one import at a time)
