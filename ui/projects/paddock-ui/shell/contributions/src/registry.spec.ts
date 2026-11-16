@@ -156,6 +156,19 @@ describe('ShellContextHost', () => {
     }
   });
 
+  it('schedules nothing, and does not throw, once its injector is destroyed', () => {
+    vi.useFakeTimers();
+    try {
+      setup();
+      const idle = TestBed.inject(SHELL_IDLE);
+      TestBed.resetTestingModule();
+      expect(() => idle(vi.fn())).not.toThrow();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('warns instead of failing when no runner or port is wired', async () => {
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

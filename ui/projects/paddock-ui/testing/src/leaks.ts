@@ -106,12 +106,12 @@ export function registerInFlight(source: InFlightSource): () => void {
   return () => void shared().sources.delete(source.name);
 }
 
-/** Registers (or replaces, by name) a page-wide singleton whose leftover state fails the test that left it. Returns its remover. */
 /** Whether `installLeakDetector` ran in this worker (the kit then leaves the body for the detector to read). */
 export function leakDetectorInstalled(): boolean {
   return (globalThis as unknown as Record<symbol, unknown>)[SHARED] !== undefined;
 }
 
+/** Registers (or replaces, by name) a page-wide singleton whose leftover state fails the test that left it. Returns its remover. */
 export function registerSingleton(singleton: ResettableSingleton): () => void {
   shared().singletons.set(singleton.name, singleton);
   return () => void shared().singletons.delete(singleton.name);
