@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { openApp, openSettings, settingsDialog } from './app';
 
 test.describe('caching', () => {

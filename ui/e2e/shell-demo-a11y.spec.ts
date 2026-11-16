@@ -1,4 +1,5 @@
-import { axeEveryDialog, dialogContracts, expect, expectEscapeReturnsFocus, expectReachableByKeyboard, expectTabOrder, test, THEMES } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeEveryDialog, dialogContracts, expectEscapeReturnsFocus, expectReachableByKeyboard, expectTabOrder, THEMES } from '@decryp7/paddock-e2e';
 
 // Accessibility of every shell window (plan X49, WCAG 2.2 AA): axe over the window of every dialog the demo declares, in
 // both themes, and keyboard-only flows. The dialog list is the generated contract file, so a new dialog is covered the

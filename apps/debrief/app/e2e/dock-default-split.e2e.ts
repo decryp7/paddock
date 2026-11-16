@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { openApp } from './app';
 
 // The default split is applied once the dock has its size, so the layout is the same the moment the app is ready and

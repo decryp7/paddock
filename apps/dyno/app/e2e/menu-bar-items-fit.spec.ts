@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { dialogWindowUrl } from '@decryp7/paddock-e2e';
 
 /**

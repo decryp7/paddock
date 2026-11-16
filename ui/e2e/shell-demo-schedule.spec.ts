@@ -1,4 +1,5 @@
-import { axeViolations, expect, expectNoHorizontalScroll, LAYOUT_WIDTHS, test, THEMES } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, expectNoHorizontalScroll, LAYOUT_WIDTHS, THEMES } from '@decryp7/paddock-e2e';
 
 // The shared schedule editors (plan X33) in the shell demo: modes, presets, times, cron problems, the preview from the
 // demo's stand-in engine (a fixed demo clock, so nothing here depends on the real time), pause windows, axe in both themes

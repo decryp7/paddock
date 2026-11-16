@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { openApp, openView } from './app';
 import { chooseMenu } from './menu-support';
 import { stableCenter } from '../src/app/layout-plan/layout-scenarios.playwright';

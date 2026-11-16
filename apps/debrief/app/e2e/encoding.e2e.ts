@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { openAppWith } from './tools-support';
 
 test.describe('source encodings', () => {

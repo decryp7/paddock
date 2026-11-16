@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { openApp, openSettingsWindow } from './app';
 
 // One primary action per region (UI review 2 rule 1, design guide: Buttons): on every route and tab, at most one filled

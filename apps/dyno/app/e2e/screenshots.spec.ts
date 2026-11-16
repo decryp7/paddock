@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { pressMod } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { MOCK_ESTIMATES, mockRun, mockTrace } from '../src/app/core/mock/bench';

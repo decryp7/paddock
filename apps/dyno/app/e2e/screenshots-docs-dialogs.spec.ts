@@ -1,8 +1,9 @@
+import { expect, test } from './test';
 import { mkdirSync } from 'node:fs';
 import type { Frame, FrameLocator, Page } from '@playwright/test';
 import { join } from 'node:path';
 import { FIXTURES } from './dialog-fixtures';
-import { dialogContracts, dialogWindowUrl, expect, test, type DialogContractEntry } from '@decryp7/paddock-e2e';
+import { dialogContracts, dialogWindowUrl, type DialogContractEntry } from '@decryp7/paddock-e2e';
 
 /**
  * The dialogs of the documentation, as the app shows them: each is its own window (family rule), so the picture is the window's

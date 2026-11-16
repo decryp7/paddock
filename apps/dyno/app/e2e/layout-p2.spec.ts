@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { Page } from '@decryp7/paddock-e2e';
 
 /**
  * The layout re-review's P2 findings (Dyno 1.1.1 plan WP-14 e), each as a measured condition (ER-12: conditions, never sleeps):

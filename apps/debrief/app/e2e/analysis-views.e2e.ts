@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { expandFields, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openQuery, runCommand, searchField } from './analysis-support';

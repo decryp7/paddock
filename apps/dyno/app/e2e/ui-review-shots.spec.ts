@@ -1,4 +1,5 @@
-import { expect, pressMod, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { pressMod } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 

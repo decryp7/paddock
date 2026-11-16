@@ -1,4 +1,5 @@
-import { axeViolations, expect, test, THEMES } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, THEMES } from '@decryp7/paddock-e2e';
 
 // The shell pages on Angular Material (WP-2, rule 47): axe in both themes, keyboard-only use of the toggles, checkboxes and radios,
 // and no CSP or console errors (Material sets styles through the CSSOM, which the CSP allows; this proves it). Chromium only in

@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { Page } from '@decryp7/paddock-e2e';
 import { chartsDrawn } from './charts-drawn';
 
 /**

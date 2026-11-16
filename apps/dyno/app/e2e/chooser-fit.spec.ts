@@ -1,4 +1,4 @@
-import { expect, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
 
 /**
  * The "Add a widget" list (the shared chooser in its add mode, in the dashboard's side sheet) shows every row whole: no row is cut

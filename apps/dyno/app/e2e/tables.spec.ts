@@ -1,4 +1,5 @@
-import { expectHeaderOnTop, expect, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { expectHeaderOnTop } from '@decryp7/paddock-e2e';
 
 /** The grids of Dyno are the shared pd-table: their headers stay above the rows while they scroll (C43), and the keyboard is the table's. */
 const url = (path: string) => `/?latency=0#${path}`;
@@ -75,7 +76,6 @@ test.describe('keyboard on the shared grids', () => {
 
   test('processes: Enter on a row far down opens the details, the row keeps the focus, every drawn row has the header\'s cells, and Escape closes the panel', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 600 });
-    await page.clock.install();
     await page.goto(url('/processes'));
     await page.getByRole('radio', { name: 'All', exact: true }).click();
     const grid = page.getByRole('treegrid', { name: 'Processes' });
@@ -103,7 +103,6 @@ test.describe('keyboard on the shared grids', () => {
 test.describe('live updates keep the keyboard where it was', () => {
   test('processes sorted by CPU: a focused row keeps the focus while the rows reorder, the keys keep working, Escape closes the details', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.clock.install();
     await page.goto(url('/processes'));
     await page.getByRole('radio', { name: 'All', exact: true }).click();
     const grid = page.getByRole('treegrid', { name: 'Processes' });
@@ -137,7 +136,6 @@ test.describe('the row menu from the keyboard', () => {
   test('processes: after switching Apps to All, Shift+F10 opens the focused row\'s menu and Escape gives the focus back', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 800 });
     // The page's clock stands still: no live update reorders the rows between the focus and the key.
-    await page.clock.install();
     await page.goto(url('/processes'));
     const grid = page.getByRole('treegrid', { name: 'Processes' });
     await expect(grid).toBeVisible();

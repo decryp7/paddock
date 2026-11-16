@@ -1,5 +1,6 @@
+import { test } from './test';
 import { mkdirSync } from 'node:fs';
-import { dialogWindowUrl, settleTransitions, test } from '@decryp7/paddock-e2e';
+import { dialogWindowUrl, settleTransitions } from '@decryp7/paddock-e2e';
 
 // The map, the IP lists and the firewall page, light and dark, in their states, for the independent review (rule 22). Only on request:
 // `SCREENSHOTS=1 NETWORK_SHOTS_DIR=<dir> PW_PORT=<port> npx playwright test --project=screenshots e2e/screenshots-network.spec.ts`.

@@ -1,4 +1,5 @@
-import { axeViolations, expect, expectNoHorizontalScroll, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, expectNoHorizontalScroll } from '@decryp7/paddock-e2e';
 
 // Settings > Notification channels (plan X17) in the shell demo: the page over the demo's in-memory engine, which plays
 // `paddock-channels` (the same validation, secrets that never leave the engine, a test that ends by an event).

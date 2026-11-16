@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { expectNoSeriousViolations } from './axe';
 import { ask, narrativeDialog, openAiApp, openChat, runCommand, viewAnswer, waitAnswered } from './ai-support';
 import { gridRows, openAppWith } from './mock-url';

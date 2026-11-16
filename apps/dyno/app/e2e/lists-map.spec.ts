@@ -1,4 +1,4 @@
-import { expect, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
 
 /** The IP lists, the connections map and the firewall against the mock backend (chromium). */
 const url = (hash: string) => `/?latency=0#/${hash}`;

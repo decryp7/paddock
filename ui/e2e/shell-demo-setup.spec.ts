@@ -1,4 +1,5 @@
-import { axeViolations, expect, expectNoHorizontalScroll, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, expectNoHorizontalScroll } from '@decryp7/paddock-e2e';
 
 // The first-run set-up checklist (plan X19) in the shell demo: the Set-up window and Settings > Set-up over the demo's
 // in-memory engine, which plays `paddock_shell::setup` (the same states, the working-then-outcome events, the refusals).

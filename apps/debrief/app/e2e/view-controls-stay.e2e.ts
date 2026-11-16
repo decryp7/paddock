@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { openAiApp, releaseMockHolds } from './ai-support';
 import { showProfileEditor } from './menu-support';
 

@@ -1,4 +1,5 @@
-import { axeViolations, bodyIndentProblems, checkboxLayoutProblems, rowPinProblems, dialogContracts, dialogFitProblems, measureDialogWindow, openEveryDialog, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, bodyIndentProblems, checkboxLayoutProblems, rowPinProblems, dialogContracts, dialogFitProblems, measureDialogWindow, openEveryDialog, expectNoHorizontalScroll, THEMES } from '@decryp7/paddock-e2e';
 
 // The shell demo is the reference consumer of @decryp7/paddock-ui/shell (ADR 0012 §7); each work package adds its checks.
 // It uses only the test kit (@decryp7/paddock-e2e, plan S16); the static source checks are in shell/testing's specs.

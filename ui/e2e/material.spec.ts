@@ -1,5 +1,6 @@
+import { expect, test } from './test';
 import AxeBuilder from '@axe-core/playwright';
-import { expect, expectNoButtonLabelWraps, test, type Page } from '@decryp7/paddock-e2e';
+import { expectNoButtonLabelWraps, type Page } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 

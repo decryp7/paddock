@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { openApp, openView } from './app';
 import { runCommand } from './analysis-support';
 import { chooseMenu, showProfileEditor } from './menu-support';

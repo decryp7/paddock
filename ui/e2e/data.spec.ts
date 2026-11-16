@@ -1,4 +1,5 @@
-import { axeViolations, expect, test, type Page } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, type Page } from '@decryp7/paddock-e2e';
 
 // The data parts of paddock-ui (plan X21) in the gallery: the table's sorting, filter, keyboard, menus and virtual rows, the
 // chart wrapper over a real ECharts, and the forms helpers, in both themes, with axe and without horizontal scroll at 320 px.

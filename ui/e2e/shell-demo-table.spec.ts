@@ -1,4 +1,5 @@
-import { axeViolations, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, expectNoHorizontalScroll, THEMES } from '@decryp7/paddock-e2e';
 
 // The Runners page of the shell demo draws its fleet with `pd-table` (plan X21): the shared table inside the pages frame,
 // its row actions, keyboard and narrow widths, in both themes.

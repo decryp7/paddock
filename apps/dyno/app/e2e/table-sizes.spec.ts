@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { Locator, Page } from '@decryp7/paddock-e2e';
 
 /**
  * Tables size to the window (pd-table `height="window"`): on a page that scrolls once, each table is as tall as its rows up to the

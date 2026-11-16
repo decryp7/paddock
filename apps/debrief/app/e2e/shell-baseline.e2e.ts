@@ -1,6 +1,7 @@
+import { expect, test } from './test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { expect, Locator, Page, test } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { DIALOG_TEST_INPUTS } from '../src/app/dialog-windows/dialog-test-inputs';
 import { runCommand } from './analysis-support';
 import { gridRows, openApp } from './app';

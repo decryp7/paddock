@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { openApp } from './app';
 
 // Usability review 2026-10-23 (U9): 72 Tab presses from the window start to the events grid. Toolbars are roving

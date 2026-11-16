@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { dialogContracts, dialogWindowUrl, expectNoButtonLabelWraps, pressMod, textClippedWithoutEllipsis, textCutOffWithoutTooltip } from '@decryp7/paddock-e2e';
 import { FIXTURES } from './dialog-fixtures';
 import { NAV } from '../src/app/shell/nav';

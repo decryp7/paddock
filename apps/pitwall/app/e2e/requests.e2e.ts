@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { openApp } from './app';
 
 test.describe('requests inspector', () => {

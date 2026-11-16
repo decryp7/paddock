@@ -1,4 +1,5 @@
-import { axeViolations, expect, expectNoHorizontalScroll, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, expectNoHorizontalScroll } from '@decryp7/paddock-e2e';
 
 // Settings > Knowledge packs (plan X15/X23) in the shell demo: the page over the demo's in-memory engine, which plays
 // `paddock-packs` (the same views, health and refusals). `?packs=problems|notes|clean` picks where it starts. Chromium only in

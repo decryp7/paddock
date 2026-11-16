@@ -1,5 +1,5 @@
+import { expect, test } from './test';
 import { mkdirSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
 
 // The Power page in every designed state, light and dark, for the independent review (rule 22). Only on request:
 // `SCREENSHOTS=1 POWER_SHOTS_DIR=<dir> npx playwright test --project=screenshots e2e/screenshots-power.spec.ts`.

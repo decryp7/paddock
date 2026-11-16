@@ -1,4 +1,5 @@
-import { expect, installTauriFake, readVersion, test, WorkbenchApp, type IpcCall, type Page, type TauriFake } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { installTauriFake, readVersion, WorkbenchApp, type IpcCall, type Page, type TauriFake } from '@decryp7/paddock-e2e';
 
 // The workbench demo as the desktop app (plan X50 W8, apps/workbench-demo): every part on its Tauri backend, played by the
 // kit's fake `__TAURI_INTERNALS__` (@decryp7/paddock-e2e). The shell's commands go to `paddock-shell` (the kit records them

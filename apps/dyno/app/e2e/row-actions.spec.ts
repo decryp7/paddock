@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test } from './test';
+import type { Locator, Page } from '@playwright/test';
 
 /**
  * Every icon-only action of a list or table row shows a tooltip with its name (design guide: every icon-only button has an

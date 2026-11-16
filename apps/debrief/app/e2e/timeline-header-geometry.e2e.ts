@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { openAppWith } from './mock-url';
 
 /** Live tail at 40 events/s: the timeline reloads (loading indicator), the health headline counts, the hint changes. */
@@ -31,7 +32,6 @@ for (const width of [1100, 760]) {
     test.use({ viewport: { width, height: 800 } });
 
     test('the zoom and menu buttons stay put while live data loads, counts and pauses following', async ({ page }) => {
-      await page.clock.install();
       await openAppWith(page, LIVE);
       await page.locator('debrief-status-bar').getByRole('button', { name: 'Live tail', exact: true }).click();
       await page.getByRole('combobox', { name: 'Live window' }).selectOption('5m');

@@ -1,4 +1,5 @@
-import { axeEveryDialog, axeTargets, expect, pressMod, test, type AxeTarget } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeEveryDialog, axeTargets, pressMod, type AxeTarget } from '@decryp7/paddock-e2e';
 import { FIXTURES } from './dialog-fixtures';
 
 // Accessibility (C33): axe over every Dyno screen, dialog window and the tray popover, in both themes, against WCAG 2.2 AA.

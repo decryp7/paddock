@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { gridRows, nextRender, openApp } from './app';
 import { chooseMenu, openMenu } from './menu-support';
 

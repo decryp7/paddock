@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { openApp } from './app';
 
 /** The most Tab presses allowed from the page start to the events grid (docs/ux-audit G1). */

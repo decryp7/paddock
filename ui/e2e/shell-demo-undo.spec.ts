@@ -1,4 +1,5 @@
-import { axeViolations, expect, expectNoHorizontalScroll, LAYOUT_WIDTHS, test, THEMES } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, expectNoHorizontalScroll, LAYOUT_WIDTHS, THEMES } from '@decryp7/paddock-e2e';
 
 // Undo and the activity log (plan X44) in the shell demo: a greeting is an undoable edit (Edit > Undo and Redo keys, the
 // "Done, Undo" toast) and an entry of the Activity page, which can take it back. The Lab page exists while there is at least

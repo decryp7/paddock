@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { openApp, openView } from './app';
 
 // Regression guard: the production build must run under the Tauri CSP (see ui/projects/paddock-e2e/src/serve-prod.ts).

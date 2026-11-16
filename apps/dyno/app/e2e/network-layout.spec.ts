@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { Page } from '@decryp7/paddock-e2e';
 
 /**
  * The Network page's Connections table (grouped by program) fits the window: the page area does not scroll, the table's one scroller

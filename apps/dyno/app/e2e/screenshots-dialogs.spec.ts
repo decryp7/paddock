@@ -1,6 +1,7 @@
+import { expect, test } from './test';
 import { mkdirSync } from 'node:fs';
 import { FIXTURES as DIALOG_FIXTURES } from './dialog-fixtures';
-import { dialogContracts, dialogWindowUrl, expect, test, type DialogContractEntry } from '@decryp7/paddock-e2e';
+import { dialogContracts, dialogWindowUrl, type DialogContractEntry } from '@decryp7/paddock-e2e';
 
 // Every Dyno dialog at its fitted size, light and dark, in the macOS and the Windows button order, for the independent
 // review (rule 22). Only on request: `SCREENSHOTS=1 DIALOG_SHOTS_DIR=<dir> npx playwright test --project=screenshots e2e/screenshots-dialogs.spec.ts`.

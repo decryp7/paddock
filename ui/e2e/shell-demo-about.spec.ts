@@ -1,4 +1,5 @@
-import { axeViolations, expect, installTauriFake, readVersion, test, type Page, type TauriFake } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, installTauriFake, readVersion, type Page, type TauriFake } from '@decryp7/paddock-e2e';
 
 // About, Updates and What's New in the shell demo (plan S11). The browser build plays the engine with a fake update server
 // (`?updates=release|bad-signature|unavailable|...`: no network); one test runs the real Tauri backends against a fake

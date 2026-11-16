@@ -1,4 +1,5 @@
-import { expect, Locator, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Locator, Page } from '@playwright/test';
 import { APP_LOAD_TIMEOUT, gridRows } from './app';
 
 // The generated pseudo-locale (Settings ▸ General ▸ Language ▸ Pseudo): accented, longer, bracketed (⟦…⟧) text.
