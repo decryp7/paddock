@@ -291,7 +291,7 @@ impl Supervised {
         folder: Option<&std::path::Path>,
     ) -> std::io::Result<Supervised> {
         crate::sys::own_group(&mut cmd);
-        let child = cmd.spawn()?;
+        let child = crate::command::spawn_retrying(&mut cmd)?;
         let pid = child.id();
         // Not reaped yet, so the pid is still this child's.
         let process = identify(pid);

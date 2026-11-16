@@ -340,11 +340,9 @@ fn the_conformance_list_has_one_copy_the_contract() {
 #[cfg(unix)]
 #[test]
 fn heavy_puts_every_line_through_the_machine_wide_slot_and_refuses_without_one() {
-    use std::os::unix::fs::PermissionsExt;
     let r = Repo::new("ui", &json(&["echo ran > out"]));
     let wrap = r.root().join("wrap.sh");
-    std::fs::write(&wrap, "#!/bin/sh\necho slot >> slot-log\nexec \"$@\"\n").unwrap();
-    std::fs::set_permissions(&wrap, std::fs::Permissions::from_mode(0o755)).unwrap();
+    paddock_testkit::exe::write_program(&wrap, "#!/bin/sh\necho slot >> slot-log\nexec \"$@\"\n").unwrap();
     let (code, log) = r.run("ui", "checks", |a| a.heavy = true, &[("PADDOCK_HEAVY", wrap.to_str().unwrap())]);
     assert_eq!(code, 0, "{log}");
     assert_eq!(

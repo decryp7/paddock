@@ -108,10 +108,8 @@ fn backoff_grows_then_caps() {
 /// A stand-in agent program: a shell script in a temp folder that ignores `run` and does what the test says.
 #[cfg(unix)]
 fn script(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
     let p = dir.join(name);
-    std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    paddock_testkit::exe::write_program(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
     p
 }
 

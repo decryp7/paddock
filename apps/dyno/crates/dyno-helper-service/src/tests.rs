@@ -460,14 +460,13 @@ fn the_maintainer_scripts_are_posix_sh_skip_without_systemd_and_touch_only_the_h
     reason = "the test runs the shipped sh script itself; it exits on its own over the fake systemctl"
 )]
 fn run_maintainer_script(tmp: &std::path::Path, script: &str, args: &[&str], enabled: bool) -> Vec<String> {
-    use std::os::unix::fs::PermissionsExt;
     let bin = tmp.join("bin");
     let systemd = tmp.join("run-systemd");
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::create_dir_all(&systemd).unwrap();
     let calls = tmp.join("calls");
     let fake = bin.join("systemctl");
-    std::fs::write(
+    paddock_testkit::exe::write_program(
         &fake,
         format!(
             "#!/bin/sh\necho \"$*\" >> '{}'\ncase \"$1\" in is-enabled) exit {} ;; esac\nexit 0\n",
@@ -476,7 +475,6 @@ fn run_maintainer_script(tmp: &std::path::Path, script: &str, args: &[&str], ena
         ),
     )
     .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
     let text = package_file(script);
     assert!(text.contains("/run/systemd/system"), "{script} looks for a running systemd");
     let copy = tmp.join(script);

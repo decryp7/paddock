@@ -1026,8 +1026,7 @@ exit $rc
                 "echo 'error[E0432]: unresolved import' >&2\nexit 101\n".to_string()
             };
             let cargo = bin.join("cargo");
-            std::fs::write(&cargo, format!("#!/bin/sh\n{body}")).unwrap();
-            std::fs::set_permissions(&cargo, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+            paddock_testkit::exe::write_program(&cargo, format!("#!/bin/sh\n{body}")).unwrap();
             let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
             RealExec {
                 root: d.to_path_buf(),

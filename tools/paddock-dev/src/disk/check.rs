@@ -205,15 +205,13 @@ mod tests {
     /// A fake `df` (ER-14: the real disk is never read): a script printing `avail_kib` KiB available.
     #[cfg(unix)]
     fn fake_df(dir: &Path, avail_gib: u64) -> String {
-        use std::os::unix::fs::PermissionsExt;
         let p = dir.join("df");
         let kib = avail_gib * 1024 * 1024;
-        std::fs::write(
+        paddock_testkit::exe::write_program(
             &p,
             format!("#!/bin/sh\necho 'Filesystem 1024-blocks Used Available Capacity Mounted on'\necho '/dev/x 9 9 {kib} 50% /x'\n"),
         )
         .unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
         p.to_string_lossy().to_string()
     }
 

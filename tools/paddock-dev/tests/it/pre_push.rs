@@ -4,7 +4,6 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
@@ -17,8 +16,7 @@ fn fake_bin(dir: &Path, script: &str) -> String {
     let real_dir = Path::new(&real).parent().unwrap().display().to_string();
     let cargo = format!("#!/bin/sh\ncase \"$1\" in metadata) PATH=\"{real_dir}:$PATH\" exec \"{real}\" \"$@\";; esac\n{script}\n");
     let path = dir.join("cargo");
-    std::fs::write(&path, cargo).unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    paddock_testkit::exe::write_program(&path, cargo).unwrap();
     format!("{}:/usr/bin:/bin", dir.display())
 }
 

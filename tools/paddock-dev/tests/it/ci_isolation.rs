@@ -118,10 +118,9 @@ fn acquires_uses_releases_and_sweeps_with_the_real_binary() {
 
 /// A stand-in for `heavy` that records its arguments (a throw-away script, never a real queue).
 fn fake_heavy(root: &Path, exit: i32) -> (PathBuf, PathBuf) {
-    use std::os::unix::fs::PermissionsExt;
     let log = root.join("heavy-calls");
     let bin = root.join("fake-heavy");
-    std::fs::write(
+    paddock_testkit::exe::write_program(
         &bin,
         format!(
             "#!/bin/sh\necho \"$@\" >> '{}'\necho 'fake heavy says no' >&2\nexit {exit}\n",
@@ -129,7 +128,6 @@ fn fake_heavy(root: &Path, exit: i32) -> (PathBuf, PathBuf) {
         ),
     )
     .unwrap();
-    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
     (bin, log)
 }
 

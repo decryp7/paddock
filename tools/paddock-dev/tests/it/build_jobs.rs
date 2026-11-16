@@ -9,7 +9,6 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -47,8 +46,7 @@ impl Scratch {
             "#!/bin/sh\necho \"{name} $* token=${{PADDOCK_DEV_TOKEN:-}}\" >> '{}'\n{body}\n",
             self.path("calls").display()
         );
-        std::fs::write(&p, text).unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&p, text).unwrap();
     }
 
     fn base_env(&self, vars: &[(&str, &str)], with_env_file: bool) -> Vec<(String, String)> {

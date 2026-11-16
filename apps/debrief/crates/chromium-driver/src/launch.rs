@@ -913,11 +913,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_browser_that_exits_at_launch_fails_fast_with_a_launch_error() {
-        use std::os::unix::fs::PermissionsExt;
         let d = tempfile::tempdir().unwrap();
         let exe = d.path().join("dies.sh");
-        std::fs::write(&exe, "#!/bin/sh\nexit 3\n").unwrap();
-        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&exe, "#!/bin/sh\nexit 3\n").unwrap();
         let browser = Browser {
             flavor: crate::Flavor::Chromium,
             path: exe,
@@ -993,11 +991,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_start_that_outlasts_the_lifetime_is_ended_and_names_the_time_limit() {
-        use std::os::unix::fs::PermissionsExt;
         let d = tempfile::tempdir().unwrap();
         let exe = d.path().join("never-ready.sh");
-        std::fs::write(&exe, "#!/bin/sh\nexec sleep 3600\n").unwrap();
-        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&exe, "#!/bin/sh\nexec sleep 3600\n").unwrap();
         let browser = Browser {
             flavor: crate::Flavor::Chromium,
             path: exe,

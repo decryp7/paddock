@@ -454,12 +454,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_windows_self_test_runs_a_headless_page_dump() {
-        use std::os::unix::fs::PermissionsExt;
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("9.9.manifest"), "<assembly/>").unwrap();
         let exe = d.path().join("chrome.exe");
-        std::fs::write(&exe, "#!/bin/sh\ncase \"$*\" in *--dump-dom*about:blank*) echo '<html><head></head><body></body></html>';; *) exit 3;; esac\n").unwrap();
-        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&exe, "#!/bin/sh\ncase \"$*\" in *--dump-dom*about:blank*) echo '<html><head></head><body></body></html>';; *) exit 3;; esac\n").unwrap();
         let k = ChromeForTesting::new(OsKind::Windows);
         assert_eq!(
             k.self_test(&exe, "9.9"),
@@ -476,11 +474,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_self_test_runs_the_program() {
-        use std::os::unix::fs::PermissionsExt;
         let d = tempfile::tempdir().unwrap();
         let exe = d.path().join("chrome");
-        std::fs::write(&exe, "#!/bin/sh\necho \"Chromium 9.9 $1\"\n").unwrap();
-        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&exe, "#!/bin/sh\necho \"Chromium 9.9 $1\"\n").unwrap();
         let k = ChromeForTesting::new(OsKind::Linux);
         assert_eq!(
             k.self_test(&exe, "9.9"),

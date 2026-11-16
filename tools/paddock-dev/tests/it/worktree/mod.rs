@@ -135,13 +135,11 @@ impl Fixture {
     // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
     #[allow(clippy::disallowed_methods)]
     pub fn fake_git(&self, name: &str, body: &str) -> String {
-        use std::os::unix::fs::PermissionsExt;
         let real = String::from_utf8(Command::new("which").arg("git").output().unwrap().stdout).unwrap();
         let bin = self.root.join(format!("fakebin-{name}"));
         std::fs::create_dir_all(&bin).unwrap();
         let script = format!("#!/bin/sh\nREAL={}\n{body}\nexec \"$REAL\" \"$@\"\n", real.trim());
-        std::fs::write(bin.join("git"), script).unwrap();
-        std::fs::set_permissions(bin.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(bin.join("git"), script).unwrap();
         format!("{}:{}", bin.display(), std::env::var("PATH").unwrap())
     }
 

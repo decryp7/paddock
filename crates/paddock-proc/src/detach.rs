@@ -101,7 +101,7 @@ fn start(cmd: &mut Command) -> Result<Child, DetachError> {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    cmd.spawn().map_err(|source| DetachError::Spawn {
+    crate::command::spawn_retrying(cmd).map_err(|source| DetachError::Spawn {
         program: cmd.get_program().to_string_lossy().into_owned(),
         source,
     })
