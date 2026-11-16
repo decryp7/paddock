@@ -197,9 +197,12 @@ export class DialogShell {
       { injector: this.injector },
     );
     // A component that appears later is checked by the observer; the first check also runs when it mounts.
-    effect(() => {
+    effect((onCleanup) => {
       this.component();
-      untracked(() => setTimeout(check, 0));
+      untracked(() => {
+        const timer = setTimeout(check, 0);
+        onCleanup(() => clearTimeout(timer));
+      });
     });
   }
 
@@ -238,6 +241,8 @@ export class DialogShell {
    */
   private fitToContent(): void {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // A refit still waiting when the dialog goes would fire into whatever runs next.
+    this.destroyRef.onDestroy(() => clearTimeout(timer));
     let last = 0;
     const fit = () => {
       const needed = this.neededHeight();

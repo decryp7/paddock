@@ -125,7 +125,11 @@ export class TourService {
       const el = this.query(selector);
       if (el && visible(el)) return el;
       if (mine.aborted || Date.now() >= deadline) return null;
-      await new Promise((r) => setTimeout(r, TARGET_POLL_MS));
+      // The pause ends early when the step is abandoned (the injector going aborts it): no timer outlives the tour.
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, TARGET_POLL_MS);
+        mine.addEventListener('abort', () => (clearTimeout(timer), resolve()), { once: true });
+      });
     }
   }
 }

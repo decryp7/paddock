@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, input, signal } from '@angular/core';
 import { copyText } from '../tools/clipboard';
 import { splitForEllipsis } from './format/middle-ellipsis';
 import { Icon } from './icon';
@@ -32,6 +32,10 @@ import { Icon } from './icon';
   `,
 })
 export class PathText {
+  private copiedTimer: ReturnType<typeof setTimeout> | undefined;
+  // The label's reset ends with the component: one left running fires into whatever runs next.
+  private readonly endTimer = inject(DestroyRef).onDestroy(() => clearTimeout(this.copiedTimer));
+
   /** The text shown (shortened in the middle when it does not fit). */
   readonly value = input.required<string>();
   /** What the tooltip shows and Copy copies when it is more than `value` (a file name shown for its full path). */
@@ -51,6 +55,7 @@ export class PathText {
     event.stopPropagation();
     if (!(await copyText(this.whole()))) return;
     this.copied.set(true);
-    setTimeout(() => this.copied.set(false), 1500);
+    clearTimeout(this.copiedTimer);
+    this.copiedTimer = setTimeout(() => this.copied.set(false), 1500);
   }
 }

@@ -69,6 +69,8 @@ export class QuerySession {
 
   private focusRequestedAt = Number.NEGATIVE_INFINITY;
   private checkTimer: ReturnType<typeof setTimeout> | undefined;
+  // A check still waiting for its delay when the injector goes would fire into whatever runs next.
+  private readonly endCheckTimer = inject(DestroyRef).onDestroy(() => clearTimeout(this.checkTimer));
   /** The latest check and completion request wins (ADR 0071). */
   private readonly checks = new LatestRequest(inject(DestroyRef));
 

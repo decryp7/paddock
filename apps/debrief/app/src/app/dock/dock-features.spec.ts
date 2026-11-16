@@ -576,10 +576,14 @@ describe('DockHost auto-hide bars, slide-out and navigator', () => {
 });
 
 describe('DockKeys', () => {
+  const containers: HTMLElement[] = [];
+  afterEach(() => containers.splice(0).forEach((c) => c.remove()));
+
   function keys() {
     TestBed.configureTestingModule({ providers: [provideDockTesting(), { provide: LAYOUT_STORE, useValue: { load: () => null, save: () => undefined, clear: () => undefined } }] });
     const dock = TestBed.inject(DockService);
     const container = document.createElement('div');
+    containers.push(container);
     document.body.appendChild(container);
     dock.attach(container);
     const target = document.createElement('div');
@@ -647,9 +651,13 @@ describe('DockKeys', () => {
 });
 
 describe('auto-hide button and sides', () => {
+  const containers: HTMLElement[] = [];
+  afterEach(() => containers.splice(0).forEach((c) => c.remove()));
+
   function dockWithInspector() {
     TestBed.configureTestingModule({ providers: [provideDockTesting()] });
     const container = document.createElement('div');
+    containers.push(container);
     document.body.appendChild(container);
     const dock = TestBed.inject(DockService);
     dock.attach(container);

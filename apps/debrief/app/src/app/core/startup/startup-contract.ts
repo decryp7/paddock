@@ -28,6 +28,8 @@ export interface RetryOptions {
   attempts: number;
   /** Timer (tests). */
   setTimer?: (fn: () => void, ms: number) => unknown;
+  /** When it is destroyed no further attempt is sent (an injector going away ends the retries of the store that asked). */
+  destroyRef?: { onDestroy(fn: () => void): unknown };
   /** Cancels a timer `setTimer` returned (tests); the real `clearTimeout` by default. */
   clearTimer?: (handle: unknown) => void;
 }
@@ -50,6 +52,10 @@ export function retryUntilAnswered<T>(call: () => Promise<T>, options: RetryOpti
       settled = true;
       clearTimer(next);
     };
+    options.destroyRef?.onDestroy(() => {
+      settled = true;
+      clearTimer(next);
+    });
     const attempt = () => {
       if (settled) return;
       sent++;

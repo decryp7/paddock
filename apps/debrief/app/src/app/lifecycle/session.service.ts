@@ -1,4 +1,4 @@
-import { computed, effect, inject, Injectable, signal, untracked } from '@angular/core';
+import { computed, DestroyRef, effect, inject, Injectable, signal, untracked } from '@angular/core';
 import { Logger } from '../core/logger';
 import { LifecycleBackend } from '../core/tools-backend';
 import { UiStateRegistry } from './ui-state';
@@ -28,6 +28,8 @@ export class SessionService {
 
   private savedSnapshot: string | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
+  // An autosave still waiting when the injector goes would fire into whatever runs next.
+  private readonly endTimer = inject(DestroyRef).onDestroy(() => clearTimeout(this.timer));
   private started = false;
 
   constructor() {

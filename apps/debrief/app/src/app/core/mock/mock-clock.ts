@@ -27,9 +27,64 @@ export interface MockClock {
 export const systemMockClock: MockClock = {
   now: () => Date.now(),
   elapsed: () => globalThis.performance?.now() ?? Date.now(),
-  setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms),
-  clearTimeout: (t) => globalThis.clearTimeout(t),
-  setInterval: (fn, ms) => globalThis.setInterval(fn, ms),
-  clearInterval: (t) => globalThis.clearInterval(t),
-  sleep: (ms) => new Promise<void>((resolve) => globalThis.setTimeout(resolve, ms)),
+  setTimeout: (fn, ms) => {
+    if (halted) return 0; // between tests: nothing new starts
+    const handle = globalThis.setTimeout(() => {
+      pending.delete(handle);
+      fn();
+    }, ms);
+    pending.set(handle, { clear: globalThis.clearTimeout, wake: null });
+    return handle;
+  },
+  clearTimeout: (t) => {
+    pending.delete(t);
+    globalThis.clearTimeout(t);
+  },
+  setInterval: (fn, ms) => {
+    if (halted) return 0;
+    const handle = globalThis.setInterval(fn, ms);
+    pending.set(handle, { clear: globalThis.clearInterval, wake: null });
+    return handle;
+  },
+  clearInterval: (t) => {
+    pending.delete(t);
+    globalThis.clearInterval(t);
+  },
+  sleep: (ms) =>
+    new Promise<void>((resolve) => {
+      if (halted) return resolve(); // a loop of sleeps ends at once once the clock is stopped
+      const handle = globalThis.setTimeout(() => {
+        pending.delete(handle);
+        resolve();
+      }, ms);
+      pending.set(handle, { clear: globalThis.clearTimeout, wake: resolve });
+    }),
 };
+
+/** Set by `stopSystemMockClock` until `resumeSystemMockClock`: nothing new starts, sleeps return at once. */
+let halted = false;
+
+/** The timers of `systemMockClock` still running, by handle. */
+const pending = new Map<unknown, { clear: (handle: never) => void; wake: (() => void) | null }>();
+
+/**
+ * Stops every timer `systemMockClock` still has running and lets the sleeps waiting on them go (tests: none outlives the test
+ * that started it; the mock's own `dispose` is not reached by a spec that ends with a mock still ticking).
+ */
+export function stopSystemMockClock(): void {
+  halted = true;
+  for (const [handle, t] of [...pending]) {
+    pending.delete(handle);
+    try {
+      t.clear(handle as never);
+    } catch {
+      /* a clear that belonged to fake timers no longer installed: nothing to stop */
+    }
+    t.wake?.();
+  }
+}
+
+/** Lets `systemMockClock` run again (before every test). */
+export function resumeSystemMockClock(): void {
+  halted = false;
+}

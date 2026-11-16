@@ -1,4 +1,4 @@
-import { afterNextRender, ApplicationRef, computed, EnvironmentInjector, inject, Injectable, Injector, signal } from '@angular/core';
+import { afterNextRender, ApplicationRef, computed, DestroyRef, EnvironmentInjector, inject, Injectable, Injector, signal } from '@angular/core';
 import type { DockviewApi, DockviewGroupPanel } from 'dockview';
 import { dockview, loadDockview } from './dockview-loader';
 import { Logger } from '../core/logger';
@@ -113,6 +113,9 @@ export class DockService {
   }
 
   constructor() {
+    // The dock detaches with the injector that owns it (the host's view normally detaches first, and `detach` is safe to repeat):
+    // an attach left standing keeps the cue elements it appended to `<body>`, its listeners and its timers.
+    inject(DestroyRef).onDestroy(() => this.detach());
     inject(DockPolicy).start({
       ready: this.ctx.apiReady,
       show: (id) => this.show(id),

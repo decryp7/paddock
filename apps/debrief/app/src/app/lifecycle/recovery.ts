@@ -1,4 +1,4 @@
-import { effect, inject, Injectable, Injector, Provider, untracked } from '@angular/core';
+import { DestroyRef, effect, inject, Injectable, Injector, Provider, untracked } from '@angular/core';
 import { toObservable } from '@angular/core/rxjs-interop';
 import { filter, firstValueFrom, map } from 'rxjs';
 import { Logger } from '../core/logger';
@@ -32,6 +32,8 @@ export class WindowRecovery {
   private readonly injector = inject(Injector);
   private checkpointing = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
+  // A checkpoint still waiting when the injector goes would fire into whatever runs next.
+  private readonly endTimer = inject(DestroyRef).onDestroy(() => clearTimeout(this.timer));
 
   /** Handles the ready reply (null: none came). */
   async afterReady(reply: ReadyReply | null): Promise<void> {

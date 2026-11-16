@@ -9,6 +9,8 @@ describe('the page between tests', () => {
     const tab = document.createElement('div');
     tab.className = 'dv-tab dv-active-tab';
     tab.textContent = 'Inspector';
+    // TestBed's roots (`ng-version`) are the leak detector's one exemption: this stands in for a dock a test left behind, on purpose.
+    tab.setAttribute('ng-version', 'leftover');
     document.body.appendChild(tab);
     expect(activeViewTitle()).toBe('Inspector');
   });
