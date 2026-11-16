@@ -59,7 +59,9 @@ Its own `env_clear` goes **back to the listed set**. It starts from an **empty e
   made (logged once), links into each command's own folder instead. ci.yml run 8152 measured the per-command version about 6
   times slower on Windows, docs/benchmarks.md), never the folder they came from, because `cargo install`
   puts other tools beside them in `$CARGO_HOME/bin` (`heavy`: the review of `7edb8cad6` measured `command -v heavy` finding it,
-  which reopened incident 1); then the folders of `node`, `npm`, `npx` and `git` as the test process finds them; on Windows Git
+  which reopened incident 1); on Windows a toolchain's own `bin` (it holds `rustc_driver-*.dll`) goes on the `PATH` as it is
+  instead, because its programs load their DLLs from their own folder (a linked `rustc.exe` exited STATUS_DLL_NOT_FOUND on the
+  test VM, whose toolchain has no rustup) and that folder holds only the toolchain; then the folders of `node`, `npm`, `npx` and `git` as the test process finds them; on Windows Git
   for Windows' `usr/bin`, after git's own folder, from `git --exec-path` (asked once per `git`; the layout around `git.exe`
   when it cannot answer), because Git's bash puts `mingw64/bin` first and the shell tools live in `usr/bin` (ci.yml run 8138: 11
   Windows tests found no `grep`, `tr` or `touch`); never Git's `bin` or `cmd`, which hold only launchers that start the real

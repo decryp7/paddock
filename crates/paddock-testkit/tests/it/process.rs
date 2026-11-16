@@ -791,3 +791,44 @@ fn the_path_report_names_each_links_program() {
         "{report}"
     );
 }
+
+/// A toolchain's own `bin` (it holds `rustc_driver-*.dll`) goes on a child's PATH as it is, and a bare `rustc` starts from it:
+/// its programs load their DLLs from their own folder, so a link or copy elsewhere fails with STATUS_DLL_NOT_FOUND (the full
+/// paddock-dev suite on the test VM, whose toolchain has no rustup: `rustc -vV` exited 0xC0000135 in 13 tests).
+#[cfg(windows)]
+#[test]
+fn a_toolchains_own_bin_goes_on_the_path_as_it_is_and_rustc_starts_from_it() {
+    let d = paddock_testkit::tempdir();
+    let bin = d.path().join("toolchain\\bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    for f in [
+        "rustc.exe",
+        "cargo.exe",
+        "rustc_driver-0123456789abcdef.dll",
+    ] {
+        std::fs::write(bin.join(f), "").unwrap();
+    }
+    let mut m = machine_with(&bin, &d.path().join("links"));
+    m.cargo = Some(bin.join("cargo.exe"));
+    let cmd = TestCommand::on("rustc", &m);
+    let report = cmd.path_report();
+    let program = Path::new(cmd.get_program());
+    assert!(
+        paddock_env::winpath::same(program, &bin.join("rustc.exe"), paddock_env::Os::Windows),
+        "a bare rustc starts {}: {report}",
+        program.display()
+    );
+    assert!(
+        report
+            .child
+            .iter()
+            .any(|p| paddock_env::winpath::same(p, &bin, paddock_env::Os::Windows)),
+        "{report}"
+    );
+    assert!(
+        !report.toolchain.iter().any(|l| l
+            .file_name()
+            .is_some_and(|n| n.eq_ignore_ascii_case("rustc.exe"))),
+        "rustc.exe was linked away from its DLLs: {report}"
+    );
+}
