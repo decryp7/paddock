@@ -38,6 +38,7 @@ fn facts() -> Facts {
         pitwall_tests: vec!["scripts/ci/a.test.mjs".into()],
         dev_exe: "/x/dev".into(),
         target_dir: Some("/t/".into()),
+        base_ref: None,
     }
 }
 
@@ -444,6 +445,18 @@ fn the_conformance_gate_runs_the_contracts_list_and_a_broken_contract_is_broken_
         "through the executor, like CI"
     );
     assert!(!args.is_empty());
+    assert!(
+        g.env.iter().all(|(k, _)| k != "PADDOCK_BASE_REF"),
+        "no base resolved: the checks' own default"
+    );
+    // The base the run resolved (a train member's target) is the ref its growth is measured against (ER-21, report-only per ER-41).
+    let with_base = Facts {
+        base_ref: Some("origin/train/2026-11-15-13".into()),
+        ..f.clone()
+    };
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &with_base);
+    let g = run_gates(&planned).into_iter().find(|g| g.id == "conformance").unwrap();
+    assert_eq!(g.env, [("PADDOCK_BASE_REF".to_string(), "origin/train/2026-11-15-13".to_string())]);
     // An unreadable contract: the gate is BROKEN (exit 7), it does not silently run nothing.
     let f = Facts {
         conformance: Some(Err("conformance/paddock.ci.json cannot be read".into())),

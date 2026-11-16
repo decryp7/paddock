@@ -274,3 +274,94 @@ fn growth_findings_equal_the_js_host_in_a_git_repository() {
         assert_eq!(got, want, "{name}");
     }
 }
+
+/// `main` has the list `base`; `train` (off main) has `train_list`; `member` (off train) has `member_list`; both host refs are in
+/// `refs/remotes/origin/*` so a run names them as `origin/main` and `origin/train`.
+fn train_repo(base: &str, train_list: &str, member_list: &str) -> tempfile::TempDir {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    std::fs::create_dir_all(root.join("conformance")).unwrap();
+    std::fs::create_dir_all(root.join("tools/t/tests/it")).unwrap();
+    std::fs::write(root.join("conformance/c130-allow.json"), base).unwrap();
+    std::fs::write(root.join("tools/t/tests/it/ok.rs"), SH.repeat(4)).unwrap();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["add", "."]);
+    git(root, &["commit", "-q", "-m", "main"]);
+    git(root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    git(root, &["checkout", "-q", "-b", "train"]);
+    std::fs::write(root.join("conformance/c130-allow.json"), train_list).unwrap();
+    git(root, &["commit", "-q", "-a", "-m", "train member 1"]);
+    git(root, &["update-ref", "refs/remotes/origin/train", "HEAD"]);
+    git(root, &["checkout", "-q", "-b", "member"]);
+    std::fs::write(root.join("conformance/c130-allow.json"), member_list).unwrap();
+    git(root, &["commit", "-q", "-a", "--allow-empty", "-m", "member"]);
+    d
+}
+
+fn grew_against(root: &Path, base_ref: &str) -> Vec<String> {
+    let mut o = c130_options(root, "fixture");
+    o.base_ref = Some(base_ref.into());
+    run_checks(&o, &registry())
+        .unwrap()
+        .findings
+        .iter()
+        .filter(|f| f.message.contains("allow list grew"))
+        .map(|f| f.message.clone())
+        .collect()
+}
+
+#[test]
+fn the_trains_own_entries_are_not_growth_of_a_member_measured_against_the_train() {
+    let repo = train_repo(&allow_of(1, ""), &allow_of(3, ""), &allow_of(3, ""));
+    assert_eq!(
+        grew_against(repo.path(), "origin/main").len(),
+        1,
+        "against main the train's raise shows as the member's growth"
+    );
+    assert!(
+        grew_against(repo.path(), "origin/train").is_empty(),
+        "against the train the member added nothing"
+    );
+    let own = train_repo(&allow_of(1, ""), &allow_of(3, ""), &allow_of(4, ""));
+    let msgs = grew_against(own.path(), "origin/train");
+    assert_eq!(msgs.len(), 1, "the member's own raise counts");
+    assert!(msgs[0].starts_with("the allow list grew: 1 entry is"), "{msgs:?}");
+    // The JavaScript host agrees on the same repositories with the same ref.
+    if has_node() {
+        for (name, repo) in [("clean", &repo), ("own", &own)] {
+            let js: Value = serde_json::from_str(&node(
+                JS_RUN_C130,
+                &[
+                    ("RT5_ROOT", repo.path().display().to_string()),
+                    ("RT5_APP", "fixture".into()),
+                    ("PADDOCK_BASE_REF", "origin/train".into()),
+                ],
+            ))
+            .unwrap();
+            let mut o = c130_options(repo.path(), "fixture");
+            o.base_ref = Some("origin/train".into());
+            let r = run_checks(&o, &registry()).unwrap();
+            assert_eq!(shared_part(&r.json())["findings"], shared_part(&js)["findings"], "{name}");
+        }
+    }
+}
+
+#[test]
+fn a_base_in_the_older_format_says_so_with_its_own_fix_on_both_hosts() {
+    let repo = growth_repo(
+        "{\"allow\":[{\"path\":\"tools/t/tests/it/ok.rs\",\"reason\":\"an older entry without a site\"}]}",
+        &allow_of(1, ""),
+    );
+    let r = run_checks(&c130_options(repo.path(), "fixture"), &registry()).unwrap();
+    let f: Vec<_> = r
+        .findings
+        .iter()
+        .filter(|f| f.message.contains("shrink-only rule is not enforced"))
+        .collect();
+    assert_eq!(f.len(), 1);
+    assert!(
+        f[0].message.contains("cannot be parsed") && f[0].fix.contains("older format"),
+        "{:?}",
+        f[0]
+    );
+}

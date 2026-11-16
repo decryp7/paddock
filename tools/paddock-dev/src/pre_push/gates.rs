@@ -114,6 +114,9 @@ pub struct Facts {
     pub kept_targets: Option<String>,
     /// The caller's `CARGO_TARGET_DIR`: the Windows lint gets `<it>/xwin` (ADR 0021 §3).
     pub target_dir: Option<String>,
+    /// The base the push is measured from (the one this run resolved): the conformance gate measures baseline and allow-list growth
+    /// against it (`PADDOCK_BASE_REF`), so a train member's growth is its own, not the train's. None: the checks' own default.
+    pub base_ref: Option<String>,
 }
 
 /// The push: its changed files and the commits to lint.
@@ -445,6 +448,7 @@ fn conformance(facts: &Facts) -> Planned {
         Some(Ok(_)) => Planned::Run(Gate {
             program: facts.dev_exe.clone(),
             args: strs(&["ci", "run", "conformance", "paddock"]),
+            env: facts.base_ref.iter().map(|b| ("PADDOCK_BASE_REF".to_string(), b.clone())).collect(),
             ..gate(id, "", "", &[], 0, "fix the finding it printed; the list of checks is the `conformance` field of conformance/paddock.ci.json (CI's \"Paddock itself\" step runs the same)".into())
         }),
         Some(Err(e)) => Planned::Broken { id, cause: e.clone(), next: "fix the `conformance` object in conformance/paddock.ci.json (app, root, only, strict)".into() },

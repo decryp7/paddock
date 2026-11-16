@@ -160,6 +160,19 @@ fn git(root: &Path, args: &[&str]) -> Result<String, (String, String)> {
     }
 }
 
+/// The ref every baseline's and allow list's growth is measured against: `explicit` (the run's own), else `PADDOCK_BASE_REF`, else
+/// `origin/main`. The ONE place that reads `PADDOCK_BASE_REF` (ER-21: C53, C71, C115, C104 and the shared allow-list reader each
+/// read it or forgot it, and a member branch of a train was measured against main, so the train's own entries counted as its growth).
+/// CI's conformance and train-gates jobs and `./dev check --pre-push` set it to the branch's target (the train before, for a train
+/// member). Report-only (ER-41) until the first green run on the real tree with it set in CI. JavaScript host: `targetRef` in
+/// `conformance/src/util/baseline.mjs`.
+pub fn target_ref(explicit: Option<&str>) -> String {
+    explicit
+        .map(str::to_string)
+        .or_else(|| std::env::var("PADDOCK_BASE_REF").ok())
+        .unwrap_or_else(|| "origin/main".into())
+}
+
 /// Whether `root` is a git work tree git itself accepts (a folder with a stray `.git` file, as a fixture has, is not).
 pub fn is_work_tree(root: &Path) -> bool {
     git(root, &["rev-parse", "--is-inside-work-tree"]).is_ok_and(|t| t.trim_matches(is_js_space) == "true")
@@ -256,6 +269,16 @@ pub fn growth<T: Clone>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_target_ref_is_the_runs_own_then_the_variable_then_main_and_this_is_the_one_reader() {
+        let mut env = paddock_testkit::env_lock();
+        env.remove("PADDOCK_BASE_REF");
+        assert_eq!(target_ref(None), "origin/main");
+        env.set("PADDOCK_BASE_REF", "origin/train/x");
+        assert_eq!(target_ref(None), "origin/train/x");
+        assert_eq!(target_ref(Some("topic")), "topic");
+    }
 
     const FILE: &str = "# header\nabc\n\n  def  \n# note\nghi\n";
 

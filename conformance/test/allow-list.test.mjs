@@ -175,3 +175,73 @@ test('allow list growth: a list new at the merge base, a fixture folder without 
   const w = (await findingsOf('C130', none, { options: { baseRef: 'no-such-ref' } })).filter((f) => /shrink-only rule is not enforced/.test(f.message));
   assert.equal(w.length, 1, 'a checkout where git cannot give a base says so, never silence');
 });
+
+// ---- the target ref: a member branch of a train is measured against the train, not main (ER-21; report-only, ER-41) ----
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { targetRef } from '../src/util/baseline.mjs';
+
+/** main has the list `base`; `train` (off main) has `trainList`; `member` (off train) has `memberList`. */
+function trainRepo(base, trainList, memberList) {
+  const root = makeApp({ 'conformance/c130-allow.json': allowJson(base), 'tools/t/tests/it/ok.rs': 'let s = "#!/bin/sh\\n";\n'.repeat(4) });
+  sh(root, 'init', '-q', '-b', 'main');
+  sh(root, 'add', '.');
+  sh(root, 'commit', '-q', '-m', 'main');
+  sh(root, 'checkout', '-q', '-b', 'train');
+  writeFileSync(join(root, 'conformance/c130-allow.json'), allowJson(trainList));
+  sh(root, 'commit', '-q', '-a', '-m', 'train member 1');
+  sh(root, 'checkout', '-q', '-b', 'member');
+  writeFileSync(join(root, 'conformance/c130-allow.json'), allowJson(memberList));
+  sh(root, 'commit', '-q', '-a', '--allow-empty', '-m', 'member');
+  return root;
+}
+const growthOn = async (root, baseRef) => (await findingsOf('C130', root, { options: { baseRef } })).filter((f) => /allow list grew/.test(f.message));
+
+test('target ref: the train\'s own entries are not growth of a member branch measured against the train, but are against main', async () => {
+  const root = trainRepo([ok(1)], [ok(3)], [ok(3)]);
+  assert.equal((await growthOn(root, 'main')).length, 1, 'against main the train\'s raised count shows up as the member\'s growth');
+  assert.deepEqual(await growthOn(root, 'train'), [], 'against the train the member added nothing');
+  const grew = trainRepo([ok(1)], [ok(3)], [ok(4)]);
+  const own = await growthOn(grew, 'train');
+  assert.equal(own.length, 1, 'the member\'s own raise counts');
+  assert.match(own[0].message, /the allow list grew: 1 entry is/);
+});
+
+test('target ref: the run\'s own, else PADDOCK_BASE_REF, else origin/main, and nothing else reads the variable', () => {
+  const saved = process.env.PADDOCK_BASE_REF;
+  try {
+    delete process.env.PADDOCK_BASE_REF;
+    assert.equal(targetRef({}), 'origin/main');
+    assert.equal(targetRef(undefined), 'origin/main');
+    process.env.PADDOCK_BASE_REF = 'origin/train/x';
+    assert.equal(targetRef({}), 'origin/train/x');
+    assert.equal(targetRef({ baseRef: 'topic' }), 'topic');
+  } finally {
+    if (saved === undefined) delete process.env.PADDOCK_BASE_REF;
+    else process.env.PADDOCK_BASE_REF = saved;
+  }
+  // A source audit over the host's own code (not declared data): the variable is read in util/baseline.mjs only.
+  const readers = [];
+  const walk = (dir) => {
+    for (const f of readdirSync(dir)) {
+      const p = join(dir, f);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (f.endsWith('.mjs') && /process\.env\.PADDOCK_BASE_REF/.test(readFileSync(p, 'utf8'))) readers.push(p);
+    }
+  };
+  walk(new URL('../src', import.meta.url).pathname);
+  assert.deepEqual(readers.map((p) => p.slice(p.indexOf('conformance/'))), ['conformance/src/util/baseline.mjs']);
+});
+
+test('allow list growth: a base in the older format says so with its own fix', async () => {
+  const root = makeApp({ 'conformance/c130-allow.json': JSON.stringify({ allow: [{ path: 'tools/t/tests/it/ok.rs', reason: 'an older entry without a site' }] }), 'tools/t/tests/it/ok.rs': 'x\n' });
+  sh(root, 'init', '-q', '-b', 'main');
+  sh(root, 'add', '.');
+  sh(root, 'commit', '-q', '-m', 'old');
+  sh(root, 'checkout', '-q', '-b', 'topic');
+  writeFileSync(join(root, 'conformance/c130-allow.json'), allowJson([ok(1)]));
+  sh(root, 'commit', '-q', '-a', '-m', 'new');
+  const w = (await findingsOf('C130', root, { options: { baseRef: 'main' } })).filter((f) => /shrink-only rule is not enforced/.test(f.message));
+  assert.equal(w.length, 1);
+  assert.match(w[0].message, /cannot be parsed/);
+  assert.match(w[0].fix, /older format/);
+});

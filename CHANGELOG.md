@@ -52,6 +52,8 @@ Conventional Commits; one semver tag for the whole repo.
 - `StopProcess.started_at` is required and the process list's start times are the exact milliseconds the service read (a stop compares them to the identity it holds, within 1 ms, and `paddock_proc` compares the pid's holder again right before it signals). A process the system gives no start time for is refused with a next step; the Stop button is disabled for it. The app and the service must be the same version (protocol 4 is refused).
 - Windows: Stop on a console process without a window no longer fails; when the close request is not taken, the process is ended after the stop timeout.
 - A refused stop answers `badRequest`, not `busy`.
+### Growth of baselines and allow lists is measured against the branch's target (report-only, ER-41)
+- One function reads `PADDOCK_BASE_REF`: `check::baseline::target_ref` (Rust) and `targetRef` in `conformance/src/util/baseline.mjs` (JS), the run's own ref, else the variable, else `origin/main`. Every baseline and allow-list growth check (C53, C71, C104, C115 and the shared allow-list readers of C121, C124, C125 and C130) uses it, so a member branch of a train is not charged with the train's entries. CI sets it in the conformance job (the dispatch's `base`, else the pull request's target, else main) and in the train-gates job (the train before, ADR 0098), and `./dev check --pre-push` passes the base it resolved. Report-only until the first green run with it set in CI. A base list in an older format now says so with its own fix.
 
 ### `paddock-testkit`: `StandIn`, check C130
 - New `paddock_testkit::StandIn` (with `Actions`, `Spawn`, `Installed`, `Invocation`) and the std-only binary `paddock-stand-in`: one stand-in

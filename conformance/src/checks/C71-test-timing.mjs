@@ -36,7 +36,7 @@
 // performance.now, page.clock.install without pauseAt, vi.waitFor under fake timers, the live-status spread, C30's elapsed asserts,
 // vm-smoke `observe()`, the ESLint rule.
 import { createHash } from 'node:crypto';
-import { baselineGrowth as sharedGrowth, reconcile } from '../util/baseline.mjs';
+import { baselineGrowth as sharedGrowth, reconcile, targetRef } from '../util/baseline.mjs';
 import { error, warn } from '../finding.mjs';
 import { maskRust } from './C39-freed-port.mjs';
 
@@ -494,7 +494,7 @@ export function baselineGrowth(ctx, current, path = BASELINE_PATH) {
     looseKeyOf: hashOf,
     entriesOf: (json) => json.sites ?? [],
     ...(ctx.options.git ? { git: ctx.options.git } : {}),
-    ...(ctx.options.baseRef ?? process.env.PADDOCK_BASE_REF ? { baseRef: ctx.options.baseRef ?? process.env.PADDOCK_BASE_REF } : {}),
+    baseRef: targetRef(ctx.options),
   });
 }
 
