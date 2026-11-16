@@ -58,6 +58,27 @@ that quotes a result links to the block instead of carrying the only copy.
 - **Notes:** noise, anomalies, what is not measured, where the raw output is kept
 ```
 
+## Timing benchmarks on a busy host
+
+A benchmark that gives a verdict on the shared Mac does not gate on the 1-minute load average (ER-24: it counts OrbStack and
+build threads, and run 8175 was red for starts that were not slowed). The one shared mechanism is `scripts/bench/busy-host.mjs`
+(tests: `busy-host.test.mjs`); Debrief's `scripts/ci/startup-bench.mjs` uses it, results in
+[Debrief performance.md](../apps/debrief/docs/performance.md#start-up-benchmark-on-a-busy-host-2026-11-16-featbench-busy-host).
+
+- It measures the CPU time (user + sys) of the started process tree and gates on it, and gates each wall mark, against a recorded
+  baseline plus a measured noise margin (ER-12; both in the app's budgets file, with the results block that measured them).
+- A fixed reference workload is timed before and after, and start-up is reported as a ratio to it. It scales wall time only
+  where a measurement showed it tracks the app (`reference.normaliseWall`); on the Mac it does not, so it is off there.
+- Host CPU idle is printed for every start and never used to drop one.
+- Measured and over a threshold: `::error::`, exit 1, on every run. Measured and under: pass, the numbers in the step summary.
+  NOT MEASURED means only that the starts' own spread (middle half over median) is over the recorded limit, or there are fewer
+  than 3 starts: a `::warning::` and exit 0 on a train or branch, an `::error::` and exit 6 on a release tag (ER-33,
+  `GITHUB_REF_TYPE=tag`).
+- A new timing benchmark imports `verdict`, `annotations`, `readTreeCpuMs` and `readCpuIdle` from it and records its thresholds the
+  same way. Other load gates in the repo are admission gates (they decide whether to start work, they give no verdict) and are not
+  part of this: `scripts/vm-win.sh`, `scripts/vm-win/prepare.sh`, `scripts/vm-smoke/run.mjs` and `tools/macos-vm-smoke.sh`
+  (do not start a VM above a load), `tools/heavy` (the heavy-slot gate) and `./dev`'s queue reason (`pre_push/exec.rs`).
+
 ## Results of shared tooling
 
 ### 2026-11-08, `./dev gates check` (feat/gates-c100)
@@ -196,7 +217,7 @@ Not benchmarks, though the names suggest it:
 | Debrief CPU, memory and idle gates | idle ≤ 0.5% of a core and ≤ 1 wake-up/s; catalogue ≤ 512 MB; import ≤ 6 s and ≤ 32 CPU-s per GB; post-import ≤ 20 CPU-s/GB; name rebuild ≤ 1 s | Debrief [research/2026-10-28-cpu-memory.md](../apps/debrief/docs/research/2026-10-28-cpu-memory.md) §4; family [ADR 0024](adr/0024-background-work-contract.md) D7 | **nothing yet** (planned `bench/budgets.toml`) |
 | Debrief plugin memory | cap 1024 MB; import ≤ 512 MB (proposed) | Debrief ADR 0031; [plugins research](research/2026-10-plugins-memory-and-manager.md) | `evtx_memory.rs` (ignored, fails today) |
 | Debrief profile operations | 100–2000 ms each | Debrief [profiling.md](../apps/debrief/docs/profiling.md#performance) | `debrief-profile` `perf.rs` (CI, debug, budgets × 20) |
-| Debrief start-up marks (macOS) | windowCreated 325 … firstInteractive 940 ms | Rule 16, Debrief ADR 0058 | `startup-bench.mjs` (nightly) |
+| Debrief start-up (macOS) | tree CPU 561 ms; marks windowCreated 232 … firstInteractive 687 ms (baseline + 3 sd, 2026-11-16) | Rule 16, Debrief ADR 0058 | `startup-bench.mjs` (nightly) |
 | First-paint JS | Debrief main 1355 kB, About 480 kB; other apps not set | Rule 35 | `window-weight.mjs` (Debrief); C29 (not configured) |
 | Angular initial bundle | Debrief 185/192 kB; Dyno 900 kB/1.5 MB; Pitcrew 1/2 MB; Pitwall 1.2/2 MB; Spotter 1/2 MB; gallery 1.5/3 MB; shell-demo 500 kB/1 MB; workbench-demo 580 kB/1 MB | Rule 35 | `ng build` in CI |
 | Idle process | ≤ 0.5% of a core, ≤ 1 wake-up/s | [ADR 0024](adr/0024-background-work-contract.md) D7 | **nothing** shared; Debrief's gate is planned |

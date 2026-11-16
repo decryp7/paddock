@@ -2342,3 +2342,16 @@ from inside axe's scan: a 90 ms colour animation, the same on `::before`, and a 
 rescan version in both engines and are green now. **Rule:** a check that reads a moving page stops the motion; it does not try
 to detect every kind of motion. **Class: axe read colours that were still changing (fourth instance: the theme switch transition that `settleTransitions`
 was made for, the hover tooltip fading in, run 7872, this run, and the rescan's own misses).**
+
+## The start-up benchmark was red for starts a busy host had not slowed (Debrief, 2026-11-16, CI run 8175)
+
+Run 8175 said "NOT MEASURED: 1 of 5 starts ran with host load <= 12 (14 discarded in 15 attempts, peak 1-minute load 49.4)". The
+load average on the shared Mac counts OrbStack and build threads, and the gate threw away starts that were fine: under 14, 28
+and 84 CPU-bound `yes` loops (with `dd`) Debrief's start moved by under 5% (firstInteractive 585 to 622 ms) and its tree CPU
+time not at all (480 to 525 ms). **The planned fix did not hold either:** scaling wall time by a fixed Node reference workload
+would have been wrong, because the reference ran 2.2 to 5.2 times slower under the same loops (macOS schedules a short start
+ahead of long-running loops), so a regression of two times would have passed. **Rule:** a benchmark's gate is a quantity that does
+not move with the host (CPU time) plus a threshold from a measurement; a normaliser is used only after it is measured to track
+the thing it normalises, under load, with the numbers in the results block. A host-load gate on a verdict is a proxy for a
+measurement nobody made. Results: apps/debrief/docs/performance.md, "Start-up benchmark on a busy host". **Class: a proxy gate
+(load average) stood in for a measured effect (second instance: ER-12's raised timeouts without a measured cause).**
