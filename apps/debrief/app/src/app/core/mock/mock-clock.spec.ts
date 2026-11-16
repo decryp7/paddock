@@ -83,7 +83,7 @@ describe('systemMockClock stop and resume', () => {
     let woke = false;
     void systemMockClock.sleep(1000).then(() => void (woke = true));
     expect(vi.getTimerCount()).toBe(3);
-    stopSystemMockClock();
+    stopSystemMockClock('the stop test');
     expect(vi.getTimerCount()).toBe(0);
     await Promise.resolve();
     expect(woke).toBe(true);
@@ -113,10 +113,12 @@ describe('systemMockClock stop and resume', () => {
     const lines: string[] = [];
     stderr.write = (s: string) => (lines.push(s), true);
     try {
-      stopSystemMockClock();
+      stopSystemMockClock('a finished test');
       systemMockClock.setTimeout(() => undefined, 1);
       systemMockClock.setInterval(() => undefined, 1);
       expect(lines.filter((l) => l.includes('[mock-clock]'))).toHaveLength(1);
+      // It names the test the clock was stopped after and the caller (this spec).
+      expect(lines.find((l) => l.includes('[mock-clock]'))).toMatch(/after "a finished test".* at .*mock-clock\.spec\.ts/);
       resumeSystemMockClock();
       stopSystemMockClock();
       systemMockClock.setTimeout(() => undefined, 1);

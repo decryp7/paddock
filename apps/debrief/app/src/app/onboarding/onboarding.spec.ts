@@ -77,6 +77,41 @@ describe('TourService', () => {
     expect(tour.active()).toBe(false);
   });
 
+  it('leaves no abort listener on the step signal after the polls of a panel that appears late', async () => {
+    vi.useFakeTimers();
+    let polls = 0;
+    const added: unknown[] = [];
+    const removed: unknown[] = [];
+    // The page's AbortSignal (jsdom's) inherits its own EventTarget: patch the prototype that owns the methods.
+    let proto: object | null = AbortSignal.prototype;
+    while (proto && !Object.prototype.hasOwnProperty.call(proto, 'addEventListener')) proto = Object.getPrototypeOf(proto) as object | null;
+    const owner = proto as EventTarget;
+    const realAdd = owner.addEventListener;
+    const realRemove = owner.removeEventListener;
+    owner.addEventListener = function (this: EventTarget, type: string, ...rest: [unknown, unknown?]) {
+      if (this instanceof AbortSignal && type === 'abort') added.push(rest[0]);
+      return (realAdd as (...a: unknown[]) => void).call(this, type, ...rest);
+    } as typeof realAdd;
+    owner.removeEventListener = function (this: EventTarget, type: string, ...rest: [unknown, unknown?]) {
+      if (this instanceof AbortSignal && type === 'abort') removed.push(rest[0]);
+      return (realRemove as (...a: unknown[]) => void).call(this, type, ...rest);
+    } as typeof realRemove;
+    try {
+      const { tour } = setupTour(() => (++polls > 4 ? box() : null));
+      tour.start();
+      tour.next(); // the first step has no target: the second waits for its panel
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(polls).toBeGreaterThan(4);
+      // A listener a poll added is removed when its timer fires (before the fix they piled up on the signal, one per poll).
+      expect(added.length).toBeGreaterThan(0);
+      // At most the poll in flight keeps its listener (it goes with its timer).
+      expect(added.filter((l) => !removed.includes(l)).length).toBeLessThanOrEqual(1);
+    } finally {
+      owner.addEventListener = realAdd;
+      owner.removeEventListener = realRemove;
+    }
+  });
+
   it('ends the wait for a panel with the tour: its pause timer is cleared when the injector goes', async () => {
     vi.useFakeTimers();
     const { tour } = setupTour(() => null);

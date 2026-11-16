@@ -40,9 +40,9 @@ registerSingleton({ name: 'mock notifications', leftover: () => null, reset: res
 registerInFlight({ name: 'start-up loads', pending: unsettledStartupLoads });
 // The page-wide activity runtime ends its current task with a zero-delay timer; end it now so none outlives its test.
 beforeEach(resumeSystemMockClock);
-afterEach(() => {
+afterEach((ctx) => {
   activity.endTaskNow();
-  stopSystemMockClock();
+  stopSystemMockClock((ctx.task as { fullName?: string }).fullName ?? ctx.task.name);
   cancelFocusRetries();
 });
 installLeakDetector({ mode: 'fail' });
