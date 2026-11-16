@@ -24,13 +24,14 @@
 //! Realistic defaults are opt-in: [`StandIn::npm_like`] and [`StandIn::git_like`] answer the common calls with the shape the real
 //! program prints; override any call with [`StandIn::when_args`] (rules added later are matched first).
 //!
-//! Where the binary comes from (once per build folder, not per test): the variable `PADDOCK_STAND_IN_BIN` when it is set (CI jobs
-//! and the Windows test VM, which has no compiler, point it at a binary cross-built with the testkit), else the kit compiles the
+//! Where the binary comes from (once per build folder, not per test): the variable `PADDOCK_STAND_IN_BIN` when it is set (the Windows test VM, which has no compiler: `docs/testing/windows-test-vm.md`; the binary must be built from the same sources, which is checked), else the kit compiles the
 //! binary's one source file with `rustc` (std only, about a second) into the build folder the test program is in, under a name
 //! that holds a hash of the source, so an edited stand-in is rebuilt and an unchanged one is found by every later test process.
 //! The stand-in finds its script beside itself, so install it where the code under test will look for the program; copying or moving
 //! the installed program alone leaves the script behind. It is installed as a hard link (a copy when the folders are on different volumes), never a symlink: the stand-in finds its
-//! script from its own path.
+//! script from its own path. The copy is the fallback only: a process that forks while another thread of the same process has the
+//! copy open for writing can make that thread's first run of it fail with "Text file busy" (ETXTBSY) on Linux, so tests in one process
+//! that install across volumes take turns (nextest runs each test in its own process, where this cannot happen).
 
 use crate::cargo_layout::profile_dir_for;
 use crate::process::TestCommand;
@@ -109,6 +110,7 @@ impl Spawn {
 pub struct Actions {
     steps: Vec<Value>,
     exit: i32,
+    echoes: bool,
 }
 
 impl Actions {
@@ -168,9 +170,10 @@ impl Actions {
         self.step("spawn", child.to_value())
     }
 
-    /// Prints on stdout what was read on stdin (needs [`StandIn::reads_stdin`]).
+    /// Prints on stdout what was read on stdin (the stand-in then reads stdin, without recording it).
     #[must_use]
-    pub fn echoes_stdin(self) -> Actions {
+    pub fn echoes_stdin(mut self) -> Actions {
+        self.echoes = true;
         self.step("echo_stdin", Value::Null)
     }
 
@@ -372,6 +375,16 @@ impl StandIn {
             )
     }
 
+    /// Whether any answer echoes stdin, which needs it read.
+    fn reads_stdin_for_echo(&self) -> bool {
+        self.actions.echoes || self.cases.iter().any(|(_, a)| a.echoes)
+    }
+
+    /// Every exit code the stand-in can end with.
+    fn exit_codes(&self) -> impl Iterator<Item = i32> + '_ {
+        std::iter::once(self.actions.exit).chain(self.cases.iter().map(|(_, a)| a.exit))
+    }
+
     fn script(&self, record: &Path) -> Value {
         let cases = self
             .cases
@@ -387,7 +400,10 @@ impl StandIn {
         let mut m = vec![
             ("actions".to_string(), self.actions.to_value()),
             ("cases".to_string(), Value::Arr(cases)),
-            ("read_stdin".to_string(), Value::Bool(self.read_stdin)),
+            (
+                "read_stdin".to_string(),
+                Value::Bool(self.read_stdin || self.reads_stdin_for_echo()),
+            ),
             ("record_env".to_string(), strs(&self.record_env)),
         ];
         if self.record {
@@ -410,6 +426,15 @@ impl StandIn {
             return Err(invalid(format!(
                 "`{}` is not a bare program name (no folder, no `.exe`)",
                 self.name
+            )));
+        }
+        // A Unix exit status is one byte: 256 would read as 0, and -1 as 255, so a test asking for either never sees what it wrote.
+        if let Some(code) = self
+            .exit_codes()
+            .find(|c| cfg!(unix) && !(0..=255).contains(c))
+        {
+            return Err(invalid(format!(
+                "exit code {code} does not exist on Unix: use 0 to 255"
             )));
         }
         let stub = stub_binary().map_err(io::Error::other)?;
@@ -552,20 +577,21 @@ fn stub_binary() -> Result<PathBuf, String> {
 const STUB_SOURCE: &str = include_str!("bin/paddock-stand-in.rs");
 const JSON_SOURCE: &str = include_str!("stand_in_json.rs");
 
-/// FNV-1a over both sources: a name that changes when either does.
+/// The hash of the sources this kit was built from, in the name of the compiled binary and checked on a prebuilt one.
 fn source_hash() -> String {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in STUB_SOURCE.bytes().chain([0]).chain(JSON_SOURCE.bytes()) {
-        h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
-    }
-    format!("{h:016x}")
+    stand_in_json::source_hash(STUB_SOURCE, JSON_SOURCE)
 }
 
 fn locate_stub() -> Result<PathBuf, String> {
-    if let Some(p) = std::env::var_os(STAND_IN_ENV) {
+    locate_from(std::env::var_os(STAND_IN_ENV))
+}
+
+/// [`locate_stub`] with the variable's value given (a test names a binary without touching the environment).
+fn locate_from(named: Option<std::ffi::OsString>) -> Result<PathBuf, String> {
+    if let Some(p) = named {
         let p = PathBuf::from(p);
         return if p.is_file() {
-            Ok(p)
+            check_prebuilt(&p).map(|()| p)
         } else {
             Err(format!(
                 "{STAND_IN_ENV} names {}, which is not a file",
@@ -586,6 +612,26 @@ fn locate_stub() -> Result<PathBuf, String> {
     }
     compile_stub(&profile, &built)?;
     Ok(built)
+}
+
+/// A prebuilt binary must come from these sources: it prints their hash when asked, so a binary left from another commit is refused
+/// with the fix, not run with a script format it does not know.
+fn check_prebuilt(bin: &Path) -> Result<(), String> {
+    let out = TestCommand::new(bin)
+        .env("PADDOCK_STAND_IN_PRINT_HASH", "1")
+        .output()
+        .map_err(|e| format!("cannot run {STAND_IN_ENV} ({}): {e}", bin.display()))?;
+    let said = String::from_utf8_lossy(&out.stdout);
+    if said.trim() == source_hash() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{STAND_IN_ENV} ({}) is not built from these sources (it says `{}`, the kit's is `{}`): rebuild it from this commit",
+            bin.display(),
+            said.trim(),
+            source_hash()
+        ))
+    }
 }
 
 /// Compiles the stand-in with `rustc` into a private folder under `profile`, then moves it to `built` (a rename, so a test process
@@ -612,8 +658,8 @@ fn compile_stub(profile: &Path, built: &Path) -> Result<(), String> {
     let out = work
         .path()
         .join(format!("{STAND_IN_BIN}{}", std::env::consts::EXE_SUFFIX));
-    let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-    let result = TestCommand::new(rustc)
+    let result = TestCommand::new(rustc_program())
+        .env("RUSTUP_AUTO_INSTALL", "0")
         .args([
             "--edition",
             "2021",
@@ -635,6 +681,102 @@ fn compile_stub(profile: &Path, built: &Path) -> Result<(), String> {
             String::from_utf8_lossy(&result.stderr)
         ));
     }
-    std::fs::rename(&out, built)
-        .map_err(|e| format!("cannot move {} to {}: {e}", out.display(), built.display()))
+    publish_stub(&out, built)
+}
+
+/// Moves the compiled stand-in to its hash-named place. On Windows a rename onto a file another test process already started fails; the
+/// file is then the same program (its name holds the hash of the sources), so a file that is there is success.
+fn publish_stub(out: &Path, built: &Path) -> Result<(), String> {
+    match std::fs::rename(out, built) {
+        Ok(()) => Ok(()),
+        Err(_) if built.is_file() => Ok(()),
+        Err(e) => Err(format!(
+            "cannot move {} to {}: {e}",
+            out.display(),
+            built.display()
+        )),
+    }
+}
+
+/// The compiler for the stand-in: the real `rustc` beside the `cargo` that runs the tests (a rustup proxy could install a toolchain
+/// or pick another one), else `$RUSTC`, else `rustc` on the `PATH`.
+fn rustc_program() -> std::ffi::OsString {
+    let beside = std::env::var_os("CARGO")
+        .map(PathBuf::from)
+        .and_then(|c| {
+            c.parent()
+                .map(|d| d.join(format!("rustc{}", std::env::consts::EXE_SUFFIX)))
+        })
+        .filter(|p| p.is_file());
+    beside
+        .map(PathBuf::into_os_string)
+        .or_else(|| std::env::var_os("RUSTC"))
+        .unwrap_or_else(|| "rustc".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Scratch, env_lock};
+
+    #[test]
+    fn a_rename_that_fails_onto_a_file_that_is_there_is_success_and_onto_nothing_is_an_error() {
+        let s = Scratch::new();
+        let built = s.work().join("paddock-stand-in-x");
+        std::fs::write(&built, "already there").unwrap();
+        // The source is gone, as when the rename lost the race for the target on Windows: the file that is there is the same program.
+        assert_eq!(publish_stub(&s.work().join("missing"), &built), Ok(()));
+        let err = publish_stub(&s.work().join("missing"), &s.work().join("nothing")).unwrap_err();
+        assert!(err.contains("cannot move"), "{err}");
+    }
+
+    #[test]
+    fn the_compiler_is_the_one_beside_cargo_then_rustc_then_the_path() {
+        let s = Scratch::new();
+        let mut env = env_lock();
+        let rustc = s
+            .work()
+            .join(format!("rustc{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&rustc, "").unwrap();
+        env.set("CARGO", s.work().join("cargo"));
+        env.set("RUSTC", "/the/other/rustc");
+        assert_eq!(rustc_program(), rustc.into_os_string());
+        env.set("CARGO", s.work().join("no-such-dir").join("cargo"));
+        assert_eq!(
+            rustc_program(),
+            std::ffi::OsString::from("/the/other/rustc")
+        );
+        env.remove("RUSTC");
+        assert_eq!(rustc_program(), std::ffi::OsString::from("rustc"));
+    }
+
+    #[test]
+    fn a_stale_or_missing_binary_named_by_the_variable_is_refused_before_any_test_runs_it() {
+        let ok = stub_binary().unwrap();
+        assert_eq!(locate_from(Some(ok.clone().into_os_string())), Ok(ok));
+        let missing = locate_from(Some("/no/such/stand-in".into())).unwrap_err();
+        assert!(missing.contains("which is not a file"), "{missing}");
+        #[cfg(unix)]
+        assert!(
+            locate_from(Some("/bin/echo".into()))
+                .unwrap_err()
+                .contains("is not built from these sources")
+        );
+    }
+
+    #[test]
+    fn a_prebuilt_binary_of_these_sources_is_accepted_and_another_program_is_refused() {
+        check_prebuilt(&stub_binary().unwrap()).unwrap();
+        #[cfg(unix)]
+        {
+            let err = check_prebuilt(Path::new("/bin/echo")).unwrap_err();
+            assert!(
+                err.contains("is not built from these sources")
+                    && err.contains("rebuild it from this commit"),
+                "{err}"
+            );
+        }
+        let missing = check_prebuilt(Path::new("/no/such/stand-in")).unwrap_err();
+        assert!(missing.contains("cannot run"), "{missing}");
+    }
 }

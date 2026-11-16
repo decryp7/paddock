@@ -16,6 +16,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+/// Both sources, for the version check (`PADDOCK_STAND_IN_PRINT_HASH`): the builder hashes the same two files.
+const STUB_SOURCE: &str = include_str!("paddock-stand-in.rs");
+const JSON_SOURCE: &str = include_str!("../stand_in_json.rs");
 /// The longest a `sleep` step waits (a stand-in that sleeps is a program that hangs: a test cuts it with its own bound).
 const MAX_SLEEP_MS: i64 = 120_000;
 /// The most of stdin that is read and recorded.
@@ -24,6 +27,10 @@ const MAX_STDIN: u64 = 1 << 20;
 const BROKEN: i32 = 70;
 
 fn main() {
+    if std::env::var_os("PADDOCK_STAND_IN_PRINT_HASH").is_some() {
+        println!("{}", json::source_hash(STUB_SOURCE, JSON_SOURCE));
+        std::process::exit(0);
+    }
     let code = match run() {
         Ok(code) => code,
         Err(message) => {
@@ -40,10 +47,15 @@ fn run() -> Result<i32, String> {
         .parent()
         .ok_or("its own path has no folder")?
         .to_path_buf();
-    let name = exe
-        .file_stem()
+    // The installed name: the file name, without the `.exe` Windows adds (never the stem: `python3.12` has a dot of its own).
+    let file = exe
+        .file_name()
         .and_then(|s| s.to_str())
         .ok_or("its own file name is not text")?;
+    let name = match file.len().checked_sub(4).and_then(|at| file.get(at..)) {
+        Some(ext) if cfg!(windows) && ext.eq_ignore_ascii_case(".exe") => &file[..file.len() - 4],
+        _ => file,
+    };
     let script_path = dir.join(format!("{name}.stand-in.json"));
     let text = std::fs::read_to_string(&script_path)
         .map_err(|e| format!("cannot read its script {}: {e}", script_path.display()))?;

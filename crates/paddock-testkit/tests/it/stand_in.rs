@@ -49,6 +49,19 @@ fn installs_under_the_program_name_with_the_platform_suffix() {
 }
 
 #[test]
+fn a_program_name_with_a_dot_finds_its_script() {
+    // `python3.12`: the script is `python3.12.stand-in.json`, never `python3.stand-in.json` (a file stem would cut at the dot).
+    let s = Scratch::new();
+    let p = StandIn::new(&s.work(), "python3.12")
+        .stdout("3.12.1")
+        .records_args()
+        .install()
+        .unwrap();
+    assert_eq!(out(&run(p.program(), &["--version"])), "3.12.1\n");
+    assert_eq!(p.calls().unwrap(), [["--version"]]);
+}
+
+#[test]
 fn writes_and_appends_files() {
     let s = Scratch::new();
     let f = s.work().join("made.txt");
@@ -342,4 +355,52 @@ fn git_like_answers_the_common_calls_and_a_test_can_override_one() {
         " M a.txt\n"
     );
     assert_eq!(run(p.program(), &["nope"]).status.code(), Some(1));
+}
+
+#[test]
+fn an_exit_code_a_unix_status_cannot_hold_is_refused_at_install() {
+    let s = Scratch::new();
+    for bad in [256, -1, 1000] {
+        let e = StandIn::new(&s.work(), "tool").exit(bad).install();
+        let c = StandIn::new(&s.work(), "tool")
+            .when_args(&["x"], Actions::new().exit(bad))
+            .install();
+        if cfg!(unix) {
+            assert!(
+                e.unwrap_err()
+                    .to_string()
+                    .contains("does not exist on Unix"),
+                "{bad}"
+            );
+            assert!(c.is_err(), "{bad}: a case counts too");
+        } else {
+            assert!(e.is_ok() && c.is_ok());
+        }
+    }
+    assert!(StandIn::new(&s.work(), "tool").exit(255).install().is_ok());
+}
+
+#[test]
+fn echoing_stdin_in_a_case_reads_stdin_without_asking_for_it_twice() {
+    let s = Scratch::new();
+    let p = StandIn::new(&s.work(), "tee")
+        .when_args(&["--echo"], Actions::new().echoes_stdin())
+        .install()
+        .unwrap();
+    let mut child = TestCommand::new(p.program())
+        .arg("--echo")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"piped text")
+            .unwrap();
+    }
+    assert_eq!(out(&child.wait_with_output().unwrap()), "piped text");
 }

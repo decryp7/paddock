@@ -17,6 +17,16 @@ pub enum Value {
     Obj(Vec<(String, Value)>),
 }
 
+/// FNV-1a over the stand-in's two sources: a name and a version check that change when either does. The binary prints it (with
+/// `PADDOCK_STAND_IN_PRINT_HASH` set) so the builder can tell a prebuilt binary from another version of the sources.
+pub fn source_hash(stub: &str, json: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in stub.bytes().chain([0]).chain(json.bytes()) {
+        h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
 /// Nesting deeper than this is refused (a script is two or three levels deep).
 const MAX_DEPTH: usize = 32;
 
