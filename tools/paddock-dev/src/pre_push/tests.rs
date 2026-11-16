@@ -1747,10 +1747,26 @@ fn a_tracking_upstream_wins_only_a_tie() {
 fn a_push_of_only_reservation_refs_has_nothing_to_check() {
     let zero = "0".repeat(40);
     let paddock = format!("refs/paddock/check-ids/C9 aaa refs/paddock/check-ids/C9 {zero}\n");
-    assert!(super::only_reservation_refs(&paddock));
+    let blob = |sha: &str| sha == "aaa";
+    assert!(super::only_reservation_refs(&paddock, &blob));
+    let deletion = format!("(delete) {zero} refs/paddock/check-ids/C9 aaa\n");
+    assert!(super::only_reservation_refs(&deletion, &blob), "a deletion is a reservation push");
     let mixed = format!("{paddock}refs/heads/a bbb refs/heads/a {zero}\n");
-    assert!(!super::only_reservation_refs(&mixed), "a branch in the same push is still checked");
-    assert!(!super::only_reservation_refs(""), "no lines is not a reservation push");
+    assert!(
+        !super::only_reservation_refs(&mixed, &blob),
+        "a branch in the same push is still checked"
+    );
+    assert!(!super::only_reservation_refs("", &blob), "no lines is not a reservation push");
+    let commit = format!("refs/paddock/check-ids/C9 ccc refs/paddock/check-ids/C9 {zero}\n");
+    assert!(
+        !super::only_reservation_refs(&commit, &blob),
+        "a commit under check-ids goes through the gates"
+    );
+    let other = format!("refs/paddock/x aaa refs/paddock/x {zero}\n");
+    assert!(
+        !super::only_reservation_refs(&other, &blob),
+        "only refs/paddock/check-ids/ is exempt"
+    );
 }
 
 #[test]

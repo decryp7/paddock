@@ -271,7 +271,6 @@ fn concurrent_reservations_from_two_clones_get_different_ids() {
         for c in [&a, &b] {
             std::fs::remove_dir_all(c.join(RESERVED_DIR)).unwrap();
         }
-        let _ = std::fs::remove_dir_all(a.join(RESERVED_DIR));
         let n = ids.len();
         assert_ne!(ids[n - 1], ids[n - 2], "both clones got {}: {ids:?}", ids[n - 1]);
     }
@@ -306,4 +305,43 @@ fn a_taken_ref_moves_the_reservation_to_the_next_id() {
         git(&origin, &["update-ref", &format!("refs/paddock/check-ids/C{id}"), &blob]);
     }
     assert_eq!(dev(&a, &["--reserve", "feat/late"]).1["id"], "C43");
+}
+
+/// A server that refuses the reservation push (a pre-receive hook, as a rights or policy refusal) is an error that says no id was
+/// taken, and no reservation file is written.
+#[cfg(unix)]
+#[test]
+fn a_refusing_server_is_an_error_and_writes_no_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = repo();
+    let a = clone_of(d.path(), "ca");
+    let hook = d.path().join("origin.git/hooks/pre-receive");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    std::fs::write(&hook, "#!/bin/sh\necho refused by policy >&2\nexit 1\n").unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (code, _, err) = dev(&a, &["--reserve", "feat/nope"]);
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("::error::") && err.contains("no id was taken"), "{err}");
+    assert!(!a.join(RESERVED_DIR).exists(), "no reservation file without a reservation");
+}
+
+/// The hand-numbered files of branches that never used the server (C130 and C131 on 2026-11-16) still count, with no ref on origin.
+#[test]
+fn hand_written_reservation_files_without_a_server_ref_still_count() {
+    let d = repo();
+    let a = clone_of(d.path(), "ca");
+    git(&a, &["checkout", "-q", "-b", "golden", "origin/main"]);
+    reserve_file(&a, 131, "feat/golden");
+    git(&a, &["add", "-A"]);
+    git(&a, &["commit", "-q", "-m", "chore: reserve"]);
+    git(&a, &["push", "-q", "origin", "golden"]);
+    git(&a, &["checkout", "-q", "main"]);
+    let b = clone_of(d.path(), "cb");
+    reserve_file(&b, 130, "feat/stand-in");
+    assert_eq!(
+        dev(&b, &[]).1["id"],
+        "C132",
+        "a pushed hand-written file and a local one are both counted"
+    );
+    assert_eq!(dev(&b, &["--reserve", "feat/next"]).1["id"], "C132");
 }

@@ -294,7 +294,7 @@ fn remote_reservations(exec: &dyn Exec, root: &Path) -> Result<Vec<u32>, CliErro
 }
 
 /// Takes the lowest free id above `max` on the remote: pushes a blob to `refs/paddock/check-ids/C<n>` (refused when the ref
-/// exists, i.e. someone took it first) and moves on to the next number until a push is accepted. Returns the id taken.
+/// exists, i.e. someone else took it first; one holding this very blob is ours) and moves on to the next number until a push is accepted. Returns the id taken.
 fn claim_on_remote(exec: &dyn Exec, root: &Path, mut max: u32, text_for: &dyn Fn(u32) -> String) -> Result<u32, CliError> {
     for _ in 0..MAX_ATTEMPTS {
         let id = max + 1;
@@ -305,6 +305,10 @@ fn claim_on_remote(exec: &dyn Exec, root: &Path, mut max: u32, text_for: &dyn Fn
             Err(e) => {
                 // Refused because the ref exists: take the next number. Anything else (network, rights) is an error.
                 let existing = git(exec, root, &["ls-remote", REMOTE, &format!("{RESERVATION_REFS}/C{id}")], None)?;
+                // The ref holds the blob this call hashed: an earlier push of this call whose reply was lost, so it is ours.
+                if existing.split_whitespace().next() == Some(blob.trim()) {
+                    return Ok(id);
+                }
                 if existing.trim().is_empty() {
                     return Err(CliError::failure(format!(
                         "::error::check new-id: the reservation C{id} could not be pushed to {REMOTE} ({RESERVATION_REFS}/C{id}): {e}"
@@ -492,4 +496,82 @@ pub fn command_with(exec: &dyn Exec, root: Option<PathBuf>, reserve: Option<Stri
         json!({ "id": format!("C{id}"), "highest_taken": max, "branches": s.refs, "tips": s.tips, "reserved": reserve.is_some() }),
         text,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    /// A scripted `git`: an empty repository whose origin has no branches, and the replies to the reservation pushes in order.
+    struct Scripted {
+        /// For each push in order: `Ok` or refused.
+        pushes: RefCell<Vec<bool>>,
+        /// What `ls-remote origin refs/paddock/check-ids/C<n>` answers (the same for every id).
+        existing: String,
+        log: RefCell<Vec<String>>,
+    }
+
+    impl Exec for Scripted {
+        fn run(&self, _program: &str, args: &[&str], _cwd: &Path, _stdin: Option<&[u8]>) -> Result<String, CliError> {
+            self.log.borrow_mut().push(args.join(" "));
+            match args {
+                ["for-each-ref", ..] => Ok(String::new()),
+                ["ls-remote", "--heads", _] => Ok(String::new()),
+                ["ls-remote", _, p] if p.ends_with("/*") => Ok(String::new()),
+                ["ls-remote", _, _] => Ok(self.existing.clone()),
+                ["hash-object", ..] => Ok("blobsha\n".into()),
+                ["push", ..] => {
+                    if self.pushes.borrow_mut().remove(0) {
+                        Ok(String::new())
+                    } else {
+                        Err(CliError::failure("rejected"))
+                    }
+                }
+                other => Err(CliError::failure(format!("unexpected git {other:?}"))),
+            }
+        }
+    }
+
+    fn reserve(s: &Scripted) -> Result<Report, CliError> {
+        let d = tempfile::tempdir().unwrap();
+        command_with(s, Some(d.path().to_path_buf()), Some("feat/x".into()), "2026-11-16")
+    }
+
+    /// The race itself: the scan saw nothing, but C1's push is refused because someone took it a moment before: the next number is
+    /// pushed. (Delete the `max = id` step and this loops on C1 until the attempt limit.)
+    #[test]
+    fn a_push_refused_because_the_ref_exists_moves_to_the_next_id() {
+        let s = Scripted {
+            pushes: RefCell::new(vec![false, true]),
+            existing: "othersha\trefs/paddock/check-ids/C1\n".into(),
+            log: RefCell::default(),
+        };
+        let r = reserve(&s).unwrap();
+        assert_eq!(r.json()["id"], "C2", "{:?}", s.log.borrow());
+        assert_eq!(s.log.borrow().iter().filter(|l| l.starts_with("push")).count(), 2);
+    }
+
+    /// A lost reply: the push got through but the call saw an error, and the ref holds our own blob: the id is ours, not burnt.
+    #[test]
+    fn a_ref_holding_our_own_blob_is_ours() {
+        let s = Scripted {
+            pushes: RefCell::new(vec![false]),
+            existing: "blobsha\trefs/paddock/check-ids/C1\n".into(),
+            log: RefCell::default(),
+        };
+        assert_eq!(reserve(&s).unwrap().json()["id"], "C1");
+    }
+
+    /// A refusal with no ref behind it (network, rights) is an error, and takes no id.
+    #[test]
+    fn a_refusal_without_a_ref_takes_no_id() {
+        let s = Scripted {
+            pushes: RefCell::new(vec![false]),
+            existing: String::new(),
+            log: RefCell::default(),
+        };
+        let e = reserve(&s).err().unwrap();
+        assert!(format!("{e:?}{e}").contains("could not be pushed"));
+    }
 }
