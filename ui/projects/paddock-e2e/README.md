@@ -64,7 +64,7 @@ export { expect };
   selftest `pinned-clock.shot.ts`). A `pageErrors` guard or an error handler sees a timer's throw again.
 - It covers contexts the fixtures create (`page`, `context`). A context made with `browser.newContext()` is not pinned: a spec that needs a
   context of its own (a window size, a user agent, a colour scheme) calls `newPinnedContext(browser, { ...contextOptions, pin })`, which installs the
-  same clock, zone, locale and timer-error reporting (`pin: false` is the plain context). Conformance C133 flags a bare `browser.newContext(`.
+  same clock, zone, locale and timer-error reporting (`pin: false` is the plain context). A conformance check over the e2e specs flags a bare `browser.newContext(`.
 
 ```ts
 // e2e/screenshots.spec.ts: the documentation screenshots, run with `SCREENSHOTS=1 npx playwright test --project=screenshots`
