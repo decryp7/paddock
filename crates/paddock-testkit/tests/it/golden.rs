@@ -170,10 +170,10 @@ fn a_rewrite_prints_the_command_that_confirms_it_in_the_ci_image() {
     std::fs::create_dir_all(&pkg).expect("package folder");
     s.write("repo/ci-image/VERSION", "3\n").expect("version");
     let cmd =
-        paddock_testkit::golden::confirm_command(Some(&pkg), Some("check::c130::tests::a_test"));
+        paddock_testkit::golden::confirm_command(Some(&pkg), Some("check::c131::tests::a_test"));
     assert_eq!(
         cmd,
-        "tools/linux-container.sh --id paddock --ci-image -- sh -c 'cd tools/paddock-dev && cargo nextest run check::c130::tests::a_test'"
+        "tools/linux-container.sh --id paddock --ci-image -- sh -c 'cd tools/paddock-dev && cargo nextest run check::c131::tests::a_test'"
     );
     // the repository root itself, and the names that are not a test path
     assert!(

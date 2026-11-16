@@ -1,4 +1,4 @@
-//! C130: a golden file holds nothing that belongs to the machine that captured it (ER-21 class "a golden captured on one machine fails
+//! C131: a golden file holds nothing that belongs to the machine that captured it (ER-21 class "a golden captured on one machine fails
 //! on another": WP-2 of train 14 had six, among them the Mac's uid 501 baked into a guardian golden). The fix is in the test: normalise
 //! the value in the test's `norm()` so the golden says `<uid>` and every machine writes the same.
 //!
@@ -7,10 +7,10 @@
 //! (`/Users/<name>`, `/home/<name>`, `C:\Users\<name>`), temp paths (`/tmp/<x>`, `/private/tmp/<x>`, `/var/folders/`, `\Temp\`) and
 //! the machine that runs the check, read from the environment and never written down: user name and home folder, host name, RAM in
 //! bytes, KiB or MiB, and the CPU count next to `cpu`, `core` or `thread`. `PADDOCK_GOLDEN_FACTS` (JSON: user, home, host, memBytes,
-//! cpus) replaces them (tests; judging a tree against another machine). Allowed: per-site entries of `conformance/c130-allow.json`, read
+//! cpus) replaces them (tests; judging a tree against another machine). Allowed: per-site entries of `conformance/c131-allow.json`, read
 //! by the shared [`super::allow_list`]. **Report-only (warnings) until its first green run on the real tree (ER-41).**
 //!
-//! The JavaScript check `conformance/src/checks/C130-golden-machine.mjs` is the original; `tests/it/check_c130.rs` compares the two
+//! The JavaScript check `conformance/src/checks/C131-golden-machine.mjs` is the original; `tests/it/check_c131.rs` compares the two
 //! finding for finding. Patterns never use a look-around (the `regex` crate has none): the text around a site is matched as a character.
 
 use super::allow_list::{self, Admit};
@@ -25,13 +25,13 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 /// The allow file both hosts read.
-pub const ALLOW: &str = "conformance/c130-allow.json";
+pub const ALLOW: &str = "conformance/c131-allow.json";
 /// The check's own files: they name the patterns.
 pub const IMPLEMENTATION: [&str; 5] = [
-    "conformance/src/checks/C130-golden-machine.mjs",
-    "conformance/test/c130-golden-machine.test.mjs",
-    "tools/paddock-dev/src/check/c130.rs",
-    "tools/paddock-dev/tests/it/check_c130.rs",
+    "conformance/src/checks/C131-golden-machine.mjs",
+    "conformance/test/c131-golden-machine.test.mjs",
+    "tools/paddock-dev/src/check/c131.rs",
+    "tools/paddock-dev/tests/it/check_c131.rs",
     ALLOW,
 ];
 /// The longest the host-name and memory probes may take.
@@ -44,8 +44,8 @@ static BINARY: LazyLock<Regex> = LazyLock::new(|| {
     )
 });
 const BROKEN_FIX: &str =
-    "Restore conformance/c130-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"...\", \"reason\": \"...\", \"count\": 1}]}.";
-const FIX: &str = "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c130-allow.json with a reason.";
+    "Restore conformance/c131-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"...\", \"reason\": \"...\", \"count\": 1}]}.";
+const FIX: &str = "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason.";
 
 /// The fixed line patterns: `(kind, pattern)`, group 1 (or 2) the site.
 static PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
@@ -233,7 +233,7 @@ pub fn is_golden(path: &str) -> bool {
 }
 
 static SPEC: allow_list::Spec = allow_list::Spec {
-    id: "C130",
+    id: "C131",
     rule: 40,
     file: ALLOW,
     unseen: "a machine-specific value",
@@ -241,11 +241,11 @@ static SPEC: allow_list::Spec = allow_list::Spec {
 };
 
 /// The check.
-pub struct C130;
+pub struct C131;
 
-impl Check for C130 {
+impl Check for C131 {
     fn id(&self) -> &'static str {
-        "C130"
+        "C131"
     }
 
     fn rule(&self) -> u32 {
@@ -312,7 +312,7 @@ impl Check for C130 {
                 let finding = match allow.admit(f, |entry| s.text.contains(entry)) {
                     Admit::Allowed => continue,
                     Admit::Beyond => Finding::warn(
-                        "C130",
+                        "C131",
                         40,
                         f,
                         s.line,
@@ -322,7 +322,7 @@ impl Check for C130 {
                         FIX,
                     ),
                     Admit::Unlisted => Finding::warn(
-                        "C130",
+                        "C131",
                         40,
                         f,
                         s.line,

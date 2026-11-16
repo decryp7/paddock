@@ -2283,7 +2283,7 @@ the hang point of a hung-phase test meeting its limit under load (third sighting
 On WP-2 alone six goldens captured on the Mac failed elsewhere: macOS-only git config keys, the CI image's `/sccache` mount, RAM
 from `sysctl` against a file, the host OS paired with its pin, root against a normal uid, and a guardian golden with the Mac's uid
 501 baked in that would have turned the Linux leg red. Each was found by CI or by a later review, after the golden had been
-committed. Now the check runs when the golden is made: conformance C130 (report-only, ER-41) reads the tracked golden folders for
+committed. Now the check runs when the golden is made: conformance C131 (report-only, ER-41) reads the tracked golden folders for
 uid and gid numbers, `/Users`, `/home` and `C:\Users` paths, temp paths and the user, host, home folder, RAM and CPU count of the
 machine that runs it; a rewrite with `PADDOCK_UPDATE_GOLDEN` prints the command that runs the test on Linux as root in the CI image;
 and `./dev golden confirm <test filter>` runs both and passes only if both pass. The first run on the tree found one real value (a

@@ -1,5 +1,5 @@
 //! `dev golden confirm <test filter>`: a golden file captured on one machine passes only if the tests also pass on the other kind
-//! (ER-21 class "a golden captured on one machine fails on another", train 14 WP-2; conformance C130 looks for the literals, this runs
+//! (ER-21 class "a golden captured on one machine fails on another", train 14 WP-2; conformance C131 looks for the literals, this runs
 //! the tests). It runs the filtered tests with `cargo nextest run <filter>` twice, in the same workspace: on this machine, then on
 //! Linux as root in the CI image (`tools/linux-container.sh --ci-image`, the container runs as root unless `PADDOCK_LINUX_USER` is
 //! set). It passes only when both pass; a run that selects no test fails (nextest exits 4), so a typo cannot pass. Both runs always
@@ -180,7 +180,7 @@ pub fn command(c: GoldenCommand) -> Result<Report, CliError> {
     verdict(&results).map_err(|why| {
         CliError::failure(error_line(
             &format!("dev golden confirm: {why}."),
-            "fix the test's norm() so the golden does not hold a value of one machine (conformance C130 lists such values), or the golden, and run it again.",
+            "fix the test's norm() so the golden does not hold a value of one machine (conformance C131 lists such values), or the golden, and run it again.",
         ))
     })?;
     Ok(Report::new(
@@ -205,10 +205,10 @@ mod tests {
 
     #[test]
     fn two_runs_the_same_filter_in_the_same_workspace_one_in_the_ci_image() {
-        let [host, linux] = plan(Path::new("/r"), Path::new("/r/tools/paddock-dev"), "check::c130").unwrap();
+        let [host, linux] = plan(Path::new("/r"), Path::new("/r/tools/paddock-dev"), "check::c131").unwrap();
         assert_eq!(
             (host.program.as_str(), host.args.join(" ")),
-            ("cargo", "nextest run check::c130".to_string())
+            ("cargo", "nextest run check::c131".to_string())
         );
         assert_eq!(host.cwd, Path::new("/r/tools/paddock-dev"));
         assert_eq!(linux.cwd, Path::new("/r"));
@@ -217,7 +217,7 @@ mod tests {
             line.starts_with("tools/linux-container.sh --id paddock --ci-image --root /r -- sh -c"),
             "{line}"
         );
-        assert!(line.ends_with("cd 'tools/paddock-dev' && cargo nextest run check::c130"), "{line}");
+        assert!(line.ends_with("cd 'tools/paddock-dev' && cargo nextest run check::c131"), "{line}");
         assert_eq!(
             plan(Path::new("/r"), Path::new("/r"), "t").unwrap()[1].args.last().unwrap(),
             "cd '.' && cargo nextest run t"

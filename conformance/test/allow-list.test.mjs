@@ -84,7 +84,7 @@ const SAMPLE = {
   C121: ['docs/g.toml', `check = ["sh", "-c", "sed -n p .gitea/${'workflows'}/ci.yml"]\n`],
   C124: ['tools/paddock-dev/src/x.rs', 'pub enum V {\n    NotMeasured,\n}\n'],
   C125: ['scripts/a.sh', `x=/${'Volumes'}/d7sst7\n`],
-  C130: ['x/tests/golden/a.json', '{"uid": 501}\n'],
+  C131: ['x/tests/golden/a.json', '{"uid": 501}\n'],
 };
 const users = checks.filter((c) => c.allowList);
 
@@ -101,9 +101,9 @@ test('allow list: the reader reads and parses the file once, and a file it could
   assert.deepEqual(l.warnings().map((f) => f.message), ['stale allow entry (a/b.rs: needle) matches no site', 'stale allow entry (a/gone.rs: needle) matches no site']);
 });
 
-test('allow list: every check that reads one has a sample here, C121, C124, C125 and C130 read one', () => {
+test('allow list: every check that reads one has a sample here, C121, C124, C125 and C131 read one', () => {
   assert.deepEqual(users.map((c) => c.id).filter((id) => !SAMPLE[id]), []);
-  for (const id of ['C121', 'C124', 'C125', 'C130']) assert.ok(users.some((c) => c.id === id), id);
+  for (const id of ['C121', 'C124', 'C125', 'C131']) assert.ok(users.some((c) => c.id === id), id);
 });
 
 test('allow list: a broken allow file is one unwaivable check-broken finding and nothing else, for every check that reads one', async () => {

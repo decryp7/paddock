@@ -1,8 +1,8 @@
-//! C130 (a golden file holds no value of the machine that captured it): the Rust host against the conformance host as the oracle, on a fixture tree and on this
+//! C131 (a golden file holds no value of the machine that captured it): the Rust host against the conformance host as the oracle, on a fixture tree and on this
 //! working tree.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::check::{LIVE_STALL, has_node, node, node_ticking, repo_root, skip};
-use paddock_dev::check::c130::machine_facts;
+use paddock_dev::check::c131::machine_facts;
 use paddock_dev::check::tree::Tree;
 use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
 use serde_json::{Value, json};
@@ -25,7 +25,7 @@ fn cases() -> Vec<(String, String)> {
     let s = |a: &str, b: &str| (a.to_string(), b.to_string());
     vec![
         s(
-            "conformance/c130-allow.json",
+            "conformance/c131-allow.json",
             r#"{"allow": [{"path": "x/tests/golden/b.json", "site": "/Users/ana", "reason": "an invented user the test passes in", "count": 2},
 {"path": "x/tests/golden/b.json", "site": "gone", "reason": "a stale entry here"}]}"#,
         ),
@@ -54,7 +54,7 @@ fn options(root: &Path, app: &str) -> RunOptions {
         root: root.to_path_buf(),
         config: paddock_dev::check::config::Config::bare(app),
         scope: None,
-        only: Some(vec!["C130".into()]),
+        only: Some(vec!["C131".into()]),
         files: None,
         today: "2026-11-16".into(),
         base_ref: Some("origin/main".into()),
@@ -77,7 +77,7 @@ const JS_RUN: &str = r#"
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C130'], options: {} });
+const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C131'], options: {} });
 process.stdout.write(JSON.stringify(r));
 "#;
 
@@ -107,7 +107,7 @@ fn both(root: &Path) -> (Value, Value) {
 }
 
 #[test]
-fn c130_flags_the_planted_uid_and_the_other_machine_values_as_warnings() {
+fn c131_flags_the_planted_uid_and_the_other_machine_values_as_warnings() {
     let tree = fixture_tree();
     let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
     let got: Vec<(&str, usize)> = r.findings.iter().map(|f| (f.file.as_str(), f.line)).collect();
@@ -144,26 +144,26 @@ fn c130_flags_the_planted_uid_and_the_other_machine_values_as_warnings() {
 
 /// The positive control (ER-33): the host ran the check over its own planted tree and it saw the planted uid.
 #[test]
-fn c130_control_sees_a_planted_uid() {
+fn c131_control_sees_a_planted_uid() {
     let tree = fixture_tree();
     let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
-    let record = &r.runs.iter().find(|x| x.record.check == "C130").expect("a run record").record;
+    let record = &r.runs.iter().find(|x| x.record.check == "C131").expect("a run record").record;
     assert!(record.control, "the control found its planted uid");
 }
 
 /// "Delete the check": an allow file that is missing, not JSON or without its list makes the check broken, one finding and nothing
 /// else, on both hosts, never a pass.
 #[test]
-fn c130_with_a_broken_allow_file_is_one_check_broken_finding_on_both_hosts() {
+fn c131_with_a_broken_allow_file_is_one_check_broken_finding_on_both_hosts() {
     for allow in [None, Some("nope"), Some("{}"), Some("{\"allow\": [{\"path\": \"a\"}]}")] {
         let mut files = vec![("x/tests/golden/a.json", "{\"uid\": 501}\n")];
         if let Some(text) = allow {
-            files.push(("conformance/c130-allow.json", text));
+            files.push(("conformance/c131-allow.json", text));
         }
         let tree = tree_of(&files);
         let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
         let got: Vec<(&str, Option<&str>)> = r.findings.iter().map(|f| (f.file.as_str(), f.outcome.map(|o| o.name()))).collect();
-        assert_eq!(got, [("conformance/c130-allow.json", Some("check-broken"))], "{allow:?}");
+        assert_eq!(got, [("conformance/c131-allow.json", Some("check-broken"))], "{allow:?}");
         if has_node() {
             // The JSON parsers word their own error differently (serde_json and V8): the message is compared up to that text.
             let cut = |mut v: Value| {
@@ -180,7 +180,7 @@ fn c130_with_a_broken_allow_file_is_one_check_broken_finding_on_both_hosts() {
 }
 
 #[test]
-fn live_c130_fixture_findings_equal_the_js_host() {
+fn live_c131_fixture_findings_equal_the_js_host() {
     if !has_node() {
         return skip("node is not installed");
     }
@@ -191,13 +191,13 @@ fn live_c130_fixture_findings_equal_the_js_host() {
 }
 
 #[test]
-fn live_c130_tree_findings_equal_the_js_host() {
+fn live_c131_tree_findings_equal_the_js_host() {
     if !has_node() {
         return skip("node is not installed");
     }
     let root = repo_root();
     let js_root = root.clone();
-    let js = paddock_testkit::guarded("the JS C130 over the live tree", LIVE_STALL, move |progress| {
+    let js = paddock_testkit::guarded("the JS C131 over the live tree", LIVE_STALL, move |progress| {
         let driver = format!(
             "import fs from 'node:fs';\nimport {{ syncBuiltinESMExports }} from 'node:module';\nconst read = fs.readFileSync;\nfs.readFileSync = (...a) => {{ process.stdout.write('.\\n'); return read(...a); }};\nsyncBuiltinESMExports();\n{JS_RUN}"
         );
@@ -208,7 +208,7 @@ fn live_c130_tree_findings_equal_the_js_host() {
         ];
         serde_json::from_str::<Value>(node_ticking(&driver, &env, &progress).trim()).unwrap()
     });
-    let r = paddock_testkit::guarded("the Rust C130 over the live tree", LIVE_STALL, {
+    let r = paddock_testkit::guarded("the Rust C131 over the live tree", LIVE_STALL, {
         let root = root.clone();
         move |progress| {
             let tree = Tree::open(&root).with_progress(move || progress.tick());

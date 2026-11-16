@@ -1,4 +1,4 @@
-// C130: a golden file holds nothing that belongs to the machine that captured it (ER-21 class "a golden captured on one machine fails on
+// C131: a golden file holds nothing that belongs to the machine that captured it (ER-21 class "a golden captured on one machine fails on
 // another": WP-2 of train 14 alone had six: macOS-only git config keys, the CI image's /sccache mount, RAM from sysctl against a file,
 // the host OS paired with its pin, root against a normal uid, and a guardian golden with the Mac's uid 501 baked in that would have
 // turned the Linux leg red; see docs/lessons.md, 2026-11-15). The fix is in the test, not the file: normalise the value in the test's
@@ -12,29 +12,29 @@
 // - this machine, read from the environment when the check runs and never written down: the user name and home folder, the host name,
 //   the RAM in bytes, KiB or MiB, and the CPU count next to `cpu`, `core` or `thread`. `PADDOCK_GOLDEN_FACTS` (JSON: user, home, host,
 //   memBytes, cpus) replaces them, for tests and for judging a tree against another machine.
-// A site that is fine (an invented id in a fixture, a documented name) has an entry in `conformance/c130-allow.json` (path, a piece of the
+// A site that is fine (an invented id in a fixture, a documented name) has an entry in `conformance/c131-allow.json` (path, a piece of the
 // flagged line as `site`, a `reason`, `count`), read by the shared allow list; an entry that matches nothing is stale (a warning).
 // Known gaps: a value spelled another way (`0x1f5`, a size in GiB, a uid in `ls -l` columns) and one split over lines; a golden outside the
 // folders above is not read.
 // ER-41: report-only (warnings) until its first green run on the real tree, recorded in docs/gates.toml.
-// Rust host: tools/paddock-dev/src/check/c130.rs (same findings, line for line).
+// Rust host: tools/paddock-dev/src/check/c131.rs (same findings, line for line).
 import os from 'node:os';
 import { warn } from '../finding.mjs';
 import { readAllowList } from '../util/allow-list.mjs';
 
-export const ALLOW = 'conformance/c130-allow.json';
+export const ALLOW = 'conformance/c131-allow.json';
 /** The check's own files: they name the patterns. */
 export const IMPLEMENTATION = new Set([
-  'conformance/src/checks/C130-golden-machine.mjs',
-  'conformance/test/c130-golden-machine.test.mjs',
-  'tools/paddock-dev/src/check/c130.rs',
-  'tools/paddock-dev/tests/it/check_c130.rs',
+  'conformance/src/checks/C131-golden-machine.mjs',
+  'conformance/test/c131-golden-machine.test.mjs',
+  'tools/paddock-dev/src/check/c131.rs',
+  'tools/paddock-dev/tests/it/check_c131.rs',
   ALLOW,
 ]);
 const GOLDEN_PATH = /(?:^|\/)goldens?\/|\.golden$/;
 const BINARY = /\.(?:png|jpe?g|gif|ico|icns|webp|bmp|tiff?|pdf|zip|gz|tgz|xz|zst|7z|whl|wasm|dmg|pkg|msi|exe|dll|so|dylib|a|lib|rlib|o|obj|pdb|ttf|otf|woff2?|mp3|mp4|mov|wav|webm|parquet|duckdb|sqlite|db|evtx|dmp|bin|onnx|safetensors)$/i;
-const BROKEN_FIX = 'Restore conformance/c130-allow.json: {"allow": [{"path": "...", "site": "...", "reason": "...", "count": 1}]}.';
-const FIX = "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c130-allow.json with a reason.";
+const BROKEN_FIX = 'Restore conformance/c131-allow.json: {"allow": [{"path": "...", "site": "...", "reason": "...", "count": 1}]}.';
+const FIX = "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason.";
 
 /**
  * The line patterns, each with its kind; group 1 is the site. The text around a site is matched as a character, never with a
@@ -98,7 +98,7 @@ export function goldenSites(text, facts) {
 export const isGolden = (path) => GOLDEN_PATH.test(path) && !BINARY.test(path) && !IMPLEMENTATION.has(path);
 
 const SPEC = {
-  id: 'C130',
+  id: 'C131',
   rule: 40,
   file: ALLOW,
   unseen: 'a machine-specific value',
@@ -106,7 +106,7 @@ const SPEC = {
 };
 
 export default {
-  id: 'C130',
+  id: 'C131',
   scope: 'root',
   mode: 'report-only',
   allowList: SPEC,
@@ -132,7 +132,7 @@ export default {
         const said = allow.admit(f, (s) => at.includes(s));
         if (said === 'allowed') continue;
         const what = said === 'beyond' ? ' beyond the count of its allow entry' : '';
-        out.push(warn('C130', 40, f, line, `golden holds a machine-specific ${kind} \`${site}\`${what}: it fails on a machine that differs`, FIX));
+        out.push(warn('C131', 40, f, line, `golden holds a machine-specific ${kind} \`${site}\`${what}: it fails on a machine that differs`, FIX));
       }
     }
     return [...out, ...allow.warnings()];

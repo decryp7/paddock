@@ -3,7 +3,7 @@
 //! A golden is captured on one machine and checked on every other: the Mac, the Linux CI image (which runs as root) and Windows. A
 //! value that belongs to the capturing machine (a uid, a home folder, the RAM, a temp path, the host name) makes it fail elsewhere
 //! (train 14 WP-2 had six such goldens). Normalise such a value in the test, before the comparison (for example `norm()` in
-//! `tools/paddock-dev/tests/it/host_steps.rs`), so the file says `<uid>` and every machine writes the same; conformance C130 reads
+//! `tools/paddock-dev/tests/it/host_steps.rs`), so the file says `<uid>` and every machine writes the same; conformance C131 reads
 //! the tracked golden folders for these literals.
 //!
 //! **Rewriting.** With [`UPDATE_VAR`] set, a differing golden is rewritten, and the run prints [`confirm_command`]: the exact command
