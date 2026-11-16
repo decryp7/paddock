@@ -9,7 +9,7 @@
 // Also flagged, with no allow entry: a spec line that sets the `ng-version` attribute by hand (a node faking a TestBed root).
 // Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
 import { error, warn } from '../finding.mjs';
-import { baselineGrowth } from '../util/baseline.mjs';
+import { baselineGrowth, unmeasuredFinding } from '../util/baseline.mjs';
 import { parseAllowList, readAllowList } from '../util/allow-list.mjs';
 
 export const ALLOW = 'conformance/c135-allow.json';
@@ -88,7 +88,7 @@ export default {
       ...(ctx.options.git ? { git: ctx.options.git } : {}),
       ...(ctx.options.baseRef ? { baseRef: ctx.options.baseRef } : {}),
     });
-    if (g.reason) out.push(warn('C135', 21, ALLOW, 1, `the list's shrink-only rule is not enforced here: ${g.reason}`, 'Fetch the target branch (`git fetch origin main`), or set PADDOCK_BASE_REF.'));
+    if (g.reason) out.push(unmeasuredFinding(ctx, { id: 'C135', rule: 21, file: ALLOW, what: 'the list', g }));
     else for (const a of g.added) out.push(error('C135', 21, ALLOW, 1, `the list grew: \`${a.site}\` in ${a.path} is not in the list at the merge base ${g.base.slice(0, 9)}`, "Remove the entry and fix the suite; growing the list needs the user's approval."));
     return [...out, ...allow.warnings()];
   },

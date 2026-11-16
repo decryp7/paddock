@@ -19,7 +19,7 @@
 //! The JavaScript check `conformance/src/checks/C129-no-new-shell.mjs` is the original; `tests/it/check_c129.rs` compares the two finding
 //! for finding.
 
-use super::baseline::{Growth, growth};
+use super::baseline::{self, Growth, growth};
 use super::finding::Finding;
 use super::jsre::{DOT, is_js_space, rx, trim, units};
 use super::outcome::Outcome;
@@ -473,13 +473,13 @@ impl Check for C129 {
             let exact = |e: &Entry| format!("{}\t{}", e.path, e.lines);
             let loose = |e: &Entry| e.path.clone();
             match growth(ctx.root(), &ctx.base_ref(), BASELINE, &baseline, &entries_of, &exact, Some(&loose)) {
-                Growth::Reason(reason) => out.push(Finding::warn(
+                Growth::Unmeasured(why) => out.push(baseline::unmeasured_finding(
+                    ctx.in_ci(),
                     "C129",
                     55,
                     BASELINE,
-                    1,
-                    format!("the baseline's shrink-only rule is not enforced here: {reason}"),
-                    "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.",
+                    "the baseline",
+                    &why,
                 )),
                 Growth::Added { base, added, moved } => {
                     for m in &moved {
@@ -526,13 +526,13 @@ impl Check for C129 {
             let entries_of = |text: &str| exception_keys(text).ok();
             let exact = |e: &ExcKey| format!("{}\t{}", e.path, e.id);
             match growth(ctx.root(), &ctx.base_ref(), EXCEPTIONS, &current, &entries_of, &exact, None) {
-                Growth::Reason(reason) => out.push(Finding::warn(
+                Growth::Unmeasured(why) => out.push(baseline::unmeasured_finding(
+                    ctx.in_ci(),
                     "C129",
                     55,
                     EXCEPTIONS,
-                    1,
-                    format!("the exceptions' shrink-only rule is not enforced here: {reason}"),
-                    "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.",
+                    "the exceptions",
+                    &why,
                 )),
                 Growth::Added { base, added, .. } if added > 0 => {
                     let names: Vec<String> = current
