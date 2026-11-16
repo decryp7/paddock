@@ -180,6 +180,7 @@ describe('KnowledgeSettings', () => {
     const { f, dialogs, backend } = await setup();
     buttonByText(f, 'Remove…').click();
     await settle(f);
+    await openDialog(dialogs);
     let dlg = dialogs.stack().at(-1);
     expect(dlg?.options.title).toBe('Remove knowledge file?');
     expect(String(dlg?.options.inputs?.['message'])).toContain('deleted from this computer');

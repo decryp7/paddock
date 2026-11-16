@@ -126,6 +126,14 @@ module.exports = defineConfig(
           selector: "AssignmentExpression[left.type='MemberExpression'][left.object.property.name='prototype']",
           message: 'use vi.spyOn so the patch is restored',
         },
+        {
+          // A dialog may open after a lazy chunk or an engine call: a fixed number of turns (`settle`) before reading the stack
+          // is the flake of import-range.spec (rule 49). A check that no dialog is open (`toHaveLength(0)`) cannot wait on
+          // a condition and is not matched.
+          selector:
+            "ExpressionStatement:has(AwaitExpression > CallExpression[callee.name='settle']) + :matches(ExpressionStatement, VariableDeclaration):has(CallExpression[callee.property.name='stack']):not(:has(ArrowFunctionExpression)):not(:has(CallExpression[callee.property.name='toHaveLength'][arguments.0.value=0]))",
+          message: 'wait on the dialog with openDialog() (testing/helpers.ts), not a fixed settle() before reading stack()',
+        },
       ],
     },
   },

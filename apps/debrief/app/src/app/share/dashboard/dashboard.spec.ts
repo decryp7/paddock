@@ -449,11 +449,13 @@ describe('DashboardView', () => {
     buttonByText(fixture, /Add tile/).click();
     await TestBed.inject(DialogService).whenLoaded();
     await settle(fixture);
+    await openDialog(dialogs);
     at(dialogs.stack(), 0).ref.close({ ...tile('new one'), type: 'annotations' });
     await settle(fixture);
     expect(ds.current()!.tile.some((t) => t.id === 'new-one')).toBe(true);
     buttonByText(fixture, /Add tile/).click();
     await settle(fixture);
+    await openDialog(dialogs);
     at(dialogs.stack(), 0).ref.close();
     buttonByText(fixture, 'Save').click();
     await settle(fixture);
