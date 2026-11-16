@@ -119,10 +119,19 @@ mod tests {
         std::fs::write(p.join("f"), b"x").unwrap();
         drop(t);
         assert!(!p.exists());
-        let kept = private_tempdir().unwrap().keep();
+        // Kept in a parent of the test's own, so the cleanup can show it removes only what the test made.
+        let parent = tempfile::tempdir().unwrap();
+        let kept = PrivateTemp::new_in(parent.path()).unwrap().keep();
         assert!(kept.is_dir());
         std::fs::remove_dir_all(&kept).unwrap();
-        let _ = std::fs::remove_dir(kept.parent().unwrap());
+        // On Windows the owner-only folder sits in an outer one the test made too; on Unix the kept folder is the outer one,
+        // and its parent is the temp folder itself, which must stay (it was removed when empty, review of df9af3cda).
+        #[cfg(windows)]
+        std::fs::remove_dir(kept.parent().unwrap()).unwrap();
+        assert!(
+            parent.path().is_dir(),
+            "the cleanup removed a folder the test did not make"
+        );
     }
 
     /// The CI runner's temp folder: a Windows folder under `C:\` grants `Authenticated Users` (S-1-5-11) Modify to what is made in it.
