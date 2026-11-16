@@ -2182,12 +2182,12 @@ still does not read, not a drain); the fake clock lost a wake-up (no: both waits
 after it had advanced the reason deadline (confirmed). The endpoint tries the reason once more when its wait ends, so which peer
 it found, still stopped or reading again, depended on which thread ran first. A new `mini::run_with` hook makes the harness wait
 for the endpoint's `reason decided` line before it goes on: the old order then fails 1 of 1 with the CI message, the fixed order
-(the peer reads before the deadline is advanced) passes 400 of 400 under load.
+(the peer reads before the deadline is advanced) passes 400 of 400 on Linux under 4 CPU spinners.
 **plugin-host.** Causes listed: a process still runs the file (no: `/proc` showed no process with the file as exe, a map or a
 descriptor when it failed); a leaked write descriptor in a forked child (no: the failing call is an open for writing, and that
 descriptor would make an exec fail); the kernel keeps the file text-busy for a moment after the process was reaped (the same
-refusal Go's tests retry, golang/go 22315, 56811; reproduced in 7 of about 800 runs under 4 CPU spinners on a Linux container,
-0 of 450 with the fix). The product path has the same refusal in the other direction (a program written or installed a moment ago
+refusal Go's tests retry, golang/go 22315, 56811; reproduced in 7 of 1,000 runs (3 of 100, 1 of 150, 3 of 300, 0 of 450) under 4 to 14 CPU spinners in a Linux container;
+0 of 300 with the fix). The product path has the same refusal in the other direction (a program written or installed a moment ago
 and started at once), where it was reported as a counted crash.
 **Fix, one mechanism.** `paddock_env::text_busy::retry` retries only `ETXTBSY`, at most 8 times with doubling pauses (about
 1.3 s in all, logged and counted), and every start in `paddock-proc` goes through it. `paddock_testkit::exe::write_program` writes a
