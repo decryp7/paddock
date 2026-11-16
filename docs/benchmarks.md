@@ -73,7 +73,7 @@ that quotes a result links to the block instead of carrying the only copy.
 
   | Suite (tests) | Before | After | Mode now | Verdict |
   |---|---|---|---|---|
-  | Debrief (4989, 4990 after) | 33.19 s | 32.20 s and 36.34 s (two runs) | report | within 10% (+9.5% on the slower run, -3% on the faster) |
+  | Debrief (4989, 4990 after) | 33.19 s | 32.20 s and 36.34 s (two runs) | report | no measurable change (the review timed it alternating with the base) |
   | Dyno (1652) | 17.80 s | 16.16 s and 16.41 s | report | within 10% |
   | Pitcrew (642, 646 after) | 9.90 s | 9.34 s | fail | within 10% |
   | Pitwall (959, 962 after) | 9.01 s | 6.61 s | fail | within 10% (noise: the earlier run was loaded) |
@@ -91,8 +91,8 @@ that quotes a result links to the block instead of carrying the only copy.
 Debrief (about 1,640 findings in about 660 tests, after `retryUntilAnswered` stopped leaving its 4 s retry timer): the shell's
 idle fallback `ui/projects/paddock-ui/shell/contributions/src/context.ts:122` (`setTimeout(work, 0)` when there is no
 `requestIdleCallback`: a test that boots the shell without a `SHELL_IDLE`, 530), `app/core/activity/runtime.ts:26` (a 0 ms
-clock timer, 388), the in-flight check ("start-up loads still in flight" after the settle hook, 190 to 340 per run: it depends on
-timing, so it cannot fail a test until a load that starts after the hook is accounted for), `app/jobs/mock-jobs.ts:474`
+clock timer, 388), the in-flight check ("start-up loads still in flight", 190 to 340 per run) was a poisoned counter, not timing: `unsettledStartupLoads` kept counting the load that `startup.spec` leaves unsettled on purpose, so every later test was blamed; the detector now reports growth per test only (fixed in this branch), so these are gone,
+`app/jobs/mock-jobs.ts:474`
 (mock job steps still waiting, 63) with the singleton check (`mock jobs` left queued or running: 35 tests),
 `app/core/mock/mock-clock.ts:30,32,34` (the mock clock's timers and its 1.5 s interval, 120), `app/core/workspace/query.store.ts:59`
 (250 ms, 45), `app/profile/profile-draft.ts:131` (300 ms, 27), `app/analysis/query-session.ts:82` (150 ms, 19),
