@@ -1,12 +1,12 @@
 import { expect, test } from './test';
-import { dialogWindowUrl } from '@decryp7/paddock-e2e';
+import { dialogWindowUrl, newPinnedContext } from '@decryp7/paddock-e2e';
 
 /**
  * Settings > Menu bar items: a number row shows its style whole ("Number" is neither cut nor wrapped, in the
  * closed select or the open list), and the kind's description keeps a readable width. Waits are on conditions, never sleeps.
  */
 test('a number row shows its style and description whole', async ({ browser, baseURL }) => {
-  const ctx = await browser.newContext({ baseURL, viewport: { width: 980, height: 900 } });
+  const ctx = await newPinnedContext(browser, { baseURL, viewport: { width: 980, height: 900 } });
   const page = await ctx.newPage();
   await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings' }));
   await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
@@ -80,7 +80,7 @@ const PLATFORMS = [
 for (const platform of PLATFORMS) {
   for (const width of [980, 760]) {
     test(`menu bar rows: ${platform.name} at ${width} px (number, line graph, meter, graph and number)`, async ({ browser, baseURL }) => {
-      const ctx = await browser.newContext({ baseURL, viewport: { width, height: 900 } });
+      const ctx = await newPinnedContext(browser, { baseURL, viewport: { width, height: 900 } });
       const page = await ctx.newPage();
       await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings', query: platform.query }));
       await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
@@ -151,7 +151,7 @@ for (const platform of PLATFORMS) {
  * widgets, a 900 px chooser) the list is about 520 px, so the description keeps its 10rem and the controls wrap under it.
  */
 test('the popup widgets chooser with its preview column: rows follow the list width', async ({ browser, baseURL }) => {
-  const ctx = await browser.newContext({ baseURL, viewport: { width: 1320, height: 1000 } });
+  const ctx = await newPinnedContext(browser, { baseURL, viewport: { width: 1320, height: 1000 } });
   const page = await ctx.newPage();
   await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings' }));
   await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });

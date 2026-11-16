@@ -1,6 +1,6 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
-import { dialogContracts, dialogWindowUrl, expectNoButtonLabelWraps, pressMod, textClippedWithoutEllipsis, textCutOffWithoutTooltip } from '@decryp7/paddock-e2e';
+import { dialogContracts, dialogWindowUrl, expectNoButtonLabelWraps, newPinnedContext, pressMod, textClippedWithoutEllipsis, textCutOffWithoutTooltip } from '@decryp7/paddock-e2e';
 import { FIXTURES } from './dialog-fixtures';
 import { NAV } from '../src/app/shell/nav';
 import { EXTRAS_TABS } from '../src/app/features/extras/extras-model';
@@ -167,7 +167,7 @@ test.describe('nothing is cut off', () => {
 
     for (const advanced of [false, true]) {
       test(`settings pages at ${width}x${height}${advanced ? ' with the advanced fields' : ''}`, async ({ browser, baseURL }) => {
-        const ctx = await browser.newContext({ baseURL, viewport: { width: Math.max(width, CONTRACTS['pd.settings'].width), height } });
+        const ctx = await newPinnedContext(browser, { baseURL, viewport: { width: Math.max(width, CONTRACTS['pd.settings'].width), height } });
         const page = await ctx.newPage();
         await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings' }));
         await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
@@ -197,7 +197,7 @@ test.describe('nothing is cut off', () => {
       const problems: Record<string, string[]> = {};
       for (const [id, c] of Object.entries(CONTRACTS)) {
         for (const [n, input] of (FIXTURES[id] ?? [{}]).entries()) {
-          const ctx = await browser.newContext({ baseURL, viewport: { width: c.width, height: (c as { height?: number }).height ?? height } });
+          const ctx = await newPinnedContext(browser, { baseURL, viewport: { width: c.width, height: (c as { height?: number }).height ?? height } });
           const page = await ctx.newPage();
           await page.goto(dialogWindowUrl(id, input, { title: id }));
           await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });

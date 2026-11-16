@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { dialogContracts, dialogWindowUrl, waitForStableFrame, type DialogContractEntry } from '../../../../../ui/projects/paddock-e2e/src/index.ts';
 import { FIXTURES } from '../dialog-fixtures';
+import { newPinnedContext } from '../../../../../ui/projects/paddock-e2e/src/pinned-clock.ts';
 
 // Pitwall's windows, for the independent review (rule 22): the tray popover window, every section of the Settings window
 // (and a refused save), and every dialog window (Pitwall's, About, Updates, What's New, the confirmation) at its fitted
@@ -108,7 +109,7 @@ test.describe('WP-2.5 screenshots', () => {
           if (os === 'win' && (id === 'pd.about' || id === 'pd.whats-new')) continue;
           test(`dialog ${id} ${os}`, async ({ browser, baseURL }) => {
             const capH = Math.floor(1080 * 0.75);
-            const context = await browser.newContext({ baseURL, colorScheme: scheme, deviceScaleFactor: 2, userAgent: p.ua, viewport: { width: contract.width, height: capH } });
+            const context = await newPinnedContext(browser, { baseURL, colorScheme: scheme, deviceScaleFactor: 2, userAgent: p.ua, viewport: { width: contract.width, height: capH } });
             await context.addInitScript((platform) => Object.defineProperty(navigator, 'platform', { get: () => platform }), p.platform);
             try {
               const page = await context.newPage();

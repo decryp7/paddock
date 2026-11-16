@@ -1,4 +1,4 @@
-import type { PlaywrightTestArgs, PlaywrightTestOptions, PlaywrightWorkerArgs, PlaywrightWorkerOptions, TestType } from '@playwright/test';
+import type { Browser, BrowserContext, BrowserContextOptions, PlaywrightTestArgs, PlaywrightTestOptions, PlaywrightWorkerArgs, PlaywrightWorkerOptions, TestType } from '@playwright/test';
 
 /**
  * The default instant of every pinned page, and of the documentation screenshots (`FROZEN_AT` in doc-screens.ts is this value): a
@@ -101,4 +101,22 @@ export function pinnedClockTest<T extends object, W extends object>(
     },
   });
   return extended as unknown as TestType<T & PinnedClockFixtures, W>;
+}
+
+/**
+ * A context of its own (a window size, a user agent, a colour scheme) with the same pin as the fixture's: the clock installed at
+ * {@link PINNED_NOW} (or `pin.now`, or `PADDOCK_E2E_NOW`), the zone and locale of the wrapper unless `options` names its own, and
+ * {@link reportTimerErrors}. `browser.newContext()` makes none of that; a spec that needs a context beyond the fixtures' calls this.
+ * `pin: false` returns the context as `browser.newContext` makes it (a spec that needs the real time, with its reason on the line above).
+ */
+export async function newPinnedContext(
+  browser: Browser,
+  options: BrowserContextOptions & { readonly pin?: PinnedClockSetting } = {},
+): Promise<BrowserContext> {
+  const { pin = {}, ...contextOptions } = options;
+  if (pin === false) return browser.newContext(contextOptions);
+  const context = await browser.newContext({ timezoneId: pin.timezoneId ?? PINNED_ZONE, locale: pin.locale ?? PINNED_LOCALE, ...contextOptions });
+  await context.clock.install({ time: pinnedInstant(pin) });
+  await context.addInitScript(reportTimerErrors);
+  return context;
 }

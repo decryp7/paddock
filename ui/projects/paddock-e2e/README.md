@@ -62,7 +62,9 @@ export { expect };
   keeps only the first error of a batch, so the page saw no `error` event and no `pageerror`. The fixture fixes that: after the install
   it wraps the four timer functions so each callback's exception goes to `reportError`, as in a real browser (`reportTimerErrors`,
   selftest `pinned-clock.shot.ts`). A `pageErrors` guard or an error handler sees a timer's throw again.
-- It covers contexts the fixtures create (`page`, `context`). A context made with `browser.newContext()` is not pinned.
+- It covers contexts the fixtures create (`page`, `context`). A context made with `browser.newContext()` is not pinned: a spec that needs a
+  context of its own (a window size, a user agent, a colour scheme) calls `newPinnedContext(browser, { ...contextOptions, pin })`, which installs the
+  same clock, zone, locale and timer-error reporting (`pin: false` is the plain context). Conformance C133 flags a bare `browser.newContext(`.
 
 ```ts
 // e2e/screenshots.spec.ts: the documentation screenshots, run with `SCREENSHOTS=1 npx playwright test --project=screenshots`

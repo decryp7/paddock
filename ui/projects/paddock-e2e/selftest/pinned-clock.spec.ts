@@ -1,6 +1,6 @@
 import { test as base, expect } from '@playwright/test';
 import { test as kit } from '../src/fixtures.ts';
-import { pinnedClockTest } from '../src/index.ts';
+import { newPinnedContext, pinnedClockTest } from '../src/index.ts';
 
 const test = pinnedClockTest(kit, { now: '2001-09-09T01:46:40Z', timezoneId: 'Asia/Singapore', locale: 'en-GB' });
 // The same wrapper over plain Playwright, for the checks that need no kit fixture.
@@ -84,5 +84,39 @@ test.describe('a throw from a timer callback reaches pageErrors and the window e
     await page.clock.runFor(10_000);
     expect(await page.evaluate(() => (window as unknown as { __n: number }).__n)).toBe(1);
     expect(pageErrors).toEqual([]);
+  });
+});
+
+// A context of a spec's own: pinned like the fixture's, with its own options kept and a timer throw reported.
+test.describe('newPinnedContext', () => {
+  test('is pinned, keeps its own options, and reports a timer throw', async ({ browser }) => {
+    const context = await newPinnedContext(browser, { viewport: { width: 600, height: 400 }, pin: { now: '2001-09-09T01:46:40Z', timezoneId: 'Asia/Singapore', locale: 'en-GB' } });
+    try {
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      await page.goto('data:text/html,<p>x</p>');
+      const read = await page.evaluate(() => ({ now: new Date().toISOString().slice(0, 13), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, lang: navigator.language, w: innerWidth }));
+      expect(read).toEqual({ now: '2001-09-09T01', tz: 'Asia/Singapore', lang: 'en-GB', w: 600 });
+      await page.evaluate(() => void (window as unknown as Timers)['setTimeout'](() => { throw new Error('boom-context'); }, 0));
+      await expect.poll(() => errors).toEqual(['boom-context']);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('takes the wrapper defaults, and pin false is the plain context', async ({ browser }) => {
+    const pinned = await newPinnedContext(browser);
+    const plainContext = await newPinnedContext(browser, { pin: false });
+    try {
+      const a = await pinned.newPage();
+      const b = await plainContext.newPage();
+      expect(await a.evaluate(() => new Date().toISOString().slice(0, 16))).toBe('2026-10-22T14:30');
+      expect(await a.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('UTC');
+      expect(Math.abs((await b.evaluate(() => Date.now())) - Date.now())).toBeLessThan(60_000);
+    } finally {
+      await pinned.close();
+      await plainContext.close();
+    }
   });
 });
