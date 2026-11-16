@@ -313,6 +313,11 @@ changes here, every app's copy is updated in the same change.
     packages.
     (a) The batch dispatches `<app>-release.yml` with gates on and the installers (bundle) built; passing tests alone is
     not enough.
+    (a2) A train dispatches an app's release gate only when the plan (`./dev plan` or `scripts/affected.mjs`, over the train's
+    diff against main) marks that app's release workflow or release path (user, 2026-11-16). Otherwise it skips the gate and
+    records the plan output in the landing report. The counting full `ci.yml` run always runs. This is also how rule 50's train
+    sequence reads. *Why:* each unaffected release gate cost up to 34 minutes of the single Mac runner per train (train 12:
+    runs 8164, 8165, 8167, 8169, about 77 minutes in total).
     (b) Partly enforced: the ci-actions test (added on fix/dyno-bundle-ui) checks that every release workflow whose app
     imports `@decryp7/paddock-ui` builds the UI.
     (c) Amendment of 2026-11-09 (ADR 0080 D13, accepted by the user): the release workflow dispatched for this rule

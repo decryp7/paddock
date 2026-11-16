@@ -2089,3 +2089,6 @@ Waiter holding a slot the waited-for build needed (2026-11-14/15, ER-43); a slow
 
 ## A gate on the wrong machine and an assertion over nothing (2026-11-16, ER-9 and ER-12)
 The Windows-on-Arm VM and an amd64-emulated container failed 22 paddock-dev tests on a base the real runner passed, so a member check on another kind of machine measured the machine, not the branch. Dyno's layout check passed on zero rows (an `every()` over an empty set) and failed 31 of 240 runs under the pinned clock. **Rules:** a branch-deciding gate runs on CI's kind of machine, else it is not measured (rule 50 (k), the member gate); a set assertion requires a non-empty set and a layout check needs two agreeing reads (rule 49 (d)). **Class: a check that could not see what it checked still reported.**
+
+## Unaffected release gates held the Mac runner (2026-11-16, train 12; rule 54 (a2))
+Train 12 dispatched every app's release gate whether or not its diff reached that app: runs 8164, 8165, 8167 and 8169 cost about 77 minutes of the single Mac runner, up to 34 minutes each, and delayed the gates that mattered. **Rule:** the plan over the train's diff against main decides which release gates run; a skipped gate records the plan output in the landing report, and the counting full `ci.yml` run always runs. **Class: a fixed sequence ran work the change did not need (rule 50).**
