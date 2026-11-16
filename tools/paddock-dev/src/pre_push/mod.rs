@@ -357,6 +357,13 @@ fn command_in(
     }
     let (change, mut notes, extra) = discover(&root, &base, &args.files, &pushed)?;
     notes.insert(0, format!("base: {base} ({base_why})"));
+    // The target the baselines' growth is measured against: the branch's target, never the incremental diff base above (ER-27: said here).
+    let target_sha = pushed
+        .first()
+        .cloned()
+        .or_else(|| git_text(&root, &["rev-parse", "--verify", "--quiet", "HEAD"]).map(|t| t.trim().to_string()));
+    let (target, target_why) = growth_target(&root, target_sha.as_deref(), args.remote.as_deref(), args.base.as_deref());
+    notes.insert(1, format!("growth target (PADDOCK_BASE_REF): {target} ({target_why})"));
     notes.extend(lookup_notes.into_iter().map(|l| format!("known-commit lookup: {l}")));
     // An empty diff passes on its own only for a person's run with no pushed commit; a push is always measured (or known).
     if pushed.is_empty() && change.files.is_empty() && change.ranges.is_empty() && extra.is_empty() {
@@ -443,7 +450,7 @@ fn command_in(
     };
     facts.linux = args.linux;
     facts.kept_targets = kept_targets;
-    facts.base_ref = Some(base.clone());
+    facts.base_ref = Some(target.clone());
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     if !args.only.is_empty() {
         planned.retain(|p| {
@@ -643,6 +650,55 @@ fn read_stdin() -> Result<String, CliError> {
         .read_to_string(&mut text)
         .map_err(|e| CliError::failure(format!("Standard input could not be read: {e}.")))?;
     Ok(text)
+}
+
+/// The target the baselines' and allow lists' growth is measured against (`PADDOCK_BASE_REF` of the conformance gate), and why. NOT the
+/// diff base: a push's base is the nearest commit the remote has (often the remote ref's own old tip), and growth measured from it hides
+/// itself on the second push (a C53 baseline that grew on the first push is "already there" on the next). The target is the branch's
+/// own target: the nearest of `<remote>/main` and `<remote>/train/*` that the pushed commit contains (fewest commits ahead; on a tie
+/// the train), never the remote ref's old commit and never another feature branch. An explicit `--base` (the merge check) is kept.
+/// `<remote>/main` when no such ref is contained or `sha` is unknown.
+pub fn growth_target(root: &Path, sha: Option<&str>, remote: Option<&str>, explicit: Option<&str>) -> (String, String) {
+    if let Some(b) = explicit {
+        return (b.to_string(), format!("--base {b} was given"));
+    }
+    let remote = remote.filter(|r| !r.is_empty() && !r.starts_with('-')).unwrap_or("origin");
+    let main = format!("{remote}/main");
+    let Some(sha) = sha else {
+        return (main.clone(), format!("no commit to look at; {main}"));
+    };
+    let listed = git_text(
+        root,
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "--merged",
+            sha,
+            &format!("refs/remotes/{remote}/main"),
+            &format!("refs/remotes/{remote}/train/"),
+        ],
+    )
+    .unwrap_or_default();
+    let mut best: Option<(u64, bool, String)> = None;
+    for r in listed.lines().map(str::trim).filter(|r| !r.is_empty()) {
+        let Some(n) = git_text(root, &["rev-list", "--count", &format!("{r}..{sha}")]).and_then(|t| t.trim().parse::<u64>().ok()) else {
+            continue;
+        };
+        let key = (n, r == main, r.to_string());
+        if best.as_ref().is_none_or(|b| key < *b) {
+            best = Some(key);
+        }
+    }
+    match best {
+        Some((n, _, r)) => (
+            r.clone(),
+            format!("the nearest of {main} and {remote}/train/* that the pushed commit contains, {n} commit(s) behind it"),
+        ),
+        None => (
+            main.clone(),
+            format!("none of {main} and {remote}/train/* is contained in the pushed commit; {main}"),
+        ),
+    }
 }
 
 /// The base a push is measured from when `--base` is not given.
@@ -1029,7 +1085,7 @@ fn dry_run(planned: &[gates::Planned]) -> Report {
         match p {
             gates::Planned::Run(g) => {
                 text.push_str(&format!("run   {:<34} {}\n", g.id, g.rerun()));
-                data.push(json!({"id": g.id, "action": "run", "command": g.rerun(), "heavy": g.heavy}));
+                data.push(json!({"id": g.id, "action": "run", "command": g.rerun(), "heavy": g.heavy, "env": g.env.iter().cloned().collect::<std::collections::BTreeMap<String, String>>()}));
             }
             gates::Planned::Skip { id, reason } => {
                 text.push_str(&format!("skip  {id:<34} {reason}\n"));

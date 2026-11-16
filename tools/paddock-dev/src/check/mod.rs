@@ -82,6 +82,7 @@ pub struct Ctx<'a> {
     config: &'a Config,
     scope: Option<String>,
     today: String,
+    ci: bool,
     workflows: OnceCell<Rc<Vec<util::workflows::Workflow>>>,
 }
 
@@ -102,8 +103,20 @@ impl<'a> Ctx<'a> {
             config,
             scope,
             today,
+            ci: false,
             workflows: OnceCell::new(),
         }
+    }
+
+    /// Marks the run a CI run: a growth check whose target ref cannot be seen is then a not-measured error ([`baseline::unmeasured_finding`]).
+    pub fn with_ci(mut self, ci: bool) -> Ctx<'a> {
+        self.ci = ci;
+        self
+    }
+
+    /// Whether this is a CI run.
+    pub fn in_ci(&self) -> bool {
+        self.ci
     }
 
     /// The files this run looks at (all of the tree, or the `--files` that the tree knows), sorted.
@@ -336,6 +349,9 @@ pub struct RunOptions {
     pub today: String,
     /// The ref baselines are compared with (tests pin it); `None` reads `PADDOCK_BASE_REF`, then `origin/main`.
     pub base_ref: Option<String>,
+    /// Whether this is a CI run (`None` reads `CI`, `GITEA_ACTIONS` and `GITHUB_ACTIONS`): a target that cannot be seen is then a
+    /// not-measured error, not a warning ([`baseline::unmeasured_finding`]). Tests pin it.
+    pub ci: Option<bool>,
 }
 
 /// The result of a run.
@@ -531,7 +547,8 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
         &opts.config,
         opts.scope.clone(),
         opts.today.clone(),
-    );
+    )
+    .with_ci(opts.ci.unwrap_or_else(|| baseline::is_ci(&|k| std::env::var(k).ok())));
 
     let mut findings: Vec<Finding> = unknown_files
         .iter()
@@ -711,6 +728,7 @@ pub fn command(args: Args) -> Result<Report, CliError> {
         files: args.files,
         today: today_utc(),
         base_ref: None,
+        ci: None,
     };
     let result = run_checks(&opts, &registry()).map_err(|u| {
         let known: Vec<&str> = registry().iter().map(|c| c.id()).collect();
@@ -775,6 +793,7 @@ mod tests {
             files,
             today: "2026-11-10".into(),
             base_ref: None,
+            ci: None,
         };
         run_checks_in(&tree, &opts, &[Box::new(Reader)]).unwrap()
     }

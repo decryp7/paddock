@@ -3,6 +3,7 @@
 // ("remove it"), so two branches that each fix some of the same entries can land in either order. C71's three baselines and the
 // baselines of the CI-env and shared-enum tests all use this.
 import { execFileSync } from 'node:child_process';
+import { error, unwaivable, warn } from '../finding.mjs';
 
 /**
  * Matches `current` against `base` entries in two passes: first by `exact` (the full key, for example file + hash), then the leftovers
@@ -40,12 +41,32 @@ export function reconcile(current, base, exact, loose, canMove = () => true) {
 
 /**
  * The ref every baseline's and allow list's growth is measured against: the run's own (`options.baseRef`), else PADDOCK_BASE_REF, else
- * `origin/main`. The ONE place that reads PADDOCK_BASE_REF (ER-21: C53, C71, C115, C104 and the shared allow-list reader each read it
- * or forgot it, and a member branch of a train was measured against main, so the train's own entries counted as its growth). CI's
- * conformance and train-gates jobs and `./dev check --pre-push` set it to the branch's target (the train before, for a train member).
- * Report-only (ER-41) until the first green run on the real tree with it set in CI. Rust host: `check::baseline::target_ref`.
+ * `origin/main`; an empty value is unset. The ONE place that reads PADDOCK_BASE_REF (ER-21: C53, C71, C115, C104 and the shared
+ * allow-list reader each read it or forgot it, and a member branch of a train was measured against main, so the train's own entries
+ * counted as its growth). CI's conformance and train-gates jobs and `./dev check --pre-push` set it to the branch's target (the train
+ * before, for a train member). A deliberate change of meaning for the blocking baselines (C53, C71, C104, C115): the target branch
+ * instead of `origin/main` (ADR 0098, amendment). Rust host: `check::baseline::target_ref`.
  */
-export const targetRef = (options) => options?.baseRef ?? process.env.PADDOCK_BASE_REF ?? 'origin/main';
+export const targetRef = (options) => options?.baseRef || process.env.PADDOCK_BASE_REF || 'origin/main';
+
+/** Whether the run is a CI run (`CI`, `GITEA_ACTIONS` or `GITHUB_ACTIONS` set and not false/0): a target that cannot be seen is then not measured. */
+export const isCi = (env = process.env) => ['CI', 'GITEA_ACTIONS', 'GITHUB_ACTIONS'].some((k) => env[k] && !/^(?:false|0)$/i.test(env[k]));
+
+const FETCH_FIX = 'Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.';
+const PARSE_FIX = 'The list at the base is in an older format (an entry without a `site`), so growth cannot be measured against it; nothing to fix here: it is measured once the new format is on the base branch.';
+
+/**
+ * The finding for a growth check that could not measure (`g` = { reason, kind } from `baselineGrowth`): a warning with the next step,
+ * except that in CI a target that cannot be resolved is a not-measured error no waiver covers (ADR 0089: not measured never passes;
+ * a blocking baseline must not turn into a warning because the target ref is missing). `what` names the list ("the baseline").
+ * `ctx.options.ci` overrides the environment (tests).
+ */
+export function unmeasuredFinding(ctx, { id, rule, file, line = 1, what = 'the baseline', g }) {
+  if (g.kind === 'no-base' && (ctx.options?.ci ?? isCi())) {
+    return unwaivable(error(id, rule, file, line, `not measured: ${what}'s shrink-only rule cannot be checked, the target ref is not usable: ${g.reason}`, `${FETCH_FIX} A gate that cannot see its target does not pass (ADR 0089).`), 'not-measured');
+  }
+  return warn(id, rule, file, line, `${what}'s shrink-only rule is not enforced here: ${g.reason}`, g.kind === 'unparsed' ? PARSE_FIX : FETCH_FIX);
+}
 
 const defaultGit = (cwd) => (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
 
@@ -72,19 +93,19 @@ export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = de
     base = git(['merge-base', 'HEAD', baseRef]).trim();
     if (base === head) base = git(['rev-parse', 'HEAD^1']).trim(); // on the target branch itself: this commit against its parent
   } catch (e) {
-    return { reason: `no merge base (${String(e.message ?? e).split('\n')[0].slice(0, 120)})` };
+    return { kind: 'no-base', reason: `no merge base (${String(e.message ?? e).split('\n')[0].slice(0, 120)})` };
   }
   try {
     text = git(['show', `${base}:${path}`]);
   } catch (e) {
     if (/does not exist|exists on disk, but not in|not in/.test(String(e.stderr ?? e.message))) return { base, added: [], moved: [] };
-    return { reason: `the baseline at ${base.slice(0, 9)} cannot be read` };
+    return { kind: 'unreadable', reason: `the baseline at ${base.slice(0, 9)} cannot be read` };
   }
   let entries;
   try {
     entries = entriesOf(JSON.parse(text));
   } catch {
-    return { reason: `the baseline at ${base.slice(0, 9)} cannot be parsed` };
+    return { kind: 'unparsed', reason: `the baseline at ${base.slice(0, 9)} cannot be parsed` };
   }
   const { fresh, moved } = reconcile(current, entries, keyOf, looseKeyOf);
   return { base, added: fresh, moved };

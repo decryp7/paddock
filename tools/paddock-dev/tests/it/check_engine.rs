@@ -349,6 +349,7 @@ fn a_new_check_gets_inline_waivers_from_the_engine_without_any_waiver_code() {
         files: None,
         today: "2026-11-13".into(),
         base_ref: None,
+        ci: Some(false),
     };
     let r = run_checks(&opts, &[Box::new(Todo)]).unwrap();
     let lines: Vec<usize> = r.findings.iter().map(|f| f.line).collect();

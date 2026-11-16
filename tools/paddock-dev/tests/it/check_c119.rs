@@ -39,6 +39,7 @@ fn rust(root: &Path) -> Value {
         files: None,
         today: paddock_dev::check::today_utc(),
         base_ref: None,
+        ci: Some(false),
     };
     let r = run_checks(&opts, &registry()).unwrap().json();
     json!({"findings": r["findings"], "errors": r["errors"], "warnings": r["warnings"]})
