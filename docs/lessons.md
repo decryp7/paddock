@@ -2393,3 +2393,10 @@ follow-up when the last of them has arrived, and `endReveal()` (called by the gr
 user's first scroll. Specs: the forced-order reveal and "does not pull the view back to the end after the user scrolls away" (red on the
 first fix at 120028 against under 70000). `flush` in `events-grid.spec.ts` no longer sleeps a fixed `SCROLL_IDLE_MS + 30`: it waits on the
 store's `scrollIdlePending`. C71 had caught that helper (its sites were in the baseline); the baseline was shrunk by the three sites.
+
+**Real browser (e2e, same day):** jsdom hid a second cause. `applyLive` wrote `scrollTop` before the spacer had grown to the new total; Chromium and
+WebKit clamp such a write, and the scroll event that follows reports the clamped position, which the grid took for the user's scroll
+(the reveal ended 21 rows short in Chromium, with or without a push between the pages). Fix: a live arrival writes the scroll after the render
+(`setTop(..., afterRender)`, `afterNextRender`), the position signal is still set at once. Playwright e2e `live tail: reveal newest ends on the
+newest row when events are pushed between the reveal pages` (new mock switch `mockPageStaggerMs` answers pages at different times, pinned
+clock moves them and the 50 ms ticks): red in both engines without the deferred write, green 3 of 3 in Chromium and in WebKit with it.

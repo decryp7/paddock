@@ -1,4 +1,4 @@
-import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, effect, ElementRef, inject, linkedSignal, signal, untracked, viewChild } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, effect, ElementRef, inject, Injector, linkedSignal, signal, untracked, viewChild } from '@angular/core';
 import { ErrorDetails } from '../ui/error-details';
 import { RecordView } from '../core/api.types';
 import { DebriefBackend } from '../core/backend';
@@ -292,6 +292,7 @@ export class EventsGrid {
   protected readonly prefs = inject(UiPrefsStore);
   private readonly backend = inject(DebriefBackend);
   private readonly logger = inject(Logger);
+  private readonly injector = inject(Injector);
   private readonly formatters = inject(FieldFormatters);
   private readonly actions = inject(RecordActions);
   private readonly settings = inject(SettingsStore);
@@ -549,12 +550,12 @@ export class EventsGrid {
   /** After the first response of a live refresh: follow the end, or keep the same events in view. */
   private applyLive({ mode, newTotal, delta }: LiveArrival): void {
     if (mode === 'end') {
-      this.setTop(Number.POSITIVE_INFINITY, newTotal);
+      this.setTop(Number.POSITIVE_INFINITY, newTotal, true);
       return;
     }
     if (delta <= 0) return;
     if (mode === 'shift') {
-      this.setTop(this.virtualTop() + delta * this.rowH(), newTotal);
+      this.setTop(this.virtualTop() + delta * this.rowH(), newTotal, true);
       this.selection.update((sel) => shift(sel, delta));
     }
   }
@@ -634,15 +635,24 @@ export class EventsGrid {
   }
 
   /** Moves the rows area to a virtual offset and writes the matching scrollbar position. */
-  private setTop(top: number, total = this.total()): void {
+  /**
+   * Moves the view to `top` of `total` rows. The position is set at once; the scroll write waits for the render with `afterRender`
+   * (a live arrival: the spacer has not grown to `total` yet, and a browser clamps a scroll written before it has, then reports the
+   * clamped position as a scroll of the user, so the view would stay short of the newest row).
+   */
+  private setTop(top: number, total = this.total(), afterRender = false): void {
     const g = makeGeometry(total, this.rowH(), this.viewportH());
     const t = clamp(top, 0, g.maxTop);
     this.virtualTop.set(t);
-    const el = this.viewport()?.nativeElement;
-    if (!el) return;
-    const physical = Math.round(topToScroll(g, t));
-    el.scrollTop = physical;
-    this.writtenScroll = physical;
+    const write = (): void => {
+      const el = this.viewport()?.nativeElement;
+      if (!el) return;
+      const physical = Math.round(topToScroll(g, t));
+      el.scrollTop = physical;
+      this.writtenScroll = physical;
+    };
+    if (afterRender) afterNextRender(write, { injector: this.injector });
+    else write();
   }
 
   protected onScroll(): void {

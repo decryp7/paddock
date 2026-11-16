@@ -280,7 +280,7 @@ export class PagedRowsStore {
     // The reveal asked for several pages. An event pushed between two of their answers makes a later one report a larger total
     // than the one the scroll to the end was made for: the end moved, so the view follows it once more. Only the reveal's own
     // pages count (a page fetched because the user scrolled is not part of it), and the follow-up ends with its last page or
-    // the first scroll of the user (`noteScroll`).
+    // the first scroll the grid did not write itself (`endReveal`, called from the grid's `onScroll`).
     const end = this.endArrival;
     if (!end || end.round !== round || !end.pages.delete(page)) return;
     if (end.pages.size === 0) this.endArrival = null;

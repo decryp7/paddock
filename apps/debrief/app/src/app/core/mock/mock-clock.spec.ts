@@ -3,7 +3,7 @@ import { resumeSystemMockClock, stopSystemMockClock, systemMockClock } from './m
 import { MockBackend } from './mock-backend';
 import { MockImportSim } from './mock-import';
 import { MockAlertMutes } from './mock-live';
-import { tinyDataset } from '../../../testing/helpers';
+import { query, tinyDataset } from '../../../testing/helpers';
 import { ManualClock } from '../../../testing/manual-clock';
 
 describe('mock clock', () => {
@@ -126,5 +126,20 @@ describe('systemMockClock stop and resume', () => {
     } finally {
       stderr.write = real;
     }
+  });
+});
+
+describe('page stagger', () => {
+  it('answers a later page later, so the pages of one request arrive at different times', async () => {
+    const clock = new ManualClock();
+    const backend = new MockBackend({ latency: true, dataset: tinyDataset, syntheticTotal: 5000, pageStaggerMs: 10, clock });
+    const answered: number[] = [];
+    const ask = (page: number) => void backend.queryPage({ query: query(), offset: page * 500, limit: 500, descending: false, anchor: null }).then(() => answered.push(page));
+    ask(0);
+    ask(4);
+    await clock.advance(20);
+    expect(answered).toEqual([0]);
+    await clock.advance(40);
+    expect(answered).toEqual([0, 4]);
   });
 });
