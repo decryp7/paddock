@@ -4,6 +4,15 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui/testing`: holding a live mock feed in a unit test
+- New `holdableTimers(clock)` (wraps the timers a mock already takes: Debrief's `MockClock` and `ManualClock`, or an app's own
+  timer option; no second clock), `holdLive()`, `releaseLive()` and `withLiveHeld(fn)`. While held, a timer that comes due waits
+  (a repeated one waits once) and runs on release, so an assertion never races the feed. A hold a test leaves open is named
+  by the leak detector and reset. The unit twin of the e2e `pauseLive` / `withLivePaused`.
+- Debrief's events-grid and live-tail specs and the live tail specs of the mock run the feed on a `ManualClock` the test moves;
+  Dyno's `MockOptions.timers` and Spotter's `CLOCK_TIMERS` take a held source. C136 (report-only) flags a unit spec that starts
+  a ticking live feed and never holds it.
+
 ### `@decryp7/paddock-ui/testing`: the test leak detector
 - New `installLeakDetector({ mode })` for every app's and the ui's `test-setup.ts` (call it after `installTestKit()`), with
   `registerInFlight` (tracked start-up work, Debrief's load record generalised), `registerSingleton` (a page-wide singleton
