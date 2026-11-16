@@ -47,7 +47,8 @@ Its own `env_clear` goes **back to the listed set**. It starts from an **empty e
   `cargo-clippy`, `cargo-fmt`, `rustfmt`, `clippy-driver`, `rustdoc`: symbolic links on Unix, where rustup's proxies dispatch on
   the name they were started as, hard links or copies on Windows; one folder per toolchain under the temp folder's
   `paddock-test-toolchain`, made once and shared by every command and test process, never inside a command's or a `new_in`
-  folder, and removed by a later run once its programs are gone; ci.yml run 8152 measured the per-command version about 6 times
+  folder, made again when it disappears under a running process, and removed by a later run once its programs are gone and it
+  is an hour old (a crashed run's staging folder too, once an hour old); ci.yml run 8152 measured the per-command version about 6 times
   slower on Windows, docs/benchmarks.md), never the folder they came from, because `cargo install`
   puts other tools beside them in `$CARGO_HOME/bin` (`heavy`: the review of `7edb8cad6` measured `command -v heavy` finding it,
   which reopened incident 1); then the folders of `node`, `npm`, `npx` and `git` as the test process finds them; on Windows Git

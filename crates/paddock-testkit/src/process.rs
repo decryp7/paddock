@@ -688,7 +688,10 @@ fn curated() -> Curated {
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(c) = seen.get(&key) {
+    // A cached link folder that is gone (another process's sweep, a cleaned temp folder) is made again, never left off the PATH.
+    if let Some(c) = seen.get(&key)
+        && c.links.as_deref().is_none_or(Path::is_dir)
+    {
         return c.clone();
     }
     let ambient = key.0.as_deref();
@@ -745,7 +748,7 @@ fn link_folder(ambient: Option<&OsStr>) -> Option<PathBuf> {
         return Some(dir);
     }
     std::fs::create_dir_all(&root).ok()?;
-    sweep(&root);
+    sweep(&root, std::time::SystemTime::now());
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
@@ -786,18 +789,35 @@ fn link_folder(ambient: Option<&OsStr>) -> Option<PathBuf> {
     }
 }
 
-/// Removes the link folders under `root` whose programs are gone (named in their [`SOURCES`]). Folders being made (`.`) stay.
-fn sweep(root: &Path) {
+/// The sweep of [`link_folder`] over `root` as of `now`, for the tests of its age rules.
+#[doc(hidden)]
+pub fn sweep_toolchain_folders(root: &Path, now: std::time::SystemTime) {
+    sweep(root, now);
+}
+
+/// How old a folder must be before the sweep may remove it: another process may still use a younger link folder whose
+/// programs look gone to this one, or still be filling a younger staging folder. A test process lives minutes, not an hour.
+const SWEEP_AGE: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// Removes from `root` the link folders whose programs are gone (named in their [`SOURCES`]) and the staging folders (`.`) a
+/// crashed process left, each only when it is older than [`SWEEP_AGE`] as of `now`.
+fn sweep(root: &Path, now: std::time::SystemTime) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
     for e in entries.flatten() {
         let path = e.path();
-        if e.file_name().to_string_lossy().starts_with('.') {
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| now.duration_since(t).is_ok_and(|age| age > SWEEP_AGE));
+        if !old {
             continue;
         }
-        let gone = std::fs::read_to_string(path.join(SOURCES))
-            .is_ok_and(|t| t.lines().any(|l| !Path::new(l).exists()));
+        let staging = e.file_name().to_string_lossy().starts_with('.');
+        let gone = staging
+            || std::fs::read_to_string(path.join(SOURCES))
+                .is_ok_and(|t| t.lines().any(|l| !Path::new(l).exists()));
         if gone {
             let _ = std::fs::remove_dir_all(&path);
         }
