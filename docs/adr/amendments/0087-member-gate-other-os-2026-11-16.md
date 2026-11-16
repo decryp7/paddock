@@ -1,6 +1,6 @@
 # Amendment to ADR 0087 (2026-11-16, draft): the other-OS member gate, and a pinned toolchain for the test VM
 
-- Status: Proposed 2026-11-16. The gate (§1) is built and report-only; the toolchain choice (§2) waits for a decision.
+- Status: Proposed 2026-11-16. The gate (§1) is built and report-only. §2 was decided by the user on 2026-11-16: option (b) plus the MSVC Build Tools in the image; it is built and measured below.
 - Trigger: train 12 spent about 17 hours in three red CI rounds, and every failure was Linux- or Windows-only: run 8138 (23
   failures: a hidden PATH, `/srv` paths that are not absolute on Windows, a lost Git-bash PATH, slow process starts, ext4 folder
   blocks), run 8147 (a `#!/bin/sh` fixture Windows cannot run), run 8152 (TestCommand 6x slower on Windows). All of them passed the
@@ -35,16 +35,25 @@ root, with `TMPDIR` on an ext4 loop mount (the only addition to the container: `
 `ci` profile. The script prints `other-os-control: os=linux tree=<tree> user=root tmp=ext4 clone=fresh-shallow gitconfig=none`
 only after it checked each of those.
 
-**Windows** (`scripts/member-gate-windows.sh`): under the test machines lock (`vm-lock-run.sh`; busy is exit 75), the test
-programs are built on the Mac (`cargo xwin env` + `cargo test --no-run`, target `aarch64-pc-windows-msvc`, with
-`-C target-feature=+crt-static`), the guest is reverted to `clean-baseline`, started, and `vm-win.sh run --ci-like` runs each
-test in its own process, three at a time (`<exe> --exact <test>`, nextest's model). The guest command prints
-`other-os-control: os=windows tree=<tree> autocrlf=true ...` from its own checkout and its verdict as an
+**Windows** (`scripts/member-gate-windows.sh`): under the test machines lock (`vm-lock-run.sh`; busy is exit 75), the guest is reverted
+to the snapshot `buildtools-baseline` (clean-baseline plus the Build Tools, §2), started, and `vm-win.sh run --ci-like
+--tools-provided` copies in the Rust toolchain of `rust-toolchain.toml`, the pinned Arm `cargo-nextest.exe` and the pinned Node,
+then builds and runs the specs **natively**: `cargo nextest run -p <package> --profile ci --locked --no-fail-fast`. Tests that run
+cargo (all of `paddock-dev`'s) therefore work. The guest command prints `other-os-control: os=windows tree=<tree> autocrlf=true
+... target=x86_64-pc-windows-msvc vm-arch=aarch64 runner-arch=x86_64` from its own checkout and its verdict as an
 `other-os-result: failed=<n>` line (the ci-like wrapper turns a guest exit 100 into 1, so an exit code cannot carry it).
-Measured 2026-11-16 on the guest: an x64 program does not start (exit 0xC0000135, a missing DLL), which includes the pinned
-`cargo-nextest.exe` (the x64 release is the only Windows one it pins), and an Arm program needs the static CRT for the same
-reason. So nextest itself does not run there; its test groups, retries and per-test timeouts (`.config/nextest.toml`) are not
-mirrored, and the guest's architecture is the Arm one (ADR 0087 amendment of 2026-11-13, S1), not the runner's.
+
+**Architecture (decided 2026-11-16 on the coordinator's note).** The guest is Arm; the CI runner is x64. The gate builds
+**x86_64-pc-windows-msvc by default**: the native Arm rustc cross-compiles (the image has the x64 MSVC libraries and a
+`Hostarm64\x64\link.exe`; the extra `rust-std-x86_64-pc-windows-msvc` is copied with the toolchain) and the x64 test programs run
+under Prism emulation, so a member is tested in the runner's architecture. Reason: native aarch64 does not build every crate yet
+(Dyno's `dyno-platform` tests do not compile for aarch64: the `windows` crate lacks `RegisterClassW` in `mount_events.rs`; that gap
+is recorded as its own item, not fixed here), and x64 programs built with the repo's `crt-static` rustflags start in the guest.
+`cargo-nextest.exe` itself is the **native Arm** release: the pinned x64 one does not start (it is not statically linked and the
+guest has no x64 VC runtime), so running the x64 nextest under emulation is not worth it: it would need the x64 VC++
+redistributable in the image for no gain, since nextest only starts the test processes.
+`PADDOCK_MEMBER_GATE_WIN_TARGET=aarch64-pc-windows-msvc` builds natively instead. Every Windows row says so (`note` in the JSON,
+`[x64 test programs ... Arm64 test VM ...]` in the text).
 
 **The row** (ER-33): `passed` needs exit 0, the control line for this merge's tree and nextest's summary with tests run for every
 nextest target; `failed` is exit 100 with the control line; everything else (Docker down, the VM busy, a build failure, a missing
@@ -57,37 +66,62 @@ First report-only run: see "Measurements" at the end.
 
 A package whose tests run `cargo` (all of `paddock-dev`) cannot run on Windows (§2): its row is `not measured`, listed by name.
 
-## 2. DECISION NEEDED: a Rust toolchain for the Windows guest
+## 2. The toolchain for the Windows guest (decided: (b) plus Build Tools)
 
-The guest has no Rust. Today the gate cross-builds test programs on the Mac, which covers every test that only runs the program
-under test, and none that runs `cargo`. In `paddock-dev` that is `inputs.rs`, `generators.rs`, `golden.rs`, `locks.rs`,
-`contracts.rs` and `src/queue`, `src/generators`, `src/check/c121.rs` and others: they call `env!("CARGO")`, which the
-cross-build bakes in as a Mac path, or run `cargo metadata` over the repository. So with only the cross-built archive the Windows
-row for `paddock-dev` is `not measured: its tests run cargo`, and the other packages run. That hole is exactly the class of run
-8034 (a `/c/Users/...` checkout path read by `queue::tests`).
+The first version cross-built on the Mac and could not run tests that call `cargo` (all of `paddock-dev`'s: they read
+`env!("CARGO")`, a Mac path in a cross-built program, or run `cargo metadata`). That hole is the class of run 8034 (a `/c/Users/...`
+checkout path read by `queue::tests`). The options were (a) a pinned toolchain in the image, (b) the toolchain per run from a
+host-side cache, (c) cross-built programs only. The user chose (b) **plus** the MSVC Build Tools in the image, so the guest builds
+natively. (b) follows `rust-toolchain.toml` by itself; an image copy (a) would need a re-provision on every Rust bump.
 
-A toolchain in the guest is therefore not enough by itself for an archive: `env!("CARGO")` is fixed at compile time. A run that
-uses it must build in the guest, which also needs a linker (the MSVC Build Tools, a few GB) and the registry sources
-(`cargo fetch --locked` needs the private registry token). I measured or looked up what I could without touching the image:
+What was built:
 
-| | (a) pinned toolchain in the VM image, once | (b) toolchain per run from a host-side cache | (c) cross-built programs only, no cargo-running tests |
-| --- | --- | --- | --- |
-| What it is | a provisioning step (`vm-win.sh toolchain-setup`, like `admin-setup`): from `clean-baseline`, installs the channel of `rust-toolchain.toml` (rustup-init with `--default-toolchain 1.100.0 --profile minimal`, SHA-256 from the channel manifest), takes the snapshot `toolchain-baseline`, reverts. Gate runs start from that snapshot. | the Mac keeps the unpacked toolchain in a cache folder (the `rust-1.100.0-x86_64-pc-windows-msvc.tar.xz` dist is 207 MB; minimal profile about 300 MB unpacked), the gate packs it as one archive, copies it with `--with` and unpacks it in the guest before the command (`vm-win/ci-like.ps1` already puts `%USERPROFILE%\\.cargo\\bin` first on PATH) | nothing to add: today's script |
-| Changes the user's VM image | yes (one more snapshot, about 0.5 to 1 GB; `clean-baseline` stays untouched) | no | no |
-| Build cost | about 1.0 agent-day: the subcommand, the checksum check, a check that fails when the snapshot's `rustc --version` differs from `rust-toolchain.toml`, a fake-VM test, the doc | about 0.7 agent-day: the fetch and verify, the pack, the unpack step in `ci-like.ps1`, tests, the doc | 0 (done); 0.2 agent-day to make the `paddock-dev` tests say what they need (a `PADDOCK_TEST_NEEDS_CARGO` skip) |
-| Run time added | 0 s | about 30 to 60 s per run (a 100 MB packed copy over SSH plus unpack of about 10k files; to be measured when built) | 0 s |
-| Upkeep | re-provision on every Rust bump (about 10 minutes of machine time, one command); a stale snapshot is refused by the check | none: it follows `rust-toolchain.toml` | none |
-| Covers cargo-running tests | only with a linker and the registry added to the image (about +2 days and +3 to 6 GB for the Build Tools; the registry token must be put in the guest) | the same extra needs, every run | no |
-| Risk | the snapshot drifts from the pin; a bigger image on d8 | slower runs; the cache must be verified | the biggest hole stays |
+- **Build Tools (once, in the image).** `vm-win.sh toolchain-setup` (under the lock, bounded, with a cleanup trap that reverts to
+  `clean-baseline` on any early exit): reverts to `clean-baseline`, takes the rollback snapshot **`pre-buildtools-2026-11-16`**
+  (a copy of `clean-baseline`'s state before the change), installs **Visual Studio Build Tools 2022 17.12.37502.7** (LTSC 17.12,
+  components `VC.Tools.x86.x64`, `VC.Tools.ARM64`, `Windows11SDK.22621`) as `paddock-admin`, shuts down cleanly and takes
+  **`buildtools-baseline`**. `clean-baseline` is unchanged; the way back is `vm-win.sh revert` to it (or to the rollback snapshot).
+  The installer is Microsoft's fixed LTSC 17.12 bootstrapper (`https://aka.ms/vs/17/release.ltsc.17.12/vs_buildtools.exe`, which
+  redirects to `download.visualstudio.microsoft.com/download/pr/0b774c01-.../7ab0e750...e3e/vs_BuildTools.exe`); the SHA-256 in
+  that path, `7ab0e75003c995688999833d01fce07ac60b92f53fc9439494e4dd8521bf4e3e`, is checked on the host and again in the guest,
+  and the Authenticode signature must be valid and Microsoft's. The components come from Microsoft's CDN through that installer.
+  No token, no account (ER-26).
+- **Measured.** The installer ran 540 s (about 13 minutes from the VM start to the snapshot); about 8.3 GB used on the guest's C:,
+  which is the size the new snapshot adds to the VM folder (the folder was 118 GB before; other agents' snapshots grew it too).
+  Two first attempts failed and were fixed: an SSH session over the installer was dropped by its keep-alive while the guest was
+  starved, and a `Start-Process` launch over SSH never started (the script now creates a scheduled task as SYSTEM, which survives
+  the session). The poll loop prints a live progress line (ER-18; the first version printed only "still working" and kept the
+  lock for 73 minutes while nothing ran). The install needs the VM exclusively, so it cannot release the lock in the middle, but
+  it now lasts about 13 minutes.
+- **Toolchain per run (host-side cache, `scripts/vm-win/member-gate-tools.lock`).** The cache folder holds the toolchain of
+  `rust-toolchain.toml` (an exact version is required) for `aarch64-pc-windows-msvc` plus the x86_64 std, checked against the
+  `.sha256` that static.rust-lang.org publishes, packed as one archive of about 160 MB; the pinned aarch64 `cargo-nextest` (the
+  version of `host_tools.rs`' pin; a test holds the lock file equal to it; its SHA-256 comes from the GitHub release, which
+  publishes none for this archive: the first trust is TLS) and Node 24.22.3 (`.nvmrc`'s major; SHA-256 from nodejs.org's
+  SHASUMS256.txt). They are copied in with `--with` each run and unpacked in the guest (4 to 5 s). No rustup runs in the guest, so
+  nothing can auto-install a toolchain (`RUSTUP_AUTO_INSTALL=0` is set too); the host never touches `~/.rustup` or `~/.cargo`.
+- **Registries.** No token: the Gitea registry is read anonymously (`.cargo/config.toml`: "no token needed to read") and
+  crates.io too. Nothing secret is written into the image or a log (ER-27); a test in `scripts/member-gate.test.mjs` fails if
+  the script names a token.
 
-Recommendation: **(c) now, then (b) only if a test that needs cargo on Windows has failed in CI again**, and not (a).
-Reasons: (1) a toolchain alone does not unlock the tests that matter, because they bake in `env!("CARGO")` (so the real price of
-covering them is the Build Tools and the registry, beyond either option: about +2 agent-days); (2) (b) costs less to build than
-(a), leaves the user's image alone and follows the Rust pin by itself, and its 30 to 60 s per run is small against the VM's own
-start and revert; (3) the failures of train 12 that were Windows-only were in paddock-testkit, paddock-proc and fixtures
-(`#!/bin/sh`, `/srv`, PATH), which (c) already runs. The honest limit of (c) is the `not measured` row for `paddock-dev`; it is
-visible in every report. I stopped here for the decision; the gate is built so that either option changes only
-`scripts/member-gate-windows.sh` (the `needs_toolchain` list) and `ci-like.ps1`.
+## 2b. Measurements of the native guest build (2026-11-16, the VM under load from other lanes: upper bounds)
+
+| What | Time |
+| --- | --- |
+| VM start from `buildtools-baseline` | 23 to 56 s |
+| Toolchain, Node and nextest unpack in the guest | 4 to 5 s |
+| `paddock-testkit-start`: cold build in the guest, then 23 tests (all passed, green on a real member) | 490 s for the whole run including the 400 MB bundle copy and the checkout |
+| `paddock-dev`: cold build in the guest, then 1444 tests (first run, before Node was copied in) | 554 s of nextest, 808 s for the guest run; 1393 passed, 50 failed, 1 timed out (84 of the panics say `node must be installed` or `the host must run`, which Node in the guest fixes) |
+
+The guest is reverted for every run, so every run is a cold build; a warm build exists only inside one session. The cost per run
+of a `paddock-dev` change is therefore about 8 to 13 minutes. A second run with Node in the guest ran for over 35 minutes and was
+ended by me when the coordinator asked the VM to be freed (the guest had stopped answering SSH under load), so the post-Node
+failure list is **not measured yet**.
+
+Failures seen in the first run that are not about Node and are for the review to triage (they are what this gate is for):
+`/srv/dev-targets`-style paths that are not absolute on Windows (`places`, `wrapper`, `check_engine`: "The dev-targets folder
+/srv/... is not absolute"), `grep: command not found` in a copy of the repo's `dev` script (the runner-style PATH has Git's `bin`
+but not `usr/bin`), and a `TotalPhysicalMemory` a standard user cannot read.
 
 ## 3. Common practice and cost (ER-37)
 

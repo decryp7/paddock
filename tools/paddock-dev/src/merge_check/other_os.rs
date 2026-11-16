@@ -363,9 +363,9 @@ fn last_lines(text: &str, n: usize) -> String {
     lines[lines.len().saturating_sub(n)..].join(" | ")
 }
 
-/// What a Windows row is not: the guest's architecture differs from the runner's (`dev ci` runs x64; the test VM is Arm and an x64
-/// program does not start there). Said in the row and the text, so a pass is never read as "the runner's architecture passed".
-const WINDOWS_NOTE: &str = "Arm64 test VM (aarch64-pc-windows-msvc); the CI runner is x64";
+/// What a Windows row is not: the guest's architecture differs from the runner's (CI runs x64; the test VM is Arm and runs the x64
+/// test programs under emulation). Said in the row and the text, so a pass is never read as "the runner's architecture passed".
+const WINDOWS_NOTE: &str = "x64 test programs (the runner's architecture) on an Arm64 test VM under Prism emulation; cargo-nextest and the toolchain run natively on Arm";
 
 fn row(os: Os, targets: &BTreeSet<Target>, verdict: &Verdict, seconds: f64, log: &str) -> Value {
     json!({

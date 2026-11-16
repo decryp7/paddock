@@ -8,6 +8,12 @@ param(
   [Parameter(Mandatory)] [string] $Sha256
 )
 $ErrorActionPreference = 'Stop'
+# Runs detached from the SSH session that started it (vm-win.sh toolchain-setup polls): the installer starves the guest for minutes and
+# an SSH session over a stalled guest is dropped by its keep-alive (seen 2026-11-16). It writes a log and, last, a done file with 0 or 1.
+$log = 'C:\paddock-test\buildtools.log'
+Remove-Item 'C:\paddock-test\buildtools.done' -Force -ErrorAction SilentlyContinue
+Start-Transcript -Path $log -Force | Out-Null
+try {
 function Say($m) { Write-Output "buildtools-setup: $m" }
 $got = (Get-FileHash -Algorithm SHA256 $Installer).Hash.ToLower()
 if ($got -ne $Sha256.ToLower()) { throw "installer SHA-256 is $got, not the pinned $Sha256" }
@@ -33,3 +39,9 @@ $sdk = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Lib' -Directory | S
 Say "Windows SDK libs: $($sdk -join ', ')"
 $used = [math]::Round(($free0 - (Get-PSDrive C).Free) / 1MB)
 Say "disk used on C: about $used MB"
+Say 'done'
+Set-Content 'C:\paddock-test\buildtools.done' '0'
+} catch {
+  Write-Output "buildtools-setup: FAILED: $_"
+  Set-Content 'C:\paddock-test\buildtools.done' '1'
+} finally { Stop-Transcript | Out-Null }

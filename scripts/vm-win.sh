@@ -13,7 +13,7 @@
 #   scripts/vm-win.sh revert --snapshot <name>   the same, named with a flag (for example admin-baseline)
 #   scripts/vm-win.sh admin-setup             one-time: from clean-baseline, paddock-test joins Administrators, UAC consent on the normal
 #                                             desktop (+ auto-logon and job runner as gui-setup), snapshot admin-baseline; reverts at the end
-#   scripts/vm-win.sh run --ci-like [--ref <commit>] [--with <file>]... [--] <bash command...>
+#   scripts/vm-win.sh run --ci-like [--ref <commit>] [--with <file>]... [--tools-provided] [--] <bash command...>
 #                                             in the RUNNING guest, run the command the way the Gitea Windows CI runner starts a step: runner-style
 #                                             temp folder (Authenticated Users may write), a git checkout of <ref> (default HEAD) with core.autocrlf=true
 #                                             sent as a git bundle of its tree, --with files (built on the Mac: the guest has no toolchain) copied to the
@@ -261,10 +261,12 @@ case $cmd in
     [ "${1:-}" = "--ci-like" ] || die "usage: vm-win.sh run --ci-like [--ref <commit>] [--] <bash command...> (--ci-like is the only mode)"
     shift
     ref=HEAD
+    tools_provided=""
     withs=()
     while [ $# -gt 0 ]; do
       case $1 in
         --ref) ref=${2:-}; [ -n "$ref" ] || die "usage: vm-win.sh run --ci-like --ref <commit> ..."; shift 2 ;;
+        --tools-provided) tools_provided="-ToolsProvided"; shift ;;
         --with) [ -f "${2:-}" ] || die "--with needs a file: ${2:-}"; withs+=("$2"); shift 2 ;;
         *) break ;;
       esac
@@ -294,7 +296,7 @@ case $cmd in
       scp_via paddock-test "$f" "@HOST@:$gdir/$(basename "$f")" || die "copy of $(basename "$f") to the guest failed"
     done
     set +e
-    ssh_to paddock-test "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\paddock-test\\ci-like\\ci-like.ps1 -Bundle C:\\Users\\paddock-test\\ci-like\\src.bundle -Ref $refname -ScriptFile C:\\Users\\paddock-test\\ci-like\\step.sh" |
+    ssh_to paddock-test "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\paddock-test\\ci-like\\ci-like.ps1 -Bundle C:\\Users\\paddock-test\\ci-like\\src.bundle -Ref $refname -ScriptFile C:\\Users\\paddock-test\\ci-like\\step.sh $tools_provided" |
       grep -v -e 'post-quantum' -e 'store now' -e 'openssh.com/pq'
     rc=${PIPESTATUS[0]}
     set -e
@@ -366,9 +368,22 @@ case $cmd in
     for f in "$bt_exe:vs_BuildTools.exe" "$here/vm-win/buildtools-setup.ps1:buildtools-setup.ps1"; do
       (scp_via paddock-admin "${f%%:*}" "@HOST@:C:/paddock-test/${f##*:}") || admin_fail "copy ${f##*:}"
     done
-    bounded "$bt_deadline" ssh_admin_exec "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\buildtools-setup.ps1 -Installer C:\\paddock-test\\vs_BuildTools.exe -Sha256 $bt_sha" || admin_fail "buildtools-setup.ps1"
+    # Detached in the guest (a scheduled task as SYSTEM: it survives the SSH session and has the rights), then polled with short SSH
+    # calls that may fail while the installer starves the guest. Each poll prints the installer's own last log line (ER-18).
+    bt_cmd="powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\buildtools-setup.ps1 -Installer C:\\paddock-test\\vs_BuildTools.exe -Sha256 $bt_sha"
+    ssh_to paddock-admin "schtasks /create /tn paddock-buildtools /tr \"$bt_cmd\" /sc once /st 00:00 /ru SYSTEM /rl HIGHEST /f; schtasks /run /tn paddock-buildtools" || admin_fail "start buildtools-setup.ps1"
+    bt_end=$((SECONDS + bt_deadline)); bt_next=$((SECONDS + 60)); bt_code=""; bt_started=0
+    while [ -z "$bt_code" ]; do
+      [ $SECONDS -lt $bt_end ] || admin_fail "buildtools-setup.ps1 did not finish within ${bt_deadline}s"
+      sleep 15
+      bt_out=$(ssh_to paddock-admin 'if (Test-Path C:\paddock-test\buildtools.done) { "DONE " + (Get-Content C:\paddock-test\buildtools.done).Trim() } else { $l = Get-ChildItem C:\Windows\Temp, $env:TEMP -Filter dd_*.log -ErrorAction SilentlyContinue | Sort LastWriteTime | Select -Last 1; if ($l) { "LOG " + $l.Name + " " + $l.Length + " bytes, " + $l.LastWriteTime.ToString("HH:mm:ss") + ": " + ((Get-Content $l.FullName -Tail 1) -replace "\s+", " ") } elseif (Test-Path C:\paddock-test\buildtools.log) { "LOG buildtools.log: " + (Get-Content C:\paddock-test\buildtools.log -Tail 1) } else { "NOLOG the task has written nothing yet" } }' 2>/dev/null | grep -E '^(DONE|LOG|NOLOG)' | head -1) || true
+      case "$bt_out" in DONE\ [01]) bt_code=${bt_out#DONE } ;; esac
+      if [ $SECONDS -ge $bt_next ]; then echo "  buildtools ($(( (SECONDS - started) / 60 )) min): ${bt_out:-no answer from the guest (it may be busy)}" | cut -c1-240; bt_next=$((SECONDS + 60)); fi
+    done
+    ssh_to paddock-admin 'Get-Content C:\paddock-test\buildtools.log' 2>/dev/null | grep -E 'buildtools-setup:' || true
+    [ "$bt_code" = 0 ] || admin_fail "buildtools-setup.ps1 reported failure (exit $bt_code)"
     echo "buildtools-setup took $((SECONDS - started)) s"
-    shutdown_guest 'Remove-Item C:\paddock-test\vs_BuildTools.exe, C:\paddock-test\buildtools-setup.ps1 -Force -ErrorAction SilentlyContinue; shutdown /s /t 0'
+    shutdown_guest 'Remove-Item C:\paddock-test\vs_BuildTools.exe, C:\paddock-test\buildtools-setup.ps1 -Force -ErrorAction SilentlyContinue; schtasks /delete /tn paddock-buildtools /f; shutdown /s /t 0'
     wait_off "$off_deadline" "shutting down" || { reap_shutdown; admin_fail "clean shutdown (a snapshot of a hard power-off is not taken)"; }
     reap_shutdown
     vmx_vnc_free || admin_fail "the .vmx got RemoteDisplay.vnc.* lines during the run"
