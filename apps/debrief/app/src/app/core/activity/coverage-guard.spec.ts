@@ -1,7 +1,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { AbstractType } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { SHELL_IDLE } from '@decryp7/paddock-ui/shell/contributions';
 import { MemoryLogger } from '../../../testing/helpers';
+import { settleStartup } from '../../../testing/startup';
 import { appConfig } from '../../app.config';
 import { Logger, withFailureLogging } from '../logger';
 import { isActivityTracked, methodKind } from './backend-activity';
@@ -19,9 +21,6 @@ import { activity } from './runtime';
  */
 
 const SRC = 'src/app';
-
-/** Lets the app's start-up work finish before the test module is torn down. */
-const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 function sources(): { path: string; text: string }[] {
   return readdirSync(SRC, { recursive: true })
@@ -41,7 +40,10 @@ describe('activity coverage guard', () => {
       .flatMap((f) => [...f.text.matchAll(/export abstract class (\w+Backend)\b/g)].map((m) => ({ name: m[1] ?? '', path: f.path })))
       .sort((a, b) => a.name.localeCompare(b.name));
     expect(ports.length).toBeGreaterThan(10);
-    TestBed.configureTestingModule({ providers: [...appConfig.providers, { provide: Logger, useFactory: () => new MemoryLogger() }] });
+    // No idle work of its own: `settleStartup` loads what start-up would load and waits for it.
+    TestBed.configureTestingModule({
+      providers: [...appConfig.providers, { provide: Logger, useFactory: () => new MemoryLogger() }, { provide: SHELL_IDLE, useValue: () => undefined }],
+    });
     const untracked: string[] = [];
     for (const port of ports) {
       // Resolve the class by importing its module dynamically is not possible here; look it up by name among
@@ -55,7 +57,7 @@ describe('activity coverage guard', () => {
       if (instance !== null && !isActivityTracked(instance)) untracked.push(port.name);
     }
     expect(untracked).toEqual([]);
-    await settle();
+    await settleStartup();
   });
 
   it('every backend method is attributed or becomes an operation', { timeout: 20000 }, async () => {
