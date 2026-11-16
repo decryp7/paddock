@@ -1508,3 +1508,35 @@ Superseded on 2026-11-16 before it landed: `axeViolations` no longer detects mot
 measured is gone). It turns transitions and animations off for a single scan instead (the user's decision after the fourth
 instance of the class; lessons.md, "axe read a table row half-way into the dark theme"). The measurement (at most 3 scans per
 screen over ui, Dyno and Pitwall, 409 tests) is in this branch's history, commit b661502f0.
+
+## sccache 0.19.0 across worktrees, local disk cache (2026-11-16, docs/sccache-basedirs)
+
+- **Machine:** Mac mini (arm64), macOS 27.2, 14 cores, CPU idle 46 to 69% at each start (`top -l 2 -n 0 -s 2`), load
+  average 11 to 12 (other agents running), no CI run of mine
+- **Tool:** sccache 0.19.0 release binary (aarch64-apple-darwin, sha256 a35a0b7d...286af, checked against the release's
+  `.sha256`), one server on a private port, `SCCACHE_DIR` a scratch folder on the vault volume, `SCCACHE_BASEDIRS` set to the
+  three worktree roots (0.19.0 does not use it for Rust, see the note)
+- **Workspace:** `tools/paddock-dev` at 3585bcab1 (260 lockfile packages; 210 compile requests, 152 cacheable), Rust 1.100.0,
+  `cargo build --locked` (dev profile), `CARGO_BUILD_JOBS=2`, one shared scratch `CARGO_HOME`, target folder removed before
+  each run; three detached worktrees A, B, C of the same commit at different paths; single runs, run in the order listed
+- **Numbers:**
+
+  | Run | Target folder | Wall (s) | Rust hits |
+  |---|---|---|---|
+  | A, no sccache | `<A>/tools/paddock-dev/target` | 66 | n/a |
+  | B, no sccache | `<B>/...` | 64 | n/a |
+  | A, empty cache | `<A>/...` | 51 | 0 / 146 |
+  | A again, same path | `<A>/...` | 23 | 146 / 146 |
+  | B, other worktree | `<B>/...` | 28 | 120 / 146 (82%) |
+  | C, other worktree, `--config build.target-dir=<scratch>` | outside the worktree | 32 | 120 / 146 (82%) |
+  | C, `CARGO_TARGET_DIR=<scratch>` in the environment | outside the worktree | 58 | 0 / 146 |
+  | C, default target | `<C>/...` | 28 | 120 / 146 (82%) |
+
+- **Memory measure:** not measured; cache on disk 369 MiB after all runs, one target folder 1.4 GiB
+- **Reading:** across worktrees 0.19.0 hits 82% of the third-party Rust compiles (wall time 28 s against 64 s cold)
+  as long as the target folder is not given through `CARGO_TARGET_DIR` (every `CARGO_*` variable is part of the key, so
+  that gives 0%). The 26 misses are crates whose build scripts set `OUT_DIR` (proc-macro2, serde, serde_json, thiserror,
+  libsqlite3-sys, ...) and crates built on them. The workspace's own crates are never cached in a dev build
+  (`CannotCache(incremental)`), nor are build scripts, binaries and proc-macros. The empty-cache run being faster than the
+  no-sccache run is noise of single runs on a loaded machine, not a sccache effect. Not measured: an app workspace,
+  Linux, Windows, release profile.
