@@ -3,8 +3,6 @@ import type { Page } from '@playwright/test';
 import { CAPTURE_TIMEOUT, openApp, openView } from './app';
 import { openAppWith } from './mock-url';
 
-// The error snapshot (html-to-image) and the unhandled-error timer wait on real timers; under the pinned fake clock the toast never appears (red with the pin, green on the base).
-test.use({ pinnedClock: false });
 
 // Error snapshots: the window is rendered to an image inside the webview (html-to-image), so this runs
 // against the real capture code in every project. The production build is served with the Tauri CSP,
@@ -12,9 +10,9 @@ test.use({ pinnedClock: false });
 
 const toast = (page: Page) => page.locator('[data-testid=notification][data-cause="diagnostics.snapshot"]');
 
-/** Raises an uncaught error the way a bug would: from a timer, outside Angular's zone of control. */
+/** Raises an uncaught error the way a bug would: from a microtask outside Angular's zone of control (not a timer: the pinned fake clock's setTimeout swallows an exception thrown by its callback, with no window 'error' event). */
 async function throwUncaught(page: Page, message: string): Promise<void> {
-  await page.evaluate((m) => void setTimeout(() => { throw new Error(m); }, 0), message);
+  await page.evaluate((m) => void queueMicrotask(() => { throw new Error(m); }), message);
 }
 
 async function openSnapshotsView(page: Page): Promise<void> {

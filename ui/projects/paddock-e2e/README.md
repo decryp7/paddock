@@ -53,6 +53,12 @@ export { expect };
 - A spec that installs its own clock still can: a second `page.clock.install({ time })` or `setFixedTime` wins over the pin
   (Playwright 1.64.1, measured on Chromium and WebKit). Drop a bare `page.clock.install()` instead, because it restarts the
   clock at the real time; the pinned clock is already installed and `runFor` works on it.
+- What the fake clock changes (measured on Playwright 1.64.1, Chromium and WebKit): timers and `requestAnimationFrame` keep running, and CSS
+  transitions are not affected, but a `setTimeout(0)` takes about twice as long (Chromium 8 ms against 3.8 ms, WebKit 13 against 6), so a
+  spec that reads the page right after an action must wait on the condition; an exception thrown by a timer callback is caught by the
+  clock (logged as `console.error`, no `window` error event, no `pageerror`), so raise a test error from a microtask
+  (`queueMicrotask`) or a rejected promise; and `performance.now` and `requestAnimationFrame` are the fake ones, so a spec that measures
+  real frame cost opts out (`test.use({ pinnedClock: false })`).
 - It covers contexts the fixtures create (`page`, `context`). A context made with `browser.newContext()` is not pinned.
 
 ```ts

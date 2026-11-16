@@ -4,8 +4,6 @@ import { startFrameCost, stopFrameCost, type Locator, type Page } from '@decryp7
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-// Measures frames, virtual rows and notch geometry on the browser's own timers; the fake clock's requestAnimationFrame makes them read wrong (red with the pin, green without).
-test.use({ pinnedClock: false });
 
 /** Set WIDGET_GRID_SHOTS to a folder to also write the review screenshots there (light and dark, 1x and 2x). */
 const SHOTS = process.env['WIDGET_GRID_SHOTS'];
@@ -234,7 +232,10 @@ test('Widget grid: the states and the twelve golden scenarios are drawn', async 
   await expect(page.getByTestId('wgg-case-7').getByRole('status')).toContainText('already at the left edge');
 });
 
-test('Widget grid: a drag across a 32-widget board stays under the frame budget', async ({ page }) => {
+test.describe('frame budget', () => {
+  // Measures real frames: the sampler reads requestAnimationFrame and performance.now, which the fake clock replaces, so under the pin it counted 8 frames in a drag that draws more than 30 on the real clock.
+  test.use({ pinnedClock: false });
+  test('Widget grid: a drag across a 32-widget board stays under the frame budget', async ({ page }) => {
   await open(page, 'dark');
   const big = page.getByTestId('wgg-big');
   await big.getByRole('button', { name: 'Edit layout' }).click();
@@ -260,6 +261,7 @@ test('Widget grid: a drag across a 32-widget board stays under the frame budget'
   // WebKit in the macOS CI job); the annotation says when it was not.
   if (process.platform === 'darwin') expect(p95).toBeLessThan(16.7);
   else test.info().annotations.push({ type: 'frame-budget', description: `not enforced on ${process.platform}: software rendering (ADR 0044 §7 names the CI Mac)` });
+});
 });
 
 test('Widget grid: the add sheet lists the kinds and adds one; Options is in the menu of a kind that has it', async ({ page }) => {
