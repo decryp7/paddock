@@ -185,7 +185,7 @@ fn a_rewrite_prints_the_command_that_confirms_it_in_the_ci_image() {
     );
     assert!(confirm_command(None, Some("a b"), Some("a b; rm")).contains("<the package folder>"));
     assert!(!confirm_command(None, Some("a b"), Some("t")).contains("-p"));
-    let notice = rewritten_notice(&s.path("x.txt"), Some(&pkg), None, Some("t"));
+    let notice = rewritten_notice(&s.path("x.txt"), Some(&pkg), None, Some("t"), Some("main"));
     assert!(
         notice.contains("Confirm it on Linux as root in the CI image")
             && notice.contains("./dev golden confirm"),
@@ -195,6 +195,17 @@ fn a_rewrite_prints_the_command_that_confirms_it_in_the_ci_image() {
         notice.contains(&s.path("x.txt").display().to_string()),
         "{notice}"
     );
+    // a thread named `main` is no test: no `main` filter is printed, nextest's name wins, a thread's name is the fallback
+    let main = rewritten_notice(&s.path("x.txt"), Some(&pkg), None, None, Some("main"));
+    assert!(
+        main.contains("cargo nextest run <test name>") && !main.contains("run main"),
+        "{main}"
+    );
+    assert!(
+        rewritten_notice(&s.path("x.txt"), Some(&pkg), None, None, Some("a::b"))
+            .contains("cargo nextest run a::b'")
+    );
+    assert!(notice.contains("cargo nextest run t'"), "{notice}");
     // a quote in a folder name stays inside its word
     let odd = s.path("repo/it's here");
     std::fs::create_dir_all(&odd).expect("odd folder");

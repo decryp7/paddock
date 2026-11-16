@@ -210,5 +210,5 @@ fn live_c131_tree_findings_equal_the_js_host() {
 /// The shared parity corpus (a byte order mark, CRLF, astral text, case-folding letters, no-break spaces, long lines).
 #[test]
 fn c131_hosts_agree_on_the_shared_parity_corpus() {
-    super::parity_corpus::assert_no_divergence("C131");
+    super::parity_corpus::assert_no_divergence("C131", &[("x/tests/golden/first.json", "uid=1\n")]);
 }

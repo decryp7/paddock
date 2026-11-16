@@ -1,14 +1,45 @@
 {
-  "about": "The shared parity corpus: ways of writing the same file that a JavaScript check and its Rust twin must read alike. tools/paddock-dev/tests/it/parity_corpus.rs takes every file of a dual-host check's own control tree (a Check's `control()`), rewrites it by each variant below, runs both hosts on the result and compares their findings. A file the check reads as data (its allow file) is left as it is. A check with a twin is checked by adding one line to the tests (see check_c131.rs).",
+  "about": "The shared parity corpus: ways of writing the same file that a JavaScript check and its Rust twin must read alike. tools/paddock-dev/tests/it/parity_corpus.rs takes every file of a dual-host check's own control tree (a Check's `control()`), rewrites it by each variant below, runs both hosts on the result and compares their findings. A file the check reads as data (its allow file) is left as it is. A check with a twin is checked by one line in its parity test (see check_c131.rs): `assert_no_divergence(id, seeds)`, with a seed site on line 1. A variant marked mayEmptyTree may take the site away because it rewrites the code itself; the others must keep every expected site.",
   "variants": [
-    { "name": "plain" },
-    { "name": "bom", "bom": true },
-    { "name": "crlf", "eol": "\r\n" },
-    { "name": "astral-and-emoji", "prefix": "😀😀😀😀 𝒳𝒴 é 日本語\n" },
-    { "name": "case-fold-letters", "prefix": "ſ ſſ K İ ı ß ǅ\n", "suffix": "\nuſer_id=5 K\n" },
-    { "name": "no-break-space", "nbsp": true },
-    { "name": "line-separators", "prefix": "a b c\u0085d\u000bf\u000c\n" },
-    { "name": "long-line", "suffix": "\n", "suffixRepeat": { "text": "a", "times": 200000 } },
-    { "name": "no-final-newline", "trim": true }
+    {
+      "name": "plain"
+    },
+    {
+      "name": "bom",
+      "bom": true
+    },
+    {
+      "name": "crlf",
+      "eol": "\r\n"
+    },
+    {
+      "name": "astral-and-emoji",
+      "prefix": "😀😀😀😀 𝒳𝒴 é 日本語\n"
+    },
+    {
+      "name": "case-fold-letters",
+      "prefix": "ſ ſſ K İ ı ß ǅ\n",
+      "suffix": "\nuſer_id=5 K\n"
+    },
+    {
+      "name": "no-break-space",
+      "nbsp": true
+    },
+    {
+      "name": "line-separators",
+      "prefix": "a b cd\u000bf\f\n"
+    },
+    {
+      "name": "long-line",
+      "suffix": "\n",
+      "suffixRepeat": {
+        "text": "a",
+        "times": 200000
+      }
+    },
+    {
+      "name": "no-final-newline",
+      "trim": true
+    }
   ]
 }

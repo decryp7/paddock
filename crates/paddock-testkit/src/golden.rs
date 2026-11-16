@@ -124,7 +124,7 @@ pub fn test_name_of<'a>(nextest: Option<&'a str>, thread: Option<&'a str>) -> Op
 }
 
 /// `text` as one `sh` word: in single quotes, a `'` inside written as `'\''`.
-pub fn sh_quote(text: &str) -> String {
+fn sh_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
@@ -173,17 +173,18 @@ pub fn confirm_command(
 }
 
 /// What a rewrite prints: the file, why it matters and [`confirm_command`] (a Mac-only rewrite that was never run as root on Linux is
-/// how a golden with the Mac's uid reaches CI). `test` is `NEXTEST_TEST_NAME` when set, else the name of the thread.
+/// how a golden with the Mac's uid reaches CI). The test is [`test_name_of`] of `NEXTEST_TEST_NAME` and the name of the thread.
 pub fn rewritten_notice(
     path: &Path,
     manifest_dir: Option<&Path>,
     package: Option<&str>,
-    test: Option<&str>,
+    nextest: Option<&str>,
+    thread: Option<&str>,
 ) -> String {
     format!(
         "golden: rewrote {}\n  Confirm it on Linux as root in the CI image before you commit it (a value of this machine fails there):\n    {}\n  or both runs at once: ./dev golden confirm [-p <package>] <test filter>",
         path.display(),
-        confirm_command(manifest_dir, package, test)
+        confirm_command(manifest_dir, package, test_name_of(nextest, thread))
     )
 }
 
@@ -213,16 +214,17 @@ pub fn check_golden(path: &Path, actual: &str, mode: GoldenMode) -> Result<Golde
         fs::write(path, actual.as_bytes()).map_err(io_err)?;
         let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from);
         let package = std::env::var("CARGO_PKG_NAME").ok();
-        // nextest names the test in NEXTEST_TEST_NAME (its last word is the test path); a libtest thread is named after the test.
         let nextest = std::env::var("NEXTEST_TEST_NAME").ok();
         let thread = std::thread::current();
-        let test = nextest
-            .as_deref()
-            .and_then(|n| n.split_whitespace().last())
-            .or_else(|| thread.name());
         eprintln!(
             "{}",
-            rewritten_notice(path, manifest_dir.as_deref(), package.as_deref(), test)
+            rewritten_notice(
+                path,
+                manifest_dir.as_deref(),
+                package.as_deref(),
+                nextest.as_deref(),
+                thread.name()
+            )
         );
         return Ok(Golden::Updated);
     }

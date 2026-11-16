@@ -2288,7 +2288,7 @@ gid numbers, `/Users`, `/home` and `C:\Users` paths and temp paths; a rewrite wi
 runs the test on Linux as root in the CI image; and `./dev golden confirm <test filter>` runs both and passes only if both pass.
 The first version also read the user, host, RAM and CPU count of the machine that ran it; review found that made its result differ
 per machine (a waiver for the account name was stale on CI, a RAM figure in KiB collided with other numbers, a non-ASCII host name
-panicked the Rust host), so it reads fixed patterns only. The first run on the tree found no real value, only invented users.
+panicked the Rust host), so it reads fixed patterns only. The first run on the tree found no real value, only invented users. The same review found the JS and Rust hosts of C131 could differ on text shape; the shared parity corpus (conformance/test/parity-corpus, run over every dual-host check through `tests/it/parity_corpus.rs`) is the mechanism that keeps them equal, and it found three more divergences (C119, C121, C124: a BOM, `\r` in a waiver, prepended lines). A lint that asks for the `u` flag was tried and dropped: `u` alone does not make the hosts agree (`\w`, `\b`, `\d`, `\s`, `trim()` and U+FEFF, `\r` and line handling differ even with it), so its fix text misled; ESLint's `require-unicode-regexp` is the standard rule if conformance ever gets ESLint.
 **Rule:** a golden holds nothing of the machine that captured it; normalise the value in the test's `norm()`, and confirm a rewritten
 golden on Linux as root before committing it; a check's result never depends on the machine that runs it. **Class: a golden captured
 on one machine fails on another (second and later sightings: the six WP-2 cases above; ER-21).**
