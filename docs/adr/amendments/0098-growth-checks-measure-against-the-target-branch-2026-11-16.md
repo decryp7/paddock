@@ -1,8 +1,7 @@
 # Amendment to ADR 0098 (2026-11-16): growth checks measure against the branch's target, not `origin/main`
 
-- Status: proposed by the implementer on `feat/testkit-stand-in`; the decision to change the meaning of blocking gates is the user's
-  (ER-37: more than the common-practice option needs the user's yes). Recorded here so the integrator and the user see it as a
-  deliberate change, not a side effect of the allow-list work.
+- Status: Accepted (user, 2026-11-16): growth for C53, C71, C104 and C115 is measured against the branch's target, and an
+  unresolvable target is a not-measured error in CI (ADR 0089). Implemented on `feat/testkit-stand-in`.
 
 ## What changes, and for which gates
 
@@ -37,6 +36,8 @@ the real tree this stays recorded as a proposal.
 
 ## Common practice
 
-Comparing a branch with its merge base on the branch it will land on is what a pull request diff does; measuring a stacked branch
-against the main line is the known way that goes wrong (the stack's earlier work shows as the top branch's). No source was looked up for
-this note; the cost is about 0.5 agent-day, done.
+A pull request is judged against its target: Danger's `git` object names the two commits it compares as `base` ("The git commit Danger
+is comparing from") and `head`, and gives file contents "at the PR merge base" as the before state
+(<https://danger.systems/js/reference.html>, read 2026-11-16). That page does not spell out how the modified-file list is computed, so
+it supports the principle (compare with the target's merge base) but is not a measurement of it. Measuring a stacked branch against the
+main line is the failure this amendment removes: the stack's earlier work shows as the top branch's. Cost: about 0.5 agent-day, done.
