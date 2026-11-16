@@ -74,7 +74,7 @@ that quotes a result links to the block instead of carrying the only copy.
   | Suite (tests) | Before | After | Mode now | Verdict |
   |---|---|---|---|---|
   | Debrief (4989, 4990 after) | 33.19 s | 32.20 s and 36.34 s (two runs) | report | no measurable change (the review timed it alternating with the base) |
-  | Dyno (1652) | 17.80 s | 16.16 s and 16.41 s | report | within 10% |
+  | Dyno (1652) | 17.80 s | 16.16 s and 16.41 s | fail (follow-up) | within 10% |
   | Pitcrew (642, 646 after) | 9.90 s | 9.34 s | fail | within 10% |
   | Pitwall (959, 962 after) | 9.01 s | 6.61 s | fail | within 10% (noise: the earlier run was loaded) |
   | Spotter (496, 500 after) | 6.20 s | 3.97 s | fail | within 10% (noise) |
@@ -86,27 +86,21 @@ that quotes a result links to the block instead of carrying the only copy.
   `[leak-detector] <test>: <kind>: <what>` on stderr): the `Duration` figures above carry them. Raw logs are in the
   agent's scratch folder only.
 
-#### Findings left, by file and line (Debrief and Dyno stay report-only until these are fixed)
+#### Findings left, by file and line (Debrief stays report-only until these are fixed)
 
-Debrief (about 1,640 findings in about 660 tests, after `retryUntilAnswered` stopped leaving its 4 s retry timer): the shell's
-idle fallback `ui/projects/paddock-ui/shell/contributions/src/context.ts:122` (`setTimeout(work, 0)` when there is no
-`requestIdleCallback`: a test that boots the shell without a `SHELL_IDLE`, 530), `app/core/activity/runtime.ts:26` (a 0 ms
-clock timer, 388), the in-flight check ("start-up loads still in flight", 190 to 340 per run) was a poisoned counter, not timing: `unsettledStartupLoads` kept counting the load that `startup.spec` leaves unsettled on purpose, so every later test was blamed; the detector now reports growth per test only (fixed in this branch), so these are gone,
-`app/jobs/mock-jobs.ts:474`
-(mock job steps still waiting, 63) with the singleton check (`mock jobs` left queued or running: 35 tests),
-`app/core/mock/mock-clock.ts:30,32,34` (the mock clock's timers and its 1.5 s interval, 120), `app/core/workspace/query.store.ts:59`
-(250 ms, 45), `app/profile/profile-draft.ts:131` (300 ms, 27), `app/analysis/query-session.ts:82` (150 ms, 19),
-`app/projects/open-requests.ts:64`, `app/popout/popout-backend.ts:420`, `app/core/activity/backend-activity.ts:111`,
-`app/settings/parsers/mock-parsers-backend.ts:30`, `app/profile/extractor-editor.ts:168`, `app/browser/mock-browser-backend.ts:170`,
-`app/settings/engine-settings.store.ts:171`, `app/dock/angular-panel.ts:202` and `app/inspector/context-section.ts:158` (the
-copy-label resets, fixed in the ui's copies with `DestroyRef`), `app/lifecycle/recovery.ts:75`, `app/workspace/live-tail.ts:62`,
-`app/onboarding/tour.service.ts:128`, `app/dialog-windows/dialog-shell.ts:202`, `app/sources/encoding/encoding-dialog.ts:92`,
-`app/settings/parsers/parsers.store.ts:93,121`; 13 nodes left in the body (`.debrief-float-cue`, `.sr-only`, a `div`).
-Dyno (about 100 findings in 55 tests): `app/core/mock-backend.ts:390` (the disk-map scan steps), `:431` and `:459` (the
-live and agent-status first pushes, 0 ms), `:437` (the live tick interval, never stopped by the specs), `:1728` (job steps),
-`app/state/counters.store.ts:111` (2 s poll), `app/state/processes.store.ts:59`, `app/state/live.store.ts:101`; 5 tests leave
-a `<main>` in the body. A `dispose()` on `MockBackend` that clears its timers, called from the specs' `afterEach`, covers most
-of Dyno's list.
+Debrief (about 310 findings in about 230 tests after the follow-up fixes; was about 1,640): the mock clock `app/core/mock/mock-clock.ts:30,32,34`
+(its timers and 1.5 s interval, 114), `app/core/workspace/query.store.ts:59` (250 ms, 43), the singleton check (`mock jobs`
+left queued or running: 35 tests), `app/profile/profile-draft.ts:131` (300 ms, 26), `app/analysis/query-session.ts:82`
+(150 ms, 18), 13 nodes left in the body (`.debrief-float-cue`, `.sr-only`, a `div`), `app/core/startup/startup-contract.ts:42`
+and `app/projects/open-requests.ts:64` (10 each), `app/popout/popout-backend.ts:420` (7), then single sites:
+`app/profile/extractor-editor.ts:168`, `app/settings/parsers/mock-parsers-backend.ts:30`, `app/browser/mock-browser-backend.ts:170`,
+`app/settings/engine-settings.store.ts:171`, `app/dock/angular-panel.ts:202` and `app/inspector/context-section.ts:158`
+(copy-label resets, as the ui's). Fixed by the follow-up: the shell idle fallback (`context.ts`, now cancelled with its
+injector), the activity runtime's end-of-task timer (`endTaskNow` after every test), the mock job steps (`mock-jobs.ts`) and the
+in-flight check (growth per test).
+Dyno: zero findings after `MockBackend.dispose()` (disposed after every test by the setup), the counters store (it
+armed a second poll timer and one after destroy) and `scroll-to-section.spec.ts` (left a `<main>` in the body); Dyno runs in
+failing mode.
 
 ### 2026-11-08, `./dev gates check` (feat/gates-c100)
 

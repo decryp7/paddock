@@ -2360,7 +2360,7 @@ its own test; a new page-wide singleton is registered with `registerSingleton`; 
 dashboard and editor, Pitcrew's and Pitwall's service store, Pitwall's settings and presets), a wait in Pitcrew's
 `TauriBackend.init` and its mock, and the Debrief and Dyno findings listed in `docs/benchmarks.md`; the stores now clear their
 timers with `DestroyRef`, each with a test that was red first. The ui, Pitcrew, Pitwall and Spotter switched to `fail` with zero
-findings; Dyno and Debrief stay report-only until their lists are fixed. **Class: a test fails for what an earlier test left in
+findings; Debrief stays report-only until its list is fixed; Dyno joined the failing suites after its `MockBackend.dispose()` and two store fixes. **Class: a test fails for what an earlier test left in
 a shared page (earlier: runs 7257/7274/7276 fake-timer spy, run 8170 teardown chunk, the mock-jobs singleton, the leftover DOM).**
 
 ## Debrief: the live tail "holds the rows while not following" read 120052 for 120028 once in four runs (tests, 2026-11-16, open)
