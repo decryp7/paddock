@@ -243,6 +243,14 @@ changes here, every app's copy is updated in the same change.
     rows; it is not fixed on the train. The gate is report-only (printed, exit unchanged) until its first green run on a real
     train is recorded in ADR 0098, and sends members back from then on. For a failed train run, `./dev ci triage <run> --members
     <train-base>` names the members whose change reaches each new failure (the queue's own rule). Tests stay once per train.
+    The train's sequence (user, 2026-11-16): (1) each member's one short review runs at the same time as the train's CI, not
+    before the merge; a P1 cancels the train's run and pulls the member, so a review never delays a green train. (2) The next
+    train is assembled during the current train's CI: its integrator merges members on top of the running train's head, runs
+    all local gates, and re-merges the running train's final head when it lands, so the next CI starts at once. (3) The
+    train dispatches an app's release gate only when the plan marks it (rule 54 (a2)), and with `gates=false` once the counting
+    full `ci.yml` run is green on that exact commit (rule 54 (a3)). *Why:* release gates cost about 77 minutes of the Mac runner
+    on train 12 (runs 8164, 8165, 8167, 8169); the review before the merge and the serial assembly after the green run were
+    waits with nothing running (their minutes are not yet measured; the landing report records them from the next train).
     The gate that decides on a branch runs on the same kind of machine as CI (the real runners, as merge queues and merge trains
     do); a run on another architecture, under emulation or as another user counts only as not measured, or as a finding only when
     compared with the base's own result on that machine (ER-9; 2026-11-16: the Windows-on-Arm VM and an amd64 container failed 22
@@ -318,6 +326,14 @@ changes here, every app's copy is updated in the same change.
     records the plan output in the landing report. The counting full `ci.yml` run always runs. This is also how rule 50's train
     sequence reads. *Why:* each unaffected release gate cost up to 34 minutes of the single Mac runner per train (train 12:
     runs 8164, 8165, 8167, 8169, about 77 minutes in total).
+    (a3) When the counting full `ci.yml` run is green on the exact commit, the affected release gates run with `gates=false`:
+    they build and check the installers, which is what rule 54 needs, and do not rerun the tests `ci.yml` just ran on that sha.
+    If `ci.yml` is not yet green on that sha, `gates=true`. Checked 2026-11-16 in the workflows: in `dyno-`, `pitwall-`,
+    `pitcrew-` and `spotter-release.yml` the `installers` job does not need the `gates` job, and calls `app-release.yml`
+    with the same inputs either way, so the bundle check, the Windows bundle and installer checks and the macOS verify
+    (sidecars started with `--version`) run with `gates=false`. The version and notes checks of `app-release.yml` run only on a
+    tag, so a dispatch never ran them with `gates` on or off. `shell-demo-release.yml` and `workbench-demo-release.yml` have no
+    `gates` input (their `gates` job always runs and `bundle` needs it), so (a3) does not apply to them.
     (b) Partly enforced: the ci-actions test (added on fix/dyno-bundle-ui) checks that every release workflow whose app
     imports `@decryp7/paddock-ui` builds the UI.
     (c) Amendment of 2026-11-09 (ADR 0080 D13, accepted by the user): the release workflow dispatched for this rule
