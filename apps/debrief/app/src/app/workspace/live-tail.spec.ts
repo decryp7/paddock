@@ -7,12 +7,11 @@ import { WorkspaceStore } from '../core/workspace.store';
 import { DEFAULT_LIVE_OPTIONS, LiveTail } from './live-tail';
 import { at } from '../../testing/must';
 import { ManualClock } from '../../testing/manual-clock';
-import { holdableTimers, withLiveHeld } from '@decryp7/paddock-ui/testing';
 
 describe('LiveTail', () => {
-  /** The feed runs on a clock the test moves and can hold, not on the page's timers (a tick lands when the test says). */
+  /** The feed runs on a clock the test moves, not on the page's timers (a tick lands when the test says). */
   const LIVE_MS = 15;
-  const liveClock = () => holdableTimers(new ManualClock());
+  const liveClock = () => new ManualClock();
   const tickingBackend = (clock: ManualClock) => new MockBackend({ latency: false, dataset: tinyDataset, liveMs: LIVE_MS, clock });
   /** Moves the feed's clock one tick at a time until `done()` (a bounded number of ticks). */
   async function tickUntil(clock: ManualClock, done: () => boolean) {
@@ -56,13 +55,11 @@ describe('LiveTail', () => {
     expect(live.isLiveRefresh()).toBe(false);
     await live.set(true);
     await tickUntil(clock, () => store.summary()!.total > 11);
-    // Held while read: no further tick changes the summary or the refresh mark between the checks.
-    await withLiveHeld(async () => {
-      expect(store.dataVersion()).toBeGreaterThan(version);
-      expect(store.selected()).toBe(row);
-      expect(store.query().levels).toEqual(['Information']);
-      expect(live.isLiveRefresh()).toBe(true);
-    });
+    // The clock only moves when the test advances it: nothing ticks between the checks.
+    expect(store.dataVersion()).toBeGreaterThan(version);
+    expect(store.selected()).toBe(row);
+    expect(store.query().levels).toEqual(['Information']);
+    expect(live.isLiveRefresh()).toBe(true);
     await live.set(false);
     store.applySummary(store.summary()!);
     expect(live.isLiveRefresh()).toBe(false);

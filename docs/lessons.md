@@ -2400,3 +2400,20 @@ WebKit clamp such a write, and the scroll event that follows reports the clamped
 (`setTop(..., afterRender)`, `afterNextRender`), the position signal is still set at once. Playwright e2e `live tail: reveal newest ends on the
 newest row when events are pushed between the reveal pages` (new mock switch `mockPageStaggerMs` answers pages at different times, pinned
 clock moves them and the 50 ms ticks): red in both engines without the deferred write, green 3 of 3 in Chromium and in WebKit with it.
+
+2026-11-17, Debrief `helpers.spec.ts` leak (open fix item, ER-28 cause list). The leak detector (report mode) now and then names a live
+`setTimeout(0)` from `settle()` (`apps/debrief/app/src/testing/helpers.ts:191`) after a `settleUntil` test in `helpers.spec.ts`. Not yet
+reproduced, so no cause is confirmed. Plausible causes, each with the observation that rules it out: (1) a `settleUntil` that timed out
+leaves its `vi.waitFor` callback running a `settle()` that has already started its `setTimeout(0)`; ruled out when the leak shows in a test
+whose `settleUntil` succeeded; (2) the test ends between `await Promise.resolve()` and the timer, and `assertSameTest` only throws after the
+timer fires; ruled out when the stack of the leaked timer is created before the test's end (detector stack names the call); (3) a spec in the
+same file that fakes timers (`vi.useFakeTimers`) and leaves a fake `setTimeout` that `settle()` then arms; ruled out when no test in
+`helpers.spec.ts` installs fake timers before the leaking one; (4) the detector's own `wrapTimers` counts a timer armed by the previous test's
+`afterEach`. Next step: run `helpers.spec.ts` alone 50 times in a loop with the leak detector in `fail` mode and keep the stack the detector prints;
+fix through `assertSameTest` before the timer is armed. Fix with the failing run first (ER-11); no sleep or raised timeout (ER-12).
+
+2026-11-17, unit tests of live mock feeds. Only the Debrief events-grid live tail (run 8191) was a unit test asserting a value while a
+feed kept changing it; the Dyno row menu under live updates was an e2e case (the e2e kit has `pauseLive` and `withLivePaused`). Common
+practice for a feed on timers is a clock the test moves (`ManualClock` for the Debrief mock backends, `clock` option) or Vitest's fake
+timers, never the page's real timers; a hold on top of a manual clock added nothing, so no helper was built. C136 (report-only) flags a
+unit spec block that starts a ticking `MockBackend` or `synthetic` feed without one.

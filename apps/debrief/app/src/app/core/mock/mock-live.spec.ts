@@ -7,7 +7,6 @@ import { mockDurationMs, validateLiveSection } from './mock-live-profile';
 import { at } from '../../../testing/must';
 import { mockJobs } from '../../jobs/mock-jobs';
 import { ManualClock } from '../../../testing/manual-clock';
-import { holdableTimers } from '@decryp7/paddock-ui/testing';
 
 describe('mock live tail helpers', () => {
   it('derives log families like the engine', () => {
@@ -125,8 +124,8 @@ describe('MockLiveSim', () => {
 });
 
 describe('MockBackend live tail', () => {
-  /** The feed runs on a clock the test moves (and can hold), not on the page's timers. */
-  const liveClock = () => holdableTimers(new ManualClock());
+  /** The feed runs on a clock the test moves, not on the page's timers. */
+  const liveClock = () => new ManualClock();
   /** Moves the clock one `ms` step at a time until `done()` (a bounded number of steps). */
   async function tickUntil(clock: ManualClock, ms: number, done: () => boolean) {
     for (let i = 0; i < 200 && !done(); i++) await clock.advance(ms);
