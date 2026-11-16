@@ -196,7 +196,7 @@ test('table: loading and empty say no count, and the columns do not move when ro
   await expect(page.locator('[data-testid="box-loading"] [data-testid="table-count"]')).toHaveCount(0);
   await expect(page.locator('[data-testid="box-empty"] [data-testid="table-count"]')).toHaveCount(0);
   // A box renders its grid and settles its column widths over a few frames (the first read of box-selected was 353 px, then 363): read
-  // header and grid in one step, and take the value once two reads a frame apart agree.
+  // header and grid in one step, and take the value once two polls in a row agree.
   const left = async (id: string) => {
     const read = () =>
       page.locator(`[data-testid="${id}"]`).evaluate((box) => {
@@ -204,13 +204,14 @@ test('table: loading and empty say no count, and the columns do not move when ro
         const header = [...box.querySelectorAll('[role=columnheader]')].find((h) => h.textContent?.includes('Size (KiB)'));
         return grid && header ? Math.round(header.getBoundingClientRect().left - grid.getBoundingClientRect().left) : null;
       });
-    const frame = () => page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+    // Two polls in a row agree: no frame is counted, the claim is the position, not a number of turns.
+    let previous: number | null = null;
     let settled: number | null = null;
     await expect
       .poll(async () => {
-        const first = await read();
-        await frame();
-        settled = (await read()) === first ? first : null;
+        const now = await read();
+        settled = now !== null && now === previous ? now : null;
+        previous = now;
         return settled;
       }, { message: `${id}: the Size (KiB) header inside its grid, settled` })
       .not.toBeNull();
