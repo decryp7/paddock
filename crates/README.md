@@ -1902,8 +1902,8 @@ scratch.finish()?;                                  // or just drop it: anything
   runner trait for it in its test module (Dyno's `Runner`).
 - `StandIn`: one stand-in program for any program a test plants (`cargo`, `git`, `npm`, `smartctl`, `df`), the same on every OS, instead of a
   `#!/bin/sh` fixture (C130 lists the old ones). `StandIn::new(dir, "cargo").stdout("added 3 packages").exit(0).records_args().install()?`
-  hard-links the kit's std-only `paddock-stand-in` binary (compiled once per build folder with `rustc`; `PADDOCK_STAND_IN_BIN` names a
-  prebuilt one, for the Windows test VM) under the program's name, writes `<name>.stand-in.json` beside it and returns an `Installed`:
+  hard-links the kit's std-only `paddock-stand-in` binary (compiled once per build folder with `rustc`, the one beside `$CARGO`; `PADDOCK_STAND_IN_BIN` names a
+  prebuilt one built from the same sources, which the kit checks: the Windows test VM has no compiler, `docs/testing/windows-test-vm.md`) under the program's name, writes `<name>.stand-in.json` beside it and returns an `Installed`:
   `program()`, `dir()`, `calls()` / `invocations()` (arguments with spaces and non-ASCII as given, chosen env vars, stdin). Actions:
   `stdout`, `stderr`, `writes`, `appends`, `sleeps` (at most two minutes), `spawns(&Spawn::new("child").pid_file(..))`, `echoes_stdin`,
   `exit`; `when_args(&["--scan"], Actions::new()...)` and `when_arg_contains("usb-", ..)` answer a call differently (later rules win);
