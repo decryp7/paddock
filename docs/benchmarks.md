@@ -1683,3 +1683,17 @@ Windows CI runner (ci.yml run 8152, job 39497: merge_check median 5.8 to 44 s, g
   staging folder (logged), which is correct. Per command after the first: median 1.2 to 2.5 ms.
 - **Not measured:** the CI runner itself (the integrator's rerun of the failed jobs is the check), a release build, a cold
   Defender cache.
+
+## `rustc --print sysroot` through rustup's proxy (2026-11-16, fix/testkit-ambient-hardening, ADR 0100)
+
+Question: how long the test kit's one-per-process `rustc --print sysroot` (finding the toolchain's cargo when `CARGO` is unset)
+takes, so its hang guard `SYSROOT_LIMIT` rests on a measurement (ER-12).
+
+- **Machine:** the Mac mini (arm64), 1-minute load 23.8 to 26.5 with other agents' builds running; rustup 1.29.3, rustc
+  1.100.0 (the repository's pinned toolchain, installed).
+- **Command:** `env RUSTUP_AUTO_INSTALL=0 rustc --print sysroot` from `crates/` (the proxy reads `rust-toolchain.toml`), timed
+  with `/usr/bin/time -p`, 10 runs.
+- **Numbers:** 0.04 to 0.06 s wall (median 0.05 s).
+- **Bound chosen:** `SYSROOT_LIMIT` is 30 s, a hang guard about 500 times the measured time: it ends only a proxy that hangs
+  (a toolchain install that `RUSTUP_AUTO_INSTALL=0` should prevent), never a slow answer on a loaded machine. Not measured:
+  Windows, a cold disk cache.

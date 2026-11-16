@@ -57,7 +57,14 @@ fn a_child_sees_only_listed_names_whatever_the_machine_has() {
     ] {
         env.set(k, "machine");
     }
-    let seen = child_env(&mut env_program());
+    // What the kit itself reads is the captured Ambient: one that holds the machine's own HOME and RUSTC_WRAPPER (a build
+    // variable, passed only to `cargo_build`) gives the child neither.
+    let mut m = paddock_testkit::ambient().clone();
+    m.home = Some("/machine/home".into());
+    m.vars.retain(|(k, _)| k != "RUSTC_WRAPPER");
+    m.vars.push(("RUSTC_WRAPPER".into(), "machine".into()));
+    let program = if cfg!(windows) { "cmd" } else { "env" };
+    let seen = child_env(&mut TestCommand::on(program, &m));
     let allowed = allowed_names();
     // A shell that `env` or `cmd` starts may add its own (`PWD`, `_`, `SHLVL`, `PROMPT`...): not a lookup of the machine.
     let strays: Vec<&String> = seen
@@ -75,14 +82,21 @@ fn a_child_sees_only_listed_names_whatever_the_machine_has() {
         seen.contains_key("PATH") && seen.contains_key("HOME") || cfg!(windows),
         "{seen:?}"
     );
+    assert!(!seen.contains_key("RUSTC_WRAPPER"), "{seen:?}");
+    assert!(
+        seen.get("HOME").is_none_or(|h| h != "/machine/home"),
+        "{seen:?}"
+    );
 }
 
 #[test]
 fn home_and_temp_are_the_commands_private_folders_never_the_machines() {
     let mut env = env_lock();
-    env.set("HOME", "/machine/home");
     env.set("XDG_CACHE_HOME", "/machine/cache");
-    let mut c = env_program();
+    // The machine's home as the kit captured it: the child never gets it.
+    let mut m = paddock_testkit::ambient().clone();
+    m.home = Some("/machine/home".into());
+    let mut c = TestCommand::on(if cfg!(windows) { "cmd" } else { "env" }, &m);
     let (private, home) = (c.private_dir().to_path_buf(), c.home());
     let seen = child_env(&mut c);
     let under = |k: &str| std::path::Path::new(&seen[k]).starts_with(&private);

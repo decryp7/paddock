@@ -69,6 +69,10 @@ fn main() {
         let mut dirs = vec![dir.clone()];
         dirs.extend(std::env::split_paths(&path));
         // SAFETY: set before any other thread starts; this program has one thread until here.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "a measuring program with one thread here, not a test: it sets up the machine it measures"
+        )]
         unsafe {
             std::env::set_var("PATH", std::env::join_paths(dirs).unwrap());
             std::env::set_var("CARGO", dir.join(exe("cargo")));

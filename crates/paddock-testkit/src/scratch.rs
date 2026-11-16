@@ -25,7 +25,13 @@ impl fmt::Display for ScratchError {
                 f,
                 "{p:?} is not a plain relative path inside the scratch folder"
             ),
-            ScratchError::Io(e) => write!(f, "scratch folder: {e}"),
+            // The temp folder the kit makes scratch folders in, so a failure says where it looked (ER-27; the hermetic flake
+            // said only "No such file or directory").
+            ScratchError::Io(e) => write!(
+                f,
+                "scratch folder (in the temp folder {}): {e}",
+                crate::ambient::ambient().temp_dir.display()
+            ),
         }
     }
 }

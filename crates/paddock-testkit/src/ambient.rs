@@ -87,7 +87,12 @@ fn capture_now() -> Ambient {
 /// The cargo of the toolchain the `rustc` on `path` belongs to (`rustc --print sysroot` plus `bin/cargo`), asked once, with
 /// rustup told not to install anything. `None` when there is no `rustc` or it does not answer within the limit.
 fn cargo_of_toolchain(path: Option<&OsStr>) -> Option<PathBuf> {
-    let rustc = PathBuf::from(crate::process::resolve(OsStr::new("rustc"), path));
+    // Read live, during the capture: the one place the kit reads the environment.
+    let rustc = PathBuf::from(crate::process::resolve(
+        OsStr::new("rustc"),
+        path,
+        std::env::var_os("PATHEXT").as_deref(),
+    ));
     if !rustc.is_absolute() {
         return None;
     }
@@ -106,7 +111,8 @@ fn cargo_of_toolchain(path: Option<&OsStr>) -> Option<PathBuf> {
 }
 
 /// How long `rustc --print sysroot` may take: a hang guard, not a budget (the toolchain is installed; rustup is told not to
-/// install one).
+/// install one). Measured 0.04 to 0.06 s on the Mac mini at load 24 to 26 (docs/benchmarks.md, "`rustc --print sysroot`
+/// through rustup's proxy").
 const SYSROOT_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// `<target>/paddock-test-toolchain` of the cargo target folder this program runs from: its profile folder's parent, and only
@@ -174,7 +180,8 @@ mod tests {
             assert!(
                 !PathBuf::from(crate::process::resolve(
                     OsStr::new("rustc"),
-                    path.as_deref()
+                    path.as_deref(),
+                    std::env::var_os("PATHEXT").as_deref(),
                 ))
                 .is_absolute()
             );
@@ -184,6 +191,7 @@ mod tests {
         let rustc = PathBuf::from(crate::process::resolve(
             OsStr::new("rustc"),
             path.as_deref(),
+            std::env::var_os("PATHEXT").as_deref(),
         ));
         let proxy_dir = rustc.parent().unwrap();
         // Under rustup `rustc` on PATH is a proxy in `$CARGO_HOME/bin`; the toolchain's cargo is elsewhere.
