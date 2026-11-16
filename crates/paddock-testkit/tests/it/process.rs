@@ -660,3 +660,38 @@ fn a_toolchain_program_found_in_another_spelling_is_linked_and_started_under_its
         program.display()
     );
 }
+
+/// `path_report()` names the program each toolchain link stands for, as recorded when the link was made (on Windows a hard link
+/// or a copy does not name it).
+#[test]
+fn the_path_report_names_each_links_program() {
+    use paddock_env::Os;
+    let d = tempfile::tempdir().unwrap();
+    let tc = d.path().join("toolchain");
+    std::fs::create_dir(&tc).unwrap();
+    let rustc = tc.join(if cfg!(windows) { "rustc.exe" } else { "rustc" });
+    std::fs::write(&rustc, "").unwrap();
+    let mut env = env_lock();
+    env.set("PATH", &tc);
+    let cmd = TestCommand::new("git");
+    let report = cmd.path_report();
+    let own = format!("rustc{}", std::env::consts::EXE_SUFFIX);
+    let (link, target) = report
+        .targets
+        .iter()
+        .find(|(l, _)| l.file_name().is_some_and(|n| n == own.as_str()))
+        .unwrap_or_else(|| panic!("no recorded rustc link: {report}"));
+    assert!(report.toolchain.contains(link), "{report}");
+    assert!(
+        paddock_env::winpath::same(target, &rustc, Os::current()),
+        "{} is not {}: {report}",
+        target.display(),
+        rustc.display()
+    );
+    assert!(
+        report
+            .to_string()
+            .contains(&format!("{} -> {}", link.display(), target.display())),
+        "{report}"
+    );
+}

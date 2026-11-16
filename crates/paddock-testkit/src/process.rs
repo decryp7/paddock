@@ -574,8 +574,11 @@ pub struct PathReport {
     pub found: Vec<(&'static str, Option<PathBuf>)>,
     /// Git for Windows' install folder, when one was found (always `None` elsewhere).
     pub git_root: Option<PathBuf>,
-    /// The toolchain links in the command's private folder.
+    /// The toolchain links of the folder the command was built with.
     pub toolchain: Vec<PathBuf>,
+    /// Each link and the program it stands for, as recorded when the link was made (a hard link or a copy on Windows does not
+    /// name its program; the record does).
+    pub targets: Vec<(PathBuf, PathBuf)>,
 }
 
 impl std::fmt::Display for PathReport {
@@ -603,7 +606,11 @@ impl std::fmt::Display for PathReport {
                 .as_ref()
                 .map_or_else(|| "none".to_string(), |p| p.display().to_string())
         )?;
-        write!(f, "toolchain links: {}", list(&self.toolchain))
+        write!(f, "toolchain links: {}", list(&self.toolchain))?;
+        for (link, target) in &self.targets {
+            write!(f, "\n  {} -> {}", link.display(), target.display())?;
+        }
+        Ok(())
     }
 }
 
@@ -628,7 +635,27 @@ impl TestCommand {
             .links
             .as_deref()
             .and_then(|d| std::fs::read_dir(d).ok())
-            .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).collect())
+            .map(|d| {
+                d.filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| p.file_name() != Some(OsStr::new(LINKS)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        // The record the folder was made with: `<link name>\t<program>` per line.
+        let targets = self
+            .links
+            .as_deref()
+            .and_then(|d| {
+                std::fs::read_to_string(d.join(LINKS))
+                    .ok()
+                    .map(|t| (d.to_path_buf(), t))
+            })
+            .map(|(d, t)| {
+                t.lines()
+                    .filter_map(|l| l.split_once('\t'))
+                    .map(|(name, target)| (d.join(name), PathBuf::from(target)))
+                    .collect()
+            })
             .unwrap_or_default();
         PathReport {
             child,
@@ -642,9 +669,14 @@ impl TestCommand {
                 .collect(),
             git_root: self.git_root.clone(),
             toolchain,
+            targets,
         }
     }
 }
+
+/// The file in a link folder that records each link and its program, `<link name>\t<program>` per line, written when the links
+/// are made; [`TestCommand::path_report`] reads it.
+const LINKS: &str = "links.txt";
 
 /// The bare program names a [`TestCommand`] starts through its toolchain link, never through the machine's `PATH`.
 const TOOLCHAIN_STARTED: &[&str] = &["cargo", "rustc", "rustup"];
@@ -736,6 +768,8 @@ fn link_folder(ambient: Option<&OsStr>, root: &Path) -> Option<PathBuf> {
         return None;
     }
     let mut h = std::hash::DefaultHasher::new();
+    // The folder's format: a folder made before its record ([`LINKS`]) was written is not reused.
+    "links-v2".hash(&mut h);
     for src in &sources {
         src.hash(&mut h);
         if let Ok(m) = std::fs::metadata(src) {
@@ -773,6 +807,12 @@ fn link_folder(ambient: Option<&OsStr>, root: &Path) -> Option<PathBuf> {
             let _ = std::fs::copy(src, &link);
         }
     }
+    let record: String = names
+        .iter()
+        .zip(&sources)
+        .map(|(n, src)| format!("{n}\t{}\n", src.display()))
+        .collect();
+    let _ = std::fs::write(staging.join(LINKS), record);
     match rename_retrying(&staging, &dir) {
         Ok(()) => Some(dir),
         // Another process made it first: use that one.
@@ -934,8 +974,9 @@ fn exec_path(git: &Path, limit: std::time::Duration) -> Option<PathBuf> {
 #[cfg_attr(not(windows), allow(dead_code))]
 const EXEC_PATH_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// The pure part of [`git_root`]: three folders above git's exec path, else the nearest folder above `git` (at most three up)
-/// that holds `cmd/git.exe` or `bin/git.exe`; only a folder with a `usr/bin` is Git's.
+/// The pure part of [`git_root`]: the folder three levels above git's exec path (`<root>/mingw64/libexec/git-core` gives
+/// `<root>`), else the first of the three folders above `git` (its own folder, that one's parent, and the next) that holds
+/// `cmd/git.exe` or `bin/git.exe`; either way only a folder with a `usr/bin` is Git's.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn git_root_from(exec_path: Option<&Path>, git: &Path) -> Option<PathBuf> {
     let is_git = |r: &Path| r.join("usr").join("bin").is_dir();

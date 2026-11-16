@@ -175,8 +175,8 @@ named list) is about 0.4 agent-day but does not stop the next lookup; it is not 
 - **Follow-up (review of `0916c8060` and of `df9af3cda`):** done on this branch after ci.yml runs 8152 and 8154 (the user asked
   for the whole fix in one round): one link folder per toolchain in the target folder, the logged Windows copy fallback and
   rename retry, the time limit on `git --exec-path` with its test, `path_report()` from what the command was built with, links
-  named for their program. Still open: `path_report()` showing each link's target, and the doc of `git_root_from`, which says
-  "three folders above the exec path" where the code takes the third ancestor.
+  named for their program, `path_report()` naming each link's program (recorded in the folder's `links.txt` when the links
+  are made), and the doc of `git_root_from` worded as the code reads. Nothing is open.
 - **D4 (decided): git is not in C123.** `git` reads `HOME` and the git config, which `TestCommand` redirects when it is
   used; plain `Command::new("git")` fixtures (about 60) keep working. If a git-config incident appears, add it to the check.
 - **D5 (decided, review of f39597fbb P1-3): every `CARGO_BIN_EXE_*` binary a test starts itself.** The check judges a constructor
