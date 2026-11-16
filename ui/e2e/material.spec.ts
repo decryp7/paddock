@@ -442,6 +442,8 @@ test('Material controls: tab nav bar links size to their label, so eight tabs fi
 // geometry is read from the rendered boxes (the label's box is after Material's scale), not from the stylesheet. Review shots
 // (MATERIAL_SHOTS) are taken at 2x.
 test.describe('outlined field geometry', () => {
+  // Measures frames, virtual rows and notch geometry on the browser's own timers; the fake clock's requestAnimationFrame makes them read wrong (red with the pin, green without).
+  test.use({ pinnedClock: false });
   test.use({ deviceScaleFactor: SHOTS ? 2 : 1 });
   for (const theme of THEMES) {
     for (const density of ['standard', 'compact'] as const) {

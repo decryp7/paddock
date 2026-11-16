@@ -2,6 +2,9 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { CAPTURE_TIMEOUT, openApp } from './app';
 
+// The error snapshot (html-to-image) and the unhandled-error timer wait on real timers; under the pinned fake clock the toast never appears (red with the pin, green on the base).
+test.use({ pinnedClock: false });
+
 // Report a problem (mock backend): an error raises the toast, "Report a problem…" opens the dialog that lists
 // what the zip will contain and the steps to reproduce, and Save writes it (the mock records the save).
 

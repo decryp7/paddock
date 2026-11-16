@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-e2e`: `pinnedClockTest`, one fixed page clock for every spec
+- New `pinnedClockTest(base, { now, timezoneId, locale })` (with `pinnedInstant`, `PINNED_NOW`, `PINNED_ZONE`, `PINNED_LOCALE`, `PINNED_NOW_ENV`): `base` with the page clock installed at one fixed instant, zone and locale before the first navigation, so a mock's relative stamps and the app's day grouping agree at every wall-clock time (Spotter's first-load spec failed just after midnight, CI run 8154). `PADDOCK_E2E_NOW` moves the pin; `test.use({ pinnedClock: false })` opts a file out.
+- Debrief, Dyno, Pitcrew, Pitwall, Spotter and the ui gallery and demos wrap their `test` once in `e2e/test.ts` and their specs import `test` and `expect` from there. Bare `page.clock.install()` calls are gone (the clock is already installed).
+
 ### `paddock-testkit`: `TestCommand`, check C123
 - New `paddock_testkit::TestCommand`: a `Command` that starts from an empty environment plus an allow-list (`process::allowed_names()`), with a private `HOME` and temp folder, a curated `PATH` and `path_first`, `cargo_target_dir` and `into_parts`. Every test that starts `./dev`, `cargo` or `node` uses it (ADR 0100); check C123 (report-only) flags any other way.
 - `paddock-dev`: a named `ENGINEERING_RULES` is the only place the sibling `heavy.sh` lookup reads.

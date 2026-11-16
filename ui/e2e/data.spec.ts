@@ -1,6 +1,9 @@
 import { expect, test } from './test';
 import { axeViolations, type Page } from '@decryp7/paddock-e2e';
 
+// Measures frames, virtual rows and notch geometry on the browser's own timers; the fake clock's requestAnimationFrame makes them read wrong (red with the pin, green without).
+test.use({ pinnedClock: false });
+
 // The data parts of paddock-ui (plan X21) in the gallery: the table's sorting, filter, keyboard, menus and virtual rows, the
 // chart wrapper over a real ECharts, and the forms helpers, in both themes, with axe and without horizontal scroll at 320 px.
 

@@ -3,6 +3,9 @@ import type { ConsoleMessage, Page } from '@playwright/test';
 import { APP_LOAD_TIMEOUT } from './app';
 import { chooseMenu } from './menu-support';
 
+// The error snapshot (html-to-image) and the unhandled-error timer wait on real timers; under the pinned fake clock the toast never appears (red with the pin, green on the base).
+test.use({ pinnedClock: false });
+
 // Error capture: every failure is logged once, with the operation that caused it. The browser build logs to the
 // console (the mock log sink); `?debriefFault=view:*` (core/activity/fault-injection.ts) makes every view throw.
 

@@ -27,6 +27,34 @@ port from the environment, and the web server. `CHROMIUM_TEST_PATH` names a pinn
 `npx playwright merge-reports --reporter list,html blob-report` in the merge job. Anything else goes in `extend`
 (`use`, extra `projects`, `webServer`, ...); `reporters` adds the retried reporter after `list`.
 
+## A fixed page clock for every spec: `pinnedClockTest`
+
+A mock backend stamps its items relative to the page clock and the app groups them by local calendar day, so a run just after
+midnight had no "Today" (CI run 8154). `pinnedClockTest(base, options)` returns `base` with the page clock installed before the
+first navigation of every context, at one fixed instant (default 2026-11-16 12:00 UTC), in one zone (`UTC`) and locale
+(`en-US`). The clock ticks on from there, so timers and animation frames keep working. Wrap once per app and export the result
+as the app's `test`; specs import `test` and `expect` from that file, never from `@playwright/test`.
+
+```ts
+// e2e/test.ts
+import { expect, test as base } from '@playwright/test'; // or the kit's `test` from '@decryp7/paddock-e2e'
+import { pinnedClockTest } from '@decryp7/paddock-e2e';
+
+export const test = pinnedClockTest(base, { now: '2026-11-16T12:00:00Z', timezoneId: 'UTC', locale: 'en-US' });
+export { expect };
+```
+
+- Options are all optional: `now` (a `Date`, epoch milliseconds or ISO string), `timezoneId`, `locale`. The constants
+  `PINNED_NOW`, `PINNED_ZONE` and `PINNED_LOCALE` hold the defaults.
+- `PADDOCK_E2E_NOW=<ISO instant>` moves the pin for a whole run (for example `2026-11-16T00:19:00Z` to see which specs depend on the
+  time of day). An unreadable value throws, naming the variable. `pinnedInstant(options)` reads the pin the same way.
+- A spec that needs the real time says so: `test.use({ pinnedClock: false })` in the file or a `describe`, with a one-line reason
+  next to it. The zone and locale defaults stay then.
+- A spec that installs its own clock still can: a second `page.clock.install({ time })` or `setFixedTime` wins over the pin
+  (Playwright 1.64.1, measured on Chromium and WebKit). Drop a bare `page.clock.install()` instead, because it restarts the
+  clock at the real time; the pinned clock is already installed and `runFor` works on it.
+- It covers contexts the fixtures create (`page`, `context`). A context made with `browser.newContext()` is not pinned.
+
 ```ts
 // e2e/screenshots.spec.ts: the documentation screenshots, run with `SCREENSHOTS=1 npx playwright test --project=screenshots`
 import { captureDocScreens } from '@decryp7/paddock-e2e';

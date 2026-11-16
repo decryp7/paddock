@@ -3,6 +3,9 @@ import type { Page } from '@playwright/test';
 import { CAPTURE_TIMEOUT, openApp, openView } from './app';
 import { openAppWith } from './mock-url';
 
+// The error snapshot (html-to-image) and the unhandled-error timer wait on real timers; under the pinned fake clock the toast never appears (red with the pin, green on the base).
+test.use({ pinnedClock: false });
+
 // Error snapshots: the window is rendered to an image inside the webview (html-to-image), so this runs
 // against the real capture code in every project. The production build is served with the Tauri CSP,
 // which proves the capture needs no blob:, remote or inline-script permission.
