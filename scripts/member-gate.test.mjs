@@ -1,5 +1,6 @@
-// Tests of the other-os member gate scripts (docs/adr/amendments/0087-member-gate-other-os-2026-11-16.md): what can be checked
-// without Docker or the VM. The runs themselves are shown in the amendment's measurements.
+// Tests of scripts/member-gate-windows.sh, the MANUAL Windows test-VM runner (docs/adr/amendments/0087-member-gate-other-os-2026-11-16.md).
+// The member gate itself runs on the real CI runners (tools/paddock-dev/src/merge_check/other_os.rs); this script stays for
+// running one package natively on the test VM by hand. These tests need no Docker and no VM.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -10,29 +11,14 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (f) => readFileSync(join(here, f), 'utf8');
 
-for (const f of ['member-gate-linux.sh', 'member-gate-linux-inner.sh', 'member-gate-windows.sh']) {
-  test(`${f} parses`, () => {
-    assert.equal(spawnSync('bash', ['-n', join(here, f)]).status, 0);
-  });
-}
-
-test('the Linux run builds and tests in its own writable fresh clone, never in the read-only /work mount', () => {
-  // A test that writes into the repository's .git (wrapper::the_cached_tool_holds_itself..., which takes a waiter lock there) fails
-  // with "Read-only file system" on linux-container.sh's read-only mounts, 5 of 5; CI has a writable clone. The inner script must
-  // run every spec in the clone it made and never `cd /work`.
-  const s = read('member-gate-linux-inner.sh');
-  assert.match(s, /git init -q "\$src"/);
-  assert.match(s, /fetch -q --depth 1 file:\/\/\/work/);
-  assert.match(s, /cd "\$src\/\$a" && cargo nextest run/);
-  assert.doesNotMatch(s, /cd \/work/);
+test('member-gate-windows.sh parses', () => {
+  assert.equal(spawnSync('bash', ['-n', join(here, 'member-gate-windows.sh')]).status, 0);
 });
 
-test('every script refuses a call without a spec with exit 2 before it touches Docker or the VM', () => {
-  for (const f of ['member-gate-linux.sh', 'member-gate-windows.sh']) {
-    const r = spawnSync('bash', [join(here, f), 'sometree'], { encoding: 'utf8' });
-    assert.equal(r.status, 2, `${f}: ${r.stderr}`);
-    assert.match(r.stderr, /::error::.*no spec given/);
-  }
+test('a call without a spec is refused with exit 2 before it touches the VM', () => {
+  const r = spawnSync('bash', [join(here, 'member-gate-windows.sh'), 'sometree'], { encoding: 'utf8' });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /::error::.*no spec given/);
 });
 
 test('the Windows run copies the toolchain of rust-toolchain.toml in per run, never runs rustup, and carries no token', () => {
@@ -42,4 +28,8 @@ test('the Windows run copies the toolchain of rust-toolchain.toml in per run, ne
   assert.doesNotMatch(s, /rustup (install|toolchain|update|default|target)|rustup-init/);
   assert.doesNotMatch(s, /Authorization|--token|_TOKEN|credential-provider/);
   assert.match(s, /buildtools-baseline/);
+});
+
+test('the script says it is for manual use and that the member gate runs on the real runners', () => {
+  assert.match(read('member-gate-windows.sh'), /MANUAL USE/);
 });

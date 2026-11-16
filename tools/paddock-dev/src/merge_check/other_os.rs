@@ -1,45 +1,56 @@
-//! The `other-os` member gate of `./dev merge check --gates` (train 14, early-catch item 1; ADR 0087 amendment of 2026-11-16):
-//! a member's affected tests run on Linux (the CI image, as root, TMPDIR on an ext4 loop mount, in a fresh clone with no
-//! repo-local git config) and on Windows (the test VM under its lock, `vm-win.sh run --ci-like`) BEFORE the member joins a
-//! train. Train 12 lost about 17 hours to three red CI rounds whose every failure was Linux- or Windows-only.
+//! The `other-os` member gate of `./dev merge check --gates` (train 14, early-catch item 1; ADR 0087 amendment of 2026-11-16): a
+//! member's affected tests run on Linux and Windows BEFORE the member joins a train, **on the real CI runners**, as merge queues and
+//! merge trains do. The user decided this on 2026-11-16 after the first version (a container on the Arm Mac and the Windows test VM)
+//! gave false findings: 22 `paddock-dev` tests failed on the VM on a base where the real runner is green.
 //!
-//! This module is the pure part and the verdict: which changed paths reach which OS ([`select`], from the paths of the member's
-//! own change), what a run's answer means ([`interpret`]), and the row. The two runs themselves are scripts
-//! (`scripts/member-gate-linux.sh`, `scripts/member-gate-windows.sh`) behind the [`Runner`] port, so every verdict is tested
-//! without Docker or the VM.
+//! The step does no selection and no running of its own:
+//! 1. **Selection is the plan's** (`./dev plan <train before> <merge>`, the planner CI uses; rule 55: one copy of "what does a
+//!    change reach"). A member that reaches no project says `not run (<why>)`.
+//! 2. The merge commit is pushed to a short-lived ref `trial/member-<sha>` (the `trial/*` namespace of ADR 0098 WP-4, which
+//!    `./dev ci trial-prune` also cleans), and `ci.yml` is dispatched on it with `base` = the train before, so CI's own planner runs
+//!    only the affected jobs. The dispatch waits for a busy single-machine runner (ER-24, D-1: one train's CI per runner class at a
+//!    time), bounded; a runner that stays busy is `not measured`.
+//! 3. One bounded wait on the run (`./dev wait --ci-run`), then the jobs and the triage are read: **only NEW failures fail a
+//!    row** (`./dev ci triage` compares with the last main run and the flake history; a failure also on main is listed, not blamed).
 //!
-//! **Never a silent skip (ER-33).** Every outcome is a row with its reason: `passed`, `failed`, `not measured` (no Docker, the VM
-//! is busy, a control line is missing) or `not run` (no changed path reaches the OS). A pass needs the run's own control line for
-//! this merge's tree and the nextest summary; an exit code alone is never a pass. **Report-only until its first green run
-//! (ER-41)**: [`ENFORCED`] is false, so the exit code is unchanged and a `::warning::` says what would happen.
+//! Every OS gets a row made with the shared [`measure`] and [`Outcome`] types (C124): `Clean` with evidence for this run, `Findings`
+//! (the NEW failures), `NotMeasured` (the reason) or `NotApplicable` (no job of the plan ran on that OS). Never a silent skip
+//! (ER-33). **Report-only until its first green run is recorded (ER-41)**: [`ENFORCED`] is false, so the exit code is unchanged.
+//! The pass/fail reading of a PARTIAL run is this module's; `ci verdict` stays the one reader of FULL runs (it refuses a base
+//! dispatch by design), so it is not asked here.
 
 use super::generator_step::Step;
 use super::{Merge, git::Git, short};
-use paddock_cli::Exit;
+use crate::ci_runs::client::{Client, TimedJob};
+use crate::ci_runs::{dispatch, time, triage, trial};
+use crate::queue::ports::{Blame, Failure, Sent};
+use crate::queue::real::{Child, GitTrain, failures_of};
+use crate::wait::{CurlHttp, Http};
+use paddock_cli::outcome::{CheckId, Finding, Outcome, Reason, RunId, Sha, Subject, ToolVersion, UnixSeconds, measure};
+use paddock_cli::{Exit, Severity};
 use paddock_proc::{Limits, command, run_bounded};
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-/// Whether a failing row changes the exit code. False until the first green report-only run is recorded in ADR 0087's amendment
-/// of 2026-11-16 (ER-41); the change that records it flips this.
+/// Whether a failing or unmeasured row changes the exit code. False until the first green report-only run on a real train is
+/// recorded in the ADR 0087 amendment of 2026-11-16 (ER-41); the change that records it flips this.
 pub const ENFORCED: bool = false;
 
-/// The exit code of the two scripts when tests failed (nextest's own code for it).
-pub const EXIT_TESTS_FAILED: i32 = 100;
-/// The exit code of the two scripts when nothing was measured (EX_TEMPFAIL: the VM is busy, Docker is down, a control failed).
-pub const EXIT_NOT_MEASURED: i32 = 75;
+/// The workflow the member's run uses: the plan's own jobs.
+pub const WORKFLOW: &str = "ci.yml";
 
-/// An outer bound on one OS run (ER-32). A cold Linux build of `paddock-dev` in the container is the long case.
-const TIMEOUT: Duration = Duration::from_secs(60 * 60);
+/// How long the dispatch may wait for a busy single-machine runner (ER-24).
+const MAX_DISPATCH_WAIT: &str = "45m";
+/// How long the run may take once it is dispatched (a full affected plan on the real runners).
+const MAX_RUN_WAIT: &str = "2h";
 
-/// An operating system the gate runs on besides the host's.
+/// An operating system a row is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Os {
-    /// The CI image in a container, as root, on an ext4 loop mount.
+    /// The Linux jobs of the run (`ubuntu-latest`, the CI image).
     Linux,
-    /// The test VM, the way the Gitea Windows runner starts a step.
+    /// The Windows jobs of the run (`windows-latest`, the real runner).
     Windows,
 }
 
@@ -51,344 +62,272 @@ impl Os {
             Os::Windows => "windows",
         }
     }
-}
 
-/// One thing to run on an OS.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Target {
-    /// `cargo nextest run -p <package>` in the Cargo workspace at `workspace` (relative to the repository root).
-    Nextest {
-        /// The workspace folder, for example `crates` or `tools/paddock-dev`.
-        workspace: String,
-        /// The package name.
-        package: String,
-    },
-    /// A Node test command run from a folder (Linux only: the Windows gate runs the Rust tests the runner runs).
-    Node {
-        /// The folder, relative to the repository root.
-        dir: String,
-        /// The command, run with `sh -c`.
-        cmd: String,
-    },
-}
-
-impl Target {
-    /// The line the scripts take: `nextest <workspace> <package>` or `node <dir> <command...>`.
-    pub fn spec(&self) -> String {
-        match self {
-            Target::Nextest { workspace, package } => format!("nextest {workspace} {package}"),
-            Target::Node { dir, cmd } => format!("node {dir} {cmd}"),
+    /// The OS a job of ci.yml's matrix belongs to, from its name (`paddock-dev (windows-latest)`); `None` for a job that names none
+    /// (the plan, the conformance job) or another OS (macOS is the integrator's own machine).
+    pub fn of_job(name: &str) -> Option<Os> {
+        let n = name.to_ascii_lowercase();
+        if n.contains("windows") {
+            Some(Os::Windows)
+        } else if n.contains("ubuntu") || n.contains("linux") {
+            Some(Os::Linux)
+        } else {
+            None
         }
     }
 }
 
-/// What the gate runs on each OS, and why.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct Selection {
-    /// Targets for the Linux run.
-    pub linux: BTreeSet<Target>,
-    /// Targets for the Windows run.
-    pub windows: BTreeSet<Target>,
-    /// One line per trigger, for the row's text.
-    pub why: Vec<String>,
-}
-
-/// What the selection needs to know about the tree. The real one reads the checkout; tests give a table.
-pub trait Tree {
-    /// The Cargo package that owns `file` (the nearest `Cargo.toml` above it): its folder, its name and its workspace folder.
-    fn package_of(&self, file: &str) -> Option<Package>;
-    /// Whether the tests of the package at `dir` start programs (`Command::new`, `TestCommand`, `paddock_proc`, `spawn`).
-    fn starts_programs(&self, dir: &str) -> bool;
-}
-
-/// A Cargo package found above a changed file.
+/// One job of the member's run.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Package {
-    /// The package folder, relative to the repository root.
-    pub dir: String,
-    /// The package name.
+pub struct JobRow {
+    /// The job's display name.
     pub name: String,
-    /// The workspace folder it is built in.
-    pub workspace: String,
+    /// `success`, `failure`, `cancelled`, `skipped` or empty while unfinished.
+    pub conclusion: String,
 }
 
-/// Paths that always trigger a Rust or Node run, whatever the plan says: the code that starts programs for every test (the
-/// testkit), the tool that runs the gates, the conformance checks and the CI kit under it, and the VM scripts.
-const ALWAYS_RUST: [(&str, &str, &str); 3] = [
-    ("tools/paddock-dev/", "tools/paddock-dev", "paddock-dev"),
-    ("crates/paddock-testkit/", "crates", "paddock-testkit"),
-    ("crates/paddock-testkit-start/", "crates", "paddock-testkit-start"),
-];
-
-/// Documentation and notes never start a program (the same rule as the plan's `is_docs`, which a Markdown file is).
-fn docs_only(file: &str) -> bool {
-    file.ends_with(".md") || file.starts_with("docs/")
+/// How the wait on the run ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunEnd {
+    /// The run finished (any conclusion).
+    Finished,
+    /// The run was still going when the bound ended.
+    StillRunning,
 }
 
-/// Which OS runs what for the files a member changed: the member's own change (`parent..merge`), never the whole train.
-pub fn select(changed: &[String], tree: &dyn Tree) -> Selection {
-    let mut s = Selection::default();
-    let note = |why: String, s: &mut Selection| {
-        if !s.why.contains(&why) {
-            s.why.push(why);
-        }
-    };
-    for file in changed.iter().filter(|f| !docs_only(f)) {
-        for (prefix, workspace, package) in ALWAYS_RUST {
-            if file.starts_with(prefix) {
-                let t = Target::Nextest {
-                    workspace: workspace.into(),
-                    package: package.into(),
-                };
-                s.linux.insert(t.clone());
-                s.windows.insert(t);
-                note(format!("{prefix} changed: {package} runs on both"), &mut s);
-            }
-        }
-        if file.starts_with("conformance/") {
-            s.linux.insert(Target::Node {
-                dir: "conformance".into(),
-                cmd: "npm test".into(),
-            });
-            note("conformance/ changed: its tests run on Linux".into(), &mut s);
-        }
-        if file.starts_with("scripts/vm-") || file.starts_with("scripts/member-gate") {
-            s.linux.insert(Target::Node {
-                dir: ".".into(),
-                cmd: "node --test scripts/vm-*.test.mjs scripts/member-gate.test.mjs".into(),
-            });
-            note(
-                "scripts/vm-* or scripts/member-gate* changed: their tests run on Linux".into(),
-                &mut s,
-            );
-        }
-        if !file.ends_with(".rs") && !file.ends_with("Cargo.toml") {
-            continue;
-        }
-        if let Some(p) = tree.package_of(file)
-            && tree.starts_programs(&p.dir)
-        {
-            let t = Target::Nextest {
-                workspace: p.workspace,
-                package: p.name.clone(),
-            };
-            s.linux.insert(t.clone());
-            s.windows.insert(t);
-            note(
-                format!("{} changed and its tests start programs: {} runs on both", p.dir, p.name),
-                &mut s,
-            );
-        }
-    }
-    s
-}
-
-/// The real tree: reads `Cargo.toml` and the sources of the checkout.
-pub struct DiskTree(pub PathBuf);
-
-impl Tree for DiskTree {
-    fn package_of(&self, file: &str) -> Option<Package> {
-        let mut dir = Path::new(file).parent()?.to_path_buf();
-        loop {
-            let manifest = self.0.join(&dir).join("Cargo.toml");
-            if let Ok(text) = std::fs::read_to_string(&manifest)
-                && let Some(name) = package_name(&text)
-            {
-                let rel = dir.to_string_lossy().replace('\\', "/");
-                return Some(Package {
-                    workspace: self.workspace_of(&dir),
-                    name,
-                    dir: rel,
-                });
-            }
-            if !dir.pop() || dir.as_os_str().is_empty() {
-                return None;
-            }
-        }
-    }
-
-    fn starts_programs(&self, dir: &str) -> bool {
-        starts_programs_in(&self.0.join(dir))
-    }
-}
-
-impl DiskTree {
-    /// The folder of the Cargo workspace a package folder is built in: the nearest `Cargo.toml` above it (or the folder itself)
-    /// with a `[workspace]` table.
-    fn workspace_of(&self, package_dir: &Path) -> String {
-        let mut dir = package_dir.to_path_buf();
-        loop {
-            if let Ok(text) = std::fs::read_to_string(self.0.join(&dir).join("Cargo.toml"))
-                && text.parse::<toml::Table>().is_ok_and(|t| t.contains_key("workspace"))
-            {
-                return dir.to_string_lossy().replace('\\', "/");
-            }
-            if !dir.pop() || dir.as_os_str().is_empty() {
-                return package_dir.to_string_lossy().replace('\\', "/");
-            }
-        }
-    }
-}
-
-/// The `[package] name` of a manifest.
-fn package_name(manifest: &str) -> Option<String> {
-    let table: toml::Table = manifest.parse().ok()?;
-    table.get("package")?.get("name")?.as_str().map(str::to_string)
-}
-
-/// The text markers of a Rust test that starts a program. A heuristic on purpose: it only decides whether the other OSes are
-/// worth their minutes, and a false positive costs a run while a false negative is what the gate exists to prevent.
-const START_MARKERS: [&str; 5] = ["Command::new", "TestCommand", "paddock_proc", ".spawn(", "assert_cmd"];
-
-/// Bounds of the source walk: a crate with more files or larger files than this is read only in part and counts as starting programs.
-const MAX_FILES: usize = 4000;
-const MAX_FILE_BYTES: u64 = 1 << 20;
-
-fn starts_programs_in(dir: &Path) -> bool {
-    let mut stack = vec![dir.to_path_buf()];
-    let mut seen = 0usize;
-    while let Some(d) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&d) else { continue };
-        for e in entries.flatten() {
-            let path = e.path();
-            let name = e.file_name();
-            let name = name.to_string_lossy();
-            let Ok(kind) = e.file_type() else { continue };
-            if kind.is_dir() {
-                if name != "target" && name != "node_modules" && !name.starts_with('.') {
-                    stack.push(path);
-                }
-            } else if name.ends_with(".rs") {
-                seen += 1;
-                if seen > MAX_FILES {
-                    return true;
-                }
-                if e.metadata().is_ok_and(|m| m.len() > MAX_FILE_BYTES) {
-                    return true;
-                }
-                if std::fs::read_to_string(&path).is_ok_and(|t| START_MARKERS.iter().any(|m| t.contains(m))) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-/// What one OS run answered.
+/// What the plan said about the member's own change.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunResult {
-    /// The script's exit code (`None`: ended by the bound or a signal).
-    pub code: Option<i32>,
-    /// What it printed, standard output then standard error.
-    pub text: String,
+pub enum Reach {
+    /// At least one project is affected.
+    Projects,
+    /// Nothing but documentation (or nothing) is affected.
+    Nothing,
 }
 
-/// Runs the targets on one OS in a fresh clone of the merge.
-pub trait Runner {
-    /// An error is a failure to start (Docker or the VM could not be used at all).
-    fn run(&self, os: Os, root: &Path, merge_tree: &str, targets: &BTreeSet<Target>) -> Result<RunResult, String>;
+/// The real CI as this step needs it. The real one is [`Gitea`]; tests give a table.
+pub trait Runs {
+    /// Whether the plan reaches any project for `base..head`; `Err` when it could not be asked.
+    fn reaches(&mut self, base: &str, head: &str) -> Result<Reach, String>;
+    /// Pushes `commit` to `git_ref` (a short-lived scratch ref).
+    fn publish(&mut self, commit: &str, git_ref: &str) -> Result<(), String>;
+    /// Dispatches [`WORKFLOW`] on `git_ref` with `base`.
+    fn dispatch(&mut self, git_ref: &str, base: &str) -> Result<Sent, String>;
+    /// The id of the run on `commit`, once it exists.
+    fn find_run(&mut self, commit: &str) -> Result<Option<u64>, String>;
+    /// Waits for the run, at most [`MAX_RUN_WAIT`].
+    fn wait(&mut self, run: u64) -> Result<RunEnd, String>;
+    /// The jobs of the run.
+    fn jobs(&mut self, run: u64) -> Result<Vec<JobRow>, String>;
+    /// The failures of the finished run, each blamed by `ci triage`.
+    fn failures(&mut self, run: u64) -> Result<Vec<Failure>, String>;
+    /// Deletes the scratch ref (best effort: `ci trial-prune` catches the rest).
+    fn delete(&mut self, git_ref: &str);
 }
 
-/// The row of one OS.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Verdict {
-    /// The tests ran in the controlled environment and all passed.
-    Passed,
-    /// The tests ran in the controlled environment and some failed.
-    Failed,
-    /// Nothing can be said (the reason is the row's text): never a pass and never a failure of the member.
-    NotMeasured(String),
+/// The plan's answer as a [`Reach`]: any project flag true, an app named, or `all`.
+pub fn reach_of(plan: &Value) -> Reach {
+    let flag = |k: &str| plan.get(k).and_then(Value::as_bool).unwrap_or(false);
+    let any = [
+        "all",
+        "crates",
+        "ui",
+        "eslint",
+        "conformance",
+        "c99",
+        "tools",
+        "icons",
+        "ciImage",
+        "paddockDev",
+    ]
+    .iter()
+    .any(|k| flag(k))
+        || plan.get("apps").and_then(Value::as_array).is_some_and(|a| !a.is_empty());
+    if any { Reach::Projects } else { Reach::Nothing }
 }
 
-impl Verdict {
-    fn name(&self) -> &'static str {
-        match self {
-            Verdict::Passed => "passed",
-            Verdict::Failed => "failed",
-            Verdict::NotMeasured(_) => "not measured",
-        }
-    }
+/// One OS's row: the shared outcome, the jobs it is made of and the failures that were already on main.
+#[derive(Debug)]
+pub struct Row {
+    /// The OS.
+    pub os: Os,
+    /// The outcome (C124).
+    pub outcome: Outcome,
+    /// The jobs of the run on this OS.
+    pub jobs: Vec<String>,
+    /// Failures that triage found also on main: listed, not blamed.
+    pub known: Vec<String>,
 }
 
-/// The control line a script prints once its environment is set up, for exactly this tree. A run without it did not show that the
-/// environment was the one asked for (a Linux run as root on ext4 in a fresh clone; a Windows run in the runner-like guest).
-pub fn control_line(os: Os, tree: &str) -> String {
-    format!("other-os-control: os={} tree={tree}", os.name())
+fn tool() -> ToolVersion {
+    ToolVersion::new(concat!("paddock-dev merge check other-os ", env!("CARGO_PKG_VERSION")))
 }
 
-/// What a run's answer means. A pass is exit 0 with the control line for this tree and nextest's summary for every nextest target
-/// (so a run that executed no test is not a pass); failures are exit 100 with the control line; everything else did not look.
-pub fn interpret(os: Os, tree: &str, targets: &BTreeSet<Target>, answer: &Result<RunResult, String>) -> Verdict {
-    let run = match answer {
-        Err(why) => return Verdict::NotMeasured(why.clone()),
-        Ok(r) => r,
+/// The job a failure belongs to: its `what` is `<job>: <test>`.
+fn job_of(f: &Failure) -> &str {
+    f.what.split(": ").next().unwrap_or("")
+}
+
+/// The rows of a finished run: for each OS, `NotApplicable` when the plan ran no job there, `NotMeasured` when a job did not finish
+/// or a failure cannot be blamed, `Findings` for NEW (and flaky: still red, ER-12) failures only, and `Clean` otherwise (failures
+/// also on main are `known`).
+pub fn rows(run: u64, sha: &str, jobs: &[JobRow], failures: &[Failure]) -> Vec<Row> {
+    let subject = || Subject::CiRun {
+        workflow: WORKFLOW.into(),
+        run: RunId(run),
+        sha: Sha::new(sha),
     };
-    let control = control_line(os, tree);
-    let has_control = run.text.lines().any(|l| l.trim_end().starts_with(&control));
-    let tail = || last_lines(&run.text, 3);
-    match run.code {
-        None => Verdict::NotMeasured(format!("the run was ended by its time bound or a signal: {}", tail())),
-        Some(EXIT_NOT_MEASURED) => Verdict::NotMeasured(format!("the script did not measure: {}", tail())),
-        _ if !has_control => Verdict::NotMeasured(format!(
-            "no `{control}` line: the run did not show that its environment was the one asked for (exit {:?}): {}",
-            run.code,
-            tail()
-        )),
-        Some(0) => {
-            let nextest = targets.iter().filter(|t| matches!(t, Target::Nextest { .. })).count();
-            let summaries = run
-                .text
-                .lines()
-                .filter(|l| l.contains("Summary [") && !l.contains(" 0 tests run"))
-                .count();
-            if summaries < nextest {
-                Verdict::NotMeasured(format!(
-                    "exit 0 but {summaries} of {nextest} nextest summaries show tests run; an exit code alone is not a pass"
-                ))
+    [Os::Linux, Os::Windows]
+        .into_iter()
+        .map(|os| {
+            let mine: Vec<&JobRow> = jobs.iter().filter(|j| Os::of_job(&j.name) == Some(os)).collect();
+            let names: Vec<String> = mine.iter().map(|j| j.name.clone()).collect();
+            let fails: Vec<&Failure> = failures.iter().filter(|f| Os::of_job(job_of(f)) == Some(os)).collect();
+            let known: Vec<String> = fails
+                .iter()
+                .filter(|f| matches!(f.blame, Blame::OnMain))
+                .map(|f| f.what.clone())
+                .collect();
+            let outcome = if mine.is_empty() {
+                Outcome::NotApplicable(Reason::new(format!("the plan ran no job on {} for this member", os.name())))
+            } else if let Some(j) = mine
+                .iter()
+                .find(|j| !matches!(j.conclusion.as_str(), "success" | "failure" | "skipped"))
+            {
+                Outcome::NotMeasured(Reason::new(format!(
+                    "job `{}` ended `{}` (cancelled or unfinished), so nothing can be said about {}",
+                    j.name,
+                    if j.conclusion.is_empty() { "unfinished" } else { &j.conclusion },
+                    os.name()
+                )))
+            } else if let Some(j) = mine
+                .iter()
+                .find(|j| j.conclusion == "failure" && !fails.iter().any(|f| job_of(f) == j.name))
+            {
+                Outcome::NotMeasured(Reason::new(format!(
+                    "job `{}` failed but triage read no failing test of it (nothing proves it is the member's)",
+                    j.name
+                )))
+            } else if let Some(f) = fails.iter().find(|f| matches!(f.blame, Blame::Unknown)) {
+                Outcome::NotMeasured(Reason::new(format!(
+                    "`{}` failed and nothing proves whether it also fails on main (triage: unknown)",
+                    f.what
+                )))
             } else {
-                Verdict::Passed
+                let new: Vec<Finding> = fails
+                    .iter()
+                    .filter(|f| matches!(f.blame, Blame::New | Blame::Flaky))
+                    .map(|f| Finding::failing(f.what.clone()))
+                    .collect();
+                measure(
+                    CheckId::new(format!("member-gate-other-os:{}", os.name())),
+                    subject(),
+                    tool(),
+                    UnixSeconds::now(),
+                    || Ok(new),
+                )
+            };
+            Row {
+                os,
+                outcome,
+                jobs: names,
+                known,
             }
+        })
+        .collect()
+}
+
+/// What a row costs: nothing while report-only; once enforced, failing findings are the findings exit and an unmeasured row the
+/// not-measured exit.
+fn cost(enforced: bool, outcome: &Outcome) -> Exit {
+    match (enforced, outcome) {
+        (false, _) => Exit::Ok,
+        (true, Outcome::Findings(f)) if f.findings().as_slice().iter().any(|x| x.severity == Severity::Failing) => Exit::Findings,
+        (true, Outcome::NotMeasured(_) | Outcome::CheckBroken(_)) => Exit::NotMeasured,
+        (true, _) => Exit::Ok,
+    }
+}
+
+fn worst(a: Exit, b: Exit) -> Exit {
+    if a == Exit::Findings || b == Exit::Findings {
+        Exit::Findings
+    } else if a == Exit::NotMeasured || b == Exit::NotMeasured {
+        Exit::NotMeasured
+    } else {
+        Exit::Ok
+    }
+}
+
+fn wording(enforced: bool) -> (&'static str, &'static str) {
+    if enforced {
+        ("::error", "")
+    } else {
+        (
+            "::warning",
+            " REPORT-ONLY until its first green run on a real train is recorded in the ADR 0087 amendment of 2026-11-16 (ER-41): the exit code is unchanged.",
+        )
+    }
+}
+
+/// The step for the rows of a run.
+pub fn step_of(rows: &[Row], run: u64, git_ref: &str, base: &str, enforced: bool) -> Step {
+    let (level, report_only) = wording(enforced);
+    let mut text = vec![format!(
+        "member gate other-os (base {base}, run {run} on {git_ref}, real CI runners):"
+    )];
+    let mut exit = Exit::Ok;
+    let mut data = Vec::new();
+    for r in rows {
+        let also = if r.known.is_empty() {
+            String::new()
+        } else {
+            format!("; {} failure(s) also on main, not blamed", r.known.len())
+        };
+        text.push(format!("  {}: {} ({} jobs){also}", r.os.name(), r.outcome.name(), r.jobs.len()));
+        match &r.outcome {
+            Outcome::Findings(f) => {
+                for x in f.findings().as_slice() {
+                    text.push(format!("    NEW: {}", x.message));
+                }
+                text.push(format!(
+                    "{level}::member gate other-os FAILED on {}: the member's run has failures that are not on main. Next step: take the member out and send it back to its author with the failures above; do not fix it on the train.{report_only}",
+                    r.os.name()
+                ));
+            }
+            Outcome::NotMeasured(why) | Outcome::CheckBroken(why) => text.push(format!(
+                "{level}::member gate other-os NOT MEASURED on {}: {}. Next step: read run {run} yourself (`./dev ci triage {run}`); a member whose other-OS tests did not give a verdict is not a member that passed.{report_only}",
+                r.os.name(),
+                why.as_str()
+            )),
+            _ => {}
         }
-        Some(EXIT_TESTS_FAILED) => Verdict::Failed,
-        Some(c) => Verdict::NotMeasured(format!(
-            "exit {c} is neither a pass (0) nor failed tests ({EXIT_TESTS_FAILED}): {}",
-            tail()
-        )),
+        exit = worst(exit, cost(enforced, &r.outcome));
+        data.push(json!({
+            "os": r.os.name(),
+            "outcome": r.outcome.json(),
+            "jobs": r.jobs,
+            "alsoOnMain": r.known,
+        }));
+    }
+    let word = if rows.iter().any(|r| matches!(r.outcome, Outcome::Findings(_))) {
+        "failed"
+    } else if rows
+        .iter()
+        .any(|r| matches!(r.outcome, Outcome::NotMeasured(_) | Outcome::CheckBroken(_)))
+    {
+        "not measured"
+    } else if rows.iter().any(|r| matches!(r.outcome, Outcome::Clean(_))) {
+        "passed"
+    } else {
+        "not run"
+    };
+    Step {
+        text,
+        data: json!({"outcome": word, "base": base, "run": run, "ref": git_ref, "enforced": enforced, "rows": data}),
+        exit,
     }
 }
 
-fn last_lines(text: &str, n: usize) -> String {
-    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-    lines[lines.len().saturating_sub(n)..].join(" | ")
-}
-
-/// What a Windows row is not: the guest's architecture differs from the runner's (CI runs x64; the test VM is Arm and runs the x64
-/// test programs under emulation). Said in the row and the text, so a pass is never read as "the runner's architecture passed".
-const WINDOWS_NOTE: &str = "x64 test programs (the runner's architecture) on an Arm64 test VM under Prism emulation; cargo-nextest and the toolchain run natively on Arm";
-
-fn row(os: Os, targets: &BTreeSet<Target>, verdict: &Verdict, seconds: f64, log: &str) -> Value {
-    json!({
-        "os": os.name(),
-        "outcome": verdict.name(),
-        "why": match verdict { Verdict::NotMeasured(w) => w.as_str(), _ => "" },
-        "targets": targets.iter().map(Target::spec).collect::<Vec<_>>(),
-        "seconds": (seconds * 10.0).round() / 10.0,
-        "note": if os == Os::Windows { WINDOWS_NOTE } else { "" },
-        "log": log,
-    })
-}
-
-/// What a failed or unmeasured row costs: nothing while report-only, the exit code once enforced.
-fn cost(enforced: bool, verdict: &Verdict) -> Exit {
-    match (enforced, verdict) {
-        (false, _) | (_, Verdict::Passed) => Exit::Ok,
-        (true, Verdict::Failed) => Exit::Findings,
-        (true, Verdict::NotMeasured(_)) => Exit::NotMeasured,
-    }
-}
-
-/// Said out loud when no changed path reaches an OS; not a failure.
+/// Said out loud when the step was not asked for or cannot apply; not a failure.
 pub fn not_run(why: &str) -> Step {
     Step {
         text: vec![format!("member gate other-os: not run ({why})")],
@@ -397,425 +336,477 @@ pub fn not_run(why: &str) -> Step {
     }
 }
 
-/// Runs the gate for a merge checked out in `root`: the paths the member changed (`parents[0]` to the merge's tree) pick the work
-/// per OS, each OS runs in its own fresh clone, and every OS gets a row. `enforced` is [`ENFORCED`] outside the tests.
-pub fn run(root: &Path, git: &Git, merge: &Merge, tree: &dyn Tree, runner: &dyn Runner, enforced: bool) -> Step {
-    let Some(base) = merge.parents.first() else {
-        return not_run("the merge has no parents");
-    };
-    let changed = match git.changed_paths(base, &merge.tree) {
-        Ok(c) => c,
-        Err(e) => {
-            return unmeasured(enforced, &format!("the paths the merge changed cannot be listed: {e}"));
-        }
-    };
-    let selection = select(&changed, tree);
-    if selection.linux.is_empty() && selection.windows.is_empty() {
-        return not_run(&format!(
-            "no changed path reaches the other OSes: not tools/paddock-dev, crates/paddock-testkit, conformance, scripts/vm-* or a Rust crate whose tests start programs ({} paths checked)",
-            changed.len()
-        ));
-    }
-    execute(root, &merge.tree, &selection, runner, enforced, short(base))
-}
-
-/// Runs each OS the selection names and builds the step. Linux and Windows are independent rows; neither hides the other.
-pub fn execute(root: &Path, tree: &str, selection: &Selection, runner: &dyn Runner, enforced: bool, base: &str) -> Step {
-    let (level, report_only) = if enforced {
-        ("::error", "")
-    } else {
-        (
-            "::warning",
-            " REPORT-ONLY until its first green run is recorded in the ADR 0087 amendment of 2026-11-16 (ER-41): the exit code is unchanged.",
-        )
-    };
-    let mut text = vec![format!("member gate other-os (base {base}): {}", selection.why.join("; "))];
-    let mut rows = Vec::new();
-    let mut exit = Exit::Ok;
-    for (os, targets) in [(Os::Linux, &selection.linux), (Os::Windows, &selection.windows)] {
-        if targets.is_empty() {
-            rows.push(json!({"os": os.name(), "outcome": "not run", "why": "no changed path reaches this OS", "targets": []}));
-            text.push(format!("  {}: not run (no changed path reaches it)", os.name()));
-            continue;
-        }
-        let started = Instant::now();
-        let answer = runner.run(os, root, tree, targets);
-        let seconds = started.elapsed().as_secs_f64();
-        let verdict = interpret(os, tree, targets, &answer);
-        let log = answer.as_ref().map(|r| r.text.as_str()).unwrap_or("");
-        let note = if os == Os::Windows {
-            format!(" [{WINDOWS_NOTE}]")
-        } else {
-            String::new()
-        };
-        text.push(format!(
-            "  {}: {} in {:.0} s ({} targets){note}",
-            os.name(),
-            verdict.name(),
-            seconds,
-            targets.len()
-        ));
-        match &verdict {
-            Verdict::Passed => {}
-            Verdict::Failed => {
-                text.push(log.to_string());
-                text.push(format!(
-                    "{level}::member gate other-os FAILED on {}: the member's affected tests fail there. Next step: take the member out and send it back to its author with the failures above; do not fix it on the train.{report_only}",
-                    os.name()
-                ));
-            }
-            Verdict::NotMeasured(why) => text.push(format!(
-                "{level}::member gate other-os NOT MEASURED on {}: {why}. Next step: run `scripts/member-gate-{}.sh` yourself (docs/adr/amendments/0087-member-gate-other-os-2026-11-16.md); a member whose other-OS tests did not run is not a member that passed.{report_only}",
-                os.name(),
-                os.name()
-            )),
-        }
-        let c = cost(enforced, &verdict);
-        if c == Exit::Findings || (c == Exit::NotMeasured && exit == Exit::Ok) {
-            exit = c;
-        }
-        rows.push(row(os, targets, &verdict, seconds, &tail_of(log)));
-    }
+/// The step when nothing could be measured: report-only keeps the exit, enforced is the not-measured exit.
+pub fn unmeasured(enforced: bool, why: &str) -> Step {
+    let (level, report_only) = wording(enforced);
     Step {
-        text,
-        data: json!({"outcome": outcome_of(&rows), "base": base, "enforced": enforced, "rows": rows}),
-        exit,
-    }
-}
-
-/// The last 4 KiB of a log: enough for the rows' evidence without the whole build output in the JSON.
-fn tail_of(log: &str) -> String {
-    let start = log.len().saturating_sub(4096);
-    let start = (start..=log.len()).find(|i| log.is_char_boundary(*i)).unwrap_or(log.len());
-    log[start..].to_string()
-}
-
-/// The one word for the step: `failed` beats `not measured` beats `passed`.
-fn outcome_of(rows: &[Value]) -> &'static str {
-    let has = |w: &str| rows.iter().any(|r| r["outcome"] == w);
-    if has("failed") {
-        "failed"
-    } else if has("not measured") {
-        "not measured"
-    } else if has("passed") {
-        "passed"
-    } else {
-        "not run"
-    }
-}
-
-pub(super) fn unmeasured(enforced: bool, why: &str) -> Step {
-    Step {
-        text: vec![format!("::warning::member gate other-os NOT MEASURED: {why}")],
+        text: vec![format!(
+            "{level}::member gate other-os NOT MEASURED: {why}. Next step: dispatch `ci.yml` on the member yourself (`./dev ci dispatch ci.yml --trial <branch> --max 45m`); a member whose other-OS tests did not run is not a member that passed.{report_only}"
+        )],
         data: json!({"outcome": "not measured", "why": why, "enforced": enforced}),
         exit: if enforced { Exit::NotMeasured } else { Exit::Ok },
     }
 }
 
-/// The real runner: the two scripts, started from the checkout. Linux needs Docker (OrbStack); Windows needs the test VM, which
-/// the script takes under its lock (`scripts/vm-lock-run.sh`; busy is exit 75, not measured).
-pub struct Scripts;
+/// The scratch ref of a merge commit.
+pub fn scratch_ref(commit: &str) -> String {
+    format!("trial/member-{}", commit.get(..12).unwrap_or(commit))
+}
 
-impl Runner for Scripts {
-    fn run(&self, os: Os, root: &Path, merge_tree: &str, targets: &BTreeSet<Target>) -> Result<RunResult, String> {
-        let script = root.join(format!("scripts/member-gate-{}.sh", os.name()));
-        if !script.is_file() {
-            return Err(format!("{} is missing", script.display()));
+/// Runs the gate for a merge: plan, push, dispatch, wait, read, rows. The scratch ref is deleted whatever happens.
+pub fn run(merge: &Merge, runs: &mut dyn Runs, enforced: bool) -> Step {
+    let (Some(base), Some(commit)) = (merge.parents.first(), merge.commit.as_deref()) else {
+        return not_run("the merge has no parents or no commit");
+    };
+    match runs.reaches(base, commit) {
+        Err(e) => return unmeasured(enforced, &format!("the plan could not be asked: {e}")),
+        Ok(Reach::Nothing) => return not_run("the plan reaches no project for this member (documentation only)"),
+        Ok(Reach::Projects) => {}
+    }
+    let git_ref = scratch_ref(commit);
+    let step = measure_on_runners(runs, commit, base, &git_ref, enforced);
+    runs.delete(&git_ref);
+    step
+}
+
+fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &str, enforced: bool) -> Step {
+    if let Err(e) = runs.publish(commit, git_ref) {
+        return unmeasured(enforced, &format!("the merge could not be pushed to {git_ref}: {e}"));
+    }
+    match runs.dispatch(git_ref, base) {
+        Err(e) => return unmeasured(enforced, &format!("ci.yml could not be dispatched on {git_ref}: {e}")),
+        Ok(Sent::Busy(last)) => {
+            return unmeasured(
+                enforced,
+                &format!("the runner stayed busy for {MAX_DISPATCH_WAIT} ({last}); one train's CI per runner class at a time (ER-24)"),
+            );
         }
-        let mut cmd = command("bash");
-        cmd.arg(&script)
-            .arg(merge_tree)
-            .args(targets.iter().map(Target::spec))
-            .current_dir(root);
-        let out = run_bounded(cmd, Limits::new(TIMEOUT)).map_err(|e| format!("{} could not start: {e}", script.display()))?;
-        let code = match out.outcome {
-            paddock_proc::Outcome::Exited(st) => st.code(),
-            _ => None,
-        };
-        Ok(RunResult {
-            code,
-            text: format!("{}\n{}", String::from_utf8_lossy(&out.stdout), out.stderr_text())
-                .trim()
-                .to_string(),
+        Ok(Sent::Yes) => {}
+    }
+    let run = match runs.find_run(commit) {
+        Ok(Some(id)) => id,
+        Ok(None) => return unmeasured(enforced, &format!("no run of ci.yml appeared for {git_ref}")),
+        Err(e) => return unmeasured(enforced, &format!("the run could not be found: {e}")),
+    };
+    match runs.wait(run) {
+        Err(e) => return unmeasured(enforced, &format!("run {run} could not be waited for: {e}")),
+        Ok(RunEnd::StillRunning) => return unmeasured(enforced, &format!("run {run} was still going after {MAX_RUN_WAIT}")),
+        Ok(RunEnd::Finished) => {}
+    }
+    let jobs = match runs.jobs(run) {
+        Ok(j) => j,
+        Err(e) => return unmeasured(enforced, &format!("the jobs of run {run} could not be read: {e}")),
+    };
+    let failures = match runs.failures(run) {
+        Ok(f) => f,
+        Err(e) => return unmeasured(enforced, &format!("the failures of run {run} could not be triaged: {e}")),
+    };
+    step_of(&rows(run, commit, &jobs, &failures), run, git_ref, short(base), enforced)
+}
+
+/// The real CI: Gitea's API with `GITEA_TOKEN`, the tool's own git for the push, the tool's own planner and waiter.
+pub struct Gitea {
+    root: PathBuf,
+    server: String,
+    repo: String,
+    token: String,
+    scratch: PathBuf,
+    http: CurlHttp,
+}
+
+impl Gitea {
+    /// Reads the settings from the environment: `GITEA_TOKEN` (write access: it pushes the scratch ref) and `PADDOCK_TRIAL_DIR`
+    /// (a folder for the askpass program, like `ci dispatch --trial`). `Err` says what is missing.
+    pub fn from_env(root: &Path) -> Result<Gitea, String> {
+        let token = std::env::var("GITEA_TOKEN")
+            .ok()
+            .filter(|t| !t.is_empty())
+            .ok_or("GITEA_TOKEN is not set (it needs write access)")?;
+        let scratch = std::env::var_os("PADDOCK_TRIAL_DIR")
+            .map(PathBuf::from)
+            .ok_or("PADDOCK_TRIAL_DIR is not set (a folder on a data drive, like `ci dispatch --trial`)")?;
+        std::fs::create_dir_all(&scratch).map_err(|e| format!("cannot create {}: {e}", scratch.display()))?;
+        Ok(Gitea {
+            root: root.to_path_buf(),
+            server: "https://dev.decryptology.net".into(),
+            repo: "decryp7/paddock".into(),
+            token,
+            scratch,
+            http: CurlHttp,
         })
+    }
+
+    fn git(&self) -> GitTrain {
+        GitTrain {
+            root: self.root.clone(),
+            trusted: None,
+            url: format!("{}/{}.git", self.server, self.repo),
+            token: Some(self.token.clone()),
+            authed_fetch: false,
+            allow_file: false,
+            scratch: self.scratch.clone(),
+            merge_check: crate::merge_check::command,
+            planner: crate::queue::real::run_planner,
+            timeout: crate::queue::real::GIT_TIMEOUT,
+        }
+    }
+
+    fn me() -> Result<PathBuf, String> {
+        crate::tool_cache::self_exe().map_err(|e| format!("this program cannot be found: {e}"))
+    }
+}
+
+impl Runs for Gitea {
+    fn reaches(&mut self, base: &str, head: &str) -> Result<Reach, String> {
+        let mut cmd = command(Self::me()?);
+        cmd.args(["plan", base, head]).current_dir(&self.root);
+        let out = run_bounded(cmd, Limits::new(Duration::from_secs(300))).map_err(|e| format!("`dev plan` could not run: {e}"))?;
+        if !out.success() {
+            return Err(format!("`dev plan {base} {head}` failed: {}", out.stderr_text().trim()));
+        }
+        let text = out.stdout_text();
+        let plan: Value = text
+            .lines()
+            .find(|l| l.starts_with('{'))
+            .and_then(|l| serde_json::from_str(l).ok())
+            .ok_or("`dev plan` printed no JSON")?;
+        Ok(reach_of(&plan))
+    }
+
+    fn publish(&mut self, commit: &str, git_ref: &str) -> Result<(), String> {
+        let g = self.git();
+        let (ok, out) = g.run_git(
+            Child::Authed,
+            &["push", "--quiet", "--force", "origin", &format!("{commit}:refs/heads/{git_ref}")],
+        )?;
+        if ok { Ok(()) } else { Err(out.trim().to_string()) }
+    }
+
+    fn dispatch(&mut self, git_ref: &str, base: &str) -> Result<Sent, String> {
+        let req = dispatch::parse_request(WORKFLOW, git_ref, &[format!("base={base}")], MAX_DISPATCH_WAIT, None)?;
+        let root = self.root.clone();
+        let read = move |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
+        let mut clock = dispatch::system_clock();
+        let target = dispatch::Target {
+            server: &self.server,
+            repo: &self.repo,
+            token: &self.token,
+        };
+        match dispatch::run(&mut self.http, &target, &req, &read, &mut clock, &mut std::io::stderr())? {
+            dispatch::Dispatched::Yes { .. } => Ok(Sent::Yes),
+            dispatch::Dispatched::StillBusy { last } => Ok(Sent::Busy(last)),
+        }
+    }
+
+    fn find_run(&mut self, commit: &str) -> Result<Option<u64>, String> {
+        // The run exists within seconds of the dispatch; ask for up to two minutes (bounded: ER-32).
+        for attempt in 0..12 {
+            let mut c = Client::new(&mut self.http, &self.server, &self.repo, &self.token);
+            let page = c.runs_page_where(1, &format!("head_sha={commit}"))?;
+            if let Some(r) = page
+                .runs
+                .iter()
+                .filter(|r| r.workflow() == WORKFLOW && r.head_sha == commit)
+                .map(|r| r.id)
+                .max()
+            {
+                return Ok(Some(r));
+            }
+            if attempt < 11 {
+                std::thread::sleep(Duration::from_secs(10));
+            }
+        }
+        Ok(None)
+    }
+
+    fn wait(&mut self, run: u64) -> Result<RunEnd, String> {
+        let mut cmd = command(Self::me()?);
+        cmd.args(["wait", "--ci-run", &run.to_string(), "--max", MAX_RUN_WAIT]);
+        // The wait ends at its own --max; the outer bound only ends a hang (ER-32). What decides is the run's own state.
+        let _ = run_bounded(cmd, Limits::new(Duration::from_secs(2 * 3600 + 300))).map_err(|e| format!("`dev wait` could not run: {e}"))?;
+        let mut c = Client::new(&mut self.http, &self.server, &self.repo, &self.token);
+        match c.run(run)? {
+            Some(r) if r.finished() => Ok(RunEnd::Finished),
+            Some(_) => Ok(RunEnd::StillRunning),
+            None => Err(format!("run {run} is not listed")),
+        }
+    }
+
+    fn jobs(&mut self, run: u64) -> Result<Vec<JobRow>, String> {
+        let mut c = Client::new(&mut self.http, &self.server, &self.repo, &self.token);
+        let jobs: Vec<TimedJob> = c.timed_jobs(run)?.ok_or_else(|| format!("run {run} has no job list"))?;
+        Ok(jobs
+            .into_iter()
+            .filter(|j| !j.is_caller())
+            .map(|j| JobRow {
+                name: j.name,
+                conclusion: j.conclusion,
+            })
+            .collect())
+    }
+
+    fn failures(&mut self, run: u64) -> Result<Vec<Failure>, String> {
+        let report = {
+            let mut c = Client::new(&mut self.http, &self.server, &self.repo, &self.token);
+            let req = triage::Request {
+                run,
+                against: None,
+                app: None,
+                days: 14,
+                history: true,
+                repo: self.repo.clone(),
+                now_secs: time::now_secs(),
+            };
+            triage::collect(&mut c, &req, &mut |l| eprintln!("{l}"))?
+        };
+        let http: &mut dyn Http = &mut self.http;
+        Ok(failures_of(&report, run, http, &self.server, &self.repo, &self.token))
+    }
+
+    fn delete(&mut self, git_ref: &str) {
+        if let Err(e) = trial::delete(&self.git(), git_ref) {
+            eprintln!("::warning::other-os: {git_ref} could not be deleted ({e}); run `./dev ci trial-prune`");
+        }
+    }
+}
+
+/// The real step for `merge check --gates`: a missing token or scratch folder is `not measured`, with what to set.
+pub fn run_real(root: &Path, _git: &Git, merge: &Merge, enforced: bool) -> Step {
+    match Gitea::from_env(root) {
+        Err(why) => unmeasured(enforced, &why),
+        Ok(mut g) => run(merge, &mut g, enforced),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
 
     // Flip ENFORCED only in the change that records the first green report-only run (ER-41); this fails the build until it is decided.
     const _: () = assert!(!ENFORCED);
-    use std::sync::Mutex;
 
-    /// A tree table: file folder -> package, and which folders start programs.
-    struct Table {
-        packages: BTreeMap<&'static str, Package>,
-        starts: Vec<&'static str>,
-    }
-
-    impl Tree for Table {
-        fn package_of(&self, file: &str) -> Option<Package> {
-            self.packages
-                .iter()
-                .find(|(d, _)| file.starts_with(&format!("{d}/")))
-                .map(|(_, p)| p.clone())
-        }
-        fn starts_programs(&self, dir: &str) -> bool {
-            self.starts.contains(&dir)
-        }
-    }
-
-    fn pkg(dir: &str, name: &str, workspace: &str) -> Package {
-        Package {
-            dir: dir.into(),
+    fn job(name: &str, conclusion: &str) -> JobRow {
+        JobRow {
             name: name.into(),
-            workspace: workspace.into(),
+            conclusion: conclusion.into(),
         }
     }
 
-    fn table() -> Table {
-        let mut packages = BTreeMap::new();
-        packages.insert("crates/paddock-proc", pkg("crates/paddock-proc", "paddock-proc", "crates"));
-        packages.insert("crates/paddock-names", pkg("crates/paddock-names", "paddock-names", "crates"));
-        Table {
-            packages,
-            starts: vec!["crates/paddock-proc"],
+    fn fail(job: &str, test: &str, blame: Blame) -> Failure {
+        Failure {
+            what: format!("{job}: {test}"),
+            projects: BTreeSet::new(),
+            files: Vec::new(),
+            blame,
         }
     }
 
-    fn files(f: &[&str]) -> Vec<String> {
-        f.iter().map(|s| s.to_string()).collect()
+    fn row(rows: &[Row], os: Os) -> &Row {
+        rows.iter().find(|r| r.os == os).unwrap()
     }
 
-    fn nextest(ws: &str, p: &str) -> Target {
-        Target::Nextest {
-            workspace: ws.into(),
-            package: p.into(),
+    #[test]
+    fn jobs_belong_to_the_os_their_matrix_names() {
+        assert_eq!(Os::of_job("paddock-dev (windows-latest)"), Some(Os::Windows));
+        assert_eq!(Os::of_job("crates (ubuntu-latest)"), Some(Os::Linux));
+        assert_eq!(Os::of_job("app dyno (macos-latest)"), None);
+        assert_eq!(Os::of_job("plan (affected projects)"), None);
+    }
+
+    #[test]
+    fn the_plan_decides_what_a_member_reaches() {
+        assert_eq!(reach_of(&json!({"crates": true})), Reach::Projects);
+        assert_eq!(reach_of(&json!({"all": true})), Reach::Projects);
+        assert_eq!(reach_of(&json!({"apps": ["dyno"], "crates": false})), Reach::Projects);
+        assert_eq!(reach_of(&json!({"docs": true, "crates": false, "apps": []})), Reach::Nothing);
+        assert_eq!(reach_of(&json!({})), Reach::Nothing);
+    }
+
+    #[test]
+    fn a_green_run_is_clean_with_evidence_and_an_os_without_jobs_is_not_applicable() {
+        let r = rows(7, "abc", &[job("crates (ubuntu-latest)", "success"), job("plan", "success")], &[]);
+        assert!(matches!(row(&r, Os::Linux).outcome, Outcome::Clean(_)));
+        assert!(matches!(row(&r, Os::Windows).outcome, Outcome::NotApplicable(_)));
+    }
+
+    /// Only NEW failures fail a row: a failure also on main is listed, not blamed (the base is not the member's).
+    #[test]
+    fn only_new_failures_fail_a_row_and_failures_also_on_main_are_listed() {
+        let jobs = [
+            job("paddock-dev (windows-latest)", "failure"),
+            job("crates (ubuntu-latest)", "failure"),
+        ];
+        let fails = [
+            fail("paddock-dev (windows-latest)", "places::a", Blame::OnMain),
+            fail("paddock-dev (windows-latest)", "wrapper::b", Blame::OnMain),
+            fail("crates (ubuntu-latest)", "proc::c", Blame::New),
+        ];
+        let r = rows(7, "abc", &jobs, &fails);
+        let win = row(&r, Os::Windows);
+        assert!(matches!(win.outcome, Outcome::Clean(_)), "{:?}", win.outcome);
+        assert_eq!(win.known.len(), 2);
+        match &row(&r, Os::Linux).outcome {
+            Outcome::Findings(f) => assert_eq!(f.findings().as_slice().len(), 1),
+            other => panic!("{other:?}"),
         }
     }
 
     #[test]
-    fn the_tool_and_the_testkit_reach_both_oses() {
-        let s = select(&files(&["tools/paddock-dev/src/queue/mod.rs"]), &table());
-        assert_eq!(s.linux, BTreeSet::from([nextest("tools/paddock-dev", "paddock-dev")]));
-        assert_eq!(s.linux, s.windows);
-        let s = select(&files(&["crates/paddock-testkit/src/lib.rs"]), &table());
-        assert!(s.windows.contains(&nextest("crates", "paddock-testkit")));
-    }
-
-    #[test]
-    fn conformance_and_the_vm_scripts_run_node_tests_on_linux_only() {
-        let s = select(
-            &files(&["conformance/ci/kit.sh", "scripts/vm-win.sh", "scripts/member-gate-linux.sh"]),
-            &table(),
+    fn what_cannot_be_blamed_is_not_measured_never_a_pass() {
+        // Unknown blame, a failed job with no test read, a cancelled job, an unfinished job.
+        let r = rows(
+            1,
+            "a",
+            &[job("x (windows-latest)", "failure")],
+            &[fail("x (windows-latest)", "t", Blame::Unknown)],
         );
-        assert_eq!(s.linux.len(), 2);
-        assert!(s.windows.is_empty());
-        assert!(s.linux.iter().all(|t| matches!(t, Target::Node { .. })));
+        assert!(matches!(row(&r, Os::Windows).outcome, Outcome::NotMeasured(_)));
+        let r = rows(1, "a", &[job("x (windows-latest)", "failure")], &[]);
+        assert!(matches!(row(&r, Os::Windows).outcome, Outcome::NotMeasured(_)));
+        let r = rows(1, "a", &[job("x (ubuntu-latest)", "cancelled")], &[]);
+        assert!(matches!(row(&r, Os::Linux).outcome, Outcome::NotMeasured(_)));
+        let r = rows(1, "a", &[job("x (ubuntu-latest)", "")], &[]);
+        assert!(matches!(row(&r, Os::Linux).outcome, Outcome::NotMeasured(_)));
     }
 
-    #[test]
-    fn a_crate_whose_tests_start_programs_runs_on_both_and_one_that_does_not_is_skipped() {
-        let s = select(&files(&["crates/paddock-proc/src/lib.rs"]), &table());
-        assert_eq!(s.linux, BTreeSet::from([nextest("crates", "paddock-proc")]));
-        assert_eq!(s.windows, s.linux);
-        let s = select(
-            &files(&["crates/paddock-names/src/lib.rs", "crates/paddock-names/Cargo.toml"]),
-            &table(),
-        );
-        assert_eq!(s, Selection::default());
-    }
-
-    #[test]
-    fn documentation_and_unrelated_files_select_nothing() {
-        let s = select(
-            &files(&[
-                "docs/adr/0087-x.md",
-                "tools/paddock-dev/README.md",
-                "ui/projects/a.ts",
-                "apps/dyno/app/x.html",
-            ]),
-            &table(),
-        );
-        assert_eq!(s, Selection::default());
-    }
-
-    #[test]
-    fn the_package_walk_finds_the_workspace_and_the_markers_on_disk() {
-        let scratch = tempfile::tempdir().unwrap();
-        let dir = scratch.path().to_path_buf();
-        std::fs::create_dir_all(dir.join("crates/a/src")).unwrap();
-        std::fs::create_dir_all(dir.join("crates/b/src")).unwrap();
-        std::fs::write(dir.join("crates/Cargo.toml"), "[workspace]\nmembers=[\"a\",\"b\"]\n").unwrap();
-        std::fs::write(dir.join("crates/a/Cargo.toml"), "[package]\nname=\"a\"\n").unwrap();
-        std::fs::write(dir.join("crates/b/Cargo.toml"), "[package]\nname=\"b\"\n").unwrap();
-        std::fs::write(dir.join("crates/a/src/lib.rs"), "fn t() { std::process::Command::new(\"x\"); }").unwrap();
-        std::fs::write(dir.join("crates/b/src/lib.rs"), "fn t() {}").unwrap();
-        let tree = DiskTree(dir.clone());
-        let a = tree.package_of("crates/a/src/lib.rs").unwrap();
-        assert_eq!((a.name.as_str(), a.workspace.as_str(), a.dir.as_str()), ("a", "crates", "crates/a"));
-        assert!(tree.starts_programs("crates/a"));
-        assert!(!tree.starts_programs("crates/b"));
-        let s = select(&files(&["crates/a/src/lib.rs", "crates/b/src/lib.rs"]), &tree);
-        assert_eq!(s.windows, BTreeSet::from([nextest("crates", "a")]));
-    }
-
-    fn one() -> BTreeSet<Target> {
-        BTreeSet::from([nextest("crates", "paddock-proc")])
-    }
-
-    fn ran(code: Option<i32>, os: Os, tree: &str, body: &str) -> Result<RunResult, String> {
-        Ok(RunResult {
-            code,
-            text: format!("{}\n{body}", control_line(os, tree)),
-        })
-    }
-
-    const SUMMARY: &str = "     Summary [   1.2s] 41 tests run: 41 passed, 0 skipped";
-
-    #[test]
-    fn a_pass_needs_the_control_line_for_this_tree_and_a_nextest_summary() {
-        let ok = ran(Some(0), Os::Linux, "t1", SUMMARY);
-        assert_eq!(interpret(Os::Linux, "t1", &one(), &ok), Verdict::Passed);
-        // Exit 0 alone, the control of another tree or of another OS, and a run of zero tests are never a pass.
-        let alone = Ok(RunResult {
-            code: Some(0),
-            text: SUMMARY.into(),
-        });
-        let other_tree = ran(Some(0), Os::Linux, "t2", SUMMARY);
-        let other_os = ran(Some(0), Os::Windows, "t1", SUMMARY);
-        let zero = ran(Some(0), Os::Linux, "t1", "     Summary [   0.0s] 0 tests run: 0 passed");
-        let no_summary = ran(Some(0), Os::Linux, "t1", "nothing");
-        for a in [alone, other_tree, other_os, zero, no_summary] {
-            assert!(matches!(interpret(Os::Linux, "t1", &one(), &a), Verdict::NotMeasured(_)), "{a:?}");
-        }
-    }
-
-    #[test]
-    fn failed_tests_are_a_failure_only_with_the_control_and_every_other_answer_did_not_look() {
-        let failed = ran(Some(EXIT_TESTS_FAILED), Os::Windows, "t1", "FAIL [ 0.1s] x");
-        assert_eq!(interpret(Os::Windows, "t1", &one(), &failed), Verdict::Failed);
-        let no_control = Ok(RunResult {
-            code: Some(EXIT_TESTS_FAILED),
-            text: "FAIL".into(),
-        });
-        assert!(matches!(interpret(Os::Windows, "t1", &one(), &no_control), Verdict::NotMeasured(_)));
-        for code in [Some(75), Some(1), Some(137), None] {
-            let a = ran(code, Os::Windows, "t1", "x");
-            assert!(
-                matches!(interpret(Os::Windows, "t1", &one(), &a), Verdict::NotMeasured(_)),
-                "{code:?}"
-            );
-        }
-        assert!(matches!(
-            interpret(Os::Linux, "t1", &one(), &Err("no docker".into())),
-            Verdict::NotMeasured(_)
-        ));
-    }
-
-    /// A runner that answers per OS and records what it was asked.
+    /// A table CI: records what was asked, answers from fields.
     struct Fake {
-        linux: Result<RunResult, String>,
-        windows: Result<RunResult, String>,
-        asked: Mutex<Vec<Os>>,
+        reach: Result<Reach, String>,
+        sent: Result<Sent, String>,
+        run: Option<u64>,
+        end: RunEnd,
+        jobs: Vec<JobRow>,
+        failures: Vec<Failure>,
+        asked: Vec<String>,
     }
 
-    impl Runner for Fake {
-        fn run(&self, os: Os, _root: &Path, _tree: &str, _t: &BTreeSet<Target>) -> Result<RunResult, String> {
-            self.asked.lock().unwrap().push(os);
-            match os {
-                Os::Linux => self.linux.clone(),
-                Os::Windows => self.windows.clone(),
+    impl Fake {
+        fn green() -> Fake {
+            Fake {
+                reach: Ok(Reach::Projects),
+                sent: Ok(Sent::Yes),
+                run: Some(9),
+                end: RunEnd::Finished,
+                jobs: vec![job("crates (ubuntu-latest)", "success"), job("crates (windows-latest)", "success")],
+                failures: Vec::new(),
+                asked: Vec::new(),
             }
         }
     }
 
-    fn selected() -> Selection {
-        Selection {
-            linux: one(),
-            windows: one(),
-            why: vec!["x".into()],
+    impl Runs for Fake {
+        fn reaches(&mut self, base: &str, head: &str) -> Result<Reach, String> {
+            self.asked.push(format!("plan {base}..{head}"));
+            self.reach.clone()
+        }
+        fn publish(&mut self, commit: &str, git_ref: &str) -> Result<(), String> {
+            self.asked.push(format!("publish {commit} {git_ref}"));
+            Ok(())
+        }
+        fn dispatch(&mut self, git_ref: &str, base: &str) -> Result<Sent, String> {
+            self.asked.push(format!("dispatch {git_ref} base={base}"));
+            self.sent.clone()
+        }
+        fn find_run(&mut self, _commit: &str) -> Result<Option<u64>, String> {
+            Ok(self.run)
+        }
+        fn wait(&mut self, _run: u64) -> Result<RunEnd, String> {
+            Ok(self.end)
+        }
+        fn jobs(&mut self, _run: u64) -> Result<Vec<JobRow>, String> {
+            Ok(self.jobs.clone())
+        }
+        fn failures(&mut self, _run: u64) -> Result<Vec<Failure>, String> {
+            Ok(self.failures.clone())
+        }
+        fn delete(&mut self, git_ref: &str) {
+            self.asked.push(format!("delete {git_ref}"));
         }
     }
 
-    fn fake(linux: Result<RunResult, String>, windows: Result<RunResult, String>) -> Fake {
-        Fake {
-            linux,
-            windows,
-            asked: Mutex::new(Vec::new()),
+    fn merge() -> Merge {
+        Merge {
+            parents: vec![
+                "1111111111111111111111111111111111111111".into(),
+                "2222222222222222222222222222222222222222".into(),
+            ],
+            tree: "t".into(),
+            message: String::new(),
+            label: "m".into(),
+            commit: Some("abcdef0123456789abcdef0123456789abcdef01".into()),
         }
     }
 
-    /// A planted Linux-only failure: Windows passes, Linux fails, and the exit changes only when enforced.
     #[test]
-    fn a_planted_linux_only_failure_is_red_on_linux_and_green_on_windows() {
-        for (enforced, want) in [(false, Exit::Ok), (true, Exit::Findings)] {
-            let f = fake(
-                ran(Some(EXIT_TESTS_FAILED), Os::Linux, "t1", "FAIL macos_only_path"),
-                ran(Some(0), Os::Windows, "t1", SUMMARY),
-            );
-            let step = execute(Path::new("."), "t1", &selected(), &f, enforced, "abc");
-            assert_eq!(step.exit, want, "enforced={enforced}");
-            assert_eq!(step.data["outcome"], "failed");
-            assert_eq!(step.data["rows"][0]["outcome"], "failed");
-            assert_eq!(step.data["rows"][1]["outcome"], "passed");
-            assert!(step.text.join("\n").contains(if enforced {
-                "::error::member gate other-os FAILED on linux"
-            } else {
-                "::warning::member gate other-os FAILED on linux"
-            }));
-        }
+    fn a_member_the_plan_does_not_reach_is_not_run_and_nothing_is_pushed() {
+        let mut f = Fake::green();
+        f.reach = Ok(Reach::Nothing);
+        let s = run(&merge(), &mut f, true);
+        assert_eq!(s.data["outcome"], "not run");
+        assert_eq!(f.asked.len(), 1, "{:?}", f.asked);
     }
 
-    /// A planted Windows-only failure (a `#!/bin/sh` fixture): Linux passes, Windows fails.
     #[test]
-    fn a_planted_windows_only_failure_is_red_on_windows_and_green_on_linux() {
-        let f = fake(
-            ran(Some(0), Os::Linux, "t1", SUMMARY),
-            ran(Some(EXIT_TESTS_FAILED), Os::Windows, "t1", "FAIL sh_fixture"),
+    fn the_merge_is_pushed_dispatched_with_the_train_before_as_base_and_the_scratch_ref_is_always_deleted() {
+        let mut f = Fake::green();
+        let s = run(&merge(), &mut f, true);
+        assert_eq!(s.data["outcome"], "passed");
+        assert_eq!(s.exit, Exit::Ok);
+        let sref = "trial/member-abcdef012345";
+        assert_eq!(
+            f.asked,
+            vec![
+                "plan 1111111111111111111111111111111111111111..abcdef0123456789abcdef0123456789abcdef01".to_string(),
+                format!("publish abcdef0123456789abcdef0123456789abcdef01 {sref}"),
+                format!("dispatch {sref} base=1111111111111111111111111111111111111111"),
+                format!("delete {sref}"),
+            ]
         );
-        let step = execute(Path::new("."), "t1", &selected(), &f, true, "abc");
-        assert_eq!(step.exit, Exit::Findings);
-        assert_eq!(step.data["rows"][0]["outcome"], "passed");
-        assert_eq!(step.data["rows"][1]["outcome"], "failed");
+        // Also when the dispatch did not happen.
+        let mut f = Fake::green();
+        f.sent = Ok(Sent::Busy("run 8200".into()));
+        let s = run(&merge(), &mut f, true);
+        assert_eq!(s.data["outcome"], "not measured");
+        assert!(f.asked.last().unwrap().starts_with("delete "));
+    }
+
+    /// A planted new failure on Windows is red there and green on Linux; a busy runner or a still-running run is not measured; and
+    /// the exit changes only when enforced.
+    #[test]
+    fn a_new_failure_on_one_os_is_red_there_and_the_exit_changes_only_when_enforced() {
+        for (enforced, want) in [(false, Exit::Ok), (true, Exit::Findings)] {
+            let mut f = Fake::green();
+            f.jobs = vec![job("crates (ubuntu-latest)", "success"), job("crates (windows-latest)", "failure")];
+            f.failures = vec![fail("crates (windows-latest)", "sh_fixture", Blame::New)];
+            let s = run(&merge(), &mut f, enforced);
+            assert_eq!(s.exit, want, "enforced={enforced}");
+            assert_eq!(s.data["outcome"], "failed");
+            assert_eq!(s.data["rows"][0]["os"], "linux");
+            assert_eq!(s.data["rows"][0]["outcome"]["status"], "clean");
+            assert_eq!(s.data["rows"][1]["outcome"]["status"], "findings");
+            let text = s.text.join("\n");
+            let want_line = if enforced {
+                "::error::member gate other-os FAILED on windows"
+            } else {
+                "::warning::member gate other-os FAILED on windows"
+            };
+            assert!(text.contains(want_line), "{text}");
+        }
+        let mut f = Fake::green();
+        f.end = RunEnd::StillRunning;
+        assert_eq!(run(&merge(), &mut f, true).exit, Exit::NotMeasured);
+        let mut f = Fake::green();
+        f.run = None;
+        assert_eq!(run(&merge(), &mut f, true).data["outcome"], "not measured");
+        let mut f = Fake::green();
+        f.reach = Err("no plan".into());
+        assert_eq!(run(&merge(), &mut f, true).data["outcome"], "not measured");
     }
 
     #[test]
-    fn a_windows_row_says_the_guest_is_not_the_runners_architecture() {
-        let f = fake(ran(Some(0), Os::Linux, "t1", SUMMARY), ran(Some(0), Os::Windows, "t1", SUMMARY));
-        let step = execute(Path::new("."), "t1", &selected(), &f, true, "abc");
-        assert!(step.data["rows"][1]["note"].as_str().unwrap().contains("Arm64"));
-        assert_eq!(step.data["rows"][0]["note"], "");
-        assert!(step.text.join("\n").contains("windows: passed"));
-        assert!(step.text.join("\n").contains("Arm64 test VM"));
-    }
-
-    #[test]
-    fn an_unmeasured_os_never_hides_the_other_and_costs_the_not_measured_exit_once_enforced() {
-        let f = fake(Err("docker is not running".into()), ran(Some(0), Os::Windows, "t1", SUMMARY));
-        let step = execute(Path::new("."), "t1", &selected(), &f, true, "abc");
-        assert_eq!(step.exit, Exit::NotMeasured);
-        assert_eq!(step.data["outcome"], "not measured");
-        assert_eq!(step.data["rows"][0]["why"], "docker is not running");
-        assert_eq!(step.data["rows"][1]["outcome"], "passed");
-        assert_eq!(f.asked.lock().unwrap().len(), 2);
-        assert_eq!(execute(Path::new("."), "t1", &selected(), &f, false, "abc").exit, Exit::Ok);
-    }
-
-    #[test]
-    fn an_os_with_nothing_selected_is_a_row_that_says_so_and_is_not_asked() {
-        let f = fake(ran(Some(0), Os::Linux, "t1", SUMMARY), Err("must not be asked".into()));
-        let only_linux = Selection {
-            linux: one(),
-            windows: BTreeSet::new(),
-            why: vec![],
-        };
-        let step = execute(Path::new("."), "t1", &only_linux, &f, true, "abc");
-        assert_eq!(step.exit, Exit::Ok);
-        assert_eq!(step.data["rows"][1]["outcome"], "not run");
-        assert_eq!(*f.asked.lock().unwrap(), vec![Os::Linux]);
+    fn the_scratch_ref_is_in_the_trial_namespace_that_trial_prune_cleans() {
+        assert_eq!(scratch_ref("abcdef0123456789"), "trial/member-abcdef012345");
+        assert!(scratch_ref("ab").starts_with("trial/"));
     }
 }

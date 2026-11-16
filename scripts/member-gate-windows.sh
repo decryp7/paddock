@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# The Windows half of the other-os member gate (`./dev merge check --gates`, tools/paddock-dev/src/merge_check/other_os.rs): the
-# member's affected nextest packages build and run NATIVELY on the test VM the way the Gitea Windows runner starts a step
+# MANUAL USE ONLY. The other-os member gate (`./dev merge check --gates`, tools/paddock-dev/src/merge_check/other_os.rs) runs on the
+# real CI runners since the user's decision of 2026-11-16; this script no longer belongs to it. It stays to run one package
+# natively on the Windows test VM by hand (for a Windows-only investigation, with the guest's own differences: Arm, Prism, a
+# runner-style PATH that is not the runner's). Its packages build and run NATIVELY on the test VM the way the Gitea Windows runner starts a step
 # (`vm-win.sh run --ci-like`: runner-style temp folder, a fresh checkout with core.autocrlf=true, Git bash, CI env), under the test
 # machines lock. Tests that run cargo (paddock-dev's) therefore work: the guest has the pinned Rust toolchain.
 #
