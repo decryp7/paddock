@@ -486,6 +486,20 @@ fn git_for_windows_found_through_mingw64_brings_its_usr_bin() {
     assert!(dirs.iter().any(|d| d == &usr_bin), "{report}");
     let system32 = dirs.iter().filter(|d| d.ends_with("system32")).count();
     assert_eq!(system32, 1, "System32 joined more than once: {report}");
+    // The `git` a child (the program under test) finds is the real one, never Git's `bin\git.exe` or `cmd\git.exe`, which
+    // only start it again: one more process per call (ci.yml run 8161: merge_check about 5.7 times slower; measured on the
+    // test VM, 62 against 44 ms per call alone and 167 against 101 ms with 8 at once, called in turn, docs/benchmarks.md).
+    let first_git = report
+        .child
+        .iter()
+        .map(|d| d.join("git.exe"))
+        .find(|p| p.is_file())
+        .map(|p| p.to_string_lossy().replace('/', "\\").to_lowercase());
+    let real = git
+        .join("mingw64\\bin\\git.exe")
+        .to_string_lossy()
+        .to_lowercase();
+    assert_eq!(first_git.as_deref(), Some(real.as_str()), "{report}");
 }
 
 /// `new("cargo")` starts the cargo that runs this test (`CARGO`), not rustup's proxy, which puts all of `$CARGO_HOME/bin` in

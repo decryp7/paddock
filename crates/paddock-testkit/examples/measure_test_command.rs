@@ -1,7 +1,7 @@
 //! How long `TestCommand::new` takes, and its parts (docs/benchmarks.md, "TestCommand construction"; ADR 0100). Not a test:
 //! run it by hand, on the machine whose numbers you want (the Windows test VM through `scripts/vm-win.sh run --ci-like`).
 //!
-//!     measure_test_command [--fake-toolchain <empty folder>] [--saturate] [--runs <n>]
+//!     measure_test_command [--fake-toolchain <empty folder>] [--saturate] [--runs <n>] [--git-calls <n>]
 //!
 //! `--fake-toolchain` makes a toolchain of the shape rustup installs in the folder (one 15 MB `rustup` with its proxies as hard
 //! links of it, and a separate `cargo`) and puts it first on this process's `PATH` and in `CARGO`, so the command links real
@@ -127,4 +127,92 @@ fn main() {
         ms(t),
         report.toolchain.len()
     );
+    // `--git-ab <n>`: Git for Windows' launcher `<root>\\bin\\git.exe` against the real git on this process's PATH, called in turn
+    // (A, B, A, B, ...) so a busy moment costs both the same: what one launcher in front of every call costs.
+    if let Some(n) = flag("--git-ab")
+        .and_then(|i| args.get(i + 1))
+        .map(|v| v.parse::<usize>().unwrap())
+    {
+        let process: Vec<PathBuf> =
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+        let real = process
+            .iter()
+            .map(|d| d.join(exe("git")))
+            .find(|p| p.is_file());
+        let launcher = report
+            .child
+            .iter()
+            .find(|d| d.ends_with("usr/bin") || d.ends_with("usr\\bin"))
+            .and_then(|usr_bin| {
+                usr_bin
+                    .parent()?
+                    .parent()
+                    .map(|root| root.join("bin").join(exe("git")))
+            })
+            .filter(|p| p.is_file());
+        match (launcher, real) {
+            (Some(a), Some(b)) => {
+                let (mut ta, mut tb) = (0.0, 0.0);
+                for _ in 0..n {
+                    for (g, total) in [(&a, &mut ta), (&b, &mut tb)] {
+                        let t = Instant::now();
+                        #[allow(clippy::disallowed_methods)]
+                        // a timing of plain spawns, each awaited here
+                        let ok = std::process::Command::new(g)
+                            .arg("--version")
+                            .output()
+                            .is_ok_and(|o| o.status.success());
+                        assert!(ok, "{} --version failed", g.display());
+                        *total += ms(t);
+                    }
+                }
+                println!(
+                    "git-ab: launcher {} {:.1} ms per call; real {} {:.1} ms per call ({n} each, in turn)",
+                    a.display(),
+                    ta / n as f64,
+                    b.display(),
+                    tb / n as f64
+                );
+            }
+            (a, b) => println!("git-ab: launcher {a:?}, real {b:?}: not both found"),
+        }
+    }
+    // `--git-calls <n>`: which `git` a child finds on its curated PATH (what the program under test starts when it runs `git`),
+    // against the one on this process's PATH, and what n runs of each cost.
+    if let Some(n) = flag("--git-calls")
+        .and_then(|i| args.get(i + 1))
+        .map(|v| v.parse::<usize>().unwrap())
+    {
+        let git_in = |dirs: &[PathBuf]| {
+            dirs.iter()
+                .map(|d| d.join(exe("git")))
+                .find(|p| p.is_file())
+        };
+        let process: Vec<PathBuf> =
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+        for (label, git) in [
+            ("child's PATH", git_in(&report.child)),
+            ("process's PATH", git_in(&process)),
+        ] {
+            let Some(git) = git else {
+                println!("git on the {label}: none");
+                continue;
+            };
+            let t = Instant::now();
+            for _ in 0..n {
+                #[allow(clippy::disallowed_methods)] // a timing of plain spawns, each awaited here
+                let ok = std::process::Command::new(&git)
+                    .arg("--version")
+                    .output()
+                    .is_ok_and(|o| o.status.success());
+                assert!(ok, "{} --version failed", git.display());
+            }
+            println!(
+                "git on the {label}: {} ; {n} runs of --version: {:.0} ms ({:.1} ms each)",
+                git.display(),
+                ms(t),
+                ms(t) / n as f64
+            );
+        }
+    }
 }

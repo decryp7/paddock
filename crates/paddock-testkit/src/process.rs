@@ -9,7 +9,7 @@
 //!   folder made for this command ([`TestCommand::private_dir`]), removed when the command drops;
 //! - `PATH` is curated: a folder of links to the toolchain's programs (`cargo`, `rustc`, `rustup`, ...; never the folder they are
 //!   in, where `cargo install` puts other tools), shared under the build's target folder or the command's own, then the folders
-//!   of `node`, `npm`, `npx` and `git` on the captured `PATH` ([`crate::ambient`]), on Windows Git for Windows' `usr/bin` and `bin`, then the system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`: `lsof` and `ps` are there), nothing else; [`TestCommand::path_first`] puts a test's own stand-in folder first, and `env("PATH", ..)`
+//!   of `node`, `npm`, `npx` and `git` on the captured `PATH` ([`crate::ambient`]), on Windows Git for Windows' `usr/bin` after git's own folder, then the system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`: `lsof` and `ps` are there), nothing else; [`TestCommand::path_first`] puts a test's own stand-in folder first, and `env("PATH", ..)`
 //!   replaces it whole;
 //! - the toolchain variables cargo needs (`RUSTUP_HOME`, `CARGO_HOME`, `RUSTUP_TOOLCHAIN`) and, on Windows, the few the OS
 //!   needs (`SystemRoot`, ...): [`PASSED_THROUGH`], from the machine values captured once per process ([`crate::ambient`]),
@@ -587,7 +587,8 @@ const TOOLCHAIN: &[&str] = &[
 ];
 
 /// The other programs whose folder, as the test process finds it, joins the curated `PATH`. On Windows Git for Windows' `usr/bin`
-/// and `bin` join too, found from `git --exec-path` ([`git_root`]); the POSIX tools are in those or in the system folders.
+/// joins too, after git's own folder, found from `git --exec-path` ([`git_root`]); the POSIX tools are there or in the system
+/// folders.
 pub(crate) const NAMED_TOOLS: &[&str] = &["node", "npm", "npx", "git"];
 
 /// What decided a [`TestCommand`]'s `PATH` (ER-27): put it in a failure message, so a test that finds a tool missing says which
@@ -719,7 +720,7 @@ struct Curated {
     /// Whether `links` is the shared folder's answer; `false` when there is no link root or it refused the folder, and each
     /// command then links into its own folder.
     shared: bool,
-    /// The folders after it: the [`NAMED_TOOLS`]' (on Windows Git's `usr/bin` and `bin`), then the system folders.
+    /// The folders after it: the [`NAMED_TOOLS`]' (on Windows Git's `usr/bin` after git's own folder), then the system folders.
     tail: Vec<PathBuf>,
     /// Git for Windows' install folder, when one was found.
     git_root: Option<PathBuf>,
@@ -1107,8 +1108,9 @@ fn path_key(d: &Path) -> String {
     }
 }
 
-/// The folders after the link folder: those of the [`NAMED_TOOLS`] found on `ambient` (and, on Windows, Git for Windows' `usr/bin`
-/// and `bin`), then the system folders; each once, Windows folders compared without case.
+/// The folders after the link folder: those of the [`NAMED_TOOLS`] found on `machine`'s `PATH` (and, on Windows, Git for Windows'
+/// `usr/bin` after git's own folder, never its `bin` of launchers), then the system folders; each once, Windows folders compared
+/// without case.
 fn tail_dirs(machine: &Ambient, links: Option<&Path>, git_root: Option<&Path>) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     let system = system_dirs(machine);
@@ -1119,20 +1121,21 @@ fn tail_dirs(machine: &Ambient, links: Option<&Path>, git_root: Option<&Path>) -
         if !found.is_absolute() {
             continue;
         }
-        if *tool == "git"
-            && let Some(root) = git_root
-        {
-            dirs.extend(
-                [root.join("usr").join("bin"), root.join("bin")]
-                    .into_iter()
-                    .filter(|d| d.is_dir()),
-            );
-        }
         if let Some(d) = found
             .parent()
             .filter(|d| !d.as_os_str().is_empty() && !system_keys.contains(&path_key(d)))
         {
             dirs.push(d.to_path_buf());
+        }
+        // Git for Windows' shell tools come after git's own folder, so a child's `git` is the real program; `bin` (and `cmd`)
+        // hold only launchers that start it again, one more process per call (ci.yml run 8161: merge_check about 5.7 times
+        // slower on Windows; measured on the test VM: 62 against 44 ms per call alone, 167 against 101 ms with 8 at once).
+        if *tool == "git"
+            && let Some(usr_bin) = git_root
+                .map(|root| root.join("usr").join("bin"))
+                .filter(|d| d.is_dir())
+        {
+            dirs.push(usr_bin);
         }
     }
     dirs.extend(system);
