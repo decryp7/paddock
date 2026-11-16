@@ -1,5 +1,5 @@
 import { MatTooltip } from '@angular/material/tooltip';
-import { ChangeDetectionStrategy, Component, computed, ElementRef, effect, input, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, ElementRef, effect, inject, input, signal, viewChild } from '@angular/core';
 import { fitEnd, fitPath } from '@decryp7/paddock-ui/format';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import { copyText } from './clipboard';
@@ -38,6 +38,8 @@ import { copyText } from './clipboard';
   `,
 })
 export class PdPathText {
+  private copiedTimer: ReturnType<typeof setTimeout> | undefined;
+
   /** The text shown (shortened in the middle when it does not fit). */
   readonly value = input.required<string>();
   /** What the tooltip shows and Copy copies when it is more than `value` (a file name shown for its full path). */
@@ -72,6 +74,8 @@ export class PdPathText {
   protected readonly copied = signal(false);
 
   constructor() {
+    // The label's reset ends with the component: one left running fires into whatever runs next.
+    inject(DestroyRef).onDestroy(() => clearTimeout(this.copiedTimer));
     // effect-state: a ResizeObserver is outside the signal graph (DOM); it sets the width signal because the browser, not another signal, owns that value.
     effect((onCleanup) => {
       const el = this.box().nativeElement;
@@ -120,6 +124,7 @@ export class PdPathText {
     if (!(await copyText(text))) return;
     this.copied.set(true);
     // Resetting the label is a side effect on this component's own display, a timer outside the signal graph.
-    setTimeout(() => this.copied.set(false), 1500);
+    clearTimeout(this.copiedTimer);
+    this.copiedTimer = setTimeout(() => this.copied.set(false), 1500);
   }
 }

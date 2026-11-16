@@ -56,6 +56,8 @@ export class AngularContentRenderer implements IContentRenderer {
   readonly element = document.createElement('div');
   private ref: ComponentRef<PanelOutlet> | null = null;
   private disposed = false;
+  /** The reset of the Copy details label; `dispose` ends it. */
+  private copyTimer: ReturnType<typeof setTimeout> | undefined;
   private mounted = false;
   private visibility?: { dispose(): void };
   private resizeObserver?: ResizeObserver;
@@ -254,7 +256,8 @@ export class AngularContentRenderer implements IContentRenderer {
     } catch {
       button.textContent = $localize`:@@pd.wb.dock.panel.copyFailed:Copy failed`;
     }
-    setTimeout(() => (button.textContent = $localize`:@@pd.wb.dock.panel.copyDetails:Copy details`), 1500);
+    clearTimeout(this.copyTimer);
+    this.copyTimer = setTimeout(() => (button.textContent = $localize`:@@pd.wb.dock.panel.copyDetails:Copy details`), 1500);
   }
 
   private destroyComponent(): void {
@@ -282,6 +285,7 @@ export class AngularContentRenderer implements IContentRenderer {
 
   dispose(): void {
     this.disposed = true;
+    clearTimeout(this.copyTimer);
     this.visibility?.dispose();
     this.resizeObserver?.disconnect();
     this.destroyComponent();

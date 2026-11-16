@@ -5,6 +5,19 @@
  * `@decryp7/paddock-ui/shell/testing`.
  */
 export { installTestKit, type TestKitOptions } from './src/setup';
+export {
+  installLeakDetector,
+  LeakDetector,
+  registerInFlight,
+  registerSingleton,
+  timerOwner,
+  type InFlightSource,
+  type LeakDetectorOptions,
+  type LeakFinding,
+  type LeakKind,
+  type LeakMode,
+  type ResettableSingleton,
+} from './src/leaks';
 export { all, at, buttonByText, byText, manualFrames, must, one, press, text, typeInto } from './src/dom';
 export { FakeChart, FakeECharts } from './src/fake-chart';
 export { assertStatusGlyphs, statusGlyphRenderProblems } from './src/status-glyphs';

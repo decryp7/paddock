@@ -1,7 +1,7 @@
 import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { AppMenu, MENU_MODE, MENU_OS, provideMenus, QUIT_TITLE } from './app-menu';
-import { APP_QUIT, provideContributions, ContributionRegistry, provideShellContext, provideShellCore, ShellContextHost } from '@decryp7/paddock-ui/shell';
+import { APP_QUIT, provideContributions, ContributionRegistry, provideShellContext, provideShellCore, ShellContextHost, SHELL_IDLE } from '@decryp7/paddock-ui/shell';
 import { QUIT_COMMAND } from '../generated/menu';
 import { currentOs, currentPlatform } from './keys';
 import { provideNativeMenu, tauriNativeMenuPort } from './native-menu';
@@ -48,7 +48,8 @@ describe('Quit', () => {
 
   it('only warns in a window without a quit', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideShellCore(), provideShellContext(() => Promise.resolve(() => ({})))] });
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideShellCore(), provideShellContext(() => Promise.resolve(() => ({}))), { provide: SHELL_IDLE, useValue: (work: () => void) => work() }],
+    });
     const ctx = await TestBed.inject(ShellContextHost).load();
     await ctx.quitApp();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('APP_QUIT'));
