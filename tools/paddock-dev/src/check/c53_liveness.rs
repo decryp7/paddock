@@ -376,13 +376,13 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
     // The growth check needs only git, so it runs in every whole run and whenever the baseline itself is in scope.
     if (whole_run || baseline_in_scope) && !entries.is_empty() {
         match growth(root, &ctx.base_ref(), &entries) {
-            Growth::Reason(reason) => out.push(Finding::warn(
+            Growth::Unmeasured(why) => out.push(baseline::unmeasured_finding(
+                ctx.in_ci(),
                 "C53",
                 53,
                 LIVENESS_BASELINE,
-                1,
-                format!("the baseline's shrink-only rule is not enforced here: {reason}"),
-                "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.",
+                "the baseline",
+                &why,
             )),
             Growth::Added { base, added, moved } => {
                 for m in &moved {

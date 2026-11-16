@@ -74,6 +74,7 @@ fn options(root: &Path) -> RunOptions {
         files: None,
         today: "2026-11-10".into(),
         base_ref: Some("origin/main".into()),
+        ci: Some(false),
     }
 }
 
@@ -264,6 +265,7 @@ fn live_tree_findings_equal_the_js_host() {
                 scope: None,
                 today: paddock_dev::check::today_utc(),
                 base_ref: None,
+                ci: Some(false),
                 ..options(&root)
             };
             let tree = Tree::open(&root).with_progress(move || progress.tick());

@@ -176,7 +176,7 @@ test('allow list growth: a list new at the merge base, a fixture folder without 
 
 // ---- the target ref: a member branch of a train is measured against the train, not main (ER-21; report-only, ER-41) ----
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { targetRef } from '../src/util/baseline.mjs';
+import { isCi, targetRef } from '../src/util/baseline.mjs';
 
 /** main has the list `base`; `train` (off main) has `trainList`; `member` (off train) has `memberList`. */
 function trainRepo(base, trainList, memberList) {
@@ -217,17 +217,52 @@ test('target ref: the run\'s own, else PADDOCK_BASE_REF, else origin/main, and n
     if (saved === undefined) delete process.env.PADDOCK_BASE_REF;
     else process.env.PADDOCK_BASE_REF = saved;
   }
-  // A source audit over the host's own code (not declared data): the variable is read in util/baseline.mjs only.
-  const readers = [];
+  // A source audit over the host's own code (not declared data): outside util/baseline.mjs no code line names the variable (a read by
+  // `process.env.X`, `process.env['X']`, a destructuring or `env[...]` all name it), over src, bin and the CI scripts.
+  const offenders = [];
   const walk = (dir) => {
     for (const f of readdirSync(dir)) {
       const p = join(dir, f);
+      if (f === 'node_modules' || f === 'test' || f === 'fixtures') continue;
       if (statSync(p).isDirectory()) walk(p);
-      else if (f.endsWith('.mjs') && /process\.env\.PADDOCK_BASE_REF/.test(readFileSync(p, 'utf8'))) readers.push(p);
+      else if (/\.(?:mjs|js|cjs)$/.test(f) && !p.endsWith('conformance/src/util/baseline.mjs')) {
+        const code = readFileSync(p, 'utf8').split('\n').filter((l) => !/^\s*(?:\/\/|\*|\/\*)/.test(l)).map((l) => l.replace(/\s\/\/.*$/, ''));
+        if (code.some((l) => l.includes('PADDOCK_BASE_REF'))) offenders.push(p.slice(p.indexOf('conformance/')));
+      }
     }
   };
-  walk(new URL('../src', import.meta.url).pathname);
-  assert.deepEqual(readers.map((p) => p.slice(p.indexOf('conformance/'))), ['conformance/src/util/baseline.mjs']);
+  walk(new URL('..', import.meta.url).pathname);
+  assert.deepEqual(offenders, []);
+});
+
+test('target ref: an empty PADDOCK_BASE_REF or run ref is unset', () => {
+  const saved = process.env.PADDOCK_BASE_REF;
+  try {
+    process.env.PADDOCK_BASE_REF = '';
+    assert.equal(targetRef({}), 'origin/main');
+    assert.equal(targetRef({ baseRef: '' }), 'origin/main');
+    process.env.PADDOCK_BASE_REF = 'origin/train/x';
+    assert.equal(targetRef({ baseRef: '' }), 'origin/train/x');
+  } finally {
+    if (saved === undefined) delete process.env.PADDOCK_BASE_REF;
+    else process.env.PADDOCK_BASE_REF = saved;
+  }
+});
+
+test('allow list growth: a target ref that cannot be seen is a warning locally and a not-measured error in CI (ADR 0089)', async () => {
+  const root = growthRepo([ok(1)], [ok(1)]);
+  const said = async (ci) => (await findingsOf('C130', root, { options: { baseRef: 'no-such-ref', ci } })).filter((f) => /shrink-only rule/.test(f.message));
+  const local = await said(false);
+  assert.deepEqual(local.map((f) => [f.severity, f.unwaivable ?? false]), [['warn', false]]);
+  const ci = await said(true);
+  assert.deepEqual(ci.map((f) => [f.severity, f.unwaivable, f.outcome]), [['error', true, 'not-measured']]);
+  assert.match(ci[0].message, /^not measured: the allow list's shrink-only rule cannot be checked/);
+  assert.match(ci[0].fix, /ADR 0089/);
+  // The older format at the base is not a missing target: a warning with its own fix even in CI.
+  assert.equal(isCi({ CI: 'true' }), true);
+  assert.equal(isCi({ CI: 'false' }), false);
+  assert.equal(isCi({ GITEA_ACTIONS: 'true' }), true);
+  assert.equal(isCi({}), false);
 });
 
 test('allow list growth: a base in the older format says so with its own fix', async () => {

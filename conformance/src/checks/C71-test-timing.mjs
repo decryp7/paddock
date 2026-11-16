@@ -36,7 +36,7 @@
 // performance.now, page.clock.install without pauseAt, vi.waitFor under fake timers, the live-status spread, C30's elapsed asserts,
 // vm-smoke `observe()`, the ESLint rule.
 import { createHash } from 'node:crypto';
-import { baselineGrowth as sharedGrowth, reconcile, targetRef } from '../util/baseline.mjs';
+import { baselineGrowth as sharedGrowth, reconcile, targetRef, unmeasuredFinding } from '../util/baseline.mjs';
 import { error, warn } from '../finding.mjs';
 import { maskRust } from './C39-freed-port.mjs';
 
@@ -542,7 +542,7 @@ export default {
       if (baseline.sites.length) {
         const g = baselineGrowth(ctx, baseline.sites, path);
         if (g.reason) {
-          out.push(warn('C71', 49, path, 1, `the baseline's shrink-only rule is not enforced here: ${g.reason}`, 'Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.'));
+          out.push(unmeasuredFinding(ctx, { id: 'C71', rule: 49, file: path, g }));
         } else {
           out.push(...g.moved.map((m) => growthMovedWarning('C71', 49, path, m)));
         }

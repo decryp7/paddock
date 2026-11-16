@@ -49,10 +49,17 @@ impl Gate {
             .chain(self.args.iter().map(String::as_str))
             .collect::<Vec<_>>()
             .join(" ");
+        // The ref the growth checks measure against changes their verdict, so a rerun carries it (ER-27).
+        let base = self
+            .env
+            .iter()
+            .find(|(k, _)| k == "PADDOCK_BASE_REF")
+            .map(|(k, v)| format!("{k}={v} "))
+            .unwrap_or_default();
         if self.cwd.is_empty() {
-            line
+            format!("{base}{line}")
         } else {
-            format!("cd {} && {line}", self.cwd)
+            format!("cd {} && {base}{line}", self.cwd)
         }
     }
 }

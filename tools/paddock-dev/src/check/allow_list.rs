@@ -15,9 +15,10 @@
 //! with the list at the merge base (`baseline::growth`, the one comparison C53 and C115 use), and an entry the merge base lacks, or a
 //! raised `count`, is one unwaivable finding at the allow file that needs the user's approval. The comparison runs only on a checkout
 //! (a folder git accepts as a work tree): a tree in memory (a control) or a fixture folder has nothing to compare, and says nothing. In a checkout
-//! where git cannot give a merge base it warns that the rule is not enforced, never silence. The base is the target ref
-//! ([`baseline::target_ref`], the one reader of `PADDOCK_BASE_REF`). Report-only (ER-41) until the first green run on the real tree
-//! with it set in CI.
+//! where git cannot give a merge base it warns that the rule is not enforced, and in CI it is a not-measured error (ADR 0089), never
+//! silence. The base is the target ref ([`baseline::target_ref`], the one reader of `PADDOCK_BASE_REF`). The growth finding is a
+//! warning only because the checks that use this reader (C121, C124, C125, C130) are report-only themselves (ER-41); the blocking
+//! baselines (C53, C71, C104, C115) use the same target ref and stay errors.
 
 use super::baseline::{self, Growth};
 use super::finding::Finding;
@@ -27,9 +28,6 @@ use super::{CheckOutput, Ctx};
 use std::collections::HashSet;
 use std::rc::Rc;
 
-const FETCH_FIX: &str =
-    "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.";
-const PARSE_FIX: &str = "The list at the base is in an older format (an entry without a `site`), so growth cannot be measured against it; nothing to fix here: it is measured once the new format is on the base branch.";
 const UNREAD_FIX: &str = "Make the file readable (permissions) and run the check again.";
 
 /// The check that reads an allow list, as the reader needs it.
@@ -279,14 +277,7 @@ impl AllowList {
         let entries_of = |text: &str| parse(text, file).ok().map(|e| expand(&e));
         let exact = |k: &String| k.clone();
         match baseline::growth(ctx.root(), &ctx.base_ref(), file, &current, &entries_of, &exact, None) {
-            Growth::Reason(reason) => vec![Finding::warn(
-                id,
-                rule,
-                file,
-                1,
-                format!("the allow list's shrink-only rule is not enforced here: {reason}"),
-                if reason.contains("cannot be parsed") { PARSE_FIX } else { FETCH_FIX },
-            )],
+            Growth::Unmeasured(why) => vec![baseline::unmeasured_finding(ctx.in_ci(), id, rule, file, "the allow list", &why)],
             Growth::Added { added: 0, .. } => Vec::new(),
             Growth::Added { base, added, .. } => vec![
                 Finding::warn(
