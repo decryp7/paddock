@@ -232,7 +232,7 @@ test('Widget grid: the states and the twelve golden scenarios are drawn', async 
 });
 
 test.describe('frame budget', () => {
-  // Measures real frames: the sampler reads requestAnimationFrame and performance.now, which the fake clock replaces, so under the pin it counted 8 frames in a drag that draws more than 30 on the real clock.
+  // pinned-clock: off — measures real frames: the sampler counts requestAnimationFrame calls on performance.now, which the fake clock replaces (8 frames pinned against 31 real in the same drag)
   test.use({ pinnedClock: false });
   test('Widget grid: a drag across a 32-widget board stays under the frame budget', async ({ page }) => {
   await open(page, 'dark');

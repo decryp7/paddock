@@ -5,10 +5,12 @@ const eslint = require('@eslint/js');
 const { defineConfig } = require('eslint/config');
 const tseslint = require('typescript-eslint');
 const angular = require('angular-eslint');
+// Every e2e page runs on the pinned clock: specs reach `test` through e2e/test.ts only (C133).
+const { e2ePinnedClock } = require('../../../eslint/src/index.cjs');
 
 module.exports = defineConfig(
   {
-    ignores: ['dist/**', '.angular/**', 'coverage/**', 'node_modules/**', 'src-tauri/**', 'playwright-report/**', 'test-results/**', 'e2e/**', 'playwright.config.ts'],
+    ignores: ['dist/**', '.angular/**', 'coverage/**', 'node_modules/**', 'src-tauri/**', 'playwright-report/**', 'test-results/**', 'playwright.config.ts'],
   },
   {
     files: ['**/*.ts'],
@@ -24,4 +26,5 @@ module.exports = defineConfig(
     files: ['**/*.html'],
     extends: [angular.configs.templateRecommended, angular.configs.templateAccessibility],
   },
+  ...e2ePinnedClock(),
 );

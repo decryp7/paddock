@@ -1,7 +1,7 @@
 // Flat ESLint config for the shared UI workspace: the Paddock preset (rules 27 to 39, angular-eslint template and
 // accessibility rules) over every project. The library's selectors start with `pd`; the demo apps have their own prefixes.
 const { defineConfig } = require('eslint/config');
-const { preset } = require('../eslint/src/index.cjs');
+const { preset, e2ePinnedClock } = require('../eslint/src/index.cjs');
 
 const selectorsOf = (prefix) => ({
   '@angular-eslint/component-selector': ['error', { type: 'element', prefix, style: 'kebab-case' }],
@@ -18,4 +18,5 @@ module.exports = defineConfig(
     files: ['**/*.spec.ts', 'projects/**/testing.ts'],
     rules: { '@angular-eslint/component-selector': 'off', '@angular-eslint/directive-selector': 'off' },
   },
+  ...e2ePinnedClock(),
 );

@@ -36,3 +36,7 @@ based heuristic; reads through injected stores are not seen.
 
 Tests: `npm test` (RuleTester valid and invalid cases per rule, and the preset run through ESLint on temp files). Needs
 `npm install` for the peer dependencies as dev dependencies.
+
+## `e2ePinnedClock`: the spec folders
+
+`...e2ePinnedClock()` (flat-config blocks for `e2e/**/*.ts` except `e2e/test.ts`) refuses what would give a spec an unpinned page: a value, default or namespace import or a re-export of `test` from `@playwright/test` or `@decryp7/paddock-e2e` (`import type` is allowed), a dynamic `import()` or `require()` of them, a bare `clock.install()` (also `({})` and `(undefined)`), and `browser.newContext()` / `browser.newPage()`. A spec imports `test` and `expect` from the app's `e2e/test.ts`, which wraps `pinnedClockTest`, and makes a context of its own with `newPinnedContext`. What a linter cannot say (a reason on every opt-out, live-page steps, a wait over an empty set) is conformance C133.
