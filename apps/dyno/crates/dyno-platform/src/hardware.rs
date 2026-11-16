@@ -868,7 +868,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_copy_installed_after_the_reader_was_made_is_found_without_a_restart() {
         let tools = temp("late-own");
@@ -889,7 +888,6 @@ mod tests {
 
     /// A smartctl (the testkit's stand-in) that prints `scan` for `--scan` and `drive` for any other call, both with exit status 4
     /// (smartctl's exit status is a bit mask).
-    #[cfg(unix)]
     fn fake_smartctl(dir: &Path, scan: &str, drive: &str) -> PathBuf {
         paddock_testkit::StandIn::new(dir, "smartctl")
             .stdout(drive)
@@ -901,7 +899,6 @@ mod tests {
             .to_path_buf()
     }
 
-    #[cfg(unix)]
     #[test]
     fn smartctl_output_is_read_even_though_its_exit_status_is_a_bit_mask() {
         let dir = temp("smart");
@@ -912,7 +909,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[cfg(unix)]
     #[test]
     fn apple_silicon_scan_with_three_long_names_gives_one_ssd_once() {
         let dir = temp("smart-ios");
@@ -926,7 +922,6 @@ mod tests {
     }
 
     /// A smartctl that answers per drive: the USB entries fail to open (as on macOS, no USB SMART passthrough), the rest read.
-    #[cfg(unix)]
     fn usb_failing_smartctl(dir: &Path, scan: &str, drive: &str) -> PathBuf {
         use paddock_testkit::Actions;
         let usb = r#"{"smartctl":{"exit_status":2,"messages":[{"string":"Smartctl open device: IOService:/x/usb-drd1@B000000/IOBlockStorageServices failed: IOCreatePlugInInterfaceForService failed","severity":"error"}]}}"#;
@@ -941,7 +936,6 @@ mod tests {
             .to_path_buf()
     }
 
-    #[cfg(unix)]
     #[test]
     fn an_unreadable_usb_drive_does_not_hide_the_internal_ssd_and_is_explained_truthfully() {
         let dir = temp("smart-usb");
@@ -968,7 +962,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(only_usb);
     }
 
-    #[cfg(unix)]
     #[test]
     fn smartctl_refusals_name_the_next_step() {
         let dir = temp("smartdeny");
@@ -1008,7 +1001,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     #[test]
     fn the_device_type_of_the_scan_is_passed_to_smartctl() {
         let dir = temp("smart-d");
@@ -1030,7 +1022,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_drive_that_prints_nothing_is_explained() {
         let dir = temp("smart-run");
