@@ -113,6 +113,26 @@ describe('the shared afterEach for booted start-up work', () => {
     throw new Error('this test fails on purpose');
   });
 
+  // A load that never settles: the hook's wait is bounded by this test's timeout, and drains the record, so the next
+  // test does not wait on it.
+  it.fails('a start-up load that never settles ...', { timeout: 300 }, async () => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideTinyBackendBare(),
+        provideFakeDock(),
+        { provide: COMMAND_CONTEXT, useValue: new FakeCommandContext() },
+        { provide: SHELL_IDLE, useValue: (work: () => void) => work() },
+        ...lazyCommandFactory(() => new Promise(() => undefined), [{ id: 'never.run', title: 'Never' }]),
+      ],
+    });
+    TestBed.inject(CommandRegistry).all();
+    await settleStartup();
+  });
+
+  it('... leaves the next, clean test green and not waiting on it', async () => {
+    await startupLoadsSettled();
+  });
+
   it('... leaves the next, clean test green and with a TestBed it can still configure', () => {
     const clean = new InjectionToken<string>('clean');
     TestBed.configureTestingModule({ providers: [{ provide: clean, useValue: 'ok' }] });
