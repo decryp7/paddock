@@ -11,9 +11,11 @@
 // - rule 2 (live specs): a spec that imports `pauseLive`, `withLivePaused`, `clickWithLivePaused` or `resumeLive` from the kit is a live-page
 //   spec; in each of its tests the first click, key, focus, tap or fill is inside a `withLivePaused(` callback or after a `pauseLive(`, or the
 //   test carries `// conformance: e2e-live — <why>` (it drives the updates itself, or reads nothing the updates change).
-// - rule 3 (no wait over an empty set, ER-12): a `waitForFunction(` whose function calls `.every(` and never checks a length or size is true
-//   before the first box is drawn (`every()` over no boxes); wait with `settledLayout` from the kit (never vacuous), or check the count.
-//   A site that is fine carries `// conformance: e2e-wait — <why>`.
+// - rule 3 (no wait over an empty set, ER-12): a `waitForFunction(` whose function calls `.every(` and checks no length or size of the set
+//   (a `.length` inside the `every` callback is the element's own and does not count) is true before the first box is drawn: `every()` over
+//   no boxes. This is about boxes that must exist (rows, tables, path boxes); wait with `settledLayout` from the kit (never vacuous), or
+//   check the count. Where an empty set IS the settled state (`document.getAnimations()`), the site carries
+//   `// conformance: e2e-wait — <why>`. Limit: only a function written inside the call is read; one passed by name is not.
 // Out of scope, with their own Playwright configs outside the e2e folders: Debrief's `scripts/screenshots/capture.ts` and
 // `scripts/visual-qa/sweep.ts`.
 // ER-41: report-only (warnings) until its first green run on the real tree is recorded here. Recorded: not yet.
@@ -111,7 +113,13 @@ export function emptySetWaits(text) {
     const close = closeParen(code, open);
     if (close < 0) continue;
     const call = code.slice(open, close);
-    if (!/\.every\s*\(/.test(call) || /\.length\b|\.size\b|\.count\b/.test(call)) continue;
+    const every = /\.every\s*\(/.exec(call);
+    if (!every) continue;
+    // A length or size outside the `every` callback is a check of the set; inside it, the element's own.
+    const cbOpen = every.index + every[0].length - 1;
+    const cbClose = closeParen(call, cbOpen);
+    const outside = call.slice(0, cbOpen) + (cbClose < 0 ? '' : call.slice(cbClose));
+    if (/\.length\b|\.size\b|\.count\b/.test(outside)) continue;
     const line = lineOf(text, m.index);
     if (WAIT_WAIVER.test(lines[line - 1] ?? '') || WAIT_WAIVER.test(lines[line - 2] ?? '')) continue;
     out.push({ line, what: '`waitForFunction` over `.every(` with no length check is true before any box is drawn (every() over an empty set)' });

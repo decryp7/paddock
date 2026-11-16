@@ -38,6 +38,8 @@ test('C133 rule 3: waitForFunction over every() with no length check', () => {
   assert.deepEqual(emptySetWaits("await page.waitForFunction(() => Array.from(document.querySelectorAll('pd-table')).every((t) => t.clientWidth));\n").map((s) => s.line), [1]);
   assert.deepEqual(emptySetWaits("await page.waitForFunction(() => {\n  const t = [...document.querySelectorAll('x')];\n  return t.length > 0 && t.every((e) => e.ok);\n});\n"), [], 'a length check');
   assert.deepEqual(emptySetWaits("await page.waitForFunction(() => document.fonts.ready);\n"), [], 'no every()');
+  assert.deepEqual(emptySetWaits("await page.waitForFunction(() => rows.every((r) => r.children.length > 0));\n").map((s) => s.line), [1], 'a length inside the every callback is the element\'s');
+  assert.deepEqual(emptySetWaits("await page.waitForFunction(() => rows.size > 0 && rows.every((r) => r.ok));\n"), [], 'a size of the set');
   assert.deepEqual(emptySetWaits("// conformance: e2e-wait — the set is never empty here\nawait page.waitForFunction(() => rows.every((r) => r.ok));\n"), []);
   assert.deepEqual(emptySetWaits("// waitForFunction(() => a.every(b))\n"), []);
 });

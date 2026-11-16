@@ -16,6 +16,7 @@ const target = (p: string): AxeTarget => ({
     // Settled: nothing is loading and every finite CSS/Web animation (fades, skeleton to content) has finished, so axe sees
     // final colours. getAnimations() cannot see ECharts, which animates on canvas; the charts' own entry is short and the
     // chart text is not what axe measures there.
+    // conformance: e2e-wait — an empty set of animations is the settled state, not an early read: there is nothing to wait for
     await page.waitForFunction(
       () =>
         !document.querySelector('[aria-busy="true"]') &&
