@@ -541,12 +541,11 @@ test.describe('outlined field geometry', () => {
           await px(page, '--pd-button-height'),
         ];
         await settledLayout(
-          page,
           async () => {
             const got = (await read()).map((b) => Math.round(b.height));
             return { count: got.length, widths: got, fits: got.length === heights.length && got.every((h, i) => h === heights[i]) };
           },
-          { what: 'the row mixes heights (labelled field, field, buttons)', minCount: heights.length },
+          { what: 'the row mixes heights (labelled field, field, buttons)', minCount: heights.length, expectedWidths: heights },
         );
         const boxes = await read();
         const centres = boxes.map((b) => b.centre);

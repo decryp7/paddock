@@ -1,22 +1,38 @@
 import type { Locator, Page } from '@playwright/test';
 
+/** The first look-ahead of a pause, in milliseconds. Measured 2026-11-16 (Playwright 1.64.1, idle machine, 40 pauses each): the round trip from reading the page's time to the end of `pauseAt` took 0.6 ms median and 3.9 ms at most in Chromium, 1.4 ms and 2.9 ms in WebKit; 250 ms is about 60 times that. */
+const PAUSE_AHEAD_MS = 250;
+/** How many times a pause that lands in the past is tried again, each with twice the look-ahead (250, 500, 1000 ms). */
+const PAUSE_ATTEMPTS = 3;
+
 /**
- * Stops the page's live updates (the intervals and timers that refresh a table or a status) so an interaction is not
- * overtaken by one: a row menu opened, then the rows re-rendered under it; a Stop button pressed on a job that finished meanwhile.
- * The pinned clock (`pinnedClockTest`) is paused 5 s ahead of the page's own time (time keeps running until the pause lands, so the target lies ahead; 5 s is a margin for a slow round trip on a loaded runner, not a wait), which fires what is due on the way once each; no timer or animation frame runs
- * after that until {@link resumeLive} or `page.clock.runFor`. Playwright's own actions and `expect` waits use real time and keep working.
- * Needs the pinned (or any installed) clock; a page without one throws, naming the fix.
+ * Stops the page's live updates (the intervals and timers that refresh a table or a status) so a step is not overtaken by one: a Stop
+ * button pressed on a job that finished meanwhile, a control that moves when an item appears beside it.
  *
- * The page does not draw while the clock is paused (its timers and animation frames are the fake ones), so pause only around the steps
- * that must not be overtaken (a focus and a key), never around an assertion that waits for the page to draw, and not before the page has
- * booted: use {@link withLivePaused} and put the waits after it.
+ * What it does to the page clock (the pinned one from `pinnedClockTest`, or any other: Playwright installs a clock on the first
+ * `pauseAt` when there is none, so this never throws for a missing one):
+ * - It moves the clock forward by the look-ahead (250 ms, doubled up to 1 s when the round trip was slower than that) and pauses it there. Every
+ *   timer due within those milliseconds fires once on the way (a toast's alert, a debounce, a mock's delayed reply), so the page is
+ *   not in the state it was in a moment before.
+ * - Repeated pauses add up: each one moves the clock again.
+ * - From then on no timer or animation frame runs until {@link resumeLive} or `page.clock.runFor`. The page does not draw while the
+ *   clock is paused, so pause only around the step that must not be overtaken (a click, a focus and a key), never around an
+ *   assertion that waits for the page to draw, and not before the page has booted. {@link withLivePaused} resumes for you.
+ * - After the resume the clock runs again from where it stopped; a live update that fell due meanwhile fires then, so a result that
+ *   depends on no update arriving after the step (a menu that stays open) is not made safe by this.
  */
 export async function pauseLive(page: Page): Promise<void> {
-  const now = await page.evaluate(() => Date.now());
-  try {
-    await page.clock.pauseAt(new Date(now + 5000));
-  } catch (e) {
-    throw new Error(`pauseLive: the page clock is not installed or cannot be paused (${(e as Error).message.split('\n')[0]}). Use the app's e2e/test.ts (pinnedClockTest), or call page.clock.install first.`, { cause: e });
+  let ahead = PAUSE_AHEAD_MS;
+  for (let attempt = 1; ; attempt++) {
+    const now = await page.evaluate(() => Date.now());
+    try {
+      await page.clock.pauseAt(new Date(now + ahead));
+      return;
+    } catch (e) {
+      // The page clock moved past the target while the call was on its way (a slow round trip): look further ahead.
+      if (attempt >= PAUSE_ATTEMPTS || !/past/i.test((e as Error).message)) throw e;
+      ahead *= 2;
+    }
   }
 }
 

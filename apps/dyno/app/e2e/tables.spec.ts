@@ -135,7 +135,6 @@ test.describe('live updates keep the keyboard where it was', () => {
 test.describe('the row menu from the keyboard', () => {
   test('processes: after switching Apps to All, Shift+F10 opens the focused row\'s menu and Escape gives the focus back', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 800 });
-    // The page's clock stands still: no live update reorders the rows between the focus and the key.
     await page.goto(url('/processes'));
     const grid = page.getByRole('treegrid', { name: 'Processes' });
     await expect(grid).toBeVisible();

@@ -104,7 +104,6 @@ async function openState(page: Page, state: State): Promise<void> {
   // path fits: never on "every() of no boxes", which is true before any row exists (the pinned clock showed 31 of 240 Firewall visits read
   // too early).
   await settledLayout(
-    page,
     () =>
       page.evaluate((rows) => {
         const drawn = Array.from(document.querySelectorAll<HTMLElement>(rows)).filter((e) => e.clientWidth > 0);

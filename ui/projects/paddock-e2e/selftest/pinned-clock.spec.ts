@@ -162,6 +162,23 @@ plain.describe('pauseLive', () => {
     await expect.poll(() => count(page)).toBeGreaterThan(after);
   });
 
+  plain('a pause moves the clock about 250 ms and fires the timers due in it; repeated pauses add up', async ({ page }) => {
+    await live(page);
+    await expect.poll(() => count(page)).toBeGreaterThan(1);
+    const at = () => page.evaluate(() => Date.now());
+    const before = await at();
+    await pauseLive(page);
+    const first = await at();
+    expect(first - before).toBeGreaterThanOrEqual(250);
+    expect(first - before).toBeLessThan(1500); // the look-ahead, doubled at most twice, plus the real time since the read
+    const ticks = await count(page);
+    await pauseLive(page);
+    const second = await at();
+    expect(second - first).toBeGreaterThanOrEqual(250); // each pause moves the clock again
+    expect(await count(page)).toBeGreaterThan(ticks); // the 20 ms interval fired on the way
+    await resumeLive(page);
+  });
+
   plain('withLivePaused resumes afterwards, also when its steps throw', async ({ page }) => {
     await live(page);
     await expect(withLivePaused(page, async () => { throw new Error('steps failed'); })).rejects.toThrow('steps failed');

@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect } from '@playwright/test';
 
 /** What one look at a page's layout found: how many boxes were drawn, how wide each is, and whether every one fits. */
 export interface LayoutReading {
@@ -6,7 +6,7 @@ export interface LayoutReading {
   readonly count: number;
   /** The width of each box, in order (rounded). */
   readonly widths: readonly number[];
-  /** Whether every box fits (its text fitted its width, its columns fitted its table). A reading of no boxes never fits. */
+  /** Whether every box fits (its text fitted its width, its columns fitted its table). Count 0 with `minCount` 0 (a page that draws no boxes by design) can fit; with the default `minCount` it never settles. */
   readonly fits: boolean;
 }
 
@@ -19,6 +19,8 @@ export interface SettledLayoutOptions {
   readonly minCount?: number;
   /** What the spec waits for, in the failure message (for example `the firewall page`). */
   readonly what?: string;
+  /** The widths the settled reading is expected to have, when the spec knows them (the row heights of a design): the failure message shows them beside the last reading. */
+  readonly expectedWidths?: readonly number[];
   /** How long to wait for two agreeing readings (default Playwright's `expect` timeout). */
   readonly timeout?: number;
 }
@@ -39,20 +41,32 @@ export function layoutSettled(previous: LayoutReading | null, now: LayoutReading
  * pinned fake clock's `setTimeout(0)` takes about twice as long) shows a spec that measured too early: 31 of 240 Firewall visits in Dyno's
  * layout spec, 13%. Wait on this instead of reading once after `open()`.
  */
-export async function settledLayout(page: Page, read: () => Promise<LayoutReading>, options: SettledLayoutOptions = {}): Promise<LayoutReading> {
-  void page;
+export async function settledLayout(read: () => Promise<LayoutReading>, options: SettledLayoutOptions = {}): Promise<LayoutReading> {
+  const minCount = options.minCount ?? 1;
+  const what = options.what ?? 'the page';
   let previous: LayoutReading | null = null;
+  let last: LayoutReading | null = null;
   let settled: LayoutReading | null = null;
-  await expect
-    .poll(
-      async () => {
-        const now = await read();
-        settled = layoutSettled(previous, now, options.minCount) ? now : null;
-        previous = now;
-        return settled !== null;
-      },
-      { message: `${options.what ?? 'the page'}: the layout settles (two reads agree on the boxes and their widths, all fit, at least ${options.minCount ?? 1} drawn)`, ...(options.timeout ? { timeout: options.timeout } : {}) },
-    )
-    .toBe(true);
+  try {
+    await expect
+      .poll(
+        async () => {
+          const now = await read();
+          settled = layoutSettled(previous, now, minCount) ? now : null;
+          previous = last;
+          last = now;
+          return settled !== null;
+        },
+        { message: `${what}: the layout settles`, ...(options.timeout ? { timeout: options.timeout } : {}) },
+      )
+      .toBe(true);
+  } catch (e) {
+    const show = (r: LayoutReading | null) => (r ? `${r.count} boxes, fit ${r.fits}, widths [${r.widths.join(', ')}]` : 'none');
+    throw new Error(
+      `${what}: the layout did not settle (two reads must agree on the boxes and their widths, all fit, at least ${minCount} drawn).\n  last reading:     ${show(last)}\n  reading before:   ${show(previous)}` +
+        (options.expectedWidths ? `\n  expected widths:  [${options.expectedWidths.join(', ')}]` : ''),
+      { cause: e },
+    );
+  }
   return settled as unknown as LayoutReading;
 }

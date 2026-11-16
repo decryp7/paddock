@@ -203,7 +203,6 @@ test('table: loading and empty say no count, and the columns do not move when ro
       return grid && header ? Math.round(header.getBoundingClientRect().left - grid.getBoundingClientRect().left) : null;
     });
   const settled = await settledLayout(
-    page,
     async () => {
       const x = await left('box-selected');
       return { count: x === null ? 0 : 1, widths: [x ?? 0], fits: x !== null };
