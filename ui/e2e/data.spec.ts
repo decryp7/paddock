@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { axeViolations, type Page } from '@decryp7/paddock-e2e';
+import { axeViolations, type Page, settledLayout } from '@decryp7/paddock-e2e';
 
 // The data parts of paddock-ui (plan X21) in the gallery: the table's sorting, filter, keyboard, menus and virtual rows, the
 // chart wrapper over a real ECharts, and the forms helpers, in both themes, with axe and without horizontal scroll at 320 px.
@@ -195,23 +195,22 @@ test('table: loading and empty say no count, and the columns do not move when ro
   await expect(page.locator('[data-testid="box-loading"] [data-testid="table-count"]')).toHaveCount(0);
   await expect(page.locator('[data-testid="box-empty"] [data-testid="table-count"]')).toHaveCount(0);
   // A box renders its grid and settles its column widths over a few frames (box-selected read 353 px, then 363): read header and grid in
-  // one step; the loaded box is taken once two polls in a row agree, and every other box must come to the same position.
+  // one step; the loaded box is taken once the layout settles (two reads agree), and every other box must come to the same position.
   const left = (id: string) =>
     page.locator(`[data-testid="${id}"]`).evaluate((box) => {
       const grid = box.querySelector('.pd-grid');
       const header = [...box.querySelectorAll('[role=columnheader]')].find((h) => h.textContent?.includes('Size (KiB)'));
       return grid && header ? Math.round(header.getBoundingClientRect().left - grid.getBoundingClientRect().left) : null;
     });
-  let previous: number | null = null;
-  let loaded: number | null = null;
-  await expect
-    .poll(async () => {
-      const now = await left('box-selected');
-      loaded = now !== null && now === previous ? now : null;
-      previous = now;
-      return loaded;
-    }, { message: 'box-selected: the Size (KiB) header inside its grid, settled' })
-    .not.toBeNull();
+  const settled = await settledLayout(
+    page,
+    async () => {
+      const x = await left('box-selected');
+      return { count: x === null ? 0 : 1, widths: [x ?? 0], fits: x !== null };
+    },
+    { what: 'box-selected: the Size (KiB) header inside its grid' },
+  );
+  const loaded = settled.widths[0];
   for (const id of ['box-loading', 'box-empty', 'box-error']) await expect.poll(() => left(id), { message: id }).toBe(loaded);
 });
 

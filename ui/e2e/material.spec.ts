@@ -1,6 +1,6 @@
 import { expect, test } from './test';
 import AxeBuilder from '@axe-core/playwright';
-import { expectNoButtonLabelWraps, type Page } from '@decryp7/paddock-e2e';
+import { expectNoButtonLabelWraps, type Page, settledLayout } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -540,7 +540,14 @@ test.describe('outlined field geometry', () => {
           await px(page, '--pd-button-height'),
           await px(page, '--pd-button-height'),
         ];
-        await expect.poll(async () => (await read()).map((b) => Math.round(b.height)), { message: 'the row mixes heights (labelled field, field, buttons)' }).toEqual(heights);
+        await settledLayout(
+          page,
+          async () => {
+            const got = (await read()).map((b) => Math.round(b.height));
+            return { count: got.length, widths: got, fits: got.length === heights.length && got.every((h, i) => h === heights[i]) };
+          },
+          { what: 'the row mixes heights (labelled field, field, buttons)', minCount: heights.length },
+        );
         const boxes = await read();
         const centres = boxes.map((b) => b.centre);
         expect(Math.max(...centres) - Math.min(...centres), JSON.stringify(boxes)).toBeLessThanOrEqual(1);

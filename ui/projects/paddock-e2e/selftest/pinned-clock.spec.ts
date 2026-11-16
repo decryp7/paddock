@@ -1,6 +1,6 @@
 import { test as base, expect } from '@playwright/test';
 import { test as kit } from '../src/fixtures.ts';
-import { newPinnedContext, pinnedClockTest } from '../src/index.ts';
+import { newPinnedContext, pauseLive, pinnedClockTest, resumeLive, withLivePaused } from '../src/index.ts';
 
 const test = pinnedClockTest(kit, { now: '2001-09-09T01:46:40Z', timezoneId: 'Asia/Singapore', locale: 'en-GB' });
 // The same wrapper over plain Playwright, for the checks that need no kit fixture.
@@ -57,7 +57,7 @@ test.describe('a throw from a timer callback reaches pageErrors and the window e
     await expect.poll(() => [...pageErrors].sort()).toEqual(['boom-a', 'boom-b', 'boom-c']);
   });
 
-  test('setInterval, requestAnimationFrame and the window error event', async ({ page, pageErrors }) => {
+  test('setInterval, requestAnimationFrame, requestIdleCallback, a string callback and the window error event', async ({ page, pageErrors }) => {
     await page.goto('data:text/html,<p>x</p>');
     await page.evaluate(() => {
       const w = window as unknown as { __seen: string[] };
@@ -65,10 +65,14 @@ test.describe('a throw from a timer callback reaches pageErrors and the window e
       window.addEventListener('error', (e) => w.__seen.push((e.error as Error | null)?.message ?? e.message));
       const id = (window as unknown as Timers)['setInterval'](() => { clearInterval(id as number); throw new Error('boom-interval'); }, 5);
       (window as unknown as Timers)['requestAnimationFrame'](() => { throw new Error('boom-raf'); });
+      // WebKit has no requestIdleCallback.
+      (window as unknown as { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback?.(() => { throw new Error('boom-idle'); });
+      (window as unknown as Timers)['setTimeout']('throw new Error("boom-string")' as never, 0);
     });
-    await expect.poll(() => [...pageErrors].sort()).toEqual(['boom-interval', 'boom-raf']);
+    const planted = ['boom-interval', 'boom-raf', 'boom-string', ...((await page.evaluate(() => 'requestIdleCallback' in window)) ? ['boom-idle'] : [])].sort();
+    await expect.poll(() => [...pageErrors].sort()).toEqual(planted);
     // One window event per throw; WebKit hides the message of an error on a data: page ("Script error."), so count them.
-    expect(await page.evaluate(() => (window as unknown as { __seen: string[] }).__seen.length)).toBe(2);
+    expect(await page.evaluate(() => (window as unknown as { __seen: string[] }).__seen.length)).toBe(planted.length);
   });
 
   test('ids, string-free arguments and runFor are unchanged', async ({ page, pageErrors }) => {
@@ -118,5 +122,41 @@ test.describe('newPinnedContext', () => {
       await pinned.close();
       await plainContext.close();
     }
+  });
+});
+
+// A live page: an interval refreshes the page every 20 ms; pauseLive stops it, actions still work, resume and runFor drive it again.
+plain.describe('pauseLive', () => {
+  const live = async (page: import('@playwright/test').Page) => {
+    await page.goto('about:blank');
+    await page.setContent('<button id="b">x</button><p id="n">0</p>');
+    await page.evaluate(() => {
+      let n = 0;
+      (window as unknown as Timers)['setInterval'](() => { document.getElementById('n')!.textContent = String(++n); }, 20);
+    });
+  };
+  const count = (page: import('@playwright/test').Page) => page.evaluate(() => Number(document.getElementById('n')!.textContent));
+
+  plain('stops the updates, lets Playwright act, and resume continues them', async ({ page }) => {
+    await live(page);
+    await expect.poll(() => count(page)).toBeGreaterThan(2);
+    await pauseLive(page);
+    const frozen = await count(page);
+    await page.getByRole('button', { name: 'x' }).click(); // an action under the paused clock does not hang
+    // Real time passes while the clock is paused: round trips to the page until the host's own clock has moved 300 ms.
+    for (const t0 = Date.now(); Date.now() - t0 < 300; ) await count(page);
+    expect(await count(page)).toBe(frozen);
+    await page.clock.runFor(200);
+    expect(await count(page)).toBeGreaterThan(frozen);
+    await resumeLive(page);
+    const resumed = await count(page);
+    await expect.poll(() => count(page)).toBeGreaterThan(resumed);
+  });
+
+  plain('withLivePaused resumes afterwards, also when its steps throw', async ({ page }) => {
+    await live(page);
+    await expect(withLivePaused(page, async () => { throw new Error('steps failed'); })).rejects.toThrow('steps failed');
+    const after = await count(page);
+    await expect.poll(() => count(page)).toBeGreaterThan(after);
   });
 });

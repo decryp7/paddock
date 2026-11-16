@@ -51,22 +51,24 @@ export function pinnedInstant(options: PinnedClockOptions, env: Readonly<Record<
  * `_updateRealTimeTimer` ends in `.catch(console.error)`, and `_runTo` keeps only the first error of a batch; clock.ts of
  * playwright-core 1.64.1, read 2026-11-16), so a bug thrown from `setTimeout`, `setInterval`, `requestAnimationFrame` or
  * `requestIdleCallback` reached neither `window` 'error' nor `pageerror`. This wraps the four so each callback runs in its own
- * try/catch and reports through `reportError`, the way the browser reports a thrown timer callback. Ids, string callbacks and
- * the other arguments pass through unchanged. Serialised into the page: it must not use anything from this module.
+ * try/catch and reports through `reportError`, the way the browser reports a thrown timer callback. Ids and the other arguments pass through
+ * unchanged; a string callback is run by an indirect `eval`, so it is covered too. Serialised into the page: it must not use anything from this module.
  */
 export function reportTimerErrors(): void {
   const w = window as unknown as Record<string, unknown> & { reportError(e: unknown): void };
-  const wrap = (callback: unknown) =>
-    typeof callback !== 'function'
-      ? callback
-      : function (this: unknown, ...args: unknown[]) {
-          try {
-            return (callback as (...a: unknown[]) => unknown).apply(this, args);
-          } catch (e) {
-            w.reportError(e);
-            return undefined;
-          }
-        };
+  const wrap = (given: unknown) => {
+    // A string callback runs as global code (indirect eval); a page whose CSP forbids eval fails the same way unwrapped.
+    const callback = typeof given === 'string' ? () => (0, eval)(given) : given;
+    if (typeof callback !== 'function') return callback;
+    return function (this: unknown, ...args: unknown[]) {
+      try {
+        return (callback as (...a: unknown[]) => unknown).apply(this, args);
+      } catch (e) {
+        w.reportError(e);
+        return undefined;
+      }
+    };
+  };
   for (const name of ['setTimeout', 'setInterval', 'requestAnimationFrame', 'requestIdleCallback']) {
     const original = w[name];
     if (typeof original !== 'function') continue;

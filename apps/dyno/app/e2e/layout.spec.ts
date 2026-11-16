@@ -1,6 +1,6 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
-import { dialogContracts, dialogWindowUrl, expectNoButtonLabelWraps, newPinnedContext, pressMod, textClippedWithoutEllipsis, textCutOffWithoutTooltip } from '@decryp7/paddock-e2e';
+import { dialogContracts, dialogWindowUrl, expectNoButtonLabelWraps, newPinnedContext, pressMod, settledLayout, textClippedWithoutEllipsis, textCutOffWithoutTooltip } from '@decryp7/paddock-e2e';
 import { FIXTURES } from './dialog-fixtures';
 import { NAV } from '../src/app/shell/nav';
 import { EXTRAS_TABS } from '../src/app/features/extras/extras-model';
@@ -93,16 +93,29 @@ async function openState(page: Page, state: State): Promise<void> {
   }
   await page.evaluate(() => document.fonts.ready);
   // A pd-table draws its columns for a default width (1024) until its ResizeObserver has told it the real one, and WebKit can be slow to
-  // deliver that (a header measured meanwhile "needs 912px, has 634px"): wait until every drawn table has fitted its columns to its width.
-  await page.waitForFunction(() =>
-    Array.from(document.querySelectorAll<HTMLElement>('pd-table')).every((t) => !t.clientWidth || t.getAttribute('data-fit-width') === String(Math.round(t.getBoundingClientRect().width))),
-  );
-  // A path is cut to the width its box has once the table has fitted; wait until each shown path is the one that fits (the ResizeObserver behind it runs after the fit).
-  await page.waitForFunction(() =>
-    Array.from(document.querySelectorAll<HTMLElement>('[data-testid="path-text"]')).every((b) => {
-      const shown = b.querySelector<HTMLElement>('.pd-shown');
-      return !b.clientWidth || !shown || shown.scrollWidth <= b.clientWidth + 1;
-    }),
+  // deliver that (a header measured meanwhile "needs 912px, has 634px"); a path is cut to the width its box has once the table has fitted
+  // (the ResizeObserver behind it runs after the fit). Wait until two reads agree on the drawn rows and their widths and every table and
+  // path fits: never on "every() of no boxes", which is true before any row exists (the pinned clock showed 31 of 240 Firewall visits read
+  // too early).
+  await settledLayout(
+    page,
+    () =>
+      page.evaluate((rows) => {
+        const drawn = Array.from(document.querySelectorAll<HTMLElement>(rows)).filter((e) => e.clientWidth > 0);
+        const tables = Array.from(document.querySelectorAll<HTMLElement>('pd-table'));
+        const paths = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="path-text"]'));
+        const tablesFit = tables.every((t) => !t.clientWidth || t.getAttribute('data-fit-width') === String(Math.round(t.getBoundingClientRect().width)));
+        const pathsFit = paths.every((b) => {
+          const shown = b.querySelector<HTMLElement>('.pd-shown');
+          return !b.clientWidth || !shown || shown.scrollWidth <= b.clientWidth + 1;
+        });
+        return {
+          count: drawn.length,
+          widths: [...tables, ...paths, ...drawn].map((e) => Math.round(e.getBoundingClientRect().width)),
+          fits: tablesFit && pathsFit,
+        };
+      }, ROWS),
+    { what: `the ${state.name} state`, timeout: 45_000 },
   );
 }
 
