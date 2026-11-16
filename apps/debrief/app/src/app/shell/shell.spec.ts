@@ -255,14 +255,17 @@ describe('StatusBar', () => {
 
   it('says the workspace is loading before it has loaded (items load on import, not when the window is idle)', async () => {
     const backend = tinyBackend();
-    let release: () => void = () => undefined;
+    // Every read of the summary is held, not only the start-up one: the Problems item reads it too, and which of the two
+    // comes first depends on when its lazy chunk loads (alone against in a suite), so a single saved resolver was the wrong one.
+    const held: Array<() => void> = [];
     const real = backend.workspaceSummary.bind(backend);
-    vi.spyOn(backend, 'workspaceSummary').mockImplementation(() => new Promise((resolve) => (release = () => resolve(real()))));
+    vi.spyOn(backend, 'workspaceSummary').mockImplementation(() => new Promise((resolve) => held.push(() => resolve(real()))));
     const { fixture } = setup(StatusBar, backend);
     await itemsShown(fixture);
+    // The start-up read begins once the counts item is there, which can be after the first item: wait for the busy item.
+    await settleUntil(fixture, () => expect(el(fixture, '[data-testid=status-busy]').textContent).toContain('Loading workspace'));
     expect(text(fixture)).toContain('No workspace');
-    expect(el(fixture, '[data-testid=status-busy]').textContent).toContain('Loading workspace');
-    release();
+    held.splice(0).forEach((release) => release());
     await settleUntil(fixture, () => expect(text(fixture)).toMatch(/\d+ events/));
     expect(fixture.nativeElement.querySelector('[data-testid=status-busy]')).toBeNull();
   });
@@ -270,6 +273,8 @@ describe('StatusBar', () => {
   it('shows busy work other than imports with a spinner (E1)', async () => {
     const { fixture } = setup(StatusBar);
     await itemsShown(fixture);
+    // The start-up load ends with setBusy(null): let it finish, or it clears the busy state set below.
+    await settleUntil(fixture, () => expect(text(fixture)).toMatch(/\d+ events/));
     const status = TestBed.inject(WorkspaceStatusStore);
     status.setBusy({ kind: 'op', label: 'Clearing workspace…' });
     fixture.detectChanges();
