@@ -1191,7 +1191,7 @@ approved = "coordinator"
 
 [[report_only]]
 id = "C133"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C133-e2e-pinned-clock.mjs, then flip rule 1 (specs import test from the app's e2e/test.ts) to an error: it has 0 findings on the tree. Rule 2 (mock backends read no wall clock themselves) has 64 warnings in 33 mock files, moved onto the injected clocks app by app (Debrief's MockClock first); it flips only when they are gone. JS host only: there are no Rust mock backends."
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C133-e2e-pinned-clock.mjs, then flip all three rules to errors. First count 2026-11-16: rule 1 (a spec reaches test other than through the app's e2e/test.ts) 0 findings, rule 2 (pinnedClock false without a reason on the line above) 0, rule 3 (a bare clock.install() or a browser.newContext( in a spec) 10, all browser.newContext in 6 Dyno specs and 1 Pitwall screenshot file: each is pinned with context.clock.install({ time }) or waived with a reason before the flip. JS host only: no Rust mock backends. Out of scope (their own Playwright configs outside the e2e folders): Debrief scripts/screenshots/capture.ts and scripts/visual-qa/sweep.ts. A mock backend reading the wall clock is not checked: in the page Date.now and new Date are the pinned clock (review 2026-11-16)."
 owner = "ER-21 class: time-of-day-dependent e2e on a clock-relative mock (CI run 8154)"
 since = 2026-11-16
 review_by = 2026-12-16
