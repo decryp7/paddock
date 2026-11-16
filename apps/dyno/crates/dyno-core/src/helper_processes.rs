@@ -53,6 +53,7 @@ pub enum ProcState {
 #[serde(rename_all = "camelCase")]
 pub struct ProcessEntry {
     /// Process id.
+    // conformance: wire-pid — the helper's wire (seconds since 1970): the start time is the next field, and the agent reads both
     pub pid: u32,
     /// Start time, seconds since 1970 (with the pid it identifies the process across time).
     pub started: Option<i64>,

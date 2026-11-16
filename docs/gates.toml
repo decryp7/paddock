@@ -1188,3 +1188,11 @@ owner = "Dyno 1.1.1"
 since = 2026-11-12
 review_by = 2026-12-20
 approved = "coordinator"
+
+[[report_only]]
+id = "C134"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C134-wire-process-ref.mjs, then flip SEVERITY to error and the mode to gate. First count 2026-11-16: 4 pid fields in Dyno's wire crate, each carrying a `conformance: wire-pid` waiver with its reason (the process sample, the app group's members of one sweep, the helper's two seconds-resolution records); every other wire type names a process by ProcessRef"
+owner = "ER-21 class: a process named by a bare pid on the wire (feat/dyno-process-ref)"
+since = 2026-11-16
+review_by = 2026-12-16
+approved = "coordinator"

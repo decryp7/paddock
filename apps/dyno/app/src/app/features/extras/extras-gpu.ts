@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import { PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { GpuProcess } from '../../core/api.types';
+import { refKey } from '../../core/process-ref';
 import { AsyncState } from '../../shared/async-state';
 import { formatBytes, formatPercent } from '../../shared/format';
 import { Icon } from '../../shared/icon';
@@ -33,7 +34,7 @@ export class ExtrasGpu implements OnInit {
   protected readonly data = computed(() => this.store.gpu().data);
   protected readonly percent = formatPercent;
   protected readonly bytes = formatBytes;
-  protected readonly procKey = (p: GpuProcess): string => String(p.pid);
+  protected readonly procKey = (p: GpuProcess): string => refKey(p.process);
   protected readonly columns: PdColumn<GpuProcess>[] = [
     { key: 'name', header: 'Process', value: (p) => p.name, required: true, sortable: false, width: 'minmax(0, 1fr)' },
     { key: 'load', header: 'GPU load', value: (p) => p.gpuPercent, text: (p) => formatPercent(p.gpuPercent), align: 'end', sortable: false, width: '150px' },

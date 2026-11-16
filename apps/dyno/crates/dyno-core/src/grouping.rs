@@ -22,6 +22,7 @@ pub struct AppGroup {
     /// The main executable (the group's first or root process), when known.
     pub exe: Option<String>,
     /// Every process in the group; the root process first.
+    // conformance: wire-pid — members of one sweep: the UI joins them to the same update's samples, which carry the start times
     pub pids: Vec<Pid>,
     /// Sum of the readable members' CPU, percent of the machine; unavailable when no member's could be read.
     pub cpu: Measured<f32>,

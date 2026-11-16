@@ -282,7 +282,7 @@ impl SysinfoProcesses {
         let mut child_start = p.start_time();
         let mut next = p.parent();
         while let Some(pp) = next {
-            if out.len() >= MAX_PARENT_DEPTH || out.iter().any(|l: &ParentLink| l.pid == pp.as_u32()) {
+            if out.len() >= MAX_PARENT_DEPTH || out.iter().any(|l: &ParentLink| l.process.pid == pp.as_u32()) {
                 break;
             }
             let Some(parent) = self.sys.as_ref().and_then(|s| s.process(pp)) else {
@@ -292,8 +292,10 @@ impl SysinfoProcesses {
             if parent.start_time() > child_start {
                 break;
             }
+            // The parent's start time is what tells a reused pid from the real parent later (rule 53); 0 means the OS gave none.
+            let started = (parent.start_time() != 0).then(|| started_from_unix_secs(parent.start_time()));
             out.push(ParentLink {
-                pid: pp.as_u32(),
+                process: ProcessRef { pid: pp.as_u32(), started },
                 name: parent.name().to_string_lossy().into_owned(),
             });
             child_start = parent.start_time();
@@ -535,6 +537,12 @@ mod tests {
         assert_eq!(d.process.pid, me);
         assert!(!d.command_line.is_empty());
         assert!(!d.parents.is_empty(), "the test runner has a parent");
+        // Each parent link is a pid plus the start time (rule 53), the same as the parent's own sample gives.
+        let parent = &d.parents[0].process;
+        assert!(parent.started.is_some(), "the parent link carries a start time");
+        if let Some(listed) = first.iter().find(|p| p.pid == parent.pid) {
+            assert_eq!(*parent, listed.reference());
+        }
         // A reused pid (another start time) is not this process.
         let wrong = ProcessRef {
             pid: me,

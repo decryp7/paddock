@@ -3,9 +3,10 @@ import { osTerms } from '../../shared/os-terms';
 import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import type { ListOrReason, ProcessDetails } from '../../core/api.types';
+import type { ListOrReason, ProcessDetails, ProcessRef } from '../../core/api.types';
+import { notDifferent, refKey, refOf } from '../../core/process-ref';
 import { errorHint } from '../../core/command-error';
-import { readValue, showMeasured } from '../../core/measured';
+import { showMeasured } from '../../core/measured';
 import { formatAffinity, formatBytes, formatRate, formatCount, formatPercent, formatRelative } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { PRIORITY_LABEL, signatureText } from '../../shared/labels';
@@ -85,8 +86,8 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                 }
                 <ol class="chain">
                   <li class="me"><dy-icon name="processes" /> {{ x.process.name }}</li>
-                  @for (p of x.parents; track p.pid) {
-                    <li><button type="button" matButton="text" class="dy-link" (click)="open(p.pid)">{{ p.name }}</button> <span class="faint num">PID {{ pidText(p.pid) }}</span></li>
+                  @for (p of x.parents; track refKey(p.process)) {
+                    <li><button type="button" matButton="text" class="dy-link" (click)="open(p.process)">{{ p.name }}</button> <span class="faint num">PID {{ pidText(p.process.pid) }}</span></li>
                   }
                 </ol>
               }
@@ -189,6 +190,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
 export class ProcessDetailsPanel {
   protected readonly terms = osTerms(inject(PlatformService).platform);
   protected readonly store = inject(ProcessesStore);
+  protected readonly refKey = refKey;
   private readonly live = inject(LiveStore);
   protected readonly tab = signal<Tab>('overview');
   protected readonly cmdOpen = signal(false);
@@ -228,12 +230,12 @@ export class ProcessDetailsPanel {
   }
 
   private async loadNetwork(): Promise<void> {
-    const pid = this.d()?.process.pid;
-    if (pid === undefined) return;
+    const process = this.d()?.process;
+    if (process === undefined) return;
     this.net.set(null);
     this.netError.set(null);
     try {
-      this.net.set(await this.network.forProcess(pid));
+      this.net.set(await this.network.forProcess(refOf(process)));
     } catch (e) {
       this.netError.set(toCommandError(e).message);
     }
@@ -250,8 +252,9 @@ export class ProcessDetailsPanel {
     const s = this.store.selected();
     if (s) void this.store.select(s);
   }
-  protected open(pid: number): void {
-    const p = this.store.processes().find((x) => x.pid === pid);
-    if (p) void this.store.select({ pid: p.pid, started: readValue(p.started) });
+  /** Opens a parent from the list: the process in the live list that is that parent (pid and start time), not one that reused its pid. */
+  protected open(ref: ProcessRef): void {
+    const p = this.store.processes().find((x) => notDifferent(refOf(x), ref));
+    if (p) void this.store.select(refOf(p));
   }
 }

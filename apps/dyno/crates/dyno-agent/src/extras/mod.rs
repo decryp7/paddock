@@ -372,12 +372,14 @@ fn gpu(shared: &Shared) -> GpuReport {
     let x = &shared.extras;
     let mut report = dyno_platform::extras::gpu_report(x.tools().as_ref(), x.os(), Duration::from_secs(1));
     let core = lock(&shared.core);
-    for p in report.processes.iter_mut().filter(|p| p.name.is_empty()) {
-        if let Some(s) = core.latest.processes.iter().find(|s| s.pid == p.pid) {
-            p.name = s.name.clone();
-        }
-    }
+    // The tool gives a pid: the start time (and a name, when the tool had none) come from the process table of the same moment.
+    report.stamp_from(&core.latest.processes);
     report
+}
+
+/// Adds the start time to each blocker the tool named by pid only, from the process table (rule 53).
+pub fn stamp_sleep_report(shared: &Shared, report: &mut SleepReport) {
+    report.stamp_from(&lock(&shared.core).latest.processes);
 }
 
 fn save_inventory(shared: &Shared, path: &str, format: InventoryFormat) -> Result<SavedInventory, AgentError> {

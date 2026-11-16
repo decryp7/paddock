@@ -4,6 +4,7 @@
 
 use super::{clean, clip};
 use crate::helper_extras::{Requester, WakeRequest};
+use crate::process::ProcessRef;
 use serde::{Deserialize, Serialize};
 
 /// Most entries of each list.
@@ -27,8 +28,8 @@ pub enum Prevents {
 pub struct SleepBlocker {
     /// The program, service or driver.
     pub name: String,
-    /// Its process, when the tool says.
-    pub pid: Option<u32>,
+    /// Its process, when the tool says (the agent adds the start time from its process table).
+    pub process: Option<ProcessRef>,
     /// What it prevents.
     pub prevents: Prevents,
     /// Why, in the program's words (clipped).
@@ -45,6 +46,15 @@ pub struct WakeEvent {
     pub when: Option<String>,
     /// What woke it.
     pub reason: String,
+}
+
+impl SleepReport {
+    /// Adds each blocker's start time from `table`, a process list of the same moment (the tool names the process by pid only).
+    pub fn stamp_from(&mut self, table: &[crate::process::ProcessSample]) {
+        for b in &mut self.blockers {
+            b.process = b.process.map(|p| p.with_start_from(table));
+        }
+    }
 }
 
 /// The "Sleep" view: blockers and recent wakes, each possibly unavailable with a reason.
@@ -102,7 +112,7 @@ pub fn parse_pmset_assertions(text: &str) -> Vec<SleepBlocker> {
         }
         out.push(SleepBlocker {
             name: clip(name, 100),
-            pid: Some(pid),
+            process: Some(ProcessRef::pid_only(pid)),
             prevents,
             reason: clip(&reason, 200),
             held_for: held.contains(':').then(|| held.to_string()),
@@ -160,7 +170,7 @@ pub fn blockers_from_requests(requests: &[WakeRequest]) -> Vec<SleepBlocker> {
             };
             SleepBlocker {
                 name: clip(short, 100),
-                pid: None,
+                process: None,
                 prevents,
                 reason: match &r.reason {
                     Some(why) => clip(why, 200),
@@ -230,7 +240,7 @@ pub fn parse_systemd_inhibit(text: &str) -> Vec<SleepBlocker> {
         if out.len() < MAX_ENTRIES {
             out.push(SleepBlocker {
                 name: clip(&who, 100),
-                pid: pid.parse().ok(),
+                process: pid.parse().ok().map(ProcessRef::pid_only),
                 prevents,
                 reason: clip(&why, 200),
                 held_for: None,
@@ -264,7 +274,7 @@ Kernel Assertions: 0x4=USB
         let b = parse_pmset_assertions(ASSERTIONS);
         assert_eq!(b.len(), 2);
         assert_eq!(b[0].name, "coreaudiod");
-        assert_eq!(b[0].pid, Some(412));
+        assert_eq!(b[0].process, Some(ProcessRef::pid_only(412)));
         assert_eq!(b[0].prevents, Prevents::Sleep);
         assert_eq!(b[0].held_for.as_deref(), Some("00:12:03"));
         assert!(b[0].reason.contains("preventuseridlesleep"));
@@ -337,7 +347,7 @@ GNOME Shell    1000 sam  1500 gnome-shell     handle-power-key     Handling keyp
         let b = parse_systemd_inhibit(t);
         assert_eq!(b.len(), 1);
         assert_eq!(b[0].name, "Firefox");
-        assert_eq!(b[0].pid, Some(2210));
+        assert_eq!(b[0].process, Some(ProcessRef::pid_only(2210)));
         assert_eq!(b[0].reason, "Playing audio");
     }
 
@@ -349,5 +359,38 @@ GNOME Shell    1000 sam  1500 gnome-shell     handle-power-key     Handling keyp
         assert!(blockers_from_requests(&crate::helper_extras::parse_requests(&junk)).is_empty());
         assert!(parse_systemd_inhibit(&junk).is_empty());
         assert!(parse_pmset_wakes("é".repeat(30).as_str()).is_empty());
+    }
+
+    #[test]
+    fn a_blocker_gets_the_start_time_of_the_process_that_holds_its_pid() {
+        let mut p = crate::process::ProcessSample {
+            pid: 412,
+            parent: None,
+            name: "coreaudiod".into(),
+            exe: None,
+            user: crate::process::Measured::unavailable(crate::process::UnavailableReason::NotPermitted),
+            cpu: crate::process::Measured::Value(0.0),
+            memory: crate::process::Measured::Value(0),
+            disk_read_bps: crate::process::Measured::Value(0.0),
+            disk_write_bps: crate::process::Measured::Value(0.0),
+            started: crate::process::Measured::Value(crate::time::Timestamp(900)),
+            owner: crate::process::Owner::Own,
+            state: crate::process::RunState::Running,
+        };
+        let mut report = SleepReport {
+            blockers: parse_pmset_assertions(ASSERTIONS),
+            ..SleepReport::default()
+        };
+        report.stamp_from(std::slice::from_ref(&p));
+        assert_eq!(report.blockers[0].process, Some(ProcessRef::new(412, crate::time::Timestamp(900))));
+        assert_eq!(
+            report.blockers[1].process.unwrap().started,
+            None,
+            "a pid the table does not hold stays pid only"
+        );
+        p.started = crate::process::Measured::unavailable(crate::process::UnavailableReason::NotPermitted);
+        report.blockers[0].process = Some(ProcessRef::pid_only(412));
+        report.stamp_from(&[p]);
+        assert_eq!(report.blockers[0].process, Some(ProcessRef::pid_only(412)));
     }
 }

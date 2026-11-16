@@ -1,5 +1,6 @@
 import type { AppGroup, Measured, OtherUsers, ProcessRef, ProcessSample } from '../../core/api.types';
 import { readValue, unavailableText } from '../../core/measured';
+import { refKey, refOf } from '../../core/process-ref';
 
 export type ViewMode = 'groups' | 'tree' | 'flat';
 export type SortKey = 'name' | 'cpu' | 'memory' | 'disk' | 'user' | 'pid';
@@ -78,13 +79,9 @@ export function compareRows(a: Row, b: Row, sort: Sort): number {
   return (sort.dir === 'asc' ? c : -c) || a.name.localeCompare(b.name) || (a.pid ?? 0) - (b.pid ?? 0);
 }
 
-/**
- * The row key of a process: its pid plus its start time, so a pid the OS hands to a new process is a new row (rule 53: a reusable OS
- * name alone is never trusted). The pid alone only when the OS gave no start time.
- */
+/** The row key of a process: its pid plus its start time, so a pid the OS hands to a new process is a new row (rule 53). */
 export function processKey(p: Pick<ProcessSample, 'pid' | 'started'>): string {
-  const started = readValue(p.started);
-  return started === null ? `p${p.pid}` : `p${p.pid}@${started}`;
+  return refKey(refOf(p));
 }
 
 /**
@@ -103,11 +100,6 @@ export function carryStarts(next: readonly ProcessSample[], previous: readonly P
     const earlier = known.get(p.pid);
     return earlier !== undefined && readValue(p.started) === null ? { ...p, started: { value: earlier } } : p;
   });
-}
-
-/** Whether two references name the same process: the same pid and the same start time (a reused pid is another process; rule 53). */
-export function sameProcess(a: ProcessRef, b: ProcessRef): boolean {
-  return a.pid === b.pid && a.started === b.started;
 }
 
 function processRow(p: ProcessSample, depth: number, expandable = false, expanded = false): Row {

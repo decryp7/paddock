@@ -2197,3 +2197,18 @@ update, green 15 of 15 with one `clock.runFor(1000)` after the swap. Fix in the 
 and its comment no longer says the clock stands still. **Open (product):** the redraw is real for a user too (a row menu opened in
 the first second after a list swap closes on the next update); a fix needs a workaround in `pd-table` around the CDK table. **Resolved (2026-11-16, user: local workaround, no upstream issue):** the cause is an upstream regression since @angular/cdk 22.1.8 (angular/components#33670; 22.2.4 installed, unfixed upstream as of 22.2.7 per the research, 2026-11-16); `pd-table` records the views of its body table after each render (`recordRecycledRows`), the spec "keeps every row element through live updates after rows were removed and added again" was red on stock CDK (9 of 12 rows redrawn) and the Dyno e2e fixme is a test again; the extra `clock.runFor(1000)` in the Shift+F10 spec is gone; a canary spec (workaround switched off, stock CDK must still redraw) fails when a CDK upgrade fixes the bug and says to delete the workaround. Dyno row keys carry a start time the OS gave earlier (`carryStarts`), so a start time that comes and goes does not flip a key. Remove the workaround when the CDK fixes it (the spec stays). **Class:
 a test assumed a quiet page while live updates ran (earlier: Debrief's Stop-button probe, 2026-11-15; this file's Escape fix, 0315ca827).**
+
+## A wire type named processes by a bare pid: one `ProcessRef` instead (Dyno, 2026-11-16, rule 53)
+Symptom: a reused pid highlighted the wrong row, joined a new process to an old one's open row, and in the details panel opened,
+selected and listed another process's sockets. Found one site at a time (the row key, the selection, the reply guard in 5f7ea13fb)
+until a sweep of the wire showed the class: `ParentLink`, the network owner, `TrafficRow`, `GpuProcess`, `SleepBlocker`, the snapshot
+diff, the traffic tracker and the host tracker all kept a pid. Fix through one mechanism: `ProcessRef { pid, started }` is the wire
+form of a process everywhere (dyno-core, `api.types.ts`); `ProcessRef::identity` / `identify()` say `same`, `different` or
+`unknown` (a start time missing on a side is not evidence; a screen that must keep a selection uses `notDifferent`); producers that
+read only a pid (a tool's output) get the start time from the sampler's table of the same sweep (`with_start_from`, `stamp_from`);
+trackers key by `ProcessRef`, so a reused pid has no earlier read. Check C134 (report-only) fails a pid field in a Dyno wire type
+unless it carries `conformance: wire-pid — <why>`. Listed, not changed: the socket tuple keys of the listener and connection
+trackers (`SocketRow.pid`, an OS socket owner the sweep resolves), the helper's `Holder` and `ProcessEntry` (the start time is
+the next field), and `AppGroup.pids` (members of one sweep). **Class: a reusable OS name kept as the identity (earlier: the
+stale-pid kills behind rule 53 and ADR 0033, the row key and selection in this branch's parent).**
+

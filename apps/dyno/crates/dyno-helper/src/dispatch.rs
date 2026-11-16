@@ -530,7 +530,7 @@ mod tests {
 
     fn counter(pid: u32, name: &str) -> TrafficCounter {
         TrafficCounter {
-            pid,
+            process: dyno_core::process::ProcessRef::pid_only(pid),
             name: name.into(),
             bytes_in: 10,
             bytes_out: 20,
@@ -581,7 +581,7 @@ mod tests {
     }
 
     fn pids(a: &dyno_core::network_traffic::TrafficAnswer) -> Vec<u32> {
-        a.counters.iter().map(|c| c.pid).collect()
+        a.counters.iter().map(|c| c.process.pid).collect()
     }
 
     #[test]

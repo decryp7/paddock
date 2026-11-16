@@ -5,6 +5,7 @@
 use crate::helper_policy::{OthersPolicy, Visibility};
 use crate::helper_processes::{RawOwner, RawProcess, Sweep, MAX_NAME, MAX_SWEEP};
 use crate::helper_wire::HelperUser;
+use crate::process::ProcessRef;
 use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -17,8 +18,8 @@ pub const MAX_COUNTERS: usize = 8_192;
 /// What the OS reports for one process: bytes since it started.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrafficCounter {
-    /// Process id.
-    pub pid: u32,
+    /// Which process (a tool's output gives the pid; the agent adds the start time from its process table).
+    pub process: ProcessRef,
     /// Program name as the tool prints it (may be shortened).
     pub name: String,
     /// Bytes received.
@@ -31,8 +32,8 @@ pub struct TrafficCounter {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrafficRow {
-    /// Process id.
-    pub pid: u32,
+    /// Which process (pid and start time).
+    pub process: ProcessRef,
     /// Program name.
     pub name: String,
     /// Bytes per second received.
@@ -129,7 +130,7 @@ pub fn traffic_answer(
     let (before, after) = (by_pid(before), by_pid(after));
     let mut answer = TrafficAnswer::default();
     for c in counters.into_iter().take(MAX_COUNTERS) {
-        match whose(c.pid, &before, &after, caller) {
+        match whose(c.process.pid, &before, &after, caller) {
             Whose::Shown(p) => answer.counters.push(TrafficCounter {
                 name: p.name.chars().take(MAX_NAME).collect(),
                 ..c
@@ -162,7 +163,7 @@ pub fn parse_nettop(text: &str) -> Vec<TrafficCounter> {
         let Some((name, pid)) = label.rsplit_once('.') else { continue };
         let Ok(pid) = pid.trim().parse::<u32>() else { continue };
         out.push(TrafficCounter {
-            pid,
+            process: ProcessRef::pid_only(pid),
             name: name.trim().to_string(),
             bytes_in,
             bytes_out,
@@ -177,7 +178,8 @@ pub fn parse_nettop(text: &str) -> Vec<TrafficCounter> {
 /// Turns consecutive counter reads into rates.
 #[derive(Debug, Default)]
 pub struct TrafficTracker {
-    last: HashMap<u32, (u64, u64)>,
+    /// By process identity: a pid reused by a new process (another start time) is a new key and has no earlier read.
+    last: HashMap<ProcessRef, (u64, u64)>,
     at: Option<Timestamp>,
 }
 
@@ -194,7 +196,7 @@ impl TrafficTracker {
         let mut rows = Vec::new();
         if let Some(secs) = secs {
             for c in counters {
-                let Some((pin, pout)) = self.last.get(&c.pid).copied() else {
+                let Some((pin, pout)) = self.last.get(&c.process).copied() else {
                     continue;
                 };
                 let rx = c.bytes_in.saturating_sub(pin);
@@ -203,16 +205,20 @@ impl TrafficTracker {
                     continue;
                 }
                 rows.push(TrafficRow {
-                    pid: c.pid,
+                    process: c.process,
                     name: c.name.clone(),
                     rx_bps: rx as f64 / secs,
                     tx_bps: tx as f64 / secs,
                 });
             }
         }
-        rows.sort_by(|a, b| (b.rx_bps + b.tx_bps).total_cmp(&(a.rx_bps + a.tx_bps)).then(a.pid.cmp(&b.pid)));
+        rows.sort_by(|a, b| {
+            (b.rx_bps + b.tx_bps)
+                .total_cmp(&(a.rx_bps + a.tx_bps))
+                .then(a.process.pid.cmp(&b.process.pid))
+        });
         rows.truncate(MAX_TRAFFIC_ROWS);
-        self.last = counters.iter().map(|c| (c.pid, (c.bytes_in, c.bytes_out))).collect();
+        self.last = counters.iter().map(|c| (c.process, (c.bytes_in, c.bytes_out))).collect();
         self.at = Some(at);
         rows
     }
@@ -258,20 +264,20 @@ mod tests {
         };
         let counters = vec![
             TrafficCounter {
-                pid: 1,
+                process: crate::process::ProcessRef::pid_only(1),
                 name: "mine".into(),
                 bytes_in: 1,
                 bytes_out: 1,
             },
             TrafficCounter {
-                pid: 2,
+                process: crate::process::ProcessRef::pid_only(2),
                 name: "mystery".into(),
                 bytes_in: 5,
                 bytes_out: 6,
             },
         ];
         let a = traffic_answer(counters, &sweep, &sweep, &me, Visibility::Own(OthersPolicy::Total));
-        assert_eq!(a.counters.iter().map(|c| c.pid).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(a.counters.iter().map(|c| c.process.pid).collect::<Vec<_>>(), vec![1]);
         assert_eq!(
             a.others,
             Some(OthersTraffic {
@@ -287,11 +293,11 @@ mod tests {
         let c = parse_nettop(SAMPLE);
         assert_eq!(c.len(), 3);
         assert_eq!(
-            (c[0].pid, c[0].name.as_str(), c[0].bytes_in, c[0].bytes_out),
+            (c[0].process.pid, c[0].name.as_str(), c[0].bytes_in, c[0].bytes_out),
             (0, "kernel_task", 3_112_760_137, 9_478_161_228)
         );
         assert_eq!(c[1].name, "Google Chrome H");
-        assert_eq!((c[2].pid, c[2].name.as_str()), (77, "weird.name.with.dots"));
+        assert_eq!((c[2].process.pid, c[2].name.as_str()), (77, "weird.name.with.dots"));
         assert!(parse_nettop("").is_empty());
         assert!(parse_nettop(",bytes_in,bytes_out,\n").is_empty());
     }
@@ -307,7 +313,7 @@ mod tests {
 
     fn counter(pid: u32, i: u64, o: u64) -> TrafficCounter {
         TrafficCounter {
-            pid,
+            process: crate::process::ProcessRef::pid_only(pid),
             name: format!("app{pid}"),
             bytes_in: i,
             bytes_out: o,
@@ -323,7 +329,7 @@ mod tests {
         );
         let rows = t.update(Timestamp(2_000), &[counter(1, 2_100, 300), counter(2, 0, 0), counter(3, 50, 50)]);
         assert_eq!(rows.len(), 1, "idle programs and programs first seen now are not listed");
-        assert_eq!((rows[0].pid, rows[0].rx_bps, rows[0].tx_bps), (1, 1_000.0, 100.0));
+        assert_eq!((rows[0].process.pid, rows[0].rx_bps, rows[0].tx_bps), (1, 1_000.0, 100.0));
     }
 
     #[test]
@@ -331,7 +337,7 @@ mod tests {
         let mut t = TrafficTracker::new();
         t.update(Timestamp(0), &[counter(1, 1_000, 1_000), counter(2, 0, 0)]);
         let rows = t.update(Timestamp(1_000), &[counter(1, 10, 10), counter(2, 5_000, 0)]);
-        assert_eq!(rows.iter().map(|r| r.pid).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(rows.iter().map(|r| r.process.pid).collect::<Vec<_>>(), vec![2]);
         assert_eq!(rows[0].rx_bps, 5_000.0);
         // A clock that did not move gives no rates instead of dividing by zero.
         let rows = t.update(Timestamp(1_000), &[counter(2, 9_000, 0)]);
@@ -346,7 +352,7 @@ mod tests {
         t.update(Timestamp(0), &first);
         let rows = t.update(Timestamp(1_000), &next);
         assert_eq!(rows.len(), MAX_TRAFFIC_ROWS);
-        assert_eq!(rows[0].pid, 99);
+        assert_eq!(rows[0].process.pid, 99);
     }
 
     fn proc(pid: u32, started: Option<i64>, name: &str, owner: RawOwner) -> crate::helper_processes::RawProcess {
@@ -383,7 +389,7 @@ mod tests {
 
     fn c(pid: u32, name: &str) -> TrafficCounter {
         TrafficCounter {
-            pid,
+            process: crate::process::ProcessRef::pid_only(pid),
             name: name.into(),
             bytes_in: 10,
             bytes_out: 20,
@@ -409,7 +415,7 @@ mod tests {
         ]);
         let counters = vec![c(7, "theirs.exe"), c(8, "a.exe"), c(9, "b.exe"), c(10, "whatever")];
         let a = traffic_answer(counters, &before, &after, &me, Visibility::Own(OthersPolicy::Total));
-        assert_eq!(a.counters.iter().map(|x| x.pid).collect::<Vec<_>>(), vec![10]);
+        assert_eq!(a.counters.iter().map(|x| x.process.pid).collect::<Vec<_>>(), vec![10]);
         assert_eq!(
             a.others.map(|o| o.programs),
             Some(3),
@@ -448,12 +454,30 @@ mod tests {
         let answer =
             |before: &Sweep, after: &Sweep| traffic_answer(vec![c(4, "System")], before, after, &me, Visibility::Own(OthersPolicy::Total));
         let ok = answer(&system(RawOwner::System), &system(RawOwner::System));
-        assert_eq!(ok.counters.iter().map(|x| x.pid).collect::<Vec<_>>(), vec![4]);
+        assert_eq!(ok.counters.iter().map(|x| x.process.pid).collect::<Vec<_>>(), vec![4]);
         assert!(ok.others.is_none());
         // A pid reused by a process that is not the system's, or an account's process with no start time, is not trusted.
         let reused = answer(&system(RawOwner::System), &system(mine(1_000)));
         assert!(reused.counters.is_empty() && reused.others.is_some());
         let account = answer(&system(mine(1_000)), &system(mine(1_000)));
         assert!(account.counters.is_empty() && account.others.is_some());
+    }
+
+    #[test]
+    fn a_pid_reused_by_a_new_process_has_no_earlier_read_and_gives_no_rate() {
+        let at = |pid: u32, started: i64, i: u64| TrafficCounter {
+            process: crate::process::ProcessRef::new(pid, Timestamp(started)),
+            name: "x".into(),
+            bytes_in: i,
+            bytes_out: 0,
+        };
+        let mut t = TrafficTracker::new();
+        t.update(Timestamp(0), &[at(7, 100, 1_000)]);
+        // Same pid, another start time: a new process, so its counter is not a continuation of the old one's.
+        assert!(t.update(Timestamp(1_000), &[at(7, 200, 9_000)]).is_empty());
+        // The same process in the next read does have a rate, and the row says which process it is.
+        let rows = t.update(Timestamp(2_000), &[at(7, 200, 10_000)]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].process, crate::process::ProcessRef::new(7, Timestamp(200)));
     }
 }

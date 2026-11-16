@@ -3,7 +3,8 @@ import { patchState, signalStore, withComputed, withMethods, withState } from '@
 import type { AppGroup, CommandError, LiveVia, LockerList, OtherUsers, ProcessDetails, ProcessRef, ProcessSample } from '../core/api.types';
 import { BACKEND, type Unsubscribe } from '../core/backend';
 import { toCommandError } from '../core/command-error';
-import { type Row, type Sort, type ViewMode, buildRows, carryStarts, collapseAllKeys, expandAllKeys, sameProcess } from '../features/processes/process-rows';
+import { notDifferent } from '../core/process-ref';
+import { type Row, type Sort, type ViewMode, buildRows, carryStarts, collapseAllKeys, expandAllKeys } from '../features/processes/process-rows';
 
 interface ProcessesState {
   processes: ProcessSample[];
@@ -25,7 +26,7 @@ interface ProcessesState {
 }
 
 /** Whether the process selected now is the one a reply is for (the pid alone could be a new process that reused it). */
-const sameSelected = (selected: ProcessRef | null, ref: ProcessRef): boolean => selected !== null && sameProcess(selected, ref);
+const sameSelected = (selected: ProcessRef | null, ref: ProcessRef): boolean => selected !== null && notDifferent(selected, ref);
 
 /** The task manager's state: the live process list (subscribed only while the screen is open) and view settings. */
 export const ProcessesStore = signalStore(

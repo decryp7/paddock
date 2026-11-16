@@ -242,6 +242,17 @@ describe('dy-extras-page', () => {
     expect(el.textContent).toContain('No app activity to show');
   });
 
+  it('GPU: a pid reused by a new process is a row of its own, keyed by pid and start time', async () => {
+    const { f, el, mock, store } = render('gpu');
+    await settle(f);
+    const row = (started: number) => ({ process: { pid: 311, started }, name: 'WindowServer', gpuPercent: 5, memoryBytes: 1024 });
+    vi.spyOn(mock, 'gpuProcesses').mockResolvedValue({ processes: [row(100), row(200)], source: null, unavailable: null });
+    await store.reload('gpu');
+    await settle(f);
+    const keys = [...rowsOf(el, 'GPU use per process')].map((r) => r.getAttribute('data-key'));
+    expect(keys).toEqual(['p311@100', 'p311@200']);
+  });
+
   it('GPU: a table, and the unavailable and idle states', async () => {
     const { f, el, mock, store } = render('gpu');
     await settle(f);

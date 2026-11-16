@@ -37,8 +37,8 @@ pub struct Snapshot {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcessSummary {
-    /// Pid.
-    pub pid: u32,
+    /// Which process (pid and start time).
+    pub process: ProcessRef,
     /// Name.
     pub name: String,
     /// Executable.
@@ -53,8 +53,8 @@ pub struct ProcessSummary {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcessChange {
-    /// Pid.
-    pub pid: u32,
+    /// Which process (pid and start time).
+    pub process: ProcessRef,
     /// Name.
     pub name: String,
     /// CPU before.
@@ -92,7 +92,7 @@ pub const MAX_PROCESSES: usize = 5_000;
 
 fn summary(p: &ProcessSample) -> ProcessSummary {
     ProcessSummary {
-        pid: p.pid,
+        process: p.reference(),
         name: p.name.clone(),
         exe: p.exe.clone(),
         cpu: p.cpu,
@@ -145,7 +145,7 @@ pub fn diff(a: &Snapshot, b: &Snapshot) -> SnapshotDiff {
             let mem = dm >= 10 << 20 && dm as f64 >= memory_before as f64 * 0.1;
             let cpu = (cpu_after - cpu_before).abs() >= 5.0;
             (mem || cpu).then(|| ProcessChange {
-                pid: p.pid,
+                process: p.reference(),
                 name: p.name.clone(),
                 cpu_before,
                 cpu_after,

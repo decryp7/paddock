@@ -73,6 +73,24 @@ describe('ProcessDetailsPanel', () => {
     expect(el.querySelector('dl')?.textContent).not.toContain('Nice value');
   });
 
+  it('opens a parent only when the process with that pid is that parent, not one that reused the pid', async () => {
+    const { f, el, store, settle, tab, mock } = await make();
+    const child = store.processes().find((x) => x.parent !== null && x.name.startsWith('rustc'))!;
+    const real = mock.processDetails.bind(mock);
+    vi.spyOn(mock, 'processDetails').mockImplementation(async (ref) => {
+      const d = await real(ref);
+      // The first parent link names pid P with a start time that is not the start time of the live process with that pid.
+      return { ...d, parents: d.parents.map((p, i) => (i === 0 ? { ...p, process: { pid: p.process.pid, started: (p.process.started ?? 0) + 12_345 } } : p)) };
+    });
+    await store.select({ pid: child.pid, started: readValue(child.started) });
+    f.detectChanges();
+    await settle();
+    await tab('Parents');
+    el.querySelector<HTMLButtonElement>('ol.chain button')!.click();
+    await settle();
+    expect(store.selected()?.pid).toBe(child.pid);
+  });
+
   it('walks the tabs: parents, files, network, libraries', async () => {
     const { f, el, store, settle, tab } = await make();
     const withParent = store.processes().find((x) => x.parent !== null && x.name.startsWith('rustc'))!;
@@ -103,12 +121,12 @@ describe('ProcessDetailsPanel', () => {
     f.detectChanges();
     await settle();
     const snap = await mock.network({ showLoopback: true, proto: null, state: null, exposedOnly: false, search: '', country: null });
-    const own = { kind: 'process' as const, pid: chrome.pid, name: 'chrome', path: null };
+    const own = { kind: 'process' as const, process: { pid: chrome.pid, started: readValue(chrome.started) }, name: 'chrome', path: null };
     vi.spyOn(mock, 'network').mockResolvedValue({
       ...snap,
       connections: [{ ...snap.connections[0]!, owner: own, remote: '142.250.74.46', remotePort: 443 }],
       listeners: [{ ...snap.listeners[0]!, owner: own }],
-      traffic: [{ pid: chrome.pid, name: 'chrome', rxBps: 2048, txBps: 512 }],
+      traffic: [{ process: { pid: chrome.pid, started: readValue(chrome.started) }, name: 'chrome', rxBps: 2048, txBps: 512 }],
     });
     await tab('Network');
     await settle();

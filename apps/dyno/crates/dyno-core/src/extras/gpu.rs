@@ -3,7 +3,7 @@
 //! combinations (Linux with AMD or Intel graphics, which need vendor interfaces) say so instead of showing zeros.
 
 use super::{clean, clip};
-use crate::process::Pid;
+use crate::process::{Pid, ProcessRef};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -14,8 +14,8 @@ pub const MAX_PROCESSES: usize = 30;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GpuProcess {
-    /// Process id.
-    pub pid: Pid,
+    /// Which process (the pid from the tool; the agent adds the start time from its process table).
+    pub process: ProcessRef,
     /// Its name, when the tool gives it (the agent fills it in from the process table otherwise).
     pub name: String,
     /// Percent of the GPU's time it used (0-100).
@@ -36,12 +36,26 @@ pub struct GpuReport {
     pub unavailable: Option<String>,
 }
 
+impl GpuReport {
+    /// Adds each process's start time (and its name, when the tool gave none) from `table`, a process list of the same moment.
+    pub fn stamp_from(&mut self, table: &[crate::process::ProcessSample]) {
+        for p in &mut self.processes {
+            p.process = p.process.with_start_from(table);
+            if p.name.is_empty() {
+                if let Some(s) = table.iter().find(|s| s.pid == p.process.pid) {
+                    p.name = s.name.clone();
+                }
+            }
+        }
+    }
+}
+
 fn finish(map: BTreeMap<Pid, GpuProcess>) -> Vec<GpuProcess> {
     let mut v: Vec<GpuProcess> = map
         .into_values()
         .filter(|p| p.gpu_percent > 0.0 || p.memory_bytes.is_some())
         .collect();
-    v.sort_by(|a, b| b.gpu_percent.total_cmp(&a.gpu_percent).then(a.pid.cmp(&b.pid)));
+    v.sort_by(|a, b| b.gpu_percent.total_cmp(&a.gpu_percent).then(a.process.pid.cmp(&b.process.pid)));
     v.truncate(MAX_PROCESSES);
     v
 }
@@ -69,7 +83,7 @@ pub fn parse_nvidia_pmon(text: &str) -> Vec<GpuProcess> {
         let name = at("command").map(|c| clip(c, 100)).unwrap_or_default();
         let memory_bytes = num("fb").map(|mib| (mib * 1024.0 * 1024.0) as u64);
         let e = map.entry(pid).or_insert(GpuProcess {
-            pid,
+            process: ProcessRef::pid_only(pid),
             name,
             gpu_percent: 0.0,
             memory_bytes: None,
@@ -116,7 +130,7 @@ pub fn parse_typeperf_gpu(text: &str) -> Vec<GpuProcess> {
     let mut map: BTreeMap<Pid, GpuProcess> = BTreeMap::new();
     for ((pid, _), x) in per {
         let e = map.entry(pid).or_insert(GpuProcess {
-            pid,
+            process: ProcessRef::pid_only(pid),
             name: String::new(),
             gpu_percent: 0.0,
             memory_bytes: None,
@@ -172,7 +186,7 @@ pub fn macos_rates(first: &[(Pid, String, u64)], second: &[(Pid, String, u64)], 
         map.insert(
             *pid,
             GpuProcess {
-                pid: *pid,
+                process: ProcessRef::pid_only(*pid),
                 name: name.clone(),
                 gpu_percent: ((used / wall_ns) * 100.0).clamp(0.0, 100.0) as f32,
                 memory_bytes: None,
@@ -195,11 +209,11 @@ mod tests {
     0        900     G     -     -     -     -    20  Xorg
 ";
         let p = parse_nvidia_pmon(t);
-        assert_eq!(p[0].pid, 4242);
+        assert_eq!(p[0].process.pid, 4242);
         assert_eq!(p[0].gpu_percent, 35.0);
         assert_eq!(p[0].memory_bytes, Some(400 * 1024 * 1024));
         assert_eq!(p[0].name, "firefox");
-        assert_eq!(p[1].pid, 900);
+        assert_eq!(p[1].process.pid, 900);
         assert!(parse_nvidia_pmon("").is_empty());
     }
 
@@ -211,7 +225,7 @@ The command completed successfully.
 ";
         let p = parse_typeperf_gpu(t);
         assert_eq!(p.len(), 1);
-        assert_eq!(p[0].pid, 100);
+        assert_eq!(p[0].process.pid, 100);
         assert_eq!(p[0].gpu_percent, 50.0);
         assert!(parse_typeperf_gpu("The data is not valid.").is_empty());
     }
@@ -246,5 +260,37 @@ The command completed successfully.
         // A counter that went backwards (a restarted client) is not negative.
         let c = vec![(433, "WindowServer".to_string(), 5)];
         assert!(macos_rates(&a, &c, 1000).is_empty());
+    }
+
+    #[test]
+    fn the_start_time_comes_from_the_process_table_and_a_pid_the_table_does_not_know_stays_pid_only() {
+        let sample = |pid: u32, started: i64, name: &str| crate::process::ProcessSample {
+            pid,
+            parent: None,
+            name: name.into(),
+            exe: None,
+            user: crate::process::Measured::unavailable(crate::process::UnavailableReason::NotPermitted),
+            cpu: crate::process::Measured::Value(0.0),
+            memory: crate::process::Measured::Value(0),
+            disk_read_bps: crate::process::Measured::Value(0.0),
+            disk_write_bps: crate::process::Measured::Value(0.0),
+            started: crate::process::Measured::Value(crate::time::Timestamp(started)),
+            owner: crate::process::Owner::Own,
+            state: crate::process::RunState::Running,
+        };
+        let row = |pid: u32| GpuProcess {
+            process: ProcessRef::pid_only(pid),
+            name: String::new(),
+            gpu_percent: 1.0,
+            memory_bytes: None,
+        };
+        let mut report = GpuReport {
+            processes: vec![row(7), row(8)],
+            ..GpuReport::default()
+        };
+        report.stamp_from(&[sample(7, 500, "seven")]);
+        assert_eq!(report.processes[0].process, ProcessRef::new(7, crate::time::Timestamp(500)));
+        assert_eq!(report.processes[0].name, "seven");
+        assert_eq!(report.processes[1].process, ProcessRef::pid_only(8));
     }
 }

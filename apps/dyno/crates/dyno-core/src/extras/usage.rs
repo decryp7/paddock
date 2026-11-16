@@ -68,7 +68,7 @@ pub fn parse_top_power(text: &str) -> Vec<EnergySample> {
 
 /// Sums counters and energy per app. `apps` maps each app name to its process ids.
 pub fn build(apps: &[(String, Vec<Pid>)], counters: Option<&[TrafficCounter]>, energy: Option<&[EnergySample]>) -> Vec<AppUsageRow> {
-    let by_pid: HashMap<Pid, &TrafficCounter> = counters.unwrap_or_default().iter().map(|c| (c.pid, c)).collect();
+    let by_pid: HashMap<Pid, &TrafficCounter> = counters.unwrap_or_default().iter().map(|c| (c.process.pid, c)).collect();
     let power: HashMap<Pid, f32> = energy.unwrap_or_default().iter().map(|e| (e.pid, e.impact)).collect();
     let mut rows: Vec<AppUsageRow> = apps
         .iter()
@@ -125,7 +125,7 @@ bad    line here        x
 
     fn counter(pid: u32, i: u64, o: u64) -> TrafficCounter {
         TrafficCounter {
-            pid,
+            process: crate::process::ProcessRef::pid_only(pid),
             name: "x".into(),
             bytes_in: i,
             bytes_out: o,

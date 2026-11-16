@@ -56,7 +56,7 @@ pub fn signals_from_report(report: &SleepReport, own_pid: u32) -> (Reading<bool>
     let mut audio = false;
     let mut others: Vec<String> = Vec::new();
     for b in &report.blockers {
-        if b.pid == Some(own_pid)
+        if b.process.is_some_and(|p| p.pid == own_pid)
             || b.name.eq_ignore_ascii_case("dyno")
             || b.name.to_ascii_lowercase().starts_with("dyno-")
             || is_system_noise(&b.name, &b.reason)
@@ -222,7 +222,7 @@ mod tests {
     fn blocker(name: &str, pid: Option<u32>, prevents: Prevents, reason: &str) -> SleepBlocker {
         SleepBlocker {
             name: name.into(),
-            pid,
+            process: pid.map(dyno_core::process::ProcessRef::pid_only),
             prevents,
             reason: reason.into(),
             held_for: None,

@@ -208,7 +208,7 @@ fn listener(port: u16, exposure: Exposure) -> ListenerRow {
         port,
         exposure,
         owner: dyno_core::network::Owner::Process {
-            pid: 1,
+            process: dyno_core::process::ProcessRef::pid_only(1),
             name: "x".into(),
             path: None,
         },
@@ -229,7 +229,7 @@ fn connection(remote: &str, state: SocketState) -> ConnectionRow {
         state,
         state_label: state.label().into(),
         owner: dyno_core::network::Owner::Process {
-            pid: 1,
+            process: dyno_core::process::ProcessRef::pid_only(1),
             name: "x".into(),
             path: None,
         },

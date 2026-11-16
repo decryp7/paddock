@@ -102,8 +102,10 @@ import type {
   SearchSeed,
   StartupFilter,
   StartupOverview,
+  ParentLink,
 } from './api.types';
 import type { DynoBackend, Unsubscribe } from './backend';
+import { refKey, refOf } from './process-ref';
 import {
   demoActivity,
   demoAlerts,
@@ -595,11 +597,11 @@ export class MockBackend implements DynoBackend {
     return this.reply('processDetails', () => {
       const p = this.find(target);
       const sample = sampleProcess(p, Math.floor(this.now() / 1000), null, 1);
-      const parents: { pid: number; name: string }[] = [];
+      const parents: ParentLink[] = [];
       for (let cur = p.parent; cur !== null; ) {
         const parent = this.processes.find((x) => x.pid === cur);
         if (!parent || parents.length > 12) break;
-        parents.push({ pid: parent.pid, name: parent.name });
+        parents.push({ process: { pid: parent.pid, started: parent.started }, name: parent.name });
         cur = parent.parent;
       }
       const pr = this.profile;
@@ -723,20 +725,20 @@ export class MockBackend implements DynoBackend {
       const [first, second] = b.at <= a.at ? [b, a] : [a, b];
       const x = this.snapshotData.get(first.id) ?? [];
       const y = this.snapshotData.get(second.id) ?? [];
-      const xs = new Map(x.map((s) => [s.pid, s]));
-      const ys = new Map(y.map((s) => [s.pid, s]));
-      const summary = (s: ProcessSample) => ({ pid: s.pid, name: s.name, exe: s.exe, cpu: s.cpu, memory: s.memory });
+      const xs = new Map(x.map((s) => [refKey(refOf(s)), s]));
+      const ys = new Map(y.map((s) => [refKey(refOf(s)), s]));
+      const summary = (s: ProcessSample) => ({ process: refOf(s), name: s.name, exe: s.exe, cpu: s.cpu, memory: s.memory });
       const changed = y
-        .filter((s) => xs.has(s.pid))
-        .map((s) => ({ pid: s.pid, name: s.name, cpuBefore: num(xs.get(s.pid)!.cpu), cpuAfter: num(s.cpu), memoryBefore: num(xs.get(s.pid)!.memory), memoryAfter: num(s.memory) }))
+        .filter((s) => xs.has(refKey(refOf(s))))
+        .map((s) => ({ process: refOf(s), name: s.name, cpuBefore: num(xs.get(refKey(refOf(s)))!.cpu), cpuAfter: num(s.cpu), memoryBefore: num(xs.get(refKey(refOf(s)))!.memory), memoryAfter: num(s.memory) }))
         .filter((c) => Math.abs(c.memoryAfter - c.memoryBefore) >= 10 * MB || Math.abs(c.cpuAfter - c.cpuBefore) >= 5)
         .sort((p, q) => Math.abs(q.memoryAfter - q.memoryBefore) - Math.abs(p.memoryAfter - p.memoryBefore));
       const sum = (l: ProcessSample[], f: (s: ProcessSample) => number) => l.reduce((acc, s) => acc + f(s), 0);
       return {
         before: first,
         after: second,
-        added: y.filter((s) => !xs.has(s.pid)).map(summary),
-        removed: x.filter((s) => !ys.has(s.pid)).map(summary),
+        added: y.filter((s) => !xs.has(refKey(refOf(s)))).map(summary),
+        removed: x.filter((s) => !ys.has(refKey(refOf(s)))).map(summary),
         changed,
         memoryUsedDelta: Math.round(sum(y, (s) => num(s.memory)) - sum(x, (s) => num(s.memory))),
         cpuDelta: round(sum(y, (s) => num(s.cpu)) - sum(x, (s) => num(s.cpu)), 1),

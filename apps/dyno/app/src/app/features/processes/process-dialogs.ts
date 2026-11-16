@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import type { CommandError, LockerList } from '../../core/api.types';
 import { errorHint, isNotBuilt } from '../../core/command-error';
 import { Icon } from '../../shared/icon';
+import { refKey } from '../../core/process-ref';
 import { ReadingSource } from '../../core/reading-source';
 import { ProcessesStore } from '../../state/processes.store';
 import { MatButton } from '@angular/material/button';
@@ -40,7 +41,7 @@ import { MatInput } from '@angular/material/input';
           <p class="more" data-testid="lockers-truncated"><dy-icon name="info" /> The search stopped at its limit, so more programs may hold it.</p>
         }
         <ul>
-          @for (l of found.lockers; track l.process.pid) {
+          @for (l of found.lockers; track refKey(l.process)) {
             <li>
               <div class="txt"><strong>{{ l.name }}</strong><small>{{ l.kind ?? 'Holds it open' }}</small></div>
             </li>
@@ -67,6 +68,7 @@ import { MatInput } from '@angular/material/input';
 })
 export class LockersDialog {
   private readonly store = inject(ProcessesStore);
+  protected readonly refKey = refKey;
   protected readonly path = signal('');
   protected readonly busy = signal(false);
   protected readonly results = signal<LockerList | null>(null);

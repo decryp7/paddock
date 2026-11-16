@@ -161,7 +161,7 @@ export interface ProcessRef {
 export type Priority = 'idle' | 'belowNormal' | 'normal' | 'aboveNormal' | 'high';
 
 export interface ParentLink {
-  pid: number;
+  process: ProcessRef;
   name: string;
 }
 
@@ -246,7 +246,7 @@ export interface SnapshotInfo {
 }
 
 export interface ProcessSummary {
-  pid: number;
+  process: ProcessRef;
   name: string;
   exe: string | null;
   cpu: Measured<number>;
@@ -254,7 +254,7 @@ export interface ProcessSummary {
 }
 
 export interface ProcessChange {
-  pid: number;
+  process: ProcessRef;
   name: string;
   cpuBefore: number;
   cpuAfter: number;
@@ -1385,7 +1385,7 @@ export type NetProto = 'tcp' | 'udp';
 export type SocketState = 'listen' | 'synSent' | 'synReceived' | 'established' | 'finWait' | 'closeWait' | 'closing' | 'lastAck' | 'timeWait' | 'other';
 export type Exposure = 'loopback' | 'allInterfaces' | 'interface';
 
-export type NetOwner = { kind: 'process'; pid: number; name: string; path: string | null } | { kind: 'unknown'; reason: string };
+export type NetOwner = { kind: 'process'; process: ProcessRef; name: string; path: string | null } | { kind: 'unknown'; reason: string };
 
 export interface ListenerRow {
   proto: NetProto;
@@ -1457,7 +1457,7 @@ export interface NetworkSnapshot {
 
 /** What one program sent and received in the last interval. */
 export interface TrafficRow {
-  pid: number;
+  process: ProcessRef;
   name: string;
   rxBps: number;
   txBps: number;
@@ -1929,7 +1929,7 @@ export type Prevents = 'sleep' | 'displaySleep' | 'other';
 
 export interface SleepBlocker {
   name: string;
-  pid: number | null;
+  process: ProcessRef | null;
   prevents: Prevents;
   reason: string;
   /** How long it has held on, as the tool printed it ("00:12:03"). */
@@ -1987,7 +1987,7 @@ export interface UsageReport {
 }
 
 export interface GpuProcess {
-  pid: number;
+  process: ProcessRef;
   name: string;
   gpuPercent: number;
   memoryBytes: number | null;

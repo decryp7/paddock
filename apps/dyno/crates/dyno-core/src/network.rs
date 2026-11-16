@@ -2,7 +2,7 @@
 //! built from them, the filters the page asks for and the tracker that notices new listeners and new remote hosts.
 //! Pure: the agent passes rows, the process table and the time in as values.
 
-use crate::process::ProcessSample;
+use crate::process::{ProcessRef, ProcessSample};
 use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -120,8 +120,8 @@ pub fn exposure(addr: &IpAddr) -> Exposure {
 pub enum Owner {
     /// A process Dyno could name.
     Process {
-        /// Process id.
-        pid: u32,
+        /// Which process: its pid and start time (a pid is reused, so the pid alone is not an identity).
+        process: ProcessRef,
         /// Executable name.
         name: String,
         /// Full path, when readable.
@@ -137,21 +137,33 @@ pub enum Owner {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 enum OwnerJson {
-    Process { pid: u32, name: String, path: Option<String> },
-    Unknown { reason: String },
+    Process {
+        process: ProcessRef,
+        name: String,
+        path: Option<String>,
+    },
+    Unknown {
+        reason: String,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 enum OwnerBinary {
-    Process { pid: u32, name: String, path: Option<String> },
-    Unknown { reason: String },
+    Process {
+        process: ProcessRef,
+        name: String,
+        path: Option<String>,
+    },
+    Unknown {
+        reason: String,
+    },
 }
 
 impl From<Owner> for OwnerJson {
     fn from(o: Owner) -> Self {
         match o {
-            Owner::Process { pid, name, path } => OwnerJson::Process { pid, name, path },
+            Owner::Process { process, name, path } => OwnerJson::Process { process, name, path },
             Owner::Unknown { reason } => OwnerJson::Unknown { reason },
         }
     }
@@ -159,7 +171,7 @@ impl From<Owner> for OwnerJson {
 impl From<Owner> for OwnerBinary {
     fn from(o: Owner) -> Self {
         match o {
-            Owner::Process { pid, name, path } => OwnerBinary::Process { pid, name, path },
+            Owner::Process { process, name, path } => OwnerBinary::Process { process, name, path },
             Owner::Unknown { reason } => OwnerBinary::Unknown { reason },
         }
     }
@@ -167,7 +179,7 @@ impl From<Owner> for OwnerBinary {
 impl From<OwnerJson> for Owner {
     fn from(o: OwnerJson) -> Self {
         match o {
-            OwnerJson::Process { pid, name, path } => Owner::Process { pid, name, path },
+            OwnerJson::Process { process, name, path } => Owner::Process { process, name, path },
             OwnerJson::Unknown { reason } => Owner::Unknown { reason },
         }
     }
@@ -175,7 +187,7 @@ impl From<OwnerJson> for Owner {
 impl From<OwnerBinary> for Owner {
     fn from(o: OwnerBinary) -> Self {
         match o {
-            OwnerBinary::Process { pid, name, path } => Owner::Process { pid, name, path },
+            OwnerBinary::Process { process, name, path } => Owner::Process { process, name, path },
             OwnerBinary::Unknown { reason } => Owner::Unknown { reason },
         }
     }
@@ -203,11 +215,11 @@ impl<'de> Deserialize<'de> for Owner {
 
 const UNKNOWN_REASON: &str = "The OS did not say which program owns this. It may belong to another account or the system. On Linux, turn on administrator readings in Settings and Dyno's helper names it.";
 
-fn owner_of(pid: Option<u32>, names: &HashMap<u32, (&str, Option<&str>)>) -> Owner {
+fn owner_of(pid: Option<u32>, names: &HashMap<u32, (ProcessRef, &str, Option<&str>)>) -> Owner {
     match pid {
         Some(pid) => match names.get(&pid) {
-            Some((name, path)) => Owner::Process {
-                pid,
+            Some((process, name, path)) => Owner::Process {
+                process: *process,
                 name: (*name).to_string(),
                 path: path.map(str::to_string),
             },
@@ -372,7 +384,10 @@ pub fn build_with_geo(
     geo: Option<&dyn crate::geo::GeoLookup>,
     flagged: Option<&dyn Fn(&IpAddr) -> Vec<String>>,
 ) -> NetworkSnapshot {
-    let names: HashMap<u32, (&str, Option<&str>)> = processes.iter().map(|p| (p.pid, (p.name.as_str(), p.exe.as_deref()))).collect();
+    let names: HashMap<u32, (ProcessRef, &str, Option<&str>)> = processes
+        .iter()
+        .map(|p| (p.pid, (p.reference(), p.name.as_str(), p.exe.as_deref())))
+        .collect();
     let mut listeners = Vec::new();
     let mut connections = Vec::new();
     let mut unknown = 0_u32;
@@ -556,7 +571,8 @@ pub struct Tracker {
     primed: bool,
     listeners: HashMap<ListenerKey, Timestamp>,
     connections: HashMap<ConnKey, Timestamp>,
-    hosts: HashSet<(u32, IpAddr)>,
+    /// Which hosts each process has been seen connected to, by process identity: a pid reused by a new process starts afresh.
+    hosts: HashSet<(ProcessRef, IpAddr)>,
 }
 
 impl Tracker {
@@ -579,6 +595,7 @@ impl Tracker {
     /// Learns the current rows and returns the events they imply. `names` maps pid to program name.
     pub fn update(&mut self, now: Timestamp, rows: &[SocketRow], processes: &[ProcessSample]) -> Vec<NetEvent> {
         let names: HashMap<u32, &str> = processes.iter().map(|p| (p.pid, p.name.as_str())).collect();
+        let refs: HashMap<u32, ProcessRef> = processes.iter().map(|p| (p.pid, p.reference())).collect();
         let program = |pid: Option<u32>| pid.and_then(|p| names.get(&p).copied()).unwrap_or("A program").to_string();
         let mut events = Vec::new();
         let mut live_l: HashMap<ListenerKey, Timestamp> = HashMap::new();
@@ -603,7 +620,8 @@ impl Tracker {
                     let first = self.connections.get(&key).copied();
                     live_c.insert(key, first.unwrap_or(now));
                     if let Some(pid) = r.pid {
-                        let fresh = self.hosts.insert((pid, *ip));
+                        let who = refs.get(&pid).copied().unwrap_or_else(|| ProcessRef::pid_only(pid));
+                        let fresh = self.hosts.insert((who, *ip));
                         if fresh && self.primed && !ip.is_loopback() && state == SocketState::Established {
                             events.push(NetEvent::NewRemoteHost {
                                 program: program(r.pid),
@@ -620,7 +638,7 @@ impl Tracker {
         if self.hosts.len() > MAX_REMEMBERED {
             // Forget the hosts of programs that are no longer connected; the set only has to be bounded.
             let live: HashSet<u32> = rows.iter().filter_map(|r| r.pid).collect();
-            self.hosts.retain(|(pid, _)| live.contains(pid));
+            self.hosts.retain(|(who, _)| live.contains(&who.pid));
             if self.hosts.len() > MAX_REMEMBERED {
                 self.hosts.clear();
             }
@@ -887,7 +905,7 @@ mod tests {
     #[test]
     fn owners_cross_the_ipc_and_the_ui_wire_in_their_own_shapes() {
         let named = Owner::Process {
-            pid: 7,
+            process: ProcessRef::new(7, Timestamp(1_700_000_000_000)),
             name: "node".into(),
             path: Some("/bin/node".into()),
         };
@@ -988,5 +1006,46 @@ mod tests {
         let by: Vec<(&str, &[String])> = s.connections.iter().map(|c| (c.remote.as_str(), c.flagged_by.as_slice())).collect();
         assert!(by.contains(&("8.8.8.8", &["Work blocklist".to_string()][..])));
         assert!(by.contains(&("9.9.9.9", &[][..])));
+    }
+
+    #[test]
+    fn an_owner_carries_the_start_time_of_the_process_and_a_reused_pid_is_another_owner() {
+        let mut old = proc(2, "Server");
+        old.started = crate::process::Measured::Value(Timestamp(100));
+        let mut new = proc(2, "Server");
+        new.started = crate::process::Measured::Value(Timestamp(200));
+        let rows = vec![listen(v4(0, 0, 0, 0), 8080, Some(2))];
+        let owner_in = |p: ProcessSample| match build(Timestamp(0), &rows, &[p], &NetworkQuery::default(), &Tracker::new())
+            .listeners
+            .remove(0)
+            .owner
+        {
+            Owner::Process { process, .. } => process,
+            Owner::Unknown { reason } => panic!("{reason}"),
+        };
+        let (a, b) = (owner_in(old), owner_in(new));
+        assert_eq!((a.pid, a.started), (2, Some(Timestamp(100))));
+        assert_eq!(a.identity(&b), crate::process::Identity::Different);
+    }
+
+    #[test]
+    fn a_pid_reused_by_a_new_process_is_new_to_the_host_tracker() {
+        let host = v4(93, 184, 216, 34);
+        let row = vec![conn(host, 443, Some(2), SocketState::Established)];
+        let mut old = proc(2, "Server");
+        old.started = crate::process::Measured::Value(Timestamp(100));
+        let mut new = proc(2, "Server");
+        new.started = crate::process::Measured::Value(Timestamp(200));
+        let mut t = Tracker::new();
+        t.update(Timestamp(0), &row, std::slice::from_ref(&old));
+        assert!(
+            t.update(Timestamp(1), &row, std::slice::from_ref(&old)).is_empty(),
+            "the same process: not new"
+        );
+        let events = t.update(Timestamp(2), &row, std::slice::from_ref(&new));
+        assert!(
+            events.iter().any(|e| matches!(e, NetEvent::NewRemoteHost { .. })),
+            "the new process that reused the pid connecting to the host is news: {events:?}"
+        );
     }
 }

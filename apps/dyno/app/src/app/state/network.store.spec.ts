@@ -92,11 +92,31 @@ describe('NetworkStore', () => {
   it('reports what one program has open, with its traffic, without touching the page filters', async () => {
     const { store } = setup();
     const before = store.query();
-    const n = await store.forProcess(905);
+    const n = await store.forProcess({ pid: 905, started: null });
     expect(n.connections.length).toBe(3);
     expect(n.traffic?.name).toBe('Google Chrome');
-    expect((await store.forProcess(4120)).listeners.length).toBeGreaterThan(0);
+    expect((await store.forProcess({ pid: 4120, started: null })).listeners.length).toBeGreaterThan(0);
     expect(store.query()).toEqual(before);
+  });
+
+  it('does not report the sockets and traffic of an earlier process that had the same pid', async () => {
+    const { mock, store } = setup();
+    const real = mock.network.bind(mock);
+    const owner = { kind: 'process' as const, process: { pid: 905, started: 100 }, name: 'Google Chrome', path: null };
+    vi.spyOn(mock, 'network').mockImplementation(async (q) => {
+      const snap = await real(q);
+      return {
+        ...snap,
+        connections: snap.connections.map((c) => (c.owner.kind === 'process' && c.owner.process.pid === 905 ? { ...c, owner } : c)),
+        traffic: (snap.traffic ?? []).map((t) => (t.process.pid === 905 ? { ...t, process: owner.process } : t)),
+      };
+    });
+    const old = await store.forProcess({ pid: 905, started: 100 });
+    expect(old.connections.length).toBe(3);
+    expect(old.traffic).not.toBeNull();
+    const reused = await store.forProcess({ pid: 905, started: 200 });
+    expect(reused.connections).toEqual([]);
+    expect(reused.traffic).toBeNull();
   });
 
   it('passes on why traffic per program is not available, as the engine words it', async () => {
@@ -104,7 +124,7 @@ describe('NetworkStore', () => {
     const why = 'Traffic per program is not available without administrator rights on Windows.';
     const real = mock.network.bind(mock);
     vi.spyOn(mock, 'network').mockImplementation(async (q) => ({ ...(await real(q)), traffic: [], trafficNote: why }));
-    const n = await store.forProcess(905);
+    const n = await store.forProcess({ pid: 905, started: null });
     expect(n.traffic).toBeNull();
     expect(n.note).toBe(why);
     await store.load();

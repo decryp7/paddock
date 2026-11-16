@@ -14,13 +14,14 @@ import { LiveStore } from '../../state/live.store';
 import { Lookups } from '../lookup/lookups';
 import { ProcessesStore } from '../../state/processes.store';
 import { ProcessDetailsPanel } from './process-details';
-import { type Row, type SortKey, type ViewMode, sameProcess } from './process-rows';
+import { type Row, type SortKey, type ViewMode } from './process-rows';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
 import { SearchField } from '../../shared/search-field';
 import { TreeActions } from '../../shared/tree-actions';
 import { MatMenuModule } from '@angular/material/menu';
+import { notDifferent } from '../../core/process-ref';
 
 /** The task manager: every app and process, grouped by app, as a tree or flat; sortable, searchable, with a details panel and lookups. Read-only: nothing here changes a process. */
 @Component({
@@ -259,7 +260,7 @@ export class ProcessesPage implements OnInit, OnDestroy {
   }
   protected isSelected(r: Row): boolean {
     const selected = this.store.selected();
-    return r.ref !== null && selected !== null && sameProcess(selected, r.ref);
+    return r.ref !== null && selected !== null && notDifferent(selected, r.ref);
   }
   protected rowClick(r: Row): void {
     if (r.ref) void this.store.select(r.ref);

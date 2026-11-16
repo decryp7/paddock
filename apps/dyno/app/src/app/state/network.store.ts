@@ -1,8 +1,9 @@
 import { DestroyRef, inject } from '@angular/core';
 import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
-import type { CommandError, ConnectionRow, ListenerRow, NetworkQuery, NetworkSnapshot, TrafficRow } from '../core/api.types';
+import type { CommandError, ConnectionRow, ListenerRow, NetOwner, NetworkQuery, NetworkSnapshot, ProcessRef, TrafficRow } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
+import { notDifferent } from '../core/process-ref';
 import { Notifier } from '../shared/notifier';
 
 /** The page asks again this often while it is open (the engine caches reads for a moment, so this stays cheap). */
@@ -102,13 +103,14 @@ export const NetworkStore = signalStore(
         await resolve([address]);
       },
       /** What one program has open now, without touching the page's own filters. */
-      async forProcess(pid: number): Promise<ProcessNetwork> {
+      async forProcess(ref: ProcessRef): Promise<ProcessNetwork> {
         const snap = await backend.network({ showLoopback: true, proto: null, state: null, exposedOnly: false, search: '', country: null });
-        const mine = (o: { kind: string; pid?: number }) => o.kind === 'process' && o.pid === pid;
+        // By identity, not by pid alone: a socket of the process that had this pid before is not this process's (rule 53).
+        const mine = (o: NetOwner) => o.kind === 'process' && notDifferent(o.process, ref);
         return {
           connections: snap.connections.filter((c) => mine(c.owner)),
           listeners: snap.listeners.filter((l) => mine(l.owner)),
-          traffic: snap.traffic?.find((t) => t.pid === pid) ?? null,
+          traffic: snap.traffic?.find((t) => notDifferent(t.process, ref)) ?? null,
           note: snap.trafficNote ?? null,
         };
       },

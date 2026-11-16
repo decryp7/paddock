@@ -53,9 +53,9 @@ export function mockChanges(query: ChangesQuery, now: number): ChangeTimeline {
 export function mockSleep(): SleepReport {
   return {
     blockers: [
-      { name: 'zoom.us', pid: 4821, prevents: 'displaySleep', reason: 'Video call in progress', heldFor: '00:42:17' },
-      { name: 'coreaudiod', pid: 412, prevents: 'sleep', reason: 'Audio playing', heldFor: '01:12:03' },
-      { name: 'Backblaze Backup', pid: 903, prevents: 'sleep', reason: 'Uploading a backup', heldFor: '00:06:51' },
+      { name: 'zoom.us', process: { pid: 4821, started: null }, prevents: 'displaySleep', reason: 'Video call in progress', heldFor: '00:42:17' },
+      { name: 'coreaudiod', process: { pid: 412, started: null }, prevents: 'sleep', reason: 'Audio playing', heldFor: '01:12:03' },
+      { name: 'Backblaze Backup', process: { pid: 903, started: null }, prevents: 'sleep', reason: 'Uploading a backup', heldFor: '00:06:51' },
     ],
     wakes: [
       { when: '2026-10-22 08:01:12 +0800', reason: 'Lid open' },
@@ -109,11 +109,11 @@ export function mockUsage(): UsageReport {
 export function mockGpu(): GpuReport {
   return {
     processes: [
-      { pid: 311, name: 'WindowServer', gpuPercent: 14.2, memoryBytes: Math.round(612 * MB) },
-      { pid: 5120, name: 'Google Chrome Helper (GPU)', gpuPercent: 9.8, memoryBytes: Math.round(388 * MB) },
-      { pid: 4821, name: 'zoom.us', gpuPercent: 6.1, memoryBytes: Math.round(204 * MB) },
-      { pid: 7788, name: 'Figma', gpuPercent: 3.4, memoryBytes: Math.round(176 * MB) },
-      { pid: 622, name: 'Dock', gpuPercent: 0.7, memoryBytes: Math.round(42 * MB) },
+      { process: { pid: 311, started: null }, name: 'WindowServer', gpuPercent: 14.2, memoryBytes: Math.round(612 * MB) },
+      { process: { pid: 5120, started: null }, name: 'Google Chrome Helper (GPU)', gpuPercent: 9.8, memoryBytes: Math.round(388 * MB) },
+      { process: { pid: 4821, started: null }, name: 'zoom.us', gpuPercent: 6.1, memoryBytes: Math.round(204 * MB) },
+      { process: { pid: 7788, started: null }, name: 'Figma', gpuPercent: 3.4, memoryBytes: Math.round(176 * MB) },
+      { process: { pid: 622, started: null }, name: 'Dock', gpuPercent: 0.7, memoryBytes: Math.round(42 * MB) },
     ],
     source: 'Apple GPU accelerator counters',
     unavailable: null,

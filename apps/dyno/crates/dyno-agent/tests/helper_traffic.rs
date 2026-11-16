@@ -51,7 +51,7 @@ fn account(caller: Caller) -> RawOwner {
 
 fn counter(pid: u32, name: &str, bytes_in: u64) -> TrafficCounter {
     TrafficCounter {
-        pid,
+        process: dyno_core::process::ProcessRef::pid_only(pid),
         name: name.into(),
         bytes_in,
         bytes_out: 1,

@@ -37,6 +37,32 @@ describe('LockersDialog', () => {
     });
     expect(el.textContent).toContain('Writes build output');
   });
+  it('lists two lockers that share a pid but not a start time as two rows, with no duplicate-key warning', async () => {
+    const { f, el, backend } = setup(LockersDialog, undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const real = backend.lockers.bind(backend);
+    vi.spyOn(backend, 'lockers').mockImplementation(async (p) => {
+      const r = await real(p);
+      const first = r.lockers[0]!;
+      return { ...r, lockers: [{ ...first, process: { pid: first.process.pid, started: 100 } }, { ...first, process: { pid: first.process.pid, started: 200 } }] };
+    });
+    await typePath(f, el, '/work/target/debug');
+    el.querySelector('form')!.dispatchEvent(new Event('submit'));
+    await f.whenStable();
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(el.querySelectorAll('ul li').length).toBe(2);
+    });
+    // A second search reconciles the list (Angular checks the track keys then).
+    el.querySelector('form')!.dispatchEvent(new Event('submit'));
+    await f.whenStable();
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(el.querySelectorAll('ul li').length).toBe(2);
+    });
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('NG0955'))).toEqual([]);
+    warn.mockRestore();
+  });
   it('says so when nothing has the path open', async () => {
     const { f, el } = setup(LockersDialog, undefined);
     await typePath(f, el, '/nothing/here.txt');

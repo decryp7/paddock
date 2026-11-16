@@ -3,6 +3,7 @@
 //! `tcp_info`, and any user may ask, so per-program traffic needs no elevation. Pure: the adapter does the socket I/O.
 
 use dyno_core::network_traffic::{TrafficCounter, MAX_COUNTERS};
+use dyno_core::process::ProcessRef;
 use std::collections::HashMap;
 
 /// Most sockets accepted from one dump (a bound on kernel output we do not control the size of).
@@ -145,7 +146,7 @@ pub fn counters_by_process(sockets: &[DiagSocket], owners: &HashMap<u64, (u32, S
     for s in sockets {
         let Some((pid, name)) = owners.get(&s.inode) else { continue };
         let c = by_pid.entry(*pid).or_insert_with(|| TrafficCounter {
-            pid: *pid,
+            process: ProcessRef::pid_only(*pid),
             name: name.clone(),
             bytes_in: 0,
             bytes_out: 0,
@@ -154,7 +155,7 @@ pub fn counters_by_process(sockets: &[DiagSocket], owners: &HashMap<u64, (u32, S
         c.bytes_out = c.bytes_out.saturating_add(s.bytes_out);
     }
     let mut v: Vec<_> = by_pid.into_values().collect();
-    v.sort_by_key(|c| c.pid);
+    v.sort_by_key(|c| c.process.pid);
     v.truncate(MAX_COUNTERS);
     v
 }
@@ -290,6 +291,6 @@ mod tests {
         let owners = HashMap::from([(1, (7, "alpha".to_string())), (2, (7, "alpha".to_string()))]);
         let c = counters_by_process(&sockets, &owners);
         assert_eq!(c.len(), 1, "inode 3 belongs to nobody we can see");
-        assert_eq!((c[0].pid, c[0].bytes_in, c[0].bytes_out), (7, 30, 3));
+        assert_eq!((c[0].process.pid, c[0].bytes_in, c[0].bytes_out), (7, 30, 3));
     }
 }

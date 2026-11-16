@@ -1,5 +1,5 @@
 import type { AppGroup, Measured, ProcessSample } from '../../core/api.types';
-import { type Row, type RowInput, type Sort, buildRows, carryStarts, collapseAllKeys, sameProcess, compareRows, expandAllKeys, matches } from './process-rows';
+import { type Row, type RowInput, type Sort, buildRows, carryStarts, collapseAllKeys, compareRows, expandAllKeys, matches } from './process-rows';
 
 type SampleOver = Partial<Omit<ProcessSample, 'user' | 'cpu' | 'memory' | 'diskReadBps' | 'diskWriteBps' | 'started'>> & {
   user?: string | null;
@@ -308,10 +308,5 @@ describe('a start time that comes and goes', () => {
     expect(carryStarts([reused], procs)[0]!.started).toEqual({ value: 9999 });
     expect(carryStarts([noStart(sample(50, 'new'))], procs)[0]!.started).toEqual({ unavailable: { reason: 'notPermitted' } });
     expect(carryStarts(procs, [])).toBe(procs);
-  });
-  it('sameProcess needs the pid and the start time to match', () => {
-    expect(sameProcess({ pid: 1, started: 5 }, { pid: 1, started: 5 })).toBe(true);
-    expect(sameProcess({ pid: 1, started: 5 }, { pid: 1, started: 6 })).toBe(false);
-    expect(sameProcess({ pid: 1, started: null }, { pid: 2, started: null })).toBe(false);
   });
 });

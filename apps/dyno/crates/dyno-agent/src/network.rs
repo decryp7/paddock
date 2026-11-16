@@ -9,6 +9,7 @@ use dyno_core::network::{NetEvent, NetworkQuery, NetworkSnapshot, SocketRow, Tra
 use dyno_core::network_names::{clean_name, parse_addresses, HostName};
 use dyno_core::network_traffic::{OthersTraffic, TrafficRow, TrafficTracker};
 use dyno_core::ports::{NetworkSockets, PlatformError, ProcessTraffic, ReverseDns};
+use dyno_core::process::ProcessSample;
 use dyno_core::protocol::{AgentError, ErrorCode};
 use dyno_core::read_via::ReadVia;
 use std::collections::{HashMap, VecDeque};
@@ -173,16 +174,16 @@ impl NetCentre {
 
     /// Bytes per second per program, or why there are none. The OS tool can take seconds (macOS `nettop`), so this
     /// never waits for it: it returns the last read and starts a refresh in the background when that is stale.
-    fn traffic(&self) -> (Vec<TrafficRow>, Option<String>, ReadVia, Option<OthersTraffic>) {
+    fn traffic(&self, processes: &[ProcessSample]) -> (Vec<TrafficRow>, Option<String>, ReadVia, Option<OthersTraffic>) {
         let mut t = lock(&self.traffic);
         let stale = t.cache.as_ref().is_none_or(|c| c.at.elapsed() >= TRAFFIC_EVERY);
         if stale && !t.refreshing {
             t.refreshing = true;
-            let (source, state) = (self.traffic_source.clone(), self.traffic.clone());
+            let (source, state, table) = (self.traffic_source.clone(), self.traffic.clone(), processes.to_vec());
             std::thread::spawn(move || {
                 // The Network page waits for it: live work (rule 52).
                 dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
-                refresh_traffic(source.as_ref(), &state)
+                refresh_traffic(source.as_ref(), &state, &table)
             });
         }
         match &t.cache {
@@ -218,7 +219,7 @@ impl NetCentre {
             snapshot.traffic_note,
             snapshot.traffic_via,
             snapshot.traffic_others,
-        ) = self.traffic();
+        ) = self.traffic(&processes);
         Ok(snapshot)
     }
 
@@ -312,11 +313,18 @@ impl NetCentre {
 }
 
 /// Reads the counters once and stores the rates (or the reason there are none) with who read them.
-fn refresh_traffic(source: &dyn ProcessTraffic, state: &Mutex<Traffic>) {
+fn refresh_traffic(source: &dyn ProcessTraffic, state: &Mutex<Traffic>, table: &[ProcessSample]) {
     let read = source.read();
     let mut t = lock(state);
     let (rows, note, others) = match read.answer {
-        Ok(a) => (t.tracker.update(now(), &a.counters), None, a.others),
+        Ok(mut a) => {
+            // A tool's counters name a pid; with the start time from the process table, a pid reused between two reads is a new process
+            // with no earlier read, not a rate over the old one's counters (rule 53).
+            for c in a.counters.iter_mut() {
+                c.process = c.process.with_start_from(table);
+            }
+            (t.tracker.update(now(), &a.counters), None, a.others)
+        }
         Err(PlatformError::Unsupported(why)) => (Vec::new(), Some(why), None),
         Err(e) => (Vec::new(), Some(format!("Traffic per program could not be read ({e}).")), None),
     };
@@ -475,7 +483,7 @@ mod tests {
     }
 
     fn settled(c: &NetCentre) -> (Vec<TrafficRow>, Option<String>) {
-        let first = c.traffic();
+        let first = c.traffic(&[]);
         assert_eq!(
             first.1.as_deref(),
             Some("Reading traffic per program…"),
@@ -487,7 +495,7 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        let (rows, note, ..) = c.traffic();
+        let (rows, note, ..) = c.traffic(&[]);
         (rows, note)
     }
 
@@ -519,7 +527,7 @@ mod tests {
             cache: None,
             refreshing: true,
         });
-        refresh_traffic(&Sourced, &state);
+        refresh_traffic(&Sourced, &state, &[]);
         let t = lock(&state);
         let c = t.cache.as_ref().unwrap();
         assert_eq!(c.via, ReadVia::Helper);
@@ -532,6 +540,50 @@ mod tests {
             })
         );
         assert!(c.note.is_none() && !t.refreshing);
+    }
+
+    #[test]
+    fn a_pid_reused_between_two_reads_gets_no_rate_from_the_old_processs_counters() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        struct Growing(AtomicU64);
+        impl ProcessTraffic for Growing {
+            fn counters(&self) -> Result<Vec<dyno_core::network_traffic::TrafficCounter>, PlatformError> {
+                let n = self.0.fetch_add(1_000, Ordering::SeqCst);
+                Ok(vec![dyno_core::network_traffic::TrafficCounter {
+                    process: dyno_core::process::ProcessRef::pid_only(7),
+                    name: "x".into(),
+                    bytes_in: n,
+                    bytes_out: 0,
+                }])
+            }
+        }
+        let started = |secs: i64| {
+            let mut p = dyno_platform::fake::process(7, "x", 0.0);
+            p.started = dyno_core::process::Measured::Value(dyno_core::time::Timestamp(secs));
+            vec![p]
+        };
+        let state = Mutex::new(Traffic {
+            tracker: TrafficTracker::new(),
+            cache: None,
+            refreshing: true,
+        });
+        let source = Growing(AtomicU64::new(0));
+        refresh_traffic(&source, &state, &started(100));
+        std::thread::sleep(Duration::from_millis(5));
+        refresh_traffic(&source, &state, &started(100));
+        let rows = lock(&state).cache.as_ref().unwrap().rows.clone();
+        assert_eq!(rows.len(), 1, "the same process has a rate");
+        assert_eq!(
+            rows[0].process.started,
+            Some(dyno_core::time::Timestamp(100)),
+            "and the row names the process by pid and start time"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+        refresh_traffic(&source, &state, &started(200));
+        assert!(
+            lock(&state).cache.as_ref().unwrap().rows.is_empty(),
+            "pid 7 is another process now: no earlier read to take a rate from"
+        );
     }
 
     #[test]
@@ -557,7 +609,7 @@ mod tests {
             cache: None,
             refreshing: true,
         });
-        refresh_traffic(&Refused, &state);
+        refresh_traffic(&Refused, &state, &[]);
         let t = lock(&state);
         let c = t.cache.as_ref().unwrap();
         assert!(c.note.as_deref().unwrap().contains("administrator rights"));

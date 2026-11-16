@@ -395,14 +395,14 @@ mod tests {
 
         let t = "\"(PDH-CSV 4.0)\",\"\\\\PC\\GPU Engine(pid_9_luid_0x0_0x1_phys_0_eng_0_engtype_3D)\\Utilization Percentage\"\n\"10/23/2026 10:00:00.1\",\"12.5\"\n";
         let g = gpu_report(&Scripted::new(vec![ok(t)]), "windows", Duration::ZERO);
-        assert_eq!(g.processes[0].pid, 9);
+        assert_eq!(g.processes[0].process.pid, 9);
 
         let g = gpu_report(
             &Scripted::new(vec![ok("# gpu pid type sm mem enc dec fb command\n0 7 G 10 2 - - 50 x\n")]),
             "linux",
             Duration::ZERO,
         );
-        assert_eq!(g.processes[0].pid, 7);
+        assert_eq!(g.processes[0].process.pid, 7);
         let g = gpu_report(
             &Scripted::new(vec![Err(PlatformError::Unsupported("nvidia-smi is not available".into()))]),
             "linux",

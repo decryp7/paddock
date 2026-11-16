@@ -1,7 +1,7 @@
 import type { ConnectionRow, ListenerRow } from '../../core/api.types';
 import { reachTone, connectionLine, endpoint, exposureBadge, initial, listenerLine, lookupBlockedReason, ownerName, ownerReason, portService, protoText, middleEllipsis, sortListeners, stateView, summarise, tableRows, allGroupKeys } from './network-model';
 
-const owner = { kind: 'process', pid: 1, name: 'node', path: null } as const;
+const owner = { kind: 'process', process: { pid: 1, started: null }, name: 'node', path: null } as const;
 const unknown = { kind: 'unknown', reason: 'because' } as const;
 const c = (remote: string, o: ConnectionRow['owner'] = owner, lookupOk = true): ConnectionRow => ({
   proto: 'tcp', ipv6: remote.includes(':'), local: '1.1.1.1', localPort: 1, remote, remotePort: 443, remoteIsLoopback: false, lookupOk, state: 'established', stateLabel: 'ESTABLISHED', owner: o, firstSeen: null, country: null, flaggedBy: [],

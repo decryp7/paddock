@@ -519,7 +519,7 @@ export class NetworkPage implements OnInit, OnDestroy {
   protected detailFields(x: ConnectionRow | ListenerRow): [string, string][] {
     const owner: [string, string][] =
       x.owner.kind === 'process'
-        ? [['Program', x.owner.name], ['Process id', x.owner.pid.toString()], ['Path', x.owner.path ?? 'Not readable']]
+        ? [['Program', x.owner.name], ['Process id', x.owner.process.pid.toString()], ['Path', x.owner.path ?? 'Not readable']]
         : [['Program', 'Owner unknown'], ['Why', x.owner.reason]];
     const seen: [string, string][] = [['First seen', this.since(x.firstSeen)]];
     if (this.isConn(x)) {

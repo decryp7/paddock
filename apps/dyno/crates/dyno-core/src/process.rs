@@ -142,6 +142,7 @@ impl<T: Copy + Default + std::ops::Add<Output = T>> Total<T> {
 #[serde(rename_all = "camelCase")]
 pub struct ProcessSample {
     /// Process id.
+    // conformance: wire-pid — the sample itself: `started` is its start time (a Measured, with a reason) and `reference()` makes its ProcessRef
     pub pid: Pid,
     /// Parent process id, when known.
     pub parent: Option<Pid>,
@@ -202,8 +203,64 @@ pub enum RunState {
 pub struct ProcessRef {
     /// Process id.
     pub pid: Pid,
-    /// Start time, when it was read (without it the pid alone identifies the process).
+    /// Start time, when it was read. Without it two refs with the same pid are [`Identity::Unknown`], not equal.
     pub started: Option<Timestamp>,
+}
+
+/// Whether two [`ProcessRef`]s name the same process. A start time that was not read is not evidence either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Identity {
+    /// The same pid and the same start time.
+    Same,
+    /// Another pid, or the same pid with another start time (the pid was reused).
+    Different,
+    /// The same pid, and one side has no start time: nothing says whether it is the same process.
+    Unknown,
+}
+
+impl ProcessRef {
+    /// A ref with a start time.
+    pub fn new(pid: Pid, started: Timestamp) -> ProcessRef {
+        ProcessRef {
+            pid,
+            started: Some(started),
+        }
+    }
+
+    /// A ref for a pid whose start time was not read.
+    pub fn pid_only(pid: Pid) -> ProcessRef {
+        ProcessRef { pid, started: None }
+    }
+
+    /// Compares two refs (rule 53): the derived `==` is for map keys and tests; this is for deciding whether two things are one process.
+    pub fn identity(&self, other: &ProcessRef) -> Identity {
+        match (self.pid == other.pid, self.started, other.started) {
+            (false, _, _) => Identity::Different,
+            (true, Some(a), Some(b)) => {
+                if a == b {
+                    Identity::Same
+                } else {
+                    Identity::Different
+                }
+            }
+            (true, _, _) => Identity::Unknown,
+        }
+    }
+
+    /// This ref with the start time of the process in `table` that has its pid, when it has none and the table has one.
+    /// Used where a producer read only a pid (a tool's output) and a process table of the same sweep is at hand.
+    pub fn with_start_from(self, table: &[ProcessSample]) -> ProcessRef {
+        if self.started.is_some() {
+            return self;
+        }
+        match table.iter().find(|p| p.pid == self.pid) {
+            Some(p) => ProcessRef {
+                pid: self.pid,
+                started: p.started.copied(),
+            },
+            None => self,
+        }
+    }
 }
 
 /// Scheduling priority, in the platform-neutral classes both OSes can express.
@@ -295,8 +352,8 @@ pub struct ProcessDetails {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParentLink {
-    /// Process id.
-    pub pid: Pid,
+    /// Which process (pid and start time).
+    pub process: ProcessRef,
     /// Name.
     pub name: String,
 }
@@ -606,5 +663,21 @@ mod tests {
         }
         assert_eq!(v["cpu"], json!({"unavailable": {"reason": "needsAdmin"}}));
         assert_eq!(serde_json::from_value::<ProcessSample>(v).unwrap(), p);
+    }
+
+    #[test]
+    fn two_refs_with_the_same_pid_are_the_same_process_only_when_the_start_times_say_so() {
+        let t = |s: i64| Timestamp(s);
+        assert_eq!(ProcessRef::new(7, t(1)).identity(&ProcessRef::new(7, t(1))), Identity::Same);
+        assert_eq!(
+            ProcessRef::new(7, t(1)).identity(&ProcessRef::new(7, t(2))),
+            Identity::Different,
+            "a reused pid"
+        );
+        assert_eq!(ProcessRef::new(7, t(1)).identity(&ProcessRef::new(8, t(1))), Identity::Different);
+        // Without a start time on either side nothing says: unknown, never equal.
+        assert_eq!(ProcessRef::pid_only(7).identity(&ProcessRef::pid_only(7)), Identity::Unknown);
+        assert_eq!(ProcessRef::new(7, t(1)).identity(&ProcessRef::pid_only(7)), Identity::Unknown);
+        assert_eq!(ProcessRef::pid_only(7).identity(&ProcessRef::pid_only(8)), Identity::Different);
     }
 }

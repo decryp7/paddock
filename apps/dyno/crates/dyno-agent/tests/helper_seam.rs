@@ -579,7 +579,13 @@ fn a_socket_the_kernel_hides_gets_its_program_from_the_helper_and_the_page_says_
     assert_eq!(n.listeners.len(), 1, "{:?}", n.listeners);
     assert_eq!(n.listeners[0].port, 5432);
     assert!(
-        matches!(&n.listeners[0].owner, dyno_core::network::Owner::Process { pid: 7001, .. }),
+        matches!(
+            &n.listeners[0].owner,
+            dyno_core::network::Owner::Process {
+                process: dyno_core::process::ProcessRef { pid: 7001, .. },
+                ..
+            }
+        ),
         "{:?}",
         n.listeners[0].owner
     );

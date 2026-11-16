@@ -293,7 +293,8 @@ changes here, every app's copy is updated in the same change.
     `TerminateProcess`, `TerminateJobObject`, open ADR 0033 follow-ups) enforce it; for an agent's own Bash commands the
     blocking hook `.claude/hooks/kill-guard.sh` does, once it is wired in the main checkout's `.claude/settings.json` (`pkill`,
     `killall`, `fuser -k`, `xargs kill` and a `kill` of a pid it cannot prove is the agent's own are refused). ADR
-    [0033](adr/0033-processes-by-identity-never-by-a-bare-pid.md); ADR [0023](adr/0023-tests-never-free-a-port-they-probe.md)
+    [0033](adr/0033-processes-by-identity-never-by-a-bare-pid.md); on a wire a process is a `ProcessRef` (pid plus start time; two refs
+    without a start time are `unknown`, never equal), never a bare pid field (report-only check C134); ADR [0023](adr/0023-tests-never-free-a-port-they-probe.md)
     is the same rule for ports.
     A discovery file, a file that names a pid or a port (Dyno's `agent.json`), is only a hint: act on it only after a held
     lock or a live connection proves the process is there, and remove it only if it is still the same file (same pid and

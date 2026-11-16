@@ -1,6 +1,6 @@
 import type { ConnectionRow, ListenerRow, NetOwner, NetworkQuery, NetworkSnapshot, SocketState, TrafficRow } from '../api.types';
 
-const proc = (pid: number, name: string, path: string): NetOwner => ({ kind: 'process', pid, name, path });
+const proc = (pid: number, name: string, path: string): NetOwner => ({ kind: 'process', process: { pid, started: null }, name, path });
 const UNKNOWN: NetOwner = { kind: 'unknown', reason: 'The OS did not say which program owns this. It may belong to another account or the system. On Linux, turn on administrator readings in Settings and Dyno\'s helper names it.' };
 
 const MIN = 60_000;
@@ -99,11 +99,11 @@ const KB = 1024;
 export function mockTraffic(at: number): TrafficRow[] {
   const wob = (seed: number) => 0.7 + 0.6 * Math.abs(Math.sin(at / 6000 + seed));
   return [
-    { pid: 905, name: 'Google Chrome', rxBps: Math.round(420 * KB * wob(1)), txBps: Math.round(38 * KB * wob(2)) },
-    { pid: 1177, name: 'Slack', rxBps: Math.round(6 * KB * wob(3)), txBps: Math.round(2 * KB * wob(4)) },
-    { pid: 4410, name: 'cargo', rxBps: Math.round(1800 * KB * wob(5)), txBps: Math.round(12 * KB * wob(6)) },
-    { pid: 2290, name: 'Code Helper', rxBps: Math.round(3 * KB * wob(7)), txBps: Math.round(1 * KB * wob(8)) },
-    { pid: 1544, name: 'Spotify', rxBps: Math.round(48 * KB * wob(9)), txBps: Math.round(3 * KB * wob(10)) },
+    { process: { pid: 905, started: null }, name: 'Google Chrome', rxBps: Math.round(420 * KB * wob(1)), txBps: Math.round(38 * KB * wob(2)) },
+    { process: { pid: 1177, started: null }, name: 'Slack', rxBps: Math.round(6 * KB * wob(3)), txBps: Math.round(2 * KB * wob(4)) },
+    { process: { pid: 4410, started: null }, name: 'cargo', rxBps: Math.round(1800 * KB * wob(5)), txBps: Math.round(12 * KB * wob(6)) },
+    { process: { pid: 2290, started: null }, name: 'Code Helper', rxBps: Math.round(3 * KB * wob(7)), txBps: Math.round(1 * KB * wob(8)) },
+    { process: { pid: 1544, started: null }, name: 'Spotify', rxBps: Math.round(48 * KB * wob(9)), txBps: Math.round(3 * KB * wob(10)) },
   ];
 }
 
