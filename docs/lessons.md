@@ -2083,3 +2083,6 @@ timeout says what it saw last. A second test makes the slow path certain (the he
 before (the tree is ended before the helper writes), green after; 200 of 200 green under the same burners. **Rule for tests:** a test that must observe a process
 the code under test is about to end holds the stand-in until it has observed it, and a wait's failure message names its last
 observation. **Class: an observation raced the action under test (rule 53's "act on a name read earlier", seen from the test side).**
+
+## Rules ER-43 to ER-47 and the ER-9, ER-14, ER-24 amendments (user, 2026-11-15 and 2026-11-16)
+Waiter holding a slot the waited-for build needed (2026-11-14/15, ER-43); a slowdown fix split into a small part and a deferred root fix (2026-11-16, ER-44); a probe that would have started installs and a reviewer's probe that installed into `~/.rustup` (ER-45); growable exception lists and Mac-only goldens, Spotter e2e after midnight UTC (run 8154, ER-46); cleared child environments (run 8138, ER-47); train 12's red rounds (runs 8138, 8147, 8152, 8154, ER-9). The rules and reasons are in `docs/rules.md` 80 to 84 and the engineering rules. **Class: a mechanism changed the thing it checked, waited on or started.**

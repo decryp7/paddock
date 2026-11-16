@@ -409,6 +409,16 @@ changes here, every app's copy is updated in the same change.
     data that already had an accessor (`./dev ci conformance-args` now), `0308201b4` a span ended at a comment the author
     remembered, `11c365fc4` a path into another area's layout, `be69a31f6` a hand list that had to equal `cargo metadata`.
 
+## Waiting, fixes, checks, lists and environments (user, 2026-11-15 and 2026-11-16; ER-43 to ER-47)
+Status is as of train 14 planning: "planned" is not built, "in progress" is on a branch. Rules 80 to 84 map the engineering rules to Paddock's mechanisms.
+80. **A waiter never holds the capacity the work it waits for needs** (ER-43). Paddock: `./dev wait` and the heavy-slot queue take no slot for the wait; the waiter guard (duplicate waits, grep polling) and the scheduled-runs-yield rule follow. Status: planned, train 14.
+81. **A complete fix, not a quick one** (ER-44). A review's or incident's cause, its fix and its copies in `docs/known-copies.toml` (rule 55) land in one round; ask the user only above 1 agent-day beyond common practice (rule 76). Status: in force.
+82. **Checks have no side effects** (ER-45). Paddock: launcher probes and `setup-rust` set `RUSTUP_AUTO_INSTALL=0`, shell checks print the cause before exiting under `set -e`, and a check's positive control (C129) runs on in-memory data. Container runs go through `tools/linux-container.sh` only (ER-14); tests use `StandIn` programs, never installed apps or `~/.rustup`. Status: in progress, train 14.
+83. **Lists only shrink; goldens hold no machine** (ER-46). Paddock: the growth checks C129 (exceptions), C130 (allow list) and C131 (baselines) compare each list with the merge base and fail on growth without the user's approval; goldens are normalised (uid, names, paths, sizes) and the e2e suites use the fixed clock. Status: C129 and C130 in progress, C131 planned (report-only first, ER-41); fixed e2e clock in progress.
+84. **Children inherit the environment** (ER-47). Paddock: `TestCommand` and the `paddock_proc` environment policy pass the caller's environment; clearing needs a named policy with a kept list and never strips restricting variables such as `PADDOCK_DEV_DOWNLOAD=0`. Status: in progress, train 14.
+
+Amendments of the same date, no new number: the member gate runs each member's affected tests on every target OS in a fresh CI-like clone before it joins a train (ER-9; planned, train 14); agents start on the 15-minute load and CPU idle, count container runs and run at most 5 builders while containers run (ER-24); agents never start the user's installed apps or touch `~/.rustup` and `~/.cargo` (ER-14).
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (a full checkout: `./dev worktree add --profile gates`,
