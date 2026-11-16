@@ -4,14 +4,17 @@ const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h)
 const NOW = at(2026, 10, 22, 15);
 
 describe('dayLabel', () => {
-  it('names today, yesterday and the future as Today/Yesterday', () => {
+  it('names any time of the current day Today and the day before Yesterday', () => {
     expect(dayLabel(at(2026, 10, 22, 0), NOW)).toBe('Today');
     expect(dayLabel(at(2026, 10, 22, 23), NOW)).toBe('Today');
-    expect(dayLabel(at(2026, 10, 23), NOW)).toBe('Today');
     expect(dayLabel(at(2026, 10, 21, 23), NOW)).toBe('Yesterday');
   });
 
-  it('switches from Today to Yesterday exactly at local midnight', () => {
+  it('names an item later than now Today, never a future day', () => {
+    expect(dayLabel(at(2026, 10, 23), NOW)).toBe('Today');
+  });
+
+  it('moves an item from Today to Yesterday when now crosses local midnight, and not before', () => {
     const lateItem = new Date(2026, 9, 22, 23, 59).getTime();
     expect(dayLabel(lateItem, new Date(2026, 9, 22, 23, 59).getTime())).toBe('Today');
     expect(dayLabel(lateItem, new Date(2026, 9, 23, 0, 1).getTime())).toBe('Yesterday');
