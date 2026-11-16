@@ -84,6 +84,7 @@ const SAMPLE = {
   C121: ['docs/g.toml', `check = ["sh", "-c", "sed -n p .gitea/${'workflows'}/ci.yml"]\n`],
   C124: ['tools/paddock-dev/src/x.rs', 'pub enum V {\n    NotMeasured,\n}\n'],
   C125: ['scripts/a.sh', `x=/${'Volumes'}/d7sst7\n`],
+  C130: ['tools/t/tests/it/a.rs', 'let s = "#!/bin/sh\\n";\n'],
   C131: ['x/tests/golden/a.json', '{"uid": 501}\n'],
   C135: ['apps/a/src/x.spec.ts', "installLeakDetector({ mode: 'off' });\n"],
 };
