@@ -1395,6 +1395,11 @@ Windows CI runner (ci.yml run 8152, job 39497: merge_check median 5.8 to 44 s, g
   found early on PATH); where they are refused (another volume, or the 1024-link limit of one rustup file that every command
   linked again) it is the copy, 72.6 ms median and up to 3.5 s. Which of the two the CI runner hit is not recorded in its log
   (the runner's volumes are not printed; the copy fallback now says so on stderr); both are now paid once per test process,
-  and the copy once per toolchain and machine. `git --exec-path` was not the cause.
+  and the copy once per toolchain and target folder (in CI: once per job, whose target folder is new). `git --exec-path` was
+  not the cause. Since the review of df9af3cda the folder is in the build's target folder, not the temp folder; the numbers
+  above were measured with it in the temp folder, which costs the same.
+- **Rename retry (2026-11-16):** in six runs of `measure_test_command --saturate` on the VM (copies, so a scanner may hold the
+  new files), run from a target-folder layout, no rename of a staging folder was refused, so the retry never ran; its 500 ms
+  bound is ADR 0078's for transient Windows refusals, not a measured hold. Per command after the first: median 1.2 to 2.5 ms.
 - **Not measured:** the CI runner itself (the integrator's rerun of the failed jobs is the check), a release build, a cold
   Defender cache.

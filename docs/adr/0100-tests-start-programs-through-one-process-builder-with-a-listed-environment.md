@@ -45,19 +45,22 @@ Its own `env_clear` goes **back to the listed set**. It starts from an **empty e
   keeps them in the private folder, never in `~/.cache/heavy-slots`.
 - `PATH` is **curated**: first a folder of **links to the toolchain's programs** (`cargo`, `rustc`, `rustup`,
   `cargo-clippy`, `cargo-fmt`, `rustfmt`, `clippy-driver`, `rustdoc`: symbolic links on Unix, where rustup's proxies dispatch on
-  the name they were started as, hard links or copies on Windows; one folder per toolchain under the temp folder's
-  `paddock-test-toolchain`, made once and shared by every command and test process, never inside a command's or a `new_in`
-  folder, made again when it disappears under a running process, and removed by a later run once its programs are gone and it
-  is an hour old (a crashed run's staging folder too, once an hour old); ci.yml run 8152 measured the per-command version about 6 times
-  slower on Windows, docs/benchmarks.md), never the folder they came from, because `cargo install`
+  the name they were started as, hard links or copies on Windows; one folder per toolchain in the build's target folder,
+  `<target>/paddock-test-toolchain` (the practice of cargo's own test support and `CARGO_TARGET_TMPDIR`: nothing in a user's or a
+  shared temp folder, `cargo clean` removes it, every test program of the build shares it), made once (a staging folder renamed
+  into place, a refused rename on Windows tried again for at most 500 ms and logged) and shared by every command and test
+  process, never inside a command's or a `new_in` folder, made again when it disappears under a running process; only a
+  crashed run's staging folder is swept, once an hour old. A test program run outside a target folder (copied elsewhere, as on
+  the Windows test VM) links into each command's own folder instead. ci.yml run 8152 measured the per-command version about 6
+  times slower on Windows, docs/benchmarks.md), never the folder they came from, because `cargo install`
   puts other tools beside them in `$CARGO_HOME/bin` (`heavy`: the review of `7edb8cad6` measured `command -v heavy` finding it,
   which reopened incident 1); then the folders of `node`, `npm`, `npx` and `git` as the test process finds them; on Windows Git
   for Windows' `usr/bin` and `bin`, from `git --exec-path` (asked once per `git`; the layout around `git.exe` when it cannot
   answer), because Git's bash puts `mingw64/bin` first and the shell tools live in `usr/bin` (ci.yml run 8138: 11 Windows tests
   found no `grep`, `tr` or `touch`); then the system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, or `System32` and the
   Windows folder; Windows folders compare without case). `TestCommand::path_report()` says what decided it (the child's and
-  the machine's `PATH`, where `git`, `sh`, `bash`, `node`, `cargo`, `rustc` and `rustup` were found, Git's root, the links) for
-  a failure message. **Remaining exposure, accepted:** the folders of `node` and `git` are added whole, so on a Homebrew Mac
+  the machine's `PATH`, where `git`, `sh`, `bash`, `node`, `cargo`, `rustc` and `rustup` were found, and the link folder and
+  Git's root this command was built with: a query that starts and changes nothing) for a failure message. **Remaining exposure, accepted:** the folders of `node` and `git` are added whole, so on a Homebrew Mac
   `/opt/homebrew/bin` and its other tools are reachable, and on Windows all of Git's `usr/bin`; cargo itself still finds
   `cargo-<name>` subcommands in `$CARGO_HOME/bin`, and rustup's proxy adds all of `$CARGO_HOME/bin` in front of its child's
   `PATH` (measured in the review of `0916c8060`: a build script found `cargo-hakari`). So a bare `cargo`, `rustc` or `rustup`
@@ -169,11 +172,11 @@ named list) is about 0.4 agent-day but does not stop the next lookup; it is not 
   judged by C123 and have no builder yet; a JavaScript `testProcess()` in `conformance/test/helpers.mjs` and a C123 arm that
   reads `.mjs` would be about 0.5 agent-day. Not done here: the incidents were Rust tests, and a second builder needs the
   parity rule applied once more.
-- **Follow-up for train 14's env-builder item (review of `0916c8060`, P2-2 to P2-4):** the per-process link folder, the logged
-  Windows copy fallback and the time limit on `git --exec-path` were done after ci.yml run 8152; still open:
-  - `path_report()` shows each link's target, not only the link;
-  - the doc of `git_root_from` says "three folders above the exec path" where the code takes the third ancestor: word it as
-    the code does.
+- **Follow-up (review of `0916c8060` and of `df9af3cda`):** done on this branch after ci.yml runs 8152 and 8154 (the user asked
+  for the whole fix in one round): one link folder per toolchain in the target folder, the logged Windows copy fallback and
+  rename retry, the time limit on `git --exec-path` with its test, `path_report()` from what the command was built with, links
+  named for their program. Still open: `path_report()` showing each link's target, and the doc of `git_root_from`, which says
+  "three folders above the exec path" where the code takes the third ancestor.
 - **D4 (decided): git is not in C123.** `git` reads `HOME` and the git config, which `TestCommand` redirects when it is
   used; plain `Command::new("git")` fixtures (about 60) keep working. If a git-config incident appears, add it to the check.
 - **D5 (decided, review of f39597fbb P1-3): every `CARGO_BIN_EXE_*` binary a test starts itself.** The check judges a constructor

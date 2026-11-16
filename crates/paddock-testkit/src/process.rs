@@ -125,6 +125,10 @@ pub struct TestCommand {
     /// The environment a fresh command carries: what [`TestCommand::env_clear`] goes back to.
     base: Vec<(OsString, OsString)>,
     private: Arc<PrivateDir>,
+    /// The toolchain link folder this command's `PATH` starts with, when the machine has a toolchain.
+    links: Option<PathBuf>,
+    /// Git for Windows' install folder, when one was found (always `None` elsewhere).
+    git_root: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -177,14 +181,17 @@ impl TestCommand {
         // `cargo`, `rustc` and `rustup` start through the toolchain links (`cargo`: the cargo that runs this test), never rustup's
         // proxy in `$CARGO_HOME/bin`, which puts all of that folder in front of its child's PATH (review of 0916c8060).
         let curated = curated();
+        // The shared folder of the build's target folder; a test program run outside one (copied elsewhere) links into its own
+        // private folder instead, removed with it.
+        let links = curated.links.clone().or_else(|| {
+            link_root()
+                .is_none()
+                .then(|| link_folder(ambient.as_deref(), &private.path().join("toolchain")))
+                .flatten()
+        });
         let linked = (Path::new(program).components().count() == 1
             && TOOLCHAIN_STARTED.contains(&program.to_string_lossy().as_ref()))
-        .then(|| {
-            curated
-                .links
-                .as_deref()
-                .and_then(|d| linked_program(d, program))
-        })
+        .then(|| links.as_deref().and_then(|d| linked_program(d, program)))
         .flatten();
         let resolved = linked.map_or_else(
             || resolve(program, ambient.as_deref()),
@@ -253,7 +260,12 @@ impl TestCommand {
                 cmd.env(k, real);
             }
         }
-        cmd.env("PATH", join_paths(&curated.dirs()));
+        let path: Vec<PathBuf> = links
+            .iter()
+            .cloned()
+            .chain(curated.tail.iter().cloned())
+            .collect();
+        cmd.env("PATH", join_paths(&path));
         let base = cmd
             .get_envs()
             .filter_map(|(k, v)| v.map(|v| (k.to_os_string(), v.to_os_string())))
@@ -262,6 +274,8 @@ impl TestCommand {
             cmd,
             base,
             private: Arc::new(private),
+            links,
+            git_root: curated.git_root,
         }
     }
 
@@ -594,7 +608,8 @@ impl std::fmt::Display for PathReport {
 }
 
 impl TestCommand {
-    /// What decided this command's `PATH` (see [`PathReport`]).
+    /// What decided this command's `PATH` (see [`PathReport`]): the folders and the Git root the command was built with, and
+    /// where the tools are on the machine's `PATH` now. A query: it starts nothing and changes nothing.
     #[must_use]
     pub fn path_report(&self) -> PathReport {
         let ambient = std::env::var_os("PATH");
@@ -609,19 +624,11 @@ impl TestCommand {
             Some(PathBuf::from(resolve(OsStr::new(name), ambient.as_deref())))
                 .filter(|p| p.is_absolute())
         };
-        let git = found_at("git");
-        #[cfg(windows)]
-        let git_root = git.as_deref().and_then(git_root);
-        #[cfg(not(windows))]
-        let git_root = None;
-        let toolchain = curated()
+        let toolchain = self
             .links
+            .as_deref()
             .and_then(|d| std::fs::read_dir(d).ok())
-            .map(|d| {
-                d.filter_map(|e| e.ok().map(|e| e.path()))
-                    .filter(|p| p.file_name() != Some(OsStr::new(SOURCES)))
-                    .collect()
-            })
+            .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).collect())
             .unwrap_or_default();
         PathReport {
             child,
@@ -631,9 +638,9 @@ impl TestCommand {
                 .unwrap_or_default(),
             found: ["git", "sh", "bash", "node", "cargo", "rustc", "rustup"]
                 .into_iter()
-                .map(|n| (n, if n == "git" { git.clone() } else { found_at(n) }))
+                .map(|n| (n, found_at(n)))
                 .collect(),
-            git_root,
+            git_root: self.git_root.clone(),
             toolchain,
         }
     }
@@ -642,39 +649,32 @@ impl TestCommand {
 /// The bare program names a [`TestCommand`] starts through its toolchain link, never through the machine's `PATH`.
 const TOOLCHAIN_STARTED: &[&str] = &["cargo", "rustc", "rustup"];
 
-/// The file in a link folder that names the programs its links stand for, one per line: a folder whose programs are gone (a
-/// test's stand-in toolchain, an uninstalled toolchain) is removed by the next process that makes one.
-const SOURCES: &str = "sources.txt";
-
 /// What the curated `PATH` is made of for one machine `PATH` and `CARGO`: worked out once per test process and reused by every
 /// command (ci.yml run 8152: worked out per command, Windows tests that start many children ran about 6 times slower).
 #[derive(Clone, Debug)]
 struct Curated {
-    /// The toolchain link folder, when the machine has a toolchain.
+    /// The shared toolchain link folder under the build's target folder, when the machine has a toolchain and the test program
+    /// runs from a target folder.
     links: Option<PathBuf>,
     /// The folders after it: the [`NAMED_TOOLS`]' (on Windows Git's `usr/bin` and `bin`), then the system folders.
     tail: Vec<PathBuf>,
+    /// Git for Windows' install folder, when one was found.
+    git_root: Option<PathBuf>,
 }
 
-impl Curated {
-    fn dirs(&self) -> Vec<PathBuf> {
-        self.links
-            .iter()
-            .cloned()
-            .chain(self.tail.iter().cloned())
-            .collect()
-    }
-}
-
-/// How many link folders this process made or reused: once per machine `PATH` and `CARGO`, whatever the number of commands.
-static FOLDERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// How many toolchain link folders this process has made or reused (one per machine `PATH` and `CARGO` it saw), for the test
-/// that many commands share one.
-#[doc(hidden)]
-#[must_use]
-pub fn toolchain_folders_made() -> usize {
-    FOLDERS.load(std::sync::atomic::Ordering::SeqCst)
+/// Where the shared toolchain link folders go: `<target>/paddock-test-toolchain`, beside the build's own folders (the
+/// practice of cargo's own test support and `CARGO_TARGET_TMPDIR`), so nothing is left in a user's or a shared temp folder,
+/// `cargo clean` removes them, and every test program of the build shares them. `None` when this program does not run from a
+/// cargo target folder.
+fn link_root() -> Option<PathBuf> {
+    use std::sync::OnceLock;
+    static ROOT: OnceLock<Option<PathBuf>> = OnceLock::new();
+    ROOT.get_or_init(|| {
+        let exe = std::env::current_exe().ok()?;
+        let profile = paddock_env::cargo_layout::profile_dir_of_exe(&exe)?;
+        Some(profile.parent()?.join("paddock-test-toolchain"))
+    })
+    .clone()
 }
 
 /// The [`Curated`] parts for the machine `PATH` and `CARGO` this process has now, worked out on first use.
@@ -695,13 +695,12 @@ fn curated() -> Curated {
         return c.clone();
     }
     let ambient = key.0.as_deref();
-    let links = link_folder(ambient);
-    if links.is_some() {
-        FOLDERS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    }
+    let links = link_root().and_then(|root| link_folder(ambient, &root));
+    let git_root = git_root_of(ambient);
     let made = Curated {
-        tail: tail_dirs(ambient, links.as_deref()),
+        tail: tail_dirs(ambient, links.as_deref(), git_root.as_deref()),
         links,
+        git_root,
     };
     seen.insert(key, made.clone());
     made
@@ -714,11 +713,11 @@ fn linked_program(dir: &Path, program: &OsStr) -> Option<PathBuf> {
     Some(dir.join(name)).filter(|p| p.exists())
 }
 
-/// The folder of links to the [`TOOLCHAIN`] programs found on `ambient` (`cargo`: the one that runs this test, `CARGO`, when set).
-/// One folder per toolchain under the temp folder's `paddock-test-toolchain`, named by the programs' paths, sizes and times, made
-/// once (in a folder of this process's own, then renamed into place) and reused by every later command and test process; never
-/// inside a command's or a `new_in` folder. Symbolic links on Unix; on Windows hard links, else a copy, logged with its error.
-fn link_folder(ambient: Option<&OsStr>) -> Option<PathBuf> {
+/// The folder of links to the [`TOOLCHAIN`] programs found on `ambient` (`cargo`: the one that runs this test, `CARGO`, when set),
+/// under `root`: one folder per toolchain, named by the programs' paths, sizes and times, made once (in a staging folder of this
+/// process, then renamed into place) and reused by every later command and test process that use the same `root`. Symbolic links
+/// on Unix; on Windows hard links, else a copy, logged with its error. `None` when the machine has none of the programs.
+fn link_folder(ambient: Option<&OsStr>, root: &Path) -> Option<PathBuf> {
     use std::hash::{Hash, Hasher};
     // Each link is named for its program plus the platform's suffix (`rustc.exe`), never after the spelling that found it
     // (`rustc.EXE` through `PATHEXT`; ci.yml run 8154), so `linked_program` finds it by the same name on every file system.
@@ -744,13 +743,12 @@ fn link_folder(ambient: Option<&OsStr>) -> Option<PathBuf> {
             m.modified().ok().hash(&mut h);
         }
     }
-    let root = std::env::temp_dir().join("paddock-test-toolchain");
     let dir = root.join(format!("{:016x}", h.finish()));
     if names.iter().all(|n| dir.join(n).exists()) {
         return Some(dir);
     }
-    std::fs::create_dir_all(&root).ok()?;
-    sweep(&root, std::time::SystemTime::now());
+    std::fs::create_dir_all(root).ok()?;
+    sweep(root, std::time::SystemTime::now());
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
@@ -766,63 +764,105 @@ fn link_folder(ambient: Option<&OsStr>) -> Option<PathBuf> {
         let _ = std::os::unix::fs::symlink(src, &link);
         #[cfg(windows)]
         if let Err(e) = std::fs::hard_link(src, &link) {
-            // Another volume, or a file at NTFS's limit of 1024 links: a copy, made once per toolchain and machine.
+            // Another volume, or a file at NTFS's limit of 1024 links: a copy, made once per toolchain and target folder.
             eprintln!(
-                "TestCommand: cannot hard-link {} into {} ({e}); copying it instead (once per toolchain)",
+                "TestCommand: cannot hard-link {} into {} ({e}); copying it instead (once per toolchain and target folder)",
                 src.display(),
                 staging.display()
             );
             let _ = std::fs::copy(src, &link);
         }
     }
-    let listed: String = sources
-        .iter()
-        .map(|s| format!("{}\n", s.display()))
-        .collect();
-    let _ = std::fs::write(staging.join(SOURCES), listed);
-    match std::fs::rename(&staging, &dir) {
+    match rename_retrying(&staging, &dir) {
         Ok(()) => Some(dir),
         // Another process made it first: use that one.
         Err(_) if dir.is_dir() => {
             let _ = std::fs::remove_dir_all(&staging);
             Some(dir)
         }
-        Err(_) => Some(staging),
+        Err(e) => {
+            eprintln!(
+                "TestCommand: cannot rename {} to {} ({e}); this process uses the staging folder",
+                staging.display(),
+                dir.display()
+            );
+            Some(staging)
+        }
     }
 }
 
-/// The sweep of [`link_folder`] over `root` as of `now`, for the tests of its age rules.
+/// How long a refused rename of a staging folder is tried again: on Windows a scanner (Defender) holds a new program file open
+/// for a moment after it is written, and the rename is refused with "access denied" or a sharing violation meanwhile. The
+/// same bound as ADR 0078's transient removals; every retry is logged (ER-12, ER-27).
+const RENAME_RETRY: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// `rename(from, to)`, tried again within [`RENAME_RETRY`] when Windows refuses it with access denied (5) or a sharing violation
+/// (32) and `to` does not exist yet; each retry is logged on stderr with its error and the time so far.
+fn rename_retrying(from: &Path, to: &Path) -> std::io::Result<()> {
+    let start = std::time::Instant::now();
+    let mut pause = std::time::Duration::from_millis(10);
+    loop {
+        match std::fs::rename(from, to) {
+            Err(e)
+                if cfg!(windows)
+                    && matches!(e.raw_os_error(), Some(5 | 32))
+                    && !to.exists()
+                    && start.elapsed() + pause <= RENAME_RETRY =>
+            {
+                eprintln!(
+                    "TestCommand: renaming {} was refused ({e}) after {} ms; trying again",
+                    from.display(),
+                    start.elapsed().as_millis()
+                );
+                std::thread::sleep(pause);
+                pause = (pause * 2).min(std::time::Duration::from_millis(100));
+            }
+            other => return other,
+        }
+    }
+}
+
+/// The sweep of [`link_folder`] over `root` as of `now`, for the tests of its age rule.
 #[doc(hidden)]
 pub fn sweep_toolchain_folders(root: &Path, now: std::time::SystemTime) {
     sweep(root, now);
 }
 
-/// How old a folder must be before the sweep may remove it: another process may still use a younger link folder whose
-/// programs look gone to this one, or still be filling a younger staging folder. A test process lives minutes, not an hour.
+/// How old a staging folder must be before the sweep removes it: a live process fills one in well under a second, so an
+/// hour-old one is a crashed process's leftover.
 const SWEEP_AGE: std::time::Duration = std::time::Duration::from_secs(3600);
 
-/// Removes from `root` the link folders whose programs are gone (named in their [`SOURCES`]) and the staging folders (`.`) a
-/// crashed process left, each only when it is older than [`SWEEP_AGE`] as of `now`.
+/// Removes from `root` the staging folders (`.`) a crashed process left, once they are older than [`SWEEP_AGE`] as of `now`.
+/// Link folders stay: they are in the build's target folder, and `cargo clean` removes them.
 fn sweep(root: &Path, now: std::time::SystemTime) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
     for e in entries.flatten() {
-        let path = e.path();
+        if !e.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
         let old = e
             .metadata()
             .and_then(|m| m.modified())
             .is_ok_and(|t| now.duration_since(t).is_ok_and(|age| age > SWEEP_AGE));
-        if !old {
-            continue;
+        if old {
+            let _ = std::fs::remove_dir_all(e.path());
         }
-        let staging = e.file_name().to_string_lossy().starts_with('.');
-        let gone = staging
-            || std::fs::read_to_string(path.join(SOURCES))
-                .is_ok_and(|t| t.lines().any(|l| !Path::new(l).exists()));
-        if gone {
-            let _ = std::fs::remove_dir_all(&path);
-        }
+    }
+}
+
+/// Git for Windows' install folder from the `git` on `ambient` (always `None` elsewhere).
+fn git_root_of(ambient: Option<&OsStr>) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        let git = PathBuf::from(resolve(OsStr::new("git"), ambient));
+        git.is_absolute().then(|| git_root(&git)).flatten()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = ambient;
+        None
     }
 }
 
@@ -842,7 +882,7 @@ fn git_root(git: &Path) -> Option<PathBuf> {
     {
         return known.clone();
     }
-    let exec = exec_path(git);
+    let exec = exec_path(git, EXEC_PATH_LIMIT);
     let root = git_root_from(exec.as_deref(), git);
     seen.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -850,10 +890,10 @@ fn git_root(git: &Path) -> Option<PathBuf> {
     root
 }
 
-/// `git --exec-path`, waited for at most [`EXEC_PATH_LIMIT`]; a `git` that does not answer in time is ended through the handle held
-/// here and counts as no answer (the layout is used then).
-#[cfg(windows)]
-fn exec_path(git: &Path) -> Option<PathBuf> {
+/// `git --exec-path`, waited for at most `limit` ([`EXEC_PATH_LIMIT`]); a `git` that does not answer in time is ended through the
+/// handle held here and counts as no answer (the layout is used then).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn exec_path(git: &Path, limit: std::time::Duration) -> Option<PathBuf> {
     use std::io::Read;
     #[allow(clippy::disallowed_methods)]
     // a read-only question to git; ended only through the handle this function holds
@@ -871,16 +911,16 @@ fn exec_path(git: &Path) -> Option<PathBuf> {
         let _ = out.read_to_string(&mut text);
         let _ = tx.send(text);
     });
-    match rx.recv_timeout(EXEC_PATH_LIMIT) {
+    match rx.recv_timeout(limit) {
         Ok(text) => {
             let ok = child.wait().is_ok_and(|s| s.success());
             Some(PathBuf::from(text.trim())).filter(|p| ok && !p.as_os_str().is_empty())
         }
         Err(_) => {
             eprintln!(
-                "TestCommand: {} --exec-path did not answer within {} s; Git's root comes from the folder layout",
+                "TestCommand: {} --exec-path did not answer within {} ms; Git's root comes from the folder layout",
                 git.display(),
-                EXEC_PATH_LIMIT.as_secs()
+                limit.as_millis()
             );
             let _ = child.kill();
             let _ = child.wait();
@@ -891,7 +931,7 @@ fn exec_path(git: &Path) -> Option<PathBuf> {
 
 /// How long `git --exec-path` may take: a hang guard, not a budget (measured 40 to 71 ms on the Windows test VM, docs/benchmarks.md,
 /// "TestCommand construction").
-#[cfg(windows)]
+#[cfg_attr(not(windows), allow(dead_code))]
 const EXEC_PATH_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The pure part of [`git_root`]: three folders above git's exec path, else the nearest folder above `git` (at most three up)
@@ -928,7 +968,11 @@ fn path_key(d: &Path) -> String {
 
 /// The folders after the link folder: those of the [`NAMED_TOOLS`] found on `ambient` (and, on Windows, Git for Windows' `usr/bin`
 /// and `bin`), then the system folders; each once, Windows folders compared without case.
-fn tail_dirs(ambient: Option<&OsStr>, links: Option<&Path>) -> Vec<PathBuf> {
+fn tail_dirs(
+    ambient: Option<&OsStr>,
+    links: Option<&Path>,
+    git_root: Option<&Path>,
+) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     let system = system_dirs();
     let system_keys: Vec<String> = system.iter().map(|d| path_key(d)).collect();
@@ -938,9 +982,8 @@ fn tail_dirs(ambient: Option<&OsStr>, links: Option<&Path>) -> Vec<PathBuf> {
         if !found.is_absolute() {
             continue;
         }
-        #[cfg(windows)]
         if *tool == "git"
-            && let Some(root) = git_root(&found)
+            && let Some(root) = git_root
         {
             dirs.extend(
                 [root.join("usr").join("bin"), root.join("bin")]
@@ -1043,6 +1086,32 @@ mod tests {
             git_root_from(None, &other),
             None,
             "a folder that is not Git's never counts"
+        );
+    }
+
+    /// A `git` that does not answer `--exec-path` within the limit counts as no answer, is ended through its handle, and the
+    /// call returns at the limit, not when the program would have ended (review of df9af3cda).
+    #[cfg(unix)]
+    #[test]
+    fn a_git_that_does_not_answer_its_exec_path_in_time_is_no_answer() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let git = d.path().join("git");
+        std::fs::write(&git, "#!/bin/sh\nexec sleep 30\n").unwrap();
+        std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let t = std::time::Instant::now();
+        assert_eq!(exec_path(&git, std::time::Duration::from_millis(200)), None);
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(10),
+            "waited {:?} for a git that did not answer",
+            t.elapsed()
+        );
+        let answering = d.path().join("git-answers");
+        std::fs::write(&answering, "#!/bin/sh\necho /opt/git/libexec/git-core\n").unwrap();
+        std::fs::set_permissions(&answering, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            exec_path(&answering, std::time::Duration::from_secs(10)),
+            Some(PathBuf::from("/opt/git/libexec/git-core"))
         );
     }
 

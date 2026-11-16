@@ -502,51 +502,65 @@ fn a_child_cargos_build_script_does_not_reach_the_tools_of_cargo_home() {
     );
 }
 
-/// Every command of a test process shares one toolchain link folder, made once (ci.yml run 8152: made per command, the Windows
-/// tests that start many children ran about 6 times slower), and it is never inside a command's or a `new_in` folder.
+/// Every command of a test process starts its `PATH` with one shared toolchain link folder in the build's target folder (ci.yml
+/// run 8152: made per command, the Windows tests that start many children ran about 6 times slower), never inside a command's
+/// or a `new_in` folder; a test program run outside a target folder (copied elsewhere) links into each command's own folder.
 #[test]
-fn many_commands_share_one_toolchain_link_folder_made_once_outside_their_own_folders() {
+fn many_commands_share_one_toolchain_link_folder_in_the_target_folder() {
     let d = tempfile::tempdir().unwrap();
     let tc = d.path().join("toolchain");
     std::fs::create_dir(&tc).unwrap();
-    let rustc = tc.join(if cfg!(windows) { "rustc.exe" } else { "rustc" });
-    std::fs::write(&rustc, "").unwrap();
+    std::fs::write(
+        tc.join(if cfg!(windows) { "rustc.exe" } else { "rustc" }),
+        "",
+    )
+    .unwrap();
     let mut env = env_lock();
     // Only the stand-in toolchain: the commands are made and looked at, never started.
     env.set("PATH", &tc);
-    let before = paddock_testkit::process::toolchain_folders_made();
     let given = d.path().join("given");
     let mut cmds: Vec<TestCommand> = (0..5).map(|_| TestCommand::new("git")).collect();
     cmds.push(TestCommand::new_in("git", &given));
-    assert_eq!(
-        paddock_testkit::process::toolchain_folders_made(),
-        before + 1,
-        "one folder for six commands"
-    );
-    let folders: std::collections::BTreeSet<std::path::PathBuf> = cmds
+    let firsts: Vec<std::path::PathBuf> = cmds
         .iter()
         .map(|c| {
             let report = c.path_report();
-            // A link is named for its program, `rustc` plus the platform's suffix, whatever spelling found it.
-            let own = format!("rustc{}", std::env::consts::EXE_SUFFIX);
-            let link = report
-                .toolchain
-                .iter()
-                .find(|l| l.file_name().is_some_and(|n| n == own.as_str()))
-                .cloned();
-            link.unwrap_or_else(|| panic!("no rustc link: {report}"))
-                .parent()
-                .unwrap()
-                .to_path_buf()
+            report
+                .child
+                .first()
+                .cloned()
+                .unwrap_or_else(|| panic!("no PATH: {report}"))
         })
         .collect();
-    assert_eq!(folders.len(), 1, "{folders:?}");
-    let folder = folders.into_iter().next().unwrap();
-    assert!(
-        !folder.starts_with(&given) && cmds.iter().all(|c| !folder.starts_with(c.private_dir())),
-        "{}",
-        folder.display()
-    );
+    let exe = std::env::current_exe().unwrap();
+    match paddock_env::cargo_layout::profile_dir_of_exe(&exe) {
+        Some(profile) => {
+            let target = profile.parent().unwrap();
+            assert!(
+                firsts.iter().all(|f| f == &firsts[0]),
+                "the commands do not share one folder: {firsts:?}"
+            );
+            assert!(
+                firsts[0].starts_with(target),
+                "{} is not in the target folder {}",
+                firsts[0].display(),
+                target.display()
+            );
+            assert!(
+                cmds.iter().all(|c| !firsts[0].starts_with(c.private_dir()))
+                    && !firsts[0].starts_with(&given)
+            );
+        }
+        None => {
+            for (c, f) in cmds.iter().zip(&firsts) {
+                assert!(
+                    f.starts_with(c.private_dir()),
+                    "{} is outside the command's own folder",
+                    f.display()
+                );
+            }
+        }
+    }
 }
 
 /// A link folder removed while a process still uses it (another process's sweep, a cleaned temp folder) is made again on the next
@@ -563,14 +577,18 @@ fn a_link_folder_removed_under_a_process_is_made_again_on_its_next_command() {
     .unwrap();
     let mut env = env_lock();
     env.set("PATH", &tc);
-    let first = TestCommand::new("git").path_report().toolchain;
+    // Held while the folder is removed: a test program outside a target folder links into the command's own folder, which goes
+    // with the command.
+    let held = TestCommand::new("git");
+    let first = held.path_report().toolchain;
     let folder = first
         .first()
         .and_then(|l| l.parent())
         .expect("a link folder")
         .to_path_buf();
     std::fs::remove_dir_all(&folder).unwrap();
-    let again = TestCommand::new("git").path_report();
+    let next = TestCommand::new("git");
+    let again = next.path_report();
     assert!(
         !again.toolchain.is_empty(),
         "the next command has no toolchain links: {again}"
@@ -578,45 +596,29 @@ fn a_link_folder_removed_under_a_process_is_made_again_on_its_next_command() {
     assert!(again.toolchain.iter().all(|l| l.exists()), "{again}");
 }
 
-/// The sweep removes a link folder only when its programs are gone and it is older than an hour (another process may still
-/// use a younger one), and a staging folder (`.`) a crashed process left only when it is older than an hour (review of
-/// df9af3cda, P2-1 and P2-2).
+/// The sweep removes only the staging folders (`.`) a crashed process left, once they are an hour old (review of df9af3cda,
+/// P2-2); link folders stay (they are in the build's target folder, and `cargo clean` removes them).
 #[test]
-fn the_sweep_removes_only_old_folders_of_gone_programs_and_old_staging_folders() {
+fn the_sweep_removes_only_hour_old_staging_folders() {
     use paddock_testkit::process::sweep_toolchain_folders;
     use std::time::{Duration, SystemTime};
     let root = tempfile::tempdir().unwrap();
-    let gone = root.path().join("0000000000000001");
-    let live = root.path().join("0000000000000002");
-    let staging = root.path().join(".0000000000000003-1-1");
-    for f in [&gone, &live, &staging] {
+    let link = root.path().join("0000000000000001");
+    let staging = root.path().join(".0000000000000002-1-1");
+    for f in [&link, &staging] {
         std::fs::create_dir(f).unwrap();
     }
-    std::fs::write(
-        gone.join("sources.txt"),
-        format!("{}\n", root.path().join("no-such-program").display()),
-    )
-    .unwrap();
-    let present = root.path().join("present-program");
-    std::fs::write(&present, "").unwrap();
-    std::fs::write(live.join("sources.txt"), format!("{}\n", present.display())).unwrap();
-    // Young: nothing goes, not even the folder whose programs are gone (a process may be using it).
     sweep_toolchain_folders(root.path(), SystemTime::now());
     assert!(
-        gone.is_dir() && live.is_dir() && staging.is_dir(),
+        link.is_dir() && staging.is_dir(),
         "a young folder was removed"
     );
-    // Two hours later: the folder of gone programs and the staging folder go; the one whose programs are there stays.
     sweep_toolchain_folders(
         root.path(),
         SystemTime::now() + Duration::from_secs(2 * 3600),
     );
-    assert!(!gone.exists(), "an old folder of gone programs stayed");
     assert!(!staging.exists(), "an old staging folder stayed");
-    assert!(
-        live.is_dir(),
-        "a folder whose programs are there was removed"
-    );
+    assert!(link.is_dir(), "a link folder was removed");
 }
 
 /// A toolchain program found as `rustc.EXE` (Windows' `PATHEXT` spelling) is linked under its own name, `rustc.exe`, and a bare
