@@ -14,7 +14,7 @@ import { join } from 'node:path';
  * pictures whose data depends on a poll's second (counters, recorder, network connections, the dashboard history markers). `Date.now()` is
  * read in whole seconds, every picture is taken at the end of a second, the mock's history windows end on a whole minute, and screenshots
  * disable animations. What still differs between two runs of one tree: the pictures of pages that poll every 2 s or more (network connections,
- * recorder), by the second their last poll read, a few hundred pixels of rates and a cursor; compare with a tolerance (see docs/screenshots).
+ * recorder), by the second their last poll read, a few hundred pixels of rates and a cursor; compare with a tolerance.
  */
 // Playwright runs from the app folder; the images live in the repository's docs.
 const OUT = process.env['SCREENSHOT_DIR'] ?? join(process.cwd(), '..', 'docs', 'screenshots');
