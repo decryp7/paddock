@@ -124,7 +124,7 @@ impl Supervisor {
         &mut self,
         runner: &RunnerName,
         pid: u32,
-        started_at: Option<Timestamp>,
+        started_at: Timestamp,
         allow_runner: bool,
         now: Timestamp,
     ) -> Response {
@@ -140,7 +140,7 @@ impl Supervisor {
                 return err(ErrorCode::BadRequest, Refusal::NotInTree.to_string());
             }
         }
-        let target = match r.watch.check(pid, started_at.map(|t| t.0), std::process::id(), allow_runner) {
+        let target = match r.watch.check(pid, started_at.0, std::process::id(), allow_runner) {
             Ok(t) => t.clone(),
             Err(refusal) => return err(ErrorCode::BadRequest, refusal.to_string()),
         };

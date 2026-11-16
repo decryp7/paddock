@@ -88,7 +88,7 @@
                             <mat-icon svgIcon="pc:more" aria-hidden="true" />
                           </button>
                         } @else {
-                          <button type="button" class="btn icon sm ghost" [attr.aria-label]="'Stop ' + e.name + ' now (pid ' + e.pid + ')'" [disabled]="store.busy() === e.pid" (click)="stop(e)">
+                          <button type="button" class="btn icon sm ghost" [attr.aria-label]="'Stop ' + e.name + ' now (pid ' + e.pid + ')'" [attr.title]="e.startedAt === null ? noStartTime : null" [disabled]="store.busy() === e.pid || e.startedAt === null" (click)="stop(e)">
                             <mat-icon svgIcon="pc:stop-circle" aria-hidden="true" />
                           </button>
                         }

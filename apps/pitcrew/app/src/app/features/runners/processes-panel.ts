@@ -10,7 +10,7 @@ import { KEEP_EXTRAS, cleanupSummary, fateText } from '../../shared/process-form
 import { LoadState } from '../../shared/ui/load-state';
 import { SettingsStore } from '../../state/settings.store';
 import { ToastStore } from '../../state/toast.store';
-import { ProcessesStore } from './processes.store';
+import { NO_START_TIME_STOP, ProcessesStore } from './processes.store';
 import { confirmStopProcess } from './stop-process-dialog';
 
 /** One table row: an entry with the words and numbers the table shows. */
@@ -43,6 +43,7 @@ export class ProcessesPanel {
   private readonly toasts = inject(ToastStore);
 
   protected readonly extras = KEEP_EXTRAS;
+  protected readonly noStartTime = NO_START_TIME_STOP;
   protected readonly list = computed(() => this.store.list().value);
   protected readonly rows = computed<ProcessRow[]>(() => {
     const l = this.list();

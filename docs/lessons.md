@@ -2278,3 +2278,14 @@ limit three times through work before the hang (a `git rev-parse` outside the ph
 hang, in the shell and in Rust (ADR 0103, "Amendment"). **Rule:** a test of a time limit times the thing that hangs, from a
 signal it gives, not the setup before it; state that an abandoned worker can still write is that worker's own. **Class: work before
 the hang point of a hung-phase test meeting its limit under load (third sighting; ADR 0103 amendment).**
+## Pitcrew's stop took a pid with an optional start time and signalled the bare pid (2026-11-16)
+`Request::StopProcess` carried `started_at: Option<Timestamp>`; `check_stop_target` compared start times only when both sides had one, so
+`None` (or a process whose start time sysinfo gave as 0) passed for any pid, and `OsTerminator` then signalled the pid with `nix::kill` /
+`taskkill /PID`, outside `paddock_proc`, after the tree read of an earlier moment (rule 53, ADR 0033; two `expect(clippy::disallowed_methods)`
+marked it as WP-6 work). Failing first: `a_stop_without_a_verified_start_time_is_refused` and `a_stop_request_without_a_start_time_does_not_decode`.
+The fix: the start time is required on the wire (protocol 5, named JSON fields, no layout change beyond the field), a member without one is
+refused (`Refusal::NoStartTime`) in the engine and the UI, and `Terminator::ask/end` take the pid and the listed start time and go through
+`ProcessId::of_reported` and `paddock_proc::ask/end`, which compare the holder immediately before the signal (`a_reused_process_id_is_neither_asked_nor_ended`).
+`of_reported` is the one shared form of what `paddock_testkit_start::recorded::reported` did for tests. **Rule:** a kill action names a
+`ProcessId`, never a pid plus an optional time. **Class: an OS name acted on without identity (earlier: ADR 0033 WP-6 sites; the
+family `ProcessRef` follows).**

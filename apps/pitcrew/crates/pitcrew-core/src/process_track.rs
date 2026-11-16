@@ -374,6 +374,8 @@ pub enum Refusal {
     SystemProcess,
     /// The pid now belongs to another process than the one the caller saw.
     Changed,
+    /// The operating system gives no start time for it, so it cannot be told from a process that reuses the id.
+    NoStartTime,
 }
 
 impl std::fmt::Display for Refusal {
@@ -384,15 +386,17 @@ impl std::fmt::Display for Refusal {
             Refusal::IsService => "that is the Pitcrew service",
             Refusal::SystemProcess => "that is a system process",
             Refusal::Changed => "that process id now belongs to a different process; refresh the list",
+            Refusal::NoStartTime => "this process cannot be told apart from another one that reuses its id (the system gives no start time for it), so Pitcrew will not stop it; end it from the system's task manager or activity monitor",
         })
     }
 }
 
 /// Checks that `pid` may be stopped. `members` is the runner's tree from the latest table; `started_ms` is the start
-/// time the caller saw (`None` accepts any, for the automatic cleanup that just read it).
+/// time the caller saw. A process whose start time is unknown is refused: without it a reused id cannot be told apart
+/// (rule 53).
 pub fn check_stop_target(
     pid: u32,
-    started_ms: Option<u64>,
+    started_ms: u64,
     runner_pid: u32,
     service_pid: u32,
     allow_runner: bool,
@@ -408,11 +412,10 @@ pub fn check_stop_target(
     if pid == runner_pid && !allow_runner {
         return Err(Refusal::IsRunner);
     }
-    if let (Some(want), Some(have)) = (started_ms, m.started_ms) {
-        // Start times come from the OS in whole seconds; allow a second of rounding.
-        if want.abs_diff(have) > 1500 {
-            return Err(Refusal::Changed);
-        }
+    let have = m.started_ms.ok_or(Refusal::NoStartTime)?;
+    // Start times come from the OS in whole seconds; allow a second of rounding.
+    if started_ms.abs_diff(have) > 1500 {
+        return Err(Refusal::Changed);
     }
     Ok(m)
 }
@@ -691,37 +694,61 @@ mod tests {
     }
 
     #[test]
+    fn a_stop_without_a_verified_start_time_is_refused() {
+        // Rule 53: a pid alone names whoever holds it now.
+        let members = vec![proc(10, "gitea-runner", Some(1)), proc(11, "sleep", Some(150))];
+        let mut unreadable = members.clone();
+        unreadable[1].started_ms = None;
+        assert_eq!(
+            check_stop_target(11, 150_000, 10, 99, false, &unreadable).unwrap_err(),
+            Refusal::NoStartTime,
+            "no start time to compare with"
+        );
+        assert_eq!(
+            check_stop_target(11, 5_000, 10, 99, false, &members).unwrap_err(),
+            Refusal::Changed,
+            "a start time of another process (a reused id)"
+        );
+    }
+
+    #[test]
     fn a_stop_is_refused_outside_the_tree_and_for_the_wrong_targets() {
         let members = vec![proc(10, "gitea-runner", Some(1)), proc(11, "sleep", Some(150))];
-        let ok = check_stop_target(11, Some(150_000), 10, 99, false, &members);
+        let ok = check_stop_target(11, 150_000, 10, 99, false, &members);
         assert_eq!(ok.unwrap().pid, 11);
         assert_eq!(
-            check_stop_target(11, Some(150_500), 10, 99, false, &members).unwrap().pid,
+            check_stop_target(11, 150_500, 10, 99, false, &members).unwrap().pid,
             11,
             "seconds rounding"
         );
-        assert_eq!(check_stop_target(11, None, 10, 99, false, &members).unwrap().pid, 11);
+        assert_eq!(check_stop_target(11, 150_000, 10, 99, false, &members).unwrap().pid, 11);
         assert_eq!(
-            check_stop_target(500, None, 10, 99, false, &members).unwrap_err(),
+            check_stop_target(500, 150_000, 10, 99, false, &members).unwrap_err(),
             Refusal::NotInTree
         );
-        assert_eq!(check_stop_target(10, None, 10, 99, false, &members).unwrap_err(), Refusal::IsRunner);
         assert_eq!(
-            check_stop_target(10, None, 10, 99, true, &members).unwrap().pid,
+            check_stop_target(10, 1_000, 10, 99, false, &members).unwrap_err(),
+            Refusal::IsRunner
+        );
+        assert_eq!(
+            check_stop_target(10, 1_000, 10, 99, true, &members).unwrap().pid,
             10,
             "explicitly chosen"
         );
-        assert_eq!(check_stop_target(99, None, 10, 99, true, &members).unwrap_err(), Refusal::IsService);
         assert_eq!(
-            check_stop_target(1, None, 10, 99, true, &members).unwrap_err(),
+            check_stop_target(99, 150_000, 10, 99, true, &members).unwrap_err(),
+            Refusal::IsService
+        );
+        assert_eq!(
+            check_stop_target(1, 150_000, 10, 99, true, &members).unwrap_err(),
             Refusal::SystemProcess
         );
         assert_eq!(
-            check_stop_target(0, None, 10, 99, true, &members).unwrap_err(),
+            check_stop_target(0, 150_000, 10, 99, true, &members).unwrap_err(),
             Refusal::SystemProcess
         );
         assert_eq!(
-            check_stop_target(11, Some(900_000), 10, 99, false, &members).unwrap_err(),
+            check_stop_target(11, 900_000, 10, 99, false, &members).unwrap_err(),
             Refusal::Changed
         );
         for r in [

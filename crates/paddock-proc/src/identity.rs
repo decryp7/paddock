@@ -32,6 +32,10 @@ impl StartTime {
     }
 }
 
+/// Linux counts a start time from a boot time each process reads in whole seconds, so two readings can differ by about a
+/// second ([`ProcessId::of_reported`]).
+const REPORTED_SLACK_MS: u64 = 1_000;
+
 /// One process: its pid and when it started. Two processes that had the same pid one after the other are different
 /// values, so a pid that was handed on is never mistaken for the process it used to name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -58,6 +62,21 @@ impl ProcessId {
     /// after the file was written got the pid when the writer had ended; it is `None` (the record is stale).
     pub fn of_recorded(pid: u32, written_ms: i64) -> Option<ProcessId> {
         ProcessId::of(pid).filter(|id| started_by(id.started, written_ms))
+    }
+
+    /// The process that holds `pid` now, if it started within `[started_ms, started_ms + resolution_ms)` (ms since the Unix
+    /// epoch) plus the clock's slack on both sides: for a pid another program reported together with the start time it
+    /// read, at that reader's resolution (1000 for whole seconds). `None` when nobody holds the pid, its start time cannot
+    /// be read, or the holder started at another time (the pid was handed on). Call it right before acting; a pid handed on
+    /// within the same window cannot be told apart, so keep the resolution as fine as the reporter's.
+    pub fn of_reported(pid: u32, started_ms: u64, resolution_ms: u64) -> Option<ProcessId> {
+        let slack = REPORTED_SLACK_MS;
+        let earliest = started_ms.saturating_sub(slack).saturating_mul(1000);
+        let latest = started_ms
+            .saturating_add(resolution_ms)
+            .saturating_add(slack)
+            .saturating_mul(1000);
+        ProcessId::of(pid).filter(|id| (earliest..latest).contains(&id.started.0))
     }
 
     /// The process id.
@@ -307,6 +326,30 @@ mod tests {
 
     const fn at(us: u64) -> StartTime {
         StartTime::from_micros(us)
+    }
+
+    #[test]
+    fn a_reported_start_names_the_holder_only_within_its_resolution() {
+        let me = ProcessId::of(std::process::id()).unwrap();
+        let ms = me.started().as_micros() / 1000;
+        let whole_seconds = ms / 1000 * 1000;
+        assert_eq!(
+            ProcessId::of_reported(me.pid(), whole_seconds, 1000),
+            Some(me),
+            "a reading in whole seconds"
+        );
+        assert_eq!(ProcessId::of_reported(me.pid(), ms, 1), Some(me));
+        assert_eq!(
+            ProcessId::of_reported(me.pid(), ms.saturating_sub(3_600_000), 1000),
+            None,
+            "the pid was handed on to a process that started an hour later"
+        );
+        assert_eq!(ProcessId::of_reported(me.pid(), ms + 3_600_000, 1000), None);
+        assert_eq!(
+            ProcessId::of_reported(u32::MAX, ms, 1000),
+            None,
+            "nobody holds it"
+        );
     }
 
     #[test]

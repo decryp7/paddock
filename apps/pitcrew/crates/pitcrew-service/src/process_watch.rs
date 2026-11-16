@@ -140,7 +140,7 @@ impl ProcessWatch {
     }
 
     /// Checks that `pid` may be stopped (it is in the runner's tree as last read, and so on).
-    pub fn check(&self, pid: u32, started_ms: Option<u64>, service_pid: u32, allow_runner: bool) -> Result<&Tracked, Refusal> {
+    pub fn check(&self, pid: u32, started_ms: u64, service_pid: u32, allow_runner: bool) -> Result<&Tracked, Refusal> {
         let runner_pid = self.runner_pid.ok_or(Refusal::NotInTree)?;
         let metas: Vec<ProcessMeta> = self.tracked.iter().map(|t| t.meta.clone()).collect();
         check_stop_target(pid, started_ms, runner_pid, service_pid, allow_runner, &metas)?;
@@ -188,10 +188,12 @@ impl ProcessWatch {
         if self.is_stopping(target.meta.pid) {
             return Ok(());
         }
-        term.ask(target.meta.pid)?;
+        // Rule 53: a process without a start time has no identity to verify, so it is never signalled.
+        let started_ms = target.meta.started_ms.ok_or_else(|| Refusal::NoStartTime.to_string())?;
+        term.ask(target.meta.pid, started_ms)?;
         self.stopping.push(Stopping {
             pid: target.meta.pid,
-            started_ms: target.meta.started_ms,
+            started_ms: Some(started_ms),
             name: target.meta.name.clone(),
             rule,
             by,
@@ -224,7 +226,7 @@ impl ProcessWatch {
                     false
                 }
                 StopStep::Wait => true,
-                StopStep::Kill if seen == Seen::Unverified => {
+                StopStep::Kill if seen == Seen::Unverified || s.started_ms.is_none() => {
                     // The pid may have been handed on: ending it by pid could end another process (rule 53).
                     done.push(Stopped {
                         name: s.name.clone(),
@@ -242,7 +244,9 @@ impl ProcessWatch {
                 }
                 StopStep::Kill => {
                     if !s.ended {
-                        term.end(s.pid);
+                        if let Some(started_ms) = s.started_ms {
+                            term.end(s.pid, started_ms);
+                        }
                         s.ended = true;
                         // Give the kill a moment to take effect before the next check.
                         s.progress.asked_at = now;
@@ -282,21 +286,22 @@ mod tests {
 
     #[derive(Default)]
     struct Fake {
-        asked: Mutex<Vec<u32>>,
-        ended: Mutex<Vec<u32>>,
+        asked: Mutex<Vec<(u32, u64)>>,
+        ended: Mutex<Vec<(u32, u64)>>,
         refuse: bool,
     }
 
     impl Terminator for Fake {
-        fn ask(&self, pid: u32) -> Result<(), String> {
+        fn ask(&self, pid: u32, started_ms: u64) -> Result<(), String> {
             if self.refuse {
                 return Err("denied".into());
             }
-            self.asked.lock().unwrap().push(pid);
+            self.asked.lock().unwrap().push((pid, started_ms));
             Ok(())
         }
-        fn end(&self, pid: u32) {
-            self.ended.lock().unwrap().push(pid);
+        fn end(&self, pid: u32, started_ms: u64) -> bool {
+            self.ended.lock().unwrap().push((pid, started_ms));
+            true
         }
     }
 
@@ -375,7 +380,7 @@ mod tests {
         assert!(w.due(t(801), true).is_empty(), "not asked twice");
         w.begin(&due[0], "again".into(), StopReason::Cleanup, t(801), &policy, &term)
             .unwrap();
-        assert_eq!(*term.asked.lock().unwrap(), vec![11]);
+        assert_eq!(*term.asked.lock().unwrap(), vec![(11, 150_000)]);
         // Still alive: wait. Then gone.
         assert!(w.advance(t(805), &mut |_, _| Seen::Same, &term).is_empty());
         let done = w.advance(t(806), &mut |_, _| Seen::Gone, &term);
@@ -390,12 +395,12 @@ mod tests {
     fn what_ignores_the_request_is_ended_after_the_timeout_and_a_stuck_one_is_given_up() {
         let (mut w, policy) = watch();
         let term = Fake::default();
-        let target = w.check(11, None, 99, false).unwrap().clone();
+        let target = w.check(11, 150_000, 99, false).unwrap().clone();
         w.begin(&target, "you".into(), StopReason::User, t(800), &policy, &term).unwrap();
         assert!(w.advance(t(814), &mut |_, _| Seen::Same, &term).is_empty());
         assert!(term.ended.lock().unwrap().is_empty());
         assert!(w.advance(t(815), &mut |_, _| Seen::Same, &term).is_empty());
-        assert_eq!(*term.ended.lock().unwrap(), vec![11], "ended after the 15 s timeout");
+        assert_eq!(*term.ended.lock().unwrap(), vec![(11, 150_000)], "ended after the 15 s timeout");
         let done = w.advance(t(816), &mut |_, _| Seen::Gone, &term);
         assert!(done[0].forced && done[0].by == StopReason::User);
         // A process that survives even that.
@@ -410,7 +415,7 @@ mod tests {
     fn a_process_whose_identity_cannot_be_verified_is_never_ended_by_its_pid() {
         let (mut w, policy) = watch();
         let term = Fake::default();
-        let target = w.check(11, None, 99, false).unwrap().clone();
+        let target = w.check(11, 150_000, 99, false).unwrap().clone();
         w.begin(&target, "you".into(), StopReason::User, t(800), &policy, &term).unwrap();
         assert!(w.advance(t(814), &mut |_, _| Seen::Unverified, &term).is_empty());
         // The timeout has passed: a pid that reports start time 0 may be a recycled one.
@@ -429,14 +434,27 @@ mod tests {
     }
 
     #[test]
+    fn a_process_without_a_start_time_is_never_signalled() {
+        let (mut w, policy) = watch();
+        let term = Fake::default();
+        let mut target = w.check(11, 150_000, 99, false).unwrap().clone();
+        target.meta.started_ms = None;
+        let err = w
+            .begin(&target, "you".into(), StopReason::User, t(800), &policy, &term)
+            .unwrap_err();
+        assert!(err.contains("cannot be told apart"), "{err}");
+        assert!(term.asked.lock().unwrap().is_empty() && !w.is_stopping(11));
+    }
+
+    #[test]
     fn refusals_and_errors() {
         let (mut w, policy) = watch();
-        assert_eq!(w.check(500, None, 99, false).unwrap_err(), Refusal::NotInTree);
-        assert_eq!(w.check(10, None, 99, false).unwrap_err(), Refusal::IsRunner);
-        assert_eq!(w.check(10, None, 99, true).unwrap().meta.pid, 10);
-        assert_eq!(w.check(1, None, 99, true).unwrap_err(), Refusal::SystemProcess);
-        assert_eq!(ProcessWatch::new().check(11, None, 99, false).unwrap_err(), Refusal::NotInTree);
-        let target = w.check(11, None, 99, false).unwrap().clone();
+        assert_eq!(w.check(500, 150_000, 99, false).unwrap_err(), Refusal::NotInTree);
+        assert_eq!(w.check(10, 1_000, 99, false).unwrap_err(), Refusal::IsRunner);
+        assert_eq!(w.check(10, 1_000, 99, true).unwrap().meta.pid, 10);
+        assert_eq!(w.check(1, 150_000, 99, true).unwrap_err(), Refusal::SystemProcess);
+        assert_eq!(ProcessWatch::new().check(11, 150_000, 99, false).unwrap_err(), Refusal::NotInTree);
+        let target = w.check(11, 150_000, 99, false).unwrap().clone();
         let deny = Fake {
             refuse: true,
             ..Default::default()

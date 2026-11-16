@@ -516,11 +516,11 @@ export class MockBackend implements PitcrewBackend {
     return structuredClone({ ...tree, entries, runnerPid: running ? tree.runnerPid : null, idle: r.currentJob === null, cleanup: policy.cleanup, keep: policy.keep, takenAt: this.now() });
   }
 
-  async stopProcess(runner: string, pid: number, startedAt: number | null, allowRunner: boolean): Promise<void> {
+  async stopProcess(runner: string, pid: number, startedAt: number, allowRunner: boolean): Promise<void> {
     await this.delay();
     const r = this.find(runner);
     const tree = this.tree(r);
-    const e = tree.entries.find((x) => x.pid === pid && (startedAt === null || x.startedAt === startedAt));
+    const e = tree.entries.find((x) => x.pid === pid && x.startedAt === startedAt);
     if (!e) throw fail('badRequest', 'that process is not part of this runner’s process tree (it may have ended already). Refresh the list.');
     if (e.isRunner && !allowRunner) throw fail('badRequest', 'that is the runner process itself; stopping it needs your explicit confirmation.');
     const age = e.startedAt === null ? 0 : Math.max(0, this.now() - e.startedAt);
