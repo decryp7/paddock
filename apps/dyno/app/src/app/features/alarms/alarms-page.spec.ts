@@ -5,7 +5,7 @@ import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { SettingsStore } from '../../state/settings.store';
 import { AlarmsPage } from './alarms-page';
-import { MAC_DISK_USED_PERCENT } from '../../core/mock/mac-disk';
+import { MAC_DISK_USED_PERCENT } from '../../core/mock/mac-machine';
 
 const NOW = 1_700_000_000_000;
 

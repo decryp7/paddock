@@ -4,6 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { BACKEND } from '../../core/backend';
 import { MockBackend, type MockOptions } from '../../core/mock-backend';
+import { demoAlarms } from '../../core/mock/alarms';
 import { provideIcons } from '../../shared/icons';
 import { QuitStore } from '../../state/quit.store';
 import { Tray } from './tray';
@@ -31,7 +32,8 @@ describe('dy-tray', () => {
     const text = frames(el).map((f) => f.textContent ?? '');
     expect(text).toHaveLength(3);
     expect(text[0]).toContain('Active alarms');
-    expect(text[0]).toContain('Memory pressure is high');
+    // The Alarms page's own active list: the tray shows what that page shows.
+    expect(text[0]).toContain(demoAlarms(NOW).find((a) => a.state === 'active' && !a.shelved)!.title);
     expect(text[1]).toContain('Disk space');
     expect(text[1]).toContain('Macintosh HD');
     expect(text[2]).toContain('CPU and memory');

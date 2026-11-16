@@ -1,5 +1,6 @@
 import type { Hint, MemoryModule, SystemInventory } from '../api.types';
 import type { MockOs } from './os';
+import { MAC_DISK_TOTAL } from './mac-machine';
 
 const GB = 1024 ** 3;
 
@@ -35,6 +36,8 @@ const stick = (slot: string, gb: number, kind: MemoryModule['kind'], mts: number
 });
 
 const disk = (name: string, gb: number) => ({ name, totalBytes: gb * GB, removable: false });
+/** The Mac's startup disk: its capacity is the one in the machine's fact sheet (mock/mac-machine.ts), not a size typed here. */
+const macDisk = (name: string) => ({ name, totalBytes: MAC_DISK_TOTAL, removable: false });
 
 function appleSilicon(): SystemInventory {
   return {
@@ -43,7 +46,7 @@ function appleSilicon(): SystemInventory {
     hostName: 'MacBook-Pro',
     cpu: { name: 'Apple M4 Pro', physicalCores: 14, logicalCores: 14, frequencyMhz: 4500 },
     memory: { unified: { total: 48 * GB, kind: 'lpddr5', manufacturer: 'Apple', upgradeable: false } },
-    disks: [disk('APPLE SSD AP1024Z', 953)],
+    disks: [macDisk('APPLE SSD AP1024Z')],
     hints: [{ kind: 'notUpgradeable', message: 'The memory is part of the chip package and cannot be upgraded. Choose the size when buying.', slot: null }],
   };
 }

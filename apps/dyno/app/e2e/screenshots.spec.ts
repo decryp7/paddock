@@ -488,5 +488,7 @@ captureDocScreens({
   // minute: a scan clicked after the minute turned read a different time, 'scanned 4 min ago' against '5 min ago' in disk-map, measured 2026-11-16).
   warmupMs: 30_000,
   appSelector: 'pd-shell-frame, dy-tray',
-  alignToBucketMs: 60_000,
+  // Every picture is taken at the same instant (14:40:30, the middle of a minute): the mock's live values are a function of the clock, so the CPU, memory
+  // and disk figures read the same on every page, and nothing depends on the minute a screen's own steps ended in.
+  shotAtMs: FROZEN + 10 * 60_000 + 30_000,
 });

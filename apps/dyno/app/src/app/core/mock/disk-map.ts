@@ -19,7 +19,7 @@ import type {
   ScanState,
   Volume,
 } from '../api.types';
-import { MAC_DISK_FREE, MAC_DISK_TOTAL } from './mac-disk';
+import { MAC_DISK_FREE, MAC_DISK_TOTAL } from './mac-machine';
 
 const GB = 1024 ** 3;
 const MB = 1024 ** 2;

@@ -1,5 +1,5 @@
 import type { AppInfo, DiskSample, NetworkSample } from '../api.types';
-import { MAC_DISK_FREE, MAC_DISK_TOTAL } from './mac-disk';
+import { MAC_DISK_FREE, MAC_DISK_TOTAL } from './mac-machine';
 import { type AppSpec, APP_SPECS } from './processes';
 
 const GB = 1024 ** 3;
@@ -133,7 +133,7 @@ export function osProfile(os: MockOs): OsProfile {
       cpuMaxMhz: 4500,
       gpuName: 'Apple M4 Pro GPU (20 cores)',
       disks: (days) => [
-        { id: 'macintosh-hd', name: 'Macintosh HD (APFS)', mount: '/', total: MAC_DISK_TOTAL, free: Math.round(MAC_DISK_FREE - days * 5.1 * GB), removable: false },
+        { id: 'macintosh-hd', name: 'Macintosh HD (APFS)', mount: '/', total: MAC_DISK_TOTAL, free: Math.round(MAC_DISK_FREE - days * 5.1e9), removable: false },
       ],
       network: (w) => [
         { name: 'Wi-Fi (en0)', rxBps: MB1(3.8 + 2.2 * w(810, 5)), txBps: MB1(0.6 + 0.4 * w(811, 5)) },

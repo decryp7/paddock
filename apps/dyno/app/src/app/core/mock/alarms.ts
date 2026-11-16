@@ -1,6 +1,6 @@
 import type { Alarm, AlarmChange, AlarmFilter, AlarmStats, RecorderSample, RecorderSnapshot, RecorderSnapshotInfo } from '../api.types';
 import { clamp, wobble } from './noise';
-import { MAC_DISK_FREE_TEXT, MAC_DISK_USED_PERCENT } from './mac-disk';
+import { MAC_DISK_FREE_TEXT, MAC_DISK_USED_PERCENT } from './mac-machine';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;

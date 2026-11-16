@@ -126,7 +126,7 @@ import { HELPER_PHASES, type MockHelperVariant, afterHelperAction, mockHelperSta
 import { type MockIdleVariant, MockPower, type MockPowerVariant, mockEnergy } from './mock/power';
 import { MockWol, type MockWolVariant } from './mock/wol';
 import { MockWakes, type MockWakeVariant } from './mock/wakes';
-import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
+import { mockAppCrashes, mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
 import { MOCK_ESTIMATES, mockCompare, mockKindResult, mockRun } from './mock/bench';
 import { mockHash, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './mock/lookups';
 import { mockHistory } from './mock/history';
@@ -135,7 +135,8 @@ import { mockInventory } from './mock/inventory';
 import { type MockOs, type OsProfile, coreKindsOf, osProfile } from './mock/os';
 import { clamp, wobble } from './mock/noise';
 import { type MockProcess, buildProcesses, groupSamples, round, sampleProcess } from './mock/processes';
-import { MAC_DISK_FREE, MAC_DISK_FREE_TEXT, MAC_DISK_TOTAL } from './mock/mac-disk';
+import { formatRate, formatStorage } from '../shared/format';
+import { MAC_DISK_FREE, MAC_DISK_FREE_TEXT, MAC_DISK_TOTAL, MAC_DISK_USED_PERCENT } from './mock/mac-machine';
 
 /** The note the engine sends when no tray host shows the icons (`dyno_core::tray_host`; the wire contract spec pins the text). */
 const NO_TRAY_HOST_NOTE =
@@ -766,6 +767,8 @@ export class MockBackend implements DynoBackend {
       const samples = this.samplesAt(t);
       const rustc = samples.filter((s) => s.name === this.profile.names.rustc);
       const rustcCpu = rustc.reduce((a, s) => a + num(s.cpu), 0);
+      // What the build writes, read from the same samples the Processes page and the disk readings show, never typed.
+      const rustcWrite = rustc.reduce((a, s) => a + num(s.diskWriteBps), 0);
       const io = this.system(t, samples).diskIo;
       const queue = 'available' in io.queue ? io.queue.available : 0;
       if (rustc.length === 0 || rustcCpu < 5) {
@@ -797,15 +800,15 @@ export class MockBackend implements DynoBackend {
           {
             kind: 'diskQueue',
             title: 'The disk is queueing writes',
-            explanation: 'rustc writes 121 MB/s of build output; requests wait in line, so apps that open files feel sluggish.',
+            explanation: `rustc writes ${formatRate(rustcWrite)} of build output; requests wait in line, so apps that open files feel sluggish.`,
             confidence: 0.58,
             evidence: [
               { label: 'Disk queue', value: queue.toFixed(1) },
               { label: 'Disk busy', value: '92%' },
-              { label: 'Writes', value: `121 MB/s by ${this.profile.names.rustc}` },
+              { label: 'Writes', value: `${formatRate(rustcWrite)} by ${this.profile.names.rustc}` },
             ],
             hints: [{ text: 'Wait for the build to finish', link: null }],
-            involved: [{ id: this.profile.names.rustc, name: this.profile.names.rustc, share: '121 MB/s' }],
+            involved: [{ id: this.profile.names.rustc, name: this.profile.names.rustc, share: formatRate(rustcWrite) }],
           },
           {
             kind: 'antivirusScan',
@@ -821,10 +824,10 @@ export class MockBackend implements DynoBackend {
           },
           {
             kind: 'lowDiskSpace',
-            title: 'Drive C: is 78% full',
-            explanation: 'Not slowing you down yet, but Windows needs free space for updates and swap.',
+            title: this.profile.os === 'macos' ? `Macintosh HD is ${MAC_DISK_USED_PERCENT}% full` : 'Drive C: is 78% full',
+            explanation: this.profile.os === 'macos' ? 'Not slowing you down yet, but macOS needs free space for updates and swap.' : 'Not slowing you down yet, but Windows needs free space for updates and swap.',
             confidence: 0.22,
-            evidence: [{ label: 'Free', value: '210 GB of 953 GB' }],
+            evidence: [{ label: 'Free', value: this.profile.os === 'macos' ? `${formatStorage(MAC_DISK_FREE)} of ${formatStorage(MAC_DISK_TOTAL)}` : '210 GB of 953 GB' }],
             hints: [],
             involved: [],
           },
@@ -845,6 +848,13 @@ export class MockBackend implements DynoBackend {
         const disks = this.profile.disks(0);
         h.diskTrends = h.diskTrends.slice(0, Math.max(1, disks.length));
         h.diskTrends.forEach((t, i) => (t.disk = i === 0 ? this.profile.primaryDisk : (disks[i]?.name ?? t.disk)));
+        if (this.profile.os === 'macos' && h.diskTrends[0]) {
+          // The startup disk is the one in the machine's fact sheet: its capacity, and its free space ending at today's figure.
+          const first = h.diskTrends[0];
+          const shift = MAC_DISK_FREE - (first.points.at(-1)?.free ?? MAC_DISK_FREE);
+          first.total = MAC_DISK_TOTAL;
+          first.points = first.points.map((p) => ({ ...p, free: p.free + shift }));
+        }
       }
       return h;
     });
@@ -1305,7 +1315,7 @@ export class MockBackend implements DynoBackend {
         peakCpu: 99,
         avgMemory: 58.2,
         topApps: mockHistory('week', null, this.now()).topConsumers.slice(0, 5),
-        crashes: 9,
+        crashes: mockAppCrashes(from, to, this.now()),
         alerts: 2,
         highlights: [
           'Your computer averaged 17% CPU and 58% memory, peaking at 99% CPU.',

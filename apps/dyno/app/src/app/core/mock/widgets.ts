@@ -38,7 +38,8 @@ import type {
 } from '../generated/widgets';
 import type { DashboardView, PopoverSurfaceValues } from '../widget-types';
 import { wobble } from './noise';
-import { MAC_DISK_FREE, MAC_DISK_TOTAL, MAC_DISK_USED_PERCENT } from './mac-disk';
+import { MAC_DISK_FREE, MAC_DISK_TOTAL, MAC_DISK_USED_PERCENT } from './mac-machine';
+import { demoAlarms } from './alarms';
 
 /**
  * The mock's widget layouts and popup values (family ADR 0035). It mimics the engine's contract with plausible data so the
@@ -698,7 +699,11 @@ export class MockWidgets {
           const rows = Array.from({ length: POPOVER_LIST_MAX }, (_, i) => ({ id: i + 1, title: `Invented alarm ${i + 1}: a rather long title that has to be cut short on one line`, level: (['critical', 'warning', 'info'] as const)[i % 3]!, since: at - (i + 1) * 3 * 60_000, acknowledged: i % 4 === 0 }));
           return ready({ activeAlarms: { rows, more: 5 } }, stale);
         }
-        return ready({ activeAlarms: { rows: [{ id: 1, title: 'Memory pressure is high', level: 'warning', since: at - 4 * 60_000, acknowledged: false }], more: 0 } }, stale);
+        {
+          // The Alarms page's own list (mock/alarms.ts), the active ones that are not shelved, so the tray shows what that page shows.
+          const open = demoAlarms(at).filter((a) => a.state === 'active' && !a.shelved);
+          return ready({ activeAlarms: { rows: open.map((a) => ({ id: a.id, title: a.title, level: a.severity, since: a.firstSeen, acknowledged: false })), more: 0 } }, stale);
+        }
       case 'diskSpace': {
         if (state === 'empty') return empty("See Time Machine's space when it's connected", "The disk isn't connected now.", 'Choose another volume', 'chooseVolume');
         if (state === 'error') return error("Couldn't read volumes", "The volume list didn't answer.");

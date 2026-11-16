@@ -10,7 +10,7 @@ export interface OsTerms {
 
 const TERMS: Record<WindowPlatform, OsTerms> = {
   windows: { handles: 'Handles', powerExample: 'Power mode: High performance' },
-  macos: { handles: 'File descriptors', powerExample: 'Low Power Mode: On' },
+  macos: { handles: 'File descriptors', powerExample: 'Low Power Mode: Off' },
   linux: { handles: 'File descriptors', powerExample: 'Power profile: Performance' },
   browser: { handles: 'Handles', powerExample: 'Power mode: High performance' },
 };

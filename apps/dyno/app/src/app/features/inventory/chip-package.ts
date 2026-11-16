@@ -95,7 +95,7 @@ let nextId = 0;
     .sw[data-kind='cpu-eff'] { background: var(--hw-region-eff); }
     .sw[data-kind='gpu'] { background: var(--hw-region-gpu); }
     .sw[data-kind='npu'] { background: var(--hw-region-npu); }
-    .sw[data-kind='memory'] { background: linear-gradient(var(--hw-pkg-a), var(--hw-pkg-b)); box-shadow: inset 0 0 0 1px var(--hw-pkg-edge); }
+    .sw[data-kind='memory'] { background: linear-gradient(var(--hw-pkg-a), var(--hw-pkg-b)); box-shadow: inset 0 0 0 1.5px var(--hw-swatch-ring); }
 
     .sub-a { stop-color: var(--hw-substrate-a); } .sub-b { stop-color: var(--hw-substrate-b); }
     .pcb-a { stop-color: var(--hw-pcb-a); } .pcb-b { stop-color: var(--hw-pcb-b); }

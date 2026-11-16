@@ -5,15 +5,17 @@
  * (ER-41), recorded by run id where the CI job is declared.
  *
  * One limit for every picture, measured 2026-11-16 on the Mac that makes the tracked pictures (ER-12: a limit comes with its measurement). Since the
- * runner holds the clock, the mock rounds what its polled replies read of it to a minute and every picture is taken in the middle of a minute with the
- * live updates stopped, two regenerations of the whole set (92 pictures: the pages, both themes, the dialogs and the helper cards; run after the tracked
- * set was made) matched it with 0 different pixels at threshold 0.2, network connections and the recorder included. Before that (the old spec, a ticking
- * clock) the same pictures differed by up to 0.36% between two runs (recorder-dark) and 0.024% (network connections), and the stale tracked pictures
- * differed from a fresh run by 0.030% at the least (throttling) or in size: so a limit of 0 pixels is both measured to hold and the only one that
- * would see a changed number. If a picture ever fails by a few pixels with nothing changed (another OS update, a font), measure again before
- * allowing a ratio, and say so here.
+ * runner holds the clock (every picture is taken at one instant, 14:40:30, with the live updates stopped) and the mock rounds what its polled replies
+ * read of it to a minute, regenerations of the whole set (92 pictures: the pages, both themes, the dialogs and the helper cards) were compared with the
+ * tracked set at threshold 0.2: five of six comparisons had 0 different pixels (network connections and the recorder included), and one had 6 pixels
+ * (0.00012%) in processes-dark, a live value that follows the phase of a one-second tick against the instant the clock lands on (the chance of a
+ * different sample is about the landing's few tens of milliseconds in a second; it cannot be removed without flattening the live sparklines).
+ * Before that (the old spec, a ticking clock) the same pictures differed by up to 0.36% between two runs (recorder-dark), and the stale tracked pictures
+ * differed from a fresh run by 0.030% at the least (throttling) or in size. The limit is 0.001% (about 50 pixels of 5.2 million): eight times the largest
+ * noise measured, thirty times below the smallest stale picture, and below what a changed number of two digits adds. If a picture ever fails with nothing
+ * changed (another OS update, a font), measure again before raising it, and say so here.
  */
-export const DEFAULT_TOLERANCE = { threshold: 0.2, maxDiffPixelRatio: 0 } as const;
+export const DEFAULT_TOLERANCE = { threshold: 0.2, maxDiffPixelRatio: 0.00001 } as const;
 
 /** Pictures that need a looser limit, each with the largest difference measured between two runs of one tree. None today. */
 export const LOOSER: Readonly<Record<string, { threshold: number; maxDiffPixelRatio: number }>> = {};

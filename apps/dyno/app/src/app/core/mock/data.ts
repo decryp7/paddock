@@ -28,7 +28,7 @@ export function healthReasons(): HealthReason[] {
     {
       id: 'uptime',
       title: 'Not restarted for 12 days',
-      detail: 'macOS installed an update that finishes on restart, and long uptimes let memory fragment.',
+      detail: 'Long uptimes let memory fragment and caches grow: a restart clears them.',
       impact: 6,
       severity: 'warning',
       since: null,

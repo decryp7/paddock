@@ -70,6 +70,12 @@ export interface DocScreensOptions {
    */
   readonly alignToBucketMs?: number;
   /**
+   * Take every picture at this one instant on the page clock (epoch milliseconds, after the screens' own steps have finished: pick one with room), so the live
+   * values of a mock that is a function of the clock (CPU, memory, rates) are the same in every picture and one fact reads the same on every page.
+   * Default: off; wins over {@link DocScreensOptions.alignToBucketMs}.
+   */
+  readonly shotAtMs?: number;
+  /**
    * Stop the page's live updates (`pauseLive`) once the page has drawn and just before the picture, so a poll or tick cannot change a value
    * while the picture is taken (default true). The page does not draw while the clock is paused, so the frame is settled first.
    */
@@ -169,7 +175,12 @@ export function captureDocScreens(options: DocScreensOptions): void {
           await page.setViewportSize({ width, height: Math.min(Math.max(height, full), FRAME_MAX_HEIGHT) });
         }
         await waitForStableFrame(page);
-        if (options.alignToBucketMs) {
+        if (options.shotAtMs) {
+          const now = await page.evaluate(() => Date.now());
+          if (now > options.shotAtMs) throw new Error(`${screen.name} (${theme}): the page clock is already ${now - options.shotAtMs} ms past shotAtMs: pick a later instant`);
+          await page.clock.runFor(options.shotAtMs - now);
+          await waitForStableFrame(page);
+        } else if (options.alignToBucketMs) {
           const bucket = options.alignToBucketMs;
           const now = await page.evaluate(() => Date.now());
           await page.clock.runFor((bucket / 2 - (now % bucket) + bucket) % bucket);
