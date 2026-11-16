@@ -2376,9 +2376,11 @@ numbers stay put after another `flush` and `settle` (`top=126148 max=126172` at 
 **Sequence measured (temporary logging, `liveMs: 1`):** one `liveRefresh('end')` for the reveal, `applyLive mode=end newTotal=5270`,
 then the assertion reads `top` = the end of 5269 rows while `total` is 5270; events pushed after the reveal are held (`newEvents`
 counts them), so nothing moves the top afterwards. **Fix (spec):** the test's backend runs its pushes on a `ManualClock` (`clock.advance`
-makes the ticks), so no push can land in the reveal; 13 runs alone and 4 full Debrief runs were green. **Not measured, and open:**
-the product side. A push that lands while the reveal's refresh is in flight leaves the grid one row short of the end (the newest
-row partly out of view). I could not reproduce it on a manual clock (pushes pumped every 1 ms around the reveal stayed green), so the
-manual-clock probe cannot see that mechanism, and a fix in `events-grid.ts` (`applyLive`, `setTop(Infinity, newTotal)` against a
-scroll event handled after the total grew) needs a reproduction on the real timer first: the fix item is the 1 ms real-timer
-variant, which fails every time. Class: **a test reads a moving value without holding the source still** (earlier: the axe theme read, Dyno's row-menu redraw).
+makes the ticks), so no push can land in the reveal; 13 runs alone and 4 full Debrief runs were green. **Product cause, found and fixed in the same round (ER-44):** the reveal's refresh asks for several pages in one round (page 0, the
+pages in view, the page of the old last row). The first answer triggers `applyLive` and the scroll to the end of its total; an event pushed
+between two answers made a later page report a larger total, which `PagedRows` stored without scrolling, so the view stayed one row
+(24 px) short of the newest event (a user-visible bug: "reveal newest" stopping one row above it). The manual-clock pumping did not
+reproduce it because it never interleaved a push between two page answers; the deterministic test does that on purpose (the second page
+read of the reveal is answered after a push) and failed with 119836 against 119860 before the fix. **Fix:** `PagedRows.arriveLive`
+remembers the round and total of an arrival that scrolled to the end and, for a later answer of the same round with a larger total, calls
+`onLive` again in end mode (bounded by the pages of the round, no loop). Class: **a test reads a moving value without holding the source still** (earlier: the axe theme read, Dyno's row-menu redraw).

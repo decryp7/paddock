@@ -921,6 +921,36 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       }
     });
 
+    // Product bug (lessons.md 2026-11-16): the reveal asks for several pages in one round; an event pushed between two of the
+    // answers made a later page report a larger total than the one the scroll to the end was made for, and the grid stayed one
+    // row (24 px) short of the newest event. The order is forced here: the second page of the reveal's round is answered after a push.
+    it('reveals the newest event even when a push lands between the pages of the reveal\'s refresh', async () => {
+      TestBed.resetTestingModule();
+      const clock = new ManualClock();
+      const backend = synthetic(5000, { liveMs: 25, clock });
+      const { fixture, grid } = await render(backend);
+      await flush(fixture);
+      TestBed.inject(LiveFollow).setFollow(false);
+      const feed = TestBed.inject(LiveFeed);
+      await TestBed.inject(LiveTail).toggle();
+      await clock.advance(100);
+      await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1), { timeout: 3000 });
+      await settle(fixture);
+      const answer = backend.queryPage.bind(backend);
+      let asked = 0;
+      vi.spyOn(backend, 'queryPage').mockImplementation(async (request) => {
+        // The reveal's first page is answered as asked; a push lands before the second page is read.
+        if (asked++ === 1) await clock.advance(25);
+        return answer(request);
+      });
+      el<HTMLButtonElement>(fixture, '[data-testid=new-events]').click();
+      await vi.waitFor(() => expect(asked).toBeGreaterThan(1), { timeout: 3000 });
+      await flush(fixture);
+      const total = grid.total();
+      expect(total).toBeGreaterThan(5000);
+      expect(grid.virtualTop(), `the view ends at the last of ${total} rows`).toBe(grid.geometry().maxTop);
+    });
+
     it('keeps the same rows selected when new events are inserted above them', async () => {
       const backend = synthetic(5000, { liveMs: 25 });
       const { fixture, store, grid, vp } = await render(backend);

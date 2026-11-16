@@ -252,17 +252,32 @@ export class PagedRowsStore {
     this.loaded.set(true);
     this.error.set(null);
     this.options.onTotal?.(res.total);
-    this.arriveLive(res.total);
+    this.arriveLive(res.total, round);
     this.bump();
     this.options.onPage?.();
   }
 
-  private arriveLive(newTotal: number): void {
+  private arriveLive(newTotal: number, round: unknown): void {
     const live = this.pendingLive;
-    if (!live) return;
-    this.pendingLive = null;
-    this.options.onLive?.({ mode: live.mode, newTotal, delta: newTotal - live.oldTotal });
+    if (live) {
+      this.pendingLive = null;
+      this.endArrival = live.mode === 'end' ? { round, total: newTotal } : null;
+      this.options.onLive?.({ mode: live.mode, newTotal, delta: newTotal - live.oldTotal });
+      return;
+    }
+    // The reveal's round asks for several pages. An event pushed between two answers makes a later page report a larger total than
+    // the one the scroll to the end was made for: the end moves, so the view follows it once more (bounded: one arrival per page
+    // of the round, and only while it grows).
+    const end = this.endArrival;
+    if (end && end.round === round && newTotal > end.total) {
+      const delta = newTotal - end.total;
+      end.total = newTotal;
+      this.options.onLive?.({ mode: 'end', newTotal, delta });
+    }
   }
+
+  /** The round and total of the last arrival that scrolled to the end (see `arriveLive`). */
+  private endArrival: { round: unknown; total: number } | null = null;
 
   private bump(): void {
     this.version.update((v) => v + 1);
