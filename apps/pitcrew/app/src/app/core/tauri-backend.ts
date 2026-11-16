@@ -91,7 +91,13 @@ export class TauriBackend implements PitcrewBackend {
       },
       () => undefined, // Window chrome falls back to the user agent's guess; nothing else depends on it.
     );
-    await Promise.race([asked, new Promise<void>((resolve) => setTimeout(resolve, waitMs))]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const waited = new Promise<void>((resolve) => void (timer = setTimeout(resolve, waitMs)));
+    try {
+      await Promise.race([asked, waited]);
+    } finally {
+      clearTimeout(timer); // the shell answered first: the wait must not outlive start-up
+    }
   }
 
   platform(): Platform {

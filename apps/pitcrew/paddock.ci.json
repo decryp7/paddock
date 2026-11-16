@@ -11,6 +11,7 @@
     "{build}[/\\\\]debug[/\\\\]examples[/\\\\]fake_runner(\\.exe)?( |$)"
   ],
   "ui": [
+    "npm run build -w ui",
     "cd apps/pitcrew/app",
     "npm audit --omit=dev --audit-level=high",
     "npm run lint",

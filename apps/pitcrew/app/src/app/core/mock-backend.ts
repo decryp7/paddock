@@ -1039,7 +1039,8 @@ export class MockBackend implements PitcrewBackend {
   }
 
   private delay(ms = this.latency): Promise<void> {
-    return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+    // Through `later`, so `dispose` also drops the wait of a call still in flight.
+    return ms > 0 ? new Promise((resolve) => this.later(ms, () => resolve())) : Promise.resolve();
   }
 }
 
