@@ -105,9 +105,10 @@ pub struct Facts {
     pub pitwall_tests: Vec<String>,
     /// This program, for the checks `./dev` runs itself.
     pub dev_exe: String,
-    /// Run the Linux Clippy in the CI image too (`--linux`): off by default, CI covers it (ER-9's overlap model) and in the
-    /// measured run it did not fit the budget.
+    /// Run the Linux Clippy for every touched workspace (`--linux`), not only those with Linux-only code.
     pub linux: bool,
+    /// The touched workspaces (see [`linux_candidates`]) that hold Linux-only code, scanned by the caller.
+    pub linux_workspaces: BTreeSet<String>,
     /// A kept build folder per workspace (`<it>/<workspace>`), used when the caller sets no `CARGO_TARGET_DIR`: the throw-away
     /// worktree of a pushed commit must not hold the builds (they would start cold every run).
     pub kept_targets: Option<String>,
@@ -276,7 +277,7 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             ),
         });
     }
-    out.push(linux_clippy(change, facts));
+    out.push(linux_clippy(plan, change, facts));
     out.push(conformance(facts));
     out.push(conformance_tests(facts));
     out.extend(commit_lint(change));
@@ -362,21 +363,39 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
     out
 }
 
-fn linux_clippy(change: &Change, facts: &Facts) -> Planned {
-    let id = "clippy-linux crates".to_string();
-    if !facts.linux {
-        return Planned::Skip {
-            id,
-            reason: "CI covers it (ER-9 overlap); `--linux` runs it here, in the CI image".into(),
-        };
+/// The workspaces the Linux Clippy could be asked about for this change: those with a changed file of their own, and `crates` when
+/// only `.cargo/` (which every build of it reads) changed. Pure; the caller scans exactly these for Linux-only code.
+pub fn linux_candidates(plan: &Value, change: &Change) -> BTreeSet<String> {
+    let code: Vec<String> = change.files.iter().filter(|f| !docs_only(f)).cloned().collect();
+    let mut out = own_workspaces(plan, &code);
+    if workspaces(plan).iter().any(|w| w == "crates") && code.iter().any(|f| f.starts_with(".cargo/")) {
+        out.insert("crates".into());
     }
-    let reaches = |f: &String| (f.starts_with("crates/") || f.starts_with(".cargo/")) && !docs_only(f);
-    if !change.files.iter().any(reaches) {
-        return Planned::Skip {
-            id,
-            reason: "nothing but documentation, or nothing at all, changed under crates/ or .cargo/".into(),
-        };
+    out
+}
+
+/// The Linux Clippy of the touched workspaces that hold Linux-only code (`cfg(target_os = "linux")`: the Mac Clippy and the xwin
+/// Clippy never compile it, so CI's Linux legs were where its lints first showed: runs 7485, 8138, 8147, 8152, 8154), in the CI
+/// image, as one container run for all of them. `--linux` adds the workspaces without such code. CI covers the rest (ER-9).
+fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Planned {
+    let skip = |reason: &str| Planned::Skip {
+        id: "clippy-linux".into(),
+        reason: reason.into(),
+    };
+    let candidates = linux_candidates(plan, change);
+    let targets: Vec<String> = candidates
+        .iter()
+        .filter(|w| facts.linux || facts.linux_workspaces.contains(*w))
+        .cloned()
+        .collect();
+    if targets.is_empty() {
+        return skip(if candidates.is_empty() {
+            "nothing but documentation, or no Cargo workspace of its own, changed"
+        } else {
+            "no touched workspace holds Linux-only code (no cfg(target_os = \"linux\")); `--linux` lints them anyway"
+        });
     }
+    let id = format!("clippy-linux {}", targets.join(","));
     let image = match &facts.image {
         Some(Ok(i)) => i.clone(),
         Some(Err(e)) => {
@@ -394,7 +413,17 @@ fn linux_clippy(change: &Change, facts: &Facts) -> Planned {
             };
         }
     };
-    let command = "rustc --version && cargo clippy --version && cd crates && cargo clippy --workspace --all-targets --all-features --locked -- -D warnings";
+    // One build folder per workspace inside the container's kept target volume: warm runs reuse it, and workspaces with other
+    // feature sets never rebuild each other's dependencies. A failing workspace does not hide the next one's lints.
+    let mut command = String::from("rustc --version && cargo clippy --version || exit 1; rc=0");
+    for ws in &targets {
+        let features = if ws == "crates" { " --all-features" } else { "" };
+        command.push_str(&format!(
+            "; (cd {ws} && CARGO_TARGET_DIR=/target/{} cargo clippy --workspace --all-targets{features} --locked -- -D warnings) || rc=1",
+            slug(ws)
+        ));
+    }
+    command.push_str("; exit $rc");
     let mut g = gate(
         id,
         "",
@@ -410,10 +439,10 @@ fn linux_clippy(change: &Change, facts: &Facts) -> Planned {
             "--",
             "sh",
             "-c",
-            command,
+            &command,
         ],
         4,
-        "a lint that exists only on Linux (a `mode_t` width, dead code behind a cfg): fix it, or run the same container command above"
+        "a lint that exists only on Linux (a `mode_t` width, dead code behind a cfg, a test child never waited for): fix it, or run the same container command above"
             .into(),
     );
     g.heavy = true;
@@ -538,10 +567,9 @@ pub const NOT_RUN: &[(&str, &str)] = &[
         "per-project commands live in YAML until WP-3's contracts",
     ),
     (
-        "Linux Clippy of the shared crates in the CI image",
-        "CI covers it; `./dev check --pre-push --linux` runs it here (ER-9 overlap, 2026-11-12)",
+        "Linux Clippy of touched workspaces without Linux-only code",
+        "runs here when a touched workspace holds Linux-only code (cfg target_os linux); `--linux` runs it for the others too",
     ),
-    ("Linux Clippy of the apps' workspaces", "the apps' Linux legs are CI's"),
     (
         "Clippy and the Windows lint of workspaces reached only through dependencies",
         "CI covers them (ER-9 overlap); only workspaces with a changed file of their own are linted here",

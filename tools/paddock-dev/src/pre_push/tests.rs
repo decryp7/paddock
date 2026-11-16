@@ -33,7 +33,8 @@ fn facts() -> Facts {
         conformance_env: None,
         windows_clippy: BTreeSet::from(["apps/dyno".to_string(), "apps/pitwall".to_string()]),
         image: Some(Ok("registry/paddock-ci:v7".into())),
-        linux: true,
+        linux: false,
+        linux_workspaces: BTreeSet::from(["crates".to_string()]),
         kept_targets: None,
         pitwall_tests: vec!["scripts/ci/a.test.mjs".into()],
         dev_exe: "/x/dev".into(),
@@ -621,8 +622,7 @@ fn the_table_names_what_ci_runs_that_this_gate_does_not() {
         "cargo deny outside Pitwall",
         "wiki lint",
         "TypeScript",
-        "Linux Clippy of the apps",
-        "Linux Clippy of the shared crates",
+        "Linux Clippy of touched workspaces without Linux-only code",
         "reached only through dependencies",
     ] {
         assert!(report.text.contains(what), "{what} missing:\n{}", report.text);
@@ -681,7 +681,7 @@ fn several_pushed_ranges_are_linted_each() {
 }
 
 #[test]
-fn only_workspaces_with_a_changed_file_of_their_own_are_linted_and_the_linux_clippy_is_opt_in() {
+fn only_workspaces_with_a_changed_file_of_their_own_are_linted() {
     let planned = plan_gates(&plan(), &change(&["crates/paddock-proc/src/lib.rs"]), &facts());
     let got = ids(&planned);
     for want in [
@@ -722,16 +722,96 @@ fn only_workspaces_with_a_changed_file_of_their_own_are_linted_and_the_linux_cli
         ],
     );
     assert_eq!(own.into_iter().collect::<Vec<_>>(), ["apps/debrief", "apps/dyno"]);
-    // Off by default: the Linux Clippy is a skipped row that says why, never a pass.
+}
+
+fn linux_row(files: &[&str], f: &Facts) -> Planned {
+    plan_gates(&plan(), &change(files), f)
+        .into_iter()
+        .find(|p| match p {
+            Planned::Run(g) => g.id.starts_with("clippy-linux"),
+            Planned::Skip { id, .. } | Planned::NotMeasured { id, .. } | Planned::Broken { id, .. } => id.starts_with("clippy-linux"),
+        })
+        .expect("the plan always has a Linux Clippy row")
+}
+
+#[test]
+fn the_linux_clippy_runs_for_a_touched_workspace_with_linux_only_code_and_skips_one_without() {
+    // crates holds Linux-only code (facts()): its row runs by default, with no flag.
+    let Planned::Run(g) = linux_row(&["crates/paddock-proc/src/lib.rs"], &facts()) else {
+        panic!("a touched workspace with Linux-only code gets the row")
+    };
+    assert_eq!(g.id, "clippy-linux crates");
+    // apps/dyno has none: skipped with the reason, never a pass.
+    let Planned::Skip { id, reason } = linux_row(&["apps/dyno/src/a.rs"], &facts()) else {
+        panic!("a touched workspace without Linux-only code is skipped")
+    };
+    assert_eq!(id, "clippy-linux");
+    assert!(reason.contains("no touched workspace holds Linux-only code"), "{reason}");
+    // `--linux` lints it anyway.
     let mut f = facts();
-    f.linux = false;
-    let planned = plan_gates(&plan(), &change(&["crates/paddock-proc/src/lib.rs"]), &f);
-    assert!(!ids(&planned).contains(&"clippy-linux crates".to_string()));
-    assert!(
-        planned
-            .iter()
-            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "clippy-linux crates" && reason.contains("CI covers it")))
+    f.linux = true;
+    assert!(matches!(linux_row(&["apps/dyno/src/a.rs"], &f), Planned::Run(g) if g.id == "clippy-linux apps/dyno"));
+    // Documentation alone reaches no workspace.
+    assert!(matches!(linux_row(&["docs/x.md"], &facts()), Planned::Skip { .. }));
+}
+
+#[test]
+fn one_container_run_covers_every_touched_workspace_with_its_own_target_folder() {
+    let mut f = facts();
+    f.linux_workspaces.insert("apps/dyno".into());
+    let Planned::Run(g) = linux_row(&["crates/a/src/lib.rs", "apps/dyno/src/a.rs", "apps/pitwall/src/a.rs"], &f) else {
+        panic!("row")
+    };
+    assert_eq!(g.id, "clippy-linux apps/dyno,crates", "pitwall holds no Linux-only code");
+    let script = g.args.last().unwrap();
+    assert_eq!(
+        g.args.iter().filter(|a| a.as_str() == "tools/linux-container.sh").count(),
+        1,
+        "one container run"
     );
+    assert!(script.contains("(cd crates && CARGO_TARGET_DIR=/target/crates cargo clippy --workspace --all-targets --all-features --locked -- -D warnings) || rc=1"), "{script}");
+    assert!(
+        script.contains(
+            "(cd apps/dyno && CARGO_TARGET_DIR=/target/apps-dyno cargo clippy --workspace --all-targets --locked -- -D warnings) || rc=1"
+        ),
+        "{script}"
+    );
+    assert!(
+        script.ends_with("exit $rc"),
+        "a failing workspace does not hide the next one: {script}"
+    );
+    assert!(g.heavy, "through the heavy queue and the load gate");
+}
+
+/// A Linux-only Clippy error (a lint in code only the container compiles) fails the push: the default row is a gate, not a note.
+#[test]
+fn a_linux_only_clippy_error_fails_the_push() {
+    let planned = plan_gates(&plan(), &change(&["crates/a/tests/it/text_busy.rs"]), &facts());
+    let fake = Fake {
+        fail: vec!["clippy-linux crates".into()],
+        ..Fake::default()
+    };
+    let rows = run_all(&planned, &fake, 3);
+    assert_eq!(verdicts(&rows)["clippy-linux crates"].kind(), Kind::Failed);
+    let report = render("h", &rows);
+    assert_eq!(report.exit, Exit::Findings, "{}", report.text);
+}
+
+#[test]
+fn linux_only_code_is_found_by_its_cfg() {
+    use super::linux_cfg::{dir_has_linux_cfg, has_linux_cfg};
+    assert!(has_linux_cfg("#![cfg(target_os = \"linux\")]"));
+    assert!(has_linux_cfg("#[cfg(all(unix, target_os=\"linux\"))]\nfn a() {}"));
+    assert!(!has_linux_cfg("#[cfg(target_os = \"macos\")] // not linux"));
+    assert!(!has_linux_cfg("#[cfg(unix)]"));
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join("target/debug")).unwrap();
+    std::fs::write(dir.path().join("src/a.rs"), "fn a() {}\n").unwrap();
+    std::fs::write(dir.path().join("target/debug/b.rs"), "#[cfg(target_os = \"linux\")]\nfn b() {}\n").unwrap();
+    assert!(!dir_has_linux_cfg(dir.path()), "a build folder is not source");
+    std::fs::write(dir.path().join("src/c.rs"), "#[cfg(target_os = \"linux\")]\nfn c() {}\n").unwrap();
+    assert!(dir_has_linux_cfg(dir.path()));
 }
 
 #[test]

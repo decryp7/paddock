@@ -11,7 +11,7 @@
 //! home folder; leftovers of ended runs are swept at the next start; builds go to a kept folder per workspace beside it)
 //! and every gate runs there, so a dirty tree or another checked-out commit cannot change the answer. Without it, the working tree
 //! as it is (a person's run). Only workspaces that hold a changed file themselves get Clippy and format; the ones reached through
-//! dependencies are CI's (ER-9 overlap), and the Linux Clippy in the CI image is opt-in (`--linux`).
+//! dependencies are CI's (ER-9 overlap), and the Linux Clippy in the CI image runs for touched workspaces with Linux-only code (`--linux`: all touched).
 //!
 //! One table at the end: what ran, what was skipped and why, what could not be measured (ER-33: never a pass), and for each
 //! failure one line with its cause and the next step. Exit 0 all passed, accepted or skipped; 5 something failed; 6 only "not
@@ -26,6 +26,7 @@ pub mod exec;
 pub mod gates;
 pub mod heavy_tool;
 pub mod known;
+pub mod linux_cfg;
 pub mod outcome;
 
 use crate::plan::{Request, plan_with_graph};
@@ -71,7 +72,8 @@ pub struct PrePushArgs {
     /// per line) and check exactly that commit in a throw-away worktree, not the working tree. The hook passes it.
     #[arg(long)]
     pub refs_from_stdin: bool,
-    /// Also run the Linux Clippy of the shared crates in the CI image (off by default: CI covers it, and it needs Docker).
+    /// Run the Linux Clippy in the CI image for every touched workspace. Without it, it runs for the touched workspaces that hold
+    /// Linux-only code (a cfg on `target_os = "linux"`) and needs Docker (a missing runtime is "not measured", exit 6).
     #[arg(long)]
     pub linux: bool,
     /// Let these not-measured rows (their full ids, for example `clippy-windows apps/dyno`) pass the push; each use is logged.
@@ -421,6 +423,7 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
         node_env_problem(cfg!(windows) && work != root, &|p| std::fs::read_to_string(work.join(p)).ok())
     };
     facts.linux = args.linux;
+    facts.linux_workspaces = linux_cfg::linux_workspaces(&work, &gates::linux_candidates(&plan, &change));
     facts.kept_targets = kept_targets;
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     if !args.only.is_empty() {
@@ -1247,6 +1250,7 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts
         windows_clippy: windows,
         image: Some(image),
         linux: false,
+        linux_workspaces: Default::default(),
         kept_targets: None,
         pitwall_tests: tests,
         dev_exe: crate::tool_cache::self_exe().map_or_else(|_| "./dev".into(), |p| p.to_string_lossy().to_string()),

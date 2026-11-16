@@ -1508,3 +1508,20 @@ Superseded on 2026-11-16 before it landed: `axeViolations` no longer detects mot
 measured is gone). It turns transitions and animations off for a single scan instead (the user's decision after the fourth
 instance of the class; lessons.md, "axe read a table row half-way into the dark theme"). The measurement (at most 3 scans per
 screen over ui, Dyno and Pitwall, 409 tests) is in this branch's history, commit b661502f0.
+
+## Pre-push Linux Clippy by default, cold and warm (2026-11-16, feat/pre-push-linux-clippy)
+
+Question: what does the Linux Clippy row cost now that `./dev check --pre-push` runs it by default for a touched workspace with Linux-only code (a `cfg` on `target_os = "linux"`)?
+
+- **Machine:** Mac mini (arm64), OrbStack, CI image `paddock-ci:v3` as linux/amd64 (emulated), `CARGO_BUILD_JOBS=2`, 1-minute load 12 to 17, CPU idle 35 to 50% at the start.
+- **Command:** `paddock-dev check --pre-push --only clippy-linux` (one container run through `heavy`), workspace `tools/paddock-dev`, one run each.
+- **Numbers:**
+
+  | Run | Seconds |
+  |---|---:|
+  | cold (no `/target/tools-paddock-dev` in the container's kept volume yet) | 198.8 |
+  | warm, nothing changed | 3.2 |
+  | warm, one planted dead-code lint (red, exit 5) | 26.6 |
+
+- **Not measured:** the `crates` workspace cold and warm, a push touching several workspaces, a quiet machine. The Linux code scan (text match over the touched workspaces' `.rs` files, no cache) is part of the 5.2 s wall time of the warm run beside the container start; it was not timed apart.
+- **Reading:** the cold cost is paid once per workspace, in the container's kept target volume; warm runs fit the 15 minute budget with room.

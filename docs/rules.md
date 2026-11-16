@@ -221,8 +221,10 @@ changes here, every app's copy is updated in the same change.
     (an import or helper used only by a unix-gated test is dead code there; ADR 0021, lessons.md "Windows-only assumptions in
     tests"), conformance with ci.yml's own list and the conformance tests (`cd conformance && npm test`, both on every push, ER-41;
     a flaky conformance test that blocks a push is fixed at once under ER-12, never skipped or bypassed, ER-39),
-    commit-lint (rule 50g) and lockfiles with `--locked`; when `crates/` or `.cargo/`
-    changed, also CI's workspace Clippy on Linux in the CI image (`--cpus 4 --memory 12g`). A gate that cannot run (no Docker, no
+    commit-lint (rule 50g) and lockfiles with `--locked`; when a workspace
+    that holds Linux-only code (a `cfg` on `target_os = "linux"`) has a changed file, also its Clippy on Linux in the CI image, one
+    container run for all of them (`--cpus 4 --memory 12g`; `--linux` adds the other touched workspaces; the member gate of
+    `./dev merge check --gates` runs the same row). A gate that cannot run (no Docker, no
     cargo-xwin) is "not measured", exit 6, never a pass; an agent never starts Docker (ER-14). It checks every commit the remote
     lacks (`git rev-list <tip> --not --remotes`), measured from the nearest commit of the remote the push contains (the header says
     which and why; never a local branch), and its 15 minutes count run time only; time queued for the heavy slot behind other
