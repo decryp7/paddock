@@ -1,4 +1,5 @@
 import { splitInstance } from './events-grid';
+import { ManualClock } from '../../testing/manual-clock';
 import { TestBed } from '@angular/core/testing';
 import { all, buttonByText, el, provideTinyBackend, settle, testLogger, text, tinyBackend } from '../../testing/helpers';
 import { Page, PageRequest, RecordView } from '../core/api.types';
@@ -896,7 +897,11 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     it('holds the rows while not following, counts the new events, and reveals the newest on request', async () => {
       for (const descending of [true, false]) {
         TestBed.resetTestingModule();
-        const backend = synthetic(5000, { liveMs: 25 });
+        // The backend's pushes run on a clock the test moves (ER-28, lessons.md 2026-11-16): the reveal scrolls to the end of the
+        // rows there are when it runs, and with a real timer a push after it moved that end by one row (24 px) before the
+        // assertion read it (120052 against 120028, once in about three full runs).
+        const clock = new ManualClock();
+        const backend = synthetic(5000, { liveMs: 25, clock });
         const { fixture, store, grid } = await render(backend);
         if (descending) store.toggleSort();
         await flush(fixture);
@@ -904,6 +909,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
         const feed = TestBed.inject(LiveFeed);
         const tail = TestBed.inject(LiveTail);
         await tail.toggle();
+        await clock.advance(100);
         await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1), { timeout: 3000 });
         expect(grid.total()).toBe(5000);
         await settle(fixture);

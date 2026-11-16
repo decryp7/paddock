@@ -2363,6 +2363,22 @@ timers with `DestroyRef`, each with a test that was red first. The ui, Pitcrew, 
 findings; Dyno and then Debrief joined the failing suites after its `MockBackend.dispose()` and two store fixes. **Class: a test fails for what an earlier test left in
 a shared page (earlier: runs 7257/7274/7276 fake-timer spy, run 8170 teardown chunk, the mock-jobs singleton, the leftover DOM).**
 
-## Debrief: the live tail "holds the rows while not following" read 120052 for 120028 once in four runs (tests, 2026-11-16, open)
+## Debrief: the live tail "holds the rows while not following" read 120052 for 120028 in about one full run in three (tests, 2026-11-16)
 
-`events-grid.spec.ts:913` failed once in four full runs of the leak-detector branch (120052 against 120028). Not fixed here; a fix item (ER-28). Causes to rule out, with the observation that would rule each out: (1) the detector (it wraps `setTimeout` and `setInterval` and clears timers only in fail mode; Debrief is report-only, so it changes nothing: rule out by running the spec 50 times with the detector off); (2) a live-tail push landing between the two reads (the 24-row difference equals one batch: check the tail's batch size and whether the test advances the mock clock); (3) a leaked mock-clock timer from an earlier test firing into this one (`core/mock/mock-clock.ts:30,32,34` are in the report list: the findings of the preceding tests in that worker show it); (4) a render frame (`requestAnimationFrame`) landing between reads. Measure all four in the failing run before changing anything. Class: **a test that reads a moving value without holding the source still** (earlier: the axe theme read, Dyno's row-menu redraw).
+`events-grid.spec.ts` "holds the rows while not following, counts the new events, and reveals the newest on request" failed
+twice in about six full runs (120052 against 120028), never in eight runs of the test alone. **Causes listed (ER-28), with what
+each measurement showed:** (1) the leak detector: refuted, Debrief was report-only then and the failing run had no finding for it, and the
+failure is the same with the detector's timer wrapper out of the picture (the 1 ms runs below); (2) a push moving the end between the
+reveal and the read: partly confirmed. At `liveMs: 1` the test failed 3 of 3 (126124/126148, 124468/124492, 123508/123532: one row of 24 px
+short, the same shape), at 25 ms 0 of 8 alone, so the rate follows the push rate; (3) a leaked mock-clock timer from an earlier test:
+refuted for the 1 ms runs (a single test); not excluded for the full-run rate; (4) a render frame between reads: refuted, the
+numbers stay put after another `flush` and `settle` (`top=126148 max=126172` at the assertion, after the flush and after the settle).
+**Sequence measured (temporary logging, `liveMs: 1`):** one `liveRefresh('end')` for the reveal, `applyLive mode=end newTotal=5270`,
+then the assertion reads `top` = the end of 5269 rows while `total` is 5270; events pushed after the reveal are held (`newEvents`
+counts them), so nothing moves the top afterwards. **Fix (spec):** the test's backend runs its pushes on a `ManualClock` (`clock.advance`
+makes the ticks), so no push can land in the reveal; 13 runs alone and 4 full Debrief runs were green. **Not measured, and open:**
+the product side. A push that lands while the reveal's refresh is in flight leaves the grid one row short of the end (the newest
+row partly out of view). I could not reproduce it on a manual clock (pushes pumped every 1 ms around the reveal stayed green), so the
+manual-clock probe cannot see that mechanism, and a fix in `events-grid.ts` (`applyLive`, `setTop(Infinity, newTotal)` against a
+scroll event handled after the total grew) needs a reproduction on the real timer first: the fix item is the 1 ms real-timer
+variant, which fails every time. Class: **a test reads a moving value without holding the source still** (earlier: the axe theme read, Dyno's row-menu redraw).
