@@ -3,6 +3,7 @@
 
 use super::budget::{BudgetClock, Timing, parse_heavy_timing, with_heavy_flags};
 use super::gates::{Gate, Need, Planned};
+use super::linux_inputs::{ImageProbe, PROBE_NEXT, image_probe};
 use crate::ci_tool::{Output, ToolCall, tail};
 use paddock_cli::{CheckId, Finding, Outcome, Reason, Subject, ToolVersion, UnixSeconds, measure};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -67,9 +68,9 @@ pub trait Exec: Sync {
     fn has_tool(&self, program: &str) -> bool;
     /// Does a Docker daemon answer? Never starts one.
     fn docker_up(&self) -> bool;
-    /// Why the local CI image the Linux Clippy runs in is not built (None: it is, or the row needs none). Never builds it.
-    fn ci_image_missing(&self) -> Option<String> {
-        None
+    /// Whether the local CI image the Linux Clippy runs in is built. Never builds it.
+    fn ci_image(&self) -> super::linux_inputs::ImageProbe {
+        super::linux_inputs::ImageProbe::Ready
     }
     /// Runs the gate within `limits` (a heavy step: at most `limits.run` of running and `limits.queue` of waiting for the slot).
     /// `Err`: it could not be started (the program is missing).
@@ -235,13 +236,19 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
         }
         _ => {}
     }
-    if gate.need == Need::LocalCiImage
-        && let Some(why) = exec.ci_image_missing()
-    {
-        return Row::not_measured(
-            why,
-            "run `./dev check --warm-linux` (it builds the local CI image first, with its own bound, then warms the workspaces), then push again; the image build is never started under the push budget",
-        );
+    if gate.need == Need::LocalCiImage {
+        match exec.ci_image() {
+            ImageProbe::Ready => {}
+            ImageProbe::Missing => {
+                return Row::not_measured(
+                    "local CI image missing",
+                    "run `./dev check --warm-linux` (it builds the local CI image first, with its own bound, then warms the workspaces), then push again; the image build is never started under the push budget",
+                );
+            }
+            ImageProbe::Broken(how) => {
+                return Row::not_measured(format!("image probe broken ({how})"), PROBE_NEXT);
+            }
+        }
     }
     if gate.heavy
         && let Some(why) = exec.heavy_unavailable()
@@ -773,7 +780,7 @@ impl Exec for RealExec {
         self.heavy_command().err()
     }
 
-    fn ci_image_missing(&self) -> Option<String> {
+    fn ci_image(&self) -> ImageProbe {
         let ran = ToolCall::new("bash")
             .args([
                 "tools/linux-container.sh",
@@ -787,9 +794,11 @@ impl Exec for RealExec {
             .cwd(&self.root)
             .pass(PASS.iter().copied())
             .timeout(Duration::from_secs(60))
-            .run(&self.env, &mut std::io::sink())
-            .ok()?;
-        (ran.how == "exit 3").then(|| "local CI image missing".to_string())
+            .run(&self.env, &mut std::io::sink());
+        match ran {
+            Ok(r) => image_probe(r.how.strip_prefix("exit ").and_then(|n| n.trim().parse().ok())),
+            Err(e) => ImageProbe::Broken(format!("could not start: {e}")),
+        }
     }
 
     fn load(&self) -> Option<f64> {

@@ -230,6 +230,7 @@ fn a_unreadable_conformance_line_makes_the_check_broken_not_passed() {
 struct Fake {
     no_docker: bool,
     no_image: bool,
+    probe_broken: bool,
     no_tools: Vec<String>,
     fail: Vec<String>,
     unstartable: Vec<String>,
@@ -251,8 +252,15 @@ impl Exec for Fake {
     fn docker_up(&self) -> bool {
         !self.no_docker
     }
-    fn ci_image_missing(&self) -> Option<String> {
-        self.no_image.then(|| "local CI image missing".to_string())
+    fn ci_image(&self) -> super::linux_inputs::ImageProbe {
+        use super::linux_inputs::ImageProbe;
+        if self.probe_broken {
+            ImageProbe::Broken("exit 2".into())
+        } else if self.no_image {
+            ImageProbe::Missing
+        } else {
+            ImageProbe::Ready
+        }
     }
     fn run(&self, g: &Gate, limits: Limits) -> Result<Done, String> {
         self.limits.lock().unwrap().push((g.id.clone(), limits));
@@ -2631,7 +2639,32 @@ fn a_multi_workspace_linux_row_can_be_accepted_by_its_id() {
     let report = render("h", &rows);
     assert!(report.text.contains(&format!("ACCEPTED      {id}")), "{}", report.text);
     assert_eq!(
-        super::accepted_ids_for_test(&["x".into()], &[("PADDOCK_ACCEPT_NOT_MEASURED", id)]),
+        super::accepted_ids(&["x".into()], &[("PADDOCK_ACCEPT_NOT_MEASURED".to_string(), id.to_string())].into()),
         ["x", id]
+    );
+}
+
+/// ER-33: a probe that says neither "built" (0) nor "not built" (3) is broken, never read as one of them.
+#[test]
+fn an_image_probe_that_neither_succeeds_nor_says_missing_is_broken_not_measured() {
+    use super::linux_inputs::{ImageProbe, image_probe};
+    assert_eq!(image_probe(Some(0)), ImageProbe::Ready);
+    assert_eq!(image_probe(Some(3)), ImageProbe::Missing);
+    for code in [Some(1), Some(2), Some(127), Some(137), None] {
+        assert!(matches!(image_probe(code), ImageProbe::Broken(_)), "{code:?}");
+    }
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
+    let fake = Fake {
+        probe_broken: true,
+        ..Fake::default()
+    };
+    let rows = run_all(&planned, &fake, 3);
+    let v = verdicts(&rows);
+    let (reason, next) = nm(&v["clippy-linux crates"]).expect("not measured");
+    assert!(reason.contains("image probe broken"), "{reason}");
+    assert!(next.contains("--image-ready") && next.contains("broken"), "{next}");
+    assert!(
+        !fake.ran.lock().unwrap().iter().any(|r| r.starts_with("clippy-linux")),
+        "nothing started"
     );
 }

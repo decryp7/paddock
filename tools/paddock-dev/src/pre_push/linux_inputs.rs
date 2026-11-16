@@ -53,3 +53,27 @@ pub fn left_out(root: &Path, ws: &str) -> Result<Vec<String>, String> {
         .map_err(|e| format!("cargo metadata for {ws} failed: {e}"))?;
     tauri_crates(&json)
 }
+
+/// What `linux-container.sh --ci-image --image-ready` said about the local CI image.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImageProbe {
+    /// Exit 0: built (or the registry image, which is pulled when it runs).
+    Ready,
+    /// Exit 3: not built; `./dev check --warm-linux` builds it.
+    Missing,
+    /// Any other exit, or no exit: the probe itself is broken (ER-33), which is not "missing" and not a pass.
+    Broken(String),
+}
+
+/// Reads the probe's exit code: 0 ready, 3 missing, anything else broken (a signal, exit 2 for a usage error, 127 for no bash).
+pub fn image_probe(code: Option<i32>) -> ImageProbe {
+    match code {
+        Some(0) => ImageProbe::Ready,
+        Some(3) => ImageProbe::Missing,
+        Some(n) => ImageProbe::Broken(format!("exit {n}")),
+        None => ImageProbe::Broken("it was ended by a signal or could not start".into()),
+    }
+}
+
+/// The advice for a broken probe.
+pub const PROBE_NEXT: &str = "run `bash tools/linux-container.sh --id paddock --ci-image --image-ready` yourself and read what it prints (exit 0 built, 3 not built); report this, the image check is broken";

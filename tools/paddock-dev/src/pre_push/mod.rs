@@ -577,12 +577,6 @@ fn accepted_ids(option: &[String], env: &HashMap<String, String>) -> Vec<String>
     option.iter().cloned().chain(from_env).filter(|w| !w.is_empty()).collect()
 }
 
-/// [`accepted_ids`] with an environment given as pairs, for the tests.
-#[cfg(test)]
-pub(crate) fn accepted_ids_for_test(option: &[String], env: &[(&str, &str)]) -> Vec<String> {
-    accepted_ids(option, &env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect())
-}
-
 /// The exit code of a second Ctrl+C or SIGTERM: 128 + SIGINT.
 #[cfg(unix)]
 const SECOND_SIGNAL_EXIT: i32 = 130;

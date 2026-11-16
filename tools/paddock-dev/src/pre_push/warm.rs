@@ -4,14 +4,15 @@
 //! the workspace itself is reported (exit 5) but the dependencies are warm either way.
 
 use super::budget::with_heavy_flags;
+use super::exec::{Done, Row};
 use super::exec::{docker_answers, heavy_command_for, on_path};
 use super::gates::{self, Gate, LinuxTarget};
-use super::linux_inputs::{ci_version, left_out};
-use super::repo_root;
+use super::linux_inputs::{ImageProbe, PROBE_NEXT, ci_version, image_probe, left_out};
+use super::outcome::subject_of;
+use super::{render, repo_root};
 use crate::plan::{Request, plan_with_graph};
-use paddock_cli::{CliError, Exit, Report};
+use paddock_cli::{CliError, Report};
 use paddock_repo_graph::GitHistory;
-use serde_json::json;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -59,12 +60,60 @@ pub fn runs(targets: &[String], version: &str, left_out: &dyn Fn(&str) -> Result
         .collect()
 }
 
+/// A report of one row that did not run: the shared table, never a hand-made object.
+fn one_row(id: &str, row: Row) -> Report {
+    render("warm-linux", &[(id.to_string(), row)])
+}
+
 fn not_measured(why: &str, next: &str) -> Report {
-    Report {
-        data: json!({"outcome": "not measured", "why": why, "next": next}),
-        text: format!("NOT MEASURED  warm-linux: {why}. Next step: {next}"),
-        exit: Exit::NotMeasured,
-    }
+    one_row("warm-linux", Row::not_measured(why, next))
+}
+
+/// Runs `argv` (a heavy prefix and a command) in `root` with the child's output live; its row says how it ended.
+fn step(root: &Path, id: &str, argv: &[String], what: &str) -> (String, Row, bool) {
+    eprintln!("warm-linux: {id}: start ({what}; the container's own output follows)");
+    let started = Instant::now();
+    let status = paddock_proc::command(&argv[0]).args(&argv[1..]).current_dir(root).status();
+    let secs = started.elapsed().as_secs_f64();
+    let subject = subject_of(root, None);
+    let (done, word) = match status {
+        Ok(s) => (
+            Done {
+                success: s.success(),
+                how: format!("exit {}", s.code().map_or("?".to_string(), |c| c.to_string())),
+                tail: String::new(),
+                log: None,
+                timing: None,
+            },
+            if s.success() { "done" } else { "failed" },
+        ),
+        Err(e) => (
+            Done {
+                success: false,
+                how: format!("could not start: {e}"),
+                tail: String::new(),
+                log: None,
+                timing: None,
+            },
+            "could not start",
+        ),
+    };
+    eprintln!("warm-linux: {id}: {word} after {secs:.1} s ({})", done.how);
+    let ok = done.success;
+    let cause = format!("{id}: {} (clippy or the build failed; what compiled is kept)", done.how);
+    let row = if ok {
+        Row::from_run(id, &subject, &done, cause, secs)
+    } else {
+        Row::failed(
+            id,
+            &subject,
+            cause,
+            String::new(),
+            "read the output above, fix it, and run `./dev check --warm-linux` again".into(),
+            secs,
+        )
+    };
+    (id.to_string(), row, ok)
 }
 
 /// Runs `./dev check --warm-linux`.
@@ -90,7 +139,7 @@ pub fn command(root: &Option<PathBuf>, named: &[String]) -> Result<Report, CliEr
     };
     let todo = targets(&root, named, &all)?;
     if todo.is_empty() {
-        return Ok(Report::new(json!({"warmed": []}), "warm-linux: no Cargo workspace to warm."));
+        return Ok(one_row("warm-linux", Row::skipped("no Cargo workspace to warm")));
     }
     if !docker_answers(&env) {
         return Ok(not_measured(
@@ -109,10 +158,9 @@ pub fn command(root: &Option<PathBuf>, named: &[String]) -> Result<Report, CliEr
         }
     };
     let prefix = with_heavy_flags(&base_prefix, false, QUEUE_MAX, RUN_MAX);
-    let mut rows = Vec::new();
-    let mut worst = Exit::Ok;
+    let mut rows: Vec<(String, Row)> = Vec::new();
     // The local CI image is its own step with its own bound: it is minutes and gigabytes, and neither a workspace's run limit nor
-    // the push budget may cut it off. Built once per change to ci-image/; a probe (exit 3: not built) decides.
+    // the push budget may cut it off. Built once per change to ci-image/; the probe decides, and a broken probe is not "missing".
     let probe = paddock_proc::command("bash")
         .args([
             "tools/linux-container.sh",
@@ -125,74 +173,31 @@ pub fn command(root: &Option<PathBuf>, named: &[String]) -> Result<Report, CliEr
         .arg(&root)
         .current_dir(&root)
         .status();
-    if matches!(probe, Ok(s) if s.code() == Some(3)) {
-        eprintln!(
-            "warm-linux: local CI image: building (once per change to ci-image/; limit {} s)",
-            IMAGE_MAX.as_secs()
-        );
-        let started = Instant::now();
-        let mut argv = with_heavy_flags(&base_prefix, false, QUEUE_MAX, IMAGE_MAX);
-        argv.extend(["bash", "tools/linux-container.sh", "--id", "paddock", "--ci-image", "--", "true"].map(String::from));
-        let status = paddock_proc::command(&argv[0]).args(&argv[1..]).current_dir(&root).status();
-        let secs = started.elapsed().as_secs_f64();
-        let code = status.map_or(-1, |s| s.code().unwrap_or(-1));
-        eprintln!(
-            "warm-linux: local CI image: {} after {secs:.1} s (exit {code})",
-            if code == 0 { "built" } else { "failed" }
-        );
-        rows.push(json!({"workspace": "local CI image", "seconds": (secs * 10.0).round() / 10.0, "exit": code}));
-        if code != 0 {
-            return Ok(Report {
-                data: json!({"warmed": rows}),
-                text: format!(
-                    "warm-linux: the local CI image build failed (exit {code}) after {secs:.1} s. Next step: read the output above (a stopped build, exit 80, hit the {} s bound)",
-                    IMAGE_MAX.as_secs()
-                ),
-                exit: Exit::Findings,
-            });
+    match image_probe(probe.as_ref().ok().and_then(|s| s.code())) {
+        ImageProbe::Ready => {}
+        ImageProbe::Broken(how) => {
+            return Ok(not_measured(&format!("image probe broken ({how})"), PROBE_NEXT));
+        }
+        ImageProbe::Missing => {
+            let mut argv = with_heavy_flags(&base_prefix, false, QUEUE_MAX, IMAGE_MAX);
+            argv.extend(["bash", "tools/linux-container.sh", "--id", "paddock", "--ci-image", "--", "true"].map(String::from));
+            let what = format!("local CI image, once per change to ci-image/; limit {} s", IMAGE_MAX.as_secs());
+            let (id, row, ok) = step(&root, "local CI image", &argv, &what);
+            rows.push((id, row));
+            if !ok {
+                return Ok(render("warm-linux", &rows));
+            }
         }
     }
     let gates = runs(&todo, &version, &|ws| left_out(&root, ws)).map_err(|e| {
         CliError::failure(format!("{e}.")).with_hint("Run `cargo metadata --no-deps` in that workspace and fix what it prints.")
     })?;
     for (ws, g) in todo.iter().zip(gates) {
-        eprintln!("warm-linux: {ws}: start (the container's own output follows; no budget)");
-        let started = Instant::now();
         let mut argv: Vec<String> = prefix.clone();
         argv.push(g.program.clone());
         argv.extend(g.args.iter().cloned());
-        let status = paddock_proc::command(&argv[0]).args(&argv[1..]).current_dir(&root).status();
-        let secs = started.elapsed().as_secs_f64();
-        let (word, code) = match status {
-            Ok(s) if s.success() => ("warm", 0),
-            Ok(s) => (
-                "clippy or the build failed (dependencies compiled so far are kept)",
-                s.code().unwrap_or(-1),
-            ),
-            Err(e) => {
-                eprintln!("warm-linux: {ws}: could not start: {e}");
-                ("could not start", -1)
-            }
-        };
-        eprintln!("warm-linux: {ws}: {word} after {secs:.1} s (exit {code})");
-        if code != 0 {
-            worst = Exit::Findings;
-        }
-        rows.push(json!({"workspace": ws, "seconds": (secs * 10.0).round() / 10.0, "exit": code}));
+        let (id, row, _) = step(&root, ws, &argv, &format!("no push budget; limit {} s", RUN_MAX.as_secs()));
+        rows.push((id, row));
     }
-    let text = rows
-        .iter()
-        .map(|r| {
-            format!(
-                "{:<28} {:>7.1} s  exit {}",
-                r["workspace"].as_str().unwrap_or(""),
-                r["seconds"].as_f64().unwrap_or(0.0),
-                r["exit"]
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let mut report = Report::new(json!({"warmed": rows}), format!("warm-linux:\n{text}"));
-    report.exit = worst;
-    Ok(report)
+    Ok(render("warm-linux", &rows))
 }
