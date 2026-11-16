@@ -111,6 +111,16 @@ describe('PresetsStore', () => {
     expect(await first).toBe(true);
   });
 
+  it('leaves no preview timer running once its injector is destroyed', () => {
+    vi.useFakeTimers();
+    const { store } = setup();
+    store.openEditor(null);
+    store.schedulePreview(draft('a'));
+    expect(vi.getTimerCount()).toBe(1);
+    TestBed.resetTestingModule();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('asks the engine for a preview only after typing pauses, and keeps the latest answer', async () => {
     vi.useFakeTimers();
     const { store, backend } = setup();

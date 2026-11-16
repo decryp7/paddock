@@ -130,6 +130,8 @@ describe('the tray popup', () => {
     expect(el.querySelector('[aria-busy="true"]')).not.toBeNull();
     expect(el.querySelectorAll('section.pd-w').length).toBe(0);
     expect(pill(el)).toBe('Connecting…');
+    // Wait for the condition, so the mock's latency timers have all run before the test ends.
+    await vi.waitFor(() => expect(el.querySelector('[aria-busy="true"]')).toBeNull());
     await settle(fixture, 12);
   });
 

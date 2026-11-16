@@ -170,6 +170,22 @@ describe('ServiceStore', () => {
       expect(toasts.toasts().at(-1)?.tone).toBe('bad');
     });
 
+    it('leaves no look scheduled once its injector is destroyed', async () => {
+      vi.useFakeTimers();
+      try {
+        const backend = new MockBackend({ repairing: true, latencyMs: 0 });
+        const { store } = setup({}, backend);
+        const base = await backend.serviceState();
+        vi.spyOn(backend, 'serviceState').mockResolvedValueOnce({ ...base, repair: working });
+        await store.refresh();
+        expect(vi.getTimerCount()).toBe(1);
+        TestBed.resetTestingModule();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('reads again while the repair works and reports how it ended', async () => {
       vi.useFakeTimers();
       try {
