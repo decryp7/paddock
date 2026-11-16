@@ -4,6 +4,7 @@ import * as mocks from './app/mock-backends';
 import { installBrowserMocks } from './app/core/mock-registry';
 import { resetMockJobs } from './app/jobs/mock-jobs';
 import { resetMockNotifications } from './app/notifications/mock-notifications';
+import { settleBootedStartup } from './testing/startup';
 import { testEnded, testStarted } from './testing/test-lifetime';
 
 // The app loads the mock backends before bootstrapping in a browser; specs get them at once.
@@ -19,6 +20,9 @@ afterEach(dropTauriStub);
 // instead of acting on the next test's TestBed (testing/test-lifetime.ts).
 beforeEach(testStarted);
 afterEach(testEnded);
+
+// A test that booted the app's lazy registrations waits for their chunks before TestBed tears the module down (testing/startup.ts).
+afterEach(settleBootedStartup);
 
 // The mock jobs service and notification centre are page-wide singletons, and spec files share the page (the Angular
 // builder runs Vitest with `isolate: false`). A job one test left running held its kind's slot (one import at a time)
