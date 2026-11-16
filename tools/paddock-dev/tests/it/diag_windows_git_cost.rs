@@ -2,7 +2,7 @@
 //! 5.7 times slower than in run 8138, and the test VM does not reproduce it (docs/benchmarks.md, "A child's `git` on Windows").
 //! This measures on the runner itself what one git call costs a test: through `TestCommand` (its construction and its child's
 //! curated environment, as merge_check's `World::cmd` starts git) against a plain `Command` of the same git, alone and with
-//! eight threads at once; it prints `path_report()` of a merge_check-shaped command and what the runner says about Defender.
+//! eight threads at once (25 calls each); it prints `path_report()` of a merge_check-shaped command and what the runner says about Defender.
 //! It always fails, so nextest prints its numbers. It lives on the branch diag/testkit-git-cost only and is never merged.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stderr)]
 
@@ -10,7 +10,9 @@ use paddock_testkit::TestCommand;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-const CALLS: usize = 100;
+// Small enough to finish inside nextest's 60 s on the slow test VM (100 calls timed out there); each line is printed as soon as
+// it is measured, so a timeout still shows what was.
+const CALLS: usize = 25;
 const THREADS: usize = 8;
 
 /// merge_check's `World::cmd`: a TestCommand for `program` with git's config and identity pinned.
@@ -89,13 +91,23 @@ fn diagnostic_windows_git_cost_always_fails_to_print_its_numbers() {
     // Warm both paths once (first-run checks of a fresh program are not what is measured).
     through_test_command(&git);
     through_plain_command(&git);
+    eprintln!(
+        "program a merge_check command starts: {}; first git.exe on its child's PATH: {child_git:?}",
+        git.display()
+    );
     let alone_kit = per_call(CALLS, &|| through_test_command(&git));
+    eprintln!("alone, TestCommand + git: {alone_kit:.1} ms per call");
     let alone_plain = per_call(CALLS, &|| through_plain_command(&git));
+    eprintln!("alone, plain Command + git: {alone_plain:.1} ms per call");
     let alone_build = per_call(CALLS, &|| construction_only(&git));
+    eprintln!("alone, TestCommand construction only: {alone_build:.2} ms per call");
     let busy_kit = per_call_concurrent(CALLS, through_test_command, &git);
+    eprintln!("{THREADS} threads, TestCommand + git: {busy_kit:.1} ms per call");
     let busy_plain = per_call_concurrent(CALLS, through_plain_command, &git);
+    eprintln!("{THREADS} threads, plain Command + git: {busy_plain:.1} ms per call");
     let busy_build = per_call_concurrent(CALLS, construction_only, &git);
-    // A program under test starts git by name through its own PATH, the curated one: 100 calls from a shell started like that.
+    eprintln!("{THREADS} threads, TestCommand construction only: {busy_build:.2} ms per call");
+    // A program under test starts git by name through its own PATH, the curated one: the same calls from a shell started like that.
     let loop_ms = {
         let t = Instant::now();
         let out = merge_check_cmd("sh")
