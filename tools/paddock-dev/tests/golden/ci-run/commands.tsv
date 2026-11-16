@@ -446,6 +446,8 @@ job	e2e			{
 job	e2e			} >> "$GITHUB_ENV"
 job	e2e		ui	npx playwright test --shard=1/2
 job	e2e		ui	npx playwright test --shard=2/2
+job	e2e		ui	npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=chromium --shard=1/2
+job	e2e		ui	npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=chromium --shard=2/2
 job	eslint-preset			"$PADDOCK_DEV" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	eslint-preset			*) echo "::error::sccache-backend must be auto, redis or local (got 'local')"
 job	eslint-preset			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
