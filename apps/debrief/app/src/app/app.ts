@@ -92,7 +92,7 @@ import { RegionNavigator } from './shell/regions';
     .center { flex: 1; min-width: 0; display: flex; flex-direction: column; }
     /* The deferred side bar's and filter bar's room (their host sizes: shell/sidebar.ts, workspace/filter-bar.ts). */
     .sidebar-placeholder { width: 272px; flex: none; background: var(--bg-2); border-inline-end: 1px solid var(--border); }
-    .filter-bar-placeholder { flex: none; height: 30px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg-1); }
+    .filter-bar-placeholder { flex: none; height: 51px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg-1); }
     .stage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
     /* dockview gives its sashes and floating groups high z-indexes; keep them inside the dock so the
        welcome screen (and anything else stacked over the dock) covers them. */

@@ -602,13 +602,13 @@ describe('QueryField', () => {
 
     it('renders nothing for a message search', async () => {
       await type('hello');
-      expect(statusEl().classList.contains('empty')).toBe(true);
+      expect(statusEl().classList.contains('shown')).toBe(false);
       expect(statusText().trim()).toBe('');
     });
 
     it('shows the applied query with its match count and clears it', async () => {
       await type('level >= error');
-      expect(statusEl().classList.contains('empty')).toBe(true);
+      expect(statusEl().classList.contains('shown')).toBe(false);
       session.dismissCompletions();
       key(input, 'Enter', { ctrlKey: true });
       await wait(60);
