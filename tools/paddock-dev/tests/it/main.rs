@@ -32,6 +32,7 @@ mod ipc_endpoints;
 mod isolation;
 mod locks;
 mod merge_check;
+mod parity_corpus;
 mod pr;
 mod pre_push;
 mod release_isolation;

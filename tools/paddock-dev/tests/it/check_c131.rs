@@ -29,6 +29,8 @@ fn cases() -> Vec<(String, String)> {
         s("x/tests/fixtures/g.json", "{\"uid\": 501}\n"),
         s("x/f.snap", "uid: 7\n"),
         s("x/tests/golden/h.txt", "é😀 uid=1\r\nclean\r\n/home/bï\r\n"),
+        // astral characters count as one character, and ſ folds to s in a case-insensitive match, on both hosts
+        s("x/tests/golden/i.txt", "uid😀😀😀😀=1\nuſer_id=5\nK uid: 3\n"),
     ]
 }
 
@@ -121,9 +123,13 @@ fn c131_flags_the_planted_uid_and_the_other_machine_values_as_warnings() {
             && has("x/tests/golden/h.txt", 1, "id `uid=1`")
             && has("x/tests/golden/h.txt", 3, "home `/home/b`")
     );
-    // Exactly these 13, whoever runs it: the check reads no fact of the machine, so a Mac and the CI image as root agree
+    // Exactly these 16, whoever runs it: the check reads no fact of the machine, so a Mac and the CI image as root agree
     // (`./dev golden confirm check_c131` runs this on both).
-    assert_eq!(got.len(), 13, "{got:?}");
+    assert!(
+        has("x/tests/golden/i.txt", 1, "id") && has("x/tests/golden/i.txt", 2, "id") && has("x/tests/golden/i.txt", 3, "id"),
+        "{got:?}"
+    );
+    assert_eq!(got.len(), 16, "{got:?}");
     assert_eq!(r.errors(), 0, "report-only until its first green run (ER-41)");
 }
 
@@ -199,4 +205,10 @@ fn live_c131_tree_findings_equal_the_js_host() {
     let (got, want) = (shared_part(&r.json()), shared_part(&js));
     assert_eq!(got["findings"], want["findings"]);
     assert_eq!(got, want);
+}
+
+/// The shared parity corpus (a byte order mark, CRLF, astral text, case-folding letters, no-break spaces, long lines).
+#[test]
+fn c131_hosts_agree_on_the_shared_parity_corpus() {
+    super::parity_corpus::assert_no_divergence("C131");
 }

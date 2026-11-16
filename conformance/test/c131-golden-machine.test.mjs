@@ -15,6 +15,8 @@ test('C131 bad: the ids and paths that failed on another machine (WP-2, train 14
   assert.deepEqual(kinds('cwd=/Users/someone/work\nx=/home/runner/x\n'), ['1:home', '2:home']);
   assert.deepEqual(kinds('"C:\\\\Users\\\\Bo\\\\AppData" C:\\Users\\Bo\\x'), ['1:home']);
   assert.deepEqual(kinds('/var/folders/zz/abc/T/x\n/private/tmp/run1\n/tmp/work-1\nC:\\Users\\a\\AppData\\Local\\Temp\\x'), ['1:temp', '2:temp', '3:temp', '4:home', '4:temp']);
+  // Astral characters are one character, and ſ folds to s in a case-insensitive match (the `u` flag; the Rust host does both).
+  assert.deepEqual(kinds('uid😀😀😀😀=1\nuſer_id=5\nK uid: 3\n'), ['1:id', '2:id', '3:id']);
   // CRLF and non-ASCII text around a site.
   assert.deepEqual(kinds('é😀 uid=1\r\nclean\r\n/home/bï\r\n'), ['1:id', '3:home']);
 });

@@ -254,6 +254,14 @@ review_by = 2026-12-15
 approved = "coordinator"
 
 [[report_only]]
+id = "C132"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in C132-js-regex-flags.mjs. It flags a regular expression without the u flag in a JavaScript check that has a Rust twin (the ER-21 class 'the two hosts of a check diverge': without u an astral character counts as two characters and a case-insensitive match does not fold the letters the Rust regex crate folds). First count 2026-11-16 on feat/golden-checked-when-made: 116 sites in 9 other checks (C39 14, C53 22, C119 15, C120 9, C121 7, C122 11, C123 17, C124 16, C125 5 after C131's own 4 were fixed), reported, not fixed here: train 14 fixes them together with the divergences the shared parity corpus (conformance/test/parity-corpus) found in C119, C121 and C124. Known gap: flags that are not a literal, a heuristic for telling a regular expression from a division"
+owner = "ER-21 class: the two hosts of a check diverge (feat/golden-checked-when-made)"
+since = 2026-11-15
+review_by = 2026-12-15
+approved = "coordinator"
+
+[[report_only]]
 id = "step:tools/hooks"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then remove continue-on-error from ci.yml's `Hooks tests (report-only)` step (the tools job, `./dev ci run tools hooks`) and this entry; C100 fails when review_by passes or when the step already blocks. It runs every .claude/hooks/*.test.sh (python3, jq and git are in paddock-ci:v3, checked 2026-11-15) with PADDOCK_DEV set to the built tool, so the rule-55 parity test of places.rs against lib/paddockpaths.py runs in CI. First green run id: none yet"
 owner = "fix/hooks-ci-and-config-guard"

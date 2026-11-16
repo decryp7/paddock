@@ -31,8 +31,8 @@ export const IMPLEMENTATION = new Set([
   'tools/paddock-dev/tests/it/check_c131.rs',
   ALLOW,
 ]);
-const GOLDEN_PATH = /(?:^|\/)goldens?\/|\.(?:golden|snap)$/;
-const BINARY = /\.(?:png|jpe?g|gif|ico|icns|webp|bmp|tiff?|pdf|zip|gz|tgz|xz|zst|7z|whl|wasm|dmg|pkg|msi|exe|dll|so|dylib|a|lib|rlib|o|obj|pdb|ttf|otf|woff2?|mp3|mp4|mov|wav|webm|parquet|duckdb|sqlite|db|evtx|dmp|bin|onnx|safetensors)$/i;
+const GOLDEN_PATH = /(?:^|\/)goldens?\/|\.(?:golden|snap)$/u;
+const BINARY = /\.(?:png|jpe?g|gif|ico|icns|webp|bmp|tiff?|pdf|zip|gz|tgz|xz|zst|7z|whl|wasm|dmg|pkg|msi|exe|dll|so|dylib|a|lib|rlib|o|obj|pdb|ttf|otf|woff2?|mp3|mp4|mov|wav|webm|parquet|duckdb|sqlite|db|evtx|dmp|bin|onnx|safetensors)$/iu;
 const BROKEN_FIX = 'Restore conformance/c131-allow.json: {"allow": [{"path": "...", "site": "...", "reason": "...", "count": 1}]}.';
 const FIX = "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason.";
 
@@ -41,17 +41,16 @@ const FIX = "Normalise it in the test's norm() (replace the value with a placeho
  * look-around, so the Rust host's `regex` crate (which has none) reads the same lines. A pattern may match once per line and kind.
  */
 const PATTERNS = [
-  { kind: 'id', re: /(?:^|[^A-Za-z0-9_])((?:e?uid|e?gid|user_id|group_id)[^A-Za-z0-9_\n][^A-Za-z0-9\n]{0,5}[0-9]+)/i },
-  { kind: 'home', re: /(?:^|[^A-Za-z0-9_.-])((?:\/Users\/|\/home\/|[A-Za-z]:\\{1,2}Users\\{1,2})[A-Za-z0-9][A-Za-z0-9._-]*)/ },
-  { kind: 'temp', re: /(?:^|[^A-Za-z0-9_.-])((?:\/private)?\/(?:tmp\/[A-Za-z0-9._-]|var\/folders\/))|(\\Temp\\)/ },
+  { kind: 'id', re: /(?:^|[^A-Za-z0-9_])((?:e?uid|e?gid|user_id|group_id)[^A-Za-z0-9_\n][^A-Za-z0-9\n]{0,5}[0-9]+)/iu },
+  { kind: 'home', re: /(?:^|[^A-Za-z0-9_.-])((?:\/Users\/|\/home\/|[A-Za-z]:\\{1,2}Users\\{1,2})[A-Za-z0-9][A-Za-z0-9._-]*)/u },
+  { kind: 'temp', re: /(?:^|[^A-Za-z0-9_.-])((?:\/private)?\/(?:tmp\/[A-Za-z0-9._-]|var\/folders\/))|(\\Temp\\)/u },
 ];
-const escape = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** [{ line, kind, site, text }] of every machine-specific literal in `text`, one per line and kind. */
 export function goldenSites(text) {
   const out = [];
   text.split('\n').forEach((raw, i) => {
-    const line = raw.replace(/\r$/, '');
+    const line = raw.replace(/\r$/u, '');
     for (const { kind, re } of PATTERNS) {
       const m = re.exec(line);
       if (m) out.push({ line: i + 1, kind, site: m[1] ?? m[2], text: line });
