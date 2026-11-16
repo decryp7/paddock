@@ -615,6 +615,16 @@ fn the_mac_runner_joins_the_shared_server_when_its_config_names_a_folder_and_nev
         "{}",
         rs.env
     );
+    // A server that is already running makes `--start-server` fail with "Address in use": the job joins it.
+    let running = format!("[ \"$1\" = --start-server ] && {{ echo 'error: Server startup failed: Address in use' >&2; exit 2; }}\n{shim}");
+    let r = Runner::new(Some(&running));
+    let rs = r.rust(&LOCAL, &[("PADDOCK_SHARED_SCCACHE_DIR", "/shared/sccache")]);
+    assert!(
+        rs.env.contains("RUSTC_WRAPPER=sccache\n") && !rs.calls.contains("--stop-server"),
+        "{}\n{}",
+        rs.env,
+        rs.out
+    );
     // A server on the shared port with another folder is not used and not stopped.
     let other = "[ \"$1\" = --show-stats ] && echo 'Cache location                  Local disk: \"/somebody/else\"'";
     let r = Runner::new(Some(other));

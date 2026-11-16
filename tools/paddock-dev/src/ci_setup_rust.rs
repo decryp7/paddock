@@ -562,7 +562,13 @@ impl Step<'_> {
         let log = self
             .temp_base()
             .join(format!("paddock-sccache-start-{}-{}.log", std::process::id(), nanos()));
-        let started = self.run(&call("--start-server").output(Output::File(log.clone())));
+        let mut started = self.run(&call("--start-server").output(Output::File(log.clone())));
+        // On the shared port a server is usually running already (the agents' or an earlier job's): "Address in use" is no failure.
+        if shared.is_some()
+            && let Ok(r) = &mut started
+        {
+            r.success |= crate::local_sccache::already_running(r);
+        }
         let _ = std::fs::remove_file(&log);
         // Asked only when the start worked (the shell's `&&`).
         let stats = if matches!(&started, Ok(r) if r.success) {

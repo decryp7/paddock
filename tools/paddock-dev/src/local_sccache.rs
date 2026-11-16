@@ -316,6 +316,12 @@ fn server_call(bin: &Path, arg: &str, backend: &Backend, creds: Option<&Creds>) 
     c
 }
 
+/// `--start-server` on a port that already has a server (the next agent's or the Mac runner's) fails with "Address in use": that is
+/// a running server, and the answer of `--show-stats` decides whether it is ours.
+pub fn already_running(ran: &crate::ci_tool::Ran) -> bool {
+    !ran.success && ran.stderr.contains("Address in use")
+}
+
 fn version_of(bin: &Path, env: &HashMap<String, String>) -> Option<String> {
     let ran = ToolCall::new(bin.to_string_lossy())
         .args(["--version"])
@@ -480,7 +486,11 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
     // The server outlives this process and would hold a pipe open, so its starter writes to a file.
     let start = server_call(&bin, "--start-server", &backend, creds.as_ref())
         .output(Output::File(log.clone()))
-        .run(env, &mut std::io::sink());
+        .run(env, &mut std::io::sink())
+        .map(|mut s| {
+            s.success |= already_running(&s);
+            s
+        });
     let _ = std::fs::remove_file(&log);
     let stats = server_call(&bin, "--show-stats", &backend, creds.as_ref()).run(env, &mut std::io::sink());
     let verdict = match (&start, &stats) {
@@ -604,6 +614,22 @@ mod tests {
         .unwrap();
         assert!(s3.matches_stats("Cache location                  S3, bucket: Bucket(name=b1, base_url=http://h:1)\n"));
         assert!(!s3.matches_stats(local));
+    }
+
+    #[test]
+    fn a_server_that_is_already_running_is_not_a_failed_start() {
+        let ran = |success: bool, stderr: &str| crate::ci_tool::Ran {
+            success,
+            how: String::new(),
+            stdout: String::new(),
+            stderr: stderr.into(),
+        };
+        assert!(already_running(&ran(
+            false,
+            "sccache: error: Server startup failed: Address in use"
+        )));
+        assert!(!already_running(&ran(true, "Address in use")));
+        assert!(!already_running(&ran(false, "permission denied")));
     }
 
     #[test]
