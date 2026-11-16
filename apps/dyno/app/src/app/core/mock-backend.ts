@@ -115,9 +115,6 @@ import {
   demoSettings,
   demoStartup,
   healthReasons,
-  MAC_DISK_FACT,
-  WINDOWS_DISK_FACT,
-  type DiskFact,
 } from './mock/data';
 import { manyAlarms, demoAlarms, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
 import { MockCounters, demoCounterSettings } from './mock/counters';
@@ -139,8 +136,8 @@ import { type MockOs, type OsProfile, coreKindsOf, osProfile } from './mock/os';
 import { clamp, wobble } from './mock/noise';
 import { type MockProcess, buildProcesses, deviation, groupSamples, round, sampleProcess } from './mock/processes';
 import { formatRate, formatStorage } from '../shared/format';
-import { MAC_CPU_OVERHEAD, MAC_MEMORY_USED, MAC_DISK_FREE, MAC_DISK_FREE_TEXT, MAC_DISK_TOTAL, MAC_DISK_USED_PERCENT } from './mock/mac-machine';
-import { WIN_DISK_FREE, WIN_DISK_FREE_TEXT, WIN_DISK_NAME, WIN_DISK_TOTAL, WIN_DISK_USED_PERCENT } from './mock/windows-machine';
+import { MAC_CPU_OVERHEAD, MAC_MEMORY_USED } from './mock/mac-machine';
+import { dataDisk, startupDisk, type StartupDisk } from './mock/disk-facts';
 
 /** The note the engine sends when no tray host shows the icons (`dyno_core::tray_host`; the wire contract spec pins the text). */
 const NO_TRAY_HOST_NOTE =
@@ -541,8 +538,8 @@ export class MockBackend implements DynoBackend {
    * minute the polled replies read, which is also the second the live readings sample, so every page shows the same value.
    */
   /** The startup disk's facts as this machine's sheet declares them. */
-  private diskFact(): DiskFact {
-    return this.profile.os === 'macos' ? MAC_DISK_FACT : WINDOWS_DISK_FACT;
+  private diskFact(): StartupDisk {
+    return startupDisk(this.profile.os);
   }
 
   private referenceSecond(): number {
@@ -851,10 +848,10 @@ export class MockBackend implements DynoBackend {
           },
           {
             kind: 'lowDiskSpace',
-            title: this.profile.os === 'macos' ? `Macintosh HD is ${MAC_DISK_USED_PERCENT}% full` : `${WIN_DISK_NAME} is ${WIN_DISK_USED_PERCENT}% full`,
+            title: `${this.diskFact().name} is ${this.diskFact().usedPercent}% full`,
             explanation: this.profile.os === 'macos' ? 'Not slowing you down yet, but macOS needs free space for updates and swap.' : 'Not slowing you down yet, but Windows needs free space for updates and swap.',
             confidence: 0.22,
-            evidence: [{ label: 'Free', value: this.profile.os === 'macos' ? `${formatStorage(MAC_DISK_FREE)} of ${formatStorage(MAC_DISK_TOTAL)}` : `${formatStorage(WIN_DISK_FREE)} of ${formatStorage(WIN_DISK_TOTAL)}` }],
+            evidence: [{ label: 'Free', value: `${formatStorage(this.diskFact().free)} of ${formatStorage(this.diskFact().total)}` }],
             hints: [],
             involved: [],
           },
@@ -875,12 +872,14 @@ export class MockBackend implements DynoBackend {
         const disks = this.profile.disks(0);
         h.diskTrends = h.diskTrends.slice(0, Math.max(1, disks.length));
         h.diskTrends.forEach((t, i) => (t.disk = i === 0 ? this.profile.primaryDisk : (disks[i]?.name ?? t.disk)));
-        if (this.profile.os === 'macos' && h.diskTrends[0]) {
-          // The startup disk is the one in the machine's fact sheet: its capacity, and its free space ending at today's figure.
-          const first = h.diskTrends[0];
-          const shift = MAC_DISK_FREE - (first.points.at(-1)?.free ?? MAC_DISK_FREE);
-          first.total = MAC_DISK_TOTAL;
-          first.points = first.points.map((p) => ({ ...p, free: p.free + shift }));
+        const fact = this.diskFact();
+        const data = dataDisk(this.profile.os);
+        // The disks are the ones in the machine's fact sheet: their capacity, and their free space ending at today's figure.
+        for (const [trend, want] of [[h.diskTrends[0], fact], [h.diskTrends[1], data]] as const) {
+          if (!trend || !want) continue;
+          const shift = want.free - (trend.points.at(-1)?.free ?? want.free);
+          trend.total = want.total;
+          trend.points = trend.points.map((p) => ({ ...p, free: p.free + shift }));
         }
       }
       return h;
@@ -1351,13 +1350,13 @@ export class MockBackend implements DynoBackend {
         ],
         scoreTrend: [66, 68, 71, 70, 72, 74].map((score, i) => ({ at: from + i * 28 * 60 * MIN, score })),
         disks: [
-          { disk: this.profile.os === 'windows' ? 'C:' : '/', total: this.profile.os === 'macos' ? MAC_DISK_TOTAL : WIN_DISK_TOTAL, free: this.profile.os === 'macos' ? MAC_DISK_FREE : WIN_DISK_FREE, forecast: { fullInDays: 41 } },
+          { disk: this.profile.os === 'windows' ? 'C:' : '/', total: this.diskFact().total, free: this.diskFact().free, forecast: { fullInDays: 41 } },
           // Invented long mount paths: the page must shorten them, never let them push the numbers out of the card.
           { disk: '/Volumes/Example-Archive-Drive-With-A-Long-Name/Projects-2026/Quarter-Four/Backups-Of-Everything-From-Every-Computer-In-The-House-Kept-Here-For-Ten-Years', total: 3726 * GB, free: 652 * GB, forecast: 'notFilling' },
           { disk: '/Volumes/Spare', total: 1863 * GB, free: 1210 * GB, forecast: 'notEnoughData' },
         ],
         issues: [
-          { at: issueAt(6 * 60), severity: 'warning', title: 'Drive is getting full', detail: `${this.profile.os === 'macos' ? MAC_DISK_FREE_TEXT : WIN_DISK_FREE_TEXT}; at this rate it is full in about 41 days.` },
+          { at: issueAt(6 * 60), severity: 'warning', title: 'Drive is getting full', detail: `${this.diskFact().freeText}; at this rate it is full in about 41 days.` },
           { at: issueAt(30 * 60), severity: 'info', title: 'A build used a lot of CPU for a long time', detail: 'rustc averaged 74% for 32 minutes.' },
         ],
         hardware: ['The CPU ran slower than it should for 52 min this week (52 min of heat).', 'Battery: replace in about 23 months (17 to 31 months) (confidence medium).'],

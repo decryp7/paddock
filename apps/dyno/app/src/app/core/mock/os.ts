@@ -1,6 +1,7 @@
 import type { AppInfo, DiskSample, NetworkSample } from '../api.types';
 import { MAC_BUILD_CPU, MAC_BUILD_DISK_BPS, MAC_CPU_OVERHEAD, MAC_CPU_TOTAL, MAC_DISK_FREE, MAC_DISK_IO_BPS, MAC_DISK_TOTAL, MAC_MEMORY_TOTAL } from './mac-machine';
-import { WIN_DISK_FREE, WIN_DAILY_FILL, WIN_DISK_TOTAL } from './windows-machine';
+import { LINUX_DAILY_FILL, LINUX_DATA_FREE, LINUX_DATA_TOTAL, LINUX_DISK_FREE, LINUX_DISK_TOTAL, LINUX_MEMORY_TOTAL } from './linux-machine';
+import { WIN_DAILY_FILL, WIN_DATA_FREE, WIN_DATA_TOTAL, WIN_DISK_FREE, WIN_DISK_TOTAL, WIN_MEMORY_TOTAL } from './windows-machine';
 import { type AppSpec, APP_SPECS } from './processes';
 
 const GB = 1024 ** 3;
@@ -181,13 +182,13 @@ export function osProfile(os: MockOs): OsProfile {
       user: 'alex',
       cores: 16,
       hybrid: null,
-      memoryTotal: 32 * GB,
+      memoryTotal: LINUX_MEMORY_TOTAL,
       cpuBaseMhz: 3800,
       cpuMaxMhz: 4650,
       gpuName: 'NVIDIA GeForce RTX 4070 Laptop GPU',
       disks: (days) => [
-        { id: 'nvme0n1p2', name: 'WD Blue SN570 (ext4)', mount: '/', total: Math.round(953 * GB), free: Math.round((210 - days * 5.1) * GB), removable: false },
-        { id: 'sda1', name: 'Seagate BarraCuda (ext4)', mount: '/mnt/data', total: Math.round(1863 * GB), free: Math.round(1204 * GB), removable: false },
+        { id: 'nvme0n1p2', name: 'WD Blue SN570 (ext4)', mount: '/', total: LINUX_DISK_TOTAL, free: Math.round(LINUX_DISK_FREE - days * LINUX_DAILY_FILL), removable: false },
+        { id: 'sda1', name: 'Seagate BarraCuda (ext4)', mount: '/mnt/data', total: LINUX_DATA_TOTAL, free: LINUX_DATA_FREE, removable: false },
       ],
       network: (w) => [
         { name: 'enp5s0 (Ethernet)', rxBps: MB1(3.8 + 2.2 * w(810, 5)), txBps: MB1(0.6 + 0.4 * w(811, 5)) },
@@ -216,13 +217,13 @@ export function osProfile(os: MockOs): OsProfile {
     user: WIN_USER,
     cores: 16,
     hybrid: null,
-    memoryTotal: Math.round(31.7 * GB),
+    memoryTotal: WIN_MEMORY_TOTAL,
     cpuBaseMhz: 3800,
     cpuMaxMhz: 4640,
     gpuName: 'NVIDIA GeForce RTX 4070 Laptop GPU',
     disks: (days) => [
       { id: 'C', name: 'Samsung PM9A1 NVMe', mount: 'C:\\', total: WIN_DISK_TOTAL, free: Math.round(WIN_DISK_FREE - days * WIN_DAILY_FILL), removable: false },
-      { id: 'D', name: 'Seagate BarraCuda HDD', mount: 'D:\\', total: Math.round(1863 * GB), free: Math.round(1204 * GB), removable: false },
+      { id: 'D', name: 'Seagate BarraCuda HDD', mount: 'D:\\', total: WIN_DATA_TOTAL, free: WIN_DATA_FREE, removable: false },
     ],
     network: (w) => [
       { name: 'Ethernet (USB-C dock)', rxBps: MB1(3.8 + 2.2 * w(810, 5)), txBps: MB1(0.6 + 0.4 * w(811, 5)) },

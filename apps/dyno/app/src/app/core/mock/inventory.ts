@@ -1,7 +1,8 @@
 import type { Hint, MemoryModule, SystemInventory } from '../api.types';
 import type { MockOs } from './os';
 import { MAC_DISK_TOTAL, MAC_MEMORY_TOTAL } from './mac-machine';
-import { WIN_DISK_TOTAL } from './windows-machine';
+import { LINUX_DISK_TOTAL } from './linux-machine';
+import { WIN_DISK_TOTAL, WIN_MEMORY_STICKS_GIB } from './windows-machine';
 
 const GB = 1024 ** 3;
 
@@ -16,7 +17,7 @@ export type InventoryVariant = 'ddr4' | 'ddr5' | 'sodimm' | 'sodimm-dual' | 'sol
 
 export const INVENTORY_VARIANTS: readonly InventoryVariant[] = ['ddr4', 'ddr5', 'sodimm', 'sodimm-dual', 'soldered', 'apple', 'generic'];
 
-const DEFAULT_VARIANT: Record<MockOs, InventoryVariant> = { windows: 'ddr4', macos: 'apple', linux: 'sodimm' };
+const DEFAULT_VARIANT: Record<MockOs, InventoryVariant> = { windows: 'ddr4', macos: 'apple', linux: 'sodimm-dual' };
 
 /** The `?inv=` variant of a query string, or null. */
 export function inventoryVariantFromSearch(search: string): InventoryVariant | null {
@@ -105,7 +106,7 @@ function sodimmLaptop(dual: boolean): SystemInventory {
     hostName: 'dev-laptop',
     cpu: { name: 'AMD Ryzen 9 7940HS', physicalCores: 8, logicalCores: 16, frequencyMhz: 4000 },
     memory: { slots: { slots: 2, maxCapacityBytes: 64 * GB, modules } },
-    disks: [disk('WD Blue SN570 NVMe', 953)],
+    disks: [{ name: 'WD Blue SN570 NVMe', totalBytes: LINUX_DISK_TOTAL, removable: false }],
     hints,
   };
 }
@@ -140,7 +141,7 @@ function ddr4Desktop(): SystemInventory {
       slots: {
         slots: 4,
         maxCapacityBytes: 128 * GB,
-        modules: [stick('DIMM_A1', 16, 'ddr4', 3200, 2666, 'Corsair', 'CMK16GX4M1E3200C16'), stick('DIMM_A2', 8, 'ddr4', 2666, 2666, 'Kingston', 'KVR26N19S6/8')],
+        modules: [stick('DIMM_A1', WIN_MEMORY_STICKS_GIB[0], 'ddr4', 3200, 2666, 'Corsair', 'CMK16GX4M1E3200C16'), stick('DIMM_A2', WIN_MEMORY_STICKS_GIB[1], 'ddr4', 2666, 2666, 'Kingston', 'KVR26N19S6/8')],
       },
     },
     disks: [{ name: 'Samsung PM9A1 NVMe', totalBytes: WIN_DISK_TOTAL, removable: false }, disk('Crucial MX500 SATA', 931)],

@@ -8,19 +8,10 @@ import type {
   StartupEntry,
 } from '../api.types';
 
-import { MAC_DISK_FREE_TEXT, MAC_DISK_USED_PERCENT } from './mac-machine';
-import { WIN_DISK_FREE_TEXT, WIN_DISK_NAME, WIN_DISK_USED_PERCENT } from './windows-machine';
+import { startupDisk, type StartupDisk } from './disk-facts';
 
-/** The startup disk as the Health reason and the alert name it: from the fact sheet of the machine the mock pretends to be. */
-export interface DiskFact {
-  name: string;
-  freeText: string;
-  usedPercent: number;
-}
-/** The Windows PC's drive C:, from mock/windows-machine.ts. */
-export const WINDOWS_DISK_FACT: DiskFact = { name: WIN_DISK_NAME, freeText: WIN_DISK_FREE_TEXT, usedPercent: WIN_DISK_USED_PERCENT };
-/** The Mac's startup disk, from mock/mac-machine.ts. */
-export const MAC_DISK_FACT: DiskFact = { name: 'Macintosh HD', freeText: MAC_DISK_FREE_TEXT, usedPercent: MAC_DISK_USED_PERCENT };
+/** The startup disk as the Health reason and the alert name it. */
+export type DiskFact = Pick<StartupDisk, 'name' | 'freeText' | 'usedPercent'>;
 
 const MB = 1024 ** 2;
 const MIN = 60_000;
@@ -29,7 +20,7 @@ const DAY = 24 * HOUR;
 
 // -------------------------------------------------------------------------------------------- health
 
-export function healthReasons(disk: DiskFact = WINDOWS_DISK_FACT): HealthReason[] {
+export function healthReasons(disk: DiskFact = startupDisk('windows')): HealthReason[] {
   return [
     {
       id: 'low-disk-c',
@@ -165,7 +156,7 @@ export function demoAnomalies(now: number): Anomaly[] {
   ];
 }
 
-export function demoAlerts(now: number, disk: DiskFact = WINDOWS_DISK_FACT): Alert[] {
+export function demoAlerts(now: number, disk: DiskFact = startupDisk('windows')): Alert[] {
   return [
     { id: 'al-6', at: now - 52 * MIN, kind: 'crashLoop', severity: 'warning', title: 'VirtualBox service keeps restarting', detail: '6 restarts in 2 hours.' },
     { id: 'al-5', at: now - 3 * HOUR, kind: 'longHighCpu', severity: 'info', title: 'rustc.exe used over 50% CPU for 12 minutes', detail: 'It stayed busy for a long time.' },

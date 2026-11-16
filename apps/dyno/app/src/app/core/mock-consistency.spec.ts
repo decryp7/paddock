@@ -1,6 +1,9 @@
 import { formatRate, formatStorage } from '../shared/format';
 import { readValue } from './measured';
 import { MockBackend, type MockOptions } from './mock-backend';
+import { dataDisk, startupDisk } from './mock/disk-facts';
+import { LINUX_MEMORY_TOTAL } from './mock/linux-machine';
+import { WIN_MEMORY_TOTAL } from './mock/windows-machine';
 import {
   MAC_BUILD_CPU,
   MAC_BUILD_DISK_BPS,
@@ -112,5 +115,53 @@ describe('memory has one total', () => {
     const unified = 'unified' in layout ? (layout as { unified: { total: number } }).unified.total : -1;
     expect(unified).toBe(total);
     expect(total).toBe(MAC_MEMORY_TOTAL);
+  });
+});
+
+describe.each(['windows', 'linux'] as const)('the mock %s machine says one thing about its startup disk and its memory', (os) => {
+  const sheet = startupDisk(os);
+  const mount = os === 'windows' ? 'C:\\' : '/';
+
+  it('the live readings, the inventory, the history, the weekly report and the Health reason agree on the disk', async () => {
+    const b = make({ os });
+    const live = b.liveUpdate('summary').system!.disks.find((d) => d.mount === mount)!;
+    expect([live.total, live.free]).toEqual([sheet.total, sheet.free]);
+
+    const inventory = await b.inventory();
+    expect(inventory.disks[0]!.totalBytes).toBe(sheet.total);
+
+    const trend = (await b.history('week', null)).diskTrends[0]!;
+    expect(trend.total).toBe(sheet.total);
+    expect(trend.points.at(-1)!.free).toBe(sheet.free);
+
+    const report = (await b.weeklyReport(1)).disks[0]!;
+    expect([report.total, report.free]).toEqual([sheet.total, sheet.free]);
+
+    const reason = (await b.health()).reasons.find((r) => r.id === 'low-disk-c')!;
+    expect(reason.title).toBe(`${sheet.name} is ${sheet.usedPercent}% full`);
+    expect(reason.detail).toContain(sheet.freeText);
+    const card = (await b.whySlow()).causes.find((c) => c.kind === 'lowDiskSpace')!;
+    expect(card.title).toBe(`${sheet.name} is ${sheet.usedPercent}% full`);
+    expect(card.evidence[0]!.value).toBe(`${formatStorage(sheet.free)} of ${formatStorage(sheet.total)}`);
+    expect(JSON.stringify(await b.weeklyReport(1))).toContain(sheet.freeText);
+  });
+
+  it('the second disk is the same size in the live readings and the history', async () => {
+    const b = make({ os });
+    const data = dataDisk(os)!;
+    const live = b.liveUpdate('summary').system!.disks[1]!;
+    expect([live.total, live.free]).toEqual([data.total, data.free]);
+    const trend = (await b.history('week', null)).diskTrends[1]!;
+    expect(trend.total).toBe(data.total);
+    expect(trend.points.at(-1)!.free).toBe(data.free);
+  });
+
+  it('the live readings and the inventory say the same memory size', async () => {
+    const b = make({ os });
+    const total = b.liveUpdate('summary').system!.memory.total;
+    const layout = (await b.inventory()).memory;
+    const installed = 'slots' in layout ? (layout as { slots: { modules: { capacityBytes: number }[] } }).slots.modules.reduce((a, m) => a + m.capacityBytes, 0) : -1;
+    expect(installed).toBe(total);
+    expect(total).toBe(os === 'windows' ? WIN_MEMORY_TOTAL : LINUX_MEMORY_TOTAL);
   });
 });
