@@ -157,7 +157,7 @@ fn folders_are_in_the_callers_group_even_when_the_parent_is_in_another() {
     // On macOS a new folder takes its parent's group: a temp folder on a disk whose folders are group `admin` made Dyno's
     // "folder is in a shared group" check fail in tests that passed elsewhere (twice).
     let egid = unsafe { libc::getegid() };
-    let parent = paddock_testkit::tempdir();
+    let parent = tempfile::tempdir().unwrap();
     if let Some(other) = another_group(egid) {
         chown(parent.path(), None, Some(other)).unwrap();
         assert_eq!(

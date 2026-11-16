@@ -89,15 +89,9 @@ impl std::ops::Deref for CanonicalTempDir {
 
 /// A new temporary folder with a canonical path, or why it could not be made.
 pub fn try_canonical_tempdir() -> io::Result<CanonicalTempDir> {
-    try_canonical_tempdir_in(&crate::ambient::ambient().temp_dir)
-}
-
-/// A new temporary folder under `parent` with a canonical path (a `parent` reached through a link is resolved), or why it could
-/// not be made.
-pub fn try_canonical_tempdir_in(parent: &Path) -> io::Result<CanonicalTempDir> {
     let dir = tempfile::Builder::new()
         .prefix("paddock-testkit-")
-        .tempdir_in(parent)?;
+        .tempdir()?;
     let path = paddock_env::winpath::real(dir.path())?;
     Ok(CanonicalTempDir { path, _dir: dir })
 }
