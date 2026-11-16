@@ -381,7 +381,7 @@ fn every_git_call_of_a_scan_runs_without_optional_locks() {
             &fx.primary,
             &["disk", "scan", "--no-sizes", "--root", s(&fx.root), "--index", s(&index)],
         )
-        .path_first(&path_env)
+        .env("PATH", path_env)
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));

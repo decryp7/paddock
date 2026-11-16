@@ -2,11 +2,11 @@
 //! the TLS stack. Reads the dependency graph with `cargo tree` (offline: it reads the lock file, nothing is downloaded or built).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use paddock_testkit::TestCommand;
+use std::process::Command;
 
 fn tree(extra: &[&str]) -> String {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    let out = TestCommand::new(cargo)
+    let out = Command::new(cargo)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .args([
             "tree",
