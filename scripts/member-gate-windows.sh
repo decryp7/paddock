@@ -6,9 +6,10 @@
 #   scripts/member-gate-windows.sh <tree> <spec>...      <tree>: the tree of HEAD; spec: `nextest <workspace> <package>`
 #
 # The guest has no Rust toolchain (docs/adr/amendments/0087-member-gate-other-os-2026-11-16.md compares the ways to give it one), so
-# the test programs are built on the Mac: `cargo nextest archive` for x86_64-pc-windows-msvc through `cargo xwin env` (the CI
-# runner's architecture; the Arm guest runs it under Prism), and the pinned cargo-nextest.exe (the version and SHA-256 of
-# tools/paddock-dev/src/ci_host/host_tools.rs, `dev ci host-tools --print-pin`) runs the archive in the guest. A package whose tests run
+# the test programs are built on the Mac: `cargo test --no-run` for aarch64-pc-windows-msvc through `cargo xwin env` (the guest is
+# Arm: an x64 program, nextest.exe included, does not start there, exit 0xC0000135, measured 2026-11-16), and the guest runs each
+# test in its own process, three at a time, the way nextest does (`<exe> --exact <test>`). Nextest's own features (test groups,
+# retries, the per-test timeouts of .config/nextest.toml) are therefore not mirrored. A package whose tests run
 # cargo (they read env!("CARGO"), a Mac path in a cross-built program) cannot run there: it is reported, not skipped, and the
 # run is then "not measured" unless something failed.
 #
@@ -30,21 +31,9 @@ fail() { echo "::error::member-gate-windows: $1. Next step: $2" >&2; exit 75; }
 commit=$(git -C "$root" rev-parse HEAD)
 scratch="${PADDOCK_MEMBER_GATE_SCRATCH:-/Volumes/vault-dev/dev-targets/scratch/member-gate-windows}"
 mkdir -p "$scratch/archives" || fail "cannot make $scratch" "check the disk"
-target=x86_64-pc-windows-msvc
+target=aarch64-pc-windows-msvc # the guest is Arm: an x64 program does not start there (exit 0xC0000135, measured 2026-11-16)
 
-# The pinned cargo-nextest.exe: the release the runners keep (`./dev ci host-tools-pin` prints its URL and SHA-256), fetched once into the
-# scratch folder and verified every time.
-read -r nx_version nx_url nx_sum nx_bin < <(cd "$root" && ./dev ci host-tools-pin) || fail "cannot read the nextest pin" "run ./dev ci host-tools-pin"
-nextest_exe="$scratch/nextest-$nx_version/$nx_bin"
-if [ ! -f "$nextest_exe" ]; then
-  mkdir -p "$scratch/nextest-$nx_version" && curl -fsSL --retry 3 -o "$scratch/nextest-$nx_version/pkg.zip" "$nx_url" \
-    || fail "cannot download $nx_url" "check the network, or copy the release to $scratch/nextest-$nx_version/pkg.zip"
-  got=$(shasum -a 256 "$scratch/nextest-$nx_version/pkg.zip" | awk '{print $1}')
-  [ "$got" = "$nx_sum" ] || { rm -f "$scratch/nextest-$nx_version/pkg.zip"; fail "cargo-nextest $nx_version checksum mismatch (got $got)" "the pin in host_tools.rs is the reference"; }
-  (cd "$scratch/nextest-$nx_version" && unzip -q -o pkg.zip "$nx_bin") || fail "cannot unpack the nextest release" "check the archive"
-fi
-
-# Build the archives on the Mac, one per spec, with the xwin cross environment of that workspace.
+# Build the test programs on the Mac, per spec, with the xwin cross environment of that workspace.
 declare -a archives=() names=() needs_toolchain=()
 for spec in "$@"; do
   read -r kind ws pkg <<<"$spec"
@@ -52,12 +41,17 @@ for spec in "$@"; do
   case "$pkg" in
     paddock-dev) needs_toolchain+=("$pkg"); continue ;; # its tests run cargo: see the header
   esac
-  out="$scratch/archives/$pkg.tar.zst"
-  echo "member-gate-windows: building the $pkg archive for $target" >&2
-  (cd "$root/$ws" && eval "$(cargo xwin env --target $target 2>/dev/null)" && CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$scratch/target}/$(echo "$ws" | tr / -)" \
-    nice -n 10 cargo nextest archive --locked --target "$target" -p "$pkg" --archive-file "$out" >&2) \
-    || fail "the Windows build of $pkg failed (cargo nextest archive)" "fix the build, or run the same command by hand in $ws"
-  archives+=("$out"); names+=("$pkg")
+  echo "member-gate-windows: building the $pkg test programs for $target" >&2
+  json="$scratch/archives/$pkg.json"
+  (cd "$root/$ws" && eval "$(cargo xwin env --target $target 2>/dev/null)" && CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$scratch/target}/$(echo "$ws" | tr / -)" RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static" \
+    nice -n 10 cargo test --locked --no-run --target "$target" -p "$pkg" --message-format=json >"$json") \
+    || fail "the Windows build of $pkg failed (cargo test --no-run)" "fix the build, or run the same command by hand in $ws"
+  while IFS= read -r exe; do archives+=("$exe"); names+=("$pkg"); done < <(python3 -c '
+import json,sys
+for l in open(sys.argv[1]):
+    try: m=json.loads(l)
+    except ValueError: continue
+    if m.get("reason")=="compiler-artifact" and m.get("executable") and m.get("profile",{}).get("test"): print(m["executable"])' "$json")
 done
 
 failed=0; ran=0
@@ -65,22 +59,40 @@ if [ ${#archives[@]} -gt 0 ]; then
   "$here/vm-win.sh" revert >&2 || fail "cannot revert the VM to clean-baseline" "see docs/testing/windows-test-vm.md"
   trap '"$here/vm-win.sh" stop >&2 || true; "$here/vm-win.sh" revert >&2 || true' EXIT
   "$here/vm-win.sh" start >&2 || fail "the VM did not start" "see docs/testing/windows-test-vm.md"
-  withs=(--with "$nextest_exe")
+  withs=()
   for a in "${archives[@]}"; do withs+=(--with "$a"); done
   # In the guest (Git bash, runner-like): the control line from the guest's own checkout, then each archive through nextest.
-  step='d=$(cygpath -u "$CI_LIKE_DIR")
+  step='set +e
+d=$(cygpath -u "$CI_LIKE_DIR")
 echo "other-os-control: os=windows tree=$(git rev-parse HEAD^{tree}) autocrlf=$(git config core.autocrlf) shell=bash temp=$TEMP ci-env=${CI:-unset}"
-rc=0
-for a in "$d"/*.tar.zst; do
-  echo "::group::nextest archive $(basename "$a")"
-  "$d/cargo-nextest.exe" nextest run --archive-file "$a" --workspace-remap "$(pwd)" --profile ci --no-fail-fast || { c=$?; [ "$c" = 100 ] && rc=100 || { [ "$rc" = 100 ] || rc=$c; }; }
+res=$(mktemp)
+run_one() { out=$("$1" --exact "$2" --test-threads 1 2>&1); c=$?; if [ $c = 0 ] && printf "%s" "$out" | grep -q " 1 passed"; then echo "PASS $2" >> "$3"; else echo "FAIL $2 (exit $c)" >> "$3"; printf "%s\n" "$out" | sed "s/^/    /"; fi; }
+export -f run_one
+for exe in "$d"/*.exe; do
+  echo "::group::$(basename "$exe")"
+  list=$("$exe" --list --format terse 2>&1); lc=$?
+  if [ "$lc" != 0 ] || [ -z "$list" ]; then echo "FAIL $(basename "$exe") --list (exit $lc): $list" | tee -a "$res"; continue; fi
+  while IFS= read -r t; do
+    run_one "$exe" "$t" "$res" &
+    while [ "$(jobs -r | wc -l)" -ge 3 ]; do wait -n; done
+  done < <(printf "%s\n" "$list" | sed -n "s/: test\$//p")
+  wait
   echo "::endgroup::"
 done
-exit $rc'
-  "$here/vm-win.sh" run --ci-like --ref "$commit" "${withs[@]}" -- "$step"
-  rc=$?
+pass=$(grep -c "^PASS" "$res" || true); fail=$(grep -c "^FAIL" "$res" || true)
+grep "^FAIL" "$res" || true
+echo "     Summary [   0.0s] $((pass + fail)) tests run: $pass passed, $fail failed"
+echo "other-os-result: failed=$fail"'
+  # The verdict travels as a line, not as an exit code: the ci-like wrapper turns the guest's exit 100 into 1.
+  log="$scratch/guest.log"
+  "$here/vm-win.sh" run --ci-like --ref "$commit" "${withs[@]}" -- "$step" 2>&1 | tee "$log"
+  rc=${PIPESTATUS[0]}
   ran=${#archives[@]}
-  case "$rc" in 0) ;; 100) failed=1 ;; *) echo "::error::member-gate-windows: the guest run exited $rc (not 0 or 100)" >&2; exit 75 ;; esac
+  [ "$rc" = 0 ] || { echo "::error::member-gate-windows: the guest run exited $rc, not a verdict" >&2; exit 75; }
+  case "$(tr -d "\r" <"$log" | sed -n 's/^other-os-result: failed=\([0-9]*\)$/\1/p' | tail -1)" in
+    0) ;; "") echo "::error::member-gate-windows: the guest printed no other-os-result line" >&2; exit 75 ;;
+    *) failed=1 ;;
+  esac
 fi
 if [ "$failed" = 1 ]; then exit 100; fi
 if [ ${#needs_toolchain[@]} -gt 0 ]; then

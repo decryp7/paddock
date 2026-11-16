@@ -36,11 +36,15 @@ root, with `TMPDIR` on an ext4 loop mount (the only addition to the container: `
 only after it checked each of those.
 
 **Windows** (`scripts/member-gate-windows.sh`): under the test machines lock (`vm-lock-run.sh`; busy is exit 75), the test
-programs are built on the Mac (`cargo xwin env` + `cargo nextest archive`, target `x86_64-pc-windows-msvc`, the runner's
-architecture; the Arm guest runs it under Prism), the guest is reverted to `clean-baseline`, started, and
-`vm-win.sh run --ci-like` runs the pinned `cargo-nextest.exe` (the release and SHA-256 of `host_tools.rs`, read through the new
-`./dev ci host-tools-pin`) over each archive. The guest command prints `other-os-control: os=windows tree=<tree>
-autocrlf=true ...` from its own checkout.
+programs are built on the Mac (`cargo xwin env` + `cargo test --no-run`, target `aarch64-pc-windows-msvc`, with
+`-C target-feature=+crt-static`), the guest is reverted to `clean-baseline`, started, and `vm-win.sh run --ci-like` runs each
+test in its own process, three at a time (`<exe> --exact <test>`, nextest's model). The guest command prints
+`other-os-control: os=windows tree=<tree> autocrlf=true ...` from its own checkout and its verdict as an
+`other-os-result: failed=<n>` line (the ci-like wrapper turns a guest exit 100 into 1, so an exit code cannot carry it).
+Measured 2026-11-16 on the guest: an x64 program does not start (exit 0xC0000135, a missing DLL), which includes the pinned
+`cargo-nextest.exe` (the x64 release is the only Windows one it pins), and an Arm program needs the static CRT for the same
+reason. So nextest itself does not run there; its test groups, retries and per-test timeouts (`.config/nextest.toml`) are not
+mirrored, and the guest's architecture is the Arm one (ADR 0087 amendment of 2026-11-13, S1), not the runner's.
 
 **The row** (ER-33): `passed` needs exit 0, the control line for this merge's tree and nextest's summary with tests run for every
 nextest target; `failed` is exit 100 with the control line; everything else (Docker down, the VM busy, a build failure, a missing
@@ -50,6 +54,8 @@ unchanged, the text says `REPORT-ONLY` and what would happen. The first green ru
 that flips it; a const assertion in the tests fails until that is decided.
 
 First report-only run: see "Measurements" at the end.
+
+A package whose tests run `cargo` (all of `paddock-dev`) cannot run on Windows (§2): its row is `not measured`, listed by name.
 
 ## 2. DECISION NEEDED: a Rust toolchain for the Windows guest
 
@@ -89,3 +95,17 @@ GitHub Actions and the Gitea runner here use one runner per OS, so CI itself is 
 before merge" is the point of this gate, and the local VM is the user's own decision (ADR 0087). The gate costs about 1.5
 agent-days beyond a docs-only change (module, scripts, tests, this note); the cheaper option, "run the other OSes only in CI",
 is what train 12 cost 17 hours for.
+
+## Measurements (2026-11-16, report-only; the machine was shared and often at 0% idle, so the times are upper bounds)
+
+A planted merge (the member adds `crates/paddock-testkit-start/tests/planted.rs`: a `#[cfg(unix)]` test that needs the macOS-only
+`/Applications`, and a `#[cfg(windows)]` test that starts a `#!/bin/sh` fixture) through `./dev merge check --gates`:
+
+| Row | Result | Time |
+| --- | --- | --- |
+| Linux | `failed`: `planted_linux_only_failure_a_macos_only_path_is_expected`; 34 other tests passed; control line `os=linux user=root tmp=ext4 clone=fresh-shallow gitconfig=none arch=x86_64` | 31 s (warm build volume; a cold conformance run was 203 s under emulation) |
+| Windows | `failed`: `planted_windows_only_failure_a_sh_shebang_fixture_cannot_run` (os error 193); 23 other tests passed | 90 to 120 s per run with the build warm; the bundle of the tree is 400 MB |
+
+The same Linux mode ran `wrapper::the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_is_pruned_meanwhile`
+(it fails 5 of 5 under `linux-container.sh`'s read-only `.git` mount) and it passed, because the run builds in its own
+writable fresh clone, as CI does: 71 s including the build, `1 test run: 1 passed`.

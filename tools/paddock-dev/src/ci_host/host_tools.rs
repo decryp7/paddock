@@ -59,16 +59,6 @@ pub const PIN: Pin = Pin {
     base_url: "https://github.com/nextest-rs/nextest/releases/download",
 };
 
-/// The Windows x86_64 download of a pin as one line: `<version> <url> <sha256> <program>` (exit code 0).
-pub fn print_windows_pin(pin: &Pin, out: &mut dyn Write) -> i32 {
-    let _ = writeln!(
-        out,
-        "{} {}/cargo-nextest-{}/cargo-nextest-{}-{} {} {}",
-        pin.version, pin.base_url, pin.version, pin.version, pin.windows.archive, pin.windows.sum, pin.windows.bin
-    );
-    0
-}
-
 /// How long the download, the extraction and the version probe may each run.
 const TOOL_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -308,24 +298,6 @@ fn hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
-
-    #[test]
-    fn the_pin_line_names_the_windows_release_the_runners_keep() {
-        let mut out = Vec::new();
-        assert_eq!(print_windows_pin(&PIN, &mut out), 0);
-        let line = String::from_utf8(out).unwrap();
-        let f: Vec<&str> = line.split_whitespace().collect();
-        assert_eq!(f.len(), 4, "{line}");
-        assert_eq!(f[0], PIN.version);
-        assert_eq!(
-            f[1],
-            format!(
-                "{0}/cargo-nextest-{1}/cargo-nextest-{1}-{2}",
-                PIN.base_url, PIN.version, PIN.windows.archive
-            )
-        );
-        assert_eq!((f[2], f[3]), (PIN.windows.sum, PIN.windows.bin));
-    }
 
     fn script(path: &Path, body: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
