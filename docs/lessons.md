@@ -2342,3 +2342,23 @@ from inside axe's scan: a 90 ms colour animation, the same on `::before`, and a 
 rescan version in both engines and are green now. **Rule:** a check that reads a moving page stops the motion; it does not try
 to detect every kind of motion. **Class: axe read colours that were still changing (fourth instance: the theme switch transition that `settleTransitions`
 was made for, the hover tooltip fading in, run 7872, this run, and the rescan's own misses).**
+
+## A test blamed for what an earlier test left behind: a shared leak detector (tests, 2026-11-16)
+
+The apps' and ui's Vitest suites run with `isolate: false` (one page per worker), so state one test leaves reaches a later
+test and the wrong test fails: debrief.yml run 8170 (a chunk loaded after teardown), a leaked mock-jobs singleton (its running
+job held the import slot of the next spec), nodes left in the body, a fake timer that hung unrelated specs (ER-29) and a
+module-level record a hook kept waiting on. Each was fixed where it showed, with a one-off hook in one app's `test-setup.ts`.
+**Fix (user decision, 2026-11-16):** one shared detector, `installLeakDetector` in `@decryp7/paddock-ui/testing`
+(`ui/projects/paddock-ui/testing/src/leaks.ts`). It records at the end of every test, after Angular's clean-up, what the test
+left (live timers and intervals, fake timers, body nodes, registered singletons, tracked in-flight work) and names the leaking
+test: a warning in `report` mode, a failure of that test in `fail` mode. Its hook never throws inside the `afterEach` chain (a
+throw there skips Angular's clean-up and the next TestBed test fails too: the kit's own lesson). **Rule:** anything
+module-level that a hook reads is drained per test (a reader takes what is recorded and clears it), so a stuck item fails only
+its own test; a new page-wide singleton is registered with `registerSingleton`; a new gate starts report-only (ER-41).
+**Roll-out:** report-only first; the first full runs found timers started by stores that outlive their injector (Toast, Spotter's
+dashboard and editor, Pitcrew's and Pitwall's service store, Pitwall's settings and presets), a wait in Pitcrew's
+`TauriBackend.init` and its mock, and the Debrief and Dyno findings listed in `docs/benchmarks.md`; the stores now clear their
+timers with `DestroyRef`, each with a test that was red first. The ui, Pitcrew, Pitwall and Spotter switched to `fail` with zero
+findings; Dyno and Debrief stay report-only until their lists are fixed. **Class: a test fails for what an earlier test left in
+a shared page (earlier: runs 7257/7274/7276 fake-timer spy, run 8170 teardown chunk, the mock-jobs singleton, the leftover DOM).**

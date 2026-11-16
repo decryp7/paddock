@@ -60,6 +60,54 @@ that quotes a result links to the block instead of carrying the only copy.
 
 ## Results of shared tooling
 
+### 2026-11-16, unit suites with the test leak detector (feat/test-leak-detector)
+
+- **Commit:** the tip of `feat/test-leak-detector`; base `3585bcab1` (train 13) plus `fix/debrief-startup-loads-drain`
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** base runs at about 40 to 46% CPU idle; the runs after at about 56% idle (other agents' jobs were on the machine; a run at 0% idle was discarded)
+- **Build:** the Angular unit-test builder with Vitest 5.0.5 (jsdom), `ui/dist` built once
+- **Corpus:** the apps' and the ui's own specs (no data files)
+- **Command:** `npx ng test --watch=false` in each `apps/<app>/app`; `npx ng test <project> --watch=false` in `ui`
+- **Runs:** one run before and one or two after (not interleaved), Vitest's `Duration`; the fail-mode runs of Pitcrew, Pitwall and Spotter were repeated three times (no red)
+- **Numbers:**
+
+  | Suite (tests) | Before | After | Mode now | Verdict |
+  |---|---|---|---|---|
+  | Debrief (4989, 4990 after) | 33.19 s | 32.20 s and 36.34 s (two runs) | report | within 10% (+9.5% on the slower run, -3% on the faster) |
+  | Dyno (1652) | 17.80 s | 16.16 s and 16.41 s | report | within 10% |
+  | Pitcrew (642, 646 after) | 9.90 s | 9.34 s | fail | within 10% |
+  | Pitwall (959, 962 after) | 9.01 s | 6.61 s | fail | within 10% (noise: the earlier run was loaded) |
+  | Spotter (496, 500 after) | 6.20 s | 3.97 s | fail | within 10% (noise) |
+  | ui paddock-ui (3036, 3065 after) | 11.70 s | 8.01 s | fail | within 10% (noise) |
+  | ui workbench-demo (2) | 0.71 s | 0.61 s | fail | within 10% |
+
+- **Notes:** the detector wraps `setTimeout`/`setInterval` once per worker and reads `new Error().stack` (limit 12 frames)
+  per call that is not Vitest's own; no cost shows beyond noise. Detector findings for Debrief and Dyno (report mode, lines
+  `[leak-detector] <test>: <kind>: <what>` on stderr): the `Duration` figures above carry them. Raw logs are in the
+  agent's scratch folder only.
+
+#### Findings left, by file and line (Debrief and Dyno stay report-only until these are fixed)
+
+Debrief (about 1,640 findings in about 660 tests, after `retryUntilAnswered` stopped leaving its 4 s retry timer): the shell's
+idle fallback `ui/projects/paddock-ui/shell/contributions/src/context.ts:122` (`setTimeout(work, 0)` when there is no
+`requestIdleCallback`: a test that boots the shell without a `SHELL_IDLE`, 530), `app/core/activity/runtime.ts:26` (a 0 ms
+clock timer, 388), the in-flight check ("start-up loads still in flight" after the settle hook, 190 to 340 per run: it depends on
+timing, so it cannot fail a test until a load that starts after the hook is accounted for), `app/jobs/mock-jobs.ts:474`
+(mock job steps still waiting, 63) with the singleton check (`mock jobs` left queued or running: 35 tests),
+`app/core/mock/mock-clock.ts:30,32,34` (the mock clock's timers and its 1.5 s interval, 120), `app/core/workspace/query.store.ts:59`
+(250 ms, 45), `app/profile/profile-draft.ts:131` (300 ms, 27), `app/analysis/query-session.ts:82` (150 ms, 19),
+`app/projects/open-requests.ts:64`, `app/popout/popout-backend.ts:420`, `app/core/activity/backend-activity.ts:111`,
+`app/settings/parsers/mock-parsers-backend.ts:30`, `app/profile/extractor-editor.ts:168`, `app/browser/mock-browser-backend.ts:170`,
+`app/settings/engine-settings.store.ts:171`, `app/dock/angular-panel.ts:202` and `app/inspector/context-section.ts:158` (the
+copy-label resets, fixed in the ui's copies with `DestroyRef`), `app/lifecycle/recovery.ts:75`, `app/workspace/live-tail.ts:62`,
+`app/onboarding/tour.service.ts:128`, `app/dialog-windows/dialog-shell.ts:202`, `app/sources/encoding/encoding-dialog.ts:92`,
+`app/settings/parsers/parsers.store.ts:93,121`; 13 nodes left in the body (`.debrief-float-cue`, `.sr-only`, a `div`).
+Dyno (about 100 findings in 55 tests): `app/core/mock-backend.ts:390` (the disk-map scan steps), `:431` and `:459` (the
+live and agent-status first pushes, 0 ms), `:437` (the live tick interval, never stopped by the specs), `:1728` (job steps),
+`app/state/counters.store.ts:111` (2 s poll), `app/state/processes.store.ts:59`, `app/state/live.store.ts:101`; 5 tests leave
+a `<main>` in the body. A `dispose()` on `MockBackend` that clears its timers, called from the specs' `afterEach`, covers most
+of Dyno's list.
+
 ### 2026-11-08, `./dev gates check` (feat/gates-c100)
 
 - **Commit:** the tip of `feat/gates-c100` before the app clippy fixes (see the branch)
