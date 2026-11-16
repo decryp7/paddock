@@ -941,7 +941,6 @@ dependencies = [
  "libc",
  "paddock-env",
  "paddock-proc",
- "paddock-testkit",
  "paddock-testkit-start",
  "proptest",
  "serde_json",

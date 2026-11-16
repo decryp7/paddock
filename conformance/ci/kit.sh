@@ -52,6 +52,10 @@ root=$(cd "$here/../.." && pwd)
 # `du -A || du --apparent-size` was the same shape). Answered before anything else here runs: no toolchain, no kit choice.
 #   portable volume-of <path>    the device number of the volume that holds <path> (fails, printing nothing, when it cannot be read)
 #   portable file-bytes <dir>    the length in bytes of the regular files below <dir>, hard links once; what cannot be read counts 0
+#   portable file-allocated <dir>  the bytes allocated to those files, the same way: folders are not files, and ext4 gives each
+#                                folder 4 KiB, so `du` called a folder of empty folders 20 KiB (CI run 8138). GNU find's %b and
+#                                BSD stat's %b (st_blocks) count 512-byte blocks; GNU stat's %b counts blocks of %B bytes
+#   portable file-sizes <dir>    both, from one pass: `<bytes> <allocated>` (a pass is a find and a stat of every file)
 if [ "${1:-}" = portable ]; then
   gnu_stat() { stat -c %s / >/dev/null 2>&1; }
   case "${2:-}" in
@@ -59,18 +63,20 @@ if [ "${1:-}" = portable ]; then
       if gnu_stat; then exec stat -c %d "${3:?volume-of needs a path}" 2>/dev/null; fi
       exec stat -f %d "${3:?volume-of needs a path}" 2>/dev/null
       ;;
-    file-bytes)
-      d="${3:?file-bytes needs a folder}"
+    file-bytes | file-allocated | file-sizes)
+      d="${3:?$2 needs a folder}"
       {
-        if find / -maxdepth 0 -printf '' >/dev/null 2>&1; then find "$d" -type f -printf '%D:%i %s\n'
-        elif gnu_stat; then find "$d" -type f -exec stat -c '%d:%i %s' {} +
-        else find "$d" -type f -exec stat -f '%d:%i %z' {} +
+        if find / -maxdepth 0 -printf '' >/dev/null 2>&1; then find "$d" -type f -printf '%D:%i %s %b\n'
+        elif gnu_stat; then find "$d" -type f -exec stat -c '%d:%i %s %b %B' {} +
+        else find "$d" -type f -exec stat -f '%d:%i %z %b' {} +
         fi
-      } 2>/dev/null | grep -E '^[0-9]+:[0-9]+ [0-9]+$' | sort -u | awk '{ s += $2 } END { printf "%.0f\n", s }'
+      } 2>/dev/null | grep -E '^[0-9]+:[0-9]+ [0-9]+ [0-9]+( [0-9]+)?$' | sort -u |
+        awk -v what="$2" '{ b += $2; a += $3 * ($4 == "" ? 512 : $4) }
+          END { if (what == "file-bytes") printf "%.0f\n", b; else if (what == "file-allocated") printf "%.0f\n", a; else printf "%.0f %.0f\n", b, a }'
       exit 0
       ;;
     *)
-      echo "usage: kit.sh portable volume-of <path> | file-bytes <dir>" >&2
+      echo "usage: kit.sh portable volume-of <path> | file-bytes <dir> | file-allocated <dir> | file-sizes <dir>" >&2
       exit 2
       ;;
   esac

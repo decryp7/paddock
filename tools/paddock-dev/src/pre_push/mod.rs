@@ -1145,12 +1145,26 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
             .and_then(|t| t.trim().parse::<u32>().ok())
             .unwrap_or(0)
     };
+    // File names through the shared reader (`merge_check::git::Git`): NUL-separated, never quoted, both names of a move
+    // (`--no-renames`), so a file moved out of a workspace still plans that workspace and a non-ASCII path is the real one.
+    let reader = crate::merge_check::git::Git::new(root);
+    let names = |args: &[&str]| {
+        reader
+            .paths(args)
+            .map_err(|e| CliError::failure(format!("{e}.")).with_hint("Run it by hand to see why."))
+    };
     // Every file a commit of the range touches, also one a later commit changes back: the tree diff alone would miss it, and the
     // commit is still one the push sends.
     let commit_files = |mb: &str, tip: &str| {
-        git_text(root, &["log", "--no-merges", "--name-only", "--format=", &format!("{mb}..{tip}")])
-            .map(|t| lines(Some(t)))
-            .ok_or_else(|| CliError::failure(format!("git log {mb}..{tip} failed.")).with_hint("Run it by hand to see why."))
+        names(&[
+            "log",
+            "--no-merges",
+            "--no-renames",
+            "-z",
+            "--name-only",
+            "--format=",
+            &format!("{mb}..{tip}"),
+        ])
     };
     let mut notes = Vec::new();
     let mut changed: Vec<String> = Vec::new();
@@ -1162,9 +1176,7 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
         notes.push(format!(
             "measured from {base} (merge base {mb}): every file the commits {mb}..{tip} change, one by one and in all"
         ));
-        let diff = git_text(root, &["diff", "--name-only", &mb, tip])
-            .ok_or_else(|| CliError::failure(format!("git diff {mb} {tip} failed.")).with_hint("Run it by hand to see why."))?;
-        changed.extend(lines(Some(diff)));
+        changed.extend(names(&["diff", "--name-only", "--no-renames", "-z", &mb, tip])?);
         changed.extend(commit_files(&mb, tip)?);
         if count(&mb, tip) > 0 {
             ranges.push(format!("{mb}..{tip}"));
@@ -1179,11 +1191,9 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
     } else {
         let mb = merge_base("HEAD")?;
         if files.is_empty() {
-            let tracked = git_text(root, &["diff", "--name-only", &mb])
-                .ok_or_else(|| CliError::failure(format!("git diff against {mb} failed.")).with_hint("Run it by hand to see why."))?;
-            changed.extend(lines(Some(tracked)));
+            changed.extend(names(&["diff", "--name-only", "--no-renames", "-z", &mb])?);
             changed.extend(commit_files(&mb, "HEAD")?);
-            changed.extend(lines(git_text(root, &["ls-files", "--others", "--exclude-standard"])));
+            changed.extend(names(&["ls-files", "-z", "--others", "--exclude-standard"])?);
             let dirty = lines(git_text(root, &["status", "--porcelain"]));
             if !dirty.is_empty() {
                 notes.push(format!(

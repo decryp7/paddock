@@ -100,7 +100,6 @@ The check index (generated from each module's id, title, scope, mode and needs):
 | C120 | No guessing of the cargo build-folder layout | both | report-only | all |
 | C121 | Declared data is read through its accessor, not by searching a workflow's text | root | report-only | all |
 | C122 | Tests compare paths as paths | root | report-only | all |
-| C123 | a Rust test starts ./dev, cargo or node only through paddock_testkit::TestCommand | root | report-only | all |
 | C124 | A gate's result is built through the shared outcome, never by hand | root | report-only | all |
 | C125 | No hard-coded machine disk paths | root | report-only | all |
 | C126 | Tests bound each step on progress and end every process they start | root | report-only | all |

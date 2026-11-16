@@ -2047,18 +2047,6 @@ env overrides, and refuse with a `Blocked: ... Next step: ...` message when they
 (`.claude/hooks/lib/paddockpaths.py`). Tests build temp repos at run time. **Rule:** a path that can be derived (from git, a
 config key or the script's own location) is never a literal default, and a guard whose input is missing fails closed.
 **Class: stale machine paths after a move** (earlier: the tart symlink and plists in paddock-bench/RESUME-AFTER-REBOOT.md).
-## A test child that inherits the machine's environment reads the machine (tests, 2026-11-13)
-Twice in one day a new environment lookup in a tool reached real machine state through tests: the pre-push integration tests ran
-the real heavy steps (`PATH` found `heavy.sh`), and on `fix/precommit-heavy-slot` the helper `dev()` found the real
-engineering-rules `heavy.sh` through `ENGINEERING_RULES` and the checkout beside the repository, and took machine-wide slots in
-`~/.cache/heavy-slots` (ER-14). Patching each test (`2ff5f5072`) leaves every other spawn site open for the next lookup, because
-a deny-list never contains the variable that bites next. Fix (ADR 0100): `paddock_testkit::TestCommand` starts `./dev`, `cargo` and
-`node` from an empty environment plus an allow-list (`allowed_names()`), with a private `HOME` and temp folder and a curated
-`PATH`; check C123 (report-only) flags a test that starts one of them any other way. Two things the cleaner environment exposed
-at once, both real: `lsof` lives in `/usr/sbin`, which a curated `PATH` must name, and `ps -o lstart=` prints another date format
-in a clean locale, so a test that compares a stamp must start `ps` through the same builder as the program that reads it.
-Lesson: give a test child what the test names and nothing else; Cargo's own test support removes a list of variables and
-keeps the rest, which is the shape that failed here.
 
 the same tools. **Class: acting on a reusable OS name without identity (rule 53).**
 
@@ -2278,3 +2266,32 @@ limit three times through work before the hang (a `git rev-parse` outside the ph
 hang, in the shell and in Rust (ADR 0103, "Amendment"). **Rule:** a test of a time limit times the thing that hangs, from a
 signal it gives, not the setup before it; state that an abandoned worker can still write is that worker's own. **Class: work before
 the hang point of a hung-phase test meeting its limit under load (third sighting; ADR 0103 amendment).**
+## A git-fixture property test timed out on Windows: count a fixture's processes (2026-11-15)
+The pre-push property test built 24 random git stacks in one test: 1,651 git processes, 17 s on the Mac, and past nextest's
+60 s limit on the Windows runner (run 8138, job 39335), where a process spawn costs about 100 ms. Enumerating the shapes (each
+train state once, each flag on and off in at least one) cut it to 267 processes and 2.9 s; each shape is now its own test, so
+nextest runs them in parallel and a failure names its shape. The test files are planned through the shared `-z --no-renames`
+reader, which the review found the production code had not used (a `git mv` out of a workspace and a non-ASCII path were missed;
+fixed with failing shapes first).
+**Rule:** before adding cases to a test that builds git repositories or many files, count the processes (or files) one case
+costs and multiply by Windows' spawn and file cost; split cases into separate tests so they run in parallel.
+**Class: tests that pass on the Mac and time out on Windows because of per-process or per-file cost; earlier: 50,000 files
+timed out on NTFS + Defender (Platforms, "Tests that pass on the Mac fail on Windows").**
+
+## Dyno's row-menu e2e failed once in about 100 runs: a live update redrew the focused row (tests, 2026-11-16)
+Symptom: in WebKit `tables.spec.ts` "after switching Apps to All, Shift+F10 opens the focused row's menu" failed once with
+`getByRole('menu')` not found and passed on its retry (run 8161, job 39628; three flaky marks in 368 runs of history).
+Causes listed with what would rule each out: the key reached the wrong element (a `keydown` listener showed the key on the row
+every time: ruled out); the menu opened before the list settled (no: it was added, then removed); the clock stood still (it
+did not: `page.clock.install()` lets time flow, a probe read 1,523 ms in 1.5 s); a re-render replaced the row. Root cause,
+measured: a live update redrew the row's element (an `Element.remove` hook showed `MatTable.renderRows` > `forEachIdentityChange` >
+`viewContainer.remove`). pd-table's virtual-scroll viewport puts the CDK table on its recycle strategy; a view reused from the
+row cache comes back with a new ViewRef (`ViewContainerRef.detach`, @angular/core `_debug_node-chunk.mjs` 9697-9701); `renderRows`
+records the row definition only for INSERTED views, not for REPLACED ones (cdk `table.mjs` 1602-1606); so the next identity-change
+render (1608-1617) recreates each reused view. It happens on any update where rows come and go, not only after a swap (20 views
+reused on the swap, the cache size; the row indexes matched, 0 mismatches). The row's trigger went with the element, so an open menu closed and
+the focus fell to the page. Probe (ticks forced during the key, WebKit and Chromium, 15 runs each): red 15 of 15 (WebKit 14) without a prior
+update, green 15 of 15 with one `clock.runFor(1000)` after the swap. Fix in the spec: take that update before the row gets the focus,
+and its comment no longer says the clock stands still. **Open (product):** the redraw is real for a user too (a row menu opened in
+the first second after a list swap closes on the next update); a fix needs a workaround in `pd-table` around the CDK table. **Class:
+a test assumed a quiet page while live updates ran (earlier: Debrief's Stop-button probe, 2026-11-15; this file's Escape fix, 0315ca827).**

@@ -1749,7 +1749,6 @@ dependencies = [
  "globset",
  "log",
  "paddock-proc",
- "paddock-testkit",
  "regex",
  "serde",
  "serde_json",
