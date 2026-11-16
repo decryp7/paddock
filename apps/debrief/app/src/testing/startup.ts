@@ -1,31 +1,29 @@
 import { ApplicationRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ShellContextHost } from '@decryp7/paddock-ui/shell/contributions';
-import { LAZY_COMMAND_SETS } from '../app/extensions/lazy-registration';
+import { startupLoadsSettled } from '../app/extensions/startup-loads';
 
 /**
- * Resolves when the app's start-up work that loads code is done: the app context's chunk, every lazy command set's
- * chunk, and whatever the application still has pending. It waits on the loads themselves, never on a clock, and only
- * waits: a load that fails is the concern of the spec that asked for it (`lazy-commands.spec.ts`).
+ * Resolves when the code loads that start-up began (the lazy command sets' chunks, see `app/extensions/startup-loads.ts`)
+ * are done and the application has nothing else pending. For a spec that boots `appConfig` and wants start-up finished
+ * at a known point; it waits on the loads themselves, never on a clock, and never starts a load of its own.
  */
 export async function settleStartup(): Promise<void> {
-  await settleLoads();
+  await startupLoadsSettled();
   await TestBed.inject(ApplicationRef).whenStable();
 }
 
-/** The chunk loads alone: they are real promises, so this also ends under fake timers (`whenStable` would not). */
-async function settleLoads(): Promise<void> {
-  await Promise.allSettled([TestBed.inject(ShellContextHost).load()]);
-  await Promise.allSettled(TestBed.inject(LAZY_COMMAND_SETS, []).map((set) => set.load()));
-}
-
 /**
- * The shared `afterEach` of `test-setup.ts`: when the test booted the app's lazy registrations, waits for their chunks
- * before TestBed tears the module down. Start-up begins those loads on its own (idle work, a gated key's microtask), so a
- * chunk that is still loading when the module goes away is imported after the environment is torn down, and Vitest
- * reports an `EnvironmentTeardownError` against whichever file runs next (debrief.yml run 8170).
+ * The shared `afterEach` of `test-setup.ts`: waits for the loads start-up began before TestBed tears the module down, so no
+ * chunk is imported into a torn-down environment (Vitest reports that as an `EnvironmentTeardownError` against whichever
+ * file runs next: debrief.yml run 8170).
+ *
+ * It reads the record only: it never touches TestBed (a hook that built the module could throw, and Vitest would then
+ * skip Angular's own cleanup and blame the next test), never starts a load, never rejects (a failed start-up load is
+ * swallowed by its caller by design, and `lazy-commands.spec.ts` asserts that every set loads) and waits on real
+ * promises only, so it ends under fake timers. A hook that times out (a load that never settles) still skips Angular's own
+ * cleanup for that one test; the record is drained first, so no later test waits on it. Covered: the lazy command sets' chunks, which are Debrief's only start-up
+ * `import()`s (it has no app-context prefetch; its initializers import nothing lazily).
  */
 export async function settleBootedStartup(): Promise<void> {
-  if (TestBed.inject(LAZY_COMMAND_SETS, null) === null) return;
-  await settleLoads();
+  await startupLoadsSettled();
 }
