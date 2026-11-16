@@ -848,8 +848,18 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
   });
 
   describe('live tail', () => {
+    /** Moves the feed's clock one tick at a time until `done()`, letting the grid take each batch (a bounded number of ticks). */
+    async function tickUntil(clock: ManualClock, fixture: Awaited<ReturnType<typeof render>>['fixture'], done: () => boolean) {
+      for (let i = 0; i < 40 && !done(); i++) {
+        await clock.advance(25);
+        await flush(fixture);
+      }
+      expect(done()).toBe(true);
+    }
+
     async function live(descending: boolean, scrollRows: number | 'end') {
-      const backend = synthetic(5000, { liveMs: 25 });
+      const clock = new ManualClock();
+      const backend = synthetic(5000, { liveMs: 25, clock });
       const { fixture, store, grid, vp } = await render(backend);
       if (descending) store.toggleSort();
       await flush(fixture);
@@ -863,7 +873,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       const tail = TestBed.inject(LiveTail);
       await tail.toggle();
       expect(tail.enabled()).toBe(true);
-      await vi.waitFor(() => expect(grid.total()).toBeGreaterThan(before.total + 1), { timeout: 3000 });
+      await tickUntil(clock, fixture, () => grid.total() > before.total + 1);
       await tail.toggle();
       await flush(fixture);
       return { fixture, store, grid, before, tail };
@@ -989,7 +999,8 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     });
 
     it('keeps the same rows selected when new events are inserted above them', async () => {
-      const backend = synthetic(5000, { liveMs: 25 });
+      const clock = new ManualClock();
+      const backend = synthetic(5000, { liveMs: 25, clock });
       const { fixture, store, grid, vp } = await render(backend);
       store.toggleSort();
       await flush(fixture);
@@ -1007,7 +1018,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       const total = grid.total();
       const tail = TestBed.inject(LiveTail);
       await tail.toggle();
-      await vi.waitFor(() => expect(grid.total()).toBeGreaterThan(total + 1), { timeout: 3000 });
+      await tickUntil(clock, fixture, () => grid.total() > total + 1);
       await tail.toggle();
       await flush(fixture);
       expect(selectedIds()).toEqual(before);

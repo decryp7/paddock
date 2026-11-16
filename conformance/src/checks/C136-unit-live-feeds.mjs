@@ -3,16 +3,19 @@
 // updates, which the e2e kit's `pauseLive` / `withLivePaused` cover). Common practice for a feed on timers is a clock the test
 // advances (Debrief's `ManualClock` in apps/debrief/app/src/testing/manual-clock.ts, which every `MockBackend` takes as `clock`) or
 // Vitest's fake timers, never the page's real ones.
-// Flagged: an `it(` / `test(` block of a unit spec (`*.spec.ts` under `apps/` or `ui/`, not an e2e folder) that starts a live feed on
-// the page's own timers: a `MockBackend(` or `synthetic(` call whose options (any number of lines) have `liveMs: <n>` below one second
-// (a long `liveMs` never ticks and is not flagged); unless the same block, or the code outside every block of
-// the file (a shared `setup`), uses `ManualClock`, `useFakeTimers` or a `clock:` option. Findings are warnings: report-only until its
-// first green run on the real tree is recorded here (ER-41). Recorded: not yet.
+// Flagged: a `MockBackend(` or `synthetic(` call in a unit spec (`*.spec.ts` under `apps/` or `ui/`, not an e2e folder) whose options (any
+// number of lines) have `liveMs: <literal>` below one second, a feed that ticks on the page's own timers (a long `liveMs` never ticks and
+// is not flagged; only literals are judged, a `liveMs` held in a constant is not read). Each call is judged by itself: it is covered when
+// its own options have `clock:` or the shorthand `clock`, or when its `it(` / `test(` block, or a `beforeEach` that encloses it, calls
+// `useFakeTimers`. A mention of `ManualClock` elsewhere in the file (an import) covers nothing. Findings are warnings: report-only until
+// its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
 import { warn } from '../finding.mjs';
 
 const SPEC = /^(?:apps|ui)\/.*\.spec\.ts$/;
 const SKIP = /(?:^|\/)(?:node_modules|dist|e2e)\//;
-const MOVES = /\b(?:ManualClock|useFakeTimers)\b|\bclock\s*:/;
+const FAKES = /\buseFakeTimers\s*\(/;
+const CLOCK_OPTION = /\bclock\b\s*[:,}]/;
+const BEFORE_EACH = /^(\s*)beforeEach\s*\(/;
 const BLOCK = /^\s*(?:it|test)(?:\.\w+)*\s*\(/;
 const CALL = /(?:\bMockBackend\b\s*\(|\bsynthetic\s*\()/g;
 const FIX = 'Run the feed on a clock the test moves: `new MockBackend({ liveMs, clock })` with a `ManualClock` and `await clock.advance(ms)` per tick (apps/debrief/app/src/testing/manual-clock.ts), or `vi.useFakeTimers()`.';
@@ -30,29 +33,46 @@ function span(text, from) {
   return text.slice(from, i);
 }
 
-/** [{ line, why }] of every live-feed start in `text` that no clock the test moves covers (judged per it() block). */
+/** The 0-based line ranges [from, to) in which a `beforeEach` that calls `useFakeTimers` is in force (its end to the end of its scope). */
+function fakedScopes(lines) {
+  const scopes = [];
+  lines.forEach((l, i) => {
+    const m = BEFORE_EACH.exec(l);
+    if (!m) return;
+    const indent = m[1].length;
+    const closes = (j) => /^\s*\}/.test(lines[j]) && lines[j].length - lines[j].trimStart().length <= indent;
+    let end = i;
+    while (end < lines.length - 1 && !(end > i && closes(end)) && !(end === i && /\}\)\s*;?\s*$/.test(l))) end++;
+    if (!FAKES.test(lines.slice(i, end + 1).join('\n'))) return;
+    let scope = end + 1;
+    while (scope < lines.length && !(closes(scope) && lines[scope].length - lines[scope].trimStart().length < indent)) scope++;
+    scopes.push([end + 1, scope]);
+  });
+  return scopes;
+}
+
+/** [{ line, why }] of every ticking live-feed start in `text` that no clock the test moves covers (each call judged by itself). */
 export function liveStarts(text) {
   const lines = text.split('\n');
   const starts = [];
   lines.forEach((l, i) => {
     if (BLOCK.test(l)) starts.push(i);
   });
-  // Blocks run from one it( to the next (the last to the end); the rest of the file is shared code.
+  // Blocks run from one it( to the next (the last to the end).
   const blocks = starts.map((s, k) => ({ from: s, to: k + 1 < starts.length ? starts[k + 1] : lines.length }));
-  const inBlock = (i) => blocks.find((b) => i >= b.from && i < b.to);
-  const sharedMoves = MOVES.test(lines.filter((_, i) => !inBlock(i)).join('\n'));
+  const scopes = fakedScopes(lines);
   const found = [];
-  const note = (index, why) => {
-    const line = lineOf(text, index);
-    const block = inBlock(line - 1);
-    if (sharedMoves || (block && MOVES.test(lines.slice(block.from, block.to).join('\n')))) return;
-    found.push({ line, why });
-  };
   for (const m of text.matchAll(CALL)) {
-    if (lineOfComment(lines, lineOf(text, m.index))) continue;
+    const callLine = lineOf(text, m.index);
+    if (lineOfComment(lines, callLine)) continue;
     const opts = span(text, m.index + m[0].length);
     const live = /\bliveMs\s*:\s*(\d{1,3})\b(?![_\d])/.exec(opts);
-    if (live) note(m.index + m[0].length + live.index, `starts a live mock feed on the page's timers (\`liveMs: ${live[1]}\`)`);
+    if (!live || CLOCK_OPTION.test(opts)) continue;
+    const i = callLine - 1;
+    const block = blocks.find((b) => i >= b.from && i < b.to);
+    if (block && FAKES.test(lines.slice(block.from, block.to).join('\n'))) continue;
+    if (scopes.some(([from, to]) => i >= from && i < to)) continue;
+    found.push({ line: lineOf(text, m.index + m[0].length + live.index), why: `starts a live mock feed on the page's timers (\`liveMs: ${live[1]}\`)` });
   }
   return found.sort((a, b) => a.line - b.line);
 }
@@ -63,7 +83,7 @@ export default {
   id: 'C136',
   scope: 'root',
   mode: 'report-only',
-  title: 'A unit test that starts a live mock feed holds it before it asserts',
+  title: 'A unit test that starts a live mock feed runs it on a clock the test moves',
   rule: 21,
   run(ctx) {
     const out = [];
@@ -74,7 +94,7 @@ export default {
         out.push(warn('C136', 21, f, 1, 'not measured: the file cannot be read', 'Fix the file, then run the check again.'));
         continue;
       }
-      for (const { line, why } of liveStarts(text)) out.push(warn('C136', 21, f, line, `${why} and neither its block nor the shared code of the file moves a clock or fakes the timers`, FIX));
+      for (const { line, why } of liveStarts(text)) out.push(warn('C136', 21, f, line, `${why} and its call has no clock option and no useFakeTimers covers it`, FIX));
     }
     return out;
   },

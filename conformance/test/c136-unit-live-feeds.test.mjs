@@ -33,20 +33,37 @@ test('C136 good: a feed too slow to tick, an options parser, a comment are not f
   assert.deepEqual(liveStarts("it('x', () => { bridge.onLive('summary', fn); });\n"), []);
 });
 
-test('C136 is judged per it() block: a clock in the same block or in the shared code covers it, a clock in another block does not', () => {
-  const own = "it('a', () => {\n  const c = new ManualClock();\n  new MockBackend({ liveMs: 25, clock: c });\n});\n";
-  assert.deepEqual(liveStarts(own), []);
+test('C136 judges each call by itself: a clock option or the shorthand covers it, an import of ManualClock does not', () => {
+  const importOnly = "import { ManualClock } from '../testing/manual-clock';\nit('a', () => {\n  new MockBackend({ liveMs: 25 });\n});\n";
+  assert.deepEqual(liveStarts(importOnly).map((f) => f.line), [3]);
+  assert.deepEqual(liveStarts("it('a', () => {\n  const c = new ManualClock();\n  new MockBackend({ liveMs: 25, clock: c });\n});\n"), []);
+  assert.deepEqual(liveStarts("it('a', () => {\n  const clock = new ManualClock();\n  new MockBackend({ liveMs: 25, clock });\n});\n"), []);
+  assert.deepEqual(liveStarts("it('a', () => {\n  new MockBackend({ clock, liveMs: 25 });\n});\n"), []);
+  // a helper outside every it() with no clock is flagged, whatever the file imports
+  const helper = "import { ManualClock } from 'x';\nasync function live() {\n  const b = synthetic(5000, { liveMs: 25 });\n}\n";
+  assert.deepEqual(liveStarts(helper).map((f) => f.line), [3]);
+  // a clock in another call or another block covers nothing
+  assert.deepEqual(liveStarts("it('a', () => {\n  new MockBackend({ clock });\n});\nit('b', () => {\n  new MockBackend({ liveMs: 25 });\n});\n").map((f) => f.line), [5]);
+});
+
+test('C136 fake timers cover the it() block and an enclosing beforeEach, not another describe', () => {
   assert.deepEqual(liveStarts("it('a', () => {\n  vi.useFakeTimers();\n  new MockBackend({ liveMs: 25 });\n});\n"), []);
-  const shared = "const make = () => new MockBackend({ liveMs: 15, clock: new ManualClock() });\nit('a', () => {\n  make();\n  new MockBackend({ liveMs: 25 });\n});\n";
-  assert.deepEqual(liveStarts(shared), []);
-  const other = "it('a', () => {\n  new ManualClock();\n});\nit('b', () => {\n  new MockBackend({ liveMs: 25 });\n});\n";
-  assert.deepEqual(liveStarts(other).map((f) => f.line), [5]);
+  const before = "describe('x', () => {\n  beforeEach(() => {\n    vi.useFakeTimers();\n  });\n  it('a', () => {\n    new MockBackend({ liveMs: 25 });\n  });\n});\n";
+  assert.deepEqual(liveStarts(before), []);
+  const other = "describe('x', () => {\n  beforeEach(() => {\n    vi.useFakeTimers();\n  });\n  it('a', () => {});\n});\ndescribe('y', () => {\n  it('b', () => {\n    new MockBackend({ liveMs: 25 });\n  });\n});\n";
+  assert.deepEqual(liveStarts(other).map((f) => f.line), [9]);
+  const usedElsewhere = "describe('x', () => {\n  it('a', () => {\n    vi.useFakeTimers();\n  });\n  it('b', () => {\n    new MockBackend({ liveMs: 25 });\n  });\n});\n";
+  assert.deepEqual(liveStarts(usedElsewhere).map((f) => f.line), [6]);
+});
+
+test('C136 reads literals only: a liveMs held in a constant is not judged', () => {
+  assert.deepEqual(liveStarts("const LIVE_MS = 25;\nit('a', () => {\n  new MockBackend({ liveMs: LIVE_MS });\n});\n"), []);
 });
 
 test('C136 through the runner: unit specs only, warnings only', async () => {
   const files = {
     'apps/a/src/a.spec.ts': "it('x', () => {\n  new MockBackend({ liveMs: 20 });\n});\n",
-    'apps/a/src/held.spec.ts': "it('x', () => {\n  new ManualClock();\n  new MockBackend({ liveMs: 20 });\n});\n",
+    'apps/a/src/held.spec.ts': "it('x', () => {\n  const clock = new ManualClock();\n  new MockBackend({ liveMs: 20, clock });\n});\n",
     'apps/a/e2e/e.spec.ts': "it('x', () => {\n  new MockBackend({ liveMs: 20 });\n});\n",
     'apps/a/src/b.ts': 'const b = new MockBackend({ liveMs: 20 });\n',
   };

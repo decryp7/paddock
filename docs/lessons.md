@@ -2401,16 +2401,14 @@ WebKit clamp such a write, and the scroll event that follows reports the clamped
 newest row when events are pushed between the reveal pages` (new mock switch `mockPageStaggerMs` answers pages at different times, pinned
 clock moves them and the 50 ms ticks): red in both engines without the deferred write, green 3 of 3 in Chromium and in WebKit with it.
 
-2026-11-17, Debrief `helpers.spec.ts` leak (open fix item, ER-28 cause list). The leak detector (report mode) now and then names a live
-`setTimeout(0)` from `settle()` (`apps/debrief/app/src/testing/helpers.ts:191`) after a `settleUntil` test in `helpers.spec.ts`. Not yet
-reproduced, so no cause is confirmed. Plausible causes, each with the observation that rules it out: (1) a `settleUntil` that timed out
-leaves its `vi.waitFor` callback running a `settle()` that has already started its `setTimeout(0)`; ruled out when the leak shows in a test
-whose `settleUntil` succeeded; (2) the test ends between `await Promise.resolve()` and the timer, and `assertSameTest` only throws after the
-timer fires; ruled out when the stack of the leaked timer is created before the test's end (detector stack names the call); (3) a spec in the
-same file that fakes timers (`vi.useFakeTimers`) and leaves a fake `setTimeout` that `settle()` then arms; ruled out when no test in
-`helpers.spec.ts` installs fake timers before the leaking one; (4) the detector's own `wrapTimers` counts a timer armed by the previous test's
-`afterEach`. Next step: run `helpers.spec.ts` alone 50 times in a loop with the leak detector in `fail` mode and keep the stack the detector prints;
-fix through `assertSameTest` before the timer is armed. Fix with the failing run first (ER-11); no sleep or raised timeout (ER-12).
+2026-11-17, Debrief `helpers.spec.ts` leak (fixed, ER-28). Debrief runs the leak detector in fail mode, and the timeout spec of `settleUntil`
+failed 7 of 300 runs (one process, the spec repeated) with "left a live setTimeout(0) started at helpers.ts:191" (`settle()`). Causes listed
+before measuring: (1) `vi.waitFor` rejects at its timeout while an attempt is inside `settle()` waiting on its `setTimeout(0)`; (2) the test
+ends between the first `await` and the timer; (3) fake timers left by another spec of the file; (4) the detector counting the previous test's
+timer. (3) and (4) are out: the file installs no fake timers and the leak named this test's own call. (1) and (2) are the same race. Confirmed:
+a spec that stretches every zero-delay timer to 20 ms and times out at 5 ms fails every time without the fix (the timer is pending when the
+wait rejects) and passes with it; the repeated run went from 7 of 300 red to 0 of 300. Fix: `settleUntil` awaits its last attempt before it
+returns or throws, so no timer of its own outlives it. No sleep and no longer timeout (ER-12).
 
 2026-11-17, unit tests of live mock feeds. Only the Debrief events-grid live tail (run 8191) was a unit test asserting a value while a
 feed kept changing it; the Dyno row menu under live updates was an e2e case (the e2e kit has `pauseLive` and `withLivePaused`). Common

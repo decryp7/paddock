@@ -106,7 +106,7 @@ The check index (generated from each module's id, title, scope, mode and needs):
 | C127 | A recursive delete of a computed path in a shell script goes through safe_rm | root | report-only | all |
 | C128 | Tests take a recorded pid's identity through the kit, never ProcessId::of | root | report-only | all |
 | C135 | The test leak detector is switched off only where listed | root | report-only | all |
-| C136 | A unit test that starts a live mock feed holds it before it asserts | root | report-only | all |
+| C136 | A unit test that starts a live mock feed runs it on a clock the test moves | root | report-only | all |
 <!-- checks:end -->
 
 Notes per check (written by hand; the index above is the complete list):
