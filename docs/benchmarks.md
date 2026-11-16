@@ -1540,3 +1540,39 @@ screen over ui, Dyno and Pitwall, 409 tests) is in this branch's history, commit
   (`CannotCache(incremental)`), nor are build scripts, binaries and proc-macros. The empty-cache run being faster than the
   no-sccache run is noise of single runs on a loaded machine, not a sccache effect. Not measured: an app workspace,
   Linux, Windows, release profile.
+
+## Local sccache: local disk against RustFS, and the CI-like environment (2026-11-16, feat/local-sccache)
+
+- **Command:** `cargo build --locked --config build.target-dir='<scratch>'` with `RUSTC_WRAPPER=<sccache 0.19.0>`; `tools/paddock-dev` (dev
+  profile) and `cargo build -p dyno-cli` in `apps/dyno`; `CARGO_BUILD_JOBS=2`, `RUSTUP_AUTO_INSTALL=0`, the default `CARGO_HOME`; the
+  target folder removed before each run; `--zero-stats` before each; two sparse detached worktrees A and B of 3585bcab1 at different
+  paths; single runs. The CPU idle was 30% or more on two readings a minute apart before each series (38 and 41; 60 and 58; 60 and 59).
+  The scripts were in the scratch folder, not committed.
+- **Hardware / OS:** Mac mini, macOS 27.2 (Darwin 27.2.0), arm64; RustFS at 172.16.1.220:15000 on the LAN, plain HTTP, path-style.
+- **Numbers (wall seconds, Rust hits / Rust compiles):**
+
+  | Workspace | Run | Local disk | RustFS (S3) |
+  |---|---|---|---|
+  | paddock-dev | no sccache, cold | 70 | n/a |
+  | paddock-dev | empty cache, worktree A | 55, 0 / 152 | 58, 0 / 152 |
+  | paddock-dev | warm cache, worktree B | 32, 126 / 152 (83%) | 37, 126 / 152 (83%) |
+  | dyno-cli | no sccache, cold | 141 | n/a |
+  | dyno-cli | empty cache, worktree A | 92, 2 / 138 | 90, 2 / 138 |
+  | dyno-cli | warm cache, worktree B | 46, 111 / 138 (80%) | 48, 111 / 138 (80%) |
+
+- **CI-like environment, local disk, cache filled by the agent runs above (paddock-dev, worktree A's path, another build folder):**
+
+  | Setting of the CI-like run | Wall (s) | Hits |
+  |---|---|---|
+  | `CARGO_INCREMENTAL=0` as a variable (what `setup-rust` writes to `$GITHUB_ENV`) | 63 | 6 / 153 (4%) |
+  | the same setting as `--config build.incremental=false` | 38 | 126 / 159 (79%) |
+  | dyno-cli, `--config build.incremental=false` | 45 | 111 / 153 (73%) |
+
+- **Not measured:** the `CARGO_TARGET_DIR` control in this series (the script failed on bash 3's empty array; the earlier note measured it:
+  0 / 146); Linux, Windows, a release profile; a second machine; the cache's size on RustFS (the local cache was 625 MiB after all runs).
+- **First RustFS attempt:** the first series (prefix `bench-20261116233304`) had a write error on every compile (138 of 138 on Dyno) and so
+  0 hits; the cause was not found (a debug run a few minutes later, with the same settings and a small build, had none). The series above
+  is a second run from scratch with a new prefix and no write errors. Treat RustFS as unproven under load until it has run for days.
+- **Reading:** passing the folder as configuration gives the 80% across worktrees on both workspaces; the S3 backend on the LAN costs
+  about 5 s more on a warm build than the local disk (37 against 32 s, 48 against 46 s) and needs the network and the key. The CI-like
+  run hits the agents' entries only when `CARGO_INCREMENTAL=0` is cargo configuration: the variable is part of sccache's key.

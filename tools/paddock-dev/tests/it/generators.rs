@@ -98,6 +98,8 @@ impl Repo {
         let out = self
             .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
             .env("PADDOCK_DEV_TARGET_DIR", self.builds.path())
+            // A test never starts a compile-cache server on the machine it runs on (ER-45).
+            .env("PADDOCK_SCCACHE", "off")
             .env("HOME", self.home.path())
             .args(args)
             .arg("--root")

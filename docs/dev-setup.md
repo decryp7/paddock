@@ -88,6 +88,48 @@ passes `--config` on every cargo step. Never put a script between cargo and scca
 whose 8191-character command line limit rustc's arguments for a large crate (windows-sys) exceed. The workspace's own path crates still
 key on their checkout path (`CARGO_MANIFEST_DIR`); a symlink does not help, cargo uses the physical path.
 
+### Local sccache
+
+Agents' builds use one local sccache 0.19.0 (the CI pin and checksums, `tools/paddock-dev/src/ci_setup_rust.rs`), set by Paddock's
+tools and never by your shell profile (user decision 2026-11-16; docs/research/sccache-basedirs-2026-11-16.md):
+
+- `eval "$(./dev sccache env)"` installs the pinned release into `<PADDOCK_DEV_HOME or ~/.paddock-dev>/tools/sccache/0.19.0/` (never
+  `~/.cargo`), starts the one server on the default port 4226, and prints `export RUSTC_WRAPPER=...` lines for that shell. Run it
+  once per machine to install; the push gates and `./dev gen check` then use the installed copy by themselves and never download.
+- It is off, with one `::warning::` line and a build without the cache, when sccache is not installed, the server does not
+  start, or a server on the port uses another cache. It is off without a warning in CI (`CI`, `GITHUB_ACTIONS`), with
+  `PADDOCK_SCCACHE=off`, or when `RUSTC_WRAPPER` is already set.
+- The build folder goes in as `--config build.target-dir=...` in every tool (see AGENTS.md, "Build folders").
+- **One setting picks the backend, `PADDOCK_SCCACHE_BACKEND`:** `local` (the default; `SCCACHE_DIR` and `SCCACHE_CACHE_SIZE` from
+  the profile above) or `s3` (a shared cache on an S3-compatible store, through sccache's own S3 support). `s3` needs
+  `PADDOCK_SCCACHE_S3_BUCKET` and `PADDOCK_SCCACHE_S3_ENDPOINT` (`host:port`), and optionally `PADDOCK_SCCACHE_S3_REGION` (default
+  `auto`), `PADDOCK_SCCACHE_S3_SSL` (`true`; default `false`) and `PADDOCK_SCCACHE_S3_PREFIX` (default `paddock`).
+- **S3 credentials are never in the repository, a log or a message.** They are read from `AWS_ACCESS_KEY_ID` and
+  `AWS_SECRET_ACCESS_KEY` in the environment, else from `~/.config/paddock/sccache-s3.env` (`$XDG_CONFIG_HOME/paddock/sccache-s3.env`,
+  or the file `PADDOCK_SCCACHE_ENV_FILE` names): two `NAME=value` lines, mode 600 (a file others can read is refused). The tools
+  print only `credentials configured` or `credentials missing`. The macOS keychain is not read by the tools (it would raise a
+  dialog); export the key from it into the file yourself.
+- One server takes one cache at a time. To switch the backend, run `sccache --stop-server` once, then the next build starts the
+  server with the new setting. A server on the port that uses another cache is never stopped by the tools.
+
+The shared RustFS cache (S3 API `http://172.16.1.220:15000`, bucket `sccache-paddock`, 50 GiB quota, policy `sccache-paddock-rw`):
+`PADDOCK_SCCACHE_BACKEND=s3 PADDOCK_SCCACHE_S3_BUCKET=sccache-paddock PADDOCK_SCCACHE_S3_ENDPOINT=172.16.1.220:15000`, plus the
+key in the file above. Create the access key bound to that policy in the RustFS console (port 15001) and write it as:
+
+```sh
+mkdir -p ~/.config/paddock && umask 077 && cat > ~/.config/paddock/sccache-s3.env <<'KEYS'
+AWS_ACCESS_KEY_ID=<access key>
+AWS_SECRET_ACCESS_KEY=<secret key>
+KEYS
+chmod 600 ~/.config/paddock/sccache-s3.env
+```
+
+**The Mac CI runner shares the agents' local cache.** It is a runner setting, not a workflow one (agents never change it, ER-14):
+in the runner's `config.yaml`, under `runner.envs`, set `PADDOCK_SHARED_SCCACHE_DIR: <dev-targets>/sccache` (the same folder as
+`SCCACHE_DIR` in the profile; the user that runs the runner must own it, mode 755, and `SCCACHE_CACHE_SIZE` there should match).
+`setup-rust` then makes a macOS job join the one server on port 4226 instead of starting its own on a slot port, and never stops
+it. Windows and Linux jobs keep their per-slot folders and ports.
+
 **Linker on Linux.** On a Linux development machine use mold (`sudo apt install mold`), in `~/.cargo/config.toml`:
 
 ```toml

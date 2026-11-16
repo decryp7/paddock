@@ -35,6 +35,8 @@ fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>, test_off: bool) -> 
         .args(args)
         .current_dir(root)
         .env("PATH", path)
+        // A test never starts a compile-cache server on the machine it runs on (ER-45).
+        .env("PADDOCK_SCCACHE", "off")
         .env_remove("PADDOCK_HEAVY")
         .envs(heavy.map(|h| ("PADDOCK_HEAVY", h)))
         .envs(test_off.then_some(("PADDOCK_TEST_HEAVY_OFF", "1")))

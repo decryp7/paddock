@@ -274,7 +274,9 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
         }
     };
     let stdin = if args.refs_from_stdin { read_stdin()? } else { String::new() };
-    command_in(args, &root, &stdin, &RealLookups { root: root.clone() })
+    // Only here, never in `command_in`: the unit tests of the push gate must not start a server on the machine they run on (ER-45).
+    let wrapper = crate::local_sccache::prepare_and_say(&std::env::vars().collect(), crate::local_sccache::Install::Never);
+    command_in(args, &root, &stdin, &RealLookups { root: root.clone() }, wrapper)
 }
 
 /// The lookups of one run, `git ls-remote` read once per remote: the base choice and the known-commit lookup ask the same question.
@@ -302,7 +304,13 @@ impl known::Lookups for OnceLookups<'_> {
 }
 
 /// [`command`] with the repository, git's pre-push lines and the outside lookups given.
-fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lookups) -> Result<Report, CliError> {
+fn command_in(
+    args: &PrePushArgs,
+    root: &Path,
+    stdin: &str,
+    look: &dyn known::Lookups,
+    wrapper: Option<crate::local_sccache::Ready>,
+) -> Result<Report, CliError> {
     let look = &OnceLookups {
         inner: look,
         listings: Default::default(),
@@ -398,6 +406,7 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
         built_heavy: Default::default(),
         budget_end: std::time::Instant::now() + BUDGET,
         priority: pushes.iter().any(|p| budget::is_landing_ref(&p.remote_ref)),
+        wrapper,
     };
     let queue = queue_max(&env);
     let history = GitHistory::new(&work, GIT_TIMEOUT);

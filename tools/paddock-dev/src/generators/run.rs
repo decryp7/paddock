@@ -105,6 +105,8 @@ pub struct Real {
     default_roots: Vec<PathBuf>,
     /// The heavy built from the tree, held for this whole run (never the shared cache path: see `tool_cache::Held`).
     built_heavy: OnceLock<Result<crate::tool_cache::Held, String>>,
+    /// The local sccache wrapper (`None`: off, or a test; [`crate::local_sccache`]).
+    wrapper: Option<crate::local_sccache::Ready>,
 }
 
 impl Real {
@@ -113,7 +115,11 @@ impl Real {
         let env: HashMap<String, String> = std::env::vars().collect();
         // The roots `./dev disk` tracks (PADDOCK_DISK_ROOTS, else its defaults): no machine path is named here.
         let roots = crate::disk::config::Settings::resolve(&crate::disk::config::CommonArgs::default(), &|k| env.get(k).cloned()).roots;
-        Real::with(root, env, roots)
+        let wrapper = crate::local_sccache::prepare_and_say(&env, crate::local_sccache::Install::Never);
+        Real {
+            wrapper,
+            ..Real::with(root, env, roots)
+        }
     }
 
     /// The same with an explicit environment and default roots (tests).
@@ -123,6 +129,7 @@ impl Real {
             env,
             default_roots,
             built_heavy: OnceLock::new(),
+            wrapper: None,
         }
     }
 
@@ -188,7 +195,15 @@ impl Runner for Real {
                 Err(why) => return Ran::Unavailable(format!("no machine-wide heavy slot: {why}")),
             }
         }
-        full.extend(argv.iter().cloned());
+        // The target's own program is the first of `argv` (a heavy prefix before it is only the slot's wrapper).
+        let cargo = argv.first().is_some_and(|p| crate::cargo_target::is_cargo(p));
+        match (cargo, argv.split_first()) {
+            (true, Some((p, rest))) => {
+                full.push(p.clone());
+                full.extend(crate::cargo_target::with_target_dir(rest, &target.to_string_lossy()));
+            }
+            _ => full.extend(argv.iter().cloned()),
+        }
         let Some((program, args)) = full.split_first() else {
             return Ran::Unavailable("the entry names no command".into());
         };
@@ -200,12 +215,19 @@ impl Runner for Real {
             .unwrap_or_else(|| "2".into());
         let mut cmd = command(resolve(program));
         // The whole environment as this runner has it (the process's, in production): the program is looked up on its PATH.
-        cmd.env_clear()
-            .envs(&self.env)
-            .current_dir(dir)
-            .args(args)
-            .env("CARGO_TARGET_DIR", &target)
-            .env("CARGO_BUILD_JOBS", jobs);
+        cmd.env_clear().envs(&self.env).current_dir(dir).env("CARGO_BUILD_JOBS", jobs);
+        // A cargo call got its build folder as configuration above (sccache hashes `CARGO_TARGET_DIR`: crate::cargo_target) and
+        // compiles through the local sccache; a program that starts cargo itself (a script, `npm`) keeps the variable, as there is no
+        // argument to put it in.
+        cmd.args(args);
+        if cargo {
+            cmd.env_remove("CARGO_TARGET_DIR").env_remove("CARGO_BUILD_TARGET_DIR");
+            if let Some(w) = &self.wrapper {
+                cmd.envs(w.vars.iter().map(|(k, v)| (k, v)));
+            }
+        } else {
+            cmd.env("CARGO_TARGET_DIR", &target);
+        }
         match run_bounded(cmd, Limits::new(limit).max_output(1 << 22).stop_on_cap()) {
             Ok(o) => match o.outcome {
                 paddock_proc::Outcome::Exited(status) => {

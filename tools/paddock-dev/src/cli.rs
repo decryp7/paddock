@@ -1,7 +1,7 @@
 use crate::{
     brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, disk, gates,
-    generators, heavy_cmd, hook, input_hash, ipc_endpoints, load, locks, merge_check, places, plan, plan_cmd, pr, pre_push, queue,
-    release_isolation, slots, wait, worktree,
+    generators, heavy_cmd, hook, input_hash, ipc_endpoints, load, local_sccache, locks, merge_check, places, plan, plan_cmd, pr, pre_push,
+    queue, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -75,6 +75,13 @@ enum Command {
     Worktree {
         #[command(subcommand)]
         command: worktree::WorktreeCommand,
+    },
+    /// The local sccache for an agent's own cargo calls: `eval "$(./dev sccache env)"` installs the pinned release when needed,
+    /// starts the one local server and prints the `export` lines (RUSTC_WRAPPER and the cache settings). Warns and prints nothing
+    /// when sccache cannot be used (the build then runs without it).
+    Sccache {
+        #[command(subcommand)]
+        command: SccacheCommand,
     },
     /// Disk watch and clean-up: free-space check, usage report, scan, owner records, clean.
     Disk {
@@ -354,6 +361,12 @@ struct LocksArgs {
     /// The repository root (default: the folder containing .git, found from the current folder).
     #[arg(long)]
     root: Option<PathBuf>,
+}
+
+#[derive(Subcommand)]
+enum SccacheCommand {
+    /// Print `export` lines for the shell: `eval "$(./dev sccache env)"`.
+    Env,
 }
 
 #[derive(Subcommand)]
@@ -719,6 +732,13 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CheckCommand::Primary(a),
         } => worktree::check_primary(&a),
         Command::Worktree { command } => worktree::command(command),
+        Command::Sccache {
+            command: SccacheCommand::Env,
+        } => {
+            let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+            let lines = local_sccache::prepare_and_say(&env, local_sccache::Install::OnDemand).map(|r| local_sccache::shell_lines(&r)).unwrap_or_default();
+            Ok(Report::new(serde_json::json!({ "lines": lines }), lines.join("\n")))
+        }
         Command::Disk { command } => disk::command(command),
         Command::Pr { command } => pr::command(command),
         Command::Queue { command } => queue::command(command),

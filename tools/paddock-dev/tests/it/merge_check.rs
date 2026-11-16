@@ -66,6 +66,8 @@ impl Repo {
         let out = self
             .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
             .args(["merge", "check", "--root"])
+            // A test never starts a compile-cache server on the machine it runs on (ER-45).
+            .env("PADDOCK_SCCACHE", "off")
             .arg(root)
             .args(args)
             .output()

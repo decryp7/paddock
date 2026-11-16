@@ -464,6 +464,17 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   Testing installer on macOS from CI 6353 on). Use `isMain` (conformance/src/util/is-main.mjs); a step that relies on a
   script's output also checks that the output is there.
 
+- **`CARGO_TARGET_DIR` in the environment defeats sccache 0.19 (2026-11-16, feat/local-sccache).** sccache puts every `CARGO_*`
+  variable into its cache key and cargo hands the variable to rustc, so a per-worktree build folder given as `CARGO_TARGET_DIR`
+  (or `CARGO_BUILD_TARGET_DIR`) gives 0% hits across worktrees; the same folder as `--config build.target-dir='<dir>'` gives about
+  82%. ADR 0014 §1's 6.5% was this, not the checkout path. The same holds for `CARGO_INCREMENTAL=0` set as a variable (see
+  docs/benchmarks.md, "Local sccache"): put such a setting in cargo configuration, where it is not part of the key. Every tool
+  that starts cargo now passes the folder through one accessor, `tools/paddock-dev/src/cargo_target.rs`, and drops the variables
+  from the child's environment (the variable would outrank the configuration). A stand-in cargo in the tests fails when
+  `CARGO_TARGET_DIR` reaches it. Tools that start a compile-cache server must not do it from their tests (ER-45): the unit tests of
+  the push gate pass the wrapper in, and the integration tests set `PADDOCK_SCCACHE=off`; a first version prepared the wrapper in
+  `command_in` and a unit-test run downloaded sccache and started a server on the developer's machine.
+
 ## Linux VM guests (Paddock C21, 2026-10-25)
 - Linux guests: `tart exec` (like `ssh` without a PAM login) has no logind session, so there is no `systemd --user`
   manager and no session bus; `loginctl enable-linger <user>` starts one, as a desktop login would. A desktop smoke

@@ -91,6 +91,13 @@ written as `apps/debrief/docs/adr/0056-...`.
   warm cache halves a Rust compile; on the dev Mac the saving comes from keeping a target folder per app per worktree
   (§9), which rebuilt Pitwall in 13 s after a shared-crate change.
 
+  **Amended 2026-11-16 (feat/local-sccache; measurement: docs/benchmarks.md, "Local sccache").** The 6.5% came from passing the
+  folder as `CARGO_TARGET_DIR`, not from the checkout path: sccache 0.19 hashes every `CARGO_*` variable, so a per-worktree folder
+  in the environment misses on every crate. With the folder passed as `--config build.target-dir='<dir>'` a second worktree hits
+  about 82% of the third-party compiles (tools/paddock-dev: 70 s cold, 32 s warm). Agents therefore use one local sccache with the
+  folder passed as configuration (kept per app per worktree as before; only how it is passed changed). The user's 2026-10-28
+  decision against a shared compile-cache backend stands: the default is the local disk, and the S3 setting is an option.
+
 `crates/` stays one workspace for the shared crates; its tests are the shared behaviour tests of rule 43.
 A third kind, `tools/<tool>/`, is a developer and CI tool with its own workspace and lockfile and path dependencies on
 `crates/` (ADR 0022, `tools/paddock-dev`).

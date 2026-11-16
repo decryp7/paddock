@@ -109,11 +109,17 @@ pub fn ensure(root: &Path, env: &HashMap<String, String>, left: Duration) -> Res
 /// Builds heavy into `target` and returns the binary's path there.
 fn build(root: &Path, env: &HashMap<String, String>, target: &Path, key: &str, limit: Duration) -> Result<PathBuf, String> {
     let built = target.join("release").join(exe("heavy"));
+    // The build folder as cargo configuration, never `CARGO_TARGET_DIR` (sccache hashes it: crate::cargo_target).
+    let args = crate::cargo_target::with_target_dir(
+        &["build", "--release", "--locked", "--quiet"].map(String::from),
+        &target.display().to_string(),
+    );
     let call = ToolCall::new("cargo")
-        .args(["build", "--release", "--locked", "--quiet"])
+        .args(args)
         .pass(PASS.iter().copied())
         .cwd(root.join("tools/heavy"))
-        .env("CARGO_TARGET_DIR", target.display().to_string())
+        .without("CARGO_TARGET_DIR")
+        .without("CARGO_BUILD_TARGET_DIR")
         .env("CARGO_BUILD_JOBS", "2")
         .timeout(limit);
     let ran = call.run(env, &mut std::io::sink()).map_err(|e| {

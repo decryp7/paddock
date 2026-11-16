@@ -37,8 +37,14 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   missing folders (measurements: [benchmarks](docs/benchmarks.md#2026-11-12-full-against-sparse-worktree-checkout-fixworktree-gates-profile));
   `--sparse` is only for a `--detach` review copy, and `-b <branch>` attaches to a branch that already exists.
   Never work in the main checkout; never `git stash`.
-- **Build folders.** One `CARGO_TARGET_DIR` per app per worktree, kept between tasks for the same app (reusing it is
-  what makes rebuilds fast; sccache gives almost nothing across worktrees, ADR 0014 §1). Worktrees and build folders go in
+- **Build folders.** One build folder per app per worktree, kept between tasks for the same app (reusing it is what makes
+  rebuilds fast). Pass it to cargo as `--config build.target-dir='<dir>'` (or `build.target-dir` in a `.cargo/config.toml`),
+  **never as `CARGO_TARGET_DIR` or `CARGO_BUILD_TARGET_DIR`**: sccache 0.19 puts every `CARGO_*` variable into its cache key, so
+  the variable gives 0% hits across worktrees and the configuration gives about 82% (ADR 0014 §1; docs/benchmarks.md). The
+  tools do this themselves (push gates, `./dev gen check`, `./dev`'s own build). For your own cargo calls run
+  `eval "$(./dev sccache env)"` once per shell: it installs the pinned sccache, starts the one local server and sets
+  `RUSTC_WRAPPER` for that shell only ([docs/dev-setup.md](docs/dev-setup.md#local-sccache)); it warns and builds without
+  it when sccache cannot be used. Worktrees and build folders go in
   `<dev-targets>` (the parent of the worktree root; this machine's folders are in
   [docs/dev-setup.md](docs/dev-setup.md#where-things-live), the one place that names a disk, C125). The worktree root is
   machine config, not code: `git config paddock.worktreeRoot <dev-targets>/wt` (repo-local, so it covers every worktree), or
@@ -173,7 +179,7 @@ Apply these deliberately. They are not decoration:
   workspace `Cargo.toml`, the wire types and DTOs) are changed by the integrating agent only, or by adding a single
   declared line.
 - Don't run `cargo fmt --all` / `cargo clippy --fix` across the workspace while others are editing; format your own
-  files (`rustfmt <files>`). Use a private `CARGO_TARGET_DIR`.
+  files (`rustfmt <files>`). Use a private build folder, passed as `--config build.target-dir=...` (never `CARGO_TARGET_DIR`).
 - Before committing, check the subject: `node conformance/bin/paddock-conformance.mjs commit-lint --subject "<subject>"` (at
   most 100 characters; detail goes in the body). A rejected commit commits nothing and leaves your staged files as they are:
   shorten the subject and commit again, never amend an earlier commit.

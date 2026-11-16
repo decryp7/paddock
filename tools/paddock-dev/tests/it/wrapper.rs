@@ -360,12 +360,36 @@ fn a_config_that_only_names_the_build_folder_does_not_change_the_hash() {
     }
 }
 
+#[cfg(unix)]
+const CARGO_FOLDER_PRELUDE: &str = r#"[ -z "${CARGO_TARGET_DIR:-}" ] || { echo "CARGO_TARGET_DIR reached cargo: pass --config build.target-dir" >&2; exit 97; }
+for a in "$@"; do case "$a" in build.target-dir=*) CARGO_TARGET_DIR=${a#build.target-dir=}; CARGO_TARGET_DIR=${CARGO_TARGET_DIR#\'}; CARGO_TARGET_DIR=${CARGO_TARGET_DIR%\'};; esac; done
+"#;
+
 /// A tiny stand-in for the tool binary: answers `--version`, otherwise prints a marker.
 #[cfg(unix)]
 pub(crate) fn write_script(path: &Path, body: &str) {
+    write_script_with(path, body, true);
+}
+
+/// [`write_script`] without the cargo build-folder rule, for `conformance/ci/dev-tool-publish.sh`: that CI script builds one
+/// throw-away tool with `CARGO_TARGET_DIR` and no compile cache, and CI is not part of the local sccache change.
+#[cfg(unix)]
+pub(crate) fn write_script_plain(path: &Path, body: &str) {
+    write_script_with(path, body, false);
+}
+
+#[cfg(unix)]
+fn write_script_with(path: &Path, body: &str, cargo_rule: bool) {
     use std::os::unix::fs::PermissionsExt;
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    // A stand-in cargo takes its build folder from `--config build.target-dir='...'` and fails when `CARGO_TARGET_DIR` reaches it:
+    // sccache hashes every `CARGO_*` variable, so the variable defeats the compile cache across worktrees (lessons.md).
+    let prelude = if cargo_rule && path.file_name().is_some_and(|n| n == "cargo") {
+        CARGO_FOLDER_PRELUDE
+    } else {
+        ""
+    };
+    std::fs::write(path, format!("#!/bin/sh\n{prelude}{body}\n")).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
