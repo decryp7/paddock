@@ -15,11 +15,12 @@ const OUT = process.env['SCREENSHOT_DIR'] ?? join(process.cwd(), '..', 'docs', '
 const FROZEN = Date.UTC(2026, 9, 22, 14, 30, 0);
 
 /** The fitted-content dialogs: what shows that the content (not the skeleton) is there, then the size the window fits to. */
-const FITTED: { name: string; id: string; title: string; loaded: string; payload?: unknown }[] = [
+const FITTED: { name: string; id: string; title: string; loaded: string; payload?: unknown; css?: string }[] = [
   // A text that still reads well after the redaction of the user name and the address.
   { name: 'web-search', id: 'dy.web-search', title: 'Search the web: Slack', loaded: 'input[name=query]', payload: { text: 'Slack crashed EXC_BAD_ACCESS macOS 27 alex', subject: 'Slack' } },
   // Report a problem: the diagnostics bundle's preview, with the list of every file and its size.
-  { name: 'diagnostics-bundle', id: 'pd.report-problem', title: 'Report a problem', loaded: '[data-testid=diag-files]', payload: {} },
+  // The list of files scrolls in a 300 px box in the product; the picture shows every row, so none is cut in half.
+  { name: 'diagnostics-bundle', id: 'pd.report-problem', title: 'Report a problem', loaded: '[data-testid=diag-files]', payload: {}, css: '.pd-diag__scroller { max-height: none !important; overflow: visible !important; }' },
   { name: 'hash-search', id: 'dy.file-hash', title: 'Search the file hash on VirusTotal', loaded: 'code[aria-label="SHA-256 hash"]' },
 ];
 
@@ -62,6 +63,7 @@ const fitted = (d: (typeof FITTED)[number]): DocScreen => ({
     const route = dialogWindowUrl(d.id, d.payload ?? FIXTURES[d.id]![0] ?? {}, { title: d.title });
     const win = await openWindow(page, route, d.title, contract.width, 800);
     await expect(win.in.locator(d.loaded).first()).toBeVisible({ timeout: 15_000 });
+    if (d.css) await win.frame.addStyleTag({ content: d.css });
     await page.clock.runFor(1_000);
     let last = -1;
     await expect(async () => {
@@ -72,6 +74,7 @@ const fitted = (d: (typeof FITTED)[number]): DocScreen => ({
     }).toPass({ timeout: 10_000, intervals: [200, 200, 300] });
     const again = await openWindow(page, route, d.title, contract.width, last);
     await expect(again.in.locator(d.loaded).first()).toBeVisible({ timeout: 15_000 });
+    if (d.css) await again.frame.addStyleTag({ content: d.css });
     await expect(again.in.locator('[data-testid=dialog-footer]')).toBeVisible();
     await page.clock.runFor(1_000);
   },
