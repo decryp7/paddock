@@ -287,7 +287,7 @@ export class MockJobs implements JobsBackend {
         entry.info = { ...entry.info, state: 'running', startedAt: Date.now() };
         this.emit();
         const ctx: MockJobCtx = {
-          cancelled: () => cancelled,
+          cancelled: () => cancelled || this.disposed,
           progress: (p) => {
             entry.info = { ...entry.info, progress: { ...entry.info.progress, ...p } };
           },
@@ -469,9 +469,24 @@ export function mockJobsLeftover(): string | null {
 export function resetMockJobs(next: MockJobs | null = null): void {
   if (instance !== next) instance?.dispose();
   instance = next;
+  // The steps of the old instance's jobs wake at once and find their job cancelled (`dispose` set it), so they end quietly.
+  for (const [timer, wake] of [...sleeps]) {
+    clearTimeout(timer);
+    sleeps.delete(timer);
+    wake();
+  }
 }
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** The sleeps of `mockSteps` still waiting: `resetMockJobs` ends them, so no job step outlives its test. */
+const sleeps = new Map<ReturnType<typeof setTimeout>, () => void>();
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      sleeps.delete(timer);
+      resolve();
+    }, ms);
+    sleeps.set(timer, resolve);
+  });
 
 /** Waits `ms` in small steps, reporting progress and stopping early when cancelled. */
 export async function mockSteps(ctx: MockJobCtx, ms: number, steps = 10): Promise<void> {

@@ -4,6 +4,7 @@ import * as mocks from './app/mock-backends';
 import { installBrowserMocks } from './app/core/mock-registry';
 import { mockJobsLeftover, resetMockJobs } from './app/jobs/mock-jobs';
 import { resetMockNotifications } from './app/notifications/mock-notifications';
+import { activity } from './app/core/activity';
 import { unsettledStartupLoads } from './app/extensions/startup-loads';
 import { installLeakDetector, registerInFlight, registerSingleton } from '@decryp7/paddock-ui/testing';
 import { settleBootedStartup } from './testing/startup';
@@ -35,6 +36,8 @@ afterAll(settleBootedStartup);
 registerSingleton({ name: 'mock jobs', leftover: mockJobsLeftover, reset: resetMockJobs });
 registerSingleton({ name: 'mock notifications', leftover: () => null, reset: resetMockNotifications });
 registerInFlight({ name: 'start-up loads', pending: unsettledStartupLoads });
+// The page-wide activity runtime ends its current task with a zero-delay timer; end it now so none outlives its test.
+afterEach(() => activity.endTaskNow());
 installLeakDetector({ mode: 'report' });
 
 // The page is shared the same way: elements a spec left in the body (a dock with an active tab, an overlay) were read by
