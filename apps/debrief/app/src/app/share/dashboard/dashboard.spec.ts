@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { FakeECharts } from '../../../testing/fake-echarts';
-import { all, buttonByText, el, provideTinyBackend, settle, text, tinyBackend, typeInto } from '../../../testing/helpers';
+import { all, buttonByText, el, openDialog, provideTinyBackend, settle, text, tinyBackend, typeInto } from '../../../testing/helpers';
 import { AnalysisBackend } from '../../core/analysis-backend';
 import { TileCfg, TileData, TileRequest } from '../../core/api.types';
 import { DebriefBackend } from '../../core/backend';
@@ -519,13 +519,11 @@ describe('dashboard commands and view', () => {
     expect(ds.editing()).toBe(true);
     expect(cmd('dashboards.addTile').when!(ctx)).toBe(true);
     const done = cmd('dashboards.addTile').run(ctx);
-    await settle();
-    at(TestBed.inject(DialogService).stack(), 0).ref.close(tile('cmd'));
+    (await openDialog(TestBed.inject(DialogService))).ref.close(tile('cmd'));
     await done;
     expect(ds.current()!.tile.some((t) => t.id === 'cmd')).toBe(true);
     const nothing = cmd('dashboards.addTile').run(ctx);
-    await settle();
-    at(TestBed.inject(DialogService).stack(), 0).ref.close();
+    (await openDialog(TestBed.inject(DialogService))).ref.close();
     await nothing;
     await cmd('dashboards.edit').run(ctx);
     expect(ds.editing()).toBe(false);
