@@ -1,31 +1,32 @@
 //! `./dev check --warm-linux [workspace...]`: builds the Linux Clippy's dependencies in the CI image's kept volume, one container
 //! run per workspace, with no push budget and the container's own output live. The first run of a workspace compiles everything
-//! (cold `crates` 522 s, cold `apps/dyno` over 15 minutes under amd64 emulation); the push gate's row then only ever sees warm
-//! runs. It runs the push gate's own command ([`gates::linux_gate`]), so what it warms is what the row reuses; a lint it finds in
+//! (see docs/benchmarks.md, "Pre-push Linux Clippy"); the push gate's row then only ever sees warm runs. It runs the push gate's own command ([`gates::linux_gate`]), so what it warms is what the row reuses; a lint it finds in
 //! the workspace itself is reported (exit 5) but the dependencies are warm either way.
 
 use super::budget::with_heavy_flags;
 use super::exec::{docker_answers, heavy_command_for, on_path};
-use super::gates::{self, Gate};
-use super::{linux_cfg, repo_root};
+use super::gates::{self, Gate, LinuxTarget};
+use super::linux_inputs::{ci_version, left_out};
+use super::repo_root;
 use crate::plan::{Request, plan_with_graph};
 use paddock_cli::{CliError, Exit, Report};
 use paddock_repo_graph::GitHistory;
 use serde_json::json;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-/// The wait for the machine-wide slot, and the hang backstop of one workspace's run (ER-32: a maximum with a reason). The cold
-/// run of the largest workspace measured about 25 minutes; three hours only ends a hung container.
-const QUEUE_MAX: Duration = Duration::from_secs(3600);
-const RUN_MAX: Duration = Duration::from_secs(3 * 3600);
+/// The hang backstop of one workspace's run (ER-12, ER-32): about twice the largest cold run measured on the native image
+/// (apps/dyno, 173.7 s; docs/benchmarks.md, "Pre-push Linux Clippy, native"), so a hung container ends, a loaded machine still fits.
+const RUN_MAX: Duration = Duration::from_secs(360);
+/// The wait for the machine-wide slot: one full `--warm-linux` of another agent holds it for the sum of the seven cold runs
+/// measured (767.6 s), rounded up to 15 minutes.
+const QUEUE_MAX: Duration = Duration::from_secs(15 * 60);
 
-/// The workspaces to warm: the ones named (each must be a Cargo workspace folder), else every workspace with Linux-only code.
+/// The workspaces to warm: the ones named (each must be a Cargo workspace folder), else every Cargo workspace.
 pub fn targets(root: &Path, named: &[String], all_workspaces: &[String]) -> Result<Vec<String>, CliError> {
     if named.is_empty() {
-        let all: BTreeSet<String> = all_workspaces.iter().cloned().collect();
-        return Ok(linux_cfg::linux_workspaces(root, &all).into_iter().collect());
+        return Ok(all_workspaces.to_vec());
     }
     let mut out = Vec::new();
     for w in named {
@@ -41,9 +42,18 @@ pub fn targets(root: &Path, named: &[String], all_workspaces: &[String]) -> Resu
     Ok(out)
 }
 
-/// One container run per workspace, the push gate's own command.
-pub fn runs(targets: &[String], image: &str) -> Vec<Gate> {
-    targets.iter().map(|w| gates::linux_gate(std::slice::from_ref(w), image)).collect()
+/// One container run per workspace, the push gate's own command; `left_out` reads a workspace's Tauri crates.
+pub fn runs(targets: &[String], version: &str, left_out: &dyn Fn(&str) -> Result<Vec<String>, String>) -> Result<Vec<Gate>, String> {
+    targets
+        .iter()
+        .map(|w| {
+            let t = LinuxTarget {
+                ws: w.clone(),
+                left_out: left_out(w)?,
+            };
+            Ok(gates::linux_gate(&[t], version))
+        })
+        .collect()
 }
 
 fn not_measured(why: &str, next: &str) -> Report {
@@ -58,9 +68,7 @@ fn not_measured(why: &str, next: &str) -> Report {
 pub fn command(root: &Option<PathBuf>, named: &[String]) -> Result<Report, CliError> {
     let root = repo_root(root)?;
     let env: HashMap<String, String> = std::env::vars().collect();
-    let image = std::fs::read_to_string(root.join("ci-image/VERSION"))
-        .map(|v| format!("dev.decryptology.net/decryp7/paddock-ci:v{}", v.trim()))
-        .map_err(|e| CliError::failure(format!("ci-image/VERSION cannot be read: {e}.")).with_hint("Run it from a full checkout."))?;
+    let version = ci_version(&root).map_err(|e| CliError::failure(format!("{e}.")).with_hint("Run it from a full checkout."))?;
     let all = if named.is_empty() {
         let history = GitHistory::new(&root, Duration::from_secs(60));
         let req = Request {
@@ -102,7 +110,10 @@ pub fn command(root: &Option<PathBuf>, named: &[String]) -> Result<Report, CliEr
     };
     let mut rows = Vec::new();
     let mut worst = Exit::Ok;
-    for (ws, g) in todo.iter().zip(runs(&todo, &image)) {
+    let gates = runs(&todo, &version, &|ws| left_out(&root, ws)).map_err(|e| {
+        CliError::failure(format!("{e}.")).with_hint("Run `cargo metadata --no-deps` in that workspace and fix what it prints.")
+    })?;
+    for (ws, g) in todo.iter().zip(gates) {
         eprintln!("warm-linux: {ws}: start (the container's own output follows; no budget)");
         let started = Instant::now();
         let mut argv: Vec<String> = prefix.clone();

@@ -164,8 +164,8 @@ enum CheckCommand {
     #[command(name = "pre-push", long_flag = "pre-push")]
     PrePush(pre_push::PrePushArgs),
     /// Builds the Linux Clippy's dependencies in the CI image's kept volume (one container run per workspace, no budget, live
-    /// output), so the pre-push row only sees warm runs. Default: every workspace with Linux-only code. Run it once per
-    /// workspace, and again after a toolchain or dependency change; a push that finds the volume cold is "not measured".
+    /// output), so the pre-push row only sees warm runs. Default: every Cargo workspace. Run it once per
+    /// workspace, and again after a CI image bump (the target folder is keyed by ci-image/VERSION) or a large dependency change; a push that finds the volume cold is "not measured". The kept volume `paddock-linux-target-arm64` grows with every workspace and image version (size: docs/benchmarks.md, "Pre-push Linux Clippy"); `bash tools/linux-container.sh --id paddock --clean` removes it.
     #[command(name = "warm-linux", long_flag = "warm-linux")]
     WarmLinux {
         /// Workspace folders to warm (`crates`, `apps/dyno`, ...).

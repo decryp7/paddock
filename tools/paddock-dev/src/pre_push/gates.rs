@@ -47,6 +47,7 @@ impl Gate {
     pub fn rerun(&self) -> String {
         let line = std::iter::once(self.program.as_str())
             .chain(self.args.iter().map(String::as_str))
+            .map(shell_quote)
             .collect::<Vec<_>>()
             .join(" ");
         if self.cwd.is_empty() {
@@ -54,6 +55,17 @@ impl Gate {
         } else {
             format!("cd {} && {line}", self.cwd)
         }
+    }
+}
+
+/// `word` as one shell word: unchanged when it holds only safe characters, else in single quotes, so a printed command can be
+/// pasted.
+pub fn shell_quote(word: &str) -> String {
+    let safe = !word.is_empty() && word.chars().all(|c| c.is_ascii_alphanumeric() || "-_./:=+@%,".contains(c));
+    if safe {
+        word.to_string()
+    } else {
+        format!("'{}'", word.replace('\'', "'\\''"))
     }
 }
 
@@ -99,16 +111,15 @@ pub struct Facts {
     pub conformance_env: Option<String>,
     /// Workspace folders whose CI lints Windows too (`apps/<app>`, from `windowsClippy`); `crates` always does.
     pub windows_clippy: BTreeSet<String>,
-    /// The CI image reference (from `ci-image/VERSION`), or why it cannot be read.
-    pub image: Option<Result<String, String>>,
+    /// The CI image version (from `ci-image/VERSION`), or why it cannot be read.
+    pub ci_version: Option<Result<String, String>>,
     /// Pitwall's script tests (`scripts/ci/*.test.mjs`, relative to `apps/pitwall`): no shell expands a glob here.
     pub pitwall_tests: Vec<String>,
     /// This program, for the checks `./dev` runs itself.
     pub dev_exe: String,
-    /// Run the Linux Clippy for every touched workspace (`--linux`), not only those with Linux-only code.
-    pub linux: bool,
-    /// The touched workspaces (see [`linux_candidates`]) that hold Linux-only code, scanned by the caller.
-    pub linux_workspaces: BTreeSet<String>,
+    /// The Tauri crates each candidate workspace leaves out of the Linux Clippy ([`super::linux_inputs::left_out`]), or why cargo
+    /// could not say. Filled for [`linux_candidates`] only.
+    pub left_out: std::collections::BTreeMap<String, Result<Vec<String>, String>>,
     /// A kept build folder per workspace (`<it>/<workspace>`), used when the caller sets no `CARGO_TARGET_DIR`: the throw-away
     /// worktree of a pushed commit must not hold the builds (they would start cold every run).
     pub kept_targets: Option<String>,
@@ -363,8 +374,10 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
     out
 }
 
-/// The workspaces the Linux Clippy could be asked about for this change: those with a changed file of their own, and `crates` when
-/// only `.cargo/` (which every build of it reads) changed. Pure; the caller scans exactly these for Linux-only code.
+/// The workspaces the Linux Clippy runs for: every Cargo workspace with a changed file of its own (documentation aside), and
+/// `crates` when only `.cargo/` (which every build of it reads) changed. Every one, not only those with a `cfg(target_os =
+/// "linux")`: a text scan misses `cfg(unix)`, `not(macos)`, target-specific dependencies and `CARGO_CFG_TARGET_OS` in build scripts,
+/// and filtered few workspaces anyway. Pure; the caller reads each one's left-out crates.
 pub fn linux_candidates(plan: &Value, change: &Change) -> BTreeSet<String> {
     let code: Vec<String> = change.files.iter().filter(|f| !docs_only(f)).cloned().collect();
     let mut out = own_workspaces(plan, &code);
@@ -374,30 +387,33 @@ pub fn linux_candidates(plan: &Value, change: &Change) -> BTreeSet<String> {
     out
 }
 
-/// The Linux Clippy of the touched workspaces that hold Linux-only code (`cfg(target_os = "linux")`: the Mac Clippy and the xwin
-/// Clippy never compile it, so CI's Linux legs were where its lints first showed: runs 7485, 8138, 8147, 8152, 8154), in the CI
-/// image, as one container run for all of them. `--linux` adds the workspaces without such code. CI covers the rest (ER-9).
+/// One workspace of the Linux Clippy run and the crates the container cannot lint in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinuxTarget {
+    /// The workspace folder, repository-relative.
+    pub ws: String,
+    /// Its Tauri crates, left out (named in the row: a pass never claims them).
+    pub left_out: Vec<String>,
+}
+
+/// The Linux Clippy of every touched workspace, in the CI image, as one container run (native: the helper's `--ci-image` on this
+/// host's own architecture; CI's x64 Linux legs and the member gate catch the rare arch-specific lint). The Mac Clippy and the xwin
+/// Clippy never compile Linux-only code, so its lints first showed in CI: tonight's `zombie_processes` in paddock-env and an unused
+/// import in dyno-agent (fix/shared-crate-flakes-8174, 2026-11-16).
+///
+/// Report-only until its first green run on the real tree (ER-41): not yet recorded; the evidence so far is the measured runs in
+/// docs/benchmarks.md ("Pre-push Linux Clippy").
 fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Planned {
-    let skip = |reason: &str| Planned::Skip {
-        id: "clippy-linux".into(),
-        reason: reason.into(),
-    };
     let candidates = linux_candidates(plan, change);
-    let targets: Vec<String> = candidates
-        .iter()
-        .filter(|w| facts.linux || facts.linux_workspaces.contains(*w))
-        .cloned()
-        .collect();
-    if targets.is_empty() {
-        return skip(if candidates.is_empty() {
-            "nothing but documentation, or no Cargo workspace of its own, changed"
-        } else {
-            "no touched workspace holds Linux-only code (no cfg(target_os = \"linux\")); `--linux` lints them anyway"
-        });
+    if candidates.is_empty() {
+        return Planned::Skip {
+            id: "clippy-linux".into(),
+            reason: "nothing but documentation, or no Cargo workspace of its own, changed".into(),
+        };
     }
-    let id = format!("clippy-linux {}", targets.join(","));
-    let image = match &facts.image {
-        Some(Ok(i)) => i.clone(),
+    let id = format!("clippy-linux {}", candidates.iter().cloned().collect::<Vec<_>>().join(","));
+    let version = match &facts.ci_version {
+        Some(Ok(v)) => v.clone(),
         Some(Err(e)) => {
             return Planned::Broken {
                 id,
@@ -408,57 +424,84 @@ fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Planned {
         None => {
             return Planned::Broken {
                 id,
-                cause: "the CI image was not looked up".into(),
-                next: "report this: the caller of plan_gates must fill Facts::image".into(),
+                cause: "the CI image version was not looked up".into(),
+                next: "report this: the caller of plan_gates must fill Facts::ci_version".into(),
             };
         }
     };
-    Planned::Run(linux_gate(&targets, &image))
+    let mut targets = Vec::new();
+    for ws in &candidates {
+        match facts.left_out.get(ws) {
+            Some(Ok(l)) => targets.push(LinuxTarget {
+                ws: ws.clone(),
+                left_out: l.clone(),
+            }),
+            Some(Err(e)) => {
+                return Planned::Broken {
+                    id,
+                    cause: e.clone(),
+                    next: format!(
+                        "run `cargo metadata --no-deps` in {ws} and fix what it prints; the row cannot tell which crates the container cannot lint"
+                    ),
+                };
+            }
+            None => {
+                return Planned::Broken {
+                    id,
+                    cause: format!("the crates {ws} leaves out were not looked up"),
+                    next: "report this: the caller of plan_gates must fill Facts::left_out".into(),
+                };
+            }
+        }
+    }
+    Planned::Run(linux_gate(&targets, &version))
 }
 
-/// The one container run that lints `targets` (workspace folders) in the CI image: the push gate's row and `./dev check
-/// --warm-linux` both run exactly this command, so a warm volume is the one the row reuses.
-pub fn linux_gate(targets: &[String], image: &str) -> Gate {
-    let id = format!("clippy-linux {}", targets.join(","));
-    // One build folder per workspace inside the container's kept target volume: warm runs reuse it, and workspaces with other
-    // feature sets never rebuild each other's dependencies. A failing workspace does not hide the next one's lints.
+/// The row id of a Linux Clippy run: the workspaces, each with the crates it leaves out, so a pass never claims them.
+pub fn linux_id(targets: &[LinuxTarget]) -> String {
+    let parts: Vec<String> = targets
+        .iter()
+        .map(|t| {
+            if t.left_out.is_empty() {
+                t.ws.clone()
+            } else {
+                format!("{} (left out: {})", t.ws, t.left_out.join(", "))
+            }
+        })
+        .collect();
+    format!("clippy-linux {}", parts.join(","))
+}
+
+/// The workspace folders of a Linux Clippy row id ([`linux_id`]), for the next step that names them.
+pub fn linux_workspaces_of(id: &str) -> Vec<String> {
+    id.trim_start_matches("clippy-linux")
+        .split(',')
+        .map(|p| p.split(" (left out").next().unwrap_or(p).trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+/// The one container run that lints `targets` in the CI image: the push gate's row and `./dev check --warm-linux` both run exactly
+/// this command, so a warm volume is the one the row reuses. Each workspace builds in `/target/v<version>/<workspace>` of the
+/// helper's kept volume (one folder per workspace, so feature sets never rebuild each other's dependencies; the image version in
+/// the path, so a CI image bump starts clean). A failing workspace does not hide the next one's lints.
+pub fn linux_gate(targets: &[LinuxTarget], version: &str) -> Gate {
     let mut command = String::from("rustc --version && cargo clippy --version || exit 1; rc=0");
-    for ws in targets {
-        let features = if ws == "crates" { " --all-features" } else { "" };
-        // The apps' Tauri crates (`src-tauri`) are left out, with a warning in the output: their build script writes into the source
-        // tree (the sidecar placeholders in `binaries/`, tauri-build's `gen/`), which the container mounts read-only (ER-14; a writable
-        // overlay of the repository would cost more than the one crate is worth). Their Linux Clippy stays CI's; the crates they depend
-        // on are linted. `crates` has none.
-        if ws == "crates" {
-            command.push_str(&format!(
-                "; (cd {ws} && CARGO_TARGET_DIR=/target/{} cargo clippy --workspace --all-targets{features} --locked -- -D warnings) || rc=1",
-                slug(ws)
-            ));
-        } else {
-            command.push_str(&format!(
-                r#"; ex=$(cd {ws} && cargo metadata --no-deps --format-version 1 | jq -r '[.packages[] | select(.manifest_path | test("/src-tauri/")) | .name] | join(" ")'); [ -z "$ex" ] || echo "::warning::clippy-linux {ws}: the Tauri crate(s) $ex are left out: their build script writes into the read-only repository mount; CI lints them on Linux"; ex=$(for p in $ex; do printf -- '--exclude %s ' "$p"; done); (cd {ws} && CARGO_TARGET_DIR=/target/{} cargo clippy --workspace $ex --all-targets{features} --locked -- -D warnings) || rc=1"#,
-                slug(ws)
-            ));
-        }
+    for t in targets {
+        let features = if t.ws == "crates" { " --all-features" } else { "" };
+        let exclude: String = t.left_out.iter().map(|c| format!(" --exclude {c}")).collect();
+        command.push_str(&format!(
+            "; (cd {ws} && CARGO_TARGET_DIR=/target/v{version}/{slug} cargo clippy --workspace{exclude} --all-targets{features} --locked -- -D warnings) || rc=1",
+            ws = t.ws,
+            slug = slug(&t.ws)
+        ));
     }
     command.push_str("; exit $rc");
     let mut g = gate(
-        id,
+        linux_id(targets),
         "",
         "bash",
-        &[
-            "tools/linux-container.sh",
-            "--id",
-            "paddock",
-            "--image",
-            image,
-            "--platform",
-            "linux/amd64",
-            "--",
-            "sh",
-            "-c",
-            &command,
-        ],
+        &["tools/linux-container.sh", "--id", "paddock", "--ci-image", "--", "sh", "-c", &command],
         4,
         "a lint that exists only on Linux (a `mode_t` width, dead code behind a cfg, a test child never waited for): fix it, or run the same container command above"
             .into(),
@@ -585,8 +628,8 @@ pub const NOT_RUN: &[(&str, &str)] = &[
         "per-project commands live in YAML until WP-3's contracts",
     ),
     (
-        "Linux Clippy of touched workspaces without Linux-only code",
-        "runs here when a touched workspace holds Linux-only code (cfg target_os linux); `--linux` runs it for the others too",
+        "Linux Clippy of the apps' Tauri crates",
+        "their build scripts write into the read-only mount; CI's Linux legs lint them",
     ),
     (
         "Clippy and the Windows lint of workspaces reached only through dependencies",

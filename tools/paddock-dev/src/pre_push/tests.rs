@@ -32,9 +32,14 @@ fn facts() -> Facts {
             .to_vec())),
         conformance_env: None,
         windows_clippy: BTreeSet::from(["apps/dyno".to_string(), "apps/pitwall".to_string()]),
-        image: Some(Ok("registry/paddock-ci:v7".into())),
-        linux: false,
-        linux_workspaces: BTreeSet::from(["crates".to_string()]),
+        ci_version: Some(Ok("7".into())),
+        left_out: [
+            ("crates".to_string(), Ok(vec![])),
+            ("apps/dyno".to_string(), Ok(vec!["dyno-app".to_string()])),
+            ("apps/pitwall".to_string(), Ok(vec!["pitwall-app".to_string()])),
+            ("apps/debrief".to_string(), Ok(vec!["debrief-app".to_string()])),
+        ]
+        .into(),
         kept_targets: None,
         pitwall_tests: vec!["scripts/ci/a.test.mjs".into()],
         dev_exe: "/x/dev".into(),
@@ -73,7 +78,7 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
         "lockfile crates",
         "clippy crates",
         "clippy-windows crates",
-        "clippy-linux crates",
+        "clippy-linux apps/dyno (left out: dyno-app),apps/pitwall (left out: pitwall-app),crates",
         "conformance",
         "commit-lint",
         "ipc-endpoints",
@@ -111,12 +116,15 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
             .next
             .contains("rustup target add x86_64-pc-windows-msvc --toolchain")
     );
-    assert_eq!(by("clippy-linux crates").need, Need::Docker);
+    assert_eq!(
+        by("clippy-linux apps/dyno (left out: dyno-app),apps/pitwall (left out: pitwall-app),crates").need,
+        Need::Docker
+    );
     assert!(
-        by("clippy-linux crates")
+        by("clippy-linux apps/dyno (left out: dyno-app),apps/pitwall (left out: pitwall-app),crates")
             .args
             .join(" ")
-            .contains("--image registry/paddock-ci:v7 --platform linux/amd64")
+            .contains("tools/linux-container.sh --id paddock --ci-image --")
     );
     assert_eq!(
         (by("conformance").program.as_str(), by("conformance").args.join(" ")),
@@ -622,7 +630,7 @@ fn the_table_names_what_ci_runs_that_this_gate_does_not() {
         "cargo deny outside Pitwall",
         "wiki lint",
         "TypeScript",
-        "Linux Clippy of touched workspaces without Linux-only code",
+        "Linux Clippy of the apps' Tauri crates",
         "reached only through dependencies",
     ] {
         assert!(report.text.contains(what), "{what} missing:\n{}", report.text);
@@ -735,83 +743,136 @@ fn linux_row(files: &[&str], f: &Facts) -> Planned {
 }
 
 #[test]
-fn the_linux_clippy_runs_for_a_touched_workspace_with_linux_only_code_and_skips_one_without() {
-    // crates holds Linux-only code (facts()): its row runs by default, with no flag.
+fn the_linux_clippy_runs_for_every_touched_workspace_and_names_what_it_leaves_out() {
     let Planned::Run(g) = linux_row(&["crates/paddock-proc/src/lib.rs"], &facts()) else {
-        panic!("a touched workspace with Linux-only code gets the row")
+        panic!("a touched workspace gets the row")
     };
     assert_eq!(g.id, "clippy-linux crates");
-    // apps/dyno has none: skipped with the reason, never a pass.
-    let Planned::Skip { id, reason } = linux_row(&["apps/dyno/src/a.rs"], &facts()) else {
-        panic!("a touched workspace without Linux-only code is skipped")
+    // An app too, whatever its sources say: the row does not guess from a text scan. Its Tauri crate is named in the row.
+    let Planned::Run(g) = linux_row(&["apps/pitwall/src/a.rs"], &facts()) else {
+        panic!("an app workspace gets the row")
     };
-    assert_eq!(id, "clippy-linux");
-    assert!(reason.contains("no touched workspace holds Linux-only code"), "{reason}");
-    // `--linux` lints it anyway.
-    let mut f = facts();
-    f.linux = true;
-    assert!(matches!(linux_row(&["apps/dyno/src/a.rs"], &f), Planned::Run(g) if g.id == "clippy-linux apps/dyno"));
+    assert_eq!(g.id, "clippy-linux apps/pitwall (left out: pitwall-app)");
+    assert_eq!(super::gates::linux_workspaces_of(&g.id), ["apps/pitwall"]);
     // Documentation alone reaches no workspace.
     assert!(matches!(linux_row(&["docs/x.md"], &facts()), Planned::Skip { .. }));
+    // Cargo could not say what to leave out: the row is broken (ER-45), never a pass or a guess.
+    let mut f = facts();
+    f.left_out
+        .insert("apps/pitwall".into(), Err("cargo metadata for apps/pitwall failed: x".into()));
+    assert!(matches!(linux_row(&["apps/pitwall/src/a.rs"], &f), Planned::Broken { cause, .. } if cause.contains("cargo metadata")));
 }
 
 #[test]
-fn one_container_run_covers_every_touched_workspace_with_its_own_target_folder() {
-    let mut f = facts();
-    f.linux_workspaces.insert("apps/dyno".into());
-    let Planned::Run(g) = linux_row(&["crates/a/src/lib.rs", "apps/dyno/src/a.rs", "apps/pitwall/src/a.rs"], &f) else {
+fn a_passing_linux_clippy_names_the_crates_it_never_linted() {
+    let planned = plan_gates(&plan(), &change(&["apps/dyno/src/a.rs"]), &facts());
+    let report = render("h", &run_all(&planned, &Fake::default(), 3));
+    assert!(
+        report.text.contains("clippy-linux apps/dyno (left out: dyno-app)"),
+        "a green row must not claim the Tauri crate: {}",
+        report.text
+    );
+    assert!(
+        report.text.contains("Linux Clippy of the apps' Tauri crates") && report.text.contains("CI's Linux legs lint them"),
+        "{}",
+        report.text
+    );
+}
+
+#[test]
+fn one_container_run_covers_every_touched_workspace_and_a_failing_one_fails_the_row_not_the_next() {
+    let Planned::Run(g) = linux_row(&["crates/a/src/lib.rs", "apps/dyno/src/a.rs"], &facts()) else {
         panic!("row")
     };
-    assert_eq!(g.id, "clippy-linux apps/dyno,crates", "pitwall holds no Linux-only code");
-    let script = g.args.last().unwrap();
+    assert_eq!(g.id, "clippy-linux apps/dyno (left out: dyno-app),crates");
     assert_eq!(
         g.args.iter().filter(|a| a.as_str() == "tools/linux-container.sh").count(),
         1,
         "one container run"
     );
-    assert!(script.contains("(cd crates && CARGO_TARGET_DIR=/target/crates cargo clippy --workspace --all-targets --all-features --locked -- -D warnings) || rc=1"), "{script}");
-    assert!(
-        script.contains("(cd apps/dyno && CARGO_TARGET_DIR=/target/apps-dyno cargo clippy --workspace $ex --all-targets --locked -- -D warnings) || rc=1")
-            && script.contains("test(\"/src-tauri/\")")
-            && script.contains("::warning::clippy-linux apps/dyno"),
-        "an app workspace leaves its Tauri crates out (their build script writes into the read-only repository): {script}"
-    );
-    assert!(
-        script.ends_with("exit $rc"),
-        "a failing workspace does not hide the next one: {script}"
-    );
     assert!(g.heavy, "through the heavy queue and the load gate");
-}
-
-/// A Linux-only Clippy error (a lint in code only the container compiles) fails the push: the default row is a gate, not a note.
-#[test]
-fn a_linux_only_clippy_error_fails_the_push() {
-    let planned = plan_gates(&plan(), &change(&["crates/a/tests/it/text_busy.rs"]), &facts());
-    let fake = Fake {
-        fail: vec!["clippy-linux crates".into()],
-        ..Fake::default()
-    };
-    let rows = run_all(&planned, &fake, 3);
-    assert_eq!(verdicts(&rows)["clippy-linux crates"].kind(), Kind::Failed);
-    let report = render("h", &rows);
-    assert_eq!(report.exit, Exit::Findings, "{}", report.text);
-}
-
-#[test]
-fn linux_only_code_is_found_by_its_cfg() {
-    use super::linux_cfg::{dir_has_linux_cfg, has_linux_cfg};
-    assert!(has_linux_cfg("#![cfg(target_os = \"linux\")]"));
-    assert!(has_linux_cfg("#[cfg(all(unix, target_os=\"linux\"))]\nfn a() {}"));
-    assert!(!has_linux_cfg("#[cfg(target_os = \"macos\")] // not linux"));
-    assert!(!has_linux_cfg("#[cfg(unix)]"));
+    // The real script, with a stub rustc and cargo on PATH: each workspace gets its own folder in the version's target folder,
+    // the left-out crate is excluded, a failing workspace does not hide the next, and the exit code is the worst.
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join("src")).unwrap();
-    std::fs::create_dir_all(dir.path().join("target/debug")).unwrap();
-    std::fs::write(dir.path().join("src/a.rs"), "fn a() {}\n").unwrap();
-    std::fs::write(dir.path().join("target/debug/b.rs"), "#[cfg(target_os = \"linux\")]\nfn b() {}\n").unwrap();
-    assert!(!dir_has_linux_cfg(dir.path()), "a build folder is not source");
-    std::fs::write(dir.path().join("src/c.rs"), "#[cfg(target_os = \"linux\")]\nfn c() {}\n").unwrap();
-    assert!(dir_has_linux_cfg(dir.path()));
+    for ws in ["crates", "apps/dyno"] {
+        std::fs::create_dir_all(dir.path().join(ws)).unwrap();
+    }
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let log = dir.path().join("calls.log");
+    let stub = format!(
+        "#!/bin/sh\necho \"$PWD|$CARGO_TARGET_DIR|$*\" >> '{}'\ncase \"$PWD\" in */apps/dyno) [ \"$1\" = clippy ] && [ \"$2\" = --version ] || exit 1;; esac\nexit 0\n",
+        log.display()
+    );
+    for tool in ["cargo", "rustc"] {
+        let p = bin.join(tool);
+        std::fs::write(&p, &stub).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    let script = g.args.last().unwrap();
+    let mut cmd = paddock_proc::command("sh");
+    cmd.args(["-c", script])
+        .current_dir(dir.path())
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
+    let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(30))).unwrap();
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        matches!(out.outcome, paddock_proc::Outcome::Exited(s) if s.code() == Some(1)),
+        "worst exit wins: {calls}"
+    );
+    let lines: Vec<&str> = calls.lines().filter(|l| l.contains("|/target/")).collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "both workspaces ran, the failing one did not stop the next: {calls}"
+    );
+    assert!(
+        lines[0].ends_with("|/target/v7/apps-dyno|clippy --workspace --exclude dyno-app --all-targets --locked -- -D warnings"),
+        "{}",
+        lines[0]
+    );
+    assert!(
+        lines[1].ends_with("|/target/v7/crates|clippy --workspace --all-targets --all-features --locked -- -D warnings"),
+        "{}",
+        lines[1]
+    );
+}
+
+#[test]
+fn the_printed_rerun_can_be_pasted() {
+    let Planned::Run(g) = linux_row(&["crates/a/src/lib.rs"], &facts()) else {
+        panic!("row")
+    };
+    let line = g.rerun();
+    assert!(
+        line.contains("-- sh -c 'rustc --version && cargo clippy --version || exit 1;"),
+        "the script is one quoted word: {line}"
+    );
+    assert_eq!(super::gates::shell_quote("a b"), "'a b'");
+    assert_eq!(super::gates::shell_quote("it's"), "'it'\\''s'");
+    assert_eq!(super::gates::shell_quote("plain-1.2/x"), "plain-1.2/x");
+}
+
+#[test]
+fn the_tauri_crates_are_the_packages_with_a_writing_build_dependency() {
+    use super::linux_inputs::{ci_version, tauri_crates};
+    let json = r#"{"packages":[
+        {"name":"dyno-app","dependencies":[{"name":"tauri-build","kind":"build"},{"name":"serde","kind":null}]},
+        {"name":"pitwall-app","dependencies":[{"name":"paddock-build","kind":"build"}]},
+        {"name":"dyno-core","dependencies":[{"name":"serde","kind":null}]},
+        {"name":"dev-only","dependencies":[{"name":"tauri-build","kind":"dev"}]},
+        {"name":"in-src-tauri-but-no-build-script","dependencies":[]}]}"#;
+    assert_eq!(tauri_crates(json).unwrap(), ["dyno-app", "pitwall-app"]);
+    assert!(tauri_crates("{}").is_err() && tauri_crates("x").is_err());
+    let d = tempfile::tempdir().unwrap();
+    assert!(ci_version(d.path()).is_err());
+    std::fs::create_dir_all(d.path().join("ci-image")).unwrap();
+    std::fs::write(d.path().join("ci-image/VERSION"), "7\n").unwrap();
+    assert_eq!(ci_version(d.path()).unwrap(), "7");
 }
 
 #[test]
@@ -1063,7 +1124,6 @@ mod known_commit {
             dry_run: false,
             files: vec![],
             refs_from_stdin: true,
-            linux: false,
             accept_not_measured: vec![],
         }
     }
@@ -1655,7 +1715,6 @@ mod base_choice {
             dry_run: true,
             files: vec![],
             refs_from_stdin: true,
-            linux: false,
             accept_not_measured: vec![],
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
@@ -2499,22 +2558,24 @@ fn a_cold_linux_clippy_cut_short_names_the_warm_command() {
 #[test]
 fn warm_linux_runs_the_push_rows_own_command_once_per_workspace() {
     use super::warm::{runs, targets};
-    let rows = runs(&["crates".to_string(), "apps/dyno".to_string()], "registry/paddock-ci:v7");
+    let rows = runs(&["crates".to_string(), "apps/dyno".to_string()], "7", &|ws| {
+        Ok(if ws == "crates" { vec![] } else { vec!["dyno-app".to_string()] })
+    })
+    .unwrap();
     assert_eq!(rows.len(), 2, "one container run per workspace");
     let Planned::Run(row) = linux_row(&["crates/a.rs"], &facts()) else {
         panic!("row")
     };
     assert_eq!(rows[0].args, row.args, "what it warms is what the push row reuses");
     assert_eq!(rows[0].program, row.program);
-    // Named workspaces must be Cargo workspaces; none named means those that hold Linux-only code.
+    assert!(rows[1].id.contains("left out: dyno-app"), "{}", rows[1].id);
+    assert!(runs(&["x".to_string()], "7", &|_| Err("cargo metadata for x failed".into())).is_err());
+    // Named workspaces must be Cargo workspaces; none named means every one.
     let d = tempfile::tempdir().unwrap();
-    for (w, src) in [("a", "#[cfg(target_os = \"linux\")]\nfn x() {}\n"), ("b", "fn y() {}\n")] {
-        std::fs::create_dir_all(d.path().join(w).join("src")).unwrap();
-        std::fs::write(d.path().join(w).join("Cargo.toml"), "[workspace]\n").unwrap();
-        std::fs::write(d.path().join(w).join("src/lib.rs"), src).unwrap();
-    }
+    std::fs::create_dir_all(d.path().join("b")).unwrap();
+    std::fs::write(d.path().join("b/Cargo.toml"), "[workspace]\n").unwrap();
     let all = ["a".to_string(), "b".to_string()];
-    assert_eq!(targets(d.path(), &[], &all).unwrap(), ["a"]);
+    assert_eq!(targets(d.path(), &[], &all).unwrap(), ["a", "b"]);
     assert_eq!(targets(d.path(), &["b/".to_string()], &all).unwrap(), ["b"]);
     assert!(targets(d.path(), &["nope".to_string()], &all).is_err());
 }

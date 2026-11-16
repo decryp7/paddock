@@ -271,8 +271,8 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
             ),
             if gate.id.starts_with("clippy-linux") {
                 format!(
-                    "run `./dev check --warm-linux {}` once (no budget, live output; the first run of a workspace builds all its dependencies in the container's kept volume, cold apps/dyno took over 15 min), then push again",
-                    gate.id.trim_start_matches("clippy-linux").trim().replace(',', " ")
+                    "run `./dev check --warm-linux {}` once (no budget, live output; the first run of a workspace builds all its dependencies in the container's kept volume, minutes per workspace; docs/benchmarks.md), then push again",
+                    super::gates::linux_workspaces_of(&gate.id).join(" ")
                 )
             } else {
                 format!(
@@ -285,7 +285,7 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
         Ok(done) => {
             let hint = match (gate.id.starts_with("clippy-linux"), done.how.as_str()) {
                 (true, "exit 125") => {
-                    "docker could not start the container (usually the image cannot be pulled): `docker login dev.decryptology.net`"
+                    "docker could not start the container or build the local CI image (read the output above; `docker login dev.decryptology.net` if a base image cannot be pulled)"
                         .to_string()
                 }
                 (true, "exit 137") => {

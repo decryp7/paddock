@@ -1549,3 +1549,26 @@ Question: what does the Linux Clippy row cost now that `./dev check --pre-push` 
   Each app row printed the `::warning::` naming its Tauri crate, so the `cargo metadata` match found `debrief-app`, `pitcrew-app`, `pitwall-app` and `spotter-app` in the container.
 - **Not measured:** a push touching several workspaces, a quiet machine. The Linux code scan (text match over the touched workspaces' `.rs` files, no cache) is part of the 5.2 s wall time of the warm run beside the container start; it was not timed apart.
 - **Reading:** the cold cost is paid once per workspace, in the container's kept target volume; warm runs fit the 15 minute budget with room.
+
+### Pre-push Linux Clippy, native (2026-11-16, feat/pre-push-linux-clippy)
+
+The row now runs on the native arm64 CI image (the helper's `--ci-image`, built locally from ci-image/), not the x64 image under emulation (user decision: CI's x64 Linux legs and the member gate catch the rare arch-specific lint). The emulated numbers above are superseded.
+
+- **Machine:** Mac mini (arm64), OrbStack, `CARGO_BUILD_JOBS=2`, CPU idle 48 to 53% at the start, cargo registry volume already filled, target folders cold (a new `v3/<workspace>` folder each).
+- **Method:** `./dev check --warm-linux crates tools/paddock-dev apps/debrief apps/dyno apps/pitcrew apps/pitwall apps/spotter`, one cold run per workspace, the Tauri app crates left out.
+
+  | Workspace | Cold seconds |
+  |---|---:|
+  | `crates` | 100.3 |
+  | `tools/paddock-dev` | 39.7 |
+  | `apps/debrief` | 158.9 |
+  | `apps/dyno` | 173.7 |
+  | `apps/pitcrew` | 74.2 |
+  | `apps/pitwall` | 104.8 |
+  | `apps/spotter` | 116.1 |
+  | all seven | 767.6 |
+
+- **Warm, native:** `apps/dyno` with a planted dead-code lint in dyno-agent: red in 5.0 s; the clean tree: 4.7 s (row text `clippy-linux apps/dyno (left out: dyno-app)`).
+- **Limits set from this:** `--warm-linux` ends one workspace's run at 360 s (about twice the largest cold run, 173.7 s) and waits at most 15 minutes for the heavy slot (another agent's full warm-linux holds it for about 768 s). Recorded in `tools/paddock-dev/src/pre_push/warm.rs`.
+- **Size:** after these runs the kept volume `paddock-linux-target-arm64` is 10.2 GB and `paddock-cargo-registry` 644 MB (`docker system df -v`); each CI image version adds its own `v<version>/` folders. `bash tools/linux-container.sh --id paddock --clean` removes both volumes (and the local images); the next `--warm-linux` refills them. The older amd64 volume `paddock-linux-target` (12.6 GB, from the emulated runs) is no longer used.
+- **Not measured:** a quiet machine, a push touching several workspaces, the cold time of the local image build itself (the image existed).
