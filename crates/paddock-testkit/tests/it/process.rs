@@ -4,6 +4,7 @@
 use paddock_testkit::process::allowed_names;
 use paddock_testkit::{TestCommand, env_lock};
 use std::collections::BTreeMap;
+use std::path::Path;
 
 /// The environment of a real child: `env` on Unix, `set` on Windows (both print `NAME=value` per line).
 fn child_env(c: &mut TestCommand) -> BTreeMap<String, String> {
@@ -526,10 +527,12 @@ fn many_commands_share_one_toolchain_link_folder_made_once_outside_their_own_fol
         .iter()
         .map(|c| {
             let report = c.path_report();
+            // A link is named for its program, `rustc` plus the platform's suffix, whatever spelling found it.
+            let own = format!("rustc{}", std::env::consts::EXE_SUFFIX);
             let link = report
                 .toolchain
                 .iter()
-                .find(|l| l.file_name() == rustc.file_name())
+                .find(|l| l.file_name().is_some_and(|n| n == own.as_str()))
                 .cloned();
             link.unwrap_or_else(|| panic!("no rustc link: {report}"))
                 .parent()
@@ -613,5 +616,45 @@ fn the_sweep_removes_only_old_folders_of_gone_programs_and_old_staging_folders()
     assert!(
         live.is_dir(),
         "a folder whose programs are there was removed"
+    );
+}
+
+/// A toolchain program found as `rustc.EXE` (Windows' `PATHEXT` spelling) is linked under its own name, `rustc.exe`, and a bare
+/// `rustc` starts through that link (ci.yml run 8154: the link was named after the found spelling, `rustc.EXE`).
+#[test]
+fn a_toolchain_program_found_in_another_spelling_is_linked_and_started_under_its_own_name() {
+    use paddock_env::Os;
+    let d = tempfile::tempdir().unwrap();
+    let tc = d.path().join("toolchain");
+    std::fs::create_dir(&tc).unwrap();
+    std::fs::write(
+        tc.join(if cfg!(windows) { "rustc.EXE" } else { "rustc" }),
+        "",
+    )
+    .unwrap();
+    let mut env = env_lock();
+    env.set("PATH", &tc);
+    let cmd = TestCommand::new("rustc");
+    let report = cmd.path_report();
+    let own = format!("rustc{}", std::env::consts::EXE_SUFFIX);
+    let link = report
+        .toolchain
+        .iter()
+        .find(|l| {
+            l.file_name().is_some_and(|n| {
+                paddock_env::winpath::same(Path::new(n), Path::new(&own), Os::current())
+            })
+        })
+        .unwrap_or_else(|| panic!("no rustc link: {report}"));
+    assert_eq!(
+        link.file_name().unwrap().to_string_lossy(),
+        own,
+        "the link keeps the spelling it was found in: {report}"
+    );
+    let program = Path::new(cmd.get_program());
+    assert!(
+        paddock_env::winpath::same(program, link, Os::current()),
+        "a bare rustc starts {}, not the link: {report}",
+        program.display()
     );
 }

@@ -710,9 +710,7 @@ fn curated() -> Curated {
 /// The link to `program` in the link folder (with `.exe` on Windows), when there is one.
 fn linked_program(dir: &Path, program: &OsStr) -> Option<PathBuf> {
     let mut name = program.to_os_string();
-    if cfg!(windows) {
-        name.push(".exe");
-    }
+    name.push(std::env::consts::EXE_SUFFIX);
     Some(dir.join(name)).filter(|p| p.exists())
 }
 
@@ -722,14 +720,19 @@ fn linked_program(dir: &Path, program: &OsStr) -> Option<PathBuf> {
 /// inside a command's or a `new_in` folder. Symbolic links on Unix; on Windows hard links, else a copy, logged with its error.
 fn link_folder(ambient: Option<&OsStr>) -> Option<PathBuf> {
     use std::hash::{Hash, Hasher};
-    let sources: Vec<PathBuf> = TOOLCHAIN
+    // Each link is named for its program plus the platform's suffix (`rustc.exe`), never after the spelling that found it
+    // (`rustc.EXE` through `PATHEXT`; ci.yml run 8154), so `linked_program` finds it by the same name on every file system.
+    let (sources, names): (Vec<PathBuf>, Vec<String>) = TOOLCHAIN
         .iter()
-        .map(|name| match std::env::var_os("CARGO") {
-            Some(c) if *name == "cargo" => PathBuf::from(c),
-            _ => PathBuf::from(resolve(OsStr::new(name), ambient)),
+        .map(|name| {
+            let source = match std::env::var_os("CARGO") {
+                Some(c) if *name == "cargo" => PathBuf::from(c),
+                _ => PathBuf::from(resolve(OsStr::new(name), ambient)),
+            };
+            (source, format!("{name}{}", std::env::consts::EXE_SUFFIX))
         })
-        .filter(|p| p.is_absolute() && p.is_file())
-        .collect();
+        .filter(|(p, _)| p.is_absolute() && p.is_file())
+        .unzip();
     if sources.is_empty() {
         return None;
     }
@@ -743,7 +746,6 @@ fn link_folder(ambient: Option<&OsStr>) -> Option<PathBuf> {
     }
     let root = std::env::temp_dir().join("paddock-test-toolchain");
     let dir = root.join(format!("{:016x}", h.finish()));
-    let names: Vec<&OsStr> = sources.iter().filter_map(|s| s.file_name()).collect();
     if names.iter().all(|n| dir.join(n).exists()) {
         return Some(dir);
     }
