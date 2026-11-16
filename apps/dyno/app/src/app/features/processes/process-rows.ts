@@ -143,6 +143,17 @@ export interface RowInput {
   expanded: ReadonlySet<string>;
 }
 
+/**
+ * The parent of `p` in this sweep, or null: the process with the parent pid, unless it started after its child, which makes it a
+ * process that reused the pid and not the parent (a start time missing on either side is no evidence, so the link stays; rule 53).
+ */
+function parentOf(p: ProcessSample, byPid: ReadonlyMap<number, ProcessSample>): ProcessSample | null {
+  const parent = p.parent === null ? undefined : byPid.get(p.parent);
+  if (parent === undefined) return null;
+  const [parentStart, childStart] = [readValue(parent.started), readValue(p.started)];
+  return parentStart !== null && childStart !== null && parentStart > childStart ? null : parent;
+}
+
 /** The visible rows for a view: grouped by app, as a parent/child tree, or flat. Pure; the view only renders it. */
 export function buildRows(input: RowInput): Row[] {
   const rows = buildListRows(input);
@@ -158,7 +169,7 @@ export function expandAllKeys(mode: ViewMode, processes: readonly ProcessSample[
   if (mode === 'groups') return groups.filter((g) => g.pids.length > 1).map((g) => `g${g.id}`);
   if (mode === 'tree') {
     const byPid = new Map(processes.map((p) => [p.pid, p]));
-    const parents = new Set(processes.map((p) => p.parent).filter((parent): parent is number => parent !== null && byPid.has(parent)));
+    const parents = new Set(processes.filter((p) => parentOf(p, byPid) !== null).map((p) => p.parent!));
     return [...parents].map((pid) => processKey(byPid.get(pid)!));
   }
   return [];
@@ -242,20 +253,19 @@ function buildListRows(input: RowInput): Row[] {
   }
 
   // Tree: a process under its parent; a process whose parent is gone is a root.
-  const present = new Set(kept.map((p) => p.pid));
+  const byPid = new Map(kept.map((p) => [p.pid, p]));
   const children = new Map<number, ProcessSample[]>();
   const roots: ProcessSample[] = [];
   for (const p of kept) {
     const parent = p.parent;
-    // A match whose parent did not match (or is gone) shows as a root, so nothing hides.
-    if (parent !== null && present.has(parent)) {
+    // A match whose parent did not match (or is gone, or only shares its pid) shows as a root, so nothing hides.
+    if (parent !== null && parentOf(p, byPid) !== null) {
       const list = children.get(parent) ?? [];
       list.push(p);
       children.set(parent, list);
     } else roots.push(p);
   }
   const rows: Row[] = [];
-  const byPid = new Map(kept.map((p) => [p.pid, p]));
   const walk = (p: ProcessSample, depth: number, seen: Set<number>): void => {
     if (seen.has(p.pid)) return;
     seen.add(p.pid);

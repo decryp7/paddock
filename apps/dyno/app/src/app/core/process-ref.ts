@@ -24,6 +24,15 @@ export function notDifferent(a: ProcessRef, b: ProcessRef): boolean {
   return identify(a, b) !== 'different';
 }
 
+/**
+ * Whether `b` is the process `a` names, for a screen that must not act on another one (a selection, the reply for a request): the
+ * same pid and the same start time, or the same pid with no start time on either side (the OS never gave one, so the pid is all
+ * there is). A start time on one side only is not enough: that may be a process that reused the pid.
+ */
+export function isSame(a: ProcessRef, b: ProcessRef): boolean {
+  return identify(a, b) === 'same' || (a.pid === b.pid && a.started === null && b.started === null);
+}
+
 /** The reference of a process sample (pid and the start time when it was read). */
 export function refOf(p: Pick<ProcessSample, 'pid' | 'started'>): ProcessRef {
   return { pid: p.pid, started: readValue(p.started) };

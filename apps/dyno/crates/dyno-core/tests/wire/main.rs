@@ -14,6 +14,7 @@ mod extras;
 mod health;
 mod jobs;
 mod power;
+mod process_ref;
 mod read_via;
 mod startup;
 mod tray_host;

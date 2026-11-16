@@ -1,0 +1,221 @@
+{
+  "connection": {
+    "country": null,
+    "firstSeen": null,
+    "flaggedBy": [],
+    "ipv6": false,
+    "local": "192.0.2.1",
+    "localPort": 50000,
+    "lookupOk": true,
+    "owner": {
+      "kind": "process",
+      "name": "tool",
+      "path": null,
+      "process": {
+        "pid": 8,
+        "started": null
+      }
+    },
+    "proto": "tcp",
+    "remote": "198.51.100.2",
+    "remoteIsLoopback": false,
+    "remotePort": 443,
+    "state": "established",
+    "stateLabel": "ESTABLISHED"
+  },
+  "details": {
+    "affinity": null,
+    "commandLine": [
+      "node"
+    ],
+    "connections": {
+      "unavailable": "r"
+    },
+    "cwd": null,
+    "efficiencyMode": null,
+    "handles": null,
+    "modules": {
+      "unavailable": "r"
+    },
+    "openFiles": {
+      "unavailable": "r"
+    },
+    "parents": [
+      {
+        "name": "init",
+        "process": {
+          "pid": 1,
+          "started": 1700000000001
+        }
+      },
+      {
+        "name": "kernel",
+        "process": {
+          "pid": 0,
+          "started": null
+        }
+      }
+    ],
+    "priority": null,
+    "process": {
+      "cpu": {
+        "value": 1.5
+      },
+      "diskReadBps": {
+        "value": 0.0
+      },
+      "diskWriteBps": {
+        "value": 0.0
+      },
+      "exe": "/bin/node",
+      "memory": {
+        "value": 1024
+      },
+      "name": "node",
+      "owner": "own",
+      "parent": 1,
+      "pid": 7,
+      "started": {
+        "value": 1700000000007
+      },
+      "state": "running",
+      "user": {
+        "value": "ana"
+      }
+    },
+    "signature": "unsigned",
+    "startupSource": null,
+    "threads": null
+  },
+  "diff": {
+    "added": [
+      {
+        "cpu": {
+          "value": 1.0
+        },
+        "exe": null,
+        "memory": {
+          "value": 2
+        },
+        "name": "old",
+        "process": {
+          "pid": 9,
+          "started": 1700000000009
+        }
+      }
+    ],
+    "after": {
+      "at": 2,
+      "id": "b",
+      "label": "b",
+      "processCount": 1
+    },
+    "before": {
+      "at": 1,
+      "id": "a",
+      "label": "a",
+      "processCount": 1
+    },
+    "changed": [
+      {
+        "cpuAfter": 9.0,
+        "cpuBefore": 1.0,
+        "memoryAfter": 99,
+        "memoryBefore": 1,
+        "name": "node",
+        "process": {
+          "pid": 7,
+          "started": 1700000000007
+        }
+      }
+    ],
+    "cpuDelta": 8.0,
+    "memoryUsedDelta": 98,
+    "removed": [
+      {
+        "cpu": {
+          "value": 1.0
+        },
+        "exe": null,
+        "memory": {
+          "value": 2
+        },
+        "name": "old",
+        "process": {
+          "pid": 10,
+          "started": null
+        }
+      }
+    ]
+  },
+  "gpu": {
+    "processes": [
+      {
+        "gpuPercent": 14.0,
+        "memoryBytes": 2048,
+        "name": "WindowServer",
+        "process": {
+          "pid": 311,
+          "started": 1700000000311
+        }
+      }
+    ],
+    "source": "counters",
+    "unavailable": null
+  },
+  "listener": {
+    "exposure": "allInterfaces",
+    "firstSeen": null,
+    "ipv6": false,
+    "local": "0.0.0.0",
+    "owner": {
+      "kind": "process",
+      "name": "node",
+      "path": "/bin/node",
+      "process": {
+        "pid": 7,
+        "started": 1700000000007
+      }
+    },
+    "port": 3000,
+    "proto": "tcp"
+  },
+  "ownerUnknown": {
+    "kind": "unknown",
+    "reason": "why"
+  },
+  "sleep": {
+    "blockers": [
+      {
+        "heldFor": null,
+        "name": "zoom",
+        "prevents": "displaySleep",
+        "process": {
+          "pid": 4821,
+          "started": 1700000004821
+        },
+        "reason": "call"
+      },
+      {
+        "heldFor": "00:01:00",
+        "name": "driver",
+        "prevents": "sleep",
+        "process": null,
+        "reason": "audio"
+      }
+    ],
+    "blockersUnavailable": null,
+    "blockersVia": "local",
+    "wakes": [],
+    "wakesUnavailable": null
+  },
+  "traffic": {
+    "name": "node",
+    "process": {
+      "pid": 7,
+      "started": 1700000000007
+    },
+    "rxBps": 10.0,
+    "txBps": 2.0
+  }
+}

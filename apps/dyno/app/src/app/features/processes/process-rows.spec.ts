@@ -222,7 +222,8 @@ describe('buildRows: tree', () => {
     expect(both.map((r) => [r.name, r.depth])).toEqual([['zeta', 0], ['zeta-child', 1]]);
   });
   it('survives parent cycles without looping or duplicating', () => {
-    const cyc = [sample(1, 'a', { parent: 2 }), sample(2, 'b', { parent: 1 })];
+    const same = { started: { value: 1 } };
+    const cyc = [{ ...sample(1, 'a', { parent: 2 }), ...same }, { ...sample(2, 'b', { parent: 1 }), ...same }];
     // Nobody is a root, so nothing is shown, but it must terminate.
     expect(buildRows(input({ mode: 'tree', processes: cyc }))).toEqual([]);
     const selfRoot = [sample(1, 'a', { parent: null }), sample(2, 'b', { parent: 1 }), sample(3, 'c', { parent: 2 })];
@@ -284,7 +285,10 @@ describe('row keys', () => {
     const procs = [sample(1, 'init'), sample(2, 'shell', { parent: 1 }), sample(3, 'tool', { parent: 2 })];
     const open = new Set(expandAllKeys('tree', procs, []));
     const reusedProcs = procs.map((p) => (p.pid === 2 ? { ...p, started: { value: 9999 } } : p));
-    expect(names(buildRows(input({ mode: 'tree', processes: reusedProcs, expanded: open })))).toEqual(['init', 'shell']);
+    const rows = buildRows(input({ mode: 'tree', processes: reusedProcs, expanded: open }));
+    // The shell that now holds pid 2 started after `tool`, so it is not tool's parent: it has no children and tool is a root.
+    expect(rows.find((r) => r.name === 'shell')).toMatchObject({ expandable: false, expanded: false });
+    expect(rows.find((r) => r.name === 'tool')).toMatchObject({ depth: 0 });
   });
 });
 
@@ -308,5 +312,20 @@ describe('a start time that comes and goes', () => {
     expect(carryStarts([reused], procs)[0]!.started).toEqual({ value: 9999 });
     expect(carryStarts([noStart(sample(50, 'new'))], procs)[0]!.started).toEqual({ unavailable: { reason: 'notPermitted' } });
     expect(carryStarts(procs, [])).toBe(procs);
+  });
+});
+
+describe('a parent pid that a newer process now holds', () => {
+  it('is no parent: a process whose "parent" started after it is a root, and is not opened by Expand all', () => {
+    // pid 2 started at 1002; its pid-parent 1 started at 5000, so pid 1 is a process that reused the pid of the real parent.
+    const procs = [{ ...sample(1, 'newcomer'), started: { value: 5_000 } }, sample(2, 'orphan', { parent: 1 }), sample(3, 'child', { parent: 2 })];
+    const rows = buildRows(input({ mode: 'tree', processes: procs, expanded: new Set(expandAllKeys('tree', procs, [])) }));
+    expect(rows.map((r) => [r.name, r.depth])).toEqual([['newcomer', 0], ['orphan', 0], ['child', 1]]);
+    expect(expandAllKeys('tree', procs, [])).toEqual(['p2@1002']);
+  });
+  it('stays the parent when a start time is missing on either side', () => {
+    const procs = [{ ...sample(1, 'parent'), started: { unavailable: { reason: 'notPermitted' as const } } }, sample(2, 'kid', { parent: 1 })];
+    const rows = buildRows(input({ mode: 'tree', processes: procs, expanded: new Set(expandAllKeys('tree', procs, [])) }));
+    expect(rows.map((r) => [r.name, r.depth])).toEqual([['parent', 0], ['kid', 1]]);
   });
 });

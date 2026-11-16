@@ -816,7 +816,7 @@ mod tests {
             HelperMessage::Request(HelperRequest::Audit(5)),
             HelperMessage::Reply(HelperReply::Traffic(TrafficAnswer {
                 counters: vec![crate::network_traffic::TrafficCounter {
-                    process: crate::process::ProcessRef::pid_only(4),
+                    pid: 4,
                     name: "x".into(),
                     bytes_in: 1,
                     bytes_out: 2,

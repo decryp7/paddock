@@ -58,6 +58,7 @@ pub struct ProcessEntry {
     /// Start time, seconds since 1970 (with the pid it identifies the process across time).
     pub started: Option<i64>,
     /// Parent process id.
+    // conformance: wire-pid — the helper's wire (the agent turns it into `ProcessSample.parent`): a link inside one sweep, checked against the child's start time by the tree builder
     pub parent: Option<u32>,
     /// Name, at most [`MAX_NAME`] characters.
     pub name: String,

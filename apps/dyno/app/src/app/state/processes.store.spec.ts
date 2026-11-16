@@ -197,6 +197,18 @@ describe('ProcessesStore: selection', () => {
     expect(store.details()).toBeNull();
     expect(store.detailsLoading()).toBe(true);
   });
+  it('ignores the answer for a selection whose start time is known when the selection now has none (it may be a reused pid)', async () => {
+    const { mock, store } = setup();
+    const [a] = mock.liveUpdate('processes').processes!;
+    const real = mock.processDetails.bind(mock);
+    let release!: (d: ProcessDetails) => void;
+    vi.spyOn(mock, 'processDetails').mockImplementationOnce(() => new Promise((r) => (release = r))).mockImplementation(() => new Promise(() => undefined));
+    const first = store.select({ pid: a!.pid, started: readValue(a!.started) });
+    void store.select({ pid: a!.pid, started: null });
+    release(await real({ pid: a!.pid, started: readValue(a!.started) }));
+    await first;
+    expect(store.details()).toBeNull();
+  });
   it('a live update without a start time keeps the one the process was seen with, so its row key does not change', () => {
     const { mock, store } = setup();
     const { push } = feed(mock, store);

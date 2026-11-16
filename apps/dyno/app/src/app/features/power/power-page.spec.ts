@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
+import type { LiveUpdate } from '../../core/api.types';
 import { PowerPage } from './power-page';
 import { settle, useSettleClock } from '../../../testing/settle';
 
@@ -188,5 +189,36 @@ describe('dy-power-page', () => {
     btn(el, 'Keep awake while it runs').click();
     await settle(f);
     expect(spy.mock.calls[0]![0].until).toHaveProperty('whileProcess');
+  });
+
+  it('holds the chosen program by pid and start time: a pid reused between choosing and starting starts nothing', async () => {
+    const mock = new MockBackend({ now: () => NOW });
+    let push: ((u: LiveUpdate) => void) | null = null;
+    const real = mock.onLive.bind(mock);
+    vi.spyOn(mock, 'onLive').mockImplementation((detail, listener) => {
+      if (detail === 'processes') push = listener;
+      return real(detail, listener);
+    });
+    TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
+    const f = TestBed.createComponent(PowerPage);
+    f.detectChanges();
+    await settle(f);
+    const el = f.nativeElement as HTMLElement;
+    const spy = vi.spyOn(mock, 'powerKeepAwake');
+    const update = mock.liveUpdate('processes');
+    push!(update);
+    await settle(f);
+    const select = el.querySelector<HTMLSelectElement>('select')!;
+    const chosen = [...select.options].find((o) => o.value)!;
+    select.value = chosen.value;
+    select.dispatchEvent(new Event('change'));
+    await settle(f);
+    // The chosen process ends and another one takes its pid: same pid, another start time.
+    const pid = Number(/\d+/.exec(chosen.value)![0]);
+    push!({ ...update, processes: update.processes!.map((p) => (p.pid === pid ? { ...p, started: { value: 42 } } : p)) });
+    await settle(f);
+    btn(el, 'Keep awake while it runs').click();
+    await settle(f);
+    expect(spy).not.toHaveBeenCalled();
   });
 });

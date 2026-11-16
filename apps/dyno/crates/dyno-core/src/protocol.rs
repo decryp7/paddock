@@ -79,6 +79,11 @@ use serde::{Deserialize, Serialize};
 ///
 /// Also in version 8 (still unreleased, so no further bump; ADR 0033, WP-4): `StartupOverview` gained `signer_read` and `coverage`, and
 /// `StartupLocation` gained `UserRunOnceKey`, `MachineRunOnceKey` and `PackagedApp` appended after `LoginItem`. `tests/wire/startup.rs` pins both.
+///
+/// Also in version 8: `ProcessRef` (pid plus start time; rule 53) replaced the bare `pid` of `ParentLink`, the network `Owner::Process`,
+/// `TrafficRow`, `GpuProcess`, `ProcessSummary` and `ProcessChange` (a `process` field) and of `SleepBlocker` (`process: Option<ProcessRef>`).
+/// These are on the agent-to-UI wire only; the helper wire is untouched (`HELPER_API` 6, pinned byte for byte by
+/// `tests/helper_wire_golden.rs`). `tests/wire/process_ref.rs` pins the new shapes.
 pub const PROTOCOL_VERSION: u32 = 8;
 
 /// The major version the IPC handshake carries between the app (or the command line) and the agent: [`PROTOCOL_VERSION`], so a

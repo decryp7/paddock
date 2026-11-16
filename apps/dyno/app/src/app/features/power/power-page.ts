@@ -8,7 +8,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatTabsModule } from '@angular/material/tabs';
 import type { AwakeUntil } from '../../core/api.types';
-import { readValue } from '../../core/measured';
+import { refKey, refOf } from '../../core/process-ref';
 import { AsyncState } from '../../shared/async-state';
 import { formatClock } from '../../shared/format';
 import { Icon } from '../../shared/icon';
@@ -186,7 +186,7 @@ const SUBTITLES = [
                         <select matNativeControl [disabled]="!!blocked()" [ngModel]="program()" (ngModelChange)="program.set($event)" aria-label="Keep awake while this program runs">
                           <option value="">Choose a program…</option>
                           @for (p of programs(); track p.key) {
-                            <option [value]="p.key">{{ p.name }} (process {{ p.pid }})</option>
+                            <option [value]="p.key">{{ p.name }} (process {{ p.ref.pid }})</option>
                           }
                         </select>
                       </mat-form-field>
@@ -303,12 +303,12 @@ export class PowerPage implements OnInit, OnDestroy {
   protected readonly timeWhy = computed(() => whyDisabled('time', this.minute() !== null, this.blocked()));
   protected readonly busyWhy = computed(() => whyDisabled('busy', this.anyBusy(), this.blocked()));
   protected readonly programWhy = computed(() => whyDisabled('program', !!this.program(), this.blocked()));
-  /** Running programs to follow, one entry per process (pid and start time identify it, never the pid alone). */
+  /** Running programs to follow, one entry per process: its key is pid plus start time (`refKey`), so a pid the OS hands to a new process is another entry. */
   protected readonly programs = computed(() =>
     this.processes
       .processes()
-      .map((p) => ({ key: `${p.pid}`, pid: p.pid, name: p.name, started: readValue(p.started) }))
-      .sort((a, b) => a.name.localeCompare(b.name) || a.pid - b.pid),
+      .map((p) => ({ key: refKey(refOf(p)), ref: refOf(p), name: p.name }))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.ref.pid - b.ref.pid),
   );
 
   ngOnInit(): void {
@@ -366,7 +366,13 @@ export class PowerPage implements OnInit, OnDestroy {
     this.start({ whileBusy: { conds: busyConditions(this.busy(), this.keep()), graceSecs: this.keep().graceSecs } });
   }
   protected startProgram(): void {
+    // The program chosen is held by its key; if that process is gone (or its pid is another process now) the choice is dropped and
+    // nothing starts, so a hold never follows the process that reused the pid (rule 53).
     const p = this.programs().find((x) => x.key === this.program());
-    if (p) this.start({ whileProcess: { process: { pid: p.pid, started: p.started } } });
+    if (!p) {
+      this.program.set('');
+      return;
+    }
+    this.start({ whileProcess: { process: p.ref } });
   }
 }

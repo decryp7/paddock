@@ -4,7 +4,6 @@
 
 use dyno_core::network_traffic::{TrafficCounter, MAX_COUNTERS};
 use dyno_core::ports::PlatformError;
-use dyno_core::process::ProcessRef;
 use std::collections::HashMap;
 
 /// `ERROR_ACCESS_DENIED`.
@@ -40,7 +39,7 @@ pub fn counters_by_pid(conns: &[(u32, u64, u64)], names: &HashMap<u32, String>) 
     let mut by_pid: HashMap<u32, TrafficCounter> = HashMap::new();
     for (pid, rx, tx) in conns {
         let c = by_pid.entry(*pid).or_insert_with(|| TrafficCounter {
-            process: ProcessRef::pid_only(*pid),
+            pid: *pid,
             name: names.get(pid).cloned().unwrap_or_else(|| format!("pid {pid}")),
             bytes_in: 0,
             bytes_out: 0,
@@ -49,7 +48,7 @@ pub fn counters_by_pid(conns: &[(u32, u64, u64)], names: &HashMap<u32, String>) 
         c.bytes_out = c.bytes_out.saturating_add(*tx);
     }
     let mut v: Vec<_> = by_pid.into_values().collect();
-    v.sort_by_key(|c| c.process.pid);
+    v.sort_by_key(|c| c.pid);
     v.truncate(MAX_COUNTERS);
     v
 }
@@ -80,10 +79,7 @@ mod tests {
         let names = HashMap::from([(4, "alpha".to_string())]);
         let c = counters_by_pid(&[(4, 10, 1), (9, 5, 5), (4, 20, 2)], &names);
         assert_eq!(c.len(), 2);
-        assert_eq!(
-            (c[0].process.pid, c[0].name.as_str(), c[0].bytes_in, c[0].bytes_out),
-            (4, "alpha", 30, 3)
-        );
+        assert_eq!((c[0].pid, c[0].name.as_str(), c[0].bytes_in, c[0].bytes_out), (4, "alpha", 30, 3));
         assert_eq!(c[1].name, "pid 9");
     }
 }

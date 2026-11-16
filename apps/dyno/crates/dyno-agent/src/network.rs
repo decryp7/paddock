@@ -314,13 +314,10 @@ impl NetCentre {
 
 /// Adds the start time from `table` to each counter a tool named by pid only (rule 53).
 fn stamp_counters(
-    mut counters: Vec<dyno_core::network_traffic::TrafficCounter>,
+    counters: &[dyno_core::network_traffic::TrafficCounter],
     table: &[ProcessSample],
-) -> Vec<dyno_core::network_traffic::TrafficCounter> {
-    for c in &mut counters {
-        c.process = c.process.with_start_from(table);
-    }
-    counters
+) -> Vec<dyno_core::network_traffic::StampedCounter> {
+    counters.iter().map(|c| c.stamped(table)).collect()
 }
 
 /// Reads the counters once and stores the rates (or the reason there are none) with who read them.
@@ -328,11 +325,10 @@ fn refresh_traffic(source: &dyn ProcessTraffic, state: &Mutex<Traffic>, table: &
     let read = source.read();
     let mut t = lock(state);
     let (rows, note, others) = match read.answer {
-        Ok(mut a) => {
+        Ok(a) => {
             // A tool's counters name a pid; with the start time from the process table, a pid reused between two reads is a new process
             // with no earlier read, not a rate over the old one's counters (rule 53).
-            a.counters = stamp_counters(a.counters, table);
-            (t.tracker.update(now(), &a.counters), None, a.others)
+            (t.tracker.update(now(), &stamp_counters(&a.counters, table)), None, a.others)
         }
         Err(PlatformError::Unsupported(why)) => (Vec::new(), Some(why), None),
         Err(e) => (Vec::new(), Some(format!("Traffic per program could not be read ({e}).")), None),
@@ -556,7 +552,7 @@ mod tests {
         use dyno_core::network_traffic::TrafficCounter;
         use dyno_core::time::Timestamp;
         let counter = |bytes_in: u64| TrafficCounter {
-            process: dyno_core::process::ProcessRef::pid_only(7),
+            pid: 7,
             name: "x".into(),
             bytes_in,
             bytes_out: 0,
@@ -567,15 +563,15 @@ mod tests {
             vec![p]
         };
         let mut tracker = TrafficTracker::new();
-        tracker.update(Timestamp(0), &stamp_counters(vec![counter(1_000)], &table(100)));
-        let rows = tracker.update(Timestamp(1_000), &stamp_counters(vec![counter(2_000)], &table(100)));
+        tracker.update(Timestamp(0), &stamp_counters(&[counter(1_000)], &table(100)));
+        let rows = tracker.update(Timestamp(1_000), &stamp_counters(&[counter(2_000)], &table(100)));
         assert_eq!(rows.len(), 1, "the same process has a rate");
         assert_eq!(
             rows[0].process.started,
             Some(Timestamp(100)),
             "and the row names the process by pid and start time"
         );
-        let rows = tracker.update(Timestamp(2_000), &stamp_counters(vec![counter(3_000)], &table(200)));
+        let rows = tracker.update(Timestamp(2_000), &stamp_counters(&[counter(3_000)], &table(200)));
         assert!(rows.is_empty(), "pid 7 is another process now: no earlier read to take a rate from");
     }
 

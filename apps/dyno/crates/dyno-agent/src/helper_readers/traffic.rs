@@ -99,7 +99,7 @@ mod tests {
 
     fn counter(pid: u32) -> TrafficCounter {
         TrafficCounter {
-            process: dyno_core::process::ProcessRef::pid_only(pid),
+            pid,
             name: format!("p{pid}"),
             bytes_in: 1,
             bytes_out: 2,

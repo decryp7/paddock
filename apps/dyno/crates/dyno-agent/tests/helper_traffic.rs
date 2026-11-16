@@ -51,7 +51,7 @@ fn account(caller: Caller) -> RawOwner {
 
 fn counter(pid: u32, name: &str, bytes_in: u64) -> TrafficCounter {
     TrafficCounter {
-        process: dyno_core::process::ProcessRef::pid_only(pid),
+        pid,
         name: name.into(),
         bytes_in,
         bytes_out: 1,
@@ -152,9 +152,10 @@ fn the_rows_of_a_standard_user_hold_only_its_own_and_the_systems_programs() {
     let shared = rig.running.as_ref().unwrap().shared.clone();
     // The agent's own link to the helper, as the network centre reads it: two reads, the second 8 s after the first.
     let mut tracker = TrafficTracker::new();
-    let first = shared.network.counters().unwrap();
+    let stamped = |c: Vec<dyno_core::network_traffic::TrafficCounter>| c.iter().map(|c| c.stamped(&[])).collect::<Vec<_>>();
+    let first = stamped(shared.network.counters().unwrap());
     assert!(tracker.update(Timestamp(0), &first).is_empty(), "a first read has no rates");
-    let second = shared.network.counters().unwrap();
+    let second = stamped(shared.network.counters().unwrap());
     let rows = tracker.update(Timestamp(8_000), &second);
     let mut names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
     names.sort_unstable();

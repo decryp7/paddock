@@ -145,6 +145,7 @@ pub struct ProcessSample {
     // conformance: wire-pid — the sample itself: `started` is its start time (a Measured, with a reason) and `reference()` makes its ProcessRef
     pub pid: Pid,
     /// Parent process id, when known.
+    // conformance: wire-pid — a link inside one sweep: the tree builder treats a parent that started after its child as a reused pid (process-rows.ts), as `parents()` does in the details
     pub parent: Option<Pid>,
     /// Executable name, e.g. "chrome.exe".
     pub name: String,
