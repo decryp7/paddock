@@ -28,7 +28,7 @@ pub struct PrivateTemp {
 }
 
 impl PrivateTemp {
-    /// A new folder in the system temp folder.
+    /// A new folder in the system temp folder, as captured for the kit ([`crate::ambient::Ambient::temp_dir`]).
     ///
     /// # Errors
     /// The folder cannot be made or made private.
@@ -36,7 +36,7 @@ impl PrivateTemp {
         PrivateTemp::from(
             tempfile::Builder::new()
                 .prefix("paddock-private-")
-                .tempdir()?,
+                .tempdir_in(&crate::ambient::ambient().temp_dir)?,
         )
     }
 
@@ -61,7 +61,7 @@ impl PrivateTemp {
         b.prefix(prefix);
         PrivateTemp::from(match parent {
             Some(p) => b.tempdir_in(p)?,
-            None => b.tempdir()?,
+            None => b.tempdir_in(&crate::ambient::ambient().temp_dir)?,
         })
     }
 
@@ -120,7 +120,7 @@ mod tests {
         drop(t);
         assert!(!p.exists());
         // Kept in a parent of the test's own, so the cleanup can show it removes only what the test made.
-        let parent = tempfile::tempdir().unwrap();
+        let parent = crate::ambient::tempdir();
         let kept = PrivateTemp::new_in(parent.path()).unwrap().keep();
         assert!(kept.is_dir());
         std::fs::remove_dir_all(&kept).unwrap();

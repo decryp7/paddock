@@ -1399,7 +1399,8 @@ Windows CI runner (ci.yml run 8152, job 39497: merge_check median 5.8 to 44 s, g
   not the cause. Since the review of df9af3cda the folder is in the build's target folder, not the temp folder; the numbers
   above were measured with it in the temp folder, which costs the same.
 - **Rename retry (2026-11-16):** in six runs of `measure_test_command --saturate` on the VM (copies, so a scanner may hold the
-  new files), run from a target-folder layout, no rename of a staging folder was refused, so the retry never ran; its 500 ms
-  bound is ADR 0078's for transient Windows refusals, not a measured hold. Per command after the first: median 1.2 to 2.5 ms.
+  new files), run from a target-folder layout, no rename of a staging folder was refused, so the retry never ran. Its 500 ms
+  bound was ADR 0078's, not a measured hold, so the retry was dropped: a refused rename leaves the process on its complete
+  staging folder (logged), which is correct. Per command after the first: median 1.2 to 2.5 ms.
 - **Not measured:** the CI runner itself (the integrator's rerun of the failed jobs is the check), a release build, a cold
   Defender cache.

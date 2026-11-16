@@ -37,6 +37,7 @@
 //! Nothing here touches the user's folders or starts a process, except [`TestCommand`] (a child with a listed environment) and [`boot_volume`], which runs the shared rule
 //! (`conformance/ci/boot-volume.sh`) once per process on macOS; the only real time is [`wait`]'s poll interval.
 
+pub mod ambient;
 pub mod boot_volume;
 pub mod cargo_layout;
 pub mod cases;
@@ -52,6 +53,7 @@ pub mod runner;
 pub mod scratch;
 pub mod wait;
 
+pub use ambient::{Ambient, ambient, tempdir};
 pub use cases::{both, case, run_cases};
 pub use env::{EnvLock, env_lock};
 pub use golden::{Golden, GoldenError, GoldenMode, assert_golden, check_golden};

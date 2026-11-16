@@ -48,7 +48,7 @@ pub fn boot_volume_temp() -> PathBuf {
         let choice = boot_volume_choice(
             cfg!(target_os = "macos"),
             &rule_script(),
-            &std::env::temp_dir(),
+            &crate::ambient::ambient().temp_dir,
         );
         if let Some(note) = &choice.note {
             eprintln!("{note}");

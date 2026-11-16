@@ -47,11 +47,15 @@ Its own `env_clear` goes **back to the listed set**. It starts from an **empty e
   `cargo-clippy`, `cargo-fmt`, `rustfmt`, `clippy-driver`, `rustdoc`: symbolic links on Unix, where rustup's proxies dispatch on
   the name they were started as, hard links or copies on Windows; one folder per toolchain in the build's target folder,
   `<target>/paddock-test-toolchain` (the practice of cargo's own test support and `CARGO_TARGET_TMPDIR`: nothing in a user's or a
-  shared temp folder, `cargo clean` removes it, every test program of the build shares it), made once (a staging folder renamed
-  into place, a refused rename on Windows tried again for at most 500 ms and logged) and shared by every command and test
-  process, never inside a command's or a `new_in` folder, made again when it disappears under a running process; only a
-  crashed run's staging folder is swept, once an hour old. A test program run outside a target folder (copied elsewhere, as on
-  the Windows test VM) links into each command's own folder instead. ci.yml run 8152 measured the per-command version about 6
+  shared temp folder, `cargo clean` removes it, every test program of the build shares it; only a folder with cargo's
+  `CACHEDIR.TAG` counts as a target folder, so a test program copied to `.../deps/x` elsewhere never writes there), made once
+  (a staging folder renamed into place; a refused rename leaves this process on its complete staging folder, logged, with no
+  retry: none was ever seen, docs/benchmarks.md "Rename retry") and shared by every command and test process, never inside a
+  command's or a `new_in` folder. Its record `links.txt` starts with a format header; a folder without it, of another format or
+  missing a link is made again, also when it disappears under a running process. The sweep removes, once an hour old, a crashed
+  run's staging folder and a folder whose recorded programs are all gone (a test's stand-in toolchain; tests give their
+  stand-ins a link root in their own folder). A test program run outside a target folder, or one whose link root cannot be
+  made (logged once), links into each command's own folder instead. ci.yml run 8152 measured the per-command version about 6
   times slower on Windows, docs/benchmarks.md), never the folder they came from, because `cargo install`
   puts other tools beside them in `$CARGO_HOME/bin` (`heavy`: the review of `7edb8cad6` measured `command -v heavy` finding it,
   which reopened incident 1); then the folders of `node`, `npm`, `npx` and `git` as the test process finds them; on Windows Git
@@ -70,6 +74,15 @@ Its own `env_clear` goes **back to the listed set**. It starts from an **empty e
   `path_first(dir)` puts a test's stand-in folder first; `.env("PATH", ..)` replaces it whole. A bare program name is
   resolved once, at construction, against the **test process's** `PATH`: `path_first` and `env("PATH", ..)` change only the
   child's own lookups, never which program starts (a test that starts a stand-in names it by its path).
+- **the machine values are captured once** (`paddock_testkit::ambient`): `PATH`, `CARGO`, the temp folder, the user's home and
+  the toolchain and build variables are read once per test process, under the environment lock before any test changes it,
+  and never live again. The plain harness runs a binary's tests on threads of one process, so a live read saw another test's
+  changes (`hermetic` points `TMPDIR` into its scratch; measured on `a9a7e6484`: a `Scratch` made there and removed with it, 5
+  of 40 runs). A test that needs other machine values passes an `Ambient` to `TestCommand::on`, never changes the process
+  environment for it, and the kit's temp folders (`Scratch`, `canonical_tempdir`, `private_tempdir`, `tempdir`) use the
+  captured temp folder. **The cargo** is `CARGO`, else the toolchain's own (`rustc --print sysroot` plus `bin/cargo`, asked once
+  with `RUSTUP_AUTO_INSTALL=0`): a test program started directly or copied has no `CARGO`, and rustup's proxy would put all of
+  `$CARGO_HOME/bin` in front of its child's `PATH` (the review of `a9a7e6484` measured the proxy 15 of 15 times).
 - the toolchain: `RUSTUP_HOME`, `CARGO_HOME`, `RUSTUP_TOOLCHAIN` and `CARGO_BUILD_JOBS` (a bound, ER-24) as the test process has them, and, when unset, the real
   `~/.cargo` and `~/.rustup` named explicitly (a redirected `HOME` would otherwise hide the offline registry and the
   toolchains); on Windows `SystemRoot`, `ComSpec`, `PATHEXT` and a few more. These are `PASSED_THROUGH` and the only
