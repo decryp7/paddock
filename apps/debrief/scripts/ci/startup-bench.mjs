@@ -11,22 +11,20 @@
 // On macOS the path may be the .app (its main executable is used). `--report-only` prints the medians without
 // failing (an OS whose budgets are not measured yet).
 //
-// Verdict on a busy host (user decision 2026-11-16; the mechanism is scripts/bench/busy-host.mjs, shared). The gate is the
-// CPU time (user + sys) of the started process tree, read when the "Startup timings" line arrives; it does not grow when the
-// host is busy. A fixed reference workload is timed before and after the starts, and the wall-time marks are scaled by how
-// much slower the host ran it than its recorded baseline. Host CPU idle is printed with every start, never used to drop one.
+// Verdict on a busy host (user rule 2026-11-17; the mechanism is scripts/bench/busy-host.mjs, shared): the benchmark is always
+// taken and the host's CPU idle and load are recorded with every start; a busy host never makes it "not measured".
+//   - FAIL: the CPU time (user + sys) of the started process tree, read when the "Startup timings" line arrives, over its
+//     threshold (baseline + measured noise margin); or a wall mark over its ceiling (5 times its baseline), which only a
+//     broken start reaches. Both on every run, tag or not.
+//   - NOTE, never a failure: a wall mark over its noise threshold but under the ceiling, a high spread of the starts, the
+//     ratio to a fixed reference workload, host CPU idle and load.
+//   - NOT MEASURED only when the app produced no timings (it did not start or logged no line): ::error:: and exit 6.
 // The tree is the app and its sidecars; the WebKit web-content process is not its child on macOS, so its CPU is not in the
-// number, and the scaled wall time is what covers the rendering marks.
-// Thresholds (startup-budgets.json, measured: docs/performance.md, "Start-up benchmark on a busy host"): CPU = recorded
-// baseline + measured noise margin; wall marks = budgets scaled to the reference; reference spread limit.
-//   - Measured and over a threshold: ::error:: and exit 1, on every run.
-//   - Measured and under: pass; the numbers go to the job's step summary.
-//   - NOT MEASURED means only that the reference workload was unstable (spread over its limit) or missing. On a tag run
-//     (GITHUB_REF_TYPE=tag, ER-33) that is an ::error:: and exit 6; on any other run a ::warning:: and exit 0.
-// `--report-only` prints the numbers and never fails. Exit codes: 0 ok, 1 over budget or error, 2 usage, 6 not measured (tag).
+// number. Thresholds and their measurement: startup-budgets.json and docs/performance.md, "Start-up benchmark on a busy host".
+// `--report-only` prints the numbers and never fails. Exit codes: 0 ok, 1 over a threshold, 2 usage, 6 not measured.
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -75,15 +73,16 @@ export function evaluate(runs, budgets) {
 
 /**
  * Starts `want` times and returns the samples: each carries the host's CPU idle before and after it. A start that fails
- * propagates. `measure()` runs one start; `idle()` reads the host's CPU idle (percent or null). No sample is dropped for
- * the host being busy: the verdict handles that (scaled wall time, tree CPU).
+ * propagates. `measure()` runs one start; `idle()` reads the host's CPU idle (percent or null) and `load()` the 1-minute load,
+ * both recorded with the sample and never used to drop one.
  */
-export async function collectSamples({ want, measure, idle }) {
+export async function collectSamples({ want, measure, idle, load = () => null }) {
   const samples = [];
   for (let i = 0; i < want; i++) {
     const idleBefore = idle();
+    const loadBefore = load();
     const run = await measure();
-    samples.push({ ...run, idleBefore, idleAfter: idle() });
+    samples.push({ ...run, idleBefore, idleAfter: idle(), loadBefore, loadAfter: load() });
   }
   return samples;
 }
@@ -149,11 +148,12 @@ async function main() {
     console.log(
       `${label}: ${MARKS.map(([m]) => `${m} ${r.marks[m]}`).join(', ')} ms | steps ${r.steps}` +
         ` | tree cpu ${r.cpuMs === null || r.cpuMs === undefined ? 'n/a' : `${fmt(r.cpuMs)} ms`}` +
-        (r.idleBefore === undefined ? '' : ` | host cpu idle ${r.idleBefore ?? 'n/a'}% -> ${r.idleAfter ?? 'n/a'}%`),
+        (r.idleBefore === undefined ? '' : ` | host cpu idle ${r.idleBefore ?? 'n/a'}% -> ${r.idleAfter ?? 'n/a'}%, load ${r.loadBefore === null || r.loadBefore === undefined ? 'n/a' : `${fmt(r.loadBefore)} -> ${fmt(r.loadAfter)}`}`),
     );
-  console.log(`run kind: ${tag ? 'release tag (a measured result is required, ER-33)' : 'not a tag (NOT MEASURED is a warning)'}`);
+  console.log(`run kind: ${tag ? 'release tag' : 'not a tag'} (judged alike: a busy host is never "not measured")`);
   let first;
-  let samples;
+  let startError = null;
+  let samples = [];
   let repsBefore;
   let repsAfter;
   try {
@@ -161,10 +161,14 @@ async function main() {
     repsBefore = referenceReps(5);
     first = await runOnce(exe, data, 60_000);
     show('first run (not counted)', first);
-    samples = await collectSamples({ want: runs, measure: () => runOnce(exe, data, 60_000), idle: () => readCpuIdle() });
-    repsAfter = referenceReps(5);
+    samples = await collectSamples({ want: runs, measure: () => runOnce(exe, data, 60_000), idle: () => readCpuIdle(), load: () => (process.platform === 'win32' ? null : loadavg()[0]) });
     samples.forEach((r, i) => show(`run ${i + 1}`, r));
+  } catch (e) {
+    startError = e.message; // the app did not start or logged no timings: NOT MEASURED below, with this cause
+    samples = [];
+    console.log(`the app gave no timings: ${startError}`);
   } finally {
+    repsAfter = referenceReps(5);
     rmSync(data, { recursive: true, force: true });
   }
   const reps = [...repsBefore, ...repsAfter];
@@ -172,18 +176,20 @@ async function main() {
   const v = verdict({
     cpuMsSamples: samples.map((r) => r.cpuMs ?? null),
     wallSamples: samples.map((r) => r.marks),
-    reference: { reps, ...budgets?.reference },
-    thresholds: { cpu: budgets?.cpu, marks: budgets?.marks, samples: budgets?.samples },
-    tag,
+    reference: { reps },
+    thresholds: { cpu: budgets?.cpu, marks: budgets?.marks, wallCeilingFactor: budgets?.wallCeilingFactor },
+    idle: samples,
     reportOnly: reportOnly || !budgets,
   });
+  if (startError) v.notes[0] = `the app produced no start-up timings (${startError})`;
   const ref = referenceStats(reps);
   const num = (x) => (Number.isFinite(x) ? fmt(x) : '-');
   const lines = [
-    `reference workload: median ${fmt(ref.median)} ms, spread ${(ref.spread * 100).toFixed(1)}% over ${ref.n} readings (before ${fmt(referenceStats(repsBefore).median)} ms, after ${fmt(referenceStats(repsAfter).median)} ms; baseline ${budgets?.reference?.baselineMs ?? '-'} ms); start-up is ${num(v.ratio)} times the reference${budgets?.reference?.normaliseWall ? ` (wall scaled by ${v.scale.toFixed(3)})` : ' (reported, not used to scale the wall time)'}`,
-    `starts: tree cpu median ${num(v.cpuMedian)} ms (threshold ${num(budgetMs(budgets?.cpu) ?? NaN)}), spread of the middle half ${num(v.sampleSpread * 100)}% (limit ${budgets?.samples?.maxSpread === undefined ? '-' : budgets.samples.maxSpread * 100}%), median of ${samples.length} starts (${os}):`,
-    ...MARKS.map(([m]) => `  ${m.padEnd(17)} wall ${String(medians[m]).padStart(6)} ms   threshold ${num(budgetMs(budgets?.marks?.[m]) ?? NaN)}`),
-    `verdict: ${v.status.toUpperCase()}${v.notes.length ? ` (${v.notes.join('; ')})` : ''}`,
+    `reference workload: median ${fmt(ref.median)} ms, spread ${(ref.spread * 100).toFixed(1)}% over ${ref.n} readings (before ${fmt(referenceStats(repsBefore).median)} ms, after ${fmt(referenceStats(repsAfter).median)} ms; idle baseline ${budgets?.reference?.baselineMs ?? '-'} ms); start-up is ${num(v.ratio)} times it (a note only)`,
+    `starts: tree cpu median ${num(v.cpuMedian)} ms (threshold ${num(budgetMs(budgets?.cpu) ?? NaN)}), spread of the middle half ${num(v.sampleSpread * 100)}%, median of ${samples.length} starts (${os}):`,
+    ...MARKS.map(([m]) => `  ${m.padEnd(17)} wall ${String(medians[m]).padStart(6)} ms   noise threshold ${num(budgetMs(budgets?.marks?.[m]) ?? NaN)}   ceiling ${num(budgets?.marks?.[m] && budgets?.wallCeilingFactor ? budgets.marks[m].baselineMs * budgets.wallCeilingFactor : NaN)}`),
+    `verdict: ${v.status.toUpperCase()}`,
+    ...v.notes.map((n) => `  note: ${n}`),
   ];
   lines.forEach((l) => console.log(l));
   const summary = process.env.GITHUB_STEP_SUMMARY;
@@ -196,7 +202,7 @@ async function main() {
   }
   const out = opt('--out', null);
   if (out) writeFileSync(out, JSON.stringify({ os, tag, firstRun: first, runs: samples, medians, budgets, reference: { reps, ...ref }, verdict: v }, null, 2));
-  for (const a of annotations(v, { name: 'start-up benchmark', tag, os })) (a.startsWith('::warning::') ? console.log : console.error)(a);
+  for (const a of annotations(v, { name: 'start-up benchmark', os })) (a.startsWith('::warning::') ? console.log : console.error)(a);
   if (v.exitCode !== 0) process.exit(v.exitCode);
 }
 

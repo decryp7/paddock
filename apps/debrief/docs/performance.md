@@ -1456,40 +1456,42 @@ A call is 1,600 to 15,000 us here, so three watches (under 1 us) are under the n
 request, next to a thread-pool hand-off) are not on the store's hot path. An earlier debug-build run (one run each) showed the
 same: within the noise.
 
-## Start-up benchmark on a busy host (2026-11-16, `feat/bench-busy-host`)
+## Start-up benchmark on a busy host (2026-11-16 and 17, `feat/bench-busy-host`)
 
 Run 8175 reported "NOT MEASURED: 1 of 5 starts ran with host load <= 12 (14 discarded in 15 attempts, peak 1-minute load 49.4)" and
-the job went red. The load average on the shared Mac counts OrbStack and build threads (ER-24), so it said "busy" about starts
-that were not slowed. The benchmark (`scripts/ci/startup-bench.mjs`, with the shared `scripts/bench/busy-host.mjs`) now gates on
-the CPU time of the started process tree and on the wall marks, both against a recorded baseline plus a measured noise margin,
-and the load gate is gone. Mechanism: [benchmarks.md](../../../docs/benchmarks.md#timing-benchmarks-on-a-busy-host).
+the job went red. The user's rule (2026-11-17): always take the start-up benchmark and record the host load and CPU idle with it,
+never refuse to measure because the host is busy, fail only on a real regression. `scripts/ci/startup-bench.mjs` with the shared
+`scripts/bench/busy-host.mjs` now fails on the tree CPU time over its threshold or a wall mark over a ceiling that only a broken start
+reaches; everything else is a note with the numbers, on a train and on a tag alike. NOT MEASURED is only "the app gave no timings".
+Mechanism: [benchmarks.md](../../../docs/benchmarks.md#timing-benchmarks-on-a-busy-host).
 
-### 2026-11-16, start-up on an idle and a stressed Mac mini (3585bcab1)
+### 2026-11-16, start-up on an idle, a stressed and an overloaded Mac mini (3585bcab1)
 
 - **Commit:** 3585bcab1 (the app is unchanged by this branch; only the benchmark script, its shared module and the budgets differ)
 - **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; the shared CI host, so other agents were building the whole time
-- **Load:** the "idle" rows are not a quiet machine: host CPU idle before a start was 0 to 65% (median 35%) because other agents
-  were working; the stress rows had 0 to 1% idle. The 1-minute load average was 10 to 12 before and was not used.
+- **Load:** the "unstressed" rows are not a quiet machine: host CPU idle before a start was 0 to 65% (median 35%). The stress rows
+  had 0 to 1% idle. The "overloaded" rows were taken on 2026-11-17 while other agents' builds and tests ran: 1-minute load 97 to 177,
+  CPU idle 0% for every start.
 - **Build:** debug `.app` from `npx tauri build --debug --bundles app --config src-tauri/tauri.sidecars.conf.json`
   (`DEBRIEF_CARGO_PROFILE=debug`), libduckdb 2.0.0
 - **Corpus:** none (the first run is a fresh data folder, not counted; the others are the everyday start)
 - **Command:** `node scripts/ci/startup-bench.mjs <Debrief.app> --runs 5 --report-only --budgets <file that records only>` once per
   invocation; stress by `yes > /dev/null &` loops (14, 28, and 84 together with 4 `dd if=/dev/zero bs=1m count=1500` loops), started
   5 s before the first invocation and killed after the last, deliberately and for a few minutes only
-- **Runs:** 19 invocations of 5 starts (95 starts): 6 unstressed, 6 with 14 `yes`, 4 with 28 `yes`, 3 with 84 `yes` + 4 `dd`. Reported:
-  the median of each invocation's 5 starts, then the median and standard deviation of those 19 medians
+- **Runs:** 22 invocations of 5 starts (110 starts): 6 unstressed, 6 with 14 `yes`, 4 with 28 `yes`, 3 with 84 `yes` + 4 `dd`, 3
+  overloaded (no stress of ours). Reported: the median of each invocation's 5 starts, then the median and standard deviation of those 22
 - **Numbers:**
 
-  | Measure | Min | Baseline (median of 19) | Max | Std dev | Threshold (baseline + 3 sd) |
+  | Measure | Min | Baseline (median of 22) | Max | Std dev | Used for |
   |---|---|---|---|---|---|
-  | Tree CPU at firstInteractive (user + sys, ms) | 470 | 500 | 540 | 20.3 | 561 |
-  | windowCreated (ms) | 189 | 206 | 220 | 8.6 | 232 |
-  | setupDone (ms) | 228 | 244 | 264 | 10.6 | 276 |
-  | pageLoad (ms) | 434 | 486 | 518 | 22.8 | 554 |
-  | firstPaint (ms) | 547 | 599 | 619 | 22.8 | 667 |
-  | windowReady (ms) | 548 | 600 | 620 | 22.8 | 669 |
-  | workspaceLoaded (ms) | 558 | 611 | 630 | 23.1 | 680 |
-  | firstInteractive (ms) | 565 | 618 | 637 | 22.9 | 687 |
+  | Tree CPU at firstInteractive (user + sys, ms) | 470 | 515 | 700 | 49.1 | fail over 875 (below) |
+  | windowCreated (ms) | 189 | 208 | 442 | 58.1 | note over 382; fail over 1040 (5 x) |
+  | setupDone (ms) | 228 | 245 | 558 | 77.6 | note over 478; fail over 1225 |
+  | pageLoad (ms) | 434 | 489 | 790 | 90.4 | note over 760; fail over 2445 |
+  | firstPaint (ms) | 547 | 600 | 1059 | 139.8 | note over 1019; fail over 3000 |
+  | windowReady (ms) | 548 | 601 | 1063 | 144.0 | note over 1033; fail over 3005 |
+  | workspaceLoaded (ms) | 558 | 612 | 1070 | 145.3 | note over 1048; fail over 3060 |
+  | firstInteractive (ms) | 565 | 620 | 1077 | 144.7 | note over 1054; fail over 3100 |
 
   By condition, median of the invocation medians (min to max), CPU and firstInteractive:
 
@@ -1499,26 +1501,33 @@ and the load gate is gone. Mechanism: [benchmarks.md](../../../docs/benchmarks.m
   | 14 `yes` (6) | 515 (500 to 540) | 614 (565 to 637) | 273 (193 to 359) |
   | 28 `yes` (4) | 495 (490 to 520) | 617 (583 to 635) | 323 (275 to 438) |
   | 84 `yes` + 4 `dd` (3) | 480 (470 to 490) | 585 (567 to 618) | 635 (529 to 684) |
+  | overloaded, load 97 to 177, 0% idle (3) | 630 (540 to 700) | 972 (about 880 to 1100) | 620 and up (about 5 times) |
 
-  The spread of the middle half of one invocation's five CPU times, `(P75 - P25) / median`, was at most 10.2% over the 19
-  invocations (2 to 6% unstressed). The limit for NOT MEASURED is three times that, 30%.
-- **The reference workload:** a single-threaded integer loop of 25 M iterations (`referenceWork`), timed 5 times before and 5
-  times after the starts (one warm-up reading dropped): 121 to 125 ms at best, 124 ms median of the per-invocation minimums. It
-  was NOT steady on a busy host: the `(max - min) / median` spread of its 10 readings was 3 to 162% unstressed (other agents)
-  and 68 to 180% under stress.
-- **Verdict on the design:** the user's plan was to scale wall time by the ratio to this workload. It cannot be: under 14 to 84
-  CPU-bound loops the Node loop ran 2.2 to 5.2 times slower while the app's start moved by under 5% (macOS schedules a short
-  start's threads ahead of loops that have been running). Scaling by it would have put a 620 ms start at 120 to 280 ms, so a
-  regression of two times would have passed. So the reference is reported (start-up as a ratio, 5.0 on an idle run, 1.7 under 28
-  `yes`) and scales nothing (`reference.normaliseWall: false` in `startup-budgets.json`); the code to scale and to call an unstable
-  reference NOT MEASURED stays, tested, for an OS or a build where a measurement shows the reference tracks the app. It also means
-  an unstable reference cannot be the "not measured" test on this host: it was unstable in every stressed invocation while the starts
-  were fine. NOT MEASURED is therefore the starts' own spread over 30%, or fewer than 3 starts.
+- **Thresholds and why (ER-12):**
+  - CPU fails over **875 ms** (`baselineMs` 515 + `noiseMs` 360): 1.25 times the worst invocation median measured (700 ms, load 150).
+    Under `yes` and `dd` loops the CPU did not move (470 to 540 ms); under real build load (many processes, memory and cache
+    contention) it rose by up to 40% (530 to 720 ms per start). A tighter threshold (baseline + 3 sd of the calm conditions was
+    561 ms) failed on the first overloaded run (650 ms), which is a busy host and not a regression. The cost: a CPU regression under
+    about 70% is not caught. If that is too coarse, the alternative is a tight threshold that applies only when the recorded CPU
+    idle was above some value (a decision for the user).
+  - A wall mark fails only over **5 times its baseline** (`wallCeilingFactor`). The worst single start of the 110 was 2.52 times
+    its mark's baseline (setupDone, overloaded); 5 is twice that, and a broken start is far above it (the app waits 10 s for a first
+    paint, 16 times the firstInteractive baseline). A first try of 3 times was only 1.19 times the worst start. Over baseline + 3 sd
+    (the "noise threshold") but under the ceiling is a note.
+  - The spread of the middle half of one invocation's five CPU times, `(P75 - P25) / median`, was at most 10.2% (2 to 6%
+    unstressed). It is a note, never a failure.
+- **The reference workload:** a single-threaded integer loop of 25 M iterations (`referenceWork`), timed 5 times before and 5 times
+  after the starts: 121 to 125 ms at best on this host. The ratio of start-up to it is a note (5.0 idle, 1.7 under 28 `yes`, 1.6
+  overloaded). It is not used to scale the wall time: under 14 to 84 CPU-bound loops it ran 2.2 to 5.2 times slower while the app's
+  start moved by under 5%, so scaling would have put a 620 ms start at 120 to 280 ms and hidden a regression of two times. Its
+  `(max - min) / median` spread was 3 to 162% unstressed and 68 to 180% under stress, so it cannot say "the host is too busy" either.
 - **Notes:** the CPU time is that of the app and its sidecars, read with `ps -axo pid=,ppid=,cputime=` (10 ms resolution) when
   the "Startup timings" line arrives. The WebKit web-content process is not the app's child on macOS, so its CPU is not in the
-  number; the wall marks cover the rendering. One start in 95 had a CPU of 1050 ms (twice the others, 28 `yes`, invocation 4);
-  the median of five ignores it. The earlier wall budgets (2026-10-24: 215/264/524/610/611/619/624 ms plus 50%) agree with these
-  baselines (206/244/486/599/600/611/618) and are now baseline plus 3 sd, so they are tighter (firstInteractive 940 to 687 ms).
-  The stress was `yes` and `dd` only: no memory pressure and no other disk-heavy builds, so an I/O- or memory-bound neighbour is
-  not covered by this block. Raw per-invocation JSON: `/Volumes/vault-dev/dev-targets/scratch/implementer-bench-busy/m-*.json`
-  (scratch, not kept). Check run with the new thresholds: unstressed and 28 `yes`, `PASS`, exit 0 (tree CPU 510 and 490 ms, firstInteractive 610 and 587 ms).
+  number. One start in 110 had a CPU of 1050 ms (28 `yes`); the median of five ignores it. The host CPU idle is read with
+  `iostat -n 0 -c 2 -w 1` (1 s; `top -l 2` took 10 s on a host at load 70) and the load from `os.loadavg()`, both printed with every
+  start and written to the JSON and the step summary. The earlier wall budgets (2026-10-24: 215/264/524/610/611/619/624 ms plus 50%)
+  agree with the unstressed baselines (206/244/486/599/600/611/618). The stress was `yes` and `dd` only, plus whatever the other
+  agents ran; a different neighbour (memory pressure) is covered only by the overloaded runs. Raw per-invocation JSON:
+  `/Volumes/vault-dev/dev-targets/scratch/implementer-bench-busy/m-*.json` (scratch, not kept). A check run with the first
+  (3 x, 561 ms) thresholds: unstressed and 28 `yes`, `PASS` (CPU 510 and 490 ms); overloaded, `FAIL` on CPU 650 ms, the reason for the
+  thresholds above.

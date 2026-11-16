@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import {
   annotations,
   budgetMs,
+  ceilingMs,
+  hostSummary,
   iqrSpread,
   quantile,
   EXIT_NOT_MEASURED,
@@ -11,7 +13,7 @@ import {
   isTagRun,
   median,
   parseCpuTime,
-  parseTopIdle,
+  parseIostatIdle,
   procStatIdle,
   readCpuIdle,
   readTreeCpuMs,
@@ -19,153 +21,119 @@ import {
   referenceWork,
   treeCpuMs,
   verdict,
-  wallScale,
 } from './busy-host.mjs';
 
 const T = (baselineMs, noiseMs) => ({ baselineMs, noiseMs });
-const thresholds = { cpu: T(400, 60), marks: { setupDone: T(250, 30), firstInteractive: T(900, 100) }, samples: { maxSpread: 0.3 } };
-const steady = { reps: [100, 101, 99, 100, 102], baselineMs: 100, maxSpread: 0.1, normaliseWall: false };
+// cpu threshold 460; firstInteractive: noise threshold 1000, ceiling 3 x 900 = 2700
+const thresholds = { cpu: T(400, 60), marks: { setupDone: T(250, 30), firstInteractive: T(900, 100) }, wallCeilingFactor: 3 };
+const wall = (...ms) => ms.map((x) => ({ setupDone: 240, firstInteractive: x }));
 const input = (o = {}) => ({
   cpuMsSamples: [410, 420, 415, 405, 430],
-  wallSamples: [900, 910, 905, 920, 915].map((ms) => ({ setupDone: 240, firstInteractive: ms })),
-  reference: steady,
+  wallSamples: wall(900, 910, 905, 920, 915),
+  reference: { reps: [100, 101, 99, 100, 102] },
   thresholds,
-  tag: false,
   ...o,
 });
 
-test('measured and under every threshold passes, with the numbers in the result', () => {
-  const v = verdict(input());
+test('measured and under every threshold passes, with the numbers as notes', () => {
+  const v = verdict(input({ idle: [{ idleBefore: 80, idleAfter: 70, loadBefore: 3, loadAfter: 4 }] }));
   assert.equal(v.status, 'pass');
   assert.equal(v.exitCode, 0);
   assert.equal(v.level, null);
   assert.equal(v.cpuMedian, 415);
-  assert.equal(v.scaledWall.firstInteractive, 910, 'wall time is left as it is unless normalising is on');
   assert.ok(Math.abs(v.ratio - 9.1) < 1e-9, 'start-up as a ratio to the reference workload');
-  assert.ok(v.sampleSpread < 0.05);
+  assert.match(v.notes.join('\n'), /9\.1 times the reference workload/);
+  assert.match(v.notes.join('\n'), /CPU idle 70 to 80%, 1-minute load 3\.0 to 4\.0/);
 });
 
-test('measured and over the CPU threshold fails, on a tag and on a train alike', () => {
-  for (const tag of [false, true]) {
-    const v = verdict(input({ cpuMsSamples: [500, 510, 505, 520, 515], tag }));
-    assert.equal(v.status, 'fail');
-    assert.equal(v.exitCode, EXIT_OVER);
-    assert.deepEqual(v.over, [{ kind: 'cpu', median: 510, budget: 460 }]);
-    assert.match(annotations(v, { name: 'start-up benchmark', tag, os: 'macos' })[0], /^::error::.*CPU.*510 ms.*460 ms/);
-  }
+test('a busy host passes with a note: slow wall time under the ceiling, a wild spread, a slow reference, no idle', () => {
+  const v = verdict({
+    cpuMsSamples: [410, 700, 415, 900, 430], // spread, but the median is under the threshold
+    wallSamples: wall(1500, 1700, 1600, 2400, 1650), // over the noise threshold, under the ceiling
+    reference: { reps: [300, 500, 280, 700, 350] },
+    thresholds,
+    idle: [{ idleBefore: 0, idleAfter: 1, loadBefore: 49.4, loadAfter: 50 }],
+    tag: true,
+  });
+  assert.equal(v.status, 'pass', 'a busy host is measured, on a tag too');
+  assert.equal(v.exitCode, 0);
+  const notes = v.notes.join('\n');
+  assert.match(notes, /firstInteractive median 1650 ms is over its 1000 ms noise threshold, under the 2700 ms ceiling: a note/);
+  assert.match(notes, /the starts' own spread .* is \d+%/);
+  assert.match(notes, /CPU idle 0 to 1%, 1-minute load 49\.4 to 50\.0/);
+  assert.doesNotMatch(annotations(v, { name: 'b', os: 'macos' }).join(''), /./, 'no annotation for a pass');
 });
 
-test('measured and over a wall threshold fails, naming the mark', () => {
-  const v = verdict(input({ wallSamples: [1100, 1110, 1105, 1120, 1115].map((ms) => ({ setupDone: 240, firstInteractive: ms })) }));
+test('the CPU time over its threshold fails, on a busy host and a quiet one', () => {
+  const v = verdict(input({ cpuMsSamples: [500, 510, 505, 520, 515], idle: [{ idleBefore: 0, idleAfter: 0 }] }));
   assert.equal(v.status, 'fail');
-  assert.deepEqual(v.over.map((o) => [o.kind, o.mark, o.budget]), [['wall', 'firstInteractive', 1000]]);
-  assert.match(annotations(v, { name: 'start-up', tag: false, os: 'macos' })[0], /^::error::start-up firstInteractive: median 1110 ms exceeds the 1000 ms threshold/);
+  assert.equal(v.exitCode, EXIT_OVER);
+  assert.deepEqual(v.over, [{ kind: 'cpu', median: 510, budget: 460 }]);
+  assert.match(annotations(v, { name: 'start-up benchmark', os: 'macos' })[0], /^::error::.*CPU.*510 ms.*460 ms/);
 });
 
-test('a threshold is the recorded baseline plus the noise margin', () => {
+test('a threshold is the recorded baseline plus the noise margin; the ceiling is a factor of the baseline', () => {
   assert.equal(budgetMs(T(400, 60)), 460);
   assert.equal(budgetMs({ baselineMs: 400 }), null);
-  assert.equal(budgetMs(undefined), null);
+  assert.equal(ceilingMs(T(900, 100), 3), 2700);
+  assert.equal(ceilingMs(T(900, 100), undefined), null);
   assert.equal(verdict(input({ cpuMsSamples: [460, 460, 460] })).status, 'pass', 'exactly at the threshold is not over');
   assert.equal(verdict(input({ cpuMsSamples: [461, 461, 461] })).status, 'fail');
 });
 
-test('busy host, measured on the Mac: a slow reference does not move the verdict, so a regression is not hidden', () => {
-  // The reference ran 3 times slower than its baseline (a CPU-bound loop under yes loops); the start did not move.
-  const busy = { ...steady, reps: [300, 310, 290, 305, 295], normaliseWall: false };
-  const regressed = [1100, 1110, 1105, 1120, 1115].map((ms) => ({ setupDone: 240, firstInteractive: ms }));
-  assert.equal(verdict(input({ reference: busy, wallSamples: regressed })).status, 'fail', 'a 20% slower start fails even on a busy host');
-  assert.equal(verdict(input({ reference: busy })).status, 'pass');
+test('a wall mark over its ceiling fails, naming the mark', () => {
+  const v = verdict(input({ wallSamples: wall(2800, 2900, 2850, 3000, 2950) }));
+  assert.equal(v.status, 'fail');
+  assert.deepEqual(v.over.map((o) => [o.kind, o.mark, o.budget]), [['wall', 'firstInteractive', 2700]]);
+  assert.match(annotations(v, { name: 'start-up', os: 'macos' })[0], /^::error::start-up firstInteractive: median 2900 ms exceeds the 2700 ms ceiling/);
+  assert.equal(verdict(input({ wallSamples: wall(2700, 2700, 2700) })).status, 'pass', 'exactly at the ceiling is not over');
 });
 
-test('with normalising on, a slow reference takes the host slowdown off the wall time', () => {
-  const busy = { reps: [180, 190, 200, 185, 195], baselineMs: 100, maxSpread: 0.25, normaliseWall: true };
-  const slow = [1700, 1750, 1800, 1720, 1780].map((ms) => ({ setupDone: 240, firstInteractive: ms }));
-  const ok = verdict(input({ reference: busy, wallSamples: slow }));
-  assert.equal(ok.status, 'pass');
-  assert.ok(Math.abs(ok.scale - 100 / 190) < 1e-9);
-  const regressed = verdict(input({ reference: busy, wallSamples: [2500, 2600, 2550, 2520, 2580].map((ms) => ({ setupDone: 240, firstInteractive: ms })) }));
-  assert.equal(regressed.status, 'fail');
+test('no timings is NOT MEASURED, an error and exit 6 on a train and a tag alike', () => {
+  for (const tag of [false, true]) {
+    const v = verdict(input({ cpuMsSamples: [], wallSamples: [], tag }));
+    assert.equal(v.status, 'not-measured');
+    assert.equal(v.exitCode, EXIT_NOT_MEASURED);
+    assert.equal(v.level, 'error');
+    assert.match(annotations(v, { name: 'start-up benchmark', os: 'macos' })[0], /^::error::start-up benchmark NOT MEASURED \(macos\): the app produced no start-up timings.*ER-33.*Next step/);
+  }
+  assert.equal(verdict(input({ cpuMsSamples: [null], wallSamples: [{}] })).status, 'not-measured', 'samples without a single number are no timings');
 });
 
-test('a host faster than the baseline never scales the wall time up', () => {
-  assert.equal(wallScale(100, 50), 1);
-  assert.equal(wallScale(100, 200), 0.5);
-  assert.equal(wallScale(undefined, 200), 1);
-  assert.equal(wallScale(100, NaN), 1);
-});
-
-test('starts that are not steady are NOT MEASURED: a warning and exit 0 on a train, an error and exit 6 on a tag', () => {
-  const wild = { cpuMsSamples: [300, 900, 400, 1200, 350] };
-  const train = verdict(input(wild));
-  assert.equal(train.status, 'not-measured');
-  assert.equal(train.exitCode, 0, 'a train run stays green');
-  assert.equal(train.level, 'warning');
-  const [w] = annotations(train, { name: 'start-up benchmark', tag: false, os: 'macos' });
-  assert.match(w, /^::warning::start-up benchmark NOT MEASURED/);
-  assert.match(w, /spread \d+% is over the 30% limit/);
-  assert.match(w, /Next step/);
-  const tag = verdict(input({ ...wild, tag: true }));
-  assert.equal(tag.status, 'not-measured');
-  assert.equal(tag.exitCode, EXIT_NOT_MEASURED);
-  assert.equal(tag.level, 'error');
-  assert.match(annotations(tag, { name: 'start-up benchmark', tag: true, os: 'macos' })[0], /^::error::.*NOT MEASURED.*ER-33.*Next step/);
-});
-
-test('starts whose median is 0 have no spread: NOT MEASURED, not a pass', () => {
-  const v = verdict(input({ cpuMsSamples: [0, 0, 0] }));
-  assert.equal(v.status, 'not-measured');
-  assert.match(v.notes[0], /cannot be computed/);
-});
-
-test('one outlier among five does not make the starts unsteady (the middle half is judged)', () => {
-  const v = verdict(input({ cpuMsSamples: [490, 490, 490, 520, 1050].map((x) => x - 80) }));
+test('one or two starts are still measured, with a note that there is no spread', () => {
+  const v = verdict(input({ cpuMsSamples: [410, 420], wallSamples: wall(900, 910) }));
   assert.equal(v.status, 'pass');
-  assert.equal(v.cpuMedian, 410);
+  assert.match(v.notes.join('\n'), /fewer than 3 starts: no spread/);
+  assert.equal(verdict(input({ cpuMsSamples: [900], wallSamples: wall(900) })).status, 'fail', 'and still fail over the CPU threshold');
 });
 
-test('fewer than 3 starts, or no recorded spread limit, is NOT MEASURED too', () => {
-  const few = verdict(input({ cpuMsSamples: [410, 420], wallSamples: [{ firstInteractive: 900 }, { firstInteractive: 910 }] }));
-  assert.equal(few.status, 'not-measured');
-  assert.match(few.notes[0], /only 2 usable starts/);
-  const none = verdict(input({ thresholds: { ...thresholds, samples: {} } }));
-  assert.equal(none.status, 'not-measured');
-  assert.match(none.notes[0], /no spread limit/);
-});
-
-test('with normalising on, an unstable or missing reference is NOT MEASURED, with it off it is ignored', () => {
-  const wild = { reps: [100, 300, 90, 250, 120], baselineMs: 100, maxSpread: 0.1, normaliseWall: true };
-  const on = verdict(input({ reference: wild }));
-  assert.equal(on.status, 'not-measured');
-  assert.match(on.notes[0], /reference workload's spread \d+% is over the 10% limit/);
-  assert.equal(verdict(input({ reference: { ...wild, normaliseWall: false } })).status, 'pass');
-  assert.equal(verdict(input({ reference: { reps: [100], baselineMs: 100, maxSpread: 0.1, normaliseWall: true } })).status, 'not-measured');
-  const noLimit = verdict(input({ reference: { reps: [100, 100], baselineMs: 100, normaliseWall: true } }));
-  assert.match(noLimit.notes[0], /no reference spread limit/);
-  assert.equal(verdict(input({ reference: undefined })).status, 'pass', 'no reference at all is fine when the wall time is not normalised');
-});
-
-test('report-only never fails and never errors, tag or not', () => {
-  const over = verdict(input({ cpuMsSamples: [900, 900, 900], reportOnly: true, tag: true }));
+test('report-only never fails and never errors', () => {
+  const over = verdict(input({ cpuMsSamples: [900, 900, 900], reportOnly: true }));
   assert.equal(over.status, 'pass');
   assert.equal(over.exitCode, 0);
-  const wild = verdict(input({ cpuMsSamples: [300, 900, 400, 1200, 350], reportOnly: true, tag: true }));
-  assert.equal(wild.exitCode, 0);
-  assert.equal(wild.level, 'warning');
+  const none = verdict(input({ cpuMsSamples: [], wallSamples: [], reportOnly: true }));
+  assert.equal(none.exitCode, 0);
+  assert.equal(none.level, 'warning');
 });
 
 test('no thresholds for an OS: numbers only, a pass', () => {
   const v = verdict(input({ thresholds: undefined, reportOnly: true }));
   assert.equal(v.status, 'pass');
-  assert.match(v.notes[0], /no thresholds/);
+  assert.match(v.notes.join('\n'), /no thresholds/);
 });
 
 test('an OS with no readable tree CPU judges the wall time of the starts and says so', () => {
   const v = verdict(input({ cpuMsSamples: [null, null, null] }));
   assert.equal(v.status, 'pass');
-  assert.match(v.notes[0], /not readable/);
-  const bad = verdict(input({ cpuMsSamples: [null, null, null], wallSamples: [1500, 1510, 1520].map((ms) => ({ setupDone: 240, firstInteractive: ms })) }));
+  assert.match(v.notes.join('\n'), /not readable/);
+  const bad = verdict(input({ cpuMsSamples: [null, null, null], wallSamples: wall(2800, 2810, 2820) }));
   assert.equal(bad.status, 'fail');
+});
+
+test('host summary: ranges of idle and load, or nothing', () => {
+  assert.equal(hostSummary([]), null);
+  assert.equal(hostSummary([{ idleBefore: null }]), null);
+  assert.match(hostSummary([{ idleBefore: 10, idleAfter: 90 }]), /CPU idle 10 to 90%, load n\/a/);
 });
 
 test('a tag run is read from the environment Gitea Actions sets', () => {
@@ -207,11 +175,12 @@ test('the readers run the OS tools only where they exist', () => {
   assert.equal(readTreeCpuMs(42, 'linux', run), null, 'ps cputime has a 1 s resolution there: no reading');
   assert.equal(readTreeCpuMs(42, 'win32', run), null);
   assert.deepEqual(calls.map((c) => c[0]), ['ps']);
-  const top = 'CPU usage: 9.0% user, 9.0% sys, 82.0% idle\nCPU usage: 3.1% user, 4.2% sys, 92.7% idle\n';
-  assert.equal(readCpuIdle('darwin', () => ({ status: 0, stdout: top })), 92.7, 'the second sample is the one measured over the interval');
+  const top = '      cpu    load average\n us sy id   1m   5m   15m\n 34 13 53  68.69 57.08 40.94\n 79 21  0  68.69 57.08 40.94\n';
+  assert.equal(readCpuIdle('darwin', () => ({ status: 0, stdout: top })), 0, 'the second sample is the one measured over the interval');
   assert.equal(readCpuIdle('darwin', () => ({ status: 1, stdout: '' })), null);
   assert.equal(readCpuIdle('win32'), null);
-  assert.equal(parseTopIdle('no cpu line'), null);
+  assert.equal(parseIostatIdle('no cpu line'), null);
+  assert.equal(parseIostatIdle(' 34 13 53  1 2 3\n'), null, 'one row is since boot, not an interval');
   assert.equal(procStatIdle('cpu 10 0 10 80 0 0 0 0', 'cpu 20 0 20 160 0 0 0 0'), 80);
   assert.equal(procStatIdle('cpu 1 2', 'cpu 1 2'), null);
 });

@@ -1,17 +1,43 @@
 {
-  "_comment": "Start-up thresholds (scripts/ci/startup-bench.mjs, scripts/bench/busy-host.mjs). Each is a recorded baseline plus a measured noise margin (ER-12): the median of 19 invocations of 5 starts each of the debug .app on the Mac mini, 2026-11-16, at idle and under yes/dd stress, and 3 standard deviations of those medians. The measurement and the commands are the results block 'Start-up benchmark on a busy host' in apps/debrief/docs/performance.md. Times are ms since the process start (marks) and ms of CPU (user + sys) of the app's process tree at firstInteractive (cpu). samples.maxSpread: 3 times the worst spread of the middle half (P75 - P25) / median of the 5 starts' CPU measured (0.102); over it the result is NOT MEASURED (extreme load). reference: the fixed workload's best idle time; normaliseWall false because it was measured not to track the app under load (docs/performance.md). Linux reports only until its first nightly numbers are recorded here.",
+  "_comment": "Start-up thresholds (scripts/ci/startup-bench.mjs, scripts/bench/busy-host.mjs). Measured 2026-11-16/17 on the Mac mini: 22 invocations of 5 starts (110 starts) of the debug .app: unstressed, under yes/dd stress, and 3 invocations at a host load of 140 to 177 and 0% CPU idle (other agents' builds); results block 'Start-up benchmark on a busy host' in apps/debrief/docs/performance.md. Rule (user, 2026-11-17): the benchmark is always taken and never refused for a busy host; it fails only on a real regression. cpu: ms of CPU (user + sys) of the app's process tree at firstInteractive. FAILS over baselineMs + noiseMs. baselineMs = median of the 22 invocation medians (515). noiseMs 360 makes the threshold 875 = 1.25 times the worst invocation median measured (700, at load 150 and 0% idle): CPU time did not move under yes/dd loops (480 to 540) but rose to 530 to 720 under real build load, so a tighter threshold would fail on a busy host. A start-up that needs 70% more CPU than idle is a regression. marks: ms since the process start. Over baselineMs + noiseMs (baseline = median of the 22 invocation medians, noise = 3 standard deviations of them) is only a NOTE: wall time moves with host load (up to 2.5 times its baseline for a single start at load 150). A mark FAILS only over wallCeilingFactor times its baseline. wallCeilingFactor 5: the worst single start of the 110 was 2.52 times its mark's baseline (setupDone), so 5 is twice that, and a broken start is far beyond it (the app waits 10 s for a first paint before it gives up, 16 times the firstInteractive baseline). reference: the fixed workload's best idle time; the ratio to it is a note only (it slows 2 to 5 times under the loads that leave the start unmoved). Linux reports only until its first nightly numbers are recorded here.",
   "macos": {
-    "cpu": { "baselineMs": 500, "noiseMs": 61 },
-    "marks": {
-      "windowCreated": { "baselineMs": 206, "noiseMs": 26 },
-      "setupDone": { "baselineMs": 244, "noiseMs": 32 },
-      "pageLoad": { "baselineMs": 486, "noiseMs": 68 },
-      "firstPaint": { "baselineMs": 599, "noiseMs": 68 },
-      "windowReady": { "baselineMs": 600, "noiseMs": 69 },
-      "workspaceLoaded": { "baselineMs": 611, "noiseMs": 69 },
-      "firstInteractive": { "baselineMs": 618, "noiseMs": 69 }
+    "cpu": {
+      "baselineMs": 515,
+      "noiseMs": 360
     },
-    "samples": { "maxSpread": 0.3 },
-    "reference": { "baselineMs": 124, "normaliseWall": false }
+    "marks": {
+      "windowCreated": {
+        "baselineMs": 208,
+        "noiseMs": 174
+      },
+      "setupDone": {
+        "baselineMs": 245,
+        "noiseMs": 233
+      },
+      "pageLoad": {
+        "baselineMs": 489,
+        "noiseMs": 271
+      },
+      "firstPaint": {
+        "baselineMs": 600,
+        "noiseMs": 419
+      },
+      "windowReady": {
+        "baselineMs": 601,
+        "noiseMs": 432
+      },
+      "workspaceLoaded": {
+        "baselineMs": 612,
+        "noiseMs": 436
+      },
+      "firstInteractive": {
+        "baselineMs": 620,
+        "noiseMs": 434
+      }
+    },
+    "reference": {
+      "baselineMs": 124
+    },
+    "wallCeilingFactor": 5
   }
 }

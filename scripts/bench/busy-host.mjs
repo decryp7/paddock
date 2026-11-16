@@ -1,20 +1,17 @@
 // The shared mechanism for a timing benchmark that has to give a verdict on a busy host (ER-22: one implementation;
 // ER-24: the load average misleads, CPU idle and the work done are what count; ER-33: a measured result on a tag).
 // Used by apps/debrief/scripts/ci/startup-bench.mjs. Pure functions take their readings as arguments so tests inject them;
-// the readers at the end touch the OS.
-//
-// How a verdict is reached (apps/debrief/docs/performance.md, "Start-up benchmark on a busy host", has the measurements):
-//   1. CPU time (user + sys) of the started process tree is read when the start is done and gated against
-//      `baselineMs + noiseMs`. It does not grow when the host is busy.
-//   2. Wall time of each mark is gated the same way. A fixed reference workload (deterministic CPU work of a fixed size)
-//      is timed before and after the starts and the ratio of start-up to it is reported. It scales the wall time only when
-//      a measurement has shown that it tracks the app (`reference.normaliseWall`): on the Mac it does not (a CPU-bound Node
-//      loop slows 2 to 5 times under `yes` loops while the app's start does not move), so there it is off.
-//   3. CPU idle is read for every sample and printed, never used to drop one.
-//   4. "Not measured" means only that the numbers cannot be trusted: fewer than 3 starts, the starts' own CPU spread over
-//      the recorded limit (`samples.maxSpread`, extreme load), or, when the wall time is normalised, an unstable reference.
-//      A tag run (ER-33) fails then; any other run warns and stays green.
-//      Measured and over a threshold always fails. Measured and under passes.
+// the readers at the end touch the OS. The rule (user, 2026-11-17): always take the benchmark and record the host load and
+// CPU idle with it; never refuse to measure because the host is busy; fail only on a real regression.
+// (apps/debrief/docs/performance.md, "Start-up benchmark on a busy host", has the measurements.)
+//   1. FAIL when the tree CPU time (user + sys of the started process tree, read when the start is done) is over
+//      `baselineMs + noiseMs`: CPU time barely moves with host load.
+//   2. FAIL when a wall mark is over its ceiling, `ceilingFactor` times its baseline: a limit only a broken start reaches,
+//      well above anything a busy host produced.
+//   3. NOTE (never a failure): a wall mark over `baselineMs + noiseMs` but under the ceiling, a high spread of the starts,
+//      the ratio of start-up to a fixed reference workload, host CPU idle and load. The numbers are printed with the note.
+//   4. NOT MEASURED only when the app produced no timings (it did not start, or logged no "Startup timings" line): an
+//      ::error:: and exit 6 on every run, since a start that gives nothing is not a pass (ER-33). Report-only warns.
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
@@ -40,8 +37,6 @@ export function iqrSpread(values) {
 export const EXIT_OK = 0;
 export const EXIT_OVER = 1;
 export const EXIT_NOT_MEASURED = 6;
-/** Fewer starts than this give no spread to judge. */
-export const MIN_SAMPLES = 3;
 
 /** Is this a release-tag run? `GITHUB_REF_TYPE=tag`, or `GITHUB_REF` starting `refs/tags/` (Gitea Actions sets both). Pure. */
 export function isTagRun(env = process.env) {
@@ -56,90 +51,93 @@ export function referenceStats(reps) {
   return { median: m, spread: (Math.max(...clean) - Math.min(...clean)) / m, n: clean.length };
 }
 
-/** The factor that takes the host's slowdown off a wall time: `min(1, baselineMs / medianMs)`. Pure. */
-export function wallScale(baselineMs, medianMs) {
-  if (!(baselineMs > 0) || !(medianMs > 0)) return 1;
-  return Math.min(1, baselineMs / medianMs);
-}
-
 /** A threshold: the recorded baseline plus the measured noise margin (ER-12), or null when either is missing. Pure. */
 export function budgetMs(t) {
   return t && Number.isFinite(t.baselineMs) && Number.isFinite(t.noiseMs) ? t.baselineMs + t.noiseMs : null;
 }
 
+/** The wall ceiling of a mark: `ceilingFactor` times its recorded baseline, or null. Pure. */
+export function ceilingMs(t, ceilingFactor) {
+  return t && Number.isFinite(t.baselineMs) && ceilingFactor > 0 ? t.baselineMs * ceilingFactor : null;
+}
+
 /**
  * The verdict of a benchmark. Pure.
  *   cpuMsSamples   tree CPU time per sample in ms (null entries: not readable on this OS)
- *   wallSamples    per sample: { mark: ms } wall marks
- *   reference      { reps: [ms], baselineMs, maxSpread, normaliseWall }  (reps measured before and after the starts)
- *   thresholds     { cpu: {baselineMs, noiseMs}, marks: { mark: {baselineMs, noiseMs} }, samples: { maxSpread } }
- *   tag, reportOnly
- * Returns { status: 'pass' | 'fail' | 'not-measured', exitCode, over, cpuMedian, ratio, scale, scaledWall, sampleSpread,
- * reference, notes, level }; `level` is the annotation to print for a non-pass: 'error' | 'warning' | null.
+ *   wallSamples    per sample: { mark: ms } wall marks (no sample at all: the app gave no timings)
+ *   reference      { reps: [ms] }  the fixed workload's readings, a note only
+ *   thresholds     { cpu: {baselineMs, noiseMs}, marks: { mark: {baselineMs, noiseMs} }, wallCeilingFactor }
+ *   idle           optional [{ idleBefore, idleAfter, loadBefore, loadAfter }] per sample, summarised in the notes
+ *   tag, reportOnly (tag is not used by the verdict: a busy host and a tag run are judged alike; it is kept for callers)
+ * Returns { status: 'pass' | 'fail' | 'not-measured', exitCode, over, notes, cpuMedian, ratio, sampleSpread, level }; `level`
+ * is the annotation to print for a non-pass: 'error' | 'warning' | null.
  */
-export function verdict({ cpuMsSamples, wallSamples, reference, thresholds, tag, reportOnly = false }) {
+export function verdict({ cpuMsSamples, wallSamples, reference, thresholds, idle, reportOnly = false }) {
   const ref = referenceStats(reference?.reps ?? []);
-  const normalise = reference?.normaliseWall === true;
   const cpuVals = (cpuMsSamples ?? []).filter((v) => Number.isFinite(v));
   const cpuMedian = cpuVals.length ? median(cpuVals) : NaN;
   const markNames = Object.keys(thresholds?.marks ?? {});
   const lastMark = markNames.at(-1);
   const wallOf = (m) => (wallSamples ?? []).map((w) => w[m]).filter(Number.isFinite);
-  const scale = normalise ? wallScale(reference?.baselineMs, ref.median) : 1;
-  const scaledWall = Object.fromEntries(markNames.map((m) => [m, median(wallOf(m)) * scale]));
-  // The spread of the starts themselves: tree CPU where it is readable, else the wall time of the last mark.
-  const judged = cpuVals.length >= MIN_SAMPLES ? cpuVals : lastMark ? wallOf(lastMark) : [];
-  const sampleSpread = judged.length >= MIN_SAMPLES ? iqrSpread(judged) : NaN;
-  const ratio = lastMark && ref.median > 0 ? median(wallOf(lastMark)) / ref.median : NaN;
-  const base = { cpuMedian, ratio, scale, scaledWall, sampleSpread, reference: { ...ref, baselineMs: reference?.baselineMs, maxSpread: reference?.maxSpread, normaliseWall: normalise } };
-  const cpuMax = budgetMs(thresholds?.cpu);
-  const markBudgets = Object.fromEntries(markNames.map((m) => [m, budgetMs(thresholds.marks[m])]));
-  if (cpuMax === null && !Object.values(markBudgets).some((b) => b !== null)) {
-    return { ...base, status: 'pass', over: [], exitCode: EXIT_OK, level: null, notes: ['no thresholds are recorded for this OS: numbers only'] };
+  const wallMedian = Object.fromEntries(markNames.map((m) => [m, median(wallOf(m))]));
+  const judged = cpuVals.length >= 3 ? cpuVals : lastMark ? wallOf(lastMark) : [];
+  const sampleSpread = judged.length >= 3 ? iqrSpread(judged) : NaN;
+  const ratio = lastMark && ref.median > 0 ? wallMedian[lastMark] / ref.median : NaN;
+  const base = { cpuMedian, wallMedian, ratio, sampleSpread, reference: ref };
+
+  if (!cpuVals.length && !Object.values(wallMedian).some((v) => Number.isFinite(v))) {
+    return { ...base, status: 'not-measured', over: [], exitCode: reportOnly ? EXIT_OK : EXIT_NOT_MEASURED, level: reportOnly ? 'warning' : 'error', notes: ['the app produced no start-up timings'] };
   }
 
-  const maxSpread = thresholds?.samples?.maxSpread;
-  let why = null;
-  if (judged.length < MIN_SAMPLES) why = `only ${judged.length} usable starts (at least ${MIN_SAMPLES} are needed to judge their spread)`;
-  else if (!Number.isFinite(maxSpread)) why = 'no spread limit for the starts is recorded for this OS';
-  else if (Number.isNaN(sampleSpread)) why = "the starts' spread cannot be computed (their median is 0)";
-  else if (sampleSpread > maxSpread) why = `the starts' own spread ${(sampleSpread * 100).toFixed(0)}% is over the ${(maxSpread * 100).toFixed(0)}% limit (extreme load)`;
-  else if (normalise && ref.n < 2) why = 'the reference workload gave fewer than 2 readings';
-  else if (normalise && !Number.isFinite(reference?.maxSpread)) why = 'no reference spread limit is recorded for this OS';
-  else if (normalise && ref.spread > reference.maxSpread) why = `the reference workload's spread ${(ref.spread * 100).toFixed(0)}% is over the ${(reference.maxSpread * 100).toFixed(0)}% limit`;
-  if (why) {
-    const strict = tag && !reportOnly;
-    return { ...base, status: 'not-measured', over: [], exitCode: strict ? EXIT_NOT_MEASURED : EXIT_OK, level: strict ? 'error' : 'warning', notes: [why] };
-  }
-
-  const over = [];
-  if (cpuMax !== null && Number.isFinite(cpuMedian) && cpuMedian > cpuMax) over.push({ kind: 'cpu', median: cpuMedian, budget: cpuMax });
-  for (const m of markNames) {
-    if (markBudgets[m] !== null && Number.isFinite(scaledWall[m]) && scaledWall[m] > markBudgets[m]) over.push({ kind: 'wall', mark: m, median: scaledWall[m], budget: markBudgets[m] });
-  }
   const notes = [];
+  const over = [];
+  const cpuMax = budgetMs(thresholds?.cpu);
+  if (cpuMax !== null && Number.isFinite(cpuMedian) && cpuMedian > cpuMax) over.push({ kind: 'cpu', median: cpuMedian, budget: cpuMax });
   if (cpuMax !== null && !Number.isFinite(cpuMedian)) notes.push('tree CPU time is not readable on this OS: only the wall time was judged');
+  for (const m of markNames) {
+    const ceiling = ceilingMs(thresholds.marks[m], thresholds.wallCeilingFactor);
+    const soft = budgetMs(thresholds.marks[m]);
+    const med = wallMedian[m];
+    if (!Number.isFinite(med)) continue;
+    if (ceiling !== null && med > ceiling) over.push({ kind: 'wall', mark: m, median: med, budget: ceiling });
+    else if (soft !== null && med > soft) notes.push(`${m} median ${med.toFixed(0)} ms is over its ${soft.toFixed(0)} ms noise threshold, under the ${ceiling === null ? '-' : ceiling.toFixed(0)} ms ceiling: a note, not a failure (wall time moves with host load)`);
+  }
+  if (Number.isFinite(sampleSpread)) notes.push(`the starts' own spread (middle half over median) is ${(sampleSpread * 100).toFixed(0)}%`);
+  else notes.push('fewer than 3 starts: no spread');
+  if (Number.isFinite(ratio)) notes.push(`start-up is ${ratio.toFixed(1)} times the reference workload (median ${ref.median.toFixed(0)} ms, spread ${(ref.spread * 100).toFixed(0)}%)`);
+  const hostNote = hostSummary(idle);
+  if (hostNote) notes.push(hostNote);
+  if (cpuMax === null && !markNames.length) notes.push('no thresholds are recorded for this OS: numbers only');
   if (over.length && !reportOnly) return { ...base, status: 'fail', over, exitCode: EXIT_OVER, level: 'error', notes };
   return { ...base, status: 'pass', over, exitCode: EXIT_OK, level: null, notes };
 }
 
+/** "host CPU idle min-max%, load min-max" over the samples' readings, or null. Pure. */
+export function hostSummary(idle) {
+  const range = (k) => {
+    const v = (idle ?? []).flatMap((s) => [s[`${k}Before`], s[`${k}After`]]).filter(Number.isFinite);
+    return v.length ? [Math.min(...v), Math.max(...v)] : null;
+  };
+  const i = range('idle');
+  const l = range('load');
+  if (!i && !l) return null;
+  return `host during the starts: ${i ? `CPU idle ${i[0].toFixed(0)} to ${i[1].toFixed(0)}%` : 'CPU idle n/a'}, ${l ? `1-minute load ${l[0].toFixed(1)} to ${l[1].toFixed(1)}` : 'load n/a'}`;
+}
+
 /** The annotation lines for a verdict, with the cause and the next step (ER-27). Pure. */
-export function annotations(v, { name, tag, os }) {
+export function annotations(v, { name, os }) {
   const out = [];
   if (v.status === 'not-measured') {
-    const l = v.level === 'error' ? '::error::' : '::warning::';
     out.push(
-      `${l}${name} NOT MEASURED (${os}): ${v.notes[0]}. ` +
-        (tag
-          ? 'A release tag needs a measured result (ER-33): not a pass. Next step: re-run the step when the host is quieter; if it stays unstable on a quiet host, the benchmark is broken, investigate it.'
-          : 'Not a failure on a non-tag run. Next step: none, or re-run when the host is quieter.'),
+      `${v.level === 'error' ? '::error::' : '::warning::'}${name} NOT MEASURED (${os}): ${v.notes[0]}. Not a pass (ER-33). ` +
+        'Next step: run the app by hand with the same data folder and read its log for why it did not start or log "Startup timings".',
     );
   }
   for (const o of v.over) {
     out.push(
       o.kind === 'cpu'
         ? `::error::${name} CPU: median ${o.median.toFixed(0)} ms of tree CPU exceeds the ${o.budget.toFixed(0)} ms threshold (baseline + noise margin, ${os}). A real regression: CPU time does not grow on a busy host. Next step: compare the steps of the start with the last green run.`
-        : `::error::${name} ${o.mark}: median ${o.median.toFixed(0)} ms exceeds the ${o.budget.toFixed(0)} ms threshold (baseline + noise margin, ${os}). Next step: compare the steps of the start with the last green run.`,
+        : `::error::${name} ${o.mark}: median ${o.median.toFixed(0)} ms exceeds the ${o.budget.toFixed(0)} ms ceiling (${os}), which only a broken start reaches. Next step: compare the steps of the start with the last green run.`,
     );
   }
   return out;
@@ -215,11 +213,14 @@ export function readTreeCpuMs(pid, platform = process.platform, run = spawnSync)
   return r.status === 0 ? treeCpuMs(r.stdout, pid) : null;
 }
 
-/** The idle percentage of a `top` CPU line (`CPU usage: 3.1% user, 4.2% sys, 92.6% idle`), or null. Pure. */
-export function parseTopIdle(text) {
-  const lines = text.split('\n').filter((l) => /CPU usage/.test(l));
-  const m = /([\d.]+)% idle/.exec(lines.at(-1) ?? '');
-  return m ? Number(m[1]) : null;
+/**
+ * The idle percentage of the last row of `iostat -n 0 -c 2 -w 1` (`us sy id 1m 5m 15m`), or null. The second row is the
+ * interval; the first is since boot. (`top -l 2` took 10 s on a host at load 70: it lists every process.) Pure.
+ */
+export function parseIostatIdle(text) {
+  const rows = text.split('\n').filter((l) => /^\s*\d+\s+\d+\s+\d+(\s|$)/.test(l));
+  const m = /^\s*\d+\s+\d+\s+(\d+)/.exec(rows.at(-1) ?? '');
+  return rows.length >= 2 && m ? Number(m[1]) : null;
 }
 
 /** Parses two `/proc/stat` first lines into the idle percentage between them, or null. Pure. */
@@ -234,11 +235,11 @@ export function procStatIdle(before, after) {
   return dt > 0 ? (100 * (idle(b) - idle(a))) / dt : null;
 }
 
-/** Host CPU idle percentage over about one second (macOS: top; Linux: /proc/stat); null where unavailable. */
+/** Host CPU idle percentage over about one second (macOS: iostat; Linux: /proc/stat); null where unavailable. */
 export function readCpuIdle(platform = process.platform, run = spawnSync) {
   if (platform === 'darwin') {
-    const r = run('top', ['-l', '2', '-n', '0', '-s', '1'], { encoding: 'utf8' });
-    return r.status === 0 ? parseTopIdle(r.stdout) : null;
+    const r = run('iostat', ['-n', '0', '-c', '2', '-w', '1'], { encoding: 'utf8' });
+    return r.status === 0 ? parseIostatIdle(r.stdout) : null;
   }
   if (platform === 'linux') {
     try {

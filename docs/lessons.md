@@ -2347,11 +2347,13 @@ was made for, the hover tooltip fading in, run 7872, this run, and the rescan's 
 
 Run 8175 said "NOT MEASURED: 1 of 5 starts ran with host load <= 12 (14 discarded in 15 attempts, peak 1-minute load 49.4)". The
 load average on the shared Mac counts OrbStack and build threads, and the gate threw away starts that were fine: under 14, 28
-and 84 CPU-bound `yes` loops (with `dd`) Debrief's start moved by under 5% (firstInteractive 585 to 622 ms) and its tree CPU
-time not at all (480 to 525 ms). **The planned fix did not hold either:** scaling wall time by a fixed Node reference workload
-would have been wrong, because the reference ran 2.2 to 5.2 times slower under the same loops (macOS schedules a short start
-ahead of long-running loops), so a regression of two times would have passed. **Rule:** a benchmark's gate is a quantity that does
-not move with the host (CPU time) plus a threshold from a measurement; a normaliser is used only after it is measured to track
-the thing it normalises, under load, with the numbers in the results block. A host-load gate on a verdict is a proxy for a
-measurement nobody made. Results: apps/debrief/docs/performance.md, "Start-up benchmark on a busy host". **Class: a proxy gate
-(load average) stood in for a measured effect (second instance: ER-12's raised timeouts without a measured cause).**
+and 84 CPU-bound `yes` loops (with `dd`) Debrief's start moved by under 5% and its tree CPU time not at all. **Two plans did not
+hold.** (1) Scaling wall time by a fixed Node reference workload: the reference ran 2.2 to 5.2 times slower under the same loops, so a
+regression of two times would have passed. (2) "CPU time barely moves with load", from those `yes` loops: under real build load (load
+97 to 177, 0% idle) the CPU time rose by up to 40% (530 to 720 ms against 515) and the wall time of a single start by up to 2.5 times,
+so a tight CPU threshold (561 ms) failed a busy host. **Rule:** measure a gate in the condition it must survive, with the real
+neighbours (other agents' builds), not only a synthetic stress; thresholds come from that, and a quantity that is noisy under load is
+a note, with a ceiling only a broken run reaches. The user's rule (2026-11-17): always measure, record host load and CPU idle, never
+refuse for a busy host, fail only on a real regression. Results: apps/debrief/docs/performance.md, "Start-up benchmark on a busy
+host". **Class: a proxy gate (load average) stood in for a measured effect (second instance: ER-12's raised timeouts without a
+measured cause), and a synthetic stress stood in for the real neighbour (instance: this lesson's second plan).**
