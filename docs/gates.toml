@@ -1204,3 +1204,11 @@ owner = "ER-21 class: a test fails for what an earlier test left behind (feat/te
 since = 2026-11-16
 review_by = 2026-12-16
 approved = "coordinator"
+
+[[report_only]]
+id = "C136"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C136-unit-live-feeds.mjs, then flip the warnings to errors and the mode to gate. First count 2026-11-16: 5 findings in 2 files before the sweep, 0 after (no allow list)"
+owner = "ER-21 class: a unit test asserts a value while a live mock feed or clock keeps changing it (feat/unit-live-helper)"
+since = 2026-11-16
+review_by = 2026-12-16
+approved = "coordinator"
