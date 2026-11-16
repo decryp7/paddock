@@ -28,13 +28,24 @@ test('C130 sites: sh, bash and zsh, plain and through env; other text is not a s
   }
 });
 
-test('C130 good: comments, a waiver on the line or above, fixtures, vendored code and the check\'s own files', () => {
+test('C130 good: comments, fixtures, vendored code and the check\'s own files are not read', () => {
   assert.deepEqual(sites('x/tests/a.rs', '// writes #!/bin/sh in the old test\n/// doc #!/bin/sh\n'), []);
-  assert.deepEqual(sites('x/tests/a.rs', 'let s = "#!/bin/sh\\n"; // conformance: stand-in — the hook under test is a script\n'), []);
-  assert.deepEqual(sites('x/tests/a.rs', '// conformance: stand-in — the hook under test is a script\nlet s = "#!/bin/sh\\n";\n'), []);
-  assert.equal(sites('x/tests/a.rs', 'let s = "#!/bin/sh\\n"; // conformance: stand-in — a script by design\n').length, 0);
-  assert.equal(sites('x/tests/a.rs', '// conformance: stand-in — a script by design\n\nlet s = "#!/bin/sh\\n";\n').length, 1, 'the waiver is on the line or the one above only');
   for (const p of ['x/tests/fixtures/a.rs', 'target/x/tests/a.rs', 'vendor/y/tests/a.rs', 'x/tests/a.sh', ...IMPLEMENTATION]) assert.equal(readable(p), false, p);
+});
+
+test('C130 waivers: one with a reason on the line or the line above is `waived` (and counted by the allow list), a bare or distant one is not', () => {
+  const w = (text) => sites('x/tests/a.rs', text).map(({ line, waived }) => [line, waived]);
+  assert.deepEqual(w('let s = "#!/bin/sh\\n"; // conformance: stand-in — the hook under test is a script\n'), [[1, true]]);
+  assert.deepEqual(w('// conformance: stand-in — a script by design\nlet s = "#!/bin/sh\\n";\n'), [[2, true]]);
+  assert.deepEqual(w('// conformance: stand-in — a script by design\n\nlet s = "#!/bin/sh\\n";\n'), [[3, false]], 'the line or the one above only');
+  assert.deepEqual(w('let s = "#!/bin/sh\\n"; // conformance: stand-in\n'), [[1, false]]);
+  assert.deepEqual(w('let s = "#!/bin/sh\\n"; // conformance: stand-in - ab\n'), [[1, false]], 'a reason is at least three characters');
+  assert.deepEqual(w('let s = "#!/bin/sh\\n"; // conformance: stand-in -- a\\u{1}b\n'), [[1, true]]);
+  // CRLF: the carriage return is not part of the reason; an emoji is two UTF-16 units, so one emoji and a letter is a reason, an emoji alone is not.
+  assert.deepEqual(w('let s = "#!/bin/sh\\n"; // conformance: stand-in — ab\r\n'), [[1, false]]);
+  assert.deepEqual(w('let s = "#!/bin/sh\\n"; // conformance: stand-in — abc\r\n'), [[1, true]]);
+  assert.deepEqual(w('let s = "#!/bin/sh\\n"; // conformance: stand-in — \u{1F600}a\n'), [[1, true]]);
+  assert.deepEqual(w('let s = "#!/bin/sh\\n"; // conformance: stand-in — \u{1F600}\n'), [[1, false]]);
 });
 
 test('C130 allow list: a path, the shebang text as the site, a reason and a count', () => {

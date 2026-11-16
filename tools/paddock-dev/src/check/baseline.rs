@@ -160,6 +160,11 @@ fn git(root: &Path, args: &[&str]) -> Result<String, (String, String)> {
     }
 }
 
+/// Whether `root` is a git work tree git itself accepts (a folder with a stray `.git` file, as a fixture has, is not).
+pub fn is_work_tree(root: &Path) -> bool {
+    git(root, &["rev-parse", "--is-inside-work-tree"]).is_ok_and(|t| t.trim_matches(is_js_space) == "true")
+}
+
 /// A current entry whose loose key is in the baseline at the merge base but whose exact key is not.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Moved<T> {

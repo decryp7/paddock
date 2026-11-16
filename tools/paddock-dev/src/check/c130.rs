@@ -12,7 +12,8 @@
 //! Not flagged, said out loud: a script built without a shebang (`sh -c`), a shebang another way (a byte string split over lines), and
 //! shell files themselves (C129 flags those; this reads the Rust text C129 names as its known gap, so the two never report the same
 //! line). A fixture that has to be a script (a hook or a wrapper script under test) carries `// conformance: stand-in — <why>` on its
-//! line or the line above. Today's sites are the allow list `conformance/c130-allow.json` (path, site = the shebang text, reason,
+//! line or the line above, and is counted: the allow list must name it (site `conformance: stand-in`, a count per file), so a new waiver is
+//! growth of the list, which the shrink-only rule ([`super::allow_list`], against the merge base) puts to the user. Today's sites are the allow list `conformance/c130-allow.json` (path, site = the shebang text, reason,
 //! count), read by the shared [`super::allow_list`]: a stale entry is a warning (remove it or lower its count), a site beyond an
 //! entry's count is reported at its own line, an unreadable list makes the check broken. Convert a site to `StandIn` and delete its
 //! entry. The check's own files are not read ([`IMPLEMENTATION`]).
@@ -23,7 +24,7 @@
 
 use super::allow_list::{self, Admit, Entry, Spec};
 use super::finding::Finding;
-use super::jsre::rx;
+use super::jsre::{has_reason, rx};
 use super::{Check, CheckOutput, Control, Ctx};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -41,11 +42,13 @@ pub const IMPLEMENTATION: [&str; 5] = [
 ];
 
 static SHEBANG: LazyLock<Regex> = LazyLock::new(|| rx(r"#!/(?:usr/)?bin/(?:env[ \t]+)?(?:ba|z)?sh\b"));
-static WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*stand-in\s*[—–-]+\s*\S.{2,}"));
+/// The marker up to its dashes; a reason must follow ([`has_reason`], JavaScript's `\S.{2,}`).
+static WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*stand-in\s*([—–-]+)"));
 static TEST_PATH: LazyLock<Regex> = LazyLock::new(|| rx(r"(?:^|/)tests?/|(?:^|/)tests\.rs$|_tests?\.rs$"));
 static NOT_READ: LazyLock<Regex> = LazyLock::new(|| rx(r"(?:^|/)(?:target|vendor|fixtures|node_modules)/"));
 static CFG_TEST: LazyLock<Regex> = LazyLock::new(|| rx(r"^[ \t]*#\[cfg\((?:test|(?:all|any)\([^\]]*\btest\b[^\]]*)\)\]"));
 
+const WAIVER_FIX: &str = "Waivers are counted, so none is free: list it in conformance/c130-allow.json (path, site `conformance: stand-in`, a reason and the file's count), which the user approves, or convert the fixture to `StandIn`.";
 const FIX: &str = "Install the testkit's stand-in instead: `paddock_testkit::StandIn::new(dir, \"name\").stdout(..).exit(..).records_args().install()?` (it runs on Windows and records its calls). A fixture that has to be a script carries `// conformance: stand-in — <why>`; an existing site is listed in conformance/c130-allow.json until it is converted.";
 
 /// Whether `path` is a Rust file this check reads.
@@ -53,8 +56,12 @@ pub fn readable(path: &str) -> bool {
     path.ends_with(".rs") && !NOT_READ.is_match(path) && !IMPLEMENTATION.contains(&path)
 }
 
-/// `(line, the line's text)` of every shebang line in the test code of `text` (the Rust file `path`) that is not waived.
-pub fn sites(path: &str, text: &str) -> Vec<(usize, String)> {
+/// The `site` an allow entry uses to name a waived fixture.
+pub const WAIVED_SITE: &str = "conformance: stand-in";
+
+/// `(line, the line's text, waived)` of every shebang line in the test code of `text` (the Rust file `path`); `waived` when a comment
+/// with a reason is on it or above.
+pub fn sites(path: &str, text: &str) -> Vec<(usize, String, bool)> {
     if !readable(path) {
         return Vec::new();
     }
@@ -72,11 +79,8 @@ pub fn sites(path: &str, text: &str) -> Vec<(usize, String)> {
         if line.trim().starts_with("//") || !SHEBANG.is_match(line) {
             continue;
         }
-        let above = i.checked_sub(1).and_then(|p| lines.get(p)).is_some_and(|l| WAIVER.is_match(l));
-        if WAIVER.is_match(line) || above {
-            continue;
-        }
-        out.push((i + 1, (*line).to_string()));
+        let above = i.checked_sub(1).and_then(|p| lines.get(p)).is_some_and(|l| has_reason(l, &WAIVER));
+        out.push((i + 1, (*line).to_string(), has_reason(line, &WAIVER) || above));
     }
     out
 }
@@ -155,8 +159,20 @@ impl Check for C130 {
                     continue;
                 }
             };
-            for (line, at) in sites(f, &text) {
-                let finding = match allow.admit(f, |site| at.contains(site)) {
+            for (line, at, waived) in sites(f, &text) {
+                let said = if waived {
+                    allow.admit(f, |site| site == WAIVED_SITE)
+                } else {
+                    allow.admit(f, |site| at.contains(site))
+                };
+                if waived {
+                    if said != Admit::Allowed {
+                        let what = if said == Admit::Beyond { "a stand-in waiver beyond the count of its allow entry" } else { "a stand-in waiver the allow list does not name" };
+                        findings.push(Finding::warn("C130", 42, f, line, what.to_string(), WAIVER_FIX));
+                    }
+                    continue;
+                }
+                let finding = match said {
                     Admit::Allowed => continue,
                     Admit::Beyond => Finding::warn(
                         "C130",
