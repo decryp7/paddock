@@ -896,7 +896,7 @@ fn keep_longer_postpones_the_stop_and_cleanup_can_be_turned_off() {
 }
 
 /// Ends a leftover the service listed, by identity: the pid must still name the process that started when the service saw it
-/// start (its `started_at`, in whole seconds), so a leftover the service already stopped, whose pid went to another process,
+/// start (its `started_at`, the whole milliseconds the service read), so a leftover the service already stopped, whose pid went to another process,
 /// is never signalled (rule 53, ER-14).
 #[cfg(unix)]
 fn end_leftover(pid: u32, started_at: Option<Timestamp>) {
@@ -904,7 +904,7 @@ fn end_leftover(pid: u32, started_at: Option<Timestamp>) {
         eprintln!("leftover pid {pid} was listed without a start time: not ended (no identity to check)");
         return;
     };
-    match paddock_testkit_start::recorded::reported(pid, started.0, 1000).running() {
+    match paddock_testkit_start::recorded::reported(pid, started.0, 1).running() {
         Some(id) => {
             let _ = paddock_proc::end(id);
         }

@@ -32,9 +32,33 @@ impl StartTime {
     }
 }
 
-/// Linux counts a start time from a boot time each process reads in whole seconds, so two readings can differ by about a
-/// second ([`ProcessId::of_reported`]).
+/// How far a start time may lie outside a reported window, in milliseconds. Linux counts a start time from a boot time each
+/// process reads in whole seconds, so two readings can differ by about a second; elsewhere the reading is exact.
+#[cfg(target_os = "linux")]
 const REPORTED_SLACK_MS: u64 = 1_000;
+#[cfg(not(target_os = "linux"))]
+const REPORTED_SLACK_MS: u64 = 0;
+
+/// The start times (µs since the Unix epoch) that match a reported start of `started_ms` at `resolution_ms`:
+/// `[started_ms - slack, started_ms + resolution_ms + slack)`, the end excluded. Pure, so its edges are tested on every
+/// platform ([`ProcessId::of_reported`]).
+pub(crate) fn reported_window(started_ms: u64, resolution_ms: u64) -> std::ops::Range<u64> {
+    reported_window_with(started_ms, resolution_ms, REPORTED_SLACK_MS)
+}
+
+/// [`reported_window`] with the slack named (a test pins both values on one platform).
+pub(crate) fn reported_window_with(
+    started_ms: u64,
+    resolution_ms: u64,
+    slack_ms: u64,
+) -> std::ops::Range<u64> {
+    let earliest = started_ms.saturating_sub(slack_ms).saturating_mul(1000);
+    let latest = started_ms
+        .saturating_add(resolution_ms)
+        .saturating_add(slack_ms)
+        .saturating_mul(1000);
+    earliest..latest
+}
 
 /// One process: its pid and when it started. Two processes that had the same pid one after the other are different
 /// values, so a pid that was handed on is never mistaken for the process it used to name.
@@ -65,18 +89,13 @@ impl ProcessId {
     }
 
     /// The process that holds `pid` now, if it started within `[started_ms, started_ms + resolution_ms)` (ms since the Unix
-    /// epoch) plus the clock's slack on both sides: for a pid another program reported together with the start time it
-    /// read, at that reader's resolution (1000 for whole seconds). `None` when nobody holds the pid, its start time cannot
-    /// be read, or the holder started at another time (the pid was handed on). Call it right before acting; a pid handed on
-    /// within the same window cannot be told apart, so keep the resolution as fine as the reporter's.
+    /// epoch; Linux adds its clock slack on both sides, see [`reported_window`]): for a pid another program reported together
+    /// with the start time it read, at that reader's resolution (1 for the whole milliseconds of a start this crate read).
+    /// `None` when nobody holds the pid, its start time cannot be read, or the holder started at another time (the pid was
+    /// handed on). Call it right before acting. A caller that holds the [`ProcessId`] itself acts on that instead.
     pub fn of_reported(pid: u32, started_ms: u64, resolution_ms: u64) -> Option<ProcessId> {
-        let slack = REPORTED_SLACK_MS;
-        let earliest = started_ms.saturating_sub(slack).saturating_mul(1000);
-        let latest = started_ms
-            .saturating_add(resolution_ms)
-            .saturating_add(slack)
-            .saturating_mul(1000);
-        ProcessId::of(pid).filter(|id| (earliest..latest).contains(&id.started.0))
+        let window = reported_window(started_ms, resolution_ms);
+        ProcessId::of(pid).filter(|id| window.contains(&id.started.0))
     }
 
     /// The process id.
@@ -326,6 +345,31 @@ mod tests {
 
     const fn at(us: u64) -> StartTime {
         StartTime::from_micros(us)
+    }
+
+    #[test]
+    fn the_reported_window_includes_its_start_and_excludes_its_end_with_and_without_slack() {
+        // 5 s, 1 ms resolution, no slack: [5_000_000, 5_001_000) µs.
+        let w = reported_window_with(5_000, 1, 0);
+        assert!(w.contains(&5_000_000) && w.contains(&5_000_999));
+        assert!(!w.contains(&4_999_999), "just before the start");
+        assert!(!w.contains(&5_001_000), "the end is excluded");
+        // 1 s of slack on both sides.
+        let w = reported_window_with(5_000, 1000, 1000);
+        assert!(w.contains(&4_000_000) && w.contains(&6_999_999));
+        assert!(!w.contains(&3_999_999) && !w.contains(&7_000_000));
+        // The platform's own slack: none off Linux, a second on it.
+        assert_eq!(
+            reported_window(5_000, 1),
+            reported_window_with(5_000, 1, REPORTED_SLACK_MS)
+        );
+        assert_eq!(
+            REPORTED_SLACK_MS,
+            if cfg!(target_os = "linux") { 1_000 } else { 0 }
+        );
+        // Large values saturate instead of wrapping.
+        let w = reported_window_with(u64::MAX, u64::MAX, u64::MAX);
+        assert_eq!(w.end, u64::MAX);
     }
 
     #[test]

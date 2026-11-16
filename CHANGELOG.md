@@ -4,6 +4,16 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-proc`: `ProcessId::of_reported`, `ask_outcome`; Windows `ask` runs the system's `taskkill` bounded
+- New `ProcessId::of_reported(pid, started_ms, resolution_ms)`: the holder of a pid by a start another program reported (a second of slack on Linux only); `paddock_testkit_start::recorded::reported` calls it.
+- New `ask_outcome(id) -> Ending` (`ask` is `ask_outcome(id) == Ending::Ended`): `Refused` says the process is the one named but did not take the request.
+- Windows: the close request runs `%SystemRoot%\System32\taskkill.exe` (not found through `PATH`) with a 20 s bound.
+
+### Pitcrew: stopping a process names it by identity (protocol 5)
+- `StopProcess.started_at` is required and the process list's start times are the exact milliseconds the service read (a stop compares them to the identity it holds, within 1 ms, and `paddock_proc` compares the pid's holder again right before it signals). A process the system gives no start time for is refused with a next step; the Stop button is disabled for it. The app and the service must be the same version (protocol 4 is refused).
+- Windows: Stop on a console process without a window no longer fails; when the close request is not taken, the process is ended after the stop timeout.
+- A refused stop answers `badRequest`, not `busy`.
+
 ### `paddock-testkit`: `TestCommand`, check C123
 - New `paddock_testkit::TestCommand`: a `Command` that starts from an empty environment plus an allow-list (`process::allowed_names()`), with a private `HOME` and temp folder, a curated `PATH` and `path_first`, `cargo_target_dir` and `into_parts`. Every test that starts `./dev`, `cargo` or `node` uses it (ADR 0100); check C123 (report-only) flags any other way.
 - `paddock-dev`: a named `ENGINEERING_RULES` is the only place the sibling `heavy.sh` lookup reads.

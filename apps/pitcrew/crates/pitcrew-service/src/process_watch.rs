@@ -5,13 +5,14 @@
 //! operating-system side through a [`Terminator`] and an `alive` check, both passed in so the tests need no real
 //! process.
 
-use crate::terminate::Terminator;
+use crate::terminate::{Asked, Terminator};
+use paddock_proc::{Ending, ProcessId, StartTime};
 use pitcrew_core::history::StopReason;
 use pitcrew_core::jobs::FinishedJob;
 use pitcrew_core::process_policy::{KeepFor, ProcessPolicy};
 use pitcrew_core::process_track::{
     self, check_stop_target, classify, due, entries, export_extensions, extend, import_extensions, leftover_count, next_step,
-    prune_extensions, rule_label, Extensions, JobSpan, KeepRecord, ProcessMeta, Refusal, StopProgress, StopStep, Tracked,
+    prune_extensions, rule_label, same_start, Extensions, JobSpan, KeepRecord, ProcessMeta, Refusal, StopProgress, StopStep, Tracked,
 };
 use pitcrew_core::protocol::ProcessList;
 use pitcrew_core::time::Timestamp;
@@ -33,10 +34,45 @@ pub enum Seen {
 pub const MAX_STOPPING: usize = 64;
 
 /// A stop that was asked for.
+/// Why a stop was not begun.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BeginError {
+    /// [`MAX_STOPPING`] stops are in progress already (try again in a moment).
+    TooMany,
+    /// The process may not be stopped: it has no start time to verify, its pid was handed on, or the system refused. The
+    /// text says what to do next.
+    Refused(String),
+}
+
+impl std::fmt::Display for BeginError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BeginError::TooMany => f.write_str("too many stops are in progress; try again in a moment"),
+            BeginError::Refused(why) => f.write_str(why),
+        }
+    }
+}
+
+impl BeginError {
+    /// The code a request answers with: a refusal is a bad request (the caller names a process that may not be stopped), only
+    /// the bound is "busy".
+    pub fn code(&self) -> pitcrew_core::protocol::ErrorCode {
+        match self {
+            BeginError::TooMany => pitcrew_core::protocol::ErrorCode::Busy,
+            BeginError::Refused(_) => pitcrew_core::protocol::ErrorCode::BadRequest,
+        }
+    }
+}
+
+/// The identity the service holds for a listed process: its pid and the exact start the OS gave when it was listed.
+/// `None` when the OS gave none (it cannot be told from a process that reuses the pid, so nothing acts on it).
+pub fn identity_of(meta: &ProcessMeta) -> Option<ProcessId> {
+    meta.started_micros.map(|us| ProcessId::new(meta.pid, StartTime::from_micros(us)))
+}
+
 #[derive(Debug, Clone)]
 struct Stopping {
-    pid: u32,
-    started_ms: Option<u64>,
+    id: ProcessId,
     name: String,
     rule: String,
     by: StopReason,
@@ -136,7 +172,7 @@ impl ProcessWatch {
 
     /// Whether a stop of `pid` is under way.
     pub fn is_stopping(&self, pid: u32) -> bool {
-        self.stopping.iter().any(|s| s.pid == pid)
+        self.stopping.iter().any(|s| s.id.pid() == pid)
     }
 
     /// Checks that `pid` may be stopped (it is in the runner's tree as last read, and so on).
@@ -162,7 +198,7 @@ impl ProcessWatch {
         let t = self
             .tracked
             .iter()
-            .find(|t| t.meta.pid == pid && t.meta.started_ms.is_some_and(|s| s.abs_diff(started_ms) <= 1500))
+            .find(|t| t.meta.pid == pid && t.meta.started_ms.is_some_and(|s| same_start(started_ms, s)))
             .ok_or("that process is not in the runner's list any more; refresh it")?;
         if t.leftover.is_none() {
             return Err("only leftover processes can be kept longer: this one belongs to a running job or to no job".into());
@@ -181,19 +217,20 @@ impl ProcessWatch {
         now: Timestamp,
         policy: &ProcessPolicy,
         term: &dyn Terminator,
-    ) -> Result<(), String> {
+    ) -> Result<(), BeginError> {
         if self.stopping.len() >= MAX_STOPPING {
-            return Err("too many stops are in progress; try again in a moment".into());
+            return Err(BeginError::TooMany);
         }
         if self.is_stopping(target.meta.pid) {
             return Ok(());
         }
         // Rule 53: a process without a start time has no identity to verify, so it is never signalled.
-        let started_ms = target.meta.started_ms.ok_or_else(|| Refusal::NoStartTime.to_string())?;
-        term.ask(target.meta.pid, started_ms)?;
+        let id = identity_of(&target.meta).ok_or_else(|| BeginError::Refused(Refusal::NoStartTime.to_string()))?;
+        match term.ask(id).map_err(BeginError::Refused)? {
+            Asked::Delivered | Asked::NotTaken => {}
+        }
         self.stopping.push(Stopping {
-            pid: target.meta.pid,
-            started_ms: Some(started_ms),
+            id,
             name: target.meta.name.clone(),
             rule,
             by,
@@ -206,65 +243,61 @@ impl ProcessWatch {
         Ok(())
     }
 
-    /// Moves the stops along: finished ones are returned, those that ignored the request are ended.
-    pub fn advance(&mut self, now: Timestamp, alive: &mut dyn FnMut(u32, Option<u64>) -> Seen, term: &dyn Terminator) -> Vec<Stopped> {
+    /// Moves the stops along: finished ones are returned, those that ignored the request are ended. `alive` looks at one
+    /// held identity and says what it found (rule 53: never by pid alone).
+    pub fn advance(&mut self, now: Timestamp, alive: &mut dyn FnMut(ProcessId) -> Seen, term: &dyn Terminator) -> Vec<Stopped> {
         let mut done = vec![];
         self.stopping.retain_mut(|s| {
-            let seen = alive(s.pid, s.started_ms);
+            let seen = alive(s.id);
             let is_alive = seen != Seen::Gone;
+            let age_ms = now.0.saturating_sub(s.id.started().as_micros() / 1000);
+            let stopped = |s: &Stopping, rule: String, forced: bool, unconfirmed: bool| Stopped {
+                name: s.name.clone(),
+                pid: s.id.pid(),
+                age_ms,
+                rule,
+                by: s.by,
+                forced,
+                unconfirmed,
+            };
             match next_step(&s.progress, is_alive, now) {
                 StopStep::Done => {
-                    done.push(Stopped {
-                        name: s.name.clone(),
-                        pid: s.pid,
-                        age_ms: s.started_ms.map_or(0, |st| now.0.saturating_sub(st)),
-                        rule: s.rule.clone(),
-                        by: s.by,
-                        forced: s.ended,
-                        unconfirmed: false,
-                    });
+                    done.push(stopped(s, s.rule.clone(), s.ended, false));
                     false
                 }
                 StopStep::Wait => true,
-                StopStep::Kill if seen == Seen::Unverified || s.started_ms.is_none() => {
+                StopStep::Kill if seen == Seen::Unverified => {
                     // The pid may have been handed on: ending it by pid could end another process (rule 53).
-                    done.push(Stopped {
-                        name: s.name.clone(),
-                        pid: s.pid,
-                        age_ms: s.started_ms.map_or(0, |st| now.0.saturating_sub(st)),
-                        rule: format!(
-                            "{} (could not confirm that it stopped: the process could not be verified to be the same one)",
-                            s.rule
-                        ),
-                        by: s.by,
-                        forced: s.ended,
-                        unconfirmed: true,
-                    });
+                    let rule = format!(
+                        "{} (could not confirm that it stopped: the process could not be verified to be the same one)",
+                        s.rule
+                    );
+                    done.push(stopped(s, rule, s.ended, true));
                     false
                 }
-                StopStep::Kill => {
-                    if !s.ended {
-                        if let Some(started_ms) = s.started_ms {
-                            term.end(s.pid, started_ms);
+                StopStep::Kill if !s.ended => {
+                    match term.end(s.id) {
+                        Ending::Ended | Ending::Refused => {
+                            s.ended = true;
+                            // Give the kill a moment to take effect before the next check.
+                            s.progress.asked_at = now;
+                            s.progress.timeout = Duration::from_secs(5);
+                            true
                         }
-                        s.ended = true;
-                        // Give the kill a moment to take effect before the next check.
-                        s.progress.asked_at = now;
-                        s.progress.timeout = Duration::from_secs(5);
-                    } else {
-                        // Ended twice and still there (a process in uninterruptible sleep): give up on it.
-                        done.push(Stopped {
-                            name: s.name.clone(),
-                            pid: s.pid,
-                            age_ms: s.started_ms.map_or(0, |st| now.0.saturating_sub(st)),
-                            rule: format!("{} (could not be ended)", s.rule),
-                            by: s.by,
-                            forced: true,
-                            unconfirmed: false,
-                        });
-                        return false;
+                        // It ended by itself since the look: the next look says so.
+                        Ending::Gone => true,
+                        // Its pid was handed on between the look and the kill and nothing was ended: not a forced stop.
+                        Ending::NotOurs(_) => {
+                            let rule = format!("{} (its process id was handed on to another process: nothing was ended)", s.rule);
+                            done.push(stopped(s, rule, false, true));
+                            false
+                        }
                     }
-                    true
+                }
+                StopStep::Kill => {
+                    // Ended twice and still there (a process in uninterruptible sleep): give up on it.
+                    done.push(stopped(s, format!("{} (could not be ended)", s.rule), true, false));
+                    false
                 }
             }
         });
@@ -284,25 +317,39 @@ mod tests {
     use pitcrew_core::process_track::spans;
     use std::sync::Mutex;
 
-    #[derive(Default)]
+    /// A terminator that records what it was asked and answers as it is told.
     struct Fake {
-        asked: Mutex<Vec<(u32, u64)>>,
-        ended: Mutex<Vec<(u32, u64)>>,
-        refuse: bool,
+        asked: Mutex<Vec<ProcessId>>,
+        ended: Mutex<Vec<ProcessId>>,
+        ask_answer: Result<Asked, String>,
+        end_answer: Ending,
+    }
+
+    impl Default for Fake {
+        fn default() -> Fake {
+            Fake {
+                asked: Mutex::default(),
+                ended: Mutex::default(),
+                ask_answer: Ok(Asked::Delivered),
+                end_answer: Ending::Ended,
+            }
+        }
     }
 
     impl Terminator for Fake {
-        fn ask(&self, pid: u32, started_ms: u64) -> Result<(), String> {
-            if self.refuse {
-                return Err("denied".into());
-            }
-            self.asked.lock().unwrap().push((pid, started_ms));
-            Ok(())
+        fn ask(&self, id: ProcessId) -> Result<Asked, String> {
+            self.asked.lock().unwrap().push(id);
+            self.ask_answer.clone()
         }
-        fn end(&self, pid: u32, started_ms: u64) -> bool {
-            self.ended.lock().unwrap().push((pid, started_ms));
-            true
+        fn end(&self, id: ProcessId) -> Ending {
+            self.ended.lock().unwrap().push(id);
+            self.end_answer
         }
+    }
+
+    /// The identity of a stand-in listed at `started_s` seconds.
+    fn id(pid: u32, started_s: u64) -> ProcessId {
+        ProcessId::new(pid, StartTime::from_micros(started_s * 1_000_000))
     }
 
     fn t(s: u64) -> Timestamp {
@@ -317,6 +364,7 @@ mod tests {
             exe: None,
             command: name.into(),
             started_ms: Some(started_s * 1000),
+            started_micros: Some(started_s * 1_000_000),
             cpu_permille: 0,
             mem_bytes: 1,
         }
@@ -380,10 +428,10 @@ mod tests {
         assert!(w.due(t(801), true).is_empty(), "not asked twice");
         w.begin(&due[0], "again".into(), StopReason::Cleanup, t(801), &policy, &term)
             .unwrap();
-        assert_eq!(*term.asked.lock().unwrap(), vec![(11, 150_000)]);
+        assert_eq!(*term.asked.lock().unwrap(), vec![id(11, 150)]);
         // Still alive: wait. Then gone.
-        assert!(w.advance(t(805), &mut |_, _| Seen::Same, &term).is_empty());
-        let done = w.advance(t(806), &mut |_, _| Seen::Gone, &term);
+        assert!(w.advance(t(805), &mut |_| Seen::Same, &term).is_empty());
+        let done = w.advance(t(806), &mut |_| Seen::Gone, &term);
         assert_eq!(done.len(), 1);
         assert_eq!((done[0].pid, done[0].forced, done[0].by), (11, false, StopReason::Cleanup));
         assert_eq!(done[0].age_ms, 806_000 - 150_000);
@@ -397,18 +445,67 @@ mod tests {
         let term = Fake::default();
         let target = w.check(11, 150_000, 99, false).unwrap().clone();
         w.begin(&target, "you".into(), StopReason::User, t(800), &policy, &term).unwrap();
-        assert!(w.advance(t(814), &mut |_, _| Seen::Same, &term).is_empty());
+        assert!(w.advance(t(814), &mut |_| Seen::Same, &term).is_empty());
         assert!(term.ended.lock().unwrap().is_empty());
-        assert!(w.advance(t(815), &mut |_, _| Seen::Same, &term).is_empty());
-        assert_eq!(*term.ended.lock().unwrap(), vec![(11, 150_000)], "ended after the 15 s timeout");
-        let done = w.advance(t(816), &mut |_, _| Seen::Gone, &term);
+        assert!(w.advance(t(815), &mut |_| Seen::Same, &term).is_empty());
+        assert_eq!(*term.ended.lock().unwrap(), vec![id(11, 150)], "ended after the 15 s timeout");
+        let done = w.advance(t(816), &mut |_| Seen::Gone, &term);
         assert!(done[0].forced && done[0].by == StopReason::User);
         // A process that survives even that.
         w.begin(&target, "you".into(), StopReason::User, t(900), &policy, &term).unwrap();
-        w.advance(t(915), &mut |_, _| Seen::Same, &term);
-        let done = w.advance(t(921), &mut |_, _| Seen::Same, &term);
+        w.advance(t(915), &mut |_| Seen::Same, &term);
+        let done = w.advance(t(921), &mut |_| Seen::Same, &term);
         assert_eq!(done.len(), 1);
         assert!(done[0].rule.contains("could not be ended"));
+    }
+
+    #[test]
+    fn a_process_that_does_not_take_the_polite_request_is_tracked_and_ended_after_the_timeout() {
+        // Windows: a console process without a window refuses `taskkill` without /F. Before, the refusal ended the stop at
+        // once and the forced end never ran.
+        let (mut w, policy) = watch();
+        let term = Fake {
+            ask_answer: Ok(Asked::NotTaken),
+            ..Default::default()
+        };
+        let target = w.check(11, 150_000, 99, false).unwrap().clone();
+        w.begin(&target, "you".into(), StopReason::User, t(800), &policy, &term).unwrap();
+        assert!(w.is_stopping(11));
+        assert!(w.advance(t(814), &mut |_| Seen::Same, &term).is_empty());
+        assert!(w.advance(t(815), &mut |_| Seen::Same, &term).is_empty());
+        assert_eq!(*term.ended.lock().unwrap(), vec![id(11, 150)], "ended once the timeout passed");
+        let done = w.advance(t(816), &mut |_| Seen::Gone, &term);
+        assert!(done[0].forced);
+    }
+
+    #[test]
+    fn a_kill_that_finds_the_pid_handed_on_is_not_reported_as_forced() {
+        let (mut w, policy) = watch();
+        let term = Fake {
+            end_answer: Ending::NotOurs(StartTime::from_micros(9)),
+            ..Default::default()
+        };
+        let target = w.check(11, 150_000, 99, false).unwrap().clone();
+        w.begin(&target, "you".into(), StopReason::User, t(800), &policy, &term).unwrap();
+        let done = w.advance(t(815), &mut |_| Seen::Same, &term);
+        assert_eq!(done.len(), 1, "{done:?}");
+        assert!(!done[0].forced, "nothing was ended: {done:?}");
+        assert!(done[0].unconfirmed && done[0].rule.contains("handed on"), "{done:?}");
+        assert!(!w.is_stopping(11));
+    }
+
+    #[test]
+    fn a_kill_that_finds_it_already_gone_waits_for_the_next_look() {
+        let (mut w, policy) = watch();
+        let term = Fake {
+            end_answer: Ending::Gone,
+            ..Default::default()
+        };
+        let target = w.check(11, 150_000, 99, false).unwrap().clone();
+        w.begin(&target, "you".into(), StopReason::User, t(800), &policy, &term).unwrap();
+        assert!(w.advance(t(815), &mut |_| Seen::Same, &term).is_empty());
+        let done = w.advance(t(816), &mut |_| Seen::Gone, &term);
+        assert!(!done[0].forced, "it ended by itself: {done:?}");
     }
 
     #[test]
@@ -417,9 +514,9 @@ mod tests {
         let term = Fake::default();
         let target = w.check(11, 150_000, 99, false).unwrap().clone();
         w.begin(&target, "you".into(), StopReason::User, t(800), &policy, &term).unwrap();
-        assert!(w.advance(t(814), &mut |_, _| Seen::Unverified, &term).is_empty());
+        assert!(w.advance(t(814), &mut |_| Seen::Unverified, &term).is_empty());
         // The timeout has passed: a pid that reports start time 0 may be a recycled one.
-        let done = w.advance(t(815), &mut |_, _| Seen::Unverified, &term);
+        let done = w.advance(t(815), &mut |_| Seen::Unverified, &term);
         assert!(term.ended.lock().unwrap().is_empty(), "never ended by a bare pid");
         let reported: Vec<_> = done
             .iter()
@@ -439,10 +536,15 @@ mod tests {
         let term = Fake::default();
         let mut target = w.check(11, 150_000, 99, false).unwrap().clone();
         target.meta.started_ms = None;
+        target.meta.started_micros = None;
         let err = w
             .begin(&target, "you".into(), StopReason::User, t(800), &policy, &term)
             .unwrap_err();
-        assert!(err.contains("cannot be told apart"), "{err}");
+        assert!(
+            matches!(&err, BeginError::Refused(why) if why.contains("cannot be told apart")),
+            "{err}"
+        );
+        assert_eq!(err.code(), pitcrew_core::protocol::ErrorCode::BadRequest);
         assert!(term.asked.lock().unwrap().is_empty() && !w.is_stopping(11));
     }
 
@@ -456,12 +558,15 @@ mod tests {
         assert_eq!(ProcessWatch::new().check(11, 150_000, 99, false).unwrap_err(), Refusal::NotInTree);
         let target = w.check(11, 150_000, 99, false).unwrap().clone();
         let deny = Fake {
-            refuse: true,
+            ask_answer: Err("denied".into()),
             ..Default::default()
         };
+        let denied = w.begin(&target, "x".into(), StopReason::User, t(1), &policy, &deny).unwrap_err();
+        assert_eq!(denied, BeginError::Refused("denied".into()));
         assert_eq!(
-            w.begin(&target, "x".into(), StopReason::User, t(1), &policy, &deny).unwrap_err(),
-            "denied"
+            denied.code(),
+            pitcrew_core::protocol::ErrorCode::BadRequest,
+            "a refusal is not \"busy\""
         );
         assert!(!w.is_stopping(11));
         // The number of stops in progress is bounded.
@@ -471,10 +576,9 @@ mod tests {
             m.meta.pid = pid;
             w.begin(&m, "x".into(), StopReason::Cleanup, t(1), &policy, &term).unwrap();
         }
-        assert!(w
-            .begin(&target, "x".into(), StopReason::User, t(1), &policy, &term)
-            .unwrap_err()
-            .contains("too many"));
+        let full = w.begin(&target, "x".into(), StopReason::User, t(1), &policy, &term).unwrap_err();
+        assert_eq!(full, BeginError::TooMany);
+        assert_eq!(full.code(), pitcrew_core::protocol::ErrorCode::Busy);
     }
 
     #[test]

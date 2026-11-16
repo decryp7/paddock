@@ -24,8 +24,7 @@ impl Supervisor {
         let Some(r) = self.runners.get_mut(name) else { return };
         let done = {
             let probe_ref = &mut self.probe;
-            r.watch
-                .advance(now, &mut |pid, started| probe_ref.alive(pid, started), self.terminator.as_ref())
+            r.watch.advance(now, &mut |id| probe_ref.seen(id), self.terminator.as_ref())
         };
         let mut failures: Vec<String> = vec![];
         if probe && r.process.is_some() && !r.jobs.running(now) {
@@ -156,7 +155,7 @@ impl Supervisor {
                 );
                 Response::Ok
             }
-            Err(e) => err(ErrorCode::Busy, e),
+            Err(e) => err(e.code(), e.to_string()),
         }
     }
 

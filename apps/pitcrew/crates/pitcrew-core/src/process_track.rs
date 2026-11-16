@@ -49,8 +49,12 @@ pub struct ProcessMeta {
     pub exe: Option<String>,
     /// The command line, arguments joined by spaces (raw: only [`display_command`] output leaves the service).
     pub command: String,
-    /// When it started (milliseconds since the epoch), when known.
+    /// When it started (milliseconds since the epoch, the whole milliseconds of [`ProcessMeta::started_micros`]), when known.
     pub started_ms: Option<u64>,
+    /// When it started in microseconds since the epoch, as `paddock_proc::ProcessId::of` read it when the process was
+    /// listed: the exact identity the service holds, so a stop compares it right before it signals (rule 53). `None` when
+    /// the OS gives no start time.
+    pub started_micros: Option<u64>,
     /// CPU use, per mille of the whole machine.
     pub cpu_permille: u32,
     /// Resident memory.
@@ -391,6 +395,16 @@ impl std::fmt::Display for Refusal {
     }
 }
 
+/// How far two readings of one start, in milliseconds, may differ: the app echoes the whole milliseconds the service listed,
+/// so they are equal; one millisecond covers a conversion that rounds the other way. Whole seconds are not the resolution
+/// any more (the service reads the exact start from the OS).
+pub const START_MATCH_MS: u64 = 1;
+
+/// Whether the start time the caller names (`wanted_ms`) is the one the service listed (`listed_ms`).
+pub fn same_start(wanted_ms: u64, listed_ms: u64) -> bool {
+    wanted_ms.abs_diff(listed_ms) <= START_MATCH_MS
+}
+
 /// Checks that `pid` may be stopped. `members` is the runner's tree from the latest table; `started_ms` is the start
 /// time the caller saw. A process whose start time is unknown is refused: without it a reused id cannot be told apart
 /// (rule 53).
@@ -413,8 +427,7 @@ pub fn check_stop_target(
         return Err(Refusal::IsRunner);
     }
     let have = m.started_ms.ok_or(Refusal::NoStartTime)?;
-    // Start times come from the OS in whole seconds; allow a second of rounding.
-    if started_ms.abs_diff(have) > 1500 {
+    if !same_start(started_ms, have) {
         return Err(Refusal::Changed);
     }
     Ok(m)
@@ -497,6 +510,7 @@ mod tests {
             exe: Some(format!("/usr/bin/{name}")),
             command: format!("{name} --flag"),
             started_ms: started_s.map(|s| s * 1000),
+            started_micros: started_s.map(|s| s * 1_000_000),
             cpu_permille: 10,
             mem_bytes: u64::from(pid) * 100,
         }
@@ -554,6 +568,7 @@ mod tests {
             exe: None,
             command: String::new(),
             started_ms: Some(started),
+            started_micros: Some(started * 1000),
             cpu_permille: 0,
             mem_bytes: 1,
         };
@@ -709,6 +724,16 @@ mod tests {
             Refusal::Changed,
             "a start time of another process (a reused id)"
         );
+        // The listed start is exact now: a start a second off is another process, not rounding.
+        for off in [1_000, 500, 2] {
+            assert_eq!(
+                check_stop_target(11, 150_000 + off, 10, 99, false, &members).unwrap_err(),
+                Refusal::Changed,
+                "{off} ms off"
+            );
+        }
+        assert!(same_start(150_000, 150_000) && same_start(150_001, 150_000) && same_start(149_999, 150_000));
+        assert!(!same_start(150_002, 150_000) && !same_start(149_998, 150_000));
     }
 
     #[test]
@@ -717,9 +742,9 @@ mod tests {
         let ok = check_stop_target(11, 150_000, 10, 99, false, &members);
         assert_eq!(ok.unwrap().pid, 11);
         assert_eq!(
-            check_stop_target(11, 150_500, 10, 99, false, &members).unwrap().pid,
+            check_stop_target(11, 150_001, 10, 99, false, &members).unwrap().pid,
             11,
-            "seconds rounding"
+            "one millisecond of rounding"
         );
         assert_eq!(check_stop_target(11, 150_000, 10, 99, false, &members).unwrap().pid, 11);
         assert_eq!(

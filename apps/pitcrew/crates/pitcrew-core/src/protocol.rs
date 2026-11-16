@@ -35,6 +35,8 @@ use std::io::{Read, Write};
 /// The protocol version this build speaks. 2: push events, maintenance, settings, registration, history, disk.
 /// 3: the runner's configuration file (get, preview, save) and the processes a runner started.
 /// 4: holds, update deadlines and loops in the snapshot; container engine hygiene and the Actions cache folder.
+/// 5: `StopProcess.started_at` is required (a stop names the process by pid and start time, never by pid alone), and the
+/// start times of the process list are the exact milliseconds the service read, not whole seconds.
 pub const PROTOCOL_VERSION: u32 = 5;
 /// Largest frame either side sends or accepts.
 pub const MAX_FRAME: usize = 1024 * 1024;

@@ -87,6 +87,8 @@ export interface MockOptions {
   serverDown?: boolean;
   /** macOS: launchd refuses the service after an update (the "could not start" state with Repair). */
   startFailed?: boolean;
+  /** Process names the system gives no start time for (the Processes tab then has rows that cannot be stopped). */
+  processesWithoutStartTime?: readonly string[];
 }
 
 const FLOW: Exclude<RunnerSnapshot['updatePhase']['phase'], 'idle' | 'rollingBack'>[] = [
@@ -133,7 +135,10 @@ export class MockBackend implements PitcrewBackend {
   private cacheTrimmedBytes = new Map<string, number>();
   private debrief = true;
 
+  private readonly withoutStartTime: readonly string[];
+
   constructor(options: MockOptions = {}) {
+    this.withoutStartTime = options.processesWithoutStartTime ?? [];
     this.scenario = options.scenario ?? 'demo';
     this.latency = options.latencyMs ?? 0;
     this.simulate = options.simulate ?? false;
@@ -845,7 +850,9 @@ export class MockBackend implements PitcrewBackend {
   private tree(r: RunnerSnapshot): ProcessList {
     let t = this.processTrees.get(r.name);
     if (!t) {
-      t = demoProcesses(r, this.now());
+      const tree = demoProcesses(r, this.now());
+      const unreadable = this.withoutStartTime;
+      t = { ...tree, entries: tree.entries.map((e) => (unreadable.includes(e.name) ? { ...e, startedAt: null } : e)) };
       this.processTrees.set(r.name, t);
     }
     return t;
