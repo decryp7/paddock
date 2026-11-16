@@ -297,6 +297,14 @@ const num = (m: Measured<number>): number => readValue(m) ?? 0;
 /** How many seconds of live samples a new summary subscriber gets first (the live store keeps SPARK_CAPACITY = 60 including the current one). */
 export const LIVE_BACKLOG = 59;
 
+/** The mocks not yet disposed: the test setup disposes them after every test. */
+const liveBackends = new Set<{ dispose(): void }>();
+
+/** Disposes every `MockBackend` still alive (tests). */
+export function disposeMockBackends(): void {
+  for (const backend of [...liveBackends]) backend.dispose();
+}
+
 export class MockBackend implements DynoBackend {
   private readonly machine: MockMachine;
   private readonly latencyMs: number;
@@ -362,7 +370,30 @@ export class MockBackend implements DynoBackend {
     return true;
   }
 
+  /** The timeouts started and not yet run; `dispose` cancels them. */
+  private readonly timeouts = new Set<ReturnType<typeof setTimeout>>();
+
+  /** `setTimeout` that `dispose` can cancel. */
+  private after(fn: () => void, ms: number): ReturnType<typeof setTimeout> {
+    const handle = setTimeout(() => {
+      this.timeouts.delete(handle);
+      fn();
+    }, ms);
+    this.timeouts.add(handle);
+    return handle;
+  }
+
+  /** Stops every timer of this mock (the tick interval, scan steps, job steps, first pushes): none outlives the test that made it. */
+  dispose(): void {
+    for (const handle of this.timeouts) clearTimeout(handle);
+    this.timeouts.clear();
+    if (this.timer !== null) clearInterval(this.timer);
+    this.timer = null;
+    liveBackends.delete(this);
+  }
+
   constructor(options: MockOptions = {}) {
+    liveBackends.add(this);
     this.options = options;
     this.keepsMeasuring = options.keepsMeasuring ?? false;
     this.os = options.os ?? 'macos';
@@ -387,7 +418,7 @@ export class MockBackend implements DynoBackend {
     this.widgets = new MockWidgets({ storage: browserStorage(options.widgetStorage), now: this.now, gridCases: gridCases as unknown as GridCase[], longLists: options.longLists ?? false, ...(options.widgets ?? {}) });
     // A scan reports a few times: one timer per step (zero delay with no latency, so a test sees the first status before the rest).
     const latency = this.latencyMs;
-    this.disk = new MockDiskMap(this.now, (fn, step) => setTimeout(fn, latency === 0 ? 0 : Math.max(300, latency * 2) * step), err);
+    this.disk = new MockDiskMap(this.now, (fn, step) => this.after(fn, latency === 0 ? 0 : Math.max(300, latency * 2) * step), err);
     for (const m of options.savedMaps ?? []) this.disk.seedSaved(m.target, m.ageMs, m.changedBytes);
     if (options.holdScans) {
       this.disk.hold();
@@ -428,7 +459,7 @@ export class MockBackend implements DynoBackend {
 
   onLive(detail: LiveDetail, listener: (u: LiveUpdate) => void): Unsubscribe {
     this.liveListeners.set(listener, detail);
-    setTimeout(() => {
+    this.after(() => {
       if (!this.liveListeners.has(listener)) return;
       // The summary subscriber (the shared live store) opens with the last minute already measured, so its sparklines are full width.
       if (detail === 'summary') for (const u of this.liveBacklog()) listener(u);
@@ -456,7 +487,7 @@ export class MockBackend implements DynoBackend {
 
   onAgentStatus(listener: (s: AgentStatus) => void): Unsubscribe {
     this.agentListeners.add(listener);
-    setTimeout(() => {
+    this.after(() => {
       if (this.agentListeners.has(listener)) listener({ state: 'running', message: null });
     }, 0);
     return () => this.agentListeners.delete(listener);
@@ -1199,7 +1230,7 @@ export class MockBackend implements DynoBackend {
         }
         const kind = kinds[i]!;
         p.current = kind;
-        setTimeout(() => {
+        this.after(() => {
           p.done.push(kind);
           p.current = null;
           step(i + 1);
@@ -1725,7 +1756,7 @@ export class MockBackend implements DynoBackend {
 
   private schedule(job: MockJob): void {
     if (this.jobsStalled) return;
-    job.timer = setTimeout(() => {
+    job.timer = this.after(() => {
       job.step++;
       if (job.step < this.jobSteps) {
         this.change(job, runningStep(job.status.kind as JobKindSlug, job.step, this.jobSteps - 1));
@@ -1893,7 +1924,7 @@ export class MockBackend implements DynoBackend {
       const delay = this.latencyMs === 0 ? 0 : this.latencyMs + extraMs;
       if (gate && !gate.open) gate.waiting.push(run);
       else if (delay === 0) queueMicrotask(run);
-      else setTimeout(run, delay);
+      else this.after(run, delay);
     });
   }
 }
