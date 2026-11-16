@@ -7,9 +7,8 @@
 //!
 //! - `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, the `XDG_*` folders, `TMPDIR`, `TEMP` and `TMP` point into a private
 //!   folder made for this command ([`TestCommand::private_dir`]), removed when the command drops;
-//! - `PATH` is curated: a private folder of links to the toolchain's programs (`cargo`, `rustc`, `rustup`, ...; never the folder
-//!   they are in, where `cargo install` puts other tools), the folders of `node`, `npm`, `npx` and `git` as the test process
-//!   finds them, on Windows Git for Windows' `usr/bin` and `bin`, then the system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`: `lsof` and `ps` are there), nothing else; [`TestCommand::path_first`] puts a test's own stand-in folder first, and `env("PATH", ..)`
+//! - `PATH` is curated: the folders of the toolchain the test run itself uses (`cargo`, `rustc`, `node`, `git`), then the
+//!   system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`: `lsof` and `ps` are there), nothing else; [`TestCommand::path_first`] puts a test's own stand-in folder first, and `env("PATH", ..)`
 //!   replaces it whole;
 //! - the toolchain variables cargo needs (`RUSTUP_HOME`, `CARGO_HOME`, `RUSTUP_TOOLCHAIN`) and, on Windows, the few the OS
 //!   needs (`SystemRoot`, ...): [`PASSED_THROUGH`], read from this process;
@@ -28,8 +27,7 @@
 //! it derefs to the `Command` read-only (`get_program`, `get_envs`), never mutably, so nothing can reach past the listed set.
 //!
 //! The program is resolved once, when the command is made: a bare name (`node`, `git`) becomes the full path found on the **test
-//! process's** `PATH`, except `cargo`, `rustc` and `rustup`, which start through the command's own toolchain links (`cargo` is
-//! the cargo that runs the test, `CARGO`), never rustup's proxy, which puts all of `$CARGO_HOME/bin` in front of its child's PATH. [`TestCommand::path_first`] and `env("PATH", ..)` change only the child's own lookups, never which program
+//! process's** `PATH`. [`TestCommand::path_first`] and `env("PATH", ..)` change only the child's own lookups, never which program
 //! starts: to start a stand-in, name it by its path.
 //!
 //! A child [`TestCommand::spawn`] starts is a [`TestChild`], which ends that child through its handle when it drops. What the child
@@ -173,22 +171,7 @@ impl TestCommand {
 
     #[allow(clippy::disallowed_methods)] // the one place a test's child process is made (C123 forbids it elsewhere)
     fn build(program: &OsStr, private: PrivateDir) -> TestCommand {
-        let ambient = std::env::var_os("PATH");
-        // `cargo`, `rustc` and `rustup` start through the command's own links (`cargo`: the cargo that runs this test), never
-        // rustup's proxy in `$CARGO_HOME/bin`, which puts all of that folder in front of its child's PATH (review of 0916c8060).
-        let bin = bin_dir(private.path());
-        let linked = (Path::new(program).components().count() == 1
-            && TOOLCHAIN_STARTED.contains(&program.to_string_lossy().as_ref()))
-        .then(|| {
-            link_toolchain(&bin, ambient.as_deref())
-                .then(|| linked_program(&bin, program))
-                .flatten()
-        })
-        .flatten();
-        let resolved = linked.map_or_else(
-            || resolve(program, ambient.as_deref()),
-            PathBuf::into_os_string,
-        );
+        let resolved = resolve(program, std::env::var_os("PATH").as_deref());
         let mut cmd = Command::new(resolved);
         #[cfg(windows)]
         {
@@ -252,7 +235,7 @@ impl TestCommand {
                 cmd.env(k, real);
             }
         }
-        cmd.env("PATH", curated_path(&[], &bin_dir(&root)));
+        cmd.env("PATH", curated_path(&[]));
         let base = cmd
             .get_envs()
             .filter_map(|(k, v)| v.map(|v| (k.to_os_string(), v.to_os_string())))
@@ -528,258 +511,43 @@ fn real_home() -> Option<PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from)
 }
 
-/// The toolchain's programs a child may start by name. They are linked into a private folder of the command (symbolic links on
-/// Unix, where rustup's proxies dispatch on the name they were started as; hard links, else copies, on Windows), and that folder
-/// joins the curated `PATH`, never the folder they came from: `cargo install` puts other tools beside them in `$CARGO_HOME/bin`
-/// (`heavy`; review of 7edb8cad6, P1-1, which reopened ADR 0100's first incident).
-const TOOLCHAIN: &[&str] = &[
-    "cargo",
-    "rustc",
-    "rustup",
-    "cargo-clippy",
-    "cargo-fmt",
-    "rustfmt",
-    "clippy-driver",
-    "rustdoc",
-];
-
-/// The other programs whose folder, as the test process finds it, joins the curated `PATH`. On Windows Git for Windows' `usr/bin`
-/// and `bin` join too, found from `git --exec-path` ([`git_root`]); the POSIX tools are in those or in the system folders.
-pub(crate) const NAMED_TOOLS: &[&str] = &["node", "npm", "npx", "git"];
-
-/// What decided a [`TestCommand`]'s `PATH` (ER-27): put it in a failure message, so a test that finds a tool missing says which
-/// folders the child had, what the machine's `PATH` was and where the tools were found.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PathReport {
-    /// The child's `PATH`, folder by folder, as the command holds it now.
-    pub child: Vec<PathBuf>,
-    /// The test process's own `PATH`.
-    pub ambient: Vec<PathBuf>,
-    /// Where `git`, `sh`, `bash`, `node`, `cargo`, `rustc` and `rustup` are on the test process's `PATH` (`None`: not found).
-    pub found: Vec<(&'static str, Option<PathBuf>)>,
-    /// Git for Windows' install folder, when one was found (always `None` elsewhere).
-    pub git_root: Option<PathBuf>,
-    /// The toolchain links in the command's private folder.
-    pub toolchain: Vec<PathBuf>,
-}
-
-impl std::fmt::Display for PathReport {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let list = |v: &[PathBuf]| {
-            v.iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join(" ; ")
-        };
-        writeln!(f, "child PATH:   {}", list(&self.child))?;
-        writeln!(f, "machine PATH: {}", list(&self.ambient))?;
-        for (name, at) in &self.found {
-            writeln!(
-                f,
-                "{name}: {}",
-                at.as_ref()
-                    .map_or_else(|| "not found".to_string(), |p| p.display().to_string())
-            )?;
-        }
-        writeln!(
-            f,
-            "Git for Windows: {}",
-            self.git_root
-                .as_ref()
-                .map_or_else(|| "none".to_string(), |p| p.display().to_string())
-        )?;
-        write!(f, "toolchain links: {}", list(&self.toolchain))
-    }
-}
-
-impl TestCommand {
-    /// What decided this command's `PATH` (see [`PathReport`]).
-    #[must_use]
-    pub fn path_report(&self) -> PathReport {
-        let ambient = std::env::var_os("PATH");
-        let child = self
-            .cmd
-            .get_envs()
-            .find(|(k, _)| *k == "PATH")
-            .and_then(|(_, v)| v)
-            .map(|v| std::env::split_paths(v).collect())
-            .unwrap_or_default();
-        let found_at = |name: &str| {
-            Some(PathBuf::from(resolve(OsStr::new(name), ambient.as_deref())))
-                .filter(|p| p.is_absolute())
-        };
-        let git = found_at("git");
-        #[cfg(windows)]
-        let git_root = git.as_deref().and_then(git_root);
-        #[cfg(not(windows))]
-        let git_root = None;
-        let toolchain = std::fs::read_dir(bin_dir(self.private.path()))
-            .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).collect())
-            .unwrap_or_default();
-        PathReport {
-            child,
-            ambient: ambient
-                .as_deref()
-                .map(|v| std::env::split_paths(v).collect())
-                .unwrap_or_default(),
-            found: ["git", "sh", "bash", "node", "cargo", "rustc", "rustup"]
-                .into_iter()
-                .map(|n| (n, if n == "git" { git.clone() } else { found_at(n) }))
-                .collect(),
-            git_root,
-            toolchain,
-        }
-    }
-}
-
-/// The bare program names a [`TestCommand`] starts through its own link, never through the machine's `PATH`.
-const TOOLCHAIN_STARTED: &[&str] = &["cargo", "rustc", "rustup"];
-
-/// The link to `program` in `bin` (with `.exe` on Windows), when there is one.
-fn linked_program(bin: &Path, program: &OsStr) -> Option<PathBuf> {
-    let mut name = program.to_os_string();
-    if cfg!(windows) {
-        name.push(".exe");
-    }
-    Some(bin.join(name)).filter(|p| p.exists())
-}
-
-/// The command's private folder of toolchain links.
-fn bin_dir(private: &Path) -> PathBuf {
-    private.join("bin")
-}
-
-/// Links the [`TOOLCHAIN`] programs found on `ambient` (`cargo`: the one that runs this test, `CARGO`, when set) into `bin`;
-/// whether `bin` holds any. A link that is already there (a `new_in` folder shared by several commands) is kept.
-fn link_toolchain(bin: &Path, ambient: Option<&OsStr>) -> bool {
-    for name in TOOLCHAIN {
-        let source = match std::env::var_os("CARGO") {
-            Some(c) if *name == "cargo" => PathBuf::from(c),
-            _ => PathBuf::from(resolve(OsStr::new(name), ambient)),
-        };
-        let (true, Some(file)) = (source.is_absolute() && source.is_file(), source.file_name())
-        else {
-            continue;
-        };
-        let link = bin.join(file);
-        if std::fs::create_dir_all(bin).is_err() || link.exists() {
-            continue;
-        }
-        #[cfg(unix)]
-        let _ = std::os::unix::fs::symlink(&source, &link);
-        #[cfg(windows)]
-        if std::fs::hard_link(&source, &link).is_err() {
-            // Another volume: a copy (rustup's proxies are one program that reads the name it was started as).
-            let _ = std::fs::copy(&source, &link);
-        }
-    }
-    std::fs::read_dir(bin).is_ok_and(|mut d| d.next().is_some())
-}
-
-/// Git for Windows' install folder from the `git` found on the PATH: from `git --exec-path` (`<root>/mingw64/libexec/git-core`,
-/// also through a shim such as scoop's), asked once per `git`, else from the layout of the folders around it. `None` when the
-/// folder is not Git's (it has no `usr/bin`).
-#[cfg(windows)]
-fn git_root(git: &Path) -> Option<PathBuf> {
-    use std::collections::HashMap;
-    use std::sync::{Mutex, OnceLock};
-    static SEEN: OnceLock<Mutex<HashMap<PathBuf, Option<PathBuf>>>> = OnceLock::new();
-    let seen = SEEN.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(known) = seen
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get(git)
-    {
-        return known.clone();
-    }
-    #[allow(clippy::disallowed_methods)]
-    // a read-only question to git, awaited here; nothing is ended by pid
-    let exec = Command::new(git)
-        .arg("--exec-path")
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()));
-    let root = git_root_from(exec.as_deref(), git);
-    seen.lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(git.to_path_buf(), root.clone());
-    root
-}
-
-/// The pure part of [`git_root`]: three folders above git's exec path, else the nearest folder above `git` (at most three up)
-/// that holds `cmd/git.exe` or `bin/git.exe`; only a folder with a `usr/bin` is Git's.
-#[cfg_attr(not(windows), allow(dead_code))]
-fn git_root_from(exec_path: Option<&Path>, git: &Path) -> Option<PathBuf> {
-    let is_git = |r: &Path| r.join("usr").join("bin").is_dir();
-    if let Some(root) = exec_path
-        .and_then(|e| e.ancestors().nth(3))
-        .filter(|r| is_git(r))
-    {
-        return Some(root.to_path_buf());
-    }
-    git.ancestors()
-        .skip(1)
-        .take(3)
-        .find(|r| {
-            is_git(r)
-                && (r.join("cmd").join("git.exe").is_file()
-                    || r.join("bin").join("git.exe").is_file())
-        })
-        .map(Path::to_path_buf)
-}
-
-/// A folder as `PATH` compares it: Windows folders ignore case and separator spelling (`System32` and `system32` are one).
-fn path_key(d: &Path) -> String {
-    let s = d.to_string_lossy();
-    if cfg!(windows) {
-        s.replace('/', "\\").trim_end_matches('\\').to_lowercase()
-    } else {
-        s.into_owned()
-    }
-}
-
-/// The curated `PATH`: `first`, then the private folder of toolchain links (`bin`), the folders of the [`NAMED_TOOLS`] found on
-/// this process's `PATH` (and, on Windows, Git for Windows' `usr/bin` and `bin`), then the system folders.
-fn curated_path(first: &[PathBuf], bin: &Path) -> OsString {
+/// The curated `PATH`: `first`, then the folder of the cargo that runs this test (`CARGO`, set by cargo for tests, so also the
+/// folder of `rustc`), of `node` and of `git` found on this process's `PATH`, then the system folders.
+fn curated_path(first: &[PathBuf]) -> OsString {
     let mut dirs: Vec<PathBuf> = first.to_vec();
-    let ambient = std::env::var_os("PATH");
-    if link_toolchain(bin, ambient.as_deref()) {
-        dirs.push(bin.to_path_buf());
+    if let Some(cargo) = std::env::var_os("CARGO").map(PathBuf::from)
+        && let Some(d) = cargo.parent()
+    {
+        dirs.push(d.to_path_buf());
     }
-    let system = system_dirs();
-    let system_keys: Vec<String> = system.iter().map(|d| path_key(d)).collect();
-    for tool in NAMED_TOOLS {
-        let found = PathBuf::from(resolve(OsStr::new(tool), ambient.as_deref()));
-        // `resolve` returns the bare name when the tool is not on the PATH: no folder then.
-        if !found.is_absolute() {
-            continue;
-        }
-        #[cfg(windows)]
-        if *tool == "git"
-            && let Some(root) = git_root(&found)
-        {
-            dirs.extend(
-                [root.join("usr").join("bin"), root.join("bin")]
-                    .into_iter()
-                    .filter(|d| d.is_dir()),
-            );
-        }
-        if let Some(d) = found
+    let ambient = std::env::var_os("PATH");
+    for tool in ["node", "git"] {
+        let found = resolve(OsStr::new(tool), ambient.as_deref());
+        if let Some(d) = Path::new(&found)
             .parent()
-            .filter(|d| !d.as_os_str().is_empty() && !system_keys.contains(&path_key(d)))
+            .filter(|d| !d.as_os_str().is_empty())
         {
             dirs.push(d.to_path_buf());
         }
     }
-    dirs.extend(system);
+    #[cfg(windows)]
+    if let Some(git_dir) = Path::new(&resolve(OsStr::new("git"), ambient.as_deref()))
+        .parent()
+        .and_then(Path::parent)
+    {
+        // Git for Windows keeps `sh`, `bash`, `ps`, `sed` and the other tools its scripts need in `usr/bin`, not beside `git.exe`.
+        for sub in ["usr/bin", "bin"] {
+            let d = git_dir.join(sub);
+            if d.is_dir() {
+                dirs.push(d);
+            }
+        }
+    }
+    dirs.extend(system_dirs());
     let mut seen = Vec::new();
     dirs.retain(|d| {
-        let key = path_key(d);
-        let new = !seen.contains(&key);
-        seen.push(key);
+        let new = !seen.contains(d);
+        seen.push(d.clone());
         new
     });
     join_paths(&dirs)
@@ -834,49 +602,4 @@ fn resolve(program: &OsStr, path: Option<&OsStr>) -> OsString {
         }
     }
     program.to_os_string()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn git_s_root_comes_from_its_exec_path_or_its_layout_and_only_a_folder_with_usr_bin_is_git_s() {
-        let d = tempfile::tempdir().unwrap();
-        let root = d.path().join("Git");
-        for sub in ["mingw64/libexec/git-core", "mingw64/bin", "cmd", "usr/bin"] {
-            std::fs::create_dir_all(root.join(sub)).unwrap();
-        }
-        std::fs::write(root.join("cmd/git.exe"), "").unwrap();
-        let git = root.join("mingw64/bin/git.exe");
-        let exec = root.join("mingw64/libexec/git-core");
-        assert_eq!(git_root_from(Some(&exec), &git), Some(root.clone()));
-        assert_eq!(
-            git_root_from(None, &git),
-            Some(root.clone()),
-            "the layout, when git cannot answer"
-        );
-        let other = d.path().join("tools/bin/git.exe");
-        std::fs::create_dir_all(d.path().join("tools/bin")).unwrap();
-        assert_eq!(
-            git_root_from(None, &other),
-            None,
-            "a folder that is not Git's never counts"
-        );
-    }
-
-    #[test]
-    fn windows_folders_compare_without_case_or_separator_spelling() {
-        if cfg!(windows) {
-            assert_eq!(
-                path_key(Path::new(r"C:\WINDOWS\system32")),
-                path_key(Path::new("C:/Windows/System32/"))
-            );
-        } else {
-            assert_ne!(
-                path_key(Path::new("/usr/Bin")),
-                path_key(Path::new("/usr/bin"))
-            );
-        }
-    }
 }
