@@ -94,27 +94,18 @@ specs=$(printf '%s\n' "$@")
 step='set +e
 d=$(cygpath -u "$CI_LIKE_DIR")
 echo "other-os-control: os=windows tree=$(git rev-parse HEAD^{tree}) autocrlf=$(git config core.autocrlf) shell=bash temp=$TEMP ci-env=${CI:-unset} target=$TARGET vm-arch=aarch64 runner-arch=x86_64"
-t=$(date +%s)
 mkdir -p "$d/rust" && tar -xf "$d"/rust-prefix-*.tar.gz -C "$d/rust" || { echo "other-os-fatal: cannot unpack the toolchain"; echo "other-os-result: failed=-1"; exit 0; }
-mkdir -p "$d/node" && tar -xf "$d"/node-*-win-arm64.zip -C "$d/node" --strip-components 1 || { echo "other-os-fatal: cannot unpack node"; echo "other-os-result: failed=-1"; exit 0; }
-echo "other-os-timing: toolchain unpack $(( $(date +%s) - t )) s"
+mkdir -p "$d/node" && /c/Windows/System32/tar.exe -xf "$(cygpath -w "$(ls "$d"/node-*-win-arm64.zip)")" -C "$(cygpath -w "$d/node")" --strip-components 1 || { echo "other-os-fatal: cannot unpack node"; echo "other-os-result: failed=-1"; exit 0; }
 export CARGO_BUILD_TARGET="$TARGET" PATH="$d/rust/bin:$d/node:$d:$PATH" CARGO_HOME="$d/cargo-home" CARGO_TARGET_DIR="$d/target" RUSTUP_AUTO_INSTALL=0 PADDOCK_JOB_TEMP="$TEMP"
 echo "other-os-guest: $(rustc --version) / $(cargo --version) / $(cargo-nextest.exe nextest --version | head -1) / node $(node --version) / link=$(command -v link.exe || echo none)"
 fail=0
 while IFS= read -r spec; do
   read -r kind ws pkg filter <<<"$spec"
   echo "::group::nextest $ws $pkg"
-  t=$(date +%s)
   # The other tools whose cargo metadata the paddock-dev tests read offline (ci.yml: "Fetch the other tools dependencies").
   if [ "$pkg" = paddock-dev ]; then for tl in heavy wiki; do (cd "tools/$tl" && cargo fetch --locked >/dev/null 2>&1) || echo "other-os-warn: cargo fetch --locked failed in tools/$tl"; done; fi
   (cd "$ws" && cargo nextest run -p "$pkg" --profile ci --locked --no-fail-fast ${filter:+-E "$filter"} 2>&1)
   c=$?
-  echo "other-os-timing: $pkg $(( $(date +%s) - t )) s exit $c"
-  if [ "$WARM" = 1 ] && { [ "$c" = 0 ] || [ "$c" = 100 ]; }; then
-    # Warm: the same build folder after a touch of the package (measurement only: PADDOCK_MEMBER_GATE_MEASURE_WARM=1).
-    [ -f "$ws/src/lib.rs" ] && touch "$ws/src/lib.rs"
-    t=$(date +%s); (cd "$ws" && cargo nextest run -p "$pkg" --profile ci --locked --no-fail-fast ${filter:+-E "$filter"} 2>&1 | grep -E "Summary|error") ; echo "other-os-timing: $pkg warm $(( $(date +%s) - t )) s"
-  fi
   echo "::endgroup::"
   case "$c" in 0) ;; 100) fail=1 ;; *) echo "other-os-fatal: $pkg exited $c (a build or setup failure, not failed tests)"; fail=-1 ;; esac
 done <<<"$SPECS"
@@ -123,9 +114,10 @@ step="SPECS='$specs'; TARGET='$gate_target'; WARM='${PADDOCK_MEMBER_GATE_MEASURE
 $step"
 log="$scratch/guest.log"
 t1=$SECONDS
-"$here/vm-win.sh" run --ci-like --ref "$commit" --tools-provided --with "$prefix_tgz" --with "$nx_exe" --with "$node_zip" -- "$step" 2>&1 | tee "$log"
+timeout "${PADDOCK_MEMBER_GATE_WIN_MAX:-2700}" "$here/vm-win.sh" run --ci-like --ref "$commit" --tools-provided --with "$prefix_tgz" --with "$nx_exe" --with "$node_zip" -- "$step" 2>&1 | tee "$log"
 rc=${PIPESTATUS[0]}
 echo "member-gate-windows: guest run took $((SECONDS - t1)) s" >&2
+[ "$rc" != 124 ] || { echo "::error::member-gate-windows: the guest run was ended after ${PADDOCK_MEMBER_GATE_WIN_MAX:-2700} s (a hang or a starved guest). Next step: read the output above; set PADDOCK_MEMBER_GATE_WIN_MAX to allow longer" >&2; exit 75; }
 [ "$rc" = 0 ] || { echo "::error::member-gate-windows: the guest run exited $rc, not a verdict" >&2; exit 75; }
 case "$(tr -d '\r' <"$log" | sed -n 's/^other-os-result: failed=\(-*[0-9]*\)$/\1/p' | tail -1)" in
   0) exit 0 ;;
