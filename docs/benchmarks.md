@@ -1697,3 +1697,30 @@ takes, so its hang guard `SYSROOT_LIMIT` rests on a measurement (ER-12).
 - **Bound chosen:** `SYSROOT_LIMIT` is 30 s, a hang guard about 500 times the measured time: it ends only a proxy that hangs
   (a toolchain install that `RUSTUP_AUTO_INSTALL=0` should prevent), never a slow answer on a loaded machine. Not measured:
   Windows, a cold disk cache.
+
+## A child's `git` on Windows: Git's launcher against the real program (2026-11-16, fix/testkit-ambient-hardening, ADR 0100)
+
+Question: ci.yml run 8161 (job 39640, windows-latest) ran the merge_check integration tests about 5.7 times slower than run 8138
+(median 37.6 s against 5.8 s, 9 timeouts at 60 s) while the other tests were back to normal; merge_check's program under test
+starts `git` many times through its own `PATH`, which `TestCommand` curates. Which `git` does a child find, and what does it cost?
+
+- **Machine:** the Windows 11 Arm test VM (x64 program under emulation, Git's native `clangarm64` git), through
+  `scripts/vm-win.sh run --ci-like` (the runner's temp folder, Git's `bin` first on PATH) under the test machines lock.
+- **Command:** `crates/paddock-testkit/examples/measure_test_command.rs --git-calls 100` (which git the child's curated PATH and
+  the test process's PATH find, 100 runs of `--version` each) and `--git-ab 100` (Git's `bin\git.exe` launcher and the real git
+  called in turn, A B A B, so a busy moment costs both alike), alone and with 8 copies at once.
+- **Numbers:**
+
+  | Measure | Before (991365671) | After (this change) |
+  |---|---|---|
+  | `git` on a child's curated PATH | `C:\Program Files\Git\bin\git.exe` (the launcher) | `C:\Program Files\Git\clangarm64\bin\git.exe` |
+  | launcher against real, in turn, alone (ms per call) | 62.3 against 44.3 | |
+  | the same, 8 at once (ms per call, 8 runs) | 163.2 to 168.7 against 98.8 to 102.6 | |
+
+- **Cause:** the curated PATH put Git for Windows' `usr/bin` and `bin` before git's own folder, so a child's `git` was
+  `bin\git.exe`, a launcher that starts the real git: one more process per call, 1.4 times the cost alone and 1.65 times with 8
+  at once. Run 8138 predates that order (its PATH had git's own folder and no `bin`). Fix: git's own folder first, then
+  `usr/bin`; `bin` (launchers only) is left out.
+- **Not measured:** the merge_check suite itself on Windows before and after (the test VM's native toolchain for paddock-dev is
+  the member-gate work, not yet on a pushed branch); whether the launcher accounts for all of the 5.7 times. The next Windows
+  run of the train confirms it.

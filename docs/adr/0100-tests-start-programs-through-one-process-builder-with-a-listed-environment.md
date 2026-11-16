@@ -60,9 +60,11 @@ Its own `env_clear` goes **back to the listed set**. It starts from an **empty e
   times slower on Windows, docs/benchmarks.md), never the folder they came from, because `cargo install`
   puts other tools beside them in `$CARGO_HOME/bin` (`heavy`: the review of `7edb8cad6` measured `command -v heavy` finding it,
   which reopened incident 1); then the folders of `node`, `npm`, `npx` and `git` as the test process finds them; on Windows Git
-  for Windows' `usr/bin` and `bin`, from `git --exec-path` (asked once per `git`; the layout around `git.exe` when it cannot
-  answer), because Git's bash puts `mingw64/bin` first and the shell tools live in `usr/bin` (ci.yml run 8138: 11 Windows tests
-  found no `grep`, `tr` or `touch`); then the system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, or `System32` and the
+  for Windows' `usr/bin`, after git's own folder, from `git --exec-path` (asked once per `git`; the layout around `git.exe`
+  when it cannot answer), because Git's bash puts `mingw64/bin` first and the shell tools live in `usr/bin` (ci.yml run 8138: 11
+  Windows tests found no `grep`, `tr` or `touch`); never Git's `bin` or `cmd`, which hold only launchers that start the real
+  `git` again (ci.yml run 8161: with `bin` first, a child's `git` was the launcher and merge_check ran about 5.7 times slower;
+  the test VM measured 62 against 44 ms per call alone and 167 against 101 ms with 8 at once, called in turn); then the system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, or `System32` and the
   Windows folder; Windows folders compare without case). `TestCommand::path_report()` says what decided it (the child's and
   the machine's `PATH`, where `git`, `sh`, `bash`, `node`, `cargo`, `rustc` and `rustup` were found, and the link folder and
   Git's root this command was built with: a query that starts and changes nothing) for a failure message. **Remaining exposure, accepted:** the folders of `node` and `git` are added whole, so on a Homebrew Mac
