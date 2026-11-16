@@ -125,7 +125,38 @@ pub fn mask(text: &str) -> String {
     blank_ranges(text, &blank)
 }
 
-/// The length in chars of a `#[cfg(test)]` attribute (spaces allowed between its tokens) that starts at `at`, or None.
+/// Whether a `cfg(...)` predicate (the text inside the parentheses) marks test-only code: `test`, `all(..)` with a test-only part
+/// (`all(unix, test)`), or `any(..)` with one (`any(test, feature = "testing")`: test support by convention). `not(..)` never does.
+/// The twin of `impliesTest` in conformance/src/util/rust-test-items.mjs; both run tools/paddock-dev/tests/fixtures/test-items-corpus.tsv.
+pub fn implies_test(predicate: &str) -> bool {
+    let p = predicate.trim();
+    let Some(open) = p.find('(') else { return p == "test" };
+    let (name, rest) = (p[..open].trim(), &p[open..]);
+    if !matches!(name, "all" | "any" | "not") || !rest.ends_with(')') {
+        return p == "test";
+    }
+    if name == "not" {
+        return false;
+    }
+    let inner = &rest[1..rest.len() - 1];
+    let (mut depth, mut from) = (0i32, 0usize);
+    let mut parts = Vec::new();
+    for (i, c) in inner.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(&inner[from..i]);
+                from = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&inner[from..]);
+    parts.into_iter().any(implies_test)
+}
+
+/// The length in chars of a test-only `#[cfg(..)]` attribute (spaces allowed between its tokens) that starts at `at`, or None.
 fn cfg_test_attr(chars: &[char], at: usize) -> Option<usize> {
     let mut i = at;
     let skip = |i: &mut usize| {
@@ -140,19 +171,34 @@ fn cfg_test_attr(chars: &[char], at: usize) -> Option<usize> {
         }
         ok
     };
-    if !word(&mut i, "#") {
-        return None;
-    }
-    for w in ["[", "cfg", "(", "test", ")", "]"] {
+    for w in ["#", "[", "cfg", "("] {
         skip(&mut i);
         if !word(&mut i, w) {
             return None;
         }
     }
+    let inner_start = i;
+    let mut depth = 1;
+    while i < chars.len() && depth > 0 {
+        match chars[i] {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ => {}
+        }
+        i += 1;
+    }
+    if depth != 0 {
+        return None;
+    }
+    let inner: String = chars[inner_start..i - 1].iter().collect();
+    skip(&mut i);
+    if !word(&mut i, "]") || !implies_test(&inner) {
+        return None;
+    }
     Some(i - at)
 }
 
-/// `masked` (a [`mask`] result) with every `#[cfg(test)]` item blanked, newlines and offsets kept: a `mod name { .. }` or a fn with
+/// `masked` (a [`mask`] result) with every test-only item (`#[cfg(test)]`, `#[cfg(all(unix, test))]`, see [`implies_test`]) blanked, newlines and offsets kept: a `mod name { .. }` or a fn with
 /// a body (brace-matched), or a single item ending in `;` (a `use`, a `const`). Code after a test item stays visible, so a
 /// `#[cfg(test)] use ..;` or a test module in the middle of a file hides nothing below it. The twin of
 /// `conformance/src/util/rust-test-items.mjs`: an audit of production code reads this, never "the text before the first
@@ -285,5 +331,66 @@ mod tests {
         let lines = production_lines(text);
         assert_eq!(lines[4], "", "a line of the test module is emptied");
         assert_eq!(lines[7], "fn c() {}");
+    }
+
+    /// The twin of `conformance/test/rust-test-items.test.mjs`: both read the same corpus, so neither can drift from the other.
+    #[test]
+    fn without_test_items_agrees_with_the_shared_corpus() {
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/test-items-corpus.tsv")).unwrap();
+        let mut seen = 0;
+        let mut wrong = Vec::new();
+        for row in text.lines().filter(|l| !l.is_empty() && !l.starts_with('#')) {
+            let cols: Vec<&str> = row.split('\t').collect();
+            let (name, source) = (cols[0], cols[1].replace("\\n", "\n"));
+            let words = |i: usize| {
+                cols.get(i)
+                    .map_or(Vec::new(), |w| w.split(',').filter(|w| !w.is_empty()).collect::<Vec<_>>())
+            };
+            let masked = mask(&source);
+            let out = without_test_items(&masked);
+            if out.chars().count() != masked.chars().count() || out.matches('\n').count() != masked.matches('\n').count() {
+                wrong.push(format!("{name}: offsets or newlines moved"));
+            }
+            wrong.extend(
+                words(2)
+                    .into_iter()
+                    .filter(|w| !out.contains(w))
+                    .map(|w| format!("{name}: {w} should stay visible")),
+            );
+            wrong.extend(
+                words(3)
+                    .into_iter()
+                    .filter(|w| out.contains(w))
+                    .map(|w| format!("{name}: {w} should be hidden")),
+            );
+            seen += 1;
+        }
+        assert!(seen >= 10, "the corpus is read");
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    #[test]
+    fn a_cfg_predicate_is_test_only_when_test_is_one_of_its_positive_parts() {
+        for p in [
+            "test",
+            " test ",
+            "all(unix, test)",
+            "all(test, target_os = \"linux\")",
+            "any(test, feature = \"testing\")",
+            "all(unix, any(test, windows))",
+        ] {
+            assert!(implies_test(p), "{p}");
+        }
+        for p in [
+            "unix",
+            "not(test)",
+            "all(unix, not(test))",
+            "feature = \"test\"",
+            "all(unix, windows)",
+            "any(unix, windows)",
+            "testing",
+        ] {
+            assert!(!implies_test(p), "{p}");
+        }
     }
 }
