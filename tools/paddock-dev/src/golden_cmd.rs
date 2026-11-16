@@ -6,7 +6,7 @@
 //! happen, so one report shows which side failed. The filter is parsed once: letters, digits and `_ : . -` only, so it is safe to
 //! put into the container's `sh -c`.
 
-use crate::ci_tool::{Output, ToolCall, error_line};
+use crate::ci_tool::{Output, ToolCall, error_line, quote};
 use crate::wait::parse_duration;
 use clap::{Args, Subcommand};
 use paddock_cli::{CliError, Report};
@@ -19,7 +19,7 @@ use std::time::Duration;
 const DEFAULT_MAX: &str = "40m";
 
 /// The variables the runs are given besides the base environment: the golden mode, the build caps and what `linux-container.sh` reads.
-const PASSED_ENV: [&str; 10] = [
+const PASSED_ENV: [&str; 12] = [
     "PADDOCK_UPDATE_GOLDEN",
     "PADDOCK_LINUX_CPUS",
     "PADDOCK_LINUX_JOBS",
@@ -27,6 +27,8 @@ const PASSED_ENV: [&str; 10] = [
     "PADDOCK_LINUX_USER",
     "PADDOCK_LINUX_CI_REGISTRY",
     "PADDOCK_LINUX_HOST_ARCH",
+    "PADDOCK_LINUX_BASE_IMAGE",
+    "PADDOCK_LINUX_RUN_LABEL",
     "CARGO_BUILD_JOBS",
     "CARGO_TARGET_DIR",
     "DOCKER",
@@ -96,11 +98,6 @@ pub fn parse_package(package: &str) -> Result<&str, String> {
     }
 }
 
-/// `text` as one `sh` word: in single quotes, a `'` inside written as `'\''`.
-pub fn sh_quote(text: &str) -> String {
-    format!("'{}'", text.replace('\'', "'\\''"))
-}
-
 /// The repository root above `dir`: the folder with `ci-image/VERSION` (what `linux-container.sh --ci-image` reads).
 pub fn repo_root(dir: &Path) -> Option<PathBuf> {
     dir.ancestors()
@@ -130,7 +127,7 @@ pub fn plan(root: &Path, manifest_dir: &Path, package: Option<&str>, filter: &st
     };
     let in_container = format!(
         "cd {} && {}",
-        sh_quote(&rel),
+        quote(&rel),
         ["cargo".to_string()]
             .into_iter()
             .chain(nextest(filter))
@@ -204,7 +201,7 @@ pub fn command(c: GoldenCommand) -> Result<Report, CliError> {
             "golden confirm: running the filtered tests on {} ({} {})",
             s.name,
             s.program,
-            s.args.join(" ")
+            s.args.iter().map(|a| quote(a)).collect::<Vec<_>>().join(" ")
         );
         let ran = ToolCall::new(&s.program)
             .args(s.args.iter().cloned())
@@ -220,13 +217,17 @@ pub fn command(c: GoldenCommand) -> Result<Report, CliError> {
                 (false, false)
             }
         };
-        if no_tests {
-            eprintln!(
-                "golden confirm: no test matched the filter `{}` on {} (nextest exits 4)",
-                a.filter, s.name
-            );
-        }
         eprintln!("golden confirm: {}: {}", s.name, if ok { "passed" } else { "FAILED" });
+        if no_tests {
+            // The same filter selects nothing in the image either: stop, and say what to check.
+            return Err(CliError::failure(error_line(
+                &format!(
+                    "dev golden confirm: no test matched `{}` on {} (nextest exits 4).",
+                    a.filter, s.name
+                ),
+                "check the name, or pass -p <package>.",
+            )));
+        }
         results.push((s.name, ok));
     }
     verdict(&results).map_err(|why| {
@@ -269,10 +270,10 @@ mod tests {
             line.starts_with("tools/linux-container.sh --id paddock --ci-image --root /r -- sh -c"),
             "{line}"
         );
-        assert!(line.ends_with("cd 'tools/paddock-dev' && cargo nextest run check::c131"), "{line}");
+        assert!(line.ends_with("cd tools/paddock-dev && cargo nextest run check::c131"), "{line}");
         assert_eq!(
             plan(Path::new("/r"), Path::new("/r"), None, "t").unwrap()[1].args.last().unwrap(),
-            "cd '.' && cargo nextest run t"
+            "cd . && cargo nextest run t"
         );
         assert!(
             plan(Path::new("/r"), Path::new("/elsewhere"), None, "t")
@@ -295,7 +296,6 @@ mod tests {
             linux.args
         );
         assert!(plan(Path::new("/r"), Path::new("/r"), Some("-x"), "t").is_err());
-        assert_eq!(sh_quote("a'b"), "'a'\\''b'");
     }
 
     #[test]

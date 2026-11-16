@@ -111,8 +111,20 @@ impl fmt::Display for GoldenError {
 
 impl std::error::Error for GoldenError {}
 
+/// The name of the running test: nextest's `NEXTEST_TEST_NAME` (the bare test path), else a libtest thread's name (`main` under
+/// `--test-threads=1` is no test path). A name with a character other than letters, digits, `_` and `:` is no name.
+pub fn test_name_of<'a>(nextest: Option<&'a str>, thread: Option<&'a str>) -> Option<&'a str> {
+    let ok = |n: &&str| {
+        !n.is_empty()
+            && *n != "main"
+            && n.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ':'))
+    };
+    nextest.filter(ok).or(thread.filter(ok))
+}
+
 /// `text` as one `sh` word: in single quotes, a `'` inside written as `'\''`.
-fn sh_quote(text: &str) -> String {
+pub fn sh_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 

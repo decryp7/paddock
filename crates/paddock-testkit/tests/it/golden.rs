@@ -204,3 +204,21 @@ fn a_rewrite_prints_the_command_that_confirms_it_in_the_ci_image() {
         "{cmd}"
     );
 }
+
+#[test]
+fn the_test_name_is_nextests_whole_name_else_the_thread_s() {
+    use paddock_testkit::golden::test_name_of;
+    assert_eq!(
+        test_name_of(Some("a::b::c_1"), Some("x::y")),
+        Some("a::b::c_1")
+    );
+    assert_eq!(test_name_of(None, Some("x::y")), Some("x::y"));
+    assert_eq!(test_name_of(None, Some("main")), None);
+    assert_eq!(
+        test_name_of(Some("a b"), None),
+        None,
+        "a name with a space is no test path"
+    );
+    assert_eq!(test_name_of(Some("a b"), Some("x::y")), Some("x::y"));
+    assert_eq!(test_name_of(None, None), None);
+}
