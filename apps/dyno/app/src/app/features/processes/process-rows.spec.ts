@@ -88,7 +88,7 @@ describe('buildRows: flat', () => {
     const rows = buildRows(input({ mode: 'flat', processes }));
     expect(names(rows)).toEqual(['a', 'b', 'c']);
     expect(rows.every((r) => r.depth === 0 && !r.expandable && r.kind === 'process')).toBe(true);
-    expect(rows[2]).toMatchObject({ suspended: true, ref: { pid: 3, started: 1003 }, key: 'p3' });
+    expect(rows[2]).toMatchObject({ suspended: true, ref: { pid: 3, started: 1003 }, key: 'p3@1003' });
   });
   it('sums disk and filters by the query', () => {
     const rows = buildRows(input({ mode: 'flat', processes: [sample(1, 'x', { diskReadBps: 3, diskWriteBps: 4 })], query: 'x' }));
@@ -205,12 +205,12 @@ describe('buildRows: tree', () => {
     expect(rows.find((r) => r.name === 'orphan')).toMatchObject({ expandable: false, expanded: false });
   });
   it('expands a node on request and sorts siblings', () => {
-    const rows = buildRows(input({ mode: 'tree', processes, expanded: new Set(['p2']) }));
+    const rows = buildRows(input({ mode: 'tree', processes, expanded: new Set(['p2@1002']) }));
     expect(rows.map((r) => r.name)).toEqual(['orphan', 'init', 'shell', 'build', 'editor']);
     expect(rows.find((r) => r.name === 'build')!.depth).toBe(2);
   });
   it('an explicit collapse (-key) closes a root', () => {
-    const rows = buildRows(input({ mode: 'tree', processes, expanded: new Set(['-p1']) }));
+    const rows = buildRows(input({ mode: 'tree', processes, expanded: new Set(['-p1@1001']) }));
     expect(rows.map((r) => r.name)).toEqual(['orphan', 'init']);
     expect(rows.find((r) => r.name === 'init')!.expanded).toBe(false);
   });
@@ -228,7 +228,7 @@ describe('buildRows: tree', () => {
     const selfRoot = [sample(1, 'a', { parent: null }), sample(2, 'b', { parent: 1 }), sample(3, 'c', { parent: 2 })];
     const withCycle = selfRoot.map((p) => (p.pid === 1 ? { ...p, parent: 3 } : p));
     expect(() => buildRows(input({ mode: 'tree', processes: withCycle, query: 'a' }))).not.toThrow();
-    const rows = buildRows(input({ mode: 'tree', processes: selfRoot, expanded: new Set(['p2', 'p3']) }));
+    const rows = buildRows(input({ mode: 'tree', processes: selfRoot, expanded: new Set(['p2@1002', 'p3@1003']) }));
     expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length);
   });
   it('a process that is its own parent is not a root and does not hang', () => {
@@ -246,7 +246,7 @@ describe('expand all and collapse all', () => {
 
   it('opens the groups with more than one process in the Apps view, and every parent in the Tree view', () => {
     expect(expandAllKeys('groups', procs, groups)).toEqual(['ga']);
-    expect(expandAllKeys('tree', procs, groups).sort()).toEqual(['p1', 'p2']);
+    expect(expandAllKeys('tree', procs, groups).sort()).toEqual(['p1@1001', 'p2@1002']);
     expect(expandAllKeys('flat', procs, groups)).toEqual([]);
     const open = buildRows(input({ mode: 'tree', processes: procs, groups, expanded: new Set(expandAllKeys('tree', procs, groups)) }));
     expect(names(open)).toContain('tool');
@@ -256,7 +256,7 @@ describe('expand all and collapse all', () => {
     expect(collapseAllKeys('groups', procs)).toEqual([]);
     expect(collapseAllKeys('flat', procs)).toEqual([]);
     const keys = collapseAllKeys('tree', procs);
-    expect(keys).toEqual(['-p1']);
+    expect(keys).toEqual(['-p1@1001']);
     expect(names(buildRows(input({ mode: 'tree', processes: procs, groups, expanded: new Set(keys) })))).toEqual(['init', 'solo']);
   });
 
@@ -265,5 +265,25 @@ describe('expand all and collapse all', () => {
     const keys = expandAllKeys('tree', many, []);
     const rows = buildRows(input({ mode: 'tree', processes: many, expanded: new Set(keys) }));
     expect(rows).toHaveLength(5000);
+  });
+});
+
+describe('row keys', () => {
+  it('a pid reused by a new process (another start time) is a new row, so no row state carries over to it', () => {
+    const reused: ProcessSample = { ...sample(7, 'new'), started: { value: 9999 } };
+    const before = buildRows(input({ mode: 'flat', processes: [sample(7, 'old')] }));
+    const after = buildRows(input({ mode: 'flat', processes: [reused] }));
+    expect(before[0]!.key).not.toBe(after[0]!.key);
+  });
+  it('the same process in a later sample keeps its key; without a start time the pid alone is the key', () => {
+    const key = (p: ProcessSample) => buildRows(input({ mode: 'flat', processes: [p] }))[0]!.key;
+    expect(key(sample(7, 'a', { cpu: 1 }))).toBe(key(sample(7, 'a', { cpu: 50 })));
+    expect(key({ ...sample(7, 'a'), started: { unavailable: { reason: 'notPermitted' } } })).toBe('p7');
+  });
+  it('an expanded parent whose pid was reused is not expanded', () => {
+    const procs = [sample(1, 'init'), sample(2, 'shell', { parent: 1 }), sample(3, 'tool', { parent: 2 })];
+    const open = new Set(expandAllKeys('tree', procs, []));
+    const reusedProcs = procs.map((p) => (p.pid === 2 ? { ...p, started: { value: 9999 } } : p));
+    expect(names(buildRows(input({ mode: 'tree', processes: reusedProcs, expanded: open })))).toEqual(['init', 'shell']);
   });
 });
