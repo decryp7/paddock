@@ -28,6 +28,9 @@ mod ipc_endpoints;
 mod isolation;
 mod locks;
 mod merge_check;
+// The run-8161 diagnostic of the branch diag/testkit-git-cost (never merged): it always fails to print its numbers.
+#[cfg(windows)]
+mod diag_windows_git_cost;
 mod pr;
 mod pre_push;
 mod release_isolation;
