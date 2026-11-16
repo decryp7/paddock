@@ -129,7 +129,7 @@ fn run(dir: &Path, program: &str, args: &[&str]) {
 /// `./dev --json locks <sub>` in `root`, with cargo and npm kept away from the user's homes.
 #[allow(clippy::disallowed_methods)] // the binary under test
 fn dev(root: &Path, home: &Path, sub: &str) -> (i32, Value, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = crate::dev_bin::command()
         .args(["--json", "locks", sub, "--root"])
         .arg(root)
         .env("CARGO_HOME", home.join("cargo"))

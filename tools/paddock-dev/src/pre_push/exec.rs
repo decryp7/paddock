@@ -621,7 +621,7 @@ pub struct RealExec {
     /// The push is a landing (`train/*`, `main`, a release tag): its heavy steps take the priority lane (`heavy --high`, ADR 0102).
     pub priority: bool,
     /// The local sccache wrapper for the gates that compile (`None`: off, or CI; [`crate::local_sccache`]).
-    pub wrapper: Option<crate::local_sccache::Ready>,
+    pub wrapper: crate::local_sccache::Lazy,
 }
 
 /// Variables every gate may see besides the base list: the toolchain, Docker, caches and Paddock's own settings.
@@ -709,7 +709,7 @@ impl RealExec {
         if crate::cargo_target::is_cargo(&gate.program) && crate::cargo_target::names_target_dir(&gate.args) {
             call = call.without("CARGO_TARGET_DIR").without("CARGO_BUILD_TARGET_DIR");
             if gate.heavy
-                && let Some(w) = &self.wrapper
+                && let Some(w) = self.wrapper.get()
             {
                 call = crate::local_sccache::apply(call, w);
             }
@@ -951,7 +951,7 @@ exit $rc
                 built_heavy: Default::default(),
                 budget_end: Instant::now() + Duration::from_secs(60),
                 priority: false,
-                wrapper: None,
+                wrapper: crate::local_sccache::Lazy::off(),
             }
         }
 
@@ -1055,7 +1055,7 @@ exit $rc
                 built_heavy: Default::default(),
                 budget_end: Instant::now() + Duration::from_secs(60),
                 priority: false,
-                wrapper: None,
+                wrapper: crate::local_sccache::Lazy::off(),
             }
         }
 
@@ -1080,7 +1080,7 @@ exit $rc
                 plain.iter().all(|(k, _)| k != "CARGO_TARGET_DIR" && k != "RUSTC_WRAPPER"),
                 "{plain:?}"
             );
-            ex.wrapper = Some(crate::local_sccache::Ready {
+            ex.wrapper = crate::local_sccache::Lazy::ready(crate::local_sccache::Ready {
                 bin: "/x/sccache".into(),
                 vars: vec![("RUSTC_WRAPPER".into(), "/x/sccache".into())],
             });
@@ -1135,7 +1135,7 @@ exit $rc
                 built_heavy: Default::default(),
                 budget_end: Instant::now() + Duration::from_secs(60),
                 priority: false,
-                wrapper: None,
+                wrapper: crate::local_sccache::Lazy::off(),
                 env: ex.env.clone(),
                 root: ex.root.clone(),
                 logs: ex.logs.clone(),

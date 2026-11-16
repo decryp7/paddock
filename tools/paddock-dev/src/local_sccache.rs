@@ -29,6 +29,14 @@ const PASS: [&str; 3] = ["SCCACHE_SERVER_PORT", "SCCACHE_LOG", "SCCACHE_ERROR_LO
 /// The cache size when the environment names none (the machine's profile sets 60G; the research note's start size is 30 GiB).
 pub const DEFAULT_SIZE: &str = "30G";
 
+/// The server's port: the caller's `SCCACHE_SERVER_PORT`, else sccache's default.
+pub fn server_port(env: &HashMap<String, String>) -> String {
+    env.get("SCCACHE_SERVER_PORT")
+        .filter(|p| !p.is_empty())
+        .cloned()
+        .unwrap_or_else(|| "4226".into())
+}
+
 /// Whether [`prepare`] may download the pinned release.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Install {
@@ -171,16 +179,18 @@ impl Backend {
         }
     }
 
-    /// Whether `--show-stats` says the running server uses this very cache (a server with another backend, bucket or folder is
-    /// somebody else's, and is left alone).
+    /// Whether `--show-stats` says the running server uses this very cache (a server with another backend, bucket, prefix or folder is
+    /// somebody else's, and is left alone). The comparison is exact: the quoted folder as sccache prints it
+    /// (`Local disk: "<dir>"`), and for S3 `s3, name: <bucket>, prefix: /<prefix>/`. A prefix of its own never matches another's, and
+    /// the folder `/a/b` never matches `/a/b2` or `/x/a/b`. (sccache's stats do not print the S3 endpoint.)
     pub fn matches_stats(&self, stats: &str) -> bool {
-        stats.lines().any(|l| {
-            l.contains("Cache location")
-                && match self {
-                    Backend::Local { dir, .. } => l.contains("Local disk") && l.contains(dir.trim_end_matches('/')),
-                    Backend::S3(s) => l.contains("S3") && l.contains(&s.bucket),
-                }
-        })
+        let want = match self {
+            Backend::Local { dir, .. } => format!("Local disk: \"{dir}\""),
+            Backend::S3(s) => format!("s3, name: {}, prefix: /{}/", s.bucket, s.prefix.trim_matches('/')),
+        };
+        stats
+            .lines()
+            .any(|l| l.strip_prefix("Cache location").is_some_and(|rest| rest.trim() == want))
     }
 }
 
@@ -300,10 +310,25 @@ pub fn read_creds(env: &HashMap<String, String>) -> Result<Creds, String> {
     })
 }
 
+/// The folder the server runs in and uses as its temporary folder: tool-owned and never deleted by a job. A server that inherits the
+/// starter's `TMPDIR` (a job's or an agent's scratch folder) outlives it, and every later build fails once that folder is gone
+/// (measured in review of 872ab6743).
+pub fn run_folder(bin: &Path) -> PathBuf {
+    bin.with_file_name("run")
+}
+
 fn server_call(bin: &Path, arg: &str, backend: &Backend, creds: Option<&Creds>) -> ToolCall {
+    let run = run_folder(bin);
     let mut c = ToolCall::new(bin.to_string_lossy())
         .args([arg])
         .pass(PASS)
+        .cwd(run.clone())
+        .without("TMPDIR")
+        .without("TMP")
+        .without("TEMP")
+        .env("TMPDIR", run.to_string_lossy())
+        .env("TMP", run.to_string_lossy())
+        .env("TEMP", run.to_string_lossy())
         .env("SCCACHE_IGNORE_SERVER_IO_ERROR", "1")
         .timeout(Duration::from_secs(60));
     for (k, v) in backend.vars() {
@@ -477,12 +502,21 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
             );
         }
     };
+    if let Err(e) = std::fs::create_dir_all(run_folder(&bin)) {
+        return off(
+            format!(
+                "cannot make the server's folder {}: {e}. Next: fix PADDOCK_DEV_HOME",
+                run_folder(&bin).display()
+            ),
+            true,
+        );
+    }
     if let Backend::Local { dir, .. } = &backend
         && let Err(e) = std::fs::create_dir_all(dir)
     {
         return off(format!("cannot make the cache folder {dir}: {e}. Next: fix SCCACHE_DIR"), true);
     }
-    let log = bin.with_file_name(format!("start-{}.log", std::process::id()));
+    let log = run_folder(&bin).join(format!("start-{}.log", std::process::id()));
     // The server outlives this process and would hold a pipe open, so its starter writes to a file.
     let start = server_call(&bin, "--start-server", &backend, creds.as_ref())
         .output(Output::File(log.clone()))
@@ -499,7 +533,8 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
                 None
             } else {
                 Some(format!(
-                    "the sccache server on the default port does not use this cache ({}); it is not touched. Next: stop it yourself (`sccache --stop-server`) or leave the wrapper off",
+                    "the sccache server on port {} does not use this cache ({}); it is not touched. Next: stop it yourself (`sccache --stop-server`) or leave the wrapper off",
+                    server_port(env),
                     backend.describe()
                 ))
             }
@@ -538,6 +573,56 @@ pub fn prepare_and_say(env: &HashMap<String, String>, install: Install) -> Optio
             None
         }
     }
+}
+
+/// The wrapper, prepared on first use and never before: a tool that only plans, lists or runs a non-cargo step must not start a
+/// server (ER-45), and a test that spawns `paddock-dev` must not reach [`prepare`] unless it runs a cargo step through it.
+pub struct Lazy {
+    env: HashMap<String, String>,
+    cell: std::sync::OnceLock<Option<Ready>>,
+}
+
+impl Lazy {
+    /// No wrapper, ever (tests).
+    pub fn off() -> Lazy {
+        let cell = std::sync::OnceLock::new();
+        let _ = cell.set(None);
+        Lazy { env: HashMap::new(), cell }
+    }
+
+    /// A wrapper that is already there (tests of the call's environment).
+    pub fn ready(r: Ready) -> Lazy {
+        let cell = std::sync::OnceLock::new();
+        let _ = cell.set(Some(r));
+        Lazy { env: HashMap::new(), cell }
+    }
+
+    /// Prepared with [`Install::Never`] from `env` when [`Lazy::get`] is first called.
+    pub fn on_demand(env: HashMap<String, String>) -> Lazy {
+        Lazy {
+            env,
+            cell: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// The wrapper, preparing it now when this is the first call.
+    pub fn get(&self) -> Option<&Ready> {
+        self.cell.get_or_init(|| prepare_and_say(&self.env, Install::Never)).as_ref()
+    }
+}
+
+/// Warnings for a shell that is about to build: a `CARGO_TARGET_DIR` (or `CARGO_BUILD_TARGET_DIR`) in its environment defeats the
+/// cache (sccache hashes it, and the variable outranks the configuration the tools pass).
+pub fn shell_warnings(env: &HashMap<String, String>) -> Vec<String> {
+    ["CARGO_TARGET_DIR", "CARGO_BUILD_TARGET_DIR"]
+        .iter()
+        .filter(|k| env.get(**k).is_some_and(|v| !v.is_empty()))
+        .map(|k| {
+            format!(
+                "::warning::local-sccache: your shell exports {k}; sccache hashes it, so builds miss the cache across worktrees. Next: `unset {k}` and pass the folder as `--config build.target-dir=...`"
+            )
+        })
+        .collect()
 }
 
 /// Adds the wrapper's variables to a call.
@@ -612,8 +697,81 @@ mod tests {
             ("PADDOCK_SCCACHE_S3_ENDPOINT", "h:1"),
         ]))
         .unwrap();
-        assert!(s3.matches_stats("Cache location                  S3, bucket: Bucket(name=b1, base_url=http://h:1)\n"));
+        assert!(s3.matches_stats("Cache location                  s3, name: b1, prefix: /paddock/\n"));
         assert!(!s3.matches_stats(local));
+    }
+
+    #[test]
+    fn the_stats_must_name_exactly_this_folder_bucket_and_prefix() {
+        let line = |loc: &str| format!("Compile requests  0\nCache location                  {loc}\n");
+        let local = |d: &str| Backend::Local {
+            dir: d.into(),
+            size: "1G".into(),
+        };
+        assert!(local("/a/b").matches_stats(&line("Local disk: \"/a/b\"")));
+        for other in [
+            "Local disk: \"/a/b2\"",
+            "Local disk: \"/x/a/b\"",
+            "Local disk: \"/a\"",
+            "Local disk: /a/b",
+        ] {
+            assert!(!local("/a/b").matches_stats(&line(other)), "{other}");
+        }
+        let s3 = |prefix: &str| {
+            backend(&env(&[
+                ("PADDOCK_SCCACHE_BACKEND", "s3"),
+                ("PADDOCK_SCCACHE_S3_BUCKET", "b1"),
+                ("PADDOCK_SCCACHE_S3_ENDPOINT", "h:1"),
+                ("PADDOCK_SCCACHE_S3_PREFIX", prefix),
+            ]))
+            .unwrap()
+        };
+        assert!(s3("paddock").matches_stats(&line("s3, name: b1, prefix: /paddock/")));
+        assert!(!s3("paddock").matches_stats(&line("s3, name: b1, prefix: /paddock2/")));
+        assert!(!s3("paddock").matches_stats(&line("s3, name: b10, prefix: /paddock/")));
+        assert!(!s3("paddock").matches_stats(&line("s3, name: b1, prefix: /")));
+    }
+
+    /// The server outlives the process that starts it, so it must not inherit that process's temporary folder: builds fail once
+    /// a job's folder is deleted (measured in review of 872ab6743).
+    #[test]
+    fn the_server_runs_in_a_tool_owned_folder_whatever_the_starters_tmpdir_is() {
+        let bin = Path::new("/h/tools/sccache/0.19.0/sccache");
+        let backend = Backend::Local {
+            dir: "/c".into(),
+            size: "1G".into(),
+        };
+        let parent = env(&[
+            ("TMPDIR", "/jobs/gone"),
+            ("TMP", "/jobs/gone"),
+            ("TEMP", "/jobs/gone"),
+            ("PATH", "/usr/bin"),
+        ]);
+        for arg in ["--start-server", "--show-stats"] {
+            let child = server_call(bin, arg, &backend, None)
+                .pass(["TMPDIR", "TMP", "TEMP"])
+                .child_env(&parent);
+            let last = |k: &str| child.iter().rev().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+            let run = run_folder(bin).display().to_string();
+            for k in ["TMPDIR", "TMP", "TEMP"] {
+                assert_eq!(last(k).as_deref(), Some(run.as_str()), "{arg} {k}: {child:?}");
+                assert_eq!(child.iter().filter(|(n, _)| n == k).count(), 1, "one value, no inherited copy: {k}");
+            }
+        }
+        assert!(
+            run_folder(bin).starts_with("/h/tools/sccache/0.19.0"),
+            "inside the tool folder, never a job's"
+        );
+    }
+
+    #[test]
+    fn a_shell_that_exports_the_target_folder_is_warned() {
+        assert!(shell_warnings(&env(&[("PATH", "/x")])).is_empty());
+        let w = shell_warnings(&env(&[("CARGO_TARGET_DIR", "/t"), ("CARGO_BUILD_TARGET_DIR", "/u")]));
+        assert_eq!(w.len(), 2);
+        assert!(w[0].starts_with("::warning::") && w[0].contains("unset CARGO_TARGET_DIR") && w[0].contains("--config build.target-dir"));
+        assert_eq!(server_port(&env(&[])), "4226");
+        assert_eq!(server_port(&env(&[("SCCACHE_SERVER_PORT", "4300")])), "4300");
     }
 
     #[test]

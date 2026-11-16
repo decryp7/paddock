@@ -28,7 +28,7 @@ fn run_host(js: bool, args: &[&str], scratch: &Path) -> Ran {
         c.arg("conformance/bin/paddock-conformance.mjs");
         c
     } else {
-        let mut c = paddock_proc::command(env!("CARGO_BIN_EXE_paddock-dev"));
+        let mut c = crate::dev_bin::command();
         c.arg("conformance");
         c
     };
@@ -144,7 +144,7 @@ fn a_report_file_that_cannot_be_written_is_an_io_error_with_the_cause_and_the_ne
     let d = tree(&[("crates/a/src/x.rs", "fn a() {}\n")]);
     let missing = d.path().join("no-such-folder").join("out.json");
     for flag in ["--out", "--summary"] {
-        let o = paddock_proc::command(env!("CARGO_BIN_EXE_paddock-dev"))
+        let o = crate::dev_bin::command()
             .args(["conformance", "--app", "t", "--root"])
             .arg(d.path())
             .args(["--only", "C39", flag])

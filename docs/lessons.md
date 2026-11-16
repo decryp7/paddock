@@ -471,9 +471,18 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   docs/benchmarks.md, "Local sccache"): put such a setting in cargo configuration, where it is not part of the key. Every tool
   that starts cargo now passes the folder through one accessor, `tools/paddock-dev/src/cargo_target.rs`, and drops the variables
   from the child's environment (the variable would outrank the configuration). A stand-in cargo in the tests fails when
-  `CARGO_TARGET_DIR` reaches it. Tools that start a compile-cache server must not do it from their tests (ER-45): the unit tests of
-  the push gate pass the wrapper in, and the integration tests set `PADDOCK_SCCACHE=off`; a first version prepared the wrapper in
-  `command_in` and a unit-test run downloaded sccache and started a server on the developer's machine.
+  `CARGO_TARGET_DIR` reaches it, and a source audit (`tests/it/cargo_target_lint.rs`) fails when a tool sets the variable on a child
+  outside its short list.
+- **A server a tool starts is the machine's, not the test's or the job's (2026-11-16/17, feat/local-sccache).** Three review
+  findings, one class. (1) A tool that starts the shared sccache server from a test starts it on the developer's machine (ER-45):
+  the wrapper is prepared on first use by a cargo step (`local_sccache::Lazy`), never when the tool starts, and every test spawn of
+  `paddock-dev` goes through `tests/it/dev_bin.rs`, which sets `PADDOCK_SCCACHE=off` (an audit fails on a direct use of the binary's
+  path). (2) A server inherits the starter's `TMPDIR` and outlives it: builds failed once the starter's scratch folder was deleted, so
+  the server now starts with a tool-owned `TMPDIR` and working folder. (3) Whether a running server is "ours" is decided by an
+  exact comparison of the printed folder (`Local disk: "<dir>"`) or bucket and prefix, never by `contains`. CI keeps its per-slot
+  sccache; a first version let the Mac runner join the agents' server, and the review found `CARGO_INCREMENTAL=0` (a `CARGO_*`
+  variable, so part of the key) gave 4% hits against the agents' entries and that a shared server is one more thing that can stop a
+  runner; the user dropped it.
 
 ## Linux VM guests (Paddock C21, 2026-10-25)
 - Linux guests: `tart exec` (like `ssh` without a PAM login) has no logind session, so there is no `systemd --user`

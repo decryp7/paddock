@@ -736,6 +736,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: SccacheCommand::Env,
         } => {
             let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+            for w in local_sccache::shell_warnings(&env) {
+                eprintln!("{w}");
+            }
             let lines = local_sccache::prepare_and_say(&env, local_sccache::Install::OnDemand).map(|r| local_sccache::shell_lines(&r)).unwrap_or_default();
             Ok(Report::new(serde_json::json!({ "lines": lines }), lines.join("\n")))
         }

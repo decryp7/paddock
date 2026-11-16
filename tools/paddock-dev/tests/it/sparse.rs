@@ -49,7 +49,7 @@ fn sparse_fixture() -> tempfile::TempDir {
 // Starts the tool under test by its cargo-built path (a throw-away fixture), never a process by pid (C53).
 #[allow(clippy::disallowed_methods)]
 fn dev(dir: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    crate::dev_bin::command()
         .args(args)
         .current_dir(dir)
         .env_remove("GITHUB_ACTIONS")

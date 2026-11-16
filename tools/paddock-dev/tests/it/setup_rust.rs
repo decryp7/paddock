@@ -170,7 +170,7 @@ impl Runner {
     #[allow(clippy::disallowed_methods)]
     fn rust(&self, input: &Input, extra: &[(&str, &str)]) -> Result {
         self.reset();
-        let r = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        let r = crate::dev_bin::command()
             .args([
                 "ci",
                 "setup-rust",
@@ -587,49 +587,4 @@ fn in_a_container_a_pinned_copy_in_the_tool_cache_is_put_on_path() {
         rs.calls
     );
     assert_eq!(rest, sh.calls);
-}
-
-/// The Mac runner shares the agents' one local sccache server (default port, one folder) when its configuration sets
-/// `PADDOCK_SHARED_SCCACHE_DIR`: the job never stops that server, and a server that uses another cache is left alone.
-#[test]
-fn the_mac_runner_joins_the_shared_server_when_its_config_names_a_folder_and_never_stops_it() {
-    let shim = "[ \"$1\" = --show-stats ] && echo \"Cache location                  Local disk: \\\"$SCCACHE_DIR\\\"\"";
-    let r = Runner::new(Some(shim));
-    let rs = r.rust(&LOCAL, &[("PADDOCK_SHARED_SCCACHE_DIR", "/shared/sccache")]);
-    assert_eq!(rs.code, 0, "{}", rs.out);
-    assert!(rs.env.contains("RUSTC_WRAPPER=sccache\n"), "{}", rs.env);
-    assert!(
-        rs.env.contains("SCCACHE_SERVER_PORT=4226\n") && rs.env.contains("SCCACHE_DIR=/shared/sccache\n"),
-        "{}",
-        rs.env
-    );
-    assert!(
-        rs.calls.contains("--start-server port=4226") && !rs.calls.contains("--stop-server"),
-        "{}",
-        rs.calls
-    );
-    // Without the setting the slot's own folder and port stay as they were.
-    let rs = r.rust(&LOCAL, &[]);
-    assert!(
-        rs.env.contains("SCCACHE_SERVER_PORT=4227\n") && !rs.env.contains("/shared/"),
-        "{}",
-        rs.env
-    );
-    // A server that is already running makes `--start-server` fail with "Address in use": the job joins it.
-    let running = format!("[ \"$1\" = --start-server ] && {{ echo 'error: Server startup failed: Address in use' >&2; exit 2; }}\n{shim}");
-    let r = Runner::new(Some(&running));
-    let rs = r.rust(&LOCAL, &[("PADDOCK_SHARED_SCCACHE_DIR", "/shared/sccache")]);
-    assert!(
-        rs.env.contains("RUSTC_WRAPPER=sccache\n") && !rs.calls.contains("--stop-server"),
-        "{}\n{}",
-        rs.env,
-        rs.out
-    );
-    // A server on the shared port with another folder is not used and not stopped.
-    let other = "[ \"$1\" = --show-stats ] && echo 'Cache location                  Local disk: \"/somebody/else\"'";
-    let r = Runner::new(Some(other));
-    let rs = r.rust(&LOCAL, &[("PADDOCK_SHARED_SCCACHE_DIR", "/shared/sccache")]);
-    assert_eq!((rs.code, rs.env.as_str()), (0, ""), "{}", rs.out);
-    assert!(rs.out.contains("does not use the shared cache"), "{}", rs.out);
-    assert!(!rs.calls.contains("--stop-server"), "{}", rs.calls);
 }

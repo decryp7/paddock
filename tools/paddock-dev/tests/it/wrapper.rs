@@ -1655,7 +1655,7 @@ fn the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_i
     let entry = home.join("bin").join("0123456789abcdef0123456789abcdef01234567");
     std::fs::create_dir_all(&entry).unwrap();
     let cached = entry.join("paddock-dev-test-host");
-    std::fs::copy(env!("CARGO_BIN_EXE_paddock-dev"), &cached).unwrap();
+    std::fs::copy(crate::dev_bin::PATH, &cached).unwrap();
     let signal = scratch.path().join("signal.log");
     std::fs::write(&signal, "").unwrap();
     let mut run = Command::new(&cached)

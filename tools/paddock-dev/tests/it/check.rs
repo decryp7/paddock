@@ -477,7 +477,7 @@ fn the_report_has_the_js_shape_and_the_run_records() {
     reason = "a test spawns node, git or the built binary; it ends them itself"
 )]
 fn dev(args: &[&str]) -> (i32, String, String) {
-    let o = Command::new(env!("CARGO_BIN_EXE_paddock-dev")).args(args).output().unwrap();
+    let o = crate::dev_bin::command().args(args).output().unwrap();
     (
         o.status.code().unwrap(),
         String::from_utf8_lossy(&o.stdout).into_owned(),

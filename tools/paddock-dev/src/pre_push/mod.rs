@@ -274,8 +274,9 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
         }
     };
     let stdin = if args.refs_from_stdin { read_stdin()? } else { String::new() };
-    // Only here, never in `command_in`: the unit tests of the push gate must not start a server on the machine they run on (ER-45).
-    let wrapper = crate::local_sccache::prepare_and_say(&std::env::vars().collect(), crate::local_sccache::Install::Never);
+    // Prepared on first use by a cargo gate, never here and never in `command_in`: a push that runs no cargo gate, and the tests of
+    // the push gate, must not start a server on the machine they run on (ER-45).
+    let wrapper = crate::local_sccache::Lazy::on_demand(std::env::vars().collect());
     command_in(args, &root, &stdin, &RealLookups { root: root.clone() }, wrapper)
 }
 
@@ -309,7 +310,7 @@ fn command_in(
     root: &Path,
     stdin: &str,
     look: &dyn known::Lookups,
-    wrapper: Option<crate::local_sccache::Ready>,
+    wrapper: crate::local_sccache::Lazy,
 ) -> Result<Report, CliError> {
     let look = &OnceLookups {
         inner: look,

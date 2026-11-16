@@ -1575,4 +1575,5 @@ screen over ui, Dyno and Pitwall, 409 tests) is in this branch's history, commit
   is a second run from scratch with a new prefix and no write errors. Treat RustFS as unproven under load until it has run for days.
 - **Reading:** passing the folder as configuration gives the 80% across worktrees on both workspaces; the S3 backend on the LAN costs
   about 5 s more on a warm build than the local disk (37 against 32 s, 48 against 46 s) and needs the network and the key. The CI-like
-  run hits the agents' entries only when `CARGO_INCREMENTAL=0` is cargo configuration: the variable is part of sccache's key.
+  run hits the agents' entries only when `CARGO_INCREMENTAL=0` is cargo configuration: the variable is part of sccache's key. CI keeps
+  its own per-slot caches (user decision 2026-11-17), so this is a measurement, not a setting.

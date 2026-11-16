@@ -55,6 +55,8 @@ impl Repo {
     #[allow(clippy::disallowed_methods)]
     fn cmd(&self, program: &str) -> Command {
         let mut c = Command::new(program);
+        // Whatever this starts may be the binary under test: never a compile-cache server on this machine (ER-45).
+        crate::dev_bin::harden(&mut c);
         let empty = if cfg!(windows) { "NUL" } else { "/dev/null" };
         c.current_dir(self.dir.path())
             .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -96,10 +98,8 @@ impl Repo {
 
     fn dev(&self, args: &[&str]) -> (i32, String) {
         let out = self
-            .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+            .cmd(crate::dev_bin::PATH)
             .env("PADDOCK_DEV_TARGET_DIR", self.builds.path())
-            // A test never starts a compile-cache server on the machine it runs on (ER-45).
-            .env("PADDOCK_SCCACHE", "off")
             .env("HOME", self.home.path())
             .args(args)
             .arg("--root")
@@ -346,7 +346,7 @@ fn the_conformance_line_entry_reads_ci_yml_through_the_one_reader() {
 #[allow(clippy::disallowed_methods, reason = "a test starts the built binary; it ends it itself")]
 fn ci_conformance_args_prints_the_line_ci_runs_and_is_not_measured_without_one() {
     let root = repo_root();
-    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = crate::dev_bin::command()
         .args(["ci", "conformance-args", "--root"])
         .arg(&root)
         .output()
@@ -359,7 +359,7 @@ fn ci_conformance_args_prints_the_line_ci_runs_and_is_not_measured_without_one()
         "{text}"
     );
     let empty = tempfile::tempdir().unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = crate::dev_bin::command()
         .args(["ci", "conformance-args", "--root"])
         .arg(empty.path())
         .output()

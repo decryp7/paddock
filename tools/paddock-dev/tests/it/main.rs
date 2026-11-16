@@ -3,6 +3,7 @@
 mod build_env;
 mod build_jobs;
 mod build_jobs_golden;
+mod cargo_target_lint;
 mod check;
 mod check_allow_list;
 mod check_c119;
@@ -18,6 +19,7 @@ mod ci_isolation;
 mod ci_isolation_windows;
 mod cli;
 mod contracts;
+mod dev_bin;
 mod dev_tool_publish;
 mod dev_tool_workflow;
 mod generators;

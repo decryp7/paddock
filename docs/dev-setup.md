@@ -97,7 +97,8 @@ tools and never by your shell profile (user decision 2026-11-16; docs/research/s
   `~/.cargo`), starts the one server on the default port 4226, and prints `export RUSTC_WRAPPER=...` lines for that shell. Run it
   once per machine to install; the push gates and `./dev gen check` then use the installed copy by themselves and never download.
 - It is off, with one `::warning::` line and a build without the cache, when sccache is not installed, the server does not
-  start, or a server on the port uses another cache. It is off without a warning in CI (`CI`, `GITHUB_ACTIONS`), with
+  start, or a server on the port uses another cache. The server runs in its own folder (`<tool folder>/run`, also its `TMPDIR`), never
+  in a job's or an agent's scratch folder, which a job deletes. It is off without a warning in CI (`CI`, `GITHUB_ACTIONS`), with
   `PADDOCK_SCCACHE=off`, or when `RUSTC_WRAPPER` is already set.
 - The build folder goes in as `--config build.target-dir=...` in every tool (see AGENTS.md, "Build folders").
 - **One setting picks the backend, `PADDOCK_SCCACHE_BACKEND`:** `local` (the default; `SCCACHE_DIR` and `SCCACHE_CACHE_SIZE` from
@@ -124,11 +125,10 @@ KEYS
 chmod 600 ~/.config/paddock/sccache-s3.env
 ```
 
-**The Mac CI runner shares the agents' local cache.** It is a runner setting, not a workflow one (agents never change it, ER-14):
-in the runner's `config.yaml`, under `runner.envs`, set `PADDOCK_SHARED_SCCACHE_DIR: <dev-targets>/sccache` (the same folder as
-`SCCACHE_DIR` in the profile; the user that runs the runner must own it, mode 755, and `SCCACHE_CACHE_SIZE` there should match).
-`setup-rust` then makes a macOS job join the one server on port 4226 instead of starting its own on a slot port, and never stops
-it. Windows and Linux jobs keep their per-slot folders and ports.
+**CI keeps its own caches.** The Mac, Windows and Linux CI jobs run `setup-rust`'s per-slot sccache folders and ports exactly as
+before; they do not share the agents' server (user decision 2026-11-17, after a review: the agents' cache and CI's differ in
+`CARGO_INCREMENTAL=0`, which sccache hashes, so a shared folder would hit about 4%, and one server for two kinds of user is one more
+thing that can stop a runner). The agents share one server and one cache folder among themselves.
 
 **Linker on Linux.** On a Linux development machine use mold (`sudo apt install mold`), in `~/.cargo/config.toml`:
 

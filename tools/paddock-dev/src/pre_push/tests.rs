@@ -1170,7 +1170,7 @@ mod known_commit {
             &r,
             &push_line(&two),
             &fake(None, Err("x")),
-            None,
+            crate::local_sccache::Lazy::off(),
         )
         .unwrap();
         assert_eq!(rep.exit, Exit::Ok);
@@ -1204,7 +1204,7 @@ mod known_commit {
             &r,
             &push_line(&two),
             &fake(None, Err("x")),
-            None,
+            crate::local_sccache::Lazy::off(),
         )
         .unwrap();
         let tree = git_text(&r, &["rev-parse", &format!("{two}^{{tree}}")]).unwrap().trim().to_string();
@@ -1274,7 +1274,7 @@ mod known_commit {
             &r,
             &delete,
             &l,
-            None,
+            crate::local_sccache::Lazy::off(),
         );
         assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
         let a = PrePushArgs {
@@ -1282,7 +1282,7 @@ mod known_commit {
             base: Some("origin/main".into()),
             ..args()
         };
-        let got = command_in(&a, &r, &push_line(&two), &l, None);
+        let got = command_in(&a, &r, &push_line(&two), &l, crate::local_sccache::Lazy::off());
         assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
     }
 
@@ -1599,7 +1599,7 @@ mod base_choice {
             accept_not_measured: vec![],
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
-        let got = command_in(&args, &r, &line, &live(&r), None);
+        let got = command_in(&args, &r, &line, &live(&r), crate::local_sccache::Lazy::off());
         assert!(got.as_ref().map_or(true, |rep| !rep.text.contains("nothing to check")), "{got:?}");
     }
 }

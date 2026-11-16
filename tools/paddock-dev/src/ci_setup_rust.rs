@@ -42,8 +42,6 @@ const CONTAINER_PORT: &str = "4227";
 /// What an sccache child gets from the job's environment besides the base list (paddock_proc::KEPT_ENV): its own settings,
 /// cargo's and rustup's. Never a token.
 const SCCACHE_PASS: [&str; 3] = ["SCCACHE_*", "CARGO_*", "RUSTUP_*"];
-/// sccache's default server port: the one server of the agents' local sccache (`local_sccache`), which the Mac runner shares.
-const SHARED_PORT: &str = "4226";
 /// The packages Tauri needs on Linux.
 const TAURI_LINUX_PACKAGES: [&str; 6] = [
     "libwebkit2gtk-4.1-dev",
@@ -165,19 +163,13 @@ pub fn slot_cache_size(total_gb: Option<&str>, slots: u64) -> String {
 pub const LEGACY_BUILD_DIR_LAYOUT: &str = "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1";
 
 /// The lines for `$GITHUB_ENV`, in the shell's order: on Windows [`LEGACY_BUILD_DIR_LAYOUT`] follows the wrapper settings.
-///
-/// `shared`: the job joins the agents' server (macOS, `PADDOCK_SHARED_SCCACHE_DIR`). Then `CARGO_INCREMENTAL=0` is left out: sccache
-/// hashes every `CARGO_*` variable, so it would make every key differ from the agents' (4% hits, 82% without it; docs/benchmarks.md,
-/// "Local sccache"). The cost is that this job's own workspace crates compile incrementally and are not cached.
-pub fn env_lines(port: &str, settings: &[(String, String)], windows: bool, shared: bool) -> Vec<String> {
-    let mut lines = vec!["RUSTC_WRAPPER=sccache".to_string()];
-    if !shared {
-        lines.push("CARGO_INCREMENTAL=0".to_string());
-    }
-    lines.extend([
+pub fn env_lines(port: &str, settings: &[(String, String)], windows: bool) -> Vec<String> {
+    let mut lines = vec![
+        "RUSTC_WRAPPER=sccache".to_string(),
+        "CARGO_INCREMENTAL=0".to_string(),
         "SCCACHE_IGNORE_SERVER_IO_ERROR=1".to_string(),
         format!("SCCACHE_SERVER_PORT={port}"),
-    ]);
+    ];
     if windows {
         lines.push(LEGACY_BUILD_DIR_LAYOUT.to_string());
     }
@@ -505,11 +497,8 @@ impl Step<'_> {
         };
         // CI's own server: a host may run a developer's sccache on the default port 4226 with its own backend. On a host each
         // job slot has its own port (ports.txt), so a concurrent job's start or stats never takes this job's server away.
-        let shared = self.shared_dir(&backend);
         let port = if self.os() == "Linux" {
             CONTAINER_PORT.to_string()
-        } else if shared.is_some() {
-            SHARED_PORT.to_string()
         } else {
             self.isolation(&["port", "sccache"])?
         };
@@ -521,10 +510,7 @@ impl Step<'_> {
                 self.say(format!("sccache: shared backend {} db {db}", shown_endpoint(endpoint)));
             }
             Backend::Local => {
-                let (dir, size) = match &shared {
-                    Some(d) => (d.clone(), self.get("PADDOCK_SHARED_SCCACHE_SIZE").unwrap_or("60G").to_string()),
-                    None => self.local_cache()?,
-                };
+                let (dir, size) = self.local_cache()?;
                 settings.push(("SCCACHE_DIR".into(), dir.clone()));
                 settings.push(("SCCACHE_CACHE_SIZE".into(), size));
                 self.say(format!("sccache: local disk {dir}"));
@@ -554,42 +540,14 @@ impl Step<'_> {
             self.say(v);
         }
         // A server left on this port by an earlier job would keep that job's backend: start it fresh with this job's settings.
-        // The shared server is the agents' too: it is never stopped here, only started when none runs.
-        if shared.is_none() {
-            let _ = self.run(&call("--stop-server"));
-        }
+        let _ = self.run(&call("--stop-server"));
         // The server outlives this step and would hold a pipe open, so its starter writes to a file.
         let log = self
             .temp_base()
             .join(format!("paddock-sccache-start-{}-{}.log", std::process::id(), nanos()));
-        let mut started = self.run(&call("--start-server").output(Output::File(log.clone())));
-        // On the shared port a server is usually running already (the agents' or an earlier job's): "Address in use" is no failure.
-        if shared.is_some()
-            && let Ok(r) = &mut started
-        {
-            r.success |= crate::local_sccache::already_running(r);
-        }
+        let started = self.run(&call("--start-server").output(Output::File(log.clone())));
         let _ = std::fs::remove_file(&log);
-        // Asked only when the start worked (the shell's `&&`).
-        let stats = if matches!(&started, Ok(r) if r.success) {
-            self.run(&call("--show-stats"))
-        } else {
-            Err(String::new())
-        };
-        let answers = matches!(&started, Ok(r) if r.success) && matches!(&stats, Ok(r) if r.success);
-        // A server on the shared port that uses another cache is somebody else's: it is not used and not stopped.
-        if let (Some(dir), Ok(r), true) = (&shared, &stats, answers)
-            && !(crate::local_sccache::Backend::Local {
-                dir: dir.clone(),
-                size: String::new(),
-            })
-            .matches_stats(&r.stdout)
-        {
-            self.say(format!(
-                "::warning::the sccache server on port {SHARED_PORT} does not use the shared cache {dir}; the build runs without the compile cache. Next: stop that server (`sccache --stop-server`) once, so the next job starts it on the shared folder."
-            ));
-            return Ok(());
-        }
+        let answers = matches!(&started, Ok(r) if r.success) && matches!(self.run(&call("--show-stats")), Ok(r) if r.success);
         if !answers {
             // The cache must slow a build down, never fail it: RUSTC_WRAPPER stays unset and the job builds without sccache.
             if let Ok(r) = &started
@@ -598,25 +556,14 @@ impl Step<'_> {
                 let t = tail(&r.stderr, TAIL_LINES);
                 self.say(t);
             }
-            if shared.is_none() {
-                let _ = self.run(&call("--stop-server"));
-            }
+            let _ = self.run(&call("--stop-server"));
             self.say("::warning::the sccache server did not start; the build runs without the compile cache.");
             return Ok(());
         }
         // sccache itself is the wrapper, never a script around it (Windows starts a .cmd through cmd.exe, whose 8191-character
         // command line rustc's arguments for a large crate exceed). Cached builds are not incremental.
         let windows = self.os() == "Windows";
-        self.append("GITHUB_ENV", &env_lines(&port, &settings, windows, shared.is_some()))
-    }
-
-    /// The folder the macOS runner shares with the agents' local sccache (`PADDOCK_SHARED_SCCACHE_DIR`, set by the runner's
-    /// configuration, never by a workflow): only on macOS and only for the local backend. Windows and Linux are unchanged.
-    fn shared_dir(&self, backend: &Backend) -> Option<String> {
-        if self.os() != "macOS" || !matches!(backend, Backend::Local) {
-            return None;
-        }
-        self.get("PADDOCK_SHARED_SCCACHE_DIR").filter(|d| !d.is_empty()).map(str::to_string)
+        self.append("GITHUB_ENV", &env_lines(&port, &settings, windows))
     }
 
     /// The local disk cache: a host slot's kept folder with its share of the budget, else the container's mount (or a folder
@@ -833,7 +780,6 @@ mod tests {
             "4228",
             &[("SCCACHE_DIR".into(), "/d".into()), ("SCCACHE_CACHE_SIZE".into(), "10G".into())],
             false,
-            false,
         );
         assert_eq!(
             lines,
@@ -848,25 +794,17 @@ mod tests {
         );
     }
 
-    /// Joining the agents' server: `CARGO_INCREMENTAL=0` is left out (sccache hashes it, so every key would differ from theirs).
-    #[test]
-    fn a_job_on_the_shared_server_does_not_set_cargo_incremental() {
-        let lines = env_lines("4226", &[], false, true);
-        assert!(!lines.iter().any(|l| l.starts_with("CARGO_")), "{lines:?}");
-        assert_eq!(&lines[..2], ["RUSTC_WRAPPER=sccache", "SCCACHE_IGNORE_SERVER_IO_ERROR=1"]);
-    }
-
     // Run 8027 (job 37099): under cargo 1.100's build-dir layout, rustc for spotter_app_lib had 313 `-L dependency=` arguments, about
     // 38,000 characters; cargo fell back to an @argfile, sccache 0.19 expanded it and could not start rustc (os error 206).
     #[test]
     fn on_windows_the_wrapper_comes_with_cargos_legacy_build_dir_layout() {
-        let windows = env_lines("4227", &[], true, false);
+        let windows = env_lines("4227", &[], true);
         assert!(
             windows.contains(&"__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1".to_string()),
             "{windows:?}"
         );
         assert_eq!(windows[0], "RUSTC_WRAPPER=sccache");
-        let unix = env_lines("4227", &[], false, false);
+        let unix = env_lines("4227", &[], false);
         assert!(!unix.iter().any(|l| l.starts_with("__CARGO")), "{unix:?}");
     }
 

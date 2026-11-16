@@ -106,7 +106,7 @@ pub struct Real {
     /// The heavy built from the tree, held for this whole run (never the shared cache path: see `tool_cache::Held`).
     built_heavy: OnceLock<Result<crate::tool_cache::Held, String>>,
     /// The local sccache wrapper (`None`: off, or a test; [`crate::local_sccache`]).
-    wrapper: Option<crate::local_sccache::Ready>,
+    wrapper: crate::local_sccache::Lazy,
 }
 
 impl Real {
@@ -115,7 +115,7 @@ impl Real {
         let env: HashMap<String, String> = std::env::vars().collect();
         // The roots `./dev disk` tracks (PADDOCK_DISK_ROOTS, else its defaults): no machine path is named here.
         let roots = crate::disk::config::Settings::resolve(&crate::disk::config::CommonArgs::default(), &|k| env.get(k).cloned()).roots;
-        let wrapper = crate::local_sccache::prepare_and_say(&env, crate::local_sccache::Install::Never);
+        let wrapper = crate::local_sccache::Lazy::on_demand(env.clone());
         Real {
             wrapper,
             ..Real::with(root, env, roots)
@@ -129,7 +129,7 @@ impl Real {
             env,
             default_roots,
             built_heavy: OnceLock::new(),
-            wrapper: None,
+            wrapper: crate::local_sccache::Lazy::off(),
         }
     }
 
@@ -195,8 +195,12 @@ impl Runner for Real {
                 Err(why) => return Ran::Unavailable(format!("no machine-wide heavy slot: {why}")),
             }
         }
-        // The target's own program is the first of `argv` (a heavy prefix before it is only the slot's wrapper).
-        let cargo = argv.first().is_some_and(|p| crate::cargo_target::is_cargo(p));
+        // The target's own program is the first of `argv` (a heavy prefix before it is only the slot's wrapper). A cargo call whose
+        // subcommand takes `--config` gets the folder there; anything else (a script, `npm`, an external subcommand such as
+        // `cargo nextest`) keeps the variable, as there is no argument to put it in, and is not compiled through the wrapper.
+        let cargo = argv
+            .split_first()
+            .is_some_and(|(p, rest)| crate::cargo_target::is_cargo(p) && crate::cargo_target::takes_config(rest));
         match (cargo, argv.split_first()) {
             (true, Some((p, rest))) => {
                 full.push(p.clone());
@@ -222,7 +226,7 @@ impl Runner for Real {
         cmd.args(args);
         if cargo {
             cmd.env_remove("CARGO_TARGET_DIR").env_remove("CARGO_BUILD_TARGET_DIR");
-            if let Some(w) = &self.wrapper {
+            if let Some(w) = self.wrapper.get() {
                 cmd.envs(w.vars.iter().map(|(k, v)| (k, v)));
             }
         } else {
