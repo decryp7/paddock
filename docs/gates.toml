@@ -246,6 +246,14 @@ review_by = 2026-12-15
 approved = "coordinator"
 
 [[report_only]]
+id = "C130"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in C130-golden-machine.mjs and c130.rs. It reads the tracked golden folders for values of the machine that captured them (uid and gid, /Users, /home and C:\\Users paths, temp paths, and this machine's user, host, home, RAM and CPU count): the ER-21 class 'a golden captured on one machine fails on another' (train 14 WP-2: six goldens, among them the Mac's uid 501 in a guardian golden). First count 2026-11-15 on feat/golden-checked-when-made: 12 sites in 282 files on the Mac, 1 real (a real host name in a wiki fixture, replaced) and 11 waived with a reason in conformance/c130-allow.json (the decryp7 organisation, invented users). Known gap: a value spelled another way (hex, GiB) or split over lines"
+owner = "ER-21 class: a golden holds a value of its capturing machine (feat/golden-checked-when-made)"
+since = 2026-11-15
+review_by = 2026-12-15
+approved = "coordinator"
+
+[[report_only]]
 id = "step:tools/hooks"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then remove continue-on-error from ci.yml's `Hooks tests (report-only)` step (the tools job, `./dev ci run tools hooks`) and this entry; C100 fails when review_by passes or when the step already blocks. It runs every .claude/hooks/*.test.sh (python3, jq and git are in paddock-ci:v3, checked 2026-11-15) with PADDOCK_DEV set to the built tool, so the rule-55 parity test of places.rs against lib/paddockpaths.py runs in CI. First green run id: none yet"
 owner = "fix/hooks-ci-and-config-guard"
