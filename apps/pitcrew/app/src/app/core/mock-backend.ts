@@ -111,6 +111,8 @@ function fail(code: CommandError['code'], message: string): CommandError {
 export class MockBackend implements PitcrewBackend {
   private readonly scenario: MockScenario;
   private readonly latency: number;
+  /** Calls waiting out their latency; `dispose` lets them go. */
+  private readonly waiting = new Set<() => void>();
   private readonly simulate: boolean;
   private readonly platformName: Platform;
   private readonly now: () => number;
@@ -213,6 +215,7 @@ export class MockBackend implements PitcrewBackend {
     this.stopSimulation();
     for (const t of this.timers) clearTimeout(t);
     this.timers.clear();
+    for (const done of [...this.waiting]) done();
   }
 
   // ---- runner actions ----------------------------------------------------------------------------------------------
@@ -1039,8 +1042,16 @@ export class MockBackend implements PitcrewBackend {
   }
 
   private delay(ms = this.latency): Promise<void> {
-    // Through `later`, so `dispose` also drops the wait of a call still in flight.
-    return ms > 0 ? new Promise((resolve) => this.later(ms, () => resolve())) : Promise.resolve();
+    if (ms <= 0) return Promise.resolve();
+    // Through `later`, so `dispose` also drops the timer; the call itself is let go (resolved), never left hanging.
+    return new Promise((resolve) => {
+      const done = (): void => {
+        this.waiting.delete(done);
+        resolve();
+      };
+      this.waiting.add(done);
+      this.later(ms, done);
+    });
   }
 }
 

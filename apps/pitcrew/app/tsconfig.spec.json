@@ -1,7 +1,12 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["vitest/globals"]
+    "types": ["vitest/globals"],
+    // Only the specs use the shared test kit (the leak detector); the app build imports nothing from the shared UI.
+    "paths": {
+      "@decryp7/paddock-ui": ["../../../ui/dist/paddock-ui"],
+      "@decryp7/paddock-ui/*": ["../../../ui/dist/paddock-ui/*"]
+    }
   },
   "include": ["src/**/*.d.ts", "src/**/*.spec.ts", "src/test-setup.ts"]
 }

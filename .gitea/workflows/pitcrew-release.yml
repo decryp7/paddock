@@ -104,8 +104,6 @@ jobs:
       tag-prefix: pitcrew-
       latest-tag: pitcrew-latest
       notes-extra: "**Existing installs:** download this version once by hand. Pitcrew now updates from the Paddock releases, which a copy installed before this version does not look at."
-      # The app's specs import the shared test kit from ui/dist (the leak detector), which the app build needs.
-      prepare: npm run build -w ui
       cliff-config: apps/pitcrew/cliff.toml
       cliff-paths: |
         apps/pitcrew/**
@@ -138,8 +136,6 @@ jobs:
       tag-prefix: pitcrew-
       latest-tag: pitcrew-latest
       notes-extra: "**Existing installs:** download this version once by hand. Pitcrew now updates from the Paddock releases, which a copy installed before this version does not look at."
-      # The app's specs import the shared test kit from ui/dist (the leak detector), which the app build needs.
-      prepare: npm run build -w ui
       cliff-config: apps/pitcrew/cliff.toml
       cliff-paths: |
         apps/pitcrew/**
