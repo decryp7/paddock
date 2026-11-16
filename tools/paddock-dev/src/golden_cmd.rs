@@ -18,6 +18,20 @@ use std::time::Duration;
 /// The longest each of the two runs may take unless `--max` says otherwise.
 const DEFAULT_MAX: &str = "40m";
 
+/// The variables the runs are given besides the base environment: the golden mode, the build caps and what `linux-container.sh` reads.
+const PASSED_ENV: [&str; 10] = [
+    "PADDOCK_UPDATE_GOLDEN",
+    "PADDOCK_LINUX_CPUS",
+    "PADDOCK_LINUX_JOBS",
+    "PADDOCK_LINUX_MEMORY",
+    "PADDOCK_LINUX_USER",
+    "PADDOCK_LINUX_CI_REGISTRY",
+    "PADDOCK_LINUX_HOST_ARCH",
+    "CARGO_BUILD_JOBS",
+    "CARGO_TARGET_DIR",
+    "DOCKER",
+];
+
 /// `dev golden`.
 #[derive(Subcommand, Debug)]
 pub enum GoldenCommand {
@@ -30,6 +44,9 @@ pub enum GoldenCommand {
 pub struct ConfirmArgs {
     /// The test filter, as `cargo nextest run` takes it (a test name or part of one; letters, digits and `_ : . -`).
     pub filter: String,
+    /// Run only this package's tests (`cargo nextest run -p <package>`).
+    #[arg(short = 'p', long)]
+    pub package: Option<String>,
     /// The folder of the workspace the tests are in (default: the current folder).
     #[arg(long)]
     pub manifest_dir: Option<PathBuf>,
@@ -51,9 +68,11 @@ pub struct Step {
     pub cwd: PathBuf,
 }
 
-/// A filter of letters, digits and `_ : . -` (never empty), or why it is not one.
+/// A filter of letters, digits and `_ : . -` that does not start with `-` (nextest would read it as an option: `--no-run` runs nothing
+/// and passes, `-E` takes an expression), never empty; or why it is not one.
 pub fn parse_filter(filter: &str) -> Result<&str, String> {
     if !filter.is_empty()
+        && !filter.starts_with('-')
         && filter
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ':' | '.' | '-'))
@@ -61,9 +80,25 @@ pub fn parse_filter(filter: &str) -> Result<&str, String> {
         Ok(filter)
     } else {
         Err(format!(
-            "`{filter}` is not a test filter: write a test name or part of one (letters, digits and _ : . - only)"
+            "`{filter}` is not a test filter: write a test name or part of one (letters, digits and _ : . -, not starting with -)"
         ))
     }
+}
+
+/// A package name of letters, digits, `_` and `-`, not starting with `-`.
+pub fn parse_package(package: &str) -> Result<&str, String> {
+    if !package.is_empty() && !package.starts_with('-') && package.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-')) {
+        Ok(package)
+    } else {
+        Err(format!(
+            "`{package}` is not a package name (letters, digits, _ and -, not starting with -)"
+        ))
+    }
+}
+
+/// `text` as one `sh` word: in single quotes, a `'` inside written as `'\''`.
+pub fn sh_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
 }
 
 /// The repository root above `dir`: the folder with `ci-image/VERSION` (what `linux-container.sh --ci-image` reads).
@@ -74,8 +109,9 @@ pub fn repo_root(dir: &Path) -> Option<PathBuf> {
 }
 
 /// The two runs for `filter` in the workspace `manifest_dir` of the repository at `root`.
-pub fn plan(root: &Path, manifest_dir: &Path, filter: &str) -> Result<[Step; 2], String> {
+pub fn plan(root: &Path, manifest_dir: &Path, package: Option<&str>, filter: &str) -> Result<[Step; 2], String> {
     let filter = parse_filter(filter)?;
+    let package = package.map(parse_package).transpose()?;
     let rel = manifest_dir
         .strip_prefix(root)
         .map_err(|_| format!("{} is not inside the repository {}", manifest_dir.display(), root.display()))?;
@@ -84,7 +120,23 @@ pub fn plan(root: &Path, manifest_dir: &Path, filter: &str) -> Result<[Step; 2],
     } else {
         rel.to_string_lossy().replace('\\', "/")
     };
-    let nextest = |filter: &str| vec!["nextest".to_string(), "run".to_string(), filter.to_string()];
+    let nextest = |filter: &str| {
+        let mut v = vec!["nextest".to_string(), "run".to_string()];
+        if let Some(p) = package {
+            v.extend(["-p".to_string(), p.to_string()]);
+        }
+        v.push(filter.to_string());
+        v
+    };
+    let in_container = format!(
+        "cd {} && {}",
+        sh_quote(&rel),
+        ["cargo".to_string()]
+            .into_iter()
+            .chain(nextest(filter))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
     Ok([
         Step {
             name: "this machine",
@@ -105,7 +157,7 @@ pub fn plan(root: &Path, manifest_dir: &Path, filter: &str) -> Result<[Step; 2],
                 "--",
                 "sh",
                 "-c",
-                &format!("cd '{rel}' && cargo nextest run {filter}"),
+                &in_container,
             ]
             .map(String::from)
             .to_vec(),
@@ -144,7 +196,7 @@ pub fn command(c: GoldenCommand) -> Result<Report, CliError> {
             "run it from the workspace of the test, or pass --manifest-dir.",
         ))
     })?;
-    let steps = plan(&root, &dir, &a.filter).map_err(|e| CliError::usage(format!("dev golden confirm: {e}")))?;
+    let steps = plan(&root, &dir, a.package.as_deref(), &a.filter).map_err(|e| CliError::usage(format!("dev golden confirm: {e}")))?;
     let env: HashMap<String, String> = std::env::vars().collect();
     let mut results = Vec::new();
     for s in &steps {
@@ -154,26 +206,26 @@ pub fn command(c: GoldenCommand) -> Result<Report, CliError> {
             s.program,
             s.args.join(" ")
         );
-        let ok = ToolCall::new(&s.program)
+        let ran = ToolCall::new(&s.program)
             .args(s.args.iter().cloned())
             .cwd(&s.cwd)
             .timeout(max)
             .output(Output::Stream)
-            .pass([
-                "PADDOCK_UPDATE_GOLDEN",
-                "PADDOCK_LINUX_CPUS",
-                "PADDOCK_LINUX_JOBS",
-                "PADDOCK_LINUX_MEMORY",
-                "CARGO_BUILD_JOBS",
-                "CARGO_TARGET_DIR",
-                "DOCKER",
-            ])
-            .run(&env, &mut std::io::stderr())
-            .map(|ran| ran.success)
-            .unwrap_or_else(|e| {
+            .pass(PASSED_ENV)
+            .run(&env, &mut std::io::stderr());
+        let (ok, no_tests) = match &ran {
+            Ok(r) => (r.success, r.how == "exit 4"),
+            Err(e) => {
                 eprintln!("golden confirm: {e}");
-                false
-            });
+                (false, false)
+            }
+        };
+        if no_tests {
+            eprintln!(
+                "golden confirm: no test matched the filter `{}` on {} (nextest exits 4)",
+                a.filter, s.name
+            );
+        }
         eprintln!("golden confirm: {}: {}", s.name, if ok { "passed" } else { "FAILED" });
         results.push((s.name, ok));
     }
@@ -198,14 +250,14 @@ mod tests {
         for ok in ["golden", "a::b::c_1", "x-y.z"] {
             assert_eq!(parse_filter(ok), Ok(ok));
         }
-        for bad in ["", "a b", "a;b", "a'b", "$(x)", "a|b", "a/b"] {
+        for bad in ["", "a b", "a;b", "a'b", "$(x)", "a|b", "a/b", "--no-run", "-E", "-x"] {
             assert!(parse_filter(bad).unwrap_err().contains("not a test filter"), "{bad}");
         }
     }
 
     #[test]
     fn two_runs_the_same_filter_in_the_same_workspace_one_in_the_ci_image() {
-        let [host, linux] = plan(Path::new("/r"), Path::new("/r/tools/paddock-dev"), "check::c131").unwrap();
+        let [host, linux] = plan(Path::new("/r"), Path::new("/r/tools/paddock-dev"), None, "check::c131").unwrap();
         assert_eq!(
             (host.program.as_str(), host.args.join(" ")),
             ("cargo", "nextest run check::c131".to_string())
@@ -219,14 +271,31 @@ mod tests {
         );
         assert!(line.ends_with("cd 'tools/paddock-dev' && cargo nextest run check::c131"), "{line}");
         assert_eq!(
-            plan(Path::new("/r"), Path::new("/r"), "t").unwrap()[1].args.last().unwrap(),
+            plan(Path::new("/r"), Path::new("/r"), None, "t").unwrap()[1].args.last().unwrap(),
             "cd '.' && cargo nextest run t"
         );
         assert!(
-            plan(Path::new("/r"), Path::new("/elsewhere"), "t")
+            plan(Path::new("/r"), Path::new("/elsewhere"), None, "t")
                 .unwrap_err()
                 .contains("not inside")
         );
+    }
+
+    #[test]
+    fn a_package_and_a_quote_in_the_folder_are_passed_safely() {
+        let [host, linux] = plan(Path::new("/r"), Path::new("/r/it's here"), Some("paddock-dev"), "t").unwrap();
+        assert_eq!(host.args.join(" "), "nextest run -p paddock-dev t");
+        assert!(
+            linux
+                .args
+                .last()
+                .unwrap()
+                .ends_with("cd 'it'\\''s here' && cargo nextest run -p paddock-dev t"),
+            "{:?}",
+            linux.args
+        );
+        assert!(plan(Path::new("/r"), Path::new("/r"), Some("-x"), "t").is_err());
+        assert_eq!(sh_quote("a'b"), "'a'\\''b'");
     }
 
     #[test]

@@ -165,26 +165,27 @@ fn every_error_reads_as_a_sentence_naming_the_file() {
 /// the Mac's uid reached a Linux leg, train 14 WP-2).
 #[test]
 fn a_rewrite_prints_the_command_that_confirms_it_in_the_ci_image() {
+    use paddock_testkit::golden::{confirm_command, rewritten_notice};
     let s = Scratch::new();
     let pkg = s.path("repo/tools/paddock-dev");
     std::fs::create_dir_all(&pkg).expect("package folder");
     s.write("repo/ci-image/VERSION", "3\n").expect("version");
-    let cmd =
-        paddock_testkit::golden::confirm_command(Some(&pkg), Some("check::c131::tests::a_test"));
     assert_eq!(
-        cmd,
-        "tools/linux-container.sh --id paddock --ci-image -- sh -c 'cd tools/paddock-dev && cargo nextest run check::c131::tests::a_test'"
+        confirm_command(
+            Some(&pkg),
+            Some("paddock-dev"),
+            Some("check::c131::tests::a_test")
+        ),
+        "tools/linux-container.sh --id paddock --ci-image -- sh -c 'cd '\\''tools/paddock-dev'\\'' && cargo nextest run -p paddock-dev check::c131::tests::a_test'"
     );
-    // the repository root itself, and the names that are not a test path
+    // the repository root itself, and the names that are not a test path or package
     assert!(
-        paddock_testkit::golden::confirm_command(Some(&s.path("repo")), Some("main"))
-            .contains("cd . && cargo nextest run <test name>")
+        confirm_command(Some(&s.path("repo")), None, Some("main"))
+            .contains("cargo nextest run <test name>")
     );
-    assert!(
-        paddock_testkit::golden::confirm_command(None, Some("a b; rm"))
-            .contains("<the package folder> && cargo nextest run <test name>")
-    );
-    let notice = paddock_testkit::golden::rewritten_notice(&s.path("x.txt"), Some(&pkg), Some("t"));
+    assert!(confirm_command(None, Some("a b"), Some("a b; rm")).contains("<the package folder>"));
+    assert!(!confirm_command(None, Some("a b"), Some("t")).contains("-p"));
+    let notice = rewritten_notice(&s.path("x.txt"), Some(&pkg), None, Some("t"));
     assert!(
         notice.contains("Confirm it on Linux as root in the CI image")
             && notice.contains("./dev golden confirm"),
@@ -193,5 +194,13 @@ fn a_rewrite_prints_the_command_that_confirms_it_in_the_ci_image() {
     assert!(
         notice.contains(&s.path("x.txt").display().to_string()),
         "{notice}"
+    );
+    // a quote in a folder name stays inside its word
+    let odd = s.path("repo/it's here");
+    std::fs::create_dir_all(&odd).expect("odd folder");
+    let cmd = confirm_command(Some(&odd), None, Some("t"));
+    assert!(
+        cmd.contains("s here") && !cmd.contains("cd 'it's here'"),
+        "{cmd}"
     );
 }

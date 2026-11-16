@@ -111,10 +111,20 @@ impl fmt::Display for GoldenError {
 
 impl std::error::Error for GoldenError {}
 
-/// The command that confirms the test `test` of the package at `manifest_dir` on Linux as root in the CI image: run from the
-/// repository root (the folder with `ci-image/VERSION` above `manifest_dir`). A name that is not a test path (`main`, as nextest and
-/// `--test-threads=1` name the thread, or nothing) leaves `<test name>` to fill in.
-pub fn confirm_command(manifest_dir: Option<&Path>, test: Option<&str>) -> String {
+/// `text` as one `sh` word: in single quotes, a `'` inside written as `'\''`.
+fn sh_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+/// The command that confirms the test `test` of the package `package` at `manifest_dir` on Linux as root in the CI image: run from the
+/// repository root (the folder with `ci-image/VERSION` above `manifest_dir`), every word safe to paste into `sh`. A name that is not a
+/// test path (`main`, as `--test-threads=1` names the thread, or nothing) leaves `<test name>` to fill in; so does a missing package or
+/// folder. On an arm64 Mac the CI image is a local arm64 build (`tools/linux-container.sh --ci-image`), not the registry's amd64 one.
+pub fn confirm_command(
+    manifest_dir: Option<&Path>,
+    package: Option<&str>,
+    test: Option<&str>,
+) -> String {
     let test = test
         .filter(|t| {
             *t != "main"
@@ -123,6 +133,13 @@ pub fn confirm_command(manifest_dir: Option<&Path>, test: Option<&str>) -> Strin
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ':'))
         })
         .unwrap_or("<test name>");
+    let package = package
+        .filter(|p| {
+            !p.is_empty()
+                && p.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+        })
+        .map_or(String::new(), |p| format!("-p {p} "));
     let rel = manifest_dir
         .and_then(|dir| {
             let root = dir
@@ -136,18 +153,25 @@ pub fn confirm_command(manifest_dir: Option<&Path>, test: Option<&str>) -> Strin
             Some(if rel.is_empty() { ".".to_string() } else { rel })
         })
         .unwrap_or_else(|| "<the package folder>".to_string());
+    let inner = format!("cd {} && cargo nextest run {package}{test}", sh_quote(&rel));
     format!(
-        "tools/linux-container.sh --id paddock --ci-image -- sh -c 'cd {rel} && cargo nextest run {test}'"
+        "tools/linux-container.sh --id paddock --ci-image -- sh -c {}",
+        sh_quote(&inner)
     )
 }
 
 /// What a rewrite prints: the file, why it matters and [`confirm_command`] (a Mac-only rewrite that was never run as root on Linux is
-/// how a golden with the Mac's uid reaches CI).
-pub fn rewritten_notice(path: &Path, manifest_dir: Option<&Path>, test: Option<&str>) -> String {
+/// how a golden with the Mac's uid reaches CI). `test` is `NEXTEST_TEST_NAME` when set, else the name of the thread.
+pub fn rewritten_notice(
+    path: &Path,
+    manifest_dir: Option<&Path>,
+    package: Option<&str>,
+    test: Option<&str>,
+) -> String {
     format!(
-        "golden: rewrote {}\n  Confirm it on Linux as root in the CI image before you commit it (a value of this machine fails there):\n    {}\n  or both runs at once: ./dev golden confirm <test filter>",
+        "golden: rewrote {}\n  Confirm it on Linux as root in the CI image before you commit it (a value of this machine fails there):\n    {}\n  or both runs at once: ./dev golden confirm [-p <package>] <test filter>",
         path.display(),
-        confirm_command(manifest_dir, test)
+        confirm_command(manifest_dir, package, test)
     )
 }
 
@@ -176,10 +200,17 @@ pub fn check_golden(path: &Path, actual: &str, mode: GoldenMode) -> Result<Golde
         fs::create_dir_all(path.parent().unwrap_or(Path::new(""))).map_err(io_err)?;
         fs::write(path, actual.as_bytes()).map_err(io_err)?;
         let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from);
+        let package = std::env::var("CARGO_PKG_NAME").ok();
+        // nextest names the test in NEXTEST_TEST_NAME (its last word is the test path); a libtest thread is named after the test.
+        let nextest = std::env::var("NEXTEST_TEST_NAME").ok();
         let thread = std::thread::current();
+        let test = nextest
+            .as_deref()
+            .and_then(|n| n.split_whitespace().last())
+            .or_else(|| thread.name());
         eprintln!(
             "{}",
-            rewritten_notice(path, manifest_dir.as_deref(), thread.name())
+            rewritten_notice(path, manifest_dir.as_deref(), package.as_deref(), test)
         );
         return Ok(Golden::Updated);
     }

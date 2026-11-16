@@ -4,21 +4,21 @@
 // turned the Linux leg red; see docs/lessons.md, 2026-11-15). The fix is in the test, not the file: normalise the value in the test's
 // `norm()` (tools/paddock-dev/tests/it/host_steps.rs) before the comparison, so the golden says `<uid>` and every machine writes the same.
 //
-// Read: the tracked text files of the golden folders: any path with a `golden` or `goldens` folder, and files named `*.golden`.
-// Flagged, one finding per line and kind:
+// Read: the text files under the golden folders (a `golden` or `goldens` folder in the path), and files named `*.golden` or `*.snap`. The
+// check walks the working folder today; reading git's tracked file list instead is the approved train-14 item.
+// Flagged, one finding per line and kind, by fixed patterns only: the result is the same on every machine (a Mac, the CI image as root,
+// Windows), never a function of who runs it:
 // - ids: `uid`, `gid`, `euid`, `egid`, `user_id` or `group_id` followed by a number (the Mac's 501 against a CI container's 0);
 // - home paths: `/Users/<name>`, `/home/<name>`, `C:\Users\<name>` (also with `\\`; a placeholder such as `<name>` is not a name);
-// - temp paths: `/tmp/<x>`, `/private/tmp/<x>`, `/var/folders/`, `\Temp\`;
-// - this machine, read from the environment when the check runs and never written down: the user name and home folder, the host name,
-//   the RAM in bytes, KiB or MiB, and the CPU count next to `cpu`, `core` or `thread`. `PADDOCK_GOLDEN_FACTS` (JSON: user, home, host,
-//   memBytes, cpus) replaces them, for tests and for judging a tree against another machine.
-// A site that is fine (an invented id in a fixture, a documented name) has an entry in `conformance/c131-allow.json` (path, a piece of the
-// flagged line as `site`, a `reason`, `count`), read by the shared allow list; an entry that matches nothing is stale (a warning).
-// Known gaps: a value spelled another way (`0x1f5`, a size in GiB, a uid in `ls -l` columns) and one split over lines; a golden outside the
-// folders above is not read.
-// ER-41: report-only (warnings) until its first green run on the real tree, recorded in docs/gates.toml.
+// - temp paths: `/tmp/<x>`, `/private/tmp/<x>`, `/var/folders/`, `\Temp\`.
+// A site that is fine (an invented id or user in a fixture) has an entry in `conformance/c131-allow.json` (path, a piece of the flagged
+// line as `site`, a `reason`, `count`), read by the shared allow list; an entry that matches nothing is stale (a warning).
+// Known gaps: this machine's own user, host, RAM or CPU count (read from the environment, they made the result differ per machine and
+// were dropped), a value spelled another way (`0x1f5`, a uid in `ls -l` columns), one split over lines, and a golden outside the folders
+// above.
+// ER-41: report-only (warnings) until its first green run on the real tree, recorded in docs/gates.toml; it may not block before the
+// shared allow-list reader has its merge-base growth guard (docs/gates.toml).
 // Rust host: tools/paddock-dev/src/check/c131.rs (same findings, line for line).
-import os from 'node:os';
 import { warn } from '../finding.mjs';
 import { readAllowList } from '../util/allow-list.mjs';
 
@@ -31,7 +31,7 @@ export const IMPLEMENTATION = new Set([
   'tools/paddock-dev/tests/it/check_c131.rs',
   ALLOW,
 ]);
-const GOLDEN_PATH = /(?:^|\/)goldens?\/|\.golden$/;
+const GOLDEN_PATH = /(?:^|\/)goldens?\/|\.(?:golden|snap)$/;
 const BINARY = /\.(?:png|jpe?g|gif|ico|icns|webp|bmp|tiff?|pdf|zip|gz|tgz|xz|zst|7z|whl|wasm|dmg|pkg|msi|exe|dll|so|dylib|a|lib|rlib|o|obj|pdb|ttf|otf|woff2?|mp3|mp4|mov|wav|webm|parquet|duckdb|sqlite|db|evtx|dmp|bin|onnx|safetensors)$/i;
 const BROKEN_FIX = 'Restore conformance/c131-allow.json: {"allow": [{"path": "...", "site": "...", "reason": "...", "count": 1}]}.';
 const FIX = "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason.";
@@ -47,46 +47,12 @@ const PATTERNS = [
 ];
 const escape = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** What this machine is: { user, home, host, memBytes, cpus }, from `PADDOCK_GOLDEN_FACTS` or the environment. */
-export function machineFacts(env = process.env) {
-  if (env.PADDOCK_GOLDEN_FACTS) return JSON.parse(env.PADDOCK_GOLDEN_FACTS);
-  return {
-    user: env.USER || env.USERNAME || env.LOGNAME || '',
-    home: env.HOME || env.USERPROFILE || '',
-    host: os.hostname(),
-    memBytes: os.totalmem(),
-    cpus: os.availableParallelism(),
-  };
-}
-
-/** The patterns of the machine `facts` describe: [{ kind, re }], group 1 the site. A fact too short or too common to tell from other text makes none. */
-export function machinePatterns(facts) {
-  const out = [];
-  const word = (name) => new RegExp(`(?:^|[^A-Za-z0-9_.-])(${escape(name)})(?:$|[^A-Za-z0-9_-])`, 'i');
-  const user = String(facts.user ?? '');
-  if (user.length >= 3 && user.toLowerCase() !== 'root') out.push({ kind: 'user', re: word(user) });
-  const home = String(facts.home ?? '');
-  if (home.length > 3 && home !== '/' && home !== '/root') out.push({ kind: 'home-of-this-machine', re: new RegExp(`(${escape(home)})(?:$|[^A-Za-z0-9_])`) });
-  const host = String(facts.host ?? '').replace(/\.local$/i, '');
-  for (const h of new Set([host, host.split('.')[0]])) {
-    if (h.length >= 4 && h.toLowerCase() !== 'localhost') out.push({ kind: 'host', re: word(h) });
-  }
-  const mem = Number(facts.memBytes);
-  if (Number.isFinite(mem) && mem >= 2 ** 28) {
-    for (const n of new Set([mem, Math.floor(mem / 1024), Math.floor(mem / 1048576)])) out.push({ kind: 'ram', re: new RegExp(`(?:^|[^0-9.])(${n})(?:$|[^0-9])`) });
-  }
-  const cpus = Number(facts.cpus);
-  if (Number.isInteger(cpus) && cpus >= 2) out.push({ kind: 'cpus', re: new RegExp(`(?:^|[^A-Za-z0-9_])((?:cpus?|cores?|threads?|nproc)[^A-Za-z0-9\\n]{0,4}${cpus})(?:$|[^0-9.])`, 'i') });
-  return out;
-}
-
 /** [{ line, kind, site, text }] of every machine-specific literal in `text`, one per line and kind. */
-export function goldenSites(text, facts) {
-  const patterns = [...PATTERNS, ...machinePatterns(facts)];
+export function goldenSites(text) {
   const out = [];
   text.split('\n').forEach((raw, i) => {
     const line = raw.replace(/\r$/, '');
-    for (const { kind, re } of patterns) {
+    for (const { kind, re } of PATTERNS) {
       const m = re.exec(line);
       if (m) out.push({ line: i + 1, kind, site: m[1] ?? m[2], text: line });
     }
@@ -115,7 +81,6 @@ export default {
   run(ctx) {
     const { list: allow, broken } = readAllowList(ctx, this.allowList);
     if (broken) return broken;
-    const facts = machineFacts();
     const out = [];
     for (const f of ctx.files()) {
       if (!isGolden(f)) continue;
@@ -128,7 +93,7 @@ export default {
         allow.skip(f);
         continue;
       }
-      for (const { line, kind, site, text: at } of goldenSites(text, facts)) {
+      for (const { line, kind, site, text: at } of goldenSites(text)) {
         const said = allow.admit(f, (s) => at.includes(s));
         if (said === 'allowed') continue;
         const what = said === 'beyond' ? ' beyond the count of its allow entry' : '';

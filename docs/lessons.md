@@ -2279,15 +2279,16 @@ hang, in the shell and in Rust (ADR 0103, "Amendment"). **Rule:** a test of a ti
 signal it gives, not the setup before it; state that an abandoned worker can still write is that worker's own. **Class: work before
 the hang point of a hung-phase test meeting its limit under load (third sighting; ADR 0103 amendment).**
 
-## Goldens captured on one machine failed on another; they are now checked when they are made (2026-11-16, train 14 WP-2)
+## Goldens captured on one machine failed on another; they are now checked when they are made (2026-11-15, train 14 WP-2; C131 added 2026-11-16)
 On WP-2 alone six goldens captured on the Mac failed elsewhere: macOS-only git config keys, the CI image's `/sccache` mount, RAM
 from `sysctl` against a file, the host OS paired with its pin, root against a normal uid, and a guardian golden with the Mac's uid
 501 baked in that would have turned the Linux leg red. Each was found by CI or by a later review, after the golden had been
-committed. Now the check runs when the golden is made: conformance C131 (report-only, ER-41) reads the tracked golden folders for
-uid and gid numbers, `/Users`, `/home` and `C:\Users` paths, temp paths and the user, host, home folder, RAM and CPU count of the
-machine that runs it; a rewrite with `PADDOCK_UPDATE_GOLDEN` prints the command that runs the test on Linux as root in the CI image;
-and `./dev golden confirm <test filter>` runs both and passes only if both pass. The first run on the tree found one real value (a
-real host name in a wiki fixture) and 11 sites that are invented data or the `decryp7` organisation, waived with reasons.
+committed. Now the check runs when the golden is made: conformance C131 (report-only, ER-41) reads the golden folders for uid and
+gid numbers, `/Users`, `/home` and `C:\Users` paths and temp paths; a rewrite with `PADDOCK_UPDATE_GOLDEN` prints the command that
+runs the test on Linux as root in the CI image; and `./dev golden confirm <test filter>` runs both and passes only if both pass.
+The first version also read the user, host, RAM and CPU count of the machine that ran it; review found that made its result differ
+per machine (a waiver for the account name was stale on CI, a RAM figure in KiB collided with other numbers, a non-ASCII host name
+panicked the Rust host), so it reads fixed patterns only. The first run on the tree found no real value, only invented users.
 **Rule:** a golden holds nothing of the machine that captured it; normalise the value in the test's `norm()`, and confirm a rewritten
-golden on Linux as root before committing it. **Class: a golden captured on one machine fails on another (second and later
-sightings: the six WP-2 cases above; ER-21).**
+golden on Linux as root before committing it; a check's result never depends on the machine that runs it. **Class: a golden captured
+on one machine fails on another (second and later sightings: the six WP-2 cases above; ER-21).**

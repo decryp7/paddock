@@ -2,26 +2,14 @@
 //! working tree.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::check::{LIVE_STALL, has_node, node, node_ticking, repo_root, skip};
-use paddock_dev::check::c131::machine_facts;
 use paddock_dev::check::tree::Tree;
 use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use std::path::Path;
 
 /// The planted uid, the invented user an allow entry covers (twice, then a third beyond its count), a placeholder, a golden of
-/// another kind, a binary golden, a stale entry, and (made from this machine's own facts at run time, never written down) the user,
-/// the host, the home folder, the RAM and the CPU count of the machine that runs the test.
+/// another kind, a binary golden, a snapshot, CRLF and non-ASCII text, and a stale entry.
 fn cases() -> Vec<(String, String)> {
-    let env: HashMap<String, String> = std::env::vars().collect();
-    let f = machine_facts(&env);
-    let mut own = format!("user {}\nhost {}\nhome {}/x\n", f.user, f.host, f.home);
-    own.push_str(&format!(
-        "ram {:.0}\nram_kb {:.0}\ncpus: {:.0}\n",
-        f.mem_bytes,
-        (f.mem_bytes / 1024.0).floor(),
-        f.cpus
-    ));
     let s = |a: &str, b: &str| (a.to_string(), b.to_string());
     vec![
         s(
@@ -39,7 +27,8 @@ fn cases() -> Vec<(String, String)> {
         s("z/e.golden", "euid: 0\n"),
         s("x/tests/golden/f.png", "bytes uid 501"),
         s("x/tests/fixtures/g.json", "{\"uid\": 501}\n"),
-        s("x/tests/golden/h.txt", &own),
+        s("x/f.snap", "uid: 7\n"),
+        s("x/tests/golden/h.txt", "é😀 uid=1\r\nclean\r\n/home/bï\r\n"),
     ]
 }
 
@@ -65,14 +54,6 @@ fn shared_part(v: &Value) -> Value {
     json!({"app": v["app"], "checks": v["checks"], "findings": v["findings"], "waived": v["waived"], "errors": v["errors"], "warnings": v["warnings"]})
 }
 
-/// This machine's facts as the Rust host reads them, handed to the JavaScript host (the `node` helper starts it with a bare
-/// environment, so it would not see the user or home folder): both hosts then judge the same machine.
-fn facts_json() -> String {
-    let env: HashMap<String, String> = std::env::vars().collect();
-    let f = machine_facts(&env);
-    json!({"user": f.user, "home": f.home, "host": f.host, "memBytes": f.mem_bytes, "cpus": f.cpus}).to_string()
-}
-
 const JS_RUN: &str = r#"
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
@@ -95,11 +76,7 @@ fn tree_of(files: &[(&str, &str)]) -> tempfile::TempDir {
 fn both(root: &Path) -> (Value, Value) {
     let js: Value = serde_json::from_str(&node(
         JS_RUN,
-        &[
-            ("RT5_ROOT", root.display().to_string()),
-            ("RT5_APP", "fixture".into()),
-            ("PADDOCK_GOLDEN_FACTS", facts_json()),
-        ],
+        &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", "fixture".into())],
     ))
     .unwrap();
     let r = run_checks(&options(root, "fixture"), &registry()).unwrap();
@@ -139,6 +116,14 @@ fn c131_flags_the_planted_uid_and_the_other_machine_values_as_warnings() {
             .any(|f| f.message.starts_with("stale allow entry (x/tests/golden/b.json: gone)")),
         "{got:?}"
     );
+    assert!(
+        has("x/f.snap", 1, "id `uid: 7`")
+            && has("x/tests/golden/h.txt", 1, "id `uid=1`")
+            && has("x/tests/golden/h.txt", 3, "home `/home/b`")
+    );
+    // Exactly these 13, whoever runs it: the check reads no fact of the machine, so a Mac and the CI image as root agree
+    // (`./dev golden confirm check_c131` runs this on both).
+    assert_eq!(got.len(), 13, "{got:?}");
     assert_eq!(r.errors(), 0, "report-only until its first green run (ER-41)");
 }
 
@@ -201,11 +186,7 @@ fn live_c131_tree_findings_equal_the_js_host() {
         let driver = format!(
             "import fs from 'node:fs';\nimport {{ syncBuiltinESMExports }} from 'node:module';\nconst read = fs.readFileSync;\nfs.readFileSync = (...a) => {{ process.stdout.write('.\\n'); return read(...a); }};\nsyncBuiltinESMExports();\n{JS_RUN}"
         );
-        let env = [
-            ("RT5_ROOT", js_root.display().to_string()),
-            ("RT5_APP", "paddock".into()),
-            ("PADDOCK_GOLDEN_FACTS", facts_json()),
-        ];
+        let env = [("RT5_ROOT", js_root.display().to_string()), ("RT5_APP", "paddock".into())];
         serde_json::from_str::<Value>(node_ticking(&driver, &env, &progress).trim()).unwrap()
     });
     let r = paddock_testkit::guarded("the Rust C131 over the live tree", LIVE_STALL, {
