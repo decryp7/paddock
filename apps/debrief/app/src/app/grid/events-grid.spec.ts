@@ -934,7 +934,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       const feed = TestBed.inject(LiveFeed);
       await TestBed.inject(LiveTail).toggle();
       await clock.advance(100);
-      await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1), { timeout: 3000 });
+      await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1));
       await settle(fixture);
       const answer = backend.queryPage.bind(backend);
       let asked = 0;
@@ -944,7 +944,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
         return answer(request);
       });
       el<HTMLButtonElement>(fixture, '[data-testid=new-events]').click();
-      await vi.waitFor(() => expect(asked).toBeGreaterThan(1), { timeout: 3000 });
+      await vi.waitFor(() => expect(asked).toBeGreaterThan(1));
       await flush(fixture);
       const total = grid.total();
       expect(total).toBeGreaterThan(5000);
