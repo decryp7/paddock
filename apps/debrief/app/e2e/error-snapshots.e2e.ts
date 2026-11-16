@@ -3,16 +3,15 @@ import type { Page } from '@playwright/test';
 import { CAPTURE_TIMEOUT, openApp, openView } from './app';
 import { openAppWith } from './mock-url';
 
-
 // Error snapshots: the window is rendered to an image inside the webview (html-to-image), so this runs
 // against the real capture code in every project. The production build is served with the Tauri CSP,
 // which proves the capture needs no blob:, remote or inline-script permission.
 
 const toast = (page: Page) => page.locator('[data-testid=notification][data-cause="diagnostics.snapshot"]');
 
-/** Raises an uncaught error the way a bug would: from a microtask outside Angular's zone of control (not a timer: the pinned fake clock's setTimeout swallows an exception thrown by its callback, with no window 'error' event). */
+/** Raises an uncaught error the way a bug would: from a timer, outside Angular's zone of control. */
 async function throwUncaught(page: Page, message: string): Promise<void> {
-  await page.evaluate((m) => void queueMicrotask(() => { throw new Error(m); }), message);
+  await page.evaluate((m) => void setTimeout(() => { throw new Error(m); }, 0), message);
 }
 
 async function openSnapshotsView(page: Page): Promise<void> {

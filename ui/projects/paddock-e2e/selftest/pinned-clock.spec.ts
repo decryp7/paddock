@@ -1,0 +1,88 @@
+import { test as base, expect } from '@playwright/test';
+import { test as kit } from '../src/fixtures.ts';
+import { pinnedClockTest } from '../src/index.ts';
+
+const test = pinnedClockTest(kit, { now: '2001-09-09T01:46:40Z', timezoneId: 'Asia/Singapore', locale: 'en-GB' });
+// The same wrapper over plain Playwright, for the checks that need no kit fixture.
+const plain = pinnedClockTest(base, { now: '2001-09-09T01:46:40Z', timezoneId: 'Asia/Singapore', locale: 'en-GB' });
+
+plain('a page starts at the pinned instant in the pinned zone and locale, and the clock ticks', async ({ page }) => {
+  await page.goto('data:text/html,<p>x</p>');
+  const read = () => page.evaluate(() => ({ now: new Date().toISOString(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, lang: navigator.language }));
+  const first = await read();
+  expect(first.now.startsWith('2001-09-09T01:46:')).toBe(true);
+  expect(first.tz).toBe('Asia/Singapore');
+  expect(first.lang).toBe('en-GB');
+  await page.clock.runFor(60_000);
+  expect((await read()).now >= '2001-09-09T01:47:').toBe(true);
+});
+
+plain('a page opened from the context is pinned too', async ({ context }) => {
+  const other = await context.newPage();
+  expect(await other.evaluate(() => new Date().toISOString().slice(0, 13))).toBe('2001-09-09T01');
+});
+
+plain.describe('opted out', () => {
+  // The spec needs the real time.
+  plain.use({ pinnedClock: false });
+  plain('keeps the real clock', async ({ page }) => {
+    expect(Math.abs((await page.evaluate(() => Date.now())) - Date.now())).toBeLessThan(60_000);
+  });
+});
+
+plain('a second install in the spec wins over the pin', async ({ page }) => {
+  await page.clock.install({ time: new Date('2001-01-01T00:00:00Z') });
+  expect(await page.evaluate(() => new Date().toISOString().slice(0, 10))).toBe('2001-01-01');
+});
+
+// The timers are the subject here, not waits, and C71 (rule 49) reads the call names: inside the page the timer functions are called
+// through the window by name.
+type Timers = Record<'setTimeout' | 'setInterval' | 'requestAnimationFrame', (cb: (...a: unknown[]) => void, ...rest: unknown[]) => unknown>;
+
+// Playwright's fake clock catches an exception a timer callback throws; the fixture reports it the way a browser does.
+test.describe('a throw from a timer callback reaches pageErrors and the window error event', () => {
+  const plant = (page: import('@playwright/test').Page, body: () => void) => page.evaluate(body);
+
+  test('setTimeout', async ({ page, pageErrors }) => {
+    await page.goto('data:text/html,<p>x</p>');
+    await plant(page, () => void (window as unknown as Timers)['setTimeout'](() => { throw new Error('boom-timeout'); }, 0));
+    await expect.poll(() => pageErrors).toEqual(['boom-timeout']);
+  });
+
+  test('three in one batch: every one is reported, not only the first', async ({ page, pageErrors }) => {
+    await page.goto('data:text/html,<p>x</p>');
+    await plant(page, () => {
+      for (const n of ['a', 'b', 'c']) (window as unknown as Timers)['setTimeout'](() => { throw new Error(`boom-${n}`); }, 0);
+    });
+    await expect.poll(() => [...pageErrors].sort()).toEqual(['boom-a', 'boom-b', 'boom-c']);
+  });
+
+  test('setInterval, requestAnimationFrame and the window error event', async ({ page, pageErrors }) => {
+    await page.goto('data:text/html,<p>x</p>');
+    await page.evaluate(() => {
+      const w = window as unknown as { __seen: string[] };
+      w.__seen = [];
+      window.addEventListener('error', (e) => w.__seen.push((e.error as Error | null)?.message ?? e.message));
+      const id = (window as unknown as Timers)['setInterval'](() => { clearInterval(id as number); throw new Error('boom-interval'); }, 5);
+      (window as unknown as Timers)['requestAnimationFrame'](() => { throw new Error('boom-raf'); });
+    });
+    await expect.poll(() => [...pageErrors].sort()).toEqual(['boom-interval', 'boom-raf']);
+    // One window event per throw; WebKit hides the message of an error on a data: page ("Script error."), so count them.
+    expect(await page.evaluate(() => (window as unknown as { __seen: string[] }).__seen.length)).toBe(2);
+  });
+
+  test('ids, string-free arguments and runFor are unchanged', async ({ page, pageErrors }) => {
+    await page.goto('data:text/html,<p>x</p>');
+    const r = await page.evaluate(
+      () =>
+        new Promise<{ id: string; arg: number }>((resolve) => {
+          const id = (window as unknown as Timers)['setTimeout']((a: unknown) => resolve({ id: typeof id, arg: a as number }), 50, 7);
+        }),
+    );
+    expect(r).toEqual({ id: 'number', arg: 7 });
+    await page.evaluate(() => { (window as unknown as { __n: number }).__n = 0; (window as unknown as Timers)['setTimeout'](() => { (window as unknown as { __n: number }).__n = 1; }, 10_000); });
+    await page.clock.runFor(10_000);
+    expect(await page.evaluate(() => (window as unknown as { __n: number }).__n)).toBe(1);
+    expect(pageErrors).toEqual([]);
+  });
+});

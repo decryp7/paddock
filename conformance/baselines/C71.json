@@ -3,12 +3,17 @@
  "sites": [
   {
    "file": "apps/debrief/app/e2e/activity-errors.e2e.ts",
-   "line": 51,
+   "line": 49,
    "hash": "3dc7b574344af5e8"
   },
   {
+   "file": "apps/debrief/app/e2e/activity-report.e2e.ts",
+   "line": 19,
+   "hash": "1133341f068e0f3a"
+  },
+  {
    "file": "apps/debrief/app/e2e/app.ts",
-   "line": 51,
+   "line": 44,
    "hash": "1ca8abafcfaa7000"
   },
   {
@@ -18,7 +23,7 @@
   },
   {
    "file": "apps/debrief/app/e2e/browser-scripts.e2e.ts",
-   "line": 155,
+   "line": 154,
    "hash": "bb92dac1c07fac8b"
   },
   {
@@ -28,37 +33,42 @@
   },
   {
    "file": "apps/debrief/app/e2e/dock-float.e2e.ts",
-   "line": 160,
+   "line": 159,
    "hash": "df1ed6aaf4310034"
   },
   {
    "file": "apps/debrief/app/e2e/dock-panels.e2e.ts",
-   "line": 46,
+   "line": 45,
    "hash": "4edc13f2277d3a67"
   },
   {
+   "file": "apps/debrief/app/e2e/error-snapshots.e2e.ts",
+   "line": 13,
+   "hash": "17cb6cf49dfdd8f8"
+  },
+  {
    "file": "apps/debrief/app/e2e/home-narrow.e2e.ts",
-   "line": 26,
+   "line": 25,
    "hash": "27f38a8ce590d2bf"
   },
   {
    "file": "apps/debrief/app/e2e/i18n-pseudo.e2e.ts",
-   "line": 76,
+   "line": 75,
    "hash": "f98d49048bc13eb5"
   },
   {
    "file": "apps/debrief/app/e2e/main-layout.e2e.ts",
-   "line": 32,
+   "line": 31,
    "hash": "76f566c13a340666"
   },
   {
    "file": "apps/debrief/app/e2e/main-layout.e2e.ts",
-   "line": 158,
+   "line": 157,
    "hash": "124cb5498dd4d240"
   },
   {
    "file": "apps/debrief/app/e2e/main-layout.e2e.ts",
-   "line": 170,
+   "line": 169,
    "hash": "e1fd20482c6b752c"
   },
   {
@@ -73,12 +83,12 @@
   },
   {
    "file": "apps/debrief/app/e2e/native-feel.e2e.ts",
-   "line": 117,
+   "line": 116,
    "hash": "27323be34a0005e1"
   },
   {
    "file": "apps/debrief/app/e2e/navigation-history.e2e.ts",
-   "line": 24,
+   "line": 23,
    "hash": "23168f3397fdadfa"
   },
   {
@@ -88,12 +98,12 @@
   },
   {
    "file": "apps/debrief/app/e2e/tools-monitor-charts.e2e.ts",
-   "line": 59,
+   "line": 58,
    "hash": "008ef4ffa34e854e"
   },
   {
    "file": "apps/debrief/app/e2e/ux-home.e2e.ts",
-   "line": 67,
+   "line": 66,
    "hash": "bb92dac1c07fac8b"
   },
   {
@@ -158,7 +168,7 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/opener.rs",
-   "line": 420,
+   "line": 416,
    "hash": "4a1046787de4599e"
   },
   {
@@ -338,12 +348,12 @@
   },
   {
    "file": "apps/debrief/app/src/app/core/mock/mock-backend.spec.ts",
-   "line": 188,
+   "line": 187,
    "hash": "88cb7f34bcfcddf6"
   },
   {
    "file": "apps/debrief/app/src/app/core/mock/mock-backend.spec.ts",
-   "line": 192,
+   "line": 191,
    "hash": "88cb7f34bcfcddf6"
   },
   {
@@ -358,7 +368,7 @@
   },
   {
    "file": "apps/debrief/app/src/app/core/mock/mock-options.spec.ts",
-   "line": 62,
+   "line": 57,
    "hash": "6460a11b205cdcd7"
   },
   {
@@ -483,17 +493,17 @@
   },
   {
    "file": "apps/debrief/app/src/app/grid/events-grid.spec.ts",
-   "line": 557,
+   "line": 419,
    "hash": "2c9c3e44992adf7f"
   },
   {
    "file": "apps/debrief/app/src/app/grid/events-grid.spec.ts",
-   "line": 570,
+   "line": 432,
    "hash": "ac61110a874b0754"
   },
   {
    "file": "apps/debrief/app/src/app/grid/events-grid.spec.ts",
-   "line": 631,
+   "line": 493,
    "hash": "2c9c3e44992adf7f"
   },
   {
@@ -793,12 +803,12 @@
   },
   {
    "file": "apps/debrief/app/src/app/timeline/timeline-panel.spec.ts",
-   "line": 255,
+   "line": 254,
    "hash": "3107a0efa167e54b"
   },
   {
    "file": "apps/debrief/app/src/app/timeline/timeline-panel.spec.ts",
-   "line": 262,
+   "line": 261,
    "hash": "3107a0efa167e54b"
   },
   {
@@ -1153,22 +1163,22 @@
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
-   "line": 121,
+   "line": 120,
    "hash": "c69aa0a4d55d7a61"
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
-   "line": 126,
+   "line": 125,
    "hash": "af4d226ec4967c29"
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
-   "line": 155,
+   "line": 154,
    "hash": "a837550434f7c685"
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
-   "line": 253,
+   "line": 252,
    "hash": "a837550434f7c685"
   },
   {
@@ -1198,12 +1208,12 @@
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-native/tests/it/real_process.rs",
-   "line": 51,
+   "line": 53,
    "hash": "855cc4dd1d9f922c"
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-native/tests/it/real_process.rs",
-   "line": 103,
+   "line": 105,
    "hash": "a837550434f7c685"
   },
   {
@@ -1268,17 +1278,17 @@
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-windows/tests/it/eventlog_live.rs",
-   "line": 80,
+   "line": 76,
    "hash": "cf7f54f465941ddb"
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-windows/tests/it/eventlog_live.rs",
-   "line": 93,
+   "line": 89,
    "hash": "d6b395f9d534be1a"
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-windows/tests/it/eventlog_live.rs",
-   "line": 172,
+   "line": 168,
    "hash": "8a7b239b74fa9163"
   },
   {
@@ -1463,37 +1473,37 @@
   },
   {
    "file": "apps/dyno/app/e2e/flows.spec.ts",
-   "line": 289,
+   "line": 288,
    "hash": "7bba35e4f6072e4b"
   },
   {
    "file": "apps/dyno/app/e2e/flows.spec.ts",
-   "line": 343,
+   "line": 342,
    "hash": "7bba35e4f6072e4b"
   },
   {
    "file": "apps/dyno/app/e2e/row-actions.spec.ts",
-   "line": 34,
+   "line": 33,
    "hash": "812c3fa30b7f8bf0"
   },
   {
    "file": "apps/dyno/app/e2e/row-actions.spec.ts",
-   "line": 46,
+   "line": 45,
    "hash": "33046128e6ab59e9"
   },
   {
    "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 21,
+   "line": 20,
    "hash": "58bc5f6c17c7dc29"
   },
   {
    "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 30,
+   "line": 29,
    "hash": "767f0cb771c9e849"
   },
   {
    "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 43,
+   "line": 42,
    "hash": "7ea17622a91efd03"
   },
   {
@@ -1508,12 +1518,12 @@
   },
   {
    "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
-   "line": 820,
+   "line": 815,
    "hash": "c0f7df0977a37afe"
   },
   {
    "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
-   "line": 833,
+   "line": 828,
    "hash": "c0f7df0977a37afe"
   },
   {
@@ -1743,7 +1753,7 @@
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/term.rs",
-   "line": 68,
+   "line": 67,
    "hash": "c0f7df0977a37afe"
   },
   {
@@ -1773,7 +1783,7 @@
   },
   {
    "file": "apps/dyno/crates/dyno-platform/src/process.rs",
-   "line": 437,
+   "line": 435,
    "hash": "090f4447a438ed17"
   },
   {
@@ -1798,17 +1808,17 @@
   },
   {
    "file": "apps/pitcrew/app/e2e/screenshots.spec.ts",
-   "line": 91,
+   "line": 90,
    "hash": "124cb5498dd4d240"
   },
   {
    "file": "apps/pitcrew/app/e2e/screenshots.spec.ts",
-   "line": 206,
+   "line": 205,
    "hash": "767f0cb771c9e849"
   },
   {
    "file": "apps/pitcrew/app/e2e/screenshots.spec.ts",
-   "line": 208,
+   "line": 207,
    "hash": "4551282862261b15"
   },
   {
@@ -2073,7 +2083,7 @@
   },
   {
    "file": "apps/spotter/app/e2e/screenshots.spec.ts",
-   "line": 16,
+   "line": 14,
    "hash": "cd9a9c3c550c9a1a"
   },
   {
@@ -2213,7 +2223,7 @@
   },
   {
    "file": "apps/spotter/crates/spotter-render/src/page.rs",
-   "line": 729,
+   "line": 693,
    "hash": "50e8c3d16541ae4d"
   },
   {
@@ -2318,77 +2328,77 @@
   },
   {
    "file": "ui/e2e/contact-sheet-x21.spec.ts",
-   "line": 25,
+   "line": 24,
    "hash": "4551282862261b15"
   },
   {
    "file": "ui/e2e/contact-sheet-x21.spec.ts",
-   "line": 96,
+   "line": 95,
    "hash": "e1fd20482c6b752c"
   },
   {
    "file": "ui/e2e/data.spec.ts",
-   "line": 288,
+   "line": 263,
    "hash": "4551282862261b15"
   },
   {
    "file": "ui/e2e/gallery.spec.ts",
-   "line": 14,
+   "line": 13,
    "hash": "124cb5498dd4d240"
   },
   {
    "file": "ui/e2e/material.spec.ts",
-   "line": 171,
+   "line": 170,
    "hash": "9e2d480bbadca745"
   },
   {
    "file": "ui/e2e/shell-demo-channels.spec.ts",
-   "line": 114,
+   "line": 113,
    "hash": "58bc5f6c17c7dc29"
   },
   {
    "file": "ui/e2e/shell-demo-locale.spec.ts",
-   "line": 93,
+   "line": 92,
    "hash": "f98d49048bc13eb5"
   },
   {
    "file": "ui/e2e/shell-demo-locale.spec.ts",
-   "line": 101,
+   "line": 100,
    "hash": "17383b7125192a2b"
   },
   {
    "file": "ui/e2e/shell-demo-locale.spec.ts",
-   "line": 102,
+   "line": 101,
    "hash": "b43a663ea302b6b3"
   },
   {
    "file": "ui/e2e/shell-demo-locale.spec.ts",
-   "line": 108,
+   "line": 107,
    "hash": "f98d49048bc13eb5"
   },
   {
    "file": "ui/e2e/shell-demo-pages.spec.ts",
-   "line": 110,
+   "line": 120,
    "hash": "db3498fbec4cf17e"
   },
   {
    "file": "ui/e2e/shell-demo-pages.spec.ts",
-   "line": 112,
+   "line": 122,
    "hash": "d88056c1497b8c1e"
   },
   {
    "file": "ui/e2e/shell-demo-theme.spec.ts",
-   "line": 82,
+   "line": 81,
    "hash": "7bba35e4f6072e4b"
   },
   {
    "file": "ui/e2e/sunburst.spec.ts",
-   "line": 24,
+   "line": 23,
    "hash": "81c9bdcb95680af4"
   },
   {
    "file": "ui/e2e/workbench-demo.spec.ts",
-   "line": 328,
+   "line": 327,
    "hash": "b9493258497f2913"
   },
   {

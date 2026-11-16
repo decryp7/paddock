@@ -206,7 +206,6 @@ test.describe('jobs (plan S9)', () => {
   });
 
   test('a quiet job shows "Still working" and is never timed out', async ({ app, page }) => {
-    await page.clock.install();
     await page.goto('/');
     await page.getByRole('button', { name: 'Start quiet job' }).click();
     const status = app.statusBar.jobs;
@@ -416,7 +415,6 @@ test.describe('notifications and service health (plan S4)', () => {
   });
 
   test('a toast is at most 360 px wide, and in a small window one line above the status bar', async ({ app, page }) => {
-    await page.clock.install();
     await page.setViewportSize({ width: 700, height: 700 });
     await page.goto('/');
     await page.getByRole('button', { name: 'Notify three times' }).click();
@@ -436,7 +434,6 @@ test.describe('notifications and service health (plan S4)', () => {
   });
 
   test('the same notice three times is one toast with a count, which times out and stays in the centre', async ({ app, page }) => {
-    await page.clock.install();
     await page.goto('/');
     await page.getByRole('button', { name: 'Notify three times' }).click();
     const toast = app.notifications.toastItems;

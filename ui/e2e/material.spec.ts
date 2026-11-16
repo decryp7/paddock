@@ -468,7 +468,7 @@ test.describe('outlined field geometry', () => {
           const field = page.getByTestId(id);
           await field.scrollIntoViewIfNeeded();
           // Material sizes the notch from a setTimeout its label's resize observer schedules: read the boxes once it has.
-          await expect(field.locator('.mdc-notched-outline__notch')).toHaveAttribute('style', /width/);
+          await expect(field.locator('.mdc-notched-outline__notch')).toHaveAttribute('style', /(^|;)\s*width:/);
           const m = await field.evaluate((f) => {
             const r = (e: Element | null) => e!.getBoundingClientRect();
             const text = f.querySelector('input.mat-mdc-input-element, textarea.mat-mdc-input-element');
@@ -525,18 +525,23 @@ test.describe('outlined field geometry', () => {
           await page.screenshot({ path: join(SHOTS, `mixed-row-${theme}-${density}.png`), clip: { x: b.x - 12, y: b.y - 12, width: b.width + 24, height: b.height + 24 } });
         }
         // The visible boxes: a field's outlined container (not its host, which also holds the subscript), a button itself.
-        const boxes = await row.evaluate((r) =>
-          [...r.children].map((c) => {
-            const box = (c.querySelector('.mat-mdc-text-field-wrapper') ?? c).getBoundingClientRect();
-            return { name: c.textContent?.trim() || (c.querySelector('input')?.getAttribute('aria-label') ?? ''), height: box.height, centre: box.top + box.height / 2 };
-          }),
-        );
-        expect(boxes.map((b) => Math.round(b.height)), 'the row mixes heights (labelled field, field, buttons)').toEqual([
+        const read = () =>
+          row.evaluate((r) =>
+            [...r.children].map((c) => {
+              const box = (c.querySelector('.mat-mdc-text-field-wrapper') ?? c).getBoundingClientRect();
+              return { name: c.textContent?.trim() || (c.querySelector('input')?.getAttribute('aria-label') ?? ''), height: box.height, centre: box.top + box.height / 2 };
+            }),
+          );
+        // The density and the field's own sizing apply over a few frames after open(): wait for the four heights (44, 44, 28, 28 were read
+        // against 40, 24, 28, 28 once, compact, light), never read the boxes once.
+        const heights = [
           (await px(page, '--pd-control-height')) + 2 * (await px(page, '--pd-space-2')),
           await px(page, '--pd-control-height'),
           await px(page, '--pd-button-height'),
           await px(page, '--pd-button-height'),
-        ]);
+        ];
+        await expect.poll(async () => (await read()).map((b) => Math.round(b.height)), { message: 'the row mixes heights (labelled field, field, buttons)' }).toEqual(heights);
+        const boxes = await read();
         const centres = boxes.map((b) => b.centre);
         expect(Math.max(...centres) - Math.min(...centres), JSON.stringify(boxes)).toBeLessThanOrEqual(1);
       });

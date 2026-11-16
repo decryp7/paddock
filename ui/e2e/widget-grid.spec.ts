@@ -4,7 +4,6 @@ import { startFrameCost, stopFrameCost, type Locator, type Page } from '@decryp7
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-
 /** Set WIDGET_GRID_SHOTS to a folder to also write the review screenshots there (light and dark, 1x and 2x). */
 const SHOTS = process.env['WIDGET_GRID_SHOTS'];
 const THEMES = ['dark', 'light'] as const;

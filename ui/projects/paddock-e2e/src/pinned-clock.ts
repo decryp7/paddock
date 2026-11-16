@@ -1,7 +1,12 @@
 import type { PlaywrightTestArgs, PlaywrightTestOptions, PlaywrightWorkerArgs, PlaywrightWorkerOptions, TestType } from '@playwright/test';
 
-/** The default instant of every pinned page: a Monday, 12:00 UTC, so "today" holds the mock's items at any wall-clock time. */
-export const PINNED_NOW = '2026-11-16T12:00:00Z';
+/**
+ * The default instant of every pinned page, and of the documentation screenshots (`FROZEN_AT` in doc-screens.ts is this value): a
+ * Thursday, 14:30 UTC, so "today" holds a mock's items at any wall-clock time.
+ */
+export const PINNED_AT = Date.UTC(2026, 9, 22, 14, 30, 0);
+/** {@link PINNED_AT} as an ISO instant. */
+export const PINNED_NOW = new Date(PINNED_AT).toISOString();
 
 /** The default zone and locale of a pinned page (a spec that sets its own, such as a screenshots project, can reuse them). */
 export const PINNED_ZONE = 'UTC';
@@ -42,10 +47,40 @@ export function pinnedInstant(options: PinnedClockOptions, env: Readonly<Record<
 }
 
 /**
+ * Runs in the page after the clock is installed. Playwright's fake clock catches an exception a timer callback throws (its
+ * `_updateRealTimeTimer` ends in `.catch(console.error)`, and `_runTo` keeps only the first error of a batch; clock.ts of
+ * playwright-core 1.64.1, read 2026-11-16), so a bug thrown from `setTimeout`, `setInterval`, `requestAnimationFrame` or
+ * `requestIdleCallback` reached neither `window` 'error' nor `pageerror`. This wraps the four so each callback runs in its own
+ * try/catch and reports through `reportError`, the way the browser reports a thrown timer callback. Ids, string callbacks and
+ * the other arguments pass through unchanged. Serialised into the page: it must not use anything from this module.
+ */
+export function reportTimerErrors(): void {
+  const w = window as unknown as Record<string, unknown> & { reportError(e: unknown): void };
+  const wrap = (callback: unknown) =>
+    typeof callback !== 'function'
+      ? callback
+      : function (this: unknown, ...args: unknown[]) {
+          try {
+            return (callback as (...a: unknown[]) => unknown).apply(this, args);
+          } catch (e) {
+            w.reportError(e);
+            return undefined;
+          }
+        };
+  for (const name of ['setTimeout', 'setInterval', 'requestAnimationFrame', 'requestIdleCallback']) {
+    const original = w[name];
+    if (typeof original !== 'function') continue;
+    w[name] = function (this: unknown, callback: unknown, ...rest: unknown[]) {
+      return (original as (...a: unknown[]) => unknown).call(this, wrap(callback), ...rest);
+    };
+  }
+}
+
+/**
  * `base` with the page clock installed before the first navigation of every context: the same fixed instant for a mock
  * backend's stamps and for the app's day grouping (CI run 8154: a run just after midnight had no "Today"). The clock
  * ticks on from the instant, so timers and animation frames keep working; a spec that calls `page.clock.install` or
- * `setFixedTime` itself still can (the later call wins, Playwright 1.64). `PADDOCK_E2E_NOW` moves the pin for a sweep.
+ * `setFixedTime` itself still can (the later call wins, Playwright 1.64). A throw from a timer callback is reported as in a real browser ({@link reportTimerErrors}). `PADDOCK_E2E_NOW` moves the pin for a sweep.
  * Wrap once per app and export the result as the app's `test`; specs import it from there.
  */
 export function pinnedClockTest<T extends object, W extends object>(
@@ -58,7 +93,10 @@ export function pinnedClockTest<T extends object, W extends object>(
     timezoneId: options.timezoneId ?? PINNED_ZONE,
     locale: options.locale ?? PINNED_LOCALE,
     context: async ({ context, pinnedClock }, use) => {
-      if (pinnedClock) await context.clock.install({ time: pinnedInstant(pinnedClock) });
+      if (pinnedClock) {
+        await context.clock.install({ time: pinnedInstant(pinnedClock) });
+        await context.addInitScript(reportTimerErrors);
+      }
       await use(context);
     },
   });

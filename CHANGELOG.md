@@ -6,6 +6,7 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### `@decryp7/paddock-e2e`: `pinnedClockTest`, one fixed page clock for every spec
 - New `pinnedClockTest(base, { now, timezoneId, locale })` (with `pinnedInstant`, `PINNED_NOW`, `PINNED_ZONE`, `PINNED_LOCALE`, `PINNED_NOW_ENV`): `base` with the page clock installed at one fixed instant, zone and locale before the first navigation, so a mock's relative stamps and the app's day grouping agree at every wall-clock time (Spotter's first-load spec failed just after midnight, CI run 8154). `PADDOCK_E2E_NOW` moves the pin; `test.use({ pinnedClock: false })` opts a file out.
+- The fixture also reports a throw from a timer callback (`reportTimerErrors`, new export): Playwright's fake clock catches an exception thrown from `setTimeout`, `setInterval`, `requestAnimationFrame` or `requestIdleCallback` (and keeps only the first of a batch), so it reached neither `window` 'error' nor `pageerror`; each callback now runs in a try/catch that calls `reportError`. The default pin is now the documentation screenshots' instant (`PINNED_AT`, 2026-10-22 14:30 UTC; `FROZEN_AT` is the same value). The selftest folder holds `pinned-clock.spec.ts` and runs in chromium and webkit.
 - Debrief, Dyno, Pitcrew, Pitwall, Spotter and the ui gallery and demos wrap their `test` once in `e2e/test.ts` and their specs import `test` and `expect` from there. Bare `page.clock.install()` calls are gone (the clock is already installed).
 
 ### `paddock-testkit`: `TestCommand`, check C123
