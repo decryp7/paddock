@@ -40,6 +40,15 @@ export function reconcile(current, base, exact, loose, canMove = () => true) {
 
 const defaultGit = (cwd) => (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
 
+/** Whether `root` is a git work tree git itself accepts (a folder with a stray `.git` file, as a fixture has, is not). */
+export function isWorkTree(root, git = defaultGit(root)) {
+  try {
+    return git(['rev-parse', '--is-inside-work-tree']).trim() === 'true';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The entries of `current` that the baseline at the merge base does not have (a multiset difference by `keyOf`), or `{ reason }` when
  * it cannot be measured (no git, no merge base, an unreadable file). A baseline absent at the merge base is the first introduction:

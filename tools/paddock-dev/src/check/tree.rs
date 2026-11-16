@@ -89,6 +89,11 @@ impl Tree {
         v
     }
 
+    /// Whether this tree is held in memory (a check's positive control): there is no checkout to compare with a merge base.
+    pub fn is_in_memory(&self) -> bool {
+        self.memory.is_some()
+    }
+
     /// The root folder.
     pub fn root(&self) -> &Path {
         &self.root

@@ -129,3 +129,47 @@ test('allow list: a file the check cannot read is a not-measured error at that f
     }
   }
 });
+
+// ---- the list only shrinks: every entry, counted `count` times, against the merge base (C121, C124, C125 and C130 all get it) ----
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+
+const allowJson = (entries) => JSON.stringify({ allow: entries });
+const sh = (root, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: root, stdio: 'ignore' });
+/** A repository whose merge base (`main`) has the allow list `base` and whose `topic` commit has `now`. */
+function growthRepo(base, now) {
+  const SHELL = 'let s = "#!/bin/sh\\n";\n';
+  const root = makeApp({ 'conformance/c130-allow.json': allowJson(base), 'tools/t/tests/it/ok.rs': SHELL.repeat(3) });
+  sh(root, 'init', '-q', '-b', 'main');
+  sh(root, 'add', '.');
+  sh(root, 'commit', '-q', '-m', 'base');
+  sh(root, 'checkout', '-q', '-b', 'topic');
+  writeFileSync(join(root, 'conformance/c130-allow.json'), allowJson(now));
+  sh(root, 'commit', '-q', '-a', '--allow-empty', '-m', 'topic');
+  return root;
+}
+const ok = (count) => ({ path: 'tools/t/tests/it/ok.rs', site: '#!/bin/sh', reason: 'baseline: planted before StandIn', count });
+const grew = async (root) => (await findingsOf('C130', root, { options: { baseRef: 'main' } })).filter((f) => /allow list (grew|.s shrink-only)/.test(f.message));
+
+test('allow list growth: an unchanged or shrunk list says nothing, a raised count or a new entry is one unwaivable finding at the allow file', async () => {
+  assert.deepEqual(await grew(growthRepo([ok(3)], [ok(3)])), []);
+  assert.deepEqual(await grew(growthRepo([ok(3)], [ok(2)])), [], 'a lowered count is shrinking');
+  const raised = await grew(growthRepo([ok(2)], [ok(3)]));
+  assert.deepEqual(raised.map((f) => [f.file, f.line, f.unwaivable]), [['conformance/c130-allow.json', 1, true]]);
+  assert.match(raised[0].message, /the allow list grew: 1 entry is \(counting each `count`\) not in conformance\/c130-allow\.json at the merge base [0-9a-f]{9}; it may only shrink/);
+  const added = await grew(growthRepo([ok(1)], [ok(1), { ...ok(2), site: '#!/bin/bash' }]));
+  assert.match(added[0].message, /grew: 2 entries are/);
+  assert.match(added[0].fix, /user's approval/);
+});
+
+test('allow list growth: a list new at the merge base, a fixture folder without .git and an unmeasurable base are not growth', async () => {
+  const first = makeApp({ 'conformance/c130-allow.json': allowJson([ok(3)]), 'tools/t/tests/it/ok.rs': 'x\n' });
+  sh(first, 'init', '-q', '-b', 'main');
+  sh(first, 'add', '.');
+  sh(first, 'commit', '-q', '-m', 'only');
+  assert.deepEqual((await grew(first)).map((f) => f.message.slice(0, 40)), [], 'the first introduction adds nothing');
+  assert.deepEqual(await grew(makeApp({ 'conformance/c130-allow.json': allowJson([ok(3)]) })), [], 'no .git: nothing to compare, nothing said');
+  const none = growthRepo([ok(1)], [ok(1)]);
+  const w = (await findingsOf('C130', none, { options: { baseRef: 'no-such-ref' } })).filter((f) => /shrink-only rule is not enforced/.test(f.message));
+  assert.equal(w.length, 1, 'a checkout where git cannot give a base says so, never silence');
+});

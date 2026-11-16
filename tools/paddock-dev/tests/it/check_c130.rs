@@ -21,7 +21,7 @@ fn c130_tree() -> tempfile::TempDir {
     let files: Vec<(&str, String)> = vec![
         (
             "conformance/c130-allow.json",
-            "{\"allow\":[{\"path\":\"tools/t/tests/it/ok.rs\",\"site\":\"#!/bin/sh\",\"reason\":\"baseline: planted before StandIn\",\"count\":2},{\"path\":\"tools/t/tests/it/gone.rs\",\"site\":\"#!/bin/sh\",\"reason\":\"a stale entry\"}]}".to_string(),
+            "{\"allow\":[{\"path\":\"tools/t/tests/it/ok.rs\",\"site\":\"#!/bin/sh\",\"reason\":\"baseline: planted before StandIn\",\"count\":2},{\"path\":\"tools/t/src/d_test.rs\",\"site\":\"conformance: stand-in\",\"reason\":\"the hook under test is a script\"},{\"path\":\"tools/t/tests/it/gone.rs\",\"site\":\"#!/bin/sh\",\"reason\":\"a stale entry\"}]}".to_string(),
         ),
         ("tools/t/tests/it/ok.rs", format!("{SH}{SH}{SH}")),
         ("tools/t/tests/it/bad.rs", format!("fn b() {{}}\n{SH}")),
@@ -31,6 +31,10 @@ fn c130_tree() -> tempfile::TempDir {
         ("tools/t/src/c.rs", format!("#[cfg(any(test, windows))]\nmod t {{\n{SH}}}\n")),
         ("tools/t/src/tests.rs", "let a = \"#!/usr/bin/env bash\\n\";\nlet b = \"#!/bin/zsh\\n\";\nlet c = \"#!/usr/bin/env node\\n\";\n".to_string()),
         ("tools/t/src/d_test.rs", "// writes #!/bin/sh in the old test\n/// doc #!/bin/sh\nlet w = \"#!/bin/sh\\n\"; // conformance: stand-in — the hook under test is a script\n// conformance: stand-in — a script by design\nlet v = \"#!/bin/sh\\n\";\n\nlet u = \"#!/bin/sh\\n\";\n".to_string()),
+        (
+            "tools/t/src/e_test.rs",
+            "let a = \"#!/bin/sh\\n\"; // conformance: stand-in \u{2014} ab\r\nlet b = \"#!/bin/sh\\n\"; // conformance: stand-in \u{2014} \u{1F600}a\r\nlet c = \"#!/bin/sh\\n\"; // conformance: stand-in \u{2014} \u{1F600}\r\n".to_string(),
+        ),
         ("tools/t/tests/fixtures/f.rs", SH.to_string()),
         ("tools/t/tests/it/script.sh", "#!/bin/sh\necho hi\n".to_string()),
         ("a/tests/crlf.rs", "let a = \"#!/bin/sh\\n\";\r\nlet b = 1;\r\n".to_string()),
@@ -75,7 +79,11 @@ fn c130_flags_the_shapes_it_names_and_only_as_warnings() {
             ("tools/t/src/a.rs".to_string(), 4),
             ("tools/t/src/b.rs".to_string(), 3),
             ("tools/t/src/c.rs".to_string(), 3),
+            ("tools/t/src/d_test.rs".to_string(), 5),
             ("tools/t/src/d_test.rs".to_string(), 7),
+            ("tools/t/src/e_test.rs".to_string(), 1),
+            ("tools/t/src/e_test.rs".to_string(), 2),
+            ("tools/t/src/e_test.rs".to_string(), 3),
             ("tools/t/src/tests.rs".to_string(), 1),
             ("tools/t/src/tests.rs".to_string(), 2),
             ("tools/t/tests/it/bad.rs".to_string(), 2),
@@ -86,7 +94,21 @@ fn c130_flags_the_shapes_it_names_and_only_as_warnings() {
     );
     assert!(r.findings.iter().any(|f| f.message.contains("beyond the count of its allow entry")));
     assert_eq!(r.errors(), 0, "report-only until its first green run (ER-41)");
-    assert_eq!(r.warnings(), 10);
+    assert_eq!(r.warnings(), 14);
+    assert!(
+        r.findings.iter().any(|f| f.file == "tools/t/src/d_test.rs"
+            && f.line == 5
+            && f.message == "a stand-in waiver beyond the count of its allow entry")
+    );
+    assert!(
+        r.findings
+            .iter()
+            .any(|f| f.file == "tools/t/src/e_test.rs" && f.line == 2 && f.message == "a stand-in waiver the allow list does not name")
+    );
+    assert!(
+        !r.findings.iter().any(|f| f.file == "tools/t/src/d_test.rs" && f.line == 3),
+        "the first waiver is named by the list"
+    );
 }
 
 #[test]
@@ -137,4 +159,118 @@ fn c130_does_not_read_its_own_files() {
     let r = run_checks(&c130_options(d.path(), "fixture"), &registry()).unwrap();
     let got: Vec<(&str, usize)> = r.findings.iter().map(|f| (f.file.as_str(), f.line)).collect();
     assert_eq!(got, [("tools/paddock-dev/tests/it/check.rs", 1)], "another test file is still read");
+}
+
+#[allow(clippy::disallowed_methods, reason = "a test spawns git; it ends it itself")]
+fn git(root: &Path, args: &[&str]) {
+    let out = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+fn allow_of(count: usize, extra: &str) -> String {
+    format!(
+        "{{\"allow\":[{{\"path\":\"tools/t/tests/it/ok.rs\",\"site\":\"#!/bin/sh\",\"reason\":\"baseline: planted before StandIn\",\"count\":{count}}}{extra}]}}"
+    )
+}
+
+/// A repository whose merge base (`origin/main`) holds the allow list `base` and whose `topic` commit holds `now`.
+fn growth_repo(base: &str, now: &str) -> tempfile::TempDir {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    std::fs::create_dir_all(root.join("conformance")).unwrap();
+    std::fs::create_dir_all(root.join("tools/t/tests/it")).unwrap();
+    std::fs::write(root.join("conformance/c130-allow.json"), base).unwrap();
+    std::fs::write(root.join("tools/t/tests/it/ok.rs"), SH.repeat(3)).unwrap();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["add", "."]);
+    git(root, &["commit", "-q", "-m", "base"]);
+    git(root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    git(root, &["checkout", "-q", "-b", "topic"]);
+    std::fs::write(root.join("conformance/c130-allow.json"), now).unwrap();
+    git(root, &["commit", "-q", "-a", "--allow-empty", "-m", "topic"]);
+    d
+}
+
+fn grew(root: &Path) -> Vec<(String, usize, bool, String)> {
+    let r = run_checks(&c130_options(root, "fixture"), &registry()).unwrap();
+    r.findings
+        .iter()
+        .filter(|f| f.message.contains("allow list grew") || f.message.contains("shrink-only rule"))
+        .map(|f| (f.file.clone(), f.line, f.unwaivable, f.message.clone()))
+        .collect()
+}
+
+#[test]
+fn a_raised_count_or_a_new_entry_is_one_unwaivable_finding_and_shrinking_is_silent() {
+    assert!(grew(growth_repo(&allow_of(3, ""), &allow_of(3, "")).path()).is_empty());
+    assert!(
+        grew(growth_repo(&allow_of(3, ""), &allow_of(2, "")).path()).is_empty(),
+        "a lowered count is shrinking"
+    );
+    let raised = grew(growth_repo(&allow_of(2, ""), &allow_of(3, "")).path());
+    assert_eq!(raised.len(), 1, "{raised:?}");
+    assert_eq!(
+        (raised[0].0.as_str(), raised[0].1, raised[0].2),
+        ("conformance/c130-allow.json", 1, true)
+    );
+    assert!(
+        raised[0]
+            .3
+            .starts_with("the allow list grew: 1 entry is (counting each `count`) not in conformance/c130-allow.json at the merge base ")
+    );
+    let extra =
+        ",{\"path\":\"tools/t/tests/it/ok.rs\",\"site\":\"#!/bin/bash\",\"reason\":\"baseline: planted before StandIn\",\"count\":2}";
+    let added = grew(growth_repo(&allow_of(1, ""), &allow_of(1, extra)).path());
+    assert!(added[0].3.contains("grew: 2 entries are"), "{added:?}");
+}
+
+#[test]
+fn growth_is_not_measured_on_a_fixture_folder_and_a_missing_base_is_said() {
+    let tree = c130_tree();
+    assert!(grew(tree.path()).is_empty(), "no .git: nothing to compare, nothing said");
+    let repo = growth_repo(&allow_of(1, ""), &allow_of(1, ""));
+    let mut o = c130_options(repo.path(), "fixture");
+    o.base_ref = Some("no-such-ref".into());
+    let r = run_checks(&o, &registry()).unwrap();
+    let said: Vec<_> = r
+        .findings
+        .iter()
+        .filter(|f| f.message.contains("shrink-only rule is not enforced"))
+        .collect();
+    assert_eq!(said.len(), 1, "a checkout where git cannot give a base says so, never silence");
+}
+
+#[test]
+fn growth_findings_equal_the_js_host_in_a_git_repository() {
+    if !has_node() {
+        return skip("node is not installed");
+    }
+    let extra = ",{\"path\":\"tools/t/tests/it/ok.rs\",\"site\":\"#!/bin/bash\",\"reason\":\"baseline: planted before StandIn\"}";
+    for (name, repo) in [
+        ("raised", growth_repo(&allow_of(2, ""), &allow_of(3, ""))),
+        ("added", growth_repo(&allow_of(3, ""), &allow_of(3, extra))),
+        ("same", growth_repo(&allow_of(3, ""), &allow_of(3, ""))),
+    ] {
+        let js: Value = serde_json::from_str(&node(
+            JS_RUN_C130,
+            &[("RT5_ROOT", repo.path().display().to_string()), ("RT5_APP", "fixture".into())],
+        ))
+        .unwrap();
+        let r = run_checks(&c130_options(repo.path(), "fixture"), &registry()).unwrap();
+        let (got, want) = (shared_part(&r.json()), shared_part(&js));
+        assert_eq!(got["findings"], want["findings"], "{name}");
+        assert_eq!(got, want, "{name}");
+    }
 }

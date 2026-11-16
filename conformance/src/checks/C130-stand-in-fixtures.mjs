@@ -9,7 +9,8 @@
 // Not flagged, said out loud: a script built without a shebang (`sh -c`), a shebang another way (a byte string split over lines), and
 // shell files themselves (C129 flags those; this reads the Rust text C129 names as its known gap, so the two never report the same
 // line). A fixture that has to be a script (a hook or a wrapper script under test) carries `// conformance: stand-in — <why>` on its
-// line or the line above. Today's sites are the allow list `conformance/c130-allow.json` (path, site = the shebang text, reason, count);
+// line or the line above, and is counted: the allow list must name it (site `conformance: stand-in`, a count per file), so a new waiver is growth
+// of the list, which the shrink-only rule (util/allow-list.mjs, against the merge base) puts to the user. Today's sites are the allow list `conformance/c130-allow.json` (path, site = the shebang text, reason, count);
 // it only ever shrinks by its own rule (a stale entry is a warning: remove it or lower its count), and a site beyond an entry's count
 // is reported at its own line. Convert a site to `StandIn` and delete its entry.
 // The shared reader owns the error paths (`util/allow-list.mjs`): an unreadable allow list makes the check broken; a file that cannot
@@ -35,12 +36,16 @@ const NOT_READ = /(?:^|\/)(?:target|vendor|fixtures|node_modules)\//;
 const CFG_TEST = /^[ \t]*#\[cfg\((?:test|(?:all|any)\([^\]]*\btest\b[^\]]*)\)\]/;
 const FIX =
   "Install the testkit's stand-in instead: `paddock_testkit::StandIn::new(dir, \"name\").stdout(..).exit(..).records_args().install()?` (it runs on Windows and records its calls). A fixture that has to be a script carries `// conformance: stand-in — <why>`; an existing site is listed in conformance/c130-allow.json until it is converted.";
+const WAIVER_FIX = `Waivers are counted, so none is free: list it in ${ALLOW} (path, site \`conformance: stand-in\`, a reason and the file's count), which the user approves, or convert the fixture to \`StandIn\`.`;
 const BEYOND_FIX = `Install the testkit's stand-in instead (\`paddock_testkit::StandIn\`), or raise the entry's \`count\` in ${ALLOW} only for a site that has to stay a script.`;
 
 /** Whether `path` is a Rust file this check reads. */
 export const readable = (path) => path.endsWith('.rs') && !NOT_READ.test(path) && !IMPLEMENTATION.has(path);
 
-/** [{ line, text }] of every shebang line in the test code of `text` (the Rust file `path`) that is not waived. */
+/** The `site` an allow entry uses to name a waived fixture. */
+export const WAIVED_SITE = 'conformance: stand-in';
+
+/** [{ line, text, waived }] of every shebang line in the test code of `text` (the Rust file `path`); `waived` when a comment with a reason is on it or above. */
 export function sites(path, text) {
   if (!readable(path)) return [];
   const lines = text.split('\n');
@@ -51,8 +56,7 @@ export function sites(path, text) {
   for (let i = from; i < lines.length; i++) {
     const line = lines[i];
     if (line.trim().startsWith('//') || !SHEBANG.test(line)) continue;
-    if (WAIVER.test(line) || WAIVER.test(lines[i - 1] ?? '')) continue;
-    out.push({ line: i + 1, text: line });
+    out.push({ line: i + 1, text: line, waived: WAIVER.test(line) || WAIVER.test(lines[i - 1] ?? '') });
   }
   return out;
 }
@@ -79,9 +83,13 @@ export default {
         out.push(finding);
         continue;
       }
-      for (const { line, text: at } of sites(f, text)) {
-        const said = allow.admit(f, (site) => at.includes(site));
+      for (const { line, text: at, waived } of sites(f, text)) {
+        const said = allow.admit(f, waived ? (site) => site === WAIVED_SITE : (site) => at.includes(site));
         if (said === 'allowed') continue;
+        if (waived) {
+          out.push(warn('C130', 42, f, line, said === 'beyond' ? 'a stand-in waiver beyond the count of its allow entry' : 'a stand-in waiver the allow list does not name', WAIVER_FIX));
+          continue;
+        }
         out.push(
           said === 'beyond'
             ? warn('C130', 42, f, line, 'writes another shell fixture beyond the count of its allow entry', BEYOND_FIX)

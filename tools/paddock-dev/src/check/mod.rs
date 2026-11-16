@@ -117,6 +117,11 @@ impl<'a> Ctx<'a> {
             .unwrap_or_else(|| "origin/main".into())
     }
 
+    /// Whether the tree is held in memory (a positive control): nothing on disk or in git to compare with.
+    pub fn is_in_memory(&self) -> bool {
+        self.tree.is_in_memory()
+    }
+
     /// The tree's root folder.
     pub fn root(&self) -> &std::path::Path {
         self.tree.root()

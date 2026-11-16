@@ -9,7 +9,7 @@ Conventional Commits; one semver tag for the whole repo.
   program for the programs a test plants, on Windows too, replacing `#!/bin/sh` fixtures. It prints lines, writes files, records its calls
   (arguments with spaces and non-ASCII, chosen env vars, stdin), sleeps (bounded), starts a named grandchild, answers per argument and exits
   with a code; `npm_like` and `git_like` give the common calls the real programs' shapes. New check C130 (report-only) lists the existing
-  shell fixtures in Rust tests in `conformance/c130-allow.json`. Converted: Dyno's `smartctl` fakes, `paddock-dev`'s `df`, `git` and `heavy` fakes.
+  shell fixtures in Rust tests in `conformance/c130-allow.json`. Every allow list read through the shared readers (C121, C124, C125, C130) now only shrinks: an entry or a raised `count` that the merge base lacks is one unwaivable finding (both hosts). Converted: Dyno's `smartctl` fakes, `paddock-dev`'s `df`, `git` and `heavy` fakes.
 
 ### `paddock-testkit`: `TestCommand`, check C123
 - New `paddock_testkit::TestCommand`: a `Command` that starts from an empty environment plus an allow-list (`process::allowed_names()`), with a private `HOME` and temp folder, a curated `PATH` and `path_first`, `cargo_target_dir` and `into_parts`. Every test that starts `./dev`, `cargo` or `node` uses it (ADR 0100); check C123 (report-only) flags any other way.
