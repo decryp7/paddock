@@ -7,12 +7,13 @@
 //!
 //! - `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, the `XDG_*` folders, `TMPDIR`, `TEMP` and `TMP` point into a private
 //!   folder made for this command ([`TestCommand::private_dir`]), removed when the command drops;
-//! - `PATH` is curated: a private folder of links to the toolchain's programs (`cargo`, `rustc`, `rustup`, ...; never the folder
-//!   they are in, where `cargo install` puts other tools), the folders of `node`, `npm`, `npx` and `git` as the test process
-//!   finds them, on Windows Git for Windows' `usr/bin` and `bin`, then the system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`: `lsof` and `ps` are there), nothing else; [`TestCommand::path_first`] puts a test's own stand-in folder first, and `env("PATH", ..)`
+//! - `PATH` is curated: a folder of links to the toolchain's programs (`cargo`, `rustc`, `rustup`, ...; never the folder they are
+//!   in, where `cargo install` puts other tools), shared under the build's target folder or the command's own, then the folders
+//!   of `node`, `npm`, `npx` and `git` on the captured `PATH` ([`crate::ambient`]), on Windows Git for Windows' `usr/bin` and `bin`, then the system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`: `lsof` and `ps` are there), nothing else; [`TestCommand::path_first`] puts a test's own stand-in folder first, and `env("PATH", ..)`
 //!   replaces it whole;
 //! - the toolchain variables cargo needs (`RUSTUP_HOME`, `CARGO_HOME`, `RUSTUP_TOOLCHAIN`) and, on Windows, the few the OS
-//!   needs (`SystemRoot`, ...): [`PASSED_THROUGH`], read from this process;
+//!   needs (`SystemRoot`, ...): [`PASSED_THROUGH`], from the machine values captured once per process ([`crate::ambient`]),
+//!   never read live;
 //! - a private global git config, `.gitconfig` in the private home, which git finds through `HOME` (no `GIT_CONFIG_GLOBAL`, so a test
 //!   that names another home gets that home's `.gitconfig`, as on a machine): `maintenance.auto=false`, `gc.auto=0`, a test identity
 //!   and `safe.directory=*` (the system config, where CI's image names it, is not read), so no test's git starts background maintenance;
@@ -27,9 +28,10 @@
 //! The command wraps a [`std::process::Command`] and has its own `arg`, `args`, `current_dir`, `env`, `output`, `spawn` and the rest;
 //! it derefs to the `Command` read-only (`get_program`, `get_envs`), never mutably, so nothing can reach past the listed set.
 //!
-//! The program is resolved once, when the command is made: a bare name (`node`, `git`) becomes the full path found on the **test
-//! process's** `PATH`, except `cargo`, `rustc` and `rustup`, which start through the command's own toolchain links (`cargo` is
-//! the cargo that runs the test, `CARGO`), never rustup's proxy, which puts all of `$CARGO_HOME/bin` in front of its child's PATH. [`TestCommand::path_first`] and `env("PATH", ..)` change only the child's own lookups, never which program
+//! The program is resolved once, when the command is made: a bare name (`node`, `git`) becomes the full path found on the
+//! **captured** `PATH` (with the captured `PATHEXT` on Windows), except `cargo`, `rustc` and `rustup`, which start through the
+//! toolchain links (`cargo` is the cargo that runs the tests: `CARGO`, else the toolchain's own from `rustc --print sysroot`),
+//! never rustup's proxy, which puts all of `$CARGO_HOME/bin` in front of its child's PATH. [`TestCommand::path_first`] and `env("PATH", ..)` change only the child's own lookups, never which program
 //! starts: to start a stand-in, name it by its path.
 //!
 //! A child [`TestCommand::spawn`] starts is a [`TestChild`], which ends that child through its handle when it drops. What the child
@@ -206,7 +208,6 @@ impl TestCommand {
 
     #[allow(clippy::disallowed_methods)] // the one place a test's child process is made (C123 forbids it elsewhere)
     fn build(program: &OsStr, private: PrivateDir, machine: &Ambient) -> TestCommand {
-        let ambient = machine.path.clone();
         // `cargo`, `rustc` and `rustup` start through the toolchain links (`cargo`: the cargo that runs this test), never rustup's
         // proxy in `$CARGO_HOME/bin`, which puts all of that folder in front of its child's PATH (review of 0916c8060).
         let curated = curated(machine);
@@ -223,10 +224,7 @@ impl TestCommand {
             && TOOLCHAIN_STARTED.contains(&program.to_string_lossy().as_ref()))
         .then(|| links.as_deref().and_then(|d| linked_program(d, program)))
         .flatten();
-        let resolved = linked.map_or_else(
-            || resolve(program, ambient.as_deref()),
-            PathBuf::into_os_string,
-        );
+        let resolved = linked.map_or_else(|| resolve_on(program, machine), PathBuf::into_os_string);
         let mut cmd = Command::new(resolved);
         #[cfg(windows)]
         {
@@ -658,7 +656,7 @@ impl TestCommand {
             .map(|v| std::env::split_paths(v).collect())
             .unwrap_or_default();
         let found_at = |name: &str| {
-            Some(PathBuf::from(resolve(OsStr::new(name), ambient.as_deref())))
+            Some(PathBuf::from(resolve_on(OsStr::new(name), &self.ambient)))
                 .filter(|p| p.is_absolute())
         };
         let toolchain = self
@@ -761,10 +759,9 @@ fn curated(machine: &Ambient) -> Curated {
             }
         },
     };
-    let ambient = machine.path.as_deref();
-    let git_root = git_root_of(ambient);
+    let git_root = git_root_of(machine);
     let made = Curated {
-        tail: tail_dirs(ambient, links.as_deref(), git_root.as_deref()),
+        tail: tail_dirs(machine, links.as_deref(), git_root.as_deref()),
         links,
         shared,
         git_root,
@@ -818,7 +815,6 @@ fn folder_is_valid(dir: &Path) -> bool {
 /// the programs; `Err` when `root`, a link or the record cannot be written (the caller links into the command's own folder).
 fn link_folder(machine: &Ambient, root: &Path) -> std::io::Result<Option<PathBuf>> {
     use std::hash::{Hash, Hasher};
-    let ambient = machine.path.as_deref();
     // Each link is named for its program plus the platform's suffix (`rustc.exe`), never after the spelling that found it
     // (`rustc.EXE` through `PATHEXT`; ci.yml run 8154), so `linked_program` finds it by the same name on every file system.
     let (sources, names): (Vec<PathBuf>, Vec<String>) = TOOLCHAIN
@@ -826,7 +822,7 @@ fn link_folder(machine: &Ambient, root: &Path) -> std::io::Result<Option<PathBuf
         .map(|name| {
             let source = match &machine.cargo {
                 Some(c) if *name == "cargo" => c.clone(),
-                _ => PathBuf::from(resolve(OsStr::new(name), ambient)),
+                _ => PathBuf::from(resolve_on(OsStr::new(name), machine)),
             };
             (source, format!("{name}{}", std::env::consts::EXE_SUFFIX))
         })
@@ -959,16 +955,16 @@ fn sweep(root: &Path, now: std::time::SystemTime) {
     }
 }
 
-/// Git for Windows' install folder from the `git` on `ambient` (always `None` elsewhere).
-fn git_root_of(ambient: Option<&OsStr>) -> Option<PathBuf> {
+/// Git for Windows' install folder from the `git` on `machine`'s `PATH` (always `None` elsewhere).
+fn git_root_of(machine: &Ambient) -> Option<PathBuf> {
     #[cfg(windows)]
     {
-        let git = PathBuf::from(resolve(OsStr::new("git"), ambient));
+        let git = PathBuf::from(resolve_on(OsStr::new("git"), machine));
         git.is_absolute().then(|| git_root(&git)).flatten()
     }
     #[cfg(not(windows))]
     {
-        let _ = ambient;
+        let _ = machine;
         None
     }
 }
@@ -1113,16 +1109,12 @@ fn path_key(d: &Path) -> String {
 
 /// The folders after the link folder: those of the [`NAMED_TOOLS`] found on `ambient` (and, on Windows, Git for Windows' `usr/bin`
 /// and `bin`), then the system folders; each once, Windows folders compared without case.
-fn tail_dirs(
-    ambient: Option<&OsStr>,
-    links: Option<&Path>,
-    git_root: Option<&Path>,
-) -> Vec<PathBuf> {
+fn tail_dirs(machine: &Ambient, links: Option<&Path>, git_root: Option<&Path>) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
-    let system = system_dirs();
+    let system = system_dirs(machine);
     let system_keys: Vec<String> = system.iter().map(|d| path_key(d)).collect();
     for tool in NAMED_TOOLS {
-        let found = PathBuf::from(resolve(OsStr::new(tool), ambient));
+        let found = PathBuf::from(resolve_on(OsStr::new(tool), machine));
         // `resolve` returns the bare name when the tool is not on the PATH: no folder then.
         if !found.is_absolute() {
             continue;
@@ -1155,16 +1147,17 @@ fn tail_dirs(
 }
 
 #[cfg(not(windows))]
-fn system_dirs() -> Vec<PathBuf> {
+fn system_dirs(_machine: &Ambient) -> Vec<PathBuf> {
     ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
         .map(PathBuf::from)
         .to_vec()
 }
 
 #[cfg(windows)]
-fn system_dirs() -> Vec<PathBuf> {
-    let root =
-        std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
+fn system_dirs(machine: &Ambient) -> Vec<PathBuf> {
+    let root = machine
+        .var("SystemRoot")
+        .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
     vec![root.join("System32"), root]
 }
 
@@ -1173,14 +1166,23 @@ fn join_paths(dirs: &[PathBuf]) -> OsString {
         .unwrap_or_else(|e| panic!("TestCommand: a PATH folder holds the separator: {e}"))
 }
 
-/// `program` as a full path when it is a bare name found in `path`; anything with a separator, or not found, as given.
-pub(crate) fn resolve(program: &OsStr, path: Option<&OsStr>) -> OsString {
+/// [`resolve`] on `machine`'s `PATH` and `PATHEXT`.
+pub(crate) fn resolve_on(program: &OsStr, machine: &Ambient) -> OsString {
+    resolve(program, machine.path.as_deref(), machine.var("PATHEXT"))
+}
+
+/// `program` as a full path when it is a bare name found in `path` (on Windows also with each `pathext` suffix); anything with
+/// a separator, or not found, as given.
+pub(crate) fn resolve(program: &OsStr, path: Option<&OsStr>, pathext: Option<&OsStr>) -> OsString {
     let p = Path::new(program);
     if p.components().count() != 1 || p.is_absolute() {
         return program.to_os_string();
     }
     let exts: Vec<String> = if cfg!(windows) {
-        let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+        let pathext = pathext.map_or_else(
+            || ".COM;.EXE;.BAT;.CMD".to_string(),
+            |v| v.to_string_lossy().into_owned(),
+        );
         std::iter::once(String::new())
             .chain(
                 pathext

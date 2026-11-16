@@ -31,6 +31,10 @@ pub struct EnvLock {
 
 impl EnvLock {
     /// Sets a variable for the rest of the test.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "EnvLock is the one place a test changes the environment: it holds the lock and puts every change back"
+    )]
     pub fn set(&mut self, key: impl AsRef<OsStr>, value: impl AsRef<OsStr>) {
         self.remember(key.as_ref());
         // SAFETY: the environment lock is held, so no other test changes the environment at the same time.
@@ -38,6 +42,10 @@ impl EnvLock {
     }
 
     /// Removes a variable for the rest of the test.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "EnvLock is the one place a test changes the environment: it holds the lock and puts every change back"
+    )]
     pub fn remove(&mut self, key: impl AsRef<OsStr>) {
         self.remember(key.as_ref());
         // SAFETY: as in `set`.
@@ -89,6 +97,10 @@ impl EnvLock {
 }
 
 impl Drop for EnvLock {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "EnvLock puts back what it changed, still holding the lock"
+    )]
     fn drop(&mut self) {
         for (key, old) in self.saved.drain(..).rev() {
             // SAFETY: the lock guard is still held (fields drop after this body).

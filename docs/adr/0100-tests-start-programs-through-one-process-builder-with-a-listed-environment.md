@@ -83,6 +83,10 @@ Its own `env_clear` goes **back to the listed set**. It starts from an **empty e
   captured temp folder. **The cargo** is `CARGO`, else the toolchain's own (`rustc --print sysroot` plus `bin/cargo`, asked once
   with `RUSTUP_AUTO_INSTALL=0`): a test program started directly or copied has no `CARGO`, and rustup's proxy would put all of
   `$CARGO_HOME/bin` in front of its child's `PATH` (the review of `a9a7e6484` measured the proxy 15 of 15 times).
+  **The class is closed by Clippy** (fix/testkit-ambient-hardening): `std::env::set_var` and `std::env::remove_var` are in the
+  `disallowed-methods` of `crates/clippy.toml` and `tools/paddock-dev/clippy.toml`; `EnvLock` is the one place a test changes
+  the environment, and the other sites (a build script, a measuring example, one test of a macro that reads the environment)
+  carry an `#[expect]` with their reason. On Windows `SystemRoot` and `PATHEXT` come from the capture too.
 - the toolchain: `RUSTUP_HOME`, `CARGO_HOME`, `RUSTUP_TOOLCHAIN` and `CARGO_BUILD_JOBS` (a bound, ER-24) as the test process has them, and, when unset, the real
   `~/.cargo` and `~/.rustup` named explicitly (a redirected `HOME` would otherwise hide the offline registry and the
   toolchains); on Windows `SystemRoot`, `ComSpec`, `PATHEXT` and a few more. These are `PASSED_THROUGH` and the only
