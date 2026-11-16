@@ -2192,7 +2192,7 @@ and started at once), where it was reported as a counted crash.
 **Fix, one mechanism.** `paddock_env::text_busy::retry` retries only `ETXTBSY`, at most 8 times with doubling pauses (about
 1.3 s in all, logged and counted), and every start in `paddock-proc` goes through it. `paddock_testkit::exe::write_program` writes a
 program through a short-lived `install` process (the parent never holds its write handle, and a running program is replaced,
-not rewritten) and `exe::spawn`, `output` and `status` retry for programs a test did not write. 48 test sites that wrote a
+not rewritten) and `exe::spawn`, `output` and `status` retry for programs a test did not write. 52 test sites that wrote a
 script and then set its mode now call `write_program`.
 **Rule:** a test writes a program with `paddock_testkit::exe::write_program` and starts one it did not write with `exe::spawn`,
 `output` or `status`; product code starts programs through `paddock-proc`.

@@ -19,10 +19,15 @@
 //! counts and logs each retry, and returns the last error when the bound is reached. It never hides a product defect: a file
 //! that stays busy (a program that really runs) fails after the bound with the same error.
 //!
+//! Measured (ER-12; Linux container, 4 CPU spinners, 2026-11-16): the write of a program right after its process was killed and
+//! reaped needed one retry in 300 of 300 runs, and that one is the retry the test forces by writing while the program still
+//! runs; none needed a second. The bound of 8 (about 1.3 s) is the Go tool's 3 tries (0.7 s) with room, not a measured need.
+//!
 //! The pause is real time on purpose. There is nothing to wait on, and a fake clock would turn the bound into an endless
 //! loop (ER-12: the measured cause is recorded above).
 
 use std::io;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -32,15 +37,24 @@ pub const MAX_RETRIES: u32 = 8;
 pub const FIRST_PAUSE: Duration = Duration::from_millis(5);
 
 static RETRIES: AtomicU64 = AtomicU64::new(0);
+static BY_LABEL: Mutex<Vec<(String, u64)>> = Mutex::new(Vec::new());
 
 /// Whether `error` is `ETXTBSY`: the file is being executed (or held open for writing by a child that has not exec'd yet).
 pub fn is_text_busy(error: &io::Error) -> bool {
     error.kind() == io::ErrorKind::ExecutableFileBusy
 }
 
-/// How many retries this process has made so far (a test waits on it to know that a first attempt failed).
+/// How many retries this process has made so far, all operations together (a test that waits for its own retry uses
+/// [`retries_for`]).
 pub fn retries_so_far() -> u64 {
     RETRIES.load(Ordering::SeqCst)
+}
+
+/// How many retries were made for an operation named exactly `what` (the label [`retry`] logs): a test waits on its own label,
+/// so another test's retry cannot stand in for it.
+pub fn retries_for(what: &str) -> u64 {
+    let by = BY_LABEL.lock().unwrap_or_else(|p| p.into_inner());
+    by.iter().find(|(w, _)| w == what).map_or(0, |(_, n)| *n)
 }
 
 /// Runs `op`, again after a pause while it fails with `ETXTBSY` (see the module text), at most [`MAX_RETRIES`] times.
@@ -54,6 +68,13 @@ pub fn retry<T>(what: &str, mut op: impl FnMut() -> io::Result<T>) -> io::Result
         match op() {
             Err(e) if is_text_busy(&e) => {
                 RETRIES.fetch_add(1, Ordering::SeqCst);
+                {
+                    let mut by = BY_LABEL.lock().unwrap_or_else(|p| p.into_inner());
+                    match by.iter_mut().find(|(w, _)| w == what) {
+                        Some((_, n)) => *n += 1,
+                        None => by.push((what.to_string(), 1)),
+                    }
+                }
                 log::warn!(
                     "{what}: text file busy ({e}); a program was written or ended a moment ago, trying again in {pause:?} (retry {attempt} of {MAX_RETRIES})"
                 );
