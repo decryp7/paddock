@@ -164,9 +164,9 @@ enum CheckCommand {
     #[command(name = "pre-push", long_flag = "pre-push")]
     PrePush(pre_push::PrePushArgs),
     /// The next free conformance check id, read from the working tree, every local branch, every branch of origin as the
-    /// remote has it now (git ls-remote) and conformance/reserved/ (ER-21: two branches took the same id four times). `--reserve <branch>` creates the reservation file.
+    /// remote has it now (git ls-remote) and conformance/reserved/ (ER-21: two branches took the same id four times). `--reserve <branch>` takes the id on origin at once (a push of refs/paddock/check-ids/C<n>, which only one agent can create) and writes the reservation file.
     NewId {
-        /// Create conformance/reserved/C<n>-<branch-slug> (commit it: the commit is the reservation).
+        /// Reserve on origin (refs/paddock/check-ids/C<n>), then create conformance/reserved/C<n>-<branch-slug> (commit it: the record).
         #[arg(long)]
         reserve: Option<String>,
         /// The repository root (default: the folder containing .git, found from the current folder).

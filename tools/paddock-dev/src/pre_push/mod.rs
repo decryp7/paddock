@@ -303,6 +303,13 @@ impl known::Lookups for OnceLookups<'_> {
 
 /// [`command`] with the repository, git's pre-push lines and the outside lookups given.
 fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lookups) -> Result<Report, CliError> {
+    if args.refs_from_stdin && only_reservation_refs(stdin) {
+        return Ok(Report::new(
+            json!({"gates": [], "changed": 0, "outcome": outcome::nothing_to_check("a reservation ref").json()}),
+            "pre-push: the push only creates refs under refs/paddock/ (check-id reservations, a blob and no commit); nothing to check."
+                .to_string(),
+        ));
+    }
     let look = &OnceLookups {
         inner: look,
         listings: Default::default(),
@@ -937,6 +944,18 @@ fn nearest_base(
             format!("{notes}no commit of {tracking_of} that the pushed commit contains is usable ({took})"),
         ),
     }
+}
+
+/// True when git's pre-push lines are all for refs under `refs/paddock/` (`./dev check new-id --reserve` pushes a blob there).
+pub fn only_reservation_refs(input: &str) -> bool {
+    let mut any = false;
+    for l in input.lines().filter(|l| !l.trim().is_empty()) {
+        match l.split_whitespace().nth(2) {
+            Some(r) if r.starts_with("refs/paddock/") => any = true,
+            _ => return false,
+        }
+    }
+    any
 }
 
 /// The commits a push sends, from git's pre-push input: the local sha of every ref that is not a deletion.

@@ -1744,6 +1744,16 @@ fn a_tracking_upstream_wins_only_a_tie() {
 }
 
 #[test]
+fn a_push_of_only_reservation_refs_has_nothing_to_check() {
+    let zero = "0".repeat(40);
+    let paddock = format!("refs/paddock/check-ids/C9 aaa refs/paddock/check-ids/C9 {zero}\n");
+    assert!(super::only_reservation_refs(&paddock));
+    let mixed = format!("{paddock}refs/heads/a bbb refs/heads/a {zero}\n");
+    assert!(!super::only_reservation_refs(&mixed), "a branch in the same push is still checked");
+    assert!(!super::only_reservation_refs(""), "no lines is not a reservation push");
+}
+
+#[test]
 fn git_pre_push_lines_become_pushed_refs_and_the_not_measured_ids_end_the_output() {
     let zero = "0".repeat(40);
     let input = format!("refs/heads/a aaa refs/heads/a {zero}\nrefs/heads/gone {zero} refs/heads/gone bbb\nbad line\n");
