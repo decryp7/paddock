@@ -12,6 +12,10 @@ import { errorTarget, LIVE_DEFAULTS, newRule, readLive, writeLive } from './live
 import { LiveRulesProfile } from './live-rules.profile';
 import { QL_CHECK_MS, QlInput } from './ql-input';
 import { at } from '../../testing/must';
+import { endMockJobs } from '../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 /** A profile save re-imports as a job: waits for it to finish and for the view to follow. */
 async function applied(fixture?: Parameters<typeof settle>[0]): Promise<void> {

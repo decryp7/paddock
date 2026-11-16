@@ -4,6 +4,10 @@ import { DebriefBackend } from '../core/backend';
 import { MarkerPreviewService } from './marker-preview';
 import { MarkerProfile } from './marker-profile';
 import { writeRows } from './marker-rules';
+import { endMockJobs } from '../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 describe('MarkerProfile', () => {
   const setup = () => {

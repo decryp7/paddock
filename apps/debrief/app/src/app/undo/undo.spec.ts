@@ -11,6 +11,10 @@ import { QueryUndo, queryChangeLabel, trackedPart } from './query-undo';
 import { RangeUndo } from './range-undo';
 import { recordSnapshot } from './snapshot-undo';
 import { MERGE_WINDOW_MS, UNDO_LIMIT, UndoStack } from './undo-stack';
+import { endMockJobs } from '../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 /** A profile save re-imports as a job: waits for it to finish and for the view to follow. */
 async function applied(fixture?: Parameters<typeof settle>[0]): Promise<void> {

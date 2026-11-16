@@ -43,8 +43,6 @@ beforeEach(resumeSystemMockClock);
 afterEach(() => {
   activity.endTaskNow();
   stopSystemMockClock();
-  // A job a test left queued or running holds its kind's slot for the next spec: drained per test, like the other page-wide records.
-  resetMockJobs();
   cancelFocusRetries();
 });
 installLeakDetector({ mode: 'fail' });

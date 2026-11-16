@@ -1,4 +1,5 @@
 import { CHANGELOG } from '../../whats-new/changelog.generated';
+import { systemMockClock } from '../../core/mock/mock-clock';
 import {
   Manifest,
   AppStatus,
@@ -429,7 +430,7 @@ export class MockToolsBackend implements ToolsBackend {
   }
 
   private async slow<T>(value: T): Promise<T> {
-    if (this.options.latency) await new Promise((r) => setTimeout(r, this.options.latency));
+    if (this.options.latency) await systemMockClock.sleep(this.options.latency);
     return value;
   }
 

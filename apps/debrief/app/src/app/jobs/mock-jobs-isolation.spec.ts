@@ -1,22 +1,59 @@
+import { LeakDetector, registerSingleton } from '@decryp7/paddock-ui/testing';
 import { tinyBackend } from '../../testing/helpers';
+import { endMockJobs } from '../../testing/jobs';
 import { mockNotifications } from '../notifications/mock-notifications';
-import { MockJobCancelled, mockJobs, mockSteps, resetMockJobs } from './mock-jobs';
+import { MockJobCancelled, mockJobs, mockJobsLeftover, mockSteps, resetMockJobs } from './mock-jobs';
 
 // Spec files share one window and one module graph (the Angular builder runs Vitest with `isolate: false`), so the mock
 // jobs service is shared by every spec a worker runs. An import job one spec left running (its fake timers were thrown
 // away when it ended) used to hold the one import slot forever: the next spec's profile save queued behind it and its
 // "re-import did not finish" wait timed out, depending on which spec files a worker happened to run together.
-// test-setup.ts gives every test a fresh mock jobs service; the first two tests run in order and prove it.
+// test-setup.ts gives every test a fresh mock jobs service (`resetMockJobs`) and registers it with the leak detector, which
+// names a test that leaves jobs behind. A spec that starts jobs ends them itself (`endMockJobs`). Both halves are proved here
+// within one test each, so no test leaves a job on purpose.
 describe('mock jobs between tests', () => {
   afterEach(() => vi.useRealTimers());
 
-  it('a test may end with an import job that never finishes', () => {
-    mockJobs().start({ kind: 'import', title: 'Left running' }, () => new Promise(() => undefined));
-    expect(mockJobs().nextId()).toBe(2);
+  it('resetMockJobs gives a fresh service: no job, ids start again, the old one is dropped', () => {
+    const old = mockJobs();
+    old.start({ kind: 'import', title: 'Left running' }, () => new Promise(() => undefined));
+    expect(old.activeCount()).toBe(1);
+    expect(old.nextId()).toBe(2);
+    resetMockJobs();
+    const fresh = mockJobs();
+    expect(fresh).not.toBe(old);
+    expect(fresh.activeCount()).toBe(0);
+    expect(fresh.nextId()).toBe(1);
+    expect(mockJobsLeftover()).toBeNull();
   });
 
-  it("the next test's re-import is not queued behind it", async () => {
+  it('the leak detector names a test that leaves a job running, and resets the service', () => {
+    // A local detector instance (the page-wide one belongs to the global detector).
+    const remove = registerSingleton({ name: 'mock jobs (probe)', leftover: mockJobsLeftover, reset: resetMockJobs });
+    try {
+      const detector = new LeakDetector();
+      detector.begin();
+      mockJobs().start({ kind: 'import', title: 'Left running' }, () => new Promise(() => undefined));
+      detector.snapshot(vi);
+      const found = detector.finish(false);
+      // The page-wide entry of the same service reports it too (the first reader resets it): either name carries the count.
+      expect(found.some((f) => f.kind === 'singleton' && f.message.includes('holding state: 1 queued or running job(s)'))).toBe(true);
+      expect(mockJobsLeftover()).toBeNull();
+    } finally {
+      remove();
+    }
+  });
+
+  it('endMockJobs ends what a test started, so nothing is left to name', () => {
+    mockJobs().start({ kind: 'export', title: 'Started' }, () => new Promise(() => undefined));
+    endMockJobs();
+    expect(mockJobsLeftover()).toBeNull();
+  });
+
+  it("a re-import is not queued behind an import job left running before a reset", async () => {
     vi.useFakeTimers();
+    mockJobs().start({ kind: 'import', title: 'Left running' }, () => new Promise(() => undefined));
+    resetMockJobs();
     const backend = tinyBackend();
     const save = backend.saveProfile('name = "Next"\n');
     await vi.advanceTimersByTimeAsync(0);

@@ -8,6 +8,10 @@ import { ParsersBackend } from '../settings/parsers/parsers-backend';
 import { DIALOG_REF } from '../ui/dialog.service';
 import { FormatWizard } from './format-wizard';
 import { at } from '../../testing/must';
+import { endMockJobs } from '../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 /** Selects `needle` inside the element's text, like a user dragging over it. */
 function selectText(root: HTMLElement, needle: string): void {

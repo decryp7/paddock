@@ -22,6 +22,10 @@ import { sampleReport, sampleReportState, SAMPLE_REPORT_IMAGE } from './mock/moc
 import { MockSnapshotBackend } from './mock/mock-snapshot-backend';
 import { SnapshotBackend, TauriSnapshotBackend } from './snapshot-backend';
 import { createSnapshotBackend } from './provide-diagnostics';
+import { endMockJobs } from '../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 const ZIP = { path: '/samples/diagnostics/debrief-diagnostics-sample.zip', name: 'debrief-diagnostics-sample.zip' };
 

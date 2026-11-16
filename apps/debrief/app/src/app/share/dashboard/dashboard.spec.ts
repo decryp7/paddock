@@ -20,6 +20,10 @@ import { addTile, bottomOf, clampTile, moveTile, overlaps, placeTile, removeTile
 import { cellText, DashboardTile, sparkPoints } from './dashboard-tile';
 import { DashboardView, tileKeyAction } from './dashboard-view';
 import { at } from '../../../testing/must';
+import { endMockJobs } from '../../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 /** A profile save re-imports as a job: waits for it to finish and for the view to follow. */
 async function applied(fixture?: Parameters<typeof settle>[0]): Promise<void> {

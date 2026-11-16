@@ -16,6 +16,10 @@ import { RedactionSummaryView } from './redaction-summary';
 import { provideMockShare } from './share-testing';
 import { ShareBackend } from '../share-backend';
 import { at } from '../../../testing/must';
+import { endMockJobs } from '../../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 const closed = vi.fn();
 
