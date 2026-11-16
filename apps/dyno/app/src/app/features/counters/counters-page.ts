@@ -266,7 +266,7 @@ import { MatMenuModule } from '@angular/material/menu';
     .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     small { color: var(--text-3); margin-left: 3px; font-size: var(--fs-xs); }
     .muted { color: var(--text-2); }
-    .swatch { width: 10px; height: 3px; border-radius: 2px; flex: none; }
+    .swatch { width: 10px; height: 3px; border-radius: 2px; flex: none; margin-inline-end: var(--sp-2); }
     .pinned { --icon-size: 12px; color: var(--text-3); flex: none; }
     .unavail { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }

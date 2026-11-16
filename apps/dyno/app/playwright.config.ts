@@ -42,7 +42,7 @@ export default defineConfig({
       ? [
           {
             name: 'screenshots-made',
-            testMatch: /screenshots(-docs-dialogs)?\.spec\.ts$/,
+            testMatch: /screenshots(-docs-dialogs|-helper)?\.spec\.ts$/,
             use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 },
           },
           {

@@ -77,3 +77,17 @@ test('C24 checks the folders named in screenshotDirs (an app whose images live u
   // Without the setting the folder is not looked at.
   assert.deepEqual(await run({ ...files, 'paddock.conformance.json': '{}' }), []);
 });
+
+test('C24 capturedOutside: an image the runner cannot make needs its review row but no hashes.json entry', async () => {
+  const files = { ...good(), 'docs/screenshots/os/dialog.png': A, 'docs/screenshots/REVIEWED.md': reviewed(row('dark/a.png', A), row('light/b.png', B), row('os/dialog.png', A)) };
+  const config = (list) => ({ 'paddock.conformance.json': JSON.stringify({ capturedOutside: list }) });
+  // without the entry the image has no hashes.json entry: an error
+  assert.match(messages(await run(files)), /os\/dialog\.png.*no entry in hashes\.json|has no entry in hashes\.json/);
+  // with a folder entry and a reason: fine
+  assert.deepEqual(await run({ ...files, ...config([{ path: 'docs/screenshots/os/', reason: 'a real OS dialog, captured by hand' }]) }), []);
+  // without a reason the entry does not count
+  assert.match(messages(await run({ ...files, ...config([{ path: 'docs/screenshots/os/', reason: ' ' }]) })), /has no entry in hashes\.json/);
+  // the review row is still required
+  const noRow = { ...files, 'docs/screenshots/REVIEWED.md': reviewed(row('dark/a.png', A), row('light/b.png', B)), ...config([{ path: 'docs/screenshots/os/dialog.png', reason: 'a real OS dialog' }]) };
+  assert.match(messages(await run(noRow)), /os\/dialog\.png|has no review/);
+});

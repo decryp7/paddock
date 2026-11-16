@@ -1,20 +1,17 @@
-import { expect, test } from './test';
+import { expect } from './test';
 import type { Page } from '@playwright/test';
-import { pressMod } from '@decryp7/paddock-e2e';
-import { mkdirSync } from 'node:fs';
+import { captureDocScreens, pressMod, type DocScreen, type Theme } from '@decryp7/paddock-e2e';
 import { MOCK_ESTIMATES, mockRun, mockTrace } from '../src/app/core/mock/bench';
 import type { BenchOverview } from '../src/app/core/api.types';
 import { join } from 'node:path';
 
 /**
- * Documentation screenshots of every screen in both themes (`SCREENSHOTS=1 npx playwright test --project=screenshots`).
- * Deterministic: the clock is frozen, the mock is a macOS laptop, the timezone and locale are fixed and motion is reduced. Measured
- * 2026-11-16 (ER-40, ER-46): the old code reproduces its own tracked images byte for byte on this machine (54 of 62), so fonts and rendering are
- * stable here; the pictures drifted because the UI changed (62 of 72 differ after 386 Dyno commits), and two runs of one tree differed in the
- * pictures whose data depends on a poll's second (counters, recorder, network connections, the dashboard history markers). `Date.now()` is
- * read in whole seconds, every picture is taken at the end of a second, the mock's history windows end on a whole minute, and screenshots
- * disable animations. What still differs between two runs of one tree: the pictures of pages that poll every 2 s or more (network connections,
- * recorder), by the second their last poll read, a few hundred pixels of rates and a cursor; compare with a tolerance.
+ * Documentation screenshots of every screen in both themes (`SCREENSHOTS=1 npx playwright test --project=screenshots`), through the shared runner
+ * (`captureDocScreens` in @decryp7/paddock-e2e): the pinned clock, the end of a minute on it, live updates stopped, no animation and no caret before
+ * every picture. The mock is a macOS laptop, the timezone and locale are fixed and motion is reduced; `?stable=60000` makes the mock round what its
+ * polled replies read of the clock down to a minute (a 2 s poll's phase against the clock otherwise showed in the network and recorder pictures).
+ * Measured 2026-11-16 (ER-40, ER-46): the old code reproduces its own tracked pictures byte for byte on this machine (54 of 62), so fonts and
+ * rendering are stable here; the tracked ones had drifted because the UI changed (62 of 72 differed after 386 Dyno commits).
  */
 // Playwright runs from the app folder; the images live in the repository's docs.
 const OUT = process.env['SCREENSHOT_DIR'] ?? join(process.cwd(), '..', 'docs', 'screenshots');
@@ -49,6 +46,22 @@ async function fitToContent(page: Page, maxContent = MAX_CONTENT): Promise<void>
   await main.evaluate((el) => el.scrollTo(0, 0));
 }
 
+/**
+ * Ends the window just below the last row of a table that scrolls inside the window (its height follows the window's): a shorter window cut the last
+ * row in two and a taller one left an empty card. Call it with the window made too tall for the rows, then it shrinks to them.
+ */
+async function trimToLastRow(page: Page, gridName: string): Promise<void> {
+  const grid = page.getByRole('treegrid', { name: gridName, exact: true });
+  const slack = await grid.evaluate((g) => {
+    const rows = Array.from(g.querySelectorAll<HTMLElement>('[role=row]')).filter((r) => r.getBoundingClientRect().height > 0);
+    const last = rows.at(-1)?.getBoundingClientRect().bottom ?? 0;
+    return Math.max(0, Math.floor(g.getBoundingClientRect().bottom - last));
+  });
+  const height = await page.evaluate(() => window.innerHeight);
+  await page.setViewportSize({ width: 1440, height: height - slack + 16 });
+  await page.clock.runFor(300);
+}
+
 /** The macOS window buttons, over the top-left of the window as the native title bar draws them (the shell leaves room for them). */
 async function macWindowButtons(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -62,33 +75,6 @@ async function macWindowButtons(page: Page): Promise<void> {
     }
     document.body.append(bar);
   });
-}
-
-test.use({ timezoneId: 'UTC', locale: 'en-GB', reducedMotion: 'reduce', colorScheme: 'light' });
-
-async function prepare(page: Page, theme: 'dark' | 'light', mock = 'macos'): Promise<void> {
-  // A fake clock starting at a fixed time: the mock's live values are a function of the clock, so every run is identical.
-  await page.clock.install({ time: FROZEN });
-  // The mock stamps every sample and window edge with `Date.now()`, and the clock ticks in real time while the page loads, so the phase of
-  // its one-second polls against the fake clock differs from run to run (measured 2026-11-16: two runs of this spec differed in 6 of 64
-  // pictures, the counters and recorder charts, by their last sample time: sub-pixel shifts and a digit). The page reads whole seconds, and
-  // `alignToSecond` takes every picture at the end of a second, so each poll since the last second reads the same time.
-  await page.addInitScript(() => {
-    const real = Date.now.bind(Date);
-    (window as unknown as { __fakeNow: () => number }).__fakeNow = real;
-    Date.now = () => Math.floor(real() / 1000) * 1000;
-  });
-  await page.emulateMedia({ colorScheme: theme });
-  void mock;
-}
-
-/**
- * Runs the page's clock to the last millisecond of a second (fake time = 999 mod 1000), so every one-second poll since the last second
- * reads the same whole second whatever its phase against the clock was. Call it right before a picture.
- */
-async function alignToSecond(page: Page): Promise<void> {
-  const now = await page.evaluate(() => (window as unknown as { __fakeNow: () => number }).__fakeNow());
-  await page.clock.runFor((999 - (now % 1000) + 1000) % 1000);
 }
 
 /**
@@ -106,7 +92,9 @@ async function freezeClock(page: Page): Promise<void> {
   await page.clock.runFor(200);
 }
 
-const SCREENS: { name: string; path: string; mock?: string; query?: string; latency?: number; maxContent?: number; before?: (page: Page) => Promise<void>; ready: (page: Page) => Promise<void>; size?: { width: number; height: number } }[] = [
+type Screen = { name: string; path: string; mock?: string; query?: string; latency?: number; maxContent?: number; trimTo?: string; before?: (page: Page) => Promise<void>; ready: (page: Page) => Promise<void>; size?: { width: number; height: number } };
+
+const SCREENS: Screen[] = [
   {
     name: 'dashboard',
     path: '/#/',
@@ -158,6 +146,9 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
   {
     name: 'network-connections',
     path: '/#/network',
+    // The window is tall enough for the whole table: its rows scroll inside it, so a shorter window cut the last row.
+    size: { width: 1440, height: 1500 },
+    trimTo: 'Connections',
     ready: async (page) => {
       await expect(page.getByRole('treegrid', { name: 'Connections' })).toBeVisible();
       await page.getByRole('row', { name: /142.250.74.46/ }).click();
@@ -344,7 +335,8 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
     path: '/#/issues',
     // The whole table, so no group of rows is cut in half.
     maxContent: 3600,
-    size: { width: 1440, height: 1100 },
+    size: { width: 1440, height: 2900 },
+    trimTo: 'Issues',
     ready: async (page) => {
       await expect(page.getByRole('region', { name: 'Stability' })).toBeVisible();
       await expect(page.locator('dy-chart canvas').first()).toBeVisible();
@@ -404,67 +396,97 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
   },
 ];
 
-mkdirSync(OUT, { recursive: true });
+const screenUrl = (screen: Screen) => screen.path.replace('/#/', `/?latency=${screen.latency ?? 0}&stable=60000&chrome=macos&menu=native${screen.mock ? `&mock=${screen.mock}` : ''}${screen.query ?? ''}#/`);
 
-for (const theme of ['dark', 'light'] as const) {
-  for (const screen of SCREENS) {
-    test(`${screen.name} (${theme})`, async ({ page }) => {
-      if (screen.size) await page.setViewportSize(screen.size);
-      await prepare(page, theme);
-      await screen.before?.(page);
-      await page.goto(`${screen.path.replace('/#/', `/?latency=${screen.latency ?? 0}&chrome=macos&menu=native${screen.mock ? `&mock=${screen.mock}` : ''}${screen.query ?? ''}#/`)}`);
-      await expect(page.locator('pd-shell-frame, dy-tray').first()).toBeVisible();
-      await page.clock.runFor(45_000);
-      await screen.ready(page);
-      await freezeClock(page);
-      if (screen.name !== 'tray') {
-        await fitToContent(page, screen.maxContent);
-        await macWindowButtons(page);
-      }
-      if (screen.name === 'tray') {
-        // A desktop-like backdrop (blurred wallpaper gradient and a menu bar) so the rounded, translucent popover is visible. The
-        // tray window's root is `html.pd-tray`; the shot fails if the backdrop did not apply (a renamed root would leave it plain).
-        const wall = theme === 'dark' ? 'linear-gradient(160deg, #262a33 0%, #3b414d 100%)' : 'linear-gradient(160deg, #c3c7cf 0%, #e1e3e8 100%)';
-        await page.addStyleTag({
-          content: `html.pd-tray { background: ${wall} !important; }
-            html.pd-tray body { padding: 34px 40px 0 !important; }
-            #mac-menubar { position: fixed; inset: 0 0 auto 0; height: 24px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; font: 13px -apple-system, 'Helvetica Neue', Arial, sans-serif; color: ${theme === 'dark' ? '#f2f2f5' : '#1d1d1f'}; background: rgb(${theme === 'dark' ? '20 20 24 / 55%' : '255 255 255 / 55%'}); backdrop-filter: blur(20px); z-index: 0; }
-            #mac-menubar span { margin-right: 14px; } #mac-menubar b { margin-right: 14px; } #mac-menubar .right { display: flex; align-items: center; } #mac-menubar .right span { margin: 0 0 0 14px; }`,
-        });
-        await page.evaluate(() => {
-          const bar = document.createElement('div');
-          bar.id = 'mac-menubar';
-          bar.innerHTML = '<div><b>Dyno</b><span>File</span><span>View</span><span>Window</span><span>Help</span></div>'
-            + '<div class="right"><span title="Dyno" style="display:inline-flex;align-items:center;gap:4px"><svg width="26" height="12" viewBox="0 0 26 12"><polyline points="0,9 4,6 8,7 12,3 16,5 20,2 25,4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>76</span><span>Thu 22 Oct  14:30</span></div>';
-          document.body.append(bar);
-        });
-        await expect(page.locator('body')).toHaveCSS('padding-top', '34px');
-        await expect(page.locator('html')).toHaveCSS('background-image', /linear-gradient/);
-        // The sparklines have their history before the picture is taken.
-        await page.clock.runFor(45_000);
-        await page.clock.runFor(500);
-      }
-      await alignToSecond(page);
-      if (screen.name === 'tray') {
-        // Only the popover plus a margin, not the empty wallpaper below it.
-        const box = await page.getByRole('button', { name: /Open Dyno/ }).boundingBox();
-        const bottom = Math.ceil((box?.y ?? 560) + (box?.height ?? 40));
-        await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`), clip: { x: 0, y: 0, width: 440, height: Math.max(480, bottom + 28) }, animations: 'disabled', caret: 'hide' });
-      } else {
-        await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`), animations: 'disabled', caret: 'hide' });
-      }
-      if (screen.name === 'dashboard') {
-        // The whole page, for the README and for review (the 1440x900 image only shows the top): the window is made as tall as the
-        // page (the page scrolls inside it), scrolled to the top, and the shot waits until nothing is left to scroll.
-        const main = page.locator('#pd-main');
-        const total = await main.evaluate((el) => window.innerHeight - el.clientHeight + el.scrollHeight);
-        await page.setViewportSize({ width: 1440, height: total });
-        await expect(async () => expect(await main.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(0)).toPass({ timeout: 10_000 });
-        await main.evaluate((el) => el.scrollTo(0, 0));
-        await page.clock.runFor(500);
-        await alignToSecond(page);
-        await page.screenshot({ path: join(OUT, `dashboard-full-${theme}.png`), fullPage: true, animations: 'disabled', caret: 'hide' });
-      }
-    });
-  }
+/** The tray popover on a desktop-like backdrop (blurred wallpaper gradient and a menu bar), so the rounded, translucent popover is visible. */
+async function trayBackdrop(page: Page, theme: Theme): Promise<void> {
+  // A desktop-like backdrop (blurred wallpaper gradient and a menu bar) so the rounded, translucent popover is visible. The
+  // tray window's root is `html.pd-tray`; the shot fails if the backdrop did not apply (a renamed root would leave it plain).
+  const wall = theme === 'dark' ? 'linear-gradient(160deg, #262a33 0%, #3b414d 100%)' : 'linear-gradient(160deg, #c3c7cf 0%, #e1e3e8 100%)';
+  await page.addStyleTag({
+    content: `html.pd-tray { background: ${wall} !important; }
+      html.pd-tray body { padding: 34px 40px 0 !important; }
+      #mac-menubar { position: fixed; inset: 0 0 auto 0; height: 24px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; font: 13px -apple-system, 'Helvetica Neue', Arial, sans-serif; color: ${theme === 'dark' ? '#f2f2f5' : '#1d1d1f'}; background: rgb(${theme === 'dark' ? '20 20 24 / 55%' : '255 255 255 / 55%'}); backdrop-filter: blur(20px); z-index: 0; }
+      #mac-menubar span { margin-right: 14px; } #mac-menubar b { margin-right: 14px; } #mac-menubar .right { display: flex; align-items: center; } #mac-menubar .right span { margin: 0 0 0 14px; }`,
+  });
+  await page.evaluate(() => {
+    const bar = document.createElement('div');
+    bar.id = 'mac-menubar';
+    bar.innerHTML = '<div><b>Dyno</b><span>File</span><span>View</span><span>Window</span><span>Help</span></div>'
+      + '<div class="right"><span title="Dyno" style="display:inline-flex;align-items:center;gap:4px"><svg width="26" height="12" viewBox="0 0 26 12"><polyline points="0,9 4,6 8,7 12,3 16,5 20,2 25,4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>76</span><span>Thu 22 Oct  14:30</span></div>';
+    document.body.append(bar);
+  });
+  await expect(page.locator('body')).toHaveCSS('padding-top', '34px');
+  await expect(page.locator('html')).toHaveCSS('background-image', /linear-gradient/);
+  // The sparklines have their history before the picture is taken.
+  await page.clock.runFor(45_000);
+  await page.clock.runFor(500);
 }
+
+/** The whole dashboard, for the README and for review (the 1440x900 picture only shows the top): the window is made as tall as the page (it scrolls inside it). */
+async function wholeDashboard(page: Page): Promise<void> {
+  const main = page.locator('#pd-main');
+  const total = await main.evaluate((el) => window.innerHeight - el.clientHeight + el.scrollHeight);
+  await page.setViewportSize({ width: 1440, height: total });
+  await expect(async () => expect(await main.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(0)).toPass({ timeout: 10_000 });
+  await main.evaluate((el) => el.scrollTo(0, 0));
+  await page.clock.runFor(500);
+}
+
+const toDocScreen = (screen: Screen): DocScreen => ({
+  name: screen.name,
+  url: screenUrl(screen),
+  ...(screen.size ? { size: screen.size } : {}),
+  ...(screen.before ? { before: (page: Page) => screen.before!(page) } : {}),
+  ready: async (page, theme) => {
+    await screen.ready(page);
+    if (screen.name === 'tray') {
+      await trayBackdrop(page, theme);
+      return;
+    }
+    await freezeClock(page);
+    await fitToContent(page, screen.maxContent);
+    if (screen.trimTo) await trimToLastRow(page, screen.trimTo);
+    await macWindowButtons(page);
+  },
+  ...(screen.name === 'tray'
+    ? {
+        // Only the popover plus a margin, not the empty wallpaper below it.
+        clip: async (page: Page) => {
+          const box = await page.getByRole('button', { name: /Open Dyno/ }).boundingBox();
+          const bottom = Math.ceil((box?.y ?? 560) + (box?.height ?? 40));
+          return { x: 0, y: 0, width: 440, height: Math.max(480, bottom + 28) };
+        },
+      }
+    : {}),
+});
+
+// The shared documentation screenshot runner (paddock-e2e): the pinned clock, the end of a minute on it, live updates stopped, no animation and
+// no caret before every picture.
+captureDocScreens({
+  screens: [
+    ...SCREENS.map(toDocScreen),
+    {
+      ...toDocScreen(SCREENS.find((s) => s.name === 'dashboard')!),
+      name: 'dashboard-full',
+      ready: async (page, theme) => {
+        await SCREENS.find((s) => s.name === 'dashboard')!.ready(page);
+        await freezeClock(page);
+        await fitToContent(page);
+        await macWindowButtons(page);
+        await wholeDashboard(page);
+        void theme;
+      },
+    },
+  ],
+  outDir: OUT,
+  layout: 'flat',
+  frozenAt: FROZEN,
+  timezoneId: 'UTC',
+  locale: 'en-GB',
+  // 30 s of the clock before a screen's own steps, so a slow start still leaves them inside the first minute (the mock rounds its polled replies to a
+  // minute: a scan clicked after the minute turned read a different time, 'scanned 4 min ago' against '5 min ago' in disk-map, measured 2026-11-16).
+  warmupMs: 30_000,
+  appSelector: 'pd-shell-frame, dy-tray',
+  alignToBucketMs: 60_000,
+});

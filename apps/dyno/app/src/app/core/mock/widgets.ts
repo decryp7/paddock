@@ -38,6 +38,7 @@ import type {
 } from '../generated/widgets';
 import type { DashboardView, PopoverSurfaceValues } from '../widget-types';
 import { wobble } from './noise';
+import { MAC_DISK_FREE, MAC_DISK_TOTAL, MAC_DISK_USED_PERCENT } from './mac-disk';
 
 /**
  * The mock's widget layouts and popup values (family ADR 0035). It mimics the engine's contract with plausible data so the
@@ -706,7 +707,7 @@ export class MockWidgets {
           const rows = Array.from({ length: 30 }, (_, i) => ({ id: `/Volumes/V${i}`, name: `Invented volume ${i + 1}`, usedPercent: (i * 7) % 100, freeBytes: (100 - ((i * 7) % 100)) * GB, totalBytes: 100 * GB, tone: 'ok' as const, reachable: true, measuredAt: null, freshness: 'fresh' as const }));
           return ready({ diskSpace: { rows, more: 0 } }, stale);
         }
-        return ready({ diskSpace: { rows: [{ id: '/', name: 'Macintosh HD', usedPercent: 82, freeBytes: 182 * GB, totalBytes: 994 * GB, tone: 'ok', reachable: true, measuredAt: null, freshness: 'fresh' as const }, { id: '/Volumes/Projects', name: 'Projects', usedPercent: 96, freeBytes: 19 * GB, totalBytes: 500 * GB, tone: 'bad', reachable: true, measuredAt: null, freshness: 'fresh' as const }], more: 0 } }, stale);
+        return ready({ diskSpace: { rows: [{ id: '/', name: 'Macintosh HD', usedPercent: MAC_DISK_USED_PERCENT, freeBytes: MAC_DISK_FREE, totalBytes: MAC_DISK_TOTAL, tone: 'ok', reachable: true, measuredAt: null, freshness: 'fresh' as const }, { id: '/Volumes/Projects', name: 'Projects', usedPercent: 96, freeBytes: 19 * GB, totalBytes: 500 * GB, tone: 'bad', reachable: true, measuredAt: null, freshness: 'fresh' as const }], more: 0 } }, stale);
       }
       case 'cpuMemory':
         return ready({ cpuMemory: { cpuPercent: 76, cpuTone: 'warn', memoryUsed: 16.3 * 1024 ** 3, memoryTotal: 32 * 1024 ** 3, memoryPercent: 51, memoryTone: 'ok', cpuMinute: wave(70, 12) } }, stale);

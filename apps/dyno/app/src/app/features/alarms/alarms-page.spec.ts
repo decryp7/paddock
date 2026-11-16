@@ -5,6 +5,7 @@ import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { SettingsStore } from '../../state/settings.store';
 import { AlarmsPage } from './alarms-page';
+import { MAC_DISK_USED_PERCENT } from '../../core/mock/mac-disk';
 
 const NOW = 1_700_000_000_000;
 
@@ -141,7 +142,7 @@ describe('dy-alarms-page, Active', () => {
     arows(el)[3]!.click();
     await settle(f);
     const panel = el.querySelector('aside')!;
-    expect(text(panel)).toContain('Macintosh HD is 78% full');
+    expect(text(panel)).toContain(`Macintosh HD is ${MAC_DISK_USED_PERCENT}% full`);
     expect(text(panel)).toContain('Waiting for the Xcode caches');
     expect(text(panel)).toContain('Raised');
     expect(panel.querySelector('a[href="/recorder"]')).toBeTruthy();

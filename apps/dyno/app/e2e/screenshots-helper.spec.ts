@@ -1,56 +1,67 @@
-import { expect, test } from './test';
-import { mkdirSync } from 'node:fs';
-import { dialogWindowUrl, settleTransitions } from '@decryp7/paddock-e2e';
+import { expect } from './test';
+import type { Page } from '@playwright/test';
+import { join } from 'node:path';
+import { captureDocScreens, dialogWindowUrl, settleTransitions, type DocScreen } from '@decryp7/paddock-e2e';
 
-// The Administrator readings card in every state, light and dark, for the independent review (ER-23). Only on request:
-// `SCREENSHOTS=1 HELPER_SHOTS_DIR=<dir> npx playwright test --project=screenshots e2e/screenshots-helper.spec.ts`.
-const OUT = process.env['HELPER_SHOTS_DIR'] ?? '';
-const STATES = ['off', 'silent', 'foreign', 'outdated', 'ready', 'notIncluded'] as const;
+// The Administrator readings card in every state, light and dark, in the helper folder of the documentation screenshots, through the shared runner
+// (`SCREENSHOTS=1 npx playwright test --project=screenshots -g "documentation screenshots"`): the pinned clock, live updates stopped, no animation.
+const OUT = process.env['SCREENSHOT_DIR'] ?? join(process.cwd(), '..', 'docs', 'screenshots');
+const STATES: readonly [string, string][] = [
+  ['off', 'off'],
+  ['silent', 'silent'],
+  ['foreign', 'foreign'],
+  ['outdated', 'outdated'],
+  ['ready', 'ready'],
+  ['not-included', 'notIncluded'],
+];
 
-test.describe('Administrator readings card screenshots', () => {
-  test.skip(!OUT, 'set HELPER_SHOTS_DIR');
-  for (const scheme of ['light', 'dark'] as const) {
-    test.describe(scheme, () => {
-      test.use({ colorScheme: scheme });
-      for (const helper of STATES) {
-        test(`state ${helper}`, async ({ page }) => {
-          mkdirSync(OUT, { recursive: true });
-          await page.setViewportSize({ width: 880, height: 760 });
-          await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings', query: `?latency=0&helper=${helper}` }));
-          await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
-          await page.getByText('Dyno', { exact: true }).first().click();
-          const card = page.getByRole('region', { name: 'Administrator readings' });
-          await expect(card.locator('pd-status-pill')).toBeVisible();
-          await card.screenshot({ path: `${OUT}/card-${helper}-${scheme}.png` });
-        });
-      }
-      for (const os of ['windows', 'linux'] as const) {
-        test(`${os} card, off`, async ({ page }) => {
-          mkdirSync(OUT, { recursive: true });
-          await page.setViewportSize({ width: 880, height: 760 });
-          await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings', query: `?latency=0&mock=${os}&helper=off` }));
-          await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
-          await page.getByText('Dyno', { exact: true }).first().click();
-          const card = page.getByRole('region', { name: 'Administrator readings' });
-          await expect(card.locator('pd-status-pill')).toBeVisible();
-          await card.screenshot({ path: `${OUT}/card-off-${os}-${scheme}.png` });
-        });
-      }
-      test('turning on, mid-job (the prompt phase cannot be cancelled)', async ({ page }) => {
-        mkdirSync(OUT, { recursive: true });
-        await page.emulateMedia({ reducedMotion: 'reduce' });
-        await page.setViewportSize({ width: 880, height: 760 });
-        await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings', query: '?latency=400&helper=off&jobsteps=16' }));
-        await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
-        await page.getByText('Dyno', { exact: true }).first().click();
-        const card = page.getByRole('region', { name: 'Administrator readings' });
-        await card.getByRole('button', { name: 'Turn on administrator readings' }).click();
-        await expect(card.locator('pd-status-pill')).toContainText('Turning on');
-        // The job is at its permission prompt (the phase the shot is about), and the card has stopped moving.
-        await expect(card).toContainText("Waiting for the system's permission prompt");
-        await settleTransitions(page);
-        await card.screenshot({ path: `${OUT}/card-turning-on-${scheme}.png` });
-      });
-    });
-  }
-});
+const card = (page: Page) => page.getByRole('region', { name: 'Administrator readings' });
+
+/** Opens Settings (880 x 760) with the mock's query and shows Dyno's page of it, where the card is. */
+async function openCard(page: Page, query: string): Promise<void> {
+  await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings', query }));
+  await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
+  await page.getByText('Dyno', { exact: true }).first().click();
+}
+
+const screens: DocScreen[] = [
+  ...STATES.map(([name, helper]): DocScreen => ({
+    name: `helper/card-${name}`,
+    url: 'about:blank',
+    size: { width: 880, height: 760 },
+    ready: async (page) => {
+      await openCard(page, `?latency=0&helper=${helper}`);
+      await expect(card(page).locator('pd-status-pill')).toBeVisible();
+    },
+    element: (page) => card(page),
+  })),
+  ...(['windows', 'linux'] as const).map(
+    (os): DocScreen => ({
+      name: `helper/card-off-${os}`,
+      url: 'about:blank',
+      size: { width: 880, height: 760 },
+      ready: async (page) => {
+        await openCard(page, `?latency=0&mock=${os}&helper=off`);
+        await expect(card(page).locator('pd-status-pill')).toBeVisible();
+      },
+      element: (page) => card(page),
+    }),
+  ),
+  {
+    // Mid-job: the prompt phase cannot be cancelled.
+    name: 'helper/card-turning-on',
+    url: 'about:blank',
+    size: { width: 880, height: 760 },
+    ready: async (page) => {
+      await openCard(page, '?latency=400&helper=off&jobsteps=16');
+      await card(page).getByRole('button', { name: 'Turn on administrator readings' }).click();
+      await expect(card(page).locator('pd-status-pill')).toContainText('Turning on');
+      // The job is at its permission prompt (the phase the picture is about), and the card has stopped moving.
+      await expect(card(page)).toContainText("Waiting for the system's permission prompt");
+      await settleTransitions(page);
+    },
+    element: (page) => card(page),
+  },
+];
+
+captureDocScreens({ screens, outDir: OUT, layout: 'flat', timezoneId: 'UTC', locale: 'en-GB' });

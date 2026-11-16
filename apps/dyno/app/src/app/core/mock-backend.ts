@@ -135,6 +135,7 @@ import { mockInventory } from './mock/inventory';
 import { type MockOs, type OsProfile, coreKindsOf, osProfile } from './mock/os';
 import { clamp, wobble } from './mock/noise';
 import { type MockProcess, buildProcesses, groupSamples, round, sampleProcess } from './mock/processes';
+import { MAC_DISK_FREE, MAC_DISK_FREE_TEXT, MAC_DISK_TOTAL } from './mock/mac-disk';
 
 /** The note the engine sends when no tray host shows the icons (`dyno_core::tray_host`; the wire contract spec pins the text). */
 const NO_TRAY_HOST_NOTE =
@@ -162,6 +163,13 @@ export interface MockOptions {
   latencyMs?: number;
   /** The clock (Playwright freezes it for stable screenshots). */
   now?: () => number;
+  /**
+   * `?stable=60000`: what the polled replies (history, network, counters, throttling, baselines, the recorder) read of the clock is rounded down to this many
+   * milliseconds, so a reply is the same whichever second of the window its poll fell in: the documentation screenshots then do not depend on the
+   * phase of a 2 s poll against the clock (two runs of one tree differed in the network and recorder pictures, and dark and light showed different rates).
+   * The one-second live tick keeps its own seconds. Default off: every reply reads the exact time.
+   */
+  stableMs?: number;
   /** Disk maps the agent "offers from its cache" at start (ADR 0029), as after a restart: a finished scan, `ageMs` old. */
   savedMaps?: ReadonlyArray<{ target: DiskTarget; ageMs: number; changedBytes: number | null }>;
   /**
@@ -238,6 +246,7 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     ...(q.get('lists') === 'long' ? { longLists: true } : {}),
     ...(q.get('rows') === 'many' ? { rowsMany: true } : {}),
     ...(q.get('keeps') === '1' ? { keepsMeasuring: true } : {}),
+    ...(Number.isInteger(Number(q.get('stable'))) && Number(q.get('stable')) > 0 ? { stableMs: Number(q.get('stable')) } : {}),
     ...(jobStepMs !== null && jobStepMs !== '' && Number.isInteger(Number(jobStepMs)) && Number(jobStepMs) >= 0 ? { jobStepMs: Number(jobStepMs) } : {}),
     ...(q.get('energy') === 'priced' ? { energyPriced: true } : {}),
     ...(['watching', 'blocked', 'countdown', 'acting', 'stopped', 'unavailable'].includes(q.get('idle') ?? '') ? { idle: q.get('idle') as MockIdleVariant } : {}),
@@ -301,6 +310,8 @@ export class MockBackend implements DynoBackend {
   private readonly machine: MockMachine;
   private readonly latencyMs: number;
   private readonly now: () => number;
+  /** The clock as the polled replies read it: {@link MockOptions.stableMs}. */
+  private readonly pollNow: () => number;
   private readonly fail: ReadonlySet<string>;
   private readonly start: number;
   private readonly profile: OsProfile;
@@ -383,11 +394,13 @@ export class MockBackend implements DynoBackend {
     this.jobSteps = options.jobSteps ?? 1;
     this.jobStepMs = options.jobStepMs ?? (this.latencyMs === 0 ? 0 : 400);
     this.now = options.now ?? (() => Date.now());
+    const stableMs = options.stableMs ?? 0;
+    this.pollNow = stableMs > 0 ? () => Math.floor(this.now() / stableMs) * stableMs : this.now;
     this.fail = options.fail ?? new Set();
     this.widgets = new MockWidgets({ storage: browserStorage(options.widgetStorage), now: this.now, gridCases: gridCases as unknown as GridCase[], longLists: options.longLists ?? false, ...(options.widgets ?? {}) });
     // A scan reports a few times: one timer per step (zero delay with no latency, so a test sees the first status before the rest).
     const latency = this.latencyMs;
-    this.disk = new MockDiskMap(this.now, (fn, step) => setTimeout(fn, latency === 0 ? 0 : Math.max(300, latency * 2) * step), err);
+    this.disk = new MockDiskMap(this.pollNow, (fn, step) => setTimeout(fn, latency === 0 ? 0 : Math.max(300, latency * 2) * step), err);
     for (const m of options.savedMaps ?? []) this.disk.seedSaved(m.target, m.ageMs, m.changedBytes);
     if (options.holdScans) {
       this.disk.hold();
@@ -758,6 +771,8 @@ export class MockBackend implements DynoBackend {
       if (rustc.length === 0 || rustcCpu < 5) {
         return { at: now, windowSecs: 55, headline: 'Nothing is slowing your computer down right now', causes: [{ kind: 'nothingWrong', title: 'All quiet', explanation: 'CPU, memory and disk all have room to spare.', confidence: 0.9, evidence: [], hints: [], involved: [] }] };
       }
+      // The antivirus is XProtect on macOS (its own process), the indexer's name elsewhere; Spotlight's mds_stores is the indexer, not the scanner.
+      const scanner = this.profile.os === 'macos' ? 'XProtectService' : this.profile.names.indexer;
       return {
         at: now,
         windowSecs: 55,
@@ -782,7 +797,7 @@ export class MockBackend implements DynoBackend {
           {
             kind: 'diskQueue',
             title: 'The disk is queueing writes',
-            explanation: 'rustc writes 180 MB/s of build output; requests wait in line, so apps that open files feel sluggish.',
+            explanation: 'rustc writes 121 MB/s of build output; requests wait in line, so apps that open files feel sluggish.',
             confidence: 0.58,
             evidence: [
               { label: 'Disk queue', value: queue.toFixed(1) },
@@ -798,11 +813,11 @@ export class MockBackend implements DynoBackend {
             explanation: 'Microsoft Defender inspects build output as it is written. Excluding build folders (not source) avoids it.',
             confidence: 0.41,
             evidence: [
-              { label: this.profile.names.indexer, value: '4.1% CPU' },
+              { label: this.profile.os === 'macos' ? 'XProtectService' : this.profile.names.indexer, value: '4.1% CPU' },
               { label: 'Scanning', value: `${this.profile.projectDir}${this.profile.os === 'windows' ? '\\' : '/'}target` },
             ],
             hints: [{ text: 'See what starts at sign-in', link: 'startup' }],
-            involved: [{ id: this.profile.names.indexer, name: this.profile.names.indexer, share: '4% CPU' }],
+            involved: [{ id: scanner, name: scanner, share: '4% CPU' }],
           },
           {
             kind: 'lowDiskSpace',
@@ -824,10 +839,7 @@ export class MockBackend implements DynoBackend {
 
   history(range: HistoryRange, end: Timestamp | null): Promise<History> {
     return this.reply('history', () => {
-      // The history windows end on a whole minute: its events and axis then do not move with the second the page happened to load in (two
-      // runs of the documentation screenshots differed in the event markers of the dashboard history, by a second), and a minute is finer than any chart there can show.
-      const now = this.now();
-      const h = mockHistory(range, end, now - (now % 60_000), this.profile.cores, this.kinds);
+      const h = mockHistory(range, end, this.pollNow(), this.profile.cores, this.kinds);
       if (this.profile.os !== 'windows') {
         // Only the disks this machine has, under their names (the shared demo data has two Windows drives).
         const disks = this.profile.disks(0);
@@ -945,15 +957,15 @@ export class MockBackend implements DynoBackend {
   }
 
   counterValues(paths: string[]): Promise<CounterReading[]> {
-    return this.reply('counterValues', () => this.counters.values(paths, this.now()));
+    return this.reply('counterValues', () => this.counters.values(paths, this.pollNow()));
   }
 
   counterHistory(paths: string[], minutes: number): Promise<CounterHistory> {
-    return this.reply('counterHistory', () => this.counters.history(paths, minutes, this.now()));
+    return this.reply('counterHistory', () => this.counters.history(paths, minutes, this.pollNow()));
   }
 
   throttling(): Promise<ThrottleOverview> {
-    return this.reply('throttling', () => mockThrottling(this.profile.os, this.now()));
+    return this.reply('throttling', () => mockThrottling(this.profile.os, this.pollNow()));
   }
 
   lifespan(): Promise<LifespanOverview> {
@@ -961,11 +973,11 @@ export class MockBackend implements DynoBackend {
   }
 
   baselines(): Promise<BaselineOverview> {
-    return this.reply('baselines', () => mockBaselines(this.now()));
+    return this.reply('baselines', () => mockBaselines(this.pollNow()));
   }
 
   network(query: NetworkQuery): Promise<NetworkSnapshot> {
-    return this.reply('network', () => mockNetwork(query, this.now(), this.rowsMany));
+    return this.reply('network', () => mockNetwork(query, this.pollNow(), this.rowsMany));
   }
 
   resolveHosts(addresses: string[]): Promise<HostName[]> {
@@ -1074,7 +1086,7 @@ export class MockBackend implements DynoBackend {
   // ------------------------------------------------------------------------------ recorder, diagnostics
 
   private snapshotRows(): RecorderSnapshotInfo[] {
-    return (this.snapshotInfos ??= demoSnapshotInfos(this.now()));
+    return (this.snapshotInfos ??= demoSnapshotInfos(this.pollNow()));
   }
 
   capture(): Promise<RecorderSnapshotInfo> {
@@ -1302,13 +1314,13 @@ export class MockBackend implements DynoBackend {
         ],
         scoreTrend: [66, 68, 71, 70, 72, 74].map((score, i) => ({ at: from + i * 28 * 60 * MIN, score })),
         disks: [
-          { disk: this.profile.os === 'windows' ? 'C:' : '/', total: 953 * GB, free: 210 * GB, forecast: { fullInDays: 41 } },
+          { disk: this.profile.os === 'windows' ? 'C:' : '/', total: this.profile.os === 'macos' ? MAC_DISK_TOTAL : 953 * GB, free: this.profile.os === 'macos' ? MAC_DISK_FREE : 210 * GB, forecast: { fullInDays: 41 } },
           // Invented long mount paths: the page must shorten them, never let them push the numbers out of the card.
           { disk: '/Volumes/Example-Archive-Drive-With-A-Long-Name/Projects-2026/Quarter-Four/Backups-Of-Everything-From-Every-Computer-In-The-House-Kept-Here-For-Ten-Years', total: 3726 * GB, free: 652 * GB, forecast: 'notFilling' },
           { disk: '/Volumes/Spare', total: 1863 * GB, free: 1210 * GB, forecast: 'notEnoughData' },
         ],
         issues: [
-          { at: issueAt(6 * 60), severity: 'warning', title: 'Drive is getting full', detail: '210 GB free of 953 GB; at this rate it is full in about 41 days.' },
+          { at: issueAt(6 * 60), severity: 'warning', title: 'Drive is getting full', detail: `${this.profile.os === 'macos' ? MAC_DISK_FREE_TEXT : '210 GB free of 953 GB'}; at this rate it is full in about 41 days.` },
           { at: issueAt(30 * 60), severity: 'info', title: 'A build used a lot of CPU for a long time', detail: 'rustc averaged 74% for 32 minutes.' },
         ],
         hardware: ['The CPU ran slower than it should for 52 min this week (52 min of heat).', 'Battery: replace in about 23 months (17 to 31 months) (confidence medium).'],

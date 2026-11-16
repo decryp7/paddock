@@ -71,7 +71,7 @@ function readCollapsed(): Set<string> {
 
       <div class="bar" role="group" aria-label="Filters">
         <pd-segmented-control label="Show" [options]="tabSegs" [value]="tab()" (valueChange)="setTab($event === 'listening' ? 'listening' : 'connections')" />
-        <dy-search-field label="Search the network table" placeholder="For example 443" [value]="store.query().search" (valueChange)="search($event)" />
+        <dy-search-field label="Search the network table" placeholder="Search" [value]="store.query().search" (valueChange)="search($event)" />
         <mat-checkbox [checked]="store.query().showLoopback" (change)="store.setQuery({ showLoopback: !store.query().showLoopback })">Show loopback</mat-checkbox>
         <mat-checkbox [checked]="store.query().exposedOnly" (change)="store.setQuery({ exposedOnly: !store.query().exposedOnly })">Exposed only</mat-checkbox>
         <pd-segmented-control label="Protocol" [options]="protoSegs" [value]="store.query().proto ?? ''" (valueChange)="proto($event)" />
