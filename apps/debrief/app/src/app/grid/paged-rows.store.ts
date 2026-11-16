@@ -85,7 +85,7 @@ export class PagedRowsStore {
   private currentQuery: Query | null = null;
   private desc = false;
   private scrolledAt = Number.NEGATIVE_INFINITY;
-  private pendingLive: { oldTotal: number; mode: LiveMode } | null = null;
+  private pendingLive: { oldTotal: number; mode: LiveMode; pages: Set<number> } | null = null;
 
   constructor(private readonly options: PagedRowsOptions) {
     this.pageSize = options.pageSize ?? PAGE;
@@ -152,11 +152,22 @@ export class PagedRowsStore {
     } else {
       this.stale = new Set(this.pages.keys());
     }
-    this.pendingLive = { oldTotal, mode };
-    this.bump();
+    this.endArrival = null;
     const wanted = new Set<number>([0, this.pageOf(first), this.pageOf(Math.max(first, last - 1))]);
     if (mode === 'end') wanted.add(this.pageOf(Math.max(0, oldTotal - 1)));
+    this.pendingLive = { oldTotal, mode, pages: new Set(wanted) };
+    this.bump();
     for (const page of wanted) this.ensurePage(page);
+  }
+
+  /** A page fetch is waiting for scrolling to pause (for tests: wait on this, not on a fixed time). */
+  get scrollIdlePending(): boolean {
+    return this.idle.pending;
+  }
+
+  /** The user took the view over (a scroll the grid did not write itself): the reveal is no longer followed. */
+  endReveal(): void {
+    this.endArrival = null;
   }
 
   /** The user scrolled: page fetches wait until scrolling pauses. */
@@ -252,17 +263,36 @@ export class PagedRowsStore {
     this.loaded.set(true);
     this.error.set(null);
     this.options.onTotal?.(res.total);
-    this.arriveLive(res.total);
+    this.arriveLive(res.total, round, page);
     this.bump();
     this.options.onPage?.();
   }
 
-  private arriveLive(newTotal: number): void {
+  private arriveLive(newTotal: number, round: unknown, page: number): void {
     const live = this.pendingLive;
-    if (!live) return;
-    this.pendingLive = null;
-    this.options.onLive?.({ mode: live.mode, newTotal, delta: newTotal - live.oldTotal });
+    if (live) {
+      this.pendingLive = null;
+      live.pages.delete(page);
+      this.endArrival = live.mode === 'end' && live.pages.size > 0 ? { round, total: newTotal, pages: live.pages } : null;
+      this.options.onLive?.({ mode: live.mode, newTotal, delta: newTotal - live.oldTotal });
+      return;
+    }
+    // The reveal asked for several pages. An event pushed between two of their answers makes a later one report a larger total
+    // than the one the scroll to the end was made for: the end moved, so the view follows it once more. Only the reveal's own
+    // pages count (a page fetched because the user scrolled is not part of it), and the follow-up ends with its last page or
+    // the first scroll the grid did not write itself (`endReveal`, called from the grid's `onScroll`).
+    const end = this.endArrival;
+    if (!end || end.round !== round || !end.pages.delete(page)) return;
+    if (end.pages.size === 0) this.endArrival = null;
+    if (newTotal > end.total) {
+      const delta = newTotal - end.total;
+      end.total = newTotal;
+      this.options.onLive?.({ mode: 'end', newTotal, delta });
+    }
   }
+
+  /** The reveal's round, the total it scrolled to the end of and the pages of it still to answer (see `arriveLive`). */
+  private endArrival: { round: unknown; total: number; pages: Set<number> } | null = null;
 
   private bump(): void {
     this.version.update((v) => v + 1);

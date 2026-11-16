@@ -1,4 +1,5 @@
 import { splitInstance } from './events-grid';
+import { ManualClock } from '../../testing/manual-clock';
 import { TestBed } from '@angular/core/testing';
 import { all, buttonByText, el, provideTinyBackend, settle, testLogger, text, tinyBackend } from '../../testing/helpers';
 import { Page, PageRequest, RecordView } from '../core/api.types';
@@ -11,15 +12,21 @@ import { LiveFeed } from '../live/live-feed';
 import { LiveFollow } from '../live/live-follow.store';
 import { WorkspaceStore } from '../core/workspace.store';
 import { SettingsStore } from '../settings/settings.store';
-import { EventsGrid, SCROLL_IDLE_MS } from './events-grid';
+import { EventsGrid } from './events-grid';
 import { GridSelection } from './grid-selection';
 import { RecordActions } from '../context/record-actions';
 import { HighlightRules } from '../projects/bookmarks/highlight-rules.store';
 import { at } from '../../testing/must';
-import { ManualClock } from '../../testing/manual-clock';
-import { holdableTimers, withLiveHeld } from '@decryp7/paddock-ui/testing';
 
 const VIEWPORT_H = 260;
+
+/** Pages are fetched once scrolling has paused: waits on that condition (the store's idle timer is no longer pending), not on a fixed time. */
+async function scrollIdle(f: { componentInstance: unknown; whenStable(): Promise<unknown> }): Promise<void> {
+  const rowsOf = (f.componentInstance as { rows: { scrollIdlePending: boolean } }).rows;
+  await settle(f as never); // the fill effect schedules the fetch
+  await vi.waitFor(() => expect(rowsOf.scrollIdlePending).toBe(false));
+  await settle(f as never);
+}
 
 function fakeRow(i: number): RecordView {
   return { id: i, ts: 1_700_000_000_000 + i, tsState: 'parsed', level: 'Information', message: `row ${i}`, template: null, exception: null, fields: { n: i }, source: 0, sourceName: 's.log', line: i + 1, byteOffset: 0, group: 'g', markers: [] };
@@ -549,8 +556,7 @@ describe('EventsGrid', () => {
     expect(rows(fixture).length).toBeLessThan(40);
     vp.scrollTop = parseFloat(spacer.style.height);
     vp.dispatchEvent(new Event('scroll'));
-    await new Promise((r) => setTimeout(r, SCROLL_IDLE_MS + 30));
-    await settle(fixture);
+    await scrollIdle(fixture);
     const last = rows(fixture).at(-1)!;
     expect(last.textContent).toContain('row 1999999');
     expect(backend.requests.some((r) => r.offset === 3999 * 500)).toBe(true);
@@ -615,9 +621,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
   const key = (vp: HTMLElement, k: string) => vp.dispatchEvent(new KeyboardEvent('keydown', { key: k, cancelable: true }));
   const flush = async (f: Awaited<ReturnType<typeof render>>['fixture']) => {
     await settle(f);
-    // Pages are fetched once scrolling has paused.
-    await new Promise((r) => setTimeout(r, SCROLL_IDLE_MS + 30));
-    await settle(f);
+    await scrollIdle(f);
   };
 
   it('shows the full total and a capped spacer for 50 million rows', async () => {
@@ -844,21 +848,8 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
   });
 
   describe('live tail', () => {
-    /** The live feed runs on a clock the test moves (and can hold), never on the page's timers: a tick lands when the test says. */
-    const LIVE_MS = 25;
-    const liveClock = () => holdableTimers(new ManualClock());
-    /** Moves the feed's clock one tick at a time until `done()`, letting the grid take each batch (a bounded number of ticks). */
-    async function tickUntil(clock: ManualClock, fixture: Awaited<ReturnType<typeof render>>['fixture'], done: () => boolean) {
-      for (let i = 0; i < 40 && !done(); i++) {
-        await clock.advance(LIVE_MS);
-        await flush(fixture); // the grid fetches its pages once scrolling has paused
-      }
-      expect(done()).toBe(true);
-    }
-
     async function live(descending: boolean, scrollRows: number | 'end') {
-      const clock = liveClock();
-      const backend = synthetic(5000, { liveMs: LIVE_MS, clock });
+      const backend = synthetic(5000, { liveMs: 25 });
       const { fixture, store, grid, vp } = await render(backend);
       if (descending) store.toggleSort();
       await flush(fixture);
@@ -872,7 +863,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       const tail = TestBed.inject(LiveTail);
       await tail.toggle();
       expect(tail.enabled()).toBe(true);
-      await tickUntil(clock, fixture, () => grid.total() > before.total + 1);
+      await vi.waitFor(() => expect(grid.total()).toBeGreaterThan(before.total + 1), { timeout: 3000 });
       await tail.toggle();
       await flush(fixture);
       return { fixture, store, grid, before, tail };
@@ -911,8 +902,11 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     it('holds the rows while not following, counts the new events, and reveals the newest on request', async () => {
       for (const descending of [true, false]) {
         TestBed.resetTestingModule();
-        const clock = liveClock();
-        const backend = synthetic(5000, { liveMs: LIVE_MS, clock });
+        // The backend's pushes run on a clock the test moves (ER-28, lessons.md 2026-11-16): the reveal scrolls to the end of the
+        // rows there are when it runs, and with a real timer a push after it moved that end by one row (24 px) before the
+        // assertion read it (120052 against 120028, once in about three full runs).
+        const clock = new ManualClock();
+        const backend = synthetic(5000, { liveMs: 25, clock });
         const { fixture, store, grid } = await render(backend);
         if (descending) store.toggleSort();
         await flush(fixture);
@@ -920,23 +914,82 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
         const feed = TestBed.inject(LiveFeed);
         const tail = TestBed.inject(LiveTail);
         await tail.toggle();
-        await tickUntil(clock, fixture, () => feed.newEvents() > 1);
-        // The feed is held while the count and the rows are read: nothing arrives between two reads.
-        await withLiveHeld(async () => {
-          expect(grid.total()).toBe(5000);
-          await settle(fixture);
-          el<HTMLButtonElement>(fixture, '[data-testid=new-events]').click();
-        });
-        await tickUntil(clock, fixture, () => grid.total() > 5000);
+        await clock.advance(100);
+        await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1), { timeout: 3000 });
+        expect(grid.total()).toBe(5000);
+        await settle(fixture);
+        el<HTMLButtonElement>(fixture, '[data-testid=new-events]').click();
+        await vi.waitFor(() => expect(grid.total()).toBeGreaterThan(5000), { timeout: 3000 });
         await flush(fixture);
         expect(grid.virtualTop()).toBe(descending ? 0 : grid.geometry().maxTop);
         await tail.toggle();
       }
     });
 
+    // Product bug (lessons.md 2026-11-16): the reveal asks for several pages in one round; an event pushed between two of the
+    // answers made a later page report a larger total than the one the scroll to the end was made for, and the grid stayed one
+    // row (24 px) short of the newest event. The order is forced here: the second page of the reveal's round is answered after a push.
+    it('reveals the newest event even when a push lands between the pages of the reveal\'s refresh', async () => {
+      TestBed.resetTestingModule();
+      const clock = new ManualClock();
+      const backend = synthetic(5000, { liveMs: 25, clock });
+      const { fixture, grid } = await render(backend);
+      await flush(fixture);
+      TestBed.inject(LiveFollow).setFollow(false);
+      const feed = TestBed.inject(LiveFeed);
+      await TestBed.inject(LiveTail).toggle();
+      await clock.advance(100);
+      await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1));
+      await settle(fixture);
+      const answer = backend.queryPage.bind(backend);
+      let asked = 0;
+      vi.spyOn(backend, 'queryPage').mockImplementation(async (request) => {
+        // The reveal's first page is answered as asked; a push lands before the second page is read.
+        if (asked++ === 1) await clock.advance(25);
+        return answer(request);
+      });
+      el<HTMLButtonElement>(fixture, '[data-testid=new-events]').click();
+      await vi.waitFor(() => expect(asked).toBeGreaterThan(1));
+      await flush(fixture);
+      const total = grid.total();
+      expect(total).toBeGreaterThan(5000);
+      expect(grid.virtualTop(), `the view ends at the last of ${total} rows`).toBe(grid.geometry().maxTop);
+    });
+
+    // The follow-up of a reveal belongs to the reveal's own pages, not to its round: a page fetched because the user scrolled
+    // away later (the grid holds new events, so no new round starts) must not jump the view back to the end.
+    it('does not pull the view back to the end after the user scrolls away from a reveal', async () => {
+      TestBed.resetTestingModule();
+      const clock = new ManualClock();
+      const backend = synthetic(5000, { liveMs: 25, clock });
+      const { fixture, grid, vp } = await render(backend);
+      await flush(fixture);
+      TestBed.inject(LiveFollow).setFollow(false);
+      const feed = TestBed.inject(LiveFeed);
+      await TestBed.inject(LiveTail).toggle();
+      await clock.advance(100);
+      await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1));
+      await settle(fixture);
+      el<HTMLButtonElement>(fixture, '[data-testid=new-events]').click();
+      await flush(fixture);
+      expect(grid.virtualTop()).toBe(grid.geometry().maxTop);
+      // The user scrolls to the top; more events arrive and are held; then the user scrolls to the middle.
+      TestBed.inject(LiveFollow).setFollow(false);
+      await clock.advance(100);
+      await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(0));
+      vp.scrollTop = 0;
+      vp.dispatchEvent(new Event('scroll'));
+      await flush(fixture);
+      await clock.advance(100);
+      vp.scrollTop = 60_000;
+      vp.dispatchEvent(new Event('scroll'));
+      await flush(fixture);
+      await settle(fixture);
+      expect(grid.virtualTop()).toBeLessThan(70_000);
+    });
+
     it('keeps the same rows selected when new events are inserted above them', async () => {
-      const clock = liveClock();
-      const backend = synthetic(5000, { liveMs: LIVE_MS, clock });
+      const backend = synthetic(5000, { liveMs: 25 });
       const { fixture, store, grid, vp } = await render(backend);
       store.toggleSort();
       await flush(fixture);
@@ -954,27 +1007,10 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       const total = grid.total();
       const tail = TestBed.inject(LiveTail);
       await tail.toggle();
-      await tickUntil(clock, fixture, () => grid.total() > total + 1);
+      await vi.waitFor(() => expect(grid.total()).toBeGreaterThan(total + 1), { timeout: 3000 });
       await tail.toggle();
       await flush(fixture);
       expect(selectedIds()).toEqual(before);
-    });
-
-    it('a value read while the feed is held does not move under the read; it moves once the feed is released', async () => {
-      const clock = liveClock();
-      const { fixture, grid } = await render(synthetic(5000, { liveMs: LIVE_MS, clock }));
-      const tail = TestBed.inject(LiveTail);
-      await tail.toggle();
-      await tickUntil(clock, fixture, () => grid.total() > 5000);
-      let held = 0;
-      await withLiveHeld(async () => {
-        held = grid.total();
-        await clock.advance(LIVE_MS * 8); // time passes; the feed's ticks wait
-        await settle(fixture);
-        expect(grid.total()).toBe(held);
-      });
-      await tickUntil(clock, fixture, () => grid.total() > held);
-      await tail.toggle();
     });
   });
 });
