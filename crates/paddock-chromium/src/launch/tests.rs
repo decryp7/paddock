@@ -1127,15 +1127,13 @@ fn a_launch_without_a_memory_cap_uses_a_plain_child() {
 
 #[test]
 fn a_failed_start_reports_the_browsers_error_output_and_leaves_no_profile() {
-    use std::os::unix::fs::PermissionsExt;
     let base = tempfile::tempdir().unwrap();
     let exe = base.path().join("fake-chrome.sh");
-    std::fs::write(
+    paddock_testkit::exe::write_program(
         &exe,
         "#!/bin/sh\necho 'Running as root without --no-sandbox is not supported' >&2\nexit 1\n",
     )
     .unwrap();
-    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
     let profiles = base.path().join("profiles");
     let e = Chromium::launch(&Browser::chromium(&exe), &opts(&profiles))
         .err()
@@ -1147,8 +1145,7 @@ fn a_failed_start_reports_the_browsers_error_output_and_leaves_no_profile() {
     );
     assert_eq!(std::fs::read_dir(&profiles).unwrap().count(), 0);
     let quiet = base.path().join("quiet.sh");
-    std::fs::write(&quiet, "#!/bin/sh\nexit 0\n").unwrap();
-    std::fs::set_permissions(&quiet, std::fs::Permissions::from_mode(0o755)).unwrap();
+    paddock_testkit::exe::write_program(&quiet, "#!/bin/sh\nexit 0\n").unwrap();
     let e = Chromium::launch(&Browser::chromium(&quiet), &opts(&profiles))
         .err()
         .unwrap()
@@ -1323,10 +1320,8 @@ fn a_theme_that_cannot_be_written_does_not_stop_the_launch() {
 }
 
 fn script(dir: &Path, name: &str, body: &str) -> Browser {
-    use std::os::unix::fs::PermissionsExt;
     let exe = dir.join(name);
-    std::fs::write(&exe, format!("#!/bin/sh\n{body}\n")).unwrap();
-    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+    paddock_testkit::exe::write_program(&exe, format!("#!/bin/sh\n{body}\n")).unwrap();
     Browser::chromium(exe)
 }
 
@@ -1465,12 +1460,10 @@ fn a_sweep_removes_nothing_when_the_process_table_cannot_be_read() {
 #[cfg(target_os = "macos")]
 #[test]
 fn warm_up_is_the_shared_first_run_and_a_failure_is_a_launch_error() {
-    use std::os::unix::fs::PermissionsExt;
     let base = tempfile::tempdir().unwrap();
     let write = |name: &str, body: &str| {
         let path = base.path().join(name);
-        std::fs::write(&path, body).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&path, body).unwrap();
         Browser {
             flavor: crate::discover::Flavor::Chromium,
             path,

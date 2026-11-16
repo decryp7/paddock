@@ -128,13 +128,11 @@ impl Fixture {
 /// A "compiler" that prints a chosen `-vV`.
 #[cfg(unix)]
 pub(crate) fn fake_rustc(dir: &Path, name: &str, release: &str, commit: &str, host: &str) -> String {
-    use std::os::unix::fs::PermissionsExt;
     let p = dir.join(name);
     let body = format!(
         "#!/bin/sh\nprintf 'rustc {release}\\nbinary: rustc\\ncommit-hash: {commit}\\ncommit-date: d\\nhost: {host}\\nrelease: {release}\\nLLVM version: 1\\n'\n"
     );
-    std::fs::write(&p, body).unwrap();
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    paddock_testkit::exe::write_program(&p, body).unwrap();
     p.display().to_string()
 }
 
@@ -363,10 +361,8 @@ fn a_config_that_only_names_the_build_folder_does_not_change_the_hash() {
 /// A tiny stand-in for the tool binary: answers `--version`, otherwise prints a marker.
 #[cfg(unix)]
 pub(crate) fn write_script(path: &Path, body: &str) {
-    use std::os::unix::fs::PermissionsExt;
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    paddock_testkit::exe::write_program(path, format!("#!/bin/sh\n{body}\n")).unwrap();
 }
 
 /// A stand-in `cargo` that "builds" a script answering `--version`, `self hash` (the hash it was built for, as the real tool shows)

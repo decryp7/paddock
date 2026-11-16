@@ -85,12 +85,12 @@ pub fn warm_up(exe: impl AsRef<OsStr>, args: &[&str]) -> Result<Duration, String
         return Ok(took);
     }
     let began = Instant::now();
-    let mut child = crate::command(exe.as_ref())
-        .args(args)
+    let mut cmd = crate::command(exe.as_ref());
+    cmd.args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
+        .stderr(std::process::Stdio::piped());
+    let mut child = crate::command::spawn_retrying(&mut cmd)
         .map_err(|e| format!("{name} could not be run for its first start: {e}"))?;
     let tail = child.stderr.take().map(|mut err| {
         let mut kept: Vec<u8> = Vec::new();
@@ -139,12 +139,11 @@ pub fn warm_up(exe: impl AsRef<OsStr>, args: &[&str]) -> Result<Duration, String
 mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::fs::PermissionsExt;
+
     use std::path::Path;
 
     fn script(path: &Path, body: &str) {
-        std::fs::write(path, format!("#!/bin/sh\n{body}")).unwrap();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(path, format!("#!/bin/sh\n{body}")).unwrap();
     }
 
     fn fifo(path: &Path) {

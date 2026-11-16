@@ -52,13 +52,13 @@ pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
+
     use std::path::Path;
 
     fn sccache(dir: &Path, body: &str) {
         std::fs::create_dir_all(dir).unwrap();
         let p = dir.join("sccache");
-        std::fs::write(
+        paddock_testkit::exe::write_program(
             &p,
             format!(
                 "#!/bin/sh\necho \"sccache $* port=${{SCCACHE_SERVER_PORT:-}} token=${{GITHUB_TOKEN:-}}\" >> '{}'\n{body}\n",
@@ -66,7 +66,6 @@ mod tests {
             ),
         )
         .unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     fn go(dir: &Path, vars: &[(&str, &str)]) -> (i32, String, String) {

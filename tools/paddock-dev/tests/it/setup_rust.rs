@@ -9,7 +9,6 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -71,8 +70,7 @@ impl Runner {
         // apt-get and sudo always have shims first on PATH, so no test can reach the machine's own.
         for (name, body) in [("sudo", "exec \"$@\""), ("apt-get", "exit 0")] {
             let p = bin.join(name);
-            std::fs::write(&p, format!("#!/bin/sh\necho \"{name} $*\" >> '{}'\n{body}\n", calls.display())).unwrap();
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            paddock_testkit::exe::write_program(&p, format!("#!/bin/sh\necho \"{name} $*\" >> '{}'\n{body}\n", calls.display())).unwrap();
         }
         Runner {
             root,
@@ -198,8 +196,7 @@ fn write_shim(path: &Path, calls: &Path, shim: &str) {
         calls.display(),
         tokens = calls.with_file_name("tokens").display()
     );
-    std::fs::write(path, body).unwrap();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    paddock_testkit::exe::write_program(path, body).unwrap();
 }
 
 struct Input {

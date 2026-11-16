@@ -1046,6 +1046,7 @@ version = "0.2.0"
 dependencies = [
  "libc",
  "log",
+ "paddock-env",
  "paddock-workspace-hack",
  "sysinfo",
  "thiserror",

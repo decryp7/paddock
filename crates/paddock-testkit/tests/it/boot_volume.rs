@@ -9,7 +9,7 @@ use paddock_testkit::boot_volume::{
     rule_script,
 };
 use std::ffi::OsString;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::time::Duration;
 
@@ -23,8 +23,7 @@ fn fake_path(s: &Scratch, user_temp: Option<&Path>) -> OsString {
     std::fs::create_dir_all(&bin).unwrap();
     let tool = |name: &str, body: String| {
         let p = bin.join(name);
-        std::fs::write(&p, format!("#!/bin/sh\n{body}")).unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&p, format!("#!/bin/sh\n{body}")).unwrap();
     };
     tool(
         "df",

@@ -476,10 +476,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_fake_engine_is_asked_for_a_preview_and_a_prune() {
-        use std::os::unix::fs::PermissionsExt;
         let d = temp("fake");
         let script = d.join("docker");
-        std::fs::write(
+        paddock_testkit::exe::write_program(
             &script,
             "#!/bin/sh\ncase \"$1 $2\" in\n\
              'system df') printf 'Images\\t3\\t1\\t1GB\\t600MB (60%%)\\nBuild Cache\\t4\\t0\\t2GB\\t2GB\\n';;\n\
@@ -491,7 +490,6 @@ mod tests {
              *) exit 0;;\nesac\n",
         )
         .unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         let path = d.display().to_string();
         let r = report(Some(&path), None, Timestamp(1));
         assert_eq!(r.engine, Some(EngineKind::Docker));

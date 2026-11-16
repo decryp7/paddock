@@ -1116,7 +1116,6 @@ fn a_dropped_hunk_finding_shows_where_it_was_and_what_it_said() {
 #[cfg(unix)]
 mod hakari {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
     const FAKE_CARGO: &str = r#"#!/bin/sh
 # argv: hakari generate --diff, run in <tree>/crates. Like cargo-hakari 0.9.39, it prints the diff on STANDARD ERROR.
@@ -1130,8 +1129,7 @@ exit 0
 
     fn fake_cargo(dir: &Path) -> PathBuf {
         let p = dir.join("cargo");
-        fs::write(&p, FAKE_CARGO).unwrap();
-        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&p, FAKE_CARGO).unwrap();
         p
     }
 
@@ -1305,7 +1303,6 @@ exit 0
 #[cfg(unix)]
 mod member_gate {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
     const FAKE_GATES: &str = r#"#!/bin/sh
 # argv: check --pre-push --base <base> --root <root>; run in <root>. Logs its argv and the checkout's HEAD.
@@ -1368,8 +1365,7 @@ exit 0
         }
         let gates = tempfile::tempdir().unwrap();
         let p = gates.path().join("gates");
-        fs::write(&p, FAKE_GATES).unwrap();
-        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&p, FAKE_GATES).unwrap();
         Train { repo, gates }
     }
 
@@ -1390,8 +1386,7 @@ exit 0
         let t = train(false);
         let script = |body: &str| {
             let p = t.gates.path().join("gates");
-            fs::write(&p, format!("#!/bin/sh\n{body}\nexit 0\n")).unwrap();
-            fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+            paddock_testkit::exe::write_program(&p, format!("#!/bin/sh\n{body}\nexit 0\n")).unwrap();
         };
         let stale = r#"printf '{"outcome":{"status":"clean","evidence":{"check":"pre-push","subject":{"kind":"commit","sha":"0000000000000000000000000000000000000001","tree":"0000000000000000000000000000000000000002"},"tool":"x","at":1}}}\n'"#;
         for body in ["echo fine", "echo '{\"outcome\":{\"status\":\"clean\"}}'", stale] {

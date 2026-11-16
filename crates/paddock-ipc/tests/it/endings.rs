@@ -46,6 +46,26 @@ fn the_reference_endpoint_passes_every_scenario_it_supports() {
     }
 }
 
+/// Run 8174: the harness let the peer read again only after it had advanced the reason deadline, so an endpoint that reacted
+/// to the deadline first saw a peer that still did not read, gave up on the reason and ended with `drain=none`. The peer
+/// must read again before the deadline passes, whatever the order the two threads run in.
+#[test]
+fn the_reference_ends_an_unread_close_right_when_the_endpoint_reacts_before_the_harness_goes_on() {
+    let (observed, expect) = mini::run_with(
+        None,
+        Scenario::OwnerCloseWhilePeerNotReading,
+        &|log, before| {
+            assert!(
+                log.wait_for_len(before + 1, std::time::Duration::from_secs(30)),
+                "the endpoint never decided about the reason"
+            );
+        },
+    )
+    .expect("applies");
+    let faults = judge(&observed, &expect);
+    assert!(faults.is_empty(), "{faults:?}\n{:?}", observed.log);
+}
+
 #[test]
 fn each_broken_endpoint_fails_in_the_scenario_that_sees_its_fault() {
     for fault in MiniFault::ALL {
