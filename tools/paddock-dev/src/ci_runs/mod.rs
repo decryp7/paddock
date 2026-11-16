@@ -20,6 +20,7 @@ pub mod logfind;
 pub mod members;
 pub mod preconditions;
 pub mod record;
+pub mod reservation;
 pub mod schedule_skip;
 #[cfg(test)]
 mod testutil;
@@ -525,6 +526,21 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     let mut inputs = a.inputs.clone();
     let mut git_ref = a.git_ref.clone().unwrap_or_default();
     let mut trial = None;
+    // The train always goes first (2026-11-16): while a train's CI sequence holds its reservation, a run that is not a train's
+    // (a trial, a member, a manual run) waits, at most --max, before anything is pushed. A `train/*` dispatch never waits here.
+    if a.trial.is_some() || !dispatch::is_train(&git_ref) {
+        let max = crate::wait::parse_duration(&a.max).map_err(|e| CliError::usage(e).with_hint(hint))?;
+        match reservation::wait_real(max, &mut std::io::stderr()) {
+            Ok(reservation::Free::Yes { .. }) => {}
+            Ok(reservation::Free::StillHeld { holder }) => {
+                return Err(
+                    CliError::failure(format!("not dispatched: a train's CI sequence holds the runners ({holder})."))
+                        .with_hint("Wait for the train's sequence to end, then dispatch again; the train always goes first."),
+                );
+            }
+            Err(e) => return Err(CliError::failure(e).with_hint("Set PADDOCK_TRAIN_CI_LOCK_ROOT, or check `./dev places`.")),
+        }
+    }
     if let Some(branch) = &a.trial {
         // Everything that can be refused is refused before `trial/<branch>` is pushed: the branch name, the inputs, --max and
         // --interval (parsed with a stand-in ref and base), and the workflow (readable, its runner classes known).

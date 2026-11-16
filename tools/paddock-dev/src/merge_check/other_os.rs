@@ -1,3 +1,4 @@
+// ci-runs-reader: the member gate (other-os) reads the jobs and the triage rows of ONE partial member run (a base dispatch, which ci verdict refuses by design) for a report-only row per OS; it never says a commit may land or be tagged: that verdict stays ./dev ci verdict
 //! The `other-os` member gate of `./dev merge check --gates` (train 14, early-catch item 1; ADR 0087 amendment of 2026-11-16): a
 //! member's affected tests run on Linux and Windows BEFORE the member joins a train, **on the real CI runners**, as merge queues and
 //! merge trains do. The user decided this on 2026-11-16 after the first version (a container on the Arm Mac and the Windows test VM)
@@ -22,7 +23,7 @@
 use super::generator_step::Step;
 use super::{Merge, git::Git, short};
 use crate::ci_runs::client::{Client, TimedJob};
-use crate::ci_runs::{dispatch, time, triage, trial};
+use crate::ci_runs::{dispatch, reservation, time, triage, trial};
 use crate::queue::ports::{Blame, Failure, Sent};
 use crate::queue::real::{Child, GitTrain, failures_of};
 use crate::wait::{CurlHttp, Http};
@@ -483,6 +484,11 @@ impl Runs for Gitea {
     }
 
     fn dispatch(&mut self, git_ref: &str, base: &str) -> Result<Sent, String> {
+        // The train always goes first: a member run never takes the gap between two workflows of a train's CI sequence.
+        match reservation::wait_real(Duration::from_secs(45 * 60), &mut std::io::stderr())? {
+            reservation::Free::Yes { .. } => {}
+            reservation::Free::StillHeld { holder } => return Ok(Sent::Busy(format!("a train's CI sequence holds the runners: {holder}"))),
+        }
         let req = dispatch::parse_request(WORKFLOW, git_ref, &[format!("base={base}")], MAX_DISPATCH_WAIT, None)?;
         let root = self.root.clone();
         let read = move |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();

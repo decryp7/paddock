@@ -1,151 +1,108 @@
-# Amendment to ADR 0087 (2026-11-16, draft): the other-OS member gate, and a pinned toolchain for the test VM
+# Amendment to ADR 0087 (2026-11-16, draft): the other-OS member gate runs on the real CI runners
 
-- Status: Proposed 2026-11-16. The gate (§1) is built and report-only. §2 was decided by the user on 2026-11-16: option (b) plus the MSVC Build Tools in the image; it is built and measured below.
+- Status: Proposed 2026-11-16. **Decided by the user on 2026-11-16: real runners**, as merge queues and merge trains do. The step
+  is built and report-only (ER-41).
 - Trigger: train 12 spent about 17 hours in three red CI rounds, and every failure was Linux- or Windows-only: run 8138 (23
   failures: a hidden PATH, `/srv` paths that are not absolute on Windows, a lost Git-bash PATH, slow process starts, ext4 folder
-  blocks), run 8147 (a `#!/bin/sh` fixture Windows cannot run), run 8152 (TestCommand 6x slower on Windows). All of them passed the
-  Mac member gates. A review also found a VM-test bug that only shows in a fresh clone without repo-local git config.
-- Related: ER-9, ER-33 (a row says why it did not look), ER-36, ER-41 (report-only first), ER-42 (read declared data through its
-  accessor), ER-37 (common practice and cost), ADR 0087 and its amendment of 2026-11-13 (`run --ci-like`), ADR 0098 (member
-  gates), ADR 0103.
+  blocks), run 8147 (a `#!/bin/sh` fixture Windows cannot run), run 8152 (TestCommand 6x slower on Windows). All of them passed
+  the Mac member gates. Goal: a member's affected tests run on Linux and Windows BEFORE it joins a train.
+- Related: ER-9, ER-24 and the user's D-1 (2026-11-15: one train's CI per single-machine runner class), ER-33 (a row says why it
+  did not look), ER-36, ER-41 (report-only first), ER-42, ER-37 (common practice and cost), rule 55 (one copy of "what does a
+  change reach"), ADR 0087 and its amendment of 2026-11-13 (`run --ci-like`), ADR 0098 (member gates, trial refs).
 
-## 1. The gate: `other-os`, a row of `./dev merge check --gates`
+```evidence-heads
+read: 2026-11-16
+origin/train/2026-11-15-13 13881087a
+```
 
-After the fast gates, the step reads the paths of the member's own change (`<merge>^1` to the merge) and decides what runs where
-(`tools/paddock-dev/src/merge_check/other_os.rs`, `select`):
+## Why not an emulation of the runners (the first version, measured)
 
-| A changed path | Linux (CI image) | Windows (test VM) |
-| --- | --- | --- |
-| `tools/paddock-dev/` | nextest `paddock-dev` | nextest `paddock-dev` |
-| `crates/paddock-testkit/`, `crates/paddock-testkit-start/` | nextest of the crate | nextest of the crate |
-| `conformance/` (and the CI kit under it) | `npm test` in `conformance` | none: its checks are Node and the runner's Node is not the question |
-| `scripts/vm-*` | `node --test scripts/vm-*.test.mjs` | none (Mac-only scripts) |
-| any other Rust crate whose tests start programs (`Command::new`, `TestCommand`, `paddock_proc`, `.spawn(`, `assert_cmd` in its sources) | nextest of that package | nextest of that package |
-| Markdown, `docs/`, everything else | nothing | nothing |
+The first version ran the member's tests in a container on the Arm Mac (`linux/amd64` under emulation, ext4 loop mount, fresh
+clone) and on the Windows test VM (Arm, x64 programs under Prism, a runner-style step). It worked as a mechanism (a planted
+Linux-only and a planted Windows-only failure were each red on their OS) but it gave **false findings**:
 
-The plan (`./dev plan`) is not the selector on purpose: it answers "which projects does CI test", which is every project in the
-dependency cone, while this gate answers "which changes can differ by OS", which is a property of the files. The plan's own
-documentation-only rule is the same as `docs_only` here.
+- On a base where the real Windows runner is green, 22 `paddock-dev` tests failed on the VM and one timed out (1421 of 1444
+  passed): `/srv` paths that are not absolute (`places`, `wrapper`, `queue`), `grep: command not found` under the VM's runner-style
+  PATH, `TotalPhysicalMemory` unreadable for a standard user. They are differences between the VM and the runner (account, PATH,
+  CPU, architecture), not findings in the member.
+- The native `linux/arm64` image had no pinned Chromium (a false conformance failure); `linux/amd64` ran under emulation, where a
+  failed exec may not be reported.
+- The VM needed the Build Tools in its image, a per-run toolchain copy, Node, a pinned Arm nextest (the x64 one does not start),
+  and a 13 to 15 minute cold build for `paddock-dev`, and it blocked the single VM lock for every other lane.
+- A review of that version also found that selection by file heuristics missed OS-specific crates and their dependents, and that
+  failures already red on the base were reported as the member's own.
 
-**Linux** (`scripts/member-gate-linux.sh`, through `tools/linux-container.sh --ci-image --loop-mount`): the CI image
-(`linux/amd64`, the image CI runs; native arm64 gave a false failure in conformance, "no pinned Chromium for linux/arm64"), as
-root, with `TMPDIR` on an ext4 loop mount (the only addition to the container: `CAP_SYS_ADMIN`, the loop devices; not
-`--privileged`, no host path mounted), in a fresh shallow clone of exactly the merge commit (`git init` + `fetch --depth 1`, as
-`actions/checkout` leaves it, so no repo-local config), with `CI=true`, `GITHUB_ACTIONS=true`, `ulimit -n 1024` and nextest's
-`ci` profile. The script prints `other-os-control: os=linux tree=<tree> user=root tmp=ext4 clone=fresh-shallow gitconfig=none`
-only after it checked each of those.
+A run on the real runners removes the false findings by construction (same machines, same account, same image as CI), and CI's
+own planner already selects the jobs.
 
-**Windows** (`scripts/member-gate-windows.sh`): under the test machines lock (`vm-lock-run.sh`; busy is exit 75), the guest is reverted
-to the snapshot `buildtools-baseline` (clean-baseline plus the Build Tools, §2), started, and `vm-win.sh run --ci-like
---tools-provided` copies in the Rust toolchain of `rust-toolchain.toml`, the pinned Arm `cargo-nextest.exe` and the pinned Node,
-then builds and runs the specs **natively**: `cargo nextest run -p <package> --profile ci --locked --no-fail-fast`. Tests that run
-cargo (all of `paddock-dev`'s) therefore work. The guest command prints `other-os-control: os=windows tree=<tree> autocrlf=true
-... target=x86_64-pc-windows-msvc vm-arch=aarch64 runner-arch=x86_64` from its own checkout and its verdict as an
-`other-os-result: failed=<n>` line (the ci-like wrapper turns a guest exit 100 into 1, so an exit code cannot carry it).
+## The gate: `other-os`, a row of `./dev merge check --gates`
 
-**Architecture (decided 2026-11-16 on the coordinator's note).** The guest is Arm; the CI runner is x64. The gate builds
-**x86_64-pc-windows-msvc by default**: the native Arm rustc cross-compiles (the image has the x64 MSVC libraries and a
-`Hostarm64\x64\link.exe`; the extra `rust-std-x86_64-pc-windows-msvc` is copied with the toolchain) and the x64 test programs run
-under Prism emulation, so a member is tested in the runner's architecture. Reason: native aarch64 does not build every crate yet
-(Dyno's `dyno-platform` tests do not compile for aarch64: the `windows` crate lacks `RegisterClassW` in `mount_events.rs`; that gap
-is recorded as its own item, not fixed here), and x64 programs built with the repo's `crt-static` rustflags start in the guest.
-`cargo-nextest.exe` itself is the **native Arm** release: the pinned x64 one does not start (it is not statically linked and the
-guest has no x64 VC runtime), so running the x64 nextest under emulation is not worth it: it would need the x64 VC++
-redistributable in the image for no gain, since nextest only starts the test processes.
-`PADDOCK_MEMBER_GATE_WIN_TARGET=aarch64-pc-windows-msvc` builds natively instead. Every Windows row says so (`note` in the JSON,
-`[x64 test programs ... Arm64 test VM ...]` in the text).
+`tools/paddock-dev/src/merge_check/other_os.rs`, after the fast gates, for a merge commit (report-only, `ENFORCED = false`):
 
-**The row** (ER-33): `passed` needs exit 0, the control line for this merge's tree and nextest's summary with tests run for every
-nextest target; `failed` is exit 100 with the control line; everything else (Docker down, the VM busy, a build failure, a missing
-control, a run ended by its bound, a package that needs the toolchain, below) is `not measured` with the reason. A path set that
-reaches neither OS is `not run (<why>)`. **Report-only (ER-41)**: `ENFORCED` is false in `other_os.rs`, the exit code is
-unchanged, the text says `REPORT-ONLY` and what would happen. The first green run on a real train is recorded below by the change
-that flips it; a const assertion in the tests fails until that is decided.
+1. **Selection is the plan's.** `./dev plan <train before> <merge>`; a member that reaches no project is `not run (<why>)`.
+   There is no second copy of "what does a change reach" (rule 55); the earlier path heuristic and `select()` are gone.
+2. **Push and dispatch.** The merge commit is pushed to the short-lived ref `trial/member-<sha12>` (the `trial/*` namespace of ADR
+   0098 WP-4, cleaned by this step and by `./dev ci trial-prune`) and `ci.yml` is dispatched on it with `base` = the train before,
+   so CI's planner runs only the member's affected jobs. The dispatch is `ci dispatch`'s own: it waits, bounded (45 minutes), while
+   another run holds the macOS or Windows runner, then reports `not measured` (ER-24, D-1).
+3. **One bounded wait** (`./dev wait --ci-run`, at most 2 hours), then the jobs and `ci triage` are read.
+4. **Only new failures fail a row.** `ci triage` compares each failed test with the last main run and the flake history; a failure
+   also on main is listed (`alsoOnMain`), not blamed; an unknown one is `not measured`, never a pass.
+5. **Rows are the shared types (C124):** per OS, `measure` makes `Clean` (evidence for this run) or `Findings` (the new
+   failures); `NotMeasured` carries the reason; `NotApplicable` says the plan ran no job on that OS. The Linux row is the run's
+   `ubuntu-latest` jobs and the Windows row its `windows-latest` jobs, named by their matrix label.
 
-First report-only run: see "Measurements" at the end.
+`ci verdict` is not the reader here: it is the one reader of FULL runs and refuses a base dispatch by design (a partial run
+"never counts"). The pass or fail of a partial member run is this step's, built on the same `Client` and `triage` readers the train
+queue uses.
 
-A package whose tests run `cargo` (all of `paddock-dev`) cannot run on Windows (§2): its row is `not measured`, listed by name.
+Needs `GITEA_TOKEN` (write access: it pushes the scratch ref) and `PADDOCK_TRIAL_DIR` (a folder for the askpass program, as
+`ci dispatch --trial`); either missing is `not measured` with what to set.
 
-## 2. The toolchain for the Windows guest (decided: (b) plus Build Tools)
+## What stays of the VM work
 
-The first version cross-built on the Mac and could not run tests that call `cargo` (all of `paddock-dev`'s: they read
-`env!("CARGO")`, a Mac path in a cross-built program, or run `cargo metadata`). That hole is the class of run 8034 (a `/c/Users/...`
-checkout path read by `queue::tests`). The options were (a) a pinned toolchain in the image, (b) the toolchain per run from a
-host-side cache, (c) cross-built programs only. The user chose (b) **plus** the MSVC Build Tools in the image, so the guest builds
-natively. (b) follows `rust-toolchain.toml` by itself; an image copy (a) would need a re-provision on every Rust bump.
+The Windows test VM remains for GUI and installer tests. Kept: the snapshot `buildtools-baseline` (clean-baseline plus the Visual
+Studio Build Tools 2022 17.12.37502.7; rollback snapshot `pre-buildtools-2026-11-16`; install 540 s, about 8.3 GB), `vm-win.sh
+toolchain-setup`, `vm-win.sh run --ci-like --tools-provided`, and `scripts/member-gate-windows.sh` and its lock file, now **marked
+for manual use** (one package natively on the VM for a Windows-only investigation, with the VM's own differences listed above).
+Removed: the Linux container scripts and `--loop-mount` of `tools/linux-container.sh`, and the path selection.
 
-What was built:
+## Cost (ER-37)
 
-- **Build Tools (once, in the image).** `vm-win.sh toolchain-setup` (under the lock, bounded, with a cleanup trap that reverts to
-  `clean-baseline` on any early exit): reverts to `clean-baseline`, takes the rollback snapshot **`pre-buildtools-2026-11-16`**
-  (a copy of `clean-baseline`'s state before the change), installs **Visual Studio Build Tools 2022 17.12.37502.7** (LTSC 17.12,
-  components `VC.Tools.x86.x64`, `VC.Tools.ARM64`, `Windows11SDK.22621`) as `paddock-admin`, shuts down cleanly and takes
-  **`buildtools-baseline`**. `clean-baseline` is unchanged; the way back is `vm-win.sh revert` to it (or to the rollback snapshot).
-  The installer is Microsoft's fixed LTSC 17.12 bootstrapper (`https://aka.ms/vs/17/release.ltsc.17.12/vs_buildtools.exe`, which
-  redirects to `download.visualstudio.microsoft.com/download/pr/0b774c01-.../7ab0e750...e3e/vs_BuildTools.exe`); the SHA-256 in
-  that path, `7ab0e75003c995688999833d01fce07ac60b92f53fc9439494e4dd8521bf4e3e`, is checked on the host and again in the guest,
-  and the Authenticode signature must be valid and Microsoft's. The components come from Microsoft's CDN through that installer.
-  No token, no account (ER-26).
-- **Measured.** The installer ran 540 s (about 13 minutes from the VM start to the snapshot); about 8.3 GB used on the guest's C:,
-  which is the size the new snapshot adds to the VM folder (the folder was 118 GB before; other agents' snapshots grew it too).
-  Two first attempts failed and were fixed: an SSH session over the installer was dropped by its keep-alive while the guest was
-  starved, and a `Start-Process` launch over SSH never started (the script now creates a scheduled task as SYSTEM, which survives
-  the session). The poll loop prints a live progress line (ER-18; the first version printed only "still working" and kept the
-  lock for 73 minutes while nothing ran). The install needs the VM exclusively, so it cannot release the lock in the middle, but
-  it now lasts about 13 minutes.
-- **Toolchain per run (host-side cache, `scripts/vm-win/member-gate-tools.lock`).** The cache folder holds the toolchain of
-  `rust-toolchain.toml` (an exact version is required) for `aarch64-pc-windows-msvc` plus the x86_64 std, checked against the
-  `.sha256` that static.rust-lang.org publishes, packed as one archive of about 160 MB; the pinned aarch64 `cargo-nextest` (the
-  version of `host_tools.rs`' pin; a test holds the lock file equal to it; its SHA-256 comes from the GitHub release, which
-  publishes none for this archive: the first trust is TLS) and Node 24.22.3 (`.nvmrc`'s major; SHA-256 from nodejs.org's
-  SHASUMS256.txt). They are copied in with `--with` each run and unpacked in the guest (4 to 5 s). No rustup runs in the guest, so
-  nothing can auto-install a toolchain (`RUSTUP_AUTO_INSTALL=0` is set too); the host never touches `~/.rustup` or `~/.cargo`.
-- **Registries.** No token: the Gitea registry is read anonymously (`.cargo/config.toml`: "no token needed to read") and
-  crates.io too. Nothing secret is written into the image or a log (ER-27); a test in `scripts/member-gate.test.mjs` fails if
-  the script names a token.
+Common practice is what the user chose: GitHub merge queues and GitLab merge trains run the member's merge result on the real
+runners before it lands. Build cost of this rework: about 1 agent-day (the first version was about 4). Run cost per member: the
+affected jobs of the plan on the real runners, for a `crates` change the whole workspace on Linux, macOS and Windows (about 35 to 45
+minutes on the Windows runner), queued behind a busy runner by D-1. That is minutes of CI, not of an agent. A docs-only member
+costs nothing (`not run`).
 
-## 2b. Measurements of the native guest build (2026-11-16, the VM under load from other lanes: upper bounds)
+## First runs (2026-11-16, report-only)
 
-| What | Time |
-| --- | --- |
-| VM start from `buildtools-baseline` | 23 to 56 s |
-| Toolchain, Node and nextest unpack in the guest | 4 to 5 s |
-| `paddock-testkit-start`: cold build in the guest, then 23 tests (all passed, green on a real member) | 490 s for the whole run including the 400 MB bundle copy and the checkout |
-| `paddock-dev`: cold build in the guest, then 1444 tests (first run, before Node was copied in) | 554 s of nextest, 808 s for the guest run; 1393 passed, 50 failed, 1 timed out (84 of the panics say `node must be installed` or `the host must run`, which Node in the guest fixes) |
+**Run 8166** (a real member merge touching only `crates/paddock-view`, dispatched by this step on `trial/member-0e5fd6446864` after
+waiting 31 minutes 53 seconds behind a release run on the macOS runner) was dispatched correctly and then **cancelled by me on the
+coordinator's order**: it had slipped into the gap between two workflows of train 12's release sequence and train 12's Pitwall gate
+was waiting behind it. So there is **no green or red real-runner result yet**; the planted red run and the green run are to be
+made after train 12 has landed, on the integrator's say (ER-1: the release goes first). What was proven: the plan selection, the
+push to the scratch ref, the dispatch with `base`, the wait behind a busy macOS runner (D-1), the run's creation, and the scratch
+ref's cleanup. The rows, the NEW-only blame and every `not measured` path are covered by unit tests with a fake CI
+(`other_os.rs`: a planted new failure on Windows is red there and green on Linux; a busy runner, a still-running run, an
+unreadable plan are `not measured`).
 
-With Node copied in (second measured run, x64 target): 1444 tests, 884 s of nextest, 1421 passed, 22 failed, 1 timed out. The guest
-is reverted for every run, so every run is a cold build: a `paddock-dev` change costs about 13 to 15 minutes of Windows time, a
-small crate about 4 minutes (`paddock-testkit-start`: 222 to 239 s for the whole row). The guest's own clock jumps when its time
-is synced after a revert (negative durations were printed), so the script no longer prints guest timings; the host times the run.
+## The train reservation (the gap that 8166 showed)
 
-The 22 failures and 1 timeout are **findings on the train 13 base**, not of the gate: `places::tests::*` (6), `wrapper::*` (8),
-`queue::tests::*` (3), `brief_check`, `safe_remove::guard`, `build_jobs_golden` (`TotalPhysicalMemory` is unreadable for a
-standard user). Their causes: "The dev-targets folder /srv/... is not absolute" (`/srv` paths on Windows, the class of run 8138),
-`grep: command not found` in a copy of the repo's `dev` script (the runner-style PATH has Git's `bin` but not `usr/bin`). A gate
-that runs a whole package reports what is red on the base too; a member is judged by the rows that differ from the base's, and
-until the base is green the integrator compares with the base's own row (not built here).
+`ci dispatch`'s runner guard sees only a busy runner, so a member run can take the gap between two workflows of a train's CI
+sequence. Fixed as a design rule, not a timing slip: **the integrator's sequence holds a reservation for its whole duration**, and
+every dispatch that is not a train's waits on it.
 
-Through the full `./dev merge check --gates` path, report-only (the exit code stayed 0):
-
-| Merge | Linux row | Windows row |
-| --- | --- | --- |
-| Planted (a `#[cfg(unix)]` test for the macOS-only `/Applications`, a `#[cfg(windows)]` test that starts a `#!/bin/sh` fixture) | `failed` in 34 s: `planted_linux_only_failure_a_macos_only_path_is_expected` | `failed` in 222 s: `planted_windows_only_failure_a_sh_shebang_fixture_cannot_run` (os error 193), 23 others passed |
-| A real member (a comment in `crates/paddock-testkit-start/src/lib.rs`) | `passed` in 30 s | `passed` in 239 s |
-
-The Windows row carries the note `x64 test programs (the runner's architecture) on an Arm64 test VM under Prism emulation;
-cargo-nextest and the toolchain run natively on Arm`.
-
-## 3. Common practice and cost (ER-37)
-
-GitHub Actions and the Gitea runner here use one runner per OS, so CI itself is the common practice; the cost of "a runner per OS
-before merge" is the point of this gate, and the local VM is the user's own decision (ADR 0087). The gate costs about 1.5
-agent-days beyond a docs-only change (module, scripts, tests, this note); the cheaper option, "run the other OSes only in CI",
-is what train 12 cost 17 hours for.
-
-## Measurements of the Linux row (2026-11-16, report-only)
-
-31 to 34 s with a warm build volume; a cold conformance run was 203 s under emulation (`linux/amd64` on the Arm Mac). The same
-Linux mode ran `wrapper::the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_is_pruned_meanwhile` (it
-fails 5 of 5 under `linux-container.sh`'s read-only `.git` mount) and it passed, because the run builds in its own writable fresh
-clone, as CI does: 71 s including the build, `1 test run: 1 passed`. The first green report-only run on a real train (ER-41)
-is not recorded yet: the two merges above were made by hand.
+- `scripts/train-ci-hold.sh <label> -- <the sequence>` holds one kernel file lock under `<lock root>/train-ci` (the machine's lock
+  mechanism of `scripts/vm-lock.sh`: freed when the holder dies; wrap the sequence in `timeout 8h`, so the hold is bounded by its
+  command). `--status` shows the holder.
+- `ci dispatch` of a non-train ref (and `--trial`, and the member gate) calls `ci_runs/reservation.rs` first: it waits while the
+  lock is held, polling every 15 s, at most `--max` (the member gate: 45 minutes), and then does not dispatch: `ci dispatch` fails
+  with "a train's CI sequence holds the runners", the member gate is `not measured`. A `train/*` dispatch never waits on it; an
+  unreadable lock is an error, never "free". A test (`reservation.rs`) shows a member dispatch waiting while the reservation is
+  held and going on when it is released, and being reported still held at the bound.
+- Checked by hand: with the hold taken, `./dev ci dispatch ci.yml --ref <anything> --max 10s` printed the wait line and refused,
+  and dispatched nothing.
+- **The integrator must wrap each train's sequence in `train-ci-hold.sh`** (brief template change; the rule rests on the
+  integrator until a hook exists). A member run that is already running when a sequence starts is not stopped: the train's own
+  runner-wait waits for it, as before.

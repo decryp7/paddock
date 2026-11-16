@@ -33,3 +33,10 @@ test('the Windows run copies the toolchain of rust-toolchain.toml in per run, ne
 test('the script says it is for manual use and that the member gate runs on the real runners', () => {
   assert.match(read('member-gate-windows.sh'), /MANUAL USE/);
 });
+
+test('train-ci-hold.sh parses, takes its own lock folder and wraps a command with the lock runner', () => {
+  assert.equal(spawnSync('bash', ['-n', join(here, 'train-ci-hold.sh')]).status, 0);
+  const s = read('train-ci-hold.sh');
+  assert.match(s, /train-ci/);
+  assert.match(s, /vm-lock-run\.sh/);
+});
