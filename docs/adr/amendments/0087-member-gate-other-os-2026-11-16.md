@@ -113,15 +113,27 @@ What was built:
 | `paddock-testkit-start`: cold build in the guest, then 23 tests (all passed, green on a real member) | 490 s for the whole run including the 400 MB bundle copy and the checkout |
 | `paddock-dev`: cold build in the guest, then 1444 tests (first run, before Node was copied in) | 554 s of nextest, 808 s for the guest run; 1393 passed, 50 failed, 1 timed out (84 of the panics say `node must be installed` or `the host must run`, which Node in the guest fixes) |
 
-The guest is reverted for every run, so every run is a cold build; a warm build exists only inside one session. The cost per run
-of a `paddock-dev` change is therefore about 8 to 13 minutes. A second run with Node in the guest ran for over 35 minutes and was
-ended by me when the coordinator asked the VM to be freed (the guest had stopped answering SSH under load), so the post-Node
-failure list is **not measured yet**.
+With Node copied in (second measured run, x64 target): 1444 tests, 884 s of nextest, 1421 passed, 22 failed, 1 timed out. The guest
+is reverted for every run, so every run is a cold build: a `paddock-dev` change costs about 13 to 15 minutes of Windows time, a
+small crate about 4 minutes (`paddock-testkit-start`: 222 to 239 s for the whole row). The guest's own clock jumps when its time
+is synced after a revert (negative durations were printed), so the script no longer prints guest timings; the host times the run.
 
-Failures seen in the first run that are not about Node and are for the review to triage (they are what this gate is for):
-`/srv/dev-targets`-style paths that are not absolute on Windows (`places`, `wrapper`, `check_engine`: "The dev-targets folder
-/srv/... is not absolute"), `grep: command not found` in a copy of the repo's `dev` script (the runner-style PATH has Git's `bin`
-but not `usr/bin`), and a `TotalPhysicalMemory` a standard user cannot read.
+The 22 failures and 1 timeout are **findings on the train 13 base**, not of the gate: `places::tests::*` (6), `wrapper::*` (8),
+`queue::tests::*` (3), `brief_check`, `safe_remove::guard`, `build_jobs_golden` (`TotalPhysicalMemory` is unreadable for a
+standard user). Their causes: "The dev-targets folder /srv/... is not absolute" (`/srv` paths on Windows, the class of run 8138),
+`grep: command not found` in a copy of the repo's `dev` script (the runner-style PATH has Git's `bin` but not `usr/bin`). A gate
+that runs a whole package reports what is red on the base too; a member is judged by the rows that differ from the base's, and
+until the base is green the integrator compares with the base's own row (not built here).
+
+Through the full `./dev merge check --gates` path, report-only (the exit code stayed 0):
+
+| Merge | Linux row | Windows row |
+| --- | --- | --- |
+| Planted (a `#[cfg(unix)]` test for the macOS-only `/Applications`, a `#[cfg(windows)]` test that starts a `#!/bin/sh` fixture) | `failed` in 34 s: `planted_linux_only_failure_a_macos_only_path_is_expected` | `failed` in 222 s: `planted_windows_only_failure_a_sh_shebang_fixture_cannot_run` (os error 193), 23 others passed |
+| A real member (a comment in `crates/paddock-testkit-start/src/lib.rs`) | `passed` in 30 s | `passed` in 239 s |
+
+The Windows row carries the note `x64 test programs (the runner's architecture) on an Arm64 test VM under Prism emulation;
+cargo-nextest and the toolchain run natively on Arm`.
 
 ## 3. Common practice and cost (ER-37)
 
@@ -130,16 +142,10 @@ before merge" is the point of this gate, and the local VM is the user's own deci
 agent-days beyond a docs-only change (module, scripts, tests, this note); the cheaper option, "run the other OSes only in CI",
 is what train 12 cost 17 hours for.
 
-## Measurements (2026-11-16, report-only; the machine was shared and often at 0% idle, so the times are upper bounds)
+## Measurements of the Linux row (2026-11-16, report-only)
 
-A planted merge (the member adds `crates/paddock-testkit-start/tests/planted.rs`: a `#[cfg(unix)]` test that needs the macOS-only
-`/Applications`, and a `#[cfg(windows)]` test that starts a `#!/bin/sh` fixture) through `./dev merge check --gates`:
-
-| Row | Result | Time |
-| --- | --- | --- |
-| Linux | `failed`: `planted_linux_only_failure_a_macos_only_path_is_expected`; 34 other tests passed; control line `os=linux user=root tmp=ext4 clone=fresh-shallow gitconfig=none arch=x86_64` | 31 s (warm build volume; a cold conformance run was 203 s under emulation) |
-| Windows | `failed`: `planted_windows_only_failure_a_sh_shebang_fixture_cannot_run` (os error 193); 23 other tests passed | 90 to 120 s per run with the build warm; the bundle of the tree is 400 MB |
-
-The same Linux mode ran `wrapper::the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_is_pruned_meanwhile`
-(it fails 5 of 5 under `linux-container.sh`'s read-only `.git` mount) and it passed, because the run builds in its own
-writable fresh clone, as CI does: 71 s including the build, `1 test run: 1 passed`.
+31 to 34 s with a warm build volume; a cold conformance run was 203 s under emulation (`linux/amd64` on the Arm Mac). The same
+Linux mode ran `wrapper::the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_is_pruned_meanwhile` (it
+fails 5 of 5 under `linux-container.sh`'s read-only `.git` mount) and it passed, because the run builds in its own writable fresh
+clone, as CI does: 71 s including the build, `1 test run: 1 passed`. The first green report-only run on a real train (ER-41)
+is not recorded yet: the two merges above were made by hand.
