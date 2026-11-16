@@ -22,6 +22,9 @@ const RUN_MAX: Duration = Duration::from_secs(360);
 /// The wait for the machine-wide slot: one full `--warm-linux` of another agent holds it for the sum of the seven cold runs
 /// measured (767.6 s), rounded up to 15 minutes.
 const QUEUE_MAX: Duration = Duration::from_secs(15 * 60);
+/// The hang backstop of the local CI image build (`linux-container.sh --ci-image`: the garage stage and ci-image/Dockerfile): about
+/// twice the cold build measured with `--no-cache`, 379 s (docs/benchmarks.md, "Pre-push Linux Clippy, native"): 760 s.
+const IMAGE_MAX: Duration = Duration::from_secs(760);
 
 /// The workspaces to warm: the ones named (each must be a Cargo workspace folder), else every Cargo workspace.
 pub fn targets(root: &Path, named: &[String], all_workspaces: &[String]) -> Result<Vec<String>, CliError> {
@@ -87,10 +90,7 @@ pub fn command(root: &Option<PathBuf>, named: &[String]) -> Result<Report, CliEr
     };
     let todo = targets(&root, named, &all)?;
     if todo.is_empty() {
-        return Ok(Report::new(
-            json!({"warmed": []}),
-            "warm-linux: no workspace holds Linux-only code; nothing to warm.",
-        ));
+        return Ok(Report::new(json!({"warmed": []}), "warm-linux: no Cargo workspace to warm."));
     }
     if !docker_answers(&env) {
         return Ok(not_measured(
@@ -99,8 +99,8 @@ pub fn command(root: &Option<PathBuf>, named: &[String]) -> Result<Report, CliEr
         ));
     }
     let built = std::sync::OnceLock::new();
-    let prefix = match heavy_command_for(&root, &env, &|p| on_path(&env, p), &built, Duration::from_secs(600)) {
-        Ok(p) => with_heavy_flags(&p, false, QUEUE_MAX, RUN_MAX),
+    let base_prefix = match heavy_command_for(&root, &env, &|p| on_path(&env, p), &built, Duration::from_secs(600)) {
+        Ok(p) => p,
         Err(e) => {
             return Ok(not_measured(
                 &e,
@@ -108,8 +108,50 @@ pub fn command(root: &Option<PathBuf>, named: &[String]) -> Result<Report, CliEr
             ));
         }
     };
+    let prefix = with_heavy_flags(&base_prefix, false, QUEUE_MAX, RUN_MAX);
     let mut rows = Vec::new();
     let mut worst = Exit::Ok;
+    // The local CI image is its own step with its own bound: it is minutes and gigabytes, and neither a workspace's run limit nor
+    // the push budget may cut it off. Built once per change to ci-image/; a probe (exit 3: not built) decides.
+    let probe = paddock_proc::command("bash")
+        .args([
+            "tools/linux-container.sh",
+            "--id",
+            "paddock",
+            "--ci-image",
+            "--image-ready",
+            "--root",
+        ])
+        .arg(&root)
+        .current_dir(&root)
+        .status();
+    if matches!(probe, Ok(s) if s.code() == Some(3)) {
+        eprintln!(
+            "warm-linux: local CI image: building (once per change to ci-image/; limit {} s)",
+            IMAGE_MAX.as_secs()
+        );
+        let started = Instant::now();
+        let mut argv = with_heavy_flags(&base_prefix, false, QUEUE_MAX, IMAGE_MAX);
+        argv.extend(["bash", "tools/linux-container.sh", "--id", "paddock", "--ci-image", "--", "true"].map(String::from));
+        let status = paddock_proc::command(&argv[0]).args(&argv[1..]).current_dir(&root).status();
+        let secs = started.elapsed().as_secs_f64();
+        let code = status.map_or(-1, |s| s.code().unwrap_or(-1));
+        eprintln!(
+            "warm-linux: local CI image: {} after {secs:.1} s (exit {code})",
+            if code == 0 { "built" } else { "failed" }
+        );
+        rows.push(json!({"workspace": "local CI image", "seconds": (secs * 10.0).round() / 10.0, "exit": code}));
+        if code != 0 {
+            return Ok(Report {
+                data: json!({"warmed": rows}),
+                text: format!(
+                    "warm-linux: the local CI image build failed (exit {code}) after {secs:.1} s. Next step: read the output above (a stopped build, exit 80, hit the {} s bound)",
+                    IMAGE_MAX.as_secs()
+                ),
+                exit: Exit::Findings,
+            });
+        }
+    }
     let gates = runs(&todo, &version, &|ws| left_out(&root, ws)).map_err(|e| {
         CliError::failure(format!("{e}.")).with_hint("Run `cargo metadata --no-deps` in that workspace and fix what it prints.")
     })?;

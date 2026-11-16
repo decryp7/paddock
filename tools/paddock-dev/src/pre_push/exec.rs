@@ -67,6 +67,10 @@ pub trait Exec: Sync {
     fn has_tool(&self, program: &str) -> bool;
     /// Does a Docker daemon answer? Never starts one.
     fn docker_up(&self) -> bool;
+    /// Why the local CI image the Linux Clippy runs in is not built (None: it is, or the row needs none). Never builds it.
+    fn ci_image_missing(&self) -> Option<String> {
+        None
+    }
     /// Runs the gate within `limits` (a heavy step: at most `limits.run` of running and `limits.queue` of waiting for the slot).
     /// `Err`: it could not be started (the program is missing).
     fn run(&self, gate: &Gate, limits: Limits) -> Result<Done, String>;
@@ -223,13 +227,21 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
                 ),
             );
         }
-        Need::Docker if !exec.docker_up() => {
+        Need::Docker | Need::LocalCiImage if !exec.docker_up() => {
             return Row::not_measured(
                 "Docker (OrbStack) is not running",
                 "start it yourself and re-run; an agent reports this to the coordinator and never starts or restarts it (ER-14)",
             );
         }
         _ => {}
+    }
+    if gate.need == Need::LocalCiImage
+        && let Some(why) = exec.ci_image_missing()
+    {
+        return Row::not_measured(
+            why,
+            "run `./dev check --warm-linux` (it builds the local CI image first, with its own bound, then warms the workspaces), then push again; the image build is never started under the push budget",
+        );
     }
     if gate.heavy
         && let Some(why) = exec.heavy_unavailable()
@@ -272,7 +284,7 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
             if gate.id.starts_with("clippy-linux") {
                 format!(
                     "run `./dev check --warm-linux {}` once (no budget, live output; the first run of a workspace builds all its dependencies in the container's kept volume, minutes per workspace; docs/benchmarks.md), then push again",
-                    super::gates::linux_workspaces_of(&gate.id).join(" ")
+                    gate.workspaces.join(" ")
                 )
             } else {
                 format!(
@@ -761,6 +773,25 @@ impl Exec for RealExec {
         self.heavy_command().err()
     }
 
+    fn ci_image_missing(&self) -> Option<String> {
+        let ran = ToolCall::new("bash")
+            .args([
+                "tools/linux-container.sh",
+                "--id",
+                "paddock",
+                "--ci-image",
+                "--image-ready",
+                "--root",
+            ])
+            .args([self.root.to_string_lossy().to_string()])
+            .cwd(&self.root)
+            .pass(PASS.iter().copied())
+            .timeout(Duration::from_secs(60))
+            .run(&self.env, &mut std::io::sink())
+            .ok()?;
+        (ran.how == "exit 3").then(|| "local CI image missing".to_string())
+    }
+
     fn load(&self) -> Option<f64> {
         let ran = ToolCall::new("uptime")
             .timeout(Duration::from_secs(10))
@@ -772,7 +803,7 @@ impl Exec for RealExec {
     fn run(&self, gate: &Gate, limits: Limits) -> Result<Done, String> {
         let _ = std::fs::create_dir_all(&self.logs);
         let log = self.logs.join(format!("{}.log", slug(&gate.id)));
-        let label = (gate.need == Need::Docker).then(run_token);
+        let label = matches!(gate.need, Need::Docker | Need::LocalCiImage).then(run_token);
         let mut ran = self
             .call(gate, limits, &log, label.as_deref())
             .run(&self.env, &mut std::io::sink())?;
@@ -960,6 +991,7 @@ exit $rc
                 need: Need::Nothing,
                 rank: 2,
                 next: "fix it".into(),
+                workspaces: Vec::new(),
             }
         }
 

@@ -15,8 +15,11 @@ pub enum Need {
     Nothing,
     /// A program on PATH (`cargo-xwin`, `cargo-deny`): without it the gate is "not measured", never a pass (ER-33).
     Tool(String),
-    /// A running Docker daemon (the Linux Clippy): an agent never starts one (ER-14).
+    /// A running Docker daemon: an agent never starts one (ER-14).
     Docker,
+    /// A running Docker daemon and the local CI image built (the Linux Clippy): the image build is minutes and gigabytes, so it
+    /// is its own step (`./dev check --warm-linux`), never started under the push budget.
+    LocalCiImage,
 }
 
 /// One command of the push gate.
@@ -40,6 +43,8 @@ pub struct Gate {
     pub rank: u8,
     /// What to do when it fails, in one clause.
     pub next: String,
+    /// The Cargo workspace folders it lints (the Linux Clippy), for the steps that name them; empty for the other gates.
+    pub workspaces: Vec<String>,
 }
 
 impl Gate {
@@ -150,6 +155,7 @@ fn gate(id: String, cwd: &str, program: &str, args: &[&str], rank: u8, next: Str
         need: Need::Nothing,
         rank,
         next,
+        workspaces: Vec::new(),
     }
 }
 
@@ -401,8 +407,10 @@ pub struct LinuxTarget {
 /// Clippy never compile Linux-only code, so its lints first showed in CI: tonight's `zombie_processes` in paddock-env and an unused
 /// import in dyno-agent (fix/shared-crate-flakes-8174, 2026-11-16).
 ///
-/// Report-only until its first green run on the real tree (ER-41): not yet recorded; the evidence so far is the measured runs in
-/// docs/benchmarks.md ("Pre-push Linux Clippy").
+/// Blocking since its first green run on the real tree (ER-41): the hook's run on the push of b71443899
+/// (feat/pre-push-linux-clippy, 2026-11-16: `ok clippy-linux tools/paddock-dev`, 15.1 s, native, warm), recorded with the cold and
+/// warm numbers in docs/benchmarks.md, "Pre-push Linux Clippy, native". A local gate has no CI run id; the benchmark section is its
+/// record.
 fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Planned {
     let candidates = linux_candidates(plan, change);
     if candidates.is_empty() {
@@ -411,7 +419,7 @@ fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Planned {
             reason: "nothing but documentation, or no Cargo workspace of its own, changed".into(),
         };
     }
-    let id = format!("clippy-linux {}", candidates.iter().cloned().collect::<Vec<_>>().join(","));
+    let id = format!("clippy-linux {}", candidates.iter().cloned().collect::<Vec<_>>().join(" + "));
     let version = match &facts.ci_version {
         Some(Ok(v)) => v.clone(),
         Some(Err(e)) => {
@@ -457,7 +465,8 @@ fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Planned {
     Planned::Run(linux_gate(&targets, &version))
 }
 
-/// The row id of a Linux Clippy run: the workspaces, each with the crates it leaves out, so a pass never claims them.
+/// The row id of a Linux Clippy run: the workspaces, each with the crates it leaves out, so a pass never claims them. No comma in
+/// it: `--accept-not-measured` and `PADDOCK_ACCEPT_NOT_MEASURED` are comma-separated lists of full ids.
 pub fn linux_id(targets: &[LinuxTarget]) -> String {
     let parts: Vec<String> = targets
         .iter()
@@ -465,20 +474,11 @@ pub fn linux_id(targets: &[LinuxTarget]) -> String {
             if t.left_out.is_empty() {
                 t.ws.clone()
             } else {
-                format!("{} (left out: {})", t.ws, t.left_out.join(", "))
+                format!("{} (left out: {})", t.ws, t.left_out.join(" "))
             }
         })
         .collect();
-    format!("clippy-linux {}", parts.join(","))
-}
-
-/// The workspace folders of a Linux Clippy row id ([`linux_id`]), for the next step that names them.
-pub fn linux_workspaces_of(id: &str) -> Vec<String> {
-    id.trim_start_matches("clippy-linux")
-        .split(',')
-        .map(|p| p.split(" (left out").next().unwrap_or(p).trim().to_string())
-        .filter(|p| !p.is_empty())
-        .collect()
+    format!("clippy-linux {}", parts.join(" + "))
 }
 
 /// The one container run that lints `targets` in the CI image: the push gate's row and `./dev check --warm-linux` both run exactly
@@ -507,7 +507,8 @@ pub fn linux_gate(targets: &[LinuxTarget], version: &str) -> Gate {
             .into(),
     );
     g.heavy = true;
-    g.need = Need::Docker;
+    g.need = Need::LocalCiImage;
+    g.workspaces = targets.iter().map(|t| t.ws.clone()).collect();
     g
 }
 

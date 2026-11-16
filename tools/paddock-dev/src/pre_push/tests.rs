@@ -78,7 +78,7 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
         "lockfile crates",
         "clippy crates",
         "clippy-windows crates",
-        "clippy-linux apps/dyno (left out: dyno-app),apps/pitwall (left out: pitwall-app),crates",
+        "clippy-linux apps/dyno (left out: dyno-app) + apps/pitwall (left out: pitwall-app) + crates",
         "conformance",
         "commit-lint",
         "ipc-endpoints",
@@ -117,11 +117,11 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
             .contains("rustup target add x86_64-pc-windows-msvc --toolchain")
     );
     assert_eq!(
-        by("clippy-linux apps/dyno (left out: dyno-app),apps/pitwall (left out: pitwall-app),crates").need,
-        Need::Docker
+        by("clippy-linux apps/dyno (left out: dyno-app) + apps/pitwall (left out: pitwall-app) + crates").need,
+        Need::LocalCiImage
     );
     assert!(
-        by("clippy-linux apps/dyno (left out: dyno-app),apps/pitwall (left out: pitwall-app),crates")
+        by("clippy-linux apps/dyno (left out: dyno-app) + apps/pitwall (left out: pitwall-app) + crates")
             .args
             .join(" ")
             .contains("tools/linux-container.sh --id paddock --ci-image --")
@@ -229,6 +229,7 @@ fn a_unreadable_conformance_line_makes_the_check_broken_not_passed() {
 #[derive(Default)]
 struct Fake {
     no_docker: bool,
+    no_image: bool,
     no_tools: Vec<String>,
     fail: Vec<String>,
     unstartable: Vec<String>,
@@ -249,6 +250,9 @@ impl Exec for Fake {
     }
     fn docker_up(&self) -> bool {
         !self.no_docker
+    }
+    fn ci_image_missing(&self) -> Option<String> {
+        self.no_image.then(|| "local CI image missing".to_string())
     }
     fn run(&self, g: &Gate, limits: Limits) -> Result<Done, String> {
         self.limits.lock().unwrap().push((g.id.clone(), limits));
@@ -753,7 +757,15 @@ fn the_linux_clippy_runs_for_every_touched_workspace_and_names_what_it_leaves_ou
         panic!("an app workspace gets the row")
     };
     assert_eq!(g.id, "clippy-linux apps/pitwall (left out: pitwall-app)");
-    assert_eq!(super::gates::linux_workspaces_of(&g.id), ["apps/pitwall"]);
+    assert_eq!(
+        g.workspaces,
+        ["apps/pitwall"],
+        "the workspaces are carried, not parsed back from the id"
+    );
+    assert!(
+        !g.id.contains(','),
+        "no comma in an id: --accept-not-measured lists are comma-separated"
+    );
     // Documentation alone reaches no workspace.
     assert!(matches!(linux_row(&["docs/x.md"], &facts()), Planned::Skip { .. }));
     // Cargo could not say what to leave out: the row is broken (ER-45), never a pass or a guess.
@@ -784,7 +796,7 @@ fn one_container_run_covers_every_touched_workspace_and_a_failing_one_fails_the_
     let Planned::Run(g) = linux_row(&["crates/a/src/lib.rs", "apps/dyno/src/a.rs"], &facts()) else {
         panic!("row")
     };
-    assert_eq!(g.id, "clippy-linux apps/dyno (left out: dyno-app),crates");
+    assert_eq!(g.id, "clippy-linux apps/dyno (left out: dyno-app) + crates");
     assert_eq!(
         g.args.iter().filter(|a| a.as_str() == "tools/linux-container.sh").count(),
         1,
@@ -2113,6 +2125,7 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
         need: Need::Nothing,
         rank,
         next: "fix it".into(),
+        workspaces: Vec::new(),
     })
 }
 
@@ -2578,4 +2591,47 @@ fn warm_linux_runs_the_push_rows_own_command_once_per_workspace() {
     assert_eq!(targets(d.path(), &[], &all).unwrap(), ["a", "b"]);
     assert_eq!(targets(d.path(), &["b/".to_string()], &all).unwrap(), ["b"]);
     assert!(targets(d.path(), &["nope".to_string()], &all).is_err());
+}
+
+/// The local CI image is built by `./dev check --warm-linux` with its own bound, never under the push budget: a missing image is
+/// "not measured" with that command as the next step, and the container is never started.
+#[test]
+fn a_missing_local_ci_image_is_not_measured_and_names_warm_linux() {
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
+    let fake = Fake {
+        no_image: true,
+        ..Fake::default()
+    };
+    let rows = run_all(&planned, &fake, 3);
+    let v = verdicts(&rows);
+    let (reason, next) = nm(&v["clippy-linux crates"]).expect("not measured");
+    assert!(reason.contains("local CI image missing"), "{reason}");
+    assert!(
+        next.contains("./dev check --warm-linux") && next.contains("never started under the push budget"),
+        "{next}"
+    );
+    assert!(
+        !fake.ran.lock().unwrap().iter().any(|r| r.starts_with("clippy-linux")),
+        "no build under the push budget"
+    );
+}
+
+/// A row with several workspaces has a full id with no comma, so the accept list (comma-separated) can name it.
+#[test]
+fn a_multi_workspace_linux_row_can_be_accepted_by_its_id() {
+    let state = tempfile::tempdir().unwrap();
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs", "apps/dyno/src/a.rs"]), &facts());
+    let fake = Fake {
+        no_docker: true,
+        ..Fake::default()
+    };
+    let mut rows = run_all(&planned, &fake, 3);
+    let id = "clippy-linux apps/dyno (left out: dyno-app) + crates";
+    accept_not_measured(&mut rows, &[id.to_string()], state.path());
+    let report = render("h", &rows);
+    assert!(report.text.contains(&format!("ACCEPTED      {id}")), "{}", report.text);
+    assert_eq!(
+        super::accepted_ids_for_test(&["x".into()], &[("PADDOCK_ACCEPT_NOT_MEASURED", id)]),
+        ["x", id]
+    );
 }
