@@ -897,9 +897,14 @@ export class PdTable<T> {
     this.sortHeaders().forEach((h, i) => h.setAttribute('tabindex', !hasRows && i === 0 ? '0' : '-1'));
   }
 
+  /** The workaround for the CDK's recycled-view regression (see `recordRecycledRows`); a method so the canary spec can switch it off. */
+  protected recordRecycled(): void {
+    recordRecycledRows(this.bodyTable());
+  }
+
   /** The body table drew its rows (their bindings are set in the render that follows): the row the keyboard asked for may be there now, and the stops follow. */
   protected onRowsDrawn(): void {
-    recordRecycledRows(this.bodyTable());
+    this.recordRecycled();
     afterNextRender(
       () => {
         this.updateTabStops();

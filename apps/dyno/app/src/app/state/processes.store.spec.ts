@@ -183,6 +183,31 @@ describe('ProcessesStore: selection', () => {
     await first;
     expect(store.details()?.process.pid).toBe(b!.pid);
   });
+  it('ignores the answer for an earlier process that had the same pid', async () => {
+    const { mock, store } = setup();
+    const [a] = mock.liveUpdate('processes').processes!;
+    const real = mock.processDetails.bind(mock);
+    let release!: (d: ProcessDetails) => void;
+    vi.spyOn(mock, 'processDetails').mockImplementationOnce(() => new Promise((r) => (release = r))).mockImplementation(() => new Promise(() => undefined));
+    const first = store.select({ pid: a!.pid, started: 1 });
+    void store.select({ pid: a!.pid, started: 2 });
+    release(await real({ pid: a!.pid, started: readValue(a!.started) }));
+    await first;
+    expect(store.selected()).toEqual({ pid: a!.pid, started: 2 });
+    expect(store.details()).toBeNull();
+    expect(store.detailsLoading()).toBe(true);
+  });
+  it('a live update without a start time keeps the one the process was seen with, so its row key does not change', () => {
+    const { mock, store } = setup();
+    const { push } = feed(mock, store);
+    store.setMode('flat');
+    const first = mock.liveUpdate('processes');
+    const target = first.processes![0]!;
+    const key = () => store.rows().find((r) => r.pid === target.pid)!.key;
+    const before = key();
+    push({ ...first, processes: first.processes!.map((p) => (p.pid === target.pid ? { ...p, started: { unavailable: { reason: 'notPermitted' as const } } } : p)) });
+    expect(key()).toBe(before);
+  });
   it('ignores a stale failure', async () => {
     const { mock, store } = setup();
     const [a, b] = mock.liveUpdate('processes').processes!;

@@ -1,5 +1,5 @@
 import type { AppGroup, Measured, ProcessSample } from '../../core/api.types';
-import { type Row, type RowInput, type Sort, buildRows, collapseAllKeys, compareRows, expandAllKeys, matches } from './process-rows';
+import { type Row, type RowInput, type Sort, buildRows, carryStarts, collapseAllKeys, sameProcess, compareRows, expandAllKeys, matches } from './process-rows';
 
 type SampleOver = Partial<Omit<ProcessSample, 'user' | 'cpu' | 'memory' | 'diskReadBps' | 'diskWriteBps' | 'started'>> & {
   user?: string | null;
@@ -285,5 +285,33 @@ describe('row keys', () => {
     const open = new Set(expandAllKeys('tree', procs, []));
     const reusedProcs = procs.map((p) => (p.pid === 2 ? { ...p, started: { value: 9999 } } : p));
     expect(names(buildRows(input({ mode: 'tree', processes: reusedProcs, expanded: open })))).toEqual(['init', 'shell']);
+  });
+});
+
+describe('a start time that comes and goes', () => {
+  const noStart = (p: ProcessSample): ProcessSample => ({ ...p, started: { unavailable: { reason: 'notPermitted' } } });
+  const procs = [sample(1, 'init'), sample(2, 'shell', { parent: 1 }), sample(3, 'tool', { parent: 2 })];
+
+  it('carries the earlier start time over, so the key and the expanded mark do not flip', () => {
+    const open = new Set(expandAllKeys('tree', procs, []));
+    const later = carryStarts(procs.map((p) => (p.pid === 2 ? noStart(p) : p)), procs);
+    const rows = buildRows(input({ mode: 'tree', processes: later, expanded: open }));
+    expect(names(rows)).toEqual(['init', 'shell', 'tool']);
+    expect(rows.map((r) => r.key)).toEqual(buildRows(input({ mode: 'tree', processes: procs, expanded: open })).map((r) => r.key));
+    expect(rows.find((r) => r.name === 'shell')).toMatchObject({ expanded: true });
+  });
+  it('without it the key would flip (the reason for carrying)', () => {
+    expect(buildRows(input({ mode: 'flat', processes: [noStart(procs[1]!)] }))[0]!.key).not.toBe(buildRows(input({ mode: 'flat', processes: [procs[1]!] }))[0]!.key);
+  });
+  it('keeps a start time the sample has, and a pid never seen before has none', () => {
+    const reused = { ...procs[1]!, started: { value: 9999 } };
+    expect(carryStarts([reused], procs)[0]!.started).toEqual({ value: 9999 });
+    expect(carryStarts([noStart(sample(50, 'new'))], procs)[0]!.started).toEqual({ unavailable: { reason: 'notPermitted' } });
+    expect(carryStarts(procs, [])).toBe(procs);
+  });
+  it('sameProcess needs the pid and the start time to match', () => {
+    expect(sameProcess({ pid: 1, started: 5 }, { pid: 1, started: 5 })).toBe(true);
+    expect(sameProcess({ pid: 1, started: 5 }, { pid: 1, started: 6 })).toBe(false);
+    expect(sameProcess({ pid: 1, started: null }, { pid: 2, started: null })).toBe(false);
   });
 });

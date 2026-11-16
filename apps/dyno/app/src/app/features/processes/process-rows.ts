@@ -87,6 +87,29 @@ export function processKey(p: Pick<ProcessSample, 'pid' | 'started'>): string {
   return started === null ? `p${p.pid}` : `p${p.pid}@${started}`;
 }
 
+/**
+ * The same process in the next sample, with a start time the OS gave earlier but not now (a process that cannot be opened reports one
+ * only sometimes): the earlier time is kept, so the row key does not flip between `p<pid>` and `p<pid>@<time>` and redraw the row or
+ * lose its expanded mark. A pid with no earlier time stays as it is. Pure; the store calls it on every live update.
+ */
+export function carryStarts(next: readonly ProcessSample[], previous: readonly ProcessSample[]): ProcessSample[] {
+  if (previous.length === 0) return next as ProcessSample[];
+  const known = new Map<number, number>();
+  for (const p of previous) {
+    const started = readValue(p.started);
+    if (started !== null) known.set(p.pid, started);
+  }
+  return next.map((p) => {
+    const earlier = known.get(p.pid);
+    return earlier !== undefined && readValue(p.started) === null ? { ...p, started: { value: earlier } } : p;
+  });
+}
+
+/** Whether two references name the same process: the same pid and the same start time (a reused pid is another process; rule 53). */
+export function sameProcess(a: ProcessRef, b: ProcessRef): boolean {
+  return a.pid === b.pid && a.started === b.started;
+}
+
 function processRow(p: ProcessSample, depth: number, expandable = false, expanded = false): Row {
   return {
     key: processKey(p),
