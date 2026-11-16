@@ -37,3 +37,9 @@ export const MAC_MEMORY_PERCENT = Math.round((MAC_MEMORY_USED / MAC_MEMORY_TOTAL
 export const MAC_WRITE_SHARE = 0.65;
 /** What the whole machine writes, bytes a second: the Why slow, Unusual and recorder pages quote writes, the dashboard reads plus writes. */
 export const MAC_DISK_WRITE_BPS = MAC_DISK_IO_BPS * MAC_WRITE_SHARE;
+/** The CPU's top clock in MHz: "4.50 GHz". */
+export const MAC_CPU_MAX_MHZ = 4500;
+/** The CPU's clock at the start of a session in MHz: "4.40 GHz" on the dashboard, CPU and Throttling. */
+export const MAC_CPU_CLOCK_MHZ = 4400;
+/** The CPU package's temperature at the start of a session, degrees Celsius: "74 °C" on Throttling and Is this normal. */
+export const MAC_CPU_TEMP_C = 74;

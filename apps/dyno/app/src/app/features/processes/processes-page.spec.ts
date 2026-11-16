@@ -71,6 +71,12 @@ describe('ProcessesPage', () => {
     expect(el.querySelector('[data-key="other-users"] .pd-icon-btn')).toBeNull();
     f.destroy();
   });
+  it('says in the Disk header that the figure is read plus write', async () => {
+    const r = await make();
+    const disk = [...r.el.querySelectorAll('[role="columnheader"] .pd-th-text')].find((h) => h.textContent?.trim() === 'Disk')!;
+    expect(disk.getAttribute('title')).toBe('Read + write together, per second');
+  });
+
   it('shows where the list came from: the chip when the helper read it, the reason and the button when it did not', async () => {
     const withVia = async (via: unknown) =>
       make((m) => {

@@ -1,5 +1,5 @@
 import type { AppInfo, DiskSample, NetworkSample } from '../api.types';
-import { MAC_BUILD_CPU, MAC_BUILD_DISK_BPS, MAC_CPU_OVERHEAD, MAC_CPU_TOTAL, MAC_DISK_FREE, MAC_DISK_IO_BPS, MAC_DISK_TOTAL, MAC_MEMORY_TOTAL } from './mac-machine';
+import { MAC_BUILD_CPU, MAC_BUILD_DISK_BPS, MAC_CPU_MAX_MHZ, MAC_CPU_OVERHEAD, MAC_CPU_TOTAL, MAC_DISK_FREE, MAC_DISK_IO_BPS, MAC_DISK_TOTAL, MAC_MEMORY_TOTAL } from './mac-machine';
 import { LINUX_DAILY_FILL, LINUX_DATA_FREE, LINUX_DATA_TOTAL, LINUX_DISK_FREE, LINUX_DISK_TOTAL, LINUX_MEMORY_TOTAL } from './linux-machine';
 import { WIN_DAILY_FILL, WIN_DATA_FREE, WIN_DATA_TOTAL, WIN_DISK_FREE, WIN_DISK_TOTAL, WIN_MEMORY_TOTAL } from './windows-machine';
 import { type AppSpec, APP_SPECS } from './processes';
@@ -149,7 +149,7 @@ export function osProfile(os: MockOs): OsProfile {
       hybrid: { efficiency: 4, performance: 10, efficiencyFirst: true },
       memoryTotal: MAC_MEMORY_TOTAL,
       cpuBaseMhz: 1000,
-      cpuMaxMhz: 4500,
+      cpuMaxMhz: MAC_CPU_MAX_MHZ,
       gpuName: 'Apple M4 Pro GPU (20 cores)',
       disks: (days) => [
         { id: 'macintosh-hd', name: 'Macintosh HD (APFS)', mount: '/', total: MAC_DISK_TOTAL, free: Math.round(MAC_DISK_FREE - days * 5.1e9), removable: false },

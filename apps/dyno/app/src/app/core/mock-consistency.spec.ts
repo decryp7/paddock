@@ -1,4 +1,4 @@
-import { formatRate, formatStorage } from '../shared/format';
+import { formatGhz, formatRate, formatStorage } from '../shared/format';
 import { readValue } from './measured';
 import { MockBackend, type MockOptions } from './mock-backend';
 import { dataDisk, startupDisk } from './mock/disk-facts';
@@ -8,6 +8,9 @@ import {
   MAC_BUILD_CPU,
   MAC_BUILD_DISK_BPS,
   MAC_CARGO_CPU,
+  MAC_CPU_CLOCK_MHZ,
+  MAC_CPU_MAX_MHZ,
+  MAC_CPU_TEMP_C,
   MAC_CPU_TOTAL,
   MAC_DISK_FREE,
   MAC_DISK_FREE_TEXT,
@@ -88,6 +91,21 @@ describe('the load, the memory and the disk traffic are the declared figures on 
     expect(Math.abs(traffic - MAC_DISK_IO_BPS)).toBeLessThan(1024);
     expect(Math.abs(live.system!.memory.used - MAC_MEMORY_USED)).toBeLessThan(1024 ** 2);
     expect(live.system!.memory.total).toBe(MAC_MEMORY_TOTAL);
+    expect(live.system!.cpu.frequencyMhz).toBe(MAC_CPU_CLOCK_MHZ);
+    expect(live.system!.cpu.baseFrequencyMhz).toBeLessThan(MAC_CPU_CLOCK_MHZ);
+    const sensor = live.system!.temperatures;
+    expect('available' in sensor ? sensor.available[0]!.celsius : -1).toBe(MAC_CPU_TEMP_C);
+  });
+
+  it('Throttling and Is this normal say the same clock and temperature as the live readings', async () => {
+    const b = make();
+    const reading = (await b.throttling()).reading.evidence;
+    expect(reading.find((e) => e.label === 'Clock')!.value).toBe(`${formatGhz(MAC_CPU_CLOCK_MHZ)} of ${formatGhz(MAC_CPU_MAX_MHZ)}`);
+    expect(reading.find((e) => e.label === 'Temperature')!.value).toBe(`${MAC_CPU_TEMP_C} °C`);
+    const inputs = (await b.throttling()).inputs;
+    expect(inputs.find((i) => i.label === 'CPU clock speed')!.detail).toBe(`${formatGhz(MAC_CPU_CLOCK_MHZ)} of ${formatGhz(MAC_CPU_MAX_MHZ)}`);
+    expect(inputs.find((i) => i.label === 'Temperature')!.detail).toBe(`CPU package at ${MAC_CPU_TEMP_C} °C`);
+    expect((await b.baselines()).items.find((i) => i.metric === 'temperature')!.current).toBe(`${MAC_CPU_TEMP_C} °C`);
   });
 
   it('Why slow, Throttling, Is this normal and the tray say the same load and memory', async () => {
@@ -104,6 +122,14 @@ describe('the load, the memory and the disk traffic are the declared figures on 
     const tray = JSON.stringify(await b.popoverValues());
     expect(tray).toContain(`"cpuPercent":${MAC_CPU_TOTAL}`);
     expect(tray).toContain(`"memoryUsed":${MAC_MEMORY_USED}`);
+  });
+});
+
+describe('the live history does not depend on when the page subscribed', () => {
+  it('with ?stable the seconds before the current one are the same whatever second of the minute the page asks in', () => {
+    const at = (offsetMs: number) => new MockBackend({ latencyMs: 0, now: () => NOW + offsetMs, os: 'macos', stableMs: 60_000 });
+    const key = (b: MockBackend) => JSON.stringify(b.liveBacklog().map((u) => [u.system!.cpu.total, u.system!.diskIo.busy]));
+    expect(key(at(7_000))).toBe(key(at(0)));
   });
 });
 

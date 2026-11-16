@@ -136,7 +136,7 @@ import { type MockOs, type OsProfile, coreKindsOf, osProfile } from './mock/os';
 import { clamp, wobble } from './mock/noise';
 import { type MockProcess, buildProcesses, deviation, groupSamples, round, sampleProcess } from './mock/processes';
 import { formatRate, formatStorage } from '../shared/format';
-import { MAC_CPU_OVERHEAD, MAC_MEMORY_USED } from './mock/mac-machine';
+import { MAC_CPU_CLOCK_MHZ, MAC_CPU_OVERHEAD, MAC_CPU_TEMP_C, MAC_MEMORY_USED } from './mock/mac-machine';
 import { dataDisk, startupDisk, type StartupDisk } from './mock/disk-facts';
 
 /** The note the engine sends when no tray host shows the icons (`dyno_core::tray_host`; the wire contract spec pins the text). */
@@ -498,7 +498,9 @@ export class MockBackend implements DynoBackend {
 
   /** The summary updates of the {@link LIVE_BACKLOG} seconds before the current one, oldest first (time comes from the injected clock). */
   liveBacklog(): LiveUpdate[] {
-    const t = Math.floor(this.now() / 1000);
+    // The same second the live ticks read (the polled minute with `?stable`), so the seconds before it do not depend on when the page subscribed:
+    // the sparklines of two pictures of one tree differed (command-palette-light, 9326 px).
+    const t = Math.floor(this.pollNow() / 1000);
     const out: LiveUpdate[] = [];
     for (let s = t - LIVE_BACKLOG; s < t; s++) out.push(this.liveUpdateAt(s, 'summary'));
     return out;
@@ -576,7 +578,7 @@ export class MockBackend implements DynoBackend {
     const laptop = this.machine === 'laptop';
     return {
       at: t * 1000,
-      cpu: { total: round(total, 1), perCore, coreKinds: [...this.kinds], coreFrequencyMhz, frequencyMhz: Math.round(this.profile.cpuMaxMhz - 260 + 260 * wobble(t, 700, 4)), baseFrequencyMhz: this.profile.cpuBaseMhz },
+      cpu: { total: round(total, 1), perCore, coreKinds: [...this.kinds], coreFrequencyMhz, frequencyMhz: Math.round(this.profile.os === 'macos' ? MAC_CPU_CLOCK_MHZ + 130 * dev(700, 4) : this.profile.cpuMaxMhz - 260 + 260 * dev(700, 4)), baseFrequencyMhz: this.profile.cpuBaseMhz },
       memory: {
         total: memTotal,
         used: Math.round(memUsed),
@@ -608,7 +610,7 @@ export class MockBackend implements DynoBackend {
       temperatures: laptop
         ? {
             available: [
-              { label: this.profile.cpuSensor, celsius: round(clamp(78 + 4 * wobble(t, 830, 6), 30, 105), 1), critical: 100 },
+              { label: this.profile.cpuSensor, celsius: round(clamp((this.profile.os === 'macos' ? MAC_CPU_TEMP_C : 78) + 4 * dev(830, 6), 30, 105), 1), critical: 100 },
               { label: 'GPU', celsius: round(clamp(56 + 2 * wobble(t, 831, 8), 30, 100), 1), critical: 87 },
               { label: 'SSD', celsius: round(clamp(49 + 1.5 * wobble(t, 832, 10), 30, 90), 1), critical: 82 },
             ],

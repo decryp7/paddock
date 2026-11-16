@@ -192,6 +192,17 @@ describe('pd-table', () => {
     expect(el(f).querySelector('pd-middle-text')?.getAttribute('title')).toBe('/opt/plugins/zeta/plugin.so');
   });
 
+  it('gives a header its tooltip when the column says what it means', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const f = TestBed.createComponent(Host);
+    f.componentInstance.columnsOverride = COLUMNS.map((c, i) => (i === 1 ? { ...c, headerTitle: 'Read + write' } : c));
+    document.body.appendChild(f.nativeElement);
+    await settle(f);
+    const titles = [...el(f).querySelectorAll('[role=columnheader] .pd-th-text')].map((h) => h.getAttribute('title'));
+    expect(titles[1]).toBe('Read + write');
+    expect(titles[0]).toBeNull();
+  });
+
   it('keeps a hidden header for assistive technology only (a glyph column)', async () => {
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
     const f = TestBed.createComponent(Host);

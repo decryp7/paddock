@@ -1,10 +1,13 @@
 import { expect, test } from './test';
 import { pauseLive } from '@decryp7/paddock-e2e';
-import { formatBytes, formatRate, formatStorage } from '../src/app/shared/format';
+import { formatBytes, formatGhz, formatRate, formatStorage } from '../src/app/shared/format';
 import {
   MAC_BUILD_CPU,
   MAC_BUILD_DISK_BPS,
   MAC_CARGO_CPU,
+  MAC_CPU_CLOCK_MHZ,
+  MAC_CPU_MAX_MHZ,
+  MAC_CPU_TEMP_C,
   MAC_CPU_TOTAL,
   MAC_DISK_FREE,
   MAC_DISK_FREE_TEXT,
@@ -94,8 +97,16 @@ const PAGES: { name: string; hash: string; facts: Record<string, string> }[] = [
       'disk writes': `write ${formatRate(MAC_DISK_WRITE_BPS)}`,
     },
   },
-  { name: 'throttling', hash: '/throttling', facts: { 'CPU total (Load)': `Load\n${MAC_CPU_TOTAL}%` } },
-  { name: 'cpu', hash: '/cpu', facts: { 'CPU total': `${MAC_CPU_TOTAL}% overall` } },
+  {
+    name: 'throttling',
+    hash: '/throttling',
+    facts: {
+      'CPU total (Load)': `Load\n${MAC_CPU_TOTAL}%`,
+      'clock': `Clock\n${formatGhz(MAC_CPU_CLOCK_MHZ)} of ${formatGhz(MAC_CPU_MAX_MHZ)}`,
+      'temperature': `Temperature\n${MAC_CPU_TEMP_C} °C`,
+    },
+  },
+  { name: 'cpu', hash: '/cpu', facts: { 'CPU total and clock': `${MAC_CPU_TOTAL}% overall · ${formatGhz(MAC_CPU_CLOCK_MHZ)}` } },
   { name: 'disk-map', hash: '/disk-map', facts: { 'disk free and total': `of ${formatStorage(MAC_DISK_TOTAL)} · ${formatStorage(MAC_DISK_FREE)} free` } },
 ];
 

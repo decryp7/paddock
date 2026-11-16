@@ -12,8 +12,8 @@ import type {
   ThrottleOverview,
   ThrottleReading,
 } from '../api.types';
-import { formatRate } from '../../shared/format';
-import { MAC_BUILD_CPU, MAC_CARGO_CPU, MAC_CPU_TOTAL, MAC_DISK_WRITE_BPS, MAC_MEMORY_PERCENT } from './mac-machine';
+import { formatGhz, formatRate } from '../../shared/format';
+import { MAC_BUILD_CPU, MAC_CARGO_CPU, MAC_CPU_CLOCK_MHZ, MAC_CPU_MAX_MHZ, MAC_CPU_TEMP_C, MAC_CPU_TOTAL, MAC_DISK_WRITE_BPS, MAC_MEMORY_PERCENT } from './mac-machine';
 import type { MockOs } from './os';
 
 const MIN = 60_000;
@@ -64,8 +64,8 @@ function inputs(os: MockOs, scenario: HardwareScenario): InputStatus[] {
   }
   const hot = scenario === 'hot';
   return [
-    { label: 'CPU clock speed', available: true, detail: hot ? '1.78 GHz of 3.20 GHz' : '3.18 GHz of 3.20 GHz' },
-    { label: 'Temperature', available: true, detail: hot ? 'CPU package at 99 °C' : 'CPU package at 71 °C' },
+    { label: 'CPU clock speed', available: true, detail: hot ? `1.78 GHz of ${formatGhz(MAC_CPU_MAX_MHZ)}` : `${formatGhz(MAC_CPU_CLOCK_MHZ)} of ${formatGhz(MAC_CPU_MAX_MHZ)}` },
+    { label: 'Temperature', available: true, detail: hot ? 'CPU package at 99 °C' : `CPU package at ${MAC_CPU_TEMP_C} °C` },
     os === 'windows'
       ? { label: "The system's own speed limit", available: false, detail: 'Windows does not report why the CPU slows down; Dyno infers it from the clock, the heat and the power mode.' }
       : { label: "The system's own speed limit", available: true, detail: hot ? 'Reported: 55% of full speed allowed' : 'Reported: no limit recorded' },
@@ -86,7 +86,7 @@ export function mockThrottling(os: MockOs, now: number, scenario?: HardwareScena
       headline: 'Slowed down by heat: 44% slower',
       explanation:
         'The CPU is giving up about 44% of its speed because the system reports a heat limit. Free the vents, move the machine off soft surfaces, and check for a fan that has stopped or is clogged with dust.',
-      evidence: [ev('Load', '96%'), ev('Clock', '1.78 GHz of 4.50 GHz'), ev('Temperature', '99 °C'), ev('Limit set by the system', '55% of full speed')],
+      evidence: [ev('Load', '96%'), ev('Clock', `1.78 GHz of ${formatGhz(MAC_CPU_MAX_MHZ)}`), ev('Temperature', '99 °C'), ev('Limit set by the system', '55% of full speed')],
     };
     return { at: now, reading, current, episodes: past, minutes30d: total([...past, current]), inputs: inputs(os, sc) };
   }
@@ -113,7 +113,7 @@ export function mockThrottling(os: MockOs, now: number, scenario?: HardwareScena
       confidence: 'high',
       headline: 'Running at full speed',
       explanation: 'The CPU is busy and its clock is where it should be.',
-      evidence: [ev('Load', `${MAC_CPU_TOTAL}%`), ev('Clock', '4.40 GHz of 4.50 GHz'), ev('Temperature', '71 °C')],
+      evidence: [ev('Load', `${MAC_CPU_TOTAL}%`), ev('Clock', `${formatGhz(MAC_CPU_CLOCK_MHZ)} of ${formatGhz(MAC_CPU_MAX_MHZ)}`), ev('Temperature', `${MAC_CPU_TEMP_C} °C`)],
     },
     current: null,
     episodes: past,
@@ -214,7 +214,7 @@ export function mockBaselines(now: number, scenario?: HardwareScenario): Baselin
       ),
       item('System', 'memory', 'Memory', `${MAC_MEMORY_PERCENT}%`, judgement('usual', 'Usual for Thursday afternoons', `Memory is ${MAC_MEMORY_PERCENT}% now; it is usually about 55% (49% to 61%) on Thursday afternoons, from 5 similar hours.`, '55%')),
       item('System', 'diskWrite', 'Disk writes', writes, judgement('usual', 'Usual for Thursday afternoons', `Disk writes is ${writes} now; it is usually about 140 MB/s (90 MB/s to 210 MB/s) on Thursday afternoons, from 5 similar hours.`, '140 MB/s')),
-      item('System', 'temperature', 'Temperature', '74 °C', judgement({ higher: 'notable' }, 'Higher than usual for Thursday afternoons', 'Temperature is 74 °C now; it is usually about 58 °C (54 °C to 63 °C) on Thursday afternoons, from 5 similar hours.', '58 °C', 'medium')),
+      item('System', 'temperature', 'Temperature', `${MAC_CPU_TEMP_C} °C`, judgement({ higher: 'notable' }, 'Higher than usual for Thursday afternoons', `Temperature is ${MAC_CPU_TEMP_C} °C now; it is usually about 58 °C (54 °C to 63 °C) on Thursday afternoons, from 5 similar hours.`, '58 °C', 'medium')),
       item('Google Chrome', 'appMemory', 'Memory', '4.3 GB', judgement('usual', 'Usual for weekday afternoons', 'Memory is 4.3 GB now; it is usually about 4.1 GB (3.6 GB to 4.8 GB) on weekday afternoons, from 24 similar hours.', '4.1 GB', 'medium')),
     ],
   };
