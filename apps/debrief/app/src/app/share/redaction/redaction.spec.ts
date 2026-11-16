@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { all, buttonByText, el, settle, text, tinyBackend, typeInto } from '../../../testing/helpers';
+import { all, buttonByText, el, settle, text, tinyBackend, typeInto, openDialog } from '../../../testing/helpers';
 import { DebriefBackend } from '../../core/backend';
 import { mockUnsupported } from '../../core/mock/mock-unsupported';
 import { RedactionSummary } from '../../core/api.types';
@@ -255,6 +255,7 @@ describe('RedactionBanner', () => {
     await settle(fixture);
     buttonByText(fixture, 'Settings…').click();
     await settle(fixture);
+    await openDialog(TestBed.inject(DialogService));
     expect(TestBed.inject(DialogService).stack()).toHaveLength(1);
     buttonByText(fixture, 'Turn off').click();
     await settle(fixture);

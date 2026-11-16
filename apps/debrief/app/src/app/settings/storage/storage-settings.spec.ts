@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { all, buttonByText, el, provideFakeDock, provideTinyBackend, settle, text } from '../../../testing/helpers';
+import { all, buttonByText, el, provideFakeDock, openDialog, provideTinyBackend, settle, text } from '../../../testing/helpers';
 import { CommandRegistry } from '../../extensions/command-registry';
 import { DialogService } from '../../ui/dialog.service';
 import { MockStorageBackend } from './mock-storage-backend';
@@ -39,9 +39,8 @@ describe('StorageSettings', () => {
     const { fixture, backend, dialogs } = await setup();
     const clear = vi.spyOn(backend, 'clear');
     buttonByText(fixture, 'Clear cache…').click();
-    await settle(fixture);
-    const dlg = dialogs.stack().at(-1);
-    expect(dlg?.options.title).toBe('Clear cache?');
+    const dlg = await openDialog(dialogs);
+    expect(dlg.options.title).toBe('Clear cache?');
     expect(String(dlg?.options.inputs?.['message'])).toContain('57 MB');
     expect(String(dlg?.options.inputs?.['detail'])).toContain('Web view cache — 45 MB');
     expect(String(dlg?.options.inputs?.['detail'])).not.toContain('logs');
@@ -62,9 +61,8 @@ describe('StorageSettings', () => {
     const { fixture, backend, dialogs } = await setup();
     const clear = vi.spyOn(backend, 'clear');
     row(fixture, 'logs').querySelector<HTMLButtonElement>('.act button')?.click();
-    await settle(fixture);
-    let dlg = dialogs.stack().at(-1);
-    expect(dlg?.options.title).toBe('Remove Debrief logs?');
+    let dlg = await openDialog(dialogs);
+    expect(dlg.options.title).toBe('Remove Debrief logs?');
     expect(String(dlg?.options.inputs?.['message'])).toContain('permanently deletes 5 MB');
     expect(dlg?.options.inputs?.['danger']).toBe(true);
     dlg?.ref.close();
@@ -72,9 +70,8 @@ describe('StorageSettings', () => {
     expect(clear).not.toHaveBeenCalled();
 
     row(fixture, 'logs').querySelector<HTMLButtonElement>('.act button')?.click();
-    await settle(fixture);
-    dlg = dialogs.stack().at(-1);
-    dlg?.ref.close(true);
+    dlg = await openDialog(dialogs);
+    dlg.ref.close(true);
     await settle(fixture);
     expect(clear).toHaveBeenCalledWith(['logs']);
     expect(text(fixture)).toContain('Debrief logs: freed 5 MB, kept 1 (Debrief is writing to it).');

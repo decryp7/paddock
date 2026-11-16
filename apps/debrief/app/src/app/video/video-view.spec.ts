@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
-import { all, buttonByText, el, settle, text, typeInto, settleUntil } from '../../testing/helpers';
+import { all, buttonByText, el, settle, text, typeInto, settleUntil, openDialog } from '../../testing/helpers';
 import { CmdError } from '../core/cmd-error';
 import { WorkspaceStore } from '../core/workspace.store';
 import { SettingsDialogService } from '../settings/settings-dialog';
@@ -289,7 +289,9 @@ describe('VideoView with videos', () => {
     const box = testId(fixture, 'video-include') as HTMLInputElement;
     expect(box.checked).toBe(false);
     box.click();
-    await settle(fixture, 4);
+    await openDialog(dialogs);
+    await settle(fixture);
+    await openDialog(dialogs);
     expect(dialogs.stack()).toHaveLength(1);
     expect(testId(fixture, 'video-include').closest('debrief-video-storage')).toBeTruthy();
     expect(dialogs.stack()[0]!.options.inputs?.['message']).toMatch(/MB\)/);

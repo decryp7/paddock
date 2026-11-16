@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { all, buttonByText, settle, text } from '../../testing/helpers';
+import { all, buttonByText, openDialog, settle, text } from '../../testing/helpers';
 import { DebriefBackend } from '../core/backend';
 import { WorkspaceStore } from '../core/workspace.store';
 import { ProjectBackend } from '../core/tools-backend';
@@ -154,14 +154,13 @@ describe('ProjectService', () => {
     // Save As onto an existing file asks; keeping the file leaves the project as it was.
     tools.calls.length = 0;
     let saving = projects.saveAs();
-    await settle();
-    expect(dialogs.stack()[0]?.options.title).toBe('Replace file?');
-    at(dialogs.stack(), 0).ref.close();
+    const keep = await openDialog(dialogs);
+    expect(keep.options.title).toBe('Replace file?');
+    keep.ref.close();
     expect(await saving).toBe(false);
     expect(tools.calls).toEqual([]);
     saving = projects.saveAs();
-    await settle();
-    at(dialogs.stack(), 0).ref.close(true);
+    (await openDialog(dialogs)).ref.close(true);
     expect(await saving).toBe(true);
     expect(tools.calls).toEqual(['saveProject:/p/saved.debriefz']);
   });

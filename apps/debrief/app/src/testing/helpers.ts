@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import { Component, EnvironmentProviders, Provider, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MarkerKind, PluginInfo, Query } from '../app/core/api.types';
@@ -13,6 +14,7 @@ import { DockService } from '../app/dock/dock.service';
 import { provideWorkspace } from '../app/core/workspace/provide-workspace';
 import { ConsumerGate } from '../app/core/panel-visibility';
 import { assertSameTest, currentTest } from './test-lifetime';
+import { DialogService, OpenDialog } from '../app/ui/dialog.service';
 
 export const T0 = DEMO_START;
 export const SEC = 1000;
@@ -207,6 +209,18 @@ export async function settleUntil<T>(fixture: ComponentFixture<T> | undefined, c
     },
     { timeout, interval: 10 },
   );
+}
+
+/**
+ * Waits until an in-page dialog is open and returns the topmost one. Dialogs load lazily (`openLazy`), so a test must wait
+ * on the condition, never on a number of event-loop turns; it fails (the wait times out) when no dialog opens, where
+ * `stack().at(-1)?.ref` would silently do nothing.
+ */
+export async function openDialog(dialogs: DialogService): Promise<OpenDialog> {
+  await vi.waitFor(() => {
+    if (dialogs.stack().length === 0) throw new Error('No dialog is open');
+  });
+  return dialogs.stack().at(-1)!;
 }
 
 export function el<T extends Element = HTMLElement>(fixture: ComponentFixture<unknown>, selector: string): T {

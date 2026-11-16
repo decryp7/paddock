@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { all, buttonByText, el, settle, text, typeInto } from '../../../testing/helpers';
+import { all, buttonByText, el, settle, text, typeInto, openDialog } from '../../../testing/helpers';
 import { Platform } from '../../core/platform';
 import { WorkspaceStore } from '../../core/workspace.store';
 import { DIALOG_REF, DialogService } from '../../ui/dialog.service';
@@ -149,6 +149,7 @@ describe('CollectorDialog', () => {
     // The same bundle name again: the engine refuses, the app asks.
     buttonByText(fixture, 'Collect again').click();
     await settle(fixture);
+    await openDialog(dialogs);
     expect(dialogs.stack()[0]?.options.title).toBe('Replace file?');
     at(dialogs.stack(), 0).ref.close(false);
     await settle(fixture);
@@ -158,6 +159,7 @@ describe('CollectorDialog', () => {
     // Confirmed: written again with permission.
     buttonByText(fixture, 'Collect').click();
     await settle(fixture);
+    await openDialog(dialogs);
     at(dialogs.stack(), 0).ref.close(true);
     await settle(fixture);
     expect(run.mock.calls.map((c) => c[2])).toEqual([false, false, false, true]);

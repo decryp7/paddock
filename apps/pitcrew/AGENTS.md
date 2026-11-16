@@ -4,7 +4,7 @@ Pitcrew is a runner manager for Gitea and Forgejo: a Rust core (`crates/pitcrew-
 (`crates/pitcrew-service`), a Tauri 2 shell (`app/src-tauri`) and an Angular UI (`app/src`). See README.md for what it
 does and `docs/adr/` for why it is built this way.
 
-<!-- paddock:block rules rev=8f358bf3 -->
+<!-- paddock:block rules rev=bd40c96d -->
 ## Paddock rules (binding)
 
 The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/rules.md) (the source; update there first). Where an older rule in this file disagrees, these win.
@@ -134,7 +134,12 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
     machine busy but not overloaded: start more agents when load stays low, hold or stop starting them when it stays
     high (Mac mini, 14 cores: aim for a 1-minute load of about 6–16, at most ~5 heavy jobs, `CARGO_BUILD_JOBS=2` each),
     use the shared build cache (`sccache`) and copy-on-write target folders, and never let tests crowd out a release.
-    Only one train's CI runs at a time on each shared runner class; `./dev ci dispatch` waits while it is busy (planned; ER-24; 2026-11-12).
+    Only one train's CI runs at a time on each shared runner class: `./dev ci dispatch` sends a train run at once and its first
+    job waits (`runner-wait`, on Linux) while an older run holds the Mac or Windows runner it needs; other dispatches wait in
+    the dispatcher. A run holds a class while it has an unfinished job on it; in a busy check, unknown counts as busy (a job
+    whose label is unresolved, empty or of no known class counts its run by its workflow file); only an unreadable API fails
+    open. At most the Linux slots less one (`conformance/ci/runner-slots.json`) train runs wait at once, so one Linux slot
+    stays free (ER-24; 2026-11-12, mechanism 2026-11-15; first live run: pending).
 
 ### Sharing (user, 2026-10-24)
 42. **Share first.** Before building anything in an app, check Paddock's shared crates and packages (crates/README.md,
@@ -190,7 +195,7 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
 ### Test isolation (user, 2026-10-29)
 49. **Specs never wait a fixed number of event-loop turns and never leave a patch behind.** Specs of one bundle share a
     page (the Angular builder runs Vitest with `isolate: false`), so: (a) wait on the condition, never on a count of
-    turns or timers: once `fix/debrief-import-range-flake` lands, Debrief's `openDialog()` (`testing/helpers.ts`) waits
+    turns or timers: Debrief's `openDialog()` (`testing/helpers.ts`) waits
     with `vi.waitFor` for a lazily loaded dialog and fails when none opens; (b) an optional chain never performs a
     test's action (no `stack().at(-1)?.ref.close()`): a missing thing must fail the test; (c) a patch on a prototype is
     a `vi.spyOn`, put back by `restoreMocks` and by a global `afterEach(vi.restoreAllMocks)`, never an assignment,
@@ -223,8 +228,11 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
     a flaky conformance test that blocks a push is fixed at once under ER-12, never skipped or bypassed, ER-39),
     commit-lint (rule 50g) and lockfiles with `--locked`; when `crates/` or `.cargo/`
     changed, also CI's workspace Clippy on Linux in the CI image (`--cpus 4 --memory 12g`). A gate that cannot run (no Docker, no
-    cargo-xwin) is "not measured", exit 6, never a pass; an agent never starts Docker (ER-14). Lint and type-check of the touched TS
-    files stay by hand until WP-3. Then dispatch with `./dev`
+    cargo-xwin) is "not measured", exit 6, never a pass; an agent never starts Docker (ER-14). It checks every commit the remote
+    lacks (`git rev-list <tip> --not --remotes`), measured from the nearest commit of the remote the push contains (the header says
+    which and why; never a local branch), and its 15 minutes count run time only; time queued for the heavy slot behind other
+    agents has its own allowance of 30 min per push and is reported apart (ADR 0102 and its 2026-11-15 amendment). Lint and type-check of the touched
+    TS files stay by hand until WP-3. Then dispatch with `./dev`
     and, at the same time, run the slower local checks in parallel: the affected tests on the dev OS, the same tests in the
     `train3-linux-dev:1` container (CI limits, `ulimit -n 1024`) and timing-sensitive tests under load. Cap local builds
     (`CARGO_BUILD_JOBS=2`) while CI runners share the machine. If a local check fails, cancel that run at once through the Gitea
@@ -292,7 +300,9 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
     membership, never by parent pids alone. Kills go through `paddock_proc` (`kill_tree`, `end`, `ask`, `terminate`,
     `Supervised`). Clippy's `disallowed-methods` (lint/clippy.toml: `libc::kill`, `libc::killpg`, nix's `kill`/`killpg`,
     sysinfo's `Process::kill`/`kill_with`) and conformance check C53 (`taskkill`, kill commands, `Stop-Process`,
-    `TerminateProcess`, `TerminateJobObject`, open ADR 0033 follow-ups) enforce it. ADR
+    `TerminateProcess`, `TerminateJobObject`, open ADR 0033 follow-ups) enforce it; for an agent's own Bash commands the
+    blocking hook `.claude/hooks/kill-guard.sh` does, once it is wired in the main checkout's `.claude/settings.json` (`pkill`,
+    `killall`, `fuser -k`, `xargs kill` and a `kill` of a pid it cannot prove is the agent's own are refused). ADR
     [0033](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/adr/0033-processes-by-identity-never-by-a-bare-pid.md); ADR [0023](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/adr/0023-tests-never-free-a-port-they-probe.md)
     is the same rule for ports.
     A discovery file, a file that names a pid or a port (Dyno's `agent.json`), is only a hint: act on it only after a held
@@ -590,7 +600,7 @@ Pitcrew runs privileged (a Windows service as LocalSystem), downloads executable
 - Status colours always come with words; validate colours for contrast and colour-vision deficiency.
 <!-- /paddock:block style -->
 
-<!-- paddock:block working-practices rev=23b72d08 -->
+<!-- paddock:block working-practices rev=e2d59cd6 -->
 ## Working practices
 
 - Research official sources before choosing libraries or relying on another program's behaviour, and record what you
@@ -603,7 +613,7 @@ Pitcrew runs privileged (a Windows service as LocalSystem), downloads executable
 - Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
   `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
 - Specs never wait a fixed number of event-loop turns and never leave a patch behind (rule 49): wait on the condition
-  (Debrief's `openDialog()`, once `fix/debrief-import-range-flake` lands), never let an optional chain perform a test's
+  (Debrief's `openDialog()` in `testing/helpers.ts`), never let an optional chain perform a test's
   action, and patch a prototype only with `vi.spyOn` (restored after each test).
 - Spend CI only on what a change needs (rule 50): one run per branch head, none while review fixes are pending or for a
   branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.
