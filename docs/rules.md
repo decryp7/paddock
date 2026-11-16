@@ -198,6 +198,10 @@ changes here, every app's copy is updated in the same change.
     (d) A wait or assertion over a set of elements requires the set to be non-empty, or names why empty is expected (an `every()`
     over nothing passes), and a layout check counts only when two reads agree (ER-12; 2026-11-16: Dyno's layout check passed on
     zero rows and failed 31 of 240 runs under the pinned clock).
+    (e) A claim that a timing-sensitive spec passes or is stable states its runs, workers and engines (or OS). An e2e timing fix
+    needs at least 20 runs per engine at 4 workers, or more when the measured failure rate requires it; a bare "N of N green" is
+    rejected in review (ER-28, user, 2026-11-17). *Why:* on 2026-11-16 a Debrief live-tail fix was reported "3 of 3" and was 3 of 7
+    red, and "12 of 12" was 4 of 150 red (`fix/debrief-events-grid-live-tail`, `fix/debrief-live-tail-adr`).
 
 ## CI economy (user, 2026-10-29)
 50. **CI runs only what a change needs, once.**

@@ -2098,3 +2098,6 @@ Train 12 ran each affected release gate with the tests that `ci.yml` had just ru
 
 ## Old races in unchanged code held a train (2026-11-16, run 8174; rule 50 (k) item 4)
 Two old races in shared crates that train 12 did not touch (`paddock-ipc` endings and the plugin-host ETXTBSY) passed on their one retry and held the train for hours. **Rule:** a FLAKY test blocks only when the change reaches its code; otherwise it becomes a fix item with its log, fixed next train with a failing reproduction first; a test failing both tries always blocks; the run stays marked FLAKY. Large projects (Chromium, Google) quarantine such flakes instead of blocking unrelated changes. **Class: an unrelated old defect held a landing (ER-12, rule 5).**
+
+## "3 of 3 green" was 3 of 7 red (2026-11-16, Debrief live tail; rule 49 (e))
+A live-tail fix was reported "3 of 3" and was 3 of 7 red; a later "12 of 12" was 4 of 150 red (`fix/debrief-events-grid-live-tail`, `fix/debrief-live-tail-adr`). A small green count says little when the failure rate is a few percent and depends on workers and engine. **Rule:** a stability claim states runs x workers x engines (or OS); e2e timing fixes run at least 20 per engine at 4 workers, more when the measured rate needs it; a bare "N of N green" is rejected in review. **Class: a claim without its sample size (ER-28, ER-12).**
