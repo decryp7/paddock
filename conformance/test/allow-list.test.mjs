@@ -174,7 +174,7 @@ test('allow list growth: a list new at the merge base, a fixture folder without 
   assert.equal(w.length, 1, 'a checkout where git cannot give a base says so, never silence');
 });
 
-// ---- the target ref: a member branch of a train is measured against the train, not main (ER-21; report-only, ER-41) ----
+// ---- the target ref: a member branch of a train is measured against the train, not main (ER-21; ADR 0098 amendment of 2026-11-16) ----
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { isCi, targetRef } from '../src/util/baseline.mjs';
 

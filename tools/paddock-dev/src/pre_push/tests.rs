@@ -2302,3 +2302,32 @@ fn every_commit_the_remote_lacks_is_in_the_planned_diff() {
         "the cases must cover each shape: unpushed train {with_unpushed_train}, merge {with_merge}, force push {with_force}"
     );
 }
+
+#[test]
+fn a_dry_run_names_the_growth_target_and_the_variable_each_conformance_gate_carries() {
+    let f = Facts {
+        base_ref: Some("origin/train/2026-11-15-13".into()),
+        ..facts()
+    };
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &f);
+    let r = super::dry_run(&planned, "origin/train/2026-11-15-13", "the nearest train");
+    assert!(
+        r.text
+            .starts_with("growth target (PADDOCK_BASE_REF): origin/train/2026-11-15-13 (the nearest train)\n"),
+        "{}",
+        r.text
+    );
+    let j = r.json();
+    assert_eq!(
+        j["growth_target"],
+        json!({"ref": "origin/train/2026-11-15-13", "why": "the nearest train"})
+    );
+    let conformance = j["gates"].as_array().unwrap().iter().find(|g| g["id"] == "conformance").unwrap();
+    assert_eq!(conformance["env"]["PADDOCK_BASE_REF"], "origin/train/2026-11-15-13");
+    assert!(
+        conformance["command"]
+            .as_str()
+            .unwrap()
+            .starts_with("PADDOCK_BASE_REF=origin/train/2026-11-15-13 ")
+    );
+}
