@@ -363,6 +363,10 @@ fn last_lines(text: &str, n: usize) -> String {
     lines[lines.len().saturating_sub(n)..].join(" | ")
 }
 
+/// What a Windows row is not: the guest's architecture differs from the runner's (`dev ci` runs x64; the test VM is Arm and an x64
+/// program does not start there). Said in the row and the text, so a pass is never read as "the runner's architecture passed".
+const WINDOWS_NOTE: &str = "Arm64 test VM (aarch64-pc-windows-msvc); the CI runner is x64";
+
 fn row(os: Os, targets: &BTreeSet<Target>, verdict: &Verdict, seconds: f64, log: &str) -> Value {
     json!({
         "os": os.name(),
@@ -370,6 +374,7 @@ fn row(os: Os, targets: &BTreeSet<Target>, verdict: &Verdict, seconds: f64, log:
         "why": match verdict { Verdict::NotMeasured(w) => w.as_str(), _ => "" },
         "targets": targets.iter().map(Target::spec).collect::<Vec<_>>(),
         "seconds": (seconds * 10.0).round() / 10.0,
+        "note": if os == Os::Windows { WINDOWS_NOTE } else { "" },
         "log": log,
     })
 }
@@ -438,8 +443,13 @@ pub fn execute(root: &Path, tree: &str, selection: &Selection, runner: &dyn Runn
         let seconds = started.elapsed().as_secs_f64();
         let verdict = interpret(os, tree, targets, &answer);
         let log = answer.as_ref().map(|r| r.text.as_str()).unwrap_or("");
+        let note = if os == Os::Windows {
+            format!(" [{WINDOWS_NOTE}]")
+        } else {
+            String::new()
+        };
         text.push(format!(
-            "  {}: {} in {:.0} s ({} targets)",
+            "  {}: {} in {:.0} s ({} targets){note}",
             os.name(),
             verdict.name(),
             seconds,
@@ -771,6 +781,16 @@ mod tests {
         assert_eq!(step.exit, Exit::Findings);
         assert_eq!(step.data["rows"][0]["outcome"], "passed");
         assert_eq!(step.data["rows"][1]["outcome"], "failed");
+    }
+
+    #[test]
+    fn a_windows_row_says_the_guest_is_not_the_runners_architecture() {
+        let f = fake(ran(Some(0), Os::Linux, "t1", SUMMARY), ran(Some(0), Os::Windows, "t1", SUMMARY));
+        let step = execute(Path::new("."), "t1", &selected(), &f, true, "abc");
+        assert!(step.data["rows"][1]["note"].as_str().unwrap().contains("Arm64"));
+        assert_eq!(step.data["rows"][0]["note"], "");
+        assert!(step.text.join("\n").contains("windows: passed"));
+        assert!(step.text.join("\n").contains("Arm64 test VM"));
     }
 
     #[test]

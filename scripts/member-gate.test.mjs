@@ -34,3 +34,12 @@ test('every script refuses a call without a spec with exit 2 before it touches D
     assert.match(r.stderr, /::error::.*no spec given/);
   }
 });
+
+test('the Windows run copies the toolchain of rust-toolchain.toml in per run, never runs rustup, and carries no token', () => {
+  const s = read('member-gate-windows.sh');
+  assert.match(s, /rust-toolchain\.toml/);
+  assert.match(s, /RUSTUP_AUTO_INSTALL=0/);
+  assert.doesNotMatch(s, /rustup (install|toolchain|update|default|target)|rustup-init/);
+  assert.doesNotMatch(s, /Authorization|--token|_TOKEN|credential-provider/);
+  assert.match(s, /buildtools-baseline/);
+});
