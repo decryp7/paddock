@@ -2165,3 +2165,41 @@ fixed with failing shapes first).
 costs and multiply by Windows' spawn and file cost; split cases into separate tests so they run in parallel.
 **Class: tests that pass on the Mac and time out on Windows because of per-process or per-file cost; earlier: 50,000 files
 timed out on NTFS + Defender (Platforms, "Tests that pass on the Mac fail on Windows").**
+
+## The midnight/noon sweep: six of seven e2e failures were not about the time (2026-11-17)
+The pinned-clock sweep (`PADDOCK_E2E_NOW` at 2026-11-15T23:59Z, 2026-11-16T00:19Z and 12:00Z, every app, both engines, once each) failed
+seven specs: Debrief `ux-welcome` (before and after), `ai-chat` (before), `dock-default-split` (noon); ui `gallery`
+(after), `material` twice and `workbench-demo` (noon). Each was run 40 to 240 times at its failing instant and at the others. **None depends on
+the instant** (rates within noise: 8, 8 and 9 of 100; 7, 3 and 0 of 120; 3, 0 and 1 of 40); the instant only decided which run of a
+roughly 5 to 10 % failure was the one the sweep saw (the two WebKit-only ones passed 120 of 120 in Chromium). Hypotheses for "time-dependent" (a date or hour in the code under test, a day boundary
+in a format, a timezone) were refuted by those equal rates and by failures that show no date. The causes, each confirmed by a run without it:
+- **`ux-welcome` palette order (WebKit, 3 of 40 at before, 1 of 40 noon, 0 of 40 after).** The spec read the options as soon as "an option is
+  visible"; the palette still showed the unfiltered list (recent and common commands, where "Connect to Pitwall" is the 9th), so the index
+  was 8 on every failure, and the final DOM of every failing run was correct. Fix: read after the first option has a `mark` (the filter's highlight, which the
+  unfiltered list has none of). 100 of 100 green after.
+- **`ai-chat` pipeline proposal (WebKit, 8, 9 and 8 of 100).** The spec pressed "Add to profile" while the answer's text still streamed in above
+  the card; the card moved between press and release, so no click arrived (the probe saw the same element, no running turn, no Undo
+  entry: `apply` never ran). With the answer done first: 0 of 100; fix 0 of 100. A press on a moving target is not a click.
+- **`dock-default-split` (both engines, 7 and 3 of 120 at before and noon, 0 at after).** A product fault the spec found: the dock sat 36 px from the top
+  until the lazy filter bar arrived, its placeholder was 30 px where the bar is 51 px, and the bar was 59 px for a frame (its status line host
+  had no `empty` class before the first update, so its 8 px gap counted). The dock top moved 66, 87, 95, 87 px after "ready" and the groups re-scaled
+  (279/502/781 then 282/507/789). Fixed in the product (placeholder 51 px; `debrief-query-status` is hidden until it has something to show) with
+  the spec first: it logs the dock's top and the groups' heights every frame from the first one and was red in 20 of 20 before the fix, 240 of
+  240 green after. The groups' heights still follow the container once (the dock re-plans debounced), so the spec waits with `settledLayout`
+  instead of `waitForTimeout(1000)`.
+- **`material` select and Tab walk (Chromium, 4 and 6 of 40 per theme at after; the sweep's noon pair).** The spec drove the section as soon as its first
+  button was in the DOM. That is the creation pass; the update pass (the select's `aria-expanded`, the form field's control, the picker
+  inputs' bindings) comes later, up to 60 ms in the probe. Meanwhile a click hit "onContainerClick of undefined", a keydown hit NG0950
+  "timepicker is required", and the Tab walk left the section before the select. Fix: wait for the Level select's `aria-expanded`. 0 of 160 after
+  (10 of 160 before).
+- **`gallery` open select list (Chromium, 5 of 40, 12 of 60, always 536.09 px off).** `toBeVisible` of the list is true a frame or two before the
+  overlay positions it (at x 0, 131 px wide; 40 ms later at the field's x and 212 px). Fix: wait for the alignment (`expect.poll`, a failing
+  list stays red with the last position). 100 of 100 after.
+- **`workbench-demo` Jobs view: not reproduced.** 0 of 100 at noon (40 idle, 60 with 8 CPU burners), once in the sweep; the failure page shows the palette open
+  with "View: Show jobs" selected after the second `run`. Cause not found, so no fix (ER-33: not measured); the palette helper's failure message
+  now names the label it was running. Next step: run the spec under the full suite's load with `--trace on` until it fails once.
+**Why the logs did not show it:** the specs read the page once and compared; none printed what the page showed at that moment. The material
+errors were in the dev server's console only.
+**Class: a spec that acts or reads on "it is in the DOM" while the page is not ready or still moving** (earlier: the toast whose Show missed
+its click, the Dyno Firewall layout read before it settled (`settledLayout`), the Debrief menu that ran its neighbour's command; ER-21 candidate:
+a shared "ready" per kind of check, with a lint over `waitForTimeout` and first-visible reads).
