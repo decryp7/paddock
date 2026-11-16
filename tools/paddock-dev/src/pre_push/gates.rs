@@ -418,10 +418,21 @@ fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Planned {
     let mut command = String::from("rustc --version && cargo clippy --version || exit 1; rc=0");
     for ws in &targets {
         let features = if ws == "crates" { " --all-features" } else { "" };
-        command.push_str(&format!(
-            "; (cd {ws} && CARGO_TARGET_DIR=/target/{} cargo clippy --workspace --all-targets{features} --locked -- -D warnings) || rc=1",
-            slug(ws)
-        ));
+        // The apps' Tauri crates (`src-tauri`) are left out, with a warning in the output: their build script writes into the source
+        // tree (the sidecar placeholders in `binaries/`, tauri-build's `gen/`), which the container mounts read-only (ER-14; a writable
+        // overlay of the repository would cost more than the one crate is worth). Their Linux Clippy stays CI's; the crates they depend
+        // on are linted. `crates` has none.
+        if ws == "crates" {
+            command.push_str(&format!(
+                "; (cd {ws} && CARGO_TARGET_DIR=/target/{} cargo clippy --workspace --all-targets{features} --locked -- -D warnings) || rc=1",
+                slug(ws)
+            ));
+        } else {
+            command.push_str(&format!(
+                r#"; ex=$(cd {ws} && cargo metadata --no-deps --format-version 1 | jq -r '[.packages[] | select(.manifest_path | test("/src-tauri/")) | .name] | join(" ")'); [ -z "$ex" ] || echo "::warning::clippy-linux {ws}: the Tauri crate(s) $ex are left out: their build script writes into the read-only repository mount; CI lints them on Linux"; ex=$(for p in $ex; do printf -- '--exclude %s ' "$p"; done); (cd {ws} && CARGO_TARGET_DIR=/target/{} cargo clippy --workspace $ex --all-targets{features} --locked -- -D warnings) || rc=1"#,
+                slug(ws)
+            ));
+        }
     }
     command.push_str("; exit $rc");
     let mut g = gate(

@@ -771,10 +771,10 @@ fn one_container_run_covers_every_touched_workspace_with_its_own_target_folder()
     );
     assert!(script.contains("(cd crates && CARGO_TARGET_DIR=/target/crates cargo clippy --workspace --all-targets --all-features --locked -- -D warnings) || rc=1"), "{script}");
     assert!(
-        script.contains(
-            "(cd apps/dyno && CARGO_TARGET_DIR=/target/apps-dyno cargo clippy --workspace --all-targets --locked -- -D warnings) || rc=1"
-        ),
-        "{script}"
+        script.contains("(cd apps/dyno && CARGO_TARGET_DIR=/target/apps-dyno cargo clippy --workspace $ex --all-targets --locked -- -D warnings) || rc=1")
+            && script.contains("test(\"/src-tauri/\")")
+            && script.contains("::warning::clippy-linux apps/dyno"),
+        "an app workspace leaves its Tauri crates out (their build script writes into the read-only repository): {script}"
     );
     assert!(
         script.ends_with("exit $rc"),
@@ -2478,4 +2478,17 @@ fn shape_train_on_the_remote_through_a_sibling_with_a_non_ascii_path() {
             ..NONE
         },
     );
+}
+
+/// A cold build that runs out of the push budget says the progress is kept, so the next run continues (not a finding, not a pass).
+#[test]
+fn a_cold_linux_clippy_cut_short_says_the_next_run_continues() {
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
+    let fake = Fake {
+        cut_short: vec!["clippy-linux crates".into()],
+        ..Fake::default()
+    };
+    let v = verdicts(&run_all(&planned, &fake, 3));
+    let (_, next) = nm(&v["clippy-linux crates"]).expect("not measured");
+    assert!(next.contains("kept volume") && next.contains("continues"), "{next}");
 }

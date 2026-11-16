@@ -1523,5 +1523,16 @@ Question: what does the Linux Clippy row cost now that `./dev check --pre-push` 
   | warm, nothing changed | 3.2 |
   | warm, one planted dead-code lint (red, exit 5) | 26.6 |
 
-- **Not measured:** the `crates` workspace cold and warm, a push touching several workspaces, a quiet machine. The Linux code scan (text match over the touched workspaces' `.rs` files, no cache) is part of the 5.2 s wall time of the warm run beside the container start; it was not timed apart.
+- **More numbers (same machine, one run each; load 12 to 17 at the start):**
+
+  | Workspace and run | Seconds |
+  |---|---:|
+  | `crates` cold (`--all-features`) | 521.9 |
+  | `crates` warm | 3.2 |
+  | `apps/dyno` cold, Tauri crate included | over 899: cut short by the 15 minute budget, "not measured" (the compiled part stays in the volume) |
+  | `apps/dyno` with a planted Linux-only lint in dyno-agent (red, after the Tauri crate was left out, so a rebuild) | 292.6 |
+  | `apps/dyno` clean again | 86.5 |
+
+- **Apps:** the CI image has the Tauri system libraries (gdk, cairo, pango, atk compiled), but the `dyno-app` build script writes the sidecar placeholders into the read-only repository mount and fails (`Read-only file system`), so the row leaves the `src-tauri` crates out of an app workspace and prints a `::warning::`; CI lints them on Linux.
+- **Not measured:** a push touching several workspaces, a quiet machine. The Linux code scan (text match over the touched workspaces' `.rs` files, no cache) is part of the 5.2 s wall time of the warm run beside the container start; it was not timed apart.
 - **Reading:** the cold cost is paid once per workspace, in the container's kept target volume; warm runs fit the 15 minute budget with room.

@@ -270,9 +270,14 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
                 done.log.as_ref().map_or(String::new(), |l| format!("; output so far in {l}"))
             ),
             format!(
-                "re-run it alone: {} (the whole gate has a budget of {} min)",
+                "re-run it alone: {} (the whole gate has a budget of {} min){}",
                 gate.rerun(),
-                BUDGET.as_secs() / 60
+                BUDGET.as_secs() / 60,
+                if gate.id.starts_with("clippy-linux") {
+                    "; the first run of a workspace builds all its dependencies in the container's kept volume (cold apps/dyno took over 15 min), what compiled is kept, so the next run continues and a warm run takes seconds"
+                } else {
+                    ""
+                }
             ),
         ),
         Ok(done) => {
