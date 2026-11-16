@@ -222,7 +222,12 @@ impl TestCommand {
         };
         let linked = (Path::new(program).components().count() == 1
             && TOOLCHAIN_STARTED.contains(&program.to_string_lossy().as_ref()))
-        .then(|| links.as_deref().and_then(|d| linked_program(d, program)))
+        .then(|| {
+            links
+                .iter()
+                .chain(&curated.toolchain_dirs)
+                .find_map(|d| linked_program(d, program))
+        })
         .flatten();
         let resolved = linked.map_or_else(|| resolve_on(program, machine), PathBuf::into_os_string);
         let mut cmd = Command::new(resolved);
@@ -295,6 +300,7 @@ impl TestCommand {
         let path: Vec<PathBuf> = links
             .iter()
             .cloned()
+            .chain(curated.toolchain_dirs.iter().cloned())
             .chain(curated.tail.iter().cloned())
             .collect();
         cmd.env("PATH", join_paths(&path));
@@ -720,7 +726,9 @@ struct Curated {
     /// Whether `links` is the shared folder's answer; `false` when there is no link root or it refused the folder, and each
     /// command then links into its own folder.
     shared: bool,
-    /// The folders after it: the [`NAMED_TOOLS`]' (on Windows Git's `usr/bin` after git's own folder), then the system folders.
+    /// On Windows, toolchain folders that go on the `PATH` as they are, not linked ([`toolchain_dirs`]).
+    toolchain_dirs: Vec<PathBuf>,
+    /// The folders after them: the [`NAMED_TOOLS`]' (on Windows Git's `usr/bin` after git's own folder), then the system folders.
     tail: Vec<PathBuf>,
     /// Git for Windows' install folder, when one was found.
     git_root: Option<PathBuf>,
@@ -763,6 +771,7 @@ fn curated(machine: &Ambient) -> Curated {
     let git_root = git_root_of(machine);
     let made = Curated {
         tail: tail_dirs(machine, links.as_deref(), git_root.as_deref()),
+        toolchain_dirs: toolchain_dirs(machine),
         links,
         shared,
         git_root,
@@ -809,16 +818,10 @@ fn folder_is_valid(dir: &Path) -> bool {
         })
 }
 
-/// The folder of links to the [`TOOLCHAIN`] programs `machine` has (`cargo`: [`Ambient::cargo`], the cargo that runs the
-/// tests), under `root`: one folder per toolchain, named by the programs' paths, sizes and times, made once (in a staging folder
-/// of this process, then renamed into place) and reused by every later command and test process that use the same `root`.
-/// Symbolic links on Unix; on Windows hard links, else a copy, logged with its error. `Ok(None)` when the machine has none of
-/// the programs; `Err` when `root`, a link or the record cannot be written (the caller links into the command's own folder).
-fn link_folder(machine: &Ambient, root: &Path) -> std::io::Result<Option<PathBuf>> {
-    use std::hash::{Hash, Hasher};
-    // Each link is named for its program plus the platform's suffix (`rustc.exe`), never after the spelling that found it
-    // (`rustc.EXE` through `PATHEXT`; ci.yml run 8154), so `linked_program` finds it by the same name on every file system.
-    let (sources, names): (Vec<PathBuf>, Vec<String>) = TOOLCHAIN
+/// The [`TOOLCHAIN`] programs `machine` has, each with the name its link gets (`cargo`: [`Ambient::cargo`], the cargo that runs
+/// the tests).
+fn toolchain_sources(machine: &Ambient) -> Vec<(PathBuf, String)> {
+    TOOLCHAIN
         .iter()
         .map(|name| {
             let source = match &machine.cargo {
@@ -828,6 +831,47 @@ fn link_folder(machine: &Ambient, root: &Path) -> std::io::Result<Option<PathBuf
             (source, format!("{name}{}", std::env::consts::EXE_SUFFIX))
         })
         .filter(|(p, _)| p.is_absolute() && p.is_file())
+        .collect()
+}
+
+/// On Windows, the folders of [`toolchain_sources`] that are a toolchain's own `bin` (they hold `rustc_driver-*.dll`): its
+/// programs load their DLLs from their own folder, so a hard link or a copy elsewhere does not start (`rustc -vV` exited
+/// 0xC0000135, STATUS_DLL_NOT_FOUND, on the test VM, whose toolchain has no rustup). Such a folder holds only the toolchain's
+/// programs, never a `cargo install`ed tool, so it goes on the `PATH` as it is. Empty elsewhere (a symbolic link starts the program
+/// from its own folder) and for rustup's proxies, which need no DLL.
+fn toolchain_dirs(machine: &Ambient) -> Vec<PathBuf> {
+    if !cfg!(windows) {
+        return Vec::new();
+    }
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for (source, _) in toolchain_sources(machine) {
+        let Some(dir) = source.parent() else { continue };
+        let holds_driver = std::fs::read_dir(dir).is_ok_and(|entries| {
+            entries.flatten().any(|e| {
+                let n = e.file_name().to_string_lossy().to_lowercase();
+                n.starts_with("rustc_driver-") && n.ends_with(".dll")
+            })
+        });
+        if holds_driver && !dirs.iter().any(|d| d == dir) {
+            dirs.push(dir.to_path_buf());
+        }
+    }
+    dirs
+}
+
+/// The folder of links to the [`TOOLCHAIN`] programs `machine` has (`cargo`: [`Ambient::cargo`], the cargo that runs the
+/// tests), under `root`: one folder per toolchain, named by the programs' paths, sizes and times, made once (in a staging folder
+/// of this process, then renamed into place) and reused by every later command and test process that use the same `root`.
+/// Symbolic links on Unix; on Windows hard links, else a copy, logged with its error. `Ok(None)` when the machine has none of
+/// the programs; `Err` when `root`, a link or the record cannot be written (the caller links into the command's own folder).
+fn link_folder(machine: &Ambient, root: &Path) -> std::io::Result<Option<PathBuf>> {
+    use std::hash::{Hash, Hasher};
+    // Each link is named for its program plus the platform's suffix (`rustc.exe`), never after the spelling that found it
+    // (`rustc.EXE` through `PATHEXT`; ci.yml run 8154), so `linked_program` finds it by the same name on every file system.
+    let in_place = toolchain_dirs(machine);
+    let (sources, names): (Vec<PathBuf>, Vec<String>) = toolchain_sources(machine)
+        .into_iter()
+        .filter(|(p, _)| p.parent().is_none_or(|d| !in_place.iter().any(|t| t == d)))
         .unzip();
     if sources.is_empty() {
         return Ok(None);
