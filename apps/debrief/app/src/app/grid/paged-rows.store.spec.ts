@@ -214,6 +214,88 @@ describe('PagedRowsStore', () => {
     expect(store.rowAt(0)?.id).toBe(309);
   });
 
+  // ADR 0072, decision 1: a round owns the pages it asked for.
+  describe('what a live round owns (ADR 0072)', () => {
+    /** A store with `total` rows (pageSize 100) that has loaded page 0 and is about to refresh. */
+    async function setup(total: number, descending: boolean) {
+      const engine = fakeEngine(total);
+      const arrivals: { mode: string; newTotal: number; delta: number }[] = [];
+      const store = new PagedRowsStore({ fetch: engine.fetch, pageSize: 100, onLive: (a) => arrivals.push(a) });
+      store.reset(q(), descending);
+      await engine.flush();
+      return { engine, store, arrivals };
+    }
+    const release = async (engine: ReturnType<typeof fakeEngine>, index: number) => {
+      const [call] = engine.calls.splice(index, 1);
+      call!.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+
+    it('shift mode re-applies the extra rows of a later page with a larger total (a push between the pages)', async () => {
+      const { engine, store, arrivals } = await setup(1000, true);
+      engine.setTotal(1010);
+      store.liveRefresh('shift', 300, 350);
+      expect(engine.calls.length).toBeGreaterThan(1);
+      await release(engine, 0);
+      expect(arrivals).toEqual([{ mode: 'shift', newTotal: 1010, delta: 10 }]);
+      engine.setTotal(1015);
+      await release(engine, 0);
+      expect(arrivals).toEqual([
+        { mode: 'shift', newTotal: 1010, delta: 10 },
+        { mode: 'shift', newTotal: 1015, delta: 5 },
+      ]);
+    });
+
+    it('a page the round did not ask for never moves the view, in end or shift mode', async () => {
+      for (const mode of ['end', 'shift'] as const) {
+        const { engine, store, arrivals } = await setup(1000, mode === 'shift');
+        engine.setTotal(1010);
+        store.liveRefresh(mode, 300, 350);
+        await engine.flush();
+        expect(arrivals).toHaveLength(1);
+        engine.setTotal(1020);
+        store.ensureRows([700]); // the user scrolled: this page is not the round's
+        await engine.flush();
+        expect(arrivals, mode).toHaveLength(1);
+      }
+    });
+
+    it('G9: a page fetched outside the round that reports a larger total reports the growth (the end moved while the view was pinned)', async () => {
+      const grown: { newTotal: number; delta: number }[] = [];
+      const engine = fakeEngine(1000);
+      const store = new PagedRowsStore({ fetch: engine.fetch, pageSize: 100, onGrow: (g) => grown.push(g) });
+      store.reset(q(), false);
+      await engine.flush();
+      expect(grown).toEqual([]);
+      engine.setTotal(1012);
+      store.ensureRows([700]); // a page the user's scrolling asked for
+      await engine.flush();
+      expect(grown).toEqual([{ newTotal: 1012, delta: 12 }]);
+      // Not for a page of a live round: that arrival is reported by the round.
+      engine.setTotal(1020);
+      store.liveRefresh('end', 300, 350);
+      await engine.flush();
+      expect(grown).toHaveLength(1);
+    });
+
+    it('a failed owned page ends the hold: a later owned page with a larger total no longer follows', async () => {
+      const { engine, store, arrivals } = await setup(1000, false);
+      engine.setTotal(1010);
+      store.liveRefresh('end', 300, 350);
+      expect(engine.calls.length).toBeGreaterThan(2);
+      await release(engine, 0);
+      expect(arrivals).toHaveLength(1);
+      engine.calls[0]!.reject('engine down');
+      engine.calls.splice(0, 1);
+      await Promise.resolve();
+      await Promise.resolve();
+      engine.setTotal(1020);
+      await engine.flush();
+      expect(arrivals).toHaveLength(1);
+    });
+  });
+
   it('ignores a fetch before any query and accepts totals from jumps', () => {
     const engine = fakeEngine(5);
     const store = new PagedRowsStore({ fetch: engine.fetch });

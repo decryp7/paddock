@@ -31,7 +31,11 @@ import { makeGeometry, navigate, rowAtTop, rowY, scrollToTop, topForRow, topToSc
 import { NextSteps } from '../ui/next-steps';
 import { SourceColors, SourceMark } from '../sources/source-colors.store';
 import { stripeBackground } from '../sources/source-colors';
-import { LiveArrival, liveMode, PagedRowsStore } from './paged-rows.store';
+import { LiveArrival, PagedRowsStore } from './paged-rows.store';
+import { FollowEvent, FollowState, followStep } from './follow-reducer';
+import { classifyScroll } from './scroll-classify';
+import { writeScrollTop } from './scroll-writer';
+import { LiveFollow } from '../live/live-follow.store';
 import { writeEventDrag } from '../core/event-drag';
 
 export { SCROLL_IDLE_MS } from './paged-rows.store';
@@ -161,6 +165,8 @@ function viewKey(query: unknown, descending: boolean): string {
       [attr.aria-activedescendant]="activeRowId()"
       (scroll)="onScroll()"
       (wheel)="onWheel($event)"
+      (pointerdown)="onPointerDown($event)"
+      (touchstart)="userTookOver()"
       (keydown)="onKey($event)"
     >
       <div class="header" role="row" aria-rowindex="1" [style.grid-template-columns]="columns()">
@@ -299,6 +305,7 @@ export class EventsGrid {
   private readonly live = inject(LiveTail);
   /** Live refreshes: whether to reload the rows in view (following) or keep them ("N new events"). */
   private readonly feed = inject(LiveFeed);
+  private readonly follow = inject(LiveFollow);
   private readonly highlight = inject(HighlightRules);
   private readonly notes = inject(NotesStore);
   /** Source / instance colour of each row (View › Source colours). */
@@ -315,6 +322,7 @@ export class EventsGrid {
     fetch: (request) => this.backend.queryPage(request),
     onTotal: (total) => this.sel.setMatchTotal(total),
     onLive: (arrival) => this.applyLive(arrival),
+    onGrow: ({ newTotal, delta }) => this.applyGrowth(newTotal, delta),
     onPage: () => this.selectPending(),
     centre: (): number => rowAtTop(this.geometry(), this.virtualTop()),
   });
@@ -363,6 +371,12 @@ export class EventsGrid {
   private readonly selectedCheck = new LatestRequest(inject(DestroyRef));
   /** The scrollTop we last wrote ourselves; scroll events at that position carry no new information. */
   private writtenScroll = Number.NaN;
+  /** The follow and hold state (ADR 0072): `pinned` is stored, not re-derived from the position at each round. */
+  private followState: FollowState = { holding: false, pinned: false };
+  /** The one scroll write that waits for the render, if any; a newer write replaces it and a user take-over drops it. */
+  private pendingWrite: { physical: number } | null = null;
+  /** The viewport was measured once (a later change is a resize). */
+  private measured = false;
 
   protected readonly columns = computed(() => {
     // Narrow windows (H1): the time and source columns give way before the message, which keeps a readable minimum.
@@ -461,7 +475,7 @@ export class EventsGrid {
         const sameView = this.queryKey === key && descending === this.rows.descending;
         this.queryKey = key;
         if (sameView && this.live.isLiveRefresh()) {
-          if (!this.feed.holdGrid()) this.liveRefresh();
+          if (!this.feed.holdGrid()) this.liveRefresh('data');
         } else this.reset(query, descending);
       });
     });
@@ -470,7 +484,16 @@ export class EventsGrid {
     effect(() => {
       const nonce = this.feed.revealNonce();
       untracked(() => {
-        if (nonce > 0 && this.rows.query) this.liveRefresh(this.rows.descending ? 'start' : 'end');
+        if (nonce > 0 && this.rows.query) this.liveRefresh(this.follow.holding() ? 'reveal' : 'follow');
+      });
+    });
+
+    // Follow off, a pause or live tail off: the grid holds (counts) instead of following (ADR 0072, decision 3).
+    effect(() => {
+      const holding = this.follow.holding();
+      untracked(() => {
+        if (holding) this.step({ type: 'hold' });
+        else this.followState = { ...this.followState, holding: false };
       });
     });
 
@@ -500,7 +523,14 @@ export class EventsGrid {
 
     afterNextRender(() => {
       const el = this.viewport()!.nativeElement;
-      const measure = () => this.viewportH.set(Math.max(0, el.clientHeight - HEADER_H));
+      const measure = () => {
+        const height = Math.max(0, el.clientHeight - HEADER_H);
+        if (height === this.viewportH()) return;
+        const first = !this.measured;
+        this.measured = true;
+        this.viewportH.set(height);
+        if (!first) this.step({ type: 'resize' });
+      };
       const ro = new ResizeObserver(measure);
       ro.observe(el);
       destroyRef.onDestroy(() => ro.disconnect());
@@ -520,6 +550,7 @@ export class EventsGrid {
     if (this.jumpErrorView !== viewKey(query, descending)) this.jumpError.set(null);
     this.selection.set(EMPTY_SELECTION);
     this.setTop(0);
+    this.step({ type: 'reset' }, descending);
     this.rows.reset(query, descending);
     void this.checkSelected(query, descending);
   }
@@ -536,19 +567,53 @@ export class EventsGrid {
     if (answer.status === 'done') this.sel.setSelectedHidden(id, answer.value.anchorIndex === null);
   }
 
-  /** Live tail changed the data: refetch what is on screen (old rows stay until the new ones arrive) and keep following. */
-  private liveRefresh(reveal?: 'start' | 'end'): void {
-    if (reveal === 'start') this.setTop(0);
+  /**
+   * One step of the follow and hold state machine (ADR 0072): the pure `followStep` says what to do, this does it. Returns the
+   * action so a caller can read it.
+   */
+  private step(event: FollowEvent, descending = this.rows.descending) {
+    const { state, action } = followStep(this.followState, event, descending);
+    this.followState = state;
+    if (action.endHold) {
+      this.pendingWrite = null;
+      this.rows.endReveal();
+    }
+    if (action.writeNewest || action.keepTopRow) {
+      const top = action.writeNewest ? (descending ? 0 : Number.POSITIVE_INFINITY) : this.virtualTop();
+      this.setTop(top, this.total(), true);
+      this.logger.debug('ui.grid', 'Resize re-applied', { PinnedWrite: action.writeNewest, Top: top });
+    }
+    return action;
+  }
+
+  /** Live tail changed the data, or the user asked for the newest events: refetch what is on screen (old rows stay until the new ones arrive). */
+  private liveRefresh(event: 'data' | 'reveal' | 'follow'): void {
+    // A view that is on the newest end is pinned (a short result that fits the viewport, or a position reached by a jump).
+    if (event === 'data' && !this.followState.pinned && this.atNewest(this.virtualTop())) this.followState = { ...this.followState, pinned: true };
+    const { round, goNewest } = this.step({ type: event });
+    if (round === 'none') return;
+    if (goNewest && this.rows.descending) this.setTop(0);
     const g = this.geometry();
-    const top = this.virtualTop();
-    const mode = liveMode(this.rows.descending, top < g.rowH, top >= g.maxTop - g.rowH, reveal);
-    const { first, last } = visibleWindow(g, top, 0);
+    const { first, last } = visibleWindow(g, this.virtualTop(), 0);
     this.jumpError.set(null);
-    this.rows.liveRefresh(mode, first, last);
+    this.rows.liveRefresh(round, first, last);
+  }
+
+  /**
+   * A page outside a live round reported a larger total (an event was pushed before the engine read it). A view pinned on the newest end
+   * follows the end; oldest first that is a scroll to the new last row, newest first the rows are inserted above a view that is not at the top.
+   */
+  private applyGrowth(newTotal: number, delta: number): void {
+    const { pinned } = this.followState;
+    this.logger.debug('ui.grid', 'Total grew outside a round', { NewTotal: newTotal, Delta: delta, Pinned: pinned });
+    if (this.rows.descending) {
+      if (!pinned) this.applyLive({ mode: 'shift', newTotal, delta });
+    } else if (pinned) this.applyLive({ mode: 'end', newTotal, delta });
   }
 
   /** After the first response of a live refresh: follow the end, or keep the same events in view. */
   private applyLive({ mode, newTotal, delta }: LiveArrival): void {
+    this.logger.debug('ui.grid', 'Live arrival', { Mode: mode, NewTotal: newTotal, Delta: delta, Top: this.virtualTop() });
     if (mode === 'end') {
       this.setTop(Number.POSITIVE_INFINITY, newTotal, true);
       return;
@@ -634,25 +699,70 @@ export class EventsGrid {
     this.setTop(topForRow(g, index, mode, this.virtualTop()), total);
   }
 
-  /** Moves the rows area to a virtual offset and writes the matching scrollbar position. */
+  /** Whether the virtual offset `top` is on the newest end (the last row oldest first, the first row newest first). */
+  private atNewest(top: number, g = this.geometry()): boolean {
+    return this.rows.descending ? top < g.rowH : top >= g.maxTop - g.rowH;
+  }
+
   /**
-   * Moves the view to `top` of `total` rows. The position is set at once; the scroll write waits for the render with `afterRender`
-   * (a live arrival: the spacer has not grown to `total` yet, and a browser clamps a scroll written before it has, then reports the
-   * clamped position as a scroll of the user, so the view would stay short of the newest row).
+   * Moves the view to `top` of `total` rows. The position is set at once and is the source of truth. The scroll write is the only
+   * place that writes `scrollTop` (ADR 0072, decision 2). With `afterRender` it waits for the render (the size changes: a live
+   * arrival or a resize): a browser clamps a scroll written before the spacer has grown and reports the clamped position, so
+   * writing early leaves the view short or, in WebKit, at the top. At most one write waits; a newer one replaces it and a user
+   * take-over drops it (`userTookOver`), so a deferred write never overwrites the user's position.
    */
   private setTop(top: number, total = this.total(), afterRender = false): void {
     const g = makeGeometry(total, this.rowH(), this.viewportH());
     const t = clamp(top, 0, g.maxTop);
     this.virtualTop.set(t);
+    this.followState = { ...this.followState, pinned: this.atNewest(t, g) };
+    const physical = Math.round(topToScroll(g, t));
     const write = (): void => {
       const el = this.viewport()?.nativeElement;
       if (!el) return;
-      const physical = Math.round(topToScroll(g, t));
-      el.scrollTop = physical;
+      const read = writeScrollTop(el, physical);
       this.writtenScroll = physical;
+      this.logger.debug('ui.grid', 'Scroll written', { Physical: physical, Read: read, Max: el.scrollHeight - el.clientHeight });
     };
-    if (afterRender) afterNextRender(write, { injector: this.injector });
-    else write();
+    if (!afterRender) {
+      this.pendingWrite = null;
+      write();
+      return;
+    }
+    const slot = { physical };
+    this.pendingWrite = slot;
+    this.logger.debug('ui.grid', 'Scroll write scheduled', { Physical: physical, Total: total });
+    afterNextRender(
+      () => {
+        if (this.pendingWrite !== slot) {
+          this.logger.debug('ui.grid', 'Scroll write dropped', { Physical: physical });
+          return;
+        }
+        this.pendingWrite = null;
+        write();
+      },
+      { injector: this.injector },
+    );
+  }
+
+  /**
+   * The user took the view over (an input event, or a scroll that was not our own write): the live round lets go, a pending write is
+   * dropped and the view is no longer pinned. A look at the position after the next render pins it again when the user is on the
+   * newest end (a wheel at the end moves nothing).
+   */
+  protected userTookOver(): void {
+    this.step({ type: 'userTookOver' });
+    afterNextRender(
+      () => {
+        if (!this.followState.pinned && this.atNewest(this.virtualTop())) this.step({ type: 'userAtNewest' });
+      },
+      { injector: this.injector },
+    );
+  }
+
+  protected onPointerDown(e: PointerEvent): void {
+    // The scrollbar is part of the scroller itself; a press on a row is a selection, not a scroll.
+    if (e.target === this.viewport()?.nativeElement) this.userTookOver();
   }
 
   protected onScroll(): void {
@@ -660,16 +770,22 @@ export class EventsGrid {
     if (!el) return;
     this.rows.noteScroll();
     const g = this.geometry();
-    const s = el.scrollTop;
-    if (!(Math.abs(s - this.writtenScroll) <= 1)) this.rows.endReveal(); // not our own write: the user scrolled
-    // Our own writes round to whole pixels; reading them back would lose the row-exact position.
-    if (g.scaled && Math.abs(s - this.writtenScroll) <= 1) return;
+    const read = el.scrollTop;
+    const origin = classifyScroll({ read, pendingWrite: this.pendingWrite?.physical ?? null, lastWrite: this.writtenScroll, maxScroll: el.scrollHeight - el.clientHeight });
+    this.logger.debug('ui.grid', 'Scroll event', { Read: read, Written: this.writtenScroll, Pending: this.pendingWrite?.physical ?? null, Origin: origin });
+    // Our own write (or its clamped echo): the position signal already says where the view is; reading it back would lose the row-exact position.
+    if (origin === 'own') return;
     this.writtenScroll = Number.NaN;
-    this.virtualTop.set(scrollToTop(g, s));
+    this.pendingWrite = null;
+    this.rows.endReveal();
+    const top = scrollToTop(g, read);
+    this.virtualTop.set(top);
+    this.step({ type: this.atNewest(top, g) ? 'userAtNewest' : 'userTookOver' });
   }
 
   /** With a scaled scrollbar the wheel moves by pixels of the true content, not of the compressed spacer. */
   protected onWheel(e: WheelEvent): void {
+    if (e.deltaY !== 0) this.userTookOver();
     const g = this.geometry();
     if (!g.scaled || e.ctrlKey || e.deltaY === 0) return;
     e.preventDefault();
@@ -737,6 +853,7 @@ export class EventsGrid {
     const next = navigate(this.geometry(), e.key, sel.focus);
     if (next === null) return;
     e.preventDefault();
+    this.userTookOver();
     // Shift+arrow (or Shift+Page/Home/End) extends the selection from its anchor.
     this.selection.set(e.shiftKey && sel.anchor >= 0 ? extendTo(sel, next) : single(next));
     this.revealRow(next, 'nearest');

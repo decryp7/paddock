@@ -410,7 +410,8 @@ describe('EventsGrid', () => {
     expect(store.anchorMissed()).toBe(false);
     expect(all(fixture, '.row.sel')).toHaveLength(1);
     // The log shows the jump was asked again (ER-27), with no user content.
-    expect(testLogger().entries.filter((e) => e.category === 'ui.grid').map((e) => e.message)).toEqual(['Query changed during a jump; asking again', 'Jump resolved']);
+    // The scroll writes of the grid log too (ADR 0072): this is about the jump's own lines.
+    expect(testLogger().entries.filter((e) => e.category === 'ui.grid' && /jump/i.test(e.message)).map((e) => e.message)).toEqual(['Query changed during a jump; asking again', 'Jump resolved']);
   });
 
   it('a newer jump wins over an older one still on its way', async () => {
@@ -986,6 +987,112 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       await flush(fixture);
       await settle(fixture);
       expect(grid.virtualTop()).toBeLessThan(70_000);
+    });
+
+    // ADR 0072. The reveal with its second page held back (answered after a push); `release()` answers it.
+    async function revealWithHeldPage() {
+      TestBed.resetTestingModule();
+      const clock = new ManualClock();
+      const backend = synthetic(5000, { liveMs: 25, clock });
+      const { fixture, grid, vp } = await render(backend);
+      await flush(fixture);
+      TestBed.inject(LiveFollow).setFollow(false);
+      const feed = TestBed.inject(LiveFeed);
+      await TestBed.inject(LiveTail).toggle();
+      await clock.advance(100);
+      await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1));
+      await settle(fixture);
+      const answer = backend.queryPage.bind(backend);
+      let asked = 0;
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      vi.spyOn(backend, 'queryPage').mockImplementation(async (request) => {
+        // The first page of the reveal is answered as asked; the second waits until the test lets it go (after a push).
+        if (asked++ === 1) await held;
+        return answer(request);
+      });
+      el<HTMLButtonElement>(fixture, '[data-testid=new-events]').click();
+      await vi.waitFor(() => expect(asked).toBeGreaterThan(1));
+      await settle(fixture);
+      return { fixture, grid, vp, clock, release: async () => { await clock.advance(25); release(); await flush(fixture); } };
+    }
+
+    it('G1: a key move during a reveal ends its hold: a later page with a larger total does not pull the view back', async () => {
+      const { fixture, grid, vp, release } = await revealWithHeldPage();
+      key(vp, 'PageUp');
+      await settle(fixture);
+      const left = grid.virtualTop();
+      expect(left).toBeLessThan(grid.geometry().maxTop);
+      await release();
+      expect(grid.virtualTop(), 'the view stays where the user moved it').toBeLessThan(grid.geometry().maxTop - 5 * ROW);
+    });
+
+    it('G1: a wheel in scaled mode and a click on the scrollbar are user take-overs too', async () => {
+      const { fixture, grid, vp, release } = await revealWithHeldPage();
+      vp.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      vp.dispatchEvent(new WheelEvent('wheel', { deltaY: -480, cancelable: true, bubbles: true }));
+      vp.scrollTop = Math.max(0, vp.scrollTop - 480);
+      vp.dispatchEvent(new Event('scroll'));
+      await settle(fixture);
+      await release();
+      expect(grid.virtualTop()).toBeLessThan(grid.geometry().maxTop - 5 * ROW);
+    });
+
+    it('G9: a page fetched after the reveal that reports a larger total keeps the pinned view on the newest row', async () => {
+      const { fixture, grid, clock, release } = await revealWithHeldPage();
+      await release();
+      expect(grid.virtualTop()).toBe(grid.geometry().maxTop);
+      // An event is pushed; a page the view did not ask for before is fetched (the engine reads the new total with it).
+      await clock.advance(25);
+      (grid as unknown as { rows: { ensurePage(page: number): void } }).rows.ensurePage(2);
+      await flush(fixture);
+      expect(grid.virtualTop()).toBe(grid.geometry().maxTop);
+    });
+
+    it('G2: a deferred write is dropped when the user moves the view in the same frame', async () => {
+      const { fixture, grid, vp, release } = await revealWithHeldPage();
+      // The held page answers (a larger total: a deferred write to the end is scheduled) and, before the render, the user presses PageUp.
+      const settled = release();
+      key(vp, 'PageUp');
+      await settled;
+      await settle(fixture);
+      expect(vp.scrollTop, 'the scroll position is the user\'s, not the end').toBeLessThan(grid.geometry().maxTop - 5 * ROW);
+    });
+
+    // ADR 0072, G4: `pinned` is stored; a resize keeps a pinned view on the newest row and a following grid keeps following.
+    it('G4: a smaller viewport while pinned keeps the view on the newest row, and the next push still follows', async () => {
+      TestBed.resetTestingModule();
+      let height = VIEWPORT_H;
+      vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.classList?.contains('viewport') ? height : 0;
+      });
+      let measure: () => void = () => undefined;
+      vi.stubGlobal('ResizeObserver', class {
+        constructor(cb: () => void) {
+          measure = cb;
+        }
+        observe(): void {
+          measure();
+        }
+        unobserve(): void {}
+        disconnect(): void {}
+      });
+      const clock = new ManualClock();
+      const { fixture, grid, vp } = await render(synthetic(5000, { liveMs: 25, clock }));
+      await flush(fixture);
+      key(vp, 'End'); // to the newest end: the view is pinned
+      await flush(fixture);
+      await TestBed.inject(LiveTail).toggle();
+      await clock.advance(100);
+      await flush(fixture);
+      expect(grid.virtualTop()).toBe(grid.geometry().maxTop);
+      height = VIEWPORT_H - 120;
+      measure();
+      await flush(fixture);
+      expect(grid.virtualTop(), 'a smaller viewport moves the end: the pinned view stays on the newest row').toBe(grid.geometry().maxTop);
+      await clock.advance(100);
+      await flush(fixture);
+      expect(grid.virtualTop(), 'the next push still follows').toBe(grid.geometry().maxTop);
     });
 
     it('keeps the same rows selected when new events are inserted above them', async () => {

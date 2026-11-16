@@ -2400,3 +2400,9 @@ WebKit clamp such a write, and the scroll event that follows reports the clamped
 (`setTop(..., afterRender)`, `afterNextRender`), the position signal is still set at once. Playwright e2e `live tail: reveal newest ends on the
 newest row when events are pushed between the reveal pages` (new mock switch `mockPageStaggerMs` answers pages at different times, pinned
 clock moves them and the 50 ms ticks): red in both engines without the deferred write, green 3 of 3 in Chromium and in WebKit with it.
+
+**WebKit and the ADR (same day):** at `7fa15ba95` the WebKit e2e failed 3 of 7 runs. Logs added in `setTop` (scheduled, written, dropped), `onScroll` (read,
+written, pending, origin) and `applyLive` (ER-27) showed the sequence in a failing run: two `end` arrivals reached the end (read = max), then the
+total grew once more (spacer 24 px taller) with no arrival: a page fetched outside the round answered with a larger total, `PagedRows` stored it and
+nothing scrolled. That is a third shape of the same class (a total that grows without the view following), not the deferred write failing. Fix through
+ADR 0072 (`onGrow`, one pending-write slot, `classifyScroll`, user take-over from input events, stored `pinned`); e2e green 12 of 12 in WebKit and in Chromium.

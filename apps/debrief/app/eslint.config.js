@@ -13,6 +13,12 @@ const angular = require('angular-eslint');
  */
 const REPORT = process.env['DEBRIEF_LINT_REPORT'] === '1' ? 'warn' : 'off';
 
+/** ADR 0071: the guard of a hand-rolled request counter: `mine !== this.seq`, `generation === store.generation()`, `gen !== this.gen`. */
+const REQUEST_COUNTER_SELECTORS = ['right.name', 'right.property.name', 'right.callee.property.name'].map((path) => ({
+  selector: `BinaryExpression[operator=/^[!=]==$/][left.name=/^(mine|seq|gen|generation)$/][${path}=/^(seq|gen|generation|\\w+Seq|\\w+Generation)$/]`,
+  message: 'A hand-rolled request counter: use LatestRequest from src/app/shared/latest-request.ts (ADR 0071).',
+}));
+
 /** Selectors that also match the grid's loading placeholder rows (see the e2e block below). */
 function rawRowSelectors() {
   const loaded = String.raw`(?!:not\(\.placeholder\)|\[aria-selected|\.sel|\.hl)`;
@@ -102,13 +108,22 @@ module.exports = defineConfig(
     files: ['src/**/*.ts'],
     ignores: ['src/**/*.spec.ts', 'src/app/shared/latest-request.ts'],
     rules: {
+      'no-restricted-syntax': [REPORT, ...REQUEST_COUNTER_SELECTORS],
+    },
+  },
+  {
+    // ADR 0072, decision 2: `EventsGrid.setTop` (through `scroll-writer.ts`) is the only code that writes `scrollTop` in the grid (a second writer breaks
+    // the one pending-write slot and the scroll classification). Report-only (`lint:report`) until its first green run (ER-41).
+    files: ['src/app/grid/**/*.ts'],
+    ignores: ['src/**/*.spec.ts', 'src/app/shared/latest-request.ts', 'src/app/grid/scroll-writer.ts'],
+    rules: {
       'no-restricted-syntax': [
         REPORT,
-        // The guard itself: `mine !== this.seq`, `generation === store.generation()`, `gen !== this.gen`.
-        ...['right.name', 'right.property.name', 'right.callee.property.name'].map((path) => ({
-          selector: `BinaryExpression[operator=/^[!=]==$/][left.name=/^(mine|seq|gen|generation)$/][${path}=/^(seq|gen|generation|\\w+Seq|\\w+Generation)$/]`,
-          message: 'A hand-rolled request counter: use LatestRequest from src/app/shared/latest-request.ts (ADR 0071).',
-        })),
+        ...REQUEST_COUNTER_SELECTORS,
+        {
+          selector: "AssignmentExpression[left.type='MemberExpression'][left.property.name='scrollTop']",
+          message: 'Write scrollTop only in EventsGrid.setTop (ADR 0072): a second writer breaks the single pending write and the scroll classification.',
+        },
       ],
     },
   },

@@ -285,35 +285,43 @@ test.describe('live tail: status, sources and opening', () => {
 });
 
 test.describe('live tail: reveal newest', () => {
+  /** Moves the pinned clock on in 20 ms steps until `done()` holds, at most `maxMs` of page time (virtual time, not wall time). */
+  async function runUntil(page: Page, done: () => Promise<boolean>, maxMs: number): Promise<boolean> {
+    for (let spent = 0; spent <= maxMs; spent += 20) {
+      if (await done()) return true;
+      await page.clock.runFor(20);
+    }
+    return done();
+  }
+
   // A real browser clamps a scroll written before the spacer has grown, and the scroll event that follows differs from the written
-  // position: the grid must not take that for the user scrolling away (it would drop the follow-up of the reveal and stay one row short).
+  // position: the grid must not take that for the user scrolling away (it would drop the follow-up of the reveal and stay short).
   // `mockPageStaggerMs` answers the reveal's pages at different times, and the pinned clock moves them and the live ticks (every
-  // 50 ms) on in small steps, so events are pushed between the pages' answers.
-  test('reveal newest ends on the newest row when events are pushed between the reveal pages', async ({ page }) => {
-    test.slow();
-    await openOnClock(page, '?mockTotal=5000&mockLive=1&mockLiveRate=20&mockLiveMs=50&mockLiveRotateMs=0&mockLiveAlertMs=0&mockPageStaggerMs=10');
-    await liveOn(page);
-    await page.getByTestId('follow-toggle').click();
-    await expect(page.getByTestId('follow-toggle')).toHaveAttribute('aria-pressed', 'false');
-    await page.clock.runFor(1_000);
-    const pill = page.getByTestId('new-events');
-    await expect(pill).toBeVisible();
-    await pill.click();
-    // Move the clock on in small steps until the reveal's pages are all in (the answers are 20 to 220 ms apart, ticks every 50 ms).
-    const gap = () => page.locator('debrief-events-grid .viewport').evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop);
-    await expect
-      .poll(
-        async () => {
-          await page.clock.runFor(20);
-          return gap();
-        },
-        { timeout: 20_000 },
-      )
-      .toBeLessThanOrEqual(2);
-    // A last follow-up may still be due (the later pages answer up to 220 ms after the first): once everything has arrived, the view
-    // is on the last row and a further stretch of pushes (held now) leaves it there.
-    await page.clock.runFor(1_000);
-    await expect.poll(gap).toBeLessThanOrEqual(2);
-    await expect(gridRows(page).last()).not.toHaveClass(/placeholder/);
+  // 50 ms) on in small steps, so events are pushed between the pages' answers. The grid's scroll log (ER-27, category ui.grid) is
+  // attached when the test fails.
+  test('reveal newest ends on the newest row when events are pushed between the reveal pages', async ({ page }, testInfo) => {
+    const gridLog: string[] = [];
+    page.on('console', (m) => void (m.text().startsWith('[ui.grid]') && gridLog.push(m.text())));
+    try {
+      await openOnClock(page, '?mockTotal=5000&mockLive=1&mockLiveRate=20&mockLiveMs=50&mockLiveRotateMs=0&mockLiveAlertMs=0&mockPageStaggerMs=10');
+      await liveOn(page);
+      await page.getByTestId('follow-toggle').click();
+      await expect(page.getByTestId('follow-toggle')).toHaveAttribute('aria-pressed', 'false');
+      await page.clock.runFor(1_000);
+      const pill = page.getByTestId('new-events');
+      await expect(pill).toBeVisible();
+      await pill.click();
+      const gap = () => page.locator('debrief-events-grid .viewport').evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop);
+      // The reveal's pages answer 20 to 220 ms after the click and a tick comes every 50 ms: 3 s of page time is far more than needed.
+      expect(await runUntil(page, async () => (await gap()) <= 2, 3_000), 'the view reaches the last row').toBe(true);
+      // The last follow-up may still be due: once everything has arrived the view is on the last row and a further stretch of pushes
+      // (held now) leaves it there.
+      await page.clock.runFor(1_000);
+      expect(await runUntil(page, async () => (await gap()) <= 2, 1_000), 'and stays there').toBe(true);
+      await expect(gridRows(page).last()).not.toHaveClass(/placeholder/);
+    } catch (e) {
+      await testInfo.attach('grid-log', { body: gridLog.join('\n'), contentType: 'text/plain' });
+      throw e;
+    }
   });
 });

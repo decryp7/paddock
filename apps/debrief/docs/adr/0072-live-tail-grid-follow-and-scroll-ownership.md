@@ -1,6 +1,7 @@
 # 72. Live-tail grid: what a refresh round owns, and whose scroll it is
 
-- Status: **Proposed 2026-11-16** (user decision 2026-11-16 to write it; about 0.5-1 agent-day for this ADR).
+- Status: **Accepted 2026-11-16**, option B (G1-G7 and G8): the user chose it on 2026-11-16 (about 2.5 agent-days). Implemented on
+  `fix/debrief-live-tail-adr`.
 - Date: 2026-11-16
 - Related: ADR 0071 (latest request wins), Paddock rule 55, ER-11, ER-21, ER-37, ER-41, ER-44; `docs/lessons.md`, "Debrief: the
   live tail 'holds the rows while not following' read 120052 for 120028".
@@ -140,6 +141,7 @@ Found by reading the code at `7fa15ba95`; G4 and G5 are not yet measured, and th
 | G6 | A failed reveal page never leaves `endArrival.pages`, so the hold lasts until the user scrolls or a new round. | A failed owned page ends the hold. | 0.1 |
 | G7 | The e2e matrix and unit tables above; today only the first matrix row exists. Lint for `scrollTop` writes. | Add them, failing first where a gap applies. | 0.75 |
 | G8 | The follow and hold rules are split over four classes. | Move them into one pure reducer that (3) tests as a table. | 0.5 |
+| G9 | Found by the WebKit e2e (3 of 7 runs red at `7fa15ba95`): a page fetched outside the round (`fill`, scrolling) reports a larger total after the reveal's last owned page; the total grows, nothing scrolls, the view ends one row short. | `PagedRowsStore.onGrow`: any answer outside a round that raises the total is reported; a pinned view follows the end (oldest first), a not-pinned newest-first view shifts. | 0.2 |
 
 **Options for the user (ER-37).**
 
@@ -159,3 +161,17 @@ No single gap costs more than 1 agent-day beyond common practice, so none needs 
 - User intent is seen for every way of scrolling, including the scaled scrollbar and the keyboard.
 - Real-browser clamping is handled in one tested place, not by write timing alone.
 - WebKit coverage depends on a local run or a full CI run until branch CI runs it.
+
+## Implementation (2026-11-16)
+
+- `follow-reducer.ts` (`followStep`, G8) and `scroll-classify.ts` (`classifyScroll`, G3) are pure, each with its table test.
+- `EventsGrid`: one pending-write slot dropped by `userTookOver()` (G2); `userTookOver()` from `wheel`, `pointerdown` on the scroller (the
+  scrollbar), `touchstart` and moving keys (G1), plus any scroll event `classifyScroll` calls `user`; a stored `pinned` flag, re-applied
+  on resize (G4); `setTop` is the single writer (through `scroll-writer.ts`), logging the scheduled, dropped and written writes, scroll events and
+  arrivals (ER-27).
+- `PagedRowsStore`: the round's follow-up covers `shift` as well as `end` (G5), a failed owned page ends it (G6), `onGrow` (G9).
+- Real-browser e2e matrix `e2e/live-tail-follow.e2e.ts` (both sort orders; Chromium and WebKit, run locally for WebKit): on the code before this
+  change 3 of 14 failed in each engine (a key or wheel during a reveal, resize while pinned and not pinned, following with a key away).
+- Lint, report-only (ER-41): `no-restricted-syntax` on assignments to `scrollTop` in `src/app/grid/`, in `npm run lint:report`
+  (`DEBRIEF_LINT_REPORT=1`); first run on the real tree 2026-11-16: no findings, and a probe writer is reported. It moves to the normal lint after
+  its first green run in CI (run id to be recorded here).
