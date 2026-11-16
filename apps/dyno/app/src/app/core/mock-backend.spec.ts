@@ -2,6 +2,7 @@ import { readValue } from './measured';
 import type { SuJobSnapshot } from '@decryp7/paddock-ui';
 import type { Alert, BootReport, FinderQuery, FinderResult, JobOutput, JobSpec, ProcessSample, SleepReport, SoftwareInventory, UsageReport } from './api.types';
 import { SPARK_CAPACITY, appendSeries, type Series } from '../state/live.store';
+import { holdableTimers, releaseLive, holdLive } from '@decryp7/paddock-ui/testing';
 import { LIVE_BACKLOG, MockBackend, type MockOptions, applyMockPlatform, mockOptionsFromUrl } from './mock-backend';
 
 const NOW = 1_700_000_000_000;
@@ -232,6 +233,34 @@ describe('live data', () => {
       b.onLive('summary', gone)();
       vi.advanceTimersByTime(10);
       expect(gone).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('a held live tick reaches no subscriber while held, and one tick (not the missed three) runs on release', () => {
+    vi.useFakeTimers();
+    try {
+      // The mock's tick runs on timers the test can hold; the page's (here Vitest's fake) timers drive them.
+      const timers = holdableTimers({
+        setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+        clearTimeout: (h: unknown) => clearTimeout(h as never),
+        setInterval: (fn: () => void, ms: number) => setInterval(fn, ms),
+        clearInterval: (h: unknown) => clearInterval(h as never),
+      });
+      const b = make({ timers });
+      const l = vi.fn();
+      const stop = b.onLive('summary', l);
+      vi.advanceTimersByTime(0);
+      const first = LIVE_BACKLOG + 1;
+      expect(l).toHaveBeenCalledTimes(first);
+      holdLive();
+      vi.advanceTimersByTime(3000);
+      expect(l).toHaveBeenCalledTimes(first);
+      releaseLive();
+      expect(l).toHaveBeenCalledTimes(first + 1);
+      vi.advanceTimersByTime(1000);
+      expect(l).toHaveBeenCalledTimes(first + 2);
+      stop();
     } finally {
       vi.useRealTimers();
     }

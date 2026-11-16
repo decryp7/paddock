@@ -6,9 +6,24 @@ import { MockBackend } from '../core/mock/mock-backend';
 import { WorkspaceStore } from '../core/workspace.store';
 import { DEFAULT_LIVE_OPTIONS, LiveTail } from './live-tail';
 import { at } from '../../testing/must';
+import { ManualClock } from '../../testing/manual-clock';
+import { holdableTimers, withLiveHeld } from '@decryp7/paddock-ui/testing';
 
 describe('LiveTail', () => {
-  async function setup(backend = new MockBackend({ latency: false, dataset: tinyDataset, liveMs: 15 })) {
+  /** The feed runs on a clock the test moves and can hold, not on the page's timers (a tick lands when the test says). */
+  const LIVE_MS = 15;
+  const liveClock = () => holdableTimers(new ManualClock());
+  const tickingBackend = (clock: ManualClock) => new MockBackend({ latency: false, dataset: tinyDataset, liveMs: LIVE_MS, clock });
+  /** Moves the feed's clock one tick at a time until `done()` (a bounded number of ticks). */
+  async function tickUntil(clock: ManualClock, done: () => boolean) {
+    for (let i = 0; i < 40 && !done(); i++) {
+      await clock.advance(LIVE_MS);
+      await settle();
+    }
+    expect(done()).toBe(true);
+  }
+
+  async function setup(backend = tickingBackend(liveClock())) {
     TestBed.configureTestingModule({ providers: [provideTinyBackend(backend)] });
     const store = TestBed.inject(WorkspaceStore);
     const live = TestBed.inject(LiveTail);
@@ -32,25 +47,30 @@ describe('LiveTail', () => {
   });
 
   it('refreshes the summary on every change, keeps the selection and the query, and marks the refresh as live', async () => {
-    const { store, live } = await setup();
+    const clock = liveClock();
+    const { store, live } = await setup(tickingBackend(clock));
     store.toggleLevel('Information');
     const row = at((await TestBed.inject(DebriefBackend).queryPage({ query: store.effectiveQuery(), offset: 1, limit: 1, descending: false })).rows, 0);
     store.select(row);
     const version = store.dataVersion();
     expect(live.isLiveRefresh()).toBe(false);
     await live.set(true);
-    await vi.waitFor(() => expect(store.summary()!.total).toBeGreaterThan(11));
-    expect(store.dataVersion()).toBeGreaterThan(version);
-    expect(store.selected()).toBe(row);
-    expect(store.query().levels).toEqual(['Information']);
-    expect(live.isLiveRefresh()).toBe(true);
+    await tickUntil(clock, () => store.summary()!.total > 11);
+    // Held while read: no further tick changes the summary or the refresh mark between the checks.
+    await withLiveHeld(async () => {
+      expect(store.dataVersion()).toBeGreaterThan(version);
+      expect(store.selected()).toBe(row);
+      expect(store.query().levels).toEqual(['Information']);
+      expect(live.isLiveRefresh()).toBe(true);
+    });
     await live.set(false);
     store.applySummary(store.summary()!);
     expect(live.isLiveRefresh()).toBe(false);
   });
 
   it('takes over the engine live state on start (e.g. after a webview reload)', async () => {
-    const backend = new MockBackend({ latency: false, dataset: tinyDataset, liveMs: 20 });
+    const clock = liveClock();
+    const backend = tickingBackend(clock);
     await backend.setLive(true, { watch: 'polling', pollIntervalMs: 700, detectEveryMs: 250 });
     const setLive = vi.spyOn(backend, 'setLive');
     const subscribe = vi.spyOn(backend, 'onWorkspaceChanged');
@@ -61,7 +81,7 @@ describe('LiveTail', () => {
     expect(testLogger().entries.some((e) => e.message === 'Live tail on (restored)')).toBe(true);
     // Changes are followed without starting the watchers again.
     const version = store.dataVersion();
-    await vi.waitFor(() => expect(store.dataVersion()).toBeGreaterThan(version), { timeout: 5000 });
+    await tickUntil(clock, () => store.dataVersion() > version);
     expect(setLive.mock.calls.filter(([on]) => on).length).toBeLessThanOrEqual(1);
     await live.set(false);
     expect(setLive).toHaveBeenLastCalledWith(false);

@@ -16,6 +16,8 @@ import { GridSelection } from './grid-selection';
 import { RecordActions } from '../context/record-actions';
 import { HighlightRules } from '../projects/bookmarks/highlight-rules.store';
 import { at } from '../../testing/must';
+import { ManualClock } from '../../testing/manual-clock';
+import { holdableTimers, withLiveHeld } from '@decryp7/paddock-ui/testing';
 
 const VIEWPORT_H = 260;
 
@@ -842,8 +844,21 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
   });
 
   describe('live tail', () => {
+    /** The live feed runs on a clock the test moves (and can hold), never on the page's timers: a tick lands when the test says. */
+    const LIVE_MS = 25;
+    const liveClock = () => holdableTimers(new ManualClock());
+    /** Moves the feed's clock one tick at a time until `done()`, letting the grid take each batch (a bounded number of ticks). */
+    async function tickUntil(clock: ManualClock, fixture: Awaited<ReturnType<typeof render>>['fixture'], done: () => boolean) {
+      for (let i = 0; i < 40 && !done(); i++) {
+        await clock.advance(LIVE_MS);
+        await flush(fixture); // the grid fetches its pages once scrolling has paused
+      }
+      expect(done()).toBe(true);
+    }
+
     async function live(descending: boolean, scrollRows: number | 'end') {
-      const backend = synthetic(5000, { liveMs: 25 });
+      const clock = liveClock();
+      const backend = synthetic(5000, { liveMs: LIVE_MS, clock });
       const { fixture, store, grid, vp } = await render(backend);
       if (descending) store.toggleSort();
       await flush(fixture);
@@ -857,7 +872,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       const tail = TestBed.inject(LiveTail);
       await tail.toggle();
       expect(tail.enabled()).toBe(true);
-      await vi.waitFor(() => expect(grid.total()).toBeGreaterThan(before.total + 1), { timeout: 3000 });
+      await tickUntil(clock, fixture, () => grid.total() > before.total + 1);
       await tail.toggle();
       await flush(fixture);
       return { fixture, store, grid, before, tail };
@@ -896,7 +911,8 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     it('holds the rows while not following, counts the new events, and reveals the newest on request', async () => {
       for (const descending of [true, false]) {
         TestBed.resetTestingModule();
-        const backend = synthetic(5000, { liveMs: 25 });
+        const clock = liveClock();
+        const backend = synthetic(5000, { liveMs: LIVE_MS, clock });
         const { fixture, store, grid } = await render(backend);
         if (descending) store.toggleSort();
         await flush(fixture);
@@ -904,11 +920,14 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
         const feed = TestBed.inject(LiveFeed);
         const tail = TestBed.inject(LiveTail);
         await tail.toggle();
-        await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1), { timeout: 3000 });
-        expect(grid.total()).toBe(5000);
-        await settle(fixture);
-        el<HTMLButtonElement>(fixture, '[data-testid=new-events]').click();
-        await vi.waitFor(() => expect(grid.total()).toBeGreaterThan(5000), { timeout: 3000 });
+        await tickUntil(clock, fixture, () => feed.newEvents() > 1);
+        // The feed is held while the count and the rows are read: nothing arrives between two reads.
+        await withLiveHeld(async () => {
+          expect(grid.total()).toBe(5000);
+          await settle(fixture);
+          el<HTMLButtonElement>(fixture, '[data-testid=new-events]').click();
+        });
+        await tickUntil(clock, fixture, () => grid.total() > 5000);
         await flush(fixture);
         expect(grid.virtualTop()).toBe(descending ? 0 : grid.geometry().maxTop);
         await tail.toggle();
@@ -916,7 +935,8 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     });
 
     it('keeps the same rows selected when new events are inserted above them', async () => {
-      const backend = synthetic(5000, { liveMs: 25 });
+      const clock = liveClock();
+      const backend = synthetic(5000, { liveMs: LIVE_MS, clock });
       const { fixture, store, grid, vp } = await render(backend);
       store.toggleSort();
       await flush(fixture);
@@ -934,10 +954,27 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       const total = grid.total();
       const tail = TestBed.inject(LiveTail);
       await tail.toggle();
-      await vi.waitFor(() => expect(grid.total()).toBeGreaterThan(total + 1), { timeout: 3000 });
+      await tickUntil(clock, fixture, () => grid.total() > total + 1);
       await tail.toggle();
       await flush(fixture);
       expect(selectedIds()).toEqual(before);
+    });
+
+    it('a value read while the feed is held does not move under the read; it moves once the feed is released', async () => {
+      const clock = liveClock();
+      const { fixture, grid } = await render(synthetic(5000, { liveMs: LIVE_MS, clock }));
+      const tail = TestBed.inject(LiveTail);
+      await tail.toggle();
+      await tickUntil(clock, fixture, () => grid.total() > 5000);
+      let held = 0;
+      await withLiveHeld(async () => {
+        held = grid.total();
+        await clock.advance(LIVE_MS * 8); // time passes; the feed's ticks wait
+        await settle(fixture);
+        expect(grid.total()).toBe(held);
+      });
+      await tickUntil(clock, fixture, () => grid.total() > held);
+      await tail.toggle();
     });
   });
 });

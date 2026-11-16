@@ -150,7 +150,17 @@ export type MockMachine = 'laptop' | 'desktop';
 
 export type { MockOs };
 
+/** The interval timers of the mock's live tick: the page's by default; a unit test passes a clock it can hold (`holdableTimers` of `@decryp7/paddock-ui/testing`). */
+export interface LiveTimers {
+  setInterval(fn: () => void, ms: number): unknown;
+  clearInterval(handle: unknown): void;
+}
+
+const PAGE_TIMERS: LiveTimers = { setInterval: (fn, ms) => setInterval(fn, ms), clearInterval: (h) => clearInterval(h as ReturnType<typeof setInterval>) };
+
 export interface MockOptions {
+  /** The timers of the live tick (default: the page's). */
+  timers?: LiveTimers;
   machine?: MockMachine;
   /** The operating system the mock pretends to run on (default macOS). */
   os?: MockOs;
@@ -355,10 +365,11 @@ export class MockBackend implements DynoBackend {
   private alarmList: Alarm[] | null = null;
   private snapshotInfos: RecorderSnapshotInfo[] | null = null;
   /** Bundles the mock "saved", for tests. */
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: unknown = null;
   /** The lists whose saved answer was already given once (`savedListsAgeMs`). */
   private readonly savedGiven = new Set<string>();
   private readonly options: MockOptions;
+  private readonly timers: LiveTimers;
   /** What the tray draws of a number: the mock's OS and (`?tray=16`) the taskbar's icon size. */
   private readonly os: MockOs;
   private readonly trayPx: number;
@@ -387,7 +398,7 @@ export class MockBackend implements DynoBackend {
   dispose(): void {
     for (const handle of this.timeouts) clearTimeout(handle);
     this.timeouts.clear();
-    if (this.timer !== null) clearInterval(this.timer);
+    if (this.timer !== null) this.timers.clearInterval(this.timer);
     this.timer = null;
     liveBackends.delete(this);
   }
@@ -395,6 +406,7 @@ export class MockBackend implements DynoBackend {
   constructor(options: MockOptions = {}) {
     liveBackends.add(this);
     this.options = options;
+    this.timers = options.timers ?? PAGE_TIMERS;
     this.keepsMeasuring = options.keepsMeasuring ?? false;
     this.os = options.os ?? 'macos';
     this.trayPx = options.trayPx ?? (this.os === 'macos' ? 18 : 16);
@@ -465,11 +477,11 @@ export class MockBackend implements DynoBackend {
       if (detail === 'summary') for (const u of this.liveBacklog()) listener(u);
       listener(this.liveUpdate(detail));
     }, 0);
-    this.timer ??= setInterval(() => this.tick(), 1000);
+    this.timer ??= this.timers.setInterval(() => this.tick(), 1000);
     return () => {
       this.liveListeners.delete(listener);
       if (this.liveListeners.size === 0 && this.timer !== null) {
-        clearInterval(this.timer);
+        this.timers.clearInterval(this.timer);
         this.timer = null;
       }
     };
