@@ -312,6 +312,17 @@ impl NetCentre {
     }
 }
 
+/// Adds the start time from `table` to each counter a tool named by pid only (rule 53).
+fn stamp_counters(
+    mut counters: Vec<dyno_core::network_traffic::TrafficCounter>,
+    table: &[ProcessSample],
+) -> Vec<dyno_core::network_traffic::TrafficCounter> {
+    for c in &mut counters {
+        c.process = c.process.with_start_from(table);
+    }
+    counters
+}
+
 /// Reads the counters once and stores the rates (or the reason there are none) with who read them.
 fn refresh_traffic(source: &dyn ProcessTraffic, state: &Mutex<Traffic>, table: &[ProcessSample]) {
     let read = source.read();
@@ -320,9 +331,7 @@ fn refresh_traffic(source: &dyn ProcessTraffic, state: &Mutex<Traffic>, table: &
         Ok(mut a) => {
             // A tool's counters name a pid; with the start time from the process table, a pid reused between two reads is a new process
             // with no earlier read, not a rate over the old one's counters (rule 53).
-            for c in a.counters.iter_mut() {
-                c.process = c.process.with_start_from(table);
-            }
+            a.counters = stamp_counters(a.counters, table);
             (t.tracker.update(now(), &a.counters), None, a.others)
         }
         Err(PlatformError::Unsupported(why)) => (Vec::new(), Some(why), None),
@@ -544,46 +553,30 @@ mod tests {
 
     #[test]
     fn a_pid_reused_between_two_reads_gets_no_rate_from_the_old_processs_counters() {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        struct Growing(AtomicU64);
-        impl ProcessTraffic for Growing {
-            fn counters(&self) -> Result<Vec<dyno_core::network_traffic::TrafficCounter>, PlatformError> {
-                let n = self.0.fetch_add(1_000, Ordering::SeqCst);
-                Ok(vec![dyno_core::network_traffic::TrafficCounter {
-                    process: dyno_core::process::ProcessRef::pid_only(7),
-                    name: "x".into(),
-                    bytes_in: n,
-                    bytes_out: 0,
-                }])
-            }
-        }
-        let started = |secs: i64| {
+        use dyno_core::network_traffic::TrafficCounter;
+        use dyno_core::time::Timestamp;
+        let counter = |bytes_in: u64| TrafficCounter {
+            process: dyno_core::process::ProcessRef::pid_only(7),
+            name: "x".into(),
+            bytes_in,
+            bytes_out: 0,
+        };
+        let table = |secs: i64| {
             let mut p = dyno_platform::fake::process(7, "x", 0.0);
-            p.started = dyno_core::process::Measured::Value(dyno_core::time::Timestamp(secs));
+            p.started = dyno_core::process::Measured::Value(Timestamp(secs));
             vec![p]
         };
-        let state = Mutex::new(Traffic {
-            tracker: TrafficTracker::new(),
-            cache: None,
-            refreshing: true,
-        });
-        let source = Growing(AtomicU64::new(0));
-        refresh_traffic(&source, &state, &started(100));
-        std::thread::sleep(Duration::from_millis(5));
-        refresh_traffic(&source, &state, &started(100));
-        let rows = lock(&state).cache.as_ref().unwrap().rows.clone();
+        let mut tracker = TrafficTracker::new();
+        tracker.update(Timestamp(0), &stamp_counters(vec![counter(1_000)], &table(100)));
+        let rows = tracker.update(Timestamp(1_000), &stamp_counters(vec![counter(2_000)], &table(100)));
         assert_eq!(rows.len(), 1, "the same process has a rate");
         assert_eq!(
             rows[0].process.started,
-            Some(dyno_core::time::Timestamp(100)),
+            Some(Timestamp(100)),
             "and the row names the process by pid and start time"
         );
-        std::thread::sleep(Duration::from_millis(5));
-        refresh_traffic(&source, &state, &started(200));
-        assert!(
-            lock(&state).cache.as_ref().unwrap().rows.is_empty(),
-            "pid 7 is another process now: no earlier read to take a rate from"
-        );
+        let rows = tracker.update(Timestamp(2_000), &stamp_counters(vec![counter(3_000)], &table(200)));
+        assert!(rows.is_empty(), "pid 7 is another process now: no earlier read to take a rate from");
     }
 
     #[test]
