@@ -28,6 +28,20 @@ test('C134 bad: a field of the Pid type under any name, in a tuple struct or var
   assert.deepEqual(names('#[derive(Debug, serde::Serialize)]\npub struct A {\n    pub pid: u32,\n}\n'), ['pid']);
 });
 
+test('C134 bad: a Pid or numeric parent whose type wraps onto the next line, in any layout rustfmt makes', () => {
+  assert.deepEqual(names(`${S}pub struct A {\n    pub who:\n        Pid,\n}\n`), ['who']);
+  assert.deepEqual(names(`${S}pub struct A {\n    pub all: Vec<\n        Pid,\n    >,\n}\n`), ['all']);
+  assert.deepEqual(names(`${S}pub struct A {\n    pub parent:\n        Option<u32>,\n}\n`), ['parent']);
+});
+
+test('C134 good: names that only end in the letters pid (rapid, vapid, cupid) and a parent that is not a number', () => {
+  assert.deepEqual(names(`${S}pub struct A {\n    pub rapid: bool,\n    pub vapid: u32,\n    pub cupid: String,\n    pub Cupid: u8,\n}\n`), []);
+  assert.deepEqual(names(`${S}pub struct A {\n    pub parent: Option<String>,\n    pub parent_folder: PathBuf,\n}\n`), []);
+  assert.deepEqual(names(`${S}pub struct A {\n    pub parent:\n        Option<PathBuf>,\n}\n`), []);
+  // the real shapes still count: snake and camel suffixes, and a numeric parent
+  assert.deepEqual(names(`${S}pub struct A {\n    pub via_pid: u32,\n    pub parentPid: u32,\n    pub parent: Option<u32>,\n}\n`), ['via_pid', 'parentPid', 'parent']);
+});
+
 test('C134 good: ProcessRef holds its pid, a type that does not serialize, a function argument, a comment and the test module', () => {
   assert.deepEqual(fields(`${S}pub struct ProcessRef {\n    pub pid: u32,\n    pub started: Option<i64>,\n}\n`), []);
   assert.deepEqual(names(`${S}pub struct ProcessRef {\n    pub pid: u32,\n    pub extra_pid: u32,\n}\n`), ['extra_pid']);

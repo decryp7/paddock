@@ -26,7 +26,10 @@ const SKIPPED = /(?:^|\/)tests?(?:\/|\.rs$)/;
 /** A plain `//` comment (never `///` or `//!`) with the waiver and a reason. */
 const WAIVER = /(?<!\/)\/\/(?![/!])\s*conformance:\s*wire-pid[ \t]*[—–-]+[ \t]*(\S.{2,})/;
 const BARE_WAIVER = /(?<!\/)\/\/(?![/!])\s*conformance:\s*wire-pid/;
-const NAME = /^(?:pid|pids|ppid|parent|process_?id|.*pids?)$/i;
+/** A name that is a pid by its spelling: `pid`, `pids`, `ppid`, `process_id`, `PID`, a snake or camel suffix (`via_pid`, `parentPid`), never `rapid` or `cupid`. */
+const PID_NAME = /^(?:pids?|ppid|PIDS?|process_?id|processId|.*_pids?|.*[a-z0-9]Pids?)$/;
+const PARENT_NAME = /^parent$/i;
+const NUMERIC_TYPE = /\b(?:u8|u16|u32|u64|usize|i32|i64|isize|Pid)\b/;
 const ITEM = /^\s*(?:pub(?:\([^)]*\))?\s+)?(struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/;
 const MOD_TESTS = /^\s*mod\s+tests?\b/;
 const HAND_IMPL = /\bimpl(?:\s*<[^>]*>)?\s+(?:serde::)?Serialize\s+for\s+([A-Za-z_][A-Za-z0-9_]*)/g;
@@ -53,7 +56,10 @@ function numberedFields(body, rename) {
   for (const m of body.matchAll(/(?<![\w.:])([A-Za-z_][A-Za-z0-9_]*)\s*:(?!:)\s*([^,{}]*)/g)) {
     const [, name, type] = m;
     if (name === 'pub') continue;
-    if (NAME.test(name) || (rename !== null && NAME.test(rename)) || /\bPid\b/.test(type)) out.push(name);
+    const byName = PID_NAME.test(name) || (rename !== null && PID_NAME.test(rename));
+    // `parent` is a pid only when it is a number (a folder's parent is not)
+    const parentNumber = PARENT_NAME.test(name) && NUMERIC_TYPE.test(type);
+    if (byName || parentNumber || /\bPid\b/.test(type)) out.push(name);
     rename = null;
   }
   // Tuple fields: `(pub Pid, String)` of a tuple struct or variant.
@@ -101,7 +107,11 @@ export function pidFields(text) {
       const attrRename = /#\[serde\([^\]]*\brename\s*=\s*"([^"]+)"/.exec(lines[i]);
       if (attrRename) rename = attrRename[1];
       // attributes on the field's own line are not the field (`#[serde(default = "x//y")] pub pid: u32,`)
-      const rest = body.replace(/#\[[^\]]*\]/g, '');
+      let rest = body.replace(/#\[[^\]]*\]/g, '');
+      // a type that wraps onto the next lines (`pub who:\n    Pid,` or `Vec<\n    Pid,\n>`) is read whole
+      for (let j = i; j + 1 < lines.length && (/:\s*$/.test(rest) || (rest.match(/</g) ?? []).length > (rest.match(/>/g) ?? []).length); j++) {
+        rest += ` ${code(lines[j + 1])}`;
+      }
       for (const field of numberedFields(rest, rename)) {
         // ProcessRef is the one type that holds a pid, next to its start time
         if (item.name === 'ProcessRef' && field === 'pid') continue;

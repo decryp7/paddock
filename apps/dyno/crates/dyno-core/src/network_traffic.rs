@@ -253,9 +253,15 @@ impl TrafficTracker {
                 .then(a.process.pid.cmp(&b.process.pid))
         });
         rows.truncate(MAX_TRAFFIC_ROWS);
+        // A start time that was read before is kept when this read has none (like `carryStarts` in the UI), so a later read with
+        // another start time is still seen as another process.
+        let kept = |c: &StampedCounter| match self.last.get(&c.process.pid) {
+            Some((was, _, _)) if c.process.started.is_none() && was.started.is_some() => *was,
+            _ => c.process,
+        };
         self.last = counters
             .iter()
-            .map(|c| (c.process.pid, (c.process, c.bytes_in, c.bytes_out)))
+            .map(|c| (c.process.pid, (kept(c), c.bytes_in, c.bytes_out)))
             .collect();
         self.at = Some(at);
         rows
@@ -392,6 +398,19 @@ mod tests {
             "the time went missing: still the same process"
         );
         assert_eq!(t.update(Timestamp(2_000), &[at(7, Some(100), 3_000)]).len(), 1, "and came back");
+    }
+
+    #[test]
+    fn a_known_start_time_is_not_forgotten_by_a_read_without_one() {
+        let mut t = TrafficTracker::new();
+        t.update(Timestamp(0), &[at(7, Some(100), 1_000)]);
+        assert_eq!(
+            t.update(Timestamp(1_000), &[at(7, None, 2_000)]).len(),
+            1,
+            "the time went missing: the same process"
+        );
+        // Another start time after a read without one is another process, not a continuation of the first one's counters.
+        assert!(t.update(Timestamp(2_000), &[at(7, Some(200), 9_000)]).is_empty());
     }
 
     #[test]

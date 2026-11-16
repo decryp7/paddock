@@ -238,6 +238,96 @@ fn replies() -> Vec<(&'static str, HelperReply)> {
     ]
 }
 
+/// The postcard variant index of a request, by an exhaustive `match` with no wildcard arm: a variant added to `HelperRequest` does not
+/// compile here until it has an arm, and the test below then needs a case (and a golden line) for that index. Bump
+/// `REQUEST_VARIANTS` with the new arm.
+fn request_index(r: &HelperRequest) -> usize {
+    match r {
+        HelperRequest::Info => 0,
+        HelperRequest::Processes(_) => 1,
+        HelperRequest::Traffic => 2,
+        HelperRequest::SocketOwners => 3,
+        HelperRequest::FileHolders { .. } => 4,
+        HelperRequest::LoginItems => 5,
+        HelperRequest::Counters(_) => 6,
+        HelperRequest::MemoryModules => 7,
+        HelperRequest::Smart(_) => 8,
+        HelperRequest::InstallTool { .. } => 9,
+        HelperRequest::Firewall => 10,
+        HelperRequest::Extras(_) => 11,
+        HelperRequest::Audit(_) => 12,
+        HelperRequest::LogTail(_) => 13,
+        HelperRequest::Uninstall => 14,
+        HelperRequest::ScheduleWake { .. } => 15,
+        HelperRequest::CancelWake { .. } => 16,
+        HelperRequest::ListWakes => 17,
+        HelperRequest::WolState { .. } => 18,
+        HelperRequest::Build => 19,
+    }
+}
+const REQUEST_VARIANTS: usize = 20;
+
+/// The same for a reply. Bump `REPLY_VARIANTS` with a new arm.
+fn reply_index(r: &HelperReply) -> usize {
+    match r {
+        HelperReply::About(..) => 0,
+        HelperReply::Traffic(_) => 1,
+        HelperReply::Entries(_) => 2,
+        HelperReply::Firewall(_) => 3,
+        HelperReply::Wakes(_) => 4,
+        HelperReply::WakeCancelled(_) => 5,
+        HelperReply::Wol(_) => 6,
+        HelperReply::CounterValues(_) => 7,
+        HelperReply::Memory(_) => 8,
+        HelperReply::SocketOwners(_) => 9,
+        HelperReply::FileHolders(_) => 10,
+        HelperReply::Extras(_) => 11,
+        HelperReply::Processes(_) => 12,
+        HelperReply::Smart(_) => 13,
+        HelperReply::Installed(_) => 14,
+        HelperReply::LoginItems(_) => 15,
+        HelperReply::Log(_) => 16,
+        HelperReply::Bye => 17,
+        HelperReply::Build(_) => 18,
+    }
+}
+const REPLY_VARIANTS: usize = 19;
+
+#[test]
+fn every_variant_has_a_case_and_the_declared_index_is_the_postcard_tag() {
+    let mut seen = vec![false; REQUEST_VARIANTS];
+    for (name, r) in requests() {
+        let i = request_index(&r);
+        assert!(
+            i < REQUEST_VARIANTS && !seen[i],
+            "request {name}: index {i} is out of range or listed twice"
+        );
+        seen[i] = true;
+        // The message tag (Request = 0) comes first, then the variant index: the declared order is the wire order.
+        assert_eq!(
+            postcard::to_stdvec(&HelperMessage::Request(r)).unwrap()[1] as usize,
+            i,
+            "request {name}: the wire tag moved"
+        );
+    }
+    assert!(seen.iter().all(|s| *s), "a HelperRequest variant has no golden case: {seen:?}");
+    let mut seen = vec![false; REPLY_VARIANTS];
+    for (name, r) in replies() {
+        let i = reply_index(&r);
+        assert!(
+            i < REPLY_VARIANTS && !seen[i],
+            "reply {name}: index {i} is out of range or listed twice"
+        );
+        seen[i] = true;
+        assert_eq!(
+            postcard::to_stdvec(&HelperMessage::Reply(r)).unwrap()[1] as usize,
+            i,
+            "reply {name}: the wire tag moved"
+        );
+    }
+    assert!(seen.iter().all(|s| *s), "a HelperReply variant has no golden case: {seen:?}");
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
