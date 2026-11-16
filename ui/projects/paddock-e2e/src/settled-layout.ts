@@ -12,7 +12,10 @@ export interface LayoutReading {
 
 /** Options of {@link settledLayout}. */
 export interface SettledLayoutOptions {
-  /** The fewest boxes a settled page has (default 1): a page with none drawn yet is not settled, however much agrees. */
+  /**
+   * The fewest boxes a settled page has (default 1): a page with none drawn yet is not settled, however much agrees. Say `0` only for a
+   * page that draws none by design (a text page), so an empty reading there is the settled one.
+   */
   readonly minCount?: number;
   /** What the spec waits for, in the failure message (for example `the firewall page`). */
   readonly what?: string;
@@ -21,11 +24,11 @@ export interface SettledLayoutOptions {
 }
 
 /**
- * Whether `now` settles a layout after `previous`: both have at least `minCount` boxes (never vacuous: `every()` over no boxes is
- * true, and a spec that reads layout before any row is drawn measures nothing), the same count and widths, and every box fits.
+ * Whether `now` settles a layout after `previous`: both have at least `minCount` boxes (default 1, never vacuous: `every()` over no boxes
+ * is true, and a spec that reads layout before any row is drawn measures nothing), the same count and widths, and every box fits.
  */
 export function layoutSettled(previous: LayoutReading | null, now: LayoutReading, minCount = 1): boolean {
-  if (previous === null || now.count < Math.max(1, minCount) || previous.count !== now.count || !now.fits || !previous.fits) return false;
+  if (previous === null || now.count < minCount || previous.count !== now.count || !now.fits || !previous.fits) return false;
   return previous.widths.length === now.widths.length && previous.widths.every((w, i) => w === now.widths[i]);
 }
 
@@ -48,7 +51,7 @@ export async function settledLayout(page: Page, read: () => Promise<LayoutReadin
         previous = now;
         return settled !== null;
       },
-      { message: `${options.what ?? 'the page'}: the layout settles (two reads agree on the boxes and their widths, all fit, at least ${Math.max(1, options.minCount ?? 1)} drawn)`, ...(options.timeout ? { timeout: options.timeout } : {}) },
+      { message: `${options.what ?? 'the page'}: the layout settles (two reads agree on the boxes and their widths, all fit, at least ${options.minCount ?? 1} drawn)`, ...(options.timeout ? { timeout: options.timeout } : {}) },
     )
     .toBe(true);
   return settled as unknown as LayoutReading;

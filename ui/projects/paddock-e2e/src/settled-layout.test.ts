@@ -16,7 +16,8 @@ test('the first reading never settles, and a changed count or width does not', (
 
 test('a reading of no boxes is never settled, however much it agrees (the vacuous every() of the old waits)', () => {
   assert.equal(layoutSettled(r(0, []), r(0, [])), false);
-  assert.equal(layoutSettled(r(0, []), r(0, []), 0), false, 'minCount 0 still needs a box');
+  assert.equal(layoutSettled(r(0, []), r(0, []), 0), true, 'minCount 0 is the page that draws no boxes by design');
+  assert.equal(layoutSettled(r(0, []), r(1, [5]), 0), false, 'but a box appearing is still a change');
   assert.equal(layoutSettled(r(1, [5]), r(1, [5]), 3), false, 'fewer than the expected boxes');
   assert.equal(layoutSettled(r(3, [5, 5, 5]), r(3, [5, 5, 5]), 3), true);
 });

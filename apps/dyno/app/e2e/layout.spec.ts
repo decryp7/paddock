@@ -82,6 +82,12 @@ const STATES: State[] = [
   },
 ];
 
+/**
+ * The states that draw no row, table or list by design (measured 2026-11-16 by counting the drawn rows, tables and path boxes of every
+ * state at 900 px): their settled reading is empty. Every other state must draw a row before it counts as settled.
+ */
+const NO_ROWS = new Set(['why-slow', 'inventory', 'disk-map', 'map', 'power', 'lifespan', 'diagnostics', 'cpu', 'extras files']);
+
 /** Opens a state and waits until it is drawn: its heading is there and no skeleton or indeterminate progress bar is left. */
 async function openState(page: Page, state: State): Promise<void> {
   await page.goto(`/?latency=0#/${state.path}`);
@@ -115,7 +121,7 @@ async function openState(page: Page, state: State): Promise<void> {
           fits: tablesFit && pathsFit,
         };
       }, ROWS),
-    { what: `the ${state.name} state`, timeout: 45_000 },
+    { what: `the ${state.name} state`, timeout: 45_000, minCount: NO_ROWS.has(state.name) ? 0 : 1 },
   );
 }
 

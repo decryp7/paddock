@@ -1,6 +1,6 @@
 import { test as base, expect } from '@playwright/test';
 import { test as kit } from '../src/fixtures.ts';
-import { newPinnedContext, pauseLive, pinnedClockTest, resumeLive, withLivePaused } from '../src/index.ts';
+import { clickWithLivePaused, newPinnedContext, pauseLive, pinnedClockTest, resumeLive, withLivePaused } from '../src/index.ts';
 
 const test = pinnedClockTest(kit, { now: '2001-09-09T01:46:40Z', timezoneId: 'Asia/Singapore', locale: 'en-GB' });
 // The same wrapper over plain Playwright, for the checks that need no kit fixture.
@@ -151,6 +151,15 @@ plain.describe('pauseLive', () => {
     await resumeLive(page);
     const resumed = await count(page);
     await expect.poll(() => count(page)).toBeGreaterThan(resumed);
+  });
+
+  plain('clickWithLivePaused clicks with the updates stopped and resumes them', async ({ page }) => {
+    await live(page);
+    await page.evaluate(() => { document.getElementById('b')!.addEventListener('click', () => { (window as unknown as { __clicks: number }).__clicks = ((window as unknown as { __clicks?: number }).__clicks ?? 0) + 1; }); });
+    await clickWithLivePaused(page, page.getByRole('button', { name: 'x' }));
+    expect(await page.evaluate(() => (window as unknown as { __clicks: number }).__clicks)).toBe(1);
+    const after = await count(page);
+    await expect.poll(() => count(page)).toBeGreaterThan(after);
   });
 
   plain('withLivePaused resumes afterwards, also when its steps throw', async ({ page }) => {
