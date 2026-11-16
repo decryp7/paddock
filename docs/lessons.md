@@ -2384,3 +2384,12 @@ reproduce it because it never interleaved a push between two page answers; the d
 read of the reveal is answered after a push) and failed with 119836 against 119860 before the fix. **Fix:** `PagedRows.arriveLive`
 remembers the round and total of an arrival that scrolled to the end and, for a later answer of the same round with a larger total, calls
 `onLive` again in end mode (bounded by the pages of the round, no loop). Class: **a test reads a moving value without holding the source still** (earlier: the axe theme read, Dyno's row-menu redraw).
+
+**Rule (review of the first fix, same day):** a follow-up end arrival belongs to the reveal's own pages, not to the round. The first
+version of the fix kept `endArrival` for the whole round; after a reveal with following off the grid holds new events, so no new round
+starts, and pages fetched because the user scrolled later answered in the reveal's round: each larger total jumped the view back to the end
+(scroll to 60000 ended at top=120028). `PagedRows` now records the pages `liveRefresh` asked for, follows only answers to those, clears the
+follow-up when the last of them has arrived, and `endReveal()` (called by the grid for a scroll it did not write itself) ends it at the
+user's first scroll. Specs: the forced-order reveal and "does not pull the view back to the end after the user scrolls away" (red on the
+first fix at 120028 against under 70000). `flush` in `events-grid.spec.ts` no longer sleeps a fixed `SCROLL_IDLE_MS + 30`: it waits on the
+store's `scrollIdlePending`. C71 had caught that helper (its sites were in the baseline); the baseline was shrunk by the three sites.

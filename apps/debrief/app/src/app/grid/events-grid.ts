@@ -651,6 +651,7 @@ export class EventsGrid {
     this.rows.noteScroll();
     const g = this.geometry();
     const s = el.scrollTop;
+    if (!(Math.abs(s - this.writtenScroll) <= 1)) this.rows.endReveal(); // not our own write: the user scrolled
     // Our own writes round to whole pixels; reading them back would lose the row-exact position.
     if (g.scaled && Math.abs(s - this.writtenScroll) <= 1) return;
     this.writtenScroll = Number.NaN;

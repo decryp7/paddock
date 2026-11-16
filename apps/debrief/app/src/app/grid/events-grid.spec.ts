@@ -12,13 +12,21 @@ import { LiveFeed } from '../live/live-feed';
 import { LiveFollow } from '../live/live-follow.store';
 import { WorkspaceStore } from '../core/workspace.store';
 import { SettingsStore } from '../settings/settings.store';
-import { EventsGrid, SCROLL_IDLE_MS } from './events-grid';
+import { EventsGrid } from './events-grid';
 import { GridSelection } from './grid-selection';
 import { RecordActions } from '../context/record-actions';
 import { HighlightRules } from '../projects/bookmarks/highlight-rules.store';
 import { at } from '../../testing/must';
 
 const VIEWPORT_H = 260;
+
+/** Pages are fetched once scrolling has paused: waits on that condition (the store's idle timer is no longer pending), not on a fixed time. */
+async function scrollIdle(f: { componentInstance: unknown; whenStable(): Promise<unknown> }): Promise<void> {
+  const rowsOf = (f.componentInstance as { rows: { scrollIdlePending: boolean } }).rows;
+  await settle(f as never); // the fill effect schedules the fetch
+  await vi.waitFor(() => expect(rowsOf.scrollIdlePending).toBe(false));
+  await settle(f as never);
+}
 
 function fakeRow(i: number): RecordView {
   return { id: i, ts: 1_700_000_000_000 + i, tsState: 'parsed', level: 'Information', message: `row ${i}`, template: null, exception: null, fields: { n: i }, source: 0, sourceName: 's.log', line: i + 1, byteOffset: 0, group: 'g', markers: [] };
@@ -548,8 +556,7 @@ describe('EventsGrid', () => {
     expect(rows(fixture).length).toBeLessThan(40);
     vp.scrollTop = parseFloat(spacer.style.height);
     vp.dispatchEvent(new Event('scroll'));
-    await new Promise((r) => setTimeout(r, SCROLL_IDLE_MS + 30));
-    await settle(fixture);
+    await scrollIdle(fixture);
     const last = rows(fixture).at(-1)!;
     expect(last.textContent).toContain('row 1999999');
     expect(backend.requests.some((r) => r.offset === 3999 * 500)).toBe(true);
@@ -614,9 +621,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
   const key = (vp: HTMLElement, k: string) => vp.dispatchEvent(new KeyboardEvent('keydown', { key: k, cancelable: true }));
   const flush = async (f: Awaited<ReturnType<typeof render>>['fixture']) => {
     await settle(f);
-    // Pages are fetched once scrolling has paused.
-    await new Promise((r) => setTimeout(r, SCROLL_IDLE_MS + 30));
-    await settle(f);
+    await scrollIdle(f);
   };
 
   it('shows the full total and a capped spacer for 50 million rows', async () => {
@@ -949,6 +954,38 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       const total = grid.total();
       expect(total).toBeGreaterThan(5000);
       expect(grid.virtualTop(), `the view ends at the last of ${total} rows`).toBe(grid.geometry().maxTop);
+    });
+
+    // The follow-up of a reveal belongs to the reveal's own pages, not to its round: a page fetched because the user scrolled
+    // away later (the grid holds new events, so no new round starts) must not jump the view back to the end.
+    it('does not pull the view back to the end after the user scrolls away from a reveal', async () => {
+      TestBed.resetTestingModule();
+      const clock = new ManualClock();
+      const backend = synthetic(5000, { liveMs: 25, clock });
+      const { fixture, grid, vp } = await render(backend);
+      await flush(fixture);
+      TestBed.inject(LiveFollow).setFollow(false);
+      const feed = TestBed.inject(LiveFeed);
+      await TestBed.inject(LiveTail).toggle();
+      await clock.advance(100);
+      await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1));
+      await settle(fixture);
+      el<HTMLButtonElement>(fixture, '[data-testid=new-events]').click();
+      await flush(fixture);
+      expect(grid.virtualTop()).toBe(grid.geometry().maxTop);
+      // The user scrolls to the top; more events arrive and are held; then the user scrolls to the middle.
+      TestBed.inject(LiveFollow).setFollow(false);
+      await clock.advance(100);
+      await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(0));
+      vp.scrollTop = 0;
+      vp.dispatchEvent(new Event('scroll'));
+      await flush(fixture);
+      await clock.advance(100);
+      vp.scrollTop = 60_000;
+      vp.dispatchEvent(new Event('scroll'));
+      await flush(fixture);
+      await settle(fixture);
+      expect(grid.virtualTop()).toBeLessThan(70_000);
     });
 
     it('keeps the same rows selected when new events are inserted above them', async () => {
