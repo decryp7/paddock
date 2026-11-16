@@ -14,7 +14,7 @@ import { LiveStore } from '../../state/live.store';
 import { Lookups } from '../lookup/lookups';
 import { ProcessesStore } from '../../state/processes.store';
 import { ProcessDetailsPanel } from './process-details';
-import { type Row, type SortKey, type ViewMode } from './process-rows';
+import { type Row, type SortKey, type ViewMode, sameProcess } from './process-rows';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
@@ -258,7 +258,8 @@ export class ProcessesPage implements OnInit, OnDestroy {
     if (sort) this.store.setSort({ key: sort.key as SortKey, dir: sort.direction });
   }
   protected isSelected(r: Row): boolean {
-    return r.ref !== null && this.store.selected()?.pid === r.ref.pid;
+    const selected = this.store.selected();
+    return r.ref !== null && selected !== null && sameProcess(selected, r.ref);
   }
   protected rowClick(r: Row): void {
     if (r.ref) void this.store.select(r.ref);

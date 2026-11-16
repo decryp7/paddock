@@ -6,6 +6,7 @@ import { LiveStore } from '../../state/live.store';
 import { ProcessesStore } from '../../state/processes.store';
 import { nextFrame } from '../../testing/frame';
 import { ProcessesPage } from './processes-page';
+import type { Row } from './process-rows';
 
 const NOW = 1_700_000_000_000;
 
@@ -170,5 +171,17 @@ describe('ProcessesPage', () => {
     f.destroy();
     expect(stop).toHaveBeenCalled();
     expect(mock).toBeDefined();
+  });
+  it('highlights only the row of the process selected, not a new process that reused its pid', async () => {
+    const { f, store } = await make();
+    store.setMode('flat');
+    const page = f.componentInstance as unknown as { rows(): Row[] };
+    const row = page.rows().find((r) => r.ref !== null)!;
+    const isSelected = (r: typeof row) => (f.componentInstance as unknown as { isSelected(r: typeof row): boolean }).isSelected(r);
+    await store.select(row.ref);
+    expect(isSelected(row)).toBe(true);
+    await store.select({ pid: row.ref!.pid, started: (row.ref!.started ?? 0) + 1 });
+    expect(isSelected(row)).toBe(false);
+    f.destroy();
   });
 });

@@ -78,9 +78,41 @@ export function compareRows(a: Row, b: Row, sort: Sort): number {
   return (sort.dir === 'asc' ? c : -c) || a.name.localeCompare(b.name) || (a.pid ?? 0) - (b.pid ?? 0);
 }
 
+/**
+ * The row key of a process: its pid plus its start time, so a pid the OS hands to a new process is a new row (rule 53: a reusable OS
+ * name alone is never trusted). The pid alone only when the OS gave no start time.
+ */
+export function processKey(p: Pick<ProcessSample, 'pid' | 'started'>): string {
+  const started = readValue(p.started);
+  return started === null ? `p${p.pid}` : `p${p.pid}@${started}`;
+}
+
+/**
+ * The same process in the next sample, with a start time the OS gave earlier but not now (a process that cannot be opened reports one
+ * only sometimes): the earlier time is kept, so the row key does not flip between `p<pid>` and `p<pid>@<time>` and redraw the row or
+ * lose its expanded mark. A pid with no earlier time stays as it is. Pure; the store calls it on every live update.
+ */
+export function carryStarts(next: readonly ProcessSample[], previous: readonly ProcessSample[]): ProcessSample[] {
+  if (previous.length === 0) return next as ProcessSample[];
+  const known = new Map<number, number>();
+  for (const p of previous) {
+    const started = readValue(p.started);
+    if (started !== null) known.set(p.pid, started);
+  }
+  return next.map((p) => {
+    const earlier = known.get(p.pid);
+    return earlier !== undefined && readValue(p.started) === null ? { ...p, started: { value: earlier } } : p;
+  });
+}
+
+/** Whether two references name the same process: the same pid and the same start time (a reused pid is another process; rule 53). */
+export function sameProcess(a: ProcessRef, b: ProcessRef): boolean {
+  return a.pid === b.pid && a.started === b.started;
+}
+
 function processRow(p: ProcessSample, depth: number, expandable = false, expanded = false): Row {
   return {
-    key: `p${p.pid}`,
+    key: processKey(p),
     kind: 'process',
     depth,
     name: p.name,
@@ -133,18 +165,19 @@ export function buildRows(input: RowInput): Row[] {
 export function expandAllKeys(mode: ViewMode, processes: readonly ProcessSample[], groups: readonly AppGroup[]): string[] {
   if (mode === 'groups') return groups.filter((g) => g.pids.length > 1).map((g) => `g${g.id}`);
   if (mode === 'tree') {
-    const present = new Set(processes.map((p) => p.pid));
-    return [...new Set(processes.map((p) => p.parent).filter((parent): parent is number => parent !== null && present.has(parent)))].map((pid) => `p${pid}`);
+    const byPid = new Map(processes.map((p) => [p.pid, p]));
+    const parents = new Set(processes.map((p) => p.parent).filter((parent): parent is number => parent !== null && byPid.has(parent)));
+    return [...parents].map((pid) => processKey(byPid.get(pid)!));
   }
   return [];
 }
 
 /**
  * The `expanded` keys that fold everything: none in the Apps view; in the Tree view the roots, which open by themselves,
- * carry a fold marker (`-p<pid>`).
+ * carry a fold marker (`-` before the process key).
  */
 export function collapseAllKeys(mode: ViewMode, processes: readonly ProcessSample[]): string[] {
-  return mode === 'tree' ? processes.filter((p) => p.parent === null).map((p) => `-p${p.pid}`) : [];
+  return mode === 'tree' ? processes.filter((p) => p.parent === null).map((p) => `-${processKey(p)}`) : [];
 }
 
 const OTHER_USERS_NAME = 'Other users';
@@ -235,7 +268,7 @@ function buildListRows(input: RowInput): Row[] {
     if (seen.has(p.pid)) return;
     seen.add(p.pid);
     const kids = children.get(p.pid) ?? [];
-    const open = searching || expanded.has(`p${p.pid}`) || (depth === 0 && p.parent === null && !expanded.has(`-p${p.pid}`));
+    const open = searching || expanded.has(processKey(p)) || (depth === 0 && p.parent === null && !expanded.has(`-${processKey(p)}`));
     rows.push(processRow(p, depth, kids.length > 0, open && kids.length > 0));
     if (open) {
       const sorted = kids.map((k) => processRow(k, depth + 1)).sort((a, b) => compareRows(a, b, sort));

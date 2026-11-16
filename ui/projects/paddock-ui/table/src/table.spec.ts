@@ -1368,4 +1368,43 @@ describe('pd-table', () => {
       document.documentElement.removeAttribute('data-motion');
     });
   });
+
+  /** The rows redrawn by live updates after rows left and came back (the CDK recycles their views), by key. */
+  async function redrawnAfterRowsCameBack(): Promise<(string | undefined)[]> {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const f = TestBed.createComponent(PlainHost);
+    document.body.appendChild(f.nativeElement);
+    const all = Array.from({ length: 12 }, (_, i) => ({ id: `r${String(i).padStart(2, '0')}`, group: i % 2 ? 'odd' : 'even' }));
+    f.componentInstance.rows.set(all);
+    await settle(f);
+    // A filter swap: half the rows leave (their views go to the CDK's recycle cache), then come back (taken from that cache).
+    f.componentInstance.rows.set(all.filter((r) => r.group === 'even'));
+    await settle(f);
+    f.componentInstance.rows.set(all);
+    await settle(f);
+    const marked = new WeakSet<Element>(rowEls(f));
+    expect(rowEls(f)).toHaveLength(12);
+    // Three live updates: the same keys in new objects, as every poll gives.
+    for (let tick = 0; tick < 3; tick++) {
+      f.componentInstance.rows.set(f.componentInstance.rows().map((r) => ({ ...r })));
+      await settle(f);
+    }
+    const redrawn = rowEls(f).filter((r) => !marked.has(r)).map((r) => r.dataset['key']);
+    return redrawn;
+  }
+
+  it('keeps every row element through live updates after rows were removed and added again (no recycled view drawn anew)', async () => {
+    expect(await redrawnAfterRowsCameBack()).toEqual([]);
+  });
+
+  // Canary: switches the workaround off and expects the stock CDK to still redraw. It fails once a CDK upgrade fixes the bug.
+  it('canary: without the workaround the CDK still redraws recycled rows (angular/components#33670)', async () => {
+    const off = vi.spyOn(PdTable.prototype as unknown as { recordRecycled(): void }, 'recordRecycled').mockImplementation(() => undefined);
+    const redrawn = await redrawnAfterRowsCameBack();
+    off.mockRestore();
+    expect(
+      redrawn.length,
+      'The CDK no longer redraws recycled rows: delete recordRecycledRows (and recordRecycled) in table.ts and this canary spec; keep the spec above.',
+    ).toBeGreaterThan(0);
+  });
 });
