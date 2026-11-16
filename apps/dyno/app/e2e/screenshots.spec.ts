@@ -8,7 +8,13 @@ import { join } from 'node:path';
 
 /**
  * Documentation screenshots of every screen in both themes (`SCREENSHOTS=1 npx playwright test --project=screenshots`).
- * Deterministic: the clock is frozen, the mock is a macOS laptop, the timezone and locale are fixed and motion is reduced.
+ * Deterministic: the clock is frozen, the mock is a macOS laptop, the timezone and locale are fixed and motion is reduced. Measured
+ * 2026-11-16 (ER-40, ER-46): the old code reproduces its own tracked images byte for byte on this machine (54 of 62), so fonts and rendering are
+ * stable here; the pictures drifted because the UI changed (62 of 72 differ after 386 Dyno commits), and two runs of one tree differed in the
+ * pictures whose data depends on a poll's second (counters, recorder, network connections, the dashboard history markers). `Date.now()` is
+ * read in whole seconds, every picture is taken at the end of a second, the mock's history windows end on a whole minute, and screenshots
+ * disable animations. What still differs between two runs of one tree: the pictures of pages that poll every 2 s or more (network connections,
+ * recorder), by the second their last poll read, a few hundred pixels of rates and a cursor; compare with a tolerance (see docs/screenshots).
  */
 // Playwright runs from the app folder; the images live in the repository's docs.
 const OUT = process.env['SCREENSHOT_DIR'] ?? join(process.cwd(), '..', 'docs', 'screenshots');
@@ -63,8 +69,26 @@ test.use({ timezoneId: 'UTC', locale: 'en-GB', reducedMotion: 'reduce', colorSch
 async function prepare(page: Page, theme: 'dark' | 'light', mock = 'macos'): Promise<void> {
   // A fake clock starting at a fixed time: the mock's live values are a function of the clock, so every run is identical.
   await page.clock.install({ time: FROZEN });
+  // The mock stamps every sample and window edge with `Date.now()`, and the clock ticks in real time while the page loads, so the phase of
+  // its one-second polls against the fake clock differs from run to run (measured 2026-11-16: two runs of this spec differed in 6 of 64
+  // pictures, the counters and recorder charts, by their last sample time: sub-pixel shifts and a digit). The page reads whole seconds, and
+  // `alignToSecond` takes every picture at the end of a second, so each poll since the last second reads the same time.
+  await page.addInitScript(() => {
+    const real = Date.now.bind(Date);
+    (window as unknown as { __fakeNow: () => number }).__fakeNow = real;
+    Date.now = () => Math.floor(real() / 1000) * 1000;
+  });
   await page.emulateMedia({ colorScheme: theme });
   void mock;
+}
+
+/**
+ * Runs the page's clock to the last millisecond of a second (fake time = 999 mod 1000), so every one-second poll since the last second
+ * reads the same whole second whatever its phase against the clock was. Call it right before a picture.
+ */
+async function alignToSecond(page: Page): Promise<void> {
+  const now = await page.evaluate(() => (window as unknown as { __fakeNow: () => number }).__fakeNow());
+  await page.clock.runFor((999 - (now % 1000) + 1000) % 1000);
 }
 
 /**
@@ -420,13 +444,14 @@ for (const theme of ['dark', 'light'] as const) {
         await page.clock.runFor(45_000);
         await page.clock.runFor(500);
       }
+      await alignToSecond(page);
       if (screen.name === 'tray') {
         // Only the popover plus a margin, not the empty wallpaper below it.
         const box = await page.getByRole('button', { name: /Open Dyno/ }).boundingBox();
         const bottom = Math.ceil((box?.y ?? 560) + (box?.height ?? 40));
-        await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`), clip: { x: 0, y: 0, width: 440, height: Math.max(480, bottom + 28) } });
+        await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`), clip: { x: 0, y: 0, width: 440, height: Math.max(480, bottom + 28) }, animations: 'disabled', caret: 'hide' });
       } else {
-        await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`) });
+        await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`), animations: 'disabled', caret: 'hide' });
       }
       if (screen.name === 'dashboard') {
         // The whole page, for the README and for review (the 1440x900 image only shows the top): the window is made as tall as the
@@ -437,7 +462,8 @@ for (const theme of ['dark', 'light'] as const) {
         await expect(async () => expect(await main.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(0)).toPass({ timeout: 10_000 });
         await main.evaluate((el) => el.scrollTo(0, 0));
         await page.clock.runFor(500);
-        await page.screenshot({ path: join(OUT, `dashboard-full-${theme}.png`), fullPage: true });
+        await alignToSecond(page);
+        await page.screenshot({ path: join(OUT, `dashboard-full-${theme}.png`), fullPage: true, animations: 'disabled', caret: 'hide' });
       }
     });
   }

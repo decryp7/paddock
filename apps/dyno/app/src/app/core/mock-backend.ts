@@ -824,7 +824,10 @@ export class MockBackend implements DynoBackend {
 
   history(range: HistoryRange, end: Timestamp | null): Promise<History> {
     return this.reply('history', () => {
-      const h = mockHistory(range, end, this.now(), this.profile.cores, this.kinds);
+      // The history windows end on a whole minute: its events and axis then do not move with the second the page happened to load in (two
+      // runs of the documentation screenshots differed in the event markers of the dashboard history, by a second), and a minute is finer than any chart there can show.
+      const now = this.now();
+      const h = mockHistory(range, end, now - (now % 60_000), this.profile.cores, this.kinds);
       if (this.profile.os !== 'windows') {
         // Only the disks this machine has, under their names (the shared demo data has two Windows drives).
         const disks = this.profile.disks(0);
