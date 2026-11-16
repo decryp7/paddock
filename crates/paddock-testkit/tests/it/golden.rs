@@ -160,3 +160,38 @@ fn every_error_reads_as_a_sentence_naming_the_file() {
         "assert_golden rewrites in update mode"
     );
 }
+
+/// A rewrite tells the author how to confirm the golden on Linux as root in the CI image (the Mac-only capture is how a golden with
+/// the Mac's uid reached a Linux leg, train 14 WP-2).
+#[test]
+fn a_rewrite_prints_the_command_that_confirms_it_in_the_ci_image() {
+    let s = Scratch::new();
+    let pkg = s.path("repo/tools/paddock-dev");
+    std::fs::create_dir_all(&pkg).expect("package folder");
+    s.write("repo/ci-image/VERSION", "3\n").expect("version");
+    let cmd =
+        paddock_testkit::golden::confirm_command(Some(&pkg), Some("check::c130::tests::a_test"));
+    assert_eq!(
+        cmd,
+        "tools/linux-container.sh --id paddock --ci-image -- sh -c 'cd tools/paddock-dev && cargo nextest run check::c130::tests::a_test'"
+    );
+    // the repository root itself, and the names that are not a test path
+    assert!(
+        paddock_testkit::golden::confirm_command(Some(&s.path("repo")), Some("main"))
+            .contains("cd . && cargo nextest run <test name>")
+    );
+    assert!(
+        paddock_testkit::golden::confirm_command(None, Some("a b; rm"))
+            .contains("<the package folder> && cargo nextest run <test name>")
+    );
+    let notice = paddock_testkit::golden::rewritten_notice(&s.path("x.txt"), Some(&pkg), Some("t"));
+    assert!(
+        notice.contains("Confirm it on Linux as root in the CI image")
+            && notice.contains("./dev golden confirm"),
+        "{notice}"
+    );
+    assert!(
+        notice.contains(&s.path("x.txt").display().to_string()),
+        "{notice}"
+    );
+}

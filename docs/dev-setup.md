@@ -167,6 +167,17 @@ author or by `./dev brief` (not on main yet): that call belongs there. The Rust 
   `cargo test -p <crate> --test it pool::`. A test that changes something process-wide (environment variables, the panic
   hook, the global allocator, a measured resident size) either serialises that change with a lock or runs in a child
   process of its own (re-running its own test binary with `--exact`), because `cargo test` runs all modules in one process.
+- **Golden files (`paddock_testkit::golden`):** a golden is captured on one machine and checked on all of them (the Mac, the
+  Linux CI image, which runs as root, and Windows). A value of the capturing machine (a uid, a home folder, the RAM, a temp path, the
+  host name) makes it fail elsewhere; normalise it in the test before the comparison (for example `norm()` in
+  `tools/paddock-dev/tests/it/host_steps.rs`), so the file says `<uid>`. Conformance C130 (report-only, ER-41) reads the tracked
+  golden folders for these values, with the user, host, home, RAM and CPU count of the machine that runs it; a value that is fine
+  (an invented user) gets an entry with a reason in `conformance/c130-allow.json`. **Rewriting:** `PADDOCK_UPDATE_GOLDEN=1` rewrites a
+  differing golden and prints the command that runs that test on Linux as root in the CI image
+  (`tools/linux-container.sh --id paddock --ci-image -- sh -c 'cd <package folder> && cargo nextest run <test>'`). Run it before you
+  commit the file. `./dev golden confirm <test filter>` (from the workspace of the test, or `--manifest-dir <folder>`) runs the
+  filtered tests on this machine and in that image and passes only when both pass; a filter that selects no test fails. The
+  container needs Docker or OrbStack and obeys `PADDOCK_LINUX_CPUS`, `PADDOCK_LINUX_JOBS` and `PADDOCK_LINUX_MEMORY` (ER-14).
 - **Checked (conformance C37):** a `tests/<name>.rs` outside `tests/it/` fails unless `ownTestBinaries` of
   `paddock.conformance.json` names it with the reason it needs its own binary, and every workspace member needs a CI test
   step and the workspace-hack dependency.
