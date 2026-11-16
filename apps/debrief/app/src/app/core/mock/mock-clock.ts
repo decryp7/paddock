@@ -67,13 +67,16 @@ export const systemMockClock: MockClock = {
 /** Set by `stopSystemMockClock` until `resumeSystemMockClock`: nothing new starts, sleeps return at once. */
 let halted = false;
 let warned = false;
+/** The test the clock was stopped after (named in the warning). */
+let stoppedAfter = 'an unnamed test';
 
 /** A timer asked for between tests: refused, with one warning per pause (a mock that keeps starting timers after its test ended). */
 function refused(): 0 {
   if (!warned) {
     warned = true;
+    const frame = (new Error().stack ?? '').split('\n').slice(2).map((l) => l.trim()).find((l) => l.length > 0 && !l.includes('mock/mock-clock.ts'))?.replace(/^at /, '') ?? 'unknown caller';
     const err = (globalThis as unknown as { process?: { stderr?: { write(s: string): unknown } } }).process?.stderr;
-    err?.write('[mock-clock] a timer was asked for between tests and refused: something still runs after its test ended\n');
+    err?.write(`[mock-clock] a timer was asked for after "${stoppedAfter}" and refused: something still runs after its test ended, at ${frame}\n`);
   }
   return 0;
 }
@@ -85,7 +88,8 @@ const pending = new Map<unknown, { clear: (handle: never) => void; wake: (() => 
  * Stops every timer `systemMockClock` still has running and lets the sleeps waiting on them go (tests: none outlives the test
  * that started it; the mock's own `dispose` is not reached by a spec that ends with a mock still ticking).
  */
-export function stopSystemMockClock(): void {
+export function stopSystemMockClock(afterTest = 'an unnamed test'): void {
+  stoppedAfter = afterTest;
   halted = true;
   for (const [handle, t] of [...pending]) {
     pending.delete(handle);
