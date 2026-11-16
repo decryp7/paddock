@@ -136,7 +136,7 @@ test.describe('live updates keep the keyboard where it was', () => {
 test.describe('the row menu from the keyboard', () => {
   test('processes: after switching Apps to All, Shift+F10 opens the focused row\'s menu and Escape gives the focus back', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 800 });
-    // The page's clock stands still: no live update reorders the rows between the focus and the key.
+    // The page's clock keeps running on its own (clock.install does not stop it); runFor below adds a live update on demand.
     await page.clock.install();
     await page.goto(url('/processes'));
     const grid = page.getByRole('treegrid', { name: 'Processes' });
@@ -145,6 +145,11 @@ test.describe('the row menu from the keyboard', () => {
     await all.click();
     // The rows are redrawn for the new filter: take the row (and its focus) only once the filter is the checked one.
     await expect(all).toBeChecked();
+    // The first live update after the rows were swapped redraws many of them as new elements (the CDK table keeps no record of the
+    // views it inserted while it also removed rows; measured, lessons.md): the focus drops and an open menu closes with its row.
+    // Take it now, so the row that gets the focus below is drawn already and the next updates leave it alone (a key pressed or a
+    // menu opened in the middle of that redraw made this test fail in about 1 run of 100 in CI).
+    await page.clock.runFor(1000);
     const row = grid.locator('.pd-body [role=row][data-key]:not([aria-expanded])').first();
     await expect(row).toBeVisible();
     await row.focus();

@@ -2179,3 +2179,19 @@ before any test changes them (`paddock_testkit::ambient`); tests that need other
 `TestCommand::on`; the cargo comes from `rustc --print sysroot` when `CARGO` is unset; the tests read the environment only under
 the lock. Measured after: 0 of 100 plain-harness runs failed. **Class: a process-wide value read live in a multi-threaded test
 harness (the same shape as ADR 0103's leaked fake timer: shared mutable state across tests of one process).**
+
+## Dyno's row-menu e2e failed once in about 100 runs: a live update redrew the focused row (tests, 2026-11-16)
+Symptom: in WebKit `tables.spec.ts` "after switching Apps to All, Shift+F10 opens the focused row's menu" failed once with
+`getByRole('menu')` not found and passed on its retry (run 8161, job 39628; three flaky marks in 368 runs of history).
+Causes listed with what would rule each out: the key reached the wrong element (a `keydown` listener showed the key on the row
+every time: ruled out); the menu opened before the list settled (no: it was added, then removed); the clock stood still (it
+did not: `page.clock.install()` lets time flow, a probe read 1,523 ms in 1.5 s); a re-render replaced the row. Root cause,
+measured: the first live update after the Apps to All swap removed and re-added the row's element (an `Element.remove` hook
+showed `MatTable.renderRows` > `forEachIdentityChange` > `viewContainer.remove`; the CDK table 22.2.4 records the row definition of a
+view it inserted under the line's final index, so in a render that adds and removes rows the inserted views have no record, and
+the next render redraws each of them: probe `MAP` lines were `....................MM`). The row's trigger went with the element, so an open menu closed and
+the focus fell to the page. Probe (ticks forced during the key, WebKit and Chromium, 15 runs each): red 15 of 15 (WebKit 14) without a prior
+update, green 15 of 15 with one `clock.runFor(1000)` after the swap. Fix in the spec: take that update before the row gets the focus,
+and its comment no longer says the clock stands still. **Open (product):** the redraw is real for a user too (a row menu opened in
+the first second after a list swap closes on the next update); a fix needs a workaround in `pd-table` around the CDK table. **Class:
+a test assumed a quiet page while live updates ran (earlier: Debrief's Stop-button probe, 2026-11-15; this file's Escape fix, 0315ca827).**
