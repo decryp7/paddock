@@ -73,7 +73,7 @@ that quotes a result links to the block instead of carrying the only copy.
 
   | Suite (tests) | Before | After | Mode now | Verdict |
   |---|---|---|---|---|
-  | Debrief (4989, 4990 after) | 33.19 s | 32.20 s and 36.34 s (two runs) | report | no measurable change (the review timed it alternating with the base) |
+  | Debrief (4989, 4992 after) | 33.19 s | 32.1 s to 38.1 s (five runs) | fail | no measurable change (the review timed it alternating with the base) |
   | Dyno (1652) | 17.80 s | 16.16 s and 16.41 s | fail (follow-up) | within 10% |
   | Pitcrew (642, 646 after) | 9.90 s | 9.34 s | fail | within 10% |
   | Pitwall (959, 962 after) | 9.01 s | 6.61 s | fail | within 10% (noise: the earlier run was loaded) |
@@ -86,18 +86,17 @@ that quotes a result links to the block instead of carrying the only copy.
   `[leak-detector] <test>: <kind>: <what>` on stderr): the `Duration` figures above carry them. Raw logs are in the
   agent's scratch folder only.
 
-#### Findings left, by file and line (Debrief stays report-only until these are fixed)
+#### Findings left, by file and line (none: Debrief and Dyno are in failing mode)
 
-Debrief (about 310 findings in about 230 tests after the follow-up fixes; was about 1,640): the mock clock `app/core/mock/mock-clock.ts:30,32,34`
-(its timers and 1.5 s interval, 114), `app/core/workspace/query.store.ts:59` (250 ms, 43), the singleton check (`mock jobs`
-left queued or running: 35 tests), `app/profile/profile-draft.ts:131` (300 ms, 26), `app/analysis/query-session.ts:82`
-(150 ms, 18), 13 nodes left in the body (`.debrief-float-cue`, `.sr-only`, a `div`), `app/core/startup/startup-contract.ts:42`
-and `app/projects/open-requests.ts:64` (10 each), `app/popout/popout-backend.ts:420` (7), then single sites:
-`app/profile/extractor-editor.ts:168`, `app/settings/parsers/mock-parsers-backend.ts:30`, `app/browser/mock-browser-backend.ts:170`,
-`app/settings/engine-settings.store.ts:171`, `app/dock/angular-panel.ts:202` and `app/inspector/context-section.ts:158`
-(copy-label resets, as the ui's). Fixed by the follow-up: the shell idle fallback (`context.ts`, now cancelled with its
-injector), the activity runtime's end-of-task timer (`endTaskNow` after every test), the mock job steps (`mock-jobs.ts`) and the
-in-flight check (growth per test).
+Debrief: zero findings after `fix/debrief-test-leaks` (about 310 before), in failing mode, green in three runs (32.1 s,
+33.2 s, 38.1 s against 33.19 s before the detector; the slowest run overlapped other agents' jobs). Fixed there: the
+mock clock (`systemMockClock` tracks its timers and sleeps; the setup stops them after every test and halts it between tests),
+the stores and services that kept a timer past their injector (`query.store`, `profile-draft`, `query-session`,
+`engine-settings.store`, `recovery`, `session.service`, the copy-label resets in `shared/path-text`, `context-section` and
+`dock/angular-panel`, the dialog shell, the extractor editor, the tour's wait), `OpenRequests.start` (two callers overwrote the
+timer handle of the first), the retry timer of the start-up read, the pop-out backend's poll, the dock service's cue
+elements (detached with its injector), mock job state (drained after every test), the focus retry, and the body nodes some dock specs
+left. The mock backends' own latency timers go through `systemMockClock`.
 Dyno: zero findings after `MockBackend.dispose()` (disposed after every test by the setup), the counters store (it
 armed a second poll timer and one after destroy) and `scroll-to-section.spec.ts` (left a `<main>` in the body); Dyno runs in
 failing mode.

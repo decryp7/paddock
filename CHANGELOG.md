@@ -13,7 +13,7 @@ Conventional Commits; one semver tag for the whole repo.
   containers, singleton state and pending tracked work. `report` mode prints one stderr line per finding with the test name;
   `fail` mode fails the leaking test and clears its timers. The hook never throws inside the `afterEach` chain.
 - Rolled out report-only (ER-41); failing mode in the ui, Pitcrew, Pitwall, Spotter and Dyno, which had no findings once their
-  leaks were fixed. Debrief stays report-only, with the list in `docs/benchmarks.md`. `SHELL_IDLE`'s default now drops idle work still
+  leaks were fixed. Debrief followed once its leaks were fixed. `SHELL_IDLE`'s default now drops idle work still
   waiting when its injector is destroyed. C135 keeps the opt-outs (`mode: 'off'`, `skip`) to a shrink-only list.
 - Pitcrew's specs (not its app build) resolve `@decryp7/paddock-ui` through `ui/dist` (`tsconfig.spec.json`), and its ui gate builds `ui` first.
 
