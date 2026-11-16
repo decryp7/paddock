@@ -385,6 +385,9 @@ jobs:
     env:
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+      # The ref baseline and allow-list growth is measured against (ER-21, report-only per ER-41 until the first green run): a train's
+      # base on a train dispatch, else the pull request's target branch, else main. Read in one place (check::baseline::target_ref).
+      PADDOCK_BASE_REF: ${{ github.event.inputs.base || format('origin/{0}', github.base_ref || 'main') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1117,6 +1120,8 @@ jobs:
       # No secret at all in this job (the queue's contract): ./dev is built from the checkout, never downloaded, so it needs no
       # download credential either (conformance/test/ci-action-env.test.mjs exempts a job whose download is "0").
       PADDOCK_DEV_DOWNLOAD: "0"
+      # The train before (ADR 0098), the dispatch's `base`: the train's own entries are not the member's growth (report-only, ER-41).
+      PADDOCK_BASE_REF: ${{ github.event.inputs.base }}
     steps:
       - uses: actions/checkout@v4
         with:

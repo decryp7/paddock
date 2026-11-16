@@ -111,10 +111,7 @@ impl<'a> Ctx<'a> {
 
     /// The ref a baseline's growth is measured against: the run's own, else `PADDOCK_BASE_REF`, else `origin/main`.
     pub fn base_ref(&self) -> String {
-        self.base_ref
-            .clone()
-            .or_else(|| std::env::var("PADDOCK_BASE_REF").ok())
-            .unwrap_or_else(|| "origin/main".into())
+        baseline::target_ref(self.base_ref.as_deref())
     }
 
     /// Whether the tree is held in memory (a positive control): nothing on disk or in git to compare with.

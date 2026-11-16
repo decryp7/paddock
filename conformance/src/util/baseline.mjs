@@ -38,6 +38,15 @@ export function reconcile(current, base, exact, loose, canMove = () => true) {
   return { fresh, stale: [...unmatched].sort((a, b) => a - b).map((i) => base[i]), moved };
 }
 
+/**
+ * The ref every baseline's and allow list's growth is measured against: the run's own (`options.baseRef`), else PADDOCK_BASE_REF, else
+ * `origin/main`. The ONE place that reads PADDOCK_BASE_REF (ER-21: C53, C71, C115, C104 and the shared allow-list reader each read it
+ * or forgot it, and a member branch of a train was measured against main, so the train's own entries counted as its growth). CI's
+ * conformance and train-gates jobs and `./dev check --pre-push` set it to the branch's target (the train before, for a train member).
+ * Report-only (ER-41) until the first green run on the real tree with it set in CI. Rust host: `check::baseline::target_ref`.
+ */
+export const targetRef = (options) => options?.baseRef ?? process.env.PADDOCK_BASE_REF ?? 'origin/main';
+
 const defaultGit = (cwd) => (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
 
 /** Whether `root` is a git work tree git itself accepts (a folder with a stray `.git` file, as a fixture has, is not). */
@@ -55,7 +64,7 @@ export function isWorkTree(root, git = defaultGit(root)) {
  * nothing was added. With `looseKeyOf` an entry whose loose key (say the hash) is in the base but whose full key is not is `moved`, not
  * added (`moved: [{ item, from }]`). `entriesOf(json)` reads the list out of the parsed file; `git` and `baseRef` are injectable for tests.
  */
-export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = defaultGit(root), baseRef = process.env.PADDOCK_BASE_REF ?? 'origin/main', looseKeyOf }) {
+export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = defaultGit(root), baseRef = targetRef(), looseKeyOf }) {
   let base;
   let text;
   try {

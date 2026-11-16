@@ -11,12 +11,15 @@
 // The list only ever shrinks (ER-12, ER-21; C129's baseline has the same rule): `warnings` compares every entry, counted `count` times, with the list at
 // the merge base (`baselineGrowth`, the one comparison C53 and C115 use), and an entry the merge base lacks, or a raised `count`, is one unwaivable finding
 // at the allow file that needs the user's approval. It runs only on a checkout (a folder git accepts as a work tree): a fixture folder has nothing to compare, and says
-// nothing; in a checkout where git cannot give a merge base it warns that the rule is not enforced, never silence.
+// nothing; in a checkout where git cannot give a merge base it warns that the rule is not enforced, never silence. The base is the target ref
+// (`targetRef` in baseline.mjs, the one reader of PADDOCK_BASE_REF). Report-only (ER-41) until the first green run on the real tree with it set in CI.
 // Used by C121, C124, C125 and C130, each declaring the spec it reads with as `allowList` (Rust: `Check::allow_list`). Rust host: tools/paddock-dev/src/check/allow_list.rs (same
 // entries, same findings; tools/paddock-dev/tests/it/check_allow_list.rs compares the error paths of every user on both hosts).
 import { error, unwaivable, warn } from '../finding.mjs';
-import { baselineGrowth, isWorkTree } from './baseline.mjs';
+import { baselineGrowth, isWorkTree, targetRef } from './baseline.mjs';
 
+const FETCH_FIX = 'Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.';
+const PARSE_FIX = 'The list at the base is in an older format (an entry without a `site`), so growth cannot be measured against it; nothing to fix here: it is measured once the new format is on the base branch.';
 const UNREAD_FIX = 'Make the file readable (permissions) and run the check again.';
 
 /** Whether `path` is a plain repository path (`a/b.rs`): an entry spelled otherwise names no file the run lists, so it would never be judged. */
@@ -101,7 +104,6 @@ export class AllowList {
     const { id, rule } = this.spec;
     if (!this.ctx.root || !isWorkTree(this.ctx.root)) return [];
     const current = expandEntries(this.entries);
-    const baseRef = this.ctx.options?.baseRef ?? process.env.PADDOCK_BASE_REF;
     const g = baselineGrowth({
       root: this.ctx.root,
       path: this.file,
@@ -109,9 +111,9 @@ export class AllowList {
       keyOf: (k) => k,
       entriesOf: (json) => expandEntries(parseAllowList(JSON.stringify(json), this.file)),
       ...(this.ctx.options?.git ? { git: this.ctx.options.git } : {}),
-      ...(baseRef ? { baseRef } : {}),
+      baseRef: targetRef(this.ctx.options),
     });
-    if (g.reason) return [warn(id, rule, this.file, 1, `the allow list's shrink-only rule is not enforced here: ${g.reason}`, 'Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.')];
+    if (g.reason) return [warn(id, rule, this.file, 1, `the allow list's shrink-only rule is not enforced here: ${g.reason}`, /cannot be parsed/.test(g.reason) ? PARSE_FIX : FETCH_FIX)];
     if (g.added.length === 0) return [];
     const n = g.added.length;
     return [{ ...warn(id, rule, this.file, 1, `the allow list grew: ${n} entr${n === 1 ? 'y is' : 'ies are'} (counting each \`count\`) not in ${this.file} at the merge base ${g.base.slice(0, 9)}; it may only shrink`, "Remove the added entries or lower the raised counts and fix the sites. Growing the list needs the user's approval."), unwaivable: true }];

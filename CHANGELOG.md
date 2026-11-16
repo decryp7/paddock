@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Growth of baselines and allow lists is measured against the branch's target (report-only, ER-41)
+- One function reads `PADDOCK_BASE_REF`: `check::baseline::target_ref` (Rust) and `targetRef` in `conformance/src/util/baseline.mjs` (JS), the run's own ref, else the variable, else `origin/main`. Every baseline and allow-list growth check (C53, C71, C104, C115 and the shared allow-list readers of C121, C124, C125 and C130) uses it, so a member branch of a train is not charged with the train's entries. CI sets it in the conformance job (the dispatch's `base`, else the pull request's target, else main) and in the train-gates job (the train before, ADR 0098), and `./dev check --pre-push` passes the base it resolved. Report-only until the first green run with it set in CI. A base list in an older format now says so with its own fix.
+
 ### `paddock-testkit`: `StandIn`, check C130
 - New `paddock_testkit::StandIn` (with `Actions`, `Spawn`, `Installed`, `Invocation`) and the std-only binary `paddock-stand-in`: one stand-in
   program for the programs a test plants, on Windows too, replacing `#!/bin/sh` fixtures. It prints lines, writes files, records its calls

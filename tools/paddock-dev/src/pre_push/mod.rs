@@ -422,6 +422,7 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
     };
     facts.linux = args.linux;
     facts.kept_targets = kept_targets;
+    facts.base_ref = Some(base.clone());
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     if !args.only.is_empty() {
         planned.retain(|p| {
@@ -1241,6 +1242,7 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts
         pitwall_tests: tests,
         dev_exe: crate::tool_cache::self_exe().map_or_else(|_| "./dev".into(), |p| p.to_string_lossy().to_string()),
         target_dir: env.get("CARGO_TARGET_DIR").cloned(),
+        base_ref: None,
     }
 }
 

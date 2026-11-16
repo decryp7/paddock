@@ -15,7 +15,9 @@
 //! with the list at the merge base (`baseline::growth`, the one comparison C53 and C115 use), and an entry the merge base lacks, or a
 //! raised `count`, is one unwaivable finding at the allow file that needs the user's approval. The comparison runs only on a checkout
 //! (a folder git accepts as a work tree): a tree in memory (a control) or a fixture folder has nothing to compare, and says nothing. In a checkout
-//! where git cannot give a merge base it warns that the rule is not enforced, never silence.
+//! where git cannot give a merge base it warns that the rule is not enforced, never silence. The base is the target ref
+//! ([`baseline::target_ref`], the one reader of `PADDOCK_BASE_REF`). Report-only (ER-41) until the first green run on the real tree
+//! with it set in CI.
 
 use super::baseline::{self, Growth};
 use super::finding::Finding;
@@ -25,6 +27,9 @@ use super::{CheckOutput, Ctx};
 use std::collections::HashSet;
 use std::rc::Rc;
 
+const FETCH_FIX: &str =
+    "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.";
+const PARSE_FIX: &str = "The list at the base is in an older format (an entry without a `site`), so growth cannot be measured against it; nothing to fix here: it is measured once the new format is on the base branch.";
 const UNREAD_FIX: &str = "Make the file readable (permissions) and run the check again.";
 
 /// The check that reads an allow list, as the reader needs it.
@@ -154,16 +159,16 @@ fn plain_path(path: &str) -> bool {
     clippy::cast_sign_loss,
     reason = "whole, positive and below 2^53"
 )]
+fn whole(f: f64) -> u64 {
+    f as u64
+}
+
 /// Every entry as `count` copies of its key `path NUL site`: the multiset the merge base's list is compared with.
 fn expand(entries: &[Entry]) -> Vec<String> {
     entries
         .iter()
         .flat_map(|e| std::iter::repeat_n(format!("{}\u{0}{}", e.path, e.site), e.count))
         .collect()
-}
-
-fn whole(f: f64) -> u64 {
-    f as u64
 }
 
 /// What [`AllowList::admit`] says about one site.
@@ -280,7 +285,7 @@ impl AllowList {
                 file,
                 1,
                 format!("the allow list's shrink-only rule is not enforced here: {reason}"),
-                "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.",
+                if reason.contains("cannot be parsed") { PARSE_FIX } else { FETCH_FIX },
             )],
             Growth::Added { added: 0, .. } => Vec::new(),
             Growth::Added { base, added, .. } => vec![
