@@ -10,13 +10,24 @@
  * (`takeStartupLoads`), so one load that never settles is charged to the test that started it, not to every later one.
  */
 const inFlight = new Set<Promise<unknown>>();
+/** Loads that began and have not settled, taken from the record or not: what the leak detector reads (`test-setup.ts`). */
+let unsettled = 0;
 
 /** Records a start-up load; returns the same promise. */
 export function trackStartupLoad<T>(load: Promise<T>): Promise<T> {
   inFlight.add(load);
-  const forget = (): void => void inFlight.delete(load);
+  unsettled += 1;
+  const forget = (): void => {
+    inFlight.delete(load);
+    unsettled -= 1;
+  };
   load.then(forget, forget);
   return load;
+}
+
+/** How many recorded loads have not settled yet, including ones a reader already took. Read-only. */
+export function unsettledStartupLoads(): number {
+  return unsettled;
 }
 
 /** Takes every recorded load and clears the record: a later reader never waits on a load an earlier test started. */

@@ -27,6 +27,25 @@ describe('retryUntilAnswered', () => {
     expect(m.call).toHaveBeenCalledTimes(1);
   });
 
+  it('leaves no timer running once an attempt has answered or rejected', async () => {
+    vi.useFakeTimers();
+    try {
+      const answered = manual<number>();
+      const first = retryUntilAnswered(answered.call, { timeoutMs: 10, attempts: 3 });
+      expect(vi.getTimerCount()).toBe(1);
+      answered.pending[0]!.resolve(7);
+      await first;
+      expect(vi.getTimerCount()).toBe(0);
+      const refused = manual<number>();
+      const second = retryUntilAnswered(refused.call, { timeoutMs: 10, attempts: 3 });
+      refused.pending[0]!.reject(new Error('no'));
+      await expect(second).rejects.toThrow('no');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('sends again when an attempt goes unanswered (a lost first IPC), up to the limit', async () => {
     const m = manual<number>();
     const t = timers();
