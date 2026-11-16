@@ -658,22 +658,25 @@ fn compile_stub(profile: &Path, built: &Path) -> Result<(), String> {
     let out = work
         .path()
         .join(format!("{STAND_IN_BIN}{}", std::env::consts::EXE_SUFFIX));
-    let result = TestCommand::new(rustc_program())
-        .env("RUSTUP_AUTO_INSTALL", "0")
-        .args([
-            "--edition",
-            "2021",
-            "--crate-name",
-            "paddock_stand_in",
-            "-C",
-            "debuginfo=0",
-            "-o",
-        ])
-        .arg(&out)
-        .arg(&main)
-        .current_dir(work.path())
-        .output()
-        .map_err(|e| format!("cannot run rustc to build {STAND_IN_BIN}: {e} ({hint})"))?;
+    let result = TestCommand::new(rustc_program(
+        std::env::var_os("CARGO"),
+        std::env::var_os("RUSTC"),
+    ))
+    .env("RUSTUP_AUTO_INSTALL", "0")
+    .args([
+        "--edition",
+        "2021",
+        "--crate-name",
+        "paddock_stand_in",
+        "-C",
+        "debuginfo=0",
+        "-o",
+    ])
+    .arg(&out)
+    .arg(&main)
+    .current_dir(work.path())
+    .output()
+    .map_err(|e| format!("cannot run rustc to build {STAND_IN_BIN}: {e} ({hint})"))?;
     if !result.status.success() {
         return Err(format!(
             "rustc failed on {STAND_IN_BIN} ({}); {hint}.\n{}",
@@ -698,10 +701,13 @@ fn publish_stub(out: &Path, built: &Path) -> Result<(), String> {
     }
 }
 
-/// The compiler for the stand-in: the real `rustc` beside the `cargo` that runs the tests (a rustup proxy could install a toolchain
+/// The compiler for the stand-in, from the values of `CARGO` and `RUSTC` (parameters, so a test changes no environment): the real `rustc` beside the `cargo` that runs the tests (a rustup proxy could install a toolchain
 /// or pick another one), else `$RUSTC`, else `rustc` on the `PATH`.
-fn rustc_program() -> std::ffi::OsString {
-    let beside = std::env::var_os("CARGO")
+fn rustc_program(
+    cargo: Option<std::ffi::OsString>,
+    rustc: Option<std::ffi::OsString>,
+) -> std::ffi::OsString {
+    let beside = cargo
         .map(PathBuf::from)
         .and_then(|c| {
             c.parent()
@@ -710,14 +716,14 @@ fn rustc_program() -> std::ffi::OsString {
         .filter(|p| p.is_file());
     beside
         .map(PathBuf::into_os_string)
-        .or_else(|| std::env::var_os("RUSTC"))
+        .or(rustc)
         .unwrap_or_else(|| "rustc".into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Scratch, env_lock};
+    use crate::Scratch;
 
     #[test]
     fn a_rename_that_fails_onto_a_file_that_is_there_is_success_and_onto_nothing_is_an_error() {
@@ -733,21 +739,21 @@ mod tests {
     #[test]
     fn the_compiler_is_the_one_beside_cargo_then_rustc_then_the_path() {
         let s = Scratch::new();
-        let mut env = env_lock();
         let rustc = s
             .work()
             .join(format!("rustc{}", std::env::consts::EXE_SUFFIX));
         std::fs::write(&rustc, "").unwrap();
-        env.set("CARGO", s.work().join("cargo"));
-        env.set("RUSTC", "/the/other/rustc");
-        assert_eq!(rustc_program(), rustc.into_os_string());
-        env.set("CARGO", s.work().join("no-such-dir").join("cargo"));
+        let cargo = Some(s.work().join("cargo").into_os_string());
+        let named = std::ffi::OsString::from("/the/other/rustc");
+        let other = Some(named.clone());
+        assert_eq!(rustc_program(cargo, other.clone()), rustc.into_os_string());
+        let gone = Some(s.work().join("no-such-dir").join("cargo").into_os_string());
         assert_eq!(
-            rustc_program(),
-            std::ffi::OsString::from("/the/other/rustc")
+            rustc_program(gone.clone(), other.clone()),
+            other.clone().unwrap()
         );
-        env.remove("RUSTC");
-        assert_eq!(rustc_program(), std::ffi::OsString::from("rustc"));
+        assert_eq!(rustc_program(None, other), named);
+        assert_eq!(rustc_program(gone, None), std::ffi::OsString::from("rustc"));
     }
 
     #[test]
