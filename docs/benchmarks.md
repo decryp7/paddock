@@ -1721,6 +1721,21 @@ starts `git` many times through its own `PATH`, which `TestCommand` curates. Whi
   `bin\git.exe`, a launcher that starts the real git: one more process per call, 1.4 times the cost alone and 1.65 times with 8
   at once. Run 8138 predates that order (its PATH had git's own folder and no `bin`). Fix: git's own folder first, then
   `usr/bin`; `bin` (launchers only) is left out.
-- **Not measured:** the merge_check suite itself on Windows before and after (the test VM's native toolchain for paddock-dev is
-  the member-gate work, not yet on a pushed branch); whether the launcher accounts for all of the 5.7 times. The next Windows
-  run of the train confirms it.
+- **The full suite on the test VM (2026-11-16):** `scripts/member-gate-windows.sh <tree> "nextest tools/paddock-dev paddock-dev"`
+  (feat/member-gate-other-os at ec9d7a662 merged locally with this branch; x86_64 programs on the Arm VM, the toolchain without
+  rustup), one run each, about 1040 to 1060 s of guest time:
+
+  | Tree | merge_check tests | median | total | max |
+  |---|---:|---:|---:|---:|
+  | CI run 8138 (job 39335, x64 runner), the reference | 67 | 4.54 s | 345 s | |
+  | CI run 8161 (job 39640), the slow one | 58 | 26.9 s | 1399 s | |
+  | VM, the launcher first on the PATH (the order before 756046bdc) | 79 | 3.73 s | 263 s | 20.5 s |
+  | VM, git's own folder first (756046bdc) | 79 | 3.38 s | 236 s | 17.4 s |
+  | VM, the same plus the toolchain-bin fix (85c21b7d6) | 79 | 3.19 s | 218 s | 16.3 s |
+
+  On the VM the launcher costs merge_check about 1.17 times (total 263 against 218 s), and no tree on the VM is near run 8161's
+  5.7 times: **the CI slowdown is not reproduced on the VM, so its main cause is still not found**; the launcher fix is real but
+  small. The VM run also found 13 failures from TestCommand (a hard-linked `rustc.exe` without its DLLs, fixed in 85c21b7d6) and 9
+  that are not this branch's (`places::` and `brief_check::` with `/srv` paths, `build_jobs_golden` memory probe, the
+  `safe_remove` guard's verbatim-path parity), the same 9 in every run.
+- **Not measured:** the CI runner itself with these trees (the train's next Windows run).
