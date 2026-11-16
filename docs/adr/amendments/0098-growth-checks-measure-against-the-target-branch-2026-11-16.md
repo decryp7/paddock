@@ -20,8 +20,9 @@ From this change:
 - Where the target is set: `.gitea/workflows/ci.yml` sets `PADDOCK_BASE_REF: ${{ inputs.base || 'origin/main' }}` in the conformance job
   and `${{ inputs.base }}` in the train-gates job (the dispatch's `base`: the commit of main the queue builds the train on). This
   workflow has no pull_request trigger. `./dev check --pre-push` sets it to the branch's target: the nearest of `<remote>/main` and
-  `<remote>/train/*` that the pushed commit contains, never the remote ref's own old tip (a second push would then hide the first push's
-  growth: reproduced on C53) and never another feature branch; an explicit `--base` (the merge check) is kept. It prints the target
+  `<remote>/train/*` that the pushed commit contains, never a feature branch's own old tip (a second push would then hide the first push's
+  growth: reproduced on C53) and never another feature branch; a push to main or a train is measured from its previous tip; on a tie
+  main is named, not a landed train; an explicit `--base` (the merge check) is kept. It prints the target
   and why (ER-27).
 - **Not measured never passes (ADR 0089):** in CI a target that cannot be resolved is a not-measured error no waiver covers, for the
   blocking baselines too; locally it is a warning with the next step. A base list in an older format is a warning with its own fix, not
@@ -31,8 +32,8 @@ From this change:
 
 A blocking gate now answers a different question on a train member (growth since the target, not since main). On the first runs it can
 report growth that the old gate hid (the train's entries seen from main are hidden today only because main has them too) or stop
-reporting growth the old gate blamed on the member. The first CI runs with the variable set are the measurement; until one is green on
-the real tree this stays recorded as a proposal.
+reporting growth the old gate blamed on the member. The first CI runs with the variable set are the measurement; the first green CI run with
+the variable set is recorded here by run id.
 
 ## Common practice
 

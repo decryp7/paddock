@@ -362,14 +362,25 @@ fn command_in(
         .first()
         .cloned()
         .or_else(|| git_text(&root, &["rev-parse", "--verify", "--quiet", "HEAD"]).map(|t| t.trim().to_string()));
-    let (target, target_why) = growth_target(&root, target_sha.as_deref(), args.remote.as_deref(), args.base.as_deref());
+    let landing_from = pushes
+        .first()
+        .filter(|p| p.remote_ref == "refs/heads/main" || p.remote_ref.starts_with("refs/heads/train/"))
+        .map(|p| p.remote_sha.clone())
+        .filter(|o| o.chars().any(|c| c != '0'));
+    let (target, target_why) = growth_target(
+        &root,
+        target_sha.as_deref(),
+        args.remote.as_deref(),
+        args.base.as_deref(),
+        landing_from.as_deref(),
+    );
     notes.insert(1, format!("growth target (PADDOCK_BASE_REF): {target} ({target_why})"));
     notes.extend(lookup_notes.into_iter().map(|l| format!("known-commit lookup: {l}")));
     // An empty diff passes on its own only for a person's run with no pushed commit; a push is always measured (or known).
     if pushed.is_empty() && change.files.is_empty() && change.ranges.is_empty() && extra.is_empty() {
         return Ok(Report::new(
-            json!({"gates": [], "changed": 0, "base": base, "outcome": outcome::nothing_to_check(&base).json()}),
-            format!("pre-push: base {base} ({base_why}); nothing changed since; nothing to check."),
+            json!({"gates": [], "changed": 0, "base": base, "growth_target": {"ref": target, "why": target_why}, "outcome": outcome::nothing_to_check(&base).json()}),
+            format!("pre-push: base {base} ({base_why}); growth target {target} ({target_why}); nothing changed since; nothing to check."),
         ));
     }
     if !accept.is_empty() {
@@ -462,7 +473,7 @@ fn command_in(
         });
     }
     if args.dry_run {
-        return Ok(dry_run(&planned));
+        return Ok(dry_run(&planned, &target, &target_why));
     }
     let load = exec::Exec::load(&real);
     let n = workers(load, std::thread::available_parallelism().map_or(1, |n| n.get()));
@@ -653,16 +664,32 @@ fn read_stdin() -> Result<String, CliError> {
 }
 
 /// The target the baselines' and allow lists' growth is measured against (`PADDOCK_BASE_REF` of the conformance gate), and why. NOT the
-/// diff base: a push's base is the nearest commit the remote has (often the remote ref's own old tip), and growth measured from it hides
-/// itself on the second push (a C53 baseline that grew on the first push is "already there" on the next). The target is the branch's
-/// own target: the nearest of `<remote>/main` and `<remote>/train/*` that the pushed commit contains (fewest commits ahead; on a tie
-/// the train), never the remote ref's old commit and never another feature branch. An explicit `--base` (the merge check) is kept.
-/// `<remote>/main` when no such ref is contained or `sha` is unknown.
-pub fn growth_target(root: &Path, sha: Option<&str>, remote: Option<&str>, explicit: Option<&str>) -> (String, String) {
+/// diff base: a push's base is the nearest commit the remote has (often the feature branch's own old tip), and growth measured from it
+/// hides itself on the second push (a C53 baseline that grew on the first push is "already there" on the next). The target is the
+/// branch's own target: the nearest of `<remote>/main` and `<remote>/train/*` that the pushed commit contains (fewest commits ahead; on
+/// a tie, main: a landed train that points at main's commit is not named), never a feature branch's own old tip and never another
+/// feature branch. A push to main or to a train (`landing_from`: the remote ref's previous tip) is measured from that previous tip,
+/// since there is nothing above it to be the target. An explicit `--base` (the merge check) is kept. `<remote>/main` when no such ref
+/// is contained or `sha` is unknown. A remote given as a URL falls back to `origin` for the tracking refs.
+pub fn growth_target(
+    root: &Path,
+    sha: Option<&str>,
+    remote: Option<&str>,
+    explicit: Option<&str>,
+    landing_from: Option<&str>,
+) -> (String, String) {
     if let Some(b) = explicit {
         return (b.to_string(), format!("--base {b} was given"));
     }
-    let remote = remote.filter(|r| !r.is_empty() && !r.starts_with('-')).unwrap_or("origin");
+    if let Some(old) = landing_from.filter(|o| git_text(root, &["cat-file", "-e", &format!("{o}^{{commit}}")]).is_some()) {
+        return (
+            old.to_string(),
+            "a push to main or a train is measured from the remote ref's previous tip".to_string(),
+        );
+    }
+    let remote = remote
+        .filter(|r| !r.is_empty() && !r.starts_with('-') && !r.contains("://") && !r.contains(':'))
+        .unwrap_or("origin");
     let main = format!("{remote}/main");
     let Some(sha) = sha else {
         return (main.clone(), format!("no commit to look at; {main}"));
@@ -684,7 +711,7 @@ pub fn growth_target(root: &Path, sha: Option<&str>, remote: Option<&str>, expli
         let Some(n) = git_text(root, &["rev-list", "--count", &format!("{r}..{sha}")]).and_then(|t| t.trim().parse::<u64>().ok()) else {
             continue;
         };
-        let key = (n, r == main, r.to_string());
+        let key = (n, r != main, r.to_string());
         if best.as_ref().is_none_or(|b| key < *b) {
             best = Some(key);
         }
@@ -1078,8 +1105,8 @@ pub fn accept_not_measured(rows: &mut [(String, Row)], accept: &[String], state:
     }
 }
 
-fn dry_run(planned: &[gates::Planned]) -> Report {
-    let mut text = String::new();
+fn dry_run(planned: &[gates::Planned], target: &str, target_why: &str) -> Report {
+    let mut text = format!("growth target (PADDOCK_BASE_REF): {target} ({target_why})\n");
     let mut data = Vec::new();
     for p in planned {
         match p {
@@ -1101,7 +1128,10 @@ fn dry_run(planned: &[gates::Planned]) -> Report {
             }
         }
     }
-    Report::new(json!({ "dry_run": true, "gates": data }), text)
+    Report::new(
+        json!({ "dry_run": true, "growth_target": {"ref": target, "why": target_why}, "gates": data }),
+        text,
+    )
 }
 
 /// The table, one line per row, then what CI runs that this gate does not, and the exit code (see the module doc). A failure's line

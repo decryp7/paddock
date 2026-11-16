@@ -85,7 +85,7 @@ fn grew(root: &Path, base_ref: &str) -> usize {
 #[test]
 fn the_target_is_the_nearest_main_or_train_the_pushed_commit_contains_never_the_remotes_old_tip() {
     let r = repo();
-    let (t, why) = growth_target(r.dir.path(), Some(&r.f2), Some("origin"), None);
+    let (t, why) = growth_target(r.dir.path(), Some(&r.f2), Some("origin"), None, None);
     assert_eq!(t, "origin/train/x", "{why}");
     assert!(why.contains("1 commit(s) behind") || why.contains("2 commit(s) behind"), "{why}");
     // Neither the remote ref's own old tip (origin/feature) nor another feature branch is ever the target.
@@ -94,21 +94,24 @@ fn the_target_is_the_nearest_main_or_train_the_pushed_commit_contains_never_the_
     // A branch off main only measures against main; a commit contained in neither falls back to origin/main, said.
     git(r.dir.path(), &["checkout", "-q", "-b", "off-main", "main"]);
     git(r.dir.path(), &["commit", "-q", "--allow-empty", "-m", "x"]);
-    assert_eq!(growth_target(r.dir.path(), Some("HEAD"), Some("origin"), None).0, "origin/main");
+    assert_eq!(
+        growth_target(r.dir.path(), Some("HEAD"), Some("origin"), None, None).0,
+        "origin/main"
+    );
     let orphan = git(r.dir.path(), &["commit-tree", "-m", "orphan", "HEAD^{tree}"]);
-    let (t, why) = growth_target(r.dir.path(), Some(&orphan), Some("origin"), None);
+    let (t, why) = growth_target(r.dir.path(), Some(&orphan), Some("origin"), None, None);
     assert_eq!(t, "origin/main");
     assert!(why.contains("none of"), "{why}");
     // An explicit --base (the merge check) is kept; no commit at all says so.
-    assert_eq!(growth_target(r.dir.path(), Some(&r.f2), None, Some("some-sha")).0, "some-sha");
-    assert!(growth_target(r.dir.path(), None, None, None).1.contains("no commit"));
+    assert_eq!(growth_target(r.dir.path(), Some(&r.f2), None, Some("some-sha"), None).0, "some-sha");
+    assert!(growth_target(r.dir.path(), None, None, None, None).1.contains("no commit"));
 }
 
 #[test]
 fn a_second_push_after_growth_still_reports_it_against_the_target_and_not_against_the_incremental_base() {
     let r = repo();
     let _ = &r.f1;
-    let (target, _) = growth_target(r.dir.path(), Some(&r.f2), Some("origin"), None);
+    let (target, _) = growth_target(r.dir.path(), Some(&r.f2), Some("origin"), None, None);
     assert_eq!(
         grew(r.dir.path(), &target),
         1,
@@ -176,5 +179,34 @@ fn only_target_ref_reads_the_variable() {
     assert!(
         offenders.is_empty(),
         "reads PADDOCK_BASE_REF outside check::baseline::target_ref: {offenders:?}"
+    );
+}
+
+#[test]
+fn a_landing_push_is_measured_from_its_previous_tip_a_landed_train_is_not_named_and_a_url_remote_uses_origin() {
+    let r = repo();
+    let d = r.dir.path();
+    // A push to a train (or main) is measured from the remote ref's previous tip.
+    let (t, why) = growth_target(d, Some(&r.f2), Some("origin"), None, Some(&r.f1));
+    assert_eq!(t, r.f1);
+    assert!(why.contains("previous tip"), "{why}");
+    // A tip the repository does not have is not a target: the usual choice applies.
+    assert_eq!(
+        growth_target(d, Some(&r.f2), Some("origin"), None, Some(&"1".repeat(40))).0,
+        "origin/train/x"
+    );
+    // A train that points at main's commit (landed) is not named: main wins the tie.
+    git(d, &["update-ref", "refs/remotes/origin/train/landed", "refs/remotes/origin/main"]);
+    git(d, &["checkout", "-q", "-b", "on-main", "main"]);
+    git(d, &["commit", "-q", "--allow-empty", "-m", "y"]);
+    assert_eq!(growth_target(d, Some("HEAD"), Some("origin"), None, None).0, "origin/main");
+    // A remote given as a URL falls back to origin for the tracking refs.
+    assert_eq!(
+        growth_target(d, Some(&r.f2), Some("https://example.invalid/x.git"), None, None).0,
+        "origin/train/x"
+    );
+    assert_eq!(
+        growth_target(d, Some(&r.f2), Some("git@host:x/y.git"), None, None).0,
+        "origin/train/x"
     );
 }
