@@ -118,6 +118,10 @@ pub struct Merge {
     pub label: String,
     /// The merge commit, when it exists (a branch checked before it is merged has none).
     pub commit: Option<String>,
+    /// What to call the first parent (the target) and the second (the member) in messages: their names, or short hashes.
+    pub target_name: String,
+    /// See `target_name`.
+    pub member_name: String,
 }
 
 impl Merge {
@@ -303,6 +307,8 @@ fn resolve(git: &Git, req: &Request) -> Result<Merge, CliError> {
             let tree = git.text(&["rev-parse", &format!("{c}^{{tree}}")]).map_err(gap)?.trim().to_string();
             let message = git.text(&["show", "-s", "--format=%B", c]).map_err(gap)?;
             Ok(Merge {
+                target_name: short(&ids[0]).to_string(),
+                member_name: short(&ids[1]).to_string(),
                 parents: ids,
                 tree,
                 message,
@@ -329,7 +335,12 @@ fn resolve(git: &Git, req: &Request) -> Result<Merge, CliError> {
                 .map_err(|e| {
                     let mut err = gap(format!("{b} does not merge cleanly into {t}, so there is no result to check: {e}"));
                     // The usual cause is a member built on a merge the target reverted: say so (report-only warnings).
-                    if let Some(step) = reverted_base::of_refs(git, &format!("{b} into {t}"), &first, &second) {
+                    let names = reverted_base::Names {
+                        target: t,
+                        member: b,
+                        merged: false,
+                    };
+                    if let Some(step) = reverted_base::of_refs(git, &format!("{b} into {t}"), &first, &second, &names) {
                         err.message.push('\n');
                         err.message.push_str(&step.text.join("\n"));
                     }
@@ -342,6 +353,8 @@ fn resolve(git: &Git, req: &Request) -> Result<Merge, CliError> {
                 message: String::new(),
                 label: format!("{b} into {t}"),
                 commit: None,
+                target_name: t.clone(),
+                member_name: b.clone(),
             })
         }
         _ => Err(CliError::usage("Give one merge commit, or --branch and --target together.")

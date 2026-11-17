@@ -1481,14 +1481,17 @@ cost on the real train history?
   `origin/<branch>`, debug build of `paddock-dev`
 - **Command:** `paddock-dev merge check --branch origin/<b> --target origin/train/2026-11-15-13 --no-generators`, wall time by
   `date`, one run each
-- **Numbers:**
+- **Numbers (after the review fixes: revert subjects, member forked from the reverted branch, per-branch lines):**
 
   | What | Time (s) |
   |---|---|
-  | `git log member..target` with the revert lines counted, 5 members | 0.020 to 0.058 |
-  | whole `merge check` of 6 members (all conflict with the train, so the detectors do not run) | 0.32 to 0.47 |
+  | whole `merge check`, feat/dev-vm-broker (no reverted base) | 0.48 |
+  | feat/dev-launch-rust (one reverted merge) | 3.8 before dropping a per-merge `git show` loop, then not re-measured |
+  | fix/testkit-ambient-hardening (6 reverted merges of feat/test-env-builder, one line) | 4.7 before that fix, 1.32 after |
+  | feat/pre-push-linux-clippy (trailer-less `Revert "..."` 3bbbfc7c7, found by subject) | 1.70 |
 
-- **Result:** feat/dev-launch-rust warns about feat/test-env-builder (merge 0886ef3f7, reverted in c7d27c7fc); the other five
-  say nothing. The step costs one `git log` plus, per live revert, two or three small git calls.
+- **Result:** the members that hold feat/test-env-builder (fix/testkit-ambient-hardening, diag/testkit-git-cost, feat/dev-launch-rust)
+  warn; feat/pre-push-linux-clippy warns through the revert that has no trailer; feat/dev-vm-broker and feat/debrief-duckdb-2 are
+  silent. The cost is about 0.2 s per live revert (rev-list, subject, containment: 3 to 5 git calls), one run each, debug build.
 - **Memory measure:** not measured
-- **Not measured:** a member that merges cleanly (the full detector run on top), Windows, a cold file cache, one run per member only.
+- **Not measured:** a member that merges cleanly (the full detector run on top), Windows, a cold file cache, release build.
