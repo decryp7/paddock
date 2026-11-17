@@ -218,6 +218,12 @@ jobs:
         name: Lint
         run: ./dev ci run ui lint
 
+      # The e2e ready-reads rule over every app's and the ui's e2e folder (feat/e2e-ready-helpers): never blocks until its first
+      # green recorded run (ER-41).
+      - name: e2e ready-reads (report-only, ER-41)
+        continue-on-error: true
+        run: node scripts/e2e-ready-report.mjs
+
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: Component specs

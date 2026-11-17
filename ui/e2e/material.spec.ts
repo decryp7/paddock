@@ -1,6 +1,6 @@
 import { expect, test } from './test';
 import AxeBuilder from '@axe-core/playwright';
-import { expectNoButtonLabelWraps, type Page, settledLayout } from '@decryp7/paddock-e2e';
+import { expectNoButtonLabelWraps, expectWired, type Page, settledLayout } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -16,7 +16,7 @@ async function open(page: Page, theme: string, accent = 'debrief', density = 'st
   await page.locator('[data-testid="material"] .mat-mdc-unelevated-button').first().waitFor();
   // The button is in the DOM from the creation pass; the select's `aria-expanded` comes with the update pass, so this is the moment the section
   // answers a click, a focus and a key. Before it a click ran into "onContainerClick of undefined" and a Tab walked past the select (about 1 in 18, any instant).
-  await expect(page.getByTestId('material').getByRole('combobox', { name: 'Level' })).toHaveAttribute('aria-expanded', 'false');
+  await expectWired(page.getByTestId('material').getByRole('combobox', { name: 'Level' }));
   // Let Material's enter animations and the layout settle: the page has no running animation.
   await settled(page);
 }

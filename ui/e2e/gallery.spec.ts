@@ -1,6 +1,6 @@
 import { expect, test } from './test';
 import AxeBuilder from '@axe-core/playwright';
-import { Page } from '@decryp7/paddock-e2e';
+import { expectOverlayAlignedWith, Page } from '@decryp7/paddock-e2e';
 import { PD_ICON_DOTS } from '../projects/paddock-ui/icons/src/paths';
 
 const DOTS = Object.fromEntries(Object.entries(PD_ICON_DOTS).map(([k, v]) => [k, (v ?? []).map((d) => [d[0], d[1]])]));
@@ -227,16 +227,8 @@ test.describe('UI basics review fixes (regressions)', () => {
     await trigger.click();
     const list = page.locator('#g-themed-panel');
     await expect(list).toBeVisible();
-    // the list lines up with the field's outline, of which the trigger text is inset. The list is visible a frame or two before the overlay
-    // positions it (at 0 px, 131 px wide, in 12 of 60 runs, then 536 px and 212 px as it should be), so wait for the position and fail with the last one.
-    const field = page.locator('pd-select:has(#g-themed) .mat-mdc-text-field-wrapper');
-    await expect
-      .poll(async () => {
-        const [t, l] = [(await field.boundingBox())!, (await list.boundingBox())!];
-        // The larger of the list's offset from the field's left edge and its width difference, in px.
-        return Math.max(Math.abs(l.x - t.x), Math.abs(l.width - t.width));
-      }, { message: 'the open list lines up with its field: its offset or width differs from the field by more than 1 px' })
-      .toBeLessThanOrEqual(1);
+    // the list lines up with the field's outline, of which the trigger text is inset
+    await expectOverlayAlignedWith(list, page.locator('pd-select:has(#g-themed) .mat-mdc-text-field-wrapper'));
   });
 
   test('hover changes the border of an input, a native select and the themed select, and a secondary button on a white card (review 2, N-P2-2, N-P3-3)', async ({ page }) => {

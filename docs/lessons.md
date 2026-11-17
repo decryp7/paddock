@@ -2543,3 +2543,13 @@ worktree-guard) and not `kill-guard.sh`, whose header says the coordinator wires
 started, through the tool that started it (`run_in_background` with TaskStop, or `kill %job`), or by the port you picked after `lsof` shows your own
 process in your own folder; never by a pattern on a program name. **Class: a guard that exists, is tested and is not wired** (earlier: the coordinator-hook
 rollout of 2026-11-12).
+
+## Shared "ready" waits and a lint for reads after a bare visibility wait (2026-11-17)
+The class of the sweep entry (a spec reads or presses on "it is in the DOM") now has one wait per kind in `ui/projects/paddock-e2e/src/ready.ts`
+(`expectListFiltered`, `expectOverlayAlignedWith`, `expectWired`, `expectStreamDone` (the chat log is `aria-busy` while a turn runs; an `expectIdle` over "no Stop button" passed before the stream started and was dropped), `expectDockPlanned`, `expectNotMoving`), and an ESLint rule,
+`paddock/e2e-ready-reads` (in the `e2ePinnedClock` block, AST, not a regex check; off by default because the lint commands run with `--max-warnings 0` and a warning blocked the pre-commit hook, read it with `PADDOCK_E2E_READY_LINT=warn`), that reports a read (`boundingBox`, `allInnerTexts`,
+`allTextContents`, `innerText`, `textContent`, `evaluate`, `evaluateAll`) in the statement right after a bare `toBeVisible()` or `waitFor()`. The
+sweep's five specs moved onto the helpers. First count (`node scripts/e2e-ready-report.mjs`, after the evaluate rule): 74 sites in the other specs (Debrief 26, Dyno 17, ui 23, Pitwall 5, Spotter 3, Pitcrew 0; an earlier version of the report script used a `--rule` override, which fails with "could not find plugin paddock" where the plugin is registered only inside the e2e block, and measured 2 of 6 projects; it now sets `PADDOCK_E2E_READY_LINT=warn`, and a fixture project of that shape is in its test);
+no waiver was added (ER-46), so the count only goes down as specs move or the rule flips to error after its first green run on the real tree. Many of
+the 74 are reads of a static element; a waiver `// conformance: e2e-ready — <why>` is for those.
+Debrief's `openApp` and `openAppWith` now wait on the dock signal (`expectDockPlanned`). Suite time on 9 related files (68 tests, Chromium, 4 workers, one run each, machine idle): 1.1 min with the wait, 1.0 min without; the difference is inside the run-to-run noise of one run each.

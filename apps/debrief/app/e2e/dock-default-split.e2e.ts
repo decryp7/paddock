@@ -1,5 +1,6 @@
 import { expect, test } from './test';
 import { openApp } from './app';
+import { expectDockPlanned } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // The default split is applied once the dock has its size, so the layout is the same the moment the app is ready and
 // a moment later (it used to settle at 300/489 or 282/507 px depending on when the container was measured).
@@ -63,7 +64,7 @@ for (const size of [
     });
     await openApp(page);
     await expect(page.locator('debrief-filter-bar')).toBeVisible();
-    await expect(page.locator('debrief-dock-host[data-dock-planned]')).toBeAttached();
+    await expectDockPlanned(page);
     const readLog = () => page.evaluate(() => (window as unknown as { __dockLog: Reading[] }).__dockLog);
     // The recorder reads a task after the attribute changes: wait until it has recorded the planned dock before judging the log.
     await expect.poll(async () => (await readLog()).some((r) => r.planned && r.bar), { message: 'the recorder saw the planned dock' }).toBe(true);
