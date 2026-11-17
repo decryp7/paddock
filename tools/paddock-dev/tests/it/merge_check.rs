@@ -1484,3 +1484,288 @@ exit 0
         assert!(!t.log().exists(), "a gate ran without a merge checkout");
     }
 }
+
+/// main merges `feat/x` (M), `member` starts from `from` ("M", "x": the reverted branch's own tip, or "base": before the merge),
+/// and main then does `after` (reverts). `member` and main touch other files, so the member merges cleanly into main and only the
+/// reverted-base warning can speak.
+fn reverted_base_from(from: &str, after: impl Fn(&Repo, &str)) -> Repo {
+    let r = Repo::new();
+    r.write("base.txt", "base\n");
+    let base = r.commit("base");
+    r.git(&["checkout", "-q", "-b", "feat/x"]);
+    r.write("x.txt", "x\n");
+    r.commit("feat: x");
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge branch 'feat/x'", "feat/x"]);
+    let m = r.git(&["rev-parse", "HEAD"]);
+    let start = match from {
+        "M" => m.clone(),
+        "x" => "feat/x".to_string(),
+        _ => base,
+    };
+    r.git(&["checkout", "-q", "-b", "member", &start]);
+    r.write("member.txt", "member\n");
+    r.commit("feat: member");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("other.txt", "other\n");
+    r.commit("feat: other");
+    after(&r, &m);
+    r
+}
+
+fn reverted_base_repo(after: impl Fn(&Repo, &str)) -> Repo {
+    reverted_base_from("M", after)
+}
+
+fn revert_merge(r: &Repo, sha: &str) -> String {
+    r.git(&["revert", "-m", "1", "--no-edit", sha]);
+    r.git(&["rev-parse", "HEAD"])
+}
+
+const WARNING: &str = "::warning::";
+const NEXT: &str = "on main, or land the reverted branch first";
+
+#[test]
+fn a_member_based_on_a_merge_the_target_reverted_warns_and_still_passes() {
+    // The positive control (ER-33): the same history as the two silent cases below, with the revert present.
+    let r = reverted_base_repo(|r, m| {
+        revert_merge(r, m);
+    });
+    let (code, text) = r.check(&["--branch", "member", "--target", "main", "--no-generators"]);
+    assert_eq!(code, 0, "report-only, never a refusal: {text}");
+    assert_eq!(text.matches(WARNING).count(), 1, "{text}");
+    assert!(text.contains("feat/x") && text.contains(NEXT), "{text}");
+    let revert = r.git(&["rev-parse", "--short=9", "HEAD"]);
+    assert!(text.contains(&revert), "names the revert commit: {text}");
+}
+
+#[test]
+fn a_reland_by_revert_of_revert_does_not_warn() {
+    let r = reverted_base_repo(|r, m| {
+        let rev = revert_merge(r, m);
+        r.git(&["revert", "--no-edit", &rev]);
+    });
+    let (code, text) = r.check(&["--branch", "member", "--target", "main", "--no-generators"]);
+    assert_eq!(code, 0, "{text}");
+    assert!(!text.contains(WARNING), "{text}");
+}
+
+#[test]
+fn a_clean_member_is_silent() {
+    let r = reverted_base_repo(|_, _| {});
+    let (code, text) = r.check(&["--branch", "member", "--target", "main", "--no-generators"]);
+    assert_eq!(code, 0, "{text}");
+    assert!(!text.contains(WARNING), "{text}");
+}
+
+#[test]
+fn a_member_that_conflicts_with_the_revert_is_not_measured_and_names_the_reverted_merge() {
+    // The case that started it: the member edits what the revert took out, so it does not merge at all.
+    let r = reverted_base_repo(|r, m| {
+        revert_merge(r, m);
+    });
+    r.git(&["checkout", "-q", "member"]);
+    r.write("x.txt", "member edit\n");
+    r.commit("feat: member edits x");
+    r.git(&["checkout", "-q", "main"]);
+    let (code, text) = r.check(&["--branch", "member", "--target", "main", "--no-generators"]);
+    assert_eq!(code, 6, "{text}");
+    assert!(text.contains("does not merge cleanly"), "{text}");
+    assert_eq!(text.matches(WARNING).count(), 1, "{text}");
+    assert!(text.contains("feat/x") && text.contains(NEXT), "{text}");
+}
+
+const BRANCH_ARGS: [&str; 5] = ["--branch", "member", "--target", "main", "--no-generators"];
+
+fn warnings(text: &str) -> Vec<&str> {
+    text.lines().filter(|l| l.contains(WARNING)).collect()
+}
+
+#[test]
+fn a_member_forked_from_the_reverted_branch_itself_warns() {
+    let r = reverted_base_from("x", |r, m| {
+        revert_merge(r, m);
+    });
+    let (code, text) = r.check(&BRANCH_ARGS);
+    assert_eq!(code, 0, "{text}");
+    assert_eq!(warnings(&text).len(), 1, "{text}");
+    assert!(text.contains("is built on feat/x, which main reverted"), "{text}");
+}
+
+#[test]
+fn a_member_forked_before_the_merge_is_silent_although_the_target_reverted_it() {
+    let r = reverted_base_from("base", |r, m| {
+        revert_merge(r, m);
+    });
+    let (code, text) = r.check(&BRANCH_ARGS);
+    assert_eq!(code, 0, "{text}");
+    assert!(warnings(&text).is_empty(), "{text}");
+}
+
+#[test]
+fn a_reverted_commit_that_is_not_a_merge_is_silent() {
+    // The member holds a plain commit the target reverted: no merge, nothing brought in, so only a merge counts.
+    let r = Repo::new();
+    r.write("base.txt", "base\n");
+    r.commit("base");
+    r.write("p.txt", "p\n");
+    let plain = r.commit("feat: plain");
+    r.git(&["checkout", "-q", "-b", "member"]);
+    r.write("member.txt", "member\n");
+    r.commit("feat: member");
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["revert", "--no-edit", &plain]);
+    let (code, text) = r.check(&BRANCH_ARGS);
+    assert_eq!(code, 0, "{text}");
+    assert!(warnings(&text).is_empty(), "{text}");
+}
+
+fn revert_by_subject(r: &Repo, m: &str, subject: &str) {
+    r.git(&["revert", "-m", "1", "--no-commit", m]);
+    r.commit(subject);
+}
+
+#[test]
+fn a_pull_out_without_the_trailer_is_found_by_its_subject() {
+    let r = reverted_base_repo(|r, m| revert_by_subject(r, m, "Revert \"Merge branch 'feat/x'\""));
+    let (code, text) = r.check(&BRANCH_ARGS);
+    assert_eq!(code, 0, "{text}");
+    assert_eq!(warnings(&text).len(), 1, "{text}");
+    assert!(text.contains("feat/x") && text.contains(NEXT), "{text}");
+}
+
+#[test]
+fn a_revert_subject_that_names_another_commit_is_silent_and_one_that_names_none_is_not_measured() {
+    let r = reverted_base_repo(|r, _| {
+        r.write("other.txt", "again\n");
+        r.commit("Revert \"feat: other\"");
+    });
+    let (_, text) = r.check(&BRANCH_ARGS);
+    assert!(warnings(&text).is_empty(), "a plain commit was named: {text}");
+    let r = reverted_base_repo(|r, _| {
+        r.write("other.txt", "again\n");
+        r.commit("Revert \"nothing has this subject\"");
+    });
+    let (code, text) = r.check(&BRANCH_ARGS);
+    assert_eq!(code, 0, "{text}");
+    assert!(
+        text.contains("::warning::reverted-base check NOT MEASURED") && text.contains("nothing has this subject"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_later_merge_of_the_same_branch_re_lands_it() {
+    let r = reverted_base_repo(|r, m| {
+        revert_merge(r, m);
+        r.git(&["checkout", "-q", "feat/x"]);
+        r.write("x2.txt", "x2\n");
+        r.commit("feat: x again");
+        r.git(&["checkout", "-q", "main"]);
+        r.git(&["merge", "-q", "--no-ff", "-m", "Merge branch 'feat/x'", "feat/x"]);
+    });
+    let (code, text) = r.check(&BRANCH_ARGS);
+    assert_eq!(code, 0, "{text}");
+    assert!(warnings(&text).is_empty(), "{text}");
+}
+
+#[test]
+fn an_abbreviated_sha_in_the_trailer_is_resolved() {
+    let r = reverted_base_repo(|r, m| {
+        r.git(&["revert", "-m", "1", "--no-commit", m]);
+        r.commit(&format!("Revert x\n\n  This reverts commit {}, reversing\nchanges.\n", &m[..8]));
+    });
+    let (_, text) = r.check(&BRANCH_ARGS);
+    assert_eq!(warnings(&text).len(), 1, "{text}");
+}
+
+#[test]
+fn several_reverted_merges_of_one_branch_are_one_line() {
+    let r = Repo::new();
+    r.write("base.txt", "base\n");
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "feat/x"]);
+    r.write("x.txt", "x\n");
+    r.commit("feat: x");
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&[
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "chore(train): merge feat/x (abc1234) into train 1",
+        "feat/x",
+    ]);
+    let m1 = r.git(&["rev-parse", "HEAD"]);
+    r.git(&["checkout", "-q", "feat/x"]);
+    r.write("x2.txt", "x2\n");
+    r.commit("feat: x again");
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["merge", "-q", "--no-ff", "-m", "chore(train): merge feat/x into train 1", "feat/x"]);
+    let m2 = r.git(&["rev-parse", "HEAD"]);
+    r.git(&["checkout", "-q", "-b", "member"]);
+    r.write("member.txt", "member\n");
+    r.commit("feat: member");
+    r.git(&["checkout", "-q", "main"]);
+    revert_merge(&r, &m2);
+    revert_merge(&r, &m1);
+    let (code, text) = r.check(&BRANCH_ARGS);
+    assert_eq!(code, 0, "{text}");
+    let lines = warnings(&text);
+    assert_eq!(lines.len(), 1, "{text}");
+    assert!(
+        lines[0].contains("merge of feat/x, which") && !lines[0].contains("abc1234"),
+        "{text}"
+    );
+    assert!(
+        lines[0].contains(&m1[..9]) && lines[0].contains(&m2[..9]),
+        "both merges are listed: {text}"
+    );
+}
+
+#[test]
+fn the_warning_names_the_target_not_a_sha_and_the_commit_form_says_to_build_and_test() {
+    let r = reverted_base_repo(|r, m| {
+        revert_merge(r, m);
+    });
+    let (_, text) = r.check(&BRANCH_ARGS);
+    assert!(text.contains("re-base member on main"), "{text}");
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge member", "member"]);
+    let (code, text) = r.check(&["HEAD", "--no-generators"]);
+    assert_eq!(code, 0, "{text}");
+    assert!(
+        text.contains("::warning::") && text.contains("may depend on feat/x; build and test the merge"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_shallow_clone_on_the_conflict_path_is_not_measured() {
+    let r = reverted_base_repo(|r, m| {
+        revert_merge(r, m);
+    });
+    r.git(&["checkout", "-q", "member"]);
+    r.write("x.txt", "member edit\n");
+    r.commit("feat: member edits x");
+    r.git(&["checkout", "-q", "main"]);
+    let clone = tempfile::tempdir().unwrap();
+    let url = format!("file://{}", r.path().display());
+    r.git(&[
+        "clone",
+        "-q",
+        "--depth",
+        "1",
+        "--no-single-branch",
+        &url,
+        clone.path().to_str().unwrap(),
+    ]);
+    let (code, text) = r.check_at(
+        clone.path(),
+        &["--branch", "origin/member", "--target", "origin/main", "--no-generators"],
+    );
+    assert_eq!(code, 6, "{text}");
+    assert!(
+        text.contains("::warning::reverted-base check NOT MEASURED") && text.contains("shallow"),
+        "{text}"
+    );
+}
