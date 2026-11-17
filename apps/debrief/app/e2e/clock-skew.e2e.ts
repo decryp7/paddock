@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith, runCommand } from './tools-support';
 import { gridRows } from './app';

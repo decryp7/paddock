@@ -15,7 +15,7 @@ locked worktree, never in the main checkout (rule 2).
    before merging anything else, and send the member back to its author with the failing rows. While the gate is report-only
    (until ADR 0098 records its first green run on a real train) a failure is printed with `::warning::` and the exit code stays
    0: read the output anyway and send the member back for a real failure.
-5. **One CI run per train round**, through `./dev ci dispatch` (it waits while another train holds a shared runner). Tests run
+5. **One CI run per train round**, through `./dev ci dispatch` (the run is queued at once and its first job waits while an older run holds a shared runner). Tests run
    once per train, not once per member (ER-8).
 6. **A red train run.** `./dev ci triage <run> --members <train-base>` lists the members, each with the projects its own change
    reaches, and for every new failure the members that reach it. Take out every suspect, or fix the cause in its owner's

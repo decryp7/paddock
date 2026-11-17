@@ -1,4 +1,4 @@
-import { expect, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
 
 /**
  * What Quit says and does in the tray popup's menu (the mock stands for the engine): Quit Dyno while nothing keeps the agent,

@@ -1,4 +1,4 @@
-import { afterNextRender, ApplicationRef, computed, EnvironmentInjector, inject, Injectable, Injector, signal } from '@angular/core';
+import { afterNextRender, ApplicationRef, computed, DestroyRef, EnvironmentInjector, inject, Injectable, Injector, signal } from '@angular/core';
 import type { DockviewApi, DockviewGroupPanel } from 'dockview';
 import { dockview, loadDockview } from './dockview-loader';
 import { Logger } from '../core/logger';
@@ -69,6 +69,11 @@ export class DockService {
   private readonly windowListeners = new Set<() => void>();
   /** True when the layout was built from defaults rather than restored from the store. */
   private fresh = false;
+  /**
+   * Counts the plans started or finished since attach: a settle that was scheduled for an earlier count is dropped (`releasePlannedAfterFrames`), so
+   * `planned` never comes back from a settle that a newer plan has overtaken.
+   */
+  private plannedToken = 0;
   /** The arrangement before the last fit to a small window (the saved one), for Undo; null when nothing was fitted. */
   private fitted: SavedLayout | null = null;
   /** Conditional views that were available at the last check, to detect "became available". */
@@ -103,6 +108,11 @@ export class DockService {
   readonly activeViewId = this.activeView.asReadonly();
   /** True once the dock has its layout (restored or default): a view shown before then would be dropped. */
   readonly ready = this.ctx.apiReady.asReadonly();
+  /**
+   * True when the arrangement is planned for the window's current size: the first fit has run and no resize waits for its re-plan. A layout read
+   * (a spec, a screenshot) is final from then until the window or the user changes it again; the dock host shows it as `data-dock-planned`.
+   */
+  readonly planned = computed(() => this.ctx.firstPlanned() && !this.ctx.replanPending());
   /** Ticks on every layout change of the dock (panels that keep native content in place follow it). */
   readonly layoutChanged = this.ctx.layoutVersion.asReadonly();
 
@@ -113,6 +123,9 @@ export class DockService {
   }
 
   constructor() {
+    // The dock detaches with the injector that owns it (the host's view normally detaches first, and `detach` is safe to repeat):
+    // an attach left standing keeps the cue elements it appended to `<body>`, its listeners and its timers.
+    inject(DestroyRef).onDestroy(() => this.detach());
     inject(DockPolicy).start({
       ready: this.ctx.apiReady,
       show: (id) => this.show(id),
@@ -325,7 +338,9 @@ export class DockService {
     this.evaluated = false;
     this.wasAvailable.clear();
     this.ctx.apiReady.set(true);
-    const stopResize = this.layout.watchResize(api, () => this.fitToWindow(api, null));
+    this.ctx.firstPlanned.set(false);
+    this.ctx.replanPending.set(false);
+    const stopResize = this.layout.watchResize(api, () => this.fitToWindow(api, null), (pending) => (pending ? this.holdPlanned() : this.releasePlannedAfterFrames()));
     const stopDrag = this.layout.watchSashDrag(() => {
       this.layout.rememberSizes(api);
       this.persistence.schedule();
@@ -334,7 +349,11 @@ export class DockService {
       stopResize();
       stopDrag();
     };
-    this.layout.whenSized(api, () => this.fitToWindow(api, loaded));
+    this.layout.whenSized(api, () => {
+      this.fitToWindow(api, loaded);
+      this.ctx.firstPlanned.set(true);
+      this.releasePlannedAfterFrames();
+    });
     if (extras.poppedOut.length) void this.ctx.windows()?.restore(extras.poppedOut);
   }
 
@@ -351,6 +370,9 @@ export class DockService {
     this.ctx.container = null;
     this.ctx.guides = null;
     this.ctx.apiReady.set(false);
+    this.plannedToken++;
+    this.ctx.firstPlanned.set(false);
+    this.ctx.replanPending.set(false);
     this.ctx.docked.set(new Set());
     this.ctx.autoHide.set(EMPTY_AUTO_HIDE);
   }
@@ -853,6 +875,31 @@ export class DockService {
     this.windowListeners.forEach((l) => l());
   }
 
+  /** A plan is on its way: `planned` is false until it has run and the window's reaction to it has settled. */
+  private holdPlanned(): void {
+    this.plannedToken++;
+    this.ctx.replanPending.set(true);
+  }
+
+  /**
+   * A plan has run. What its listeners did (the Explorer closing in a narrow window, a view tabbed) resizes the dock in the next frame, which
+   * starts another plan: `planned` comes back after two frames in which no new plan was started.
+   * Limit: two frames is a heuristic. A reaction that takes longer (a lazy load that resizes the dock after a few frames, a slow machine delivering the
+   * resize observer late) can start a plan after `planned` came back, and a reader then sees a layout that moves once more. Every such plan raises
+   * `planned` to false again (`holdPlanned`), so a reader that waits for the attribute to be present and stays present for two frames is safe; one that
+   * reads the instant it appears is not.
+   */
+  private releasePlannedAfterFrames(): void {
+    const token = ++this.plannedToken;
+    this.ctx.replanPending.set(true);
+    const frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb: () => void) => setTimeout(cb, 16);
+    frame(() =>
+      frame(() => {
+        if (token === this.plannedToken) this.ctx.replanPending.set(false);
+      }),
+    );
+  }
+
   /** A fit moves panels, which makes dockview leave the maximized state: full screen keeps its document well maximized. */
   private keepFullScreen(): void {
     const group = this.fullScreenGroup;
@@ -904,6 +951,12 @@ export class DockService {
   onWindowPlan(listener: () => void): () => void {
     this.windowListeners.add(listener);
     return () => this.windowListeners.delete(listener);
+  }
+
+  /** Lays the dock out at its container's size now (`DockLayout.followContainer`); the shell calls it after a change it made to the container. */
+  followContainer(): void {
+    const api = this.api;
+    if (api) this.layout.followContainer(api);
   }
 
   /**

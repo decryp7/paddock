@@ -230,7 +230,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
       </mat-table>
       <cdk-virtual-scroll-viewport pdViewportFollowsSize pdOwnedScroll class="pd-body" [itemSize]="rowPx()" [minBufferPx]="bufferPx()" [maxBufferPx]="bufferPx() * 2" [style.height.px]="bodyHeight()" [style.min-height.px]="fillMin()" [attr.data-testid]="state() === 'loading' ? 'table-loading' : null">
         <!-- A row group only while it has rows anyone can read: not when empty (the state is said below) or loading (placeholders are hidden). -->
-        <mat-table class="pd-body-table" [attr.role]="state() === 'ready' && lines().length ? 'rowgroup' : null" [dataSource]="lines()" [trackBy]="trackLine" (contentChanged)="onRowsDrawn()">
+        <mat-table class="pd-body-table" [attr.role]="state() === 'ready' && lines().length ? 'rowgroup' : null" [dataSource]="lines()" #bodyTable [trackBy]="trackLine" (contentChanged)="onRowsDrawn()">
           @for (c of columns2(); track c.key; let k = $index) {
             <ng-container [matColumnDef]="c.key">
               <mat-cell *matCellDef="let line" class="pd-cell" [attr.role]="cellRole" [class.pd-end]="c.align === 'end'" [class.pd-first]="k === 0" [style.--pd-tree-level]="k === 0 ? indent(line) : null" [class.pd-group-cell]="line.kind === 'group' && k === 0" [class.pd-group-summary]="line.kind === 'group' && k > 0">
@@ -552,6 +552,7 @@ export class PdTable<T> {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly injector = inject(Injector);
   private readonly viewport = viewChild.required(CdkVirtualScrollViewport);
+  private readonly bodyTable = viewChild.required('bodyTable', { read: MatTable });
   private readonly cells = contentChildren(PdCell);
   protected readonly emptySlot = contentChild(PdTableEmpty);
   protected readonly customCells = computed(() => new Map(this.cells().map((c) => [c.key(), c.template] as const)));
@@ -898,8 +899,14 @@ export class PdTable<T> {
     this.sortHeaders().forEach((h, i) => h.setAttribute('tabindex', !hasRows && i === 0 ? '0' : '-1'));
   }
 
+  /** The workaround for the CDK's recycled-view regression (see `recordRecycledRows`); a method so the canary spec can switch it off. */
+  protected recordRecycled(): void {
+    recordRecycledRows(this.bodyTable());
+  }
+
   /** The body table drew its rows (their bindings are set in the render that follows): the row the keyboard asked for may be there now, and the stops follow. */
   protected onRowsDrawn(): void {
+    this.recordRecycled();
     afterNextRender(
       () => {
         this.updateTabStops();
@@ -1139,5 +1146,29 @@ export class PdTable<T> {
     this.pendingFocus = null;
     this.active.set(index);
     row.focus({ preventScroll: true });
+  }
+}
+
+/**
+ * Works around a CDK table bug (22.1.8 and later, a3936ea, angular/components#33670): with virtual scrolling the table recycles row
+ * views, and `ViewContainerRef.detach` hands back a new `ViewRef`, so a row view taken from the recycle cache has no entry in the
+ * table's view-to-row-definition map. The next identity change of that row (the same key in a new object: every live update) then
+ * destroys and draws the row again, and its focus and open menu go with it. The body table has one row definition, so every view
+ * it holds is drawn from that one: record them all after each render. Does nothing when the private fields are gone, so the
+ * regression spec in table.spec.ts turns red on a CDK upgrade. Remove this function and its call once the CDK records recycled views.
+ */
+function recordRecycledRows(table: MatTable<unknown>): void {
+  const internals = table as unknown as {
+    _rowDefsByView?: WeakMap<object, unknown>;
+    _rowOutlet?: { viewContainer: { length: number; get(i: number): object | null } };
+    _defaultRowDef?: unknown;
+  };
+  const map = internals._rowDefsByView;
+  const container = internals._rowOutlet?.viewContainer;
+  const rowDef = internals._defaultRowDef;
+  if (!map || !container || !rowDef) return;
+  for (let i = 0; i < container.length; i++) {
+    const view = container.get(i);
+    if (view && !map.has(view)) map.set(view, rowDef);
   }
 }

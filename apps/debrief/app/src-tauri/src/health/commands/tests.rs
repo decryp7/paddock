@@ -200,9 +200,11 @@ fn process_is_alive(pid: u32) -> bool {
     sys.process(p).is_some()
 }
 
-/// Kills the worker child this test started: by identity (pid plus start time), taken from the supervisor's report.
+/// Kills the worker child this test started: by identity (pid plus start time), taken from the supervisor's report and
+/// verified to be a child of this test process. A worker the supervisor already reaped, whose pid went to another process,
+/// is left alone (rule 53, ER-14).
 fn kill_process(pid: u32) {
-    if let Some(id) = paddock_proc::ProcessId::of(pid) {
+    if let Some(id) = paddock_testkit_start::recorded::child_of_this_test(pid).running() {
         let _ = paddock_proc::end(id);
     }
 }

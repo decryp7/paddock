@@ -85,7 +85,22 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
     }
     assert!(!got.iter().any(|g| g.contains("fuzz")), "a fuzz workspace has its own job: {got:?}");
     let by = |id: &str| run_gates(&planned).into_iter().find(|g| g.id == id).cloned().unwrap();
-    // CI's own command lines (ci.yml: crates lint with every feature; apps without).
+    // The build folder is cargo configuration right after the subcommand, never a variable (sccache hashes it).
+    assert_eq!(&by("clippy crates").args[1..3], ["--config", "build.target-dir='/t'"]);
+    assert_eq!(&by("clippy-windows crates").args[2..4], ["--config", "build.target-dir='/t/xwin'"]);
+    assert!(
+        run_gates(&planned)
+            .iter()
+            .all(|g| g.env.iter().all(|(k, _)| !k.starts_with("CARGO_")))
+    );
+    // CI's own command lines (ci.yml: crates lint with every feature; apps without), without that pair.
+    let by = |id: &str| {
+        let mut g = by(id);
+        if let Some(i) = g.args.iter().position(|a| a == "--config") {
+            g.args.drain(i..i + 2);
+        }
+        g
+    };
     assert_eq!(
         by("clippy crates").args.join(" "),
         "clippy --workspace --all-targets --all-features --locked -- -D warnings"
@@ -100,10 +115,7 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
         by("clippy-windows crates").args.join(" "),
         "xwin clippy --target x86_64-pc-windows-msvc --workspace --all-targets --all-features --locked -- -D warnings"
     );
-    assert_eq!(
-        by("clippy-windows crates").env,
-        [("CARGO_TARGET_DIR".to_string(), "/t/xwin".to_string())]
-    );
+    assert!(by("clippy-windows crates").env.is_empty());
     assert_eq!(by("clippy-windows crates").need, Need::Tool("cargo-xwin".into()));
     assert!(
         by("clippy-windows crates")
@@ -149,6 +161,67 @@ fn a_dyno_core_change_regenerates_the_wire_fixtures_and_others_skip_it() {
     );
 }
 
+/// C100 in the push gate (user, 2026-11-17): a new conformance check that no CI line runs landed unwired twice (four checks on
+/// 2026-11-12, C138 on 2026-11-17). The row runs on every push, as the conformance row does (ER-41; review: a hand list of C100's
+/// inputs missed apps/dyno/paddock.ci.json, so a change from `--only C13` to C57 was skipped and passed, ER-42).
+#[test]
+fn the_gates_check_runs_on_every_push_whatever_changed_and_names_the_fix() {
+    let unrelated = json!({"conformance": false, "apps": [], "packages": {}});
+    for file in [
+        "apps/dyno/paddock.ci.json",
+        "conformance/src/checks/C138-new.mjs",
+        "conformance/paddock.ci.json",
+        "docs/gates.toml",
+        ".gitea/workflows/ci.yml",
+        ".gitea/actions/app-gates/action.yml",
+        "package.json",
+        "crates/paddock-proc/src/lib.rs",
+        "docs/x.md",
+    ] {
+        let planned = plan_gates(&unrelated, &change(&[file]), &facts());
+        let g = run_gates(&planned)
+            .into_iter()
+            .find(|g| g.id == "gates-register")
+            .cloned()
+            .unwrap_or_else(|| panic!("gates-register is not planned for {file}: {planned:?}"));
+        assert_eq!(
+            (g.program.as_str(), g.args.join(" ")),
+            ("/x/dev", "gates check".to_string()),
+            "{file}"
+        );
+        assert!(!g.heavy && g.rank == 0, "a cheap gate: it starts before any Clippy");
+        assert!(g.next.contains("::error") && g.next.contains("ADR 0060"), "{}", g.next);
+    }
+    let none = plan_gates(&unrelated, &change(&[]), &facts());
+    assert!(ids(&none).contains(&"gates-register".to_string()), "also for an empty change");
+}
+
+/// ROW_SET is what a pass record is compared with: it must list every row the planner can add besides the per-workspace ones, so a
+/// new row cannot leave an older pass usable.
+#[test]
+fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
+    let c = Change {
+        files: vec![
+            "crates/paddock-proc/src/lib.rs".into(),
+            "apps/dyno/crates/dyno-core/src/a.rs".into(),
+        ],
+        ranges: vec!["abc..HEAD".into()],
+    };
+    let planned = plan_gates(&plan(), &c, &facts());
+    let mut fixed: Vec<String> = ids(&planned)
+        .into_iter()
+        .filter(|id| {
+            !["fmt ", "lockfile ", "clippy ", "clippy-windows "]
+                .iter()
+                .any(|p| id.starts_with(p))
+        })
+        .collect();
+    fixed.sort();
+    let mut want: Vec<String> = super::gates::ROW_SET.iter().map(|s| s.to_string()).collect();
+    want.sort();
+    assert_eq!(fixed, want, "add the new row to gates::ROW_SET");
+}
+
 #[test]
 fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
     let docs = json!({"conformance": false, "apps": [], "packages": {}});
@@ -158,7 +231,12 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
     };
     let planned = plan_gates(&docs, &c, &facts());
     // Conformance and its tests run on every push, whatever the plan says (ER-41); everything else a docs change does not reach.
-    assert_eq!(ids(&planned), ["conformance", "conformance-tests"], "{:?}", ids(&planned));
+    assert_eq!(
+        ids(&planned),
+        ["conformance", "conformance-tests", "gates-register"],
+        "{:?}",
+        ids(&planned)
+    );
     let skipped: Vec<&String> = planned
         .iter()
         .filter_map(|p| if let Planned::Skip { reason, .. } = p { Some(reason) } else { None })
@@ -802,16 +880,21 @@ fn a_kept_build_folder_per_workspace_is_used_when_the_caller_sets_none() {
     f.target_dir = None;
     f.kept_targets = Some("/work/pre-push/targets/".into());
     let planned = plan_gates(&plan(), &change(&["crates/a.rs", "apps/dyno/src/a.rs"]), &f);
-    let env = |id: &str| run_gates(&planned).into_iter().find(|g| g.id == id).unwrap().env.clone();
-    let var = |v: &str| vec![("CARGO_TARGET_DIR".to_string(), v.to_string())];
-    assert_eq!(env("clippy crates"), var("/work/pre-push/targets/crates"));
-    assert_eq!(env("clippy apps/dyno"), var("/work/pre-push/targets/apps-dyno"));
-    assert_eq!(env("clippy-windows apps/dyno"), var("/work/pre-push/targets/apps-dyno/xwin"));
-    // The caller's own CARGO_TARGET_DIR wins (the host Clippy inherits it; the Windows one gets its xwin folder).
+    let args = |id: &str| run_gates(&planned).into_iter().find(|g| g.id == id).unwrap().args.join(" ");
+    assert!(args("clippy crates").contains("--config build.target-dir='/work/pre-push/targets/crates'"));
+    assert!(args("clippy apps/dyno").contains("--config build.target-dir='/work/pre-push/targets/apps-dyno'"));
+    assert!(args("clippy-windows apps/dyno").contains("--config build.target-dir='/work/pre-push/targets/apps-dyno/xwin'"));
+    assert!(
+        run_gates(&planned)
+            .iter()
+            .all(|g| g.env.iter().all(|(k, _)| !k.starts_with("CARGO_"))),
+        "never a CARGO_TARGET_DIR variable"
+    );
+    // The caller's own CARGO_TARGET_DIR is used as the configured folder (and dropped from the child's environment, see exec).
     f.target_dir = Some("/mine".into());
     let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &f);
     let g = run_gates(&planned).into_iter().find(|g| g.id == "clippy crates").unwrap().clone();
-    assert!(g.env.is_empty());
+    assert!(g.env.is_empty() && g.args.join(" ").contains("--config build.target-dir='/mine'"));
 }
 
 #[test]
@@ -1076,6 +1159,26 @@ mod known_commit {
         assert!(found.is_none(), "the tree id no longer matches");
     }
 
+    /// A pass made by a tool with fewer rows is no evidence for one with more (review: a record from before `gates-register` existed
+    /// would have let a push skip it). The record carries the tool's fixed row set; a different one is refused with the reason.
+    #[test]
+    fn a_record_made_with_another_set_of_rows_is_no_evidence() {
+        let (_d, r, _one, two) = repo();
+        let l = fake(None, Err("no run"));
+        known::write_record(&r, &state(&r), &two, "origin/main", &["fmt crates".into()], 1, &pass_for(&r, &two)).unwrap();
+        let rec = state(&r).join("records").join(format!("{two}.json"));
+        let text = std::fs::read_to_string(&rec).unwrap();
+        assert!(text.contains("\"gate_rows\""), "the record names the rows: {text}");
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &["origin/main"], &l);
+        assert!(found.is_some(), "positive control: the same row set is evidence");
+        let old = text.replace("gates-register,", "");
+        assert_ne!(old, text, "the control changed the record");
+        std::fs::write(&rec, old).unwrap();
+        let (found, trail) = known::find(&r, &state(&r), None, &[two], &["origin/main"], &l);
+        assert!(found.is_none(), "a record of an older row set is refused");
+        assert!(trail.iter().any(|t| t.contains("rows")), "{trail:?}");
+    }
+
     #[test]
     fn a_complete_green_ci_run_counts_only_when_the_pushed_remote_has_the_sha_as_a_tip() {
         let (_d, r, _one, two) = repo();
@@ -1153,6 +1256,7 @@ mod known_commit {
             &r,
             &push_line(&two),
             &fake(None, Err("x")),
+            crate::local_sccache::Lazy::off(),
         )
         .unwrap();
         assert_eq!(rep.exit, Exit::Ok);
@@ -1186,6 +1290,7 @@ mod known_commit {
             &r,
             &push_line(&two),
             &fake(None, Err("x")),
+            crate::local_sccache::Lazy::off(),
         )
         .unwrap();
         let tree = git_text(&r, &["rev-parse", &format!("{two}^{{tree}}")]).unwrap().trim().to_string();
@@ -1255,6 +1360,7 @@ mod known_commit {
             &r,
             &delete,
             &l,
+            crate::local_sccache::Lazy::off(),
         );
         assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
         let a = PrePushArgs {
@@ -1262,7 +1368,7 @@ mod known_commit {
             base: Some("origin/main".into()),
             ..args()
         };
-        let got = command_in(&a, &r, &push_line(&two), &l);
+        let got = command_in(&a, &r, &push_line(&two), &l, crate::local_sccache::Lazy::off());
         assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
     }
 
@@ -1579,7 +1685,7 @@ mod base_choice {
             accept_not_measured: vec![],
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
-        let got = command_in(&args, &r, &line, &live(&r));
+        let got = command_in(&args, &r, &line, &live(&r), crate::local_sccache::Lazy::off());
         assert!(got.as_ref().map_or(true, |rep| !rep.text.contains("nothing to check")), "{got:?}");
     }
 }
@@ -1740,6 +1846,32 @@ fn a_tracking_upstream_wins_only_a_tie() {
         ),
         (c3.as_str(), true),
         "{why}"
+    );
+}
+
+#[test]
+fn a_push_of_only_reservation_refs_has_nothing_to_check() {
+    let zero = "0".repeat(40);
+    let paddock = format!("refs/paddock/check-ids/C9 aaa refs/paddock/check-ids/C9 {zero}\n");
+    let blob = |sha: &str| sha == "aaa";
+    assert!(super::only_reservation_refs(&paddock, &blob));
+    let deletion = format!("(delete) {zero} refs/paddock/check-ids/C9 aaa\n");
+    assert!(super::only_reservation_refs(&deletion, &blob), "a deletion is a reservation push");
+    let mixed = format!("{paddock}refs/heads/a bbb refs/heads/a {zero}\n");
+    assert!(
+        !super::only_reservation_refs(&mixed, &blob),
+        "a branch in the same push is still checked"
+    );
+    assert!(!super::only_reservation_refs("", &blob), "no lines is not a reservation push");
+    let commit = format!("refs/paddock/check-ids/C9 ccc refs/paddock/check-ids/C9 {zero}\n");
+    assert!(
+        !super::only_reservation_refs(&commit, &blob),
+        "a commit under check-ids goes through the gates"
+    );
+    let other = format!("refs/paddock/x aaa refs/paddock/x {zero}\n");
+    assert!(
+        !super::only_reservation_refs(&other, &blob),
+        "only refs/paddock/check-ids/ is exempt"
     );
 }
 

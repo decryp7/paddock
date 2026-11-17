@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { openApp } from './app';
 
 // Usability review 2026-10-23 (U11): a level or a lane is never shown by colour alone. In forced colours (Windows

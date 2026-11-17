@@ -24,8 +24,7 @@ impl Supervisor {
         let Some(r) = self.runners.get_mut(name) else { return };
         let done = {
             let probe_ref = &mut self.probe;
-            r.watch
-                .advance(now, &mut |pid, started| probe_ref.alive(pid, started), self.terminator.as_ref())
+            r.watch.advance(now, &mut |id| probe_ref.seen(id), self.terminator.as_ref())
         };
         let mut failures: Vec<String> = vec![];
         if probe && r.process.is_some() && !r.jobs.running(now) {
@@ -124,7 +123,7 @@ impl Supervisor {
         &mut self,
         runner: &RunnerName,
         pid: u32,
-        started_at: Option<Timestamp>,
+        started_at: Timestamp,
         allow_runner: bool,
         now: Timestamp,
     ) -> Response {
@@ -140,7 +139,7 @@ impl Supervisor {
                 return err(ErrorCode::BadRequest, Refusal::NotInTree.to_string());
             }
         }
-        let target = match r.watch.check(pid, started_at.map(|t| t.0), std::process::id(), allow_runner) {
+        let target = match r.watch.check(pid, started_at.0, std::process::id(), allow_runner) {
             Ok(t) => t.clone(),
             Err(refusal) => return err(ErrorCode::BadRequest, refusal.to_string()),
         };
@@ -156,7 +155,7 @@ impl Supervisor {
                 );
                 Response::Ok
             }
-            Err(e) => err(ErrorCode::Busy, e),
+            Err(e) => err(e.code(), e.to_string()),
         }
     }
 

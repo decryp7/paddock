@@ -431,7 +431,7 @@ export class QueryField {
   selector: 'debrief-query-status',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [QlSuggestions],
-  host: { '[class.empty]': '!shown()' },
+  host: { '[class.shown]': 'shown()' },
   template: `
     @if (shown()) {
       <div class="status" role="status" data-testid="query-status">
@@ -456,8 +456,8 @@ export class QueryField {
     }
   `,
   styles: `
-    :host { display: block; }
-    :host(.empty) { display: none; }
+    :host { display: none; }
+    :host(.shown) { display: block; }
     .status { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 18px; font-size: var(--fs-sm); color: var(--text-2); }
     .err { color: var(--danger-text); overflow-wrap: anywhere; }
     .muted { color: var(--muted); }

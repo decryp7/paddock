@@ -1,5 +1,5 @@
 import { invoke } from '../core/activity/ipc';
-import { inject, Injectable } from '@angular/core';
+import { DestroyRef, inject, Injectable } from '@angular/core';
 import { Rect } from '../dock/dock-geometry';
 import { Logger, withFailureLogging } from '../core/logger';
 import { isTauri } from '../core/platform';
@@ -108,6 +108,8 @@ export abstract class PopoutBackend {
 
 export function createPopoutBackend(): PopoutBackend {
   const real = isTauri() ? new TauriPopoutBackend() : new BrowserPopoutBackend();
+  // The browser backend's poll of closed windows ends with the injector.
+  if (real instanceof BrowserPopoutBackend) inject(DestroyRef).onDestroy(() => real.dispose());
   return withFailureLogging<PopoutBackend>(real, inject(Logger), { category: 'ui.popout' });
 }
 
@@ -436,5 +438,11 @@ export class BrowserPopoutBackend extends PopoutBackend {
 
   private changed(): void {
     for (const h of this.changedHandlers) h();
+  }
+
+  /** Stops the poll of closed windows (the injector is going). */
+  dispose(): void {
+    if (this.timer !== null) clearInterval(this.timer);
+    this.timer = null;
   }
 }

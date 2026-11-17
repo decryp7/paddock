@@ -358,11 +358,35 @@ fn a_config_that_only_names_the_build_folder_does_not_change_the_hash() {
     }
 }
 
+#[cfg(unix)]
+const CARGO_FOLDER_PRELUDE: &str = r#"[ -z "${CARGO_TARGET_DIR:-}" ] || { echo "CARGO_TARGET_DIR reached cargo: pass --config build.target-dir" >&2; exit 97; }
+for a in "$@"; do case "$a" in build.target-dir=*) CARGO_TARGET_DIR=${a#build.target-dir=}; CARGO_TARGET_DIR=${CARGO_TARGET_DIR#\'}; CARGO_TARGET_DIR=${CARGO_TARGET_DIR%\'};; esac; done
+"#;
+
 /// A tiny stand-in for the tool binary: answers `--version`, otherwise prints a marker.
 #[cfg(unix)]
 pub(crate) fn write_script(path: &Path, body: &str) {
+    write_script_with(path, body, true);
+}
+
+/// [`write_script`] without the cargo build-folder rule, for `conformance/ci/dev-tool-publish.sh`: that CI script builds one
+/// throw-away tool with `CARGO_TARGET_DIR` and no compile cache, and CI is not part of the local sccache change.
+#[cfg(unix)]
+pub(crate) fn write_script_plain(path: &Path, body: &str) {
+    write_script_with(path, body, false);
+}
+
+#[cfg(unix)]
+fn write_script_with(path: &Path, body: &str, cargo_rule: bool) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    paddock_testkit::exe::write_program(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    // A stand-in cargo takes its build folder from `--config build.target-dir='...'` and fails when `CARGO_TARGET_DIR` reaches it:
+    // sccache hashes every `CARGO_*` variable, so the variable defeats the compile cache across worktrees (lessons.md).
+    let prelude = if cargo_rule && path.file_name().is_some_and(|n| n == "cargo") {
+        CARGO_FOLDER_PRELUDE
+    } else {
+        ""
+    };
+    paddock_testkit::exe::write_program(path, format!("#!/bin/sh\n{prelude}{body}\n")).unwrap();
 }
 
 /// A stand-in `cargo` that "builds" a script answering `--version`, `self hash` (the hash it was built for, as the real tool shows)
@@ -434,6 +458,36 @@ fn a_cached_binary_that_does_not_run_is_replaced_and_a_good_one_is_used_as_it_is
     let (code, out, err) = run_wrapper(&f, &home, &env);
     assert_eq!((code, out.trim(), err.as_str()), (0, "built-by-shim", ""));
     assert!(!f.cargo_home.path().join("target").exists(), "no second build");
+}
+
+/// Git Bash on Windows: the build folder reaches cargo inside `--config build.target-dir='...'`, where MSYS does not turn a
+/// `/c/Users/...` path into `C:/Users/...`, so cargo built into `C:\\c\\Users\\...` and the wrapper found an old binary in the
+/// folder it named (run 8208: "built a paddock-dev that is not for hash ... three times in a row", five Windows jobs). Where
+/// `cygpath` exists the folder is passed in its mixed form (`cygpath -m`). A stand-in `cygpath` records the call; it answers the
+/// same path, so the build still lands where the wrapper looks.
+#[cfg(unix)]
+#[test]
+fn where_cygpath_exists_the_build_folder_reaches_cargo_in_its_windows_form() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let calls = scratch.path().join("cygpath-calls");
+    write_script(
+        &f.cargo_home.path().join("shims").join("cygpath"),
+        &format!(
+            "echo \"$*\" >> '{}'\n[ \"$1\" = -m ] && shift\nprintf '%s\\n' \"$1\"",
+            calls.display()
+        ),
+    );
+    let home = scratch.path().join("home");
+    let (code, out, err) = run_wrapper(&f, &home, &[("RUSTC", rustc)]);
+    assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
+    let seen = std::fs::read_to_string(&calls).unwrap_or_default();
+    let target = f.cargo_home.path().join("target");
+    assert!(
+        seen.lines().any(|l| l.starts_with("-m ") && l.contains(&*target.to_string_lossy())),
+        "the build folder went to cargo without cygpath -m: {seen:?}"
+    );
 }
 
 /// A cached tool that answers `--version` and otherwise says it ran (what an old cached binary would do).
@@ -1627,7 +1681,7 @@ fn the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_i
     let entry = home.join("bin").join("0123456789abcdef0123456789abcdef01234567");
     std::fs::create_dir_all(&entry).unwrap();
     let cached = entry.join("paddock-dev-test-host");
-    std::fs::copy(env!("CARGO_BIN_EXE_paddock-dev"), &cached).unwrap();
+    std::fs::copy(crate::dev_bin::PATH, &cached).unwrap();
     let signal = scratch.path().join("signal.log");
     std::fs::write(&signal, "").unwrap();
     let mut run = Command::new(&cached)

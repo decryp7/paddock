@@ -174,6 +174,14 @@ review_by = 2026-12-14
 approved = "coordinator"
 
 [[report_only]]
+id = "C127"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then migrate or waive the sites left and flip SEVERITY in C127-computed-rm.mjs and the mode to gate. First count 2026-11-15: 31 warnings in 15 files (after the review rows: if, while, env, a path, find -exec) after migrating the prune (both deletes), host-cleanup, node-caches, stable-workspace, kept-clone and vm-win prepare sites onto safe_rm (conformance/ci/safe-rm.sh); left: the dev wrapper, job-tmpdir, job-isolation, tag-node-caches, tauri-bundle, the shell-demo smoke scripts and app scripts"
+owner = "ER-21 class: computed deletes that reached beyond their folder (fix/small-foundation-2026-11-15)"
+since = 2026-11-15
+review_by = 2026-12-15
+approved = "user"
+
+[[report_only]]
 id = "C138"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY in C138-owned-scroll.mjs and the mode to gate. 0 sites on this branch (21 on origin/main 97176067c, each moved onto pdOwnedScroll or waived with a reason: dockview elements, the widget grid's drag auto-scroll, Pitcrew's config editor, and the chat and assistant logs, which keep anchoring on purpose)"
 owner = "ADR 0105"
@@ -207,7 +215,7 @@ approved = "coordinator"
 
 [[report_only]]
 id = "C121"
-reason = "ER-41: report-only until its first green run on the real tree is recorded in ADR 0098 (WP-2), then flip the findings to errors in C121-declared-data.mjs and c121.rs. first count 2026-11-13: 10 findings, all the parity fixtures of C121 in tools/paddock-dev/tests/it/check.rs, now allowed with a reason (0 left); it flags a registry entry or test that runs grep, sed, awk or a regular expression over a workflow file"
+reason = "ER-41: report-only until its first green run on the real tree is recorded in ADR 0098 (WP-2), then flip the findings to errors in C121-declared-data.mjs and c121.rs. first count 2026-11-13: 10 findings, all the parity fixtures of C121 (now in tools/paddock-dev/tests/it/check_c121.rs, one of the check's own files it does not read since 2026-11-15); it flags a registry entry or test that runs grep, sed, awk or a regular expression over a workflow file"
 owner = "ADR 0098 WP-2"
 since = 2026-11-13
 review_by = 2027-01-07
@@ -227,6 +235,22 @@ reason = "ER-41: report-only until its first green run on the real tree, recorde
 owner = "ER-21 class: stale machine paths after a disk move (fix/guard-paths-derived)"
 since = 2026-11-14
 review_by = 2026-12-14
+approved = "coordinator"
+
+[[report_only]]
+id = "C128"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in C128-recorded-pid.mjs. It flags a test that takes the identity of a pid it parsed from a file or a child's output with ProcessId::of (rule 53; Spotter's run 8118 and the review of f224dd0b4): the fix is paddock_testkit_start::recorded. First count 2026-11-15 on fix/test-pid-reader: 12 sites before the branch, 0 after (5 migrated, 6 waived with a reason, 1 rewritten in paddock-proc, whose tests cannot use the kit). Known gap: a pid parsed in another function is not followed"
+owner = "ER-21 class: a test observes a recorded pid after the code under test may have ended it (fix/test-pid-reader)"
+since = 2026-11-15
+review_by = 2026-12-15
+approved = "coordinator"
+
+[[report_only]]
+id = "C131"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in C131-golden-machine.mjs and c131.rs. It may not block before the shared allow-list reader has its merge-base growth guard (being added on origin/feat/testkit-stand-in: reuse it when it lands, do not copy C129's, rule 55). It reads the golden folders (and *.golden and *.snap files) for fixed patterns only: uid and gid numbers, /Users, /home and C:\\Users paths and temp paths, so it gives the same result on every machine; the ER-21 class 'a golden captured on one machine fails on another' (train 14 WP-2: six goldens, among them the Mac's uid 501 in a guardian golden). It walks the working folder today; reading git's tracked list is the approved train-14 item. First count 2026-11-16 on feat/golden-checked-when-made: 7 sites in 310 files, the same on the Mac and as root in the CI image (the test check_c131 runs on both through ./dev golden confirm), all invented users, waived with a reason in conformance/c131-allow.json. It found no real value; a real host name in a wiki fixture was replaced as housekeeping, not as a catch. Known gap: this machine's own user, host, RAM and CPU count are not read (they made the result differ per machine)"
+owner = "ER-21 class: a golden holds a value of its capturing machine (feat/golden-checked-when-made)"
+since = 2026-11-15
+review_by = 2026-12-15
 approved = "coordinator"
 
 [[report_only]]
@@ -1187,4 +1211,44 @@ reason = "ignored or env-gated: needs a pipe served by a second Windows account;
 owner = "Dyno 1.1.1"
 since = 2026-11-12
 review_by = 2026-12-20
+approved = "coordinator"
+
+[[report_only]]
+id = "C135"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C135-leak-detector-opt-outs.mjs, then flip the warnings to errors and the mode to gate. First count 2026-11-16: one listed file (the test kit's own spec, four suites that leak on purpose); conformance/c135-allow.json is held to shrink-only against the merge base by the check itself (ER-46)"
+owner = "ER-21 class: a test fails for what an earlier test left behind (feat/test-leak-detector)"
+since = 2026-11-16
+review_by = 2026-12-16
+approved = "coordinator"
+
+[[report_only]]
+id = "C133"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C133-e2e-pinned-clock.mjs, then flip its three rules to errors. What a linter can say is the linter's (ER-37): the ESLint rule paddock/e2e-pinned-clock (eslint/src/rules/e2e-pinned-clock.cjs, block e2ePinnedClock in every app's and the ui eslint.config, e2e/**/*.ts in every lint target) refuses a value, default, namespace or subpath import or a re-export of test from Playwright or the kit, a dynamic import() or require() of them (also by template literal or variable), clock.install with no time in any form, .newContext( on any receiver and browser.newPage(; one rule of its own, so an app's no-restricted-syntax in the same files cannot replace it. eslint/test/wiring.test.cjs checks, for every app and the ui, that the lint command covers e2e, that the rule fires with the app's real config, and that the app's other e2e rules still fire (Debrief raw-row selectors, no-debugger). C133 keeps three rules over the specs: rule 1 (pinnedClock false or pin false carries `pinned-clock: off — <why>`), rule 2 (in a spec that imports the live helpers the first interaction of a test is inside withLivePaused or after pauseLive), rule 3 (ER-12, no wait over an empty set of boxes that must exist: waitForFunction over .every( with no length check outside the callback; an empty set that IS the settled state, document.getAnimations(), carries `conformance: e2e-wait — <why>`). First count 2026-11-16: 0 findings in all three rules (Dyno reports-disks.spec.ts moved to settledLayout; the two getAnimations waits in Debrief axe.ts and Dyno axe.spec.ts carry the waiver). No spec imports the live helpers yet; Debrief clickWithTimePaused and pauseAhead on fix/main-webkit-e2e (a91a5ac78) move onto the kit helpers when that branch lands. Limit of rule 3: a function passed to waitForFunction by name is not read. JS host only: no Rust mock backends. Out of scope (their own Playwright configs outside the e2e folders): Debrief scripts/screenshots/capture.ts and scripts/visual-qa/sweep.ts. A mock backend reading the wall clock is not checked: in the page Date.now and new Date are the pinned clock (review 2026-11-16)."
+owner = "ER-21 class: time-of-day-dependent e2e on a clock-relative mock (CI run 8154)"
+since = 2026-11-16
+review_by = 2026-12-16
+approved = "coordinator"
+
+[[report_only]]
+id = "C137"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C137-e2e-kit-import.mjs, then flip SEVERITY to error. An app e2e spec that imports @decryp7/paddock-e2e by package name needs its workflow to build it (build:e2e) or a relative source import (the Debrief dock spec ran no test in any shard)."
+owner = "ER-21 class: a spec imports what its CI job never builds"
+since = 2026-11-17
+review_by = 2026-12-17
+approved = "coordinator"
+
+[[report_only]]
+id = "C129"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in C129-no-new-shell.mjs and c129.rs, then flip the warnings to errors and the mode to gate. It keeps new shell and Python files out (shell-to-rust plan WP-0): a file not in the shrink-only baseline conformance/baselines/C129-shell.json or in the exceptions conformance/shell-exceptions.json is a finding, so is one that grew; it also reports callers of scripts the tree lacks and the count of inline run lines in .gitea. First count 2026-11-15: 149 baselined files (15,559 lines) and 20 exact exceptions, 1 warning (inline shell in .gitea: 1269 lines in 333 blocks); no caller names a missing script. Recorded: not yet"
+owner = "shell-to-rust plan WP-0, approved by the user 2026-11-15 (ER-21 class: a shell script behaves differently on macOS, Linux and Git Bash, run 8138)"
+since = 2026-11-15
+review_by = 2026-12-15
+approved = "user"
+
+[[report_only]]
+id = "C136"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C136-unit-live-feeds.mjs, then flip the warnings to errors and the mode to gate. First count 2026-11-16: 3 findings in 1 file (mock-backend.spec.ts), fixed through ManualClock, 0 after (no allow list)"
+owner = "ER-21 class: a unit test asserts a value while a live mock feed keeps changing it (run 8191; feat/unit-live-helper)"
+since = 2026-11-16
+review_by = 2026-12-16
 approved = "coordinator"

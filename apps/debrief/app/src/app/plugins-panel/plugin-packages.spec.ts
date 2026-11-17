@@ -1,5 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { all, buttonByText, el, settle, text } from '../../testing/helpers';
+import { all, buttonByText, el, settle, text, openDialog } from '../../testing/helpers';
 import { CmdError } from '../core/cmd-error';
 import { DROPPED_FILES_HANDLERS } from '../core/dropped-files';
 import { Platform } from '../core/platform';
@@ -274,6 +274,7 @@ describe('PackageReviewDialog', () => {
     const host = await hostFixture();
     await store.reviewPackage('/p/web.debriefplugin');
     await settle(host);
+    await openDialog(dialogs);
     expect(dialogs.stack().length).toBe(1);
     expect(el(host, '[role=dialog] h2').textContent).toBe('Install plugin');
     expect(el(host, '[data-testid=package-name]').textContent).toBe('Web access log enricher');
@@ -292,7 +293,7 @@ describe('PackageReviewDialog', () => {
     await settle(host);
     expect(backend.calls.some((c) => c.endsWith(':runPrograms') && c.startsWith('install:'))).toBe(true);
     // Installed: the dialog closed itself.
-    expect(dialogs.stack()).toEqual([]);
+    expect(dialogs.stack()).toHaveLength(0);
     expect(store.review()).toBeNull();
   });
 
@@ -304,11 +305,12 @@ describe('PackageReviewDialog', () => {
     await settle(host);
     buttonByText(host, 'Cancel').click();
     await settle(host);
-    expect(dialogs.stack()).toEqual([]);
+    expect(dialogs.stack()).toHaveLength(0);
     expect(store.review()).toBeNull();
     // A new review opens a new dialog.
     await store.reviewPackage('/p/web.debriefplugin');
     await settle(host);
+    await openDialog(dialogs);
     expect(dialogs.stack().length).toBe(1);
     dialogs.dismissTop();
     await settle(host);
@@ -466,7 +468,7 @@ describe('InstalledPackages', () => {
     await settle(host);
     await settle(fixture);
     expect(backend.calls).toContain(`setPermissions:${SAP}:`);
-    expect(dialogs.stack()).toEqual([]);
+    expect(dialogs.stack()).toHaveLength(0);
     expect(store.plugins()[0]?.granted).toEqual([]);
 
     await rowMenu(fixture, SAP);
@@ -491,11 +493,12 @@ describe('InstalledPackages', () => {
     await settle(host);
     buttonByText(host, 'Apply and restart plugin').click();
     await settle(host);
+    await openDialog(dialogs);
     expect(dialogs.stack().length).toBe(1);
     expect(el(host, '[role=dialog] .err').textContent).toContain('the plugin did not restart');
     buttonByText(host, 'Cancel').click();
     await settle(host);
-    expect(dialogs.stack()).toEqual([]);
+    expect(dialogs.stack()).toHaveLength(0);
   });
 
   it('says when the plugin of the permissions dialog is gone', async () => {

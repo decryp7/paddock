@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { systemMockClock } from './mock-clock';
+import { resumeSystemMockClock, stopSystemMockClock, systemMockClock } from './mock-clock';
 import { MockBackend } from './mock-backend';
 import { MockImportSim } from './mock-import';
 import { MockAlertMutes } from './mock-live';
-import { tinyDataset } from '../../../testing/helpers';
+import { query, tinyDataset } from '../../../testing/helpers';
 import { ManualClock } from '../../../testing/manual-clock';
 
 describe('mock clock', () => {
@@ -66,5 +66,80 @@ describe('mock clock', () => {
     expect(mutes.covers({ kind: 'silence', rule: null })).toBe(true);
     await clock.advance(10);
     expect(mutes.covers({ kind: 'silence', rule: null })).toBe(false);
+  });
+});
+
+describe('systemMockClock stop and resume', () => {
+  afterEach(() => {
+    resumeSystemMockClock();
+    vi.useRealTimers();
+  });
+
+  it('stop clears the timers and intervals and wakes the sleeps; while stopped nothing new starts and sleeps return at once', async () => {
+    vi.useFakeTimers();
+    let fired = 0;
+    systemMockClock.setTimeout(() => void fired++, 100);
+    systemMockClock.setInterval(() => void fired++, 50);
+    let woke = false;
+    void systemMockClock.sleep(1000).then(() => void (woke = true));
+    expect(vi.getTimerCount()).toBe(3);
+    stopSystemMockClock('the stop test');
+    expect(vi.getTimerCount()).toBe(0);
+    await Promise.resolve();
+    expect(woke).toBe(true);
+    // Stopped: a new timer or interval is refused, a sleep does not wait.
+    systemMockClock.setTimeout(() => void fired++, 10);
+    systemMockClock.setInterval(() => void fired++, 10);
+    expect(vi.getTimerCount()).toBe(0);
+    await systemMockClock.sleep(5000);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fired).toBe(0);
+  });
+
+  it('resume lets it run again', async () => {
+    vi.useFakeTimers();
+    stopSystemMockClock();
+    resumeSystemMockClock();
+    let fired = 0;
+    systemMockClock.setTimeout(() => void fired++, 10);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(fired).toBe(1);
+  });
+
+  it('warns once per pause about a timer asked for between tests', () => {
+    const stderr = (globalThis as unknown as { process: { stderr: { write: (s: string) => boolean } } }).process.stderr;
+    const real = stderr.write;
+    const lines: string[] = [];
+    stderr.write = (s: string) => (lines.push(s), true);
+    try {
+      stopSystemMockClock('a finished test');
+      systemMockClock.setTimeout(() => undefined, 1);
+      systemMockClock.setInterval(() => undefined, 1);
+      expect(lines.filter((l) => l.includes('[mock-clock]'))).toHaveLength(1);
+      // It names the test the clock was stopped after and the caller (this spec).
+      expect(lines.find((l) => l.includes('[mock-clock]'))).toMatch(/after "a finished test".* at .*mock-clock\.spec\.ts/);
+      resumeSystemMockClock();
+      stopSystemMockClock();
+      systemMockClock.setTimeout(() => undefined, 1);
+      expect(lines.filter((l) => l.includes('[mock-clock]'))).toHaveLength(2);
+    } finally {
+      stderr.write = real;
+    }
+  });
+});
+
+describe('page stagger', () => {
+  it('answers a later page later, so the pages of one request arrive at different times', async () => {
+    const clock = new ManualClock();
+    const backend = new MockBackend({ latency: true, dataset: tinyDataset, syntheticTotal: 5000, pageStaggerMs: 10, clock });
+    const answered: number[] = [];
+    const ask = (page: number) => void backend.queryPage({ query: query(), offset: page * 500, limit: 500, descending: false, anchor: null }).then(() => answered.push(page));
+    ask(0);
+    ask(4);
+    await clock.advance(20);
+    expect(answered).toEqual([0]);
+    await clock.advance(40);
+    expect(answered).toEqual([0, 4]);
   });
 });

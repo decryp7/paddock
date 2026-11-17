@@ -1,4 +1,5 @@
-import { expect, expectNoScrollMovesOfItsOwn, test, type Locator, type Page } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { expectNoScrollMovesOfItsOwn, type Locator, type Page } from '@decryp7/paddock-e2e';
 
 // The user's report (Dyno 1.1.0 RC, Processes, 458 rows sorted by CPU): scrolled near the end, the table showed blank space
 // under the last drawn row while more rows existed. The body must always be filled to its bottom edge while rows remain.

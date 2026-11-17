@@ -13,6 +13,10 @@ import { at } from '../../testing/must';
 import { mockJobs } from '../jobs/mock-jobs';
 import { mockUnsupported } from '../core/mock/mock-unsupported';
 import { NotificationsStore } from '../notifications/notifications.store';
+import { endMockJobs } from '../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 const exporters: ExporterInfo[] = [
   { id: 'csv', name: 'CSV', extension: 'csv' },

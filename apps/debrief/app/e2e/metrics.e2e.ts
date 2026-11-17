@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { openApp, openView } from './app';
 
 test('metrics tab renders chart cards with a canvas each', async ({ page }) => {

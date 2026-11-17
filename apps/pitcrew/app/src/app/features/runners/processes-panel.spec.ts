@@ -191,3 +191,58 @@ describe('ProcessesPanel', () => {
     expect(TestBed.inject(Overlay)).toBeDefined();
   });
 });
+
+describe('ProcessesPanel with processes the system gives no start time for', () => {
+  let mock: MockBackend;
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+    mock = makeMock({ processesWithoutStartTime: ['node.exe', 'gitea-runner.exe'] });
+    TestBed.configureTestingModule({ providers: appProviders(mock) });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    document.querySelectorAll('.cdk-overlay-container > *').forEach((n) => n.remove());
+    mock.dispose();
+  });
+
+  async function mount() {
+    await mock.status();
+    const f = TestBed.createComponent(ProcessesPanel);
+    f.componentRef.setInput('runner', 'build-win');
+    await settle(f, 6);
+    return { f, el: f.nativeElement as HTMLElement };
+  }
+  const row = (el: HTMLElement, name: string) => Array.from(el.querySelectorAll('tbody tr')).find((r) => text(r.querySelector('.name-line')).startsWith(name)) as HTMLElement;
+
+  it('keeps Stop focusable, says why it does nothing, and never asks the engine', async () => {
+    const { f, el } = await mount();
+    const spy = vi.spyOn(mock, 'stopProcess');
+    const stop = row(el, 'node.exe').querySelector('button[aria-label^="Stop node.exe now"]') as HTMLButtonElement;
+    expect(stop.disabled, 'aria-disabled keeps it in the tab order').toBe(false);
+    expect(stop.getAttribute('aria-disabled')).toBe('true');
+    // The tooltip adds its own description id next to ours: ours is the first one.
+    const ids = (stop.getAttribute('aria-describedby') ?? '').split(/\s+/);
+    const reason = el.querySelector(`#${ids[0]}`);
+    expect(text(reason)).toContain('no start time');
+    expect(reason!.className).toContain('visually-hidden');
+    stop.click();
+    await settle(f, 4);
+    expect(document.querySelector('[role="dialog"]'), 'no confirmation for a stop that cannot happen').toBeNull();
+    expect(spy).not.toHaveBeenCalled();
+    expect(text(el.querySelector('[role="alert"]'))).toContain('no start time');
+    // A row with a start time is a normal button.
+    const other = row(el, 'MSBuild.exe').querySelector('button[aria-label^="Stop MSBuild.exe now"]') as HTMLButtonElement;
+    expect(other.getAttribute('aria-disabled')).toBeNull();
+    expect(other.getAttribute('aria-describedby')).toBeNull();
+  });
+
+  it('disables "Stop the runner process" when the runner has no start time', async () => {
+    const { f, el } = await mount();
+    (row(el, 'gitea-runner.exe').querySelector('button[aria-label^="More actions"]') as HTMLElement).click();
+    await settle(f, 2);
+    const item = document.querySelector('[cdkMenuItem]') as HTMLElement;
+    expect(item.getAttribute('aria-disabled')).toBe('true');
+    expect(item.getAttribute('title')).toContain('no start time');
+  });
+});

@@ -9,7 +9,7 @@ fn dev(args: &[&str]) -> (i32, String, String) {
 
 /// Runs `dev` in `dir` (the process's own folder when `None`): a test that reads a repository gives it one of its own.
 fn dev_in(dir: Option<&std::path::Path>, args: &[&str]) -> (i32, String, String) {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    let mut cmd = crate::dev_bin::command();
     cmd.args(args);
     if let Some(d) = dir {
         cmd.current_dir(d);
@@ -116,7 +116,7 @@ fn graph_affected_with_nothing_to_plan_is_usage() {
 fn self_hash_outside_a_repository_or_without_an_input_list_names_the_next_step() {
     let d = tempfile::tempdir().unwrap();
     let run = |dir: &std::path::Path| {
-        let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        let out = crate::dev_bin::command()
             .args(["self", "hash"])
             .current_dir(dir)
             .env("GIT_CEILING_DIRECTORIES", d.path().parent().unwrap())
@@ -137,7 +137,7 @@ fn self_hash_outside_a_repository_or_without_an_input_list_names_the_next_step()
 
 /// `dev plan --commit-range|--commit-flags` in a repository with two commits, the event passed as the workflow passes it.
 fn plan_lint(repo: &std::path::Path, mode: &str, env: &[(&str, &str)]) -> (i32, String, String) {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    let mut cmd = crate::dev_bin::command();
     cmd.current_dir(repo)
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap())
@@ -225,7 +225,7 @@ fn plan_refuses_json_mentions_commit_flags_in_its_usage_and_annotates_errors_in_
     let (code, _, err) = dev(&["--json", "plan", "--all"]);
     assert_eq!(code, 2);
     assert!(err.contains("no --json mode"), "{err}");
-    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = crate::dev_bin::command()
         .args(["plan", "--nope"])
         .env("GITHUB_ACTIONS", "true")
         .output()
@@ -244,11 +244,17 @@ fn plan_refuses_json_mentions_commit_flags_in_its_usage_and_annotates_errors_in_
 fn a_trial_with_bad_arguments_is_refused_before_anything_is_cloned_or_pushed() {
     let scratch = tempfile::tempdir().unwrap();
     let run = |extra: &[&str]| {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
-        cmd.args(["ci", "dispatch", "ci.yml", "--trial", "feat/x"])
+        let mut cmd = crate::dev_bin::command();
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        cmd.args(["ci", "dispatch", "ci.yml", "--trial", "feat/x", "--root"])
+            .arg(&repo)
             .args(extra)
             .env("GITEA_TOKEN", "not-a-real-token")
-            .env("PADDOCK_TRIAL_DIR", scratch.path());
+            .env("PADDOCK_TRIAL_DIR", scratch.path())
+            // A machine with no derivable train reservation (CI's runners, run 8208): bad arguments are refused before the
+            // reservation is read, so the answer does not depend on where the tool runs.
+            .env_remove("PADDOCK_TRAIN_CI_LOCK_ROOT")
+            .current_dir(scratch.path());
         let out = cmd.output().unwrap();
         (out.status.code().unwrap(), String::from_utf8_lossy(&out.stderr).into_owned())
     };
@@ -261,7 +267,7 @@ fn a_trial_with_bad_arguments_is_refused_before_anything_is_cloned_or_pushed() {
         assert_eq!(code, 2, "{extra:?}: {err}");
         assert!(err.contains(word), "{extra:?}: {err}");
     }
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    let mut cmd = crate::dev_bin::command();
     cmd.args(["ci", "dispatch", "ci.yml", "--trial", "bad branch;x", "--max", "30m"])
         .env("GITEA_TOKEN", "not-a-real-token")
         .env("PADDOCK_TRIAL_DIR", scratch.path());

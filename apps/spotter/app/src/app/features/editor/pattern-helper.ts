@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import type { PatternSelection, PatternTest, SchemePreset } from '../../core/api.types';
@@ -202,6 +202,7 @@ export class PatternHelper {
   private run = 0;
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => clearTimeout(this.timer));
     effect(() => {
       const pattern = this.pattern();
       const text = this.testText();

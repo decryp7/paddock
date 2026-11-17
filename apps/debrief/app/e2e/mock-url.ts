@@ -1,3 +1,4 @@
+import { expectDockPlanned } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 import { expect, Page } from '@playwright/test';
 import { APP_LOAD_TIMEOUT } from './app';
 
@@ -10,7 +11,10 @@ export async function openAppWith(page: Page, search: string, options: { grid?: 
   await page.goto(`/${search}`);
   // The first load builds the demo workspace; under a full parallel run it can take longer than one assertion.
   await expect(page.locator('debrief-status-bar')).toContainText('events', { timeout: APP_LOAD_TIMEOUT });
-  if (options.grid ?? true) await expect(page.locator('debrief-events-grid')).toBeVisible();
+  if (options.grid ?? true) {
+    await expect(page.locator('debrief-events-grid')).toBeVisible();
+    await expectDockPlanned(page);
+  }
 }
 
 /** The events grid's scroll container. */

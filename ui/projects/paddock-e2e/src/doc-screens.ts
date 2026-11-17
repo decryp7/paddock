@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { THEMES, type Theme } from './axe.ts';
 import { DOC_SCREEN_VIEWPORT, isOn } from './config.ts';
+import { PINNED_AT } from './pinned-clock.ts';
 import { waitForStableFrame } from './screenshot.ts';
 
 /**
@@ -66,7 +67,7 @@ export interface DocScreensOptions {
 export const FRAME_MAX_HEIGHT = 4000;
 
 /** The default time every screen's clock starts at: 2026-10-22 14:30:00 UTC. */
-export const FROZEN_AT = Date.UTC(2026, 9, 22, 14, 30, 0);
+export const FROZEN_AT = PINNED_AT;
 
 /** The name of the manifest next to the images. */
 export const HASHES_FILE = 'hashes.json';

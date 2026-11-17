@@ -26,6 +26,8 @@ unit=1048576
 # A pass stats every file (about 7 s for 15,306 files on a Mac, where `du -sk` took 0.1 s): the size is measured once, and again
 # only after the incremental caches went (docs/benchmarks.md, "Prune size, one pass").
 kit="$(cd "$(dirname "$0")/.." && pwd)/conformance/ci/kit.sh"
+# The one guarded delete (conformance/ci/safe-rm.sh): the folder goes only strictly under its parent, as `ci prune-folder` does.
+. "$(dirname "$kit")/safe-rm.sh"
 size() {
   local sizes apparent used
   sizes=$(sh "$kit" portable file-sizes "$dir")
@@ -41,10 +43,13 @@ size() {
 now=$(size)
 if [ "$now" -ge "$max" ]; then
   echo "prune: $dir is $now (cap $max); removing incremental caches"
-  find "$dir" -type d -name incremental -prune -exec rm -rf {} + 2>/dev/null || true
+  # Each cache strictly under the folder, a refusal a warning, as `ci prune-folder` does (find -prune never enters a link).
+  find "$dir" -type d -name incremental -prune 2>/dev/null | while IFS= read -r f; do
+    SAFE_RM_ANNOTATION=warning safe_rm "$dir" "$f" || true
+  done
   now=$(size)
   if [ "$now" -ge "$max" ]; then
     echo "prune: still $now; removing $dir"
-    rm -rf "$dir"
+    safe_rm "$(dirname "$dir")" "$dir"
   fi
 fi

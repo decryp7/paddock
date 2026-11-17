@@ -907,6 +907,69 @@ The 1.4 s the user's 1.0.2 log showed between the window and the AI line was not
 folder (30 ms here); it depends on that Mac's state (stored settings with plugin sections, an AI model loading). The
 `Steps` field of the next start's line names the step.
 
+## 2026-11-15, start-up bench over budget in CI: main against train 11, and the runner's launchd class (branch docs/debrief-startup-ab)
+
+Trigger: debrief.yml run 8126 (train 11, 381e4758a), job 38999 (real-app smoke, runner d7-mac-mini-2): `setupDone` median
+409 ms against the 400 ms budget. Per start 409, 366, 384, 420, 413; first start 238. `app state` 106-173 ms in the counted
+starts, 77 in the first; `before setup` 123-153, 61 in the first. The same shape in run 8091 (job 38120, median 388,
+`app state` 30-172) and run 8033 (job 37228, median 417, `app state` 30-94, `before setup` 195-238). Run 8126 listed no
+artifacts through the API; the numbers are from the job log. No other macOS CI job ran on the host during the bench.
+
+Heads read: origin/main 3a342cb42 (A), origin/train/2026-11-14-11 381e4758a (B). Debug `.app` of each, built as the
+macOS smoke job builds it (`npx tauri build --debug --bundles app --config src-tauri/tauri.sidecars.conf.json`, own
+worktree and build folder on vault-dev). Harness: `startup-bench.mjs`'s own `runOnce`, one throw-away data folder per
+series (a first start, then five counted ones), A and B interleaved (ABBA), 6 blocks of each variant, 5 s between
+series. Mac mini M4 Pro, 14 cores. 5-minute load before each block 3.6-5.6 (other agents held quiet); the 1-minute load
+rises to 10-13 during the fresh-profile series from the bench's own starts. Data: invented, empty data folders only.
+
+Counted starts (30 per row), median (min-max), ms:
+
+| Context and variant | Build | `setupDone` | block medians | `app state` | `before setup` |
+|---|---|---|---|---|---|
+| terminal, back to back (the bench) | A | 238 (226-259) | 232-240 | 24 (22-25) | 102 (93-117) |
+| terminal, back to back (the bench) | B | 237 (226-259) | 234-244 | 24 (22-25) | 102 (89-120) |
+| terminal, 5 s between starts | A | 218 (210-233) | 213-222 | 24 (22-25) | 87 (81-108) |
+| terminal, 5 s between starts | B | 216 (210-236) | 215-219 | 24 (22-25) | 86 (82-103) |
+| terminal, fresh data folder each start | A | 277 (264-303) | 268-285 | 64 (61-87) | 100 (90-118) |
+| terminal, fresh data folder each start | B | 280 (261-303) | 276-287 | 64 (60-75) | 104 (90-119) |
+| launchd job, no `ProcessType` (as the runners) | A | 298 (229-333) | 282-314 | 90 (23-98) | 96 (87-130) |
+| launchd job, no `ProcessType` (as the runners) | B | 288 (223-327) | 267-300 | 80 (23-98) | 96 (83-129) |
+| launchd job, no `ProcessType`, + CI's `DYLD_LIBRARY_PATH` | A | 295 (229-336) | 277-300 | 84 (25-98) | 95 (81-126) |
+| launchd job, `ProcessType` Interactive | A | 229 (220-279) | 226-251 | 24 (22-30) | 92 (84-132) |
+| launchd job, `ProcessType` Interactive | B | 231 (218-273) | 224-261 | 25 (23-33) | 92 (82-127) |
+
+The part of `app state` that moves, measured apart (`load_manifests`, debrief-plugin-host `builtins.rs`: it starts
+`debrief-plugins --manifests` and polls `try_wait` with 20 ms sleeps); Python probe, 30 sleeps and 20 runs each, median (min-max), ms:
+
+| Context | `sleep(20 ms)` takes | `--manifests`, blocking wait | `--manifests`, 20 ms poll |
+|---|---|---|---|
+| terminal | 23.3 (20.0-25.0) | 6.9 (6.0-14.9) | 23.1 (21.3-26.3) |
+| launchd job, no `ProcessType` | 93.2 (20.1-95.0) | 22.5 (16.0-25.9) | 94.5 (48.5-98.8) |
+| launchd job, `ProcessType` Interactive | 28.6 (20.3-30.0) | 6.9 (6.3-22.4) | 22.0 (21.3-31.6) |
+
+Findings:
+
+- **Train 11 is not the cause.** A and B agree within 2-10 ms in every context; block medians overlap.
+- **State does not grow per start.** A reused data folder makes `app state` faster (24 ms) than a fresh one (64 ms: the
+  first run's performance probe and saved suggestion); the bench's reuse is the everyday start it means to measure.
+- **Cause of the `app state` growth in CI: the runner's launchd class.** The Gitea runners' LaunchAgents
+  (`~/Library/LaunchAgents/net.decryptology.gitea-runner.*.plist`) set no `ProcessType`; `launchctl print` shows
+  `spawn type = daemon (3)` for them, against `app (1)` for a terminal. launchd.plist(5): "If left unspecified, the system
+  will apply light resource limits to the job, throttling its CPU usage and I/O bandwidth". Under it a 20 ms sleep takes
+  about 93 ms, so the manifests poll takes about 95 ms instead of 22 and `app state` swings between 23 and 98 ms.
+  Confirmed both ways in the same launchd setup: without `ProcessType` 80-90 ms median, with `Interactive` 24-25 ms; `setupDone` 288-298 against 229-231.
+- `DYLD_LIBRARY_PATH` (set by `libduckdb-env.sh` in CI) changes nothing measurable.
+- Back-to-back starts cost about 15-20 ms against 5 s apart (`before setup` 102 against 87: the previous start's
+  teardown overlaps). Not a defect; it is part of the everyday start the budget was set on.
+- **Not reproduced: the rest of CI's excess.** Locally the runner's class gives a median of about 290 ms; CI reads
+  366-420, with `before setup` 123-238 and `app state` up to 173 ms (above the 98 ms local ceiling), and a first start
+  faster than the counted ones. That part is not explained by these measurements (not measured inside a runner job).
+
+Comparable practice: GitHub's runner installs its macOS LaunchAgent with `ProcessType` `Interactive`
+(https://raw.githubusercontent.com/actions/runner/main/src/Misc/layoutbin/actions.runner.plist.template, read
+2026-11-15). GitLab Runner also runs as a per-user LaunchAgent (https://gitlab.com/gitlab-org/gitlab-runner/-/raw/main/docs/install/osx.md, read 2026-11-15); its page
+says nothing about `ProcessType`.
+
 ## 2026-11-15, plugin manifests waited for on exit, not polled (branch fix/debrief-manifests-wait)
 
 Change: `load_manifests` (debrief-plugin-host `builtins.rs`) ran `debrief-plugins --manifests` and looked for its exit with
@@ -1392,3 +1455,116 @@ A call is 1,600 to 15,000 us here, so three watches (under 1 us) are under the n
 "after" numbers are not faster for any reason of ours. The `format!` labels of `sync::blocking` (about 350 ns more, per shell
 request, next to a thread-pool hand-off) are not on the store's hot path. An earlier debug-build run (one run each) showed the
 same: within the noise.
+
+## Start-up benchmark on a busy host (2026-11-16 and 17, `feat/bench-busy-host`)
+
+Run 8175 reported "NOT MEASURED: 1 of 5 starts ran with host load <= 12 (14 discarded in 15 attempts, peak 1-minute load 49.4)" and
+the job went red. The user's rule (2026-11-17): always take the start-up benchmark and record the host load and CPU idle with it,
+never refuse to measure because the host is busy, fail only on a real regression. `scripts/ci/startup-bench.mjs` with the shared
+`scripts/bench/busy-host.mjs` now fails on the tree CPU time over its threshold or a wall mark over a ceiling that only a broken start
+reaches; everything else is a note with the numbers, on a train and on a tag alike. NOT MEASURED is only "the app gave no timings".
+Mechanism: [benchmarks.md](../../../docs/benchmarks.md#timing-benchmarks-on-a-busy-host).
+
+### 2026-11-16, start-up on an idle, a stressed and an overloaded Mac mini (3585bcab1)
+
+- **Commit:** 3585bcab1 (the app is unchanged by this branch; only the benchmark script, its shared module and the budgets differ)
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; the shared CI host, so other agents were building the whole time
+- **Load:** the "unstressed" rows are not a quiet machine: host CPU idle before a start was 0 to 65% (median 35%). The stress rows
+  had 0 to 1% idle. The "overloaded" rows were taken on 2026-11-17 while other agents' builds and tests ran: 1-minute load 97 to 177,
+  CPU idle 0% for every start.
+- **Build:** debug `.app` from `npx tauri build --debug --bundles app --config src-tauri/tauri.sidecars.conf.json`
+  (`DEBRIEF_CARGO_PROFILE=debug`), libduckdb 2.0.0
+- **Corpus:** none (the first run is a fresh data folder, not counted; the others are the everyday start)
+- **Command:** `node scripts/ci/startup-bench.mjs <Debrief.app> --runs 5 --report-only --budgets <file that records only>` once per
+  invocation; stress by `yes > /dev/null &` loops (14, 28, and 84 together with 4 `dd if=/dev/zero bs=1m count=1500` loops), started
+  5 s before the first invocation and killed after the last, deliberately and for a few minutes only
+- **Runs:** 38 invocations of 5 starts (190 starts): 6 unstressed, 6 with 14 `yes`, 4 with 28 `yes`, 3 with 84 `yes` + 4 `dd`, 3
+  overloaded (no stress of ours), and 16 on 2026-11-17 at a moderate to light real load (8 at load 40 to 50, 8 at load 20 to 25) for the quiet limit. The baseline and
+  3 sd table below uses the first 22; the quiet limit uses all 38. Reported: the median of each invocation's 5 starts, then the median and standard deviation of those 22
+- **Numbers:**
+
+  | Measure | Min | Baseline (median of 22) | Max | Std dev | Used for |
+  |---|---|---|---|---|---|
+  | Tree CPU at firstInteractive (user + sys, ms) | 470 | 515 | 700 | 49.1 | fail over 875 (below) |
+  | windowCreated (ms) | 189 | 208 | 442 | 58.1 | note over 382; fail over 1040 (5 x) |
+  | setupDone (ms) | 228 | 245 | 558 | 77.6 | note over 478; fail over 1225 |
+  | pageLoad (ms) | 434 | 489 | 790 | 90.4 | note over 760; fail over 2445 |
+  | firstPaint (ms) | 547 | 600 | 1059 | 139.8 | note over 1019; fail over 3000 |
+  | windowReady (ms) | 548 | 601 | 1063 | 144.0 | note over 1033; fail over 3005 |
+  | workspaceLoaded (ms) | 558 | 612 | 1070 | 145.3 | note over 1048; fail over 3060 |
+  | firstInteractive (ms) | 565 | 620 | 1077 | 144.7 | note over 1054; fail over 3100 |
+
+  By condition, median of the invocation medians (min to max), CPU and firstInteractive:
+
+  | Condition | Tree CPU (ms) | firstInteractive (ms) | Reference workload (ms) |
+  |---|---|---|---|
+  | unstressed (6) | 525 (500 to 540) | 622 (597 to 637) | 125 (123 to 130) |
+  | 14 `yes` (6) | 515 (500 to 540) | 614 (565 to 637) | 273 (193 to 359) |
+  | 28 `yes` (4) | 495 (490 to 520) | 617 (583 to 635) | 323 (275 to 438) |
+  | 84 `yes` + 4 `dd` (3) | 480 (470 to 490) | 585 (567 to 618) | 635 (529 to 684) |
+  | overloaded, load 97 to 177, 0% idle (3) | 630 (540 to 700) | 972 (about 880 to 1100) | 620 and up (about 5 times) |
+
+- **Thresholds and why (ER-12):**
+  - CPU on a busy host fails over **875 ms** (`baselineMs` 515 + `noiseMs` 360): 1.25 times the worst invocation median measured
+    (700 ms, load 150). Under `yes` and `dd` loops the CPU did not move (470 to 540 ms); under real build load (many processes,
+    memory and cache contention) it rose by up to 40% (530 to 720 ms per start), and at a moderate real load (load 40 to 50, CPU
+    idle about 5 to 15%) it was 550 to 640 ms. A tight threshold applied always (baseline + 3 sd of the calm conditions, 561 ms)
+    failed the first overloaded run (650 ms), which is a busy host and not a regression.
+  - CPU on a quiet host (user, 2026-11-17, "tighter when quiet") fails over **600 ms** (`cpu.quiet`: baseline 500 + 20%). It
+    applies when the **median** of the host CPU idle readings around the starts (before and after each start, `iostat`) is **30%
+    or more**; else the busy-host limit applies, and a CPU between 600 and 875 ms is a note naming both limits and the idle seen.
+    Baseline 500 ms is the median of the 9 of 38 invocations whose median idle was 30% or more (they ranged 480 to 530 ms; 16 more
+    invocations were taken on 2026-11-17 for this). The cutoff is 30%, not the 50% first proposed: no invocation of 38 had a median
+    idle of 50% or more (best 49%), because other agents work on the host all day and the start itself uses about a core, so 50
+    would never apply; 40 leaves 4 invocations (CPU 480 to 530), 30 leaves 9, and every invocation whose CPU was above 540 ms had a
+    median idle under 30%. The median, not the lowest reading, decides, so one dip while the app starts does not turn a quiet host
+    busy. If the idle was not read, the busy limit applies.
+  - A wall mark fails only over **5 times its baseline** (`wallCeilingFactor`). The verdict judges the median of the starts, so
+    5 is compared with the worst invocation median: 2.28 times its baseline (setupDone, overloaded; 1.74 for firstInteractive),
+    so the ceiling is about 2.2 times that; the worst single start was 2.52 times. A broken start is far above it (the app waits
+    10 s for a first paint, 16 times the firstInteractive baseline). A first try of 3 times was only 1.3 times the worst invocation
+    median. Over baseline + 3 sd (the "noise threshold") but under the ceiling is a note.
+  - The spread of the middle half of one invocation's five CPU times, `(P75 - P25) / median`, was at most 10.2% (2 to 6%
+    unstressed). It is a note, never a failure.
+- **The reference workload:** a single-threaded integer loop of 25 M iterations (`referenceWork`), timed 5 times before and 5 times
+  after the starts: 121 to 125 ms at best on this host. The ratio of start-up to it is a note (5.0 idle, 1.7 under 28 `yes`, 1.6
+  overloaded). It is not used to scale the wall time: under 14 to 84 CPU-bound loops it ran 2.2 to 5.2 times slower while the app's
+  start moved by under 5%, so scaling would have put a 620 ms start at 120 to 280 ms and hidden a regression of two times. Its
+  `(max - min) / median` spread was 3 to 162% unstressed and 68 to 180% under stress, so it cannot say "the host is too busy" either.
+- **Notes:** the CPU time is that of the app and its sidecars, read with `ps -axo pid=,ppid=,cputime=` (10 ms resolution) when
+  the "Startup timings" line arrives. The WebKit web-content process is not the app's child on macOS, so its CPU is not in the
+  number. One start in 110 had a CPU of 1050 ms (28 `yes`); the median of five ignores it. The host CPU idle is read with
+  `iostat -n 0 -c 2 -w 1` (1 s; `top -l 2` took 10 s on a host at load 70) and the load from `os.loadavg()`, both printed with every
+  start and written to the JSON and the step summary. The earlier wall budgets (2026-10-24: 215/264/524/610/611/619/624 ms plus 50%)
+  agree with the unstressed baselines (206/244/486/599/600/611/618). The stress was `yes` and `dd` only, plus whatever the other
+  agents ran; a different neighbour (memory pressure) is covered only by the overloaded runs. Raw per-invocation JSON:
+  `/Volumes/vault-dev/dev-targets/scratch/implementer-bench-busy/m-*.json` (scratch, not kept). A check run with the first
+  (3 x, 561 ms) thresholds: unstressed and 28 `yes`, `PASS` (CPU 510 and 490 ms); overloaded, `FAIL` on CPU 650 ms, the reason for the
+  thresholds above.
+
+## The dock follows its container in the same frame (2026-11-17, `DockLayout.followContainer`)
+
+The resize observer of `DockLayout.watchResize` now lays dockview out at the container's size at once (`api.layout(width, height)` when the two differ) instead of
+waiting for dockview's own observer, which drew the old size for three frames (49 ms) after the Explorer closed. The cost was measured before
+(`fix/sweep-e2e-failures`, 944f4a7e5) and after (`fix/debrief-dock-same-frame`), Chromium, Playwright 1.64, the e2e production build with the pinned clock, the
+mock backend, 1440x900 start, an idle machine (CPU idle 33 to 49 % on two readings before each batch). The probe is a throw-away spec (not kept): 40 calls of
+`page.setViewportSize` alternating 1000 and 1440 px wide, each followed by waiting for `[data-dock-planned]`; Chrome DevTools `Performance.getMetrics` taken before
+and after the loop (differences); a `requestAnimationFrame` sampler of `stage.width - dock grid width` over the run, where the resting offset is 28 px (the
+auto-hide bar) and a "lagged frame" is a sampled frame with another offset. Three runs each, one worker:
+
+| per run of 40 resizes | before, runs 1 to 3 | after, runs 1 to 3 |
+|---|---|---|
+| script time (`ScriptDuration`) | 0.265, 0.457, 0.251 s | 0.303, 0.495, 0.344 s |
+| layout time (`LayoutDuration`) | 0.070, 0.140, 0.072 s | 0.075, 0.124, 0.078 s |
+| style recalculation | 0.089, 0.180, 0.088 s | 0.092, 0.150, 0.100 s |
+| layouts (`LayoutCount`) | 248, 396, 262 | 277, 350, 270 |
+| frames sampled | 315, 484, 310 | 352, 411, 336 |
+| lagged frames (dock not as wide as its stage) | 33, 52, 33 | 24, 18, 16 |
+| wall time of the loop | 5.0, 7.8, 5.0 s | 5.6, 6.6, 5.4 s |
+
+The runs were not alternated (three before, then three after) and n is 3 per side, so no cost difference is claimed: the script-time medians are 0.265 s
+(range 0.251 to 0.457) before and 0.344 s (range 0.303 to 0.495) after, about +2 ms per resize, and the ranges overlap; layout and style times and the number of
+layouts per resize (6 to 7) look the same. A resize that is slower by more than about 5 ms was not seen, and a smaller one cannot be excluded with n = 3. The lagged-frame
+result below does not depend on that. What changed is
+the lagged frames, from 0.8 to 1.3 per resize to 0.4 to 0.5: the three frames the dock drew at the old width after the Explorer closed are gone; the lag
+that remains (the dock's own first plan changing group sizes) is not width lag of the container.

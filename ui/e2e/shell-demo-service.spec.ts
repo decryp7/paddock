@@ -1,4 +1,5 @@
-import { axeViolations, expect, expectNoHorizontalScroll, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, expectNoHorizontalScroll } from '@decryp7/paddock-e2e';
 
 // Settings > Background service (plan X4) in the shell demo: the page over the demo's in-memory service, which plays
 // `paddock-service` (the same statuses, live phases and refusals). `?service=<condition>` picks where it starts and

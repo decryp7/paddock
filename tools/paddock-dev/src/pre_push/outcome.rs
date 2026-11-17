@@ -122,6 +122,14 @@ pub fn nothing_to_check(base: &str) -> Outcome {
     Outcome::NotApplicable(Reason::new(format!("nothing changed since {base}, so there was nothing to check")))
 }
 
+/// The outcome of a push that only creates or deletes check-id reservation refs (a blob under `refs/paddock/check-ids/`): no
+/// commit, so not applicable, never a pass.
+pub fn reservation_push() -> Outcome {
+    Outcome::NotApplicable(Reason::new(
+        "the push only creates or deletes check-id reservation refs (blobs), so there was no commit to check",
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::exec::Done;

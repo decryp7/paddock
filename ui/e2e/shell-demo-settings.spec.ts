@@ -1,4 +1,5 @@
-import { axeViolations, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, expectNoHorizontalScroll, THEMES } from '@decryp7/paddock-e2e';
 
 // Settings (plan S10) in the shell demo: the Settings window as a modeless tool dialog over the demo's in-memory engine,
 // which serves the sections Rust wrote into the fixtures (every field kind). Chromium only in branches (rule 3). Only the

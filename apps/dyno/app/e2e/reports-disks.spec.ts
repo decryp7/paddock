@@ -1,5 +1,6 @@
-import { expect, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
 import type { Page } from '@playwright/test';
+import { settledLayout } from '@decryp7/paddock-e2e';
 
 /**
  * Reports > Disks (user report, Dyno 1.1.0): a long mount path pushed the numbers and the forecast out of the card. At the window
@@ -16,12 +17,23 @@ async function openReports(page: Page, width: number): Promise<void> {
   await page.goto('/?latency=0#/reports');
   await expect(page.getByTestId('report-disks')).toBeVisible({ timeout: 45_000 });
   await page.evaluate(() => document.fonts.ready);
-  // The path is cut to the width its box has once laid out; wait until the shown text is the one that fits.
-  await page.waitForFunction(() =>
-    Array.from(document.querySelectorAll<HTMLElement>('[aria-label="Disks"] [data-testid="path-text"]')).every((b) => {
-      const shown = b.querySelector<HTMLElement>('.pd-shown');
-      return !b.clientWidth || !shown || shown.scrollWidth <= b.clientWidth + 1;
-    }),
+  // The path is cut to the width its box has once laid out (a ResizeObserver runs after the layout): wait until two reads agree on the
+  // path boxes and their widths and every shown text fits. Never `every()` over the boxes alone: with none drawn yet it is true (the
+  // same early read as Dyno's layout spec, 31 of 240 Firewall visits under the pinned clock).
+  await settledLayout(
+    () =>
+      page.evaluate(() => {
+        const boxes = Array.from(document.querySelectorAll<HTMLElement>('[aria-label="Disks"] [data-testid="path-text"]'));
+        return {
+          count: boxes.length,
+          widths: boxes.map((b) => Math.round(b.getBoundingClientRect().width)),
+          fits: boxes.every((b) => {
+            const shown = b.querySelector<HTMLElement>('.pd-shown');
+            return !b.clientWidth || !shown || shown.scrollWidth <= b.clientWidth + 1;
+          }),
+        };
+      }),
+    { what: `the Disks card at ${width} px`, timeout: 45_000 },
   );
 }
 

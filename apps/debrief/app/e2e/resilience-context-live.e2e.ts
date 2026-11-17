@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { gridRows, gridTotal, openApp, parseCount } from './app';
+import { expect, test } from './test';
+import { gridRows, gridTotal, openApp, parseCount, pauseAhead } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
 import { chooseMenu } from './menu-support';
@@ -51,7 +51,6 @@ test('a failed context request shows an inline error with Retry', async ({ page 
 test.describe('live tail', () => {
   test('refreshes the grid as the engine reports changes, and stops when turned off', async ({ page }) => {
     // A controllable clock (running normally until paused) makes "nothing more arrives" checkable without sleeps.
-    await page.clock.install();
     await openAppWith(page, '?mockLiveMs=300');
     const live = page.getByRole('button', { name: 'Live tail', exact: true });
     await expect(gridTotal(page)).toHaveText(/^\d[\d,]*$/);
@@ -64,7 +63,7 @@ test.describe('live tail', () => {
     await expect(live).toHaveAttribute('aria-pressed', 'false');
     // Freeze time a little ahead (time keeps running until the pause lands, so leave room), running what is due on
     // the way, then 2 s more: a refresh already under way lands...
-    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 5000));
+    await pauseAhead(page);
     await page.clock.runFor(2000);
     const stopped = await gridTotal(page).innerText();
     // ...and in 10 s more (over 30 live ticks) nothing else arrives.

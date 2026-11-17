@@ -48,6 +48,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # A train run is dispatched at once and waits here, on Linux, until no older run holds the Mac or Windows runner it
+      # needs (./dev ci runner-wait); the queued run is what scheduled runs yield to. Other events: nothing.
+      - uses: ./.gitea/actions/runner-wait
+        with:
+          dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
       # affected.mjs for Dyno, and the skip of a main push whose commit carries a dyno-v* tag (the tag run is the gate).
       # The nightly builds installers even when main's CI nightly was green.
       - id: plan

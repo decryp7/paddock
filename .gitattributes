@@ -43,3 +43,9 @@ conformance/ci/*.txt text eol=lf
 # a CRLF checkout (Windows) failed both on the Windows runner (run 7904).
 /tools/githooks/* text eol=lf
 /tools/paddock-dev/tests/** text eol=lf
+
+# The lessons log only gains sections, so two branches that both add one at the end merge without a conflict (union keeps both
+# sides' lines). Union is wrong for a file whose lines are edited in place (both versions are kept, with no conflict to warn):
+# benchmarks.md and the apps' performance.md (results blocks are corrected in place), registers and generated files are never
+# listed here. See docs/lessons.md (2026-11-15).
+/docs/lessons.md merge=union

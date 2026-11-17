@@ -1,5 +1,5 @@
+import { expect, test } from './test';
 import { readFileSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
 import { DIALOG_TEST_INPUTS } from '../src/app/dialog-windows/dialog-test-inputs';
 
 // A dialog window is its own small Angular bootstrap (ADR 0050). The browser build can open its route by URL, so this

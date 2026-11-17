@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { gridRows, openApp } from './app';
 import { runCommand } from './analysis-support';
 import { expectNoSeriousViolations } from './axe';

@@ -65,3 +65,149 @@ pub fn bounded_hung<T: Send + 'static>(
         Err(_) => Err(Phase::Timeout),
     }
 }
+
+/// A clock mark (ADR 0103, "Hang-point signal"; for tests): the phase's limit counts from the moment `file` appears, and until then the
+/// phase is bounded by `wait`. The port of `bounded.sh`'s `clock_mark` and `clock_wait`.
+pub struct ClockMark<'a> {
+    /// The file the test's stand-in writes when it enters its hang (removed when the phase starts).
+    pub file: &'a std::path::Path,
+    /// The bound before the mark appears.
+    pub wait: Duration,
+}
+
+/// How often a phase with a clock mark looks for it: the shell's first naps (0.05 s).
+const MARK_LOOK: Duration = Duration::from_millis(50);
+
+/// [`bounded_hung`] with an optional [`ClockMark`]; also returns whether the phase ended before its mark (so the mark's `wait`, not
+/// `limit`, was the bound: the caller's "did not finish within" line names it). The `done in` and `failed in` times count from the
+/// mark once it was seen, as the shell's do (its clock starts again at the mark).
+pub fn bounded_marked<T: Send + 'static>(
+    step: &mut Step<'_>,
+    label: &str,
+    limit: Duration,
+    hung: Option<&AtomicBool>,
+    mark: Option<ClockMark<'_>>,
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> (Result<T, Phase>, bool) {
+    let Some(mark) = mark else {
+        return (bounded_hung(step, label, limit, hung, f), false);
+    };
+    let _ = std::fs::remove_file(mark.file);
+    let start = Instant::now();
+    step.say(format!("{}: {label} ...", step.name));
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    // Before the mark: look for it between waits for the result, up to `wait`; from the mark on, `limit`.
+    let (mut from, mut bound, mut seen) = (start, mark.wait, false);
+    let got = loop {
+        if !seen && mark.file.exists() {
+            (from, bound, seen) = (Instant::now(), limit, true);
+        }
+        let left = bound.saturating_sub(from.elapsed());
+        if left.is_zero() {
+            break None;
+        }
+        let slice = if seen { left } else { left.min(MARK_LOOK) };
+        match rx.recv_timeout(slice) {
+            Ok(r) => break Some(r),
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break Some(Err("the phase's thread ended without a result".into())),
+        }
+    };
+    let is_hung = || hung.is_some_and(|h| h.load(Ordering::SeqCst));
+    let secs = from.elapsed().as_secs();
+    let r = match got {
+        Some(Ok(_)) if is_hung() => Err(Phase::Timeout),
+        Some(Ok(v)) => {
+            step.say(format!("{}: {label}: done in {secs} s", step.name));
+            Ok(v)
+        }
+        Some(Err(_)) if is_hung() => Err(Phase::Timeout),
+        Some(Err(e)) => {
+            step.say(format!("{}: {label}: failed (exit 1) in {secs} s", step.name));
+            Err(Phase::Failed(e))
+        }
+        None => Err(Phase::Timeout),
+    };
+    (r, !seen)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// Runs `f` as a phase with a 1 s limit and a clock mark at `file`; returns the result and the step's lines.
+    fn marked(
+        file: &std::path::Path,
+        wait: Duration,
+        f: impl FnOnce() -> Result<(), String> + Send + 'static,
+    ) -> (Result<(), Phase>, bool, String) {
+        let env = HashMap::new();
+        let mut out = Vec::new();
+        let mut step = Step {
+            env: &env,
+            out: &mut out,
+            windows: false,
+            name: "t",
+        };
+        let mark = ClockMark { file, wait };
+        let (r, before_mark) = bounded_marked(&mut step, "p", Duration::from_secs(1), None, Some(mark), f);
+        (r, before_mark, String::from_utf8_lossy(&out).into_owned())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_marked_phase_counts_its_limit_from_the_mark() {
+        // Work before the hang (1.5 s, past the 1 s limit), then the mark, then the hang: the phase is ended only after the mark, so
+        // it is the hang that meets the limit. A stale mark from before the phase is removed when it starts.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("mark");
+        std::fs::write(&file, "stale").unwrap();
+        let f2 = file.clone();
+        let (r, before_mark, _) = marked(&file, Duration::from_secs(60), move || {
+            // The phase's slow work before its hang: a program that runs longer than the limit (as a slow `git config` would), waited
+            // for as a phase waits for its programs.
+            let _ = paddock_proc::command("/bin/sleep").arg("1.5").status();
+            std::fs::write(&f2, "hang").unwrap();
+            loop {
+                std::thread::park(); // the hang: nothing unparks it
+            }
+        });
+        assert!(matches!(r, Err(Phase::Timeout)), "the hang meets the limit");
+        assert!(!before_mark, "the limit applied, counted from the mark");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap_or_default(),
+            "hang",
+            "the phase was ended after its mark, not in its work before the hang"
+        );
+    }
+
+    #[test]
+    fn a_marked_phase_that_finishes_before_its_mark_is_done() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("mark");
+        let (r, before_mark, out) = marked(&file, Duration::from_secs(60), || Ok(()));
+        assert!(r.is_ok());
+        assert!(before_mark, "it ended before any mark");
+        assert!(out.contains("t: p: done in "), "{out}");
+    }
+
+    #[test]
+    fn a_marked_phase_whose_mark_never_appears_ends_at_the_wait() {
+        // A stand-in that hangs without writing its mark (a test whose git misses the mark): the phase ends at the mark's wait, and
+        // the caller is told it ended before its mark, so its line names that bound instead of the phase's limit.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("mark");
+        let (r, before_mark, _) = marked(&file, Duration::from_secs(2), || {
+            loop {
+                std::thread::park(); // the hang, with no mark: nothing unparks it
+            }
+        });
+        assert!(matches!(r, Err(Phase::Timeout)), "the phase ends at its wait");
+        assert!(before_mark, "it ended before its mark");
+        assert!(!file.exists(), "no mark was written");
+    }
+}

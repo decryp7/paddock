@@ -88,6 +88,52 @@ passes `--config` on every cargo step. Never put a script between cargo and scca
 whose 8191-character command line limit rustc's arguments for a large crate (windows-sys) exceed. The workspace's own path crates still
 key on their checkout path (`CARGO_MANIFEST_DIR`); a symlink does not help, cargo uses the physical path.
 
+### Local sccache
+
+Agents' builds use one local sccache 0.19.0 (the CI pin and checksums, `tools/paddock-dev/src/ci_setup_rust.rs`), set by Paddock's
+tools and never by your shell profile (user decision 2026-11-16; docs/research/sccache-basedirs-2026-11-16.md):
+
+- `eval "$(./dev sccache env)"` installs the pinned release into `<PADDOCK_DEV_HOME or ~/.paddock-dev>/tools/sccache/0.19.0/` (never
+  `~/.cargo`), starts the one server on the default port 4226, and prints `export RUSTC_WRAPPER=...` lines for that shell. Run it
+  once per machine to install; the push gates and `./dev gen check` then use the installed copy by themselves and never download.
+- It is off, with one `::warning::` line and a build without the cache, when sccache is not installed, the server does not
+  start, or a server on the port uses another cache. The server runs in its own short folder (`<tool cache>/sccache-run`, also its `TMPDIR`, working folder and error log
+  `sccache.log`; short because macOS caps socket paths at 104 bytes), never in a job's or an agent's scratch folder, which a job deletes. It
+  never exits on its own (`SCCACHE_IDLE_TIMEOUT=0`; stop it with `sccache --stop-server`), so a build that finds none cannot replace it
+  with one that has the build's environment. When it comes up read-only (sccache 0.19.0 keeps a failed startup write check for the
+  server's whole life: no compile is stored) the tool stops it, starts it once more, and if it is still read-only turns the wrapper off
+  and names the log in the warning. It is off without a warning in CI (`CI`, `GITHUB_ACTIONS`), with
+  `PADDOCK_SCCACHE=off`, or when `RUSTC_WRAPPER` is already set.
+- The build folder goes in as `--config build.target-dir=...` in every tool (see AGENTS.md, "Build folders").
+- **One setting picks the backend, `PADDOCK_SCCACHE_BACKEND`:** `local` (the default; `SCCACHE_DIR` and `SCCACHE_CACHE_SIZE` from
+  the profile above) or `s3` (a shared cache on an S3-compatible store, through sccache's own S3 support). `s3` needs
+  `PADDOCK_SCCACHE_S3_BUCKET` and `PADDOCK_SCCACHE_S3_ENDPOINT` (`host:port`), and optionally `PADDOCK_SCCACHE_S3_REGION` (default
+  `auto`), `PADDOCK_SCCACHE_S3_SSL` (`true`; default `false`) and `PADDOCK_SCCACHE_S3_PREFIX` (default `paddock`).
+- **S3 credentials are never in the repository, a log or a message.** They are read from `AWS_ACCESS_KEY_ID` and
+  `AWS_SECRET_ACCESS_KEY` in the environment, else from `~/.config/paddock/sccache-s3.env` (`$XDG_CONFIG_HOME/paddock/sccache-s3.env`,
+  or the file `PADDOCK_SCCACHE_ENV_FILE` names): two `NAME=value` lines, mode 600 (a file others can read is refused). The tools
+  print only `credentials configured` or `credentials missing`. The macOS keychain is not read by the tools (it would raise a
+  dialog); export the key from it into the file yourself.
+- One server takes one cache at a time. To switch the backend, run `sccache --stop-server` once, then the next build starts the
+  server with the new setting. A server on the port that uses another cache is never stopped by the tools.
+
+The shared RustFS cache (S3 API `http://172.16.1.220:15000`, bucket `sccache-paddock`, 50 GiB quota, policy `sccache-paddock-rw`):
+`PADDOCK_SCCACHE_BACKEND=s3 PADDOCK_SCCACHE_S3_BUCKET=sccache-paddock PADDOCK_SCCACHE_S3_ENDPOINT=172.16.1.220:15000`, plus the
+key in the file above. Create the access key bound to that policy in the RustFS console (port 15001) and write it as:
+
+```sh
+mkdir -p ~/.config/paddock && umask 077 && cat > ~/.config/paddock/sccache-s3.env <<'KEYS'
+AWS_ACCESS_KEY_ID=<access key>
+AWS_SECRET_ACCESS_KEY=<secret key>
+KEYS
+chmod 600 ~/.config/paddock/sccache-s3.env
+```
+
+**CI keeps its own caches.** The Mac, Windows and Linux CI jobs run `setup-rust`'s per-slot sccache folders and ports exactly as
+before; they do not share the agents' server (user decision 2026-11-17, after a review: the agents' cache and CI's differ in
+`CARGO_INCREMENTAL=0`, which sccache hashes, so a shared folder would hit about 4%, and one server for two kinds of user is one more
+thing that can stop a runner). The agents share one server and one cache folder among themselves.
+
 **Linker on Linux.** On a Linux development machine use mold (`sudo apt install mold`), in `~/.cargo/config.toml`:
 
 ```toml
@@ -167,6 +213,21 @@ author or by `./dev brief` (not on main yet): that call belongs there. The Rust 
   `cargo test -p <crate> --test it pool::`. A test that changes something process-wide (environment variables, the panic
   hook, the global allocator, a measured resident size) either serialises that change with a lock or runs in a child
   process of its own (re-running its own test binary with `--exact`), because `cargo test` runs all modules in one process.
+- **Golden files (`paddock_testkit::golden`):** a golden is captured on one machine and checked on all of them (the Mac, the
+  Linux CI image, which runs as root, and Windows). A value of the capturing machine (a uid, a home folder, a temp path) makes it
+  fail elsewhere; normalise it in the test before the comparison (for example `norm()` in
+  `tools/paddock-dev/tests/it/host_steps.rs`), so the file says `<uid>`. Conformance C131 (report-only, ER-41) reads the golden
+  folders (and `*.golden` and `*.snap` files) for uid and gid numbers, `/Users`, `/home` and `C:\Users` paths and temp paths, by
+  fixed patterns, so it gives the same result on every machine; it walks the working folder today (reading git's tracked list is
+  the approved train-14 item). A value that is fine (an invented user) gets an entry with a reason in `conformance/c131-allow.json`.
+  **Rewriting:** `PADDOCK_UPDATE_GOLDEN=1` rewrites a differing golden and prints the command that runs that test on Linux as root
+  in the CI image (`tools/linux-container.sh --id paddock --ci-image -- sh -c 'cd <package folder> && cargo nextest run -p <package> <test>'`;
+  the test name comes from `NEXTEST_TEST_NAME`). Run it before you commit the file. `./dev golden confirm [-p <package>] <test filter>`
+  (from the workspace of the test, or `--manifest-dir <folder>`) runs the filtered tests on this machine and in that image and passes
+  only when both pass; a filter that selects no test fails with "no test matched the filter", and a filter starting with `-` is
+  refused. The container needs Docker or OrbStack and obeys `PADDOCK_LINUX_CPUS`, `PADDOCK_LINUX_JOBS`, `PADDOCK_LINUX_MEMORY`,
+  `PADDOCK_LINUX_USER`, `PADDOCK_LINUX_CI_REGISTRY` and `PADDOCK_LINUX_HOST_ARCH` (ER-14), all passed through. On an arm64 Mac the CI
+  image is a local arm64 build (not the registry's amd64 image).
 - **Checked (conformance C37):** a `tests/<name>.rs` outside `tests/it/` fails unless `ownTestBinaries` of
   `paddock.conformance.json` names it with the reason it needs its own binary, and every workspace member needs a CI test
   step and the workspace-hack dependency.

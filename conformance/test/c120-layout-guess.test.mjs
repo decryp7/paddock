@@ -54,6 +54,8 @@ test('C120 unused waivers: a site waiver no guess uses, and a file waiver that w
   const file = '// conformance: file-layout-guess — filler data\n';
   assert.deepEqual(unusedWaivers(`${file}#[cfg(test)]\nmod tests {\n    fn t() { let b = "x/deps/y"; }\n}\n`), []);
   assert.deepEqual(unusedWaivers(`${file}fn p() { let a = 1; }\n`), [1]);
+  // A production-code guess in a file with no test module: the file waiver covers nothing, so it waives no site (the guess stays reported).
+  assert.deepEqual(unusedWaivers(`${file}let a = "x/deps/y";\n`), [1]);
   assert.deepEqual(unusedWaivers(`${file}${file}#[cfg(test)]\nmod tests {\n    fn t() { let b = "x/deps/y"; }\n}\n`), [2]);
   // A site waiver beats the file waiver on its site, so the file waiver there waives nothing.
   assert.deepEqual(unusedWaivers(`${file}#[cfg(test)]\nmod tests {\n    // conformance: layout-guess — own reason\n    fn t() { let b = "x/deps/y"; }\n}\n`), [1]);

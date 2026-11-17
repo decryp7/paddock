@@ -58,7 +58,7 @@ impl Job {
             .env("RUNNER_OS", "macOS")
             .env("RUNNER_TEMP", &self.temp)
             .env("GITHUB_ENV", &self.env_file)
-            .env("PADDOCK_DEV", env!("CARGO_BIN_EXE_paddock-dev"))
+            .env("PADDOCK_DEV", crate::dev_bin::PATH)
             .env("PADDOCK_CI_SLOTS", "3")
             .env("PADDOCK_CI_KEEP_SLOTS", "1")
             .env("PADDOCK_CI_MIN_FREE_GB", "0")

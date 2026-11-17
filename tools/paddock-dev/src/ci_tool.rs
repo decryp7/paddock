@@ -83,6 +83,7 @@ pub struct ToolCall {
     timeout: Duration,
     output: Output,
     cwd: Option<PathBuf>,
+    unset: Vec<String>,
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
@@ -111,6 +112,7 @@ impl ToolCall {
             timeout: Duration::from_secs(120),
             output: Output::Capture,
             cwd: None,
+            unset: Vec::new(),
             cancel: None,
         }
     }
@@ -134,6 +136,13 @@ impl ToolCall {
         self
     }
 
+    /// A variable of the caller's environment this program never gets, though a passed name matches it (the build folder as
+    /// `CARGO_TARGET_DIR`, which sccache hashes: [`crate::cargo_target`]).
+    pub fn without(mut self, name: impl Into<String>) -> ToolCall {
+        self.unset.push(name.into());
+        self
+    }
+
     /// The child's environment: the base list and the passed names from `parent`, then the call's own variables.
     pub fn child_env(&self, parent: &HashMap<String, String>) -> Vec<(String, String)> {
         let keep = |k: &str| {
@@ -146,7 +155,7 @@ impl ToolCall {
         };
         let mut env: Vec<(String, String)> = parent
             .iter()
-            .filter(|(k, _)| keep(k))
+            .filter(|(k, _)| keep(k) && !self.unset.iter().any(|u| u == k.as_str()))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         env.sort();
@@ -343,12 +352,19 @@ pub fn describe_code(code: i32) -> String {
     }
 }
 
-/// The last `n` lines of `text`, each indented, or nothing.
+/// How many `::error` lines before the last `n` lines [`tail`] keeps.
+const KEPT_ERRORS: usize = 10;
+
+/// The last `n` lines of `text`, each indented, or nothing. A line that starts with `::error` and falls before them is kept too (the
+/// last [`KEPT_ERRORS`] of them, in order, before the window): it names the cause, and a summary printed after it must not push it
+/// out (ER-27; C100's finding was cut off by its own table).
 pub fn tail(text: &str, n: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let from = lines.len().saturating_sub(n);
+    let mut earlier: Vec<&str> = lines[..from].iter().copied().filter(|l| l.starts_with("::error")).collect();
+    earlier.drain(..earlier.len().saturating_sub(KEPT_ERRORS));
     let mut out = String::new();
-    for l in &lines[from..] {
+    for l in earlier.into_iter().chain(lines[from..].iter().copied()) {
         let _ = writeln!(out, "  {l}");
     }
     out
@@ -370,7 +386,8 @@ pub fn error_line(cause: &str, next: &str) -> String {
     format!("::error::{cause} Next step: {next}")
 }
 
-fn quote(arg: &str) -> String {
+/// `arg` as one `sh` word: as it is when plain, else in single quotes with a `'` written `'\''`.
+pub fn quote(arg: &str) -> String {
     let plain = !arg.is_empty()
         && arg
             .chars()
@@ -426,6 +443,17 @@ mod tests {
     fn the_tail_is_the_last_lines_indented() {
         assert_eq!(tail("a\nb\nc\n", 2), "  b\n  c\n");
         assert_eq!(tail("", 5), "");
+    }
+
+    #[test]
+    fn an_error_line_before_the_window_is_kept_and_the_others_are_not() {
+        let text = "noise\n::error::first\nmore\n::error::second\n1\n2\n3\n";
+        assert_eq!(tail(text, 2), "  ::error::first\n  ::error::second\n  2\n  3\n");
+        assert_eq!(tail("::error::a\nb\n", 5), "  ::error::a\n  b\n", "inside the window: once");
+        let many: String = (0..30).map(|i| format!("::error::e{i}\n")).chain(["tail\n".to_string()]).collect();
+        let t = tail(&many, 1);
+        assert_eq!(t.lines().count(), 1 + KEPT_ERRORS + 1 - 1, "{t}");
+        assert!(t.contains("::error::e29") && !t.contains("::error::e5\n"), "{t}");
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { computed, inject } from '@angular/core';
+import { DestroyRef, computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import type { CommandError, ServiceInstall } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
@@ -45,6 +45,10 @@ export const ServiceStore = signalStore(
   })),
   withMethods((store, backend = inject(BACKEND), toasts = inject(Toasts)) => {
     let poll: ReturnType<typeof setTimeout> | null = null;
+    // A look still scheduled when the injector goes would fire into whatever runs next.
+    inject(DestroyRef).onDestroy(() => {
+      if (poll !== null) clearTimeout(poll);
+    });
     let downChecks = 0;
     const setBusy = (key: string, on: boolean) => {
       const next = { ...store.busy() };

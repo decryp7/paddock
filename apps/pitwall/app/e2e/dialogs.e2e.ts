@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { dialogContracts, dialogFitProblems, dialogWindowUrl, ShellDialogs } from '../../../../ui/projects/paddock-e2e/src/index.ts';
 import { openApp } from './app';
 import { CONTRACT_FILES, FIXTURES } from './dialog-fixtures';

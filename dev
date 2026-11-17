@@ -382,9 +382,18 @@ refuse_build_target() {
 
 # build <target dir> [hash]: the binary ends up in <target dir>/release/paddock-dev. Returns 0, 1 (failed, said aloud) or 75 (the
 # compiler changed during the build: the caller starts over once, see restart_or_fail).
+# A folder as cargo reads it inside a --config value: Git Bash turns a /c/... argument into C:/... only when the argument is the
+# path itself, not inside `build.target-dir='...'`, where cargo would read /c/Users as C:\c\Users (run 8208), so it is passed in
+# its mixed form there. Elsewhere the path is unchanged.
+config_path() {
+  if command -v cygpath > /dev/null 2>&1; then cygpath -m "$1"; else printf '%s\n' "$1"; fi
+}
+
 build() {
   refuse_build_target
-  (cd "$tool" && CARGO_TARGET_DIR="$1" PADDOCK_DEV_HASH="${2:-dirty}" cargo build --release --locked --quiet) || {
+  # The build folder as cargo configuration, never CARGO_TARGET_DIR: sccache hashes every CARGO_* variable (lessons.md; src/cargo_target.rs).
+  # A caller's own CARGO_TARGET_DIR is dropped, because the variable would outrank the configuration.
+  (cd "$tool" && unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR && PADDOCK_DEV_HASH="${2:-dirty}" cargo build --release --locked --quiet --config "build.target-dir='$(config_path "$1")'") || {
     code=$?
     toolchain_changed "$code" || return $?
     echo "::error::./dev could not build paddock-dev (hash ${2:-dirty}, cargo exit $code, build folder $1). Run 'cargo build --release --locked' in tools/paddock-dev to see why; a stale tools/paddock-dev/Cargo.lock is the usual cause." >&2
@@ -535,7 +544,7 @@ if [ "${PADDOCK_DEV_FRESH:-}" = 1 ]; then
   refuse_build_target
   fresh=$(mktemp -d)
   trap 'rm -rf "$fresh"' EXIT
-  (unset RUSTC_WRAPPER; cd "$tool" && CARGO_TARGET_DIR="$fresh" PADDOCK_DEV_HASH="$hash" cargo build --release --locked --quiet)
+  (unset RUSTC_WRAPPER CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR; cd "$tool" && PADDOCK_DEV_HASH="$hash" cargo build --release --locked --quiet --config "build.target-dir='$(config_path "$fresh")'")
   built_check "$fresh"
   "$fresh/release/paddock-dev$exe" "$@"
   exit $?

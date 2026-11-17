@@ -17,6 +17,13 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
 }
 
+#[allow(clippy::disallowed_methods)]
+fn git_out(dir: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git").args(args).current_dir(dir).output().unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
 fn reserve_file(dir: &Path, id: u32, branch: &str) {
     let d = dir.join(RESERVED_DIR);
     std::fs::create_dir_all(&d).unwrap();
@@ -69,7 +76,7 @@ fn repo() -> tempfile::TempDir {
 // Plain `git` and the tool under test, started and awaited here; nothing is killed by pid.
 #[allow(clippy::disallowed_methods)]
 fn dev(root: &Path, args: &[&str]) -> (i32, Value, String) {
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = crate::dev_bin::command()
         .args(["--json", "check", "new-id", "--root"])
         .arg(root)
         .args(args)
@@ -236,4 +243,105 @@ fn the_parsers_read_each_shape() {
     assert_eq!(id_of_path("conformance/reserved/C121-feat-x"), Some(121));
     assert_eq!(ids_of_gates("[[a]]\nid = \"C7\"\nid = \"other\"\nreason = \"id = C8\"\n"), vec![7]);
     assert_eq!(slug("Feat/New_thing"), "feat-new-thing");
+}
+
+fn clone_of(d: &Path, name: &str) -> std::path::PathBuf {
+    let c = d.join(name);
+    git(d, &["clone", "-q", d.join("origin.git").to_str().unwrap(), name]);
+    c
+}
+
+/// ER-21: two agents reserving before either pushes a branch (C130 taken twice, 2026-11-16) get different ids, because the server
+/// decides: the reservation is a ref created on origin, which a second push to the same ref cannot do.
+#[test]
+fn concurrent_reservations_from_two_clones_get_different_ids() {
+    let d = repo();
+    let (a, b) = (clone_of(d.path(), "ca"), clone_of(d.path(), "cb"));
+    let mut ids = Vec::new();
+    for _round in 0..5 {
+        let (ra, rb) = (a.clone(), b.clone());
+        let ta = std::thread::spawn(move || dev(&ra, &["--reserve", &format!("feat/a{}", std::process::id())]));
+        let tb = std::thread::spawn(move || dev(&rb, &["--reserve", &format!("feat/b{}", std::process::id())]));
+        let (ra, rb) = (ta.join().unwrap(), tb.join().unwrap());
+        assert_eq!(ra.0, 0, "{}", ra.2);
+        assert_eq!(rb.0, 0, "{}", rb.2);
+        ids.push(ra.1["id"].as_str().unwrap().to_string());
+        ids.push(rb.1["id"].as_str().unwrap().to_string());
+        // A fresh branch name each round: drop the files so the next round reserves again.
+        for c in [&a, &b] {
+            std::fs::remove_dir_all(c.join(RESERVED_DIR)).unwrap();
+        }
+        let n = ids.len();
+        assert_ne!(ids[n - 1], ids[n - 2], "both clones got {}: {ids:?}", ids[n - 1]);
+    }
+    let mut all = ids.clone();
+    all.sort();
+    all.dedup();
+    assert_eq!(all.len(), ids.len(), "every reservation is unique: {ids:?}");
+}
+
+/// The reservation is on the server at once: a clone that never fetched a branch of the first sees it, and the ref says who took it.
+#[test]
+fn a_reservation_is_visible_on_origin_before_any_branch_is_pushed() {
+    let d = repo();
+    let (a, b) = (clone_of(d.path(), "ca"), clone_of(d.path(), "cb"));
+    assert_eq!(dev(&a, &["--reserve", "feat/first"]).1["id"], "C41");
+    let origin = d.path().join("origin.git");
+    let shown = git_out(&origin, &["show", "refs/paddock/check-ids/C41"]);
+    assert!(shown.contains("feat/first"), "{shown}");
+    // Without --reserve the next id also skips it.
+    assert_eq!(dev(&b, &[]).1["id"], "C42");
+    assert_eq!(dev(&b, &["--reserve", "feat/second"]).1["id"], "C42");
+}
+
+/// A ref that appears between the scan and the push (the race itself) moves the push to the next number.
+#[test]
+fn a_taken_ref_moves_the_reservation_to_the_next_id() {
+    let d = repo();
+    let a = clone_of(d.path(), "ca");
+    let origin = d.path().join("origin.git");
+    let blob = git_out(&origin, &["rev-parse", "main"]).trim().to_string();
+    for id in [41, 42] {
+        git(&origin, &["update-ref", &format!("refs/paddock/check-ids/C{id}"), &blob]);
+    }
+    assert_eq!(dev(&a, &["--reserve", "feat/late"]).1["id"], "C43");
+}
+
+/// A server that refuses the reservation push (a pre-receive hook, as a rights or policy refusal) is an error that says no id was
+/// taken, and no reservation file is written.
+#[cfg(unix)]
+#[test]
+fn a_refusing_server_is_an_error_and_writes_no_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = repo();
+    let a = clone_of(d.path(), "ca");
+    let hook = d.path().join("origin.git/hooks/pre-receive");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    std::fs::write(&hook, "#!/bin/sh\necho refused by policy >&2\nexit 1\n").unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (code, _, err) = dev(&a, &["--reserve", "feat/nope"]);
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("::error::") && err.contains("no id was taken"), "{err}");
+    assert!(!a.join(RESERVED_DIR).exists(), "no reservation file without a reservation");
+}
+
+/// The hand-numbered files of branches that never used the server (C130 and C131 on 2026-11-16) still count, with no ref on origin.
+#[test]
+fn hand_written_reservation_files_without_a_server_ref_still_count() {
+    let d = repo();
+    let a = clone_of(d.path(), "ca");
+    git(&a, &["checkout", "-q", "-b", "golden", "origin/main"]);
+    reserve_file(&a, 131, "feat/golden");
+    git(&a, &["add", "-A"]);
+    git(&a, &["commit", "-q", "-m", "chore: reserve"]);
+    git(&a, &["push", "-q", "origin", "golden"]);
+    git(&a, &["checkout", "-q", "main"]);
+    let b = clone_of(d.path(), "cb");
+    reserve_file(&b, 130, "feat/stand-in");
+    assert_eq!(
+        dev(&b, &[]).1["id"],
+        "C132",
+        "a pushed hand-written file and a local one are both counted"
+    );
+    assert_eq!(dev(&b, &["--reserve", "feat/next"]).1["id"], "C132");
 }

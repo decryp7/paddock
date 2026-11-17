@@ -113,8 +113,29 @@ export class ActivityRuntime {
   private readonly coalesced = new Map<string, Coalesced>();
   private readonly listeners = new Set<(b: Breadcrumb) => void>();
 
+  /** The end-of-task callbacks still waiting for their zero-delay timer, by the clock's handle. */
+  private readonly endOfTask = new Map<unknown, () => void>();
+
   constructor(private readonly clock: Clock = REAL_CLOCK) {
-    this.triggers = new TriggerTracker((fn) => void clock.setTimeout(fn, 0));
+    this.triggers = new TriggerTracker((fn) => {
+      const handle = clock.setTimeout(() => {
+        this.endOfTask.delete(handle);
+        fn();
+      }, 0);
+      this.endOfTask.set(handle, fn);
+    });
+  }
+
+  /**
+   * Ends the current task now: runs the end-of-task callbacks that still wait for their zero-delay timer and cancels the
+   * timers. For tests, so no timer of the page-wide runtime outlives the test that started it.
+   */
+  endTaskNow(): void {
+    for (const [handle, fn] of [...this.endOfTask]) {
+      this.clock.clearTimeout(handle);
+      this.endOfTask.delete(handle);
+      fn();
+    }
   }
 
   /** Binds where entries go; entries recorded before are flushed to it. */

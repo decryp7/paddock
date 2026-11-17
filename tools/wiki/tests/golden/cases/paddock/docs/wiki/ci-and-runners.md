@@ -15,10 +15,10 @@ does not restate them. Steward-log citations are `merge-steward.md:<line>` in `/
 - ci.yml has a concurrency group of workflow, ref and event with cancel-in-progress, so a second dispatch on the same ref
   cancels the first. Source: [ci.yml](../../.gitea/workflows/ci.yml); src: `linux-ci-share-ab.md` (the same remark).
 - What CI may run, and when, is rule 50: [CI economy](../rules.md#ci-economy-user-2026-10-29). Why it exists: [lesson of 2026-10-29](../lessons.md#stale-duplicate-and-global-trigger-ci-runs-wasted-the-runners-2026-10-29).
-- Three runners exist in Gitea's admin list: the Linux host `d-gtr9`, the Mac mini's `d7-mac-mini` and the Windows host
+- Three runners exist in Gitea's admin list: the Linux host `d-gtr9`, the Mac mini's `m1-mac-mini` and the Windows host
   `decryp7ology-dev`. Linux jobs run in the `paddock-ci:v2` container on `d-gtr9` (16 cores and about 128 GB at the 2026-10-30
   measurement; it runs up to 4 jobs at once, as observed over 100 runs). Source: src: reviewer's check of the admin runner list, 2026-10-31; src: `linux-ci-share-ab.md` (Question); [ci.yml header](../../.gitea/workflows/ci.yml).
-- Two more Mac runners (`d7-mac-mini-2`, `-3`) were registered on 2026-10-28 and parked; they were never enabled and are not in the
+- Two more Mac runners (`m1-mac-mini-2`, `-3`) were registered on 2026-10-28 and parked; they were never enabled and are not in the
   admin list. Source: src: `runners-2026-10-28.md` (Mac mini section); src: reviewer's check of the admin runner list.
 - Job isolation is in main as [the job-isolation action](../../.gitea/actions/job-isolation/action.yml); [ADR 0025](../adr/0025-ci-job-isolation.md) reads Proposed on
   main but is Accepted on `origin/pitcrew/1.1-i1` at `707300972`. Source: src: `git show origin/pitcrew/1.1-i1:docs/adr/0025-ci-job-isolation.md`; src: `merge-steward.md:93, 413` (Proposed on main).

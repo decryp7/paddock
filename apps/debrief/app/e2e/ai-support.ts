@@ -1,5 +1,6 @@
 import { expect, Locator, Page } from '@playwright/test';
 import { gridRows, openAppWith } from './mock-url';
+import { expectStreamDone } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 /** Opens the app with the scripted AI mock (fast streaming) plus `extra` switches, and waits for the grid. */
 export async function openAiApp(page: Page, extra = ''): Promise<void> {
@@ -20,15 +21,21 @@ export async function openChat(page: Page): Promise<Locator> {
   return panel;
 }
 
-/** Sends a question and waits until the answer finished streaming (Send is back). */
+/**
+ * Sends a question and waits until its turn is drawn: the stream has started (the chat log is `aria-busy` from here to the end of the answer). The
+ * answer streams on; follow it with `waitAnswered` before pressing anything in it (a card above which text still arrives moves).
+ */
 export async function ask(panel: Locator, question: string): Promise<void> {
+  const turns = panel.locator('.turn');
+  const before = await turns.count();
   await panel.getByRole('textbox', { name: 'Ask about the logs' }).fill(question);
   await panel.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(turns, 'the question is drawn as a turn').toHaveCount(before + 1);
 }
 
+/** Waits until the answer has finished streaming (call it after `ask`, which waits for the stream to start). */
 export async function waitAnswered(panel: Locator): Promise<void> {
-  await expect(panel.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
-  await expect(panel.locator('.thinking')).toHaveCount(0);
+  await expectStreamDone(panel.getByRole('log', { name: 'Conversation' }));
 }
 
 /** Right-clicks the first grid row and returns the context menu. */

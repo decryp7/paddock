@@ -5,89 +5,52 @@
 //! is usually still in the runner's group, and signalling the group would stop the runner too. The caller has
 //! already checked that the pid belongs to the runner's tree (`pitcrew_core::process_track::check_stop_target`).
 
-#[cfg(windows)]
-use crate::process::{quiet_command, run_with_timeout};
-#[cfg(windows)]
-use std::time::Duration;
-
-/// What the service can do to a process.
-pub trait Terminator: Send {
-    /// Asks it to stop: SIGTERM on Unix, a close request (`taskkill`, which sends WM_CLOSE) on Windows.
-    fn ask(&self, pid: u32) -> Result<(), String>;
-    /// Ends it now: SIGKILL, or `taskkill /F`.
-    fn end(&self, pid: u32);
+/// What asking a process to stop came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Asked {
+    /// The request was delivered (SIGTERM, a close request): the process is given its stop timeout to end.
+    Delivered,
+    /// The process is the one named, but the system does not take a polite request for it (Windows: a console process
+    /// without a window "can only be terminated forcefully"). It is tracked like a delivered ask, and ended when the stop
+    /// timeout passes.
+    NotTaken,
 }
 
-/// The operating system's way.
+/// What the service can do to a process. A process is named by its [`paddock_proc::ProcessId`], the pid and the exact start
+/// time the service read when it listed it; the implementation compares the pid's holder right before it signals, so a pid
+/// that was handed on is never signalled (rule 53, ADR 0033).
+pub trait Terminator: Send {
+    /// Asks it to stop: SIGTERM on Unix, a close request on Windows. An error says why nothing was sent: the pid now belongs
+    /// to another process, or the system refused.
+    fn ask(&self, id: paddock_proc::ProcessId) -> Result<Asked, String>;
+    /// Ends it now (SIGKILL, `TerminateProcess`) and says what that found. A pid handed on to another process is left alone
+    /// ([`paddock_proc::Ending::NotOurs`]).
+    fn end(&self, id: paddock_proc::ProcessId) -> paddock_proc::Ending;
+}
+
+/// The operating system's way, through `paddock_proc`.
 pub struct OsTerminator;
 
 impl Terminator for OsTerminator {
-    #[cfg_attr(
-        unix,
-        expect(
-            clippy::disallowed_methods,
-            reason = "ADR 0033 WP-6: asks a pid from the last probe; take a ProcessId and use paddock_proc::ask"
-        )
-    )]
-    fn ask(&self, pid: u32) -> Result<(), String> {
-        #[cfg(unix)]
-        {
-            let p = i32::try_from(pid).map_err(|_| "process id out of range".to_string())?;
-            nix::sys::signal::kill(nix::unistd::Pid::from_raw(p), nix::sys::signal::Signal::SIGTERM)
-                .map_err(|e| format!("the stop request could not be sent: {e}"))
-        }
-        #[cfg(windows)]
-        {
-            taskkill(pid, false)
-        }
-        #[cfg(not(any(unix, windows)))]
-        {
-            let _ = pid;
-            Err("stopping processes is not supported on this platform".into())
+    fn ask(&self, id: paddock_proc::ProcessId) -> Result<Asked, String> {
+        match paddock_proc::ask_outcome(id) {
+            paddock_proc::Ending::Ended => Ok(Asked::Delivered),
+            paddock_proc::Ending::Gone | paddock_proc::Ending::NotOurs(_) => Err(NOT_THE_SAME.into()),
+            // The process is the one named and the system did not take the request: on Windows a console process
+            // without a window cannot be closed politely, so it is ended when the timeout passes.
+            paddock_proc::Ending::Refused if cfg!(windows) => Ok(Asked::NotTaken),
+            paddock_proc::Ending::Refused => Err("the system refused the stop request (the process may belong to another user)".into()),
         }
     }
 
-    #[cfg_attr(
-        unix,
-        expect(
-            clippy::disallowed_methods,
-            reason = "ADR 0033 WP-6: ends a pid from the last probe; take a ProcessId and use paddock_proc::end"
-        )
-    )]
-    fn end(&self, pid: u32) {
-        #[cfg(unix)]
-        {
-            if let Ok(p) = i32::try_from(pid) {
-                let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(p), nix::sys::signal::Signal::SIGKILL);
-            }
-        }
-        #[cfg(windows)]
-        {
-            let _ = taskkill(pid, true);
-        }
-        #[cfg(not(any(unix, windows)))]
-        {
-            let _ = pid;
-        }
+    fn end(&self, id: paddock_proc::ProcessId) -> paddock_proc::Ending {
+        paddock_proc::end(id)
     }
 }
 
-/// `taskkill /PID n [/T] [/F]` (Windows). Without `/F` it posts WM_CLOSE to the process's windows; console programs
-/// without a window ignore it, and the stop timeout then ends them with `/F`.
-#[cfg(windows)]
-fn taskkill(pid: u32, force: bool) -> Result<(), String> {
-    let mut cmd = quiet_command(&crate::process::taskkill_exe());
-    cmd.args(["/PID", &pid.to_string()]);
-    if force {
-        cmd.arg("/F");
-    }
-    let out = run_with_timeout(cmd, Duration::from_secs(20)).map_err(|e| e.to_string())?;
-    if out.success {
-        Ok(())
-    } else {
-        Err(format!("taskkill: {}", out.stderr.trim().chars().take(200).collect::<String>()))
-    }
-}
+/// Why nothing was sent: the pid is free or was handed on.
+const NOT_THE_SAME: &str =
+    "that process id no longer belongs to the process that was listed (it ended, or the id was reused); refresh the list";
 
 #[cfg(test)]
 mod tests {
@@ -106,33 +69,54 @@ mod tests {
         }
     }
 
+    /// The identity the service holds for `child`: read from the OS, exactly.
+    #[cfg(unix)]
+    fn held(child: &Reaped) -> paddock_proc::ProcessId {
+        paddock_proc::ProcessId::of(child.0.id()).expect("an unreaped child has a start time")
+    }
+
+    /// The same pid with another start time: the id was reused by a process that started later.
+    #[cfg(unix)]
+    fn reused(id: paddock_proc::ProcessId) -> paddock_proc::ProcessId {
+        paddock_proc::ProcessId::new(
+            id.pid(),
+            paddock_proc::StartTime::from_micros(id.started().as_micros().saturating_sub(3_600_000_000)),
+        )
+    }
+
+    #[cfg(unix)]
+    fn stand_in(script: &str, piped: bool) -> Reaped {
+        let mut c = crate::process::quiet_command(std::path::Path::new("sh"));
+        c.args(["-c", script]).stderr(std::process::Stdio::null());
+        c.stdout(if piped {
+            std::process::Stdio::piped()
+        } else {
+            std::process::Stdio::null()
+        });
+        Reaped(c.spawn().unwrap())
+    }
+
     #[cfg(unix)]
     #[test]
-    fn a_process_is_asked_then_ended() {
+    fn a_process_is_asked_then_ended_by_identity() {
         use std::io::BufRead;
         use std::os::unix::process::ExitStatusExt;
-        let mut c = crate::process::quiet_command(std::path::Path::new("sleep"));
-        c.arg("60").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-        let mut child = Reaped(c.spawn().unwrap());
-        assert!(OsTerminator.ask(child.0.id()).is_ok());
+        let mut child = stand_in("exec sleep 60", false);
+        assert_eq!(OsTerminator.ask(held(&child)), Ok(Asked::Delivered));
         let status = child.0.wait().unwrap();
         assert_eq!(status.signal(), Some(nix::sys::signal::Signal::SIGTERM as i32));
         // Ending one that ignores SIGTERM: a shell that ignores it and then becomes `sleep` (an ignored signal stays
         // ignored across exec), so it is one process with no children of its own to leave behind. It says when the
         // signal is ignored; the test waits for that line instead of a fixed time.
-        let mut sh = crate::process::quiet_command(std::path::Path::new("sh"));
-        sh.args(["-c", "trap '' TERM; echo ready; exec sleep 60"])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null());
-        let mut child = Reaped(sh.spawn().unwrap());
+        let mut child = stand_in("trap '' TERM; echo ready; exec sleep 60", true);
         let mut ready = String::new();
         std::io::BufReader::new(child.0.stdout.take().unwrap())
             .read_line(&mut ready)
             .unwrap();
         assert_eq!(ready.trim(), "ready");
-        let pid = child.0.id();
-        OsTerminator.ask(pid).unwrap();
-        OsTerminator.end(pid);
+        let id = held(&child);
+        assert_eq!(OsTerminator.ask(id), Ok(Asked::Delivered));
+        assert_eq!(OsTerminator.end(id), paddock_proc::Ending::Ended);
         // Had the request not been ignored, SIGTERM (sent first) would have ended it.
         let status = child.0.wait().unwrap();
         assert_eq!(
@@ -140,9 +124,47 @@ mod tests {
             Some(nix::sys::signal::Signal::SIGKILL as i32),
             "it ignored the request"
         );
-        // A process that is not there is an error, not a panic.
-        assert!(OsTerminator.ask(i32::MAX as u32).is_err());
-        OsTerminator.end(i32::MAX as u32);
-        assert!(OsTerminator.ask(u32::MAX).is_err(), "out of range");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_reused_process_id_is_neither_asked_nor_ended() {
+        // The pid names a live stand-in that started at another time than the one the service listed: the id was reused.
+        let mut child = stand_in("exec sleep 60", false);
+        let id = held(&child);
+        let err = OsTerminator.ask(reused(id)).unwrap_err();
+        assert!(err.contains("no longer belongs"), "{err}");
+        assert!(matches!(OsTerminator.end(reused(id)), paddock_proc::Ending::NotOurs(_)));
+        assert!(child.0.try_wait().unwrap().is_none(), "the stand-in was not touched");
+        // The same process by its own identity is stopped.
+        assert_eq!(OsTerminator.ask(id), Ok(Asked::Delivered));
+        child.0.wait().unwrap();
+        // A pid nobody holds is an error, not a panic.
+        let nobody = |pid| paddock_proc::ProcessId::new(pid, paddock_proc::StartTime::from_micros(1_000_000));
+        assert!(OsTerminator.ask(nobody(i32::MAX as u32)).is_err());
+        assert_eq!(OsTerminator.end(nobody(i32::MAX as u32)), paddock_proc::Ending::Gone);
+        assert!(OsTerminator.ask(nobody(u32::MAX)).is_err(), "out of range");
+    }
+
+    /// Windows: a console process without a window cannot be closed politely (`taskkill` says it "can only be terminated
+    /// forcefully"). The ask reports that the request was not taken, and the forced end still works.
+    #[cfg(windows)]
+    #[test]
+    fn a_windowless_console_process_is_not_taken_politely_and_is_then_ended() {
+        let mut c = crate::process::quiet_command(std::path::Path::new("ping"));
+        c.args(["-n", "60", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        let mut child = c.spawn().unwrap();
+        let id = paddock_proc::ProcessId::of(child.id()).expect("an unreaped child has a start time");
+        let asked = OsTerminator.ask(id);
+        let ended = OsTerminator.end(id);
+        let _ = child.wait();
+        assert_eq!(
+            asked,
+            Ok(Asked::NotTaken),
+            "a console process with no window refuses the close request"
+        );
+        assert_eq!(ended, paddock_proc::Ending::Ended);
     }
 }

@@ -4,7 +4,10 @@
 //! An id is taken when any of these names it: a file `conformance/src/checks/C<n>-*.mjs`, an `import C<n>` in that folder's
 //! `index.mjs`, a `| C<n> |` row of `conformance/README.md`, a Rust check file `tools/paddock-dev/src/check/c<n>*.rs`, an
 //! `id = "C<n>"` line of `docs/gates.toml`, or a reservation file `conformance/reserved/C<n>-<branch-slug>` (`--reserve <branch>`
-//! creates one file per reservation, so two branches never touch the same file; the commit of that file is the reservation).
+//! creates one file per reservation as the record). `--reserve` first takes the id on the origin remote by pushing a blob to
+//! `refs/paddock/check-ids/C<n>` (a push that creates a ref fails when it exists, so the server decides atomically and every machine
+//! sees the reservation at once, before any branch is pushed); a refused push moves on to the next number, and the file is written
+//! only after a push was accepted.
 //! Two reservation files with the same id (two branches that reserved it) are an error: the scan lists both branches. The scan reads
 //! the working tree, every local branch and every branch of the origin remote as the remote has it now (`git ls-remote`, not this
 //! clone's possibly stale `origin/*` copies; tips this clone lacks are fetched first): one `git for-each-ref`, one `git ls-remote`,
@@ -215,6 +218,9 @@ pub fn scan(exec: &dyn Exec, root: &Path) -> Result<Scan, CliError> {
         ))
         .with_hint("Delete merged branches (`./dev worktree clean`, `git branch -d`) and run it again."));
     }
+    for id in remote_reservations(exec, root)? {
+        taken.add(id, "reservation ref");
+    }
     fetch_missing(exec, root, &tips)?;
     // Per tip: the files of the checks folder and the three listed files, as blob ids.
     let mut blobs: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
@@ -265,6 +271,59 @@ pub fn scan(exec: &dyn Exec, root: &Path) -> Result<Scan, CliError> {
 
 /// The remote whose branches every parallel branch is pushed to.
 const REMOTE: &str = "origin";
+/// Where a reservation lives on [`REMOTE`]: one ref `refs/paddock/check-ids/C<n>` per id, pointing at a blob that says who took it.
+/// A push that creates a ref fails when the ref exists, so the server decides atomically who gets an id, at once, before any branch
+/// is pushed.
+pub const RESERVATION_REFS: &str = "refs/paddock/check-ids";
+/// The most reservation pushes tried for one `--reserve` call, so a broken remote cannot loop.
+const MAX_ATTEMPTS: usize = 200;
+
+/// The ids reserved on [`REMOTE`] as the remote has them now (one `git ls-remote`).
+fn remote_reservations(exec: &dyn Exec, root: &Path) -> Result<Vec<u32>, CliError> {
+    let pattern = format!("{RESERVATION_REFS}/*");
+    let out = git(exec, root, &["ls-remote", REMOTE, &pattern], None).map_err(|e| {
+        CliError::failure(format!(
+            "::error::check new-id: the reservation refs of {REMOTE} could not be read live (git ls-remote {REMOTE} {pattern}): {e}"
+        ))
+        .with_hint("Check the network and `git remote -v`, then run it again.")
+    })?;
+    Ok(out
+        .lines()
+        .filter_map(|l| id_number(l.split_once('\t')?.1.trim().strip_prefix(RESERVATION_REFS)?.strip_prefix('/')?))
+        .collect())
+}
+
+/// Takes the lowest free id above `max` on the remote: pushes a blob to `refs/paddock/check-ids/C<n>` (refused when the ref
+/// exists, i.e. someone else took it first; one holding this very blob is ours) and moves on to the next number until a push is accepted. Returns the id taken.
+fn claim_on_remote(exec: &dyn Exec, root: &Path, mut max: u32, text_for: &dyn Fn(u32) -> String) -> Result<u32, CliError> {
+    for _ in 0..MAX_ATTEMPTS {
+        let id = max + 1;
+        let blob = git(exec, root, &["hash-object", "-w", "--stdin"], Some(text_for(id).as_bytes()))?;
+        let spec = format!("{}:{RESERVATION_REFS}/C{id}", blob.trim());
+        match git(exec, root, &["push", "--quiet", REMOTE, &spec], None) {
+            Ok(_) => return Ok(id),
+            Err(e) => {
+                // Refused because the ref exists: take the next number. Anything else (network, rights) is an error.
+                let existing = git(exec, root, &["ls-remote", REMOTE, &format!("{RESERVATION_REFS}/C{id}")], None)?;
+                // The ref holds the blob this call hashed: an earlier push of this call whose reply was lost, so it is ours.
+                if existing.split_whitespace().next() == Some(blob.trim()) {
+                    return Ok(id);
+                }
+                if existing.trim().is_empty() {
+                    return Err(CliError::failure(format!(
+                        "::error::check new-id: the reservation C{id} could not be pushed to {REMOTE} ({RESERVATION_REFS}/C{id}): {e}"
+                    ))
+                    .with_hint("Check the network and your push rights on origin, then run it again; no id was taken."));
+                }
+                max = id;
+            }
+        }
+    }
+    Err(CliError::failure(format!(
+        "::error::check new-id: {MAX_ATTEMPTS} reservation pushes in a row were refused."
+    ))
+    .with_hint("Run `git ls-remote origin 'refs/paddock/check-ids/*'` and ask who is reserving ids."))
+}
 
 /// The branches of [`REMOTE`] as the remote has them now: `(sha, branch name)` from one `git ls-remote --heads`. A failure is an
 /// error: the cached `origin/*` refs may miss a branch pushed since the last fetch, and a scan without it could hand out its id.
@@ -412,9 +471,10 @@ pub fn command_with(exec: &dyn Exec, root: Option<PathBuf>, reserve: Option<Stri
             if let Some(id) = mine {
                 (id, true)
             } else {
-                let next = max + 1;
+                let line = |id: u32| format!("C{id} {branch} {today}\n");
+                let next = claim_on_remote(exec, &root, max, &line)?;
                 std::fs::create_dir_all(&dir)
-                    .and_then(|()| std::fs::write(dir.join(format!("C{next}-{slug}")), format!("C{next} {branch} {today}\n")))
+                    .and_then(|()| std::fs::write(dir.join(format!("C{next}-{slug}")), line(next)))
                     .map_err(|e| {
                         CliError::failure(format!("::error::check new-id: {RESERVED_DIR} cannot be written: {e}."))
                             .with_hint("Fix the folder's rights and run it again.")
@@ -427,7 +487,7 @@ pub fn command_with(exec: &dyn Exec, root: Option<PathBuf>, reserve: Option<Stri
     let text = match (&reserve, existing) {
         (Some(b), true) => format!("C{id}\nalready reserved for {b} in {RESERVED_DIR}"),
         (Some(b), false) => format!(
-            "C{id}\nreserved for {b}: commit {RESERVED_DIR}/C{id}-{} (the commit is the reservation)",
+            "C{id}\nreserved for {b} on {REMOTE} ({RESERVATION_REFS}/C{id}); commit {RESERVED_DIR}/C{id}-{} as the record",
             slug(b)
         ),
         (None, _) => format!("C{id}"),
@@ -436,4 +496,82 @@ pub fn command_with(exec: &dyn Exec, root: Option<PathBuf>, reserve: Option<Stri
         json!({ "id": format!("C{id}"), "highest_taken": max, "branches": s.refs, "tips": s.tips, "reserved": reserve.is_some() }),
         text,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    /// A scripted `git`: an empty repository whose origin has no branches, and the replies to the reservation pushes in order.
+    struct Scripted {
+        /// For each push in order: `Ok` or refused.
+        pushes: RefCell<Vec<bool>>,
+        /// What `ls-remote origin refs/paddock/check-ids/C<n>` answers (the same for every id).
+        existing: String,
+        log: RefCell<Vec<String>>,
+    }
+
+    impl Exec for Scripted {
+        fn run(&self, _program: &str, args: &[&str], _cwd: &Path, _stdin: Option<&[u8]>) -> Result<String, CliError> {
+            self.log.borrow_mut().push(args.join(" "));
+            match args {
+                ["for-each-ref", ..] => Ok(String::new()),
+                ["ls-remote", "--heads", _] => Ok(String::new()),
+                ["ls-remote", _, p] if p.ends_with("/*") => Ok(String::new()),
+                ["ls-remote", _, _] => Ok(self.existing.clone()),
+                ["hash-object", ..] => Ok("blobsha\n".into()),
+                ["push", ..] => {
+                    if self.pushes.borrow_mut().remove(0) {
+                        Ok(String::new())
+                    } else {
+                        Err(CliError::failure("rejected"))
+                    }
+                }
+                other => Err(CliError::failure(format!("unexpected git {other:?}"))),
+            }
+        }
+    }
+
+    fn reserve(s: &Scripted) -> Result<Report, CliError> {
+        let d = tempfile::tempdir().unwrap();
+        command_with(s, Some(d.path().to_path_buf()), Some("feat/x".into()), "2026-11-16")
+    }
+
+    /// The race itself: the scan saw nothing, but C1's push is refused because someone took it a moment before: the next number is
+    /// pushed. (Delete the `max = id` step and this loops on C1 until the attempt limit.)
+    #[test]
+    fn a_push_refused_because_the_ref_exists_moves_to_the_next_id() {
+        let s = Scripted {
+            pushes: RefCell::new(vec![false, true]),
+            existing: "othersha\trefs/paddock/check-ids/C1\n".into(),
+            log: RefCell::default(),
+        };
+        let r = reserve(&s).unwrap();
+        assert_eq!(r.json()["id"], "C2", "{:?}", s.log.borrow());
+        assert_eq!(s.log.borrow().iter().filter(|l| l.starts_with("push")).count(), 2);
+    }
+
+    /// A lost reply: the push got through but the call saw an error, and the ref holds our own blob: the id is ours, not burnt.
+    #[test]
+    fn a_ref_holding_our_own_blob_is_ours() {
+        let s = Scripted {
+            pushes: RefCell::new(vec![false]),
+            existing: "blobsha\trefs/paddock/check-ids/C1\n".into(),
+            log: RefCell::default(),
+        };
+        assert_eq!(reserve(&s).unwrap().json()["id"], "C1");
+    }
+
+    /// A refusal with no ref behind it (network, rights) is an error, and takes no id.
+    #[test]
+    fn a_refusal_without_a_ref_takes_no_id() {
+        let s = Scripted {
+            pushes: RefCell::new(vec![false]),
+            existing: String::new(),
+            log: RefCell::default(),
+        };
+        let e = reserve(&s).err().unwrap();
+        assert!(format!("{e:?}{e}").contains("could not be pushed"));
+    }
 }

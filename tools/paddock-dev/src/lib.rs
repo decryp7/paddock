@@ -44,6 +44,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod brief_check;
+pub mod cargo_target;
 pub mod check;
 pub mod check_ids;
 pub mod child_env;
@@ -60,11 +61,13 @@ pub mod disk;
 pub mod full_tree;
 pub mod gates;
 pub mod generators;
+pub mod golden_cmd;
 pub mod heavy_cmd;
 pub mod hook;
 pub mod input_hash;
 pub mod ipc_endpoints;
 pub mod load;
+pub mod local_sccache;
 pub mod locks;
 pub mod log_text;
 pub mod merge_check;

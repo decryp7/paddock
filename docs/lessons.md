@@ -464,6 +464,32 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   Testing installer on macOS from CI 6353 on). Use `isMain` (conformance/src/util/is-main.mjs); a step that relies on a
   script's output also checks that the output is there.
 
+- **`CARGO_TARGET_DIR` in the environment defeats sccache 0.19 (2026-11-16, feat/local-sccache).** sccache puts every `CARGO_*`
+  variable into its cache key and cargo hands the variable to rustc, so a per-worktree build folder given as `CARGO_TARGET_DIR`
+  (or `CARGO_BUILD_TARGET_DIR`) gives 0% hits across worktrees; the same folder as `--config build.target-dir='<dir>'` gives about
+  82%. ADR 0014 §1's 6.5% was this, not the checkout path. The same holds for `CARGO_INCREMENTAL=0` set as a variable (see
+  docs/benchmarks.md, "Local sccache"): put such a setting in cargo configuration, where it is not part of the key. Every tool
+  that starts cargo now passes the folder through one accessor, `tools/paddock-dev/src/cargo_target.rs`, and drops the variables
+  from the child's environment (the variable would outrank the configuration). A stand-in cargo in the tests fails when
+  `CARGO_TARGET_DIR` reaches it, and a source audit (`tests/it/cargo_target_lint.rs`) fails when a tool sets the variable on a child
+  outside its short list.
+- **A server a tool starts is the machine's, not the test's or the job's (2026-11-16/17, feat/local-sccache).** Three review
+  findings, one class. (1) A tool that starts the shared sccache server from a test starts it on the developer's machine (ER-45):
+  the wrapper is prepared on first use by a cargo step (`local_sccache::Lazy`), never when the tool starts, and every test spawn of
+  `paddock-dev` goes through `tests/it/dev_bin.rs`, which sets `PADDOCK_SCCACHE=off` (an audit fails on a direct use of the binary's
+  path). (2) A server inherits the starter's `TMPDIR` and outlives it: builds failed once the starter's scratch folder was deleted, so
+  the server now starts with a tool-owned `TMPDIR` and working folder. (3) Whether a running server is "ours" is decided by an
+  exact comparison of the printed folder (`Local disk: "<dir>"`) or bucket and prefix, never by `contains`. CI keeps its per-slot
+  sccache; a first version let the Mac runner join the agents' server, and the review found `CARGO_INCREMENTAL=0` (a `CARGO_*`
+  variable, so part of the key) gave 4% hits against the agents' entries and that a shared server is one more thing that can stop a
+  runner; the user dropped it.
+- **sccache 0.19.0 latches a failed startup write check (2026-11-17, found for the RustFS cache).** At startup the server writes one test
+  object (`RemoteStorage::check`); when that one PUT fails the server runs read-only for its whole life, every later write fails
+  ("Cannot write to read-only storage") and the stats show 0 hits with a write error per compile (the first RustFS series: 138 of 138).
+  The tool now reads `Effective cache mode` from `--show-adv-stats`, restarts a read-only server of its own cache once, and turns the
+  wrapper off with the server's log path in the warning if it stays read-only. The server always logs its errors to a file in its run folder
+  and never idles out; S3 without keys fails at once instead of waiting about 75 s in the metadata lookup.
+
 ## Linux VM guests (Paddock C21, 2026-10-25)
 - Linux guests: `tart exec` (like `ssh` without a PAM login) has no logind session, so there is no `systemd --user`
   manager and no session bus; `loginctl enable-linger <user>` starts one, as a desktop login would. A desktop smoke
@@ -2105,7 +2131,6 @@ what the push sends, never by local names. Pushing a train before stacking work 
 **Class: the pre-push gate's scope differs from what the push sends (an old base measured more; a local base would have
 measured less); earlier: the 2026-11-12 base choice from origin/main for train-based branches.**
 
-
 ## A zombie answers kill(pid, 0): CI's job container never collects orphans (2026-11-15, CI run 8110)
 The VM lock test "a holder killed by its test leaves no `slot hold` process" passed on the Mac and failed in ci.yml's ui job:
 the detached holder had exited, but in the job container PID 1 is `sleep 21600` (the runner's entrypoint), which never collects
@@ -2142,6 +2167,131 @@ before (the tree is ended before the helper writes), green after; 200 of 200 gre
 the code under test is about to end holds the stand-in until it has observed it, and a wait's failure message names its last
 observation. **Class: an observation raced the action under test (rule 53's "act on a name read earlier", seen from the test side).**
 
+## The two hosts of a check gave different answers on error paths; a shared helper now owns them (ER-21, 2026-11-15)
+C121, C124 and C125 read their allow lists through one shared helper, but each check still handled the helper's error paths
+itself, and the Rust and JavaScript hosts handled them differently. The parity tests compared findings only on trees where
+everything could be read, so the differences went unseen. C125 was fixed first (865498235). On train 12 the same bug showed in
+C121 and C124. For a broken allow file, the Rust host reported an unmet precondition and went on scanning, while the JavaScript
+host gave one check-broken finding. For an unreadable file, the Rust host marked the run incomplete, while the JavaScript host
+skipped the file without a word. The fix (`fix/allow-list-shared-reader`) moves both outcomes into the helper, in both hosts
+(`conformance/src/util/allow-list.mjs` and `tools/paddock-dev/src/check/allow_list.rs`):
+- a broken allow file gives one unwaivable check-broken finding and nothing else;
+- a file the check cannot read gives a not-measured error at that file.
+Each check declares the reader's `Spec` as its allow list (`Check::allow_list`, `allowList`).
+`tools/paddock-dev/tests/it/check_allow_list.rs` runs the error-path parity tests for every check that declares one. It
+uses each check's own control tree and compares both hosts.
+**Rule:** a helper that several checks share owns its error paths. Its parity test runs over every user the helper declares, not
+over a hand-picked check, and it covers the error paths as well as the clean run.
+Two limits remain, both opt-in:
+- A check that calls the reader without declaring its `Spec` skips the parity tests, and nothing notices.
+- The JavaScript error-path test uses a hand-made table of samples (`SAMPLE` in `conformance/test/allow-list.test.mjs`). The
+  test fails when a declared check has no sample, but the table is still a hand list.
+**Class: the two hosts diverge on an error path; earlier: C125 (865498235), then C121 and C124 (train 12).**
+
+## A recorded pid is read once, as an identity or as "ended" (2026-11-15, the review of f224dd0b4)
+The review of Spotter's helper fix found the same shape in more tests: a test parses a pid from a file or a child's output and
+calls `ProcessId::of` on it later, after the code under test may have ended that process. `of` answers `None` for an ended
+process, which a poll reads as "not yet" (Spotter's never-ready test with a 3 s guard, paddock-proc's 3 s timeout test: a test
+thread kept off the CPU for the guard waits out its own bound) and an `unwrap` turns into a panic (paddock-chromium's
+launcher-gone test, whose fake ends on purpose); and once the pid is handed on, `of` gives the new holder, which a failure
+path then ends (tools/heavy's background-sleep tests, ER-14). **Fix:** `paddock_testkit_start::recorded` reads the record
+once it is complete (a pid and a newline) and takes the identity through `ProcessId::of_recorded` with the file's modification
+time, or, for a printed pid, a `Stamp` taken before the spawn; it answers `Recorded::Ended`, which is final. Each site got a
+test that forces the late look (the test looks only after the run returned, or the stand-in has ended before its pid is
+printed), red before. C128 (report-only) flags `ProcessId::of` on a pid parsed in the same function. **Class: an observation
+raced the action under test (rule 53, seen from the test side; run 8118 above).**
+
+## Two branches that each added a lesson conflicted at the end of the file (2026-11-15)
+Every train that merged two branches with a new lesson (or a new benchmark block) stopped on a conflict in `docs/lessons.md`:
+both sides added lines after the same last line, so git saw one hunk changed twice, and the integrator resolved it by hand each
+time. The lessons log now merges with git's union driver (`.gitattributes`: `docs/lessons.md merge=union`), which keeps both
+sides' added lines; `conformance/test/union-merge.test.mjs` merges two such branches in a scratch repository.
+`docs/benchmarks.md` and the apps' `docs/performance.md` stay on the normal merge: their results blocks are corrected in place
+(review of 2026-11-15), and the test checks that they are not union. **When union is not safe:** it never reports a conflict, so a change that
+edits or deletes lines in place (a reworded lesson, a corrected benchmark row) merged with another branch's edit of the same
+lines keeps both versions, silently. Rewording an earlier entry goes in its own change, merged alone, and the integrator reads
+the merged hunk of these files like any other. Registers, tables whose rows must be unique and generated files (`gates.toml`,
+`known-copies.toml`, lockfiles) are never `merge=union`: a duplicated row there is a bug, not a merge.
+
+## The nightly disk summary measured a folder CI runners do not have (2026-11-15)
+The nightly's `disk-summary` job ran `./dev disk scan` and `./dev disk report --summary` on the Mac runner. Those read the
+dev-targets folder (worktrees, build folders, agent scratch), which lives on the development machine, not in a runner's
+environment, so it summarised folders a runner does not have (or wrote "not measured") while it held the single Mac runner.
+The user asked whether it was needed; it was removed (with its README line). `./dev disk report` gives the same picture on the machine, and the
+`--summary` option stays for use there. `conformance/test/ci-actions.test.mjs` fails on any workflow step that runs
+`./dev disk scan` or `./dev disk report`. **Rule:** a CI job reads only what a runner has; a check of the development machine
+runs on the machine.
+
+## Waiters stacked and polled without a bound although the pgrep guard existed (2026-11-15)
+The `no-pgrep-wait` hook only refused a `pgrep -f` loop, by a regex over the whole command text (it also refused such a loop
+written into a heredoc or a commit message). Agents still started a second `./dev wait` for a run another one already waited
+on, and polled logs with `while ! grep ...; do sleep ...; done`, which has no maximum duration. The hook now runs on
+`lib/shellscan.py` (the loop's condition, not any text), keeps the `pgrep -f` refusal, and warns (never blocks: ER-36, a hook
+that judges text only warns) on a grep polling loop, on two waits for one target in one command, and on a wait for a target a
+running `dev wait` already has (read from `ps`; it cannot tell which agent started it, so the warning says so). Rows are in
+`lib/shell-forms.tsv`, whose runner now knows a `warn` verdict. **Class: unbounded or stacked waiters (ER-32; earlier: the 36
+stuck waiters of 2026-11-03/04).**
+
+## The shell scripts deleted computed paths with a bare rm -rf while Rust had a guard (2026-11-15)
+paddock-dev's deletes go through `safe_remove::remove_under` (strictly under a vetted root, no `..`, no link on the way), but
+the shell scripts, which still run as the CI kit's fallback, on tag runs and on the development machine, had no such helper:
+each computed `rm -rf "$x"` trusted its variable. The class has bitten or nearly bitten four times: the 2026-10-31 scratchpad
+wipe, the 2026-11-10 live-worktree removal, the prune script's IFS near-miss and its stat fallback. `conformance/ci/safe-rm.sh`
+(`safe_rm <root> <path>...`, POSIX sh) is the shell copy of the Rust guard (docs/known-copies.toml, `safe-remove-under`): it
+refuses an empty path, `/`, a top-level or home root, `..`, a relative path, a path outside the root and a link on the way,
+and removes nothing when one path is refused. The prune, host-cleanup, node-caches, stable-workspace, kept-clone and vm-win
+prepare sites use it with the same roots as their Rust twins. C127 (report-only) lists every other recursive `rm` of a computed
+path in a shell script. **Rule:** a shell script deletes a computed path only through `safe_rm`, with the root it owns; a
+mktemp folder of its own, or a site that cannot name a root two folders deep (a guest VM's home, Linux's `/tmp`), carries
+`# conformance: computed-rm — <why>`. Review then found that both copies checked one spelling and removed another: `root/link/`
+(a final link with a trailing slash) passed as a path strictly under the root, and the OS read it as the folder the link names, so
+the delete emptied a folder outside the root; the Rust guard had the same hole. Both now remove the path rebuilt from its checked
+names, and one table (`tools/paddock-dev/tests/fixtures/safe-remove-parity.tsv`) is answered by both copies' tests. **Class:
+computed deletes beyond their folder (C115's third sighting, ER-21); check and act on the same normalised value.**
+
+## A train waiting to dispatch was starved by scheduled runs (2026-11-15)
+`./dev ci dispatch` waited while another run held the single Mac or Windows runner, and `ci schedule-skip` ends a scheduled run
+early only while a train's run is queued or running. A train whose dispatcher was still waiting had nothing queued, so each new
+scheduled run took the runner first: on 2026-11-14 around 11:00 and on 2026-11-15 from 05:03 to 07:07 (runs 8112 to 8114). A
+first fix recorded a "waiting" marker in a repository Actions variable; review found that it needs a repo-admin-scoped token,
+and the common-practice answer is a queued run, as CI systems do (a job waits on a free runner, not the client). It was
+reverted. Now `ci dispatch` sends a `train/*` run of a workflow whose first job runs the `runner-wait` action at once, and that
+Linux job waits (`./dev ci runner-wait`, at most 2h30m, logged) until no OLDER run has an unfinished job on its Mac or Windows class (an older run's later Linux jobs do not hold it:
+review round 2 found that waiting for the whole run could fill the Linux slots with waiters).
+Older only: two runs of one train never wait for each other, so the oldest always goes. The queued run is what schedule-skip
+already yields to, with its bounds (never twice in a row, never past the gap). Conformance checks that every macOS or Windows
+job of such a workflow needs the runner-wait job. **Rule:** a wait for a shared resource lives in the queued job, not in the
+client that has not queued yet. **Class: a scheduler that cannot see work that has not been queued.**
+
+## safe_rm's per-call programs pushed kept-clone's checkout phase past its 1 s test limit (2026-11-15)
+`host_steps::kept_clone_the_checkout_phase_is_bounded_by_its_own_limit` failed under load after `kept-clone.sh` moved its deletes
+onto `safe_rm` (997ab3a4e): the shell and Rust kept clones differed in their config keys (the shell had no `core.sparsecheckout`),
+so the shell's 1 s checkout limit had ended the phase in `sanitize`, before `apply_profile` and before the git the test hangs. First
+hypotheses and what refuted them: bounded.sh's polling missing the last output, buffering of the last line, and a comparison of
+differently buffered outputs: the two stdouts were equal in every failing run; only where the shell's phase was killed differed. The
+cause: each `safe_rm` call started 16 programs (three same-case calls on the parent: 12 `tr` and 36 `uname`, plus subshells):
+`sanitize` (two calls) took 236 to 268 ms on average, at most 675 ms, at 1-minute load 25 to 40, and about 35 ms with the fix (30
+calls each, timer included). With 6 burners: 4 of 40 runs failed with safe_rm at load 40 to 60, 0 of 40 with the plain `rm -rf`
+before it (load 30 to 46), 0 of 60 with the fix (load 17 to 30), and an interleaved run of both at load 18 to 39 passed 32 of 32
+each (too little load to tell them apart). With 6 burners and ten loops of the test at once (load up to 38): 79 of 80 passed; the
+one failure was another cause, on the Rust side: a checkout phase abandoned at its bound (limit + 1 s) finished its git after the
+next phase had started and set that phase's shared `timed_out` flag, so `create the clone` reported "did not finish within 900 s" at
+once (the phases share one `Kc` state). The fix: the OS is asked once when the helper is sourced, and plain ASCII case is folded by
+the shell, so a call starts no program but `rm` (`tr` only for names beyond ASCII); the limit is unchanged. **Rule:** a helper that
+runs inside a bounded phase costs no program per call that it can compute once or in the shell itself. **Class: work before the hang
+point of a 1 s hung-phase test meeting its limit under load (earlier: fe1bd861d, a `git rev-parse` over 1 s in 4 of 204 runs;
+e0fdd0286, run 8099).**
+## An abandoned kept-clone phase marked the next one hung, and hung-phase tests timed the work before the hang (2026-11-15)
+Under load (6 burners and ten loops of the checkout parity test, load up to 38), 1 of 80 runs failed with the Rust side printing
+`'create the clone' did not finish within 900 s` at once. The Rust phases shared one error buffer, log and timed-out flag; a
+phase abandoned at its bound (limit + 1 s) keeps its thread, and its git, ended at its own 1 s limit, returned after the next phase
+had started and set that phase's flag. Each phase now writes to its own state, and what an abandoned phase writes later goes
+nowhere (failing first: `a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase`). The same tests had met their 1 s
+limit three times through work before the hang (a `git rev-parse` outside the phases, five phases in one test, `sanitize` once
+`safe_rm` started 16 programs per call), so the limit they assert now counts from a mark the stand-in git writes as it enters its
+hang, in the shell and in Rust (ADR 0103, "Amendment"). **Rule:** a test of a time limit times the thing that hangs, from a
+signal it gives, not the setup before it; state that an abandoned worker can still write is that worker's own. **Class: work before
+the hang point of a hung-phase test meeting its limit under load (third sighting; ADR 0103 amendment).**
 ## A git-fixture property test timed out on Windows: count a fixture's processes (2026-11-15)
 The pre-push property test built 24 random git stacks in one test: 1,651 git processes, 17 s on the Mac, and past nextest's
 60 s limit on the Windows runner (run 8138, job 39335), where a process spawn costs about 100 ms. Enumerating the shapes (each
@@ -2169,8 +2319,55 @@ reused on the swap, the cache size; the row indexes matched, 0 mismatches). The 
 the focus fell to the page. Probe (ticks forced during the key, WebKit and Chromium, 15 runs each): red 15 of 15 (WebKit 14) without a prior
 update, green 15 of 15 with one `clock.runFor(1000)` after the swap. Fix in the spec: take that update before the row gets the focus,
 and its comment no longer says the clock stands still. **Open (product):** the redraw is real for a user too (a row menu opened in
-the first second after a list swap closes on the next update); a fix needs a workaround in `pd-table` around the CDK table. **Class:
+the first second after a list swap closes on the next update); a fix needs a workaround in `pd-table` around the CDK table. **Resolved (2026-11-16, user: local workaround, no upstream issue):** the cause is an upstream regression since @angular/cdk 22.1.8 (angular/components#33670; 22.2.4 installed, unfixed upstream as of 22.2.7 per the research, 2026-11-16); `pd-table` records the views of its body table after each render (`recordRecycledRows`), the spec "keeps every row element through live updates after rows were removed and added again" was red on stock CDK (9 of 12 rows redrawn) and the Dyno e2e fixme is a test again; the extra `clock.runFor(1000)` in the Shift+F10 spec is gone; a canary spec (workaround switched off, stock CDK must still redraw) fails when a CDK upgrade fixes the bug and says to delete the workaround. Dyno row keys carry a start time the OS gave earlier (`carryStarts`), so a start time that comes and goes does not flip a key. Remove the workaround when the CDK fixes it (the spec stays). **Class:
 a test assumed a quiet page while live updates ran (earlier: Debrief's Stop-button probe, 2026-11-15; this file's Escape fix, 0315ca827).**
+## The AI browsing chip's Stop moved when the jobs pill appeared, and the click was lost (Debrief, 2026-11-15, CI run 8136)
+WebKit `browser.e2e.ts:71` flaked on main (2 of 147 runs): after "Stop the AI's browser" the chip was still there. The trace
+had no "Stop pressed on the AI browsing chip" log, so `stop()` never ran: the click did not reach the button. Its DOM
+snapshots show the jobs pill (`status-jobs`, "1 job running or waiting") inserted between the click's resolve and its end;
+the pill sits to the right of the chip in the right-anchored status bar and appears 2 s after the question is queued (the
+engine's and the mock's `visibleMs`, emitted on a 400 ms tick), as does the problems badge after its scan. Hypotheses: the
+chip re-created by the status bar (refuted: items are tracked by id), Stop disabled while `stopping` (refuted: no log at
+all), the mock dropping Stop (refuted: nothing called it). Measured in the CI image (WebKit): pressing Stop, letting the
+pill appear and releasing lost the click 10 of 10 times, Stop moved from x 1140.5 to 1092.9 (the failing trace's box is at
+1140.5). **Fix (spec):** `clickWithTimePaused` (`e2e/app.ts`) clicks with the page clock paused (`pauseAhead`, which
+`live-tail`, `resilience-context-live` and `timeline-header-geometry` now use too), so no timer can move the bar during the
+click. Proof that matches the rate: a probe that forces the pill to fall due during the click (clock running: `runFor(3000)`
+between press and release; paused: `pauseAhead`'s 5 s jump inside the helper) lost the click 6 of 6 times with the clock running
+(Stop from x 1140.5 or 1180.2 to 1092.9) and landed it 6 of 6 times through `clickWithTimePaused`; the two Stop tests were then
+60 of 60 green (`--repeat-each=30`), all in the CI image on WebKit. At CI's rate (2 in 147) 60 runs alone would not prove it.
+The probe, to rerun it: a spec that installs the clock, opens with `openAiApp`, switches the chat's browser to Agent, asks,
+waits for the chip and for no `status-jobs`, then either presses the Stop button with `page.mouse.down()`, runs
+`page.clock.runFor(3000)`, waits for `status-jobs` and releases (expect the chip to stay: the lost click), or calls
+`clickWithTimePaused(page, stop)` (expect the chip gone); run it with
+`npx playwright test <probe> --project=webkit --repeat-each=6` in `apps/debrief/app` (CI image, `DEBRIEF_E2E_PREBUILT=1`).
+The product still moves Stop when a status item to its right appears: the user approved ADR 0061 for the status bar and the
+toast stack (2026-11-15), which will replace the helper. Why the logs did not show it: the app logs Stop, so its absence named
+the lost click; the click's target is not logged. **Class: a control that moves under the pointer during a click (third instance after the
+timeline header, run 7697, and the toast stack, run 8004).**
+
+## axe read a table row half-way into the dark theme although the transitions had been settled (Pitwall, 2026-11-15, CI run 8134)
+WebKit `a11y.e2e.ts` "benchmarks" failed on main with `dark: color-contrast` on every row's muted cells: #a0a7b2 on #5c5d60,
+a background 70 % of the way from white to the dark surface; the cells' `transition: background 100ms` was running while axe
+read them. Train 11 changed nothing in Pitwall's styles or the tokens (refuted by the diff). The trace: the DOM did not change
+from the theme switch until after the dark scan, the screencast still showed the light theme 80 ms after `emulateMedia` and
+the grey rows 375 ms after it, during the scan, so the transition began after `settleTransitions` had looked. Not reproduced:
+0 of 20 runs in the CI image, and probes of emulate plus settle (40 switches, with the page kept busy 0 to 450 ms) always
+found the transition and finished it; with six CPU burners the runs timed out instead. So why the transition started late
+on the runner is open; the likeliest cause is that WebKit applies an emulated scheme only at its next rendering update, which a
+loaded runner delays past settling. **Fix (helper), after three rounds:** first a detect-and-rescan (record colour transitions
+and animations that start during a scan, scan again); its review found partial name matches (`stroke-dashoffset` read as
+`stroke`) and unreadable keyframes counted as colour, and the next check found short animations (30 to 90 ms) and `::before`
+ones that its lookup after `animationstart` never saw, so false contrast failures came back in both engines. The user then
+chose common practice: `axeViolations` holds the page still for the scan (a constructed stylesheet with `transition: none`
+and finite animations jumped to their end, `animation-duration: 0s; animation-delay: -1ms`, on `*, *::before, *::after`, so a
+tooltip that fades in with `forwards` is read open where `animation: none` left it invisible; plus `prefers-reduced-motion:
+reduce`), waits two frames, scans once and undoes both; `axeInThemes` and `axeTargets` also wait until the switched scheme is live (`matchMedia`, two
+frames; ER-33). Selftest `selftest/axe-themes.spec.ts`, run in CI (ui's e2e job, Chromium; e2e-webkit, WebKit), starts motion
+from inside axe's scan: a 90 ms colour animation, the same on `::before`, and a `fill-opacity` transition were red against the
+rescan version in both engines and are green now. **Rule:** a check that reads a moving page stops the motion; it does not try
+to detect every kind of motion. **Class: axe read colours that were still changing (fourth instance: the theme switch transition that `settleTransitions`
+was made for, the hover tooltip fading in, run 7872, this run, and the rescan's own misses).**
 
 ## Two shared-crate tests failed once each in run 8174: a harness that let the peer read after the deadline, and `ETXTBSY` (tests, 2026-11-16)
 Symptoms (crates job, Linux, each green on its retry): `paddock-ipc` `the_reference_endpoint_passes_every_scenario_it_supports`
@@ -2197,3 +2394,307 @@ script and then set its mode now call `write_program`.
 **Rule:** a test writes a program with `paddock_testkit::exe::write_program` and starts one it did not write with `exe::spawn`,
 `output` or `status`; product code starts programs through `paddock-proc`.
 **Class: a test or harness whose outcome depended on which thread ran first (earlier: the Debrief Stop-button probe and the row-menu e2e above), and Linux's text-busy refusal of a file written or run a moment ago (no earlier lesson).**
+## Rules ER-43 to ER-47 and the ER-9, ER-14, ER-24 amendments (user, 2026-11-15 and 2026-11-16)
+Waiter holding a slot the waited-for build needed (2026-11-14/15, ER-43); a slowdown fix split into a small part and a deferred root fix (2026-11-16, ER-44); a probe that would have started installs and a reviewer's probe that installed into `~/.rustup` (ER-45); growable exception lists and Mac-only goldens, Spotter e2e after midnight UTC (run 8154, ER-46); cleared child environments (run 8138, ER-47); train 12's red rounds (runs 8138, 8147, 8152, 8154, ER-9). The rules and reasons are in `docs/rules.md` 80 to 84 and the engineering rules. **Class: a mechanism changed the thing it checked, waited on or started.**
+
+## A gate on the wrong machine and an assertion over nothing (2026-11-16, ER-9 and ER-12)
+The Windows-on-Arm VM and an amd64-emulated container failed 22 paddock-dev tests on a base the real runner passed, so a member check on another kind of machine measured the machine, not the branch. Dyno's layout check passed on zero rows (an `every()` over an empty set) and failed 31 of 240 runs under the pinned clock. **Rules:** a branch-deciding gate runs on CI's kind of machine, else it is not measured (rule 50 (k), the member gate); a set assertion requires a non-empty set and a layout check needs two agreeing reads (rule 49 (d)). **Class: a check that could not see what it checked still reported.**
+
+## Unaffected release gates held the Mac runner (2026-11-16, train 12; rule 54 (a2))
+Train 12 dispatched every app's release gate whether or not its diff reached that app: runs 8164, 8165, 8167 and 8169 cost about 77 minutes of the single Mac runner, up to 34 minutes each, and delayed the gates that mattered. **Rule:** the plan over the train's diff against main decides which release gates run; a skipped gate records the plan output in the landing report, and the counting full `ci.yml` run always runs. **Class: a fixed sequence ran work the change did not need (rule 50).**
+
+## Gates repeated, reviews before the merge, assembly after the green run (2026-11-16, train 12; rules 50 (k) and 54 (a3))
+Train 12 ran each affected release gate with the tests that `ci.yml` had just run on the same sha (about 77 minutes of the Mac runner in total, runs 8164, 8165, 8167, 8169), reviewed each member before its merge, and assembled the next train only after the current one was green, so the runner or the people waited with nothing running. **Rules:** release gates run with `gates=false` once `ci.yml` is green on that sha (the installers job needs no `gates` job, so its bundle checks still run; the demo release workflows cannot); the member review runs beside the train's CI; the next train is assembled on the running train's head during its CI. **Class: a fixed order serialised work that could overlap (rule 50, ER-36).**
+
+## Old races in unchanged code held a train (2026-11-16, run 8174; rule 50 (k) item 4)
+Two old races in shared crates that train 12 did not touch (`paddock-ipc` endings and the plugin-host ETXTBSY) passed on their one retry and held the train for hours. **Rule:** a FLAKY test blocks only when the change reaches its code; otherwise it becomes a fix item with its log, fixed next train with a failing reproduction first; a test failing both tries always blocks; the run stays marked FLAKY. Large projects (Chromium, Google) quarantine such flakes instead of blocking unrelated changes. **Class: an unrelated old defect held a landing (ER-12, rule 5).**
+
+## "3 of 3 green" was 3 of 7 red (2026-11-16, Debrief live tail; rule 49 (e))
+A live-tail fix was reported "3 of 3" and was 3 of 7 red; a later "12 of 12" was 4 of 150 red (`fix/debrief-events-grid-live-tail`, `fix/debrief-live-tail-adr`). A small green count says little when the failure rate is a few percent and depends on workers and engine. **Rule:** a stability claim states runs x workers x engines (or OS); e2e timing fixes run at least 20 per engine at 4 workers, more when the measured rate needs it; a bare "N of N green" is rejected in review. **Class: a claim without its sample size (ER-28, ER-12).**
+## Linux-only Rust was never linted before a push (pre-push, 2026-11-16)
+Symptom: CI's Linux legs went red on lints in code only Linux compiles: `zombie_processes` in paddock-env `tests/it/text_busy.rs` and an unused import in dyno-agent `tests/bench_units.rs` (fix/shared-crate-flakes-8174, 2026-11-16). Cause: the Mac Clippy and the xwin Clippy do not compile `cfg(target_os = "linux")` code, and the pre-push Linux row was opt-in (`--linux`) and for `crates/` only. Fix: the row runs by default for every touched Cargo workspace (not only those a text scan finds Linux-only code in: the scan missed `cfg(unix)`, `not(macos)`, target dependencies and build scripts), as one container run on the native architecture with a kept target folder per workspace and CI image version; the Tauri app crates are left out, found from `cargo metadata` and named in the row text, so a pass never claims them; no container runtime or a cold volume is "not measured", exit 6, with `./dev check --warm-linux` as the next step. Tests: the row is chosen for apps and crates and names what it leaves out, the real script runs against a stub cargo (per-workspace folder, exclusion, a failing workspace does not hide the next), a planted Linux-only lint was red in the real container. **Class:** a platform-only code path that no local check compiles (earlier instances not re-verified here: Windows-only assumptions in tests, ADR 0021).
+
+## Design note: a read-only container plus build scripts that write into the source tree (2026-11-16)
+Two instances in one day. (1) The pre-push Linux Clippy of `apps/dyno` failed in the Tauri app crate: `paddock-build`'s build script writes the sidecar placeholders into `apps/dyno/app/src-tauri/binaries/` and tauri-build writes `gen/`, and `tools/linux-container.sh` mounts the repository read-only (ER-14), so `dyno-app` fails with "Read-only file system" before Clippy runs. (2) Another agent hit the same in the Linux container for `debrief-app` and the other app crates and had to use `--workspace --exclude <app>-app`. Options: **(A) a writable overlay** of the repository in the container (copy-on-write or a tmpfs over `src-tauri/binaries` and `gen`), so the app crates are linted too; **(B) declared container-lintable crates**: the row leaves out the packages whose build dependencies include `tauri-build` or `paddock-build` (read on the host through the repository's cargo-metadata accessor, not a path match), names them in the row text and in the NOT_RUN table, and CI lints them. **Chosen: B.** An overlay needs the helper to mount more than the repository read-only (a writable layer per app, a copy of the placeholders, and a check that nothing else leaks into the host tree), which is more than one crate per app is worth, and CI's Linux legs already lint those crates; B costs one metadata read and a row suffix. Revisit A when more than the app crates need to write into the tree, or when a Linux-only lint is found in an app crate in CI that this gate left out (then lint `src-tauri` through an overlay, not a bypass). Mechanism: `linux_inputs::tauri_crates`, `gates::linux_gate`; tests `the_tauri_crates_are_the_packages_with_a_writing_build_dependency` and `a_passing_linux_clippy_names_the_crates_it_never_linted`.
+## A test blamed for what an earlier test left behind: a shared leak detector (tests, 2026-11-16)
+
+The apps' and ui's Vitest suites run with `isolate: false` (one page per worker), so state one test leaves reaches a later
+test and the wrong test fails: debrief.yml run 8170 (a chunk loaded after teardown), a leaked mock-jobs singleton (its running
+job held the import slot of the next spec), nodes left in the body, a fake timer that hung unrelated specs (ER-29) and a
+module-level record a hook kept waiting on. Each was fixed where it showed, with a one-off hook in one app's `test-setup.ts`.
+**Fix (user decision, 2026-11-16):** one shared detector, `installLeakDetector` in `@decryp7/paddock-ui/testing`
+(`ui/projects/paddock-ui/testing/src/leaks.ts`). It records at the end of every test, after Angular's clean-up, what the test
+left (live timers and intervals, fake timers, body nodes, registered singletons, tracked in-flight work) and names the leaking
+test: a warning in `report` mode, a failure of that test in `fail` mode. Its hook never throws inside the `afterEach` chain (a
+throw there skips Angular's clean-up and the next TestBed test fails too: the kit's own lesson). **Rule:** anything
+module-level that a hook reads is drained per test (a reader takes what is recorded and clears it), so a stuck item fails only
+its own test; a new page-wide singleton is registered with `registerSingleton`; a new gate starts report-only (ER-41).
+**Roll-out:** report-only first; the first full runs found timers started by stores that outlive their injector (Toast, Spotter's
+dashboard and editor, Pitcrew's and Pitwall's service store, Pitwall's settings and presets), a wait in Pitcrew's
+`TauriBackend.init` and its mock, and the Debrief and Dyno findings listed in `docs/benchmarks.md`; the stores now clear their
+timers with `DestroyRef`, each with a test that was red first. The ui, Pitcrew, Pitwall and Spotter switched to `fail` with zero
+findings; Dyno and then Debrief joined the failing suites after its `MockBackend.dispose()` and two store fixes. **Class: a test fails for what an earlier test left in
+a shared page (earlier: runs 7257/7274/7276 fake-timer spy, run 8170 teardown chunk, the mock-jobs singleton, the leftover DOM).**
+
+## Debrief: the live tail "holds the rows while not following" read 120052 for 120028 in about one full run in three (tests, 2026-11-16)
+
+`events-grid.spec.ts:913` failed once in four full runs of the leak-detector branch (120052 against 120028). Not fixed here; a fix item (ER-28). Causes to rule out, with the observation that would rule each out: (1) the detector (it wraps `setTimeout` and `setInterval` and clears timers only in fail mode; Debrief is report-only, so it changes nothing: rule out by running the spec 50 times with the detector off); (2) a live-tail push landing between the two reads (the 24-row difference equals one batch: check the tail's batch size and whether the test advances the mock clock); (3) a leaked mock-clock timer from an earlier test firing into this one (`core/mock/mock-clock.ts:30,32,34` are in the report list: the findings of the preceding tests in that worker show it); (4) a render frame (`requestAnimationFrame`) landing between reads. Measure all four in the failing run before changing anything. Class: **a test that reads a moving value without holding the source still** (earlier: the axe theme read, Dyno's row-menu redraw).
+
+Positive controls (2026-11-17, ER-33)
+**What happened.** Three checks passed without ever being able to fail. A Debrief dock spec's "nothing moves after planned"
+check never ran (24 of 24 runs green, the signal it waited for was never logged). The shared `expectIdle` helper passed before
+the stream had started. Conformance C137 passed on the text of an unrelated ci.yml job.
+**Rule:** every new check, gate, test assertion over a signal and shared wait helper lands with a positive control: a test that
+removes or hides what it watches (the signal, element, attribute or job step) and shows it goes red. A review rejects one
+that has none (rule 71 merged into ER-33).
+**Class: a check that cannot see the thing it guards (earlier: the Dyno 1.1.0 menu-bar probe and tray count, ER-33).**
+
+## Goldens captured on one machine failed on another; they are now checked when they are made (2026-11-15, train 14 WP-2; C131 added 2026-11-16)
+On WP-2 alone six goldens captured on the Mac failed elsewhere: macOS-only git config keys, the CI image's `/sccache` mount, RAM
+from `sysctl` against a file, the host OS paired with its pin, root against a normal uid, and a guardian golden with the Mac's uid
+501 baked in that would have turned the Linux leg red. Each was found by CI or by a later review, after the golden had been
+committed. Now the check runs when the golden is made: conformance C131 (report-only, ER-41) reads the golden folders for uid and
+gid numbers, `/Users`, `/home` and `C:\Users` paths and temp paths; a rewrite with `PADDOCK_UPDATE_GOLDEN` prints the command that
+runs the test on Linux as root in the CI image; and `./dev golden confirm <test filter>` runs both and passes only if both pass.
+The first version also read the user, host, RAM and CPU count of the machine that ran it; review found that made its result differ
+per machine (a waiver for the account name was stale on CI, a RAM figure in KiB collided with other numbers, a non-ASCII host name
+panicked the Rust host), so it reads fixed patterns only. The first run on the tree found no real value, only invented users. The same review found the JS and Rust hosts of C131 could differ on text shape; the shared parity corpus (conformance/test/parity-corpus, run over every dual-host check through `tests/it/parity_corpus.rs`) is the mechanism that keeps them equal, and it found three more divergences (C119, C121, C124: a BOM, `\r` in a waiver, prepended lines). A lint that asks for the `u` flag was tried and dropped: `u` alone does not make the hosts agree (`\w`, `\b`, `\d`, `\s`, `trim()` and U+FEFF, `\r` and line handling differ even with it), so its fix text misled; ESLint's `require-unicode-regexp` is the standard rule if conformance ever gets ESLint.
+**Rule:** a golden holds nothing of the machine that captured it; normalise the value in the test's `norm()`, and confirm a rewritten
+golden on Linux as root before committing it; a check's result never depends on the machine that runs it. **Class: a golden captured
+on one machine fails on another (second and later sightings: the six WP-2 cases above; ER-21).**
+
+## Pitcrew's stop took a pid with an optional start time and signalled the bare pid (2026-11-16)
+`Request::StopProcess` carried `started_at: Option<Timestamp>`; `check_stop_target` compared start times only when both sides had one, so
+`None` (or a process whose start time sysinfo gave as 0) passed for any pid, and `OsTerminator` then signalled the pid with `nix::kill` /
+`taskkill /PID`, outside `paddock_proc`, after the tree read of an earlier moment (rule 53, ADR 0033; two `expect(clippy::disallowed_methods)`
+marked it as WP-6 work). Failing first: `a_stop_without_a_verified_start_time_is_refused` and `a_stop_request_without_a_start_time_does_not_decode`.
+The fix: the start time is required on the wire (protocol 5, named JSON fields, no layout change beyond the field), a member without one is
+refused (`Refusal::NoStartTime`) in the engine and the UI, the service reads `ProcessId::of(pid)` when it lists a process and holds that exact
+start (the list shows its whole milliseconds, a stop must match within 1 ms: the whole-second slack and its three copies are gone), and
+`Terminator::ask/end` take the `ProcessId` and go through `paddock_proc::ask_outcome/end`, which compare the holder immediately before the
+signal (`a_reused_process_id_is_neither_asked_nor_ended`). A review found the same gap one level down (a console process on Windows refused the
+polite ask and the forced end never ran, and `end`'s outcome was dropped): a signal's answer is recorded, and a refused polite ask is not the
+end of a stop. **Rule:** a kill action names a
+`ProcessId`, never a pid plus an optional time. **Class: an OS name acted on without identity (earlier: ADR 0033 WP-6 sites; the
+family `ProcessRef` follows).**
+## The midnight/noon sweep: six of seven e2e failures were not about the time (2026-11-17)
+The pinned-clock sweep (`PADDOCK_E2E_NOW` at 2026-11-15T23:59Z, 2026-11-16T00:19Z and 12:00Z, every app, both engines, once each) failed
+seven specs: Debrief `ux-welcome` (before and after), `ai-chat` (before), `dock-default-split` (noon); ui `gallery`
+(after), `material` twice and `workbench-demo` (noon). Each was run 40 to 240 times at its failing instant and at the others. **None depends on
+the instant** (rates within noise: 8, 8 and 9 of 100; 7, 3 and 0 of 120; 3, 0 and 1 of 40); the instant only decided which run of a
+roughly 5 to 10 % failure was the one the sweep saw (the two WebKit-only ones passed 120 of 120 in Chromium). Hypotheses for "time-dependent" (a date or hour in the code under test, a day boundary
+in a format, a timezone) were refuted by those equal rates and by failures that show no date. The causes, each confirmed by a run without it:
+- **`ux-welcome` palette order (WebKit, 3 of 40 at before, 1 of 40 noon, 0 of 40 after).** The spec read the options as soon as "an option is
+  visible"; the palette still showed the unfiltered list (recent and common commands, where "Connect to Pitwall" is the 9th), so the index
+  was 8 on every failure, and the final DOM of every failing run was correct. Fix: read after the first option has a `mark` (the filter's highlight, which the
+  unfiltered list has none of). After: 0 of 100 failed (100 runs, 4 workers, WebKit).
+- **`ai-chat` pipeline proposal (WebKit, 8, 9 and 8 of 100).** The spec pressed "Add to profile" while the answer's text still streamed in above
+  the card; the card moved between press and release, so no click arrived (the probe saw the same element, no running turn, no Undo
+  entry: `apply` never ran). With the answer done first: 0 of 100 (100 runs, 5 workers, WebKit); with the fix in the spec: 0 of 100 (same). A press on a moving target is not a click.
+- **`dock-default-split` (both engines, 7 and 3 of 120 at before and noon, 0 at after).** A product fault the spec found: the dock sat 36 px from the top
+  until the lazy filter bar arrived, its placeholder was 30 px where the bar is 51 px, and the bar was 59 px for a frame (its status line host
+  had no `empty` class before the first update, so its 8 px gap counted). The dock top moved 66, 87, 95, 87 px after "ready" and the groups re-scaled
+  (279/502/781 then 282/507/789). The review of the first fix found that a fixed placeholder is right in wide windows only (the bar wraps to 87 px
+  at 800 to 1100 px and WebKit showed 123 then 87 at 900 px), and that `settledLayout` is a proxy for the dock's own re-plan. Fixed in the product:
+  the filter bar is no longer deferred (it is above the fold and its height depends on the window width; no placeholder), `debrief-query-status` is
+  hidden until it has something to show, the bar measures its width before its first render, and the dock has a real ready signal,
+  `data-dock-planned` on `debrief-dock-host` (`DockService.planned`: the first fit has run, no resize waits for its debounced re-plan, and two
+  frames have passed since the last plan started, because what a plan's listeners do resizes the dock once more). The spec records the dock's top and
+  the groups' heights from the first moment with resize observers, waits on the signal, and asserts that nothing changes after it, at 1440 and
+  900 px: red in 20 of 20 runs on the old code (10 runs per engine, 5 workers), 80 of 80 green after (20 runs, 4 workers, both engines, both widths).
+  **Narrow windows:** below 1000 px the Explorer was open for the first frames and `NarrowWindow` closed it by the dock's first plan, so the bar widened
+  (123 to 87 px) and the dock top moved; a first fix started windows under 920 px closed by a constant (`EXPLORER_MIN_WINDOW_PX`), which the review found
+  wrong at 920 to 934 px (the plan closes the Explorer after the first draw, the dock's left edge 320 to 48). Three attempts to ask the plan before
+  the dock exists failed, and the cause turned out to be two: (1) the plan's input includes the dock's height, which the filter bar of the first data takes
+  part of, so only a decision after the render that draws the bar is right; (2) after any change of the container dockview's own inline size followed three
+  frames later in drawn frames (`requestAnimationFrame` samples: stage 48+880 with the dock 48+580, 49 ms later 48+852). **Fix (fix/debrief-dock-same-frame):**
+  `DockLayout.followContainer` lays dockview out at its container's size from our own resize observer, in the same frame; `NarrowWindow` decides the
+  Explorer once, from the plan's own `explorerVerdict` (the same call as every re-plan, so no constant), after the render that first draws the Explorer with
+  the filter bar and before the browser draws, and the render that removes it needs no dock frame at the old size. The spec asserts a constant dock top and left
+  edge at 1440, 1100, 1000, 936, 928, 920, 900 and 700 px (red on 7 of 20 runs at 920 and 928 px before; 320 of 320 green after: 20 runs, 4 workers, 2 engines,
+  8 sizes). Cost: docs/performance.md (+2 ms script time per resize, within the noise; lagged frames per resize about halved). The Explorer's open flag was never
+  saved, so there is no saved choice to honour.
+- **A reader that compares a read with the one two polls before (found in review).** `settledLayout` kept `previous` and `last` and compared the new
+  read with `previous`, so A, B, A passed as "two reads in a row". It now compares with the read just before; the test is red on the old code (settled on
+  the third read) and green after (the fourth).
+- **`material` select and Tab walk (Chromium, 4 and 6 of 40 per theme at after; the sweep's noon pair).** The spec drove the section as soon as its first
+  button was in the DOM. That is the creation pass; the update pass (the select's `aria-expanded`, the form field's control, the picker
+  inputs' bindings) comes later, up to 60 ms in the probe. Meanwhile a click hit "onContainerClick of undefined", a keydown hit NG0950
+  "timepicker is required", and the Tab walk left the section before the select. Fix: wait for the Level select's `aria-expanded`. After: 0 of 160 (160 runs, 1 worker, Chromium; 10 of 160 before).
+- **`gallery` open select list (Chromium, 5 of 40, 12 of 60, always 536.09 px off).** `toBeVisible` of the list is true a frame or two before the
+  overlay positions it (at x 0, 131 px wide; 40 ms later at the field's x and 212 px). Fix: wait for the alignment (`expect.poll`, a failing
+  list stays red with the last offset). After: 0 of 100 (100 runs, 1 worker, Chromium).
+- **`workbench-demo` Jobs view: not reproduced.** 0 of 100 at noon (40 idle, 60 with 8 CPU burners), once in the sweep; the failure page shows the palette open
+  with "View: Show jobs" selected after the second `run`. Cause not found, so no fix (ER-33: not measured); the palette helper's failure message
+  now names the label it was running. Next step: run the spec under the full suite's load with `--trace on` until it fails once.
+**Why the logs did not show it:** the specs read the page once and compared; none printed what the page showed at that moment. The material
+errors were in the dev server's console only.
+A second find of the review: the dock spec imported the kit by package name, which Debrief's e2e jobs never build, so every shard ran no test; C137 (report-only) flags it.
+**Class: a spec that acts or reads on "it is in the DOM" while the page is not ready or still moving** (earlier: the toast whose Show missed
+its click, the Dyno Firewall layout read before it settled (`settledLayout`), the Debrief menu that ran its neighbour's command; ER-21 candidate:
+a shared "ready" per kind of check, with a lint over `waitForTimeout` and first-visible reads).
+
+## A broad `pkill -f` by an agent, with the kill guard not wired (2026-11-17)
+While cleaning up its own e2e servers an implementer ran `pkill -f "ng serve"` (and later `pkill -f "ng serve gallery --port 4701"`, own ports). The first
+pattern matches every agent's dev server on the machine, so it may have ended other agents' runs; nobody reported one, and none can be ruled out.
+Hypotheses: the guard did not fire because it only covers `kill PID` (refuted: `.claude/hooks/kill-guard.py` refuses `pkill`, `killall` and `killall5`
+for agents, with a test) or because the pattern was inside a `&&` chain (refuted: lib/shellscan.py scans every command of a chain). **Cause:** the
+main checkout's local `.claude/settings.json` wires six hooks (docker-guard, no-force-push, no-pgrep-wait, recurring-guard, scratch-root-guard,
+worktree-guard) and not `kill-guard.sh`, whose header says the coordinator wires it after the train lands. **Rule for agents:** end only what you
+started, through the tool that started it (`run_in_background` with TaskStop, or `kill %job`), or by the port you picked after `lsof` shows your own
+process in your own folder; never by a pattern on a program name. **Class: a guard that exists, is tested and is not wired** (earlier: the coordinator-hook
+rollout of 2026-11-12).
+
+## Shared "ready" waits and a lint for reads after a bare visibility wait (2026-11-17)
+The class of the sweep entry (a spec reads or presses on "it is in the DOM") now has one wait per kind in `ui/projects/paddock-e2e/src/ready.ts`
+(`expectListFiltered`, `expectOverlayAlignedWith`, `expectWired`, `expectStreamDone` (the chat log is `aria-busy` while a turn runs; an `expectIdle` over "no Stop button" passed before the stream started and was dropped), `expectDockPlanned`, `expectNotMoving`), and an ESLint rule,
+`paddock/e2e-ready-reads` (in the `e2ePinnedClock` block, AST, not a regex check; off by default because the lint commands run with `--max-warnings 0` and a warning blocked the pre-commit hook, read it with `PADDOCK_E2E_READY_LINT=warn`), that reports a read (`boundingBox`, `allInnerTexts`,
+`allTextContents`, `innerText`, `textContent`, `evaluate`, `evaluateAll`) in the statement right after a bare `toBeVisible()` or `waitFor()`. The
+sweep's five specs moved onto the helpers. First count (`node scripts/e2e-ready-report.mjs`, after the evaluate rule): 74 sites in the other specs (Debrief 26, Dyno 17, ui 23, Pitwall 5, Spotter 3, Pitcrew 0; an earlier version of the report script used a `--rule` override, which fails with "could not find plugin paddock" where the plugin is registered only inside the e2e block, and measured 2 of 6 projects; it now sets `PADDOCK_E2E_READY_LINT=warn`, and a fixture project of that shape is in its test);
+no waiver was added (ER-46), so the count only goes down as specs move or the rule flips to error after its first green run on the real tree. Many of
+the 74 are reads of a static element; a waiver `// conformance: e2e-ready — <why>` is for those.
+Debrief's `openApp` and `openAppWith` now wait on the dock signal (`expectDockPlanned`). Suite time on 9 related files (68 tests, Chromium, 4 workers, one run each, machine idle): 1.1 min with the wait, 1.0 min without; the difference is inside the run-to-run noise of one run each.
+## The start-up benchmark was red for starts a busy host had not slowed (Debrief, 2026-11-16, CI run 8175)
+
+Run 8175 said "NOT MEASURED: 1 of 5 starts ran with host load <= 12 (14 discarded in 15 attempts, peak 1-minute load 49.4)". The
+load average on the shared Mac counts OrbStack and build threads, and the gate threw away starts that were fine: under 14, 28
+and 84 CPU-bound `yes` loops (with `dd`) Debrief's start moved by under 5% and its tree CPU time not at all. **Two plans did not
+hold.** (1) Scaling wall time by a fixed Node reference workload: the reference ran 2.2 to 5.2 times slower under the same loops, so a
+regression of two times would have passed. (2) "CPU time barely moves with load", from those `yes` loops: under real build load (load
+97 to 177, 0% idle) the CPU time rose by up to 40% (530 to 720 ms against 515) and the wall time of a single start by up to 2.5 times,
+so a tight CPU threshold (561 ms) failed a busy host. The coarse limit that a busy host needs (875 ms) would let a 70% regression through on a quiet host, so the user chose "tighter when quiet": a 600 ms limit when the median host CPU idle is 30% or more. The first proposed cutoff, 50%, would never have applied (no invocation of 38 reached a median idle of 50%: other agents are always working on the host), so a cutoff is chosen from the readings the benchmark really sees. **Rule:** measure a gate in the condition it must survive, with the real
+neighbours (other agents' builds), not only a synthetic stress; thresholds come from that, and a quantity that is noisy under load is
+a note, with a ceiling only a broken run reaches. The user's rule (2026-11-17): always measure, record host load and CPU idle, never
+refuse for a busy host, fail only on a real regression. Results: apps/debrief/docs/performance.md, "Start-up benchmark on a busy
+host". **Class: a proxy gate (load average) stood in for a measured effect (second instance: ER-12's raised timeouts without a
+measured cause), and a synthetic stress stood in for the real neighbour (instance: this lesson's second plan).**
+`events-grid.spec.ts` "holds the rows while not following, counts the new events, and reveals the newest on request" failed
+twice in about six full runs (120052 against 120028), never in eight runs of the test alone. **Causes listed (ER-28), with what
+each measurement showed:** (1) the leak detector: refuted, Debrief was report-only then and the failing run had no finding for it, and the
+failure is the same with the detector's timer wrapper out of the picture (the 1 ms runs below); (2) a push moving the end between the
+reveal and the read: partly confirmed. At `liveMs: 1` the test failed 3 of 3 (126124/126148, 124468/124492, 123508/123532: one row of 24 px
+short, the same shape), at 25 ms 0 of 8 alone, so the rate follows the push rate; (3) a leaked mock-clock timer from an earlier test:
+refuted for the 1 ms runs (a single test); not excluded for the full-run rate; (4) a render frame between reads: refuted, the
+numbers stay put after another `flush` and `settle` (`top=126148 max=126172` at the assertion, after the flush and after the settle).
+**Sequence measured (temporary logging, `liveMs: 1`):** one `liveRefresh('end')` for the reveal, `applyLive mode=end newTotal=5270`,
+then the assertion reads `top` = the end of 5269 rows while `total` is 5270; events pushed after the reveal are held (`newEvents`
+counts them), so nothing moves the top afterwards. **Fix (spec):** the test's backend runs its pushes on a `ManualClock` (`clock.advance`
+makes the ticks), so no push can land in the reveal; 13 runs alone and 4 full Debrief runs were green. **Product cause, found and fixed in the same round (ER-44):** the reveal's refresh asks for several pages in one round (page 0, the
+pages in view, the page of the old last row). The first answer triggers `applyLive` and the scroll to the end of its total; an event pushed
+between two answers made a later page report a larger total, which `PagedRows` stored without scrolling, so the view stayed one row
+(24 px) short of the newest event (a user-visible bug: "reveal newest" stopping one row above it). The manual-clock pumping did not
+reproduce it because it never interleaved a push between two page answers; the deterministic test does that on purpose (the second page
+read of the reveal is answered after a push) and failed with 119836 against 119860 before the fix. **Fix:** `PagedRows.arriveLive`
+remembers the round and total of an arrival that scrolled to the end and, for a later answer of the same round with a larger total, calls
+`onLive` again in end mode (bounded by the pages of the round, no loop). Class: **a test reads a moving value without holding the source still** (earlier: the axe theme read, Dyno's row-menu redraw).
+
+**Rule (review of the first fix, same day):** a follow-up end arrival belongs to the reveal's own pages, not to the round. The first
+version of the fix kept `endArrival` for the whole round; after a reveal with following off the grid holds new events, so no new round
+starts, and pages fetched because the user scrolled later answered in the reveal's round: each larger total jumped the view back to the end
+(scroll to 60000 ended at top=120028). `PagedRows` now records the pages `liveRefresh` asked for, follows only answers to those, clears the
+follow-up when the last of them has arrived, and `endReveal()` (called by the grid for a scroll it did not write itself) ends it at the
+user's first scroll. Specs: the forced-order reveal and "does not pull the view back to the end after the user scrolls away" (red on the
+first fix at 120028 against under 70000). `flush` in `events-grid.spec.ts` no longer sleeps a fixed `SCROLL_IDLE_MS + 30`: it waits on the
+store's `scrollIdlePending`. C71 had caught that helper (its sites were in the baseline); the baseline was shrunk by the three sites.
+
+**Real browser (e2e, same day):** jsdom hid a second cause. `applyLive` wrote `scrollTop` before the spacer had grown to the new total; Chromium and
+WebKit clamp such a write, and the scroll event that follows reports the clamped position, which the grid took for the user's scroll
+(the reveal ended 21 rows short in Chromium, with or without a push between the pages). Fix: a live arrival writes the scroll after the render
+(`setTop(..., afterRender)`, `afterNextRender`), the position signal is still set at once. Playwright e2e `live tail: reveal newest ends on the
+newest row when events are pushed between the reveal pages` (new mock switch `mockPageStaggerMs` answers pages at different times, pinned
+clock moves them and the 50 ms ticks): red in both engines without the deferred write, green 3 of 3 in Chromium and in WebKit with it.
+
+2026-11-17, Debrief `helpers.spec.ts` leak (fixed, ER-28). Debrief runs the leak detector in fail mode, and the timeout spec of `settleUntil`
+failed 7 of 300 runs (one process, the spec repeated) with "left a live setTimeout(0) started at helpers.ts:191" (`settle()`). Causes listed
+before measuring: (1) `vi.waitFor` rejects at its timeout while an attempt is inside `settle()` waiting on its `setTimeout(0)`; (2) the test
+ends between the first `await` and the timer; (3) fake timers left by another spec of the file; (4) the detector counting the previous test's
+timer. (3) and (4) are out: the file installs no fake timers and the leak named this test's own call. (1) and (2) are the same race. Confirmed:
+a spec that stretches every zero-delay timer to 20 ms and times out at 5 ms fails every time without the fix (the timer is pending when the
+wait rejects) and passes with it; the repeated run went from 7 of 300 red to 0 of 300. Fix: `settleUntil` awaits its last attempt before it
+returns or throws, so no timer of its own outlives it. No sleep and no longer timeout (ER-12).
+
+2026-11-17, unit tests of live mock feeds. Only the Debrief events-grid live tail (run 8191) was a unit test asserting a value while a
+feed kept changing it; the Dyno row menu under live updates was an e2e case (the e2e kit has `pauseLive` and `withLivePaused`). Common
+practice for a feed on timers is a clock the test moves (`ManualClock` for the Debrief mock backends, `clock` option) or Vitest's fake
+timers, never the page's real timers; a hold on top of a manual clock added nothing, so no helper was built. C136 (report-only) flags a
+unit spec block that starts a ticking `MockBackend` or `synthetic` feed without one.
+**WebKit and the ADR (same day):** at `7fa15ba95` the WebKit e2e failed 3 of 7 runs. Logs added in `setTop` (scheduled, written, dropped), `onScroll` (read,
+written, pending, origin) and `applyLive` (ER-27) showed the sequence in a failing run: two `end` arrivals reached the end (read = max), then the
+total grew once more (spacer 24 px taller) with no arrival: a page fetched outside the round answered with a larger total, `PagedRows` stored it and
+nothing scrolled. That is a third shape of the same class (a total that grows without the view following), not the deferred write failing. Fix through
+ADR 0072 (`onGrow`, one pending-write slot, `classifyScroll`, user take-over from input events, stored `pinned`); the e2e looked green 12 of 12 per engine at 69e230d15, but a 20-repeat run of the whole matrix with 4 workers (460 runs per engine) failed 4 to 5 times in WebKit and 3 in Chromium; see the next entry for what that found and the final counts.
+
+**Review of 69e230d15, and the final measurements (2026-11-17).** The reviewer's probes found three real faults, each fixed with a failing test first:
+(1) the deferred re-pin after the next render fought a user whose wheel scroll was applied after the render: removed; a wheel or key takes the view over only
+when it moves **away** from the newest end (xterm's rule), re-pinning comes only from a position event (a scroll that is not ours, a key that lands there, the
+release of the scrollbar, never while it is held); (2) `arriveLive` consumed the first answer of any page, so an unowned fill page could start the round and a
+take-over did not stop a round that had not answered: the arrival now starts from an owned page, a take-over downgrades a pending `end` to `keep`, a failed first
+owned page ends the hold; (3) the follow and hold rules were not in the reducer alone (`setTop` re-derived `pinned`, the holding effect and `applyGrowth` decided
+themselves): the reducer now has `positioned{atNewest, byUser}`, `grew`, `released` and `followOn`, `setTop` is a pure writer, `liveMode` is gone. Re-measuring
+the matrix at 20 repeats with 4 workers found three more browser behaviours, each seen in the grid log first: Chromium and WebKit reset or shift `scrollTop` with
+no input while the viewport or the spacer changes size (a scroll event the grid took for the user: `classifyScroll` now returns `spurious` when the layout changed
+since its last write, or it wrote within 300 ms, and no input came since; the grid writes its own position back); a key move to the end written before the render caught up with
+the total was clamped (such a write now waits for the render too); a headless-WebKit wheel gesture is sometimes dropped (the e2e sends it again while the view has not
+moved; that is a test-infrastructure miss, not a product behaviour). **Final counts, quoted from the runs:** the whole matrix plus the reveal case, 23 tests
+x 20 repeats = 460 runs per engine, `--workers 4`: Chromium 460 of 460, WebKit 460 of 460; before the last two fixes the same run failed 3 (Chromium) and 4 to 5 (WebKit) times.
+A WebKit scrollbar press sometimes misses the thumb (the overlay scrollbar is drawn under the pointer: the test hovers first); it is a test precondition, not measured by the grid.
+
+**Second review of the same feature (2026-11-17).** Two more faults, both from the `spurious` classification added to cope with the browsers' own scroll adjustments:
+(1) `spurious` reverted a real scrollbar drag: the input flag was set by the press but cleared by every grid write, and a drag sends only pointer moves, so
+with newest first, following and not pinned each 250 ms shift write ended the gesture and the next scroll of the drag was written back (the reviewer measured drags
+ending anywhere between 1,739 and 18,436 px; the new e2e fails on that code in both engines: red 1 of 2, green 12 of 12 on the fix). The input flag now holds for the
+whole gesture (a write while the pointer is held does not clear it, and the held pointer counts as input), and `spurious` is narrowed to the two shapes seen (a far position
+reset to 0; a shift by the size of the layout change, `layoutDelta`): any other position with no input stays the user's (find in page and assistive technology, also when the
+total changes without a write in oldest-first keep mode: table row and e2e). (2) The 300 ms `SETTLE_MS` window had no recorded measurement (ER-12): it is removed; the layout key, the
+layout delta and the gesture-scoped input flag decide, and no time constant remains. The e2e's `expectLeftNewest` now resends a wheel only when the grid's log shows no take-over
+since the last send (at most twice), and fails at once when the grid took over and the view is nevertheless back on the newest end; the resends are attached to the test.
+
+**Final counts after the second review (2026-11-17).** Matrix of 26 tests (both sort orders, the reveal case, the no-input scroll) x 20 repeats = 520 runs per engine, `--workers 4`:
+on the idle machine (>= 60% idle at the start) Chromium 520 of 520 and WebKit 517 of 520 (before the resend tweak; the three: two dropped wheel gestures, one key move that did not
+reach the grid); the last full run was made while other agents loaded the machine (load average 170, runs 60% slower): Chromium 519 of 520 and WebKit 511 of 520. Every WebKit
+failure in these runs is of one kind: an input (a key, a wheel, a scrollbar press) that the page did not turn into a scroll within the poll's 5 s of real time ("the view left the
+newest end"), or a top-row read taken while pages were still loading, not a view pulled back after a delivered gesture; the grid log of those runs shows no take-over, or a take-over
+with no scroll. The drag-across-rounds row fails on the code of 576b47507 in both engines (red 1 of 2) and is green 12 of 12 on this code. Input delivery in headless WebKit under load
+is the open measurement: it is not a claim of "460 of 460". The 300 ms window and its constant are gone.
+
+**Deterministic ownership rows (2026-11-17, third round).** A real wheel, key or scrollbar press in headless WebKit is sometimes dropped by the browser (measured: 517 of 520 on the
+idle machine, the reviewer's 259 of 260; the grid log shows the wheel received and the take-over logged, then no scroll event and no grid write), so the ownership claims cannot be
+proved by real input alone. The common practice (TanStack Virtual's and the CDK's tests) is an untrusted event dispatched on the element plus a scroll position set by the test; the
+ownership rows now do that and are 640 of 640 in Chromium and WebKit, and a small real-input smoke set keeps the real pipeline covered (WebKit 639 of 640, the failure a dropped wheel).
+Making the rows deterministic found two things the real input had hidden: (1) the reveal request is handled when change detection runs, which can be after the user's wheel; the
+late request pinned the view again (G10, unit spec first; closed, with the same race for Follow on and Resume (found in review), by one rule: requests and take-overs carry a sequence stamp taken when the user acts, a required argument so no effect takes one, and the reducer drops a request stamped before the last take-over, ADR 0072 amendment); (2) a dispatched key does not scroll natively and the grid handles keys itself, so the test presses
+enough keys to take the focus out of the window and moves nothing. The classifier's second `spurious` rule also required no `layoutChanged`: in oldest-first keep mode the delta
+grows without any write, so a no-input scroll (find in page, assistive technology) within the band was written back; it now needs the layout to be changing (the total or the viewport
+changed and the frame that renders it has not passed, or the element's height differs from the last write's), table row first.
+
+## Debrief: "resize while not pinned keeps the top row" was two rows off in about 1 in 75 WebKit runs: the browser's scroll anchoring (2026-11-17)
+
+**Symptom.** The e2e row (oldest first) of `live-tail-follow.e2e.ts` failed 4, 6 and 3 of 300 WebKit runs, 0 of 340 in Chromium. The grid log showed its
+own write of the top row, then a scroll event with no input, 59 px away (in this round's repeats: -132 and +164 px), classified `user` and kept.
+**Causes listed (ER-28), with what each measurement showed:** (1) WebKit clamping a write against a stale `scrollHeight`: refuted, the reads
+were far from the maximum (118632 against a maximum of about 121900) and in both directions; (2) a second ResizeObserver pass: refuted, no
+second `Resize re-applied` line before the move; (3) the spacer height changing between write and paint: refuted, the shift equalled the change
+of the row layer's height (`.layer`, bound to `viewportH`), not of the spacer (a probe that logged each scroll event's layer and spacer heights:
+shift 132 = layer 278 - 146, spacer change unrelated); (4) `setViewportSize` itself: refuted by (5); (5) CSS scroll anchoring: confirmed. The
+spacer is the scroller's only in-flow element, below the sticky row layer; when the layer's height changes on a resize, the browser moves
+`scrollTop` by that change to keep the spacer still. A probe of 20 resizes per run, view not pinned, was red 11 of 40 runs with
+`overflow-anchor: auto` and 0 of 80 with `none` (computed style checked in each run), the same build. A WKWebView probe (macOS 27.2.1, the
+runtime Tauri uses) moved a scroller 1000 -> 1200 when an element above the anchor grew 200 px, and not with `overflow-anchor: none`: users
+were exposed, not only the tests. Safari Technology Preview 241 lists "Added stable support for CSS scroll anchoring" (310113@main).
+**Fix.** `.viewport { overflow-anchor: none }`, as the Angular CDK virtual scroll viewport does (`.cdk-virtual-scrollable`): the grid places
+its rows and writes `scrollTop` itself. ADR 0072 decision 2 is unchanged. Regression test first: "the browser does not move the view when the
+row layer changes height" grows the layer by 100 px and reads `scrollTop`; red in both engines (100 px), green after.
+**Why the logs showed it only partly.** The `Scroll origin` line showed a no-input move, not its size against the layer change; WebKit's
+console preview cut the line after five fields. **Class:** a browser default that moves the scroll position (clamping, bug 3 of ADR 0072;
+anchoring here).
+
+## Debrief's Explorer width jumped 920 to 934 px: a constant copied a number another module decides (layout, 2026-11-17)
+
+Symptom: the Explorer pane changed width by 14 px (920 to 934) when the layout settled. An earlier 51 px placeholder had the
+same cause.
+**Cause.** The Explorer's width constant re-typed the layout plan's rule, and the placeholder re-typed the filter bar's height.
+When the owner changed, or two reads disagreed, the copy did not follow.
+**Fix, one mechanism.** A value that another module decides is read from that module, by a call or an exported constant. Rule 42
+says so, and the pre-review checklist and the independent-review checks ask "does any number re-type a decision another module
+owns?" (ER-22).
+**Class: a copied value that drifts from its owner (earlier: the filter bar height placeholder; mechanism copies of rule 55 are the same shape).**

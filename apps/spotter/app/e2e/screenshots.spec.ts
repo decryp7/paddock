@@ -1,5 +1,6 @@
-import { test, type Page } from '@playwright/test';
-import { E2E_LOCALE, E2E_ZONE } from './fixtures';
+import { test } from './test';
+import type { Page } from '@playwright/test';
+import { PINNED_LOCALE, PINNED_ZONE } from '../../../../ui/projects/paddock-e2e/src/pinned-clock.ts';
 
 /**
  * Documentation screenshots (`SCREENSHOTS=1 npx playwright test --project=screenshots`): 1440x900 at 2x, both themes.
@@ -130,7 +131,7 @@ async function section(page: Page, from: string, to: string, file: string): Prom
 
 for (const scheme of ['dark', 'light'] as const) {
   test.describe(scheme, () => {
-    test.use({ colorScheme: scheme, timezoneId: E2E_ZONE, locale: E2E_LOCALE });
+    test.use({ colorScheme: scheme, timezoneId: PINNED_ZONE, locale: PINNED_LOCALE });
     const shots: [string, string][] = [
       ['dashboard', '/'],
       ['watches', '/#/watches'],

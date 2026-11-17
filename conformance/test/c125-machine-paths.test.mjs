@@ -122,3 +122,20 @@ test('C125 allow file: stale entries and a history entry that skipped no disk pa
   assert.deepEqual(quiet.map((x) => [x.file, x.message]), [[ALLOW, 'stale history entry (docs/research/) skipped no disk path']]);
   assert.deepEqual(await run([entry('/Volumes/Data', 2)], research, { 'docs/research/a.md': 'data in /Volumes/d7sst7/x\n' }), []);
 });
+
+test('C125 allow file: an entry for a file it passes over (a NUL byte) names a file it does not read', async () => {
+  const entry = { path: 'scripts/blob.sh', site: '/Volumes/Data', reason: 'invented test data' };
+  const found = await findingsOf('C125', makeApp({ [ALLOW]: lists({ allow: [entry] }), 'scripts/blob.sh': 'x=/Volumes/Data\0\n', 'scripts/a.sh': 'echo hi\n' }));
+  assert.deepEqual(found.map((f) => [f.file, f.message]), [[ALLOW, 'allow entry (scripts/blob.sh: /Volumes/Data) names a file this check does not read']]);
+});
+
+test('C125 history: an entry whose only file cannot be read is not stale', { skip: process.getuid?.() === 0 && 'root reads a 000 file' }, async () => {
+  const root = makeApp({ [ALLOW]: lists({ history: [{ path: 'docs/adr/', reason: 'ADRs record history' }] }), 'docs/adr/0001.md': 'built in /Volumes/d7sst7/x\n' });
+  chmodSync(join(root, 'docs/adr/0001.md'), 0o000);
+  try {
+    const found = await findingsOf('C125', root);
+    assert.deepEqual(found.map((f) => [f.file, f.outcome]), [['docs/adr/0001.md', 'not-measured']]);
+  } finally {
+    chmodSync(join(root, 'docs/adr/0001.md'), 0o644);
+  }
+});

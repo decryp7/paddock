@@ -5,6 +5,8 @@
 here=$(cd "$(dirname "$0")" && pwd)
 set -euo pipefail
 iso="$here/../kit.sh"
+# shellcheck source=../safe-rm.sh
+. "$here/../safe-rm.sh"
 folder=$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9._-' '_')
 if [ "$RUNNER_OS" = Linux ]; then
   mount="${PADDOCK_CI_MOUNT:-/sccache}"
@@ -27,6 +29,6 @@ if [ "$RUNNER_OS" = Windows ] && command -v cygpath >/dev/null; then ws="$(cygpa
 mkdir -p "$ng_cache" "$ws/$ANGULAR_DIR/.angular"
 # angular.json turns the cache on in CI too (cli.cache.environment "all"); its folder is a link to the kept one.
 link="$ws/$ANGULAR_DIR/.angular/cache"
-rm -rf "$link"
+safe_rm "$ws/$ANGULAR_DIR/.angular" "$link"
 if [ "$RUNNER_OS" = Windows ]; then cmd //c mklink //J "$(cygpath -w "$link")" "$(cygpath -w "$ng_cache")" >/dev/null; else ln -s "$ng_cache" "$link"; fi
 echo "node-caches: Angular $link -> $ng_cache"

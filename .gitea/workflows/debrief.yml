@@ -93,6 +93,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # A train run is dispatched at once and waits here, on Linux, until no older run holds the Mac or Windows runner it
+      # needs (./dev ci runner-wait); the queued run is what scheduled runs yield to. Other events: nothing.
+      - uses: ./.gitea/actions/runner-wait
+        with:
+          dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
       # Exact-key lookup only: nothing is downloaded. The marker is saved by the nightly-mark job after a fully green run.
       - uses: actions/cache/restore@v4
@@ -491,7 +496,7 @@ jobs:
 
       - name: Third-party notices are up to date
         run: |
-          node --test app/scripts/build-info.test.mjs app/scripts/whats-new.test.mjs app/scripts/build-sidecars.test.mjs app/scripts/libduckdb.test.mjs app/scripts/lint-styles.test.mjs app/scripts/lint-effects.test.mjs app/scripts/window-weight.test.mjs scripts/commit-lint.test.mjs scripts/ci/check-icons.test.mjs scripts/ci/check-temp-leaks.test.mjs scripts/ci/check-index.test.mjs scripts/ci/check-smoke-dialogs.test.mjs scripts/ci/check-quarantine.test.mjs scripts/ci/scan-fixtures.test.mjs scripts/ci/startup-bench.test.mjs scripts/ci/libduckdb-env.test.mjs app/e2e/retried-reporter.test.mjs
+          node --test app/scripts/build-info.test.mjs app/scripts/whats-new.test.mjs app/scripts/build-sidecars.test.mjs app/scripts/libduckdb.test.mjs app/scripts/lint-styles.test.mjs app/scripts/lint-effects.test.mjs app/scripts/window-weight.test.mjs scripts/commit-lint.test.mjs scripts/ci/check-icons.test.mjs scripts/ci/check-temp-leaks.test.mjs scripts/ci/check-index.test.mjs scripts/ci/check-smoke-dialogs.test.mjs scripts/ci/check-quarantine.test.mjs scripts/ci/scan-fixtures.test.mjs scripts/ci/startup-bench.test.mjs ../../scripts/bench/busy-host.test.mjs scripts/ci/libduckdb-env.test.mjs app/e2e/retried-reporter.test.mjs
           node scripts/ci/check-quarantine.mjs
           node scripts/ci/scan-fixtures.mjs
           node scripts/ci/check-icons.mjs
@@ -885,12 +890,16 @@ jobs:
 
       # The start-up benchmark (Paddock rule 16; startup_timings.rs): five everyday starts of the built app after a
       # first run, each one's "Startup timings" line read and the medians checked against scripts/ci/startup-budgets.json.
-      # Nightly and manual runs only. macOS has measured budgets; Linux reports until its first nightly numbers are in.
-      # ER-33 / ADR 0089: a start counts only at host load <= 12 (DEBRIEF_BENCH_MAX_LOAD) before and after; too few quiet
-      # starts is NOT MEASURED, exit 6, a red step with an ::error:: (never a pass); over budget still exits 1.
+      # Nightly and manual runs, and on macOS every debrief-v tag (a release needs a measured benchmark). macOS has measured
+      # budgets; Linux reports until its first nightly numbers are in.
+      # Verdict on a busy host (scripts/bench/busy-host.mjs; apps/debrief/docs/performance.md, "Start-up benchmark on a busy
+      # host"): the benchmark is always taken, and the host's CPU idle and load are recorded with every start. It fails (exit 1,
+      # on every run, tag or not) only when the started tree's CPU time is over its limit (the tight one on a quiet host, else
+      # the coarse one) or a wall mark is over its ceiling; a slow wall mark, a wide spread and the host load are notes. NOT
+      # MEASURED (exit 6, an ::error::) only when the app produced no timings (ER-33).
       - name: Start-up benchmark (macOS)
         timeout-minutes: 20
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'macOS'
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/debrief-v')) && !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'macOS'
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
           app=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
@@ -910,7 +919,7 @@ jobs:
             --out "${RUNNER_TEMP:-/tmp}/startup-timings.json"
 
       - name: Start-up timings
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os != 'Windows'
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/debrief-v')) && !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os != 'Windows'
         uses: actions/upload-artifact@v3
         with:
           name: startup-timings-${{ runner.os }}

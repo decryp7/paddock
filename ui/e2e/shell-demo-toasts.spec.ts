@@ -1,4 +1,4 @@
-import { expect, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
 
 // A toast never covers a page's footer action (a wizard's Next): the host keeps the page-footer safe area above the
 // status bar (design guide, Toasts). The footer is a stand-in a page would render at the bottom of its area. Chromium only

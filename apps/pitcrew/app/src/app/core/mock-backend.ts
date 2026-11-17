@@ -87,6 +87,8 @@ export interface MockOptions {
   serverDown?: boolean;
   /** macOS: launchd refuses the service after an update (the "could not start" state with Repair). */
   startFailed?: boolean;
+  /** Process names the system gives no start time for (the Processes tab then has rows that cannot be stopped). */
+  processesWithoutStartTime?: readonly string[];
 }
 
 const FLOW: Exclude<RunnerSnapshot['updatePhase']['phase'], 'idle' | 'rollingBack'>[] = [
@@ -111,6 +113,8 @@ function fail(code: CommandError['code'], message: string): CommandError {
 export class MockBackend implements PitcrewBackend {
   private readonly scenario: MockScenario;
   private readonly latency: number;
+  /** Calls waiting out their latency; `dispose` lets them go. */
+  private readonly waiting = new Set<() => void>();
   private readonly simulate: boolean;
   private readonly platformName: Platform;
   private readonly now: () => number;
@@ -133,7 +137,10 @@ export class MockBackend implements PitcrewBackend {
   private cacheTrimmedBytes = new Map<string, number>();
   private debrief = true;
 
+  private readonly withoutStartTime: readonly string[];
+
   constructor(options: MockOptions = {}) {
+    this.withoutStartTime = options.processesWithoutStartTime ?? [];
     this.scenario = options.scenario ?? 'demo';
     this.latency = options.latencyMs ?? 0;
     this.simulate = options.simulate ?? false;
@@ -213,6 +220,7 @@ export class MockBackend implements PitcrewBackend {
     this.stopSimulation();
     for (const t of this.timers) clearTimeout(t);
     this.timers.clear();
+    for (const done of [...this.waiting]) done();
   }
 
   // ---- runner actions ----------------------------------------------------------------------------------------------
@@ -516,11 +524,11 @@ export class MockBackend implements PitcrewBackend {
     return structuredClone({ ...tree, entries, runnerPid: running ? tree.runnerPid : null, idle: r.currentJob === null, cleanup: policy.cleanup, keep: policy.keep, takenAt: this.now() });
   }
 
-  async stopProcess(runner: string, pid: number, startedAt: number | null, allowRunner: boolean): Promise<void> {
+  async stopProcess(runner: string, pid: number, startedAt: number, allowRunner: boolean): Promise<void> {
     await this.delay();
     const r = this.find(runner);
     const tree = this.tree(r);
-    const e = tree.entries.find((x) => x.pid === pid && (startedAt === null || x.startedAt === startedAt));
+    const e = tree.entries.find((x) => x.pid === pid && x.startedAt === startedAt);
     if (!e) throw fail('badRequest', 'that process is not part of this runner’s process tree (it may have ended already). Refresh the list.');
     if (e.isRunner && !allowRunner) throw fail('badRequest', 'that is the runner process itself; stopping it needs your explicit confirmation.');
     const age = e.startedAt === null ? 0 : Math.max(0, this.now() - e.startedAt);
@@ -845,7 +853,9 @@ export class MockBackend implements PitcrewBackend {
   private tree(r: RunnerSnapshot): ProcessList {
     let t = this.processTrees.get(r.name);
     if (!t) {
-      t = demoProcesses(r, this.now());
+      const tree = demoProcesses(r, this.now());
+      const unreadable = this.withoutStartTime;
+      t = { ...tree, entries: tree.entries.map((e) => (unreadable.includes(e.name) ? { ...e, startedAt: null } : e)) };
       this.processTrees.set(r.name, t);
     }
     return t;
@@ -1039,7 +1049,16 @@ export class MockBackend implements PitcrewBackend {
   }
 
   private delay(ms = this.latency): Promise<void> {
-    return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+    if (ms <= 0) return Promise.resolve();
+    // Through `later`, so `dispose` also drops the timer; the call itself is let go (resolved), never left hanging.
+    return new Promise((resolve) => {
+      const done = (): void => {
+        this.waiting.delete(done);
+        resolve();
+      };
+      this.waiting.add(done);
+      this.later(ms, done);
+    });
   }
 }
 

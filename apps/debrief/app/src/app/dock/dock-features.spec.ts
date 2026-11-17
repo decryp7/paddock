@@ -576,10 +576,14 @@ describe('DockHost auto-hide bars, slide-out and navigator', () => {
 });
 
 describe('DockKeys', () => {
+  const containers: HTMLElement[] = [];
+  afterEach(() => containers.splice(0).forEach((c) => c.remove()));
+
   function keys() {
     TestBed.configureTestingModule({ providers: [provideDockTesting(), { provide: LAYOUT_STORE, useValue: { load: () => null, save: () => undefined, clear: () => undefined } }] });
     const dock = TestBed.inject(DockService);
     const container = document.createElement('div');
+    containers.push(container);
     document.body.appendChild(container);
     dock.attach(container);
     const target = document.createElement('div');
@@ -647,15 +651,26 @@ describe('DockKeys', () => {
 });
 
 describe('auto-hide button and sides', () => {
+  const containers: HTMLElement[] = [];
+  afterEach(() => containers.splice(0).forEach((c) => c.remove()));
+
   function dockWithInspector() {
     TestBed.configureTestingModule({ providers: [provideDockTesting()] });
     const container = document.createElement('div');
+    containers.push(container);
     document.body.appendChild(container);
     const dock = TestBed.inject(DockService);
     dock.attach(container);
     dock.pin(PANEL.inspector);
     return { dock, container };
   }
+
+  it('detaches with its injector: the cue elements it put in the body go', () => {
+    dockWithInspector();
+    expect(document.querySelector('.debrief-float-cue')).not.toBeNull();
+    TestBed.resetTestingModule();
+    expect(document.querySelector('.debrief-float-cue')).toBeNull();
+  });
 
   it('applies to docked tool windows only, not to documents', () => {
     const { dock } = dockWithInspector();

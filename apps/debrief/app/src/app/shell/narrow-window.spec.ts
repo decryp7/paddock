@@ -1,3 +1,4 @@
+import { afterNextRender, ApplicationRef, Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceStore } from '../core/workspace.store';
@@ -70,5 +71,58 @@ describe('NarrowWindow (the Explorer follows the layout plan)', () => {
     listeners[0]?.();
     expect(store.sidebarOpen()).toBe(false);
     expect(verdicts).toHaveBeenCalled();
+  });
+
+  it('Angular renders again in the same tick when an afterNextRender hook changes state (decideAtStart toggles the Explorer in one, before the browser draws)', () => {
+    @Component({ selector: 'debrief-tick-probe', template: '{{ n() }}' })
+    class TickProbe {
+      readonly n = signal(0);
+      constructor() {
+        afterNextRender(() => this.n.set(1));
+      }
+    }
+    TestBed.configureTestingModule({});
+    const fixture = TestBed.createComponent(TickProbe);
+    TestBed.inject(ApplicationRef).tick();
+    expect((fixture.nativeElement as HTMLElement).textContent).toBe('1');
+  });
+
+  describe('the state when data first arrives (the layout plan decides, no constant of ours)', () => {
+    const withVerdict = (v: Verdict) => {
+      const base = setup();
+      const follow = vi.spyOn(TestBed.inject(DockService), 'followContainer').mockImplementation(() => undefined);
+      base.set(v);
+      return { ...base, follow };
+    };
+
+    it('lays the dock out first, asks the plan with the Explorer open, and closes it when the plan has no room', () => {
+      const { narrow, store, follow, verdicts } = withVerdict('hide');
+      expect(narrow.decideAtStart()).toBe(true);
+      expect(follow).toHaveBeenCalled();
+      expect(verdicts).toHaveBeenCalledWith(true, expect.any(Number));
+      expect(store.sidebarOpen()).toBe(false);
+    });
+
+    it('leaves the Explorer open when the plan keeps it', () => {
+      const { narrow, store } = withVerdict('keep');
+      expect(narrow.decideAtStart()).toBe(false);
+      expect(store.sidebarOpen()).toBe(true);
+    });
+
+    it('brings the Explorer back later when the plan allows, as if the service had closed it', () => {
+      const { narrow, store, set } = withVerdict('hide');
+      narrow.decideAtStart();
+      expect(store.sidebarOpen()).toBe(false);
+      set('show');
+      narrow.evaluate();
+      expect(store.sidebarOpen()).toBe(true);
+    });
+
+    it('does nothing when the Explorer is closed already', () => {
+      const { narrow, store, follow } = withVerdict('hide');
+      store.toggleSidebar();
+      expect(narrow.decideAtStart()).toBe(false);
+      expect(follow).not.toHaveBeenCalled();
+    });
   });
 });

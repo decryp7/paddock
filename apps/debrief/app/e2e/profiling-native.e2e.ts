@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { expectNoSeriousViolations } from './axe';
 import { findings, hotspots, openProfiles, runCommand } from './profiling-support';
 

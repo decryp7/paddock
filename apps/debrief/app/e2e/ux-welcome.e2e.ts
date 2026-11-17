@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
+import { expectListFiltered } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 import { openAppWith } from './mock-url';
 import { runCommand } from './ai-support';
 
@@ -42,7 +43,7 @@ test('the palette ranks "AI" matches first, without loose ones or duplicates', a
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill('AI');
   const options = page.locator('debrief-command-palette').getByRole('option');
-  await expect(options.first()).toBeVisible();
+  await expectListFiltered(options, 'AI');
   const texts = (await options.allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim());
   const setUp = texts.findIndex((t) => t.includes('Connect to Pitwall'));
   expect(setUp).toBeGreaterThanOrEqual(0);

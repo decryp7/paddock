@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { openApp } from './app';
 
 // ci.yml run 7854 (job 34010): a11y.e2e.ts "apps" failed in openApp with only "locator('h1') element(s) not found". The trace

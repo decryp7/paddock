@@ -1,5 +1,6 @@
+import { expect, test } from './test';
 import AxeBuilder from '@axe-core/playwright';
-import { clickShape, expect, hoverShape, test, type Page } from '@decryp7/paddock-e2e';
+import { clickShape, hoverShape, type Page } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 
 // `pd-sunburst` in the gallery (docs/plans/pd-sunburst.md): drill by click and keyboard, the centre going up, the states, axe in both

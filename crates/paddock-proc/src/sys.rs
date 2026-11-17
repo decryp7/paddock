@@ -404,6 +404,20 @@ pub fn pid_exists(_pid: u32) -> Exists {
     Exists::Refused
 }
 
+/// How long one `taskkill` may take.
+#[cfg(windows)]
+const TASKKILL_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// `taskkill.exe` by its absolute path in the system folder (never found through `PATH`, which a user can change).
+#[cfg(windows)]
+fn taskkill_exe() -> std::path::PathBuf {
+    let root = std::env::var_os("SystemRoot").map_or_else(
+        || std::path::PathBuf::from(r"C:\Windows"),
+        std::path::PathBuf::from,
+    );
+    root.join("System32").join("taskkill.exe")
+}
+
 /// A close request to `id` alone (`taskkill` without `/T` or `/F`: never a tree, whose members `taskkill` would find by
 /// parent pids that may have been handed on). A handle with `SYNCHRONIZE` is held across the `taskkill` call, after its
 /// creation time was checked: while it is open the process object, and so its pid, cannot be handed on, so the request
@@ -426,12 +440,12 @@ pub fn close_request(id: crate::ProcessId) -> (crate::Holder, bool) {
         }
         let found = crate::holder(id, creation_time(h));
         let sent = found == crate::Holder::Same && {
-            let mut cmd = crate::command("taskkill");
+            let mut cmd = crate::command(taskkill_exe());
             cmd.args(["/PID", &id.pid().to_string()]);
-            cmd.stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
-            cmd.status().is_ok_and(|s| s.success())
+            // Bounded: a hung `taskkill` must not hold the caller (and the handle) for ever. A non-zero exit is the
+            // refusal: a console process without a window "can only be terminated forcefully".
+            crate::run_bounded(cmd, crate::Limits::new(TASKKILL_LIMIT))
+                .is_ok_and(|o| matches!(o.outcome, crate::Outcome::Exited(s) if s.success()))
         };
         CloseHandle(h);
         (found, sent)

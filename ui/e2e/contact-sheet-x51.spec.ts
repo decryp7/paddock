@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { Locator, Page } from '@decryp7/paddock-e2e';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';

@@ -1,4 +1,4 @@
-import { expect, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
 
 /**
  * The default Dyno popup fits the family's popover cap (`--pd-tray-max-height`, 520 px) without scrolling, in its ordinary state and

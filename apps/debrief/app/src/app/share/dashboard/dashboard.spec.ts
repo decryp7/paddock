@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { FakeECharts } from '../../../testing/fake-echarts';
-import { all, buttonByText, el, provideTinyBackend, settle, text, tinyBackend, typeInto } from '../../../testing/helpers';
+import { all, buttonByText, el, openDialog, provideTinyBackend, settle, text, tinyBackend, typeInto } from '../../../testing/helpers';
 import { AnalysisBackend } from '../../core/analysis-backend';
 import { TileCfg, TileData, TileRequest } from '../../core/api.types';
 import { DebriefBackend } from '../../core/backend';
@@ -20,6 +20,10 @@ import { addTile, bottomOf, clampTile, moveTile, overlaps, placeTile, removeTile
 import { cellText, DashboardTile, sparkPoints } from './dashboard-tile';
 import { DashboardView, tileKeyAction } from './dashboard-view';
 import { at } from '../../../testing/must';
+import { endMockJobs } from '../../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 /** A profile save re-imports as a job: waits for it to finish and for the view to follow. */
 async function applied(fixture?: Parameters<typeof settle>[0]): Promise<void> {
@@ -449,11 +453,13 @@ describe('DashboardView', () => {
     buttonByText(fixture, /Add tile/).click();
     await TestBed.inject(DialogService).whenLoaded();
     await settle(fixture);
+    await openDialog(dialogs);
     at(dialogs.stack(), 0).ref.close({ ...tile('new one'), type: 'annotations' });
     await settle(fixture);
     expect(ds.current()!.tile.some((t) => t.id === 'new-one')).toBe(true);
     buttonByText(fixture, /Add tile/).click();
     await settle(fixture);
+    await openDialog(dialogs);
     at(dialogs.stack(), 0).ref.close();
     buttonByText(fixture, 'Save').click();
     await settle(fixture);
@@ -519,13 +525,11 @@ describe('dashboard commands and view', () => {
     expect(ds.editing()).toBe(true);
     expect(cmd('dashboards.addTile').when!(ctx)).toBe(true);
     const done = cmd('dashboards.addTile').run(ctx);
-    await settle();
-    at(TestBed.inject(DialogService).stack(), 0).ref.close(tile('cmd'));
+    (await openDialog(TestBed.inject(DialogService))).ref.close(tile('cmd'));
     await done;
     expect(ds.current()!.tile.some((t) => t.id === 'cmd')).toBe(true);
     const nothing = cmd('dashboards.addTile').run(ctx);
-    await settle();
-    at(TestBed.inject(DialogService).stack(), 0).ref.close();
+    (await openDialog(TestBed.inject(DialogService))).ref.close();
     await nothing;
     await cmd('dashboards.edit').run(ctx);
     expect(ds.editing()).toBe(false);

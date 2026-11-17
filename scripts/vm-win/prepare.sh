@@ -23,6 +23,8 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/target.sh"
+# shellcheck source=../../conformance/ci/safe-rm.sh
+. "$here/../../conformance/ci/safe-rm.sh"
 dir=${PADDOCK_WIN_VM_DIR:-$WIN_VM_DIR}
 fusion=${FUSION_APP:-/Applications/VMware Fusion.app}
 lib="$fusion/Contents/Library"
@@ -97,8 +99,8 @@ done
 
 echo "== Setup disc"
 stage="$dir/setup-disc"
-rm -rf "$stage"
-trap 'rm -rf "$stage"' EXIT # the staged copy holds the filled answer file
+safe_rm "$dir" "$stage"
+trap 'safe_rm "$dir" "$stage"' EXIT # the staged copy holds the filled answer file
 . "$here/../vm-lock.sh"; vm_lock_acquire vm-win-prepare # after the trap above: the lock's EXIT trap runs it too
 mkdir -p "$stage/setup" "$stage/payload" "$stage/keys" "$stage/\$WinPEDriver\$"
 if $no_tpm; then
@@ -124,7 +126,7 @@ unzip -q -o "$lib/isoimages/arm64/drivers-arm64.zip" -x '*.pdb' -d "$stage/\$Win
 date -u +%FT%TZ >"$stage/paddock-setup.marker"
 rm -f "$dir/iso/paddock-setup.iso"
 hdiutil makehybrid -quiet -iso -joliet -default-volume-name PADDOCKSETUP -o "$dir/iso/paddock-setup.iso" "$stage"
-rm -rf "$stage"
+safe_rm "$dir" "$stage"
 chmod 600 "$dir/iso/paddock-setup.iso"
 echo "  ok iso/paddock-setup.iso ($lang, keyboard $input_locale, $($no_tpm && echo 'no TPM' || echo 'virtual TPM'))"
 
@@ -150,7 +152,7 @@ else
   hdiutil detach "$mnt" -quiet
   cp -c "$win_iso" "$noprompt_iso.part" 2>/dev/null || cp "$win_iso" "$noprompt_iso.part"
   node "$here/noprompt-iso.mjs" "$noprompt_iso.part" "$boot/efisys.bin" "$boot/efisys_noprompt.bin" >/dev/null ||
-    { rm -rf "$boot" "$noprompt_iso.part"; die "could not make the no-prompt ISO"; }
+    { rm -rf "$boot"; rm -f "$noprompt_iso.part"; die "could not make the no-prompt ISO"; }
   rm -rf "$boot"
   mv "$noprompt_iso.part" "$noprompt_iso"
   echo "  ok $noprompt_iso"

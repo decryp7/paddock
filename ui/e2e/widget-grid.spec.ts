@@ -1,5 +1,6 @@
+import { expect, test } from './test';
 import AxeBuilder from '@axe-core/playwright';
-import { expect, startFrameCost, stopFrameCost, test, type Locator, type Page } from '@decryp7/paddock-e2e';
+import { startFrameCost, stopFrameCost, type Locator, type Page } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -230,7 +231,10 @@ test('Widget grid: the states and the twelve golden scenarios are drawn', async 
   await expect(page.getByTestId('wgg-case-7').getByRole('status')).toContainText('already at the left edge');
 });
 
-test('Widget grid: a drag across a 32-widget board stays under the frame budget', async ({ page }) => {
+test.describe('frame budget', () => {
+  // pinned-clock: off — measures real frames: the sampler counts requestAnimationFrame calls on performance.now, which the fake clock replaces (8 frames pinned against 31 real in the same drag)
+  test.use({ pinnedClock: false });
+  test('Widget grid: a drag across a 32-widget board stays under the frame budget', async ({ page }) => {
   await open(page, 'dark');
   const big = page.getByTestId('wgg-big');
   await big.getByRole('button', { name: 'Edit layout' }).click();
@@ -256,6 +260,7 @@ test('Widget grid: a drag across a 32-widget board stays under the frame budget'
   // WebKit in the macOS CI job); the annotation says when it was not.
   if (process.platform === 'darwin') expect(p95).toBeLessThan(16.7);
   else test.info().annotations.push({ type: 'frame-budget', description: `not enforced on ${process.platform}: software rendering (ADR 0044 §7 names the CI Mac)` });
+});
 });
 
 test('Widget grid: the add sheet lists the kinds and adds one; Options is in the menu of a kind that has it', async ({ page }) => {

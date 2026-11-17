@@ -233,3 +233,49 @@ fn live_c125_tree_findings_equal_the_js_host() {
     assert_eq!(got["findings"], want["findings"]);
     assert_eq!(got, want);
 }
+
+/// A file the check reads and then passes over (a NUL byte) is not read: an entry for it says so, and it is no probe.
+#[test]
+fn c125_an_entry_for_a_file_it_passes_over_names_a_file_it_does_not_read() {
+    let tree = tree_of(&[
+        (
+            "conformance/c125-allow.json",
+            "{\"history\": [], \"allow\": [{\"path\": \"scripts/blob.sh\", \"site\": \"/Volumes/Data\", \"reason\": \"invented test data\"}]}",
+        ),
+        ("scripts/blob.sh", "x=/Volumes/Data\0\n"),
+        // one text file, so the run looked at something
+        ("scripts/a.sh", "echo hi\n"),
+    ]);
+    let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
+    let got: Vec<(&str, &str)> = r.findings.iter().map(|f| (f.file.as_str(), f.message.as_str())).collect();
+    assert_eq!(
+        got,
+        [(
+            "conformance/c125-allow.json",
+            "allow entry (scripts/blob.sh: /Volumes/Data) names a file this check does not read"
+        )]
+    );
+    if has_node() {
+        let (rust, js) = both(tree.path());
+        assert_eq!(rust, js);
+    }
+}
+
+/// A run over other files (`--files`, the push gate) says nothing about a history entry whose files it did not look at.
+#[test]
+fn c125_a_history_entry_outside_a_files_run_is_not_stale() {
+    let tree = tree_of(&[
+        (
+            "conformance/c125-allow.json",
+            "{\"history\": [{\"path\": \"docs/adr/\", \"reason\": \"ADRs record history\"}], \"allow\": []}",
+        ),
+        ("docs/adr/0001.md", "built in /Volumes/d7sst7/x\n"),
+        ("scripts/a.sh", "echo hi\n"),
+    ]);
+    let o = RunOptions {
+        files: Some(vec!["scripts/a.sh".into(), "conformance/c125-allow.json".into()]),
+        ..options(tree.path(), "fixture")
+    };
+    let r = run_checks(&o, &registry()).unwrap();
+    assert!(r.findings.is_empty(), "{:?}", r.findings);
+}

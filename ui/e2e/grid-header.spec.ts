@@ -1,4 +1,5 @@
-import { expect, expectHeaderOnTop, headerCovers, headerTrack, test, type Page } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { expectHeaderOnTop, headerCovers, headerTrack, type Page } from '@decryp7/paddock-e2e';
 
 // ER-21: scrolled rows and cells never paint over a grid's header (the user's report of 2026-10-28: "the cell will cover the
 // header when scrolling"). Every gallery grid is scrolled, hovered and probed with elementFromPoint across its header row.

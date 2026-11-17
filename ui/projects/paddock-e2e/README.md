@@ -27,6 +27,45 @@ port from the environment, and the web server. `CHROMIUM_TEST_PATH` names a pinn
 `npx playwright merge-reports --reporter list,html blob-report` in the merge job. Anything else goes in `extend`
 (`use`, extra `projects`, `webServer`, ...); `reporters` adds the retried reporter after `list`.
 
+## A fixed page clock for every spec: `pinnedClockTest`
+
+A mock backend stamps its items relative to the page clock and the app groups them by local calendar day, so a run just after
+midnight had no "Today" (CI run 8154). `pinnedClockTest(base, options)` returns `base` with the page clock installed before the
+first navigation of every context, at one fixed instant (default 2026-10-22 14:30 UTC, the instant of the documentation screenshots), in one zone (`UTC`) and locale
+(`en-US`). The clock ticks on from there, so timers and animation frames keep working. Wrap once per app and export the result
+as the app's `test`; specs import `test` and `expect` from that file, never from `@playwright/test`.
+
+```ts
+// e2e/test.ts
+import { expect, test as base } from '@playwright/test'; // or the kit's `test` from '@decryp7/paddock-e2e'
+import { pinnedClockTest } from '@decryp7/paddock-e2e';
+
+export const test = pinnedClockTest(base, { now: '2026-10-22T14:30:00Z', timezoneId: 'UTC', locale: 'en-US' });
+export { expect };
+```
+
+- Options are all optional: `now` (a `Date`, epoch milliseconds or ISO string), `timezoneId`, `locale`. The constants
+  `PINNED_NOW`, `PINNED_ZONE` and `PINNED_LOCALE` hold the defaults.
+- `PADDOCK_E2E_NOW=<ISO instant>` moves the pin for a whole run (for example `2026-11-16T00:19:00Z` to see which specs depend on the
+  time of day). An unreadable value throws, naming the variable. `pinnedInstant(options)` reads the pin the same way.
+- A spec that needs the real time says so: `test.use({ pinnedClock: false })` in the file or a `describe`, with a one-line reason
+  next to it. The zone and locale defaults stay then.
+- A spec that installs its own clock still can: a second `page.clock.install({ time })` or `setFixedTime` wins over the pin
+  (Playwright 1.64.1, measured on Chromium and WebKit). Drop a bare `page.clock.install()` instead, because it restarts the
+  clock at the real time; the pinned clock is already installed and `runFor` works on it.
+- What the fake clock changes (measured on Playwright 1.64.1, Chromium and WebKit, 2026-11-16): timers and `requestAnimationFrame` keep
+  running and CSS transitions are not affected, but a `setTimeout(0)` takes about twice as long (Chromium 8 ms against 3.8 ms, WebKit 13
+  against 6), so a spec that reads the page right after an action must wait on the condition. `performance.now` and
+  `requestAnimationFrame` are the fake ones, so a spec that measures real frame cost opts out (`test.use({ pinnedClock: false })`, with
+  its reason on the line above). Playwright's clock also catches an exception thrown by a timer callback (`setTimeout`, `setInterval`,
+  `requestAnimationFrame`, `requestIdleCallback`): `_updateRealTimeTimer` in its `clock.ts` ends in `.catch(console.error)` and `_runTo`
+  keeps only the first error of a batch, so the page saw no `error` event and no `pageerror`. The fixture fixes that: after the install
+  it wraps the four timer functions so each callback's exception goes to `reportError`, as in a real browser (`reportTimerErrors`,
+  selftest `pinned-clock.spec.ts`). A `pageErrors` guard or an error handler sees a timer's throw again.
+- It covers contexts the fixtures create (`page`, `context`). A context made with `browser.newContext()` is not pinned: a spec that needs a
+  context of its own (a window size, a user agent, a colour scheme) calls `newPinnedContext(browser, { ...contextOptions, pin })`, which installs the
+  same clock, zone, locale and timer-error reporting (`pin: false` is the plain context). A conformance check over the e2e specs flags a bare `browser.newContext(`.
+
 ```ts
 // e2e/screenshots.spec.ts: the documentation screenshots, run with `SCREENSHOTS=1 npx playwright test --project=screenshots`
 import { captureDocScreens } from '@decryp7/paddock-e2e';
@@ -66,7 +105,7 @@ for (const colorScheme of THEMES) {
 | `e2ePort(name, fallback)` | The port from the environment; on CI a missing one is an error |
 | `ShellApp` and its parts | `frame` (heading, toggle, sidebar mode, regions, `focusBy`), `sidebar`, `statusBar` (items by id, chip, bell, jobs, "…"), `notifications` (toasts, centre, notices by cause, service details), `jobs`, `menus`, `dialogs` (window URLs, result, fit history, in-page dialogs), `settings` |
 | `dialogContracts(path)` | The dialogs of an app's contract file, to boot every dialog window by URL |
-| `axeViolations(page)`, `THEMES`, `WCAG_TAGS` | axe against WCAG 2.2 AA, as `rule: targets` lines |
+| `axeViolations(page)`, `THEMES`, `WCAG_TAGS` | axe against WCAG 2.2 AA, as `rule: targets` lines; the page is held still for the scan (no transitions and finite animations at their end on every element and pseudo-element, reduced motion emulated, both undone after); `axeInThemes` and `axeTargets` wait until the switched colour scheme is live before scanning |
 | `axeInThemes(page)`, `axeTargets(page, targets)` | axe in each theme (`theme: rule: targets`); or over a list of windows/screens (URL plus a ready check), returned by name so a failure names the window |
 | `axeEveryDialog(page, contractsPath, { inputs, skip })`, `dialogTargets`, `dialogWindowUrl` | axe over the window of every dialog in the app's `dialog-contracts.json`, both themes: `expect(await axeEveryDialog(page, path)).toEqual({})`. A new dialog is covered the moment it is in the file; one that cannot open alone is named in `skip` with a reason; an empty list is an error |
 | `tabWalk`, `expectTabOrder`, `expectReachableByKeyboard`, `expectEscapeReturnsFocus` | Keyboard-only flows (WCAG 2.1.1, 2.1.2, 2.4.3, 2.4.7): walk the Tab order (ends `left`, `cycled`, `trapped` or `limit`; `walkStep` is the pure rule), fail on a trap or a stop with no visible focus, prove named elements are reachable, prove Escape closes a popup and returns the focus to its trigger |
@@ -79,4 +118,25 @@ for (const colorScheme of THEMES) {
 | `@decryp7/paddock-e2e/retried-reporter` | Lists tests that passed only after a retry (console, `playwright-retried.md`, `$GITHUB_STEP_SUMMARY`); never changes the exit code |
 
 Build: `npm run build:e2e` in `ui/` (writes `ui/dist/paddock-e2e`). Its unit tests run with `npm run test:scripts`; the screenshot runner is
-also run for real on `data:` pages: `npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=screenshots`.
+also run for real on `data:` pages: `npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=screenshots`, and the
+axe helpers in both engines with `--project=chromium --project=webkit`.
+
+
+## "Ready" per kind of thing: `ready.ts`
+
+`toBeVisible()` says an element is drawn, not that its content, position or wiring is final. Wait with the helper of the kind, then read or press
+(the sweep of 2026-11-17, docs/lessons.md):
+
+| Helper | Waits for | The race it closes |
+| --- | --- | --- |
+| `expectListFiltered(options, query)` | the first option highlights `query` (a `mark` with that text) | a palette still showing the unfiltered list |
+| `expectOverlayAlignedWith(panel, anchor, tolerance = 1)` | the overlay has the anchor's left edge and width (a select's list) | a select list visible at x 0 before the overlay positions it |
+| `expectWired(control, attribute = 'aria-expanded', value = 'false')` | an attribute only the update pass sets | a click on a control the framework has not wired ("onContainerClick of undefined") |
+| `expectStreamDone(stream)` | `aria-busy` is "false" (call it after the stream has started: a turn is drawn) | a card that moves while the answer still streams |
+| `expectDockPlanned(page)` | `data-dock-planned` (Debrief's DockService.planned) | a layout read before the dock planned for the window |
+| `expectNotMoving(locator)` | the same box in two reads in a row | an element still settling |
+
+Apps import the source relatively (`../../../../ui/projects/paddock-e2e/src/ready.ts`) unless their workflow builds the kit (conformance C137).
+The ESLint rule `paddock/e2e-ready-reads` (in the `e2ePinnedClock` block, off by default because the lint commands run with `--max-warnings 0`; read it with `PADDOCK_E2E_READY_LINT=warn npx eslint 'e2e/**/*.ts'`) flags a `boundingBox`, `allInnerTexts`, `allTextContents`, `innerText`,
+`textContent`, or an `evaluate` or `evaluateAll` whose result is used, in the next statement of the same block after a bare `toBeVisible()` or `waitFor()` (a window of one statement: a read two statements later, or after a `waitForTimeout`, is not seen); a read that is meant to be immediate carries
+`// conformance: e2e-ready — <why>`. Report-only until its first green run on the real tree.

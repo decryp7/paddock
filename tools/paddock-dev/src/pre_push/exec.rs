@@ -620,6 +620,8 @@ pub struct RealExec {
     pub budget_end: Instant,
     /// The push is a landing (`train/*`, `main`, a release tag): its heavy steps take the priority lane (`heavy --high`, ADR 0102).
     pub priority: bool,
+    /// The local sccache wrapper for the gates that compile (`None`: off, or CI; [`crate::local_sccache`]).
+    pub wrapper: crate::local_sccache::Lazy,
 }
 
 /// Variables every gate may see besides the base list: the toolchain, Docker, caches and Paddock's own settings.
@@ -701,6 +703,16 @@ impl RealExec {
         }
         for (k, v) in &gate.env {
             call = call.env(k, v);
+        }
+        // A cargo gate that names its build folder as configuration never also gets it as a variable (the variable would win over
+        // the configuration and sccache hashes it), and compiles through the local sccache when there is one.
+        if crate::cargo_target::is_cargo(&gate.program) && crate::cargo_target::names_target_dir(&gate.args) {
+            call = call.without("CARGO_TARGET_DIR").without("CARGO_BUILD_TARGET_DIR");
+            if gate.heavy
+                && let Some(w) = self.wrapper.get()
+            {
+                call = crate::local_sccache::apply(call, w);
+            }
         }
         if let Some(l) = label {
             call = call.env("PADDOCK_LINUX_RUN_LABEL", format!("{RUN_LABEL}={l}"));
@@ -939,6 +951,7 @@ exit $rc
                 built_heavy: Default::default(),
                 budget_end: Instant::now() + Duration::from_secs(60),
                 priority: false,
+                wrapper: crate::local_sccache::Lazy::off(),
             }
         }
 
@@ -954,6 +967,23 @@ exit $rc
                 rank: 2,
                 next: "fix it".into(),
             }
+        }
+
+        /// The gates-register row's finding (C100's `::error` line, as `./dev gates check` prints it for a check no CI line runs) comes
+        /// before a 14-line table; it must be in the failed row's output, not cut off by the table (review of feat/pre-push-unwired-check).
+        #[test]
+        fn a_finding_printed_before_a_long_table_is_in_the_failed_rows_output() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = real(d.path(), &d.path().join("lock"));
+            let cmd = "echo '::error file=conformance/src/checks/C999.mjs,line=1::C100 conformance C999 is run by no reachable, resolved CI line'; \
+                       i=0; while [ $i -lt 14 ]; do echo \"| table row $i |\"; i=$((i+1)); done; exit 5";
+            let g = Gate {
+                heavy: false,
+                ..gate("gates-register", cmd)
+            };
+            let row = decide(&g, &ex, Duration::from_secs(60), &test_subject());
+            assert_eq!(row.kind(), Kind::Failed);
+            assert!(row.tail.contains("C100 conformance C999 is run by no reachable"), "{}", row.tail);
         }
 
         #[test]
@@ -1019,7 +1049,7 @@ exit $rc
             std::fs::create_dir_all(&bin).unwrap();
             let body = if cargo_ok {
                 format!(
-                    "mkdir -p \"$CARGO_TARGET_DIR/release\"\ncat > \"$CARGO_TARGET_DIR/release/heavy\" <<'EOS'\n#!/bin/sh\n[ \"$1\" = --version ] && {{ echo heavy-fake; exit 0; }}\necho \"$@\" >> {m}\nwhile [ \"$1\" != -- ]; do shift; done\nshift\nexec \"$@\"\nEOS\nchmod +x \"$CARGO_TARGET_DIR/release/heavy\"\n",
+                    "T=$(printf '%s\\n' \"$@\" | sed -n \"s/^build.target-dir='\\(.*\\)'$/\\1/p\")\nmkdir -p \"$T/release\"\ncat > \"$T/release/heavy\" <<'EOS'\n#!/bin/sh\n[ \"$1\" = --version ] && {{ echo heavy-fake; exit 0; }}\necho \"$@\" >> {m}\nwhile [ \"$1\" != -- ]; do shift; done\nshift\nexec \"$@\"\nEOS\nchmod +x \"$T/release/heavy\"\n",
                     m = d.join("heavy-calls").display()
                 )
             } else {
@@ -1041,7 +1071,44 @@ exit $rc
                 built_heavy: Default::default(),
                 budget_end: Instant::now() + Duration::from_secs(60),
                 priority: false,
+                wrapper: crate::local_sccache::Lazy::off(),
             }
+        }
+
+        /// The build folder travels as cargo configuration: a `CARGO_TARGET_DIR` in the caller's environment never reaches the
+        /// gate (sccache would hash it), and the wrapper's variables reach a compiling gate only when the wrapper is on.
+        #[test]
+        fn a_cargo_gate_never_gets_the_build_folder_as_a_variable_and_compiles_through_the_wrapper_when_there_is_one() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = repo_with_fake_cargo(d.path(), true);
+            let var = "CARGO_TARGET_DIR";
+            ex.env.insert(var.into(), "/mine".into());
+            let mut g = gate("clippy a", "");
+            g.program = "cargo".into();
+            g.args = crate::cargo_target::with_target_dir(&["clippy".to_string()], "/t");
+            let limits = Limits {
+                run: Duration::from_secs(60),
+                queue: Duration::from_secs(60),
+            };
+            let log = d.path().join("g.log");
+            let env_of = |ex: &RealExec| ex.call(&g, limits, &log, None).child_env(&ex.env);
+            let plain = env_of(&ex);
+            assert!(
+                plain.iter().all(|(k, _)| k != "CARGO_TARGET_DIR" && k != "RUSTC_WRAPPER"),
+                "{plain:?}"
+            );
+            ex.wrapper = crate::local_sccache::Lazy::ready(crate::local_sccache::Ready {
+                bin: "/x/sccache".into(),
+                vars: vec![("RUSTC_WRAPPER".into(), "/x/sccache".into())],
+            });
+            let wrapped = env_of(&ex);
+            assert!(wrapped.contains(&("RUSTC_WRAPPER".into(), "/x/sccache".into())), "{wrapped:?}");
+            assert!(wrapped.iter().all(|(k, _)| k != "CARGO_TARGET_DIR"), "{wrapped:?}");
+            // A gate that is not cargo (conformance, a script) is never wrapped.
+            let mut s = gate("conformance", "true");
+            s.heavy = true;
+            let sh = ex.call(&s, limits, &log, None).child_env(&ex.env);
+            assert!(sh.iter().all(|(k, _)| k != "RUSTC_WRAPPER"), "{sh:?}");
         }
 
         #[test]
@@ -1085,6 +1152,7 @@ exit $rc
                 built_heavy: Default::default(),
                 budget_end: Instant::now() + Duration::from_secs(60),
                 priority: false,
+                wrapper: crate::local_sccache::Lazy::off(),
                 env: ex.env.clone(),
                 root: ex.root.clone(),
                 logs: ex.logs.clone(),

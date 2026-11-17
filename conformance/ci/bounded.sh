@@ -4,6 +4,9 @@
 # status. After $limit seconds it ends the function's process tree, prints ONE ::error:: line (ER-27: the phase, the last output (whole
 # lines) and the next step) and exits 1; with BOUNDED_SOFT=1 it prints a ::warning:: line instead and returns 124 (a caller that must
 # never fail its job). The caller sets tool, limit, scratch and hint (the next step) before the first call.
+# A clock mark (ADR 0103, "Hang-point signal"; for tests): with clock_mark set to a file, the phase's $limit counts from the moment
+# that file appears (the test's stand-in writes it when it enters its hang), so slow work before the hang never meets the limit;
+# the file is removed when the phase starts, and until it appears the phase is bounded by $clock_wait seconds (default $limit).
 # kill_tree <pid>: ends the process and everything below it, each parent before its children: a shell ended after its child would
 # see the child killed and write bash's `Killed: 9` note into the phase's error output (the warning's `Last output`).
 kill_tree() {
@@ -17,20 +20,26 @@ kill_tree() {
 }
 
 bounded() {
-  local label="$1" fn="$2" start=$SECONDS pid rc=0 polls=0 nap
+  local label="$1" fn="$2" start=$SECONDS pid rc=0 polls=0 nap bound="$limit" marked=1
+  if [ -n "${clock_mark:-}" ]; then
+    rm -f "$clock_mark"
+    marked=0 bound="${clock_wait:-$limit}"
+  fi
   echo "$tool: $label ..."
   "$fn" > "$scratch/out" 2> "$scratch/err" &
   pid=$!
   while kill -0 "$pid" 2>/dev/null; do
+    # The clock starts again at the mark, and from then on the phase's own limit bounds it.
+    if [ "$marked" = 0 ] && [ -e "$clock_mark" ]; then marked=1 start=$SECONDS bound="$limit"; fi
     # SECONDS counts whole seconds, so `-ge` could end a phase that ran only part of a second (one that started at 0.9 s reads 1 s
-    # at 1.0 s); more than $limit whole seconds means at least $limit seconds really passed.
-    if [ $((SECONDS - start)) -gt "$limit" ]; then
+    # at 1.0 s); more than $bound whole seconds means at least $bound seconds really passed.
+    if [ $((SECONDS - start)) -gt "$bound" ]; then
       kill_tree "$pid"
       if [ "${BOUNDED_SOFT:-0}" = 1 ]; then
-        echo "::warning::$tool: '$label' did not finish within ${limit} s. Last output: $(grep -v '^[[:space:]]*$' "$scratch/err" | tail -n 4 | tr '\r\n' '  '). Next step: $hint"
+        echo "::warning::$tool: '$label' did not finish within ${bound} s. Last output: $(grep -v '^[[:space:]]*$' "$scratch/err" | tail -n 4 | tr '\r\n' '  '). Next step: $hint"
         return 124
       fi
-      echo "::error::$tool: '$label' did not finish within ${limit} s. Last output: $(grep -v '^[[:space:]]*$' "$scratch/err" | tail -n 4 | tr '\r\n' '  '). Next step: $hint"
+      echo "::error::$tool: '$label' did not finish within ${bound} s. Last output: $(grep -v '^[[:space:]]*$' "$scratch/err" | tail -n 4 | tr '\r\n' '  '). Next step: $hint"
       exit 1
     fi
     # Short naps first: most phases end within a fraction of a second, and a fixed 0.2 s nap made each of them last at least 0.2 s (a

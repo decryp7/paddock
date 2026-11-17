@@ -27,6 +27,51 @@ describe('retryUntilAnswered', () => {
     expect(m.call).toHaveBeenCalledTimes(1);
   });
 
+  it('leaves no timer running once an attempt has answered or rejected', async () => {
+    vi.useFakeTimers();
+    try {
+      const answered = manual<number>();
+      const first = retryUntilAnswered(answered.call, { timeoutMs: 10, attempts: 3 });
+      expect(vi.getTimerCount()).toBe(1);
+      answered.pending[0]!.resolve(7);
+      await first;
+      expect(vi.getTimerCount()).toBe(0);
+      const refused = manual<number>();
+      const second = retryUntilAnswered(refused.call, { timeoutMs: 10, attempts: 3 });
+      refused.pending[0]!.reject(new Error('no'));
+      await expect(second).rejects.toThrow('no');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ends with its destroy ref: no further attempt, the timer cleared, an AbortError; the hook goes once it has settled', async () => {
+    const hooks = new Set<() => void>();
+    const destroyRef = {
+      onDestroy: (fn: () => void) => {
+        hooks.add(fn);
+        return () => void hooks.delete(fn);
+      },
+    };
+    const cleared: unknown[] = [];
+    const options = { timeoutMs: 10, attempts: 3, setTimer: () => 'handle', clearTimer: (h: unknown) => void cleared.push(h), destroyRef };
+    const gone = manual<number>();
+    const result = retryUntilAnswered(gone.call, options);
+    [...hooks].forEach((h) => h());
+    await expect(result).rejects.toMatchObject({ name: 'AbortError' });
+    expect(cleared).toContain('handle');
+    expect(gone.call).toHaveBeenCalledTimes(1);
+    expect(hooks.size).toBe(1); // the destroyed call's hook is still registered (the injector is going), the next ones are not
+    hooks.clear();
+    const answered = manual<number>();
+    const ok = retryUntilAnswered(answered.call, options);
+    expect(hooks.size).toBe(1);
+    answered.pending[0]!.resolve(5);
+    await expect(ok).resolves.toBe(5);
+    expect(hooks.size).toBe(0);
+  });
+
   it('sends again when an attempt goes unanswered (a lost first IPC), up to the limit', async () => {
     const m = manual<number>();
     const t = timers();

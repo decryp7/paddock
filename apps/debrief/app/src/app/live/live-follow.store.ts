@@ -2,6 +2,7 @@ import { computed, effect, inject, untracked } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { Query } from '../core/api.types';
 import { WorkspaceStore } from '../core/workspace.store';
+import { nextRequestSeq } from '../core/request-seq';
 import { LiveTail } from '../workspace/live-tail';
 
 /** Sliding windows offered for "follow now"; `all` follows without a window (everything up to the newest event). */
@@ -29,9 +30,11 @@ export interface FollowState {
   customMinutes: number;
   /** Bumped by Resume, so the grid scrolls back to the newest events. */
   resumeNonce: number;
+  /** The request stamp (`nextRequestSeq`) of the last Follow on or Resume, taken when the user acted. */
+  resumeSeq: number;
 }
 
-const initialState: FollowState = { follow: true, paused: false, preset: 'all', customMinutes: 30, resumeNonce: 0 };
+const initialState: FollowState = { follow: true, paused: false, preset: 'all', customMinutes: 30, resumeNonce: 0, resumeSeq: 0 };
 
 /** The window length of a preset in ms (null = no window). */
 export function windowMsOf(preset: WindowPreset, customMinutes: number): number | null {
@@ -78,7 +81,7 @@ export const LiveFollow = signalStore(
   })),
   withMethods((store) => ({
     setFollow(follow: boolean) {
-      patchState(store, (s) => ({ follow, paused: false, resumeNonce: follow ? s.resumeNonce + 1 : s.resumeNonce }));
+      patchState(store, (s) => ({ follow, paused: false, resumeNonce: follow ? s.resumeNonce + 1 : s.resumeNonce, resumeSeq: follow ? nextRequestSeq() : s.resumeSeq }));
     },
     setPreset(preset: WindowPreset) {
       patchState(store, { preset, paused: false });
@@ -90,7 +93,7 @@ export const LiveFollow = signalStore(
       if (!store.paused()) patchState(store, { paused: true });
     },
     resume() {
-      patchState(store, (s) => ({ paused: false, follow: true, resumeNonce: s.resumeNonce + 1 }));
+      patchState(store, (s) => ({ paused: false, follow: true, resumeNonce: s.resumeNonce + 1, resumeSeq: nextRequestSeq() }));
     },
     restore(saved: unknown) {
       patchState(store, { ...sanitizeFollow(saved), paused: false });

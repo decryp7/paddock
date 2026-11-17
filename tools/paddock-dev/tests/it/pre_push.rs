@@ -5,7 +5,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::Path;
-use std::process::Command;
 
 const CHANGE: &str = "crates/paddock-proc/src/lib.rs";
 
@@ -28,7 +27,7 @@ fn dev(path: &str, args: &[&str]) -> (i32, String, String) {
 #[allow(clippy::disallowed_methods)]
 fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>, test_off: bool) -> (i32, String, String) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = crate::dev_bin::command()
         .args(["check", "--pre-push", "--base", "HEAD", "--files", CHANGE])
         .args(args)
         .current_dir(root)
@@ -73,6 +72,18 @@ fn the_dry_run_lists_the_gates_ci_runs_for_a_crates_change_and_why_others_are_le
         out.contains("cargo clippy --workspace --all-targets --all-features --locked -- -D warnings"),
         "{out}"
     );
+}
+
+/// The gates-register row runs on every push (ER-41), including one that changes only a file C100 reads through its own globs.
+#[test]
+fn the_gates_check_is_planned_for_a_crates_change_and_for_an_app_contract_change() {
+    let d = tempfile::tempdir().unwrap();
+    let path = fake_bin(d.path(), "exit 0");
+    for files in [CHANGE, "apps/dyno/paddock.ci.json"] {
+        let (code, out, err) = dev(&path, &["--dry-run", "--files", files]);
+        assert_eq!(code, 0, "{err}{out}");
+        assert!(out.contains("run   gates-register"), "{files}: {out}");
+    }
 }
 
 #[test]

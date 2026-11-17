@@ -11,6 +11,9 @@ import { ToastStore } from '../../state/toast.store';
 /** How often the Processes tab asks for a fresh list while it is visible. */
 export const PROCESS_POLL_MS = 5_000;
 
+/** Why a process without a start time is not stopped (rule 53: its id could belong to another program by now). */
+export const NO_START_TIME_STOP = 'The system gives no start time for this process, so Pitcrew cannot be sure it is still the same one. End it from the Task Manager or Activity Monitor instead.';
+
 interface ProcessesState {
   runner: string | null;
   list: Loadable<ProcessList>;
@@ -59,6 +62,13 @@ export const ProcessesStore = signalStore(
       async stop(entry: ProcessEntry, allowRunner = false): Promise<boolean> {
         const runner = store.runner();
         if (!runner) return false;
+        if (entry.startedAt === null) {
+          // No start time, no identity: the service would refuse too (a reused process id could be another program).
+          const message = NO_START_TIME_STOP;
+          patchState(store, { actionError: message });
+          toasts.show({ tone: 'danger', icon: 'alert', title: `${entry.name} was not stopped`, body: message });
+          return false;
+        }
         patchState(store, { busy: entry.pid, actionError: null });
         try {
           await backend.stopProcess(runner, entry.pid, entry.startedAt, allowRunner);

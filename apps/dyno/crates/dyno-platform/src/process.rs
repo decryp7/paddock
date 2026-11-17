@@ -422,6 +422,7 @@ pub(crate) mod tests {
         let started = Instant::now();
         let err = run_streaming(shell("sleep 30 & echo $!; wait"), Duration::from_secs(60), &hand, |line| {
             // Read while the helper lives: the identity (pid and start time), never the bare pid (rule 53).
+            // conformance: recorded-pid — read in the line callback while the tool still `wait`s on its helper
             helper = line.trim().parse().ok().and_then(paddock_proc::ProcessId::of);
             hand.cancel();
         })

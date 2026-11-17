@@ -90,6 +90,10 @@ pub struct TimedJob {
     pub end: Option<f64>,
     /// Its steps: name and duration in seconds.
     pub steps: Vec<(String, Option<f64>)>,
+    /// `queued`, `waiting`, `in_progress`, `completed`... (empty when the server did not say).
+    pub status: String,
+    /// The runner labels it runs on (`macos-latest`): its `runs-on`, with a matrix value filled in.
+    pub labels: Vec<String>,
 }
 
 impl TimedJob {
@@ -137,6 +141,11 @@ impl TimedJob {
                         })
                         .collect()
                 })
+                .unwrap_or_default(),
+            status: j["status"].as_str().unwrap_or("").to_string(),
+            labels: j["labels"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|l| l.as_str().map(str::to_string)).collect())
                 .unwrap_or_default(),
         }
     }

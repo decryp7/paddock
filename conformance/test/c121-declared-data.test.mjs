@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { flagged, kindOf, parseAllow } from '../src/checks/C121-declared-data.mjs';
+import { IMPLEMENTATION, flagged, kindOf, parseAllow } from '../src/checks/C121-declared-data.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
 const ALLOW = JSON.stringify({ allow: [{ path: 'conformance/test/x.test.mjs', site: 'text.match(/x/)', reason: 'tests of checks of workflows' }] });
@@ -72,4 +72,18 @@ test('C121 allow list: another site in an allowed file is still reported, and a 
   assert.deepEqual(found.map((f) => [f.file, f.line]), [['conformance/test/x.test.mjs', 2]]);
   const stale = await findingsOf('C121', makeApp({ 'conformance/c121-allow.json': ALLOW, 'conformance/test/x.test.mjs': 'const t = 1;\n' }));
   assert.deepEqual(stale.map((f) => [f.file, /stale allow entry/.test(f.message)]), [['conformance/c121-allow.json', true]]);
+});
+
+test('C121 allow list: a site beyond the count of the entry that names it is reported at its own line', async () => {
+  const line = 'const t = text.match(/x/); // .gitea/workflows/ci.yml\n';
+  const found = await findingsOf('C121', makeApp({ 'conformance/c121-allow.json': ALLOW, 'conformance/test/x.test.mjs': `${line}${line}` }));
+  assert.deepEqual(found.map((x) => [x.file, x.line, /beyond the count of its allow entry/.test(x.message)]), [['conformance/test/x.test.mjs', 2, true]]);
+});
+
+test('C121 does not read its own files (IMPLEMENTATION): their invented lines need no allow entry', async () => {
+  const line = 'const t = text.match(/x/); // .gitea/workflows/ci.yml\n';
+  const own = Object.fromEntries([...IMPLEMENTATION].filter((f) => f !== 'conformance/c121-allow.json').map((f) => [f, line]));
+  assert.ok(own['conformance/test/c121-declared-data.test.mjs'] && own['tools/paddock-dev/tests/it/check_c121.rs']);
+  const found = await findingsOf('C121', makeApp({ 'conformance/c121-allow.json': '{"allow": []}', ...own, 'tools/paddock-dev/tests/it/check.rs': line }));
+  assert.deepEqual(found.map((f) => [f.file, f.line]), [['tools/paddock-dev/tests/it/check.rs', 1]], 'another test file is still read');
 });

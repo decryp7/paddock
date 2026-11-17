@@ -1,5 +1,6 @@
+import { expect, test } from './test';
 import AxeBuilder from '@axe-core/playwright';
-import { expect, stablePressPoint, test, type Page } from '@decryp7/paddock-e2e';
+import { stablePressPoint, type Page } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -340,6 +341,9 @@ test('Widgets: the popup footer menu opens inside the popover, not past its edge
   const menu = page.locator('.mat-mdc-menu-panel[role=menu]').last();
   await expect(menu).toBeVisible();
   await animationsDone(page);
+  // The overlay is drawn before it is positioned (at x 0 for a frame; Linux CI, runs 8208 and 8209): its box is read once it
+  // has left the page's corner, a condition, not a wait.
+  await expect.poll(async () => (await menu.boundingBox())?.x ?? 0, { message: 'the menu is positioned' }).toBeGreaterThan(0);
   const p = (await popup.boundingBox())!;
   const m = (await menu.boundingBox())!;
   expect(m.x).toBeGreaterThanOrEqual(p.x);

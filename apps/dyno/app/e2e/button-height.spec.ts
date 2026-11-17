@@ -1,4 +1,4 @@
-import { expect, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
 
 /**
  * Dyno's buttons are the family's height: 32 px at the default density and 28 px at Compact (WP-14, decision 2 of the 1.1.1 plan). Dyno

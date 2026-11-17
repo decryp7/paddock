@@ -10,6 +10,10 @@ import { fieldTypeFor, InferDialog, renameGroups } from './infer-dialog';
 import { qlQuote } from '../../analysis/ql-text';
 import { InferredRegex } from '../../core/api.types';
 import { at } from '../../../testing/must';
+import { endMockJobs } from '../../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 const ref = { close: vi.fn(), closed: Promise.resolve(undefined) };
 

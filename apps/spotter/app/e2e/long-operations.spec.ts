@@ -1,4 +1,4 @@
-import { expect, test } from './fixtures';
+import { expect, test } from './test';
 
 /**
  * Long operations against the mock backend (which paces its steps like the shell would report them): the panel shows

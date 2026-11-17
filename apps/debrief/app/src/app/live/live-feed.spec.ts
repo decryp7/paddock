@@ -3,6 +3,7 @@ import { provideTinyBackend, settle, tinyDataset } from '../../testing/helpers';
 import { report } from '../../testing/live-helpers';
 import { TailReport } from '../core/api.types';
 import { MockBackend } from '../core/mock/mock-backend';
+import { nextRequestSeq } from '../core/request-seq';
 import { WorkspaceStore } from '../core/workspace.store';
 import { LiveTail } from '../workspace/live-tail';
 import { FACET_INTERVAL_MS, LiveFeed } from './live-feed';
@@ -79,7 +80,7 @@ describe('LiveFeed', () => {
     await vi.waitFor(() => expect(feed.holdGrid()).toBe(false));
     expect(feed.newEvents()).toBe(5);
     const nonce = feed.revealNonce();
-    feed.showNewEvents();
+    feed.showNewEvents(nextRequestSeq());
     expect(feed.newEvents()).toBe(0);
     expect(feed.revealNonce()).toBe(nonce + 1);
     // Resume / Follow on reveals what was held back too.

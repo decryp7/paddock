@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { openApp, openSettings, settingsDialog } from './app';
 
 // ADR 0023 WP-9a against the mock: the Chat tab's picker and apps line, Settings > Connected apps, and the key dialog.

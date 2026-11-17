@@ -107,8 +107,9 @@ describe('the graph of this tree', () => {
     const r = run('ui/projects/paddock-ui/shell/src/public-api.ts');
     assert.ok(r.ui);
     // Spotter and Dyno map @decryp7/paddock-ui to ui/dist in their tsconfig (a path edge, no npm edge); Pitwall loads its CSS.
-    // Debrief maps both packages the same way (package 0.4 of the 1.2 plan), so its UI half is marked too.
-    assert.deepEqual(r.apps, ['debrief', 'dyno', 'pitwall', 'shell-demo', 'spotter', 'workbench-demo']);
+    // Debrief maps both packages the same way (package 0.4 of the 1.2 plan), so its UI half is marked too. Pitcrew maps it
+    // for the shared test kit's leak detector (its specs only).
+    assert.deepEqual(r.apps, ['debrief', 'dyno', 'pitcrew', 'pitwall', 'shell-demo', 'spotter', 'workbench-demo']);
     assert.deepEqual(r.kinds.debrief, ['ui']);
     assert.deepEqual(r.kinds.pitwall, ['ui']);
     assert.deepEqual(r.kinds.spotter, ['ui']);
@@ -1105,6 +1106,8 @@ describe('contracts', () => {
       if (/^\s*(\/\/|\*|#)/.test(text)) continue; // a comment names the file, nothing reads it
       if (DOCS.some((r) => r.test(file))) continue; // a docs tool (docs/images/src) reading docs is docs
       if (file === 'scripts/affected.test.mjs') continue; // this file names docs as test data
+      // It asks git for the docs' merge attribute (`git check-attr`) and never reads their text.
+      if (file === 'conformance/test/union-merge.test.mjs') continue;
       for (const m of text.matchAll(new RegExp(re, 'g'))) {
         const inc = /include_str!\("([^"]+)"\)/.exec(m[0]);
         const path = inc ? posix.normalize(posix.join(posix.dirname(file), inc[1])) : m[0].slice(1, -1);

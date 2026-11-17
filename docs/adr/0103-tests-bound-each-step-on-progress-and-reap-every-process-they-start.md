@@ -1,6 +1,7 @@
 # 0103. Tests bound each step on progress and reap every process they start
 
-- Status: Accepted 2026-11-15 (user), with D1-D4 as taken (recorded under "Decisions"). Before that: proposed 2026-11-14,
+- Status: Accepted 2026-11-15 (user), with D1-D4 as taken (recorded under "Decisions"). Amended 2026-11-15 (user): the hang-point signal and
+  per-phase state ("Amendment" below). Before that: proposed 2026-11-14,
   revised 2026-11-15 after the first independent review (verdict NOT YET; its P1s and P2s are answered below) and again after the
   second (one P1: the reaper's children escaped nextest's group kill; fixed below). The user approved building the test-side
   redesign (about 1-2 agent-days) for the class "tests time out on the loaded Mac" on the night of 2026-11-14 (relayed in the
@@ -263,6 +264,66 @@ approved 1-2 agent-days only if the first round's day and this round's day are c
 - **D3:** (b): the open incidents' tests migrated now (the debrief-app session test, the Spotter browser test, the golden live
   tests); the other C126 sites only when a test fails.
 - **D4:** C126 stays report-only. Rule A is never gated; B and the ownership-based C are gated only after a green run.
+
+## Amendment (2026-11-15): the hang-point signal and per-phase state
+
+Approved by the user (relayed by the coordinator on 2026-11-15) for the class "work before the hang point of a 1 s hung-phase test
+meets its limit under load", seen three times in the kept-clone parity tests: fe1bd861d (a `git rev-parse` over 1 s outside any
+phase, 4 of 204 runs), e0fdd0286 (the five phases in one test past nextest's 60 s bound, run 8099), and on 2026-11-15 the checkout
+phase, ended inside `sanitize` in the shell while the Rust side reached its git (4 of 40 runs at load 40 to 60 once `safe_rm` added
+16 programs per call; `fix/kept-clone-checkout-flake`). The same parity runs found a second defect, on the Rust side only (1 of 80
+runs at load up to 38): a phase abandoned at its bound set the next phase's timed-out flag through the state the phases shared.
+
+**Decision.**
+
+- **Hang-point signal.** A hung-phase test's stand-in git writes a file as it enters its hang, and the phase limit the test asserts
+  counts from that file, in both implementations: `bounded.sh`'s `clock_mark` and `clock_wait` (the file is removed when the phase
+  starts; until it appears the phase is bounded by `clock_wait`), set by `kept-clone.sh` from `PADDOCK_KEPT_CLONE_CLOCK_MARK` with
+  the general limit as `clock_wait`; in Rust `ci_host::phase::bounded_marked` with a `ClockMark`, used by `kept_clone`'s phases
+  from the same variable. The variable is for tests only; unset, nothing changes, and set, every phase is still bounded (by the
+  general limit before its mark, by its own limit after). A git command's own limit in Rust needs no mark: it counts from that
+  command's start, and the stand-in writes the mark as it starts. What stays load-sensitive is a single command before the hang
+  taking longer than the phase's own limit by itself (a `git config` over 1 s), not the sum of a phase's work. Its measured rate is
+  the one instance of that shape: a `git rev-parse` over 1 s in 4 of 204 runs (fe1bd861d, outside the phases, since moved to the
+  900 s bound). Giving such a command the general limit in mark mode, as the shell's commands have, would need the phase to end its
+  running git when it is abandoned; `ToolCall`'s captured runs have no cancel, so that is not done here.
+- **The parity tests' general limit** is 20 s (`kept_hang_env` in `host_steps.rs`, with its measurement: the slowest whole hung-phase
+  test took 17.4 s in 300 runs at load 18 to 68), so a git that misses its mark ends at 20 s with "did not finish within 20 s"
+  (checked by hand: 42.4 s for the whole test, under nextest's 60 s) instead of at nextest's bound. A test checks that no workflow
+  or action sets the mark.
+- **Per-phase state.** Each Rust phase writes its error output, its `run:` lines and its timed-out flag to its own `PhaseOut`, set
+  on the phase's thread; when the phase ends or is abandoned, what it wrote by then becomes the step's, and what it writes later goes
+  nowhere. A noisy git no longer holds the log while it runs. An abandoned phase also stops acting: its flag `abandoned` is set when
+  the phase is abandoned, and from then on its git commands, removals and file writes return "the phase was abandoned" (`Kc::live`),
+  because the next phase may already be removing or making the same folder; the shell's `bounded` ends the whole function's tree.
+- **Tests.** `bounded_sh_counts_the_limit_from_the_clock_mark` (the fake clock races ahead during real work before the mark; red
+  without the mark: the phase ended with the stale mark still there), `a_marked_phase_counts_its_limit_from_the_mark` and
+  `a_marked_phase_that_finishes_before_its_mark_is_done` (Rust; red with the mark ignored),
+  `a_marked_phase_whose_mark_never_appears_ends_at_the_wait`, `kept_clone_no_workflow_or_action_sets_the_clock_mark`, and
+  `a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase` (red on the shared state: "the next phase did not hang; it
+  was reported as hung"; and, with the guard taken out, its logging git recorded the abandoned phase's second call). The hung-phase parity tests (`kept_clone_the_<phase>_phase_is_bounded_by_its_own_limit`,
+  `kept_clone_a_phase_that_hangs_ends_in_one_warning_and_never_fails_the_job`) use the mark.
+
+**Common practice (ER-37).** Tests of timeouts usually take time out of the test: an injected or virtual clock, or a signal from
+the stand-in that the test waits on (a channel or an event) before it starts timing. Sources, read 2026-11-15:
+
+| Tool | What it does | Source |
+|---|---|---|
+| Go `testing/synctest` (Go 1.25) | "Time in a bubble only advances when every goroutine in the bubble is durably blocked." | pkg.go.dev/testing/synctest |
+| .NET `FakeTimeProvider` | "A synthetic time provider that can be used to enable deterministic behavior in tests"; time moves by `Advance` or `SetUtcNow`. | learn.microsoft.com/dotnet/api/microsoft.extensions.time.testing.faketimeprovider |
+| Tokio `time::pause` | Freezes Tokio's `Instant::now()`; when the runtime is idle "the clock is auto-advanced to the next pending timer". The standard library's `Instant` is not affected. | docs.rs/tokio/latest/tokio/time/fn.pause.html |
+
+A virtual clock does not fit here: the phases run real programs (git, a shell) whose time no fake clock moves, and `bounded.sh`'s fake clock already
+serves its unit tests. The signal is the cheaper common form, and it is what this amendment does; the one addition is that the
+product's phase code reads it, behind a test-only variable, because the bound under test is inside the product.
+
+**Cost (ER-37).**
+
+| Option | Agent-days |
+|---|---|
+| Raise the hung-phase tests' limits (rejected: ER-12, no measured cause per limit) | 0.1 |
+| This amendment: the mark in both implementations, per-phase state and its abandoned guard, the tests, the parity tests moved to the mark | about 0.75 |
+| A virtual clock through `bounded.sh`, the Rust phase and `ToolCall`'s per-command timeout | about 2 (not chosen) |
 
 ## Incident while building it
 

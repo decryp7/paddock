@@ -168,7 +168,7 @@ impl Runner {
     #[allow(clippy::disallowed_methods)]
     fn rust(&self, input: &Input, extra: &[(&str, &str)]) -> Result {
         self.reset();
-        let r = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        let r = crate::dev_bin::command()
             .args([
                 "ci",
                 "setup-rust",

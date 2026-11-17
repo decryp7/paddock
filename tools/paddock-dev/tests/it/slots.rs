@@ -10,11 +10,7 @@ use std::time::Duration;
 const POLL: &str = "20";
 
 fn dev(args: &[&str]) -> (i32, Value, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
-        .args(["--json"])
-        .args(args)
-        .output()
-        .unwrap();
+    let out = crate::dev_bin::command().args(["--json"]).args(args).output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     (
         out.status.code().unwrap(),
@@ -132,15 +128,13 @@ fn a_killed_holder_frees_its_slot_at_once() {
     let d = tempfile::tempdir().unwrap();
     let (root, job) = (d.path().join("ci"), d.path().join("job"));
     std::fs::create_dir(&job).unwrap();
+    let spawned = paddock_testkit_start::Stamp::now();
     let (_, v, _) = acquire(&root, &job, "1");
-    let pid = v["holder_pid"].as_u64().unwrap().to_string();
+    let pid = u32::try_from(v["holder_pid"].as_u64().unwrap()).unwrap();
+    // The holder's identity, taken from the printed pid: started after the stamp, so a pid handed on is never killed (rule 53).
+    let holder = paddock_testkit_start::recorded::printed(pid, spawned).expect_running("the slot holder");
     assert!(!is_free(&root, 1));
-    let killed = if cfg!(windows) {
-        Command::new("taskkill").args(["/F", "/PID", &pid]).status()
-    } else {
-        Command::new("kill").args(["-9", &pid]).status()
-    };
-    assert!(killed.unwrap().success());
+    assert_eq!(paddock_proc::end(holder), paddock_proc::Ending::Ended);
     wait_until_free(&root, 1);
     assert!(job.exists());
 }
@@ -223,7 +217,7 @@ fn eight_parallel_acquires_get_eight_distinct_slots() {
 }
 
 fn idle_run(root: &Path, slot: &str, command: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    crate::dev_bin::command()
         .args(["ci", "slot", "idle-run", "--slot", slot, "--root", root.to_str().unwrap(), "--"])
         .args(command)
         .output()
@@ -237,7 +231,7 @@ fn idle_run_runs_only_on_an_idle_slot_and_holds_it_until_the_command_ends() {
     let d = tempfile::tempdir().unwrap();
     let (root, job) = (d.path().join("ci"), d.path().join("job"));
     std::fs::create_dir(&job).unwrap();
-    let bin = env!("CARGO_BIN_EXE_paddock-dev");
+    let bin = crate::dev_bin::PATH;
     let r = root.to_str().unwrap();
     // Free: the command runs, and while it runs the slot is busy (it looks at the slot itself).
     let out = idle_run(&root, "s1", &[bin, "ci", "slot", "status", "--max", "1", "--root", r]);
@@ -278,11 +272,7 @@ fn the_holder_does_not_keep_an_inherited_pipe_open() {
     std::fs::create_dir(&job).unwrap();
     let script = r#"exec 7>&1 1>/dev/null; exec "$0" ci slot acquire --max 1 --owner "$1" --root "$2" --poll-ms 20 --max-hold-secs 120"#;
     let (tx, rx) = std::sync::mpsc::channel();
-    let (bin, job_arg, root_arg) = (
-        env!("CARGO_BIN_EXE_paddock-dev"),
-        job.display().to_string(),
-        root.display().to_string(),
-    );
+    let (bin, job_arg, root_arg) = (crate::dev_bin::PATH, job.display().to_string(), root.display().to_string());
     std::thread::spawn(move || {
         // `output()` returns only when every holder of the pipe's write end has closed it.
         let out = Command::new("sh").args(["-c", script, bin, &job_arg, &root_arg]).output().unwrap();
@@ -307,11 +297,7 @@ fn the_step_output_pipe_closes_when_acquire_ends_even_though_the_holder_lives_on
     let (root, job) = (d.path().join("ci"), d.path().join("job"));
     std::fs::create_dir(&job).unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
-    let (bin, job_arg, root_arg) = (
-        env!("CARGO_BIN_EXE_paddock-dev"),
-        job.display().to_string(),
-        root.display().to_string(),
-    );
+    let (bin, job_arg, root_arg) = (crate::dev_bin::PATH, job.display().to_string(), root.display().to_string());
     std::thread::spawn(move || {
         // `output()` returns only when every holder of the stdout and stderr pipes has closed it.
         let out = Command::new(bin)
@@ -410,7 +396,7 @@ fn a_program_inside_the_job_folder_cannot_hold_a_slot() {
     let (root, job) = (d.path().join("ci"), d.path().join("job"));
     std::fs::create_dir_all(job.join("bin")).unwrap();
     let copy = job.join("bin").join(if cfg!(windows) { "paddock-dev.exe" } else { "paddock-dev" });
-    std::fs::copy(env!("CARGO_BIN_EXE_paddock-dev"), &copy).unwrap();
+    std::fs::copy(crate::dev_bin::PATH, &copy).unwrap();
     let out = Command::new(&copy)
         .args([
             "--json",

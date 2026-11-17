@@ -1,0 +1,11 @@
+# Files of paddock-dev's sources that name CARGO_TARGET_DIR or CARGO_BUILD_TARGET_DIR as a value being set, a literal followed by a
+# comma (`.env("X", ..)`, `.insert("X".into(), ..)`, `("X".to_string(), ..)`, a list of names). One line each: `path | reason`.
+# The list only shrinks (ER-46): tests/it/cargo_target_lint.rs compares it with the merge base and fails on a new entry. A new call
+# passes the folder with paddock_dev::cargo_target::with_target_dir instead (sccache hashes every CARGO_* variable).
+src/generators/run.rs | a generator that is not a cargo call (a script, npm, an external subcommand) starts cargo itself: no argument to put the folder in, and no wrapper
+src/release_isolation/setup.rs | the release build's own isolated environment (ADR 0079): a release build is never compiled through the agents' wrapper
+src/ci_host/cleanup.rs | a test fixture of the host-cleanup prune (the step reads the variable CI used to set; it sets nothing)
+src/ci_host/guardian_as_user.rs | a list of variable names the guardian keeps for a child (names, not a value being set)
+src/input_hash.rs | a test helper that builds a variable list to show the hash ignores the folder
+src/local_sccache.rs | the list of the two variable names `./dev sccache env` warns a shell about, and a test of that warning (it reads them; it sets nothing)
+src/golden_cmd.rs | `dev golden confirm` passes the caller's CARGO_TARGET_DIR on to the CI-image container on purpose (ER-47: children inherit the environment); added with the user's approval, 2026-11-17 (ER-46)

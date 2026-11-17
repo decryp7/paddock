@@ -2,16 +2,6 @@
  "_comment": "Known sites of C115 (a cleanup touches only its own items): `rm -r` on a bare variable in scripts that clean up their own folders, by file and hash of the normalised line (line is for reading only). May only shrink; scope the cleanup (an owned prefix, \"${VAR:?}\", mktemp) and delete its entry.",
  "sites": [
   {
-   "file": "conformance/ci/host/stable-workspace.sh",
-   "line": 79,
-   "hash": "308947ff5a9ca5e9"
-  },
-  {
-   "file": "conformance/ci/host/stable-workspace.sh",
-   "line": 86,
-   "hash": "20ccf0f0320a68b1"
-  },
-  {
    "file": "apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh",
    "line": 44,
    "hash": "9298b38440afa974"
@@ -45,21 +35,6 @@
    "file": "conformance/ci/job-tmpdir.sh",
    "line": 157,
    "hash": "9cb843ea621be30d"
-  },
-  {
-   "file": "conformance/ci/kept-clone.sh",
-   "line": 157,
-   "hash": "b6d2bf1036689037"
-  },
-  {
-   "file": "conformance/ci/kept-clone.sh",
-   "line": 193,
-   "hash": "e735085710370809"
-  },
-  {
-   "file": "conformance/ci/kept-clone.sh",
-   "line": 234,
-   "hash": "ad7e2474736d18ec"
   },
   {
    "file": "crates/paddock-setup/nsis/test/run-dyno-e2e.ps1",
@@ -102,24 +77,14 @@
    "hash": "4cd41770280c6d94"
   },
   {
-   "file": "dev",
-   "line": 334,
-   "hash": "59ad56995bb513bd"
-  },
-  {
    "file": "scripts/shell-demo/build-linux-arm64.sh",
    "line": 37,
    "hash": "bde95ebb929a6a61"
   },
   {
    "file": "scripts/vm-lock.sh",
-   "line": 91,
+   "line": 112,
    "hash": "32c58f509cf0fffe"
-  },
-  {
-   "file": "tools/prune-build-folders.sh",
-   "line": 37,
-   "hash": "1621e509e581b8ec"
   }
  ]
 }

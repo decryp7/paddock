@@ -273,7 +273,8 @@ describe('watchResize', () => {
     container.getBoundingClientRect = () => ({ ...size, x: 0, y: 0, top: 0, left: 0, right: size.width, bottom: size.height, toJSON: () => ({}) }) as DOMRect;
     const layout = setup();
     const ctx = TestBed.inject(DockContext);
-    const api = { ...apiSize } as unknown as DockviewApi;
+    // `layout` does nothing here: the tests below are about a dockview that has not followed its container yet.
+    const api = { ...apiSize, layout: vi.fn() } as unknown as DockviewApi;
     ctx.container = container;
     ctx.api = api;
     return { layout, api, size, fire: () => fire() };
@@ -304,5 +305,44 @@ describe('watchResize', () => {
     fire();
     vi.advanceTimersByTime(150 + 50 * 20 + 50);
     expect(onResize).toHaveBeenCalledTimes(1);
+  });
+
+  it('says a re-plan is pending from the first resize until it has run, and not before', () => {
+    vi.useFakeTimers();
+    const { layout, api, size, fire } = resizing({ width: 1440, height: 800 });
+    const pending: boolean[] = [];
+    layout.watchResize(api, vi.fn(), (p) => pending.push(p));
+    expect(pending).toEqual([]);
+    size.width = 900;
+    fire();
+    expect(pending).toEqual([true]);
+    (api as { width: number }).width = 900;
+    vi.advanceTimersByTime(150);
+    expect(pending).toEqual([true, false]);
+  });
+
+  it('followContainer lays dockview out at the container size when they differ (in the observer, in the same frame), and only then', () => {
+    const { layout, api, size } = resizing({ width: 1440, height: 800 });
+    layout.followContainer(api);
+    expect(api.layout).not.toHaveBeenCalled();
+    size.width = 900;
+    layout.followContainer(api);
+    expect(api.layout).toHaveBeenCalledWith(900, 800);
+  });
+
+  it('the resize observer follows the container before it waits to plan', () => {
+    vi.useFakeTimers();
+    const { layout, api, size, fire } = resizing({ width: 1440, height: 800 });
+    layout.watchResize(api, vi.fn());
+    size.width = 900;
+    fire();
+    expect(api.layout).toHaveBeenCalledWith(900, 800);
+  });
+
+  it('followContainer ignores a container that has no box yet', () => {
+    const { layout, api, size } = resizing({ width: 1440, height: 800 });
+    size.width = 0;
+    layout.followContainer(api);
+    expect(api.layout).not.toHaveBeenCalled();
   });
 });

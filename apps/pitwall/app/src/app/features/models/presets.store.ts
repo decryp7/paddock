@@ -1,4 +1,4 @@
-import { inject } from '@angular/core';
+import { DestroyRef, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import { computed } from '@angular/core';
 import type { CommandError, PresetDraft, PresetEntry, PresetPreview } from '../../core/api.types';
@@ -36,6 +36,10 @@ export const PresetsStore = signalStore(
   withMethods((store, backend = inject(BACKEND), toasts = inject(Toasts)) => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let seq = 0;
+    // A preview still waiting when the injector goes would fire into whatever runs next.
+    inject(DestroyRef).onDestroy(() => {
+      if (timer) clearTimeout(timer);
+    });
     const cancelPreview = () => {
       if (timer) clearTimeout(timer);
       timer = null;

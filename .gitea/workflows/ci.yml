@@ -99,6 +99,11 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      # A train run is dispatched at once and waits here, on Linux, until no older run holds the Mac or Windows runner it
+      # needs (./dev ci runner-wait); the queued run is what scheduled runs yield to. Other events: nothing.
+      - uses: ./.gitea/actions/runner-wait
+        with:
+          dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
       # ADR 0060: C100 cannot be the only guard of its own wiring (a change that deletes the line deletes the check too), so a plain
       # grep on every event checks that the conformance job and the nightly still run it.
@@ -212,6 +217,12 @@ jobs:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: Lint
         run: ./dev ci run ui lint
+
+      # The e2e ready-reads rule over every app's and the ui's e2e folder (feat/e2e-ready-helpers): never blocks until its first
+      # green recorded run (ER-41).
+      - name: e2e ready-reads (report-only, ER-41)
+        continue-on-error: true
+        run: node scripts/e2e-ready-report.mjs
 
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
@@ -361,6 +372,7 @@ jobs:
           port=$(bash ../conformance/ci/kit.sh isolation port webkit)
           export PW_PORT=$port SHELL_DEMO_PORT=$((port + 1)) WORKBENCH_DEMO_PORT=$((port + 2))
           npx playwright test --project=gallery-webkit --project=shell-demo-webkit --project=workbench-demo-webkit
+          npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=webkit
 
       - uses: ./.gitea/actions/job-isolation
         if: always()
@@ -547,7 +559,7 @@ jobs:
       - uses: ./.gitea/actions/job-isolation
 
       - name: VM lock and Windows test VM guard rails
-        run: node --test scripts/vm-lock.test.mjs scripts/vm-win.test.mjs
+        run: node --test scripts/vm-lock.test.mjs scripts/vm-win.test.mjs scripts/member-gate.test.mjs
 
       - uses: ./.gitea/actions/job-isolation
         if: always()

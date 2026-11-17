@@ -6,6 +6,10 @@ import { mockOptionsFromSearch } from './mock-options';
 
 import { at } from '../../../testing/must';
 import { MockJobs, mockJobs, resetMockJobs } from '../../jobs/mock-jobs';
+import { endMockJobs } from '../../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 describe('mock import, files and profile history', () => {
   it('a slow import reports progress file by file and stops after a cancel', async () => {
     const sim = new MockImportSim(5);

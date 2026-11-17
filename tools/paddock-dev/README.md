@@ -18,6 +18,14 @@ The developer and CI tool of ADR 0022. Run it with `./dev <command>` (`dev.cmd` 
   `paddock-cli`'s (2 usage, 4 refused, ...).
 - When a path dependency in `crates/` changes its dependencies, regenerate this lockfile in the same change.
 
+## `sccache env` and the build folder (feat/local-sccache)
+
+`eval "$(./dev sccache env)"` installs the pinned sccache (the CI pin; `<tool cache>/tools/sccache/<version>/`), starts the one local
+server and prints `export` lines (`RUSTC_WRAPPER` and the cache settings; never a credential). The tools that start builds (push gate
+Clippy, `gen check`) use the installed copy and never download. A build folder reaches cargo as `--config build.target-dir=...` through
+`cargo_target.rs`, never as `CARGO_TARGET_DIR`: sccache hashes every `CARGO_*` variable. `PADDOCK_SCCACHE=off` turns it off; the backend
+is `PADDOCK_SCCACHE_BACKEND` (`local` or `s3`). Details: docs/dev-setup.md, "Local sccache".
+
 ## `worktree` and `check primary` (ADR 0083, RT-3)
 
 One tool makes, claims and removes agent worktrees, so every one is locked with an owner note and bound to its agent, and no
@@ -103,7 +111,6 @@ start, and cargo tracks the last use of its caches in SQLite (`cargo clean gc`, 
   orphan and live folders, CI slots (the CI kit sweeps those), and anything without a record (runners, sccache, VMs, Docker, user folders).
 - `./dev disk adopt` writes records for existing worktrees (`git worktree list`) and for build folders named after one (the
   longest matching worktree name); everything else stays an orphan.
-- The nightly (`nightly.yml`, job `disk-summary`) writes `./dev disk report --summary` to the job summary; it follows the night's skip.
 ## `pr`: the branch ledger (user decision 2026-11-12)
 
 Every branch is a draft pull request against main; its labels (`.gitea/labels.toml`) say where it is. Design and the merge

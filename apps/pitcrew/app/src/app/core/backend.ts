@@ -93,8 +93,11 @@ export interface PitcrewBackend {
 
   // The runner's process tree and the leftovers of finished jobs (ADR 0012).
   runnerProcesses(runner: string): Promise<ProcessList>;
-  /** Asks the process to stop, then ends it. `allowRunner` is true only when the user chose the runner process itself. */
-  stopProcess(runner: string, pid: number, startedAt: number | null, allowRunner: boolean): Promise<void>;
+  /**
+   * Asks the process to stop, then ends it. `startedAt` is required: the service stops the process only while its id still
+   * belongs to the one that started then. `allowRunner` is true only when the user chose the runner process itself.
+   */
+  stopProcess(runner: string, pid: number, startedAt: number, allowRunner: boolean): Promise<void>;
   /** Adds time before the automatic cleanup stops a leftover. */
   keepProcess(runner: string, pid: number, startedAt: number, extra: KeepFor): Promise<void>;
 

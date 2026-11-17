@@ -17,6 +17,11 @@ describe('mockOptionsFromSearch', () => {
     });
   });
 
+  it('reads the page stagger', () => {
+    expect(mockOptionsFromSearch('?mockPageStaggerMs=10')).toEqual({ pageStaggerMs: 10 });
+    expect(mockOptionsFromSearch('?mockPageStaggerMs=0')).toEqual({});
+  });
+
   it('reads the simulated failures apart from the mock options', () => {
     expect(mockFailuresFromSearch('?mockFail=queryPage:2,queryFacet,nonsense:3,annotations:x')).toEqual({ queryPage: 2, queryFacet: 1, annotations: 1 });
     expect(mockFailuresFromSearch('')).toEqual({});

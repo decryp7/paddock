@@ -1,5 +1,5 @@
+import { expect, test } from './test';
 import { mkdirSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
 import { dialogWindowUrl, settleTransitions } from '@decryp7/paddock-e2e';
 
 // The Administrator readings card in every state, light and dark, for the independent review (ER-23). Only on request:

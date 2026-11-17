@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { gridTotal, initialTotal, openApp } from './app';
 
 // Search everything (Mod+Shift+F) against the mock backend: the palette lists results by kind with the words marked,

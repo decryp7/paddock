@@ -1,5 +1,6 @@
+import { expect, test } from './test';
 import { mkdirSync } from 'node:fs';
-import { expect, test } from '@playwright/test';
+import { newPinnedContext } from '@decryp7/paddock-e2e';
 
 // The Power page in every designed state, light and dark, for the independent review (rule 22). Only on request:
 // `SCREENSHOTS=1 POWER_SHOTS_DIR=<dir> npx playwright test --project=screenshots e2e/screenshots-power.spec.ts`.
@@ -45,7 +46,7 @@ test.describe('Power page screenshots', () => {
     for (const s of STATES) {
       test(`${s.name} ${scheme}`, async ({ browser, baseURL }) => {
         mkdirSync(OUT, { recursive: true });
-        const context = await browser.newContext({ baseURL, colorScheme: scheme, deviceScaleFactor: 2, viewport: { width: 1100, height: 760 } });
+        const context = await newPinnedContext(browser, { baseURL, colorScheme: scheme, deviceScaleFactor: 2, viewport: { width: 1100, height: 760 } });
         try {
           const page = await context.newPage();
           await page.goto(`/${s.query}#/power`);

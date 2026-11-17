@@ -18,7 +18,9 @@ param(
   [Parameter(Mandatory)][string]$Bundle,
   [Parameter(Mandatory)][string]$Ref,
   [Parameter(Mandatory)][string]$ScriptFile,
-  [string]$Slot = 'paddock-checkout-Windows-s1'
+  [string]$Slot = 'paddock-checkout-Windows-s1',
+  # The command brings its own toolchain (the member gate copies one in with --with): the missing-tool check is then its business.
+  [switch]$ToolsProvided
 )
 $ErrorActionPreference = 'Stop'
 $git = 'C:\Program Files\Git'
@@ -90,7 +92,7 @@ if ($icacls -notmatch ([regex]::Escape($tmp) + '\s+[^\r\n]*(Authenticated Users|
 # A tool the command names but the guest lacks (the guest has no toolchain; test programs come from the Mac with --with).
 $stepText = Get-Content -Raw $ScriptFile
 foreach ($t in @(@('cargo', 'cargo'), @('rustc', 'rustc'), @('node', 'node'), @('npm', 'npm.cmd'))) {
-  if ($stepText -match "(?<![\w./-])$($t[0])(?![\w-])" -and -not (Get-Command $t[1] -ErrorAction SilentlyContinue)) { Fail "the command needs $($t[1]) and the guest has none (build on the Mac and pass the program with --with)" }
+  if (-not $ToolsProvided -and $stepText -match "(?<![\w./-])$($t[0])(?![\w-])" -and -not (Get-Command $t[1] -ErrorAction SilentlyContinue)) { Fail "the command needs $($t[1]) and the guest has none (build on the Mac and pass the program with --with)" }
 }
 if ($crlf -notmatch 'true$') { Fail 'core.autocrlf is not true' }
 if ($shell[0].Trim() -ne '/usr/bin/bash') { Fail "bash is not Git's ($($shell[0]))" }

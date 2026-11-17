@@ -1,0 +1,4 @@
+{
+  "about": "How many jobs each CI runner class runs at once (the runners' `capacity`). The one place this is declared: ./dev ci dispatch reads it (at most linux - 1 train runs wait for their Mac or Windows runner at once, docs/rules.md rule 41) and conformance/test/runner-slots.test.mjs checks the docs and workflow comments that state it.",
+  "linux": 3
+}

@@ -462,7 +462,7 @@ fn recorded_command_line_cases_match_what_affected_mjs_answered_on_the_fixture_r
         let expected: Value =
             serde_json::from_str(&std::fs::read_to_string(golden_dir().join("expected/cli").join(format!("{name}.json"))).unwrap())
                 .unwrap();
-        let mut program = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        let mut program = crate::dev_bin::command();
         program.arg("plan");
         let got = run_cli(&mut program, &root, case);
         if got != expected {
@@ -494,7 +494,7 @@ fn live_command_line_matches_affected_mjs_on_a_copy_of_the_fixture_repository() 
     for case in &cli_cases() {
         let mut node = Command::new("node");
         node.arg("scripts/affected.mjs");
-        let mut ours = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        let mut ours = crate::dev_bin::command();
         ours.arg("plan");
         let (a, b) = (run_cli(&mut node, &root, case), run_cli(&mut ours, &root, case));
         if a != b {
@@ -561,7 +561,7 @@ fn live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history(
                         bounded(node, "node scripts/affected.mjs", &base, &head)
                     },
                     || {
-                        let mut plan = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+                        let mut plan = crate::dev_bin::command();
                         plan.current_dir(repo_root()).args(["plan", &base, &head, "--explain"]);
                         bounded(plan, "paddock-dev plan", &base, &head)
                     },

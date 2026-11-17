@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { APP_LOAD_TIMEOUT, openApp } from './app';
 
 // Settings > Storage > Project stores against the browser build's mock storage backend

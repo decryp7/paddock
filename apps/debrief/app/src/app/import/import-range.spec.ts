@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { settle } from '../../testing/helpers';
+import { openDialog, settle } from '../../testing/helpers';
 import { DebriefBackend } from '../core/backend';
 import { MockBackend } from '../core/mock/mock-backend';
 import { Platform } from '../core/platform';
@@ -41,11 +41,22 @@ describe('ImportRange', () => {
         { provide: Platform, useValue: { pickPaths: async () => pick, isTauri: () => false } },
       ],
     });
-    return { backend, dialogs: TestBed.inject(DialogService), range: TestBed.inject(ImportRange), store: TestBed.inject(WorkspaceStore) };
+    const dialogs = TestBed.inject(DialogService);
+    // The dialog's chunk is lazy and arrives after an unknown number of event-loop turns (cold disk, loaded CI). The chunk
+    // is held until the test releases it, so a test that waited a fixed number of turns instead of on the dialog fails every time.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const openLazy = dialogs.openLazy.bind(dialogs);
+    vi.spyOn(dialogs, 'openLazy').mockImplementation(((load: () => Promise<never>, options: never) =>
+      openLazy(async () => {
+        await gate;
+        return load();
+      }, options)) as typeof dialogs.openLazy);
+    return { release, backend, dialogs, range: TestBed.inject(ImportRange), store: TestBed.inject(WorkspaceStore) };
   }
 
   it('opens the picked paths with the chosen range and clears the range afterwards', async () => {
-    const { backend, dialogs, range, store } = setup(['/demo/range-folder']);
+    const { release, backend, dialogs, range, store } = setup(['/demo/range-folder']);
     const windows: unknown[] = [];
     const set = backend.setImportWindow.bind(backend);
     backend.setImportWindow = (f, t) => {
@@ -53,10 +64,10 @@ describe('ImportRange', () => {
       return set(f, t);
     };
     const done = range.pickAndOpen(true);
-    await settle(undefined, 2);
-    const open = dialogs.stack().at(-1);
-    expect(open?.component).toBe(ImportRangeDialog);
-    open?.ref.close({ from: 1000, to: 2000 });
+    release();
+    const open = await openDialog(dialogs);
+    expect(open.component).toBe(ImportRangeDialog);
+    open.ref.close({ from: 1000, to: 2000 });
     await done;
     await settle(undefined, 4);
     expect(windows).toEqual([[1000, 2000], [null, null]]);
@@ -69,19 +80,19 @@ describe('ImportRange', () => {
     await none.range.pickAndOpen(true);
     expect(none.dialogs.stack()).toHaveLength(0);
     TestBed.resetTestingModule();
-    const { dialogs, range, backend } = setup(['/demo/x']);
+    const { release, dialogs, range, backend } = setup(['/demo/x']);
     const done = range.pickAndOpen(false);
-    await settle(undefined, 2);
-    dialogs.stack().at(-1)?.ref.close();
+    release();
+    (await openDialog(dialogs)).ref.close();
     await done;
     expect(backend.importWindow).toBeNull();
   });
 
   it('shows an engine refusal of the range as the workspace error and opens nothing', async () => {
-    const { dialogs, range, store, backend } = setup(['/demo/y']);
+    const { release, dialogs, range, store, backend } = setup(['/demo/y']);
     const done = range.pickAndOpen(true);
-    await settle(undefined, 2);
-    dialogs.stack().at(-1)?.ref.close({ from: 5, to: 1 });
+    release();
+    (await openDialog(dialogs)).ref.close({ from: 5, to: 1 });
     await done;
     expect(store.error()).toContain('before');
     expect(store.summary()?.sources.some((s) => s.path === '/demo/y')).toBe(false);

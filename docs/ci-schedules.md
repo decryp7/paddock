@@ -27,6 +27,8 @@ known; 04:00 local (20:00 UTC) is assumed until evidence says otherwise. The Win
 Typical durations are from the last five scheduled runs (Gitea API, 2026-11-06 to 11-10; the failed runs count, they
 ran the same jobs).
 
+The Linux runner runs 3 jobs at once (3 Linux slots, declared in `conformance/ci/runner-slots.json`).
+
 | Workflow | Cron (UTC) | Local (UTC+8) | OS legs | Typical duration | Linux slots at most |
 | --- | --- | --- | --- | --- | --- |
 | debrief-mutants | `3 12 * * 6` | Saturday 20:03 | Linux | not measured (never ran on schedule) | 1 |

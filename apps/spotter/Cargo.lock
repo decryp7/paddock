@@ -3302,6 +3302,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-testkit-start"
+version = "0.1.0"
+dependencies = [
+ "paddock-proc",
+ "paddock-testkit",
+ "paddock-workspace-hack",
+]
+
+[[package]]
 name = "paddock-workspace-hack"
 version = "0.1.0"
 dependencies = [
@@ -4731,8 +4740,10 @@ dependencies = [
 name = "spotter-render"
 version = "1.0.0"
 dependencies = [
+ "libc",
  "paddock-proc",
  "paddock-testkit",
+ "paddock-testkit-start",
  "reqwest",
  "serde",
  "serde_json",

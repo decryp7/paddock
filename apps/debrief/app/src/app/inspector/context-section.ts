@@ -72,6 +72,9 @@ export const CONTEXT_SETTLE_MS = 120;
   `,
 })
 export class ContextSection {
+  private copyTimer: ReturnType<typeof setTimeout> | undefined;
+  // The label's reset ends with the component: one left running fires into whatever runs next.
+  private readonly endCopyTimer = inject(DestroyRef).onDestroy(() => clearTimeout(this.copyTimer));
   private readonly backend = inject(DebriefBackend);
   private readonly injector = inject(Injector);
 
@@ -157,6 +160,7 @@ export class ContextSection {
     } catch {
       this.copyLabel.set($localize`:@@inspector.context.copyFailed:Copy failed`);
     }
-    setTimeout(() => this.copyLabel.set($localize`:@@inspector.context.copy:Copy`), 1500);
+    clearTimeout(this.copyTimer);
+    this.copyTimer = setTimeout(() => this.copyLabel.set($localize`:@@inspector.context.copy:Copy`), 1500);
   }
 }

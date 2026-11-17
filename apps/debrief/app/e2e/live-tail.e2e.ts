@@ -1,5 +1,6 @@
-import { expect, Locator, Page, test } from '@playwright/test';
-import { gridRows, gridTotal, parseCount } from './app';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
+import { clickWithTimePaused, gridRows, gridTotal, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
 import { chooseMenu } from './menu-support';
@@ -34,21 +35,7 @@ async function openView(page: Page, name: 'Alerts' | 'Tail status'): Promise<voi
  * loaded the runner is.
  */
 async function openOnClock(page: Page, search: string): Promise<void> {
-  await page.clock.install();
   await openAppWith(page, search);
-}
-
-/**
- * Clicks a toast's button with the page's clock paused, then lets time run again. While time runs, the next live alert
- * can land between mousedown and mouseup: the stack moves that alert's toast to the bottom, under the pointer, so the
- * mouseup lands on another toast and neither button gets the click (main run 8004 and 7941, WebKit; lessons.md). Paused,
- * no tick or alert can move the stack during the click.
- */
-async function clickInToast(page: Page, button: Locator): Promise<void> {
-  // Pause a little ahead (time keeps running until the pause lands, so leave room); due timers run once on the way.
-  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 5000));
-  await button.click();
-  await page.clock.resume();
 }
 
 test.describe('live tail: follow now', () => {
@@ -121,7 +108,7 @@ test.describe('live tail: alerts', () => {
     await expect(toast).toContainText('Critical');
     await expect(toast).toContainText('Error spike');
     await expectNoSeriousViolations(page, testInfo, 'notification', 'debrief-notification-host');
-    await clickInToast(page, toast.getByRole('button', { name: 'Show' }));
+    await clickWithTimePaused(page, toast.getByRole('button', { name: 'Show' }));
     // The evidence: errors and fatals in the alert's time range (which pauses following).
     const level = (l: string) => page.getByRole('toolbar', { name: 'Levels' }).locator(`button[data-level=${l}]`);
     await expect(level('Error')).toHaveAttribute('aria-pressed', 'true');
@@ -142,7 +129,7 @@ test.describe('live tail: alerts', () => {
     await page.clock.runFor(1_500);
     const toast = page.getByTestId('notification').filter({ hasText: 'Error spike' }).first();
     await expect(toast).toBeVisible();
-    await clickInToast(page, toast.getByRole('button', { name: 'Mute this kind for 15 min' }));
+    await clickWithTimePaused(page, toast.getByRole('button', { name: 'Mute this kind for 15 min' }));
     await expect(page.getByTestId('notification').filter({ hasText: 'Error spike' })).toHaveCount(0);
     // The next alerts of other kinds still toast.
     await page.clock.runFor(1_000);
@@ -294,5 +281,47 @@ test.describe('live tail: status, sources and opening', () => {
     // ...but it grows with the new lines.
     await expect.poll(async () => parseCount((await row.locator('.count').innerText()) || '0'), { timeout: 10_000 }).toBeGreaterThan(0);
     await expect(gridTotal(page)).toHaveText('0');
+  });
+});
+
+test.describe('live tail: reveal newest', () => {
+  /** Moves the pinned clock on in 20 ms steps until `done()` holds, at most `maxMs` of page time (virtual time, not wall time). */
+  async function runUntil(page: Page, done: () => Promise<boolean>, maxMs: number): Promise<boolean> {
+    for (let spent = 0; spent <= maxMs; spent += 20) {
+      if (await done()) return true;
+      await page.clock.runFor(20);
+    }
+    return done();
+  }
+
+  // A real browser clamps a scroll written before the spacer has grown, and the scroll event that follows differs from the written
+  // position: the grid must not take that for the user scrolling away (it would drop the follow-up of the reveal and stay short).
+  // `mockPageStaggerMs` answers the reveal's pages at different times, and the pinned clock moves them and the live ticks (every
+  // 50 ms) on in small steps, so events are pushed between the pages' answers. The grid's scroll log (ER-27, category ui.grid) is
+  // attached when the test fails.
+  test('reveal newest ends on the newest row when events are pushed between the reveal pages', async ({ page }, testInfo) => {
+    const gridLog: string[] = [];
+    page.on('console', (m) => void (m.text().startsWith('[ui.grid]') && gridLog.push(m.text())));
+    try {
+      await openOnClock(page, '?mockTotal=5000&mockLive=1&mockLiveRate=20&mockLiveMs=50&mockLiveRotateMs=0&mockLiveAlertMs=0&mockPageStaggerMs=10');
+      await liveOn(page);
+      await page.getByTestId('follow-toggle').click();
+      await expect(page.getByTestId('follow-toggle')).toHaveAttribute('aria-pressed', 'false');
+      await page.clock.runFor(1_000);
+      const pill = page.getByTestId('new-events');
+      await expect(pill).toBeVisible();
+      await pill.click();
+      const gap = () => page.locator('debrief-events-grid .viewport').evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop);
+      // The reveal's pages answer 20 to 220 ms after the click and a tick comes every 50 ms: 3 s of page time is far more than needed.
+      expect(await runUntil(page, async () => (await gap()) <= 2, 3_000), 'the view reaches the last row').toBe(true);
+      // The last follow-up may still be due: once everything has arrived the view is on the last row and a further stretch of pushes
+      // (held now) leaves it there.
+      await page.clock.runFor(1_000);
+      expect(await runUntil(page, async () => (await gap()) <= 2, 1_000), 'and stays there').toBe(true);
+      await expect(gridRows(page).last()).not.toHaveClass(/placeholder/);
+    } catch (e) {
+      await testInfo.attach('grid-log', { body: gridLog.join('\n'), contentType: 'text/plain' });
+      throw e;
+    }
   });
 });

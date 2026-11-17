@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { closeStatusDetails, openStatusDetails } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith, runCommand } from './tools-support';

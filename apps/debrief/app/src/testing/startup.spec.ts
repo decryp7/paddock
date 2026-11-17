@@ -113,6 +113,27 @@ describe('the shared afterEach for booted start-up work', () => {
     throw new Error('this test fails on purpose');
   });
 
+  // A load that never settles: the test body's own `settleStartup()` takes the load from the record and waits on it, so
+  // this test's timeout is what ends it, and the hook after it finds nothing to wait on (the record was drained). The
+  // next test therefore does not wait on it either.
+  it.fails('a start-up load that never settles ...', { timeout: 300 }, async () => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideTinyBackendBare(),
+        provideFakeDock(),
+        { provide: COMMAND_CONTEXT, useValue: new FakeCommandContext() },
+        { provide: SHELL_IDLE, useValue: (work: () => void) => work() },
+        ...lazyCommandFactory(() => new Promise(() => undefined), [{ id: 'never.run', title: 'Never' }]),
+      ],
+    });
+    TestBed.inject(CommandRegistry).all();
+    await settleStartup();
+  });
+
+  it('... leaves the next, clean test green and not waiting on it', async () => {
+    await startupLoadsSettled();
+  });
+
   it('... leaves the next, clean test green and with a TestBed it can still configure', () => {
     const clean = new InjectionToken<string>('clean');
     TestBed.configureTestingModule({ providers: [{ provide: clean, useValue: 'ok' }] });

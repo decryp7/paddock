@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { pressMod } from '@decryp7/paddock-e2e';
 
 /** The Administrator readings card of Settings against the mock backend (`?helper=…` picks the state it starts in). */
