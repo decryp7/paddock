@@ -94,9 +94,49 @@ pub fn trim(s: &str) -> &str {
     s.trim_matches(is_js_space)
 }
 
-/// The number of UTF-16 code units in `s` (JavaScript's `.length`).
+#[cfg(test)]
+thread_local! {
+    /// How many bytes [`units`] and [`UnitIndex::new`] walked on this thread: a test asserts a check counts each file once, not
+    /// once per match, by this count and not by its time (ER-12).
+    pub(crate) static WALKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The number of UTF-16 code units in `s` (JavaScript's `.length`). Once per match over a growing prefix it is quadratic in the
+/// text: a check that turns many byte offsets of one text into JavaScript indexes builds a [`UnitIndex`] instead.
 pub fn units(s: &str) -> usize {
+    #[cfg(test)]
+    WALKED.with(|w| w.set(w.get() + s.len()));
     s.encode_utf16().count()
+}
+
+/// The JavaScript index (UTF-16 offset) of every byte offset of one text, counted in one pass. `units(&text[..m.start()])` for
+/// each match walked the prefix again every time: C122 spent 17 of its 20 s on that over this tree in a debug build, and its live
+/// test passed nextest's 60 s under load (2026-11-18).
+pub struct UnitIndex(Vec<usize>);
+
+impl UnitIndex {
+    /// Counts `s` once.
+    pub fn new(s: &str) -> UnitIndex {
+        #[cfg(test)]
+        WALKED.with(|w| w.set(w.get() + s.len()));
+        let mut at = Vec::with_capacity(s.len() + 1);
+        let mut u = 0;
+        // Byte by byte (a plain loop stays cheap in a debug build too): a character's first byte gets the units before it, then
+        // counts the character, one unit or two (a four-byte character is a surrogate pair). A continuation byte is no boundary.
+        for &b in s.as_bytes() {
+            at.push(u);
+            if b & 0xC0 != 0x80 {
+                u += if b >= 0xF0 { 2 } else { 1 };
+            }
+        }
+        at.push(u);
+        UnitIndex(at)
+    }
+
+    /// `units(&s[..byte])` for a byte offset on a character boundary; one past the end counts as the end.
+    pub fn at(&self, byte: usize) -> usize {
+        self.0[byte.min(self.0.len() - 1)]
+    }
 }
 
 /// The 1-based line of byte offset `at` in `text`: the newlines before it plus one.
@@ -107,6 +147,17 @@ pub fn line_at(text: &str, at: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_unit_index_equals_units_at_every_character_boundary() {
+        for s in ["", "abc", "é😀\nx", "a\u{feff}😀😀b\r\n", "\u{10ffff}z"] {
+            let ix = UnitIndex::new(s);
+            for (i, _) in s.char_indices().chain([(s.len(), ' ')]) {
+                assert_eq!(ix.at(i), units(&s[..i]), "{s:?} at {i}");
+            }
+            assert_eq!(ix.at(s.len() + 5), units(s), "past the end is the end");
+        }
+    }
 
     #[test]
     fn s_and_w_are_javascripts() {

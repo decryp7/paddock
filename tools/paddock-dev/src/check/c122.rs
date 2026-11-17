@@ -14,8 +14,8 @@
 //! Positions are UTF-16 offsets, as in the JavaScript.
 
 use super::finding::{Finding, Severity};
-use super::jsre::{has_reason, rx, units};
-use super::mask::mask_units;
+use super::jsre::{UnitIndex, has_reason, rx};
+use super::mask::mask_rust;
 use super::record::Precondition;
 use super::{Check, CheckOutput, Control, Ctx};
 use regex::Regex;
@@ -111,22 +111,29 @@ fn first_literal(text: &[u16], masked: &[u16], open: usize, end: usize) -> Strin
 
 /// The path-text sites of one Rust file at the repository path `file`.
 pub fn path_text_sites(text: &str, file: &str) -> Vec<Site> {
-    if SKIP_PATH.is_match(file) {
+    let test_file = TEST_FILE.is_match(file);
+    // Masking only blanks text, so a file whose text has no `#[cfg(test)]` has none in its masked text either: other code needs
+    // no masking to be skipped.
+    if SKIP_PATH.is_match(file) || (!test_file && !text.contains("#[cfg(test)]")) {
         return Vec::new();
     }
     let t: Vec<u16> = text.encode_utf16().collect();
-    let m: Vec<u16> = mask_units(&t);
-    let masked = String::from_utf16_lossy(&m);
-    let from = if TEST_FILE.is_match(file) {
+    // `mask_units(&t)` as text and as units, without the round trip through UTF-16 and back (the same text: `text` is valid UTF-8).
+    let masked = mask_rust(text);
+    let m: Vec<u16> = masked.encode_utf16().collect();
+    // JavaScript indexes of the matches, each text counted once (not once per match: quadratic in a test file with many calls).
+    let in_masked = UnitIndex::new(&masked);
+    let from = if test_file {
         0
     } else {
         match CFG_TEST_MOD.find(&masked) {
-            Some(x) => units(&masked[..x.start()]),
+            Some(x) => in_masked.at(x.start()),
             None => return Vec::new(),
         }
     };
     let lines: Vec<&str> = text.split('\n').collect();
-    let line_at = |i: usize| t[..i.min(t.len())].iter().filter(|&&c| c == b'\n' as u16).count() + 1;
+    let newlines: Vec<usize> = t.iter().enumerate().filter(|&(_, &c)| c == b'\n' as u16).map(|(i, _)| i).collect();
+    let line_at = |i: usize| newlines.partition_point(|&n| n < i) + 1;
     let mut out: Vec<Site> = Vec::new();
     let mut push = |index: usize, rule: Rule, what: &'static str| {
         let line = line_at(index);
@@ -155,11 +162,11 @@ pub fn path_text_sites(text: &str, file: &str) -> Vec<Site> {
         });
     };
     for c in FORMAT_CALL.find_iter(&masked) {
-        let start = units(&masked[..c.start()]);
+        let start = in_masked.at(c.start());
         if start < from {
             continue;
         }
-        let open = units(&masked[..c.end()]) - 1;
+        let open = in_masked.at(c.end()) - 1;
         let Some(end) = close_of(&m, open) else { continue };
         if !slice(&m, open, end).contains(".display()") {
             continue;
@@ -172,19 +179,21 @@ pub fn path_text_sites(text: &str, file: &str) -> Vec<Site> {
             );
         }
     }
+    // Counted only when a fold is there (rare): most files have none.
+    let in_text = std::cell::OnceCell::new();
     for c in FOLD.find_iter(text) {
-        let start = units(&text[..c.start()]);
+        let start = in_text.get_or_init(|| UnitIndex::new(text)).at(c.start());
         if start < from || slice(&m, start, start + 9) != ".replace(" {
             continue;
         }
         push(start, Rule::B, "folds path separators by hand with `.replace`");
     }
     for c in ASSERT_CALL.find_iter(&masked) {
-        let start = units(&masked[..c.start()]);
+        let start = in_masked.at(c.start());
         if start < from {
             continue;
         }
-        let open = units(&masked[..c.end()]) - 1;
+        let open = in_masked.at(c.end()) - 1;
         let Some(end) = close_of(&m, open) else { continue };
         let args = slice(&m, open, end);
         if PATH_TEXT.iter().any(|p| args.contains(p)) && !args.contains("file_name()") {
@@ -330,6 +339,23 @@ mod tests {
                 format!("{}{}{w}", s.rule.letter(), s.line)
             })
             .collect()
+    }
+
+    /// Each text is counted once, not once per call (asserted by the bytes walked, not by time, ER-12): counting the prefix of
+    /// every match again was quadratic and took the live test (tests/it/check_c122.rs) past nextest's 60 s under load (2026-11-18).
+    #[test]
+    fn a_file_with_many_calls_is_counted_once_not_once_per_call() {
+        let text: String = (0..2000)
+            .map(|i| format!("    assert_eq!(a{i}, b);\n    let s = format!(\"{{}}\", x);\n"))
+            .collect();
+        super::super::jsre::WALKED.with(|w| w.set(0));
+        assert!(path_text_sites(&text, "crates/a/tests/it/x.rs").is_empty());
+        let walked = super::super::jsre::WALKED.with(|w| w.get());
+        assert!(
+            walked <= 4 * text.len(),
+            "walked {walked} bytes of a {}-byte file: counted once per call, not once per file",
+            text.len()
+        );
     }
 
     #[test]

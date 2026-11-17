@@ -55,15 +55,44 @@ fn kind_of(lang: &str) -> Kind {
     }
 }
 
-/// The oracle's answer, then the JavaScript's, for every case; the first difference is named.
+/// The oracle's answer for every case: comments, and the mask of a Rust case. Split over a few threads: over every tracked `.rs`
+/// file this is most of the test's CPU time in a debug build (about 10 s alone, 2026-11-18), and the test runs beside the whole suite.
+fn oracle(cases: &[(String, String)]) -> Vec<(Value, Value)> {
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 4);
+    let chunk = cases.len().div_ceil(threads).max(1);
+    std::thread::scope(|s| {
+        let parts: Vec<_> = cases
+            .chunks(chunk)
+            .map(|part| {
+                s.spawn(move || {
+                    part.iter()
+                        .map(|(lang, text)| {
+                            (
+                                json!(comments_of(text, kind_of(lang))),
+                                json!((lang == "rust").then(|| mask_rust(text))),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        parts.into_iter().flat_map(|p| p.join().unwrap()).collect()
+    })
+}
+
+/// The oracle's answer, then the JavaScript's, for every case; the first difference is named. The JavaScript runs in its own
+/// process while this host computes its side, so the two overlap instead of adding up.
 fn same_everywhere(cases: &[(String, String)]) {
-    let js = node(DRIVER, &json!({ "cases": cases }));
-    for (i, (lang, text)) in cases.iter().enumerate() {
-        let want_comments = comments_of(text, kind_of(lang));
-        let want_mask = (lang == "rust").then(|| mask_rust(text));
+    let (js, want) = std::thread::scope(|s| {
+        let js = s.spawn(|| node(DRIVER, &json!({ "cases": cases })));
+        let want = oracle(cases);
+        (js.join().unwrap(), want)
+    });
+    assert_eq!(want.len(), cases.len());
+    for (i, ((lang, text), (want_comments, want_mask))) in cases.iter().zip(&want).enumerate() {
         let got = &js[i];
-        assert_eq!(got[1], json!(want_comments), "comments of case {i} ({lang}): {text:?}");
-        assert_eq!(got[0], json!(want_mask), "mask of case {i} ({lang}): {text:?}");
+        assert_eq!(&got[1], want_comments, "comments of case {i} ({lang}): {text:?}");
+        assert_eq!(&got[0], want_mask, "mask of case {i} ({lang}): {text:?}");
     }
 }
 
