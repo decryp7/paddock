@@ -1,4 +1,5 @@
-import { dialogWindowUrl, expect, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { dialogWindowUrl } from '@decryp7/paddock-e2e';
 
 /** The alert-rule dialog's rows: the controls of a row share top and bottom, all as tall as an outline field (a field's height). */
 test('the alert-rule dialog lays its controls out on one grid, each row aligned and one field tall', async ({ page }) => {

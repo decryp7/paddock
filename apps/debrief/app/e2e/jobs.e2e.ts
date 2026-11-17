@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { ask, openChat, runCommand, waitAnswered } from './ai-support';
 import { gridRows, openAppWith } from './mock-url';
@@ -105,7 +106,6 @@ test.describe('notifications', () => {
     // On Playwright's clock: the mock's live alerts are moved on below instead of waited for in real time (rendering
     // every simulated frame still takes a while on a loaded runner, hence slow).
     test.slow();
-    await page.clock.install();
     await openAiApp(page, 'mockAiStepMs=200&mockJobsVisibleMs=0&mockJobsAttentionMs=0&mockLive=1&mockLiveRate=20&mockLiveRotateMs=0&mockLiveAlertMs=300');
     const bell = page.getByTestId('status-notifications');
     await explainInBackground(page);

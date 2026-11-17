@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { pressMod } from '@decryp7/paddock-e2e';
 
 /** Report a problem in the browser build (mock backend, the in-memory report engine): reachable from the Help menu and the command palette. */

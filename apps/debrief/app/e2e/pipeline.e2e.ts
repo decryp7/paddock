@@ -1,5 +1,6 @@
+import { expect, test } from './test';
 import AxeBuilder from '@axe-core/playwright';
-import { expect, Page, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { openApp } from './app';
 import { WCAG_TAGS } from './axe';
 import { showProfileEditor } from './menu-support';

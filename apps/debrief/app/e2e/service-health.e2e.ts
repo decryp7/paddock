@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { openApp } from './app';
 
 /** The mock engine's service health, driven from the page (the browser build; the real engine is covered in Rust). */

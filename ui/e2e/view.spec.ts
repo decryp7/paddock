@@ -1,5 +1,6 @@
+import { expect, test } from './test';
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Locator, type Page } from '@decryp7/paddock-e2e';
+import { Locator, Page } from '@decryp7/paddock-e2e';
 
 // <pd-view> (plan X51, ADR 0002) in the gallery: every node kind drawn from one sample document, the actions it sends, patches,
 // the inline errors, axe in both themes, and no horizontal scroll of the page at 320 px (wide tables and drawings scroll in their

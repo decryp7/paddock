@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { gridRows, gridTotal, initialTotal, openApp, parseCount } from './app';
 
 test.describe('filters', () => {

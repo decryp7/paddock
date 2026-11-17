@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 
 // The browser build with the mock backend; `simulate=0` keeps the demo still (no pushed toasts mid-test).
 const APP = '/?simulate=0#';

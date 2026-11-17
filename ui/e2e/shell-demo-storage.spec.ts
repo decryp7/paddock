@@ -1,4 +1,5 @@
-import { axeViolations, expect, expectNoHorizontalScroll, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, expectNoHorizontalScroll } from '@decryp7/paddock-e2e';
 
 // Settings > Storage (plan X32) in the shell demo: the page over the demo's in-memory engine, which plays `paddock-storage` (the
 // same rules: a clear needs a scan, the user's data needs a confirmation, one job at a time, Cancel between items) with

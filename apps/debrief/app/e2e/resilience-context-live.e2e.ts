@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { gridRows, gridTotal, openApp, parseCount, pauseAhead } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
@@ -51,7 +51,6 @@ test('a failed context request shows an inline error with Retry', async ({ page 
 test.describe('live tail', () => {
   test('refreshes the grid as the engine reports changes, and stops when turned off', async ({ page }) => {
     // A controllable clock (running normally until paused) makes "nothing more arrives" checkable without sleeps.
-    await page.clock.install();
     await openAppWith(page, '?mockLiveMs=300');
     const live = page.getByRole('button', { name: 'Live tail', exact: true });
     await expect(gridTotal(page)).toHaveText(/^\d[\d,]*$/);

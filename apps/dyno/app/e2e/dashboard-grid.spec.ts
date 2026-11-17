@@ -1,4 +1,5 @@
-import { axeInThemes, expect, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeInThemes } from '@decryp7/paddock-e2e';
 import type { Locator, Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';

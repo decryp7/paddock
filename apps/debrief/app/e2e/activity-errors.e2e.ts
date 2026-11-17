@@ -1,4 +1,5 @@
-import { ConsoleMessage, expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { ConsoleMessage, Page } from '@playwright/test';
 import { APP_LOAD_TIMEOUT } from './app';
 import { chooseMenu } from './menu-support';
 

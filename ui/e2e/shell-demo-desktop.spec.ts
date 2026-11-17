@@ -1,4 +1,5 @@
-import { axeViolations, expect, installTauriFake, readVersion, test, type Page, type TauriFake } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, installTauriFake, readVersion, type Page, type TauriFake } from '@decryp7/paddock-e2e';
 import { SETTINGS_OVERVIEW_FIXTURE } from '../projects/paddock-ui/shell/settings/generated/settings-fixtures.ts';
 
 // The shell demo as the desktop app (plan S18, apps/shell-demo): every part on its Tauri backend, played by the kit's

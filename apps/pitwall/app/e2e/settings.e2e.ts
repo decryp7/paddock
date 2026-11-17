@@ -1,4 +1,5 @@
-import { expect, test, type Locator } from '@playwright/test';
+import { expect, test } from './test';
+import type { Locator } from '@playwright/test';
 import { openApp, openSettings, openSettingsWindow, settingsDialog } from './app';
 import { pressMod } from '../../../../ui/projects/paddock-e2e/src/index.ts';
 

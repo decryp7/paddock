@@ -1,6 +1,7 @@
+import { expect, test } from './test';
 import { mkdirSync } from 'node:fs';
 import { FIXTURES as DIALOG_FIXTURES } from './dialog-fixtures';
-import { dialogContracts, dialogWindowUrl, expect, test, type DialogContractEntry } from '@decryp7/paddock-e2e';
+import { dialogContracts, dialogWindowUrl, newPinnedContext, type DialogContractEntry } from '@decryp7/paddock-e2e';
 
 // Every Dyno dialog at its fitted size, light and dark, in the macOS and the Windows button order, for the independent
 // review (rule 22). Only on request: `SCREENSHOTS=1 DIALOG_SHOTS_DIR=<dir> npx playwright test --project=screenshots e2e/screenshots-dialogs.spec.ts`.
@@ -40,7 +41,7 @@ test.describe('Dyno dialog screenshots', () => {
           mkdirSync(OUT, { recursive: true });
           const area = { width: 1920, height: 1080 };
           const capH = Math.floor(area.height * CAP);
-          const context = await browser.newContext({ baseURL, colorScheme: scheme, deviceScaleFactor: 2, userAgent: p.ua, viewport: { width: contract.width, height: capH } });
+          const context = await newPinnedContext(browser, { baseURL, colorScheme: scheme, deviceScaleFactor: 2, userAgent: p.ua, viewport: { width: contract.width, height: capH } });
           await context.addInitScript((platform) => Object.defineProperty(navigator, 'platform', { get: () => platform }), p.platform);
           try {
             const page = await context.newPage();

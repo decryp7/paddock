@@ -1,4 +1,4 @@
-import { expect, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 
 /**

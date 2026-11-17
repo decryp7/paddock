@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { clickWithTimePaused, gridRows, gridTotal, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
@@ -34,7 +35,6 @@ async function openView(page: Page, name: 'Alerts' | 'Tail status'): Promise<voi
  * loaded the runner is.
  */
 async function openOnClock(page: Page, search: string): Promise<void> {
-  await page.clock.install();
   await openAppWith(page, search);
 }
 

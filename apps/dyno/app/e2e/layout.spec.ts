@@ -1,5 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
-import { dialogContracts, dialogWindowUrl, expectNoButtonLabelWraps, pressMod, textClippedWithoutEllipsis, textCutOffWithoutTooltip } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
+import { dialogContracts, dialogWindowUrl, expectNoButtonLabelWraps, newPinnedContext, pressMod, settledLayout, textClippedWithoutEllipsis, textCutOffWithoutTooltip } from '@decryp7/paddock-e2e';
 import { FIXTURES } from './dialog-fixtures';
 import { NAV } from '../src/app/shell/nav';
 import { EXTRAS_TABS } from '../src/app/features/extras/extras-model';
@@ -81,6 +82,12 @@ const STATES: State[] = [
   },
 ];
 
+/**
+ * The states that draw no row, table or list by design (measured 2026-11-16 by counting the drawn rows, tables and path boxes of every
+ * state at 900 px): their settled reading is empty. Every other state must draw a row before it counts as settled.
+ */
+const NO_ROWS = new Set(['why-slow', 'inventory', 'disk-map', 'map', 'power', 'lifespan', 'diagnostics', 'cpu', 'extras files']);
+
 /** Opens a state and waits until it is drawn: its heading is there and no skeleton or indeterminate progress bar is left. */
 async function openState(page: Page, state: State): Promise<void> {
   await page.goto(`/?latency=0#/${state.path}`);
@@ -92,16 +99,28 @@ async function openState(page: Page, state: State): Promise<void> {
   }
   await page.evaluate(() => document.fonts.ready);
   // A pd-table draws its columns for a default width (1024) until its ResizeObserver has told it the real one, and WebKit can be slow to
-  // deliver that (a header measured meanwhile "needs 912px, has 634px"): wait until every drawn table has fitted its columns to its width.
-  await page.waitForFunction(() =>
-    Array.from(document.querySelectorAll<HTMLElement>('pd-table')).every((t) => !t.clientWidth || t.getAttribute('data-fit-width') === String(Math.round(t.getBoundingClientRect().width))),
-  );
-  // A path is cut to the width its box has once the table has fitted; wait until each shown path is the one that fits (the ResizeObserver behind it runs after the fit).
-  await page.waitForFunction(() =>
-    Array.from(document.querySelectorAll<HTMLElement>('[data-testid="path-text"]')).every((b) => {
-      const shown = b.querySelector<HTMLElement>('.pd-shown');
-      return !b.clientWidth || !shown || shown.scrollWidth <= b.clientWidth + 1;
-    }),
+  // deliver that (a header measured meanwhile "needs 912px, has 634px"); a path is cut to the width its box has once the table has fitted
+  // (the ResizeObserver behind it runs after the fit). Wait until two reads agree on the drawn rows and their widths and every table and
+  // path fits: never on "every() of no boxes", which is true before any row exists (the pinned clock showed 31 of 240 Firewall visits read
+  // too early).
+  await settledLayout(
+    () =>
+      page.evaluate((rows) => {
+        const drawn = Array.from(document.querySelectorAll<HTMLElement>(rows)).filter((e) => e.clientWidth > 0);
+        const tables = Array.from(document.querySelectorAll<HTMLElement>('pd-table'));
+        const paths = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="path-text"]'));
+        const tablesFit = tables.every((t) => !t.clientWidth || t.getAttribute('data-fit-width') === String(Math.round(t.getBoundingClientRect().width)));
+        const pathsFit = paths.every((b) => {
+          const shown = b.querySelector<HTMLElement>('.pd-shown');
+          return !b.clientWidth || !shown || shown.scrollWidth <= b.clientWidth + 1;
+        });
+        return {
+          count: drawn.length,
+          widths: [...tables, ...paths, ...drawn].map((e) => Math.round(e.getBoundingClientRect().width)),
+          fits: tablesFit && pathsFit,
+        };
+      }, ROWS),
+    { what: `the ${state.name} state`, timeout: 45_000, minCount: NO_ROWS.has(state.name) ? 0 : 1 },
   );
 }
 
@@ -166,7 +185,7 @@ test.describe('nothing is cut off', () => {
 
     for (const advanced of [false, true]) {
       test(`settings pages at ${width}x${height}${advanced ? ' with the advanced fields' : ''}`, async ({ browser, baseURL }) => {
-        const ctx = await browser.newContext({ baseURL, viewport: { width: Math.max(width, CONTRACTS['pd.settings'].width), height } });
+        const ctx = await newPinnedContext(browser, { baseURL, viewport: { width: Math.max(width, CONTRACTS['pd.settings'].width), height } });
         const page = await ctx.newPage();
         await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings' }));
         await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
@@ -196,7 +215,7 @@ test.describe('nothing is cut off', () => {
       const problems: Record<string, string[]> = {};
       for (const [id, c] of Object.entries(CONTRACTS)) {
         for (const [n, input] of (FIXTURES[id] ?? [{}]).entries()) {
-          const ctx = await browser.newContext({ baseURL, viewport: { width: c.width, height: (c as { height?: number }).height ?? height } });
+          const ctx = await newPinnedContext(browser, { baseURL, viewport: { width: c.width, height: (c as { height?: number }).height ?? height } });
           const page = await ctx.newPage();
           await page.goto(dialogWindowUrl(id, input, { title: id }));
           await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });

@@ -1,4 +1,5 @@
-import { axeViolations, expect, expectNoHorizontalScroll, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, expectNoHorizontalScroll } from '@decryp7/paddock-e2e';
 
 // Report a problem (plan X2) in the shell demo: the dialog over the demo's in-memory engine, which plays `paddock-diag`
 // (the same preview shape, outcomes and refusals; `?report=dismiss|fail|hang` picks what Save does). Nothing is written

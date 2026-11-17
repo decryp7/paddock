@@ -1,4 +1,5 @@
-import { axeViolations, expect, test, type Page } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, type Page } from '@decryp7/paddock-e2e';
 
 // Theme switching (plan S15): system / dark / light, high contrast and reduced motion, the same in every window of the
 // app (here: tabs and a dialog window of one origin, through the BroadcastChannel backend), kept across a reload. That

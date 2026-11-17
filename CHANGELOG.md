@@ -30,6 +30,18 @@ Conventional Commits; one semver tag for the whole repo.
 - `axeInThemes` and `axeTargets` wait until the emulated colour scheme is live (`matchMedia` and two animation frames).
 - Selftest `selftest/axe-themes.spec.ts`, run in CI (ui's e2e job in Chromium, e2e-webkit in WebKit).
 
+### `@decryp7/paddock-e2e`: `pinnedClockTest`, one fixed page clock for every spec
+- New `pinnedClockTest(base, { now, timezoneId, locale })` (with `pinnedInstant`, `PINNED_NOW`, `PINNED_ZONE`, `PINNED_LOCALE`, `PINNED_NOW_ENV`): `base` with the page clock installed at one fixed instant, zone and locale before the first navigation, so a mock's relative stamps and the app's day grouping agree at every wall-clock time (Spotter's first-load spec failed just after midnight, CI run 8154). `PADDOCK_E2E_NOW` moves the pin; `test.use({ pinnedClock: false })` opts a file out.
+- The fixture also reports a throw from a timer callback (`reportTimerErrors`, new export): Playwright's fake clock catches an exception thrown from `setTimeout`, `setInterval`, `requestAnimationFrame` or `requestIdleCallback` (and keeps only the first of a batch), so it reached neither `window` 'error' nor `pageerror`; each callback now runs in a try/catch that calls `reportError`. The default pin is now the documentation screenshots' instant (`PINNED_AT`, 2026-10-22 14:30 UTC; `FROZEN_AT` is the same value). The selftest folder holds `pinned-clock.spec.ts` and runs in chromium and webkit.
+- New `settledLayout(page, read)` (with `layoutSettled`): waits until two reads of a page's layout agree (the same boxes and widths, all fit, and at least one box drawn: never vacuous). Dyno's layout spec, the gallery's data and material specs use it (a `pd-table` and its ResizeObservers settle over frames a pinned-clock run reads too early: 31 of 240 Firewall visits). New `pauseLive`, `resumeLive`, `withLivePaused` and `clickWithLivePaused`: stop and restart the page's live updates through the pinned clock (paused 250 ms ahead, doubled up to 1 s if the round trip was slower; due timers run once on the way and repeated pauses add up) around an interaction; the page does not draw while paused, so wrap only the step that must not be overtaken. The timer-error wrapper also covers a string callback (indirect `eval`).
+- New `newPinnedContext(browser, { ...contextOptions, pin })`: a context of a spec's own with the same clock, zone, locale and timer-error reporting as the fixture; Dyno's and Pitwall's `browser.newContext()` calls use it.
+- Debrief, Dyno, Pitcrew, Pitwall, Spotter and the ui gallery and demos wrap their `test` once in `e2e/test.ts` and their specs import `test` and `expect` from there. Bare `page.clock.install()` calls are gone (the clock is already installed).
+
+### `paddock-testkit`: `TestCommand`, check C123
+- New `paddock_testkit::TestCommand`: a `Command` that starts from an empty environment plus an allow-list (`process::allowed_names()`), with a private `HOME` and temp folder, a curated `PATH` and `path_first`, `cargo_target_dir` and `into_parts`. Every test that starts `./dev`, `cargo` or `node` uses it (ADR 0100); check C123 (report-only) flags any other way.
+- `paddock-dev`: a named `ENGINEERING_RULES` is the only place the sibling `heavy.sh` lookup reads.
+
+
 ### `@decryp7/paddock-ui`: `shell/contributions`, the contribution registry without the root or Material
 - New entry `@decryp7/paddock-ui/shell/contributions`: `define*`, `provideContributions`, `provideContributionKinds`, `SHELL_CONTRIBUTIONS`, the
   registry, `ShellContext`, the command service, the keys, `msg` and the lazy parts. It imports neither `@decryp7/paddock-ui` nor

@@ -1,4 +1,5 @@
-import { axeViolations, expect, expectNoHorizontalScroll, test, THEMES, WorkbenchApp } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, expectNoHorizontalScroll, THEMES, WorkbenchApp } from '@decryp7/paddock-e2e';
 
 // The workbench demo is the reference consumer of @decryp7/paddock-ui/workbench (ADR 0013 §4; plan W4, W7). It uses only
 // the test kit (@decryp7/paddock-e2e): the workbench page objects and the shell's.

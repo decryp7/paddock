@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { bodyIndentProblems, checkboxLayoutProblems, pressMod, rowPinProblems } from '@decryp7/paddock-e2e';
 
 /** Browser flows against the mock backend (a macOS laptop; `?mock=desktop` has no battery or sensors). */
@@ -646,7 +647,6 @@ test.describe('issues', () => {
   });
 
   test('a right-click right after hovering a row leaves no tooltip behind, and the first Escape closes the menu', async ({ page }) => {
-    await page.clock.install();
     await page.goto(url('/issues'));
     const table = page.getByRole('treegrid', { name: 'Issues', exact: true });
     const row = table.getByRole('row', { name: /Safari/ }).first();

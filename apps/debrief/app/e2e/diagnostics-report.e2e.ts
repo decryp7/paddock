@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { openAppWith } from './mock-url';
 
 // Opening a diagnostics zip (mock backend): the engine recognises it, so the Diagnostics report panel shows its

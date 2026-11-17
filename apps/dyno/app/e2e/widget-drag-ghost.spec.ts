@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { dialogWindowUrl, stablePressPoint } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { dialogWindowUrl, newPinnedContext, stablePressPoint } from '@decryp7/paddock-e2e';
 import type { Locator } from '@playwright/test';
 
 /**
@@ -30,7 +30,7 @@ const SIZES = [
 for (const size of SIZES) {
   for (const [scheme, which] of [['light', 'first'], ['dark', 'first'], ['light', 'last'], ['dark', 'last']] as const) {
     test(`the drag ghost is the whole row (${size.name}, ${scheme}, ${which} chooser)`, async ({ browser, baseURL }, info) => {
-      const ctx = await browser.newContext({ baseURL, viewport: { width: size.width, height: size.height }, colorScheme: scheme });
+      const ctx = await newPinnedContext(browser, { baseURL, viewport: { width: size.width, height: size.height }, colorScheme: scheme });
       try {
         const page = await ctx.newPage();
         await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings' }));
@@ -87,7 +87,7 @@ for (const size of SIZES) {
 
 for (const scheme of ['light', 'dark'] as const) {
   test(`the dashboard's Edit layout drag moves the widget, draws no clone and no stray symbol (${scheme})`, async ({ browser, baseURL }, info) => {
-    const ctx = await browser.newContext({ baseURL, viewport: { width: 1280, height: 900 }, colorScheme: scheme });
+    const ctx = await newPinnedContext(browser, { baseURL, viewport: { width: 1280, height: 900 }, colorScheme: scheme });
     try {
       const page = await ctx.newPage();
       await page.goto('/?latency=0&lists=long#/');

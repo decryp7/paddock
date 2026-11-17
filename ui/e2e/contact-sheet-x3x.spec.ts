@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { Page } from '@decryp7/paddock-e2e';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PD_ICON_PATHS } from '../projects/paddock-ui/icons/src/paths';

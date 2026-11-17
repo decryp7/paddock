@@ -1,4 +1,5 @@
-import { dialogContracts, expectLoopSettles, expectSizeToContent, SIZE_SCALES, test } from '@decryp7/paddock-e2e';
+import { test } from './test';
+import { dialogContracts, expectLoopSettles, expectSizeToContent, SIZE_SCALES } from '@decryp7/paddock-e2e';
 
 // ADR 0043 check 4: one fixture dialog per kind whose content arrives after the first measure; the page-side loop follows it
 // at every scale (the page only: a browser's deviceScaleFactor does not reach Rust).

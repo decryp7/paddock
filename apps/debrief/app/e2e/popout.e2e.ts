@@ -1,4 +1,5 @@
-import { BrowserContext, expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { BrowserContext, Page } from '@playwright/test';
 import { openQuery } from './analysis-support';
 import { ensureInspector, gridRows, openApp, openView } from './app';
 import { expectNoSeriousViolations } from './axe';

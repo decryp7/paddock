@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { runCommand } from './ai-support';
 import { ensureInspector, gridRows, openApp } from './app';
 

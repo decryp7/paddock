@@ -1,5 +1,6 @@
+import { expect, test } from './test';
 import AxeBuilder from '@axe-core/playwright';
-import { expect, expectNoButtonLabelWraps, test, type Page } from '@decryp7/paddock-e2e';
+import { expectNoButtonLabelWraps, type Page, settledLayout } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -466,6 +467,8 @@ test.describe('outlined field geometry', () => {
         for (const id of ['material-field-value', 'material-textarea']) {
           const field = page.getByTestId(id);
           await field.scrollIntoViewIfNeeded();
+          // Material sizes the notch from a setTimeout its label's resize observer schedules: read the boxes once it has.
+          await expect(field.locator('.mdc-notched-outline__notch')).toHaveAttribute('style', /(^|;)\s*width:/);
           const m = await field.evaluate((f) => {
             const r = (e: Element | null) => e!.getBoundingClientRect();
             const text = f.querySelector('input.mat-mdc-input-element, textarea.mat-mdc-input-element');
@@ -522,18 +525,29 @@ test.describe('outlined field geometry', () => {
           await page.screenshot({ path: join(SHOTS, `mixed-row-${theme}-${density}.png`), clip: { x: b.x - 12, y: b.y - 12, width: b.width + 24, height: b.height + 24 } });
         }
         // The visible boxes: a field's outlined container (not its host, which also holds the subscript), a button itself.
-        const boxes = await row.evaluate((r) =>
-          [...r.children].map((c) => {
-            const box = (c.querySelector('.mat-mdc-text-field-wrapper') ?? c).getBoundingClientRect();
-            return { name: c.textContent?.trim() || (c.querySelector('input')?.getAttribute('aria-label') ?? ''), height: box.height, centre: box.top + box.height / 2 };
-          }),
-        );
-        expect(boxes.map((b) => Math.round(b.height)), 'the row mixes heights (labelled field, field, buttons)').toEqual([
+        const read = () =>
+          row.evaluate((r) =>
+            [...r.children].map((c) => {
+              const box = (c.querySelector('.mat-mdc-text-field-wrapper') ?? c).getBoundingClientRect();
+              return { name: c.textContent?.trim() || (c.querySelector('input')?.getAttribute('aria-label') ?? ''), height: box.height, centre: box.top + box.height / 2 };
+            }),
+          );
+        // The density and the field's own sizing apply over a few frames after open(): wait for the four heights (44, 44, 28, 28 were read
+        // against 40, 24, 28, 28 once, compact, light), never read the boxes once.
+        const heights = [
           (await px(page, '--pd-control-height')) + 2 * (await px(page, '--pd-space-2')),
           await px(page, '--pd-control-height'),
           await px(page, '--pd-button-height'),
           await px(page, '--pd-button-height'),
-        ]);
+        ];
+        await settledLayout(
+          async () => {
+            const got = (await read()).map((b) => Math.round(b.height));
+            return { count: got.length, widths: got, fits: got.length === heights.length && got.every((h, i) => h === heights[i]) };
+          },
+          { what: 'the row mixes heights (labelled field, field, buttons)', minCount: heights.length, expectedWidths: heights },
+        );
+        const boxes = await read();
         const centres = boxes.map((b) => b.centre);
         expect(Math.max(...centres) - Math.min(...centres), JSON.stringify(boxes)).toBeLessThanOrEqual(1);
       });

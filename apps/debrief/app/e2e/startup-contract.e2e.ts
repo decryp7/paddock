@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { gridRows, openApp } from './app';
 
 // The start-up contract (ADR 0058). A window shows a splash until Angular renders, paints its frame (activity bar,

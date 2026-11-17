@@ -1,4 +1,5 @@
-import { expect, installTauriFake, test, type Page, type TauriFake } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { installTauriFake, type Page, type TauriFake } from '@decryp7/paddock-e2e';
 
 // The start-up contract in the shell demo (ADR 0058; plan S7 and §11). A window shows a splash until Angular renders,
 // paints its frame without waiting for any IPC, reports `window_ready` after that first paint, says calmly when the shell

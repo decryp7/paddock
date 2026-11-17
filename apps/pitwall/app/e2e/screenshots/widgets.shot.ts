@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '../test';
+import type { Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { dialogWindowUrl, waitForStableFrame } from '../../../../../ui/projects/paddock-e2e/src/index.ts';

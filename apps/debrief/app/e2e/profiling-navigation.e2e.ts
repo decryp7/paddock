@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { callTree, flame, hotspots, openProfiles, runCommand } from './profiling-support';
 
 const PRICE = 'Shop.Orders.Pricing.PriceCalculator.Calculate';

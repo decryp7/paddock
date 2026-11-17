@@ -1,4 +1,5 @@
-import { expect, stablePressPoint, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { stablePressPoint } from '@decryp7/paddock-e2e';
 import type { Locator, Page } from '@playwright/test';
 
 /**

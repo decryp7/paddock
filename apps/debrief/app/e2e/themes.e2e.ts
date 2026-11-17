@@ -1,5 +1,6 @@
+import { expect, test } from './test';
 import { existsSync } from 'node:fs';
-import { expect, Page, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations, settleAnimations, settleDockLayout } from './axe';
 

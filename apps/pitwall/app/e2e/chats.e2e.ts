@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { openApp, settingsDialog } from './app';
 
 // ADR 0023 Decision 3 (WP-3b) against the mock: the Chat bar's "Don't save this chat" (a new chat takes it to its first
