@@ -1434,3 +1434,21 @@ status = "built"
   owner = "paddock"
   delete_by = "v0.5.0"
   note = "The shell scripts' copy (safe_rm): the CI kit's shell fallback and the dev scripts run without the paddock-dev binary. Same root and path rules, read lexically; Windows paths are spelled by cygpath -m first. conformance/test/safe-rm.test.mjs tests it in bash and sh; there is no parity table with the Rust guard yet. Goes with the shell kit (docs/plans/ci-in-rust.md, WP-11) for the CI scripts; the dev scripts move to `./dev` or keep it."
+
+# =====================================================================================================================
+# The npm audit exceptions list (scripts/npm-audit-allow.json)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "npm-audit-allow-reader"
+title = "Reading and checking the approved npm audit exceptions (id, reason, approver, approval day, later review day, no duplicates; an entry counts until its review day)"
+canonical = "scripts"
+paths = ["scripts/npm-audit.mjs"]
+symbols = ["text:parseAllow", "text:reviewBy"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["tools/paddock-dev/src/audit/allow.rs"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "`./dev audit` reads the same scripts/npm-audit-allow.json in Rust (parse_allow, Exception::live) so the nightly and the train audit honour the approved exceptions; the app jobs' plain audit is the script. tools/paddock-dev/src/audit/tests.rs (the_rust_reader_and_the_scripts_agree_on_the_same_lists, the_families_real_list_is_read_by_both_and_by_the_accessor) runs both readers on the same lists, valid and seven invalid. Goes when the app jobs' audit moves onto `./dev audit` and the script is retired."
