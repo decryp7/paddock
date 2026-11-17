@@ -1571,7 +1571,8 @@ screen over ui, Dyno and Pitwall, 409 tests) is in this branch's history, commit
 - **Not measured:** the `CARGO_TARGET_DIR` control in this series (the script failed on bash 3's empty array; the earlier note measured it:
   0 / 146); Linux, Windows, a release profile; a second machine; the cache's size on RustFS (the local cache was 625 MiB after all runs).
 - **First RustFS attempt:** the first series (prefix `bench-20261116233304`) had a write error on every compile (138 of 138 on Dyno) and so
-  0 hits; the cause was not found (a debug run a few minutes later, with the same settings and a small build, had none). The series above
+  0 hits; the cause is a read-only server: sccache 0.19.0 latches a failed startup write check for the server's lifetime (docs/lessons.md; found by
+  the later investigation, not measured here; a debug run a few minutes later, with the same settings and a small build, had none). The series above
   is a second run from scratch with a new prefix and no write errors. Treat RustFS as unproven under load until it has run for days.
 - **Reading:** passing the folder as configuration gives the 80% across worktrees on both workspaces; the S3 backend on the LAN costs
   about 5 s more on a warm build than the local disk (37 against 32 s, 48 against 46 s) and needs the network and the key. The CI-like

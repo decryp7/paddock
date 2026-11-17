@@ -97,8 +97,12 @@ tools and never by your shell profile (user decision 2026-11-16; docs/research/s
   `~/.cargo`), starts the one server on the default port 4226, and prints `export RUSTC_WRAPPER=...` lines for that shell. Run it
   once per machine to install; the push gates and `./dev gen check` then use the installed copy by themselves and never download.
 - It is off, with one `::warning::` line and a build without the cache, when sccache is not installed, the server does not
-  start, or a server on the port uses another cache. The server runs in its own folder (`<tool folder>/run`, also its `TMPDIR`), never
-  in a job's or an agent's scratch folder, which a job deletes. It is off without a warning in CI (`CI`, `GITHUB_ACTIONS`), with
+  start, or a server on the port uses another cache. The server runs in its own short folder (`<tool cache>/sccache-run`, also its `TMPDIR`, working folder and error log
+  `sccache.log`; short because macOS caps socket paths at 104 bytes), never in a job's or an agent's scratch folder, which a job deletes. It
+  never exits on its own (`SCCACHE_IDLE_TIMEOUT=0`; stop it with `sccache --stop-server`), so a build that finds none cannot replace it
+  with one that has the build's environment. When it comes up read-only (sccache 0.19.0 keeps a failed startup write check for the
+  server's whole life: no compile is stored) the tool stops it, starts it once more, and if it is still read-only turns the wrapper off
+  and names the log in the warning. It is off without a warning in CI (`CI`, `GITHUB_ACTIONS`), with
   `PADDOCK_SCCACHE=off`, or when `RUSTC_WRAPPER` is already set.
 - The build folder goes in as `--config build.target-dir=...` in every tool (see AGENTS.md, "Build folders").
 - **One setting picks the backend, `PADDOCK_SCCACHE_BACKEND`:** `local` (the default; `SCCACHE_DIR` and `SCCACHE_CACHE_SIZE` from

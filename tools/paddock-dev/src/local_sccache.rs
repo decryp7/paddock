@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// What the sccache children get from the caller besides the base list: only the local-cache settings and logging.
-const PASS: [&str; 3] = ["SCCACHE_SERVER_PORT", "SCCACHE_LOG", "SCCACHE_ERROR_LOG"];
+const PASS: [&str; 1] = ["SCCACHE_SERVER_PORT"];
 
 /// The cache size when the environment names none (the machine's profile sets 60G; the research note's start size is 30 GiB).
 pub const DEFAULT_SIZE: &str = "30G";
@@ -310,35 +310,83 @@ pub fn read_creds(env: &HashMap<String, String>) -> Result<Creds, String> {
     })
 }
 
-/// The folder the server runs in and uses as its temporary folder: tool-owned and never deleted by a job. A server that inherits the
-/// starter's `TMPDIR` (a job's or an agent's scratch folder) outlives it, and every later build fails once that folder is gone
-/// (measured in review of 872ab6743).
-pub fn run_folder(bin: &Path) -> PathBuf {
-    bin.with_file_name("run")
+/// The folder the server runs in, uses as its temporary folder and writes its error log in: `<tool cache>/sccache-run`, tool-owned and
+/// never deleted by a job. A server that inherits the starter's `TMPDIR` (a job's or an agent's scratch folder) outlives it, and every
+/// later build fails once that folder is gone (measured in review of 872ab6743). It is short on purpose: macOS caps a socket path at
+/// 104 bytes and a long `PADDOCK_DEV_HOME` below the old `tools/sccache/<version>/run` could pass it.
+pub fn run_folder(env: &HashMap<String, String>) -> Result<PathBuf, String> {
+    Ok(tool_cache::home(env)?.join("sccache-run"))
 }
 
-fn server_call(bin: &Path, arg: &str, backend: &Backend, creds: Option<&Creds>) -> ToolCall {
-    let run = run_folder(bin);
-    let mut c = ToolCall::new(bin.to_string_lossy())
-        .args([arg])
-        .pass(PASS)
-        .cwd(run.clone())
-        .without("TMPDIR")
-        .without("TMP")
-        .without("TEMP")
-        .env("TMPDIR", run.to_string_lossy())
-        .env("TMP", run.to_string_lossy())
-        .env("TEMP", run.to_string_lossy())
-        .env("SCCACHE_IGNORE_SERVER_IO_ERROR", "1")
-        .timeout(Duration::from_secs(60));
-    for (k, v) in backend.vars() {
-        c = c.env(k, v);
+/// Where the server writes its errors (`SCCACHE_ERROR_LOG`), named in every warning (ER-27).
+pub fn error_log(run: &Path) -> PathBuf {
+    run.join("sccache.log")
+}
+
+/// The longest run folder path that leaves room for a socket name under macOS's 104-byte cap.
+const SHORT_RUN_PATH: usize = 80;
+
+/// One server's settings, and the calls that start, ask and stop it.
+struct Server<'a> {
+    bin: &'a Path,
+    run: &'a Path,
+    backend: &'a Backend,
+    creds: Option<&'a Creds>,
+    /// `SCCACHE_LOG`: the caller's, else `warn`.
+    log_level: String,
+}
+
+impl Server<'_> {
+    fn call(&self, arg: &str) -> ToolCall {
+        let run = self.run.to_string_lossy();
+        let mut c = ToolCall::new(self.bin.to_string_lossy())
+            .args([arg])
+            .pass(PASS)
+            .cwd(self.run.to_path_buf())
+            .without("TMPDIR")
+            .without("TMP")
+            .without("TEMP")
+            .env("TMPDIR", run.as_ref())
+            .env("TMP", run.as_ref())
+            .env("TEMP", run.as_ref())
+            .env("SCCACHE_ERROR_LOG", error_log(self.run).to_string_lossy())
+            .env("SCCACHE_LOG", self.log_level.as_str())
+            // The server never exits on its own: a build that finds none would start one with the build's environment (and, for S3,
+            // without the keys), and that one would replace ours.
+            .env("SCCACHE_IDLE_TIMEOUT", "0")
+            .env("SCCACHE_IGNORE_SERVER_IO_ERROR", "1")
+            .timeout(Duration::from_secs(60));
+        for (k, v) in self.backend.vars() {
+            c = c.env(k, v);
+        }
+        if matches!(self.backend, Backend::S3(_)) {
+            // No instance-metadata lookup: with no keys it hangs for about 75 s before it fails.
+            c = c.env("AWS_EC2_METADATA_DISABLED", "true");
+        }
+        // Only the server needs the keys, and the logged command masks them.
+        for (k, v) in self.creds.map(Creds::pairs).unwrap_or_default() {
+            c = c.env(k.as_str(), v.as_str()).secret(v.as_str());
+        }
+        c
     }
-    // Only the server needs the keys, and the logged command masks them.
-    for (k, v) in creds.map(Creds::pairs).unwrap_or_default() {
-        c = c.env(k.as_str(), v.as_str()).secret(v.as_str());
+}
+
+/// The variables a build gets: the wrapper, the settings the server runs with and the two that keep a server a build starts itself
+/// from replacing ours or hanging (never a credential).
+fn ready_vars(bin: &Path, backend: &Backend) -> Vec<(String, String)> {
+    let mut vars = vec![("RUSTC_WRAPPER".to_string(), bin.display().to_string())];
+    vars.extend(backend.vars());
+    vars.push(("SCCACHE_IGNORE_SERVER_IO_ERROR".into(), "1".into()));
+    vars.push(("SCCACHE_IDLE_TIMEOUT".into(), "0".into()));
+    if matches!(backend, Backend::S3(_)) {
+        vars.push(("AWS_EC2_METADATA_DISABLED".into(), "true".into()));
     }
-    c
+    vars
+}
+
+/// The mode the running server says it runs in (`--show-adv-stats`: `Effective cache mode            ReadWrite`).
+pub fn cache_mode(stats: &str) -> Option<&str> {
+    stats.lines().find_map(|l| l.strip_prefix("Effective cache mode")).map(str::trim)
 }
 
 /// `--start-server` on a port that already has a server (the next agent's or the Mac runner's) fails with "Address in use": that is
@@ -502,12 +550,13 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
             );
         }
     };
-    if let Err(e) = std::fs::create_dir_all(run_folder(&bin)) {
+    let run = match run_folder(env) {
+        Ok(r) => r,
+        Err(e) => return off(format!("{e}. Next: set PADDOCK_DEV_HOME"), true),
+    };
+    if let Err(e) = std::fs::create_dir_all(&run) {
         return off(
-            format!(
-                "cannot make the server's folder {}: {e}. Next: fix PADDOCK_DEV_HOME",
-                run_folder(&bin).display()
-            ),
+            format!("cannot make the server's folder {}: {e}. Next: fix PADDOCK_DEV_HOME", run.display()),
             true,
         );
     }
@@ -516,50 +565,100 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
     {
         return off(format!("cannot make the cache folder {dir}: {e}. Next: fix SCCACHE_DIR"), true);
     }
-    let log = run_folder(&bin).join(format!("start-{}.log", std::process::id()));
-    // The server outlives this process and would hold a pipe open, so its starter writes to a file.
-    let start = server_call(&bin, "--start-server", &backend, creds.as_ref())
-        .output(Output::File(log.clone()))
-        .run(env, &mut std::io::sink())
-        .map(|mut s| {
-            s.success |= already_running(&s);
-            s
-        });
-    let _ = std::fs::remove_file(&log);
-    let stats = server_call(&bin, "--show-stats", &backend, creds.as_ref()).run(env, &mut std::io::sink());
-    let verdict = match (&start, &stats) {
-        (Ok(s), Ok(t)) if s.success && t.success => {
-            if backend.matches_stats(&t.stdout) {
-                None
-            } else {
-                Some(format!(
-                    "the sccache server on port {} does not use this cache ({}); it is not touched. Next: stop it yourself (`sccache --stop-server`) or leave the wrapper off",
+    let log = error_log(&run);
+    let server = Server {
+        bin: &bin,
+        run: &run,
+        backend: &backend,
+        creds: creds.as_ref(),
+        log_level: env
+            .get("SCCACHE_LOG")
+            .filter(|l| !l.is_empty())
+            .cloned()
+            .unwrap_or_else(|| "warn".into()),
+    };
+    let where_log = format!("The server's log: {}", log.display());
+    let long_path = if run.as_os_str().len() > SHORT_RUN_PATH {
+        format!(
+            " The server's folder path is {} bytes and macOS caps socket paths at 104 bytes: use a shorter PADDOCK_DEV_HOME.",
+            run.as_os_str().len()
+        )
+    } else {
+        String::new()
+    };
+    // At most two starts: a server whose startup write check failed once stays read-only for its whole life (sccache 0.19.0
+    // `RemoteStorage::check`), so it is stopped and started once more; still read-only, the wrapper is off.
+    let mut restarted = false;
+    loop {
+        let start_log = run.join(format!("start-{}.log", std::process::id()));
+        // The server outlives this process and would hold a pipe open, so its starter writes to a file.
+        let start = server
+            .call("--start-server")
+            .output(Output::File(start_log.clone()))
+            .run(env, &mut std::io::sink())
+            .map(|mut s| {
+                s.success |= already_running(&s);
+                s
+            });
+        let _ = std::fs::remove_file(&start_log);
+        let stats = server.call("--show-adv-stats").run(env, &mut std::io::sink());
+        let (start, stats) = match (start, stats) {
+            (Ok(s), Ok(t)) if s.success && t.success => (s, t),
+            (Ok(s), _) if !s.success => {
+                return off(
+                    format!(
+                        "the sccache server did not start ({}): {}. {where_log}.{long_path}",
+                        s.how,
+                        tail(&s.stderr, 4).trim()
+                    ),
+                    true,
+                );
+            }
+            (Err(e), _) | (_, Err(e)) => return off(format!("sccache could not be run: {e}. {where_log}."), true),
+            _ => {
+                return off(
+                    format!("the sccache server did not answer `--show-adv-stats`. {where_log}.{long_path}"),
+                    true,
+                );
+            }
+        };
+        let _ = start;
+        if !backend.matches_stats(&stats.stdout) {
+            return off(
+                format!(
+                    "the sccache server on port {} does not use this cache ({}); it is not touched. Next: stop it yourself (`sccache --stop-server`) or leave the wrapper off. {where_log}",
                     server_port(env),
                     backend.describe()
-                ))
-            }
+                ),
+                true,
+            );
         }
-        (Ok(s), _) if !s.success => Some(format!(
-            "the sccache server did not start ({}): {}",
-            s.how,
-            tail(&s.stderr, 4).trim()
-        )),
-        (Err(e), _) | (_, Err(e)) => Some(format!("sccache could not be run: {e}")),
-        _ => Some("the sccache server did not answer `--show-stats`".into()),
-    };
-    if let Some(why) = verdict {
-        return off(why, true);
+        if cache_mode(&stats.stdout) != Some("ReadOnly") {
+            break;
+        }
+        if restarted {
+            return off(
+                format!(
+                    "the sccache server came up read-only twice: its startup write check against the cache failed, and sccache 0.19.0 keeps that result for the server's whole life, so no compile would be stored. {where_log}. Next: read the log for the failed write (the bucket, the key's rights, the folder's permissions), fix it, then `sccache --stop-server`"
+                ),
+                true,
+            );
+        }
+        restarted = true;
+        eprintln!("local-sccache: the server came up read-only; stopping it (it is this cache's own) and starting it once more");
+        let _ = server.call("--stop-server").run(env, &mut std::io::sink());
     }
     eprintln!(
-        "local-sccache: sccache {SCCACHE_VERSION} on, {}{}, ready in {:.1} s",
+        "local-sccache: sccache {SCCACHE_VERSION} on, {}{}, ready in {:.1} s; server log {}",
         backend.describe(),
         creds.as_ref().map_or(String::new(), |c| format!(", credentials {}", c.status())),
-        started.elapsed().as_secs_f64()
+        started.elapsed().as_secs_f64(),
+        log.display()
     );
-    let mut vars = vec![("RUSTC_WRAPPER".to_string(), bin.display().to_string())];
-    vars.extend(backend.vars());
-    vars.push(("SCCACHE_IGNORE_SERVER_IO_ERROR".into(), "1".into()));
-    Outcome::Ready(Ready { vars, bin })
+    Outcome::Ready(Ready {
+        vars: ready_vars(&bin, &backend),
+        bin,
+    })
 }
 
 /// [`prepare`], and the warning for a failure (once per call), as the tools that start builds use it.
@@ -732,11 +831,28 @@ mod tests {
         assert!(!s3("paddock").matches_stats(&line("s3, name: b1, prefix: /")));
     }
 
+    fn child_of(arg: &str, backend: &Backend, parent: &HashMap<String, String>) -> Vec<(String, String)> {
+        let server = Server {
+            bin: Path::new("/h/tools/sccache/0.19.0/sccache"),
+            run: Path::new("/h/sccache-run"),
+            backend,
+            creds: None,
+            log_level: "warn".into(),
+        };
+        server
+            .call(arg)
+            .pass(["TMPDIR", "TMP", "TEMP", "SCCACHE_ERROR_LOG", "SCCACHE_IDLE_TIMEOUT"])
+            .child_env(parent)
+    }
+
+    fn last(child: &[(String, String)], k: &str) -> Option<String> {
+        child.iter().rev().find(|(n, _)| n == k).map(|(_, v)| v.clone())
+    }
+
     /// The server outlives the process that starts it, so it must not inherit that process's temporary folder: builds fail once
     /// a job's folder is deleted (measured in review of 872ab6743).
     #[test]
     fn the_server_runs_in_a_tool_owned_folder_whatever_the_starters_tmpdir_is() {
-        let bin = Path::new("/h/tools/sccache/0.19.0/sccache");
         let backend = Backend::Local {
             dir: "/c".into(),
             size: "1G".into(),
@@ -747,20 +863,189 @@ mod tests {
             ("TEMP", "/jobs/gone"),
             ("PATH", "/usr/bin"),
         ]);
-        for arg in ["--start-server", "--show-stats"] {
-            let child = server_call(bin, arg, &backend, None)
-                .pass(["TMPDIR", "TMP", "TEMP"])
-                .child_env(&parent);
-            let last = |k: &str| child.iter().rev().find(|(n, _)| n == k).map(|(_, v)| v.clone());
-            let run = run_folder(bin).display().to_string();
+        for arg in ["--start-server", "--show-adv-stats"] {
+            let child = child_of(arg, &backend, &parent);
             for k in ["TMPDIR", "TMP", "TEMP"] {
-                assert_eq!(last(k).as_deref(), Some(run.as_str()), "{arg} {k}: {child:?}");
+                assert_eq!(last(&child, k).as_deref(), Some("/h/sccache-run"), "{arg} {k}: {child:?}");
                 assert_eq!(child.iter().filter(|(n, _)| n == k).count(), 1, "one value, no inherited copy: {k}");
             }
         }
+        let home = env(&[("PADDOCK_DEV_HOME", "/h")]);
+        assert_eq!(run_folder(&home).unwrap(), Path::new("/h/sccache-run"));
         assert!(
-            run_folder(bin).starts_with("/h/tools/sccache/0.19.0"),
-            "inside the tool folder, never a job's"
+            run_folder(&home).unwrap().as_os_str().len() < SHORT_RUN_PATH,
+            "short, for macOS's 104-byte socket paths"
+        );
+    }
+
+    /// ER-27: the server always logs its errors to a file in its own folder, whatever the caller's environment says, and never
+    /// exits on its own (a build that found none would start one with the build's environment, S3 without keys).
+    #[test]
+    fn the_server_logs_to_its_folder_never_idles_out_and_asks_no_metadata_service() {
+        let local = Backend::Local {
+            dir: "/c".into(),
+            size: "1G".into(),
+        };
+        let parent = env(&[
+            ("SCCACHE_ERROR_LOG", "/elsewhere/x.log"),
+            ("SCCACHE_IDLE_TIMEOUT", "600"),
+            ("PATH", "/usr/bin"),
+        ]);
+        let child = child_of("--start-server", &local, &parent);
+        assert_eq!(
+            last(&child, "SCCACHE_ERROR_LOG").as_deref(),
+            Some("/h/sccache-run/sccache.log"),
+            "{child:?}"
+        );
+        assert_eq!(last(&child, "SCCACHE_IDLE_TIMEOUT").as_deref(), Some("0"), "{child:?}");
+        assert_eq!(last(&child, "SCCACHE_LOG").as_deref(), Some("warn"));
+        assert!(last(&child, "AWS_EC2_METADATA_DISABLED").is_none(), "only for S3");
+        let s3 = backend(&env(&[
+            ("PADDOCK_SCCACHE_BACKEND", "s3"),
+            ("PADDOCK_SCCACHE_S3_BUCKET", "b"),
+            ("PADDOCK_SCCACHE_S3_ENDPOINT", "h:1"),
+        ]))
+        .unwrap();
+        assert_eq!(
+            last(&child_of("--start-server", &s3, &parent), "AWS_EC2_METADATA_DISABLED").as_deref(),
+            Some("true")
+        );
+        // A build that has to start a server itself gets the same two protections.
+        for b in [&local, &s3] {
+            let vars = ready_vars(Path::new("/b/sccache"), b);
+            assert!(vars.contains(&("SCCACHE_IDLE_TIMEOUT".into(), "0".into())), "{vars:?}");
+            assert!(
+                vars.iter()
+                    .all(|(k, _)| !k.starts_with("AWS_ACCESS") && !k.starts_with("AWS_SECRET")),
+                "never a key"
+            );
+        }
+        assert!(ready_vars(Path::new("/b/sccache"), &s3).contains(&("AWS_EC2_METADATA_DISABLED".into(), "true".into())));
+    }
+
+    #[test]
+    fn the_cache_mode_is_read_from_the_advanced_stats() {
+        assert_eq!(
+            cache_mode("Cache location  x\nEffective cache mode            ReadOnly\n"),
+            Some("ReadOnly")
+        );
+        assert_eq!(cache_mode("Effective cache mode            ReadWrite"), Some("ReadWrite"));
+        assert_eq!(cache_mode("Cache location  x\n"), None);
+    }
+
+    /// A stand-in sccache: `--version`, start and stop count in files beside it, and the stats say read-only for the first
+    /// `readonly-starts` starts (sccache 0.19.0 keeps a failed startup write check for the server's whole life).
+    #[cfg(unix)]
+    fn fake(readonly_starts: u32, foreign_location: Option<&str>) -> (tempfile::TempDir, HashMap<String, String>, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempfile::tempdir().unwrap();
+        let e = env(&[
+            ("PADDOCK_DEV_HOME", home.path().to_str().unwrap()),
+            ("SCCACHE_DIR", home.path().join("cache").to_str().unwrap()),
+            ("PATH", "/usr/bin:/bin"),
+        ]);
+        let bin = install_path(&e).unwrap();
+        std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        let script = r#"#!/bin/sh
+d=$(dirname "$0")
+echo "$1" >> "$d/calls"
+case "$1" in
+  --version) echo "sccache 0.19.0";;
+  --start-server) n=$(cat "$d/starts" 2>/dev/null || echo 0); echo $((n+1)) > "$d/starts";;
+  --stop-server) ;;
+  --show-adv-stats)
+    n=$(cat "$d/starts" 2>/dev/null || echo 0); ro=$(cat "$d/readonly-starts" 2>/dev/null || echo 0)
+    mode=ReadWrite; [ "$n" -le "$ro" ] && mode=ReadOnly
+    if [ -f "$d/location" ]; then cat "$d/location"; else echo "Cache location                  Local disk: \"$SCCACHE_DIR\""; fi
+    echo "Effective cache mode            $mode";;
+esac
+exit 0
+"#;
+        std::fs::write(&bin, script).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(bin.with_file_name("readonly-starts"), readonly_starts.to_string()).unwrap();
+        if let Some(l) = foreign_location {
+            std::fs::write(bin.with_file_name("location"), format!("Cache location                  {l}\n")).unwrap();
+        }
+        (home, e, bin)
+    }
+
+    #[cfg(unix)]
+    fn calls(bin: &Path) -> Vec<String> {
+        std::fs::read_to_string(bin.with_file_name("calls"))
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| l.starts_with("--start") || l.starts_with("--stop"))
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_server_that_comes_up_read_only_is_stopped_and_started_once_more() {
+        let (_h, e, bin) = fake(1, None);
+        assert!(matches!(prepare(&e, Install::Never), Outcome::Ready(_)));
+        assert_eq!(calls(&bin), ["--start-server", "--stop-server", "--start-server"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_server_that_is_read_only_twice_turns_the_wrapper_off_and_names_the_cause_and_the_log() {
+        let (h, e, bin) = fake(2, None);
+        match prepare(&e, Install::Never) {
+            Outcome::Off { reason, warn } => {
+                assert!(warn);
+                assert!(
+                    reason.contains("read-only twice") && reason.contains("keeps that result"),
+                    "{reason}"
+                );
+                let log = h.path().join("sccache-run/sccache.log");
+                assert!(reason.contains(&log.display().to_string()), "the log path is named: {reason}");
+                assert!(reason.contains("Next:"), "{reason}");
+            }
+            Outcome::Ready(_) => panic!("a read-only server stores nothing"),
+        }
+        assert_eq!(calls(&bin), ["--start-server", "--stop-server", "--start-server"], "no third start");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_read_write_server_is_left_running() {
+        let (_h, e, bin) = fake(0, None);
+        assert!(matches!(prepare(&e, Install::Never), Outcome::Ready(_)));
+        assert_eq!(calls(&bin), ["--start-server"]);
+    }
+
+    /// A server of somebody else's (another cache) is neither used nor stopped, read-only or not.
+    #[cfg(unix)]
+    #[test]
+    fn a_foreign_read_only_server_is_never_stopped() {
+        let (_h, e, bin) = fake(5, Some("Local disk: \"/somebody/else\""));
+        match prepare(&e, Install::Never) {
+            Outcome::Off { reason, warn } => assert!(warn && reason.contains("does not use this cache"), "{reason}"),
+            Outcome::Ready(_) => panic!("not our cache"),
+        }
+        assert_eq!(calls(&bin), ["--start-server"]);
+    }
+
+    /// S3 without keys fails at once, before any binary is run or any request made (it used to hang about 75 s in the metadata
+    /// lookup of a server that a build started).
+    #[test]
+    fn s3_without_keys_fails_fast_without_touching_the_binary_or_the_network() {
+        let home = tempfile::tempdir().unwrap();
+        let e = env(&[
+            ("PADDOCK_DEV_HOME", home.path().to_str().unwrap()),
+            ("PADDOCK_SCCACHE_BACKEND", "s3"),
+            ("PADDOCK_SCCACHE_S3_BUCKET", "b"),
+            ("PADDOCK_SCCACHE_S3_ENDPOINT", "10.255.255.1:15000"),
+            ("PADDOCK_SCCACHE_ENV_FILE", home.path().join("none.env").to_str().unwrap()),
+        ]);
+        let t = std::time::Instant::now();
+        assert!(matches!(prepare(&e, Install::OnDemand), Outcome::Off { warn: true, .. }));
+        assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
+        assert!(
+            !home.path().join("tools").exists() && !home.path().join("sccache-run").exists(),
+            "nothing was made or run"
         );
     }
 

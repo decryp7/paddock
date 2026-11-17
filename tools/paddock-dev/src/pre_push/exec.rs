@@ -1065,7 +1065,8 @@ exit $rc
         fn a_cargo_gate_never_gets_the_build_folder_as_a_variable_and_compiles_through_the_wrapper_when_there_is_one() {
             let d = tempfile::tempdir().unwrap();
             let mut ex = repo_with_fake_cargo(d.path(), true);
-            ex.env.insert("CARGO_TARGET_DIR".into(), "/mine".into());
+            let var = "CARGO_TARGET_DIR";
+            ex.env.insert(var.into(), "/mine".into());
             let mut g = gate("clippy a", "");
             g.program = "cargo".into();
             g.args = crate::cargo_target::with_target_dir(&["clippy".to_string()], "/t");

@@ -483,6 +483,12 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   sccache; a first version let the Mac runner join the agents' server, and the review found `CARGO_INCREMENTAL=0` (a `CARGO_*`
   variable, so part of the key) gave 4% hits against the agents' entries and that a shared server is one more thing that can stop a
   runner; the user dropped it.
+- **sccache 0.19.0 latches a failed startup write check (2026-11-17, found for the RustFS cache).** At startup the server writes one test
+  object (`RemoteStorage::check`); when that one PUT fails the server runs read-only for its whole life, every later write fails
+  ("Cannot write to read-only storage") and the stats show 0 hits with a write error per compile (the first RustFS series: 138 of 138).
+  The tool now reads `Effective cache mode` from `--show-adv-stats`, restarts a read-only server of its own cache once, and turns the
+  wrapper off with the server's log path in the warning if it stays read-only. The server always logs its errors to a file in its run folder
+  and never idles out; S3 without keys fails at once instead of waiting about 75 s in the metadata lookup.
 
 ## Linux VM guests (Paddock C21, 2026-10-25)
 - Linux guests: `tart exec` (like `ssh` without a PAM login) has no logind session, so there is no `systemd --user`
