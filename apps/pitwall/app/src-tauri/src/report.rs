@@ -532,7 +532,7 @@ mod tests {
         let mut sections = paddock_diag::builtin::all();
         sections.extend(pitwall_sections(d.data().to_path_buf(), Arc::new(Scripted)));
         let info = AppInfo::new("pitwall", "Pitwall", "1.1.0", "abc1234");
-        let now = chrono::DateTime::from_timestamp(1_762_596_000, 0).unwrap();
+        let now = jiff::Timestamp::from_second(1_762_596_000).unwrap();
         Collected::collect(&info, d, &sections, &Redactor::new(), now)
     }
 
@@ -715,7 +715,7 @@ mod tests {
         let moved = moved_logs(Some(home.to_str().unwrap()), d.logs()).expect("a moved folder that is not the app's own");
         assert_eq!(moved, home.join("logs"));
         let info = AppInfo::new("pitwall", "Pitwall", "1.1.0", "abc1234");
-        let now = chrono::DateTime::from_timestamp(1_762_596_000, 0).unwrap();
+        let now = jiff::Timestamp::from_second(1_762_596_000).unwrap();
         let sections: Vec<Arc<dyn Section>> = vec![Arc::new(MovedLogs { dir: moved })];
         let c = Collected::collect(&info, &d, &sections, &Redactor::new(), now);
         let names: Vec<&str> = c.files().iter().map(|f| f.name.as_str()).collect();
@@ -741,7 +741,7 @@ mod tests {
         write_at(&home.join("logs/pitwall-server.2026-11-08.log"), line, 1_762_596_000);
         let d = dirs(&root.path().join("app"));
         let info = AppInfo::new("pitwall", "Pitwall", "1.1.0", "abc1234");
-        let now = chrono::DateTime::from_timestamp(1_762_596_000, 0).unwrap();
+        let now = jiff::Timestamp::from_second(1_762_596_000).unwrap();
         let sections: Vec<Arc<dyn Section>> = vec![Arc::new(MovedLogs { dir: home.join("logs") })];
         let c = Collected::collect(&info, &d, &sections, &Redactor::new(), now);
         let names: Vec<&str> = c.files().iter().map(|f| f.name.as_str()).collect();

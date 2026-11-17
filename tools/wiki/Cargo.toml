@@ -22,7 +22,7 @@ path = "src/main.rs"
 clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 regex = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always"] }
 paddock-cli = { path = "../../crates/paddock-cli" }
 paddock-proc = { path = "../../crates/paddock-proc" }
 

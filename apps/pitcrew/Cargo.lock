@@ -3237,7 +3237,6 @@ dependencies = [
  "base64 0.23.1",
  "bitflags 2.13.2",
  "block2",
- "chrono",
  "crc32fast",
  "crossbeam-utils",
  "deranged",
@@ -3250,6 +3249,7 @@ dependencies = [
  "http",
  "httparse",
  "idna",
+ "jiff",
  "libc",
  "linux-raw-sys",
  "log",
@@ -3480,8 +3480,8 @@ dependencies = [
 name = "pitcrew-service"
 version = "1.0.2"
 dependencies = [
- "chrono",
  "ctrlc",
+ "jiff",
  "libc",
  "nix",
  "paddock-ipc",

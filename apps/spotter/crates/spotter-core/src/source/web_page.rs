@@ -215,15 +215,10 @@ impl Extraction {
 
 /// The date-based version of content first seen at `since`: `2026.10.22.1405` (UTC).
 pub fn change_version(since: Timestamp) -> String {
-    let d = time::OffsetDateTime::from_unix_timestamp(since.0.div_euclid(1000)).unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-    format!(
-        "{:04}.{:02}.{:02}.{:02}{:02}",
-        d.year(),
-        u8::from(d.month()),
-        d.day(),
-        d.hour(),
-        d.minute()
-    )
+    let d = jiff::Timestamp::from_second(since.0.div_euclid(1000))
+        .unwrap_or(jiff::Timestamp::UNIX_EPOCH)
+        .to_zoned(jiff::tz::TimeZone::UTC);
+    format!("{:04}.{:02}.{:02}.{:02}{:02}", d.year(), d.month(), d.day(), d.hour(), d.minute())
 }
 
 fn collapse(s: &str) -> String {

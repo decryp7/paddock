@@ -6,7 +6,7 @@
 //! Exit codes are the caller's: `0` and the printed path on success, `1` and the printed reason (what to fix) on failure.
 
 use crate::{AppInfo, Collected, Redactor, Saved, Section, suggested_name};
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use paddock_env::AppDirs;
 use paddock_jobs::CancelToken;
 use std::path::{Path, PathBuf};
@@ -77,7 +77,7 @@ pub fn resolve(
     app: &AppInfo,
     cwd: &Path,
     default_dirs: &[PathBuf],
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<PathBuf, String> {
     let path = match &args.destination {
         Destination::Path(p) if p.is_absolute() => p.clone(),
@@ -114,7 +114,7 @@ pub fn write(
     sections: &[Arc<dyn Section>],
     redactor: &Redactor,
     dest: &Path,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Result<Saved, String> {
     Collected::collect(app, dirs, sections, redactor, now)
         .assemble("")
@@ -125,14 +125,13 @@ pub fn write(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
     fn app() -> AppInfo {
         AppInfo::new("demo", "Demo", "1.0.0", "abc")
     }
 
-    fn now() -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 11, 5, 9, 0, 0).unwrap()
+    fn now() -> Timestamp {
+        "2026-11-05T09:00:00Z".parse::<Timestamp>().unwrap()
     }
 
     #[test]

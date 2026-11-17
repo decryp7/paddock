@@ -305,12 +305,8 @@ pub fn checksum_target(name: &str) -> Option<&str> {
 }
 
 fn display_time(t: Timestamp) -> String {
-    time::OffsetDateTime::from_unix_timestamp(t.0.div_euclid(1000))
-        .ok()
-        .and_then(|d| {
-            let f = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]");
-            d.format(&f).ok()
-        })
+    jiff::Timestamp::from_second(t.0.div_euclid(1000))
+        .map(|d| d.to_zoned(jiff::tz::TimeZone::UTC).strftime("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_default()
 }
 
@@ -541,6 +537,12 @@ pub fn preview_rows(candidates: Vec<Candidate>, scheme: &VersionScheme, filter: 
 mod tests {
     use super::*;
     use crate::pattern::PatternSyntax;
+
+    #[test]
+    fn display_time_is_utc_to_the_minute() {
+        assert_eq!(display_time(Timestamp(1_792_656_000_000 + 61_999)), "2026-10-22 08:01");
+        assert_eq!(display_time(Timestamp(0)), "1970-01-01 00:00");
+    }
 
     fn names(s: &Selection) -> Vec<&str> {
         s.releases.iter().map(|r| r.name.as_str()).collect()

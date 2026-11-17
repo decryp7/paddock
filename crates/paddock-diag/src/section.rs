@@ -4,7 +4,7 @@
 //! unredacted one, and a section that panics or fails costs the report only that section.
 
 use crate::manifest::{AppInfo, FileKind};
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use paddock_env::AppDirs;
 use serde_json::Value;
 
@@ -79,7 +79,7 @@ pub struct Context<'a> {
     /// The app's folders.
     pub dirs: &'a AppDirs,
     /// When the report is made.
-    pub now: DateTime<Utc>,
+    pub now: Timestamp,
 }
 
 /// A contribution to the report. Implementations must not panic (a panic is contained and noted, but costs the section) and

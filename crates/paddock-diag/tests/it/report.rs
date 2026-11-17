@@ -1,7 +1,7 @@
 //! A report end to end over temporary folders: sections, redaction, preview, zip, cancel and limits. Nothing here touches
 //! the user's folders or the network.
 
-use chrono::{TimeZone, Utc};
+use jiff::Timestamp;
 use paddock_diag::*;
 use paddock_env::{AppDirs, AppId, MapVars, Os};
 use paddock_jobs::{CancelToken, Counter};
@@ -27,8 +27,8 @@ fn dirs(root: &Path) -> AppDirs {
     .unwrap()
 }
 
-fn now() -> chrono::DateTime<Utc> {
-    Utc.with_ymd_and_hms(2026, 10, 24, 10, 30, 0).unwrap()
+fn now() -> Timestamp {
+    "2026-10-24T10:30:00Z".parse::<Timestamp>().unwrap()
 }
 
 fn redactor() -> Redactor {

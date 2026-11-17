@@ -5279,7 +5279,7 @@ dependencies = [
 name = "paddock-diag"
 version = "0.1.0"
 dependencies = [
- "chrono",
+ "jiff",
  "libc",
  "log",
  "paddock-commands",
@@ -5361,7 +5361,7 @@ dependencies = [
 name = "paddock-log"
 version = "0.1.0"
 dependencies = [
- "chrono",
+ "jiff",
  "log",
  "paddock-env",
  "paddock-jobs",
@@ -5427,7 +5427,6 @@ dependencies = [
  "base64 0.23.1",
  "bitflags 2.13.2",
  "block2",
- "chrono",
  "crc32fast",
  "crossbeam-utils",
  "deranged",
@@ -5440,6 +5439,7 @@ dependencies = [
  "http",
  "httparse",
  "idna",
+ "jiff",
  "libc",
  "linux-raw-sys",
  "log",
