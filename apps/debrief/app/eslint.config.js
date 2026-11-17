@@ -115,8 +115,9 @@ module.exports = defineConfig(
     },
   },
   {
-    // Specs share one module graph per bundle, so test state must not leak (ER-21).
-    files: ['**/*.spec.ts'],
+    // Specs share one module graph per bundle, so test state must not leak (ER-21). Unit specs only: an e2e spec keeps the
+    // e2e block's no-restricted-syntax (the raw-row selectors), which a later block for the same rule would replace.
+    files: ['src/**/*.spec.ts'],
     rules: {
       'no-restricted-syntax': [
         'error',
