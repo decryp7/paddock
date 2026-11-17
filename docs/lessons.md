@@ -2197,3 +2197,12 @@ script and then set its mode now call `write_program`.
 **Rule:** a test writes a program with `paddock_testkit::exe::write_program` and starts one it did not write with `exe::spawn`,
 `output` or `status`; product code starts programs through `paddock-proc`.
 **Class: a test or harness whose outcome depended on which thread ran first (earlier: the Debrief Stop-button probe and the row-menu e2e above), and Linux's text-busy refusal of a file written or run a moment ago (no earlier lesson).**
+
+Positive controls (2026-11-17, ER-33)
+**What happened.** Three checks passed without ever being able to fail. A Debrief dock spec's "nothing moves after planned"
+check never ran (24 of 24 runs green, the signal it waited for was never logged). The shared `expectIdle` helper passed before
+the stream had started. Conformance C137 passed on the text of an unrelated ci.yml job.
+**Rule:** every new check, gate, test assertion over a signal and shared wait helper lands with a positive control: a test that
+removes or hides what it watches (the signal, element, attribute or job step) and shows it goes red. A review rejects one
+that has none (rule 71 merged into ER-33).
+**Class: a check that cannot see the thing it guards (earlier: the Dyno 1.1.0 menu-bar probe and tray count, ER-33).**
