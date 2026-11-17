@@ -919,6 +919,7 @@ job	ui			missing=1
 job	ui			mkdir -p "$DEST"
 job	ui			mkdir -p "$DIR"
 job	ui			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
+job	ui			node scripts/e2e-ready-report.mjs
 job	ui			npm ci
 job	ui			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	ui			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
