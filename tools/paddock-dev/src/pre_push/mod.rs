@@ -73,6 +73,10 @@ pub struct PrePushArgs {
     /// per line) and check exactly that commit in a throw-away worktree, not the working tree. The hook passes it.
     #[arg(long)]
     pub refs_from_stdin: bool,
+    /// Also run the repository-wide audits (`member-audits`): set by the member gate of `./dev merge check --gates`
+    /// on the merge commit, not by a developer's push, whose time budget it would grow.
+    #[arg(long)]
+    pub member_gate: bool,
     /// Let these not-measured rows (their full ids, for example `clippy-windows apps/dyno`) pass the push; each use is logged.
     /// Also read from PADDOCK_ACCEPT_NOT_MEASURED (comma separated).
     #[arg(long, value_delimiter = ',')]
@@ -452,6 +456,7 @@ fn command_in(
             (ws, l)
         })
         .collect();
+    facts.member_gate = args.member_gate;
     facts.kept_targets = kept_targets;
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     if !args.only.is_empty() {
@@ -1293,6 +1298,7 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts
         windows_clippy: windows,
         ci_version: Some(version),
         left_out: Default::default(),
+        member_gate: false,
         kept_targets: None,
         pitwall_tests: tests,
         dev_exe: crate::tool_cache::self_exe().map_or_else(|_| "./dev".into(), |p| p.to_string_lossy().to_string()),
