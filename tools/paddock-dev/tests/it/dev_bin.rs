@@ -42,6 +42,7 @@ fn a_spawned_binary_has_the_wrapper_off() {
         .args(["sccache", "env"])
         .env_remove("CI")
         .env_remove("CARGO_TARGET_DIR")
+        .env_remove("CARGO_BUILD_TARGET_DIR")
         .output()
         .unwrap();
     assert!(out.status.success());
