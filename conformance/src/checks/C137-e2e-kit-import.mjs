@@ -5,11 +5,11 @@
 // one of: the app builds it in its own CI contract, or the spec imports the kit's source by a relative path (as `e2e/test.ts` does with
 // `pinned-clock.ts`). `import type` is erased and is not read. The contract is `apps/<app>/paddock.ci.json` (ER-42: read through the declared
 // data, never by grepping a workflow that may belong to another job): its `workflow` names the app's own workflow file, whose steps' `run` text
-// must run `build:e2e` (a comment does not count); an app without one is a leg of ci.yml, and each of its `e2e*` command lists (`e2e`, `e2eWebkit`) must run it.
+// must run `build:e2e` in each of its jobs that run Playwright (a build in another job, or a comment, does not count; a workflow with no Playwright job cannot be judged and is reported); an app without one is a leg of ci.yml, and each of its `e2e*` command lists (`e2e`, `e2eWebkit`) must run it.
 // An app with no readable contract is reported (the check cannot tell).
 // ER-41: report-only (warnings) until its first green run on the real tree, recorded by run id here. Recorded: not yet.
 import { warn } from '../finding.mjs';
-import { parseSteps } from '../util/workflows.mjs';
+import { parseJobs, parseSteps } from '../util/workflows.mjs';
 
 export const SEVERITY = warn;
 const SPEC = /^apps\/([^/]+)\/app\/e2e\/.+\.ts$/;
@@ -29,7 +29,10 @@ export function appBuildsKit(ctx, app) {
   }
   if (typeof contract.workflow === 'string') {
     const text = ctx.read(`.gitea/workflows/${contract.workflow}`);
-    return text === null || text === undefined ? null : parseSteps(text).some((st) => runsBuild(st.run));
+    if (text === null || text === undefined) return null;
+    // Only the jobs that run Playwright count, each by its own steps (a build in another job is on another runner and does not carry over).
+    const e2eJobs = parseJobs(text).filter((j) => parseSteps(j.text).some((st) => /\bplaywright\b/i.test(st.run ?? '')));
+    return e2eJobs.length ? e2eJobs.every((j) => parseSteps(j.text).some((st) => runsBuild(st.run))) : null;
   }
   // A leg of ci.yml: the contract's e2e command lists (`e2e`, `e2eWebkit`, ...) are what the e2e legs run, one command per line.
   const lists = Object.entries(contract).filter(([k, v]) => /^e2e/i.test(k) && Array.isArray(v));
