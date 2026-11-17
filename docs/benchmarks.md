@@ -1569,10 +1569,11 @@ read no tracked tree).
 
 Review asked for it as the common-practice option (no list to drift), if warm took at most about 2 minutes. Same tree, one run, load 6.4
 to 9.4 (CPU idle 66 %): 572 tests, nextest 129.9 s, whole command 160.0 s (the build of the merged tree included, which is not a cold
-build). Not taken: warm is over the 2 minute line, 10 tests failed or timed out in that environment (five `wrapper::` tests fail
-under the gate's own `RUSTUP_AUTO_INSTALL=0`, `cli::a_trial_with_bad_arguments_is_refused_before_anything_is_cloned_or_pushed` ran into
-its 120 s stop under load, and four more are the findings this branch fixes), so a negative filter would have made the gate's own
-environment a finding. The positive list is checked clause by clause against the binary's test names (`tests/it/member_audits.rs`).
+build). Not taken: warm is over the 2 minute line, and one test (`cli::a_trial_with_bad_arguments_is_refused_before_anything_is_cloned_or_pushed`)
+ran into its 120 s stop under load. That run also had 10 failures, which were not the option's: they came from the build folder
+exported in the shell that ran it (`CARGO_TARGET_DIR`; fixed in 05f72d31a, and the same tests pass with `RUSTUP_AUTO_INSTALL=0`
+exported, so the earlier note that the gate's own variable broke the wrapper tests was wrong and is withdrawn).
+The positive list is checked clause by clause against the binary's test names (`tests/it/member_audits.rs`).
 
 ### Earlier runs (superseded by the table above)
 

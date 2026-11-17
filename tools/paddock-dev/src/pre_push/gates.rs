@@ -505,7 +505,7 @@ fn member_audits(facts: &Facts) -> Planned {
     if !facts.member_gate {
         return Planned::Skip {
             id: "member-audits".into(),
-            reason: "they run in the member gate of `./dev merge check --gates` (`--member-gate`), not in a developer's push ".into(),
+            reason: "they run in the member gate of `./dev merge check --gates` (`--member-gate`), not in a developer's push".into(),
         };
     }
     let mut g = Gate {

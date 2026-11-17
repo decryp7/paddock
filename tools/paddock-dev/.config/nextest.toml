@@ -84,8 +84,8 @@ path = "junit.xml"
 # nothing a failure, and tests/it/member_audits.rs checks that every clause below selects at least one test of the binary (the replay
 # exclusion included), so a renamed audit shrinks nothing silently. They read every tracked file, so a clash between two members' changes
 # shows here and not first in the train-wide run (ER-8).
-# Measured 2026-11-17 (docs/benchmarks.md): the whole `it` binary minus the replay takes 130 s warm on the merged tree and fails on a
-# gate's own environment (RUSTUP_AUTO_INSTALL=0 breaks the wrapper tests), so the list stays positive.
+# Measured 2026-11-17 (docs/benchmarks.md): the whole `it` binary minus the replay takes 130 s warm on the merged tree (over the 2 minutes
+# the user was told to expect, with a 120 s stop on one test under load), so the list stays positive.
 # Left out on purpose: the fixture goldens (build_jobs_golden, host_steps_golden) read no tracked tree, and
 # golden::live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history: over 120 s, it replays the whole first-parent
 # history and audits no fresh code; the train-wide run keeps it.

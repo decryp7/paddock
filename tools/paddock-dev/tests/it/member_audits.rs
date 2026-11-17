@@ -104,6 +104,18 @@ fn every_clause_of_the_profile_selects_at_least_one_test_and_the_exclusion_exclu
     assert!(!selected(
         "golden::live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history"
     ));
+    // A rename cannot silently drop a live or working-tree audit: every check module's `live_` and `this_working_tree_` test is selected.
+    let audit_name = Regex::new(r"^check(_[a-z0-9]+)?::(live_|this_working_tree_)").unwrap();
+    let check_audits: Vec<&String> = all.iter().filter(|n| audit_name.is_match(n)).collect();
+    assert!(
+        check_audits.len() >= 10,
+        "the check modules' live and working-tree tests were not found: {check_audits:?}"
+    );
+    let dropped: Vec<&&String> = check_audits.iter().filter(|n| !selected(n.as_str())).collect();
+    assert!(
+        dropped.is_empty(),
+        "these live or working-tree check tests are not selected by the {AUDIT_PROFILE} profile: {dropped:?}"
+    );
     for plain in ["slots::", "locks::", "worktree::", "member_audits::"] {
         assert!(
             !all.iter().filter(|n| n.starts_with(plain)).any(|n| selected(n)),
