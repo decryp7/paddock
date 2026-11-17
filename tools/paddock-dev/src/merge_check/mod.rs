@@ -45,6 +45,7 @@ mod hakari;
 mod hunks;
 mod lost_tests;
 mod other_os;
+mod reland;
 mod reverted_base;
 mod testnames;
 mod trailers;
@@ -323,6 +324,64 @@ pub struct Request {
     /// Run the member gate (`./dev check --pre-push --base <merge>^1`) on the merge (the commit form only; the checkout must be
     /// the merge result). ADR 0098 WP-1; report-only until its first green run ([`gates::ENFORCED`]).
     pub gates: bool,
+    /// Write the merge message with the `Reverted:` lines a re-land explains to this file ([`reland`]; findings only).
+    pub write_reverted: Option<PathBuf>,
+}
+
+/// The step for `--write-reverted`: the lines a re-land explains, written with the message to `file`; says plainly when it tied none.
+fn write_reverted_step(git: &Git, merge: &Merge, found: &[Finding], file: &std::path::Path) -> generator_step::Step {
+    let step = |text: Vec<String>, data: serde_json::Value, exit| generator_step::Step { text, data, exit };
+    let lines = match reland::lines(git, merge, found) {
+        Ok(l) => l,
+        Err(why) => {
+            return step(
+                vec![format!(
+                    "::warning::--write-reverted could not read the history: {why}. Next step: write the `Reverted:` lines by hand."
+                )],
+                json!({"outcome": "not measured", "why": why}),
+                Exit::Ok,
+            );
+        }
+    };
+    if lines.is_empty() {
+        return step(
+            vec![format!(
+                "--write-reverted: no finding ties to a re-land of this member (a commit `revert: reapply ...` or `Reapply \"...\"` that undoes a revert of the target and changes the file); nothing written to {}.",
+                file.display()
+            )],
+            json!({"outcome": "none", "lines": []}),
+            Exit::Ok,
+        );
+    }
+    let head = if merge.commit.is_some() {
+        merge.message.trim_end().to_string()
+    } else {
+        format!("Merge branch '{}' into {}", merge.member_name, merge.target_name)
+    };
+    let text = format!("{head}\n\n{}\n", lines.join("\n"));
+    if let Err(e) = std::fs::write(file, &text) {
+        return step(
+            vec![format!(
+                "::error::--write-reverted could not write {}: {e}. Next step: choose a folder you can write to.",
+                file.display()
+            )],
+            json!({"outcome": "not measured", "why": e.to_string()}),
+            Exit::NotMeasured,
+        );
+    }
+    let left = found.len() - lines.len().min(found.len());
+    let mut out = vec![format!(
+        "--write-reverted: {} of {} finding(s) are the re-land's own; message with their `Reverted:` lines written to {} (use it with `git commit --amend -F` or `git merge -F`, then run the check again; the other {left} need a person):",
+        lines.len(),
+        found.len(),
+        file.display()
+    )];
+    out.extend(lines.iter().map(|l| format!("  {l}")));
+    step(
+        out,
+        json!({"outcome": "written", "file": file.display().to_string(), "lines": lines}),
+        Exit::Ok,
+    )
 }
 
 fn resolve(git: &Git, req: &Request) -> Result<Merge, CliError> {
@@ -489,6 +548,9 @@ fn check(req: &Request) -> Result<Checked, CliError> {
             steps.push("generators", step);
             // Report-only (ER-41): a member built on a merge the target reverted; never a finding, never an exit code.
             steps.push("reverted-base", reverted_base::run(&git, &merge));
+            if let (Some(file), false) = (&req.write_reverted, found.is_empty()) {
+                steps.push("write-reverted", Some(write_reverted_step(&git, &merge, &found, file)));
+            }
             if req.gates {
                 steps.push(
                     "gates",

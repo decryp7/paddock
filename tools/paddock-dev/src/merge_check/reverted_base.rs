@@ -30,7 +30,7 @@ pub struct Names<'a> {
 }
 
 /// The commit names a message reverts, from git's own line `This reverts commit <hex>` (7 to 64 hex digits, as written).
-fn trailer_targets(message: &str) -> Vec<String> {
+pub(super) fn trailer_targets(message: &str) -> Vec<String> {
     const KEY: &str = "This reverts commit ";
     message
         .lines()
@@ -146,7 +146,7 @@ struct Found {
 
 /// The full commit id `name` stands for (a full or abbreviated sha), `None` when this clone has no such commit; any other git
 /// failure is an error, never "absent" (ER-33).
-fn resolve(git: &Git, name: &str) -> Result<Option<String>, String> {
+pub(super) fn resolve(git: &Git, name: &str) -> Result<Option<String>, String> {
     let out = git.bytes_or_none(&["rev-parse", "--verify", "--quiet", &format!("{name}^{{commit}}")])?;
     let id = String::from_utf8_lossy(&out).trim().to_string();
     Ok((!id.is_empty()).then_some(id))

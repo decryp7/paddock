@@ -255,6 +255,12 @@ struct MergeCheckArgs {
     /// (ADR 0098). The checkout must be the merge result. Report-only until its first green run on a real train is recorded.
     #[arg(long)]
     gates: bool,
+    /// A member that re-lands work the target reverted (`revert: reapply ...`, `Reapply "..."`) goes backwards by design: write
+    /// the merge message with one `Reverted: <path>: <reason>` line for each backwards finding the re-land explains (its commit
+    /// undoes the revert that changed the file) to this file, for `git commit --amend -F <file>` or `git merge -F <file>`.
+    /// Any other finding stays a finding for a person to answer.
+    #[arg(long, value_name = "FILE")]
+    write_reverted: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -582,6 +588,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                     target: a.target,
                     generators: !a.no_generators,
                     gates: a.gates,
+                    write_reverted: a.write_reverted,
                 },
                 out,
                 err,
@@ -760,6 +767,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             target: a.target,
             generators: !a.no_generators,
             gates: a.gates,
+            write_reverted: a.write_reverted,
         }),
         Command::Gen {
             command: GenCommand::Check(a),

@@ -1769,3 +1769,115 @@ fn a_shallow_clone_on_the_conflict_path_is_not_measured() {
         "{text}"
     );
 }
+
+// ---- `--write-reverted`: the `Reverted:` lines of a re-land ----
+
+/// A train that took work X (`shot.txt`, three lines replaced) and reverted it (revert S), plus one revert of something else
+/// (`other.txt`, S2). The member starts at S2 and holds `L`, made by `reland`; main then moves on, so the merge is a real one.
+/// Returns the repository and the revert S.
+fn reland_repo(reland: impl Fn(&Repo, &str)) -> (Repo, String) {
+    let r = Repo::new();
+    r.write("shot.txt", "old1\nold2\nold3\n");
+    r.write("other.txt", "o1\no2\no3\n");
+    r.commit("base");
+    r.write("shot.txt", "new1\nnew2\nnew3\n");
+    let x = r.commit("feat: refresh screenshots");
+    r.write("other.txt", "p1\np2\np3\n");
+    let y = r.commit("feat: other refresh");
+    r.git(&["revert", "--no-edit", &x]);
+    let s = r.git(&["rev-parse", "HEAD"]);
+    r.git(&["revert", "--no-edit", &y]);
+    r.git(&["checkout", "-q", "-b", "member"]);
+    reland(&r, &s);
+    r.git(&["checkout", "-q", "main"]);
+    r.write("unrelated.txt", "u\n");
+    r.commit("feat: unrelated");
+    (r, s)
+}
+
+fn write_reverted(r: &Repo) -> (i32, String, String) {
+    let file = r
+        .path()
+        .join("..")
+        .join(format!("msg-{}.txt", r.path().file_name().unwrap().to_string_lossy()));
+    let (code, text) = r.check(&["--branch", "member", "--target", "main", "--write-reverted", file.to_str().unwrap()]);
+    let written = fs::read_to_string(&file).unwrap_or_default();
+    let _ = fs::remove_file(&file);
+    (code, text, written)
+}
+
+/// git's own message for a revert of a revert, as `git revert` writes it, with a re-land subject.
+fn reapply(r: &Repo, s: &str) {
+    r.git(&["revert", "--no-edit", s]);
+    let msg = format!("Reapply \"feat: refresh screenshots\"\n\nThis reverts commit {s}.\n");
+    r.git(&["commit", "-q", "--amend", "-m", &msg]);
+}
+
+#[test]
+fn a_reland_that_undoes_a_train_revert_gets_its_reverted_lines_and_the_rerun_passes() {
+    let (r, s) = reland_repo(reapply);
+    // Without the flag it is a finding (the control: the history really goes backwards).
+    let (code, text) = r.check(&["--branch", "member", "--target", "main"]);
+    assert_eq!(code, 5, "{text}");
+    assert!(text.contains("[backwards] shot.txt"), "{text}");
+    let (code, text, written) = write_reverted(&r);
+    assert_eq!(code, 5, "the findings stay until the message carries the lines: {text}");
+    assert!(
+        written.contains("Reverted: shot.txt: ") && written.contains(&s[..9]) && written.starts_with("Merge branch 'member' into main"),
+        "{written}\n{text}"
+    );
+    assert!(text.contains("1 of 1 finding(s) are the re-land's own"), "{text}");
+    // The merge made with that message passes the check.
+    let msg = r.path().join("..").join("msg-final.txt");
+    fs::write(&msg, &written).unwrap();
+    r.git(&["merge", "-q", "--no-ff", "-F", msg.to_str().unwrap(), "member"]);
+    let (code, text) = r.check(&["HEAD"]);
+    assert_eq!(code, 0, "{text}");
+}
+
+#[test]
+fn a_member_that_only_changes_the_file_back_without_being_a_reland_gets_no_line() {
+    // The same lines go backwards, but the commit is a plain edit: no `Reapply` subject, no revert named.
+    let (r, _) = reland_repo(|r, _| {
+        r.write("shot.txt", "new1\nnew2\nnew3\n");
+        r.commit("feat: new screenshots again");
+    });
+    let (code, text, written) = write_reverted(&r);
+    assert_eq!(code, 5, "{text}");
+    assert!(text.contains("[backwards] shot.txt"), "{text}");
+    assert!(written.is_empty(), "nothing is written for a finding it cannot tie: {written}");
+    assert!(text.contains("no finding ties to a re-land"), "{text}");
+}
+
+#[test]
+fn a_reland_of_another_revert_does_not_answer_a_finding_in_a_file_it_never_touched() {
+    // L re-applies the revert of `other.txt` (S2), while the backwards finding is in shot.txt: the member also edits shot.txt by
+    // a plain commit, which is no re-land.
+    let (r, _) = reland_repo(|r, _| {
+        let s2 = r.git(&["rev-parse", "HEAD~0"]);
+        r.git(&["revert", "--no-edit", &s2]);
+        let msg = format!("Reapply \"feat: other refresh\"\n\nThis reverts commit {s2}.\n");
+        r.git(&["commit", "-q", "--amend", "-m", &msg]);
+        r.write("shot.txt", "new1\nnew2\nnew3\n");
+        r.commit("feat: shot edit");
+    });
+    let (code, text, written) = write_reverted(&r);
+    assert_eq!(code, 5, "{text}");
+    assert!(text.contains("[backwards] shot.txt"), "{text}");
+    assert!(!written.contains("shot.txt"), "shot.txt is not the re-land's file: {written}");
+}
+
+#[test]
+fn a_reland_that_names_a_commit_that_is_not_a_revert_ties_nothing() {
+    // `Reapply` that "reverts" X itself (the feature commit, not a revert of it): S must be a revert.
+    let (r, _) = reland_repo(|r, _| {
+        let x = r.git(&["log", "--format=%H", "-n", "1", "--grep", "^feat: refresh screenshots", "main"]);
+        r.write("shot.txt", "new1\nnew2\nnew3\n");
+        r.git(&["add", "--all"]);
+        let msg = format!("Reapply \"feat: refresh screenshots\"\n\nThis reverts commit {x}.\n");
+        r.git(&["commit", "-q", "-m", &msg]);
+    });
+    let (code, text, written) = write_reverted(&r);
+    assert_eq!(code, 5, "{text}");
+    assert!(written.is_empty(), "{written}");
+}
