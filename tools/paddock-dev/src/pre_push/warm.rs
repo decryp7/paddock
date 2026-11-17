@@ -7,7 +7,7 @@ use super::budget::with_heavy_flags;
 use super::exec::{Done, Row};
 use super::exec::{docker_answers, heavy_command_for, on_path};
 use super::gates::{self, Gate, LinuxTarget};
-use super::linux_inputs::{ImageProbe, PROBE_NEXT, ci_version, image_probe, left_out};
+use super::linux_inputs::{ImageProbe, PROBE_NEXT, WsCrates, ci_version, image_probe, left_out};
 use super::outcome::subject_of;
 use super::{render, repo_root};
 use crate::plan::{Request, plan_with_graph};
@@ -46,16 +46,25 @@ pub fn targets(root: &Path, named: &[String], all_workspaces: &[String]) -> Resu
     Ok(out)
 }
 
-/// One container run per workspace, the push gate's own command; `left_out` reads a workspace's Tauri crates.
-pub fn runs(targets: &[String], version: &str, left_out: &dyn Fn(&str) -> Result<Vec<String>, String>) -> Result<Vec<Gate>, String> {
+/// One container run per workspace, the push gate's own command; `left_out` reads a workspace's Tauri crates. A workspace with
+/// nothing left to lint has no run (`None`: cargo would stop with "no packages to compile").
+pub fn runs(
+    targets: &[String],
+    version: &str,
+    left_out: &dyn Fn(&str) -> Result<WsCrates, String>,
+) -> Result<Vec<(String, Option<Gate>)>, String> {
     targets
         .iter()
         .map(|w| {
+            let c = left_out(w)?;
+            if c.lintable == 0 {
+                return Ok((w.clone(), None));
+            }
             let t = LinuxTarget {
                 ws: w.clone(),
-                left_out: left_out(w)?,
+                left_out: c.left_out,
             };
-            Ok(gates::linux_gate(&[t], version))
+            Ok((w.clone(), Some(gates::linux_gate(&[t], version))))
         })
         .collect()
 }
@@ -192,11 +201,18 @@ pub fn command(root: &Option<PathBuf>, named: &[String]) -> Result<Report, CliEr
     let gates = runs(&todo, &version, &|ws| left_out(&root, ws)).map_err(|e| {
         CliError::failure(format!("{e}.")).with_hint("Run `cargo metadata --no-deps` in that workspace and fix what it prints.")
     })?;
-    for (ws, g) in todo.iter().zip(gates) {
+    for (ws, g) in gates {
+        let Some(g) = g else {
+            rows.push((
+                ws,
+                Row::skipped("only Tauri crates are left in this workspace: the container cannot lint them and CI's Linux legs do"),
+            ));
+            continue;
+        };
         let mut argv: Vec<String> = prefix.clone();
         argv.push(g.program.clone());
         argv.extend(g.args.iter().cloned());
-        let (id, row, _) = step(&root, ws, &argv, &format!("no push budget; limit {} s", RUN_MAX.as_secs()));
+        let (id, row, _) = step(&root, &ws, &argv, &format!("no push budget; limit {} s", RUN_MAX.as_secs()));
         rows.push((id, row));
     }
     Ok(render("warm-linux", &rows))

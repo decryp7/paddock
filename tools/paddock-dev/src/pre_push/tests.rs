@@ -25,6 +25,13 @@ fn plan() -> serde_json::Value {
     })
 }
 
+fn crates_of(left_out: &[&str], lintable: usize) -> super::linux_inputs::WsCrates {
+    super::linux_inputs::WsCrates {
+        left_out: left_out.iter().map(|c| c.to_string()).collect(),
+        lintable,
+    }
+}
+
 fn facts() -> Facts {
     Facts {
         conformance: Some(Ok(["conformance/bin/paddock-conformance.mjs", "--app", "paddock", "--only", "C06"]
@@ -34,10 +41,10 @@ fn facts() -> Facts {
         windows_clippy: BTreeSet::from(["apps/dyno".to_string(), "apps/pitwall".to_string()]),
         ci_version: Some(Ok("7".into())),
         left_out: [
-            ("crates".to_string(), Ok(vec![])),
-            ("apps/dyno".to_string(), Ok(vec!["dyno-app".to_string()])),
-            ("apps/pitwall".to_string(), Ok(vec!["pitwall-app".to_string()])),
-            ("apps/debrief".to_string(), Ok(vec!["debrief-app".to_string()])),
+            ("crates".to_string(), Ok(crates_of(&[], 3))),
+            ("apps/dyno".to_string(), Ok(crates_of(&["dyno-app"], 2))),
+            ("apps/pitwall".to_string(), Ok(crates_of(&["pitwall-app"], 2))),
+            ("apps/debrief".to_string(), Ok(crates_of(&["debrief-app"], 2))),
         ]
         .into(),
         member_gate: true,
@@ -1059,15 +1066,20 @@ fn the_printed_rerun_can_be_pasted() {
 
 #[test]
 fn the_tauri_crates_are_the_packages_with_a_writing_build_dependency() {
-    use super::linux_inputs::{ci_version, tauri_crates};
+    use super::linux_inputs::{ci_version, split_crates};
     let json = r#"{"packages":[
         {"name":"dyno-app","dependencies":[{"name":"tauri-build","kind":"build"},{"name":"serde","kind":null}]},
         {"name":"pitwall-app","dependencies":[{"name":"paddock-build","kind":"build"}]},
         {"name":"dyno-core","dependencies":[{"name":"serde","kind":null}]},
         {"name":"dev-only","dependencies":[{"name":"tauri-build","kind":"dev"}]},
         {"name":"in-src-tauri-but-no-build-script","dependencies":[]}]}"#;
-    assert_eq!(tauri_crates(json).unwrap(), ["dyno-app", "pitwall-app"]);
-    assert!(tauri_crates("{}").is_err() && tauri_crates("x").is_err());
+    let split = split_crates(json).unwrap();
+    assert_eq!(split.left_out, ["dyno-app", "pitwall-app"]);
+    assert_eq!(split.lintable, 3, "the other packages stay lintable");
+    assert!(split_crates("{}").is_err() && split_crates("x").is_err());
+    // A workspace whose only package is a Tauri crate (apps/workbench-demo/src-tauri) has nothing left for cargo to compile.
+    let only = r#"{"packages":[{"name":"workbench-demo-app","dependencies":[{"name":"tauri-build","kind":"build"}]}]}"#;
+    assert_eq!(split_crates(only).unwrap().lintable, 0);
     let d = tempfile::tempdir().unwrap();
     assert!(ci_version(d.path()).is_err());
     std::fs::create_dir_all(d.path().join("ci-image")).unwrap();
@@ -2816,9 +2828,16 @@ fn a_cold_linux_clippy_cut_short_names_the_warm_command() {
 fn warm_linux_runs_the_push_rows_own_command_once_per_workspace() {
     use super::warm::{runs, targets};
     let rows = runs(&["crates".to_string(), "apps/dyno".to_string()], "7", &|ws| {
-        Ok(if ws == "crates" { vec![] } else { vec!["dyno-app".to_string()] })
+        Ok(if ws == "crates" {
+            crates_of(&[], 2)
+        } else {
+            crates_of(&["dyno-app"], 1)
+        })
     })
-    .unwrap();
+    .unwrap()
+    .into_iter()
+    .map(|(_, g)| g.expect("both have crates to lint"))
+    .collect::<Vec<_>>();
     assert_eq!(rows.len(), 2, "one container run per workspace");
     let Planned::Run(row) = linux_row(&["crates/a.rs"], &facts()) else {
         panic!("row")
@@ -2903,4 +2922,48 @@ fn an_image_probe_that_neither_succeeds_nor_says_missing_is_broken_not_measured(
         !fake.ran.lock().unwrap().iter().any(|r| r.starts_with("clippy-linux")),
         "nothing started"
     );
+}
+
+/// A workspace whose only package is a Tauri crate (apps/workbench-demo/src-tauri) leaves nothing for `cargo clippy --workspace
+/// --exclude ..` to compile: cargo stops with "no packages to compile" (the integrator's `--warm-linux`, train 14). The row skips
+/// it and says so; what is left of the other workspaces still runs.
+#[test]
+fn a_workspace_with_only_tauri_crates_is_skipped_and_named_not_linted() {
+    let mut f = facts();
+    let mut plan = plan();
+    plan["packages"]["apps/demo/src-tauri"] = json!(["demo-app"]);
+    let linux_row = |files: &[&str], f: &Facts| {
+        plan_gates(&plan, &change(files), f)
+            .into_iter()
+            .find(|p| {
+                matches!(p, Planned::Run(g) if g.id.starts_with("clippy-linux"))
+                    || matches!(p, Planned::Skip { id, .. } if id.starts_with("clippy-linux"))
+            })
+            .expect("a Linux Clippy row")
+    };
+    f.left_out.insert("apps/demo/src-tauri".into(), Ok(crates_of(&["demo-app"], 0)));
+    // Alone: the row is a skip that names the workspace and why.
+    let Planned::Skip { id, reason } = linux_row(&["apps/demo/src-tauri/src/a.rs"], &f) else {
+        panic!("a workspace with nothing to lint is skipped")
+    };
+    assert!(id.starts_with("clippy-linux") && id.contains("apps/demo/src-tauri"), "{id}");
+    assert!(reason.contains("only Tauri crates") && reason.contains("demo-app"), "{reason}");
+    // Beside a lintable one: that one runs, and the id names the skipped workspace.
+    let Planned::Run(g) = linux_row(&["crates/a/src/lib.rs", "apps/demo/src-tauri/src/a.rs"], &f) else {
+        panic!("the lintable workspace still runs")
+    };
+    assert!(
+        g.id.contains("apps/demo/src-tauri (skipped: only Tauri crates: demo-app)"),
+        "{}",
+        g.id
+    );
+    assert!(
+        g.args.join(" ").contains("cd crates") && !g.args.join(" ").contains("cd apps/demo/src-tauri"),
+        "{:?}",
+        g.args
+    );
+    assert_eq!(g.workspaces, ["crates"]);
+    // `--warm-linux` skips it too.
+    let rows = super::warm::runs(&["apps/demo/src-tauri".to_string()], "7", &|_| Ok(crates_of(&["demo-app"], 0))).unwrap();
+    assert!(rows[0].1.is_none());
 }

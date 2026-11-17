@@ -125,7 +125,7 @@ pub struct Facts {
     pub dev_exe: String,
     /// The Tauri crates each candidate workspace leaves out of the Linux Clippy ([`super::linux_inputs::left_out`]), or why cargo
     /// could not say. Filled for [`linux_candidates`] only.
-    pub left_out: std::collections::BTreeMap<String, Result<Vec<String>, String>>,
+    pub left_out: std::collections::BTreeMap<String, Result<super::linux_inputs::WsCrates, String>>,
     /// The run is the member gate of `./dev merge check --gates` (`--member-gate`): the repository-wide audits run too.
     pub member_gate: bool,
     /// A kept build folder per workspace (`<it>/<workspace>`), used when the caller sets no `CARGO_TARGET_DIR`: the throw-away
@@ -476,11 +476,14 @@ fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Planned {
         }
     };
     let mut targets = Vec::new();
+    // Workspaces with nothing left once the Tauri crates are out: cargo would stop with "no packages to compile".
+    let mut skipped: Vec<(String, Vec<String>)> = Vec::new();
     for ws in &candidates {
         match facts.left_out.get(ws) {
+            Some(Ok(l)) if l.lintable == 0 => skipped.push((ws.clone(), l.left_out.clone())),
             Some(Ok(l)) => targets.push(LinuxTarget {
                 ws: ws.clone(),
-                left_out: l.clone(),
+                left_out: l.left_out.clone(),
             }),
             Some(Err(e)) => {
                 return Planned::Broken {
@@ -500,7 +503,22 @@ fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Planned {
             }
         }
     }
-    Planned::Run(linux_gate(&targets, &version))
+    let named = |s: &(String, Vec<String>)| format!("{} ({})", s.0, s.1.join(" "));
+    if targets.is_empty() {
+        return Planned::Skip {
+            id,
+            reason: format!(
+                "only Tauri crates are left in {}: the container cannot lint them (their build scripts write into the read-only source tree) and CI's Linux legs do",
+                skipped.iter().map(named).collect::<Vec<_>>().join(", ")
+            ),
+        };
+    }
+    let mut gate = linux_gate(&targets, &version);
+    for (ws, crates) in &skipped {
+        gate.id
+            .push_str(&format!(" + {ws} (skipped: only Tauri crates: {})", crates.join(" ")));
+    }
+    Planned::Run(gate)
 }
 
 /// The row id of a Linux Clippy run: the workspaces, each with the crates it leaves out, so a pass never claims them. No comma in

@@ -25,33 +25,44 @@ pub fn ci_version(root: &Path) -> Result<String, String> {
     Ok(v.to_string())
 }
 
-/// The packages of one `cargo metadata --no-deps` JSON text that have `tauri-build` or `paddock-build` among their build
-/// dependencies, sorted.
-pub fn tauri_crates(metadata: &str) -> Result<Vec<String>, String> {
-    let v: Value = serde_json::from_str(metadata).map_err(|e| format!("cargo metadata is not JSON: {e}"))?;
-    let packages = v["packages"].as_array().ok_or("cargo metadata has no \"packages\" list")?;
-    let mut out: Vec<String> = packages
-        .iter()
-        .filter(|p| {
-            p["dependencies"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .any(|d| d["kind"] == "build" && d["name"].as_str().is_some_and(|n| WRITERS.contains(&n)))
-        })
-        .filter_map(|p| p["name"].as_str().map(str::to_string))
-        .collect();
-    out.sort();
-    Ok(out)
+/// The packages of one workspace, split by whether the container can lint them.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WsCrates {
+    /// The Tauri crates (a `tauri-build` or `paddock-build` build dependency), sorted: left out of the run.
+    pub left_out: Vec<String>,
+    /// The packages that remain after them. Zero means `cargo clippy --workspace --exclude ..` has nothing to compile (cargo:
+    /// "no packages to compile"), so the row skips the workspace.
+    pub lintable: usize,
 }
 
-/// The crates of workspace `ws` (repository-relative) the container leaves out, or why cargo could not say (the row is then
-/// broken, not skipped: ER-45).
-pub fn left_out(root: &Path, ws: &str) -> Result<Vec<String>, String> {
+/// Splits the packages of one `cargo metadata --no-deps` JSON text (the workspace members) into the Tauri crates and the rest.
+pub fn split_crates(metadata: &str) -> Result<WsCrates, String> {
+    let v: Value = serde_json::from_str(metadata).map_err(|e| format!("cargo metadata is not JSON: {e}"))?;
+    let packages = v["packages"].as_array().ok_or("cargo metadata has no \"packages\" list")?;
+    let writes = |p: &Value| {
+        p["dependencies"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|d| d["kind"] == "build" && d["name"].as_str().is_some_and(|n| WRITERS.contains(&n)))
+    };
+    let mut left_out: Vec<String> = packages
+        .iter()
+        .filter(|p| writes(p))
+        .filter_map(|p| p["name"].as_str().map(str::to_string))
+        .collect();
+    left_out.sort();
+    let lintable = packages.iter().filter(|p| !writes(p)).count();
+    Ok(WsCrates { left_out, lintable })
+}
+
+/// The crates of workspace `ws` (repository-relative) the container leaves out and how many remain, or why cargo could not say
+/// (the row is then broken, not skipped: ER-45).
+pub fn left_out(root: &Path, ws: &str) -> Result<WsCrates, String> {
     let json = CargoCli::new(root, Duration::from_secs(120))
         .metadata(&format!("{ws}/Cargo.toml"))
         .map_err(|e| format!("cargo metadata for {ws} failed: {e}"))?;
-    tauri_crates(&json)
+    split_crates(&json)
 }
 
 /// What `linux-container.sh --ci-image --image-ready` said about the local CI image.
