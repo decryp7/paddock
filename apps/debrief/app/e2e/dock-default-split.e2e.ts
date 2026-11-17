@@ -1,5 +1,6 @@
 import { expect, test } from './test';
 import { openApp } from './app';
+import { expectDockPlanned } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // The default split is applied once the dock has its size, so the layout is the same the moment the app is ready and
 // a moment later (it used to settle at 300/489 or 282/507 px depending on when the container was measured).
@@ -53,7 +54,7 @@ for (const size of [
     });
     await openApp(page);
     await expect(page.locator('debrief-filter-bar')).toBeVisible();
-    await expect(page.locator('debrief-dock-host[data-dock-planned]')).toBeAttached();
+    await expectDockPlanned(page);
     const log = await page.evaluate(() => (window as unknown as { __dockLog: Reading[] }).__dockLog);
     const shown = (r: Reading) => `${JSON.stringify(r)}`;
     // From the first reading with the filter bar and all groups, the dock's top never changes.

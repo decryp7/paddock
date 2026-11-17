@@ -1,4 +1,5 @@
 import { expect, test } from './test';
+import { expectListFiltered } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 import { openAppWith } from './mock-url';
 import { runCommand } from './ai-support';
 
@@ -42,9 +43,7 @@ test('the palette ranks "AI" matches first, without loose ones or duplicates', a
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill('AI');
   const options = page.locator('debrief-command-palette').getByRole('option');
-  // Read the list only once it is the filtered one: the matched text is marked, and the unfiltered list (recent and common
-  // commands, where "Connect to Pitwall" is 9th) has no marks. Reading on "an option is visible" raced the render (about 1 in 20 in WebKit).
-  await expect(options.first().locator('mark')).toBeVisible();
+  await expectListFiltered(options);
   const texts = (await options.allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim());
   const setUp = texts.findIndex((t) => t.includes('Connect to Pitwall'));
   expect(setUp).toBeGreaterThanOrEqual(0);

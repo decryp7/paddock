@@ -119,3 +119,23 @@ for (const colorScheme of THEMES) {
 
 Build: `npm run build:e2e` in `ui/` (writes `ui/dist/paddock-e2e`). Its unit tests run with `npm run test:scripts`; the screenshot runner is
 also run for real on `data:` pages: `npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=screenshots`.
+
+
+## "Ready" per kind of thing: `ready.ts`
+
+`toBeVisible()` says an element is drawn, not that its content, position or wiring is final. Wait with the helper of the kind, then read or press
+(the sweep of 2026-11-17, docs/lessons.md):
+
+| Helper | Waits for | The race it closes |
+| --- | --- | --- |
+| `expectListFiltered(options, marker = 'mark')` | the first option carries the highlight of the match | a palette still showing the unfiltered list |
+| `expectOverlayPositioned(panel, anchor, tolerance = 1)` | the overlay's left edge and width agree with the anchor | a select list visible at x 0 before the overlay positions it |
+| `expectWired(control, attribute = 'aria-expanded', value = 'false')` | an attribute only the update pass sets | a click on a control the framework has not wired ("onContainerClick of undefined") |
+| `expectIdle(...busy)` | no Stop button or "thinking" line is shown | a card that moves while the answer still streams |
+| `expectDockPlanned(page)` | `data-dock-planned` (Debrief's DockService.planned) | a layout read before the dock planned for the window |
+| `expectNotMoving(locator)` | the same box in two reads in a row | an element still settling |
+
+Apps import the source relatively (`../../../../ui/projects/paddock-e2e/src/ready.ts`) unless their workflow builds the kit (conformance C137).
+The ESLint rule `paddock/e2e-ready-reads` (in the `e2ePinnedClock` block, off by default because the lint commands run with `--max-warnings 0`; read it with `PADDOCK_E2E_READY_LINT=warn npx eslint 'e2e/**/*.ts'`) flags a `boundingBox`, `allInnerTexts`, `allTextContents`, `innerText`,
+`textContent`, `evaluate` or `evaluateAll` in the statement right after a bare `toBeVisible()` or `waitFor()`; a read that is meant to be immediate carries
+`// conformance: e2e-ready — <why>`. Report-only until its first green run on the real tree.

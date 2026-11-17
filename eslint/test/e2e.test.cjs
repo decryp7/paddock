@@ -13,7 +13,7 @@ const dir = mkdtempSync(join(tmpdir(), 'paddock-eslint-e2e-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
 
 /** Lints `files` ({ path: text }) with the e2e block over the TypeScript parser (and `extra` config blocks); returns "path:line rule". */
-async function lint(files, extra = []) {
+async function lint(files, extra = [], ready = 'warn') {
   for (const [p, text] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, p)), { recursive: true });
     writeFileSync(join(dir, p), text);
@@ -21,7 +21,7 @@ async function lint(files, extra = []) {
   const eslint = new ESLint({
     cwd: dir,
     overrideConfigFile: true,
-    overrideConfig: defineConfig({ files: ['**/*.ts'], languageOptions: { parser: tseslint.parser } }, ...extra, ...e2ePinnedClock()),
+    overrideConfig: defineConfig({ files: ['**/*.ts'], languageOptions: { parser: tseslint.parser } }, ...extra, ...e2ePinnedClock({ ready })),
   });
   const results = await eslint.lintFiles(Object.keys(files));
   return results.flatMap((r) => r.messages.map((m) => `${r.filePath.slice(dir.length + 1)}:${m.line} ${m.ruleId ?? 'parse'}`));
@@ -93,4 +93,55 @@ test("an app's own no-restricted-syntax in the same files survives (rule options
   const found = await lint({ 'e2e/both.spec.ts': "import { test } from '@playwright/test';\nconst s = 'raw-row';\n" }, extra);
   assert.ok(found.includes(`e2e/both.spec.ts:1 ${RULE}`), found.join(' | '));
   assert.ok(found.includes('e2e/both.spec.ts:2 no-restricted-syntax'), found.join(' | '));
+});
+
+const READY = 'paddock/e2e-ready-reads';
+const readLines = (found, file) => found.filter((m) => m.startsWith(`${file}:`) && m.endsWith(READY)).map((m) => Number(m.split(' ')[0].split(':')[1]));
+
+test('e2e-ready-reads: a read right after a bare visibility wait is reported (the sweep of 2026-11-17)', async () => {
+  const found = await lint({
+    'e2e/bad.spec.ts': [
+      "import { expect, test } from './test';",
+      "test('a', async ({ page }) => {",
+      "  const options = page.getByRole('option');",
+      '  await expect(options.first()).toBeVisible();',
+      '  const texts = await options.allInnerTexts();',
+      "  await page.locator('#a').waitFor();",
+      "  const box = await page.locator('#a').boundingBox();",
+      "  await page.locator('#b').waitFor({ state: 'visible' });",
+      '  const n = await page.evaluate(() => 1);',
+      '});',
+      '',
+    ].join('\n'),
+  });
+  assert.deepEqual(readLines(found, 'e2e/bad.spec.ts'), [5, 7, 9], found.join(' | '));
+});
+
+test('e2e-ready-reads: a ready helper or any other step between, a waiver, a click and a read in a function are fine', async () => {
+  const found = await lint({
+    'e2e/ok.spec.ts': [
+      "import { expect, test } from './test';",
+      "test('a', async ({ page }) => {",
+      '  await expect(options.first()).toBeVisible();',
+      '  await expectListFiltered(options);',
+      '  const texts = await options.allInnerTexts();',
+      '  await expect(options.first()).toBeVisible();',
+      '  // conformance: e2e-ready — the list is static here, read once',
+      '  const t2 = await options.allInnerTexts();',
+      '  await expect(options.first()).toBeVisible();',
+      '  await options.first().click();',
+      '  await expect(options.first()).not.toBeVisible();',
+      '  const t3 = await options.allInnerTexts();',
+      '  await expect(options.first()).toBeVisible();',
+      '  const f = async () => options.allInnerTexts();',
+      '});',
+      '',
+    ].join('\n'),
+  });
+  assert.deepEqual(readLines(found, 'e2e/ok.spec.ts'), [], found.join(' | '));
+});
+
+test('e2e-ready-reads is off by default (report-only: the lint commands run with --max-warnings 0)', async () => {
+  const found = await lint({ 'e2e/off.spec.ts': "test('a', async () => {\n  await expect(x).toBeVisible();\n  const t = await x.allInnerTexts();\n});\n" }, [], null);
+  assert.deepEqual(readLines(found, 'e2e/off.spec.ts'), []);
 });

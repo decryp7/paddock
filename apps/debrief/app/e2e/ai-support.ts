@@ -1,5 +1,6 @@
 import { expect, Locator, Page } from '@playwright/test';
 import { gridRows, openAppWith } from './mock-url';
+import { expectIdle } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 /** Opens the app with the scripted AI mock (fast streaming) plus `extra` switches, and waits for the grid. */
 export async function openAiApp(page: Page, extra = ''): Promise<void> {
@@ -27,8 +28,7 @@ export async function ask(panel: Locator, question: string): Promise<void> {
 }
 
 export async function waitAnswered(panel: Locator): Promise<void> {
-  await expect(panel.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
-  await expect(panel.locator('.thinking')).toHaveCount(0);
+  await expectIdle(panel.getByRole('button', { name: 'Stop', exact: true }), panel.locator('.thinking'));
 }
 
 /** Right-clicks the first grid row and returns the context menu. */

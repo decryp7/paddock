@@ -2226,3 +2226,12 @@ worktree-guard) and not `kill-guard.sh`, whose header says the coordinator wires
 started, through the tool that started it (`run_in_background` with TaskStop, or `kill %job`), or by the port you picked after `lsof` shows your own
 process in your own folder; never by a pattern on a program name. **Class: a guard that exists, is tested and is not wired** (earlier: the coordinator-hook
 rollout of 2026-11-12).
+
+## Shared "ready" waits and a lint for reads after a bare visibility wait (2026-11-17)
+The class of the sweep entry (a spec reads or presses on "it is in the DOM") now has one wait per kind in `ui/projects/paddock-e2e/src/ready.ts`
+(`expectListFiltered`, `expectOverlayPositioned`, `expectWired`, `expectIdle`, `expectDockPlanned`, `expectNotMoving`), and an ESLint rule,
+`paddock/e2e-ready-reads` (in the `e2ePinnedClock` block, AST, not a regex check; off by default because the lint commands run with `--max-warnings 0` and a warning blocked the pre-commit hook, read it with `PADDOCK_E2E_READY_LINT=warn`), that reports a read (`boundingBox`, `allInnerTexts`,
+`allTextContents`, `innerText`, `textContent`, `evaluate`, `evaluateAll`) in the statement right after a bare `toBeVisible()` or `waitFor()`. The
+sweep's five specs moved onto the helpers. First count (`PADDOCK_E2E_READY_LINT=warn`): 93 warnings in the other specs (Debrief 30, Dyno 26, ui 27, Pitwall 6, Spotter 3, Pitcrew 1);
+no waiver was added (ER-46), so the count only goes down as specs move or the rule flips to error after its first green run on the real tree. Many of
+the 93 are reads of a static element; a waiver `// conformance: e2e-ready — <why>` is for those.
