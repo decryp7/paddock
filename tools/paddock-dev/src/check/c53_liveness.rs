@@ -8,7 +8,7 @@ use super::Ctx;
 use super::baseline::{self, Growth, reconcile};
 use super::finding::Finding;
 use super::inline_waiver::{CommentView, InlineWaiver, Kind};
-use super::jsre::{is_js_space, line_at, rx, units};
+use super::jsre::{LineIndex, is_js_space, rx};
 use super::mask::mask_units;
 use regex::Regex;
 use serde_json::Value;
@@ -47,7 +47,8 @@ pub struct Liveness {
 }
 
 struct Hit {
-    index: usize,
+    /// Byte offset in the masked text.
+    byte: usize,
     what: String,
 }
 
@@ -73,11 +74,10 @@ pub fn pid_liveness(text: &str, file: &str) -> Vec<Liveness> {
     let view = CommentView::of(text, Kind::Rust);
     let lines: Vec<&str> = text.split('\n').collect();
     let mut hits: Vec<Hit> = Vec::new();
-    let at = |start: usize| units(&masked[..start]);
     for m in QUALIFIED.captures_iter(&masked) {
         let w = m.get(0).map_or(0, |w| w.start());
         hits.push(Hit {
-            index: at(w),
+            byte: w,
             what: format!("asks `paddock_proc::{}` about a raw pid", &m[1]),
         });
     }
@@ -86,7 +86,7 @@ pub fn pid_liveness(text: &str, file: &str) -> Vec<Liveness> {
         for m in CRATE.captures_iter(&masked) {
             let w = m.get(0).map_or(0, |w| w.start());
             hits.push(Hit {
-                index: at(w),
+                byte: w,
                 what: format!("asks `{}` about a raw pid", &m[1]),
             });
         }
@@ -132,7 +132,7 @@ pub fn pid_liveness(text: &str, file: &str) -> Vec<Liveness> {
         }
         if (in_proc || imported.iter().any(|i| i == name)) && !after_fn(tail(before, 12)) {
             hits.push(Hit {
-                index: at(w),
+                byte: w,
                 what: format!("asks `{name}` about a raw pid"),
             });
         }
@@ -143,29 +143,32 @@ pub fn pid_liveness(text: &str, file: &str) -> Vec<Liveness> {
         let method = two.ends_with('.') || (two.chars().count() == 2 && two.starts_with('.') && two.ends_with(is_js_space));
         if !method {
             hits.push(Hit {
-                index: at(m.start()),
+                byte: m.start(),
                 what: "checks a raw pid with `kill(pid, 0)`".into(),
             });
         }
     }
     for m in OPEN.find_iter(&masked) {
         hits.push(Hit {
-            index: at(m.start()),
+            byte: m.start(),
             what: "opens a process by its raw pid with `OpenProcess`".into(),
         });
     }
     for m in PID_FROM.find_iter(&masked) {
         if !OWN_PID.is_match(&masked[m.end()..]) {
             hits.push(Hit {
-                index: at(m.start()),
+                byte: m.start(),
                 what: "looks a raw pid up in sysinfo".into(),
             });
         }
     }
-    hits.sort_by_key(|h| h.index);
+    // Byte order in the masked text is the JavaScript's order; each line comes from one pass over the newlines, not a walk of the
+    // prefix per hit (quadratic).
+    hits.sort_by_key(|h| h.byte);
+    let lines_of = LineIndex::new(&masked);
     hits.into_iter()
         .map(|h| {
-            let line = line_at(&masked, masked_byte(&masked, h.index));
+            let line = lines_of.line(h.byte);
             let own = lines.get(line - 1).copied().unwrap_or("");
             let waived = view.waiver(line, "pid-liveness");
             Liveness {
@@ -176,18 +179,6 @@ pub fn pid_liveness(text: &str, file: &str) -> Vec<Liveness> {
             }
         })
         .collect()
-}
-
-/// The byte offset of UTF-16 offset `index` in `s`.
-fn masked_byte(s: &str, index: usize) -> usize {
-    let mut u = 0;
-    for (b, c) in s.char_indices() {
-        if u >= index {
-            return b;
-        }
-        u += c.len_utf16();
-    }
-    s.len()
 }
 
 /// `lineHash`: the first 16 hex digits of the SHA-256 of the line with white space collapsed and trimmed.
@@ -422,6 +413,20 @@ pub fn liveness_findings(ctx: &Ctx) -> LivenessRun {
 mod tests {
     use super::{Entry, exact_key, loose_key};
     use crate::check::baseline::{Reconciled, reconcile as generic};
+
+    /// Each text is counted once, not once per hit (by the bytes walked, not by time, ER-12; the C122 lesson of 2026-11-18).
+    #[test]
+    fn a_file_with_many_hits_is_counted_once_not_once_per_hit() {
+        let text: String = (0..2000).map(|i| format!("    let a{i} = paddock_proc::is_alive(p);\n")).collect();
+        crate::check::jsre::WALKED.with(|w| w.set(0));
+        assert_eq!(super::pid_liveness(&text, "crates/a/tests/it/x.rs").len(), 2000);
+        let walked = crate::check::jsre::WALKED.with(|w| w.get());
+        assert!(
+            walked <= 4 * text.len(),
+            "walked {walked} bytes of a {}-byte file: counted once per hit, not once per file",
+            text.len()
+        );
+    }
 
     fn e(file: &str, hash: &str) -> Entry {
         Entry {

@@ -17,7 +17,7 @@
 
 use super::finding::Finding;
 use super::inline_waiver::{CommentView, InlineWaiver, Kind};
-use super::jsre::{line_at, rx, units};
+use super::jsre::{LineIndex, UnitIndex, rx};
 use super::mask::mask_units;
 use super::record::Precondition;
 use super::{Check, CheckOutput, Control, Ctx};
@@ -74,12 +74,23 @@ pub fn pid_kills(text: &str) -> Vec<PidKill> {
     let mask_u = mask_units(&text.encode_utf16().collect::<Vec<u16>>());
     let masked = String::from_utf16_lossy(&mask_u);
     let view = CommentView::of(text, Kind::Rust);
+    // JavaScript indexes and lines of the hits, each text counted once and only when it has a hit (not once per hit: quadratic).
+    let (in_masked, in_text) = (std::cell::OnceCell::new(), std::cell::OnceCell::new());
+    let at_masked = |b: usize| in_masked.get_or_init(|| (UnitIndex::new(&masked), LineIndex::new(&masked))).0.at(b);
+    let line_masked = |b: usize| {
+        in_masked
+            .get_or_init(|| (UnitIndex::new(&masked), LineIndex::new(&masked)))
+            .1
+            .line(b)
+    };
+    let at_text = |b: usize| in_text.get_or_init(|| (UnitIndex::new(text), LineIndex::new(text))).0.at(b);
+    let line_text = |b: usize| in_text.get_or_init(|| (UnitIndex::new(text), LineIndex::new(text))).1.line(b);
     let mut hits: Vec<Hit> = Vec::new();
     for (re, what) in WIN32.iter() {
         for m in re.find_iter(&masked) {
             hits.push(Hit {
-                index: units(&masked[..m.start()]),
-                line: line_at(&masked, m.start()),
+                index: at_masked(m.start()),
+                line: line_masked(m.start()),
                 what: (*what).into(),
                 follow_up: false,
             });
@@ -94,10 +105,10 @@ pub fn pid_kills(text: &str) -> Vec<PidKill> {
             } else {
                 whole.start
             };
-            if mask_u.get(units(&text[..q])) == Some(&(b'"' as u16)) {
+            if mask_u.get(at_text(q)) == Some(&(b'"' as u16)) {
                 hits.push(Hit {
-                    index: units(&text[..whole.start]),
-                    line: line_at(text, whole.start),
+                    index: at_text(whole.start),
+                    line: line_text(whole.start),
                     what: format!("runs `{}`, which ends processes by pid", &m[1]),
                     follow_up: false,
                 });
@@ -106,8 +117,8 @@ pub fn pid_kills(text: &str) -> Vec<PidKill> {
     }
     for m in BLANKET.find_iter(&masked) {
         hits.push(Hit {
-            index: units(&masked[..m.start()]),
-            line: line_at(&masked, m.start()),
+            index: at_masked(m.start()),
+            line: line_masked(m.start()),
             what: "allows `clippy::disallowed_methods` for a whole crate or module, which hides bare-pid kills from Clippy".into(),
             follow_up: false,
         });
@@ -115,8 +126,8 @@ pub fn pid_kills(text: &str) -> Vec<PidKill> {
     for m in FOLLOW_UP.captures_iter(text) {
         let start = m.get(0).map_or(0, |w| w.start());
         hits.push(Hit {
-            index: units(&text[..start]),
-            line: line_at(text, start),
+            index: at_text(start),
+            line: line_text(start),
             what: format!("an open ADR 0033 follow-up ({}): a known bare-pid kill or parent-pid walk", &m[1]),
             follow_up: true,
         });
@@ -251,5 +262,24 @@ impl Check for C53 {
             completed,
             precondition: Precondition { met, detail },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Each text is counted once, not once per hit (by the bytes walked, not by time, ER-12; the C122 lesson of 2026-11-18).
+    #[test]
+    fn a_file_with_many_hits_is_counted_once_not_once_per_hit() {
+        let text: String = (0..2000)
+            .map(|i| format!("    TerminateProcess(h{i}, 1);\n    let s = \"taskkill\";\n"))
+            .collect();
+        crate::check::jsre::WALKED.with(|w| w.set(0));
+        assert_eq!(super::pid_kills(&text).len(), 4000);
+        let walked = crate::check::jsre::WALKED.with(|w| w.get());
+        assert!(
+            walked <= 4 * text.len(),
+            "walked {walked} bytes of a {}-byte file: counted once per hit, not once per file",
+            text.len()
+        );
     }
 }

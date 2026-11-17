@@ -109,6 +109,23 @@ pub fn units(s: &str) -> usize {
     s.encode_utf16().count()
 }
 
+/// The 1-based line of any byte offset of one text, from its newlines found once (binary search per lookup).
+pub struct LineIndex(Vec<usize>);
+
+impl LineIndex {
+    /// Finds the newlines of `s` once.
+    pub fn new(s: &str) -> LineIndex {
+        #[cfg(test)]
+        WALKED.with(|w| w.set(w.get() + s.len()));
+        LineIndex(s.bytes().enumerate().filter(|&(_, b)| b == b'\n').map(|(i, _)| i).collect())
+    }
+
+    /// [`line_at`]`(s, byte)`.
+    pub fn line(&self, byte: usize) -> usize {
+        self.0.partition_point(|&n| n < byte) + 1
+    }
+}
+
 /// The JavaScript index (UTF-16 offset) of every byte offset of one text, counted in one pass. `units(&text[..m.start()])` for
 /// each match walked the prefix again every time: C122 spent 17 of its 20 s on that over this tree in a debug build, and its live
 /// test passed nextest's 60 s under load (2026-11-18).
@@ -139,8 +156,11 @@ impl UnitIndex {
     }
 }
 
-/// The 1-based line of byte offset `at` in `text`: the newlines before it plus one.
+/// The 1-based line of byte offset `at` in `text`: the newlines before it plus one. Once per match it is quadratic like [`units`]:
+/// many offsets of one text go through a [`LineIndex`].
 pub fn line_at(text: &str, at: usize) -> usize {
+    #[cfg(test)]
+    WALKED.with(|w| w.set(w.get() + at.min(text.len())));
     text.as_bytes()[..at.min(text.len())].iter().filter(|b| **b == b'\n').count() + 1
 }
 
@@ -156,6 +176,16 @@ mod tests {
                 assert_eq!(ix.at(i), units(&s[..i]), "{s:?} at {i}");
             }
             assert_eq!(ix.at(s.len() + 5), units(s), "past the end is the end");
+        }
+    }
+
+    #[test]
+    fn the_line_index_equals_line_at_at_every_byte() {
+        for s in ["", "a", "\n", "a\nb\n\nc", "é\n😀\r\nx\n"] {
+            let ix = LineIndex::new(s);
+            for i in 0..=s.len() + 2 {
+                assert_eq!(ix.line(i), line_at(s, i), "{s:?} at {i}");
+            }
         }
     }
 
