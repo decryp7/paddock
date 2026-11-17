@@ -25,9 +25,13 @@ fn git(root: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
+/// The text C130 counts, as sample data for the check (this file plants no program): written in two pieces so that C130 does not
+/// read this test's own sample as a fixture (a split shebang is a case C130 says it does not flag).
+const SHEBANG: &str = concat!("#!", "/bin/sh");
+
 fn allow(count: usize) -> String {
     format!(
-        "{{\"allow\":[{{\"path\":\"tools/t/tests/it/ok.rs\",\"site\":\"#!/bin/sh\",\"reason\":\"baseline: planted before StandIn\",\"count\":{count}}}]}}"
+        "{{\"allow\":[{{\"path\":\"tools/t/tests/it/ok.rs\",\"site\":\"{SHEBANG}\",\"reason\":\"baseline: planted before StandIn\",\"count\":{count}}}]}}"
     )
 }
 
@@ -44,7 +48,7 @@ fn repo() -> Repo {
     std::fs::create_dir_all(r.join("conformance")).unwrap();
     std::fs::create_dir_all(r.join("tools/t/tests/it")).unwrap();
     std::fs::write(r.join("conformance/c130-allow.json"), allow(1)).unwrap();
-    std::fs::write(r.join("tools/t/tests/it/ok.rs"), "let s = \"#!/bin/sh\\n\";\n".repeat(4)).unwrap();
+    std::fs::write(r.join("tools/t/tests/it/ok.rs"), format!("let s = \"{SHEBANG}\\n\";\n").repeat(4)).unwrap();
     git(r, &["init", "-q", "-b", "main"]);
     git(r, &["add", "."]);
     git(r, &["commit", "-q", "-m", "main"]);

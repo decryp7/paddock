@@ -129,7 +129,8 @@ impl ToolCall {
         self
     }
 
-    /// Variables of the caller's environment this program also gets, besides the base list: exact names, or a prefix ending
+    /// Variables of the caller's environment this program also gets, besides the base list and the restricting ones
+    /// ([`paddock_env::RESTRICTING`], always): exact names, or a prefix ending
     /// in `*` (`SCCACHE_*`). Everything else (tokens above all) never reaches it.
     pub fn pass<I: IntoIterator<Item = S>, S: Into<String>>(mut self, names: I) -> ToolCall {
         self.pass.extend(names.into_iter().map(Into::into));
@@ -147,6 +148,7 @@ impl ToolCall {
     pub fn child_env(&self, parent: &HashMap<String, String>) -> Vec<(String, String)> {
         let keep = |k: &str| {
             KEPT_ENV.contains(&k)
+                || paddock_env::RESTRICTING.contains(&k)
                 || WINDOWS_BASE.iter().any(|b| b.eq_ignore_ascii_case(k))
                 || self.pass.iter().any(|p| match p.strip_suffix('*') {
                     Some(prefix) => k.starts_with(prefix),
@@ -241,7 +243,9 @@ impl ToolCall {
 
     fn build(&self, parent: &HashMap<String, String>) -> std::process::Command {
         let mut cmd = command(&self.program);
-        cmd.args(&self.args).env_clear();
+        cmd.args(&self.args);
+        // The one clearing function, over the caller's map: it passes the restricting variables (ER-47); the listed ones follow.
+        paddock_env::clear_env_from(&mut cmd, &[], |k| parent.get(k).map(std::ffi::OsString::from));
         if let Some(dir) = &self.cwd {
             cmd.current_dir(dir);
         }
@@ -475,6 +479,20 @@ mod tests {
             curl.contains(&"HTTPS_PROXY".to_string()) && !curl.iter().any(|k| k.ends_with("_TOKEN")),
             "{curl:?}"
         );
+    }
+
+    /// ER-47: the restricting variables of the caller (a download ban, an install ban, an offline switch) reach every program,
+    /// listed or not. The positive control: an unlisted variable of the same kind of name does not.
+    #[test]
+    fn a_child_keeps_the_restricting_variables_the_caller_has_without_a_pass() {
+        let mut pairs = vec![("PATH", "/bin"), ("PADDOCK_DEV_TOKEN", "t")];
+        pairs.extend(paddock_env::RESTRICTING.iter().map(|k| (*k, "0")));
+        let env = parent(&pairs);
+        let names: Vec<String> = ToolCall::new("x").child_env(&env).into_iter().map(|(k, _)| k).collect();
+        for k in paddock_env::RESTRICTING {
+            assert!(names.iter().any(|n| n == k), "{k} was stripped: {names:?}");
+        }
+        assert!(!names.iter().any(|n| n == "PADDOCK_DEV_TOKEN"), "{names:?}");
     }
 
     #[cfg(unix)]

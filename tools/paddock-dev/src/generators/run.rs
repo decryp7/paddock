@@ -219,7 +219,8 @@ impl Runner for Real {
             .unwrap_or_else(|| "2".into());
         let mut cmd = command(resolve(program));
         // The whole environment as this runner has it (the process's, in production): the program is looked up on its PATH.
-        cmd.env_clear().envs(&self.env).current_dir(dir).env("CARGO_BUILD_JOBS", jobs);
+        paddock_env::clear_env_from(&mut cmd, &[], |k| self.env.get(k).map(std::ffi::OsString::from));
+        cmd.envs(&self.env).current_dir(dir).env("CARGO_BUILD_JOBS", jobs);
         // A cargo call got its build folder as configuration above (sccache hashes `CARGO_TARGET_DIR`: crate::cargo_target) and
         // compiles through the local sccache; a program that starts cargo itself (a script, `npm`) keeps the variable, as there is no
         // argument to put it in.

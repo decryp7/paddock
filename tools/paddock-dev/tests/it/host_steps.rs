@@ -1613,10 +1613,10 @@ fn kept_fixture_repos_start_no_background_git_maintenance() {
     ] {
         // The step's environment (a cleared one, the fixture's HOME) and the fixture's own git (the test's PATH).
         let get = |key: &str| {
-            let out = paddock_proc::command("git")
-                .args(["config", "--get", key])
-                .current_dir(fx.p(dir))
-                .env_clear()
+            let mut git = paddock_proc::command("git");
+            git.args(["config", "--get", key]).current_dir(fx.p(dir));
+            paddock_proc::clean_env(&mut git, &[]);
+            let out = git
                 .env("PATH", path)
                 .env("HOME", fx.p("home"))
                 .env("GIT_CONFIG_NOSYSTEM", "1")

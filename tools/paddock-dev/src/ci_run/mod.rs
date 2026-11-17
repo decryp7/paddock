@@ -292,7 +292,10 @@ fn run_line(
     let mut argv: Vec<String> = heavy.to_vec();
     argv.extend(["bash", "-euo", "pipefail", "-c", text].map(String::from));
     let mut cmd = paddock_proc::command(&argv[0]);
-    cmd.args(&argv[1..]).current_dir(dir).env_clear().envs(env);
+    cmd.args(&argv[1..]).current_dir(dir);
+    // `env` is the job's whole environment; the one clearing function keeps its restricting variables (ER-47) before it is set.
+    paddock_env::clear_env_from(&mut cmd, &[], |k| env.get(k).map(std::ffi::OsString::from));
+    cmd.envs(env);
     let start = Instant::now();
     let result = run_waited_cancellable(cmd, Duration::from_secs(max_secs), Sink::Inherit, stop);
     let secs = start.elapsed().as_secs_f64();
