@@ -427,6 +427,8 @@ test.describe('notifications', () => {
     await page.evaluate(() => {
       location.hash = '#/why-slow';
     });
+    // The hash change routes asynchronously: until the page is Why slow, the network grid's own "Copy as text" row buttons are still on screen.
+    await expect(page.getByRole('heading', { level: 1, name: 'Why is my computer slow?' })).toBeVisible();
     await page.getByRole('button', { name: 'Copy as text' }).click();
     await page.getByRole('button', { name: /notifications/i }).first().click();
     const selects = page.locator('[data-testid^=notice-select-] input');
