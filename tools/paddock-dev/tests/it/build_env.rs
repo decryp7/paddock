@@ -42,7 +42,11 @@ fn the_rust_command_and_the_script_append_and_print_the_same() {
         std::fs::write(&a, "A=1\n").unwrap();
         std::fs::write(&b, "A=1\n").unwrap();
         let rust = run(crate::dev_bin::command().args(["ci", "build-env"]), sha, &a);
-        let node = run(paddock_testkit::TestCommand::new("node").arg("conformance/ci/build-env.mjs"), sha, &b);
+        let node = run(
+            paddock_testkit::TestCommand::new("node").arg("conformance/ci/build-env.mjs"),
+            sha,
+            &b,
+        );
         assert_eq!(rust, node, "GITHUB_SHA={sha:?}");
         assert!(rust.1.starts_with("A=1\nPADDOCK_BUILD_COMMIT="), "{}", rust.1);
     }
