@@ -89,14 +89,14 @@ impl Core {
         props.insert("Repeats".into(), Value::from(n));
         props.insert(
             "DedupWindowSeconds".into(),
-            Value::from(DEDUP_WINDOW.num_seconds()),
+            Value::from(DEDUP_WINDOW.as_secs()),
         );
         self.write(
             level,
             target,
             &format!(
                 "{message} (repeated {n} times in {}s)",
-                DEDUP_WINDOW.num_seconds()
+                DEDUP_WINDOW.as_secs()
             ),
             props,
         );

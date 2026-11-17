@@ -1,7 +1,7 @@
 //! The report lists what the user did just before: lines the app logged with an `Operation` become the trail (breadcrumbs). Its own
 //! test binary: the log installs once per process.
 
-use chrono::{TimeZone, Utc};
+use jiff::Timestamp;
 use paddock_diag::{AppInfo, Collected, Section, builtin};
 use paddock_env::{AppDirs, AppId, MapVars, Os};
 use std::sync::Arc;
@@ -26,7 +26,7 @@ fn the_latest_actions_are_in_the_report_without_values() {
     log::info!(Operation = "saveSettings", OperationId = "r1", Changed = "theme", Ms = 12u64, Outcome = "ok"; "Action");
     log::warn!(Operation = "startJob", OperationId = "r2", Kind = "helper/turnOn", Outcome = "failed", Code = "AccessDenied"; "Action failed");
     let sections: Vec<Arc<dyn Section>> = vec![Arc::new(builtin::Trail::new(handle.clone()))];
-    let now = Utc.with_ymd_and_hms(2026, 11, 5, 9, 0, 0).unwrap();
+    let now = "2026-11-05T09:00:00Z".parse::<Timestamp>().unwrap();
     let c = Collected::collect(
         &AppInfo::new("demo", "Demo", "1.0.0", ""),
         &dirs,

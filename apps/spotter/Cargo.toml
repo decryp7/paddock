@@ -17,7 +17,7 @@ spotter-sources = { path = "crates/spotter-sources" }
 spotter-engine = { path = "crates/spotter-engine" }
 spotter-render = { path = "crates/spotter-render" }
 croner = { version = "4", default-features = false, features = ["jiff"] }
-jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
+jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always"] }
 quick-xml = "0.42"
 regex = "1.12"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "charset", "system-proxy"] }
@@ -27,7 +27,6 @@ sha2 = "0.10"
 sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 tempfile = "3"
 thiserror = "2.0"
-time = { version = "0.3", features = ["parsing", "formatting", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util", "net"] }
 toml = "1"
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }

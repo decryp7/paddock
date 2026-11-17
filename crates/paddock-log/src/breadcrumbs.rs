@@ -2,7 +2,8 @@
 //! before. An event is a breadcrumb when it carries an `Operation` property. Entries are what was logged (after
 //! redaction), so keeping them adds nothing sensitive.
 
-use chrono::{DateTime, Duration, Utc};
+use jiff::{SignedDuration, Timestamp};
+use paddock_jobs::stamp::{Precision, rfc3339};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -18,7 +19,7 @@ pub const MAX_PARAMS: usize = 16;
 /// The breadcrumbs attached to one error are cut to this many bytes of JSON (oldest first).
 pub const MAX_BREADCRUMB_JSON: usize = 16 * 1024;
 /// Repeated identical errors inside this window are logged once, then summarised.
-pub const DEDUP_WINDOW: Duration = Duration::seconds(60);
+pub const DEDUP_WINDOW: SignedDuration = SignedDuration::from_secs(60);
 /// Most distinct errors tracked for de-duplication.
 const MAX_DEDUP_KEYS: usize = 256;
 /// Properties that are part of the entry itself, not parameters.
@@ -51,7 +52,7 @@ pub struct Breadcrumb {
 
 impl Breadcrumb {
     /// An entry from an event's properties, or `None` without an `Operation`.
-    pub fn from_props(time: DateTime<Utc>, props: &Map<String, Value>) -> Option<Breadcrumb> {
+    pub fn from_props(time: Timestamp, props: &Map<String, Value>) -> Option<Breadcrumb> {
         let text = |v: &Value| {
             v.as_str()
                 .map(str::to_string)
@@ -66,7 +67,7 @@ impl Breadcrumb {
             .map(|(k, v)| (k.clone(), text(v)))
             .collect();
         Some(Breadcrumb {
-            time: time.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+            time: rfc3339(time, Precision::Micros),
             operation,
             window: get("Window").unwrap_or_default(),
             operation_id: get("OperationId"),
@@ -140,20 +141,21 @@ pub enum Dedup {
 /// Logs the first of identical errors in each [`DEDUP_WINDOW`] and counts the rest.
 #[derive(Debug, Default)]
 pub struct ErrorDedup {
-    seen: HashMap<String, (DateTime<Utc>, u64)>,
+    seen: HashMap<String, (Timestamp, u64)>,
 }
 
 impl ErrorDedup {
     /// Decides for the error `key` seen at `now`.
-    pub fn check(&mut self, key: &str, now: DateTime<Utc>) -> Dedup {
+    pub fn check(&mut self, key: &str, now: Timestamp) -> Dedup {
         if self.seen.len() >= MAX_DEDUP_KEYS && !self.seen.contains_key(key) {
-            self.seen.retain(|_, (t, _)| now - *t < DEDUP_WINDOW);
+            self.seen
+                .retain(|_, (t, _)| now.duration_since(*t) < DEDUP_WINDOW);
             if self.seen.len() >= MAX_DEDUP_KEYS {
                 self.seen.clear();
             }
         }
         match self.seen.get_mut(key) {
-            Some((start, n)) if now - *start < DEDUP_WINDOW && now >= *start => {
+            Some((start, n)) if now.duration_since(*start) < DEDUP_WINDOW && now >= *start => {
                 *n += 1;
                 Dedup::Suppress
             }
@@ -193,11 +195,11 @@ impl ErrorDedup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
     use serde_json::json;
 
-    fn at(s: u32) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 10, 20, 9, 0, 0).unwrap() + Duration::seconds(i64::from(s))
+    fn at(s: u32) -> Timestamp {
+        "2026-10-20T09:00:00Z".parse::<Timestamp>().unwrap()
+            + SignedDuration::from_secs(i64::from(s))
     }
 
     fn crumb(window: &str, op: &str, s: u32) -> Breadcrumb {

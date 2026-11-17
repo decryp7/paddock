@@ -71,10 +71,9 @@ pub fn local_day(unix_secs: i64, offset_secs: i64) -> Day {
 
 /// Today by the system clock in the machine's local time zone, like `date +%F` (which `verified:` dates come from).
 pub fn today_local() -> Day {
-    use chrono::{Local, Offset, TimeZone};
-    let now = Local::now();
-    let offset = i64::from(Local.offset_from_utc_datetime(&now.naive_utc()).fix().local_minus_utc());
-    local_day(now.timestamp(), offset)
+    let now = jiff::Timestamp::now();
+    let offset = i64::from(jiff::tz::TimeZone::system().to_offset(now).seconds());
+    local_day(now.as_second(), offset)
 }
 
 #[cfg(test)]

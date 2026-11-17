@@ -490,7 +490,6 @@ fn the_log_handle_is_kept_for_the_logging_section_and_flushed_before_collecting(
 
 #[test]
 fn the_setups_clock_names_the_file_and_install_keeps_the_first_state() {
-    use chrono::TimeZone;
     let rig = rig(|_, _| Pick::Dismiss);
     let events = outcomes(&rig.app);
     let w = window(&rig.app, "d-main-1");
@@ -513,8 +512,8 @@ fn the_setups_clock_names_the_file_and_install_keeps_the_first_state() {
     let _ = (events, w);
     // A fixed clock gives a fixed suggested name and a fixed manifest time.
     let fixed = Arc::new(paddock_log::FakeClock::at_wall(
-        chrono::Utc
-            .with_ymd_and_hms(2026, 10, 24, 10, 30, 0)
+        "2026-10-24T10:30:00Z"
+            .parse::<jiff::Timestamp>()
             .unwrap()
             .into(),
     ));

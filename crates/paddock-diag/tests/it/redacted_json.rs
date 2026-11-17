@@ -3,7 +3,7 @@
 //! every `.json` file of the report, as written by `Collected::collect` with `Redactor::new()` (every file passes it there),
 //! still parses.
 
-use chrono::{TimeZone, Utc};
+use jiff::Timestamp;
 use paddock_diag::perf::PerformanceSection;
 use paddock_diag::*;
 use paddock_env::{AppDirs, AppId, MapVars, Os};
@@ -35,7 +35,7 @@ fn every_json_file_of_every_builtin_section_parses_after_the_redactor() {
     paddock_diag::perf::record("zz-shape-check", std::time::Duration::from_secs(3));
     let mut sections = builtin::all();
     sections.push(Arc::new(PerformanceSection::new()));
-    let now = Utc.with_ymd_and_hms(2026, 11, 11, 9, 0, 0).unwrap();
+    let now = "2026-11-11T09:00:00Z".parse::<Timestamp>().unwrap();
     let collected = Collected::collect(
         &AppInfo::new("demo", "Demo", "1.0.0", ""),
         &dirs,

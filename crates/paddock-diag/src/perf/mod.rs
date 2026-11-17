@@ -382,7 +382,7 @@ impl Section for PerformanceSection {
                 e.kind()
             ));
         }
-        let at = u64::try_from(cx.now.timestamp_millis()).unwrap_or(0);
+        let at = u64::try_from(cx.now.as_millisecond()).unwrap_or(0);
         let (startup, slowest) = self.source.snapshot(at);
         let doc = Document::new(at, self.machine.facts(cx.dirs.data()), startup, slowest);
         let summary = doc.summary();
@@ -410,7 +410,7 @@ impl Section for PerformanceSection {
 mod tests {
     use super::machine::MachineFacts;
     use super::*;
-    use chrono::{TimeZone, Utc};
+    use jiff::Timestamp;
     use paddock_env::{AppDirs, AppId, MapVars, Os};
 
     struct FakeMachine;
@@ -471,7 +471,7 @@ mod tests {
         let cx = Context {
             app: &app,
             dirs: &dirs(dir.path()),
-            now: Utc.with_ymd_and_hms(2026, 11, 11, 9, 0, 0).unwrap(),
+            now: "2026-11-11T09:00:00Z".parse::<Timestamp>().unwrap(),
         };
         section.collect(&cx)
     }
