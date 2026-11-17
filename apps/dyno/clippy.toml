@@ -1,6 +1,15 @@
 # Every child process Dyno starts goes through `dyno_platform::process::command` (it opens no console window on
 # Windows and always gets a timeout). Tests and build scripts may allow this lint.
 disallowed-methods = [
+    # ADR 0100 amendment 2026-11-16: the environment is process-wide, and tests share one process under the plain harness; a
+    # change made outside the test kit's lock is seen by every other test thread (the hermetic flake, fixed in 9ac185c24). Change
+    # it through paddock_testkit::EnvLock (the one site that may), or a justified site carries #[expect(..., reason = "...")].
+    { path = "std::env::set_var", reason = "the environment is process-wide: change it through paddock_testkit::EnvLock (ADR 0100), or justify the site with #[expect]" },
+    { path = "std::env::remove_var", reason = "the environment is process-wide: change it through paddock_testkit::EnvLock (ADR 0100), or justify the site with #[expect]" },
+    # ER-47 / rule 84 (ADR 0100): clearing a child's environment strips the variables that restrict it (a download ban, an install ban,
+    # an offline switch). paddock_env::clear_env (paddock_proc::clean_env) is the one function that clears, and it passes them.
+    { path = "std::process::Command::env_clear", reason = "clear a child's environment through paddock_proc::clean_env (paddock_env::clear_env): it keeps the restricting variables (ER-47)" },
+    { path = "tokio::process::Command::env_clear", allow-invalid = true, reason = "build the command with paddock_proc::command and clear it through paddock_proc::clean_env, which keeps the restricting variables (ER-47)" },
     # The host a composition builds for is passed in, never taken from the build OS (the second instance of the class: the wear
     # reading took `this_host()` and the firewall centre `for_this_os`, so the wiring test composing every system's agent on one
     # machine built the wrong one). `helper_os::host` is the one real detection; its callers are the OS glue and carry an #[allow] with why.

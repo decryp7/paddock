@@ -1,6 +1,15 @@
 # Every child process Debrief starts goes through `debrief_core::process::quiet_command` (or the ipc crate's spawner),
 # so none opens a console window on Windows. Tests and build scripts may allow this lint.
 disallowed-methods = [
+    # ADR 0100 amendment 2026-11-16: the environment is process-wide, and tests share one process under the plain harness; a
+    # change made outside the test kit's lock is seen by every other test thread (the hermetic flake, fixed in 9ac185c24). Change
+    # it through paddock_testkit::EnvLock (the one site that may), or a justified site carries #[expect(..., reason = "...")].
+    { path = "std::env::set_var", reason = "the environment is process-wide: change it through paddock_testkit::EnvLock (ADR 0100), or justify the site with #[expect]" },
+    { path = "std::env::remove_var", reason = "the environment is process-wide: change it through paddock_testkit::EnvLock (ADR 0100), or justify the site with #[expect]" },
+    # ER-47 / rule 84 (ADR 0100): clearing a child's environment strips the variables that restrict it (a download ban, an install ban,
+    # an offline switch). paddock_env::clear_env (paddock_proc::clean_env) is the one function that clears, and it passes them.
+    { path = "std::process::Command::env_clear", reason = "clear a child's environment through paddock_proc::clean_env (paddock_env::clear_env): it keeps the restricting variables (ER-47)" },
+    { path = "tokio::process::Command::env_clear", allow-invalid = true, reason = "build the command with paddock_proc::command and clear it through paddock_proc::clean_env, which keeps the restricting variables (ER-47)" },
     { path = "std::process::Command::new", reason = "use debrief_core::process::quiet_command: it opens no console window on Windows" },
     { path = "tokio::process::Command::new", allow-invalid = true, reason = "use debrief_core::process::quiet_command: it opens no console window on Windows" },
     { path = "std::env::temp_dir", reason = "tests use a tempfile folder and production code a fresh private folder (tempfile::Builder) or Debrief's own data folder: nothing fixed is put in the shared temp folder (C13, DBR-LINT)" },
