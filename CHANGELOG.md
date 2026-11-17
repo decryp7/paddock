@@ -6,16 +6,19 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### `@decryp7/paddock-ui`: `scroll`, scrollers our code positions make no scroll moves of their own (family ADR 0105)
 - New entry `@decryp7/paddock-ui/scroll` with `PdOwnedScroll` (`[pdOwnedScroll]`): binds `overflow-anchor: none` and `scroll-behavior: auto`
-  on the element and adds the `pd-owned-scroll` class. Put it on every scroller whose `scrollTop`/`scrollLeft` the code writes (virtual
-  lists, live logs and tails). CSS scroll anchoring otherwise moves the position by itself when content above the view changes size
-  (Debrief's events grid was two rows off after a resize in WebKit). It depends on `@angular/core` only.
+  on the element and adds the `pd-owned-scroll` class. Put it on every scroller whose position the code computes (virtual lists, grids
+  and tails). CSS scroll anchoring otherwise moves the position by itself when content above the view changes size (Debrief's events
+  grid was two rows off after a resize in WebKit). Chat and assistant logs keep anchoring on purpose (it keeps the reader's place) and
+  carry a C138 waiver instead. It depends on `@angular/core` only.
 - `_base.scss` (in `paddock.css`): the `owned-scroll` mixin and the `.pd-owned-scroll` class, the same two properties for stylesheets.
 - `pd-table`'s body carries it (the CDK viewport already set both properties; now it is explicit).
-- Adopted by Debrief (events grid, AI chat log, config diff, context lines, TOML editor, query field, flame chart, hotspots), Pitwall
-  (Compare conversations) and the shared view scene and assistant log.
+- Adopted by Debrief (events grid, config diff, context lines, TOML editor, query field, flame chart, hotspots) and the shared view
+  scene.
 - `@decryp7/paddock-e2e`: `scrollAnchoringShift` and `expectNoScrollMovesOfItsOwn` measure that a scroller does not anchor, with a
-  positive control (anchoring forced on must move it) so a scroller the probe cannot see fails as not measured.
-- Conformance C138 (report-only): a scroll-position write in a component whose template carries none of the shared style.
+  positive control (anchoring forced on must move it) so a scroller the probe cannot see fails as not measured; `anchoringVerdict` is
+  the pure verdict.
+- Conformance C138 (report-only, wired in CI and `docs/gates.toml`): a scroll-position write in a component whose template carries
+  none of the shared style.
 
 ### `@decryp7/paddock-ui`: `shell/contributions`, the contribution registry without the root or Material
 - New entry `@decryp7/paddock-ui/shell/contributions`: `define*`, `provideContributions`, `provideContributionKinds`, `SHELL_CONTRIBUTIONS`, the

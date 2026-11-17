@@ -1,14 +1,18 @@
-// C138: a scroller whose position our code sets makes no scroll moves of its own (family ADR 0105; ER-21, the class: ADR 0072's bug 3,
-// a write clamped before the spacer grew, and Debrief's "resize while not pinned" row, CSS scroll anchoring moved the view two rows).
-// In the TypeScript of `apps/*/` and `ui/projects/` (specs, tests, e2e and the e2e kit skipped), a write of the scroll position is
-// `.scrollTop`/`.scrollLeft` assigned (`=`, `+=`, `-=`, `Object.assign(el, { scrollTop })`) or a call of `.scrollTo(`, `.scrollBy(`
-// on an element (not `window` or `document`) or of the CDK's `.scrollToOffset(`/`.scrollToIndex(`. A component file with one passes
-// when its template (inline or `templateUrl`) or its styles carry the shared style: the `pdOwnedScroll` directive
-// (`@decryp7/paddock-ui/scroll`), the `pd-owned-scroll` class or `owned-scroll` mixin (`_base.scss`), or a `cdk-virtual-scroll-viewport`
-// (the CDK sets the same two properties on it). A file that is no component (a helper that scrolls an element it is given) and a
-// write the style cannot reach (a third-party element) carry `// conformance: owned-scroll — <why>` on the line or on a comment-only
-// line above. Known limit: the check is per file, not per element: a component with two scrollers passes when either carries the style.
-// ER-41: report-only (warnings) until its first green run on the real tree; ER-33: a positive control runs on in-memory text first.
+// C138: a scroller whose position our code computes makes no scroll moves of its own (family ADR 0105; ER-21, the class: ADR 0072's
+// bug 3, a write clamped before the spacer grew, and Debrief's "resize while not pinned" row, CSS scroll anchoring moved the view two
+// rows; both in a virtual grid). In the TypeScript of `apps/*/` and `ui/projects/` (specs, tests, e2e and the e2e kit skipped), a write
+// of the scroll position is `scrollTop`/`scrollLeft` assigned (`.x` or `['x']`, with `=`, `+=`, `-=`, `||=`, `&&=`, `??=`, or
+// `Object.assign(el, { scrollTop })`), or a call of `scrollTo(`/`scrollBy(` on an element (any receiver, also `?.`, `)` and `]`, except
+// `window`, `document` and `globalThis`) or of the CDK's `scrollToOffset(`/`scrollToIndex(`. A component file with one passes when its
+// template (inline or `templateUrl`) or its styles carry the shared style, read with comments (TypeScript and HTML) blanked: the
+// `pdOwnedScroll` directive (`@decryp7/paddock-ui/scroll`), the `pd-owned-scroll` class or `owned-scroll` mixin (`_base.scss`), or a
+// `cdk-virtual-scroll-viewport` (the CDK sets the same two properties on it). Anything else carries `// conformance: owned-scroll — <why>`
+// on the line or on a comment-only line above: a helper that scrolls an element it is given, a third-party element, and a chat log or
+// assistant log, which keeps the browser's anchoring on purpose (ADR 0105 decision 2: it keeps the reader's place).
+// Accepted gaps (not seen): `scrollIntoView` (it scrolls every ancestor, and the element it reveals is not the scroller),
+// `Renderer2.setProperty(el, 'scrollTop', ..)`, and per file, not per element: a component with two scrollers passes when either carries
+// the style. ER-41: report-only (warnings) until its first green run on the real tree; ER-33: a positive control runs on in-memory text
+// first.
 import { posix } from 'node:path';
 import { unwaivable, error, warn } from '../finding.mjs';
 
@@ -18,16 +22,53 @@ const SKIP = /\.spec\.ts$|\.test\.ts$|\.d\.ts$|(^|\/)(e2e|e2e-tauri|node_modules
 const WAIVER = /conformance:\s*owned-scroll\s*[—–-]+\s*(\S.{2,})/;
 const BARE_WAIVER = /conformance:\s*owned-scroll/;
 const MARKER = /\bpdOwnedScroll\b|\bpd-owned-scroll\b|@include\s+[\w.-]*owned-scroll\b|<cdk-virtual-scroll-viewport\b/;
+const PROP = String.raw`(?:\.\s*(scrollTop|scrollLeft)\b|\[\s*['"](scrollTop|scrollLeft)['"]\s*\])`;
+const ASSIGN = String.raw`\s*(?:=(?![=>])|\+=|-=|\|\|=|&&=|\?\?=)`;
 const WRITES = [
-  /\.(scrollTop|scrollLeft)\s*(?:=(?!=)|\+=|-=)/g,
-  /Object\.assign\([^)]*\{[^}]*\b(scrollTop|scrollLeft)\b/g,
-  /(?<![\w$])(?!window\.|document\.)([\w$]+(?:\(\))?(?:\.[\w$]+(?:\(\))?)*)\.(scrollTo|scrollBy)\s*\(/g,
-  /\.(scrollToOffset|scrollToIndex)\s*\(/g,
+  { re: new RegExp(PROP + ASSIGN, 'g'), what: (m) => m[1] ?? m[2] },
+  { re: /Object\.assign\s*\([^)]*?\{[^}]*?\b(scrollTop|scrollLeft)\b/g, what: (m) => m[1] },
+  { re: /(\?\.|\.)\s*(scrollTo|scrollBy)\s*\(/g, what: (m) => m[2], receiver: true },
+  { re: /(\?\.|\.)\s*(scrollToOffset|scrollToIndex)\s*\(/g, what: (m) => m[2] },
 ];
+const PAGE = /(?:^|[^\w$.])(window|document|globalThis)\s*$/;
 
-/** The text with comments blanked (newlines kept, so indexes and lines stay); strings stay, a template is markup the writes never match. */
-function maskComments(text) {
-  return text.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\])\/\/[^\n]*/g, (m, p) => p + ' '.repeat(m.length - p.length));
+/**
+ * The text with comments blanked (newlines kept, so indexes and lines stay). Strings and template literals stay (a template is markup the
+ * writes never match), and `//` inside a string is not a comment. HTML comments inside a template literal are blanked too.
+ */
+export function maskComments(text) {
+  let out = '';
+  let i = 0;
+  const blank = (s) => s.replace(/[^\n]/g, ' ');
+  while (i < text.length) {
+    const c = text[i];
+    const n = text[i + 1];
+    if (c === '/' && n === '/') {
+      const end = text.indexOf('\n', i);
+      const stop = end < 0 ? text.length : end;
+      out += blank(text.slice(i, stop));
+      i = stop;
+    } else if (c === '/' && n === '*') {
+      const end = text.indexOf('*/', i + 2);
+      const stop = end < 0 ? text.length : end + 2;
+      out += blank(text.slice(i, stop));
+      i = stop;
+    } else if (c === "'" || c === '"' || c === '`') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== c) {
+        if (text[j] === '\\') j++;
+        else if (c !== '`' && text[j] === '\n') break;
+        j++;
+      }
+      const lit = text.slice(i, Math.min(j + 1, text.length));
+      out += c === '`' ? lit.replace(/<!--[\s\S]*?-->/g, blank) : lit;
+      i = j + 1;
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out;
 }
 
 /** The scroll-position writes of a file: [{ line, what, waived }] (`waived`: 'reason', 'no-reason' or undefined). */
@@ -36,28 +77,32 @@ export function scrollWrites(text) {
   const lines = text.split('\n');
   const out = [];
   const seen = new Set();
-  for (const re of WRITES) {
-    for (const m of masked.matchAll(re)) {
-      if (/^(window|document|globalThis)$/.test(m[1] ?? '')) continue;
+  for (const w of WRITES) {
+    for (const m of masked.matchAll(w.re)) {
+      if (w.receiver && PAGE.test(masked.slice(Math.max(0, m.index - 80), m.index))) continue;
       const line = masked.slice(0, m.index).split('\n').length;
       if (seen.has(line)) continue;
       seen.add(line);
       const here = lines[line - 1] ?? '';
       const above = lines[line - 2] ?? '';
       const near = here + (/^\s*(\/\/|\*|\/\*)/.test(above) ? `\n${above}` : '');
-      const what = m[2] ?? m[1];
-      out.push({ line, what, waived: WAIVER.test(near) ? 'reason' : BARE_WAIVER.test(near) ? 'no-reason' : undefined });
+      out.push({ line, what: w.what(m), waived: WAIVER.test(near) ? 'reason' : BARE_WAIVER.test(near) ? 'no-reason' : undefined });
     }
   }
   return out.sort((a, b) => a.line - b.line);
 }
 
-/** Whether a component file's template or styles carry the shared style; `read(relative)` reads a `templateUrl`/`styleUrl(s)` file. */
+/** Whether a component file's template or styles carry the shared style (comments blanked); `read(relative)` reads a `templateUrl`/`styleUrl(s)` file. */
 export function carriesStyle(text, read) {
-  if (MARKER.test(text)) return true;
-  const urls = [...text.matchAll(/(?:templateUrl|styleUrl)\s*:\s*['"]([^'"]+)['"]/g)].map((m) => m[1]);
-  for (const m of text.matchAll(/styleUrls\s*:\s*\[([^\]]*)\]/g)) urls.push(...[...m[1].matchAll(/['"]([^'"]+)['"]/g)].map((x) => x[1]));
-  return urls.some((u) => MARKER.test(read(u) ?? ''));
+  const masked = maskComments(text);
+  if (MARKER.test(masked)) return true;
+  const urls = [...masked.matchAll(/(?:templateUrl|styleUrl)\s*:\s*['"]([^'"]+)['"]/g)].map((m) => m[1]);
+  for (const m of masked.matchAll(/styleUrls\s*:\s*\[([^\]]*)\]/g)) urls.push(...[...m[1].matchAll(/['"]([^'"]+)['"]/g)].map((x) => x[1]));
+  return urls.some((u) => {
+    const t = read(u) ?? '';
+    const clean = u.endsWith('.html') ? t.replace(/<!--[\s\S]*?-->/g, ' ') : maskComments(t);
+    return MARKER.test(clean);
+  });
 }
 
 const isComponent = (text) => /@Component\s*\(/.test(text);

@@ -74,12 +74,21 @@ export async function scrollAnchoringShift(scroller: Locator, grow = 100): Promi
 }
 
 /**
- * Asserts that a scroller our code positions makes no scroll moves of its own (family ADR 0105): when content above the view grows by
- * 100 px, `scrollTop` stays. Fails as "not measured" when the positive control did not move (the browser does not anchor here, so the
- * check could not see the thing, ER-33).
+ * The verdict of one measurement (pure): `held` when the scroller made no move of its own, `moved` when it did, `not-measured` when the
+ * positive control did not move by `grow` (the browser does not anchor there, so the probe cannot see the thing, ER-33).
+ */
+export function anchoringVerdict(r: Pick<AnchoringShift, 'control' | 'shift'>, grow = 100): 'held' | 'moved' | 'not-measured' {
+  if (Math.abs(r.control - grow) > 1) return 'not-measured';
+  return Math.abs(r.shift) > 1 ? 'moved' : 'held';
+}
+
+/**
+ * Asserts that a scroller whose position our code computes makes no scroll moves of its own (family ADR 0105): when content above the
+ * view grows by 100 px, `scrollTop` stays. Fails as "not measured" when the positive control did not move.
  */
 export async function expectNoScrollMovesOfItsOwn(scroller: Locator, name = 'the scroller'): Promise<void> {
   const r = await scrollAnchoringShift(scroller);
-  expect(r.control, `${name}: not measured, the browser did not anchor even with overflow-anchor forced on (scrolled to ${r.scrolledTo.join(', ')}, client ${r.client}, scrollHeight ${r.scrollHeight})`).toBe(100);
-  expect(r.shift, `${name}: the browser moved scrollTop by itself when content above the view grew 100 px (overflow-anchor ${r.computed}); put pdOwnedScroll on it`).toBe(0);
+  const where = `scrolled to ${r.scrolledTo.join(', ')}, client ${r.client}, scrollHeight ${r.scrollHeight}`;
+  expect(anchoringVerdict(r), `${name}: not measured, the browser did not anchor even with overflow-anchor forced on (${where})`).not.toBe('not-measured');
+  expect(anchoringVerdict(r), `${name}: the browser moved scrollTop by ${r.shift} px by itself when content above the view grew 100 px (overflow-anchor ${r.computed}); put pdOwnedScroll on it`).toBe('held');
 }

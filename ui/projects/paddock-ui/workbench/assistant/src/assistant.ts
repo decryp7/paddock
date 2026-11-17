@@ -9,7 +9,6 @@ import { chipText, conversationTitle, hasValue, waitingPhase, type TurnPart, typ
 import type { ProviderPhase } from '../generated/assistant';
 import { PdAssistantRichText, type CitationOpened } from './rich-text';
 import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, rendererFor } from './tool-cards';
-import { PdOwnedScroll } from '@decryp7/paddock-ui/scroll';
 
 /**
  * A pane shorter than this (px) is short: the files tray folds to two rows behind its "N files" chip, the question box is two
@@ -34,7 +33,7 @@ const SCROLL_STICK_PX = 24;
   host: { class: 'pd-assistant', '[class.short]': 'short()' },
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [AssistantStore],
-  imports: [PdStatusGlyph, NgComponentOutlet, PdGlyph, PdAssistantRichText, PdAssistantToolCard, PdNeedsAi, PdOwnedScroll],
+  imports: [PdStatusGlyph, NgComponentOutlet, PdGlyph, PdAssistantRichText, PdAssistantToolCard, PdNeedsAi],
   template: `
     <header class="bar">
       <h2 class="title" data-testid="assistant-title" [attr.title]="store.title()">{{ store.title() }}</h2>
@@ -73,7 +72,7 @@ const SCROLL_STICK_PX = 24;
       <pd-needs-ai class="needs" [feature]="t.feature" [settingsLink]="settingsLink()" (step)="step.emit($event)" (openSettings)="openSettings.emit()" />
     }
 
-    <div class="log" role="log" aria-live="off" [attr.aria-busy]="store.busy()" data-testid="assistant-log" #log pdOwnedScroll (scroll)="scrolled()">
+    <div class="log" role="log" aria-live="off" [attr.aria-busy]="store.busy()" data-testid="assistant-log" #log (scroll)="scrolled()">
       @if (store.isLoading() && !store.turns().length) {
         <p class="hint" data-testid="assistant-loading">{{ t.loading }}</p>
       }
@@ -752,6 +751,7 @@ export class PdAssistant {
       const el = this.log()?.nativeElement;
       if (!el) return;
       // After the new turn's DOM is rendered (an effect runs before the view updates), else the last block stays below.
+      // conformance: owned-scroll — a chat log keeps the browser's scroll anchoring on purpose: it keeps the reader's place while they read scrolled up (family ADR 0105 decision 2)
       if (this.pinned) afterNextRender(() => (el.scrollTop = el.scrollHeight), { injector: this.injector });
       // The pill is state of this effect's scroll decision (the user's position is not a signal): set only, never read.
       else this.unseen.set(true);
@@ -770,6 +770,7 @@ export class PdAssistant {
       const watch = new ResizeObserver(() => {
         // An empty conversation has nothing to follow: its empty state stays whole from the top when the composer grows
         // (files attached on a short window).
+        // conformance: owned-scroll — a chat log keeps the browser's scroll anchoring on purpose: it keeps the reader's place while they read scrolled up (family ADR 0105 decision 2)
         if (this.pinned && this.store.turns().length) el.scrollTop = el.scrollHeight;
       });
       watch.observe(el);
@@ -835,6 +836,7 @@ export class PdAssistant {
 
   protected jumpToLatest(): void {
     const el = this.log()?.nativeElement;
+    // conformance: owned-scroll — a chat log keeps the browser's scroll anchoring on purpose: it keeps the reader's place while they read scrolled up (family ADR 0105 decision 2)
     if (el) el.scrollTop = el.scrollHeight;
     this.pinned = true;
     this.unseen.set(false);

@@ -47,7 +47,7 @@
               }
             </header>
 
-            <div class="msgs" #msgs pdOwnedScroll aria-live="polite" [attr.aria-busy]="store.streaming()">
+            <div class="msgs" #msgs aria-live="polite" [attr.aria-busy]="store.streaming()">
               @if (pane.turns.length === 0) {
                 <div class="empty">
                   <mat-icon svgIcon="pw:sparkles" aria-hidden="true" />

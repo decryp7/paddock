@@ -13,7 +13,6 @@ import { bytes, duration, int, rate } from '../../shared/format';
 import { Panel } from '../../shared/ui/panel';
 import { PlaygroundChat } from './playground-chat';
 import { PlaygroundStore, type TurnStats } from './playground.store';
-import { PdOwnedScroll } from '@decryp7/paddock-ui/scroll';
 
 const SUGGESTIONS = ['Explain what a KV cache is in two sentences.', 'Write a haiku about a pit stop.', 'Summarise: the service restarted twice after a pool timeout.'];
 
@@ -32,7 +31,7 @@ export function statsText(s: TurnStats): string {
  */
 @Component({
   selector: 'pw-playground-page',
-  imports: [MatButton, MatFormField, MatLabel, MatInput, MatSlider, MatSliderThumb, MatIconModule, MatTooltipModule, MatTabGroup, MatTab, MatTabContent, NgTemplateOutlet, Panel, PdSelect, PlaygroundChat, PdOwnedScroll],
+  imports: [MatButton, MatFormField, MatLabel, MatInput, MatSlider, MatSliderThumb, MatIconModule, MatTooltipModule, MatTabGroup, MatTab, MatTabContent, NgTemplateOutlet, Panel, PdSelect, PlaygroundChat],
   providers: [PlaygroundStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './playground-page.html',
@@ -56,6 +55,7 @@ export class PlaygroundPage implements OnInit {
     // Follow the stream: keep each conversation scrolled to its newest text.
     afterRenderEffect(() => {
       this.store.panes();
+      // conformance: owned-scroll — a chat log keeps the browser's scroll anchoring on purpose: it keeps the reader's place while they read scrolled up (family ADR 0105 decision 2)
       for (const l of this.lists()) l.nativeElement.scrollTop = l.nativeElement.scrollHeight;
     });
   }

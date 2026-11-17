@@ -1,9 +1,10 @@
 import { Directive } from '@angular/core';
 
 /**
- * Marks a scroller whose position our code sets (a virtual list or grid, a live log or tail, anything that writes `scrollTop` or
- * `scrollLeft` or calls `scrollTo`, `scrollBy` or a CDK `scrollToOffset`): the browser makes no scroll moves of its own on it (family ADR
- * 0105).
+ * Marks a scroller whose position our code computes (a virtual list, grid or tail, an editor or view that places its own content and
+ * writes `scrollTop`/`scrollLeft` or calls `scrollTo`, `scrollBy` or a CDK `scrollToOffset`): the browser makes no scroll moves of its own
+ * on it (family ADR 0105). Not for a chat or assistant log that only pins itself to its end: there the browser's anchoring keeps the
+ * reader's place, and the log carries a C138 waiver instead.
  *
  * - `overflow-anchor: none`: CSS scroll anchoring (Chromium, and WebKit including WKWebView) moves `scrollTop` by itself when content
  *   above its anchor changes size; a scroller that places its rows itself then sees a scroll it did not write (Debrief's events grid: two

@@ -67,3 +67,29 @@ test('C138 positive control (ER-33): the probe sees a known write, a marker and 
   assert.deepEqual(ownedScrollProblems(component('<div></div>', '  f(el: HTMLElement) { el.scrollTop = 1; }'), () => null).length, 1);
   assert.equal(check.mode, 'report-only');
 });
+
+test('C138 precision (review of 8e06ec809): receivers, bracket and logical assignments, multi-line assigns, comments and strings', () => {
+  const one = (body, tpl = '<div></div>') => ownedScrollProblems(component(tpl, body), () => null).length;
+  // Writes the first version missed.
+  assert.equal(one('  f(el?: HTMLElement) { el?.scrollTo(0, 0); }'), 1, 'optional call');
+  assert.equal(one('  f(el: Element) { (el as HTMLElement).scrollTo(0, 0); }'), 1, 'cast receiver');
+  assert.equal(one('  f(els: HTMLElement[]) { els[0].scrollTo(0, 0); }'), 1, 'indexed receiver');
+  assert.equal(one("  f(el: HTMLElement) { el['scrollTop'] = 3; }"), 1, 'bracket write');
+  assert.equal(one('  f(el: HTMLElement) { el.scrollTop ||= 3; }'), 1, 'logical assignment');
+  assert.equal(one('  f(el: HTMLElement) { el.scrollLeft ??= 3; }'), 1, 'nullish assignment');
+  assert.equal(one('  f(el: HTMLElement) { Object.assign(el, {\n    scrollTop: 5,\n  }); }'), 1, 'multi-line Object.assign');
+  // A marker in a comment is no marker; a `//` inside a string is no comment.
+  assert.equal(one('  // TODO: add pdOwnedScroll\n  f(el: HTMLElement) { el.scrollTop = 3; }'), 1, 'marker in a TS comment');
+  assert.equal(one('  f(el: HTMLElement) { el.scrollTop = 3; }', '<!-- pdOwnedScroll --><div></div>'), 1, 'marker in an HTML comment');
+  assert.equal(one("  f(el: HTMLElement) { const u = 'a//b'; el.scrollTop = 3; }"), 1, 'write after a string with //');
+  // Not writes: reads and the page.
+  assert.equal(one('  f(el: HTMLElement) { return el.scrollTop >= 3 && el.scrollLeft == 0; }'), 0, 'comparisons');
+  assert.equal(one('  f() { window.scrollTo(0, 0); globalThis.scrollBy(0, 1); document.scrollingElement; }'), 0, 'the page');
+  // Accepted gaps, documented in the header and the README: scrollIntoView, Renderer2.setProperty, per file not per element.
+  assert.equal(one("  f(el: HTMLElement) { el.scrollIntoView({ block: 'nearest' }); }"), 0, 'scrollIntoView (gap)');
+  assert.equal(one("  f(el: HTMLElement) { this.r.setProperty(el, 'scrollTop', 3); }"), 0, 'setProperty (gap)');
+  assert.equal(one('  f(el: HTMLElement) { el.scrollTop = 3; }', '<div pdOwnedScroll></div><div #b></div>'), 0, 'per file (gap)');
+  // Outside a component, every write needs a waiver.
+  assert.equal(ownedScrollProblems("@Directive({ selector: '[x]' })\nexport class D { f() { this.el.nativeElement.scrollTop = 3; } }\n", () => null).length, 1, 'directive host');
+  assert.equal(ownedScrollProblems('@Injectable()\nexport class S { pin(el: HTMLElement) { el.scrollTop = el.scrollHeight; } }\n', () => null).length, 1, 'service');
+});
