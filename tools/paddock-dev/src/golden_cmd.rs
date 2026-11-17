@@ -194,7 +194,7 @@ pub fn command(c: GoldenCommand) -> Result<Report, CliError> {
         ))
     })?;
     let steps = plan(&root, &dir, a.package.as_deref(), &a.filter).map_err(|e| CliError::usage(format!("dev golden confirm: {e}")))?;
-    let env: HashMap<String, String> = crate::process_env::vars().collect();
+    let env: HashMap<String, String> = std::env::vars().collect();
     let mut results = Vec::new();
     for s in &steps {
         eprintln!(

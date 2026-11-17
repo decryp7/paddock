@@ -244,6 +244,7 @@ pub(crate) mod tests {
     }
 
     /// Captured shape (invented values): one internal NVMe controller and two USB drives, which smartctl also lists as `nvme`.
+    #[cfg(unix)]
     pub(crate) fn internal_and_usb_scan() -> String {
         let internal = "IOService:/AppleARMPE/arm-io@10F00000/AppleH16GFamilyIO/ans@A000000/AppleANS3NVMeController/NS_01@1";
         let usb = |n: u8| {

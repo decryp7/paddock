@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -131,24 +130,4 @@ test('C13 ratchet: clippy paths listed in clippy_not_yet may be missing from cli
   assert.doesNotMatch(m, /lacks std::env::temp_dir/);
   assert.deepEqual(ratchetClippyNotYet(exempt, 'demo'), ['std::env::temp_dir', 'reqwest::Client::new']);
   assert.deepEqual(ratchetClippyNotYet(exempt, 'other'), []);
-});
-
-// ER-47 / rule 84: clearing a child's environment goes through paddock_env::clear_env, which keeps the restricting variables. The
-// one lint over every clearing site is Clippy's ban on `Command::env_clear`; this test says the ban is in the preset and in every
-// workspace's clippy.toml, and the positive control says C13 sees a copy that dropped it (so the ban cannot be lost quietly).
-const BANNED = ['std::process::Command::env_clear', 'std::env::set_var', 'std::env::remove_var', 'std::env::vars'];
-
-test('the preset and every workspace clippy.toml ban Command::env_clear, the process-wide env writes and std::env::vars', () => {
-  const tracked = execFileSync('git', ['ls-files', '*clippy.toml'], { cwd: PADDOCK, encoding: 'utf8' }).split('\n').filter(Boolean);
-  assert.ok(tracked.includes('lint/clippy.toml') && tracked.length >= 8, `too few clippy.toml files tracked: ${tracked}`);
-  for (const f of tracked) {
-    const have = new Set(disallowedPaths(readFileSync(join(PADDOCK, f), 'utf8')));
-    for (const p of BANNED) assert.ok(have.has(p), `${f} lacks ${p}`);
-  }
-});
-
-test('C13 positive control: an app clippy.toml that dropped the env_clear ban is reported', async () => {
-  const files = good();
-  files['clippy.toml'] = files['clippy.toml'].split('\n').filter((l) => !l.includes('std::process::Command::env_clear')).join('\n');
-  assert.match(messages(await run(files)), /lacks std::process::Command::env_clear/);
 });

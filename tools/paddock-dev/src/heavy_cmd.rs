@@ -35,7 +35,7 @@ pub fn plan(
 
 /// `heavy`, against the real machine.
 pub fn command(a: &HeavyArgs) -> Result<Report, CliError> {
-    let env: HashMap<String, String> = crate::process_env::vars().collect();
+    let env: HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("current folder: {e}")))?;
     // The tree being committed in (a hook runs in an app's folder): heavy is built from this tree's tools/heavy.
     let root = crate::worktree::git::Git::at(&cwd)

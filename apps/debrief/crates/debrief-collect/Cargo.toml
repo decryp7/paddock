@@ -18,8 +18,6 @@ path = "src/bin/debrief-collect.rs"
 
 [dependencies]
 debrief-core = { path = "../debrief-core" }
-# The environment as text that never panics on a non-UTF-8 variable (std::env::vars is banned).
-paddock-env = { path = "../../../../crates/paddock-env" }
 anyhow.workspace = true
 jiff.workspace = true
 globset.workspace = true
@@ -34,5 +32,4 @@ toml.workspace = true
 zip.workspace = true
 
 [dev-dependencies]
-paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 paddock-proc = { path = "../../../../crates/paddock-proc" }

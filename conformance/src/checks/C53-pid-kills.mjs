@@ -27,7 +27,6 @@
 import { error, warn } from '../finding.mjs';
 import { applyInlineWaiver, commentView } from '../util/inline-waiver.mjs';
 import { maskRust } from './C39-freed-port.mjs';
-import { unmeasuredFinding } from '../util/baseline.mjs';
 import { againstBaseline, baselineGrowth, growthMovedWarning, lineHash, movedWarning, sourceGone } from './C71-test-timing.mjs';
 
 export const LIVENESS_BASELINE = 'conformance/baselines/C53.json';
@@ -185,7 +184,7 @@ function livenessFindings(ctx) {
   for (const e of stale) out.push(warn('C53', 53, e.file, e.line ?? 1, `${LIVENESS_BASELINE} lists a liveness site that is gone (hash ${e.hash}); the baseline may only shrink`, 'Remove the entry.'));
   if (entries.length) {
     const g = baselineGrowth(ctx, entries, LIVENESS_BASELINE);
-    if (g.reason) out.push(unmeasuredFinding(ctx, { id: 'C53', rule: 53, file: LIVENESS_BASELINE, g }));
+    if (g.reason) out.push(warn('C53', 53, LIVENESS_BASELINE, 1, `the baseline's shrink-only rule is not enforced here: ${g.reason}`, 'Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.'));
     else for (const m of g.moved) out.push(growthMovedWarning('C53', 53, LIVENESS_BASELINE, m));
     if (!g.reason && g.added.length) out.push(error('C53', 53, LIVENESS_BASELINE, 1, `the baseline grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base ${g.base.slice(0, 9)}; it may only shrink`, 'Remove the entries and fix the sites through a ProcessId. Growing the baseline needs the user\'s approval.'));
   }

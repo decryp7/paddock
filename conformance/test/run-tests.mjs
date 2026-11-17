@@ -15,13 +15,6 @@ export function testArgs(argv, env) {
   return ['--test', `--test-concurrency=${n}`, ...argv.slice(1)];
 }
 
-/** `env` without the variables that say "this is CI": a test passes `options.ci` when it needs either answer, so the tests give the same result on a laptop and in a CI job (the growth checks turn a target they cannot see into an error in CI). */
-export function testEnv(env) {
-  const e = { ...env };
-  for (const k of ['CI', 'GITEA_ACTIONS', 'GITHUB_ACTIONS']) delete e[k];
-  return e;
-}
-
 if (isMain(import.meta.url)) {
   let args;
   try {
@@ -30,7 +23,7 @@ if (isMain(import.meta.url)) {
     console.error(`::error::${e.message}`);
     process.exit(2);
   }
-  const r = spawnSync(process.execPath, args, { stdio: 'inherit', env: testEnv(process.env) });
+  const r = spawnSync(process.execPath, args, { stdio: 'inherit' });
   if (r.error) {
     console.error(`::error::node --test did not start: ${r.error.message}`);
     process.exit(1);

@@ -88,7 +88,6 @@ fn c121_options(root: &Path, app: &str) -> RunOptions {
         files: None,
         today: "2026-11-10".into(),
         base_ref: Some("origin/main".into()),
-        ci: Some(false),
     }
 }
 

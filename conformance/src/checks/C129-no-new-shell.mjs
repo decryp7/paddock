@@ -25,7 +25,7 @@
 // become errors and the mode gate. Recorded: not yet.
 // Rust host: tools/paddock-dev/src/check/c129.rs (same findings, line for line).
 import { error, unwaivable, warn } from '../finding.mjs';
-import { baselineGrowth, unmeasuredFinding } from '../util/baseline.mjs';
+import { baselineGrowth } from '../util/baseline.mjs';
 
 export const BASELINE = 'conformance/baselines/C129-shell.json';
 export const EXCEPTIONS = 'conformance/shell-exceptions.json';
@@ -205,7 +205,7 @@ export default {
     });
     if (baseline.length > 0) {
       const g = baselineGrowth({ root: ctx.root, path: BASELINE, current: baseline, keyOf: (e) => `${e.path}\t${e.lines}`, looseKeyOf: (e) => e.path, entriesOf: (v) => v.files.map((e) => ({ path: e.path, lines: e.lines })) });
-      if (g.reason) out.push(unmeasuredFinding(ctx, { id: 'C129', rule: 55, file: BASELINE, what: 'the baseline', g }));
+      if (g.reason) out.push(warn('C129', 55, BASELINE, 1, `the baseline's shrink-only rule is not enforced here: ${g.reason}`, 'Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.'));
       else {
         for (const m of g.moved) {
           if (m.item.lines > m.from.lines) out.push(warn('C129', 55, BASELINE, 1, `the baseline raised ${m.item.path} from ${m.from.lines} to ${m.item.lines} lines; it may only shrink`, 'Lower the entry again and port the change to Rust instead.'));
@@ -217,7 +217,7 @@ export default {
     }
     if (exceptions.length > 0) {
       const g = baselineGrowth({ root: ctx.root, path: EXCEPTIONS, current: exceptions, keyOf: (e) => `${e.path}\t${e.id}`, entriesOf: (v) => v.exceptions.map((e) => ({ path: e.path, id: e.id })) });
-      if (g.reason) out.push(unmeasuredFinding(ctx, { id: 'C129', rule: 55, file: EXCEPTIONS, what: 'the exception list', g }));
+      if (g.reason) out.push(warn('C129', 55, EXCEPTIONS, 1, `the exceptions' shrink-only rule is not enforced here: ${g.reason}`, 'Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.'));
       else if (g.added.length > 0) {
         out.push(warn('C129', 55, EXCEPTIONS, 1, `the exceptions grew: ${g.added.length} ${plural(g.added.length, 'entry is', 'entries are')} (${g.added.slice(0, 5).map((e) => `${e.path} ${e.id}`).join('; ')}) not in the list at the merge base ${g.base.slice(0, 9)}; an added or widened exception needs the user's approval`, 'Remove the entry and port the script, or get the user\'s approval for the exception and record it in the plan.'));
       }

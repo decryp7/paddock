@@ -138,7 +138,10 @@ fn self_hash_outside_a_repository_or_without_an_input_list_names_the_next_step()
 /// `dev plan --commit-range|--commit-flags` in a repository with two commits, the event passed as the workflow passes it.
 fn plan_lint(repo: &std::path::Path, mode: &str, env: &[(&str, &str)]) -> (i32, String, String) {
     let mut cmd = crate::dev_bin::command();
-    cmd.current_dir(repo).args(["plan", mode]);
+    cmd.current_dir(repo)
+        .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap())
+        .args(["plan", mode]);
     for (k, v) in env {
         cmd.env(k, v);
     }

@@ -10,7 +10,6 @@
 use paddock_dev::check::mask::mask_rust;
 use paddock_dev::check::tree::Tree;
 use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
-use paddock_testkit::TestCommand;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -49,7 +48,7 @@ pub(crate) fn skip(reason: &str) {
     reason = "a test spawns node, git or the built binary; it ends them itself"
 )]
 pub(crate) fn has_node() -> bool {
-    TestCommand::new("node").arg("--version").output().is_ok_and(|o| o.status.success())
+    Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
 /// The fixture cases materialized into a scratch tree (`a__b__c.rs.txt` is `a/b/c.rs`).
@@ -74,7 +73,6 @@ fn options(root: &Path) -> RunOptions {
         files: None,
         today: "2026-11-10".into(),
         base_ref: Some("origin/main".into()),
-        ci: Some(false),
     }
 }
 
@@ -147,7 +145,7 @@ fn fixture_masks_equal_the_recorded_js_masks() {
 )]
 /// Runs a node program (an ES module given on the command line) in the repository and returns its standard output.
 pub(crate) fn node(driver: &str, env: &[(&str, String)]) -> String {
-    let mut c = TestCommand::new("node");
+    let mut c = Command::new("node");
     c.args(["--input-type=module", "-e", driver]).current_dir(repo_root());
     // The parity runs measure growth against `origin/main` of their own repository, whatever the caller's environment says.
     c.env_remove("PADDOCK_BASE_REF");
@@ -174,7 +172,7 @@ pub(crate) const LIVE_STALL: std::time::Duration = std::time::Duration::from_sec
 /// around the call.
 pub(crate) fn node_ticking(driver: &str, env: &[(&str, String)], progress: &paddock_testkit::Progress) -> String {
     use std::io::{BufRead, Read};
-    let mut c = TestCommand::new("node");
+    let mut c = Command::new("node");
     c.args(["--input-type=module", "-e", driver])
         .current_dir(repo_root())
         .stdout(std::process::Stdio::piped())
@@ -265,7 +263,6 @@ fn live_tree_findings_equal_the_js_host() {
                 scope: None,
                 today: paddock_dev::check::today_utc(),
                 base_ref: None,
-                ci: Some(false),
                 ..options(&root)
             };
             let tree = Tree::open(&root).with_progress(move || progress.tick());

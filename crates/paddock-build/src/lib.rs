@@ -76,7 +76,7 @@ pub struct Env(BTreeMap<String, String>);
 impl Env {
     /// The process environment.
     pub fn process() -> Env {
-        Env(paddock_env::vars().collect())
+        Env(std::env::vars().collect())
     }
 
     /// An environment of the given variables.

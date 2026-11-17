@@ -116,9 +116,8 @@ fn the_allow_list_does_not_grow_against_the_merge_base() {
     let current: Vec<String> = entries(&std::fs::read_to_string(root.join(ALLOW)).unwrap()).into_iter().collect();
     let entries_of = |text: &str| Some(entries(text).into_iter().collect::<Vec<String>>());
     match growth(&root, &base_ref, ALLOW, &current, &entries_of, &|k: &String| k.clone(), None) {
-        Growth::Unmeasured(why) => eprintln!(
-            "::warning::NOT MEASURED: the allow list's shrink-only rule ({ALLOW}) was not checked against {base_ref}: {}. Next: fetch the target branch (`git fetch origin main`, full history) or set PADDOCK_BASE_REF",
-            why.reason()
+        Growth::Reason(why) => eprintln!(
+            "::warning::NOT MEASURED: the allow list's shrink-only rule ({ALLOW}) was not checked against {base_ref}: {why}. Next: fetch the target branch (`git fetch origin main`, full history) or set PADDOCK_BASE_REF"
         ),
         Growth::Added { added: 0, .. } => {}
         Growth::Added { base, added, .. } => panic!(
@@ -176,6 +175,6 @@ fn the_shared_comparison_finds_an_added_entry_and_not_a_removed_one() {
     let entries_of = |t: &str| Some(entries(t).into_iter().collect::<Vec<String>>());
     assert!(matches!(
         growth(root, "origin/nowhere", ALLOW, &current, &entries_of, &|k: &String| k.clone(), None),
-        Growth::Unmeasured(_)
+        Growth::Reason(_)
     ));
 }

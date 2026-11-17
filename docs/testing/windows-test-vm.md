@@ -172,16 +172,6 @@ passes with it at the fix 914b67ad4. The guest has no Rust toolchain: build the 
 `"$(cygpath -u "$CI_LIKE_DIR")/<file>"`. Not mirrored: fixtures compiled into the test program (`include_str!`, `include_bytes!`: LF, from the Mac) and `CARGO_MANIFEST_DIR` (a Mac path), so a test that reads the checkout at run time sees CRLF but one that uses a compiled-in fixture does not; CPU count and architecture, the runner's account and logon type, Defender exclusions. `start` also
 prints the load and the busy rate of the VM's disk and warns (never refuses) when the disk is busy.
 
-Tests that use the testkit's `StandIn` need its binary, and the guest has no compiler to build it. Cross-build it on the Mac as
-**x86_64** (it runs under emulation on the Arm guest; the `aarch64` build of some crates does not compile today, for example Dyno's
-`windows` imports) with the test programs: `cargo xwin build --target x86_64-pc-windows-msvc -p paddock-testkit --bin paddock-stand-in`
-and `cargo xwin test --no-run --target x86_64-pc-windows-msvc -p paddock-testkit --lib --test it` (the lib test binary holds the
-`publish_stub` and prebuilt-binary tests; the `it` binary the `stand_in::` tests). Pass each with `--with <file>` and set
-`PADDOCK_STAND_IN_BIN` to the stand-in in the command:
-`D="$(cygpath -u "$CI_LIKE_DIR")"; export PADDOCK_STAND_IN_BIN="$D/paddock-stand-in.exe"; "$D/<lib test>.exe" stand_in:: && "$D/<it test>.exe" stand_in::`.
-The testkit refuses a binary built from other sources than the test program's (it asks the binary for a hash of them), so rebuild all of
-them from the same commit. On the Mac and in CI the kit compiles it itself with `rustc`, and nothing is set.
-
 Copy files with `scp -i <vm dir>/keys/paddock-test -o UserKnownHostsFile=<vm dir>/keys/known_hosts <file>
 paddock-test@$(scripts/vm-win.sh ip):C:/paddock-test/`. Always revert afterwards; never keep test state in the baseline.
 

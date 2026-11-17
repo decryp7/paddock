@@ -7,10 +7,9 @@
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_slots::{FsLocks, SlotId, SlotLocks};
-use paddock_testkit::TestCommand;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Output;
+use std::process::{Command, Output};
 
 fn script() -> PathBuf {
     crate::full_tree(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
@@ -50,9 +49,11 @@ impl Job {
 
     /// Runs the script as a host job's step: the slots of a CI home of its own, the real paddock-dev, nothing inherited.
     fn run(&self, args: &[&str], later: bool) -> Output {
-        let mut cmd = TestCommand::new("bash");
+        let mut cmd = Command::new("bash");
         cmd.arg(script())
             .args(args)
+            .env_clear()
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("HOME", &self.home)
             .env("RUNNER_OS", "macOS")
             .env("RUNNER_TEMP", &self.temp)

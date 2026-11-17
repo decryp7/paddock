@@ -8,8 +8,7 @@ use debrief_plugin_api::time::{utc_epoch_ms, TimestampParser};
 #[test]
 fn a_skipped_hour_is_not_a_time_and_a_repeated_hour_reads_as_the_first() {
     // Central European time with the EU's summer time rules, as a POSIX rule so the test needs no zone database.
-    let mut env = paddock_testkit::env_lock();
-    env.set("TZ", "CET-1CEST,M3.5.0,M10.5.0/3");
+    std::env::set_var("TZ", "CET-1CEST,M3.5.0,M10.5.0/3");
     let p = TimestampParser::new(&[], "local", None).unwrap();
     let utc = |y, mo, d, h, mi| utc_epoch_ms(y, mo, d, h, mi, 0, 0);
     // 2026-03-29 02:30 never happened: the clocks went from 02:00 to 03:00.

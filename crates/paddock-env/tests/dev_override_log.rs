@@ -67,10 +67,6 @@ fn an_ignored_variable_is_logged_once_by_name_and_never_by_value() {
 }
 
 #[test]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the macro reads the process environment; the variable is private to this test, which no other test reads"
-)]
 fn the_macro_honours_the_variable_exactly_when_the_callers_build_is_a_debug_build() {
     // Set before any other thread reads it; the name is private to this test binary.
     let name = "PADDOCK_MACRO_TEST_SET";

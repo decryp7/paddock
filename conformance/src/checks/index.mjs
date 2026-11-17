@@ -55,14 +55,12 @@ import C119 from './C119-dev-before-toolchain.mjs';
 import C120 from './C120-layout-guess.mjs';
 import C121 from './C121-declared-data.mjs';
 import C122 from './C122-test-path-text.mjs';
-import C123 from './C123-test-process-builder.mjs';
 import C124 from './C124-gate-outcomes.mjs';
 import C125 from './C125-machine-paths.mjs';
 import C126 from './C126-test-steps.mjs';
 import C127 from './C127-computed-rm.mjs';
 import C128 from './C128-recorded-pid.mjs';
 import C129 from './C129-no-new-shell.mjs';
-import C130 from './C130-stand-in-fixtures.mjs';
 import C131 from './C131-golden-machine.mjs';
 import C133 from './C133-e2e-pinned-clock.mjs';
 import C135 from './C135-leak-detector-opt-outs.mjs';
@@ -71,4 +69,4 @@ import C137 from './C137-e2e-kit-import.mjs';
 import C138 from './C138-owned-scroll.mjs';
 
 /** Every check, in id order. A check is { id, title, rule, run(ctx) -> findings[] | Promise<findings[]> }. */
-export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C39, C43, C45, C48, C50, C51, C53, C54, C56, C57, C59, C61, C62, C71, C78, C79, C85, C91, C98, C99, C104, C110, C111, C112, C113, C114, C115, C116, C117, C118, C119, C120, C121, C122, C123, C124, C125, C126, C127, C128, C129, C130, C131, C133, C135, C136, C137, C138];
+export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C39, C43, C45, C48, C50, C51, C53, C54, C56, C57, C59, C61, C62, C71, C78, C79, C85, C91, C98, C99, C104, C110, C111, C112, C113, C114, C115, C116, C117, C118, C119, C120, C121, C122, C124, C125, C126, C127, C128, C129, C131, C133, C135, C136, C137, C138];

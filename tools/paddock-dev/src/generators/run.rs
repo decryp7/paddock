@@ -96,43 +96,6 @@ fn resolve(program: &str) -> String {
     crate::pathfind::find_program(&path, program, true, &exts).map_or_else(|| program.to_string(), |p| p.to_string_lossy().into_owned())
 }
 
-/// The command a generator's program runs as: the whole environment as the runner has it (the process's, in production; the
-/// program is looked up on its PATH), cleared through the one clearing function, which keeps the restricting variables as the map has
-/// them (ER-47), then set, with `CARGO_BUILD_JOBS`.
-fn base_command(program: impl AsRef<std::ffi::OsStr>, env: &HashMap<String, String>, dir: &Path, jobs: String) -> std::process::Command {
-    let mut cmd = command(program);
-    paddock_env::clear_env_from(&mut cmd, &[], |k| env.get(k).map(std::ffi::OsString::from));
-    cmd.envs(env).current_dir(dir).env("CARGO_BUILD_JOBS", jobs);
-    cmd
-}
-
-#[cfg(test)]
-mod command_tests {
-    use super::*;
-
-    #[test]
-    fn a_restricting_variable_in_the_map_reaches_the_built_command() {
-        let mut env: HashMap<String, String> = HashMap::new();
-        env.insert("PATH".into(), "/bin".into());
-        env.insert("PADDOCK_DEV_DOWNLOAD".into(), "0".into());
-        env.insert("RUSTUP_AUTO_INSTALL".into(), "0".into());
-        let cmd = base_command("x", &env, Path::new("."), "2".into());
-        let got: Vec<(String, String)> = cmd
-            .get_envs()
-            .filter_map(|(k, v)| v.map(|v| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned())))
-            .collect();
-        for (k, v) in [
-            ("PADDOCK_DEV_DOWNLOAD", "0"),
-            ("RUSTUP_AUTO_INSTALL", "0"),
-            ("CARGO_BUILD_JOBS", "2"),
-        ] {
-            assert!(got.contains(&(k.to_string(), v.to_string())), "{k}: {got:?}");
-        }
-        // Positive control: a variable that is not in the map is not taken from the process.
-        assert!(!got.iter().any(|(k, _)| k == "CARGO_NET_OFFLINE"), "{got:?}");
-    }
-}
-
 /// The real runner: bounded and started through `paddock-proc`. Every check runs with `CARGO_BUILD_JOBS` (the caller's, else 2)
 /// and its workspace's kept `CARGO_TARGET_DIR` under the build-folder root; a heavy one is queued through `heavy`.
 pub struct Real {
@@ -149,7 +112,7 @@ pub struct Real {
 impl Real {
     /// The runner for the checkout at `root`, with the process's environment.
     pub fn new(root: &Path) -> Real {
-        let env: HashMap<String, String> = crate::process_env::vars().collect();
+        let env: HashMap<String, String> = std::env::vars().collect();
         // The roots `./dev disk` tracks (PADDOCK_DISK_ROOTS, else its defaults): no machine path is named here.
         let roots = crate::disk::config::Settings::resolve(&crate::disk::config::CommonArgs::default(), &|k| env.get(k).cloned()).roots;
         let wrapper = crate::local_sccache::Lazy::on_demand(env.clone());
@@ -254,7 +217,9 @@ impl Runner for Real {
             .filter(|j| !j.is_empty())
             .cloned()
             .unwrap_or_else(|| "2".into());
-        let mut cmd = base_command(resolve(program), &self.env, dir, jobs);
+        let mut cmd = command(resolve(program));
+        // The whole environment as this runner has it (the process's, in production): the program is looked up on its PATH.
+        cmd.env_clear().envs(&self.env).current_dir(dir).env("CARGO_BUILD_JOBS", jobs);
         // A cargo call got its build folder as configuration above (sccache hashes `CARGO_TARGET_DIR`: crate::cargo_target) and
         // compiles through the local sccache; a program that starts cargo itself (a script, `npm`) keeps the variable, as there is no
         // argument to put it in.

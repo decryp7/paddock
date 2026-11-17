@@ -226,7 +226,7 @@ fn a_set_stop_flag_ends_the_phase_before_the_next_line() {
         root: Some(r.root().to_path_buf()),
     };
     args.max_secs = 5;
-    let env: HashMap<String, String> = crate::process_env::vars().collect();
+    let env: HashMap<String, String> = std::env::vars().collect();
     let stop = Arc::new(AtomicBool::new(true));
     let mut out = Vec::new();
     let code = run_with(&args, &env, &stop, &mut out, &mut Vec::new());

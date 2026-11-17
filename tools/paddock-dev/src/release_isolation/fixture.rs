@@ -270,8 +270,7 @@ fn sha(bytes: &[u8]) -> String {
 
 fn run(env: &Env, dir: &Path, program: &str, args: &[&str]) {
     let mut cmd = command(program);
-    cmd.args(args).current_dir(dir);
-    env.clear_into(&mut cmd);
+    cmd.args(args).current_dir(dir).env_clear();
     for (k, v) in &env.0 {
         cmd.env(k, v);
     }
@@ -342,7 +341,7 @@ impl Fixture {
         let mut env = Env::default();
         // Under the names the process has them: on Windows the path variable is `Path`, and a probe that reads `PATH` exactly would
         // pass here and fail on every real job.
-        for (name, v) in crate::process_env::vars() {
+        for (name, v) in std::env::vars() {
             if ["PATH", "PATHEXT", "SYSTEMROOT", "TEMP", "TMP", "LANG"]
                 .iter()
                 .any(|k| name.eq_ignore_ascii_case(k))
@@ -406,8 +405,7 @@ impl Fixture {
         );
         let head = {
             let mut cmd = command("git");
-            cmd.args(["rev-parse", "HEAD"]).current_dir(&clone);
-            env.clear_into(&mut cmd);
+            cmd.args(["rev-parse", "HEAD"]).current_dir(&clone).env_clear();
             for (k, v) in &env.0 {
                 cmd.env(k, v);
             }
@@ -516,8 +514,7 @@ impl Fixture {
 
     fn git_head(&self) -> String {
         let mut cmd = command("git");
-        cmd.args(["rev-parse", "HEAD"]).current_dir(&self.clone);
-        self.env.clear_into(&mut cmd);
+        cmd.args(["rev-parse", "HEAD"]).current_dir(&self.clone).env_clear();
         for (k, v) in &self.env.0 {
             cmd.env(k, v);
         }

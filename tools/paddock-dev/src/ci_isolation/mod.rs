@@ -239,7 +239,7 @@ fn run_command(ctx: &Ctx, args: &[String], io: &mut Sinks<'_>) -> R<()> {
 
 /// `dev ci isolation` for the real process: its environment, current folder and standard streams' writers.
 pub fn run(a: &IsolationArgs, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
-    let env: HashMap<String, String> = crate::process_env::vars().collect();
+    let env: HashMap<String, String> = std::env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_default();
     let tables = find_tables(a.tables.clone(), &env, &cwd);
     let exe = std::env::current_exe().unwrap_or_default();

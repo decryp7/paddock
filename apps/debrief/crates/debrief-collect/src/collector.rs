@@ -367,7 +367,7 @@ impl Run<'_, '_> {
     }
 
     fn environment(&mut self) -> Result<()> {
-        let v = env::snapshot(&self.c.plan.env_allowlist, paddock_env::vars(), &self.c.debrief_version);
+        let v = env::snapshot(&self.c.plan.env_allowlist, std::env::vars(), &self.c.debrief_version);
         let mut counts = Counts::new();
         let v = self.redactor.apply_json(&v, &mut counts);
         let bytes = serde_json::to_vec_pretty(&v)?;

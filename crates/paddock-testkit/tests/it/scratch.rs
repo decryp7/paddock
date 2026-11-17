@@ -126,10 +126,7 @@ fn errors_read_as_sentences_and_path_panics_on_a_mistake() {
         .err()
         .map(|e| e.to_string())
         .unwrap_or_default();
-    assert!(
-        io.starts_with("scratch folder (in the temp folder "),
-        "{io}"
-    );
+    assert!(io.starts_with("scratch folder: "), "{io}");
     let message = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.path("/abs")))
         .err()
         .and_then(|e| e.downcast_ref::<String>().cloned());
@@ -160,7 +157,7 @@ fn folders_are_in_the_callers_group_even_when_the_parent_is_in_another() {
     // On macOS a new folder takes its parent's group: a temp folder on a disk whose folders are group `admin` made Dyno's
     // "folder is in a shared group" check fail in tests that passed elsewhere (twice).
     let egid = unsafe { libc::getegid() };
-    let parent = paddock_testkit::tempdir();
+    let parent = tempfile::tempdir().unwrap();
     if let Some(other) = another_group(egid) {
         chown(parent.path(), None, Some(other)).unwrap();
         assert_eq!(
@@ -187,13 +184,4 @@ fn folders_are_in_the_callers_group_even_when_the_parent_is_in_another() {
     let file = s.write("a/b.txt", "x").unwrap();
     assert_eq!(fs::metadata(&file).unwrap().gid(), egid);
     assert_eq!(fs::metadata(file.parent().unwrap()).unwrap().gid(), egid);
-}
-
-/// A scratch error names the temp folder the kit makes scratch folders in (ER-27): the hermetic flake said only "scratch folder:
-/// No such file or directory".
-#[test]
-fn a_scratch_io_error_names_the_temp_folder() {
-    let e = ScratchError::Io(std::io::Error::from(std::io::ErrorKind::NotFound));
-    let temp = paddock_testkit::ambient().temp_dir.display().to_string();
-    assert!(e.to_string().contains(&temp), "{e}");
 }

@@ -100,14 +100,12 @@ The check index (generated from each module's id, title, scope, mode and needs):
 | C120 | No guessing of the cargo build-folder layout | both | report-only | all |
 | C121 | Declared data is read through its accessor, not by searching a workflow's text | root | report-only | all |
 | C122 | Tests compare paths as paths | root | report-only | all |
-| C123 | a Rust test starts ./dev, cargo or node only through paddock_testkit::TestCommand | root | report-only | all |
 | C124 | A gate's result is built through the shared outcome, never by hand | root | report-only | all |
 | C125 | No hard-coded machine disk paths | root | report-only | all |
 | C126 | Tests bound each step on progress and end every process they start | root | report-only | all |
 | C127 | A recursive delete of a computed path in a shell script goes through safe_rm | root | report-only | all |
 | C128 | Tests take a recorded pid's identity through the kit, never ProcessId::of | root | report-only | all |
 | C129 | No new shell | root | report-only | all |
-| C130 | Rust tests install the testkit stand-in, not a #!/bin/sh fixture | root | report-only | all |
 | C131 | A golden file holds no value of the machine that captured it | root | report-only | all |
 | C133 | E2E specs: opt-outs of the pinned clock say why, live steps are paused, waits are never vacuous | root | report-only | all |
 | C135 | The test leak detector is switched off only where listed | root | report-only | all |

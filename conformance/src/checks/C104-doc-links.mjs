@@ -15,7 +15,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { error, warn } from '../finding.mjs';
-import { baselineGrowth, targetRef, unmeasuredFinding } from '../util/baseline.mjs';
+import { baselineGrowth } from '../util/baseline.mjs';
 
 export const BASELINE_PATH = 'conformance/baselines/C104.json';
 const EXTRA_CHECK_IDS = ['C100']; // lives in the gate register (ADR 0060), not in conformance/src/checks
@@ -202,9 +202,9 @@ export default {
         keyOf: (e) => `${e.file}\0${e.target}`,
         entriesOf: (j) => j[key] ?? [],
         ...(ctx.options.git ? { git: ctx.options.git } : {}),
-        baseRef: targetRef(ctx.options),
+        ...(ctx.options.baseRef ? { baseRef: ctx.options.baseRef } : {}),
       });
-      if (g.reason) out.push(unmeasuredFinding(ctx, { id: 'C104', rule: 40, file: BASELINE_PATH, g }));
+      if (g.reason) out.push(warn('C104', 40, BASELINE_PATH, 1, `the baseline's shrink-only rule is not enforced here: ${g.reason}`, 'Fetch the target branch (`git fetch origin main`), or set PADDOCK_BASE_REF.'));
       else for (const a of g.added) out.push(error('C104', 40, BASELINE_PATH, 1, `the baseline grew: \`${a.target}\` in ${a.file} is not in the baseline at the merge base ${g.base.slice(0, 9)}`, 'Remove the entry and fix the text; growing the baseline needs the user\'s approval.'));
     }
     return out;

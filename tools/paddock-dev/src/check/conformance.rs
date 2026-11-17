@@ -178,7 +178,6 @@ pub fn run(argv: &[String], out: &mut dyn Write, err: &mut dyn Write, env: &dyn 
         files: None,
         today: today_utc(),
         base_ref: None,
-        ci: None,
     };
     let reg = registry();
     let result = match run_checks(&opts, &reg) {

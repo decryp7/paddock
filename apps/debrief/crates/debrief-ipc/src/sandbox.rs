@@ -408,20 +408,12 @@ fn sbpl_literal(p: &std::path::Path) -> String {
     format!("\"{}\"", p.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// Removes every environment variable but `keep` and the restricting ones ([`paddock_proc::RESTRICTING`]: the elevated child
-/// must not lose a download or install ban its parent had, ER-47).
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the elevated child clears its own environment before it starts serving; the IPC runtime reads no environment"
-)]
+/// Removes every environment variable but `keep`.
 fn clear_env(keep: &[&str]) {
     let names: Vec<std::ffi::OsString> = std::env::vars_os().map(|(k, _)| k).collect();
     for k in names {
-        let kept = |names: &[&str]| names.iter().any(|kept| std::ffi::OsStr::new(kept) == k.as_os_str());
-        let restricting = paddock_proc::RESTRICTING
-            .iter()
-            .any(|r| std::ffi::OsStr::new(r.name) == k.as_os_str());
-        if !kept(keep) && !restricting {
+        if !keep.iter().any(|kept| std::ffi::OsStr::new(kept) == k.as_os_str()) {
+            // Called before the child starts serving; the IPC runtime reads no environment.
             std::env::remove_var(&k);
         }
     }

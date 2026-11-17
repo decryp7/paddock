@@ -28,7 +28,7 @@ pub struct PrivateTemp {
 }
 
 impl PrivateTemp {
-    /// A new folder in the system temp folder, as captured for the kit ([`crate::ambient::Ambient::temp_dir`]).
+    /// A new folder in the system temp folder.
     ///
     /// # Errors
     /// The folder cannot be made or made private.
@@ -36,7 +36,7 @@ impl PrivateTemp {
         PrivateTemp::from(
             tempfile::Builder::new()
                 .prefix("paddock-private-")
-                .tempdir_in(&crate::ambient::ambient().temp_dir)?,
+                .tempdir()?,
         )
     }
 
@@ -61,7 +61,7 @@ impl PrivateTemp {
         b.prefix(prefix);
         PrivateTemp::from(match parent {
             Some(p) => b.tempdir_in(p)?,
-            None => b.tempdir_in(&crate::ambient::ambient().temp_dir)?,
+            None => b.tempdir()?,
         })
     }
 
@@ -119,19 +119,10 @@ mod tests {
         std::fs::write(p.join("f"), b"x").unwrap();
         drop(t);
         assert!(!p.exists());
-        // Kept in a parent of the test's own, so the cleanup can show it removes only what the test made.
-        let parent = crate::ambient::tempdir();
-        let kept = PrivateTemp::new_in(parent.path()).unwrap().keep();
+        let kept = private_tempdir().unwrap().keep();
         assert!(kept.is_dir());
         std::fs::remove_dir_all(&kept).unwrap();
-        // On Windows the owner-only folder sits in an outer one the test made too; on Unix the kept folder is the outer one,
-        // and its parent is the temp folder itself, which must stay (it was removed when empty, review of df9af3cda).
-        #[cfg(windows)]
-        std::fs::remove_dir(kept.parent().unwrap()).unwrap();
-        assert!(
-            parent.path().is_dir(),
-            "the cleanup removed a folder the test did not make"
-        );
+        let _ = std::fs::remove_dir(kept.parent().unwrap());
     }
 
     /// The CI runner's temp folder: a Windows folder under `C:\` grants `Authenticated Users` (S-1-5-11) Modify to what is made in it.

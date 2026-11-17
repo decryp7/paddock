@@ -437,7 +437,7 @@ fn npm_ci(dir: &Path) -> Result<String, String> {
 
 /// [`npm_ci`] with the program named (a test passes a fake npm).
 fn npm_ci_with(program: &str, dir: &Path) -> Result<String, String> {
-    let env: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     let ran = crate::ci_tool::ToolCall::new(program)
         .args(NPM_CI_ARGS)
         .cwd(dir)

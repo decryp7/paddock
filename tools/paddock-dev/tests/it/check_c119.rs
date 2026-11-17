@@ -3,7 +3,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_dev::check::{RunOptions, registry, run_checks};
-use paddock_testkit::TestCommand;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -20,7 +19,7 @@ process.stdout.write(JSON.stringify({ findings: r.findings, errors: r.errors, wa
 "#;
 
 fn js(root: &Path) -> Value {
-    let out = TestCommand::new("node")
+    let out = paddock_proc::command("node")
         .args(["--input-type=module", "-e", DRIVER])
         .current_dir(repo())
         .env("C119_ROOT", root)
@@ -39,7 +38,6 @@ fn rust(root: &Path) -> Value {
         files: None,
         today: paddock_dev::check::today_utc(),
         base_ref: None,
-        ci: Some(false),
     };
     let r = run_checks(&opts, &registry()).unwrap().json();
     json!({"findings": r["findings"], "errors": r["errors"], "warnings": r["warnings"]})

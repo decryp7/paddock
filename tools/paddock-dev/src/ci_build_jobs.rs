@@ -268,7 +268,7 @@ fn number(s: &str) -> i64 {
 
 /// The command over this process's environment.
 pub fn run(args: &BuildJobsArgs, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
-    let env: HashMap<String, String> = crate::process_env::vars().collect();
+    let env: HashMap<String, String> = std::env::vars().collect();
     let windows = cfg!(windows) || var(&env, "PADDOCK_CI_ASSUME_WINDOWS") == Some("1");
     run_with(&env, &Probes, windows, args, out, err)
 }

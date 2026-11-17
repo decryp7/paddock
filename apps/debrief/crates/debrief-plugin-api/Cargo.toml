@@ -12,8 +12,6 @@ description = "The contract of Debrief plugins (ADR 0017): plugin traits, the va
 debrief-ipc = { path = "../debrief-ipc" }
 anyhow.workspace = true
 jiff.workspace = true
-# The canonical no-console `Command` constructor (rule 55: this crate no longer keeps a copy of it).
-paddock-env = { path = "../../../../crates/paddock-env" }
 regex.workspace = true
 serde = { workspace = true, features = ["rc"] }
 serde_json = { workspace = true, features = ["preserve_order"] }

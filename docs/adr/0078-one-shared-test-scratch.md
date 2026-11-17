@@ -211,15 +211,3 @@ ships. Under D7 (b) the ratchet blocks no tag.
 | D7 | Release gating | (a) Ratchet entries block each app's next tag. (b) New sites fail from landing; old ones migrate in each app's phase; no tag blocked. | (b): test-only code, nothing a user runs. |
 | D8 | Register scope | Add `scope = "test"` to ADR 0034's register (amendment) so C58 sees test-support copies. | Yes. |
 | D9 | Scope now | (a) All (18.5 days). (b) First cut (9 days). | (b). |
-
-## Amendment 2026-11-16: build caches of the test kit live in the target folder (ADR 0100)
-
-A folder the test kit keeps across tests of one build, not one test's scratch, goes in the build's target folder, never in the
-temp folder: `paddock_testkit::TestCommand`'s toolchain link folders are `<target>/paddock-test-toolchain/<toolchain>` (found
-from the test program's own path, as `cargo_layout::profile_dir` does; the practice of cargo's own test support and
-`CARGO_TARGET_TMPDIR`). So no test leaves anything in a user's or a shared temp folder, `cargo clean` removes it, and every test
-program of the build shares it. Only a crashed process's staging folder there is swept, once an hour old. A test program run
-outside a target folder keeps such files in the command's own scratch, removed with it. Reason: the review of `df9af3cda` found
-the first version in the temp folder, swept across runs by age and by whether its programs still existed, where one process's
-sweep could remove a folder another live process used. This is a cache, not scratch: the run root, its leak check and §1's
-removal rules stay as they are for scratch.

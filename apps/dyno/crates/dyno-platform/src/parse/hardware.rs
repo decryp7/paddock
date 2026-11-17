@@ -189,8 +189,8 @@ pub fn parse_powercfg_battery(xml: &str) -> Option<BatteryCapacity> {
     })
 }
 
-/// A sample NVMe `smartctl` answer for the readers' tests (the stand-in `smartctl` prints it).
-#[cfg(test)]
+/// A sample NVMe `smartctl` answer for the readers' tests (only the Unix tests use a fake `smartctl` script).
+#[cfg(all(test, unix))]
 pub(crate) fn tests_nvme() -> &'static str {
     tests::NVME
 }

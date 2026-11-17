@@ -24,7 +24,7 @@ struct Ran {
 fn run_host(js: bool, args: &[&str], scratch: &Path) -> Ran {
     let (out, summary) = (scratch.join("out.json"), scratch.join("summary.md"));
     let mut c = if js {
-        let mut c = paddock_testkit::TestCommand::new("node");
+        let mut c = paddock_proc::command("node");
         c.arg("conformance/bin/paddock-conformance.mjs");
         c
     } else {
@@ -349,7 +349,6 @@ fn a_new_check_gets_inline_waivers_from_the_engine_without_any_waiver_code() {
         files: None,
         today: "2026-11-13".into(),
         base_ref: None,
-        ci: Some(false),
     };
     let r = run_checks(&opts, &[Box::new(Todo)]).unwrap();
     let lines: Vec<usize> = r.findings.iter().map(|f| f.line).collect();
@@ -401,7 +400,7 @@ fn the_registry_is_one_list_and_list_json_agrees_with_the_javascript_host() {
     let reg = check::registry();
     let ids: Vec<String> = reg.iter().map(|c| c.id().to_string()).collect();
     assert_eq!(check::sources().iter().map(|(id, _)| id.to_string()).collect::<Vec<_>>(), ids);
-    let js = paddock_testkit::TestCommand::new("node")
+    let js = paddock_proc::command("node")
         .args(["conformance/bin/paddock-conformance.mjs", "list", "--json"])
         .current_dir(repo())
         .output()

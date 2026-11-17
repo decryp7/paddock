@@ -123,7 +123,7 @@ fn helper_main() {
             while out.write_all(&block).is_ok() {}
         }
         "print_env" => {
-            for (k, v) in paddock_env::vars() {
+            for (k, v) in std::env::vars() {
                 say(&format!("{k}={v}"));
             }
         }

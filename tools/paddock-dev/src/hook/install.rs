@@ -146,7 +146,7 @@ impl Exec for AtRev<'_> {
 /// The input hash of the tool's inputs at `rev` (`inputs.txt`, the compiler and the build flags are the working tree's).
 pub fn expected_hash(exec: &dyn Exec, root: &Path, rev: &str) -> Result<String, CliError> {
     let env = |k: &str| std::env::var(k).ok();
-    let vars: Vec<(String, String)> = crate::process_env::vars().collect();
+    let vars: Vec<(String, String)> = std::env::vars().collect();
     Ok(input_hash::compute(&AtRev { exec, rev }, &env, &vars, root)?.hash)
 }
 

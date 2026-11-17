@@ -56,7 +56,6 @@ fn options(root: &Path, app: &str) -> RunOptions {
         files: None,
         today: "2026-11-15".into(),
         base_ref: Some("origin/main".into()),
-        ci: Some(false),
     }
 }
 
@@ -115,7 +114,7 @@ fn c129_flags_new_and_grown_shell_and_names_stale_entries_as_warnings() {
             (BASELINE, 1, "stale baseline entry"),
             (EXCEPTIONS, 1, "stale exception"),
             (BASELINE, 1, "the baseline's shrink-only rule is not enforced here"),
-            (EXCEPTIONS, 1, "the exception list's shrink-only rule is not enforced here"),
+            (EXCEPTIONS, 1, "the exceptions' shrink-only rule is not enforced here"),
             (
                 ".gitea/workflows/x.yml",
                 4,

@@ -4,7 +4,7 @@ fn main() {
     // Run from the tool cache, the tool holds its own binary until it ends, so its children start a path no prune removes. Unix
     // only: Windows cannot remove a running program's link (the hold would stay for the week-long sweep) nor its cache entry.
     #[cfg(unix)]
-    paddock_dev::tool_cache::hold_self(&paddock_dev::process_env::vars().collect());
+    paddock_dev::tool_cache::hold_self(&std::env::vars().collect());
     let code = paddock_dev::run(&args, &mut std::io::stdout(), &mut std::io::stderr());
     #[cfg(unix)]
     paddock_dev::tool_cache::release_self();

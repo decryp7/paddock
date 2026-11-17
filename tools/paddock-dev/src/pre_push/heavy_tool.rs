@@ -164,7 +164,7 @@ mod tests {
     fn a_cache_hit_is_marked_as_used_before_its_probe_so_a_slow_or_failed_probe_cannot_let_the_prune_take_it() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let home = tempfile::tempdir().unwrap();
-        let mut env: HashMap<String, String> = crate::process_env::vars().collect();
+        let mut env: HashMap<String, String> = std::env::vars().collect();
         env.insert("PADDOCK_DEV_HOME".into(), home.path().display().to_string());
         let lookup = |k: &str| env.get(k).cloned();
         let vars: Vec<(String, String)> = env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
@@ -176,14 +176,9 @@ mod tests {
         }
         let entry = home.path().join("bin").join(format!("heavy-{}", h.hash));
         std::fs::create_dir_all(&entry).unwrap();
-        // A probe that fails: `--version` prints nothing and the program exits 1.
-        let bin = paddock_testkit::StandIn::new(&entry, "heavy")
-            .exit(1)
-            .install()
-            .unwrap()
-            .program()
-            .to_path_buf();
-        assert_eq!(bin, entry.join(exe("heavy")));
+        let bin = entry.join(exe("heavy"));
+        // A probe that fails: `--version` prints nothing.
+        paddock_testkit::exe::write_program(&bin, "#!/bin/sh\nexit 1\n").unwrap();
         let two_days = std::time::SystemTime::now() - Duration::from_secs(2 * 86_400);
         std::fs::File::open(&entry).unwrap().set_modified(two_days).unwrap();
         // No budget left: ensure stops after the probe and builds nothing.

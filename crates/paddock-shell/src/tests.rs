@@ -3,7 +3,6 @@
 
 use crate::{COMMANDS, permissions};
 use paddock_commands::testing::{WriteMode, sync_generated};
-use paddock_testkit::TestCommand;
 use std::path::{Path, PathBuf};
 
 const REGENERATE: &str = "PADDOCK_WRITE_TS=1 cargo test -p paddock-shell --lib generated";
@@ -167,7 +166,7 @@ fn every_limit_registry_the_shell_links_is_registered() {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     // `--no-deps` lists only the workspace members and reads no registry crate, so the test needs neither the network nor the
     // runner's cargo cache (resolving the full graph downloaded crates for every platform, e.g. android_system_properties).
-    let out = TestCommand::new(env!("CARGO"))
+    let out = std::process::Command::new(env!("CARGO"))
         .args([
             "metadata",
             "--format-version",
