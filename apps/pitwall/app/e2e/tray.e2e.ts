@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import type { Locator, Page } from '@playwright/test';
 import { pressTab } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 import { openApp, settingsDialog } from './app';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 /** The popover is 360 px wide inside a 6 px margin; the shell fits the window to it, up to the family's 520 px cap. */
 const VIEWPORT = { width: 372, height: 1000 };
@@ -141,6 +142,7 @@ test.describe('the tray popup', () => {
     await popup.getByRole('button', { name: 'More actions' }).click();
     await page.getByRole('menuitem', { name: 'Resume serving' }).click();
     await expect(popup.locator('p.error')).toBeVisible();
+    await expectNotMoving(popup, 'the popup');
     expect(Math.floor((await popup.boundingBox())!.height)).toBeLessThanOrEqual(520);
   });
 

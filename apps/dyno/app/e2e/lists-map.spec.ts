@@ -1,4 +1,5 @@
 import { expect, test } from './test';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 /** The IP lists, the connections map and the firewall against the mock backend (chromium). */
 const url = (hash: string) => `/?latency=0#/${hash}`;
@@ -107,7 +108,8 @@ test.describe('firewall rule table at the smallest window (900 px)', () => {
     const tip = page.locator('.mat-mdc-tooltip');
     await expect(tip).toBeVisible();
     // The tooltip's text is the program, with a zero-width break hint after each separator.
-    expect((await tip.textContent())?.replaceAll('\u200b', '').trim(), 'the tooltip is exactly the rule\'s program').toBe(PROGRAM);
+    await expect.poll(async () => (await tip.textContent())?.replaceAll('\u200b', '').trim(), { message: 'the tooltip is exactly the rule\'s program' }).toBe(PROGRAM);
+    await expectNotMoving(tip.locator('.mdc-tooltip__surface'), 'the tooltip');
     const cut = await tip.locator('.mdc-tooltip__surface').evaluate((s) => s.scrollHeight - s.clientHeight);
     expect(cut, 'the tooltip shows the whole path (the end is not cut by its height)').toBeLessThanOrEqual(1);
   });
@@ -116,13 +118,14 @@ test.describe('firewall rule table at the smallest window (900 px)', () => {
     await page.goto('/?latency=0#/firewall');
     const path = page.locator('[data-source="applicationFirewall"] [data-testid="path-text"]').first();
     await expect(path).toBeVisible();
+    // conformance: e2e-ready — reads focus; the loop presses Tab until the path has it, and a toBeFocused follows
     for (let i = 0; i < 60; i++) {
       if (await path.evaluate((el) => el === document.activeElement)) break;
       await page.keyboard.press('Tab');
     }
     await expect(path, 'Tab reaches the cut path').toBeFocused();
     await expect(page.locator('.mat-mdc-tooltip')).toBeVisible();
-    expect((await page.locator('.mat-mdc-tooltip').textContent())?.replaceAll('\u200b', '').trim()).toBe(PROGRAM);
+    await expect.poll(async () => (await page.locator('.mat-mdc-tooltip').textContent())?.replaceAll('\u200b', '').trim()).toBe(PROGRAM);
   });
 
   test('the direction and the network are readable at 900 px (under the program, as the columns drop out)', async ({ page }) => {
@@ -137,6 +140,7 @@ test.describe('firewall rule table at the smallest window (900 px)', () => {
     await page.goto('/?latency=0#/firewall'); // the mock is a Mac
     const name = page.locator('[data-source="applicationFirewall"]').getByText('Example Sync helper (all networks)');
     await expect(name).toBeVisible();
+    await expectNotMoving(name, 'the program name');
     const lines = await name.evaluate((el) => {
       const cell = el.closest('[role="rowheader"], [role="gridcell"], th, td, mat-cell') ?? el;
       const lh = parseFloat(getComputedStyle(cell).lineHeight) || 16;
@@ -151,6 +155,7 @@ test.describe('connections map legend, narrow window', () => {
   test('the five steps wrap as one block below the lead text and fit the legend', async ({ page }) => {
     await page.goto(url('map'));
     await page.getByTestId('world-map').waitFor();
+    await expectNotMoving(page.getByTestId('legend'), 'the legend');
     const r = await page.getByTestId('legend').evaluate((legend) => {
       const box = (el: Element) => el.getBoundingClientRect();
       const steps = [...legend.querySelectorAll('.key[data-step]')].map(box);
@@ -170,6 +175,7 @@ for (const scheme of ['light', 'dark'] as const) {
     test('the land is told from the sea, and the lowest legend band from the land, by at least 1.5 to 1', async ({ page }) => {
       await page.goto(url('map'));
       await page.getByTestId('world-map').waitFor();
+      await expect(page.locator('path.land[data-step="0"]'), 'the map is drawn').not.toHaveCount(0);
       const ratios = await page.evaluate(() => {
         const rgb = (css: string): [number, number, number] => {
           const c = document.createElement('canvas').getContext('2d', { willReadFrequently: true })!;
@@ -200,6 +206,7 @@ for (const scheme of ['light', 'dark'] as const) {
     test('neighbouring legend steps differ in lightness (1.3 to 1 or more), and each key fill is the map\'s fill for that step', async ({ page }) => {
       await page.goto(url('map'));
       await page.getByTestId('world-map').waitFor();
+      await expect(page.locator('path.land[data-step="0"]'), 'the map is drawn').not.toHaveCount(0);
       const r = await page.evaluate(() => {
         const rgb = (css: string): [number, number, number] => {
           const c = document.createElement('canvas').getContext('2d', { willReadFrequently: true })!;

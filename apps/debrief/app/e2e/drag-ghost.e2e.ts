@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { openView } from './app';
 import { openAppWith } from './mock-url';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // A tab dragged out of the window: in Debrief the shell's ghost window follows the pointer outside it and the pop-out
 // opens exactly where the ghost was (`drag_ghost.rs`). The browser build simulates that ghost with `?mockGhost=1`
@@ -41,6 +42,7 @@ test.describe('dragging a tab out of the window with the shell ghost', () => {
 
   test('the ghost follows the pointer outside, hides back inside, and the pop-out opens exactly where it was', async ({ page, context }) => {
     await expect(tab(page, 'Metrics')).toBeVisible();
+    await expectNotMoving(tab(page, 'Metrics'), 'the Metrics tab');
     const t = (await tab(page, 'Metrics').boundingBox())!;
     await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
     await page.mouse.down();
@@ -77,6 +79,7 @@ test.describe('dragging a tab out of the window with the shell ghost', () => {
 
   test('Escape outside the window hides the ghost and nothing pops out', async ({ page }) => {
     await expect(tab(page, 'Metrics')).toBeVisible();
+    await expectNotMoving(tab(page, 'Metrics'), 'the Metrics tab');
     const t = (await tab(page, 'Metrics').boundingBox())!;
     await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
     await page.mouse.down();
@@ -88,6 +91,7 @@ test.describe('dragging a tab out of the window with the shell ghost', () => {
     expect((await ghost(page)).visible).toBe(false);
     await page.mouse.up();
     await expect(tab(page, 'Metrics')).toBeVisible();
+    // conformance: e2e-ready — asserts that nothing popped out: the list of opens is read right after the drag ended
     expect(await page.evaluate(() => (window as unknown as { __opens: string[] }).__opens.length)).toBe(0);
   });
 });

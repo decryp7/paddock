@@ -1,4 +1,5 @@
 import { expect, test } from './test';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 test.describe('row menus, keyboard rows, sticky headers and charts', () => {
   test('a right click on a feed row opens the row actions and Esc returns to the row', async ({ page }) => {
@@ -36,8 +37,9 @@ test.describe('row menus, keyboard rows, sticky headers and charts', () => {
   test('only one feed row is in the tab order', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('sp-whats-new li.item').first()).toBeVisible();
-    const stops = await page.locator('sp-whats-new li.item').evaluateAll((els) => els.filter((e) => e.getAttribute('tabindex') === '0').length);
-    expect(stops).toBe(1);
+    // Several rows are drawn, and exactly one of them is a tab stop (retried until the roving tabindex is set).
+    await expect(page.locator('sp-whats-new li.item')).not.toHaveCount(1);
+    await expect(page.locator('sp-whats-new li.item[tabindex="0"]')).toHaveCount(1);
   });
 
   test('the watch table has the row actions on right click, Delete asks by name and cancelling keeps the watch', async ({ page }) => {
@@ -80,6 +82,7 @@ test.describe('row menus, keyboard rows, sticky headers and charts', () => {
     await page.goto('/#/watches/w-1');
     const wrap = page.locator('section[aria-labelledby=hist-h] .table-wrap');
     await expect(wrap).toBeVisible();
+    await expectNotMoving(wrap, 'the history table');
     const scrollable = await wrap.evaluate((e) => e.scrollHeight > e.clientHeight);
     const th = wrap.locator('thead th').first();
     const before = await th.boundingBox();

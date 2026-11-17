@@ -1,6 +1,7 @@
 import { expect, test } from './test';
 import { openApp } from './app';
 import { runCommand } from './analysis-support';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 test.describe('release polish', () => {
   test.beforeEach(async ({ page }) => openApp(page));
@@ -26,6 +27,7 @@ test.describe('release polish', () => {
     await runCommand(page, 'Float panel');
     const floating = page.locator('.dv-resize-container').first();
     await expect(floating).toBeVisible();
+    await expectNotMoving(floating, 'the floating group');
     const box = (await floating.boundingBox())!;
     expect(box.width).toBeGreaterThan(700);
     expect(box.height).toBeGreaterThan(520);

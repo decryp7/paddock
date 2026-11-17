@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import { axeInThemes } from '../../../../ui/projects/paddock-e2e/src/axe.ts';
 import { openApp } from './app';
 import { gradientPng } from './png';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // The Chat tab's composer (ADR 0023 WP-4b, WP-5): text files and pictures attached through the picker, paste or drop, refusals in
 // words, the files on the sent question, the context meter, the layout from 900 to 1440 px wide and axe over the pane with all of
@@ -210,6 +211,8 @@ test.describe('chat composer', () => {
     const chat = await chatWithFile(page);
     await chat.getByTestId('assistant-file-input').setInputFiles(photo);
     await expect(chat.getByTestId('assistant-failure')).toBeVisible();
+    await expectNotMoving(chat.locator('pd-assistant'), 'the assistant pane');
+    await expectNotMoving(chat.getByTestId('assistant-log'), 'the log');
     const pane = (await chat.locator('pd-assistant').boundingBox())!;
     expect(pane.height).toBeLessThan(440);
     await expect(chat.locator('pd-assistant')).toHaveClass(/short/);

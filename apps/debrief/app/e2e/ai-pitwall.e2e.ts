@@ -38,6 +38,7 @@ test('Debrief offers no model download of its own: Pitwall is the only engine', 
   await openAppWith(page, '?mockPitwall=running&mockAi=setup&mockAiStepMs=5');
   const settings = await openAiSettings(page);
   await expect(settings.getByTestId('ai-engine-status')).toBeVisible();
+  await expect(settings.getByTestId('ai-engine-status')).toHaveText(/\S/);
   const text = (await settings.innerText()).toLowerCase();
   for (const word of ['manage models', 'download a model', 'built-in engine', 'inference runtime']) expect(text).not.toContain(word);
   await expect(page.getByRole('dialog', { name: /AI models|Set up the AI assistant/ })).toHaveCount(0);

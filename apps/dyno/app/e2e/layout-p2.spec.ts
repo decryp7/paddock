@@ -1,5 +1,6 @@
 import { expect, test } from './test';
 import { Page } from '@decryp7/paddock-e2e';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 /**
  * The layout re-review's P2 findings (Dyno 1.1.1 plan WP-14 e), each as a measured condition (ER-12: conditions, never sleeps):
@@ -72,6 +73,7 @@ test('firewall: the administrator-readings button is not the card width at 1280'
   await open(page, { width: 1280, height: 800 }, '/firewall');
   const b = page.getByRole('button', { name: 'Turn on administrator readings' });
   await expect(b).toBeVisible();
+  await expectNotMoving(b, 'the administrator button');
   const box = (await b.boundingBox())!;
   expect(box.width, 'the button is as wide as its words').toBeLessThanOrEqual(320);
 });

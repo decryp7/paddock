@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { axeViolations, type Page, settledLayout } from '@decryp7/paddock-e2e';
+import { axeViolations, expectNotMoving, type Page, settledLayout } from '@decryp7/paddock-e2e';
 
 // The data parts of paddock-ui (plan X21) in the gallery: the table's sorting, filter, keyboard, menus and virtual rows, the
 // chart wrapper over a real ECharts, and the forms helpers, in both themes, with axe and without horizontal scroll at 320 px.
@@ -179,6 +179,7 @@ test('table: paths are shortened only as far as the room needs, and grow back wh
   await open(page, 'dark', 1280);
   const paths = page.locator('[data-testid="table-virtual"] pd-middle-text');
   await expect(paths.first()).toBeVisible();
+  await expectNotMoving(paths.first(), 'the first path');
   // A 28-character path in a column hundreds of pixels wide is never cut.
   const cut = await paths.evaluateAll((els) => els.filter((e) => e.textContent !== e.getAttribute('title')).length);
   expect(cut).toBe(0);
@@ -202,15 +203,16 @@ test('table: loading and empty say no count, and the columns do not move when ro
       const header = [...box.querySelectorAll('[role=columnheader]')].find((h) => h.textContent?.includes('Size (KiB)'));
       return grid && header ? Math.round(header.getBoundingClientRect().left - grid.getBoundingClientRect().left) : null;
     });
-  const settled = await settledLayout(
+  // All four boxes are read in one reading and the layout is settled when two readings agree and every box is at the same position: a box
+  // that agrees with itself while the others are still settling (run 8215) is not the settled one.
+  const ids = ['box-selected', 'box-loading', 'box-empty', 'box-error'];
+  await settledLayout(
     async () => {
-      const x = await left('box-selected');
-      return { count: x === null ? 0 : 1, widths: [x ?? 0], fits: x !== null };
+      const xs = await Promise.all(ids.map(left));
+      return { count: xs.filter((x) => x !== null).length, widths: xs.map((x) => x ?? -1), fits: xs.every((x) => x !== null && x === xs[0]) };
     },
-    { what: 'box-selected: the Size (KiB) header inside its grid' },
+    { what: 'the Size (KiB) header inside its grid is at the same position in all four boxes', minCount: ids.length },
   );
-  const loaded = settled.widths[0];
-  for (const id of ['box-loading', 'box-empty', 'box-error']) await expect.poll(() => left(id), { message: id }).toBe(loaded);
 });
 
 test('table: an unsorted header hides its arrow, the sorted one shows it solid', async ({ page }) => {
@@ -248,8 +250,7 @@ test('chart: four named charts, a loading and an error one, are drawn on canvase
   await expect(charts.locator('canvas')).toHaveCount(6);
   const donut = page.getByRole('img', { name: 'Disk use by kind' });
   await expect(donut).toBeVisible();
-  const twin = await page.locator(`#${await donut.getAttribute('aria-describedby')}`).innerText();
-  expect(twin).toContain('Logs: 42 GB (48%)');
+  await expect(page.locator(`#${await donut.getAttribute('aria-describedby')}`)).toContainText('Logs: 42 GB (48%)');
   // Every chart has a visible title: metric, unit and window.
   await expect(charts.first().getByTestId('chart-title')).toHaveText('Request rate (req/h)');
   await expect(page.getByTestId('chart-loading')).toBeVisible();
@@ -300,8 +301,17 @@ test('chart: the donut total is drawn in the middle of the ring, wide, narrow an
 test('chart: switching the theme draws the charts again with the new colours', async ({ page }) => {
   await open(page, 'dark');
   const canvas = page.locator('section[data-testid="chart"] pd-chart').first().locator('canvas');
-  await canvas.waitFor();
-  const before = await canvas.evaluate((c) => (c as HTMLCanvasElement).toDataURL());
+  const drawing = () => canvas.evaluate((c) => (c as HTMLCanvasElement).toDataURL());
+  // The chart draws over a few frames: the picture before the switch is the one two reads in a row agree on.
+  let before = '';
+  await expect
+    .poll(async () => {
+      const now = await drawing();
+      const same = now === before;
+      before = now;
+      return same;
+    }, { message: 'the chart has stopped drawing' })
+    .toBe(true);
   await page.getByRole('radiogroup', { name: 'Theme' }).getByRole('radio', { name: 'light' }).click();
   await expect.poll(async () => page.locator('section[data-testid="chart"] pd-chart').first().locator('canvas').evaluate((c) => (c as HTMLCanvasElement).toDataURL())).not.toBe(before);
 });

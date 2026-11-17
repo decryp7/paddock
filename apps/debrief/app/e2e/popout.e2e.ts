@@ -5,6 +5,7 @@ import { ensureInspector, gridRows, openApp, openView } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
 import { menuItem, openMenu } from './menu-support';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // Pop-out windows in the browser build: `window.open` popups of the same app, synced over a BroadcastChannel (the
 // same port interface as the Tauri events between real OS windows).
@@ -64,6 +65,8 @@ test.describe('pop-out windows', () => {
     await closed;
     await expect(tab(page, 'Inspector')).toBeVisible();
     // Back on the right of the timeline and the document beside it, as before.
+    await expectNotMoving(page.locator('debrief-inspector'), 'the inspector');
+    await expectNotMoving(groupOf(page, 'Registry'), 'the Registry group');
     const inspector = (await page.locator('debrief-inspector').boundingBox())!;
     const documents = (await groupOf(page, 'Registry').boundingBox())!;
     expect(inspector.x).toBeGreaterThanOrEqual(documents.x + documents.width - 2);
@@ -124,6 +127,7 @@ test.describe('pop-out windows', () => {
     const popup = await popOut(page, context, 'Inspector');
     await expect(popup.locator('debrief-inspector')).toBeVisible();
     // The left edge guide of the host's dock, in screen coordinates (the browser adapter maps them back).
+    await expectNotMoving(page.locator('.debrief-dock-mount'), 'the dock');
     const dock = (await page.locator('.debrief-dock-mount').boundingBox())!;
     const origin = await page.evaluate(() => ({ x: screenX + Math.max(0, (outerWidth - innerWidth) / 2), y: screenY + Math.max(0, outerHeight - innerHeight) }));
     const at = { x: origin.x + dock.x + 26, y: origin.y + dock.y + dock.height / 2 };

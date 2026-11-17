@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import { gridTotal, initialTotal, openApp, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // The filter bar's ONE search field: plain words search the messages live; text with query structure is a query that
 // runs with Enter or Ctrl/Cmd+Enter. The mock backend classifies like the engine (operator, pipe, exists(), known field).
@@ -110,6 +111,7 @@ test.describe('search field', () => {
   test('keeps a usable text area: the inline buttons and the partial-match note do not squeeze it out', async ({ page }) => {
     await field(page).fill('imeout');
     await expect(page.getByTestId('partial-note')).toBeVisible();
+    await expectNotMoving(field(page), 'the search field');
     expect((await field(page).boundingBox())!.width).toBeGreaterThan(100);
   });
 

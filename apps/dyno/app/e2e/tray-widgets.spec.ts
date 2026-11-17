@@ -132,6 +132,7 @@ test.describe('popup widgets', () => {
     await expect(page.getByRole('alert')).toHaveCount(1);
     await expect(page.getByRole('button', { name: 'Restart agent' })).toBeVisible();
     // A stale live widget says when its readings stopped (the shared frame's "As of HH:MM"): the same moment the agent notice gives.
+    await expect(page.getByRole('alert')).toContainText(/Readings paused at \d{2}:\d{2}/);
     const paused = /Readings paused at (\d{2}:\d{2})/.exec((await page.getByRole('alert').textContent()) ?? '')?.[1];
     expect(paused, 'the agent notice names the time the readings stopped').toBeTruthy();
     await expect(page.locator('pd-widget-frame').filter({ hasText: 'CPU and memory' })).toContainText(`As of ${paused}`);

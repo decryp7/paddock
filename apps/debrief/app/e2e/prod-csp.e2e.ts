@@ -31,6 +31,7 @@ test('production build loads under the Tauri CSP without violations', async ({ p
   await page.getByRole('button', { name: 'Profile editor' }).click();
   await expect(page.getByRole('button', { name: 'Save & apply' })).toBeVisible();
 
+  // conformance: e2e-ready — reads the violations collected over the whole flow; the Save button was its last step
   const violations = await page.evaluate(() => (window as unknown as { __cspViolations: string[] }).__cspViolations);
   expect([...problems, ...violations.map((v) => `violation: ${v}`)]).toEqual([]);
 });
@@ -62,7 +63,7 @@ test('the drag ghost page renders its content under the Tauri CSP without violat
   await expect(page.locator('html')).toHaveAttribute('data-scheme', 'dark');
   await expect(page.locator('.icon path')).toHaveAttribute('d', 'M6 9l6 6l6-6');
   await expect(page.locator('.snapshot')).toBeVisible();
-  expect(await page.locator('.snapshot').evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(1);
+  await expect.poll(() => page.locator('.snapshot').evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth), { message: 'the snapshot image has loaded' }).toBe(1);
   expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
   const violations = await page.evaluate(() => (window as unknown as { __cspViolations: string[] }).__cspViolations);
   expect([...problems, ...violations.map((v) => `violation: ${v}`)]).toEqual([]);

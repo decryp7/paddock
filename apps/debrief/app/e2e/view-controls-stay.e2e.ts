@@ -24,6 +24,7 @@ test('the profile editor keeps Propose… in place while its profile loads, and 
   await releaseMockHolds(page);
   await expect(name).toHaveText('OrderService (Serilog) — demo');
   await expect(editor.getByText('Valid', { exact: true })).toBeVisible();
+  // conformance: e2e-ready — the check is that the button did not move while the profile arrived: an immediate read is the test
   expect(await propose.boundingBox()).toEqual(before);
   await page.mouse.up();
 

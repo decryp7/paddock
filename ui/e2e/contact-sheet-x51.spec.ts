@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { Locator, Page } from '@decryp7/paddock-e2e';
+import { Locator, Page, expectNotMoving } from '@decryp7/paddock-e2e';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -86,6 +86,7 @@ test.describe('contact sheet: pd-view', () => {
         await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
         await hover.hover();
         await expect(hover).toBeVisible();
+        await expectNotMoving(target, 'the target');
         const moved = await target.evaluate((e, [pad, offset]) => {
           const r = e.getBoundingClientRect();
           return { x: Math.max(0, r.left - pad), y: Math.max(0, r.top - pad + offset), width: r.width + 2 * pad };

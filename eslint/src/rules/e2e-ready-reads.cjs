@@ -4,14 +4,14 @@
 // position or its siblings are final (an unfiltered list, an overlay not yet positioned, a section whose update pass has not run, a stream still
 // writing). The next statement of the same block that READS the page (`boundingBox`, `allInnerTexts`, `allTextContents`, `innerText`, `textContent`,
 // and `evaluate` / `evaluateAll` when their result is used) is reported, unless a ready helper (@decryp7/paddock-e2e `ready.ts`: expectListFiltered, expectOverlayAlignedWith,
-// expectWired, expectStreamDone, expectDockPlanned, expectNotMoving) or any other wait stands between the two. Report-only (ER-41; off unless PADDOCK_E2E_READY_LINT=warn or error, see src/e2e.cjs) until its first green
-// run on the real tree is recorded here (the gate register lists conformance checks only). Recorded: not yet. First count 2026-11-17: 74 sites (Debrief 26, Dyno 17, ui 23, Pitwall 5, Spotter 3, Pitcrew 0; measured with `node scripts/e2e-ready-report.mjs` after the evaluate rule; the first count of 93 predates it, and an earlier version of the script measured 2 of 6 projects); no waivers added (ER-46: a waiver list only shrinks).
+// expectWired, expectStreamDone, expectDockPlanned, expectNotMoving) or any other wait stands between the two. Off unless PADDOCK_E2E_READY_LINT=warn or error (see src/e2e.cjs); the gate is the script named below. Gate blocking since run: not yet (scripts/e2e-ready-gate.json). First count 2026-11-17: 74 sites (Debrief 26, Dyno 17, ui 23, Pitwall 5, Spotter 3, Pitcrew 0; measured with `node scripts/e2e-ready-report.mjs` after the evaluate rule; the first count of 93 predates it, and an earlier version of the script measured 2 of 6 projects); no waivers added (ER-46: a waiver list only shrinks).
 // The window is one statement: only the next statement of the same block is read. A read two statements later, a read after a `waitForTimeout`
 // (itself a C71 finding), or one inside a callback is not seen; that keeps false positives low and is the limit of the rule.
 // `evaluate` and `evaluateAll` are reads only when their result is used (an assignment, an argument, a return, a chain): a bare `await x.evaluate(...)`
 // statement acts or waits.
-// Plan: after the first green recorded run, flip the default to `error` and record the existing sites with ESLint bulk suppressions
-// (eslint-suppressions.json), which shrink only (checked against the merge base, ER-46), instead of waivers in the specs.
+// Gate (ER-41, ER-46): the sites that existed on 2026-11-17 (74) were fixed through the ready helpers or carry a waiver with a reason; the gate is scripts/e2e-ready-report.mjs
+// (CI's "e2e ready-reads (gate)" step), which compares the count per spec file with scripts/e2e-ready-baseline.json (generated, only shrinks, checked against the merge base). It blocks once
+// scripts/e2e-ready-gate.json names `blockingSinceRun`. The rule itself stays off in the lint commands (--max-warnings 0); the script turns it on with PADDOCK_E2E_READY_LINT=warn.
 // A read that is meant to be immediate carries `// conformance: e2e-ready — <why>` (at least three characters) on its line or the line above.
 const READS = new Set(['boundingBox', 'allInnerTexts', 'allTextContents', 'innerText', 'textContent']);
 const RESULT_READS = new Set(['evaluate', 'evaluateAll']);

@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { axeViolations, bodyIndentProblems, checkboxLayoutProblems, rowPinProblems, dialogContracts, dialogFitProblems, measureDialogWindow, openEveryDialog, expectNoHorizontalScroll, THEMES } from '@decryp7/paddock-e2e';
+import { axeViolations, bodyIndentProblems, checkboxLayoutProblems, rowPinProblems, dialogContracts, dialogFitProblems, measureDialogWindow, openEveryDialog, expectNoHorizontalScroll, THEMES, expectNotMoving } from '@decryp7/paddock-e2e';
 
 // The shell demo is the reference consumer of @decryp7/paddock-ui/shell (ADR 0012 §7); each work package adds its checks.
 // It uses only the test kit (@decryp7/paddock-e2e, plan S16); the static source checks are in shell/testing's specs.
@@ -56,6 +56,7 @@ test(`State stays visible at 320 px and the host gives way before any runner nam
   await page.setViewportSize({ width: 320, height: 640 });
   await app.frame.open('#/runners');
   await expect(page.locator('sd-runners-page .state').first()).toBeVisible();
+  await expectNotMoving(page.locator('sd-runners-page .name').first(), 'the first runner name');
   const cut = await page.locator('sd-runners-page .name').evaluateAll((els) => els.filter((e) => e.scrollWidth > e.clientWidth).length);
   expect(cut).toBe(0);
 });
@@ -65,6 +66,7 @@ test('a runner host is never shown cut: it is dropped before it would need an el
     await page.setViewportSize({ width, height: 800 });
     await app.frame.open('#/runners');
     await expect(page.locator('sd-runners-page .name').first()).toBeVisible();
+    await expectNotMoving(page.locator('sd-runners-page .name').first(), `the first runner name at ${width} px`);
     const cut = await page.locator('sd-runners-page .host').evaluateAll((els) => els.filter((e) => e.getClientRects().length > 0 && e.scrollWidth > e.clientWidth).length);
     expect(cut, `hosts cut at ${width} px`).toBe(0);
   }
@@ -102,6 +104,7 @@ for (const width of [1280, 320]) {
     await page.setViewportSize({ width, height: 800 });
     await app.frame.open('#/runners');
     await expect(page.locator('sd-runners-page .name').first()).toBeVisible();
+    await expectNotMoving(page.locator('sd-runners-page [role="row"]').last(), 'the last runner row');
     const outside = await page.locator('sd-runners-page [role="row"]').evaluateAll((rows) =>
       rows.flatMap((row) => {
         const r = row.getBoundingClientRect();
@@ -479,6 +482,7 @@ test.describe('notifications and service health (plan S4)', () => {
     await centre.locator('[data-testid^=notice-select-] input').first().check();
     const del1 = centre.getByTestId('notices-delete-selected');
     await expect(del1).toBeVisible();
+    await expectNotMoving(del1, 'the delete button');
     expect((await del1.boundingBox())!.height).toBeLessThan(40);
     await toggle.click();
     await expect(centre.locator('[data-testid^=notice-select-]')).toHaveCount(0);

@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { installTauriFake, type Page, type TauriFake } from '@decryp7/paddock-e2e';
+import { installTauriFake, type Page, type TauriFake, expectNotMoving } from '@decryp7/paddock-e2e';
 
 // The start-up contract in the shell demo (ADR 0058; plan S7 and §11). A window shows a splash until Angular renders,
 // paints its frame without waiting for any IPC, reports `window_ready` after that first paint, says calmly when the shell
@@ -200,6 +200,7 @@ test.describe('start-up contract (plan S7)', () => {
       await page.addInitScript(() => sessionStorage.setItem('paddock.mock.unclean', '1'));
       await page.goto('/');
       await expect(notice(page)).toBeVisible();
+      await expectNotMoving(notice(page), 'the startup notice');
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(overflow).toBeLessThanOrEqual(0);
     });

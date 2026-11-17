@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { axeViolations, expectNoHorizontalScroll } from '@decryp7/paddock-e2e';
+import { axeViolations, expectNoHorizontalScroll, expectNotMoving } from '@decryp7/paddock-e2e';
 
 // Settings > AI access (MCP) (plan X22, ADR 0007) in the shell demo: the page over the demo's in-memory engine, which plays
 // `paddock-mcp` (off by default, a key returned once, an audit log). `?mcp=calls` starts with recorded calls, `?mcp=error` fails the
@@ -87,8 +87,10 @@ test.describe('AI access (MCP) (plan X22)', () => {
   test('every checkbox box lies inside the page column, so the scroll container does not clip it, at every density', async ({ app, page }) => {
     await openPage(page, app, '');
     await expect(page.getByTestId('mcp-actions')).toBeVisible();
+    await expectNotMoving(page.getByTestId('mcp-actions'), 'the actions');
     for (const density of ['comfortable', 'standard', 'compact'] as const) {
       await page.evaluate((d) => document.documentElement.setAttribute('data-density', d), density);
+      await expectNotMoving(page.locator('pd-mcp-page .mdc-checkbox__background').first(), `the first checkbox (${density})`);
       const clipped = await page.locator('pd-mcp-page').evaluate((root) => {
         const bad: string[] = [];
         for (const box of Array.from(root.querySelectorAll('.mdc-checkbox__background'))) {

@@ -123,13 +123,17 @@ test.describe('disk map', () => {
     const panel = page.locator('.mat-mdc-menu-panel');
     await expect(panel).toBeVisible();
     await expect(panel.getByRole('menuitem', { name: /Choose a folder/ })).toBeVisible();
-    const alpha = await panel.evaluate((el) => {
-      const c = getComputedStyle(el).backgroundColor;
-      const m = /rgba?\(([^)]+)\)/.exec(c);
-      const parts = m?.[1]?.split(/[ ,/]+/).filter(Boolean) ?? [];
-      return parts.length >= 4 ? Number(parts[3]) : 1;
-    });
-    expect(alpha).toBeGreaterThan(0.9);
+    // The surface comes with the panel's open animation: poll for it rather than read once.
+    await expect
+      .poll(() =>
+        panel.evaluate((el) => {
+          const c = getComputedStyle(el).backgroundColor;
+          const m = /rgba?\(([^)]+)\)/.exec(c);
+          const parts = m?.[1]?.split(/[ ,/]+/).filter(Boolean) ?? [];
+          return parts.length >= 4 ? Number(parts[3]) : 1;
+        }),
+      )
+      .toBeGreaterThan(0.9);
     await page.keyboard.press('Escape');
     await expect(panel).toBeHidden();
   });
