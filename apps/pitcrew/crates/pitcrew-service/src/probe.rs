@@ -120,7 +120,9 @@ impl Probe {
             .into_iter()
             .map(|info| {
                 let p = sys.process(Pid::from_u32(info.pid));
-                let start = p.map(sysinfo::Process::start_time).filter(|s| *s > 0);
+                // The exact start the OS gives for this pid now (rule 53): the identity a later stop compares again before it
+                // signals. sysinfo's whole seconds are not used for identity.
+                let started = paddock_proc::ProcessId::of(info.pid).map(|id| id.started().as_micros());
                 ProcessMeta {
                     pid: info.pid,
                     ppid: info.ppid,
@@ -129,7 +131,8 @@ impl Probe {
                     command: p.map_or_else(String::new, |p| {
                         p.cmd().iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" ")
                     }),
-                    started_ms: start.map(|s| s.saturating_mul(1000)),
+                    started_ms: started.map(|us| us / 1000),
+                    started_micros: started,
                     cpu_permille: usage.share_of(info.pid),
                     mem_bytes: info.rss_bytes,
                 }
@@ -137,18 +140,12 @@ impl Probe {
             .collect()
     }
 
-    /// What the process `pid` (started at `started_ms` when known) is now. A zombie that nobody has reaped yet does not
-    /// count: it is dead, only its entry is left.
-    pub fn alive(&mut self, pid: u32, started_ms: Option<u64>) -> Seen {
-        let id = Pid::from_u32(pid);
-        // Unknown counts as alive: a runner is never restarted because the process table could not be read.
-        let Some(sys) = self.sys.as_mut() else {
-            return Seen::Unverified;
-        };
-        sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[id]), true, ProcessRefreshKind::nothing());
-        seen(sys.process(id).map(|p| (p.start_time(), p.status())), started_ms, || {
-            paddock_proc::presence(pid)
-        })
+    /// What the process `id` is now: [`Seen::Same`] only when its pid still belongs to it (the pid's holder started at the
+    /// held time), [`Seen::Gone`] when nothing runs under it, a zombie, or the pid was handed on, and [`Seen::Unverified`]
+    /// when the OS could not say (the process table or the holder's start time could not be read). Unknown counts as alive:
+    /// a process is never ended because a read failed.
+    pub fn seen(&self, id: paddock_proc::ProcessId) -> Seen {
+        seen_from(id.presence())
     }
 
     /// Whether `pid` has child processes that belong to a job (its console host does not).
@@ -324,58 +321,46 @@ mod tests {
     }
 }
 
-/// What sysinfo's listing of a pid (start time in seconds and status; `None` when it is not listed) says about the process
-/// recorded at `started_ms`.
-///
-/// A pid sysinfo does not list is gone only when `paddock_proc::presence` (`absent`, asked only then) says so: sysinfo drops
-/// processes it could not read.
-fn seen(listed: Option<(u64, sysinfo::ProcessStatus)>, started_ms: Option<u64>, absent: impl FnOnce() -> paddock_proc::Presence) -> Seen {
-    match listed {
-        None => match absent() {
-            paddock_proc::Presence::Gone => Seen::Gone,
-            paddock_proc::Presence::Running | paddock_proc::Presence::Unknown => Seen::Unverified,
-        },
-        Some((_, sysinfo::ProcessStatus::Zombie)) => Seen::Gone,
-        // An unreadable start time (0), or none recorded: this cannot be told from a process that took the pid over.
-        Some((0, _)) => Seen::Unverified,
-        Some((start, _)) => match started_ms {
-            None => Seen::Unverified,
-            // The same process: start times are whole seconds, so allow rounding. Another start is a recycled pid.
-            Some(s) if s.abs_diff(start.saturating_mul(1000)) <= 1500 => Seen::Same,
-            Some(_) => Seen::Gone,
-        },
+/// What the OS's look at a held identity says ([`paddock_proc::ProcessId::presence`]): the pid's holder is compared with
+/// the held start time exactly, so no tolerance of any size is involved.
+fn seen_from(look: paddock_proc::Presence) -> Seen {
+    match look {
+        paddock_proc::Presence::Running => Seen::Same,
+        paddock_proc::Presence::Gone => Seen::Gone,
+        paddock_proc::Presence::Unknown => Seen::Unverified,
     }
 }
 
 #[cfg(test)]
 mod seen_tests {
     use super::*;
-    use paddock_proc::Presence;
-    use sysinfo::ProcessStatus::{Run, Zombie};
-
-    fn never() -> Presence {
-        panic!("a listed process needs no second look")
-    }
-
-    /// sysinfo drops processes it could not read: an unlisted pid is not gone until the OS says so.
-    #[test]
-    fn an_unlisted_pid_is_gone_only_when_the_os_confirms_it() {
-        assert_eq!(seen(None, Some(5_000), || Presence::Unknown), Seen::Unverified);
-        assert_eq!(seen(None, Some(5_000), || Presence::Running), Seen::Unverified);
-    }
+    use paddock_proc::{Presence, ProcessId, StartTime};
 
     #[test]
-    fn a_pid_that_reports_start_zero_or_has_no_recorded_start_is_unverified_not_the_same_process() {
-        assert_eq!(seen(Some((0, Run)), Some(5_000), never), Seen::Unverified, "start time unreadable");
-        assert_eq!(seen(Some((5, Run)), None, never), Seen::Unverified, "no recorded start");
+    fn the_looks_map_to_what_the_service_does_next() {
+        assert_eq!(seen_from(Presence::Running), Seen::Same);
+        assert_eq!(seen_from(Presence::Gone), Seen::Gone);
+        assert_eq!(
+            seen_from(Presence::Unknown),
+            Seen::Unverified,
+            "a failed read is never taken for gone"
+        );
     }
 
+    /// The held identity is compared exactly: this test process is the same process, the same pid with another start is a
+    /// recycled pid, and a pid nobody holds is gone.
     #[test]
-    fn the_same_start_is_the_same_process_and_a_recycled_pid_or_a_zombie_is_gone() {
-        assert_eq!(seen(Some((5, Run)), Some(5_000), never), Seen::Same);
-        assert_eq!(seen(Some((5, Run)), Some(5_900), never), Seen::Same, "rounding");
-        assert_eq!(seen(Some((9, Run)), Some(5_000), never), Seen::Gone, "recycled pid");
-        assert_eq!(seen(Some((5, Zombie)), Some(5_000), never), Seen::Gone);
-        assert_eq!(seen(None, Some(5_000), || Presence::Gone), Seen::Gone);
+    fn a_held_identity_is_the_same_process_only_by_its_exact_start() {
+        let me = ProcessId::of(std::process::id()).unwrap();
+        assert_eq!(seen_from(me.presence()), Seen::Same);
+        let micros = me.started().as_micros();
+        for off in [1_000_000, 1] {
+            let other = ProcessId::new(me.pid(), StartTime::from_micros(micros + off));
+            assert_eq!(seen_from(other.presence()), Seen::Gone, "{off} µs off is another process");
+        }
+        assert_eq!(
+            seen_from(ProcessId::new(u32::MAX, StartTime::from_micros(micros)).presence()),
+            Seen::Gone
+        );
     }
 }

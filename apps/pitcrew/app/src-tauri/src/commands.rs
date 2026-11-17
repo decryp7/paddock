@@ -453,14 +453,14 @@ pub async fn runner_processes(client: State<'_, SharedClient>, runner: String) -
 }
 
 /// The request behind `runner_process_stop`.
-pub fn stop_process_request(runner: &str, pid: u32, started_at: Option<u64>, allow_runner: bool) -> Result<Request, CommandError> {
+pub fn stop_process_request(runner: &str, pid: u32, started_at: u64, allow_runner: bool) -> Result<Request, CommandError> {
     if pid <= 1 {
         return Err(CommandError::bad("that is a system process"));
     }
     Ok(Request::StopProcess {
         runner: name(runner)?,
         pid,
-        started_at: started_at.map(Timestamp),
+        started_at: Timestamp(started_at),
         allow_runner,
     })
 }
@@ -482,7 +482,7 @@ pub async fn runner_process_stop(
     client: State<'_, SharedClient>,
     runner: String,
     pid: u32,
-    started_at: Option<u64>,
+    started_at: u64,
     allow_runner: bool,
 ) -> Result<(), CommandError> {
     let req = stop_process_request(&runner, pid, started_at, allow_runner)?;
@@ -839,15 +839,15 @@ mod tests {
     #[test]
     fn process_requests_are_parsed_and_system_processes_refused() {
         assert!(matches!(
-            stop_process_request("build-pc", 42, Some(1000), false).unwrap(),
+            stop_process_request("build-pc", 42, 1000, false).unwrap(),
             Request::StopProcess {
                 pid: 42,
                 allow_runner: false,
                 ..
             }
         ));
-        assert!(stop_process_request("build-pc", 1, None, true).is_err());
-        assert!(stop_process_request("../etc", 42, None, false).is_err());
+        assert!(stop_process_request("build-pc", 1, 1000, true).is_err());
+        assert!(stop_process_request("../etc", 42, 1000, false).is_err());
         let keep = keep_process_request("build-pc", 42, 1000, KeepFor::hours(1)).unwrap();
         assert!(matches!(keep, Request::KeepProcess { pid: 42, .. }));
         let bad = KeepFor {
@@ -869,7 +869,7 @@ mod tests {
                 )))
             }),
         };
-        let r = ask(&c, stop_process_request("a", 5, None, false).unwrap());
+        let r = ask(&c, stop_process_request("a", 5, 1000, false).unwrap());
         assert!(r.unwrap_err().message.contains("process tree"));
     }
 }

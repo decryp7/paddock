@@ -2,6 +2,7 @@ import { Dialog } from '@angular/cdk/dialog';
 import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, untracked } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
+import { MatTooltip } from '@angular/material/tooltip';
 import type { KeepFor, ProcessEntry, ProcessOverride, ProcessPolicy } from '../../core/api.types';
 import { ClockService } from '../../core/clock.service';
 import { formatBytes, formatDuration, formatPermille, plural } from '../../shared/format';
@@ -10,7 +11,7 @@ import { KEEP_EXTRAS, cleanupSummary, fateText } from '../../shared/process-form
 import { LoadState } from '../../shared/ui/load-state';
 import { SettingsStore } from '../../state/settings.store';
 import { ToastStore } from '../../state/toast.store';
-import { ProcessesStore } from './processes.store';
+import { NO_START_TIME_STOP, ProcessesStore } from './processes.store';
 import { confirmStopProcess } from './stop-process-dialog';
 
 /** One table row: an entry with the words and numbers the table shows. */
@@ -27,7 +28,7 @@ export interface ProcessRow {
 /** The Processes tab: the runner's process tree, the leftovers of finished jobs and what happens to them. */
 @Component({
   selector: 'pc-processes-panel',
-  imports: [MatIcon, LoadState, CdkMenu, CdkMenuItem, CdkMenuTrigger, ProcessOverrideEditor],
+  imports: [MatIcon, MatTooltip, LoadState, CdkMenu, CdkMenuItem, CdkMenuTrigger, ProcessOverrideEditor],
   providers: [ProcessesStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './processes-panel.html',
@@ -43,6 +44,7 @@ export class ProcessesPanel {
   private readonly toasts = inject(ToastStore);
 
   protected readonly extras = KEEP_EXTRAS;
+  protected readonly noStartTime = NO_START_TIME_STOP;
   protected readonly list = computed(() => this.store.list().value);
   protected readonly rows = computed<ProcessRow[]>(() => {
     const l = this.list();
@@ -82,6 +84,11 @@ export class ProcessesPanel {
   }
 
   protected async stop(entry: ProcessEntry): Promise<void> {
+    // The buttons stay focusable when there is no start time (aria-disabled), so the click says why nothing happens.
+    if (entry.startedAt === null) {
+      await this.store.stop(entry, entry.isRunner);
+      return;
+    }
     const ok = await confirmStopProcess(this.dialog, { name: entry.name, pid: entry.pid, isRunner: entry.isRunner, jobRunning: !!this.list() && !this.list()!.idle });
     if (ok) await this.store.stop(entry, entry.isRunner);
   }

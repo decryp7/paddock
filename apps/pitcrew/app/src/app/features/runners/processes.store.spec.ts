@@ -135,6 +135,18 @@ describe('ProcessesStore', () => {
     await flush();
   });
 
+  it('never asks the engine to stop a process that has no start time', async () => {
+    const s = setup();
+    mock = s.mock;
+    await s.store.load('build-win');
+    const spy = vi.spyOn(mock, 'stopProcess');
+    const e = s.store.list().value!.entries.find((x) => !x.isRunner)!;
+    expect(await s.store.stop({ ...e, startedAt: null })).toBe(false);
+    expect(spy).not.toHaveBeenCalled();
+    expect(s.store.actionError()).toContain('no start time');
+    await flush();
+  });
+
   it('does nothing before a runner is loaded', async () => {
     const s = setup();
     mock = s.mock;

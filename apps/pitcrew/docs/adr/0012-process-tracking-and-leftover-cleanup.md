@@ -52,12 +52,15 @@ says it is the job's). Peak CPU, peak memory and the number of survivors are sto
   the service starts; an extension whose process is gone is dropped at the next reading.
 
 **Stopping by hand** (`Request::StopProcess`) uses the same machinery and the same guard (`check_stop_target`), with a
-confirmation in the UI: the process must be in the runner's tree now, with the start time the app saw (a reused pid is
-refused), is not the Pitcrew service, not pid 0 or 1, and is **not the runner itself unless the caller says so
-explicitly** (`allow_runner`); the supervisor then treats the exit like any other runner exit.
+confirmation in the UI. The process must be in the runner's tree now, is not the Pitcrew service, not pid 0 or 1, and is
+**not the runner itself unless the caller says so explicitly** (`allow_runner`). It must also be the process the app saw
+(rule 53, ADR 0033): the request carries the start time in milliseconds the service listed (required since protocol 5), the
+service holds the exact `ProcessId` it read when it listed the process, and `paddock_proc` compares the pid's holder again right
+before it signals. A process the system gives no start time for is refused with a next step. The supervisor then treats the exit
+like any other runner exit.
 
 **Platforms.** macOS and Linux for real (signals via `nix`; verified in a Linux container with the fake runner starting
-children that outlive the job). Windows compiles (`taskkill`) and is exercised only on the Windows CI runner; there the tree
+children that outlive the job). Windows compiles (`paddock_proc`'s close request and `TerminateProcess`) and is exercised only on the Windows CI runner; there the tree
 is the parent-pid tree (ADR 0007), so orphans that lost their parent are not found.
 
 ## Consequences

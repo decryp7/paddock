@@ -798,7 +798,14 @@ fn rules_set_the_keep_time_per_process_and_never_means_never() {
     assert!(alive(tail), "a never rule is never stopped, however long it lives");
     assert_eq!(h.process_events().len(), 1);
     // The user can still stop it.
-    let started = h.processes().entries.iter().find(|e| e.pid == tail).unwrap().started_at;
+    let started = h
+        .processes()
+        .entries
+        .iter()
+        .find(|e| e.pid == tail)
+        .unwrap()
+        .started_at
+        .expect("a start time");
     let r = h.ask(Request::StopProcess {
         runner: h.name.clone(),
         pid: tail,
@@ -887,7 +894,7 @@ fn keep_longer_postpones_the_stop_and_cleanup_can_be_turned_off() {
 }
 
 /// Ends a leftover the service listed, by identity: the pid must still name the process that started when the service saw it
-/// start (its `started_at`, in whole seconds), so a leftover the service already stopped, whose pid went to another process,
+/// start (its `started_at`, the whole milliseconds the service read), so a leftover the service already stopped, whose pid went to another process,
 /// is never signalled (rule 53, ER-14).
 #[cfg(unix)]
 fn end_leftover(pid: u32, started_at: Option<Timestamp>) {
@@ -895,7 +902,7 @@ fn end_leftover(pid: u32, started_at: Option<Timestamp>) {
         eprintln!("leftover pid {pid} was listed without a start time: not ended (no identity to check)");
         return;
     };
-    match paddock_testkit_start::recorded::reported(pid, started.0, 1000).running() {
+    match paddock_testkit_start::recorded::reported(pid, started.0, 1).running() {
         Some(id) => {
             let _ = paddock_proc::end(id);
         }
@@ -944,7 +951,7 @@ fn a_stop_outside_the_runners_tree_is_refused() {
     let refuse = |h: &mut Harness, pid: u32, allow: bool| match h.ask(Request::StopProcess {
         runner: h.name.clone(),
         pid,
-        started_at: None,
+        started_at: Timestamp(1_000),
         allow_runner: allow,
     }) {
         Response::Error(e) => {
@@ -968,7 +975,7 @@ fn a_stop_outside_the_runners_tree_is_refused() {
     let r = h.ask(Request::StopProcess {
         runner: h.name.clone(),
         pid: row.pid,
-        started_at: Some(Timestamp(5_000)),
+        started_at: Timestamp(5_000),
         allow_runner: false,
     });
     assert!(

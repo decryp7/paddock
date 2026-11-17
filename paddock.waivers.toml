@@ -98,19 +98,13 @@ expires = "2026-12-31"
 [[waiver]]
 check = "C53"
 path = "apps/pitcrew/crates/pitcrew-service/src/probe.rs"
-reason = "ADR 0033 WP-6: alive() treats a missing start time as a match, and has_job_children follows parent pids without start times"
+reason = "ADR 0033 WP-6: has_job_children follows parent pids without start times"
 expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
 path = "apps/pitcrew/crates/pitcrew-service/src/process.rs"
 reason = "ADR 0033 WP-6: the taskkill /T fallback, killpg before reaping, and test walks by parent pid; use paddock_proc::Supervised and descendants"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/pitcrew/crates/pitcrew-service/src/terminate.rs"
-reason = "ADR 0033 WP-6: asks and ends pids from the last probe without a fresh start-time check; take a ProcessId and use paddock_proc::ask and end"
 expires = "2026-12-31"
 
 [[waiver]]

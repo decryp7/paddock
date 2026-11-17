@@ -225,7 +225,7 @@ export class TauriBackend implements PitcrewBackend {
   runnerProcesses(runner: string): Promise<ProcessList> {
     return this.run('runner_processes', { runner });
   }
-  stopProcess(runner: string, pid: number, startedAt: number | null, allowRunner: boolean): Promise<void> {
+  stopProcess(runner: string, pid: number, startedAt: number, allowRunner: boolean): Promise<void> {
     return this.run('runner_process_stop', { runner, pid, startedAt, allowRunner });
   }
   keepProcess(runner: string, pid: number, startedAt: number, extra: KeepFor): Promise<void> {
