@@ -482,9 +482,10 @@ fn command_in(
         notes.push("no heavy.sh or heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
-        "{overridden}pre-push: base {} ({}); {} changed file(s); {} gate(s) at a time (1-minute load {}); budget {} min of run time (time queued for the heavy slot behind other agents is reported apart and bounded on its own: {} min for the whole push; {}); logs in {}\n{}",
+        "{overridden}pre-push: base {} ({}), {} commit(s) beyond it; {} changed file(s); {} gate(s) at a time (1-minute load {}); budget {} min of run time (time queued for the heavy slot behind other agents is reported apart and bounded on its own: {} min for the whole push; {}); logs in {}\n{}",
         base,
         base_why,
+        commit_count(&root, &base, pushed.first().map_or("HEAD", String::as_str)),
         change.files.len(),
         n,
         load.map_or("unknown".to_string(), |l| format!("{l:.1}")),
@@ -657,6 +658,15 @@ fn read_stdin() -> Result<String, CliError> {
         .read_to_string(&mut text)
         .map_err(|e| CliError::failure(format!("Standard input could not be read: {e}.")))?;
     Ok(text)
+}
+
+/// How many commits `tip` has that `base` lacks, printed in the first line so a base that is far behind is visible; `?` when git
+/// cannot count them.
+fn commit_count(root: &Path, base: &str, tip: &str) -> String {
+    git_text(root, &["rev-list", "--count", &format!("{base}..{tip}")])
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| "?".to_string())
 }
 
 /// The base a push is measured from when `--base` is not given.
@@ -863,16 +873,40 @@ fn nearest_base(
         })
         .map(|t| t.trim().to_string())
         .collect();
-    let merged = format!("--merged={}", p.sha);
     let prefix = format!("refs/remotes/{tracking_of}/");
-    for line in git(&["for-each-ref", &merged, "--format=%(objectname) %(refname:strip=3)", &prefix])
+    // Every remote-tracking ref, each with whether the pushed commit contains it: a main or train the pushed commit does not contain
+    // (the train was amended or re-merged since the branch was cut) still has a merge base with it, which is on the remote too.
+    let merged_set: std::collections::HashSet<String> = git(&[
+        "for-each-ref",
+        &format!("--merged={}", p.sha),
+        "--format=%(refname:strip=3)",
+        &prefix,
+    ])
+    .unwrap_or_default()
+    .lines()
+    .map(|l| l.trim().to_string())
+    .collect();
+    for line in git(&["for-each-ref", "--format=%(objectname) %(refname:strip=3)", &prefix])
         .unwrap_or_default()
         .lines()
     {
-        let Some((sha, name)) = line.split_once(' ') else { continue };
+        let Some((ref_sha, name)) = line.split_once(' ') else { continue };
         if name == "HEAD" {
             continue;
         }
+        let contained = merged_set.contains(name);
+        if !contained && !(name == "main" || name.starts_with("train/")) {
+            continue;
+        }
+        // The commit this ref contributes: itself when the pushed commit contains it, else its merge base with the pushed commit.
+        let (sha, merge_base_of) = if contained {
+            (ref_sha.to_string(), false)
+        } else if let Some(mb) = git(&["merge-base", ref_sha, &p.sha]).map(|t| t.trim().to_string()).filter(|m| !m.is_empty()) {
+            (mb, true)
+        } else {
+            continue;
+        };
+        let sha = sha.as_str();
         let verified = match (&listing, live.get(name)) {
             // Not checked live: only a commit main or the upstream holds is surely still on the remote (a deleted branch's ref
             // is not), so only those count.
@@ -880,10 +914,10 @@ fn nearest_base(
                 Some("remote-tracking ref, not checked live; main or the upstream holds it")
             }
             (None, _) => None,
-            (Some(_), Some(now)) if now == sha => Some("remote-tracking ref, the remote has it there (live)"),
+            (Some(_), Some(now)) if now == ref_sha => Some("remote-tracking ref, the remote has it there (live)"),
             (Some(_), Some(now))
                 if git(&["cat-file", "-e", &format!("{now}^{{commit}}")]).is_some()
-                    && git(&["merge-base", "--is-ancestor", sha, now]).is_some() =>
+                    && git(&["merge-base", "--is-ancestor", ref_sha, now]).is_some() =>
             {
                 Some("remote-tracking ref, the remote has moved on from it (live)")
             }
@@ -895,7 +929,12 @@ fn nearest_base(
         };
         let rank = if upstream.as_deref() == Some(name) { 1 } else { 2 };
         let up = if rank == 1 { ", its tracking upstream" } else { "" };
-        usable.push((sha.to_string(), rank, format!("{tracking_of}/{name} ({how}{up})")));
+        let label = if merge_base_of {
+            format!("merge base with {tracking_of}/{name} ({how}{up})")
+        } else {
+            format!("{tracking_of}/{name} ({how}{up})")
+        };
+        usable.push((sha.to_string(), rank, label));
     }
     if !stale.is_empty() {
         stale.sort();
