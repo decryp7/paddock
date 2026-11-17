@@ -15,13 +15,22 @@ test('lint good: git\'s own Revert and Reapply subjects (a revert of a revert) p
   for (const m of ['Revert "feat: add x"', 'Revert "Revert "fix: y""\n\nThis reverts commit abc.', 'Reapply "feat: add x"\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567.', 'Reapply "Revert "fix: y""\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567.']) assert.deepEqual(lint(m), [], m);
 });
 
+function commitLintMainResult(subject) {
+  const out = [];
+  commitLintMain(['--subject', subject], process.cwd(), (m) => out.push(m));
+  return out.join('\n');
+}
+
 test('lint: a re-land names what it reverts (git revert form), else it fails with the fix', () => {
   const line = 'This reverts commit 0123456789abcdef0123456789abcdef01234567.';
   for (const m of ['revert: reapply feat x\n\n' + line, 'Reapply "feat: x"\n\nwhy\n\n' + line + '\n']) assert.deepEqual(lint(m), [], m);
   for (const m of ['revert: reapply feat x', 'Reapply "feat: x"', 'revert: reapply x\n\nThis reverts commit abc123.', 'Reapply "x"\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567']) {
     assert.match(lint(m).join(), /git revert <sha>/, m);
   }
-  assert.match(lint('Reapply "feat: x"', { landed: true }).join(), /This reverts commit/);
+  // Landed history (CI's range, C23's window) is never judged for it: five train-14 re-lands predate the rule.
+  assert.deepEqual(lint('Reapply "feat: x"', { landed: true }), []);
+  assert.deepEqual(lint('revert: reapply feat x', { landed: true }), []);
+  assert.match(commitLintMainResult('revert: reapply x'), /git revert <sha>/);
   assert.deepEqual(lint('revert: drop the cache'), []); // a plain revert is not a re-land
 });
 
@@ -93,7 +102,8 @@ test('C23 bad: a history with a Co-Authored-By commit and a free-form subject', 
 
 test('C23 good: git\'s Reapply and Revert subjects in a history are accepted; a malformed one is still an error', async () => {
   assert.deepEqual(await findingsOf('C23', repo(['feat: one', 'Revert "feat: one"', 'Reapply "feat: one"\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567.'])), []);
-  assert.match(messages(await findingsOf('C23', repo(['feat: one', 'Reapply "feat: one"']))), /This reverts commit/);
+  // C23 scans a window of landed history, which holds re-lands from before the rule: it does not judge them (the commit-msg hook and the range check judge new commits).
+  assert.deepEqual(await findingsOf('C23', repo(['feat: one', 'Reapply "feat: one"', 'revert: reapply feat: one'])), []);
   assert.match(messages(await findingsOf('C23', repo(['feat: one', 'Reapplied "feat: one"']))), /does not start with/);
 });
 
