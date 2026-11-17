@@ -91,9 +91,11 @@ impl Fixture {
             .env_remove("RUSTC")
             .env_remove("CARGO_BUILD_RUSTC");
         // The hash reads the environment: start from none of the variables it uses, as `rust` does.
-        std::env::vars().filter(|(k, _)| is_hashed_var(k)).for_each(|(k, _)| {
-            cmd.env_remove(k);
-        });
+        paddock_dev::process_env::vars()
+            .filter(|(k, _)| is_hashed_var(k))
+            .for_each(|(k, _)| {
+                cmd.env_remove(k);
+            });
         cmd.envs(env.iter().cloned());
         // Tests never touch the user's cache: the wrapper's home is a scratch folder too.
         cmd.env("PADDOCK_DEV_HOME", self.cargo_home.path().join("dev-home"));

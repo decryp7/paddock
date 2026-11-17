@@ -342,7 +342,7 @@ impl Fixture {
         let mut env = Env::default();
         // Under the names the process has them: on Windows the path variable is `Path`, and a probe that reads `PATH` exactly would
         // pass here and fail on every real job.
-        for (name, v) in std::env::vars() {
+        for (name, v) in crate::process_env::vars() {
             if ["PATH", "PATHEXT", "SYSTEMROOT", "TEMP", "TMP", "LANG"]
                 .iter()
                 .any(|k| name.eq_ignore_ascii_case(k))

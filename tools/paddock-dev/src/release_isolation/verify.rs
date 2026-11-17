@@ -18,9 +18,11 @@ pub struct Env(pub BTreeMap<String, String>);
 impl Env {
     /// This process's environment.
     pub fn from_process() -> Env {
-        Env(super::pathfind::normalise(std::env::vars().collect(), cfg!(windows), &|k| {
-            std::env::var(k).ok()
-        }))
+        Env(super::pathfind::normalise(
+            crate::process_env::vars().collect(),
+            cfg!(windows),
+            &|k| std::env::var(k).ok(),
+        ))
     }
 
     /// Clears `cmd`'s environment through the one clearing function, over **this job environment** (never the live process's): the

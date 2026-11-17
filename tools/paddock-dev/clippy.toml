@@ -1,5 +1,6 @@
 # The family's clippy preset (lint/clippy.toml): programs start through paddock-proc.
 disallowed-methods = [
+    { path = "std::env::vars", reason = "panics on a variable that is not valid Unicode: read the environment through crate::process_env::vars" },
     # ER-47 / rule 84 (ADR 0100): clearing a child's environment strips the variables that restrict it (a download ban, an install ban,
     # an offline switch). paddock_env::clear_env (paddock_proc::clean_env) is the one function that clears, and it passes them.
     { path = "std::process::Command::env_clear", reason = "clear a child's environment through paddock_proc::clean_env (paddock_env::clear_env): it keeps the restricting variables (ER-47)" },

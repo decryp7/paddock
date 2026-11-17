@@ -392,7 +392,7 @@ fn run_cli(program: &mut TestCommand, root: &Path, case: &Value) -> Value {
     .to_string();
     // The planner reads the workflow's environment; everything else (PATH, RUSTUP_HOME, SystemRoot, ...) stays as the runner has it.
     program.current_dir(root);
-    for (k, _) in std::env::vars() {
+    for (k, _) in paddock_dev::process_env::vars() {
         if k.starts_with("GITHUB_")
             || k.starts_with("PLAN_")
             || ["EVENT", "REF", "BEFORE", "SHA", "BASE_REF", "INPUT_APP"].contains(&k.as_str())

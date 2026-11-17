@@ -82,6 +82,7 @@ pub mod plan_repo;
 pub mod plan_since;
 pub mod pr;
 pub mod pre_push;
+pub mod process_env;
 pub mod queue;
 pub mod release_isolation;
 pub mod safe_remove;

@@ -164,7 +164,7 @@ mod tests {
     fn a_cache_hit_is_marked_as_used_before_its_probe_so_a_slow_or_failed_probe_cannot_let_the_prune_take_it() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let home = tempfile::tempdir().unwrap();
-        let mut env: HashMap<String, String> = std::env::vars().collect();
+        let mut env: HashMap<String, String> = crate::process_env::vars().collect();
         env.insert("PADDOCK_DEV_HOME".into(), home.path().display().to_string());
         let lookup = |k: &str| env.get(k).cloned();
         let vars: Vec<(String, String)> = env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
