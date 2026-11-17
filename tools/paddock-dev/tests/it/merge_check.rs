@@ -1521,7 +1521,7 @@ fn revert_merge(r: &Repo, sha: &str) -> String {
 }
 
 const WARNING: &str = "::warning::";
-const NEXT: &str = "on the train head (main), or land the reverted branch first";
+const NEXT: &str = "on main, or land the reverted branch first";
 
 #[test]
 fn a_member_based_on_a_merge_the_target_reverted_warns_and_still_passes() {
@@ -1587,7 +1587,7 @@ fn a_member_forked_from_the_reverted_branch_itself_warns() {
     let (code, text) = r.check(&BRANCH_ARGS);
     assert_eq!(code, 0, "{text}");
     assert_eq!(warnings(&text).len(), 1, "{text}");
-    assert!(text.contains("feat/x"), "{text}");
+    assert!(text.contains("is built on feat/x, which main reverted"), "{text}");
 }
 
 #[test]
@@ -1712,7 +1712,7 @@ fn several_reverted_merges_of_one_branch_are_one_line() {
     let lines = warnings(&text);
     assert_eq!(lines.len(), 1, "{text}");
     assert!(
-        lines[0].contains("merge of feat/x (merge") && !lines[0].contains("abc1234"),
+        lines[0].contains("merge of feat/x, which") && !lines[0].contains("abc1234"),
         "{text}"
     );
     assert!(
@@ -1727,7 +1727,7 @@ fn the_warning_names_the_target_not_a_sha_and_the_commit_form_says_to_build_and_
         revert_merge(r, m);
     });
     let (_, text) = r.check(&BRANCH_ARGS);
-    assert!(text.contains("(main)") && text.contains("re-base member"), "{text}");
+    assert!(text.contains("re-base member on main"), "{text}");
     r.git(&["merge", "-q", "--no-ff", "-m", "Merge member", "member"]);
     let (code, text) = r.check(&["HEAD", "--no-generators"]);
     assert_eq!(code, 0, "{text}");

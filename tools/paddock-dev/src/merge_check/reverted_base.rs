@@ -134,6 +134,8 @@ struct Reverted {
     merge: String,
     revert: String,
     branch: String,
+    /// The member holds commits the merge brought in but not the merge itself (it was forked from the reverted branch).
+    forked: bool,
 }
 
 /// What the look found: the merges, and the reverts it could not resolve.
@@ -150,7 +152,10 @@ fn resolve(git: &Git, name: &str) -> Result<Option<String>, String> {
     Ok((!id.is_empty()).then_some(id))
 }
 
-/// The newest commit before `from` whose subject is exactly `subject` (and is not `from`).
+/// The newest commit before `from` whose subject is exactly `subject` (and is not `from`). Newest is the right pick while a
+/// subject repeats: a branch merged more than once gets the same merge subject each time, and a revert that names a subject
+/// reverts the merge that was in force when it was made, which is the newest one before it. An older merge of the same branch
+/// that the member holds is still found, because every live revert in `member..target` is judged on its own.
 fn by_subject(git: &Git, from: &str, subject: &str) -> Result<Option<String>, String> {
     let log = git.text(&["log", "--format=%H%x00%s", "--fixed-strings", "--grep", subject, from])?;
     Ok(log
@@ -231,7 +236,13 @@ fn find(git: &Git, target: &str, member: &str) -> Result<Found, String> {
         if relanded || !holds(git, &merge, member)? {
             continue;
         }
-        reverted.push(Reverted { merge, revert, branch });
+        let forked = git.text(&["rev-list", "--count", &merge, &format!("^{member}")])?.trim() != "0";
+        reverted.push(Reverted {
+            merge,
+            revert,
+            branch,
+            forked,
+        });
     }
     Ok(Found { reverted, unresolved })
 }
@@ -272,20 +283,25 @@ pub fn of_refs(git: &Git, label: &str, target: &str, member: &str, names: &Names
     for b in &branches {
         let of: Vec<&Reverted> = found.reverted.iter().filter(|r| r.branch == *b).collect();
         let list = |f: fn(&Reverted) -> &str| of.iter().map(|r| short(f(r))).collect::<Vec<_>>().join(", ");
+        // The member is the reverted branch itself (its name, with or without a remote prefix): "land it first" makes no sense.
+        let itself = names.member == *b || names.member.ends_with(&format!("/{b}"));
+        let land = if itself { "" } else { ", or land the reverted branch first" };
         let next = if names.merged {
             format!(
-                "the merged member may depend on {b}; build and test the merge, or re-base on the train head, or land the reverted branch first"
+                "the merged member may depend on {b}; build and test the merge, or re-base on {}{land}",
+                names.target
             )
         } else {
-            format!(
-                "re-base {} on the train head ({}), or land the reverted branch first",
-                names.member, names.target
-            )
+            format!("re-base {} on {}{land}", names.member, names.target)
+        };
+        let what = if of.iter().all(|r| r.forked) {
+            format!("is built on {b}, which {} reverted", names.target)
+        } else {
+            format!("contains the merge of {b}, which {} reverted", names.target)
         };
         text.push(format!(
-            "::warning::{label}: its history contains the merge of {b} (merge {}), which {} reverted (revert {}). Next step: {next}.",
+            "::warning::{label}: its history {what} (merge {}; revert {}). Next step: {next}.",
             list(|r| &r.merge),
-            names.target,
             list(|r| &r.revert),
         ));
     }
