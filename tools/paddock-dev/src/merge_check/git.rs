@@ -133,6 +133,24 @@ impl<'a> Git<'a> {
         self.paths(&["diff", "--name-only", "-z", "--no-renames", from, to])
     }
 
+    /// Whether `ancestor` is reachable from `of` (`git merge-base --is-ancestor`: exit 0 yes, 1 no, anything else an error).
+    pub fn is_ancestor(&self, ancestor: &str, of: &str) -> Result<bool, String> {
+        let args = ["merge-base", "--is-ancestor", ancestor, of];
+        let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
+        let out = run_bounded(self.command_for(&args, &parent), Limits::new(TIMEOUT).max_output(1 << 16))
+            .map_err(|e| format!("git {} could not run: {e}", args.join(" ")))?;
+        match out.outcome {
+            paddock_proc::Outcome::Exited(st) if st.code() == Some(0) => Ok(true),
+            paddock_proc::Outcome::Exited(st) if st.code() == Some(1) => Ok(false),
+            _ => Err(format!(
+                "git {} failed ({:?}): {}",
+                args.join(" "),
+                out.outcome,
+                out.stderr_text().trim()
+            )),
+        }
+    }
+
     /// Whether this clone is shallow (its history is cut, so parents may be missing).
     pub fn is_shallow(&self) -> Result<bool, String> {
         Ok(self.text(&["rev-parse", "--is-shallow-repository"])?.trim() == "true")

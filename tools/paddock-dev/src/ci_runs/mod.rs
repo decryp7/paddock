@@ -640,6 +640,7 @@ fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(crate::qu
             // The trial runs no code of the branch: generator checks and the member gate need a checkout.
             generators: false,
             gates: false,
+            write_reverted: None,
         })
         .map(|_| ())
         .map_err(|e| e.message)

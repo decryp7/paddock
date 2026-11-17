@@ -216,6 +216,22 @@ enum MergeCommand {
     /// checks the merge makes due (docs/generators.toml; `--no-generators` skips them). Exit 5 on findings; a check that could not
     /// look is an error, never a pass.
     Check(MergeCheckArgs),
+    /// Before merging the train into a member branch: list the commands that re-apply the member's own work the train reverted
+    /// (`git revert <sha>`, git's "revert a faulty merge"; run them after `git merge <train>`), and warn about reverts of other
+    /// branches' merges the member holds. Read-only: runs nothing. Run it before the merge of the train.
+    SyncMember(SyncMemberArgs),
+}
+
+#[derive(Args)]
+struct SyncMemberArgs {
+    /// The train to merge in (for example `origin/train/2026-11-17-14`).
+    train: String,
+    /// The member's worktree (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// The member's branch name (default: the branch HEAD is on).
+    #[arg(long)]
+    member: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -266,6 +282,12 @@ struct MergeCheckArgs {
     /// (ADR 0098). The checkout must be the merge result. Report-only until its first green run on a real train is recorded.
     #[arg(long)]
     gates: bool,
+    /// A member that re-lands work the target reverted (`revert: reapply ...`, `Reapply "..."`) goes backwards by design: write
+    /// the merge message with one `Reverted: <path>: <reason>` line for each backwards finding the re-land explains (its commit
+    /// undoes the revert that changed the file) to this file, for `git commit --amend -F <file>` or `git merge -F <file>`.
+    /// Any other finding stays a finding for a person to answer.
+    #[arg(long, value_name = "FILE")]
+    write_reverted: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -593,6 +615,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                     target: a.target,
                     generators: !a.no_generators,
                     gates: a.gates,
+                    write_reverted: a.write_reverted,
                 },
                 out,
                 err,
@@ -774,7 +797,11 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             target: a.target,
             generators: !a.no_generators,
             gates: a.gates,
+            write_reverted: a.write_reverted,
         }),
+        Command::Merge {
+            command: MergeCommand::SyncMember(a),
+        } => merge_check::sync_member::command(a.root.as_deref(), &a.train, a.member.as_deref()),
         Command::Gen {
             command: GenCommand::Check(a),
         } => generators::command(&generators::CheckArgs {

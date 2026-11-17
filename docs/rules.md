@@ -282,6 +282,21 @@ changes here, every app's copy is updated in the same change.
     do); a run on another architecture, under emulation or as another user counts only as not measured, or as a finding only when
     compared with the base's own result on that machine (ER-9; 2026-11-16: the Windows-on-Arm VM and an amd64 container failed 22
     paddock-dev tests on a base the real runner passed).
+    A member the train pulled out with a revert keeps its work when its author catches up: before `git merge <train>`, run
+    `./dev merge sync-member <train>` (read-only); it prints a `git revert <sha>` for each live train revert of a merge of this
+    member's own branch, to run after the merge (git's howto "revert a faulty merge": a plain merge of the train would delete the
+    member's work again, as the revert is the newer change; three times, the last c156ba72a), and warns about reverts of other
+    branches' merges the member holds (re-base on the train, or land that branch first). The merge check's `--write-reverted
+    <file>` then writes the `Reverted:` lines of that re-land for the train side, only for a path with no other finding that the
+    target has not changed since the revert; every other finding stays a person's. `./dev merge check` also warns, report-only
+    (ER-41), about a member that does not contain the train's base (the newest commit of its base line the train has merged: the
+    second parent of the newest re-merge of an earlier train on the train's own first-parent line, else main's merge base); other
+    members merged ahead of it are not required.
+    **git_env (ER-47 policy).** paddock-dev starts every git through `git_env::git`, which removes the variables that select a
+    repository (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY` and the rest of
+    `GIT_REPO_VARS`) because the tool always names its repository with `git -C <folder>`: git sets `GIT_DIR` for a hook, and it
+    would otherwise override that folder. Everything else is inherited. A user's deliberate `GIT_DIR` therefore has no effect on
+    paddock-dev: point it at a repository with `--root` or the current folder. A source test refuses a bare `command("git")`.
 
 ## Performance analysis (user, 2026-10-29)
 51. **Retired 2026-11-12 (user): merged into rule 13** (more parallelism, or a cheaper operation).
