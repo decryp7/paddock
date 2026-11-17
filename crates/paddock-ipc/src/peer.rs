@@ -24,8 +24,8 @@ use crate::endlog::{ConnId, EndCode, Phase};
 use crate::error::{IpcError, ProtocolError, RemoteError, codes, panic_message};
 use crate::frame::{self, Frame, FrameError, FrameHead, FrameKind, FrameLimit};
 use crate::handshake::Connection;
+use crate::slot::{CallSlot, SlotSender, slot};
 use crate::writeq::{Out, Push, WriteQueue};
-use paddock_jobs::CancelToken;
 use paddock_jobs::time::{Clock, Deadline, SystemClock};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -35,7 +35,7 @@ use std::io::Write;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 /// How long a callee has to end a call after a cancel before the call counts as hung.
@@ -167,23 +167,68 @@ enum Event {
     Closed(IpcError),
 }
 
-/// A call this side made and is waiting for.
+/// A call this side made and is waiting for: the answering end of its completion slot (ADR 0106) and its stream credits.
+/// Dropped without an end (taken out by a close that then failed), it logs that once and ends the call with the close's
+/// recorded reason (ER-27); a call its own caller gave up is [`Pending::abandon`]ed instead.
 struct Pending {
-    tx: mpsc::Sender<Event>,
-    /// Cancelled when an event is posted, so the caller's wait on the clock ends at once.
-    arrived: CancelToken,
+    tx: SlotSender<Event>,
+    id: u64,
+    /// The peer, for its label and its close reason when the call has to be ended on drop (weak: the map is the peer's).
+    peer: Weak<Inner>,
     streams: bool,
     granted: u64,
     received: u64,
 }
 
 impl Pending {
+    /// Puts `event` in the call's slot; an item keeps the call open, anything else ends it. An event after the end (a late
+    /// answer after a close) is dropped.
     fn post(&self, event: Event) {
-        // silent: the receiver is gone when the call has ended; the event has no reader then
+        let last = !matches!(event, Event::Item(_));
+        // silent: false only for an event after the call's end, which has no reader by design (one completion)
         #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
-        let _ = self.tx.send(event);
-        self.arrived.cancel();
+        let _ = self.tx.post(event, last);
     }
+
+    /// Ends a call its own caller gave up (timed out, dropped its stream, could not send it): nobody reads its slot.
+    fn abandon(self) {
+        self.tx.abandon();
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        if self.tx.is_ended() {
+            return;
+        }
+        // Only a close that took the call out and then failed gets here: say so, and end the call with that close's reason.
+        let (label, why) = match self.peer.upgrade() {
+            Some(inner) => (inner.opts.label.clone(), recorded_reason(&inner)),
+            None => (String::from("a peer that is gone"), None),
+        };
+        let why = why.unwrap_or_else(|| IpcError::Closed(GONE.into()));
+        let line = format!(
+            "{label}: call {} was taken out by a close that did not put its end; it ends with the close's reason: {why}",
+            self.id
+        );
+        #[cfg(test)]
+        lock(&tests::DROPPED_ENDS).push(line.clone());
+        log::warn!("{line}");
+        self.post(Event::Closed(why));
+    }
+}
+
+/// The reason a close recorded (once it started), read without a `Peer`.
+fn recorded_reason(inner: &Inner) -> Option<IpcError> {
+    match &*lock(&inner.closed) {
+        Closing::Started(why) | Closing::Done(why) => Some(why.clone()),
+        Closing::Open => None,
+    }
+}
+
+/// The end a dropped [`Pending`] puts: its connection is gone.
+fn gone_event() -> Event {
+    Event::Closed(IpcError::Closed(GONE.into()))
 }
 
 /// A call of the other side this side is handling.
@@ -230,12 +275,9 @@ struct Inner {
     /// A test's look at the closing thread after the pending calls left the map, before their end is posted to them.
     #[cfg(test)]
     after_drain: Mutex<Option<tests::Hook>>,
-    /// A test's look at a caller about to look its call up for the wake-up of its wait on the clock.
+    /// A test's look at a caller that has sent its call and is about to wait on its slot.
     #[cfg(test)]
-    before_lookup: Mutex<Option<tests::Hook>>,
-    /// A test's look at a caller right after that look-up.
-    #[cfg(test)]
-    after_lookup: Mutex<Option<tests::Hook>>,
+    before_wait: Mutex<Option<tests::Hook>>,
 }
 
 /// How far the connection has closed.
@@ -426,9 +468,7 @@ impl Peer {
                 #[cfg(test)]
                 after_drain: Mutex::new(None),
                 #[cfg(test)]
-                before_lookup: Mutex::new(None),
-                #[cfg(test)]
-                after_lookup: Mutex::new(None),
+                before_wait: Mutex::new(None),
             }),
         };
         if let Some(f) = on_push {
@@ -598,10 +638,7 @@ impl Peer {
 
     /// Why the connection closed (every close records its reason first, so this is the reason while the close is under way too).
     fn closed_reason(&self) -> IpcError {
-        match &*lock(&self.inner.closed) {
-            Closing::Started(why) | Closing::Done(why) => why.clone(),
-            Closing::Open => IpcError::Closed(GONE.into()),
-        }
+        recorded_reason(&self.inner).unwrap_or_else(|| IpcError::Closed(GONE.into()))
     }
 
     /// Sends a frame, waiting for room in the write queue for at most `limit` (a call's own timeout) or the stall.
@@ -672,21 +709,25 @@ impl Peer {
         body: Vec<u8>,
         credit: u32,
         limit: Option<Duration>,
-    ) -> Result<(u64, mpsc::Receiver<Event>), IpcError> {
+    ) -> Result<(u64, CallSlot<Event>), IpcError> {
         let id = self.inner.next.fetch_add(1, Ordering::Relaxed);
-        let (tx, rx) = mpsc::channel();
+        let (rx, tx) = slot(gone_event);
         lock(&self.inner.pending).insert(
             id,
             Pending {
                 tx,
-                arrived: CancelToken::new(),
+                id,
+                peer: Arc::downgrade(&self.inner),
                 streams: credit > 0,
                 granted: u64::from(credit),
                 received: 0,
             },
         );
         if let Err(e) = self.send_within(&Frame::Call { id, credit, body }, limit) {
-            lock(&self.inner.pending).remove(&id);
+            let given_up = lock(&self.inner.pending).remove(&id);
+            if let Some(p) = given_up {
+                p.abandon();
+            }
             return Err(e);
         }
         Ok((id, rx))
@@ -710,51 +751,18 @@ impl Peer {
         }
     }
 
-    /// The next event of call `id`, waiting at most `timeout` on the peer's clock (`None`: as long as the connection
-    /// lives); `Ok(None)` when the time passed first. Event-driven: posting an event ends the wait at once.
-    fn wait_event(
-        &self,
-        id: u64,
-        rx: &mpsc::Receiver<Event>,
-        timeout: Option<Duration>,
-    ) -> Result<Option<Event>, IpcError> {
-        if let Ok(e) = rx.try_recv() {
-            return Ok(Some(e));
-        }
-        let Some(t) = timeout else {
-            return rx.recv().map(Some).map_err(|_| self.closed_reason());
-        };
-        let arrived = CancelToken::new();
+    /// The next event of a call, waiting at most `timeout` on the peer's clock (`None`: as long as it takes, which ends
+    /// because a close or a dropped [`Pending`] always puts an end); `None` when the time passed first. The wait is on the
+    /// call's own slot, never a look-up in the map, so an end put at any moment reaches it (ADR 0106, CI run 8214).
+    fn wait_event(&self, rx: &CallSlot<Event>, timeout: Option<Duration>) -> Option<Event> {
         #[cfg(test)]
-        if let Some(f) = lock(&self.inner.before_lookup).as_ref() {
+        if let Some(f) = lock(&self.inner.before_wait).as_ref() {
             f(self);
         }
-        let listed = match lock(&self.inner.pending).get_mut(&id) {
-            Some(p) => {
-                p.arrived = arrived.clone();
-                true
-            }
-            None => false,
-        };
-        #[cfg(test)]
-        if let Some(f) = lock(&self.inner.after_lookup).as_ref() {
-            f(self);
+        match timeout {
+            None => Some(rx.take()),
+            Some(t) => rx.take_within(&*self.inner.opts.clock, t, || {}),
         }
-        if !listed {
-            // No longer listed, so nothing will cancel `arrived`: a last event is already in the channel, or a close took the
-            // call out and posts its end (or drops its sender) right after. Waiting on the clock here waited for the whole
-            // timeout, and for ever on a test's fake clock (CI run 8214); the channel answers as soon as the close does.
-            return rx.recv().map(Some).map_err(|_| self.closed_reason());
-        }
-        // An event posted before the new token was in place is already in the channel.
-        if let Ok(e) = rx.try_recv() {
-            return Ok(Some(e));
-        }
-        // silent: Err(Cancelled) is the wake-up; the event channel is read right after
-        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
-        let _ = self.inner.opts.clock.wait(t, &arrived);
-        // Nothing posted: the time passed (a sender gone without an event cannot happen; it reads as a timeout).
-        Ok(rx.try_recv().ok())
     }
 
     /// Calls the other side and waits for its answer (at most `timeout`; `None` waits as long as the connection lives).
@@ -766,15 +774,18 @@ impl Peer {
         let deadline = timeout.map(|t| Deadline::after(self.inner.opts.clock.clone(), t));
         let (id, rx) = self.begin(body, 0, timeout)?;
         let left = deadline.as_ref().and_then(Deadline::remaining);
-        let event = match self.wait_event(id, &rx, left)? {
+        let event = match self.wait_event(&rx, left) {
             Some(e) => e,
             None => {
                 self.cancel(id);
-                let late = self.wait_event(id, &rx, Some(self.inner.opts.cancel_grace));
-                lock(&self.inner.pending).remove(&id);
+                let late = self.wait_event(&rx, Some(self.inner.opts.cancel_grace));
+                let given_up = lock(&self.inner.pending).remove(&id);
+                if let Some(p) = given_up {
+                    p.abandon();
+                }
                 return match late {
-                    Ok(Some(Event::Reply(b))) => Ok(b),
-                    Ok(Some(Event::Closed(e))) | Err(e) => Err(e),
+                    Some(Event::Reply(b)) => Ok(b),
+                    Some(Event::Closed(e)) => Err(e),
                     _ => Err(IpcError::Timeout),
                 };
             }
@@ -1182,7 +1193,7 @@ pub enum StreamEvent {
 pub struct CallStream {
     peer: Peer,
     id: u64,
-    rx: mpsc::Receiver<Event>,
+    rx: CallSlot<Event>,
     window: u32,
     /// Items granted but not taken yet.
     outstanding: u32,
@@ -1195,7 +1206,7 @@ impl CallStream {
         if self.done {
             return Err(IpcError::Protocol("the stream is already complete".into()));
         }
-        let Some(got) = self.peer.wait_event(self.id, &self.rx, timeout)? else {
+        let Some(got) = self.peer.wait_event(&self.rx, timeout) else {
             return Ok(StreamEvent::Idle);
         };
         match got {
@@ -1254,7 +1265,10 @@ impl Drop for CallStream {
     fn drop(&mut self) {
         if !self.done {
             self.peer.cancel(self.id);
-            lock(&self.peer.inner.pending).remove(&self.id);
+            let given_up = lock(&self.peer.inner.pending).remove(&self.id);
+            if let Some(p) = given_up {
+                p.abandon();
+            }
         }
     }
 }
@@ -1406,14 +1420,14 @@ mod tests {
     }
 
     /// Regression (CI run 8214, the crates job on Linux: paddock-plugin-host's
-    /// `a_crashing_plugin_is_restarted_after_the_back_off_and_then_quarantined` hung until nextest stopped it at 60 s, and
-    /// passed in 0.7 s on its retry). A call whose connection closed after the call was sent but before the caller looked it
-    /// up to be woken waited for its whole timeout: the close had already taken the call out of the map, so the caller's
-    /// new wake-up token was never placed where the close could cancel it, and the close cancelled the old one. On a test's
-    /// fake clock that wait never ends; on the system clock a crashed plugin is noticed only when the call times out.
-    /// The seams hold the caller before its look-up and the closer between taking the calls out and posting their end.
+    /// `a_crashing_plugin_is_restarted_after_the_back_off_and_then_quarantined` hung until nextest stopped it at 60 s; ADR
+    /// 0106 instance 4). The close takes the call out of the map, then the caller starts its wait, then the close puts the
+    /// end. Before the completion slot the caller registered its wake-up through the map, found nothing there and waited on
+    /// the clock for its whole timeout, for ever on a fake clock (red at 1ee5d2be6). Now the caller waits on the call's own
+    /// slot, which the end reaches whenever it is put. The seams hold the caller before its wait and the closer between
+    /// taking the calls out and putting their end; the caller is seen blocked on the clock before the end is put.
     #[test]
-    fn a_call_the_close_took_out_before_its_caller_looked_it_up_is_still_woken_by_that_close() {
+    fn a_call_the_close_took_out_before_its_caller_waited_is_still_ended_by_that_close() {
         use paddock_jobs::time::FakeClock;
         let (ours, theirs) = endpoint::pair().unwrap();
         let clock = FakeClock::new();
@@ -1428,13 +1442,9 @@ mod tests {
         let guard = Duration::from_secs(30);
         let (begun_tx, begun) = mpsc::channel::<()>();
         let (go_tx, go) = mpsc::channel::<()>();
-        *lock(&peer.inner.before_lookup) = Some(Box::new(move |_: &Peer| {
+        *lock(&peer.inner.before_wait) = Some(Box::new(move |_: &Peer| {
             let _ = begun_tx.send(());
             let _ = go.recv_timeout(guard);
-        }));
-        let (looked_tx, looked) = mpsc::channel::<()>();
-        *lock(&peer.inner.after_lookup) = Some(Box::new(move |_: &Peer| {
-            let _ = looked_tx.send(());
         }));
         let (drained_tx, drained) = mpsc::channel::<()>();
         let (post_tx, post) = mpsc::channel::<()>();
@@ -1460,19 +1470,157 @@ mod tests {
             .recv_timeout(guard)
             .expect("the close took the pending call out");
         go_tx.send(()).unwrap();
-        looked
-            .recv_timeout(guard)
-            .expect("the caller looked its call up");
+        assert!(
+            clock.wait_for_waiters(1, guard),
+            "the caller blocked on the clock after the close took its call out"
+        );
         post_tx.send(()).unwrap();
         let result = done.recv_timeout(guard);
         assert!(
             matches!(result, Ok(Err(IpcError::Closed(_)))),
-            "the call the close ended was not woken by that close: it waits for its timeout on the clock instead, which a \
+            "the call the close ended was not ended by that close: it waits for its timeout on the clock instead, which a \
              test's fake clock never reaches (CI run 8214); got {result:?} with {} waiter(s) on the clock",
             clock.waiters()
         );
         caller.join().unwrap();
         closer.join().unwrap();
+        drop(theirs);
+    }
+
+    /// The ends a dropped [`Pending`] had to put, process-wide (nextest runs each test in a process of its own; the lines
+    /// carry the peer's label).
+    pub(super) static DROPPED_ENDS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    /// A close that panics after it took the calls out (the after-drain seam), with one caller already waiting on the
+    /// clock: what that caller got, the reason the close recorded, and the dropped-end lines of this peer.
+    fn a_close_that_fails_after_taking_the_calls_out(
+        label: &str,
+    ) -> (Result<Vec<u8>, IpcError>, IpcError, Vec<String>) {
+        use paddock_jobs::time::FakeClock;
+        let (ours, theirs) = endpoint::pair().unwrap();
+        let clock = FakeClock::new();
+        let mut opts = PeerOptions::new(label);
+        opts.clock = Arc::new(clock.clone());
+        let peer = Peer::start(
+            Connection::raw(ours, FrameLimit::default()),
+            Arc::new(NoCalls),
+            opts,
+        )
+        .unwrap();
+        let guard = Duration::from_secs(30);
+        // The closer that wins runs the seam: this test's `close`, or the reader once the writer has shut the socket (on
+        // Linux it won 1 of 118 stress runs, and the panic was then not this thread's).
+        let (panicked_tx, panicked) = mpsc::channel::<()>();
+        let panicked_tx = Mutex::new(panicked_tx);
+        *lock(&peer.inner.after_drain) = Some(Box::new(move |_: &Peer| {
+            let _ = lock(&panicked_tx).send(());
+            panic!("a close that fails after taking the calls out")
+        }));
+        let (done_tx, done) = mpsc::channel();
+        let caller = {
+            let peer = peer.clone();
+            std::thread::spawn(move || {
+                let _ = done_tx.send(peer.call(b"x".to_vec(), Some(Duration::from_secs(3600))));
+            })
+        };
+        assert!(
+            clock.wait_for_waiters(1, guard),
+            "the caller blocked on the clock"
+        );
+        let closer = {
+            let peer = peer.clone();
+            std::thread::spawn(move || peer.close())
+        };
+        panicked
+            .recv_timeout(guard)
+            .expect("the closer that won ran the seam and panicked after taking the calls out");
+        // silent: which closer panicked depends on who won (this one or the reader); either is the case under test
+        let _ = closer.join();
+        let result = done.recv_timeout(guard).unwrap_or_else(|_| {
+            panic!(
+                "a waiting caller must end when the close that took its call out fails, not wait for its timeout ({} \
+                 waiter(s) on the clock)",
+                clock.waiters()
+            )
+        });
+        caller.join().unwrap();
+        let recorded = peer
+            .closed()
+            .expect("the close recorded its reason and was reported done");
+        let lines = lock(&DROPPED_ENDS)
+            .iter()
+            .filter(|l| l.contains(label))
+            .cloned()
+            .collect();
+        drop(theirs);
+        (result, recorded, lines)
+    }
+
+    /// ADR 0106, the slot's third invariant at the peer (instance 3's other half, 5bdefa19d: a close that fails half way
+    /// still ends). A caller already waiting on the clock is ended instead of waiting for its timeout (red at 4cb546db5:
+    /// "Err(Timeout) with 1 waiter(s) on the clock"), and with the reason the close recorded, not a bare "gone".
+    #[test]
+    fn a_close_that_panics_after_taking_the_calls_out_still_ends_a_waiting_caller() {
+        let (result, recorded, _) =
+            a_close_that_fails_after_taking_the_calls_out("the failing close's side");
+        assert_eq!(
+            result,
+            Err(recorded.clone()),
+            "the caller gets the close's recorded reason"
+        );
+        assert!(!recorded.to_string().contains(GONE), "{recorded}");
+    }
+
+    /// ER-27: a call ended by a dropped [`Pending`] is logged once, with its call id and the peer's label.
+    #[test]
+    fn a_call_ended_by_a_dropped_pending_is_logged_once_with_its_id_and_peer() {
+        let label = "the logged side";
+        let (_, recorded, lines) = a_close_that_fails_after_taking_the_calls_out(label);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(
+            lines[0].starts_with(&format!("{label}: call 1 "))
+                && lines[0].contains(&recorded.to_string()),
+            "{lines:?}"
+        );
+    }
+
+    /// A call its own caller gave up (here: timed out and not answered within the cancel grace) is abandoned quietly: no
+    /// dropped-end line.
+    #[test]
+    fn a_call_its_caller_gave_up_is_not_logged_as_dropped() {
+        use paddock_jobs::time::FakeClock;
+        let label = "the patient side";
+        let (ours, theirs) = endpoint::pair().unwrap();
+        let clock = FakeClock::new();
+        let mut opts = PeerOptions::new(label);
+        opts.clock = Arc::new(clock.clone());
+        let peer = Peer::start(
+            Connection::raw(ours, FrameLimit::default()),
+            Arc::new(NoCalls),
+            opts,
+        )
+        .unwrap();
+        let guard = Duration::from_secs(30);
+        let (done_tx, done) = mpsc::channel();
+        let caller = {
+            let peer = peer.clone();
+            std::thread::spawn(move || {
+                let _ = done_tx.send(peer.call(b"x".to_vec(), Some(Duration::from_secs(5))));
+            })
+        };
+        assert!(
+            clock.wait_for_pending(1, guard),
+            "the call waits for its answer"
+        );
+        clock.advance(Duration::from_secs(5));
+        assert!(
+            clock.wait_for_pending(1, guard),
+            "the call waits out the cancel grace"
+        );
+        clock.advance(CANCEL_GRACE);
+        assert_eq!(done.recv_timeout(guard).unwrap(), Err(IpcError::Timeout));
+        caller.join().unwrap();
+        assert!(lock(&DROPPED_ENDS).iter().all(|l| !l.contains(label)));
         drop(theirs);
     }
 
