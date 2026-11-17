@@ -1092,6 +1092,21 @@ adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
 
 
 [[mechanism]]
+id = "build-folder-config"
+title = "A build folder handed to cargo as `--config build.target-dir='<dir>'`, never `CARGO_TARGET_DIR` (sccache hashes every CARGO_* variable)"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/cargo_target.rs"]
+status = "built"
+adr = "docs/adr/0014-monorepo-under-paddock.md"
+
+  [[mechanism.copy]]
+  paths = ["dev"]
+  symbols = ["text:build.target-dir"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "`./dev` builds paddock-dev itself, before any Rust tool exists, so its two cargo build lines pass the folder as configuration in shell. A fix to how the folder is passed (quoting, the subcommands that take it) goes in cargo_target.rs and in those two lines in the same change. The CI shell steps of setup-rust and build-folder keep their own copies, listed under ci-setup-rust and ci-host-steps, and are unchanged by this: CI keeps its per-slot caches."
+
+[[mechanism]]
 id = "ci-kit-shell"
 title = "A CI kit step in two implementations: build-jobs and job-isolation in Rust, and the shell scripts the release path keeps"
 canonical = "tools/paddock-dev"

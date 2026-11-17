@@ -278,7 +278,10 @@ pub(crate) fn repo_root(given: &Option<PathBuf>) -> Result<PathBuf, CliError> {
 pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     let root = repo_root(&args.root)?;
     let stdin = if args.refs_from_stdin { read_stdin()? } else { String::new() };
-    command_in(args, &root, &stdin, &RealLookups { root: root.clone() })
+    // Prepared on first use by a cargo gate, never here and never in `command_in`: a push that runs no cargo gate, and the tests of
+    // the push gate, must not start a server on the machine they run on (ER-45).
+    let wrapper = crate::local_sccache::Lazy::on_demand(std::env::vars().collect());
+    command_in(args, &root, &stdin, &RealLookups { root: root.clone() }, wrapper)
 }
 
 /// The lookups of one run, `git ls-remote` read once per remote: the base choice and the known-commit lookup ask the same question.
@@ -306,7 +309,13 @@ impl known::Lookups for OnceLookups<'_> {
 }
 
 /// [`command`] with the repository, git's pre-push lines and the outside lookups given.
-fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lookups) -> Result<Report, CliError> {
+fn command_in(
+    args: &PrePushArgs,
+    root: &Path,
+    stdin: &str,
+    look: &dyn known::Lookups,
+    wrapper: crate::local_sccache::Lazy,
+) -> Result<Report, CliError> {
     if args.refs_from_stdin
         && only_reservation_refs(stdin, &|sha| {
             git_text(root, &["cat-file", "-t", sha]).is_some_and(|t| t.trim() == "blob")
@@ -413,6 +422,7 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
         built_heavy: Default::default(),
         budget_end: std::time::Instant::now() + BUDGET,
         priority: pushes.iter().any(|p| budget::is_landing_ref(&p.remote_ref)),
+        wrapper,
     };
     let queue = queue_max(&env);
     let history = GitHistory::new(&work, GIT_TIMEOUT);

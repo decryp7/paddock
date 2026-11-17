@@ -91,7 +91,22 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
     }
     assert!(!got.iter().any(|g| g.contains("fuzz")), "a fuzz workspace has its own job: {got:?}");
     let by = |id: &str| run_gates(&planned).into_iter().find(|g| g.id == id).cloned().unwrap();
-    // CI's own command lines (ci.yml: crates lint with every feature; apps without).
+    // The build folder is cargo configuration right after the subcommand, never a variable (sccache hashes it).
+    assert_eq!(&by("clippy crates").args[1..3], ["--config", "build.target-dir='/t'"]);
+    assert_eq!(&by("clippy-windows crates").args[2..4], ["--config", "build.target-dir='/t/xwin'"]);
+    assert!(
+        run_gates(&planned)
+            .iter()
+            .all(|g| g.env.iter().all(|(k, _)| !k.starts_with("CARGO_")))
+    );
+    // CI's own command lines (ci.yml: crates lint with every feature; apps without), without that pair.
+    let by = |id: &str| {
+        let mut g = by(id);
+        if let Some(i) = g.args.iter().position(|a| a == "--config") {
+            g.args.drain(i..i + 2);
+        }
+        g
+    };
     assert_eq!(
         by("clippy crates").args.join(" "),
         "clippy --workspace --all-targets --all-features --locked -- -D warnings"
@@ -106,10 +121,7 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
         by("clippy-windows crates").args.join(" "),
         "xwin clippy --target x86_64-pc-windows-msvc --workspace --all-targets --all-features --locked -- -D warnings"
     );
-    assert_eq!(
-        by("clippy-windows crates").env,
-        [("CARGO_TARGET_DIR".to_string(), "/t/xwin".to_string())]
-    );
+    assert!(by("clippy-windows crates").env.is_empty());
     assert_eq!(by("clippy-windows crates").need, Need::Tool("cargo-xwin".into()));
     assert!(
         by("clippy-windows crates")
@@ -963,16 +975,21 @@ fn a_kept_build_folder_per_workspace_is_used_when_the_caller_sets_none() {
     f.target_dir = None;
     f.kept_targets = Some("/work/pre-push/targets/".into());
     let planned = plan_gates(&plan(), &change(&["crates/a.rs", "apps/dyno/src/a.rs"]), &f);
-    let env = |id: &str| run_gates(&planned).into_iter().find(|g| g.id == id).unwrap().env.clone();
-    let var = |v: &str| vec![("CARGO_TARGET_DIR".to_string(), v.to_string())];
-    assert_eq!(env("clippy crates"), var("/work/pre-push/targets/crates"));
-    assert_eq!(env("clippy apps/dyno"), var("/work/pre-push/targets/apps-dyno"));
-    assert_eq!(env("clippy-windows apps/dyno"), var("/work/pre-push/targets/apps-dyno/xwin"));
-    // The caller's own CARGO_TARGET_DIR wins (the host Clippy inherits it; the Windows one gets its xwin folder).
+    let args = |id: &str| run_gates(&planned).into_iter().find(|g| g.id == id).unwrap().args.join(" ");
+    assert!(args("clippy crates").contains("--config build.target-dir='/work/pre-push/targets/crates'"));
+    assert!(args("clippy apps/dyno").contains("--config build.target-dir='/work/pre-push/targets/apps-dyno'"));
+    assert!(args("clippy-windows apps/dyno").contains("--config build.target-dir='/work/pre-push/targets/apps-dyno/xwin'"));
+    assert!(
+        run_gates(&planned)
+            .iter()
+            .all(|g| g.env.iter().all(|(k, _)| !k.starts_with("CARGO_"))),
+        "never a CARGO_TARGET_DIR variable"
+    );
+    // The caller's own CARGO_TARGET_DIR is used as the configured folder (and dropped from the child's environment, see exec).
     f.target_dir = Some("/mine".into());
     let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &f);
     let g = run_gates(&planned).into_iter().find(|g| g.id == "clippy crates").unwrap().clone();
-    assert!(g.env.is_empty());
+    assert!(g.env.is_empty() && g.args.join(" ").contains("--config build.target-dir='/mine'"));
 }
 
 #[test]
@@ -1313,6 +1330,7 @@ mod known_commit {
             &r,
             &push_line(&two),
             &fake(None, Err("x")),
+            crate::local_sccache::Lazy::off(),
         )
         .unwrap();
         assert_eq!(rep.exit, Exit::Ok);
@@ -1346,6 +1364,7 @@ mod known_commit {
             &r,
             &push_line(&two),
             &fake(None, Err("x")),
+            crate::local_sccache::Lazy::off(),
         )
         .unwrap();
         let tree = git_text(&r, &["rev-parse", &format!("{two}^{{tree}}")]).unwrap().trim().to_string();
@@ -1415,6 +1434,7 @@ mod known_commit {
             &r,
             &delete,
             &l,
+            crate::local_sccache::Lazy::off(),
         );
         assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
         let a = PrePushArgs {
@@ -1422,7 +1442,7 @@ mod known_commit {
             base: Some("origin/main".into()),
             ..args()
         };
-        let got = command_in(&a, &r, &push_line(&two), &l);
+        let got = command_in(&a, &r, &push_line(&two), &l, crate::local_sccache::Lazy::off());
         assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
     }
 
@@ -1738,7 +1758,7 @@ mod base_choice {
             accept_not_measured: vec![],
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
-        let got = command_in(&args, &r, &line, &live(&r));
+        let got = command_in(&args, &r, &line, &live(&r), crate::local_sccache::Lazy::off());
         assert!(got.as_ref().map_or(true, |rep| !rep.text.contains("nothing to check")), "{got:?}");
     }
 }

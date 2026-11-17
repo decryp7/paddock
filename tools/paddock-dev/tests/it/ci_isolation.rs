@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 const AMENDED: &str =
     "target target-{name}-{src}-{slot} slot\nsrc src/{name}-{slot} slot\ntools tools shared\n# retired: target-{name}-{slot} 2026-11-10\n";
@@ -54,7 +54,7 @@ impl Host {
     // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
     #[allow(clippy::disallowed_methods)]
     fn run(&self, args: &[&str], envs: &[(&str, &str)], later: bool) -> Output {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        let mut cmd = crate::dev_bin::command();
         cmd.args(["ci", "isolation"])
             .args(args)
             .env_clear()
@@ -96,7 +96,7 @@ fn acquires_uses_releases_and_sweeps_with_the_real_binary() {
     assert!(env.get("PADDOCK_CI_SLOT_TOKEN").is_some_and(|t| !t.is_empty()));
     assert_eq!(
         env.get("PADDOCK_DEV").map(String::as_str),
-        Some(env!("CARGO_BIN_EXE_paddock-dev")),
+        Some(crate::dev_bin::PATH),
         "the job pins this very binary"
     );
     assert!(
@@ -319,17 +319,11 @@ fn a_disk_that_cannot_be_measured_is_said_so_and_the_floor_is_not_pretended_chec
 // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
 #[allow(clippy::disallowed_methods)]
 fn the_binary_answers_print_binary_with_its_own_path() {
-    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
-        .arg("--print-binary")
-        .output()
-        .unwrap();
+    let out = crate::dev_bin::command().arg("--print-binary").output().unwrap();
     assert!(out.status.success());
     assert_eq!(
         text(&out.stdout).trim(),
-        std::env::current_exe()
-            .ok()
-            .map(|_| env!("CARGO_BIN_EXE_paddock-dev").to_string())
-            .unwrap()
+        std::env::current_exe().ok().map(|_| crate::dev_bin::PATH.to_string()).unwrap()
     );
 }
 
@@ -362,7 +356,7 @@ fn git_bash_paths_drive_path_and_owns_and_source_key_end_to_end() {
     std::fs::create_dir_all(cwd.join("C:/ci")).unwrap();
     std::fs::create_dir_all(cwd.join("C:/w")).unwrap();
     let run = |args: &[&str], later: bool| {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        let mut cmd = crate::dev_bin::command();
         cmd.args(["ci", "isolation"])
             .args(args)
             .current_dir(&cwd)

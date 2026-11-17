@@ -76,7 +76,7 @@ fn repo() -> tempfile::TempDir {
 // Plain `git` and the tool under test, started and awaited here; nothing is killed by pid.
 #[allow(clippy::disallowed_methods)]
 fn dev(root: &Path, args: &[&str]) -> (i32, Value, String) {
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = crate::dev_bin::command()
         .args(["--json", "check", "new-id", "--root"])
         .arg(root)
         .args(args)

@@ -27,6 +27,8 @@ impl Repo {
     #[allow(clippy::disallowed_methods)]
     fn cmd(&self, program: &str) -> Command {
         let mut c = Command::new(program);
+        // Whatever this starts may be the binary under test: never a compile-cache server on this machine (ER-45).
+        crate::dev_bin::harden(&mut c);
         let empty = if cfg!(windows) { "NUL" } else { "/dev/null" };
         c.current_dir(self.path())
             .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -64,7 +66,7 @@ impl Repo {
     /// The same for the repository at `root`.
     fn check_at(&self, root: &Path, args: &[&str]) -> (i32, String) {
         let out = self
-            .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+            .cmd(crate::dev_bin::PATH)
             .args(["merge", "check", "--root"])
             .arg(root)
             .args(args)
@@ -1196,7 +1198,7 @@ exit 0
     fn a_hakari_that_cannot_run_keeps_the_other_detectors_findings_and_says_it_was_not_measured() {
         let r = dropped_hunk_and_hakari();
         let out = r
-            .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+            .cmd(crate::dev_bin::PATH)
             .env("PADDOCK_MERGE_CHECK_CARGO", "/nonexistent/cargo")
             .args(["merge", "check", "--root"])
             .arg(r.path())
@@ -1213,7 +1215,7 @@ exit 0
         let bin = tempfile::tempdir().unwrap();
         fake_cargo(bin.path());
         let out = r
-            .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+            .cmd(crate::dev_bin::PATH)
             .env("PADDOCK_MERGE_CHECK_CARGO", bin.path().join("cargo"))
             .args(["merge", "check", "--root"])
             .arg(r.path())
@@ -1255,7 +1257,7 @@ exit 0
     fn a_hakari_that_cannot_run_is_not_measured_never_a_pass() {
         let r = train(true, false);
         let out = r
-            .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+            .cmd(crate::dev_bin::PATH)
             .env("PADDOCK_MERGE_CHECK_CARGO", "/nonexistent/cargo")
             .args(["merge", "check", "--root"])
             .arg(r.path())
@@ -1276,7 +1278,7 @@ exit 0
         let bin = tempfile::tempdir().unwrap();
         fake_cargo(bin.path());
         let out = r
-            .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+            .cmd(crate::dev_bin::PATH)
             .env("PADDOCK_MERGE_CHECK_CARGO", bin.path().join("cargo"))
             .args(["merge", "check", "--json", "--root"])
             .arg(r.path())
@@ -1333,7 +1335,7 @@ exit 0
         fn run(&self, args: &[&str], gates_exit: &str) -> (i32, String) {
             let out = self
                 .repo
-                .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+                .cmd(crate::dev_bin::PATH)
                 .env("PADDOCK_MERGE_CHECK_GATES", self.gates.path().join("gates"))
                 .env("GATES_LOG", self.log())
                 .env("GATES_EXIT", gates_exit)

@@ -464,6 +464,32 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   Testing installer on macOS from CI 6353 on). Use `isMain` (conformance/src/util/is-main.mjs); a step that relies on a
   script's output also checks that the output is there.
 
+- **`CARGO_TARGET_DIR` in the environment defeats sccache 0.19 (2026-11-16, feat/local-sccache).** sccache puts every `CARGO_*`
+  variable into its cache key and cargo hands the variable to rustc, so a per-worktree build folder given as `CARGO_TARGET_DIR`
+  (or `CARGO_BUILD_TARGET_DIR`) gives 0% hits across worktrees; the same folder as `--config build.target-dir='<dir>'` gives about
+  82%. ADR 0014 §1's 6.5% was this, not the checkout path. The same holds for `CARGO_INCREMENTAL=0` set as a variable (see
+  docs/benchmarks.md, "Local sccache"): put such a setting in cargo configuration, where it is not part of the key. Every tool
+  that starts cargo now passes the folder through one accessor, `tools/paddock-dev/src/cargo_target.rs`, and drops the variables
+  from the child's environment (the variable would outrank the configuration). A stand-in cargo in the tests fails when
+  `CARGO_TARGET_DIR` reaches it, and a source audit (`tests/it/cargo_target_lint.rs`) fails when a tool sets the variable on a child
+  outside its short list.
+- **A server a tool starts is the machine's, not the test's or the job's (2026-11-16/17, feat/local-sccache).** Three review
+  findings, one class. (1) A tool that starts the shared sccache server from a test starts it on the developer's machine (ER-45):
+  the wrapper is prepared on first use by a cargo step (`local_sccache::Lazy`), never when the tool starts, and every test spawn of
+  `paddock-dev` goes through `tests/it/dev_bin.rs`, which sets `PADDOCK_SCCACHE=off` (an audit fails on a direct use of the binary's
+  path). (2) A server inherits the starter's `TMPDIR` and outlives it: builds failed once the starter's scratch folder was deleted, so
+  the server now starts with a tool-owned `TMPDIR` and working folder. (3) Whether a running server is "ours" is decided by an
+  exact comparison of the printed folder (`Local disk: "<dir>"`) or bucket and prefix, never by `contains`. CI keeps its per-slot
+  sccache; a first version let the Mac runner join the agents' server, and the review found `CARGO_INCREMENTAL=0` (a `CARGO_*`
+  variable, so part of the key) gave 4% hits against the agents' entries and that a shared server is one more thing that can stop a
+  runner; the user dropped it.
+- **sccache 0.19.0 latches a failed startup write check (2026-11-17, found for the RustFS cache).** At startup the server writes one test
+  object (`RemoteStorage::check`); when that one PUT fails the server runs read-only for its whole life, every later write fails
+  ("Cannot write to read-only storage") and the stats show 0 hits with a write error per compile (the first RustFS series: 138 of 138).
+  The tool now reads `Effective cache mode` from `--show-adv-stats`, restarts a read-only server of its own cache once, and turns the
+  wrapper off with the server's log path in the warning if it stays read-only. The server always logs its errors to a file in its run folder
+  and never idles out; S3 without keys fails at once instead of waiting about 75 s in the metadata lookup.
+
 ## Linux VM guests (Paddock C21, 2026-10-25)
 - Linux guests: `tart exec` (like `ssh` without a PAM login) has no logind session, so there is no `systemd --user`
   manager and no session bus; `loginctl enable-linger <user>` starts one, as a desktop login would. A desktop smoke

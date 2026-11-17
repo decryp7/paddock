@@ -239,7 +239,7 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
     let mut cmd = paddock_proc::command("sh");
     cmd.args(["-c", "exec 2>&1; exec \"$@\"", "sh"]);
     if rust {
-        cmd.arg(env!("CARGO_BIN_EXE_paddock-dev"));
+        cmd.arg(crate::dev_bin::PATH);
         cmd.arg("ci").args(step.rust.iter().map(|a| fill(a, fx)));
     } else {
         cmd.arg("bash");
@@ -939,7 +939,7 @@ fn host_cleanup_ends_a_real_process_of_the_job_and_only_that_one() {
     env.extend([("RUNNER_OS", "macOS"), ("PADDOCK_CI_SLOT", "s2")].map(|(k, v)| (k.to_string(), v.to_string())));
     env.push(("PADDOCK_JOB_TEMP".into(), fx.p("tmp").display().to_string()));
     env.push(("RUNNER_TEMP".into(), fx.p("tmp").display().to_string()));
-    let out = paddock_proc::command(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = crate::dev_bin::command()
         .args(["ci", "host-cleanup", "--id", "pitwall", "--process-pattern", "{tmp}[/\\\\]marker-x"])
         .current_dir(fx.p("work"))
         .env_clear()

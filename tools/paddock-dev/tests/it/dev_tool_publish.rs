@@ -3,7 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 // windows-twin: none: it runs a shell script that only runs on Linux and macOS
 #![cfg(unix)]
-use super::wrapper::{Fixture, fake_rustc, shim_cargo, write_script};
+use super::wrapper::{Fixture, fake_rustc, shim_cargo, write_script_plain as write_script};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;

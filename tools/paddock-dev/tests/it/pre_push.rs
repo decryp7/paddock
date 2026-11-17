@@ -5,7 +5,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::Path;
-use std::process::Command;
 
 const CHANGE: &str = "crates/paddock-proc/src/lib.rs";
 
@@ -28,7 +27,7 @@ fn dev(path: &str, args: &[&str]) -> (i32, String, String) {
 #[allow(clippy::disallowed_methods)]
 fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>, test_off: bool) -> (i32, String, String) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = crate::dev_bin::command()
         .args(["check", "--pre-push", "--base", "HEAD", "--files", CHANGE])
         .args(args)
         .current_dir(root)

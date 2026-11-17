@@ -4,7 +4,7 @@
   workspace `Cargo.toml`, the wire types and DTOs) are changed by the integrating agent only, or by adding a single
   declared line.
 - Don't run `cargo fmt --all` / `cargo clippy --fix` across the workspace while others are editing; format your own
-  files (`rustfmt <files>`). Use a private `CARGO_TARGET_DIR`.
+  files (`rustfmt <files>`). Use a private build folder, passed as `--config build.target-dir=...` (never `CARGO_TARGET_DIR`).
 - Before committing, check the subject: `node conformance/bin/paddock-conformance.mjs commit-lint --subject "<subject>"` (at
   most 100 characters; detail goes in the body). A rejected commit commits nothing and leaves your staged files as they are:
   shorten the subject and commit again, never amend an earlier commit.
