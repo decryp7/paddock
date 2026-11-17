@@ -251,6 +251,9 @@ reason = "ER-41: report-only until its first green run on the real tree, recorde
 owner = "ER-21 class: a fixture program that exists only on Unix (feat/testkit-stand-in)"
 since = 2026-11-16
 review_by = 2026-12-16
+approved = "coordinator"
+
+[[report_only]]
 id = "C131"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in C131-golden-machine.mjs and c131.rs. It may not block before the shared allow-list reader has its merge-base growth guard (being added on origin/feat/testkit-stand-in: reuse it when it lands, do not copy C129's, rule 55). It reads the golden folders (and *.golden and *.snap files) for fixed patterns only: uid and gid numbers, /Users, /home and C:\\Users paths and temp paths, so it gives the same result on every machine; the ER-21 class 'a golden captured on one machine fails on another' (train 14 WP-2: six goldens, among them the Mac's uid 501 in a guardian golden). It walks the working folder today; reading git's tracked list is the approved train-14 item. First count 2026-11-16 on feat/golden-checked-when-made: 7 sites in 310 files, the same on the Mac and as root in the CI image (the test check_c131 runs on both through ./dev golden confirm), all invented users, waived with a reason in conformance/c131-allow.json. It found no real value; a real host name in a wiki fixture was replaced as housekeeping, not as a catch. Known gap: this machine's own user, host, RAM and CPU count are not read (they made the result differ per machine)"
 owner = "ER-21 class: a golden holds a value of its capturing machine (feat/golden-checked-when-made)"

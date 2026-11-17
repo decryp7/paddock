@@ -217,7 +217,7 @@ export default {
     }
     if (exceptions.length > 0) {
       const g = baselineGrowth({ root: ctx.root, path: EXCEPTIONS, current: exceptions, keyOf: (e) => `${e.path}\t${e.id}`, entriesOf: (v) => v.exceptions.map((e) => ({ path: e.path, id: e.id })) });
-      if (g.reason) out.push(unmeasuredFinding(ctx, { id: 'C129', rule: 55, file: EXCEPTIONS, what: 'the exceptions', g }));
+      if (g.reason) out.push(unmeasuredFinding(ctx, { id: 'C129', rule: 55, file: EXCEPTIONS, what: 'the exception list', g }));
       else if (g.added.length > 0) {
         out.push(warn('C129', 55, EXCEPTIONS, 1, `the exceptions grew: ${g.added.length} ${plural(g.added.length, 'entry is', 'entries are')} (${g.added.slice(0, 5).map((e) => `${e.path} ${e.id}`).join('; ')}) not in the list at the merge base ${g.base.slice(0, 9)}; an added or widened exception needs the user's approval`, 'Remove the entry and port the script, or get the user\'s approval for the exception and record it in the plan.'));
       }

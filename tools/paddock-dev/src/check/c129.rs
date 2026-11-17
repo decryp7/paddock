@@ -531,7 +531,7 @@ impl Check for C129 {
                     "C129",
                     55,
                     EXCEPTIONS,
-                    "the exceptions",
+                    "the exception list",
                     &why,
                 )),
                 Growth::Added { base, added, .. } if added > 0 => {
