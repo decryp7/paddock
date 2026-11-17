@@ -1,4 +1,4 @@
-import { inject, Injectable } from '@angular/core';
+import { DestroyRef, inject, Injectable } from '@angular/core';
 import { Logger } from '../core/logger';
 import { WorkspaceStore } from '../core/workspace.store';
 import { ProjectBackend, Unlisten } from '../core/tools-backend';
@@ -23,21 +23,49 @@ export class OpenRequests {
   private readonly store = inject(WorkspaceStore);
   private readonly logger = inject(Logger);
   private unlisten: Unlisten | null = null;
+  /** The pause between two looks at the workspace, and the way to end it early (the injector is going). */
+  private waitTimer: ReturnType<typeof setTimeout> | undefined;
+  private wake: (() => void) | null = null;
+  private readonly destroyRef = inject(DestroyRef);
+
+  constructor() {
+    this.destroyRef.onDestroy(() => {
+      clearTimeout(this.waitTimer);
+      this.wake?.();
+      this.stop(); // the subscription ends with the injector too
+    });
+  }
 
   /** Handles what is already waiting and subscribes to new requests. Idempotent. */
-  async start(): Promise<void> {
+  start(): Promise<void> {
+    // Two callers while the first still waits for the workspace share that wait: a second loop would overwrite the timer
+    // handle of the first, which `stop` and the injector could then no longer reach (and it would subscribe twice).
+    return (this.starting ??= this.begin());
+  }
+
+  private starting: Promise<void> | null = null;
+
+  private async begin(): Promise<void> {
     if (this.unlisten) return;
     await this.whenWorkspaceLoaded();
+    if (this.destroyRef.destroyed) return;
     try {
-      this.unlisten = await this.backend.onOpenRequested(() => void this.drain());
+      const unlisten = await this.backend.onOpenRequested(() => void this.drain());
+      if (this.destroyRef.destroyed) {
+        unlisten(); // the injector went while subscribing
+        return;
+      }
+      this.unlisten = unlisten;
     } catch (e) {
       this.logger.warn('ui.open', 'Could not subscribe to open requests', { Error: errorMessage(e) });
+      this.starting = null; // a later `start()` may try again
       return;
     }
     await this.drain();
   }
 
   stop(): void {
+    this.starting = null;
     this.unlisten?.();
     this.unlisten = null;
   }
@@ -61,6 +89,11 @@ export class OpenRequests {
 
   /** The first workspace load must not overwrite files opened at startup, so wait for it (bounded). */
   private async whenWorkspaceLoaded(): Promise<void> {
-    for (let i = 0; i < LOAD_WAIT_TRIES && !this.store.summary(); i++) await new Promise((r) => setTimeout(r, LOAD_WAIT_MS));
+    for (let i = 0; i < LOAD_WAIT_TRIES && !this.store.summary() && !this.destroyRef.destroyed; i++) {
+      await new Promise<void>((resolve) => {
+        this.wake = resolve;
+        this.waitTimer = setTimeout(resolve, LOAD_WAIT_MS);
+      });
+    }
   }
 }

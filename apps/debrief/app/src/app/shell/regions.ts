@@ -25,9 +25,19 @@ export function regionsOf(root: ParentNode, isShown: (el: HTMLElement) => boolea
 
 /** Focuses the element `selector` names, retrying briefly while it is being created or its tab is being shown. */
 export function focusWhenThere(selector: string, attempts = 20): void {
+  cancelFocusRetries(); // only the latest request matters
   const el = document.querySelector<HTMLElement>(selector);
   el?.focus();
-  if ((!el || document.activeElement !== el) && attempts > 0) setTimeout(() => focusWhenThere(selector, attempts - 1), 50);
+  if ((!el || document.activeElement !== el) && attempts > 0) focusRetry = setTimeout(() => focusWhenThere(selector, attempts - 1), 50);
+}
+
+/** The pending retry of `focusWhenThere`. */
+let focusRetry: ReturnType<typeof setTimeout> | undefined;
+
+/** Ends the pending retry of `focusWhenThere` (tests: none outlives its test). */
+export function cancelFocusRetries(): void {
+  clearTimeout(focusRetry);
+  focusRetry = undefined;
 }
 
 /** The index of the region holding `el`, or -1. */

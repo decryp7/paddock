@@ -1,4 +1,4 @@
-import { computed, effect, inject, Injectable, signal, untracked } from '@angular/core';
+import { computed, DestroyRef, effect, inject, Injectable, signal, untracked } from '@angular/core';
 import { TomlError } from 'smol-toml';
 import { ProfileDoc, ProfileValidation } from '../core/api.types';
 import { DebriefBackend } from '../core/backend';
@@ -60,6 +60,8 @@ export class ProfileDraft {
   private seenProfileVersion = this.store.profileVersion();
 
   constructor() {
+    // A validation still waiting when the injector goes would fire into whatever runs next.
+    inject(DestroyRef).onDestroy(() => clearTimeout(this.validateTimer));
     // Follow profile changes made elsewhere (undo/redo, marker rules, a restored version).
     effect(() => {
       const version = this.store.profileVersion();

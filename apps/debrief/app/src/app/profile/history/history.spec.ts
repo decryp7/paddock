@@ -8,6 +8,10 @@ import { ProfileDraft } from '../profile-draft';
 import { lineDiff, stampToMs } from './line-diff';
 import { ProfileHistory } from './profile-history';
 import { at } from '../../../testing/must';
+import { endMockJobs } from '../../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 describe('lineDiff', () => {
   it('aligns lines with the longest common subsequence after the common head and tail', () => {

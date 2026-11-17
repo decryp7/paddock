@@ -1,4 +1,5 @@
 import type { WindowingBackend } from './windowing-backend';
+import { systemMockClock } from '../core/mock/mock-clock';
 import type { Unlisten } from './window-events';
 import { BackgroundTask, CloseChoice, OpenAsk, OpenChoice, WindowInfo } from './windowing.types';
 
@@ -204,7 +205,7 @@ export class MockWindowingBackend implements WindowingBackend {
     const added = this.openAsk.add(handler);
     const seeded = this.seededAsk;
     this.seededAsk = null;
-    if (seeded) setTimeout(() => this.openAsk.emit(seeded));
+    if (seeded) systemMockClock.setTimeout(() => this.openAsk.emit(seeded), 0);
     return added;
   }
   onCapture(handler: () => void): Promise<Unlisten> {

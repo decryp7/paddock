@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component, VERSION } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { installLeakDetector, LeakDetector, registerInFlight, registerSingleton, timerOwner, type LeakFinding } from './leaks';
@@ -98,19 +98,25 @@ describe('LeakDetector (the checks, driven by hand)', () => {
     expect(found[0]?.message).toContain('fake timers');
   });
 
-  it('names a node left in the body, and leaves TestBed roots and the CDK containers alone', () => {
+  it('names a node left in the body (also one that fakes a TestBed root), and leaves real TestBed roots and the CDK containers alone', () => {
     const stray = Object.assign(document.createElement('div'), { id: 'pd-stray', className: 'dock active' });
-    const root = document.createElement('div');
-    root.setAttribute('ng-version', '0');
+    // A real TestBed root carries Angular's own version; a node that only has the attribute is a leftover.
+    TestBed.configureTestingModule({ imports: [LeakProbe] });
+    const root = TestBed.createComponent(LeakProbe).nativeElement as HTMLElement;
+    expect(root.getAttribute('ng-version')).toBe(VERSION.full);
+    const fake = Object.assign(document.createElement('div'), { id: 'pd-fake-root' });
+    fake.toggleAttribute('ng-version', true); // the attribute without Angular's version
+    document.body.append(fake);
     const cdk = Object.assign(document.createElement('div'), { className: 'cdk-overlay-container' });
-    document.body.append(stray, root, cdk);
+    document.body.append(stray, cdk);
+    if (!root.isConnected) document.body.append(root);
     detector.snapshot(vi);
     const found = detector.finish(false);
     stray.remove();
-    root.remove();
+    fake.remove();
     cdk.remove();
-    expect(kinds(found)).toEqual(['dom']);
-    expect(found[0]?.message).toContain('<div#pd-stray.dock.active>');
+    expect(kinds(found)).toEqual(['dom', 'dom']);
+    expect(found.map((f) => f.message).sort()).toEqual(['left <div#pd-fake-root> in document.body', 'left <div#pd-stray.dock.active> in document.body']);
   });
 
   it('names a registered singleton that holds state, and resets it', () => {

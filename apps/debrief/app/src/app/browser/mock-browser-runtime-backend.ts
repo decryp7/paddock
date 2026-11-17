@@ -1,9 +1,10 @@
 import { BrowserRuntimeBackend } from './browser-runtime-backend';
+import { systemMockClock } from '../core/mock/mock-clock';
 import { ResearchProfileStatus, RuntimeStatus } from './browser.types';
 import { Unlisten } from '../windowing/window-events';
 
 const PINNED = '131.0.6778.204';
-const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const delay = (ms: number) => systemMockClock.sleep(ms);
 
 /**
  * The Chromium runtime for the browser build (dev and UI tests). `?mockChromium=none` starts without any browser,

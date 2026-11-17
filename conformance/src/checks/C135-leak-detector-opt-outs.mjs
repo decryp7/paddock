@@ -6,6 +6,7 @@
 // shared allow list). The list is held to shrink-only against the merge base with the target branch (`util/baseline.mjs`): an entry
 // added by a branch is an error. A file that cannot be read is not measured (an error finding at that file); an allow file that cannot be
 // read makes the check broken (one finding, nothing else).
+// Also flagged, with no allow entry: a spec line that sets the `ng-version` attribute by hand (a node faking a TestBed root).
 // Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
 import { error, warn } from '../finding.mjs';
 import { baselineGrowth } from '../util/baseline.mjs';
@@ -37,6 +38,16 @@ export function optOuts(text) {
   return out;
 }
 
+/** [{ line }] of every spec line that sets `ng-version` by hand: a node faking a TestBed root passes the detector's body check. */
+export function fakedRoots(text) {
+  const out = [];
+  if (!text.includes('ng-version')) return out;
+  text.split('\n').forEach((l, i) => {
+    if (/\bsetAttribute\s*\(\s*['"]ng-version['"]/.test(l) || /\bng-version\s*=\s*["']/.test(l)) out.push({ line: i + 1 });
+  });
+  return out;
+}
+
 /** The allow list: [{ path, site, reason, count }], or throws why it cannot be read. */
 export const parseAllow = (text) => parseAllowList(text, ALLOW);
 const SPEC = { id: 'C135', rule: 21, file: ALLOW, unseen: 'a leak detector opt-out', restore: 'Restore conformance/c135-allow.json: {"allow": [{"path": "...", "site": "mode: \'off\'", "reason": "...", "count": 1}]}.' };
@@ -58,6 +69,9 @@ export default {
       if (finding) {
         out.push(finding);
         continue;
+      }
+      if (f.endsWith('.spec.ts')) {
+        for (const { line } of fakedRoots(text)) out.push(warn('C135', 21, f, line, 'sets `ng-version` by hand: a node that fakes a TestBed root slips past the leak detector (it only exempts roots carrying Angular\'s own version)', 'Leave the node to the detector (a local LeakDetector shows it named and removed), or use a real TestBed fixture.'));
       }
       for (const { line, site } of optOuts(text)) {
         if (allow.admit(f, (s) => s === site) === 'allowed') continue;

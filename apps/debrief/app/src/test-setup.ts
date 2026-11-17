@@ -5,6 +5,8 @@ import { installBrowserMocks } from './app/core/mock-registry';
 import { mockJobsLeftover, resetMockJobs } from './app/jobs/mock-jobs';
 import { resetMockNotifications } from './app/notifications/mock-notifications';
 import { activity } from './app/core/activity';
+import { cancelFocusRetries } from './app/shell/regions';
+import { resumeSystemMockClock, stopSystemMockClock } from './app/core/mock/mock-clock';
 import { unsettledStartupLoads } from './app/extensions/startup-loads';
 import { installLeakDetector, registerInFlight, registerSingleton } from '@decryp7/paddock-ui/testing';
 import { settleBootedStartup } from './testing/startup';
@@ -37,8 +39,13 @@ registerSingleton({ name: 'mock jobs', leftover: mockJobsLeftover, reset: resetM
 registerSingleton({ name: 'mock notifications', leftover: () => null, reset: resetMockNotifications });
 registerInFlight({ name: 'start-up loads', pending: unsettledStartupLoads });
 // The page-wide activity runtime ends its current task with a zero-delay timer; end it now so none outlives its test.
-afterEach(() => activity.endTaskNow());
-installLeakDetector({ mode: 'report' });
+beforeEach(resumeSystemMockClock);
+afterEach((ctx) => {
+  activity.endTaskNow();
+  stopSystemMockClock((ctx.task as { fullName?: string }).fullName ?? ctx.task.name);
+  cancelFocusRetries();
+});
+installLeakDetector({ mode: 'fail' });
 
 // The page is shared the same way: elements a spec left in the body (a dock with an active tab, an overlay) were read by
 // the next spec (the error logger records the active view's title). TestBed has removed its fixtures by now; every test

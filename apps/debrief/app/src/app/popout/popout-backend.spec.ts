@@ -107,10 +107,16 @@ describe('BrowserPopoutBackend', () => {
       ...overrides,
     };
     const backend = new BrowserPopoutBackend(win as unknown as Window, () => RANDOM);
+    made.push(backend);
     return { backend, win, children };
   }
 
-  afterEach(() => vi.useRealTimers());
+  // The poll of closed windows ends with the backend a test made (the product's own owner is the injector).
+  const made: { dispose(): void }[] = [];
+  afterEach(() => {
+    made.splice(0).forEach((b) => b.dispose());
+    vi.useRealTimers();
+  });
 
   it('labels itself b<base36>, or with the route label of a pop-out', async () => {
     expect(await make().backend.label()).toBe(OWN);

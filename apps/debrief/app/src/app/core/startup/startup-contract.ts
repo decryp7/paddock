@@ -28,6 +28,11 @@ export interface RetryOptions {
   attempts: number;
   /** Timer (tests). */
   setTimer?: (fn: () => void, ms: number) => unknown;
+  /**
+   * When it is destroyed no further attempt is sent and the call rejects with an `AbortError` (an injector going away ends the
+   * retries of the store that asked); the hook is removed once the call has settled.
+   */
+  destroyRef?: { onDestroy(fn: () => void): () => void };
   /** Cancels a timer `setTimer` returned (tests); the real `clearTimeout` by default. */
   clearTimer?: (handle: unknown) => void;
 }
@@ -46,9 +51,16 @@ export function retryUntilAnswered<T>(call: () => Promise<T>, options: RetryOpti
     let sent = 0;
     // The next attempt's timer: an answer ends it (a timer left running outlives the call and fires into whatever runs next).
     let next: unknown;
+    const unhook = options.destroyRef?.onDestroy(() => {
+      if (settled) return;
+      settled = true;
+      clearTimer(next);
+      reject(new DOMException('The window went away before the start-up call was answered.', 'AbortError'));
+    });
     const finish = (): void => {
       settled = true;
       clearTimer(next);
+      unhook?.();
     };
     const attempt = () => {
       if (settled) return;

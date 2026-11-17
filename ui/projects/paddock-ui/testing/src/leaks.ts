@@ -1,3 +1,5 @@
+import { VERSION } from '@angular/core';
+
 /**
  * The test leak detector: what a test leaves behind is named against that test, not against whichever test runs next.
  *
@@ -259,12 +261,12 @@ export class LeakDetector {
     guarded('fake timers', () => {
       if (this.fake) add('fake-timers', 'left fake timers installed (vi.useFakeTimers without vi.useRealTimers)');
     });
-    // After every afterEach: what TestBed and the components' own clean-up removed is not a leak. TestBed's roots (`ng-version`)
+    // After every afterEach: what TestBed and the components' own clean-up removed is not a leak. TestBed's roots (`ng-version` equal to Angular's own version: a node that only claims it is a leak)
     // and the CDK containers go with its module. The kit leaves the body to this check while a detector is installed.
     guarded('the page', () => {
       if (typeof document === 'undefined' || !document.body) return;
       for (const node of Array.from(document.body.children)) {
-        if (this.domBaseline.has(node) || node.hasAttribute('ng-version') || /^cdk-/.test(node.className?.toString() ?? '')) continue;
+        if (this.domBaseline.has(node) || node.getAttribute('ng-version') === VERSION.full || /^cdk-/.test(node.className?.toString() ?? '')) continue;
         add('dom', `left ${describeNode(node)} in document.body`);
         if (clearTimers) node.remove();
       }

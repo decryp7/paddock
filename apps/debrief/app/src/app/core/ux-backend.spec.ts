@@ -5,6 +5,10 @@ import { MOCK_DEMO_PATHS } from './mock/mock-import';
 import { MockUxBackend } from './mock/mock-ux-backend';
 import { TauriUxBackend, UxBackend } from './ux-backend';
 import { at } from '../../testing/must';
+import { endMockJobs } from '../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 describe('UxBackend', () => {
   it('maps every method to its Tauri command', async () => {

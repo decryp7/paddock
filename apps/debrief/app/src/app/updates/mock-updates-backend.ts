@@ -1,4 +1,5 @@
 import type { UpdatesBackend } from './updates-backend';
+import { systemMockClock } from '../core/mock/mock-clock';
 import { UpdateError, UpdateErrorKind, UpdateInfo, UpdatePhase, UpdateStatus } from './updates.types';
 
 /**
@@ -98,7 +99,7 @@ export class MockUpdatesBackend implements UpdatesBackend {
     this.calls.push('check');
     this.refuseUnavailable();
     this.set({ kind: 'checking' });
-    await new Promise((r) => setTimeout(r, this.tick));
+    await systemMockClock.sleep(this.tick);
     this.lastChecked = new Date().toISOString();
     switch (this.scenario) {
       case 'upToDate':
@@ -125,7 +126,7 @@ export class MockUpdatesBackend implements UpdatesBackend {
         return;
       }
       this.set({ kind: 'downloading', info, downloaded, total });
-      this.timer = setTimeout(() => step(Math.min(total, downloaded + total / 8)), this.tick);
+      this.timer = systemMockClock.setTimeout(() => step(Math.min(total, downloaded + total / 8)), this.tick) as ReturnType<typeof setTimeout>;
     };
     step(0);
     return this.snapshot();

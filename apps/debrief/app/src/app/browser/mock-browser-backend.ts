@@ -1,3 +1,4 @@
+import { systemMockClock } from '../core/mock/mock-clock';
 import { mockJobs } from '../jobs/mock-jobs';
 /**
  * The AI's browser for the browser build (dev and UI tests): a pretend page open in the AI's browser window, pages
@@ -167,7 +168,7 @@ export function resetMockWeb(): MockWeb {
 
 const later = <T>(f: () => T): Promise<T> =>
   new Promise((resolve, reject) =>
-    setTimeout(() => {
+    systemMockClock.setTimeout(() => {
       try {
         resolve(f());
       } catch (e) {

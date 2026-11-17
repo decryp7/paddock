@@ -17,6 +17,10 @@ import { CapturedImage, SNAPSHOT_NOTICE } from './snapshot.types';
 import { at } from '../../testing/must';
 import { mockJobs } from '../jobs/mock-jobs';
 import { NotificationsStore } from '../notifications/notifications.store';
+import { endMockJobs } from '../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 const IMAGE: CapturedImage = { base64: 'iVBORw0KGgo=', mime: 'image/png', bytes: 8 };
 

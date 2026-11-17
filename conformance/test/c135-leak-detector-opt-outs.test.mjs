@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { optOuts, parseAllow } from '../src/checks/C135-leak-detector-opt-outs.mjs';
+import { fakedRoots, optOuts, parseAllow } from '../src/checks/C135-leak-detector-opt-outs.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
 const ALLOW = 'conformance/c135-allow.json';
@@ -45,4 +45,11 @@ test('C135 a broken allow file is one finding, nothing else', async () => {
     const found = await findingsOf('C135', makeApp({ 'apps/a/src/x.spec.ts': "installLeakDetector({ mode: 'off' });\n", ...(text === null ? {} : { [ALLOW]: text }) }));
     assert.deepEqual(found.map((f) => [f.file, f.outcome]), [[ALLOW, 'check-broken']]);
   }
+});
+
+test('C135 flags a spec that fakes a TestBed root with ng-version, and nothing else', async () => {
+  assert.deepEqual(fakedRoots("tab.setAttribute('ng-version', 'x');\nconst a = 1;\nhtml = '<div ng-version=\"0\">';\n"), [{ line: 1 }, { line: 3 }]);
+  assert.deepEqual(fakedRoots("el.closest('[ng-version]')\n"), []);
+  const found = await findingsOf('C135', makeApp({ [ALLOW]: list(), 'apps/a/src/x.spec.ts': "tab.setAttribute('ng-version', 'leftover');\n", 'apps/a/src/x.ts': "el.setAttribute('ng-version', 'y');\n" }));
+  assert.deepEqual(found.map((f) => [f.file, f.line, f.severity]), [['apps/a/src/x.spec.ts', 1, 'warn']]);
 });

@@ -1,5 +1,5 @@
 import { OverwriteGuard } from '../ui/overwrite-guard';
-import { computed, inject, Injector } from '@angular/core';
+import { computed, DestroyRef, inject, Injector } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import { plural } from '../i18n/locale';
 import { LifecycleService } from '../lifecycle/lifecycle.service';
@@ -97,6 +97,11 @@ export const EngineSettingsStore = signalStore(
   withMethods((store, backend = inject(SettingsBackend), injector = inject(Injector), overwrite = inject(OverwriteGuard)) => {
     /** Edits waiting for their turn (a timer per section) and applies in flight. */
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
+    // An auto-apply still waiting when the injector goes would fire into whatever runs next.
+    inject(DestroyRef).onDestroy(() => {
+      for (const t of timers.values()) clearTimeout(t);
+      timers.clear();
+    });
     const inflight = new Set<string>();
     const section = (id: string) => store.sections().find((s) => s.id === id);
     const replaceValues = (id: string, values: Record<string, SettingValue>) => {

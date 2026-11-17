@@ -2,6 +2,7 @@ import { ParserDocDto, ParserDraftRequest, ParserImportCheckDto, ParserLibraryDt
 import type { DebriefBackend } from '../../core/backend';
 import { CmdError } from '../../core/cmd-error';
 import { MockBackend } from '../../core/mock/mock-backend';
+import { systemMockClock } from '../../core/mock/mock-clock';
 import { MockParserLibrary, MockParserSource } from '../../core/mock/mock-parsers';
 import { mockJobs, mockSteps } from '../../jobs/mock-jobs';
 import type { ParserSaveOptions, ParsersBackend } from './parsers-backend';
@@ -27,7 +28,7 @@ export class MockParsersBackend implements ParsersBackend {
   /** Like a command: resolves on a later task; a throw becomes a rejection. */
   private later<T>(work: () => T): Promise<T> {
     return new Promise<T>((resolve, reject) =>
-      setTimeout(() => {
+      systemMockClock.setTimeout(() => {
         try {
           resolve(work());
         } catch (e) {
