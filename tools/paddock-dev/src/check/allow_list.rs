@@ -10,7 +10,17 @@
 //! not-measured error at that file ([`AllowList::read`]). Used by C121, C124 and C125, each declaring the [`Spec`] it reads with in
 //! [`super::Check::allow_list`]. The port of `conformance/src/util/allow-list.mjs`; `tests/it/check_allow_list.rs` compares the error
 //! paths of every user on both hosts.
+//!
+//! The list only ever shrinks (ER-12, ER-21; C129's baseline has the same rule): the reader compares every entry, counted `count` times,
+//! with the list at the merge base (`baseline::growth`, the one comparison C53 and C115 use), and an entry the merge base lacks, or a
+//! raised `count`, is one unwaivable finding at the allow file that needs the user's approval. The comparison runs only on a checkout
+//! (a folder git accepts as a work tree): a tree in memory (a control) or a fixture folder has nothing to compare, and says nothing. In a checkout
+//! where git cannot give a merge base it warns that the rule is not enforced, and in CI it is a not-measured error (ADR 0089), never
+//! silence. The base is the target ref ([`baseline::target_ref`], the one reader of `PADDOCK_BASE_REF`). The growth finding is a
+//! warning only because the checks that use this reader (C121, C124, C125, C130) are report-only themselves (ER-41); the blocking
+//! baselines (C53, C71, C104, C115) use the same target ref and stay errors.
 
+use super::baseline::{self, Growth};
 use super::finding::Finding;
 use super::outcome::Outcome;
 use super::record::Precondition;
@@ -151,6 +161,14 @@ fn whole(f: f64) -> u64 {
     f as u64
 }
 
+/// Every entry as `count` copies of its key `path NUL site`: the multiset the merge base's list is compared with.
+fn expand(entries: &[Entry]) -> Vec<String> {
+    entries
+        .iter()
+        .flat_map(|e| std::iter::repeat_n(format!("{}\u{0}{}", e.path, e.site), e.count))
+        .collect()
+}
+
 /// What [`AllowList::admit`] says about one site.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Admit {
@@ -249,16 +267,46 @@ impl AllowList {
         }
     }
 
+    /// The one finding about growth against the merge base (see the module): empty when nothing was added or it cannot apply here.
+    fn growth_findings(&self, ctx: &Ctx) -> Vec<Finding> {
+        let Spec { id, rule, file, .. } = *self.spec;
+        if ctx.is_in_memory() || !baseline::is_work_tree(ctx.root()) {
+            return Vec::new();
+        }
+        let current = expand(&self.entries);
+        let entries_of = |text: &str| parse(text, file).ok().map(|e| expand(&e));
+        let exact = |k: &String| k.clone();
+        match baseline::growth(ctx.root(), &ctx.base_ref(), file, &current, &entries_of, &exact, None) {
+            Growth::Unmeasured(why) => vec![baseline::unmeasured_finding(ctx.in_ci(), id, rule, file, "the allow list", &why)],
+            Growth::Added { added: 0, .. } => Vec::new(),
+            Growth::Added { base, added, .. } => vec![
+                Finding::warn(
+                    id,
+                    rule,
+                    file,
+                    1,
+                    format!(
+                        "the allow list grew: {added} entr{} (counting each `count`) not in {file} at the merge base {}; it may only shrink",
+                        if added == 1 { "y is" } else { "ies are" },
+                        &base[..base.len().min(9)]
+                    ),
+                    "Remove the added entries or lower the raised counts and fix the sites. Growing the list needs the user's approval.",
+                )
+                .unwaivable(),
+            ],
+        }
+    }
+
     /// The warnings for the entries that matched fewer sites than their count ([`AllowList::admit`] never counts more). An entry is stale only for a file the
     /// run read, or one that does not exist: an entry for a file the run never looked at, or could not read, is neither stale nor
     /// matched. An entry for a file of the run's files that the check passed over (not its kind of file, or one of its own) names a
     /// file this check does not read: it can never match, so it is a warning too.
     pub fn warnings(&self, ctx: &Ctx) -> Vec<Finding> {
         let Spec { id, rule, file, .. } = *self.spec;
+        let mut out = self.growth_findings(ctx);
         let looked = |p: &str| self.scanned.contains(p) || (!self.unread.contains(p) && ctx.read(p).is_none());
         let files = ctx.files();
         let run: HashSet<&str> = files.iter().map(String::as_str).collect();
-        let mut out = Vec::new();
         for (a, &hits) in self.entries.iter().zip(&self.hits) {
             if run.contains(a.path.as_str()) && !self.scanned.contains(&a.path) && !self.unread.contains(&a.path) {
                 out.push(Finding::warn(
@@ -329,6 +377,15 @@ mod tests {
             l.read(ctx, "a/b.rs").unwrap();
             l.warnings(ctx).into_iter().map(|f| f.message).collect()
         })
+    }
+
+    #[test]
+    fn a_tree_in_memory_is_never_compared_with_a_merge_base() {
+        // The comparison reads git next to the tree's root; an in-memory tree (a control) has none, whatever the test's own folder holds.
+        with_ctx(&[("a/b.rs", "needle")], |ctx| {
+            assert!(ctx.is_in_memory());
+            assert!(list(&entry("")).growth_findings(ctx).is_empty());
+        });
     }
 
     #[test]

@@ -1,8 +1,9 @@
 //! Two commands started together: exactly one claim passes (ADR 0083 R8, "the flock test"), and one path is made once.
 use super::Fixture;
+use paddock_testkit::TestChild;
 use std::process::Stdio;
 
-fn spawn(fx: &Fixture, args: &[&str]) -> std::process::Child {
+fn spawn(fx: &Fixture, args: &[&str]) -> TestChild {
     fx.cmd(&fx.primary, args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

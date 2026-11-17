@@ -82,7 +82,7 @@ pub enum HostStep {
 
 /// Runs a host step for the real process.
 pub fn run(step: &HostStep, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
-    let env: HashMap<String, String> = std::env::vars().collect();
+    let env: HashMap<String, String> = crate::process_env::vars().collect();
     let windows = cfg!(windows) || env.get("PADDOCK_CI_ASSUME_WINDOWS").is_some_and(|v| v == "1");
     match step {
         HostStep::StableWorkspace(a) => stable_workspace::run(&env, windows, a, out),

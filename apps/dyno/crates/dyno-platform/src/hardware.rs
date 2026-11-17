@@ -868,56 +868,39 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_copy_installed_after_the_reader_was_made_is_found_without_a_restart() {
-        let _serial = script_tests();
-        let work = temp("late-tools");
-        let tool = fake_smartctl(
-            &work,
-            r#"{"devices":[{"name":"/dev/nvme0"}]}"#,
-            crate::parse::hardware::tests_nvme(),
-        );
         let tools = temp("late-own");
         let mut reader = SmartctlWear::new(vec![PathBuf::from("/dyno/missing")]).with_own_tools(tools.clone());
         assert!(reader.read().value().is_none(), "nothing installed yet");
+        // The stand-in is installed where the reader will look: it finds its script beside itself, so a copy of the program alone
+        // would not work.
         let folder = tools.join("smartmontools-7.5");
         std::fs::create_dir_all(&folder).unwrap();
-        std::fs::copy(&tool, folder.join("smartctl")).unwrap();
+        fake_smartctl(
+            &folder,
+            r#"{"devices":[{"name":"/dev/nvme0"}]}"#,
+            crate::parse::hardware::tests_nvme(),
+        );
         assert_eq!(reader.read().value().unwrap()[0].percent_used, Some(3.0));
-        let _ = std::fs::remove_dir_all(work);
         let _ = std::fs::remove_dir_all(tools);
     }
 
-    /// Tests that write a script and run it take turns. Without it, a test that forks while another has its script open for writing
-    /// makes that run fail with "Text file busy" (ETXTBSY) on Linux. It orders these tests among themselves only.
-    #[cfg(unix)]
-    fn script_tests() -> std::sync::MutexGuard<'static, ()> {
-        static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    #[cfg(unix)]
+    /// A smartctl (the testkit's stand-in) that prints `scan` for `--scan` and `drive` for any other call, both with exit status 4
+    /// (smartctl's exit status is a bit mask).
     fn fake_smartctl(dir: &Path, scan: &str, drive: &str) -> PathBuf {
-        std::fs::write(dir.join("scan.json"), scan).unwrap();
-        std::fs::write(dir.join("drive.json"), drive).unwrap();
-        let script = dir.join("smartctl");
-        paddock_testkit::exe::write_program(
-            &script,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"--scan\" ]; then cat '{0}'; else cat '{1}'; fi\nexit 4\n",
-                dir.join("scan.json").display(),
-                dir.join("drive.json").display()
-            ),
-        )
-        .unwrap();
-        script
+        paddock_testkit::StandIn::new(dir, "smartctl")
+            .stdout(drive)
+            .exit(4)
+            .when_args(&["--scan"], paddock_testkit::Actions::new().stdout(scan).exit(4))
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf()
     }
 
-    #[cfg(unix)]
     #[test]
     fn smartctl_output_is_read_even_though_its_exit_status_is_a_bit_mask() {
-        let _serial = script_tests();
         let dir = temp("smart");
         let tool = fake_smartctl(&dir, r#"{"devices":[{"name":"/dev/nvme0"}]}"#, crate::parse::hardware::tests_nvme());
         let r = SmartctlWear::new(vec![PathBuf::from("/dyno/missing"), tool]).read();
@@ -926,10 +909,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[cfg(unix)]
     #[test]
     fn apple_silicon_scan_with_three_long_names_gives_one_ssd_once() {
-        let _serial = script_tests();
         let dir = temp("smart-ios");
         let scan = crate::parse::smart::tests::apple_silicon_scan();
         let tool = fake_smartctl(&dir, &scan, crate::parse::hardware::tests_nvme());
@@ -941,29 +922,22 @@ mod tests {
     }
 
     /// A smartctl that answers per drive: the USB entries fail to open (as on macOS, no USB SMART passthrough), the rest read.
-    #[cfg(unix)]
     fn usb_failing_smartctl(dir: &Path, scan: &str, drive: &str) -> PathBuf {
+        use paddock_testkit::Actions;
         let usb = r#"{"smartctl":{"exit_status":2,"messages":[{"string":"Smartctl open device: IOService:/x/usb-drd1@B000000/IOBlockStorageServices failed: IOCreatePlugInInterfaceForService failed","severity":"error"}]}}"#;
-        std::fs::write(dir.join("scan.json"), scan).unwrap();
-        std::fs::write(dir.join("drive.json"), drive).unwrap();
-        std::fs::write(dir.join("usb.json"), usb).unwrap();
-        let script = dir.join("smartctl");
-        paddock_testkit::exe::write_program(
-            &script,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"--scan\" ]; then cat '{0}'; exit 0; fi\ncase \"$*\" in *usb-*) cat '{1}'; exit 2;; *) cat '{2}'; exit 4;; esac\n",
-                dir.join("scan.json").display(),
-                dir.join("usb.json").display(),
-                dir.join("drive.json").display()
-            ),
-        ).unwrap();
-        script
+        paddock_testkit::StandIn::new(dir, "smartctl")
+            .stdout(drive)
+            .exit(4)
+            .when_arg_contains("usb-", Actions::new().stdout(usb).exit(2))
+            .when_args(&["--scan"], Actions::new().stdout(scan))
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf()
     }
 
-    #[cfg(unix)]
     #[test]
     fn an_unreadable_usb_drive_does_not_hide_the_internal_ssd_and_is_explained_truthfully() {
-        let _serial = script_tests();
         let dir = temp("smart-usb");
         let scan = crate::parse::smart::tests::internal_and_usb_scan();
         let tool = usb_failing_smartctl(&dir, &scan, crate::parse::hardware::tests_nvme());
@@ -988,10 +962,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(only_usb);
     }
 
-    #[cfg(unix)]
     #[test]
     fn smartctl_refusals_name_the_next_step() {
-        let _serial = script_tests();
         let dir = temp("smartdeny");
         let denied = r#"{"smartctl":{"messages":[{"string":"open device failed: Permission denied"}]}}"#;
         let tool = fake_smartctl(&dir, r#"{"devices":[{"name":"/dev/disk0"}]}"#, denied);
@@ -1029,26 +1001,19 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     #[test]
     fn the_device_type_of_the_scan_is_passed_to_smartctl() {
-        let _serial = script_tests();
-
         let dir = temp("smart-d");
-        let script = dir.join("smartctl");
-        let log = dir.join("args.log");
         let scan = r#"{"devices":[{"name":"/dev/sdb","type":"sat"},{"name":"/dev/nvme0"}]}"#;
-        paddock_testkit::exe::write_program(
-            &script,
-            format!(
-                "#!/bin/sh\necho \"$@\" >> '{log}'\nif [ \"$1\" = \"--scan\" ]; then echo '{scan}'; else echo '{drive}'; fi\nexit 4\n",
-                log = log.display(),
-                drive = crate::parse::hardware::tests_nvme().replace('\n', " "),
-            ),
-        )
-        .unwrap();
-        let _ = SmartctlWear::new(vec![script]).read();
-        let seen = std::fs::read_to_string(&log).unwrap();
+        let tool = paddock_testkit::StandIn::new(&dir, "smartctl")
+            .records_args()
+            .stdout(&crate::parse::hardware::tests_nvme().replace('\n', " "))
+            .exit(4)
+            .when_args(&["--scan"], paddock_testkit::Actions::new().stdout(scan).exit(4))
+            .install()
+            .unwrap();
+        let _ = SmartctlWear::new(vec![tool.program().to_path_buf()]).read();
+        let seen: String = tool.calls().unwrap().iter().map(|c| format!("{}\n", c.join(" "))).collect();
         assert!(seen.lines().any(|l| l == "-a -j -d sat /dev/sdb"), "{seen}");
         assert!(
             seen.lines().any(|l| l == "-a -j /dev/nvme0"),
@@ -1057,19 +1022,22 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_drive_that_prints_nothing_is_explained() {
-        let _serial = script_tests();
-
         let dir = temp("smart-run");
-        let script = dir.join("smartctl");
         // The scan works; the drive run exits without any output at all.
-        paddock_testkit::exe::write_program(
-            &script,
-            "#!/bin/sh\nif [ \"$1\" = \"--scan\" ]; then echo '{\"devices\":[{\"name\":\"/dev/sda\"}]}'; fi\nexit 1\n",
-        )
-        .unwrap();
+        let script = paddock_testkit::StandIn::new(&dir, "smartctl")
+            .exit(1)
+            .when_args(
+                &["--scan"],
+                paddock_testkit::Actions::new()
+                    .stdout(r#"{"devices":[{"name":"/dev/sda"}]}"#)
+                    .exit(1),
+            )
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         assert!(matches!(SmartctlWear::new(vec![script]).read(), Reading::Unavailable(m) if m.contains("No SSD")));
         assert!(matches!(
             SmartctlWear::new(vec![dir.join("not-executable-dir")]).read(),

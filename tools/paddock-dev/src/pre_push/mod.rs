@@ -284,7 +284,7 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     let stdin = if args.refs_from_stdin { read_stdin()? } else { String::new() };
     // Prepared on first use by a cargo gate, never here and never in `command_in`: a push that runs no cargo gate, and the tests of
     // the push gate, must not start a server on the machine they run on (ER-45).
-    let wrapper = crate::local_sccache::Lazy::on_demand(std::env::vars().collect());
+    let wrapper = crate::local_sccache::Lazy::on_demand(paddock_env::vars().collect());
     command_in(args, &root, &stdin, &RealLookups { root: root.clone() }, wrapper)
 }
 
@@ -336,7 +336,7 @@ fn command_in(
         listings: Default::default(),
     };
     let root = root.to_path_buf();
-    let env: HashMap<String, String> = std::env::vars().collect();
+    let env: HashMap<String, String> = paddock_env::vars().collect();
     let accept = accepted_ids(&args.accept_not_measured, &env);
     let stop = Arc::new(AtomicBool::new(false));
     stop_on_signals(&stop);

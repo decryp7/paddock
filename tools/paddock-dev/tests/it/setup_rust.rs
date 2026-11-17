@@ -9,8 +9,8 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use paddock_testkit::TestCommand;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn repo() -> PathBuf {
     paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
@@ -145,10 +145,9 @@ impl Runner {
         for body in steps {
             let script = self.root.join("step.sh");
             std::fs::write(&script, body).unwrap();
-            let r = Command::new("bash")
+            let r = TestCommand::new("bash")
                 .args(["-e", "-o", "pipefail"])
                 .arg(&script)
-                .env_clear()
                 .envs(self.base_env(extra))
                 .env("BACKEND", input.backend)
                 .env("REDIS_ENDPOINT", input.endpoint)
@@ -180,7 +179,6 @@ impl Runner {
                 if input.tauri { "true" } else { "false" },
             ])
             .current_dir(repo())
-            .env_clear()
             .envs(self.base_env(extra))
             .env("PADDOCK_SCCACHE_REDIS_ENDPOINT", input.endpoint)
             .output()

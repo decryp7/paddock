@@ -2,6 +2,16 @@
 # the user asked for. Everything else (engine traffic) talks to 127.0.0.1 through `pitwall_server::loopback`.
 # `egress.rs` allows these lints with a comment; nothing else may.
 disallowed-methods = [
+    { path = "std::env::vars", reason = "panics on a variable that is not valid Unicode: read the environment through paddock_env::vars (skips and names it)" },
+    # ADR 0100 amendment 2026-11-16: the environment is process-wide, and tests share one process under the plain harness; a
+    # change made outside the test kit's lock is seen by every other test thread (the hermetic flake, fixed in 9ac185c24). Change
+    # it through paddock_testkit::EnvLock (the one site that may), or a justified site carries #[expect(..., reason = "...")].
+    { path = "std::env::set_var", reason = "the environment is process-wide: change it through paddock_testkit::EnvLock (ADR 0100), or justify the site with #[expect]" },
+    { path = "std::env::remove_var", reason = "the environment is process-wide: change it through paddock_testkit::EnvLock (ADR 0100), or justify the site with #[expect]" },
+    # ER-47 / rule 84 (ADR 0100): clearing a child's environment strips the variables that restrict it (a download ban, an install ban,
+    # an offline switch). paddock_env::clear_env (paddock_proc::clean_env) is the one function that clears, and it passes them.
+    { path = "std::process::Command::env_clear", reason = "clear a child's environment through paddock_proc::clean_env (paddock_env::clear_env): it keeps the restricting variables (ER-47)" },
+    { path = "tokio::process::Command::env_clear", allow-invalid = true, reason = "build the command with paddock_proc::command and clear it through paddock_proc::clean_env, which keeps the restricting variables (ER-47)" },
     { path = "reqwest::Client::new", reason = "outbound HTTP is egress::Egress only (ADR 0001)" },
     { path = "reqwest::Client::builder", reason = "outbound HTTP is egress::Egress only (ADR 0001)" },
     { path = "reqwest::get", reason = "outbound HTTP is egress::Egress only (ADR 0001)" },

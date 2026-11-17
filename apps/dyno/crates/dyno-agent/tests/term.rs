@@ -6,7 +6,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_proc::ProcessId;
-use std::process::{Child, Command, Stdio};
+use paddock_testkit::{TestChild, TestCommand};
+use std::process::Stdio;
 use std::sync::mpsc::channel;
 use std::time::Duration;
 
@@ -18,14 +19,14 @@ const READY_GUARD: Duration = Duration::from_secs(120);
 
 /// An agent this test started. It is ended and reaped when dropped, so a failed assertion never leaves one running; a test that
 /// stops it itself takes the child out with [`Agent::into_child`].
-struct Agent(Option<Child>);
+struct Agent(Option<TestChild>);
 
 impl Agent {
     fn id(&self) -> u32 {
         self.0.as_ref().expect("the agent is held").id()
     }
 
-    fn into_child(mut self) -> Child {
+    fn into_child(mut self) -> TestChild {
         self.0.take().expect("the agent is held")
     }
 
@@ -68,15 +69,11 @@ fn wait_ready(agent: &mut Agent, mut ready: impl FnMut() -> bool, guard: Duratio
     }
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the test starts the real agent binary, with a temporary data folder and no console"
-)]
 fn start(dir: &std::path::Path) -> Agent {
     // Its standard error goes to a file beside the data folder, one per agent, for `evidence` (the line a forced end writes).
     let stderr = std::fs::File::create(stderr_file(dir, &format!("{}", next_agent()))).expect("the stderr file");
     Agent(Some(
-        Command::new(env!("CARGO_BIN_EXE_dyno-agent"))
+        TestCommand::new(env!("CARGO_BIN_EXE_dyno-agent"))
             .arg("run")
             .env("DYNO_DATA_DIR", dir)
             .stdin(Stdio::null())
@@ -336,13 +333,9 @@ fn an_agent_on_a_data_folder_of_its_own_never_asks_this_computers_helper() {
 }
 
 /// A stand-in for an agent that never writes its discovery file: a shell that exits at once, or sleeps.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the test starts a plain shell as a stand-in child, to test the harness's wait"
-)]
 fn fake_agent(script: &str) -> Agent {
     Agent(Some(
-        Command::new("sh")
+        TestCommand::new("sh")
             .args(["-c", script])
             .stdin(Stdio::null())
             .stdout(Stdio::null())

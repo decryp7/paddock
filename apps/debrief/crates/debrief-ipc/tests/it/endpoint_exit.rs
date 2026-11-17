@@ -6,8 +6,8 @@
 
 use debrief_ipc::endpoint::{fits, prefix};
 use debrief_ipc::testing::confined_tmp;
+use paddock_testkit::TestCommand;
 use std::path::Path;
-use std::process::Command;
 
 /// The prefixes of the processes tests confine (the store worker's endpoint is made by the app process, not confined).
 const CONFINED_PREFIXES: [&str; 4] = [prefix::DEFAULT, prefix::PLUGIN, prefix::PLUGIN_TEST, prefix::STORE];
@@ -44,9 +44,8 @@ fn an_endpoint_a_host_leaves_on_exit_lands_only_in_the_confined_folder_and_goes_
     )]
     let shared = std::env::temp_dir().canonicalize().unwrap();
     #[allow(clippy::disallowed_methods)] // a test-only child that ends at once
-    let out = Command::new(env!("CARGO_BIN_EXE_debrief-ipc-fake-child"))
+    let out = TestCommand::new(env!("CARGO_BIN_EXE_debrief-ipc-fake-child"))
         .arg(format!("--leak-endpoint={name}"))
-        .env_clear()
         .envs(dir.env())
         .output()
         .unwrap();

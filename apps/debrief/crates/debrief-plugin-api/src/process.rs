@@ -2,14 +2,14 @@
 //!
 //! Debrief is a GUI app; a console program it starts (`nvidia-smi`, `cmd`, `logman`, `relog`, a plugin host,
 //! the AI worker...) would otherwise flash a command-prompt window. Every `Command` Debrief builds comes from
-//! [`quiet_command`] (or [`quiet_command_with`]); the workspace test `no_console_windows` fails when new code
-//! calls `Command::new` directly.
+//! [`quiet_command`] (or [`quiet_command_with`]), which start from `paddock_env::command::command`, the canonical
+//! constructor; the workspace test `no_console_windows` fails when new code calls `Command::new` directly.
 
 use std::ffi::OsStr;
 use std::process::Command;
 
 /// `CREATE_NO_WINDOW`: the child gets no console window (Windows process creation flag).
-pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+pub use paddock_env::command::CREATE_NO_WINDOW;
 
 /// `BELOW_NORMAL_PRIORITY_CLASS` (Windows process creation flag).
 pub const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
@@ -23,9 +23,8 @@ pub fn quiet_command(program: impl AsRef<OsStr>) -> Command {
 /// `extra_flags` is ignored on other platforms.
 pub fn quiet_command_with(program: impl AsRef<OsStr>, extra_flags: u32) -> Command {
     // Only Windows adds creation flags, so `cmd` is changed on Windows alone.
-    #[allow(clippy::disallowed_methods)]
     #[cfg_attr(not(windows), allow(unused_mut))]
-    let mut cmd = Command::new(program);
+    let mut cmd = paddock_env::command::command(program);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

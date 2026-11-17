@@ -1139,7 +1139,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase() {
-        use std::os::unix::fs::PermissionsExt;
         use std::sync::mpsc;
         // The fetch phase (own limit 1 s, bound 2 s) runs one git, which ends at its limit (a git that logs its call and sleeps), and is
         // then held until it is abandoned. While the next phase runs, the held phase goes on: its second git must not start (the next
@@ -1148,10 +1147,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
-        let git = bin.join("git");
-        let calls = dir.path().join("calls");
-        std::fs::write(&git, format!("#!/bin/sh\necho \"$*\" >> '{}'\nexec sleep 30\n", calls.display())).unwrap();
-        std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // A git that logs its call and sleeps (the stand-in records every call's arguments and stays for 30 s).
+        let git = paddock_testkit::StandIn::new(&bin, "git")
+            .records_args()
+            .sleeps(Duration::from_secs(30))
+            .install()
+            .unwrap();
         let kc = kc_with_git(&bin, &[(PhaseId::Fetch.var(), "1")]);
         let flow = flow_of(kc);
         let mut out = Vec::new();
@@ -1184,9 +1185,9 @@ mod tests {
             flow.kc.last_lines()
         );
         assert!(!text.contains("'check out' did not finish"), "{text}");
-        let ran = std::fs::read_to_string(&calls).unwrap_or_default();
+        let ran: Vec<String> = git.calls().unwrap().iter().map(|c| c.join(" ")).collect();
         assert_eq!(
-            ran.lines().filter(|l| l.contains("fetch")).collect::<Vec<_>>(),
+            ran.into_iter().filter(|l| l.contains("fetch")).collect::<Vec<_>>(),
             vec!["-c core.hooksPath=".to_string() + &bin.join("no-hooks").display().to_string() + " fetch first"],
             "the abandoned phase started no git after it was abandoned"
         );

@@ -12,7 +12,7 @@ use crate::memory_watch::{MemoryEvent, MemoryListener, MemoryWatch, Verdict};
 use crate::IpcError;
 use std::io::{BufRead, Read, Write};
 use std::path::PathBuf;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -384,19 +384,14 @@ impl ChildProcess {
             ));
         }
         let (exe, args) = launcher_command(spec);
-        // The one spawner outside debrief-core (this crate stands alone); it sets CREATE_NO_WINDOW below.
-        #[allow(clippy::disallowed_methods)]
-        let mut cmd = Command::new(&exe);
+        // The canonical constructor (no console window on Windows); the creation flags below add the priority.
+        let mut cmd = paddock_proc::command(&exe);
         cmd.args(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(if spec.log.is_some() { Stdio::piped() } else { Stdio::null() });
-        cmd.env_clear();
-        for k in spec.keep_env {
-            if let Some(v) = std::env::var_os(k) {
-                cmd.env(k, v);
-            }
-        }
+        // The one clearing function: `keep_env` plus the restricting variables (ER-47).
+        paddock_proc::clean_env(&mut cmd, spec.keep_env);
         cmd.envs(spec.env.iter().map(|(k, v)| (k, v)));
         if let Some(d) = &spec.current_dir {
             cmd.current_dir(d);
@@ -409,7 +404,7 @@ impl ChildProcess {
             use std::os::windows::process::CommandExt;
             // No console window; below-normal priority when asked.
             let priority = if spec.below_normal_priority { 0x0000_4000 } else { 0 };
-            cmd.creation_flags(0x0800_0000 | priority);
+            cmd.creation_flags(paddock_proc::CREATE_NO_WINDOW | priority);
         }
         #[cfg(target_os = "linux")]
         let report = match spec.sandbox.contained() {

@@ -5,6 +5,7 @@
 //!
 //! Blank lines and `#` comment lines are kept as they are and are not entries.
 
+use super::finding::Finding;
 use super::jsre::is_js_space;
 use paddock_proc::{Limits, command, run_bounded};
 use std::collections::{BTreeSet, HashMap, VecDeque};
@@ -160,6 +161,71 @@ fn git(root: &Path, args: &[&str]) -> Result<String, (String, String)> {
     }
 }
 
+/// The ref every baseline's and allow list's growth is measured against: `explicit` (the run's own), else `PADDOCK_BASE_REF`, else
+/// `origin/main`; an empty value is unset. The ONE place that reads `PADDOCK_BASE_REF` (ER-21: C53, C71, C115, C104 and the shared
+/// allow-list reader each read it or forgot it, and a member branch of a train was measured against main, so the train's own entries
+/// counted as its growth). CI's conformance and train-gates jobs and `./dev check --pre-push` set it to the branch's target (the train
+/// before, for a train member). A deliberate change of meaning for the blocking baselines (C53, C71, C104, C115): the target branch
+/// instead of `origin/main` (ADR 0098, amendment). JavaScript host: `targetRef` in `conformance/src/util/baseline.mjs`.
+pub fn target_ref(explicit: Option<&str>) -> String {
+    explicit
+        .filter(|r| !r.is_empty())
+        .map(str::to_string)
+        .or_else(|| std::env::var("PADDOCK_BASE_REF").ok().filter(|r| !r.is_empty()))
+        .unwrap_or_else(|| "origin/main".into())
+}
+
+/// Whether the environment says this is a CI run (`CI`, `GITEA_ACTIONS` or `GITHUB_ACTIONS` set and not false/0): a target that cannot
+/// be seen is then not measured. JavaScript host: `isCi`.
+pub fn is_ci(get: &dyn Fn(&str) -> Option<String>) -> bool {
+    ["CI", "GITEA_ACTIONS", "GITHUB_ACTIONS"]
+        .iter()
+        .any(|k| get(k).is_some_and(|v| !v.is_empty() && !v.eq_ignore_ascii_case("false") && v != "0"))
+}
+
+const FETCH_FIX: &str =
+    "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.";
+const PARSE_FIX: &str = "The list at the base is in an older format (an entry without a `site`), so growth cannot be measured against it; nothing to fix here: it is measured once the new format is on the base branch.";
+
+/// The finding for a growth check that could not measure: a warning with the next step, except that in CI (`ci`) a target that cannot be
+/// resolved is a not-measured error no waiver covers (ADR 0089: not measured never passes; a blocking baseline must not turn into a
+/// warning because the target ref is missing). `what` names the list (`the baseline`). The fix follows the typed reason, never its text.
+pub fn unmeasured_finding(ci: bool, id: &str, rule: u32, file: &str, what: &str, why: &Unmeasured) -> Finding {
+    if ci && matches!(why, Unmeasured::NoBase(_)) {
+        return Finding::error(
+            id,
+            rule,
+            file,
+            1,
+            format!(
+                "not measured: {what}'s shrink-only rule cannot be checked, the target ref is not usable: {}",
+                why.reason()
+            ),
+            format!("{FETCH_FIX} A gate that cannot see its target does not pass (ADR 0089)."),
+        )
+        .unwaivable()
+        .with_outcome(super::outcome::Outcome::NotMeasured);
+    }
+    let fix = if matches!(why, Unmeasured::BaselineUnparsed(_)) {
+        PARSE_FIX
+    } else {
+        FETCH_FIX
+    };
+    Finding::warn(
+        id,
+        rule,
+        file,
+        1,
+        format!("{what}'s shrink-only rule is not enforced here: {}", why.reason()),
+        fix,
+    )
+}
+
+/// Whether `root` is a git work tree git itself accepts (a folder with a stray `.git` file, as a fixture has, is not).
+pub fn is_work_tree(root: &Path) -> bool {
+    git(root, &["rev-parse", "--is-inside-work-tree"]).is_ok_and(|t| t.trim_matches(is_js_space) == "true")
+}
+
 /// A current entry whose loose key is in the baseline at the merge base but whose exact key is not.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Moved<T> {
@@ -181,8 +247,28 @@ pub enum Growth<T> {
         /// Entries it has under another exact key.
         moved: Vec<Moved<T>>,
     },
-    /// Not measurable here (no git, no merge base, an unreadable file): a warning, never silence.
-    Reason(String),
+    /// Not measurable here: a warning (an error in CI for [`Unmeasured::NoBase`]), never silence.
+    Unmeasured(Unmeasured),
+}
+
+/// Why growth could not be measured, typed so the finding's fix never depends on the message's words (the JavaScript host's `kind`).
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Unmeasured {
+    /// No usable target ref or merge base (no git, a ref that does not resolve).
+    NoBase(String),
+    /// The list at the merge base cannot be read.
+    BaselineUnreadable(String),
+    /// The list at the merge base is in a format this version cannot parse (an older one).
+    BaselineUnparsed(String),
+}
+
+impl Unmeasured {
+    /// The reason as the findings print it.
+    pub fn reason(&self) -> &str {
+        match self {
+            Unmeasured::NoBase(r) | Unmeasured::BaselineUnreadable(r) | Unmeasured::BaselineUnparsed(r) => r,
+        }
+    }
 }
 
 /// The entries of `current` that the baseline file `path` at the merge base with `base_ref` does not have, or the reason that
@@ -209,7 +295,7 @@ pub fn growth<T: Clone>(
         Ok(b) => b,
         Err((msg, _)) => {
             let first: String = msg.split('\n').next().unwrap_or("").chars().take(120).collect();
-            return Growth::Reason(format!("no merge base ({first})"));
+            return Growth::Unmeasured(Unmeasured::NoBase(format!("no merge base ({first})")));
         }
     };
     let short = || base.chars().take(9).collect::<String>();
@@ -226,12 +312,18 @@ pub fn growth<T: Clone>(
                     moved: Vec::new(),
                 }
             } else {
-                Growth::Reason(format!("the baseline at {} cannot be read", short()))
+                Growth::Unmeasured(Unmeasured::BaselineUnreadable(format!(
+                    "the baseline at {} cannot be read",
+                    short()
+                )))
             };
         }
     };
     let Some(old) = entries_of(&text) else {
-        return Growth::Reason(format!("the baseline at {} cannot be parsed", short()));
+        return Growth::Unmeasured(Unmeasured::BaselineUnparsed(format!(
+            "the baseline at {} cannot be parsed",
+            short()
+        )));
     };
     let r = reconcile(current, &old, exact, loose, &|_, _| true);
     Growth::Added {
@@ -251,6 +343,61 @@ pub fn growth<T: Clone>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_target_ref_is_the_runs_own_then_the_variable_then_main_and_this_is_the_one_reader() {
+        let mut env = paddock_testkit::env_lock();
+        env.remove("PADDOCK_BASE_REF");
+        assert_eq!(target_ref(None), "origin/main");
+        env.set("PADDOCK_BASE_REF", "origin/train/x");
+        assert_eq!(target_ref(None), "origin/train/x");
+        assert_eq!(target_ref(Some("topic")), "topic");
+        // An empty value is unset, in the variable and in the run's own ref.
+        env.set("PADDOCK_BASE_REF", "");
+        assert_eq!(target_ref(None), "origin/main");
+        assert_eq!(target_ref(Some("")), "origin/main");
+        env.set("PADDOCK_BASE_REF", "origin/train/x");
+        assert_eq!(target_ref(Some("")), "origin/train/x");
+    }
+
+    #[test]
+    fn ci_is_what_the_environment_says_and_false_or_zero_is_not() {
+        let with = |k: &'static str, v: &'static str| move |n: &str| (n == k).then(|| v.to_string());
+        assert!(is_ci(&with("CI", "true")) && is_ci(&with("GITEA_ACTIONS", "true")) && is_ci(&with("GITHUB_ACTIONS", "1")));
+        assert!(!is_ci(&with("CI", "false")) && !is_ci(&with("CI", "0")) && !is_ci(&with("CI", "")) && !is_ci(&|_| None));
+    }
+
+    #[test]
+    fn a_target_that_cannot_be_seen_is_a_warning_locally_and_a_not_measured_error_in_ci_and_the_fix_follows_the_kind() {
+        let no_base = Unmeasured::NoBase("no merge base (x)".into());
+        let local = unmeasured_finding(false, "CX", 21, "f.json", "the baseline", &no_base);
+        assert_eq!((local.severity, local.unwaivable), (super::super::finding::Severity::Warn, false));
+        let ci = unmeasured_finding(true, "CX", 21, "f.json", "the baseline", &no_base);
+        assert_eq!(
+            (ci.severity, ci.unwaivable, ci.outcome),
+            (
+                super::super::finding::Severity::Error,
+                true,
+                Some(super::super::outcome::Outcome::NotMeasured)
+            )
+        );
+        assert!(
+            ci.message
+                .starts_with("not measured: the baseline's shrink-only rule cannot be checked")
+                && ci.fix.contains("ADR 0089")
+        );
+        // An older format at the base is not a missing target: a warning with its own fix, in CI too.
+        let old = Unmeasured::BaselineUnparsed("the baseline at abc cannot be parsed".into());
+        let f = unmeasured_finding(true, "CX", 21, "f.json", "the baseline", &old);
+        assert!(f.fix.contains("older format") && f.severity == super::super::finding::Severity::Warn);
+        // The words of the reason do not choose the fix: a NoBase reason that says "cannot be parsed" still has the fetch fix.
+        let tricky = Unmeasured::NoBase("cannot be parsed".into());
+        assert!(
+            unmeasured_finding(false, "CX", 21, "f.json", "x", &tricky)
+                .fix
+                .contains("Fetch the target branch")
+        );
+    }
 
     const FILE: &str = "# header\nabc\n\n  def  \n# note\nghi\n";
 

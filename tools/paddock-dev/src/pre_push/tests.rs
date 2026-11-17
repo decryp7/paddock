@@ -52,6 +52,7 @@ fn facts() -> Facts {
         pitwall_tests: vec!["scripts/ci/a.test.mjs".into()],
         dev_exe: "/x/dev".into(),
         target_dir: Some("/t/".into()),
+        base_ref: None,
     }
 }
 
@@ -640,6 +641,18 @@ fn the_conformance_gate_runs_the_contracts_list_and_a_broken_contract_is_broken_
         "through the executor, like CI"
     );
     assert!(!args.is_empty());
+    assert!(
+        g.env.iter().all(|(k, _)| k != "PADDOCK_BASE_REF"),
+        "no base resolved: the checks' own default"
+    );
+    // The base the run resolved (a train member's target) is the ref its growth is measured against (ER-21, report-only per ER-41).
+    let with_base = Facts {
+        base_ref: Some("origin/train/2026-11-15-13".into()),
+        ..f.clone()
+    };
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &with_base);
+    let g = run_gates(&planned).into_iter().find(|g| g.id == "conformance").unwrap();
+    assert_eq!(g.env, [("PADDOCK_BASE_REF".to_string(), "origin/train/2026-11-15-13".to_string())]);
     // An unreadable contract: the gate is BROKEN (exit 7), it does not silently run nothing.
     let f = Facts {
         conformance: Some(Err("conformance/paddock.ci.json cannot be read".into())),
@@ -3028,4 +3041,33 @@ fn a_workspace_with_only_tauri_crates_is_skipped_and_named_not_linted() {
     // `--warm-linux` skips it too.
     let rows = super::warm::runs(&["apps/demo/src-tauri".to_string()], "7", &|_| Ok(crates_of(&["demo-app"], 0))).unwrap();
     assert!(rows[0].1.is_none());
+}
+
+#[test]
+fn a_dry_run_names_the_growth_target_and_the_variable_each_conformance_gate_carries() {
+    let f = Facts {
+        base_ref: Some("origin/train/2026-11-15-13".into()),
+        ..facts()
+    };
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &f);
+    let r = super::dry_run(&planned, "origin/train/2026-11-15-13", "the nearest train");
+    assert!(
+        r.text
+            .starts_with("growth target (PADDOCK_BASE_REF): origin/train/2026-11-15-13 (the nearest train)\n"),
+        "{}",
+        r.text
+    );
+    let j = r.json();
+    assert_eq!(
+        j["growth_target"],
+        json!({"ref": "origin/train/2026-11-15-13", "why": "the nearest train"})
+    );
+    let conformance = j["gates"].as_array().unwrap().iter().find(|g| g["id"] == "conformance").unwrap();
+    assert_eq!(conformance["env"]["PADDOCK_BASE_REF"], "origin/train/2026-11-15-13");
+    assert!(
+        conformance["command"]
+            .as_str()
+            .unwrap()
+            .starts_with("PADDOCK_BASE_REF=origin/train/2026-11-15-13 ")
+    );
 }

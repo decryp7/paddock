@@ -3,8 +3,9 @@
 
 use dyno_core::bench::wire::{parse_line, Line};
 use dyno_core::bench::BenchStatus;
+use paddock_testkit::TestCommand;
 use std::io::Write;
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 
 /// Every stdout line parsed the way the agent parses it; panics (a failing test) on a line the agent would refuse.
 fn lines(out: &Output) -> Vec<Line> {
@@ -27,8 +28,8 @@ fn status(out: &Output) -> BenchStatus {
 }
 
 #[allow(clippy::disallowed_methods)]
-fn bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_dyno-bench"))
+fn bin() -> TestCommand {
+    TestCommand::new(env!("CARGO_BIN_EXE_dyno-bench"))
 }
 
 /// One repetition, no warm-up and no gap, so a test of the real binary does not wait.

@@ -3,6 +3,7 @@
 //! that code reads (declared doc inputs), CODEOWNERS, Renovate and the one npm workspace.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::plan::{is_declared_doc_input, is_docs};
+use paddock_testkit::TestCommand;
 use regex::Regex;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -118,11 +119,10 @@ fn a_legs_nextest_config_names_only_packages_of_its_cargo_workspace_and_its_rele
 /// (the action's `PATTERNS`), never as an argument of a native process, which Windows' command line parsing rewrites (`\\` became `\`
 /// in run 7724's log, so a `[^/\\]` class reached the script as `[^/\]`).
 fn pattern_command(pattern: &str, env: &[(&str, String)]) -> std::process::Output {
-    let mut cmd = paddock_proc::command("bash");
+    let mut cmd = TestCommand::new("bash");
     cmd.arg("-c")
         .arg(r#"exec bash "$0" pattern "$PADDOCK_TEST_PATTERN""#)
         .arg(root().join("conformance/ci/job-isolation.sh"))
-        .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("PADDOCK_TEST_PATTERN", pattern);
     if let Ok(v) = std::env::var("SYSTEMROOT") {

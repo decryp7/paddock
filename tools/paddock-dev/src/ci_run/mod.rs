@@ -123,7 +123,7 @@ pub fn find_root(start: &Path) -> Option<PathBuf> {
 
 /// `dev ci run`: a CI step's contract (plain lines, `::error::` on failure, the failing line's exit code).
 pub fn run(args: &RunArgs, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
-    let env: HashMap<String, String> = std::env::vars().collect();
+    let env: HashMap<String, String> = crate::process_env::vars().collect();
     let stop = Arc::new(AtomicBool::new(false));
     crate::pre_push::stop_on_signals(&stop);
     run_with(args, &env, &stop, out, err)
@@ -277,6 +277,19 @@ fn execute(
     if failed == 0 { 0 } else { 1 }
 }
 
+/// The command that runs one line: `bash -euo pipefail -c <text>` behind the heavy prefix, in `dir`, with the job's environment.
+/// `env` is the whole environment; the one clearing function keeps its restricting variables as the job has them (ER-47) before
+/// the rest is set.
+fn line_command(text: &str, dir: &Path, env: &HashMap<String, String>, heavy: &[String]) -> std::process::Command {
+    let mut argv: Vec<String> = heavy.to_vec();
+    argv.extend(["bash", "-euo", "pipefail", "-c", text].map(String::from));
+    let mut cmd = paddock_proc::command(&argv[0]);
+    cmd.args(&argv[1..]).current_dir(dir);
+    paddock_env::clear_env_from(&mut cmd, &[], |k| env.get(k).map(std::ffi::OsString::from));
+    cmd.envs(env);
+    cmd
+}
+
 /// Runs one line; the exit code (124 for the time limit, 130 cancelled, 127 not started) and how it ended.
 fn run_line(
     text: &str,
@@ -289,10 +302,7 @@ fn run_line(
 ) -> (i32, String) {
     let _ = writeln!(out, "::group::{text}");
     let _ = out.flush();
-    let mut argv: Vec<String> = heavy.to_vec();
-    argv.extend(["bash", "-euo", "pipefail", "-c", text].map(String::from));
-    let mut cmd = paddock_proc::command(&argv[0]);
-    cmd.args(&argv[1..]).current_dir(dir).env_clear().envs(env);
+    let cmd = line_command(text, dir, env, heavy);
     let start = Instant::now();
     let result = run_waited_cancellable(cmd, Duration::from_secs(max_secs), Sink::Inherit, stop);
     let secs = start.elapsed().as_secs_f64();
@@ -309,3 +319,28 @@ fn run_line(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod line_command_tests {
+    use super::*;
+
+    #[test]
+    fn a_restricting_variable_in_the_map_reaches_the_built_command() {
+        let mut env: HashMap<String, String> = HashMap::new();
+        env.insert("PATH".into(), "/bin".into());
+        env.insert("PADDOCK_DEV_DOWNLOAD".into(), "0".into());
+        env.insert("CARGO_NET_OFFLINE".into(), "true".into());
+        let cmd = line_command("echo hi", Path::new("."), &env, &[]);
+        let got: Vec<(String, String)> = cmd
+            .get_envs()
+            .filter_map(|(k, v)| v.map(|v| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned())))
+            .collect();
+        for (k, v) in [("PADDOCK_DEV_DOWNLOAD", "0"), ("CARGO_NET_OFFLINE", "true")] {
+            assert!(got.contains(&(k.to_string(), v.to_string())), "{k}: {got:?}");
+        }
+        assert!(
+            !got.iter().any(|(k, _)| k == "RUSTUP_AUTO_INSTALL"),
+            "taken from the process: {got:?}"
+        );
+    }
+}

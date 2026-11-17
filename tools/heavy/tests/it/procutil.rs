@@ -2,8 +2,9 @@
 #![allow(dead_code)]
 
 use paddock_proc::command;
+use paddock_testkit::{TestChild, TestCommand};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 pub const BIN: &str = env!("CARGO_BIN_EXE_heavy");
@@ -12,7 +13,7 @@ pub const DEADLINE: Duration = Duration::from_secs(40);
 
 /// A child that is killed (and reaped) when dropped, so a failing test leaves no process behind.
 pub struct Guard {
-    pub child: Child,
+    pub child: TestChild,
     pub label: String,
 }
 
@@ -126,22 +127,14 @@ impl World {
 /// The command a holder runs: waits for the flag file, then appends its name to the output file.
 pub const HOLD: &str = r#"while [ ! -e "$0" ]; do sleep 0.1; done; echo "$2" >> "$1""#;
 
-/// Base environment of a test run of heavy or the shell plock: fast polling, a private lock folder, a private home.
-pub fn base_env(c: &mut std::process::Command, w: &World) {
+/// Base environment of a test run of heavy or the shell plock: fast polling, a private lock folder, a private home. `TestCommand`
+/// starts from an empty environment, so no `HEAVY_*`, `CI` or `CARGO_TARGET_DIR` of the machine reaches the child (no deny-list).
+pub fn base_env(c: &mut TestCommand, w: &World) {
     c.env("PLOCK_DIR", w.root())
         .env("PLOCK_POLL", "0.2")
         .env("PLOCK_WAIT_LOG", "1")
         .env("PLOCK_UNREADABLE_LIMIT", "3")
         .env("HOME", w.path("home"))
-        .env_remove("HEAVY_DIR")
-        .env_remove("CI")
-        .env_remove("CARGO_TARGET_DIR")
-        .env_remove("HEAVY_SLOTS")
-        .env_remove("HEAVY_LOG_FILE")
-        .env_remove("DEVKIT_RUN_ID")
-        .env_remove("CARGO_BUILD_TARGET_DIR")
-        .env_remove("HEAVY_LOCK_DIR")
-        .env_remove("HEAVY_DRAIN_MS")
         .env("CARGO_HOME", w.path("home/.cargo"))
         .stdin(Stdio::null());
 }
@@ -157,7 +150,7 @@ pub fn heavy_env(w: &World, args: &[&str], env: &[(&str, &str)]) -> Guard {
 
 /// Like `heavy_env`, in the folder `cwd`.
 pub fn heavy_in(w: &World, cwd: Option<&Path>, args: &[&str], env: &[(&str, &str)]) -> Guard {
-    let mut c = command(BIN);
+    let mut c = TestCommand::new(BIN);
     if let Some(d) = cwd {
         c.current_dir(d);
     }
@@ -214,7 +207,7 @@ pub fn dead_pid() -> u32 {
 /// A long-running process (a live pid); killed when the guard drops.
 pub fn sleeper() -> Guard {
     Guard {
-        child: command("sleep").arg("60").spawn().expect("spawn sleep"),
+        child: TestCommand::new("sleep").arg("60").spawn().expect("spawn sleep"),
         label: "sleep 60".into(),
     }
 }
