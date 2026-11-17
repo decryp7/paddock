@@ -2617,3 +2617,72 @@ feed kept changing it; the Dyno row menu under live updates was an e2e case (the
 practice for a feed on timers is a clock the test moves (`ManualClock` for the Debrief mock backends, `clock` option) or Vitest's fake
 timers, never the page's real timers; a hold on top of a manual clock added nothing, so no helper was built. C136 (report-only) flags a
 unit spec block that starts a ticking `MockBackend` or `synthetic` feed without one.
+**WebKit and the ADR (same day):** at `7fa15ba95` the WebKit e2e failed 3 of 7 runs. Logs added in `setTop` (scheduled, written, dropped), `onScroll` (read,
+written, pending, origin) and `applyLive` (ER-27) showed the sequence in a failing run: two `end` arrivals reached the end (read = max), then the
+total grew once more (spacer 24 px taller) with no arrival: a page fetched outside the round answered with a larger total, `PagedRows` stored it and
+nothing scrolled. That is a third shape of the same class (a total that grows without the view following), not the deferred write failing. Fix through
+ADR 0072 (`onGrow`, one pending-write slot, `classifyScroll`, user take-over from input events, stored `pinned`); the e2e looked green 12 of 12 per engine at 69e230d15, but a 20-repeat run of the whole matrix with 4 workers (460 runs per engine) failed 4 to 5 times in WebKit and 3 in Chromium; see the next entry for what that found and the final counts.
+
+**Review of 69e230d15, and the final measurements (2026-11-17).** The reviewer's probes found three real faults, each fixed with a failing test first:
+(1) the deferred re-pin after the next render fought a user whose wheel scroll was applied after the render: removed; a wheel or key takes the view over only
+when it moves **away** from the newest end (xterm's rule), re-pinning comes only from a position event (a scroll that is not ours, a key that lands there, the
+release of the scrollbar, never while it is held); (2) `arriveLive` consumed the first answer of any page, so an unowned fill page could start the round and a
+take-over did not stop a round that had not answered: the arrival now starts from an owned page, a take-over downgrades a pending `end` to `keep`, a failed first
+owned page ends the hold; (3) the follow and hold rules were not in the reducer alone (`setTop` re-derived `pinned`, the holding effect and `applyGrowth` decided
+themselves): the reducer now has `positioned{atNewest, byUser}`, `grew`, `released` and `followOn`, `setTop` is a pure writer, `liveMode` is gone. Re-measuring
+the matrix at 20 repeats with 4 workers found three more browser behaviours, each seen in the grid log first: Chromium and WebKit reset or shift `scrollTop` with
+no input while the viewport or the spacer changes size (a scroll event the grid took for the user: `classifyScroll` now returns `spurious` when the layout changed
+since its last write, or it wrote within 300 ms, and no input came since; the grid writes its own position back); a key move to the end written before the render caught up with
+the total was clamped (such a write now waits for the render too); a headless-WebKit wheel gesture is sometimes dropped (the e2e sends it again while the view has not
+moved; that is a test-infrastructure miss, not a product behaviour). **Final counts, quoted from the runs:** the whole matrix plus the reveal case, 23 tests
+x 20 repeats = 460 runs per engine, `--workers 4`: Chromium 460 of 460, WebKit 460 of 460; before the last two fixes the same run failed 3 (Chromium) and 4 to 5 (WebKit) times.
+A WebKit scrollbar press sometimes misses the thumb (the overlay scrollbar is drawn under the pointer: the test hovers first); it is a test precondition, not measured by the grid.
+
+**Second review of the same feature (2026-11-17).** Two more faults, both from the `spurious` classification added to cope with the browsers' own scroll adjustments:
+(1) `spurious` reverted a real scrollbar drag: the input flag was set by the press but cleared by every grid write, and a drag sends only pointer moves, so
+with newest first, following and not pinned each 250 ms shift write ended the gesture and the next scroll of the drag was written back (the reviewer measured drags
+ending anywhere between 1,739 and 18,436 px; the new e2e fails on that code in both engines: red 1 of 2, green 12 of 12 on the fix). The input flag now holds for the
+whole gesture (a write while the pointer is held does not clear it, and the held pointer counts as input), and `spurious` is narrowed to the two shapes seen (a far position
+reset to 0; a shift by the size of the layout change, `layoutDelta`): any other position with no input stays the user's (find in page and assistive technology, also when the
+total changes without a write in oldest-first keep mode: table row and e2e). (2) The 300 ms `SETTLE_MS` window had no recorded measurement (ER-12): it is removed; the layout key, the
+layout delta and the gesture-scoped input flag decide, and no time constant remains. The e2e's `expectLeftNewest` now resends a wheel only when the grid's log shows no take-over
+since the last send (at most twice), and fails at once when the grid took over and the view is nevertheless back on the newest end; the resends are attached to the test.
+
+**Final counts after the second review (2026-11-17).** Matrix of 26 tests (both sort orders, the reveal case, the no-input scroll) x 20 repeats = 520 runs per engine, `--workers 4`:
+on the idle machine (>= 60% idle at the start) Chromium 520 of 520 and WebKit 517 of 520 (before the resend tweak; the three: two dropped wheel gestures, one key move that did not
+reach the grid); the last full run was made while other agents loaded the machine (load average 170, runs 60% slower): Chromium 519 of 520 and WebKit 511 of 520. Every WebKit
+failure in these runs is of one kind: an input (a key, a wheel, a scrollbar press) that the page did not turn into a scroll within the poll's 5 s of real time ("the view left the
+newest end"), or a top-row read taken while pages were still loading, not a view pulled back after a delivered gesture; the grid log of those runs shows no take-over, or a take-over
+with no scroll. The drag-across-rounds row fails on the code of 576b47507 in both engines (red 1 of 2) and is green 12 of 12 on this code. Input delivery in headless WebKit under load
+is the open measurement: it is not a claim of "460 of 460". The 300 ms window and its constant are gone.
+
+**Deterministic ownership rows (2026-11-17, third round).** A real wheel, key or scrollbar press in headless WebKit is sometimes dropped by the browser (measured: 517 of 520 on the
+idle machine, the reviewer's 259 of 260; the grid log shows the wheel received and the take-over logged, then no scroll event and no grid write), so the ownership claims cannot be
+proved by real input alone. The common practice (TanStack Virtual's and the CDK's tests) is an untrusted event dispatched on the element plus a scroll position set by the test; the
+ownership rows now do that and are 640 of 640 in Chromium and WebKit, and a small real-input smoke set keeps the real pipeline covered (WebKit 639 of 640, the failure a dropped wheel).
+Making the rows deterministic found two things the real input had hidden: (1) the reveal request is handled when change detection runs, which can be after the user's wheel; the
+late request pinned the view again (G10, unit spec first; closed, with the same race for Follow on and Resume (found in review), by one rule: requests and take-overs carry a sequence stamp taken when the user acts, a required argument so no effect takes one, and the reducer drops a request stamped before the last take-over, ADR 0072 amendment); (2) a dispatched key does not scroll natively and the grid handles keys itself, so the test presses
+enough keys to take the focus out of the window and moves nothing. The classifier's second `spurious` rule also required no `layoutChanged`: in oldest-first keep mode the delta
+grows without any write, so a no-input scroll (find in page, assistive technology) within the band was written back; it now needs the layout to be changing (the total or the viewport
+changed and the frame that renders it has not passed, or the element's height differs from the last write's), table row first.
+
+## Debrief: "resize while not pinned keeps the top row" was two rows off in about 1 in 75 WebKit runs: the browser's scroll anchoring (2026-11-17)
+
+**Symptom.** The e2e row (oldest first) of `live-tail-follow.e2e.ts` failed 4, 6 and 3 of 300 WebKit runs, 0 of 340 in Chromium. The grid log showed its
+own write of the top row, then a scroll event with no input, 59 px away (in this round's repeats: -132 and +164 px), classified `user` and kept.
+**Causes listed (ER-28), with what each measurement showed:** (1) WebKit clamping a write against a stale `scrollHeight`: refuted, the reads
+were far from the maximum (118632 against a maximum of about 121900) and in both directions; (2) a second ResizeObserver pass: refuted, no
+second `Resize re-applied` line before the move; (3) the spacer height changing between write and paint: refuted, the shift equalled the change
+of the row layer's height (`.layer`, bound to `viewportH`), not of the spacer (a probe that logged each scroll event's layer and spacer heights:
+shift 132 = layer 278 - 146, spacer change unrelated); (4) `setViewportSize` itself: refuted by (5); (5) CSS scroll anchoring: confirmed. The
+spacer is the scroller's only in-flow element, below the sticky row layer; when the layer's height changes on a resize, the browser moves
+`scrollTop` by that change to keep the spacer still. A probe of 20 resizes per run, view not pinned, was red 11 of 40 runs with
+`overflow-anchor: auto` and 0 of 80 with `none` (computed style checked in each run), the same build. A WKWebView probe (macOS 27.2.1, the
+runtime Tauri uses) moved a scroller 1000 -> 1200 when an element above the anchor grew 200 px, and not with `overflow-anchor: none`: users
+were exposed, not only the tests. Safari Technology Preview 241 lists "Added stable support for CSS scroll anchoring" (310113@main).
+**Fix.** `.viewport { overflow-anchor: none }`, as the Angular CDK virtual scroll viewport does (`.cdk-virtual-scrollable`): the grid places
+its rows and writes `scrollTop` itself. ADR 0072 decision 2 is unchanged. Regression test first: "the browser does not move the view when the
+row layer changes height" grows the layer by 100 px and reads `scrollTop`; red in both engines (100 px), green after.
+**Why the logs showed it only partly.** The `Scroll origin` line showed a no-input move, not its size against the layer change; WebKit's
+console preview cut the line after five fields. **Class:** a browser default that moves the scroll position (clamping, bug 3 of ADR 0072;
+anchoring here).

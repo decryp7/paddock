@@ -19,17 +19,6 @@ export const SCROLL_IDLE_MS = 50;
  */
 export type LiveMode = 'end' | 'shift' | 'keep';
 
-/**
- * The live-follow policy: what a refresh does, given the sort order, where the view is and whether the user asked
- * to reveal the newest events ("N new events" or resumed following).
- */
-export function liveMode(descending: boolean, atStart: boolean, atEnd: boolean, reveal?: 'start' | 'end'): LiveMode {
-  if (reveal === 'end') return 'end';
-  if (reveal === 'start') return 'keep';
-  if (descending) return atStart ? 'keep' : 'shift';
-  return atEnd ? 'end' : 'keep';
-}
-
 /** The first response of a live refresh: how many rows were added and what to do with the view. */
 export interface LiveArrival {
   mode: LiveMode;
@@ -43,6 +32,11 @@ export interface PagedRowsOptions {
   onTotal?(total: number | null): void;
   /** The first page of a live refresh arrived. */
   onLive?(arrival: LiveArrival): void;
+  /**
+   * A page outside a live round reported a larger total than the cache had: the end moved (an event was pushed before the engine read
+   * the page). A pinned view follows it (ADR 0072).
+   */
+  onGrow?(growth: { newTotal: number; delta: number }): void;
   /** A page arrived (rows that were waiting for it can be selected now). */
   onPage?(): void;
   /** The row at the top of the view: eviction keeps the pages around it. */
@@ -152,7 +146,7 @@ export class PagedRowsStore {
     } else {
       this.stale = new Set(this.pages.keys());
     }
-    this.endArrival = null;
+    this.followUp = null;
     const wanted = new Set<number>([0, this.pageOf(first), this.pageOf(Math.max(first, last - 1))]);
     if (mode === 'end') wanted.add(this.pageOf(Math.max(0, oldTotal - 1)));
     this.pendingLive = { oldTotal, mode, pages: new Set(wanted) };
@@ -167,7 +161,9 @@ export class PagedRowsStore {
 
   /** The user took the view over (a scroll the grid did not write itself): the reveal is no longer followed. */
   endReveal(): void {
-    this.endArrival = null;
+    this.followUp = null;
+    // A round that has not answered yet must not take the view to the end any more; a shift only keeps the same events in view.
+    if (this.pendingLive?.mode === 'end') this.pendingLive.mode = 'keep';
   }
 
   /** The user scrolled: page fetches wait until scrolling pauses. */
@@ -249,6 +245,12 @@ export class PagedRowsStore {
     if (answer.status === 'failed') {
       this.inflight.delete(page);
       this.failed.add(page);
+      // A failed page of the round ends its hold on the view (ADR 0072): later answers of the round no longer move it, and a round
+      // whose first owned page failed never starts.
+      if (this.followUp?.pages.has(page) || this.pendingLive?.pages.has(page)) {
+        this.followUp = null;
+        this.pendingLive = null;
+      }
       this.error.set(describeError(answer.error));
       return;
     }
@@ -259,40 +261,46 @@ export class PagedRowsStore {
     // Still marked in flight here, so eviction keeps the page that just arrived.
     this.evictFar(this.options.centre?.() ?? 0);
     this.inflight.delete(page);
+    const before = { total: this.total(), loaded: this.loaded() };
     this.total.set(res.total);
     this.loaded.set(true);
     this.error.set(null);
     this.options.onTotal?.(res.total);
-    this.arriveLive(res.total, round, page);
+    const reported = this.arriveLive(res.total, round, page);
+    if (!reported && !this.pendingLive && before.loaded && res.total > before.total) this.options.onGrow?.({ newTotal: res.total, delta: res.total - before.total });
     this.bump();
     this.options.onPage?.();
   }
 
-  private arriveLive(newTotal: number, round: unknown, page: number): void {
+  /** Reports the arrival of an owned page to the grid; true when it did (the round reports the growth, so `onGrow` must not). */
+  private arriveLive(newTotal: number, round: unknown, page: number): boolean {
     const live = this.pendingLive;
+    // The round starts with an answer to one of its own pages; a page fetched for another reason (a fill, the user's scroll) is not it.
+    if (live && !live.pages.has(page)) return false;
     if (live) {
       this.pendingLive = null;
       live.pages.delete(page);
-      this.endArrival = live.mode === 'end' && live.pages.size > 0 ? { round, total: newTotal, pages: live.pages } : null;
+      this.followUp = live.mode !== 'keep' && live.pages.size > 0 ? { mode: live.mode, round, total: newTotal, pages: live.pages } : null;
       this.options.onLive?.({ mode: live.mode, newTotal, delta: newTotal - live.oldTotal });
-      return;
+      return true;
     }
-    // The reveal asked for several pages. An event pushed between two of their answers makes a later one report a larger total
-    // than the one the scroll to the end was made for: the end moved, so the view follows it once more. Only the reveal's own
-    // pages count (a page fetched because the user scrolled is not part of it), and the follow-up ends with its last page or
-    // the first scroll the grid did not write itself (`endReveal`, called from the grid's `onScroll`).
-    const end = this.endArrival;
-    if (!end || end.round !== round || !end.pages.delete(page)) return;
-    if (end.pages.size === 0) this.endArrival = null;
+    // The round asked for several pages. An event pushed between two of their answers makes a later one report a larger total
+    // than the one the view was moved for: the end moved, so the view follows it once more. Only the round's own pages count (a
+    // page fetched because the user scrolled is not part of it), and the follow-up ends with its last page, a failed page or the
+    // first scroll the grid did not write itself (`endReveal`, called from the grid).
+    const end = this.followUp;
+    if (!end || end.round !== round || !end.pages.delete(page)) return false;
+    if (end.pages.size === 0) this.followUp = null;
     if (newTotal > end.total) {
       const delta = newTotal - end.total;
       end.total = newTotal;
-      this.options.onLive?.({ mode: 'end', newTotal, delta });
+      this.options.onLive?.({ mode: end.mode, newTotal, delta });
     }
+    return true;
   }
 
-  /** The reveal's round, the total it scrolled to the end of and the pages of it still to answer (see `arriveLive`). */
-  private endArrival: { round: unknown; total: number; pages: Set<number> } | null = null;
+  /** The round's mode, its total so far and the owned pages still to answer (see `arriveLive`; `end` and `shift` follow a later, larger total). */
+  private followUp: { mode: 'end' | 'shift'; round: unknown; total: number; pages: Set<number> } | null = null;
 
   private bump(): void {
     this.version.update((v) => v + 1);

@@ -32,6 +32,8 @@ export class LiveFeed {
   readonly newEvents = signal(0);
   /** Bumped when the grid should reload and show the newest events (pill click, Resume). */
   readonly revealNonce = signal(0);
+  /** The request sequence stamp (`nextRequestSeq`) of the last reveal: taken when the pill is clicked, not when the grid handles it. */
+  revealSeq = 0;
   /** Timestamp of the newest record reported by live tail. */
   readonly newestTs = signal<number | null>(null);
   /** Number of UI refreshes done (diagnostics, tests). */
@@ -75,7 +77,7 @@ export class LiveFeed {
     effect(() => {
       const nonce = this.follow.resumeNonce();
       untracked(() => {
-        if (nonce > 0) this.showNewEvents();
+        if (nonce > 0) this.showNewEvents(this.follow.resumeSeq());
       });
     });
   }
@@ -85,10 +87,14 @@ export class LiveFeed {
     return this.gridMode === 'count';
   }
 
-  /** Clears the "N new events" count and asks the grid to reload with the newest events in view. */
-  showNewEvents(): void {
+  /**
+   * Clears the "N new events" count and asks the grid to reload with the newest events in view. `seq` is the request's stamp
+   * (`nextRequestSeq`), taken by the caller when the user acted: required, so no effect can take one late.
+   */
+  showNewEvents(seq: number): void {
     this.newEvents.set(0);
     this.gridMode = 'follow';
+    this.revealSeq = seq;
     this.revealNonce.update((n) => n + 1);
   }
 
