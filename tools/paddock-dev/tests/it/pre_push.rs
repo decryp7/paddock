@@ -61,7 +61,7 @@ fn the_dry_run_lists_the_gates_ci_runs_for_a_crates_change_and_why_others_are_le
         "run   lockfile crates",
         "run   clippy crates",
         "run   clippy-windows crates",
-        "skip  clippy-linux crates",
+        "run   clippy-linux crates",
         "skip  commit-lint",
         // Conformance is in every plan (fix/lint-no-fixed-test-waits, b013e1142).
         "run   conformance",
