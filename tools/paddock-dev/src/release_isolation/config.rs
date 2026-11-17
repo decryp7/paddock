@@ -106,7 +106,7 @@ fn tail_text(text: &str, max: usize) -> String {
 fn git(env: &Env, dir: &Path, args: &[&str]) -> Result<(Option<i32>, String, String), String> {
     // The working folder is spelled for a program (no `\\?\` prefix); a folder with no plain spelling is a finding, not a guess.
     let dir = winpath::for_tools(dir, Os::current()).map_err(|e| format!("git cannot be run in {}: {e}", dir.display()))?;
-    let mut cmd = command("git");
+    let mut cmd = crate::git_env::git();
     cmd.args(args).current_dir(dir).env_clear();
     for (k, v) in &env.0 {
         if !crate::git_env::REPO_VARS.contains(&k.as_str()) {

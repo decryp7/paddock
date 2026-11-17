@@ -222,3 +222,48 @@ fn a_push_of_a_commit_that_is_not_head_plans_that_commit_even_with_git_dir_set_a
     assert!(out.status.success(), "{text}");
     assert!(!text.contains("could not be read"), "{text}");
 }
+
+/// A site that is not the planner: `worktree list` reads the worktrees of the repository it runs in. With the hook's `GIT_DIR`
+/// naming another repository it must still list this one's.
+#[test]
+fn worktree_list_reads_its_own_repository_when_git_dir_names_another_one() {
+    let d = tempfile::tempdir().unwrap();
+    let git = |dir: &Path, args: &[&str]| {
+        let out = paddock_proc::command("git")
+            .args(["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env_remove("GIT_DIR")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    };
+    let (a, b) = (d.path().join("a"), d.path().join("b"));
+    for (dir, branch) in [(&a, "only-in-a"), (&b, "only-in-b")] {
+        std::fs::create_dir_all(dir).unwrap();
+        git(dir, &["init", "-q", "-b", branch]);
+        std::fs::write(dir.join("f.txt"), "x\n").unwrap();
+        git(dir, &["add", "--all"]);
+        git(dir, &["commit", "-q", "-m", "one"]);
+    }
+    let run = |git_dir: Option<&Path>| {
+        let mut cmd = crate::dev_bin::command();
+        cmd.args(["worktree", "list", "--json"]).current_dir(&b);
+        if let Some(g) = git_dir {
+            cmd.env("GIT_DIR", g);
+        }
+        let out = cmd.output().unwrap();
+        format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+    };
+    let plain = run(None);
+    assert!(
+        plain.contains("only-in-b"),
+        "positive control: the plain run lists this repository: {plain}"
+    );
+    let hooked = run(Some(&a.join(".git")));
+    assert!(
+        hooked.contains("only-in-b") && !hooked.contains("only-in-a"),
+        "GIT_DIR changed what is listed: {hooked}"
+    );
+}

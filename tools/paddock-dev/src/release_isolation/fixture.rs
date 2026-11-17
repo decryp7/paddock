@@ -404,7 +404,7 @@ impl Fixture {
             ],
         );
         let head = {
-            let mut cmd = command("git");
+            let mut cmd = crate::git_env::git();
             cmd.args(["rev-parse", "HEAD"]).current_dir(&clone).env_clear();
             for (k, v) in &env.0 {
                 cmd.env(k, v);
@@ -513,7 +513,7 @@ impl Fixture {
     }
 
     fn git_head(&self) -> String {
-        let mut cmd = command("git");
+        let mut cmd = crate::git_env::git();
         cmd.args(["rev-parse", "HEAD"]).current_dir(&self.clone).env_clear();
         for (k, v) in &self.env.0 {
             cmd.env(k, v);
