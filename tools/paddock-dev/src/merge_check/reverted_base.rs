@@ -93,7 +93,7 @@ fn live_reverts(edges: &[(String, String)]) -> Vec<(String, String)> {
 
 /// The branch a merge commit's subject names: `Merge branch 'x'`, `... merge x into train N`, `Merge x (hex) into trial of y`;
 /// a trailing `(hex)` is dropped; else the subject itself.
-fn branch_of(subject: &str) -> String {
+pub(super) fn branch_of(subject: &str) -> String {
     let subject = strip_hex_suffix(subject.trim());
     if let Some(rest) = subject.split("Merge branch '").nth(1)
         && let Some((name, _)) = rest.split_once('\'')

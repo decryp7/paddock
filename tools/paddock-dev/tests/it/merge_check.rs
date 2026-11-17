@@ -1969,3 +1969,174 @@ fn sync_member_refuses_a_dirty_tree_and_a_detached_head_with_the_next_step() {
     assert_ne!(code, 0);
     assert!(text.contains("HEAD is not on a branch. Next step:"), "{text}");
 }
+
+// ---- a member must contain the train's base (stale_base) ----
+
+/// A train cut from main (m1) that merged `feat/a`; main then moved to m2. `merged_m2`: the train has merged main up to m2.
+/// Branches `old` (built on m1) and `new` (built on m2) each add one file. HEAD is on the train; `origin/main` is main's tip.
+fn train_on_main(merged_m2: bool) -> (Repo, String) {
+    let r = Repo::new();
+    r.write("base.txt", "base\n");
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "old"]);
+    r.write("old.txt", "old\n");
+    r.commit("feat: old");
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["checkout", "-q", "-b", "train"]);
+    r.git(&["checkout", "-q", "-b", "feat/a"]);
+    r.write("a.txt", "a\n");
+    r.commit("feat: a");
+    r.git(&["checkout", "-q", "train"]);
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge feat/a (aaaaaaaaa) into train", "feat/a"]);
+    r.git(&["checkout", "-q", "main"]);
+    r.write("m2.txt", "m2\n");
+    let m2 = r.commit("feat: m2 on main");
+    r.git(&["update-ref", "refs/remotes/origin/main", &m2]);
+    r.git(&["checkout", "-q", "-b", "new"]);
+    r.write("new.txt", "new\n");
+    r.commit("feat: new");
+    r.git(&["checkout", "-q", "train"]);
+    if merged_m2 {
+        r.git(&["merge", "-q", "--no-ff", "-m", "chore(train): merge main into train", "main"]);
+    }
+    (r, m2)
+}
+
+fn check_member(r: &Repo, member: &str) -> (i32, String) {
+    r.check(&["--branch", member, "--target", "train", "--no-generators"])
+}
+
+#[test]
+fn a_member_built_before_the_commit_of_main_the_train_has_merged_is_refused_with_the_next_step() {
+    let (r, m2) = train_on_main(true);
+    let (code, text) = check_member(&r, "old");
+    assert_eq!(code, 5, "{text}");
+    assert!(
+        text.contains("::error::merge check: old is built on an old base: it does not contain ")
+            && text.contains(&m2[..9])
+            && text.contains("the newest commit of main that train has merged")
+            && text.contains("Next step: run `./dev merge sync-member train`"),
+        "{text}"
+    );
+    // The member built on that commit passes; the other member merged ahead of it (feat/a) is not required.
+    let (code, text) = check_member(&r, "new");
+    assert_eq!(code, 0, "{text}");
+    assert!(!text.contains("old base"), "{text}");
+}
+
+#[test]
+fn the_same_member_passes_while_the_train_has_not_merged_the_newer_commit_of_main() {
+    // The positive control of the refusal: identical history without the train's merge of m2.
+    let (r, _) = train_on_main(false);
+    let (code, text) = check_member(&r, "old");
+    assert_eq!(code, 0, "{text}");
+}
+
+/// A train stacked on `train/prev`: prev has p1 and p2; train2 re-merged prev up to p1 (subject as the integrator writes it).
+fn stacked_train() -> (Repo, String, String) {
+    let r = Repo::new();
+    r.write("base.txt", "base\n");
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "before_p1"]);
+    r.write("b.txt", "b\n");
+    r.commit("feat: built before p1");
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["checkout", "-q", "-b", "train/prev"]);
+    r.write("p1.txt", "p1\n");
+    let p1 = r.commit("feat: p1");
+    r.git(&["checkout", "-q", "-b", "on_p1"]);
+    r.write("c.txt", "c\n");
+    r.commit("feat: built on p1");
+    r.git(&["checkout", "-q", "train/prev"]);
+    r.write("p2.txt", "p2\n");
+    let p2 = r.commit("feat: p2");
+    r.git(&["checkout", "-q", "-b", "on_p2"]);
+    r.write("d.txt", "d\n");
+    r.commit("feat: built on p2");
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["checkout", "-q", "-b", "tr2"]);
+    r.git(&[
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        &format!("chore(train): merge train/prev ({}) into train 2", &p1[..9]),
+        &p1,
+    ]);
+    (r, p1, p2)
+}
+
+#[test]
+fn on_a_stacked_train_a_member_must_contain_the_previous_trains_commit_the_train_has_merged() {
+    let (r, p1, _p2) = stacked_train();
+    let (code, text) = r.check(&["--branch", "before_p1", "--target", "tr2", "--no-generators"]);
+    assert_eq!(code, 5, "{text}");
+    assert!(
+        text.contains(&p1[..9]) && text.contains("the newest commit of train/prev that tr2 has merged"),
+        "{text}"
+    );
+    // Built on p1 (the merged commit) and built on p2 (newer, contains p1) both pass.
+    for member in ["on_p1", "on_p2"] {
+        let (code, text) = r.check(&["--branch", member, "--target", "tr2", "--no-generators"]);
+        assert_eq!(code, 0, "{member}: {text}");
+    }
+}
+
+#[test]
+fn a_merge_into_main_itself_and_a_clone_without_origin_main_are_not_judged_and_the_second_says_so() {
+    // Main has no train: no base to demand (a merge into main).
+    let (r, _) = train_on_main(false);
+    let (code, text) = r.check(&["--branch", "old", "--target", "main", "--no-generators"]);
+    assert_eq!(code, 0, "{text}");
+    assert!(!text.contains("old base"), "{text}");
+    // No origin/main and no re-merge commit: nothing declares the base, and the output says it did not judge.
+    r.git(&["update-ref", "-d", "refs/remotes/origin/main"]);
+    let (code, text) = check_member(&r, "old");
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains("stale-base check did not run"), "{text}");
+}
+
+#[test]
+fn a_synced_member_chains_into_write_reverted_for_the_train_side() {
+    // sync-member re-applies the member's work after the train's revert; merging that member into the train then goes backwards
+    // on the lines the train's revert restored, and --write-reverted answers them from the revert commits.
+    let r = Repo::new();
+    r.write("shot.txt", "old1\nold2\nold3\n");
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "feat/shots"]);
+    r.write("shot.txt", "new1\nnew2\nnew3\n");
+    r.commit("feat: refresh screenshots");
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge branch 'feat/shots'", "feat/shots"]);
+    let m = r.git(&["rev-parse", "HEAD"]);
+    r.git(&["revert", "-m", "1", "--no-edit", &m]);
+    r.git(&["checkout", "-q", "-b", "member", "feat/shots"]);
+    r.write("member.txt", "member\n");
+    r.commit("feat: member");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("unrelated.txt", "u\n");
+    r.commit("feat: unrelated");
+    r.git(&["checkout", "-q", "member"]);
+    let (code, text) = sync_member(&r, "main");
+    assert_eq!(code, 0, "{text}");
+    assert_eq!(
+        fs::read_to_string(r.path().join("shot.txt")).unwrap(),
+        "new1\nnew2\nnew3\n",
+        "the work is back"
+    );
+    r.git(&["checkout", "-q", "main"]);
+    let file = r
+        .path()
+        .join("..")
+        .join(format!("sync-{}.txt", r.path().file_name().unwrap().to_string_lossy()));
+    let (code, text) = r.check(&["--branch", "member", "--target", "main", "--write-reverted", file.to_str().unwrap()]);
+    let written = fs::read_to_string(&file).unwrap_or_default();
+    let _ = fs::remove_file(&file);
+    assert_eq!(code, 5, "{text}");
+    assert!(written.contains("Reverted: shot.txt: "), "{written}\n{text}");
+    let msg = r.path().join("..").join("sync-final.txt");
+    fs::write(&msg, &written).unwrap();
+    r.git(&["merge", "-q", "--no-ff", "-F", msg.to_str().unwrap(), "member"]);
+    let (code, text) = r.check(&["HEAD", "--no-generators"]);
+    assert_eq!(code, 0, "{text}");
+}

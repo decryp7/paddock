@@ -285,6 +285,10 @@ changes here, every app's copy is updated in the same change.
     this member; a plain merge of the train would delete the member's work again, as the revert is the newer change (three times,
     the last c156ba72a). The merge check's `--write-reverted <file>` then writes the `Reverted:` lines of that re-land for the
     train side (a re-land only; every other finding stays a person's).
+    A member must contain the train's base, the newest commit of its base line that the train has merged so far (the previous
+    train's tip of the newest `merge train/<previous>` re-merge, else main's merge base); `./dev merge check` (and so the queue and
+    the trial) refuses one that does not, with that commit and `./dev merge sync-member <train>` as the next step. Other members
+    merged ahead of it are not required.
 
 ## Performance analysis (user, 2026-10-29)
 51. **Retired 2026-11-12 (user): merged into rule 13** (more parallelism, or a cheaper operation).
