@@ -271,7 +271,7 @@ fn sha(bytes: &[u8]) -> String {
 fn run(env: &Env, dir: &Path, program: &str, args: &[&str]) {
     let mut cmd = command(program);
     cmd.args(args).current_dir(dir);
-    paddock_env::clear_env(&mut cmd, &[]);
+    env.clear_into(&mut cmd);
     for (k, v) in &env.0 {
         cmd.env(k, v);
     }
@@ -407,7 +407,7 @@ impl Fixture {
         let head = {
             let mut cmd = command("git");
             cmd.args(["rev-parse", "HEAD"]).current_dir(&clone);
-            paddock_env::clear_env(&mut cmd, &[]);
+            env.clear_into(&mut cmd);
             for (k, v) in &env.0 {
                 cmd.env(k, v);
             }
@@ -517,7 +517,7 @@ impl Fixture {
     fn git_head(&self) -> String {
         let mut cmd = command("git");
         cmd.args(["rev-parse", "HEAD"]).current_dir(&self.clone);
-        paddock_env::clear_env(&mut cmd, &[]);
+        self.env.clear_into(&mut cmd);
         for (k, v) in &self.env.0 {
             cmd.env(k, v);
         }

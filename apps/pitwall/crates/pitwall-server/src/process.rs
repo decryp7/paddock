@@ -70,14 +70,19 @@ mod tests {
         assert!(!text.contains("PITWALL_SECRET_TEST"));
     }
 
-    /// ER-47: the engine keeps the variables that restrict it though they are not in the allow list; an unlisted one of the
-    /// same shape (the first test's) does not reach it.
+    /// ER-47: the engine keeps the variables that restrict it though they are not in the allow list, with the caller's value (an
+    /// engine inherits as every production child does, a loosening value too).
     #[tokio::test]
-    async fn restricting_variables_reach_the_engine() {
-        let set: Vec<(&str, &str)> = paddock_proc::RESTRICTING.iter().map(|k| (*k, "0")).collect();
-        let text = child_env(&set).await;
-        for k in paddock_proc::RESTRICTING {
-            assert!(text.contains(&format!("{k}=0")), "{k} was stripped: {text}");
+    async fn restricting_variables_reach_the_engine_as_the_caller_has_them() {
+        for value in ["restricting", "loosen"] {
+            let set: Vec<(&str, &str)> = paddock_proc::RESTRICTING
+                .iter()
+                .map(|r| (r.name, if value == "restricting" { r.pinned() } else { value }))
+                .collect();
+            let text = child_env(&set).await;
+            for (k, v) in &set {
+                assert!(text.contains(&format!("{k}={v}")), "{k}={v} was stripped: {text}");
+            }
         }
     }
 }

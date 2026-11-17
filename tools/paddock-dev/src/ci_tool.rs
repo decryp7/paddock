@@ -148,7 +148,7 @@ impl ToolCall {
     pub fn child_env(&self, parent: &HashMap<String, String>) -> Vec<(String, String)> {
         let keep = |k: &str| {
             KEPT_ENV.contains(&k)
-                || paddock_env::RESTRICTING.contains(&k)
+                || paddock_env::restricting_names().any(|n| n == k)
                 || WINDOWS_BASE.iter().any(|b| b.eq_ignore_ascii_case(k))
                 || self.pass.iter().any(|p| match p.strip_suffix('*') {
                     Some(prefix) => k.starts_with(prefix),
@@ -481,18 +481,35 @@ mod tests {
         );
     }
 
-    /// ER-47: the restricting variables of the caller (a download ban, an install ban, an offline switch) reach every program,
-    /// listed or not. The positive control: an unlisted variable of the same kind of name does not.
+    /// ER-47: the restricting variables of the caller (a download ban, an install ban, an offline switch) reach every program, listed
+    /// or not, with the value the caller has (a production tool inherits as it is, a loosening value too). The positive control: an
+    /// unlisted variable of another name does not.
     #[test]
     fn a_child_keeps_the_restricting_variables_the_caller_has_without_a_pass() {
-        let mut pairs = vec![("PATH", "/bin"), ("PADDOCK_DEV_TOKEN", "t")];
-        pairs.extend(paddock_env::RESTRICTING.iter().map(|k| (*k, "0")));
-        let env = parent(&pairs);
-        let names: Vec<String> = ToolCall::new("x").child_env(&env).into_iter().map(|(k, _)| k).collect();
-        for k in paddock_env::RESTRICTING {
-            assert!(names.iter().any(|n| n == k), "{k} was stripped: {names:?}");
+        for value in ["restricting", "loosen"] {
+            let mut pairs = vec![
+                ("PATH".to_string(), "/bin".to_string()),
+                ("PADDOCK_DEV_TOKEN".to_string(), "t".to_string()),
+            ];
+            pairs.extend(paddock_env::RESTRICTING.iter().map(|r| {
+                (
+                    r.name.to_string(),
+                    if value == "restricting" { r.pinned() } else { value }.to_string(),
+                )
+            }));
+            let refs: Vec<(&str, &str)> = pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+            let env = parent(&refs);
+            let got = ToolCall::new("x").child_env(&env);
+            for r in paddock_env::RESTRICTING {
+                let want = env[r.name].clone();
+                assert!(
+                    got.contains(&(r.name.to_string(), want)),
+                    "{} ({value}) was stripped: {got:?}",
+                    r.name
+                );
+            }
+            assert!(!got.iter().any(|(n, _)| n == "PADDOCK_DEV_TOKEN"), "{got:?}");
         }
-        assert!(!names.iter().any(|n| n == "PADDOCK_DEV_TOKEN"), "{names:?}");
     }
 
     #[cfg(unix)]

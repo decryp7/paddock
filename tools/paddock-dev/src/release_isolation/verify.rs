@@ -23,6 +23,13 @@ impl Env {
         }))
     }
 
+    /// Clears `cmd`'s environment through the one clearing function, over **this job environment** (never the live process's): the
+    /// restricting variables the job has (a download ban, an offline switch, ER-47) are kept as the job has them, the rest is set by
+    /// the caller from `self.0`.
+    pub fn clear_into(&self, cmd: &mut std::process::Command) {
+        paddock_env::clear_env_from(cmd, &[], |k| self.0.get(k).map(std::ffi::OsString::from));
+    }
+
     /// A variable that is set and not empty. On Windows the name is matched ignoring case (`Path` is `PATH`).
     pub fn get(&self, key: &str) -> Option<&str> {
         super::pathfind::lookup(&self.0, key, cfg!(windows))
@@ -594,6 +601,51 @@ fn pointers_probe(ctx: &mut Ctx) {
                 format!("SCCACHE_DIR is {v}, outside the job folder {}.", root.display()),
                 "Unset SCCACHE_DIR in release mode (ADR 0085 §4 item 2).",
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod env_tests {
+    use super::*;
+
+    fn seen(cmd: &std::process::Command) -> Vec<(String, String)> {
+        cmd.get_envs()
+            .filter_map(|(k, v)| v.map(|v| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned())))
+            .collect()
+    }
+
+    /// ER-47: the restricting variables come from the job's environment, not the process's. The process here has them set to other
+    /// values (`EnvLock`); the job's values, restricting and loosening alike, are what the child gets, and a variable the job lacks
+    /// is not taken from the process.
+    #[test]
+    fn clear_into_reads_the_job_environment_not_the_process() {
+        let mut live = paddock_testkit::env_lock();
+        for r in paddock_env::RESTRICTING {
+            live.set(r.name, "from-the-process");
+        }
+        for value in ["restricting", "loosen"] {
+            let job = Env(paddock_env::RESTRICTING
+                .iter()
+                .filter(|r| r.name != "CARGO_NET_OFFLINE")
+                .map(|r| {
+                    (
+                        r.name.to_string(),
+                        if value == "restricting" { r.pinned() } else { value }.to_string(),
+                    )
+                })
+                .collect());
+            let mut cmd = paddock_proc::command("x");
+            job.clear_into(&mut cmd);
+            let got = seen(&cmd);
+            for (k, v) in &job.0 {
+                assert!(got.contains(&(k.clone(), v.clone())), "{k} ({value}): {got:?}");
+            }
+            assert!(
+                !got.iter().any(|(k, _)| k == "CARGO_NET_OFFLINE"),
+                "taken from the process: {got:?}"
+            );
+            assert!(!got.iter().any(|(_, v)| v == "from-the-process"), "{got:?}");
         }
     }
 }

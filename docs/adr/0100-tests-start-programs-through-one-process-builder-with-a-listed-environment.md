@@ -260,15 +260,25 @@ lost on the way: `RUSTUP_AUTO_INSTALL=0` (a probe's rustup could then install a 
 downloads) and `PADDOCK_TOOLCHAIN_FAILED`. ER-47 says clearing needs a named policy, a reason and a kept list, and never strips a
 variable that restricts the child. The decision:
 
-- **One shared list**, `paddock_env::RESTRICTING` (`crates/paddock-env/src/command.rs`, re-exported as `paddock_proc::RESTRICTING`),
-  with the reason in its doc comment. A variable joins it when it only ever makes a child do less.
-- **One clearing function**, `paddock_env::clear_env_from(cmd, keep, lookup)` (`clear_env` over the process's environment;
-  `paddock_proc::clean_env` calls it). It sets `keep` and `RESTRICTING` from `lookup`, which is the caller's environment: the live
-  process for a tool, the kit's captured `Ambient` for `TestCommand` (never a live read, this ADR's capture rule), a job's map for
-  `paddock-dev`'s `ToolCall`.
-- **`TestCommand`** passes every `RESTRICTING` variable the `Ambient` has, whatever else it lists, and sets `RUSTUP_AUTO_INSTALL=0`
-  when the caller has none (the caller's own value stands). `TestCommand::env_clear` goes back to that set and no longer calls
-  `Command::env_clear` at all.
+- **One shared, typed list**, `paddock_env::RESTRICTING` (`crates/paddock-env/src/command.rs`, re-exported as `paddock_proc::RESTRICTING`):
+  each entry is a variable with the values that restrict it (`RUSTUP_AUTO_INSTALL=0`, `CARGO_NET_OFFLINE=true|1`,
+  `PADDOCK_DEV_DOWNLOAD=0`, `PADDOCK_TOOLCHAIN_FAILED=1`), with the reason in its doc comment. A loosening value (`PADDOCK_DEV_DOWNLOAD=1`,
+  `RUSTUP_AUTO_INSTALL=1`, `CARGO_NET_OFFLINE=false`) is not a restriction. A variable joins the list only when one of its values
+  only ever makes a child do less.
+- **One clearing function with two policies.** `paddock_env::clear_env_from(cmd, keep, lookup)` (`clear_env` over the process's
+  environment; `paddock_proc::clean_env` calls it) is the **production** policy: it keeps `keep` and every `RESTRICTING` variable the
+  caller has **as the caller has it** (a production child inherits, ER-47). `paddock_env::clear_env_pinned_from` is the **test**
+  policy: a restricting variable is set only when the caller's value restricts, so a developer's `PADDOCK_DEV_DOWNLOAD=1` never makes
+  a test download (found in review: `tools/paddock-dev/tests/it/wrapper.rs` downloaded from Gitea). `lookup` is the caller's
+  environment: the live process for a tool, the kit's captured `Ambient` for `TestCommand` (never a live read), a job's map for
+  `paddock-dev`'s `ToolCall` and release isolation.
+- **`TestCommand`** is the allow-list plus the restricting variables in their restricting values (it does not pass the caller's
+  environment through), and sets `RUSTUP_AUTO_INSTALL=0` when the caller's value does not restrict. `TestCommand::env_clear` goes back
+  to that set and no longer calls `Command::env_clear` at all.
+- **The choice, recorded (ER-37).** The coordinator chose this, the allow-list plus restricting variables (option a, about 0.1
+  agent-day), over inherit-and-redirect (option b: inherit the caller's environment and redirect `HOME`, temp and `PATH`, about 0.4
+  agent-days) on 2026-11-17, under the ER-37 threshold of one agent-day beyond common practice. The user was told and may still
+  switch to option b.
 - **The lint over every clearing site** is Clippy: `std::process::Command::env_clear` (and tokio's) is in `lint/clippy.toml`, in
   every app's and tool's `clippy.toml` (C13 compares the apps; `conformance/test/c13-rust-lints.test.mjs` checks every tracked
   `clippy.toml` and shows C13 reporting a copy that dropped it), and the one allowed call is `clear_env_from`. A new site that clears

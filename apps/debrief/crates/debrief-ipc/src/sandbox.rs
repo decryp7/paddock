@@ -418,7 +418,10 @@ fn clear_env(keep: &[&str]) {
     let names: Vec<std::ffi::OsString> = std::env::vars_os().map(|(k, _)| k).collect();
     for k in names {
         let kept = |names: &[&str]| names.iter().any(|kept| std::ffi::OsStr::new(kept) == k.as_os_str());
-        if !kept(keep) && !kept(paddock_proc::RESTRICTING) {
+        let restricting = paddock_proc::RESTRICTING
+            .iter()
+            .any(|r| std::ffi::OsStr::new(r.name) == k.as_os_str());
+        if !kept(keep) && !restricting {
             std::env::remove_var(&k);
         }
     }

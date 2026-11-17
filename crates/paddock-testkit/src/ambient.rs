@@ -70,11 +70,15 @@ pub(crate) fn capture() {
 
 fn capture_now() -> Ambient {
     let path = std::env::var_os("PATH");
-    let vars: Vec<(OsString, OsString)> = crate::process::PASSED_THROUGH
+    let names: Vec<&str> = crate::process::PASSED_THROUGH
         .iter()
         .chain(crate::process::BUILD_VARS)
-        .chain(paddock_env::RESTRICTING)
         .chain(KIT_VARS)
+        .copied()
+        .chain(paddock_env::restricting_names())
+        .collect();
+    let vars: Vec<(OsString, OsString)> = names
+        .into_iter()
         .filter_map(|k| std::env::var_os(k).map(|v| (OsString::from(k), v)))
         .collect();
     let cargo = std::env::var_os("CARGO")

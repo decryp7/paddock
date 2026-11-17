@@ -37,7 +37,9 @@ pub mod winpath;
 
 pub use app::AppId;
 pub use atomic::{write_atomic, write_atomic_created};
-pub use command::{RESTRICTING, clear_env, clear_env_from};
+pub use command::{
+    RESTRICTING, Restriction, clear_env, clear_env_from, clear_env_pinned_from, restricting_names,
+};
 pub use dirs::{AppDirs, MapVars, Os, PORTABLE_FLAG, ProcessVars, Source, Vars};
 pub use error::{EnvError, Result};
 pub use folder::{

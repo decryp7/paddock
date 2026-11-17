@@ -89,43 +89,64 @@ fn a_child_sees_only_listed_names_whatever_the_machine_has() {
     );
 }
 
-/// ER-47: a variable that restricts a child (a download ban, an install ban, an offline switch, a failure marker) is never stripped
-/// by the clearing: the child that lost it would do what the caller forbade. The machine here is an `Ambient` that carries them.
-#[test]
-fn restricting_variables_the_machine_has_reach_the_child() {
+/// A machine (`Ambient`) whose restricting variables all hold `value_of(restriction)`.
+fn machine_restricting(value_of: impl Fn(&paddock_env::Restriction) -> String) -> Ambient {
     let mut m = paddock_testkit::ambient().clone();
-    m.vars
-        .retain(|(k, _)| !paddock_env::RESTRICTING.contains(&k.to_str().unwrap_or_default()));
-    for k in paddock_env::RESTRICTING {
-        m.vars.push(((*k).into(), format!("{k}-restricts").into()));
+    m.vars.retain(|(k, _)| {
+        !paddock_env::restricting_names().any(|n| n == k.to_str().unwrap_or_default())
+    });
+    for r in paddock_env::RESTRICTING {
+        m.vars.push((r.name.into(), value_of(r).into()));
     }
+    m
+}
+
+/// ER-47: a variable that restricts a child (a download ban, an install ban, an offline switch, a failure marker) is never stripped
+/// by the clearing when the caller's value restricts: the child that lost it would do what the caller forbade.
+#[test]
+fn restricting_values_the_machine_has_reach_the_child() {
+    let m = machine_restricting(|r| r.pinned().to_string());
     let program = if cfg!(windows) { "cmd" } else { "env" };
     let seen = child_env(&mut TestCommand::on(program, &m));
-    for k in paddock_env::RESTRICTING {
+    for r in paddock_env::RESTRICTING {
         assert_eq!(
-            seen.get(*k).map(String::as_str),
-            Some(format!("{k}-restricts").as_str()),
-            "{k} did not reach the child: {seen:?}"
+            seen.get(r.name).map(String::as_str),
+            Some(r.pinned()),
+            "{} did not reach the child: {seen:?}",
+            r.name
         );
     }
 }
 
-/// Positive control (ER-33): the same machine without the variables gives a child without them, so the test above sees the
-/// pass-through and not a value the child always has. `RUSTUP_AUTO_INSTALL` is the one the kit sets itself.
+/// Negative control: a value that loosens the restriction (`PADDOCK_DEV_DOWNLOAD=1`, `RUSTUP_AUTO_INSTALL=1`,
+/// `CARGO_NET_OFFLINE=false`) never reaches a test's child: a developer's own setting must not make a test download or install.
+/// `RUSTUP_AUTO_INSTALL` is the one the kit pins to its restricting value instead.
 #[test]
-fn a_machine_without_restricting_variables_gives_the_child_none_but_the_install_ban() {
-    let mut m = paddock_testkit::ambient().clone();
-    m.vars
-        .retain(|(k, _)| !paddock_env::RESTRICTING.contains(&k.to_str().unwrap_or_default()));
+fn a_loosening_value_the_machine_has_never_reaches_the_child() {
+    let loosening = |r: &paddock_env::Restriction| match r.name {
+        "PADDOCK_DEV_DOWNLOAD" | "RUSTUP_AUTO_INSTALL" => "1".to_string(),
+        "CARGO_NET_OFFLINE" => "false".to_string(),
+        _ => "no".to_string(),
+    };
+    let m = machine_restricting(loosening);
+    for r in paddock_env::RESTRICTING {
+        assert!(
+            !r.restricts(std::ffi::OsStr::new(&loosening(r))),
+            "{} test value restricts",
+            r.name
+        );
+    }
     let program = if cfg!(windows) { "cmd" } else { "env" };
     let seen = child_env(&mut TestCommand::on(program, &m));
-    for k in paddock_env::RESTRICTING
+    for r in paddock_env::RESTRICTING
         .iter()
-        .filter(|k| **k != "RUSTUP_AUTO_INSTALL")
+        .filter(|r| r.name != "RUSTUP_AUTO_INSTALL")
     {
         assert!(
-            !seen.contains_key(*k),
-            "{k} appeared from nowhere: {seen:?}"
+            !seen.contains_key(r.name),
+            "{}={:?} reached the child: {seen:?}",
+            r.name,
+            seen.get(r.name)
         );
     }
     assert_eq!(
@@ -135,9 +156,36 @@ fn a_machine_without_restricting_variables_gives_the_child_none_but_the_install_
     );
 }
 
-/// A child's rustup never installs a toolchain into the user's `~/.rustup` unless the caller allowed it (ER-45).
+/// Positive control (ER-33): a machine without the variables gives a child without them, so the tests above see the
+/// pass-through and not a value the child always has. `RUSTUP_AUTO_INSTALL` is the one the kit sets itself.
 #[test]
-fn the_install_ban_is_set_when_the_caller_has_none_and_the_callers_value_stands() {
+fn a_machine_without_restricting_variables_gives_the_child_none_but_the_install_ban() {
+    let mut m = machine_restricting(|r| r.pinned().to_string());
+    m.vars.retain(|(k, _)| {
+        !paddock_env::restricting_names().any(|n| n == k.to_str().unwrap_or_default())
+    });
+    let program = if cfg!(windows) { "cmd" } else { "env" };
+    let seen = child_env(&mut TestCommand::on(program, &m));
+    for r in paddock_env::RESTRICTING
+        .iter()
+        .filter(|r| r.name != "RUSTUP_AUTO_INSTALL")
+    {
+        assert!(
+            !seen.contains_key(r.name),
+            "{} appeared from nowhere: {seen:?}",
+            r.name
+        );
+    }
+    assert_eq!(
+        seen.get("RUSTUP_AUTO_INSTALL").map(String::as_str),
+        Some("0"),
+        "{seen:?}"
+    );
+}
+
+/// A child's rustup never installs a toolchain into the user's `~/.rustup` (ER-45).
+#[test]
+fn the_install_ban_is_set_when_the_caller_has_none_or_allows_installs() {
     let program = if cfg!(windows) { "cmd" } else { "env" };
     let mut none = paddock_testkit::ambient().clone();
     none.vars.retain(|(k, _)| k != "RUSTUP_AUTO_INSTALL");
@@ -151,10 +199,11 @@ fn the_install_ban_is_set_when_the_caller_has_none_and_the_callers_value_stands(
     allowed
         .vars
         .push(("RUSTUP_AUTO_INSTALL".into(), "1".into()));
+    // A developer's `RUSTUP_AUTO_INSTALL=1` is not passed on: the test's child never installs into `~/.rustup`.
     let seen = child_env(&mut TestCommand::on(program, &allowed));
     assert_eq!(
         seen.get("RUSTUP_AUTO_INSTALL").map(String::as_str),
-        Some("1"),
+        Some("0"),
         "{seen:?}"
     );
 }

@@ -106,28 +106,54 @@ mod tests {
         );
     }
 
-    /// ER-47: a variable that restricts the child survives the clearing, though nobody listed it in `keep`; a positive control
-    /// (a variable of the same shape that is not restricting) is dropped.
+    /// ER-47: a variable that restricts the child survives the clearing, though nobody listed it in `keep`, with the value the caller
+    /// has (a production child inherits it as it is, a loosening value too); a variable of the same shape that is not restricting
+    /// is dropped.
     #[test]
     fn restricting_variables_survive_the_clearing_without_being_kept() {
-        let mut env = paddock_testkit::env_lock();
-        for k in paddock_env::RESTRICTING {
-            env.set(k, "0");
+        for (value_of, what) in [
+            (
+                Box::new(|r: &paddock_env::Restriction| r.pinned().to_string())
+                    as Box<dyn Fn(&paddock_env::Restriction) -> String>,
+                "restricting",
+            ),
+            (
+                Box::new(|_: &paddock_env::Restriction| "loosen".to_string()),
+                "loosening",
+            ),
+        ] {
+            let mut env = paddock_testkit::env_lock();
+            for r in paddock_env::RESTRICTING {
+                env.set(r.name, value_of(r));
+            }
+            env.set("PADDOCK_PROC_NOT_RESTRICTING", "0");
+            let mut c = command("x");
+            clean_env(&mut c, &["PATH"]);
+            let seen: Vec<(String, String)> = c
+                .get_envs()
+                .filter_map(|(k, v)| {
+                    v.map(|v| {
+                        (
+                            k.to_string_lossy().into_owned(),
+                            v.to_string_lossy().into_owned(),
+                        )
+                    })
+                })
+                .collect();
+            for r in paddock_env::RESTRICTING {
+                assert!(
+                    seen.contains(&(r.name.to_string(), value_of(r))),
+                    "{} ({what}) was stripped or changed: {seen:?}",
+                    r.name
+                );
+            }
+            assert!(
+                !seen
+                    .iter()
+                    .any(|(k, _)| k == "PADDOCK_PROC_NOT_RESTRICTING"),
+                "{seen:?}"
+            );
         }
-        env.set("PADDOCK_PROC_NOT_RESTRICTING", "0");
-        let mut c = command("x");
-        clean_env(&mut c, &["PATH"]);
-        let seen: Vec<String> = c
-            .get_envs()
-            .map(|(k, _)| k.to_string_lossy().into_owned())
-            .collect();
-        for k in paddock_env::RESTRICTING {
-            assert!(seen.iter().any(|s| s == k), "{k} was stripped: {seen:?}");
-        }
-        assert!(
-            !seen.iter().any(|s| s == "PADDOCK_PROC_NOT_RESTRICTING"),
-            "{seen:?}"
-        );
     }
 
     #[test]

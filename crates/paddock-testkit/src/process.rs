@@ -48,7 +48,7 @@ use crate::ambient::{Ambient, ambient};
 
 /// Variables copied from the test process when it has them: the toolchain cargo and rustup need to find themselves, and what
 /// Windows needs to start any program. Nothing ambient (no tokens, proxies, `CI`, `GITHUB_*`, `PADDOCK_*`, user variables), except
-/// the restricting ones ([`paddock_env::RESTRICTING`]), which are passed too, whatever their names (ER-47).
+/// the restricting ones ([`paddock_env::RESTRICTING`]) when the caller's value restricts (ER-47).
 pub const PASSED_THROUGH: &[&str] = &[
     "RUSTUP_HOME",
     "CARGO_HOME",
@@ -115,7 +115,7 @@ pub fn allowed_names() -> Vec<&'static str> {
     names.push("PATH");
     names.extend(FIXED.iter().map(|(k, _)| *k));
     names.extend(PASSED_THROUGH.iter().copied());
-    names.extend(paddock_env::RESTRICTING.iter().copied());
+    names.extend(paddock_env::restricting_names());
     names.sort_unstable();
     names.dedup();
     names
@@ -231,11 +231,18 @@ impl TestCommand {
         // `paddock_env::command::command` is the canonical constructor (no console window on Windows, as the product's children),
         // and `paddock_proc::command` is the same function; C123 forbids a test's own `Command::new`.
         let mut cmd = paddock_env::command::command(resolved);
-        // The one clearing function, over what the kit captured, never the live environment: it passes the restricting variables
-        // the caller has (`paddock_env::RESTRICTING`: a download ban, an offline switch, a failure marker) and nothing else (ER-47).
-        paddock_env::clear_env_from(&mut cmd, &[], |k| machine.var(k).map(OsStr::to_os_string));
-        // A child's rustup must never install a toolchain into the user's `~/.rustup` unless the caller allowed it (ER-45).
-        if machine.var("RUSTUP_AUTO_INSTALL").is_none() {
+        // The one clearing function, over what the kit captured, never the live environment: a restricting variable (a download
+        // ban, an offline switch, a failure marker) is passed only when the caller's value restricts, so a developer's
+        // `PADDOCK_DEV_DOWNLOAD=1` or `CARGO_NET_OFFLINE=false` never loosens a test's child (ER-47).
+        paddock_env::clear_env_pinned_from(&mut cmd, &[], |k| {
+            machine.var(k).map(OsStr::to_os_string)
+        });
+        // A child's rustup must never install a toolchain into the user's `~/.rustup` (ER-45): pinned to `0` unless the caller's
+        // value already restricts.
+        if !cmd
+            .get_envs()
+            .any(|(k, v)| k == "RUSTUP_AUTO_INSTALL" && v.is_some())
+        {
             cmd.env("RUSTUP_AUTO_INSTALL", "0");
         }
         let root = private.path().to_path_buf();

@@ -108,7 +108,7 @@ fn git(env: &Env, dir: &Path, args: &[&str]) -> Result<(Option<i32>, String, Str
     let dir = winpath::for_tools(dir, Os::current()).map_err(|e| format!("git cannot be run in {}: {e}", dir.display()))?;
     let mut cmd = command("git");
     cmd.args(args).current_dir(dir);
-    paddock_env::clear_env(&mut cmd, &[]);
+    env.clear_into(&mut cmd);
     for (k, v) in &env.0 {
         if !matches!(
             k.as_str(),
@@ -387,7 +387,7 @@ fn npm_get(env: &Env, clone: &Path, key: &str) -> Result<Option<String>, String>
     let program = which(env, "npm").ok_or_else(|| "cannot be run (npm is not on the job's PATH)".to_string())?;
     let mut cmd = command(program);
     cmd.args(["config", "get", key]).current_dir(clone);
-    paddock_env::clear_env(&mut cmd, &[]);
+    env.clear_into(&mut cmd);
     for (k, v) in &env.0 {
         cmd.env(k, v);
     }
