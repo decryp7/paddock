@@ -1220,3 +1220,11 @@ owner = "ER-21 class: time-of-day-dependent e2e on a clock-relative mock (CI run
 since = 2026-11-16
 review_by = 2026-12-16
 approved = "coordinator"
+
+[[report_only]]
+id = "C137"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C137-e2e-kit-import.mjs, then flip SEVERITY to error. An app e2e spec that imports @decryp7/paddock-e2e by package name needs its workflow to build it (build:e2e) or a relative source import (the Debrief dock spec ran no test in any shard)."
+owner = "ER-21 class: a spec imports what its CI job never builds"
+since = 2026-11-17
+review_by = 2026-12-17
+approved = "coordinator"

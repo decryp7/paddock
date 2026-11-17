@@ -20,7 +20,7 @@ export async function openChat(page: Page): Promise<Locator> {
   return panel;
 }
 
-/** Sends a question and waits until the answer finished streaming (Send is back). */
+/** Sends a question and returns at once: the answer streams on. Follow it with `waitAnswered` before pressing anything in the answer (a card above which text still arrives moves). */
 export async function ask(panel: Locator, question: string): Promise<void> {
   await panel.getByRole('textbox', { name: 'Ask about the logs' }).fill(question);
   await panel.getByRole('button', { name: 'Send', exact: true }).click();

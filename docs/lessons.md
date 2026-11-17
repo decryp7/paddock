@@ -2477,3 +2477,69 @@ polite ask and the forced end never ran, and `end`'s outcome was dropped): a sig
 end of a stop. **Rule:** a kill action names a
 `ProcessId`, never a pid plus an optional time. **Class: an OS name acted on without identity (earlier: ADR 0033 WP-6 sites; the
 family `ProcessRef` follows).**
+## The midnight/noon sweep: six of seven e2e failures were not about the time (2026-11-17)
+The pinned-clock sweep (`PADDOCK_E2E_NOW` at 2026-11-15T23:59Z, 2026-11-16T00:19Z and 12:00Z, every app, both engines, once each) failed
+seven specs: Debrief `ux-welcome` (before and after), `ai-chat` (before), `dock-default-split` (noon); ui `gallery`
+(after), `material` twice and `workbench-demo` (noon). Each was run 40 to 240 times at its failing instant and at the others. **None depends on
+the instant** (rates within noise: 8, 8 and 9 of 100; 7, 3 and 0 of 120; 3, 0 and 1 of 40); the instant only decided which run of a
+roughly 5 to 10 % failure was the one the sweep saw (the two WebKit-only ones passed 120 of 120 in Chromium). Hypotheses for "time-dependent" (a date or hour in the code under test, a day boundary
+in a format, a timezone) were refuted by those equal rates and by failures that show no date. The causes, each confirmed by a run without it:
+- **`ux-welcome` palette order (WebKit, 3 of 40 at before, 1 of 40 noon, 0 of 40 after).** The spec read the options as soon as "an option is
+  visible"; the palette still showed the unfiltered list (recent and common commands, where "Connect to Pitwall" is the 9th), so the index
+  was 8 on every failure, and the final DOM of every failing run was correct. Fix: read after the first option has a `mark` (the filter's highlight, which the
+  unfiltered list has none of). After: 0 of 100 failed (100 runs, 4 workers, WebKit).
+- **`ai-chat` pipeline proposal (WebKit, 8, 9 and 8 of 100).** The spec pressed "Add to profile" while the answer's text still streamed in above
+  the card; the card moved between press and release, so no click arrived (the probe saw the same element, no running turn, no Undo
+  entry: `apply` never ran). With the answer done first: 0 of 100 (100 runs, 5 workers, WebKit); with the fix in the spec: 0 of 100 (same). A press on a moving target is not a click.
+- **`dock-default-split` (both engines, 7 and 3 of 120 at before and noon, 0 at after).** A product fault the spec found: the dock sat 36 px from the top
+  until the lazy filter bar arrived, its placeholder was 30 px where the bar is 51 px, and the bar was 59 px for a frame (its status line host
+  had no `empty` class before the first update, so its 8 px gap counted). The dock top moved 66, 87, 95, 87 px after "ready" and the groups re-scaled
+  (279/502/781 then 282/507/789). The review of the first fix found that a fixed placeholder is right in wide windows only (the bar wraps to 87 px
+  at 800 to 1100 px and WebKit showed 123 then 87 at 900 px), and that `settledLayout` is a proxy for the dock's own re-plan. Fixed in the product:
+  the filter bar is no longer deferred (it is above the fold and its height depends on the window width; no placeholder), `debrief-query-status` is
+  hidden until it has something to show, the bar measures its width before its first render, and the dock has a real ready signal,
+  `data-dock-planned` on `debrief-dock-host` (`DockService.planned`: the first fit has run, no resize waits for its debounced re-plan, and two
+  frames have passed since the last plan started, because what a plan's listeners do resizes the dock once more). The spec records the dock's top and
+  the groups' heights from the first moment with resize observers, waits on the signal, and asserts that nothing changes after it, at 1440 and
+  900 px: red in 20 of 20 runs on the old code (10 runs per engine, 5 workers), 80 of 80 green after (20 runs, 4 workers, both engines, both widths).
+  **Narrow windows (partly fixed, open):** below 1000 px the Explorer was open for the first frames and `NarrowWindow` closed it by the dock's
+  first plan, so the bar widened (123 to 87 px) and the dock top moved. Windows under 920 px now start with the Explorer closed (`EXPLORER_MIN_WINDOW_PX`;
+  the Explorer's open flag was never saved, so there is no saved choice to honour). The spec asserts a constant dock top, left edge and width at 1440,
+  1100, 1000, 900 and 700 px. **Open (review of 1ba208da9):** the constant is a hand copy of the plan's decision and is wrong at 920 to 934 px, where the
+  plan closes the Explorer after the first draw (the dock's left edge 320 to 48, at heights of 600 to 900 px, both engines). Three attempts to ask the
+  plan itself (a pure `planLayout` call for the default arrangement before the dock exists; the dock's own `explorerVerdict` after the render that draws
+  the filter bar and the Explorer; the same with a synchronous `api.layout` afterwards) did not remove the move: the pure call says "fits" because the
+  dock's height includes the filter bar, which only the first data brings, and the real verdict closes the Explorer one plan later; after a container change
+  dockview's inline size follows three frames later in drawn frames (`requestAnimationFrame` samples: stage 48+880 with the dock 48+580, 49 ms
+  later 48+852). The fix that makes the class impossible is a dock that follows its container in the same frame (dockview's `layout` called from a
+  resize observer of ours, or a CSS-sized root) and a first plan that runs before the Explorer is drawn; about one agent-day, and a product decision.
+- **A reader that compares a read with the one two polls before (found in review).** `settledLayout` kept `previous` and `last` and compared the new
+  read with `previous`, so A, B, A passed as "two reads in a row". It now compares with the read just before; the test is red on the old code (settled on
+  the third read) and green after (the fourth).
+- **`material` select and Tab walk (Chromium, 4 and 6 of 40 per theme at after; the sweep's noon pair).** The spec drove the section as soon as its first
+  button was in the DOM. That is the creation pass; the update pass (the select's `aria-expanded`, the form field's control, the picker
+  inputs' bindings) comes later, up to 60 ms in the probe. Meanwhile a click hit "onContainerClick of undefined", a keydown hit NG0950
+  "timepicker is required", and the Tab walk left the section before the select. Fix: wait for the Level select's `aria-expanded`. After: 0 of 160 (160 runs, 1 worker, Chromium; 10 of 160 before).
+- **`gallery` open select list (Chromium, 5 of 40, 12 of 60, always 536.09 px off).** `toBeVisible` of the list is true a frame or two before the
+  overlay positions it (at x 0, 131 px wide; 40 ms later at the field's x and 212 px). Fix: wait for the alignment (`expect.poll`, a failing
+  list stays red with the last offset). After: 0 of 100 (100 runs, 1 worker, Chromium).
+- **`workbench-demo` Jobs view: not reproduced.** 0 of 100 at noon (40 idle, 60 with 8 CPU burners), once in the sweep; the failure page shows the palette open
+  with "View: Show jobs" selected after the second `run`. Cause not found, so no fix (ER-33: not measured); the palette helper's failure message
+  now names the label it was running. Next step: run the spec under the full suite's load with `--trace on` until it fails once.
+**Why the logs did not show it:** the specs read the page once and compared; none printed what the page showed at that moment. The material
+errors were in the dev server's console only.
+A second find of the review: the dock spec imported the kit by package name, which Debrief's e2e jobs never build, so every shard ran no test; C137 (report-only) flags it.
+**Class: a spec that acts or reads on "it is in the DOM" while the page is not ready or still moving** (earlier: the toast whose Show missed
+its click, the Dyno Firewall layout read before it settled (`settledLayout`), the Debrief menu that ran its neighbour's command; ER-21 candidate:
+a shared "ready" per kind of check, with a lint over `waitForTimeout` and first-visible reads).
+
+## A broad `pkill -f` by an agent, with the kill guard not wired (2026-11-17)
+While cleaning up its own e2e servers an implementer ran `pkill -f "ng serve"` (and later `pkill -f "ng serve gallery --port 4701"`, own ports). The first
+pattern matches every agent's dev server on the machine, so it may have ended other agents' runs; nobody reported one, and none can be ruled out.
+Hypotheses: the guard did not fire because it only covers `kill PID` (refuted: `.claude/hooks/kill-guard.py` refuses `pkill`, `killall` and `killall5`
+for agents, with a test) or because the pattern was inside a `&&` chain (refuted: lib/shellscan.py scans every command of a chain). **Cause:** the
+main checkout's local `.claude/settings.json` wires six hooks (docker-guard, no-force-push, no-pgrep-wait, recurring-guard, scratch-root-guard,
+worktree-guard) and not `kill-guard.sh`, whose header says the coordinator wires it after the train lands. **Rule for agents:** end only what you
+started, through the tool that started it (`run_in_background` with TaskStop, or `kill %job`), or by the port you picked after `lsof` shows your own
+process in your own folder; never by a pattern on a program name. **Class: a guard that exists, is tested and is not wired** (earlier: the coordinator-hook
+rollout of 2026-11-12).

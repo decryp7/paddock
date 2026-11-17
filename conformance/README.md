@@ -108,6 +108,7 @@ The check index (generated from each module's id, title, scope, mode and needs):
 | C131 | A golden file holds no value of the machine that captured it | root | report-only | all |
 | C133 | E2E specs: opt-outs of the pinned clock say why, live steps are paused, waits are never vacuous | root | report-only | all |
 | C135 | The test leak detector is switched off only where listed | root | report-only | all |
+| C137 | An app e2e spec imports the kit by package name only when its CI job builds it | root | report-only | all |
 <!-- checks:end -->
 
 Notes per check (written by hand; the index above is the complete list):

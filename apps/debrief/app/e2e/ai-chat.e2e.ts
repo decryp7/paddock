@@ -103,6 +103,9 @@ test.describe('AI chat', () => {
     await ask(chat, 'drop health checks with a pipeline');
     const card = chat.getByTestId('ai-proposal');
     await expect(card).toContainText('keeps 52, drops 8, changes 0');
+    // The answer's text still streams in above the card and moves it; a press and release on a moving card is no click (8 of 100 in
+    // WebKit, the same at every pinned instant; 0 of 100 once the answer is done).
+    await waitAnswered(chat);
     await card.getByRole('button', { name: 'Add to profile' }).click();
     await expect(card).toContainText('Pipeline steps added to the profile');
     await openMenu(page, 'Edit');

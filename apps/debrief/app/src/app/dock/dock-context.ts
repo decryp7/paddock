@@ -34,6 +34,10 @@ export class DockContext {
   mru: string[] = [];
 
   readonly apiReady = signal(false);
+  /** True once the first fit to the measured window has run (the default split is then applied). */
+  readonly firstPlanned = signal(false);
+  /** True while a resize of the container waits for its (debounced) re-plan. */
+  readonly replanPending = signal(false);
   /** Ids of the panels in the layout (docked or floating). */
   readonly docked = signal<ReadonlySet<string>>(new Set());
   /** Ids of the panels showing now: each group's active tab (the others are tabs behind it). */

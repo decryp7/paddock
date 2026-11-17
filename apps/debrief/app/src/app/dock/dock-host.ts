@@ -36,6 +36,8 @@ export const HOVER_HIDE_MS = 300;
   selector: 'debrief-dock-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
+  // `data-dock-planned` is set once the arrangement is planned for the window's current size (DockService.planned): specs and screenshots wait on it.
+  host: { '[attr.data-dock-planned]': 'dock.planned() ? "" : null' },
   imports: [DockSwitcher, Icon],
   template: `
     @for (side of sides; track side) {
