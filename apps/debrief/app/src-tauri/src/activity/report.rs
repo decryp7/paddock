@@ -23,8 +23,9 @@ use super::breadcrumbs::Breadcrumb;
 use super::privacy::is_secret_key;
 use crate::snapshots::{tail_of, SnapshotStore};
 use crate::{err, CmdResult};
-use chrono::{DateTime, Datelike, SecondsFormat, Timelike, Utc};
 use debrief_ipc::child_log::ProcessSummary;
+use jiff::tz::TimeZone;
+use jiff::Timestamp;
 use manifest::{FileKind, Manifest, ManifestFile};
 use paddock_diag::RedactionCounts;
 use serde::Serialize;
@@ -86,7 +87,7 @@ pub struct ReportInputs {
     /// Whether this run found that the previous one did not close properly (`None`: not known here).
     pub previous_crash: Option<bool>,
     /// When the report is made (also the time of every zip entry).
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     /// Replaces the gathered system information (reproducible samples).
     pub system_override: Option<Value>,
     /// Whether the window screenshots of the error snapshots go in. Off unless the user ticks the box in the
@@ -110,7 +111,7 @@ impl ReportInputs {
             safe_mode: false,
             live_children: Vec::new(),
             previous_crash: None,
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
             system_override: None,
             include_screenshots: false,
             redactor: redaction::machine_redactor(),
@@ -490,7 +491,7 @@ pub(crate) fn all_files(inputs: &ReportInputs, description: &str) -> Vec<ReportF
     let manifest = Manifest::new(
         text("appVersion"),
         text("commit"),
-        inputs.created_at.to_rfc3339_opts(SecondsFormat::Millis, true),
+        debrief_core::time::rfc3339_utc(inputs.created_at, debrief_core::time::Fraction::Millis),
         files
             .iter()
             .map(|f| ManifestFile {
@@ -534,7 +535,8 @@ pub fn preview(inputs: &ReportInputs, description: &str) -> ProblemReportPreview
 
 /// A zip entry time (zip times are local wall clock without a zone; Debrief writes UTC). Clamped to the
 /// format's range (1980..2107).
-fn zip_time(t: &DateTime<Utc>) -> zip::DateTime {
+fn zip_time(t: &Timestamp) -> zip::DateTime {
+    let t = t.to_zoned(TimeZone::UTC);
     let year = t.year().clamp(1980, 2107) as u16;
     zip::DateTime::from_date_and_time(
         year,
@@ -623,7 +625,7 @@ fn inputs<R: tauri::Runtime>(app: &tauri::AppHandle<R>, include_screenshots: boo
         safe_mode: life.as_ref().is_some_and(|l| l.safe_mode),
         live_children: debrief_ipc::child_log::statuses(),
         previous_crash: life.as_ref().map(|l| l.previous_crash),
-        created_at: Utc::now(),
+        created_at: Timestamp::now(),
         system_override: None,
         include_screenshots,
         redactor: redaction::machine_redactor(),
@@ -1354,9 +1356,10 @@ pub(crate) mod tests {
 
     #[test]
     fn zip_times_are_clamped_to_the_format() {
-        let t = DateTime::parse_from_rfc3339("1970-01-01T00:00:00Z").unwrap().with_timezone(&Utc);
+        let at = |s: &str| Timestamp::from_millisecond(debrief_core::strptime::parse_rfc3339_ms(s).unwrap()).unwrap();
+        let t = at("1970-01-01T00:00:00Z");
         assert_eq!(zip_time(&t).year(), 1980);
-        let t = DateTime::parse_from_rfc3339("2026-10-14T09:30:15Z").unwrap().with_timezone(&Utc);
+        let t = at("2026-10-14T09:30:15Z");
         let z = zip_time(&t);
         assert_eq!(
             (z.year(), z.month(), z.day(), z.hour(), z.minute(), z.second()),

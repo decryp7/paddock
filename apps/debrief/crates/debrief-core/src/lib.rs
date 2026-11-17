@@ -73,7 +73,7 @@ pub mod words;
 pub mod workspace;
 
 // The values plugins build live in the plugin contract (ADR 0017); the engine uses the same definitions.
-pub use debrief_plugin_api::{model, process, time, user_regex};
+pub use debrief_plugin_api::{model, process, strptime, time, user_regex};
 
 /// The event batch of ADR 0014 §3 ([`debrief_batch`]).
 pub use debrief_batch as batch;

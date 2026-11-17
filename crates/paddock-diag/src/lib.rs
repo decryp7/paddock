@@ -11,7 +11,7 @@
 //! let dirs = AppDirs::for_app(&id)?;
 //! let app = AppInfo::new("spotter", "Spotter", "1.0.0", "");
 //! let redactor = Redactor::for_machine(&ProcessVars);
-//! let collected = Collected::collect(&app, &dirs, &builtin::all(), &redactor, chrono::Utc::now());
+//! let collected = Collected::collect(&app, &dirs, &builtin::all(), &redactor, jiff::Timestamp::now());
 //! let report = collected.assemble("The timeline stays empty after a reload");
 //! let preview = report.preview();                                   // what the dialog lists, with sizes
 //! report.save(std::path::Path::new("/Users/me/spotter-diagnostics.zip"), &CancelToken::new(), &())?;

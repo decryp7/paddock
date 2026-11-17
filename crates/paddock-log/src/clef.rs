@@ -1,8 +1,9 @@
 //! The log line format: Serilog's compact JSON (CLEF, decision D1), one event per line, so a log opens in Debrief itself
 //! and in Seq and other Serilog tools. Debrief's own log has used it since 1.0.
 
-use chrono::{DateTime, SecondsFormat, Utc};
+use jiff::Timestamp;
 use log::kv::{Key, Value as KvValue, VisitSource};
+use paddock_jobs::stamp::{Precision, rfc3339};
 use serde_json::{Map, Value};
 
 /// Properties attached to every event, so a log can be matched to the exact build and run.
@@ -30,7 +31,7 @@ pub struct Enrichment {
 /// `@t` time, `@l` level (omitted for Information, as CLEF does), `@m` the rendered message; `Severity = "Fatal"` raises
 /// the level above what `log` has; `MessageTemplate` becomes `@mt`; keys starting with `@` are escaped as `@@`.
 pub fn format_event(
-    time: DateTime<Utc>,
+    time: Timestamp,
     level: log::Level,
     target: &str,
     message: &str,
@@ -38,10 +39,7 @@ pub fn format_event(
     enrich: &Enrichment,
 ) -> String {
     let mut event = Map::new();
-    event.insert(
-        "@t".into(),
-        Value::from(time.to_rfc3339_opts(SecondsFormat::Micros, true)),
-    );
+    event.insert("@t".into(), Value::from(rfc3339(time, Precision::Micros)));
     if let Some(level) = clef_level(level) {
         event.insert("@l".into(), Value::from(level));
     }
@@ -128,7 +126,6 @@ pub(crate) fn test_enrichment() -> Enrichment {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
     fn parse(line: &str) -> Map<String, Value> {
         serde_json::from_str::<Value>(line)
@@ -140,7 +137,7 @@ mod tests {
 
     #[test]
     fn formats_levels_and_enrichment() {
-        let t = Utc.with_ymd_and_hms(2026, 10, 17, 8, 30, 0).unwrap();
+        let t = "2026-10-17T08:30:00Z".parse::<Timestamp>().unwrap();
         let e = parse(&format_event(
             t,
             log::Level::Info,
@@ -189,7 +186,7 @@ mod tests {
 
     #[test]
     fn properties_keep_types_and_reserved_keys_are_handled() {
-        let t = Utc.with_ymd_and_hms(2026, 10, 17, 8, 30, 0).unwrap();
+        let t = "2026-10-17T08:30:00Z".parse::<Timestamp>().unwrap();
         let mut props = Map::new();
         props.insert("Rows".into(), 3.into());
         props.insert("@secret".into(), "x".into());

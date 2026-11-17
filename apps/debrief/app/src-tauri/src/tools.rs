@@ -685,10 +685,10 @@ pub(crate) mod tests {
         let first = call(&main, "diagnostics", "collect", json!({ "plan": plan, "outDir": out })).unwrap();
         let bundle = first["bundle"].as_str().unwrap().to_string();
         let prefix = &bundle[..bundle.len() - "yyyyMMdd-HHmmss.debriefz".len()];
-        let now = chrono::Local::now();
+        let now = debrief_core::time::now_ms();
         for s in 0..10 {
-            let at = now + chrono::Duration::seconds(s);
-            let _ = std::fs::write(format!("{prefix}{}.debriefz", at.format("%Y%m%d-%H%M%S")), "mine");
+            let at = debrief_core::time::file_stamp(now + s * 1000, true).unwrap();
+            let _ = std::fs::write(format!("{prefix}{at}.debriefz"), "mine");
         }
         let refused = call(&main, "diagnostics", "collect", json!({ "plan": plan, "outDir": out })).unwrap_err();
         assert!(

@@ -101,7 +101,7 @@ enum OnExit {
 
 struct Inner {
     phase: UpdatePhase,
-    last_checked: Option<chrono::DateTime<chrono::Utc>>,
+    last_checked: Option<jiff::Timestamp>,
     /// Bumped by every download and cancel; results of an older download are ignored.
     generation: u64,
     task: Option<tauri::async_runtime::JoinHandle<()>>,
@@ -150,8 +150,8 @@ impl Updates {
         let last_checked = rec
             .last_checked
             .as_deref()
-            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-            .map(|t| t.with_timezone(&chrono::Utc));
+            .and_then(debrief_core::strptime::parse_rfc3339_ms)
+            .and_then(|ms| jiff::Timestamp::from_millisecond(ms).ok());
         Updates {
             client,
             current_version,
@@ -181,7 +181,9 @@ impl Updates {
         UpdateStatus {
             current_version: self.current_version.clone(),
             phase: inner.phase.clone(),
-            last_checked: inner.last_checked.map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+            last_checked: inner
+                .last_checked
+                .map(|t| debrief_core::time::rfc3339_utc(t, debrief_core::time::Fraction::Secs)),
             auto_check: settings.auto_check,
             channel: settings.channel.as_str(),
             endpoint_host: self.endpoint_host.clone(),
@@ -233,10 +235,10 @@ impl Updates {
         if let Err(e) = &result {
             log::warn!(Kind = e.kind(); "Update check failed: {e}");
         }
-        let now = chrono::Utc::now();
+        let now = jiff::Timestamp::now();
         self.lock().last_checked = Some(now);
         let mut rec = record::load(self.record_dir.as_deref());
-        rec.last_checked = Some(now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+        rec.last_checked = Some(debrief_core::time::rfc3339_utc(now, debrief_core::time::Fraction::Secs));
         record::save(self.record_dir.as_deref(), &rec);
         Ok(self.apply(Event::Checked(result), |_| {}).unwrap_or_else(|_| self.status()))
     }
@@ -339,7 +341,9 @@ impl Updates {
     /// Whether the automatic check should run now.
     pub fn auto_check_due(&self) -> bool {
         let inner = self.lock();
-        let since = inner.last_checked.map(|t| (chrono::Utc::now() - t).num_seconds().max(0) as u64);
+        let since = inner
+            .last_checked
+            .map(|t| jiff::Timestamp::now().duration_since(t).as_secs().max(0) as u64);
         self.client.is_some()
             && state::auto_check_due(
                 self.settings.get().auto_check,

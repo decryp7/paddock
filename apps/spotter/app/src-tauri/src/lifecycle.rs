@@ -70,8 +70,7 @@ pub fn opener<R: Runtime>(app: &AppHandle<R>) -> Arc<dyn OpenLocation> {
 }
 
 fn local_offset_minutes() -> i32 {
-    use chrono::Offset;
-    chrono::Local::now().offset().fix().local_minus_utc() / 60
+    jiff::tz::TimeZone::system().to_offset(jiff::Timestamp::now()).seconds() / 60
 }
 
 /// Tells the clock the machine's current UTC offset and time zone name (schedules follow daylight saving by name).
@@ -171,7 +170,7 @@ pub fn notifications_paused(engine: &Engine) -> bool {
 }
 
 fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
+    jiff::Timestamp::now().as_millisecond()
 }
 
 /// A click on a tray menu item.

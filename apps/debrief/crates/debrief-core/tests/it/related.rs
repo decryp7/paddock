@@ -36,10 +36,7 @@ fn store() -> &'static (dyn LogStore + 'static) {
 }
 
 fn ms(h: u32, m: u32, s: u32) -> i64 {
-    chrono::NaiveDate::from_ymd_opt(2026, 10, 14)
-        .and_then(|d| d.and_hms_opt(h, m, s))
-        .map(|t| t.and_utc().timestamp_millis())
-        .unwrap()
+    debrief_plugin_api::time::utc_epoch_ms(2026, 10, 14, h, m, s, 0).unwrap()
 }
 
 /// The store's `Query` port over the in-memory store (only what the adapter uses).

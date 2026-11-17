@@ -13,8 +13,9 @@ use crate::manifest::{
 use crate::personal::RedactionCounts;
 use crate::redact::Redactor;
 use crate::section::{Content, Context, Section};
-use chrono::{DateTime, Datelike, SecondsFormat, Timelike, Utc};
+use jiff::{Timestamp, tz::TimeZone};
 use paddock_env::AppDirs;
+use paddock_jobs::stamp::{Precision, rfc3339};
 use paddock_jobs::{CancelToken, Counter};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -90,7 +91,7 @@ pub struct ReportFile {
 #[derive(Debug, Clone)]
 pub struct Collected {
     app: AppInfo,
-    created_at: DateTime<Utc>,
+    created_at: Timestamp,
     files: Vec<ReportFile>,
     notes: Vec<String>,
     redactions: RedactionCounts,
@@ -121,7 +122,7 @@ impl Collected {
         dirs: &AppDirs,
         sections: &[Arc<dyn Section>],
         redactor: &Redactor,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Collected {
         Collected::collect_with(app, dirs, sections, redactor, now, Limits::default())
     }
@@ -132,7 +133,7 @@ impl Collected {
         dirs: &AppDirs,
         sections: &[Arc<dyn Section>],
         redactor: &Redactor,
-        now: DateTime<Utc>,
+        now: Timestamp,
         limits: Limits,
     ) -> Collected {
         let cx = Context { app, dirs, now };
@@ -238,7 +239,7 @@ impl Collected {
             kind: MANIFEST_KIND.into(),
             schema_version: SCHEMA_VERSION,
             app: self.app.clone(),
-            created_at: self.created_at.to_rfc3339_opts(SecondsFormat::Millis, true),
+            created_at: rfc3339(self.created_at, Precision::Millis),
             redactions: self.redactions,
             notes: self.notes.clone(),
             files: files
@@ -379,7 +380,7 @@ pub struct Saved {
 /// The files of a report, ready to preview and to write.
 #[derive(Debug, Clone)]
 pub struct Report {
-    created_at: DateTime<Utc>,
+    created_at: Timestamp,
     files: Vec<ReportFile>,
     notes: Vec<String>,
     redactions: RedactionCounts,
@@ -459,7 +460,8 @@ impl Report {
 }
 
 /// A zip entry time (zip times are local wall clock without a zone; reports use UTC), clamped to the format's range.
-fn zip_time(t: &DateTime<Utc>) -> zip::DateTime {
+fn zip_time(t: &Timestamp) -> zip::DateTime {
+    let t = t.to_zoned(TimeZone::UTC);
     let year = t.year().clamp(1980, 2107) as u16;
     zip::DateTime::from_date_and_time(
         year,
@@ -512,6 +514,10 @@ pub fn validate_destination(path: &Path) -> Result<PathBuf> {
 }
 
 /// The file name suggested in the save dialog: `<app id>-diagnostics-<UTC time>.zip`.
-pub fn suggested_name(app: &AppInfo, now: DateTime<Utc>) -> String {
-    format!("{}-diagnostics-{}.zip", app.id, now.format("%Y%m%d-%H%M%S"))
+pub fn suggested_name(app: &AppInfo, now: Timestamp) -> String {
+    format!(
+        "{}-diagnostics-{}.zip",
+        app.id,
+        now.strftime("%Y%m%d-%H%M%S")
+    )
 }

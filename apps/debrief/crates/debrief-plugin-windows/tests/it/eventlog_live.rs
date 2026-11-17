@@ -125,7 +125,7 @@ mod live {
 
     #[test]
     fn follows_the_real_event_log() {
-        let nonce = format!("debrief-follower-{}-{}", std::process::id(), chrono::Utc::now().timestamp_millis());
+        let nonce = format!("debrief-follower-{}-{}", std::process::id(), debrief_plugin_api::time::now_ms());
         let dir_scratch = tempfile::tempdir().unwrap();
         let dir: PathBuf = dir_scratch.path().join(&nonce);
         let store = dir.join("bookmarks.json");
@@ -151,7 +151,7 @@ mod live {
         assert!(r.fields["RecordId"].as_u64().unwrap() > 0);
         assert!(r.fields.contains_key("Computer"));
         assert_eq!(r.level, Level::Information);
-        assert!(r.ts.is_some_and(|t| (chrono::Utc::now().timestamp_millis() - t).abs() < 120_000));
+        assert!(r.ts.is_some_and(|t| (debrief_plugin_api::time::now_ms() - t).abs() < 120_000));
         // eventcreate's message table formats the description as the message.
         assert!(r.message.contains(&first), "{}", r.message);
         assert!(

@@ -211,7 +211,6 @@ mod tests {
     use super::*;
     use crate::model::Level;
     use crate::profile::{CompiledProfile, Profile};
-    use chrono::NaiveDate;
     use std::path::Path;
 
     fn import(profile: &str, content: &str) -> Imported {
@@ -219,7 +218,7 @@ mod tests {
         let ctx = ImportCtx {
             profile: &p,
             path: Path::new("x.log"),
-            file_date: NaiveDate::from_ymd_opt(2026, 10, 14),
+            file_date: debrief_plugin_api::time::ymd(2026, 10, 14),
         };
         assert!(TextImporter.sniff(&ctx, content) > 0);
         TextImporter.import(&ctx, content).unwrap()
@@ -390,8 +389,8 @@ mod tests {
             "[format]\nregexes = ['^(?P<timestamp>\\d\\d/\\d\\d/\\d{4} \\d\\d:\\d\\d:\\d\\d) (?P<message>.*)$']\noutput_templates = []",
             "03/04/2026 10:00:00 a\n25/04/2026 10:00:00 b\n",
         );
-        let first = chrono::DateTime::from_timestamp_millis(out.records[0].ts.unwrap()).unwrap();
-        assert_eq!(first.date_naive(), NaiveDate::from_ymd_opt(2026, 4, 3).unwrap());
+        let first = debrief_plugin_api::time::utc_date_of(out.records[0].ts.unwrap()).unwrap();
+        assert_eq!(first, debrief_plugin_api::time::ymd(2026, 4, 3).unwrap());
     }
 
     #[test]
@@ -401,8 +400,8 @@ mod tests {
             "[format]\nday_first = false\nregexes = ['^(?P<timestamp>\\d\\d/\\d\\d/\\d{4} \\d\\d:\\d\\d:\\d\\d) (?P<message>.*)$']\noutput_templates = []",
             "03/04/2026 10:00:00 a\n25/04/2026 10:00:00 b\n",
         );
-        let first = chrono::DateTime::from_timestamp_millis(out.records[0].ts.unwrap()).unwrap();
-        assert_eq!(first.date_naive(), NaiveDate::from_ymd_opt(2026, 3, 4).unwrap());
+        let first = debrief_plugin_api::time::utc_date_of(out.records[0].ts.unwrap()).unwrap();
+        assert_eq!(first, debrief_plugin_api::time::ymd(2026, 3, 4).unwrap());
         assert_eq!(out.records[1].ts, None, "25 is not a month");
     }
 
@@ -494,8 +493,7 @@ mod tests {
         // The file was last written on 2026-10-14 (see `import`): December is the year before, October this year.
         let profile = "[format]\noutput_templates = []\ntimestamp_formats = ['%b %e %H:%M:%S']\nregexes = ['^(?P<timestamp>\\w{3} [ \\d]\\d \\d{2}:\\d{2}:\\d{2}) (?P<level>\\w+) (?P<message>.*)$']";
         let out = import(profile, "Dec 31 23:00:00 INFO old\nOct 13 10:00:00 INFO recent\n");
-        let year = |i: usize| chrono::DateTime::from_timestamp_millis(out.records[i].ts.unwrap()).unwrap().year();
-        use chrono::Datelike;
+        let year = |i: usize| debrief_plugin_api::time::utc_date_of(out.records[i].ts.unwrap()).unwrap().year();
         assert_eq!((year(0), year(1)), (2025, 2026));
     }
 

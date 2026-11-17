@@ -53,10 +53,7 @@ mod tests {
             let text: String = (0..6i64)
                 .map(|n| {
                     let ms = 1_791_972_000_000 + n * 7_000 + skew;
-                    let t = chrono::DateTime::from_timestamp_millis(ms)
-                        .unwrap()
-                        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                        .to_string();
+                    let t = debrief_core::time::rfc3339_utc_ms(ms, debrief_core::time::Fraction::Millis).unwrap();
                     format!("{{\"@t\":\"{t}\",\"@m\":\"{host} {n}\",\"CorrelationId\":\"c{n}\"}}\n")
                 })
                 .collect();

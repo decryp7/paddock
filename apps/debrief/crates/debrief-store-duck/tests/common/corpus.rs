@@ -99,8 +99,9 @@ pub fn corpus(dir: &Path, events: u64) -> PathBuf {
                     break 'copies;
                 }
                 let mut o = Map::new();
-                let t = chrono::DateTime::from_timestamp_millis(s.ts + k as i64 * period).unwrap_or_default();
-                o.insert("@t".into(), Value::String(t.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()));
+                let t =
+                    debrief_core::time::rfc3339_utc_ms(s.ts + k as i64 * period, debrief_core::time::Fraction::Millis).unwrap_or_default();
+                o.insert("@t".into(), Value::String(t));
                 for (key, v) in &s.clef {
                     let v = match (key.as_str(), v) {
                         ("MachineName", Value::String(m)) => Value::String(format!("{m}-{:02}", k % INSTANCE_GROUPS)),

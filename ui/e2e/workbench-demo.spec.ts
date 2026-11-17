@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { axeViolations, expectNoHorizontalScroll, THEMES, WorkbenchApp } from '@decryp7/paddock-e2e';
+import { axeViolations, expectNoHorizontalScroll, expectNotMoving, THEMES, WorkbenchApp } from '@decryp7/paddock-e2e';
 
 // The workbench demo is the reference consumer of @decryp7/paddock-ui/workbench (ADR 0013 §4; plan W4, W7). It uses only
 // the test kit (@decryp7/paddock-e2e): the workbench page objects and the shell's.
@@ -371,7 +371,11 @@ test('the rename row in Manage layouts: the buttons stand on the field\'s line, 
   const wb = new WorkbenchApp(page);
   await wb.frame.open();
   await page.getByRole('menuitem', { name: 'Window', exact: true }).click();
-  await page.getByRole('menuitem', { name: /Save layout/i }).click();
+  // The item is pressed once the opening menu has stopped moving: in the full WebKit project a click during the menu's entry
+  // animation left the menu open and no dialog (run 8215, 8218; reproduced locally in the full project, 1 of 437).
+  const save = page.getByRole('menuitem', { name: /Save layout/i });
+  await expectNotMoving(save, 'the Save layout item');
+  await save.click();
   await page.getByTestId('dialog-action-save').click();
   await page.getByRole('menuitem', { name: 'Window', exact: true }).click();
   await page.getByRole('menuitem', { name: /Manage layouts/i }).click();

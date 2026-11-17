@@ -107,7 +107,7 @@ fn timers_fire_when_due_and_state_is_recorded() {
     assert!(agent.due().is_empty());
     let again = Agent::new(config(out.path(), ""), e.deps.clone(), Arc::new(AtomicBool::new(false)));
     assert_eq!(again.state().get("nightly").last_status, Some(RunStatus::Ok));
-    assert_eq!(again.anchors["nightly"].timestamp_millis(), st.last_run_ms.unwrap());
+    assert_eq!(again.anchors["nightly"].as_millisecond(), st.last_run_ms.unwrap());
 }
 
 #[test]

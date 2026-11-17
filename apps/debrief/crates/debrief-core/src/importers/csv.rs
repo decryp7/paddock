@@ -516,12 +516,7 @@ mod tests {
     }
 
     fn utc_ms(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32, milli: u32) -> i64 {
-        chrono::NaiveDate::from_ymd_opt(y, mo, d)
-            .unwrap()
-            .and_hms_milli_opt(h, mi, s, milli)
-            .unwrap()
-            .and_utc()
-            .timestamp_millis()
+        debrief_plugin_api::time::utc_epoch_ms(y, mo, d, h, mi, s, milli).unwrap()
     }
 
     /// A log4net-style CSV without a header whose date and time are split by the delimiter (invented values).

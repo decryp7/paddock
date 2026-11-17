@@ -36,11 +36,7 @@ fn recorded_events_map_to_the_importer_fields() {
     assert_eq!(r.level, Level::Information);
     assert_eq!(
         r.ts,
-        Some(
-            chrono::DateTime::parse_from_rfc3339("2026-10-17T13:26:31.172Z")
-                .unwrap()
-                .timestamp_millis()
-        )
+        Some(debrief_plugin_api::strptime::parse_rfc3339_ms("2026-10-17T13:26:31.172Z").unwrap())
     );
     assert!(r
         .message
@@ -101,11 +97,7 @@ fn unnamed_data_and_user_data() {
     assert_eq!(r.fields["Binary"], "DEADBEEF");
     assert_eq!(
         r.ts,
-        Some(
-            chrono::DateTime::parse_from_rfc3339("2026-10-17T09:00:01.5Z")
-                .unwrap()
-                .timestamp_millis()
-        )
+        Some(debrief_plugin_api::strptime::parse_rfc3339_ms("2026-10-17T09:00:01.5Z").unwrap())
     );
 
     let r = record_from_xml(USERDATA, None, 1).unwrap();

@@ -128,8 +128,8 @@ pitwall-app = { path = ".", default-features = false, features = ["test-support"
 tempfile.workspace = true
 # Builds a PNG whose colour profile inflates to hundreds of megabytes (tests/picture_memory.rs).
 miniz_oxide = "0.8"
-# The time of a report the tests make (paddock-diag takes a chrono time).
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# The time of a report the tests make (paddock-diag takes a jiff time).
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 # A held loopback port for "nothing answers there" (C39).
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tokio = { workspace = true, features = ["time", "sync", "rt", "rt-multi-thread", "macros", "net", "io-util", "test-util"] }

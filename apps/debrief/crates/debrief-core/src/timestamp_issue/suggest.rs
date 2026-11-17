@@ -140,7 +140,7 @@ impl<'a> Cursor<'a> {
         self.run(|b| b.is_ascii_alphabetic())
     }
 
-    /// Spaces, appended to `f` as one space (chrono matches any run of whitespace with it).
+    /// Spaces, appended to `f` as one space (the reader matches any run of whitespace with it).
     fn spaces(&mut self, f: &mut String) -> bool {
         let n = self.run(|b| b == b' ').len();
         if n > 0 {

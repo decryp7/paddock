@@ -190,8 +190,8 @@ impl Summary {
             fields.push(("ProcessId", Value::from(pid)));
         }
         if let Some(c) = created.filter(|c| *c > 0) {
-            if let Some(start) = chrono::DateTime::from_timestamp(c as i64, 0) {
-                fields.push(("ProcessCreateTime", Value::from(start.to_rfc3339())));
+            if let Some(start) = debrief_plugin_api::time::rfc3339_utc_offset_secs(c as i64) {
+                fields.push(("ProcessCreateTime", Value::from(start)));
             }
             if let Some(up) = u64::from(dump_time).checked_sub(c).filter(|_| dump_time != 0) {
                 msg.push_str(&format!(", up {}", uptime(up)));

@@ -129,7 +129,10 @@ export class WorkbenchPalette {
   }
   /** Runs the option whose text contains `label` (Enter on it). */
   async run(label: string | RegExp): Promise<void> {
-    await this.options.filter({ hasText: label }).first().click();
+    // The option is chosen once the list ranks it first: "not Searching" is also true of the list from before the query, and a
+    // click on that list's "Show jobs" hit a row the filtered list then replaced (workbench-demo WebKit, run 8209; 4 of 20 locally).
+    await expect(this.options.first(), `the list ranks "${label}" first`).toContainText(label);
+    await this.options.first().click();
     await expect(this.dialog, `the palette closes once "${label}" is chosen`).toHaveCount(0);
   }
 }

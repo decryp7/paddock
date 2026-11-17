@@ -113,7 +113,18 @@ test.describe('the tray popup', () => {
     const heights = async (scenario: 'demo' | 'loading') => {
       const popup = await openTray(page, scenario);
       await expect(popup.locator('section.pd-w')).toHaveCount(4);
-      return popup.locator('section.pd-w').evaluateAll((s) => s.map((e) => [e.querySelector('.pd-w-title')?.textContent?.trim(), Math.round(e.getBoundingClientRect().height)]));
+      const read = () => popup.locator('section.pd-w').evaluateAll((s) => s.map((e) => [e.querySelector('.pd-w-title')?.textContent?.trim(), Math.round(e.getBoundingClientRect().height)]));
+      // A layout read counts only when two reads agree (ER-12): Linux WebKit read Activity 1 px short once, mid-layout (run 8212).
+      let last = await read();
+      await expect
+        .poll(async () => {
+          const now = await read();
+          const same = JSON.stringify(now) === JSON.stringify(last);
+          last = now;
+          return same;
+        }, { message: 'the widget heights settle (two reads agree)' })
+        .toBe(true);
+      return last;
     };
     // Compared with the demo, where Loaded models has no "+N more" line (that line exists only when there is more to say).
     const ready = await heights('demo');

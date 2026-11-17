@@ -25,7 +25,6 @@ debrief-core = { path = "../debrief-core" }
 # The store worker's client (no database linked); the CLI starts the worker like the app does.
 debrief-store-client = { path = "../debrief-store-client" }
 debrief-pdf = { path = "../debrief-pdf" }
-chrono.workspace = true
 # Ctrl+C / SIGTERM stop `watch` cleanly.
 ctrlc = { workspace = true, features = ["termination"] }
 serde.workspace = true

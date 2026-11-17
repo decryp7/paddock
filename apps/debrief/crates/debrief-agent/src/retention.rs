@@ -92,7 +92,6 @@ pub fn apply(output: &Path, policy: &RetentionPolicy, now_ms: i64, current: &str
 mod tests {
     use super::*;
     use crate::run::{create_run_dir, write_manifest, ActionRecord, ActionStatus, RunManifest, RunReason};
-    use chrono::{TimeZone, Utc};
     use std::time::Duration;
 
     const H: i64 = 3_600_000;
@@ -143,7 +142,7 @@ mod tests {
     #[test]
     fn applies_to_disk_and_keeps_the_current_run() {
         let dir = tempfile::tempdir().unwrap();
-        let t = |h| Utc.with_ymd_and_hms(2026, 1, 1, h, 0, 0).unwrap();
+        let t = |h| crate::testing::utc_at(2026, 1, 1, h, 0, 0);
         let mut ids = Vec::new();
         for h in 0..4 {
             let (id, run) = create_run_dir(dir.path(), "s", t(h)).unwrap();
@@ -155,7 +154,7 @@ mod tests {
         }
         std::fs::create_dir(dir.path().join("keep-me")).unwrap();
         // max 1 run, but the current one is the oldest: it is kept along with the newest.
-        let (deleted, errors) = apply(dir.path(), &policy(Some(1), None, None), t(5).timestamp_millis(), &ids[0]);
+        let (deleted, errors) = apply(dir.path(), &policy(Some(1), None, None), t(5).as_millisecond(), &ids[0]);
         assert_eq!(deleted, [ids[1].clone(), ids[2].clone()]);
         assert!(errors.is_empty());
         assert!(dir.path().join(&ids[0]).exists() && dir.path().join(&ids[3]).exists());

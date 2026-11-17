@@ -25,7 +25,7 @@ arrow-ipc = { version = "60", default-features = false }
 arrow-schema = { version = "60", default-features = false }
 base64 = "0.23"
 bytes = "1"
-chrono = "0.4.45"
+jiff = "0.2"
 csv = "1.4"
 # DuckDB 2.0.0 (MIT), pinned to the prebuilt library the fetch script verifies; never `bundled` (several GB of RAM
 # to compile).

@@ -35,7 +35,6 @@ paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 paddock-testkit-start = { path = "../../../../crates/paddock-testkit-start" }
 debrief-ipc = { path = "../debrief-ipc", features = ["test-support"] }
 getrandom.workspace = true
-chrono.workspace = true
 debrief-plugin-api = { path = "../debrief-plugin-api" }
 paddock-proc = { path = "../../../../crates/paddock-proc" }
 

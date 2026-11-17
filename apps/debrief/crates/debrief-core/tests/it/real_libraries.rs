@@ -193,9 +193,14 @@ fn mel_console_keeps_the_offset_category_and_event_id() {
     // The console formatter takes the clock's time (the run's), written with its offset.
     let first = std::fs::read_to_string(dir().join("mel-console.log")).unwrap();
     let stamp = &first[..first.find(" info:").unwrap()];
-    let want = chrono::DateTime::parse_from_str(stamp, "%Y-%m-%d %H:%M:%S%.3f%:z").unwrap();
-    assert_ne!(want.offset().local_minus_utc(), 0, "the sample has a non-UTC offset");
-    assert_eq!(recs[0].ts, Some(want.timestamp_millis()));
+    let want = debrief_plugin_api::strptime::Format::new("%Y-%m-%d %H:%M:%S%.3f%:z")
+        .read_with_offset(stamp)
+        .unwrap();
+    assert!(
+        !stamp.ends_with("+00:00") && !stamp.ends_with('Z'),
+        "the sample has a non-UTC offset: {stamp}"
+    );
+    assert_eq!(recs[0].ts, Some(want));
 }
 
 #[test]

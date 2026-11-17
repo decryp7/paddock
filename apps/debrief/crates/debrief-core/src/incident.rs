@@ -44,7 +44,7 @@ pub struct IncidentOptions {
 }
 
 fn clock(ms: i64) -> String {
-    chrono::DateTime::from_timestamp_millis(ms).map_or_else(|| ms.to_string(), |t| t.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+    debrief_plugin_api::time::utc_text(ms, false).map_or_else(|| ms.to_string(), |t| format!("{t} UTC"))
 }
 
 fn severity_word(s: Severity) -> &'static str {

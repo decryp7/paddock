@@ -15,7 +15,7 @@ fuzz_target!(|data: &[u8]| {
     ] {
         let p = TimestampParser::new(fmts, zone, day_first).unwrap();
         let _ = p.parse(&s);
-        let _ = p.parse_time_on(&s, chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap());
+        let _ = p.parse_time_on(&s, debrief_plugin_api::time::ymd(2026, 1, 1).unwrap());
         // The input's lines as lines whose timestamps were not read.
         let lines: Vec<&str> = s.lines().take(32).collect();
         let _ = debrief_core::timestamp_issue::suggest::propose(&lines, &p);

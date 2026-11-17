@@ -204,17 +204,13 @@ pub fn align(i: &AlignInput) -> Alignment {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{DateTime, NaiveDateTime};
 
     fn utc(s: &str) -> i64 {
-        DateTime::parse_from_rfc3339(s).unwrap().timestamp_millis()
+        debrief_core::strptime::parse_rfc3339_ms(s).unwrap()
     }
 
     fn local(s: &str) -> i64 {
-        NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-            .unwrap()
-            .and_utc()
-            .timestamp_millis()
+        debrief_core::strptime::parse_utc_ms(s, "%Y-%m-%d %H:%M:%S").unwrap()
     }
 
     fn input<'a>(clock: Option<&'a ClockReading>) -> AlignInput<'a> {

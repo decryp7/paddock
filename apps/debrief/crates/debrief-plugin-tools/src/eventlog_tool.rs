@@ -125,7 +125,7 @@ impl EventLogTool {
                     .data_dir()
                     .ok_or_else(|| anyhow!("choose a folder for the event log files"))?
                     .join("eventlog");
-                let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
+                let stamp = debrief_plugin_api::time::file_stamp(debrief_plugin_api::time::now_ms(), false).unwrap_or_default();
                 // A run per folder, even when two start within a second.
                 (1..100)
                     .map(|i| {

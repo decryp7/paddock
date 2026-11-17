@@ -64,6 +64,7 @@ pub mod protocol;
 pub mod sandbox;
 pub mod serve;
 pub mod settings;
+pub mod strptime;
 pub mod text;
 pub mod time;
 pub mod tools;

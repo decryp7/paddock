@@ -10,7 +10,7 @@ pub mod video;
 
 use crate::profile::CompiledProfile;
 use anyhow::Result;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use std::path::Path;
 
 pub use self::csv::CsvImporter;
@@ -29,7 +29,7 @@ pub struct ImportCtx<'a> {
     pub profile: &'a CompiledProfile,
     pub path: &'a Path,
     /// Date of the file's last modification, used for logs that only carry a time of day.
-    pub file_date: Option<NaiveDate>,
+    pub file_date: Option<Date>,
 }
 
 pub use debrief_plugin_api::importer::Imported;

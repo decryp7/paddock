@@ -90,7 +90,7 @@ pub(crate) mod testutil {
 
     /// Epoch milliseconds of an RFC 3339 time.
     pub fn ms(s: &str) -> i64 {
-        chrono::DateTime::parse_from_rfc3339(s).unwrap().timestamp_millis()
+        debrief_plugin_api::strptime::parse_rfc3339_ms(s).unwrap()
     }
 
     /// Deterministic junk built from format-relevant fragments.

@@ -255,7 +255,7 @@ impl Workspace {
             format: BUNDLE_FORMAT.into(),
             schema: BUNDLE_SCHEMA,
             name: opts.name.clone(),
-            created_at: chrono::Utc::now().timestamp_millis(),
+            created_at: debrief_plugin_api::time::now_ms(),
             debrief_version: env!("CARGO_PKG_VERSION").into(),
             content: opts.content,
             redacted: redactor.is_some(),

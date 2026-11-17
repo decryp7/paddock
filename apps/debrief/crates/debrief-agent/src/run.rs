@@ -3,7 +3,7 @@
 //! produced. The manifest is written when the run starts (status `running`)
 //! and again when it ends, atomically, so a crash leaves a readable record.
 
-use chrono::{DateTime, SecondsFormat, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -116,7 +116,7 @@ pub struct RunManifest {
 }
 
 impl RunManifest {
-    pub fn start(id: &str, schedule: &str, reason: RunReason, now: DateTime<Utc>) -> RunManifest {
+    pub fn start(id: &str, schedule: &str, reason: RunReason, now: Timestamp) -> RunManifest {
         RunManifest {
             schema: RUN_SCHEMA,
             id: id.to_string(),
@@ -124,8 +124,8 @@ impl RunManifest {
             reason,
             host: host_name(),
             agent_version: env!("CARGO_PKG_VERSION").into(),
-            started_at: now.to_rfc3339_opts(SecondsFormat::Secs, true),
-            started_ms: now.timestamp_millis(),
+            started_at: debrief_core::time::rfc3339_utc(now, debrief_core::time::Fraction::Secs),
+            started_ms: now.as_millisecond(),
             finished_at: None,
             duration_ms: 0,
             status: RunStatus::Running,
@@ -136,9 +136,9 @@ impl RunManifest {
     }
 
     /// Completes the manifest: status from the actions, end time, size.
-    pub fn finish(&mut self, now: DateTime<Utc>, stopped: bool, total_bytes: u64) {
-        self.finished_at = Some(now.to_rfc3339_opts(SecondsFormat::Secs, true));
-        self.duration_ms = (now.timestamp_millis() - self.started_ms).max(0) as u64;
+    pub fn finish(&mut self, now: Timestamp, stopped: bool, total_bytes: u64) {
+        self.finished_at = Some(debrief_core::time::rfc3339_utc(now, debrief_core::time::Fraction::Secs));
+        self.duration_ms = (now.as_millisecond() - self.started_ms).max(0) as u64;
         self.total_bytes = total_bytes;
         self.status = overall(&self.actions, stopped, !self.errors.is_empty());
     }
@@ -163,9 +163,13 @@ fn host_name() -> String {
 }
 
 /// Creates a new, uniquely named run folder.
-pub fn create_run_dir(output: &Path, schedule: &str, now: DateTime<Utc>) -> std::io::Result<(String, PathBuf)> {
+pub fn create_run_dir(output: &Path, schedule: &str, now: Timestamp) -> std::io::Result<(String, PathBuf)> {
     std::fs::create_dir_all(output)?;
-    let stem = format!("{}-{}", now.format("%Y%m%d-%H%M%S"), debrief_collect::safe_segment(schedule));
+    let stem = format!(
+        "{}-{}",
+        debrief_core::time::file_stamp(now.as_millisecond(), false).unwrap_or_default(),
+        debrief_collect::safe_segment(schedule)
+    );
     for n in 0..100 {
         let id = if n == 0 { stem.clone() } else { format!("{stem}-{n}") };
         let dir = output.join(&id);
@@ -246,9 +250,7 @@ pub fn is_run_name(name: &str) -> bool {
 
 /// Start time encoded in a run folder name (UTC).
 fn started_from_name(name: &str) -> i64 {
-    chrono::NaiveDateTime::parse_from_str(&name[..15], "%Y%m%d-%H%M%S")
-        .map(|t| t.and_utc().timestamp_millis())
-        .unwrap_or(0)
+    debrief_core::strptime::parse_utc_ms(&name[..15], "%Y%m%d-%H%M%S").unwrap_or(0)
 }
 
 /// The runs in `output`, newest first (at most [`MAX_RUNS_SCANNED`]).
@@ -316,10 +318,8 @@ mod tests {
             read_manifest(dir.path())
         });
     }
-    use chrono::TimeZone;
-
-    fn t(h: u32) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 10, 17, h, 0, 0).unwrap()
+    fn t(h: u32) -> Timestamp {
+        crate::testing::utc_at(2026, 10, 17, h, 0, 0)
     }
 
     #[test]
@@ -411,7 +411,7 @@ mod tests {
         assert!(!is_run_name("20261017-020000-"));
         assert!(!is_run_name("2026101x-020000-x"));
         assert!(!is_run_name(".debrief-agent"));
-        assert_eq!(started_from_name("20261017-020000-x"), t(2).timestamp_millis());
+        assert_eq!(started_from_name("20261017-020000-x"), t(2).as_millisecond());
         assert_eq!(started_from_name("99999999-999999-x"), 0);
     }
 }

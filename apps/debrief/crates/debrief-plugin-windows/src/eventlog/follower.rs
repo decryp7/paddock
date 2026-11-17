@@ -224,7 +224,7 @@ impl Stats {
             self.errors.pop_back();
         }
         self.errors.push_front(ErrorEntry {
-            at: chrono::Utc::now().timestamp_millis(),
+            at: debrief_plugin_api::time::now_ms(),
             channel: channel.map(|c| c.to_string()),
             message: message.chars().take(MAX_ERROR_CHARS).collect(),
         });

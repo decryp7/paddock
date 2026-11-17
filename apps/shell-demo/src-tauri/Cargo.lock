@@ -2942,7 +2942,7 @@ dependencies = [
 name = "paddock-cli"
 version = "0.1.0"
 dependencies = [
- "chrono",
+ "jiff",
  "paddock-workspace-hack",
  "serde_json",
 ]
@@ -2962,7 +2962,7 @@ dependencies = [
 name = "paddock-diag"
 version = "0.1.0"
 dependencies = [
- "chrono",
+ "jiff",
  "libc",
  "log",
  "paddock-commands",
@@ -3046,7 +3046,7 @@ dependencies = [
 name = "paddock-health"
 version = "0.2.0"
 dependencies = [
- "chrono",
+ "jiff",
  "log",
  "paddock-commands",
  "paddock-jobs",
@@ -3107,7 +3107,7 @@ dependencies = [
 name = "paddock-log"
 version = "0.1.0"
 dependencies = [
- "chrono",
+ "jiff",
  "log",
  "paddock-env",
  "paddock-jobs",
@@ -3451,7 +3451,6 @@ dependencies = [
  "base64 0.23.1",
  "bitflags 2.13.2",
  "block2",
- "chrono",
  "crc32fast",
  "crossbeam-utils",
  "deranged",
@@ -3464,6 +3463,7 @@ dependencies = [
  "http",
  "httparse",
  "idna",
+ "jiff",
  "libc",
  "linux-raw-sys",
  "log",

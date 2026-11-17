@@ -76,8 +76,8 @@ impl PluginHandler {
         TimestampParser::new(&t.formats, &t.zone, t.day_first).map_err(|e| invalid(format!("{e:#}")))
     }
 
-    fn date(d: &Option<String>) -> Option<chrono::NaiveDate> {
-        d.as_deref().and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+    fn date(d: &Option<String>) -> Option<jiff::civil::Date> {
+        d.as_deref().and_then(|d| crate::strptime::parse_date(d, "%Y-%m-%d"))
     }
 
     /// Streams the records; returns what the end of the call carries (skipped lines, problems).

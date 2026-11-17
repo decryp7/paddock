@@ -129,8 +129,7 @@ pub fn to_record(data: &Value, record_id: u64, line: u32) -> Record {
         .get("TimeCreated")
         .and_then(|t| attr(t, "SystemTime"))
         .and_then(Value::as_str)
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|d| d.timestamp_millis())
+        .and_then(debrief_plugin_api::strptime::parse_rfc3339_ms)
         // A zero FILETIME (1601-01-01) means "not recorded", not an event 400 years ago.
         .filter(|ms| *ms > FILETIME_ZERO_MS);
     r.ts = ts;

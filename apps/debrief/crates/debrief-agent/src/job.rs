@@ -36,12 +36,7 @@ pub fn run_schedule(cfg: &AgentConfig, schedule: &Schedule, reason: RunReason, d
     let log = &deps.log;
     let name = Value::from(schedule.name.as_str());
     let started = deps.clock.now();
-    let _lock = match RunLock::acquire(
-        &cfg.state_dir.join("locks"),
-        &schedule.name,
-        started.timestamp_millis(),
-        &*deps.probe,
-    ) {
+    let _lock = match RunLock::acquire(&cfg.state_dir.join("locks"), &schedule.name, started.as_millisecond(), &*deps.probe) {
         Ok(l) => l,
         Err(e) => {
             let why = e.to_string();
@@ -116,7 +111,7 @@ pub fn run_schedule(cfg: &AgentConfig, schedule: &Schedule, reason: RunReason, d
         save(&manifest);
     }
     let stopped = stop.load(Ordering::Relaxed) && manifest.actions.len() < schedule.actions.len();
-    let (deleted, errors) = crate::retention::apply(&cfg.output_dir, &cfg.retention, deps.clock.now().timestamp_millis(), &id);
+    let (deleted, errors) = crate::retention::apply(&cfg.output_dir, &cfg.retention, deps.clock.now().as_millisecond(), &id);
     for e in &errors {
         log.warn("Retention could not delete a run", &[("Error", Value::from(e.as_str()))]);
     }

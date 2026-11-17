@@ -1,23 +1,24 @@
 //! Times on the command line (`--since`, `--until`, `--from`, `--to`): RFC 3339, `YYYY-MM-DD HH:MM[:SS]` or a
 //! date, all read as UTC unless they carry an offset. Parse, don't validate: the result is epoch milliseconds.
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime};
+use debrief_core::strptime::{epoch_ms, parse_date, parse_rfc3339_ms, parse_utc_ms, Clock};
 
 /// Epoch milliseconds of `text`, or a message saying what to write.
 pub fn parse_time(text: &str) -> Result<i64, String> {
     let t = text.trim();
-    if let Ok(d) = DateTime::parse_from_rfc3339(t) {
-        return Ok(d.timestamp_millis());
+    if let Some(ms) = parse_rfc3339_ms(t) {
+        return Ok(ms);
     }
     for fmt in ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M"] {
-        if let Ok(d) = NaiveDateTime::parse_from_str(t, fmt) {
-            return Ok(d.and_utc().timestamp_millis());
+        if let Some(ms) = parse_utc_ms(t, fmt) {
+            return Ok(ms);
         }
     }
-    if let Ok(d) = NaiveDate::parse_from_str(t, "%Y-%m-%d") {
-        if let Some(dt) = d.and_hms_opt(0, 0, 0) {
-            return Ok(dt.and_utc().timestamp_millis());
-        }
+    if let Some(ms) = parse_date(t, "%Y-%m-%d")
+        .zip(Clock::new(0, 0, 0, 0))
+        .and_then(|(d, midnight)| epoch_ms(d, midnight, 0))
+    {
+        return Ok(ms);
     }
     Err(format!(
         "\"{text}\" is not a time: write 2026-10-01, 2026-10-01 14:30 or 2026-10-01T14:30:00Z (UTC unless it has an offset)"

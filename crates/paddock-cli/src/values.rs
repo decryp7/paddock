@@ -1,11 +1,20 @@
-use chrono::{DateTime, NaiveDate, NaiveDateTime};
+use jiff::Timestamp;
+use jiff::civil::{Date, DateTime};
+use jiff::tz::TimeZone;
+
+/// Epoch milliseconds of a civil time read as UTC.
+fn utc_ms(d: DateTime) -> Option<i64> {
+    d.to_zoned(TimeZone::UTC)
+        .ok()
+        .map(|z| z.timestamp().as_millisecond())
+}
 
 /// Epoch milliseconds of `text`: RFC 3339, `YYYY-MM-DD HH:MM[:SS]` or a date, read as UTC unless it carries an offset.
 /// Parse, don't validate: the error says what to write.
 pub fn parse_time(text: &str) -> Result<i64, String> {
     let t = text.trim();
-    if let Ok(d) = DateTime::parse_from_rfc3339(t) {
-        return Ok(d.timestamp_millis());
+    if let Ok(ts) = t.parse::<Timestamp>() {
+        return Ok(ts.as_millisecond());
     }
     for fmt in [
         "%Y-%m-%d %H:%M:%S%.f",
@@ -13,14 +22,16 @@ pub fn parse_time(text: &str) -> Result<i64, String> {
         "%Y-%m-%d %H:%M",
         "%Y-%m-%dT%H:%M",
     ] {
-        if let Ok(d) = NaiveDateTime::parse_from_str(t, fmt) {
-            return Ok(d.and_utc().timestamp_millis());
+        if let Ok(d) = DateTime::strptime(fmt, t)
+            && let Some(ms) = utc_ms(d)
+        {
+            return Ok(ms);
         }
     }
-    if let Ok(d) = NaiveDate::parse_from_str(t, "%Y-%m-%d")
-        && let Some(dt) = d.and_hms_opt(0, 0, 0)
+    if let Ok(d) = Date::strptime("%Y-%m-%d", t)
+        && let Some(ms) = utc_ms(d.at(0, 0, 0, 0))
     {
-        return Ok(dt.and_utc().timestamp_millis());
+        return Ok(ms);
     }
     Err(format!(
         "\"{text}\" is not a time: write 2026-10-01, 2026-10-01 14:30 or 2026-10-01T14:30:00Z (UTC unless it has an offset)"
@@ -79,6 +90,10 @@ mod tests {
         assert_eq!(parse_time("1970-01-01T00:00:01Z").unwrap(), 1_000);
         assert_eq!(parse_time("1970-01-01T01:00:00+01:00").unwrap(), 0);
         assert_eq!(parse_time(" 1970-01-01 00:00:00.5 ").unwrap(), 500);
+        assert_eq!(parse_time("1970-01-01T00:00:02").unwrap(), 2_000);
+        assert_eq!(parse_time("1970-01-01T00:01").unwrap(), 60_000);
+        assert_eq!(parse_time("1970-01-01T00:00:00.25Z").unwrap(), 250);
+        assert!(parse_time("1970-13-01").is_err());
         let e = parse_time("yesterday").unwrap_err();
         assert!(e.contains("yesterday") && e.contains("2026-10-01"), "{e}");
         assert!(parse_time("").is_err());

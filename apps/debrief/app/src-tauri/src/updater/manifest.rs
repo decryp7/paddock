@@ -70,7 +70,7 @@ pub fn from_value(value: &Value) -> Result<Manifest, String> {
     let pub_date = match root.get("pub_date") {
         None | Some(Value::Null) => None,
         Some(Value::String(s)) => {
-            chrono::DateTime::parse_from_rfc3339(s).map_err(|e| format!("\"pub_date\" is not an RFC 3339 date: {e}"))?;
+            debrief_core::strptime::parse_rfc3339_ms(s).ok_or("\"pub_date\" is not an RFC 3339 date")?;
             Some(s.clone())
         }
         Some(_) => return Err("\"pub_date\" must be text".into()),

@@ -225,7 +225,7 @@ impl Section for CrashReports {
         if self.folders.is_empty() {
             return SectionOutput::note("This system keeps no crash-report folder Dyno knows of.");
         }
-        let now = cx.now.timestamp();
+        let now = cx.now.as_second();
         let mut text = String::new();
         let mut notes = Vec::new();
         for f in &self.folders {
