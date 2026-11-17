@@ -109,10 +109,7 @@ fn git(env: &Env, dir: &Path, args: &[&str]) -> Result<(Option<i32>, String, Str
     let mut cmd = command("git");
     cmd.args(args).current_dir(dir).env_clear();
     for (k, v) in &env.0 {
-        if !matches!(
-            k.as_str(),
-            "GIT_DIR" | "GIT_WORK_TREE" | "GIT_INDEX_FILE" | "GIT_OBJECT_DIRECTORY" | "GIT_COMMON_DIR"
-        ) {
+        if !crate::git_env::REPO_VARS.contains(&k.as_str()) {
             cmd.env(k, v);
         }
     }

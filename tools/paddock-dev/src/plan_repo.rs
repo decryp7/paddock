@@ -16,6 +16,8 @@ const TIMEOUT: Duration = Duration::from_secs(120);
 pub fn git_text(root: &Path, args: &[&str]) -> Option<String> {
     let mut cmd = command("git");
     cmd.arg("-C").arg(root).args(args);
+    // A hook runs us with GIT_DIR of the pushing worktree; `-C` does not override it (crate::git_env).
+    crate::git_env::remove_from(&mut cmd);
     let out = run_bounded(cmd, Limits::new(TIMEOUT).max_output(1 << 28)).ok()?;
     out.success().then(|| out.stdout_text())
 }
