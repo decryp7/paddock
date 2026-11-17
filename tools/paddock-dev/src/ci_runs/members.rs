@@ -142,7 +142,7 @@ mod tests {
 
     #[allow(clippy::disallowed_methods, reason = "a test starts git in its own scratch repository")]
     fn git(dir: &Path, args: &[&str]) -> String {
-        let out = std::process::Command::new("git")
+        let out = crate::git_env::git()
             .current_dir(dir)
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" })

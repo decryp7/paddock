@@ -1,7 +1,7 @@
 //! The git reader of the merge check: every call is bounded, and a failure names the command and git's own words (ER-27), so a
 //! caller can turn it into "not measured" (ADR 0089) instead of an empty answer.
 
-use paddock_proc::{Limits, command, run_bounded};
+use paddock_proc::{Limits, run_bounded};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
@@ -80,7 +80,7 @@ impl<'a> Git<'a> {
     /// The git child of one call: stable output, hooks off, and none of the queue's credentials (`parent`: the names of this
     /// process's environment) - the merge check reads a merged tree that holds pull request code.
     pub(crate) fn command_for(&self, args: &[&str], parent: &[String]) -> std::process::Command {
-        let mut cmd = command("git");
+        let mut cmd = crate::git_env::git();
         // Stable, parseable output whatever the user's git config says.
         cmd.arg("-C")
             .arg(self.root)
@@ -95,7 +95,6 @@ impl<'a> Git<'a> {
             .args(["-c", "core.hooksPath=/dev/null"])
             .args(args);
         crate::child_env::scrub(&mut cmd, parent);
-        crate::git_env::remove_from(&mut cmd);
         cmd
     }
 

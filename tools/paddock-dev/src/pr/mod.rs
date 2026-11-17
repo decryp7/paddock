@@ -160,7 +160,7 @@ struct RepoGit {
 
 impl RepoGit {
     fn run(&self, args: &[&str]) -> Result<(bool, String), String> {
-        let out = paddock_proc::command("git")
+        let out = crate::git_env::git()
             .arg("-C")
             .arg(&self.root)
             .args(args)

@@ -66,7 +66,7 @@ pub fn pinned_unsupported() -> Option<&'static str> {
 
 #[cfg(not(windows))]
 fn pinned_worktree_root(from: &Path) -> Option<PathBuf> {
-    let mut cmd = paddock_proc::command("git");
+    let mut cmd = crate::git_env::git();
     cmd.env_clear().env("PATH", "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin");
     cmd.arg("-C").arg(from).args(["config", "--local", "--get", "paddock.worktreeRoot"]);
     let out = paddock_proc::run_bounded(

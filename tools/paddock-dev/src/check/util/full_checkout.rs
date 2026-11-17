@@ -2,12 +2,12 @@
 //! by one. This says it once, with the folders and the fix (ER-27). It compares the tracked folders (the top level, and the
 //! children of `apps/`) with the disk, so it needs no list of what the gates read. The port of `util/full-checkout.mjs`.
 
-use paddock_proc::{Limits, command, run_bounded};
+use paddock_proc::{Limits, run_bounded};
 use std::path::Path;
 use std::time::Duration;
 
 fn git(root: &Path, args: &[&str]) -> Option<String> {
-    let mut cmd = command("git");
+    let mut cmd = crate::git_env::git();
     cmd.arg("-C").arg(root).args(args);
     let out = run_bounded(cmd, Limits::new(Duration::from_secs(60)).max_output(1 << 24)).ok()?;
     out.success().then(|| out.stdout_text())
