@@ -2257,7 +2257,10 @@ fn a_step_that_never_got_a_slot_is_not_measured_with_its_queue_time_never_passed
     let Some((reason, next)) = nm(&v["clippy crates"]) else {
         panic!("{:?}", v["clippy crates"])
     };
-    assert!(reason.contains("never got a heavy slot") && reason.contains("31.0 s"), "{reason}");
+    assert!(
+        reason.contains("never got a heavy slot (queue allowance spent") && reason.contains("31.0 s"),
+        "{reason}"
+    );
     assert!(next.contains("heavy status") && next.contains("PADDOCK_QUEUE_MAX"), "{next}");
     let report = render_timed("h", &rows, &timings);
     assert_eq!(report.exit, Exit::NotMeasured);
@@ -2506,6 +2509,65 @@ fn a_branch_stacked_on_a_local_train_checks_the_trains_unpushed_commits_too() {
     assert_eq!(base, t2, "{why}");
     let (change, _, _) = super::discover(&r.root, &base, &[], std::slice::from_ref(&f1)).unwrap();
     assert_eq!(change.files, ["f1", "t3"].map(String::from).to_vec());
+}
+
+/// 2026-11-17: the remote's train was amended after the local train was cut (the two share t1, then differ), so `--merged` dropped
+/// the remote train and the base fell back to main: 162 commits of unrelated work. The merge base of the pushed commit and a
+/// remote main or train is on the remote too, so it is a candidate: the nearest one wins.
+#[test]
+fn a_remote_train_that_diverged_still_gives_its_merge_base_as_the_base() {
+    let r = Repo::new();
+    let c1 = r.commit("a");
+    r.remote("main", &c1);
+    r.git(&["checkout", "-q", "-b", "train/x"]);
+    let t1 = r.commit("t1");
+    let t2 = r.commit("t2");
+    r.git(&["checkout", "-q", "-b", "train-remote", &t1]);
+    let rt = r.commit("t2-amended");
+    r.remote("train/2026-11-17-14", &rt);
+    r.git(&["checkout", "-q", "-b", "fix", &t2]);
+    let f1 = r.commit("f1");
+    let (base, why) = r.choose(&new_ref("fix", &f1));
+    assert_eq!(base, t1, "{why}");
+    assert!(
+        why.contains("merge base with origin/train/2026-11-17-14") && why.contains("fewest new commits, 2"),
+        "{why}"
+    );
+    // Positive control: without the merge-base candidates (only refs the pushed commit contains) the base is the far one, main.
+    let contained = r.git(&[
+        "for-each-ref",
+        &format!("--merged={f1}"),
+        "--format=%(refname)",
+        "refs/remotes/origin/",
+    ]);
+    assert_eq!(contained.trim(), "refs/remotes/origin/main", "the old selection sees only main");
+    // A diverged remote branch that is neither main nor a train is no candidate.
+    let r2 = Repo::new();
+    let c = r2.commit("a");
+    r2.remote("main", &c);
+    r2.git(&["checkout", "-q", "-b", "feat/x"]);
+    let x1 = r2.commit("x1");
+    r2.git(&["checkout", "-q", "-b", "feat/y", &c]);
+    let y1 = r2.commit("y1");
+    r2.remote("feat/x", &x1);
+    r2.git(&["checkout", "-q", "-b", "fix", &y1]);
+    let f = r2.commit("f");
+    let (base, why) = r2.choose(&new_ref("fix", &f));
+    assert_eq!(base, c, "{why}");
+}
+
+#[test]
+fn the_first_line_counts_the_commits_beyond_the_base() {
+    let r = Repo::new();
+    let c1 = r.commit("a");
+    r.commit("b");
+    r.commit("c");
+    assert_eq!(super::commit_count(&r.root, &c1, "HEAD"), "2");
+    assert_eq!(
+        super::commit_count(&r.root, "no-such-ref", "HEAD"),
+        "?",
+        "an unreadable base is shown, not counted as 0"
+    );
 }
 
 /// A branch stacked on another pushed branch is measured from that branch (a remote-tracking ref it contains), not from main.

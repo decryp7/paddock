@@ -85,7 +85,7 @@ pub trait Exec: Sync {
     }
     /// Why a heavy gate has no machine-wide slot to go through (no `heavy` on PATH and the build of tools/heavy failed), or
     /// `None`: it would otherwise compete with every other push (ER-24), so it is not measured instead.
-    fn heavy_unavailable(&self) -> Option<String> {
+    fn heavy_unavailable(&self, _left: Duration) -> Option<String> {
         None
     }
 }
@@ -203,6 +203,28 @@ fn first_word(id: &str) -> &str {
     id.split(' ').next().unwrap_or(id)
 }
 
+/// The most one step may run on its own (heavy's `--run-max` is this or what the push's budget has left, whichever is less).
+fn own_run_limit(gate: &Gate) -> Duration {
+    Duration::from_secs(if gate.heavy { 3000 } else { 900 })
+}
+
+/// For a run `heavy` ended at its run limit: which limit it was, with the run time it had, so a row says whether the push's run
+/// budget or the gate's own limit ran out (empty for any other ending).
+fn run_limit_note(gate: &Gate, limits: Limits, done: &Done) -> String {
+    let (true, Some(t)) = (done.how.starts_with("timed out after"), done.timing) else {
+        return String::new();
+    };
+    if limits.run < own_run_limit(gate) {
+        format!("; run budget spent after {:.0} s of run", t.ran)
+    } else {
+        format!(
+            "; the gate's own run limit of {} s spent after {:.0} s of run",
+            own_run_limit(gate).as_secs(),
+            t.ran
+        )
+    }
+}
+
 /// The verdict of one gate: its needs first, then the run.
 pub fn decide(gate: &Gate, exec: &dyn Exec, left: Duration, subject: &Subject) -> Row {
     decide_with(
@@ -251,7 +273,7 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
         }
     }
     if gate.heavy
-        && let Some(why) = exec.heavy_unavailable()
+        && let Some(why) = exec.heavy_unavailable(limits.run)
     {
         return Row::not_measured(
             format!("no heavy slot tool, so a compile would run beside every other push's: {why}"),
@@ -270,10 +292,11 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
         // No slot means the command never ran: not measured, never a pass or a failure (ADR 0102 on ADR 0089's rows).
         Ok(done) if done.no_slot() => Row::not_measured(
             format!(
-                "{} never got a heavy slot ({}, queued {:.1} s, load {}): the machine was busy with other steps, so nothing was measured",
+                "{} never got a heavy slot (queue allowance spent: queued {:.1} s of the {} min allowed, {}; load {}): the machine was busy with other steps, so nothing was measured",
                 gate.rerun(),
-                done.how,
                 done.timing.map_or(0.0, |t| t.queued),
+                limits.queue.as_secs() / 60,
+                done.how,
                 load_text(exec.load())
             ),
             format!(
@@ -283,9 +306,10 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
         ),
         Ok(done) if done.cut_short() => Row::not_measured(
             format!(
-                "{} ({}) before it finished{}",
+                "{} ({}{}) before it finished{}",
                 gate.rerun(),
                 done.how,
+                run_limit_note(gate, limits, &done),
                 done.log.as_ref().map_or(String::new(), |l| format!("; output so far in {l}"))
             ),
             if gate.id.starts_with("clippy-linux") {
@@ -473,7 +497,7 @@ pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (V
                             ),
                             Start::BudgetSpent => Row::not_measured(
                                 format!(
-                                    "the {} min run budget of the push gate was spent before it started ({:.1} s queued for other agents' heavy steps did not count against it)",
+                                    "run budget spent: the {} min of run time of the push gate was used by earlier steps before this one started ({:.1} s queued for other agents' heavy steps did not count against it)",
                                     opts.budget.as_secs() / 60,
                                     clock.credit().as_secs_f64()
                                 ),
@@ -642,8 +666,6 @@ pub struct RealExec {
     pub stop: Arc<AtomicBool>,
     /// The `heavy` built from tools/heavy when none is on PATH, built once per run (or the reason it could not be).
     pub built_heavy: std::sync::OnceLock<Result<crate::tool_cache::Held, String>>,
-    /// When the push gate's budget ends: the build of heavy is cut off there.
-    pub budget_end: Instant,
     /// The push is a landing (`train/*`, `main`, a release tag): its heavy steps take the priority lane (`heavy --high`, ADR 0102).
     pub priority: bool,
     /// The local sccache wrapper for the gates that compile (`None`: off, or CI; [`crate::local_sccache`]).
@@ -694,19 +716,26 @@ fn log_name(id: &str) -> String {
 impl RealExec {
     /// The command that puts a heavy gate through the slot: `PADDOCK_HEAVY`, `heavy.sh` or `heavy` on PATH, else the `heavy`
     /// built from this tree ([`super::heavy_tool`]). Empty for `PADDOCK_HEAVY=off` (hermetic tests only); `Err` when the build failed.
-    fn heavy_command(&self) -> Result<Vec<String>, String> {
-        let left = self.budget_end.saturating_duration_since(Instant::now());
+    ///
+    /// `left` is the run time the push has left on its credited clock ([`BudgetClock`]): the build of heavy is cut off there, so
+    /// time queued for the slot never counts against it.
+    fn heavy_command(&self, left: Duration) -> Result<Vec<String>, String> {
         heavy_command_for(&self.root, &self.env, &|p| self.has_tool(p), &self.built_heavy, left)
     }
 
     fn call(&self, gate: &Gate, limits: Limits, log: &Path, label: Option<&str>) -> ToolCall {
         let left = limits.run;
-        let own = Duration::from_secs(if gate.heavy { 3000 } else { 900 });
+        let own = own_run_limit(gate);
         // A heavy step: its run time is limited by heavy itself (`--run-max`), its wait for a slot separately (`--queue-max`);
         // the outer timeout is only a backstop for both plus a minute.
         let run_max = own.min(left);
         let heavy = if gate.heavy {
-            with_heavy_flags(&self.heavy_command().unwrap_or_default(), self.priority, limits.queue, run_max)
+            with_heavy_flags(
+                &self.heavy_command(limits.run).unwrap_or_default(),
+                self.priority,
+                limits.queue,
+                run_max,
+            )
         } else {
             Vec::new()
         };
@@ -797,8 +826,8 @@ impl Exec for RealExec {
         docker_answers(&self.env)
     }
 
-    fn heavy_unavailable(&self) -> Option<String> {
-        self.heavy_command().err()
+    fn heavy_unavailable(&self, left: Duration) -> Option<String> {
+        self.heavy_command(left).err()
     }
 
     fn ci_image(&self) -> ImageProbe {
@@ -1007,7 +1036,6 @@ exit $rc
                 logs: dir.join("logs"),
                 stop: Arc::new(AtomicBool::new(false)),
                 built_heavy: Default::default(),
-                budget_end: Instant::now() + Duration::from_secs(60),
                 priority: false,
                 wrapper: crate::local_sccache::Lazy::off(),
             }
@@ -1166,7 +1194,6 @@ exit $rc
                 logs: d.join("logs"),
                 stop: Arc::new(AtomicBool::new(false)),
                 built_heavy: Default::default(),
-                budget_end: Instant::now() + Duration::from_secs(60),
                 priority: false,
                 wrapper: crate::local_sccache::Lazy::off(),
             }
@@ -1247,7 +1274,6 @@ exit $rc
             std::fs::remove_file(d.path().join("fakebin/cargo")).unwrap();
             let ex2 = RealExec {
                 built_heavy: Default::default(),
-                budget_end: Instant::now() + Duration::from_secs(60),
                 priority: false,
                 wrapper: crate::local_sccache::Lazy::off(),
                 env: ex.env.clone(),
@@ -1283,11 +1309,65 @@ exit $rc
         }
 
         #[test]
+        fn the_heavy_build_is_cut_off_by_the_credited_run_time_not_the_wall_clock() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = repo_with_fake_cargo(d.path(), true);
+            // Plenty of credited run time left (the step queued behind others for as long as it liked): the build goes ahead.
+            let r = decide(&gate("clippy a", "true"), &ex, Duration::from_secs(300), &test_subject());
+            assert_eq!(r.kind(), Kind::Passed, "{r:?}");
+        }
+
+        #[test]
+        fn a_run_ended_at_its_limit_says_which_limit_ran_out() {
+            let g = gate("clippy a", "true");
+            let done = Done {
+                success: false,
+                how: "timed out after 700 s of running".into(),
+                tail: String::new(),
+                log: None,
+                timing: Some(Timing { queued: 5.0, ran: 700.0 }),
+            };
+            let budget = run_limit_note(
+                &g,
+                Limits {
+                    run: Duration::from_secs(700),
+                    queue: QUEUE_MAX,
+                },
+                &done,
+            );
+            assert_eq!(budget, "; run budget spent after 700 s of run");
+            let own = run_limit_note(
+                &g,
+                Limits {
+                    run: own_run_limit(&g),
+                    queue: QUEUE_MAX,
+                },
+                &done,
+            );
+            assert!(own.contains("own run limit") && own.contains("after 700 s of run"), "{own}");
+            let other = Done {
+                how: "exit 1".into(),
+                ..done
+            };
+            assert_eq!(
+                run_limit_note(
+                    &g,
+                    Limits {
+                        run: own_run_limit(&g),
+                        queue: QUEUE_MAX
+                    },
+                    &other
+                ),
+                "",
+                "any other ending says nothing"
+            );
+        }
+
+        #[test]
         fn a_build_after_the_budget_is_not_started() {
             let d = tempfile::tempdir().unwrap();
-            let mut ex = repo_with_fake_cargo(d.path(), true);
-            ex.budget_end = Instant::now();
-            let r = decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5), &test_subject());
+            let ex = repo_with_fake_cargo(d.path(), true);
+            let r = decide(&gate("clippy a", "true"), &ex, Duration::ZERO, &test_subject());
             assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
             assert!(r.reason().contains("budget was spent"), "{}", r.reason());
         }
