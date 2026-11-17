@@ -70,7 +70,6 @@ test.describe('AI browser', () => {
   });
 
   test('agent mode asks before new sites, highlights data from the logs, and Stop ends it', async ({ page }, testInfo) => {
-    await page.clock.install();
     await openAiApp(page);
     const chat = await openChat(page);
     await chat.getByTestId('ai-browser-menu').click();
@@ -121,7 +120,6 @@ test.describe('AI browser', () => {
   });
 
   test('the status chip shows research, then Stop cancels it', async ({ page }, testInfo) => {
-    await page.clock.install();
     await openAiApp(page, 'mockDriving=research');
     const chip = page.locator('debrief-status-bar').getByTestId('ai-browsing');
     await expect(chip).toBeVisible();
