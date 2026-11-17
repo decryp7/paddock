@@ -1469,3 +1469,26 @@ caches went).
 - **Memory measure:** not measured
 - **Reading:** one pass costs about 70 times `du` on macOS, so the script now runs it once (four times faster than ffe91b1ac).
   Not measured: GNU `find -printf` on the Linux runners (no `stat` per file), Windows (Git Bash) and a cold file cache.
+
+## Merge check: reverted-base warning (2026-11-17, feat/merge-check-reverted-base)
+
+Question: what does the report-only reverted-base step of `./dev merge check` (a member built on a merge the target reverted)
+cost on the real train history?
+
+- **Machine:** Mac mini (arm64), macOS 27.2.1, 14 cores, CPU idle at or above 30% on two readings before the runs, no CI run
+  measured against
+- **History:** `origin/train/2026-11-15-13` (8,492 commits, 18 whose subject starts with "Revert"), each member as
+  `origin/<branch>`, debug build of `paddock-dev`
+- **Command:** `paddock-dev merge check --branch origin/<b> --target origin/train/2026-11-15-13 --no-generators`, wall time by
+  `date`, one run each
+- **Numbers:**
+
+  | What | Time (s) |
+  |---|---|
+  | `git log member..target` with the revert lines counted, 5 members | 0.020 to 0.058 |
+  | whole `merge check` of 6 members (all conflict with the train, so the detectors do not run) | 0.32 to 0.47 |
+
+- **Result:** feat/dev-launch-rust warns about feat/test-env-builder (merge 0886ef3f7, reverted in c7d27c7fc); the other five
+  say nothing. The step costs one `git log` plus, per live revert, two or three small git calls.
+- **Memory measure:** not measured
+- **Not measured:** a member that merges cleanly (the full detector run on top), Windows, a cold file cache, one run per member only.

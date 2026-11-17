@@ -1482,3 +1482,93 @@ exit 0
         assert!(!t.log().exists(), "a gate ran without a merge checkout");
     }
 }
+
+/// main merges `feat/x` (M), `member` starts from M, and main then does `after` (reverts). `member` and main touch other files, so
+/// the member merges cleanly into main and only the reverted-base warning can speak.
+fn reverted_base_repo(after: impl Fn(&Repo, &str)) -> Repo {
+    let r = Repo::new();
+    r.write("base.txt", "base\n");
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "feat/x"]);
+    r.write("x.txt", "x\n");
+    r.commit("feat: x");
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge branch 'feat/x'", "feat/x"]);
+    let m = r.git(&["rev-parse", "HEAD"]);
+    r.git(&["checkout", "-q", "-b", "member"]);
+    r.write("member.txt", "member\n");
+    r.commit("feat: member");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("other.txt", "other\n");
+    r.commit("feat: other");
+    after(&r, &m);
+    r
+}
+
+fn revert_merge(r: &Repo, sha: &str) -> String {
+    r.git(&["revert", "-m", "1", "--no-edit", sha]);
+    r.git(&["rev-parse", "HEAD"])
+}
+
+const WARNING: &str = "::warning::";
+const NEXT: &str = "re-base on the train head, or land the reverted branch first";
+
+#[test]
+fn a_member_based_on_a_merge_the_target_reverted_warns_and_still_passes() {
+    // The positive control (ER-33): the same history as the two silent cases below, with the revert present.
+    let r = reverted_base_repo(|r, m| {
+        revert_merge(r, m);
+    });
+    let (code, text) = r.check(&["--branch", "member", "--target", "main", "--no-generators"]);
+    assert_eq!(code, 0, "report-only, never a refusal: {text}");
+    assert_eq!(text.matches(WARNING).count(), 1, "{text}");
+    assert!(text.contains("feat/x") && text.contains(NEXT), "{text}");
+    let revert = r.git(&["rev-parse", "--short=9", "HEAD"]);
+    assert!(text.contains(&revert), "names the revert commit: {text}");
+}
+
+#[test]
+fn a_reland_by_revert_of_revert_does_not_warn() {
+    let r = reverted_base_repo(|r, m| {
+        let rev = revert_merge(r, m);
+        r.git(&["revert", "--no-edit", &rev]);
+    });
+    let (code, text) = r.check(&["--branch", "member", "--target", "main", "--no-generators"]);
+    assert_eq!(code, 0, "{text}");
+    assert!(!text.contains(WARNING), "{text}");
+}
+
+#[test]
+fn a_clean_member_is_silent() {
+    let r = reverted_base_repo(|_, _| {});
+    let (code, text) = r.check(&["--branch", "member", "--target", "main", "--no-generators"]);
+    assert_eq!(code, 0, "{text}");
+    assert!(!text.contains(WARNING), "{text}");
+}
+
+#[test]
+fn a_subject_that_only_says_revert_is_not_a_revert() {
+    let r = reverted_base_repo(|r, _| {
+        r.write("other.txt", "again\n");
+        r.commit("Revert \"Merge branch 'feat/x'\"");
+    });
+    let (_, text) = r.check(&["--branch", "member", "--target", "main", "--no-generators"]);
+    assert!(!text.contains(WARNING), "{text}");
+}
+
+#[test]
+fn a_member_that_conflicts_with_the_revert_is_not_measured_and_names_the_reverted_merge() {
+    // The case that started it: the member edits what the revert took out, so it does not merge at all.
+    let r = reverted_base_repo(|r, m| {
+        revert_merge(r, m);
+    });
+    r.git(&["checkout", "-q", "member"]);
+    r.write("x.txt", "member edit\n");
+    r.commit("feat: member edits x");
+    r.git(&["checkout", "-q", "main"]);
+    let (code, text) = r.check(&["--branch", "member", "--target", "main", "--no-generators"]);
+    assert_eq!(code, 6, "{text}");
+    assert!(text.contains("does not merge cleanly"), "{text}");
+    assert_eq!(text.matches(WARNING).count(), 1, "{text}");
+    assert!(text.contains("feat/x") && text.contains(NEXT), "{text}");
+}
