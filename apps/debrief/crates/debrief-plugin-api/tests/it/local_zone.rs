@@ -1,8 +1,7 @@
 //! The machine's time zone as the assumed zone of timestamps that carry no offset: a time inside a skipped hour is not a
-//! time, a repeated hour reads as its first occurrence. One test in its own process, because the zone is read from `TZ`
-//! once. Unix only: Windows takes its zone from the system settings, not from `TZ`.
-
-#![cfg(unix)]
+//! time, a repeated hour reads as its first occurrence. The only test of this binary that reads the machine's zone, which is
+//! read from `TZ` once per process. Unix only (the module is declared under `cfg(unix)`): Windows takes its zone from the
+//! system settings, not from `TZ`.
 
 use debrief_plugin_api::time::{utc_epoch_ms, TimestampParser};
 
