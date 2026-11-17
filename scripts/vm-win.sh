@@ -13,12 +13,15 @@
 #   scripts/vm-win.sh revert --snapshot <name>   the same, named with a flag (for example admin-baseline)
 #   scripts/vm-win.sh admin-setup             one-time: from clean-baseline, paddock-test joins Administrators, UAC consent on the normal
 #                                             desktop (+ auto-logon and job runner as gui-setup), snapshot admin-baseline; reverts at the end
-#   scripts/vm-win.sh run --ci-like [--ref <commit>] [--with <file>]... [--] <bash command...>
+#   scripts/vm-win.sh run --ci-like [--ref <commit>] [--with <file>]... [--tools-provided] [--] <bash command...>
 #                                             in the RUNNING guest, run the command the way the Gitea Windows CI runner starts a step: runner-style
 #                                             temp folder (Authenticated Users may write), a git checkout of <ref> (default HEAD) with core.autocrlf=true
 #                                             sent as a git bundle of its tree, --with files (built on the Mac: the guest has no toolchain) copied to the
 #                                             folder named by $CI_LIKE_DIR (a Windows path; cygpath -u in bash), Git bash (--noprofile --norc -e -o pipefail) with Git's bin first on PATH, CI env;
 #                                             prints a self-check first; exit = the command's (75: not measured). scripts/vm-win/ci-like.ps1
+#   scripts/vm-win.sh toolchain-setup         one-time: snapshot pre-buildtools-<date> (the rollback point), then from clean-baseline install the VS 2022
+#                                             Build Tools LTSC 17.12 (pinned installer, checksum, Authenticode) as paddock-admin, snapshot buildtools-baseline;
+#                                             reverts to clean-baseline at the end. The member gate (scripts/member-gate-windows.sh) starts from buildtools-baseline
 #   scripts/vm-win.sh status | ip             running or stopped / the guest's address
 #   scripts/vm-win.sh install                 one-time: install Windows headless, wait for setup to power off
 #   scripts/vm-win.sh baseline                one-time: check setup finished, detach the discs, take clean-baseline
@@ -220,7 +223,7 @@ cmd=${1:-}
 [ $# -gt 0 ] && shift
 # One user of the test VM at a time (interim lock, scripts/vm-lock.sh): only the commands that change or load the guest.
 case $cmd in
-  start | stop | ssh | put | get | run | gui-setup | admin-setup | job | snapshot | revert | install | baseline)
+  start | stop | ssh | put | get | run | gui-setup | admin-setup | toolchain-setup | job | snapshot | revert | install | baseline)
     . "$(cd "$(dirname "$0")" && pwd)/vm-lock.sh"; vm_lock_acquire "vm-win-$cmd" ;;
 esac
 case $cmd in
@@ -258,10 +261,12 @@ case $cmd in
     [ "${1:-}" = "--ci-like" ] || die "usage: vm-win.sh run --ci-like [--ref <commit>] [--] <bash command...> (--ci-like is the only mode)"
     shift
     ref=HEAD
+    tools_provided=""
     withs=()
     while [ $# -gt 0 ]; do
       case $1 in
         --ref) ref=${2:-}; [ -n "$ref" ] || die "usage: vm-win.sh run --ci-like --ref <commit> ..."; shift 2 ;;
+        --tools-provided) tools_provided="-ToolsProvided"; shift ;;
         --with) [ -f "${2:-}" ] || die "--with needs a file: ${2:-}"; withs+=("$2"); shift 2 ;;
         *) break ;;
       esac
@@ -291,7 +296,7 @@ case $cmd in
       scp_via paddock-test "$f" "@HOST@:$gdir/$(basename "$f")" || die "copy of $(basename "$f") to the guest failed"
     done
     set +e
-    ssh_to paddock-test "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\paddock-test\\ci-like\\ci-like.ps1 -Bundle C:\\Users\\paddock-test\\ci-like\\src.bundle -Ref $refname -ScriptFile C:\\Users\\paddock-test\\ci-like\\step.sh" |
+    ssh_to paddock-test "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\paddock-test\\ci-like\\ci-like.ps1 -Bundle C:\\Users\\paddock-test\\ci-like\\src.bundle -Ref $refname -ScriptFile C:\\Users\\paddock-test\\ci-like\\step.sh $tools_provided" |
       grep -v -e 'post-quantum' -e 'store now' -e 'openssh.com/pq'
     rc=${PIPESTATUS[0]}
     set -e
@@ -339,6 +344,54 @@ case $cmd in
     vmrun revertToSnapshot "$baseline" || admin_fail "final revert to $baseline"
     admin_ok=1
     echo "snapshot $admin_snap taken (clean-baseline + paddock-test in Administrators + UAC consent on the normal desktop + auto-logon and job runner); reverted to $baseline; use: vm-win.sh revert --snapshot $admin_snap"
+    ;;
+  toolchain-setup)
+    guard
+    here=$(cd "$(dirname "$0")" && pwd)
+    bt_snap=buildtools-baseline
+    pre_snap=${PADDOCK_VM_PRE_SNAPSHOT:-pre-buildtools-$(date +%Y-%m-%d)}
+    bt_exe=${PADDOCK_BUILDTOOLS_INSTALLER:?set PADDOCK_BUILDTOOLS_INSTALLER to the downloaded vs_BuildTools.exe (the host checks it too)}
+    bt_sha=${PADDOCK_BUILDTOOLS_SHA256:?set PADDOCK_BUILDTOOLS_SHA256 to its pinned SHA-256}
+    [ "$(shasum -a 256 "$bt_exe" | awk '{print $1}')" = "$bt_sha" ] || die "the installer's SHA-256 is not the pinned $bt_sha"
+    bt_deadline=${PADDOCK_BUILDTOOLS_DEADLINE:-5400}
+    running && die "the VM is running; stop it first (toolchain-setup starts from $baseline and never touches a running VM)"
+    has_snapshot "$baseline" || die "no snapshot named $baseline"
+    vmx_vnc_free || die "the .vmx has RemoteDisplay.vnc.* lines; remove them first"
+    load_ok
+    admin_active=1 # the cleanup (EXIT trap) stops the VM and reverts it to clean-baseline on any early exit
+    vmrun revertToSnapshot "$baseline" || admin_fail "revert to $baseline"
+    has_snapshot "$pre_snap" || vmrun snapshot "$pre_snap" || admin_fail "snapshot $pre_snap"
+    echo "rollback point: snapshot $pre_snap (a copy of $baseline's state taken before the change)"
+    vmrun start nogui || admin_fail "start"
+    (wait_ssh) || admin_fail "wait for SSH"
+    started=$SECONDS
+    for f in "$bt_exe:vs_BuildTools.exe" "$here/vm-win/buildtools-setup.ps1:buildtools-setup.ps1"; do
+      (scp_via paddock-admin "${f%%:*}" "@HOST@:C:/paddock-test/${f##*:}") || admin_fail "copy ${f##*:}"
+    done
+    # Detached in the guest (a scheduled task as SYSTEM: it survives the SSH session and has the rights), then polled with short SSH
+    # calls that may fail while the installer starves the guest. Each poll prints the installer's own last log line (ER-18).
+    bt_cmd="powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\buildtools-setup.ps1 -Installer C:\\paddock-test\\vs_BuildTools.exe -Sha256 $bt_sha"
+    ssh_to paddock-admin "schtasks /create /tn paddock-buildtools /tr \"$bt_cmd\" /sc once /st 00:00 /ru SYSTEM /rl HIGHEST /f; schtasks /run /tn paddock-buildtools" || admin_fail "start buildtools-setup.ps1"
+    bt_end=$((SECONDS + bt_deadline)); bt_next=$((SECONDS + 60)); bt_code=""; bt_started=0
+    while [ -z "$bt_code" ]; do
+      [ $SECONDS -lt $bt_end ] || admin_fail "buildtools-setup.ps1 did not finish within ${bt_deadline}s"
+      sleep 15
+      bt_out=$(ssh_to paddock-admin 'if (Test-Path C:\paddock-test\buildtools.done) { "DONE " + (Get-Content C:\paddock-test\buildtools.done).Trim() } else { $l = Get-ChildItem C:\Windows\Temp, $env:TEMP -Filter dd_*.log -ErrorAction SilentlyContinue | Sort LastWriteTime | Select -Last 1; if ($l) { "LOG " + $l.Name + " " + $l.Length + " bytes, " + $l.LastWriteTime.ToString("HH:mm:ss") + ": " + ((Get-Content $l.FullName -Tail 1) -replace "\s+", " ") } elseif (Test-Path C:\paddock-test\buildtools.log) { "LOG buildtools.log: " + (Get-Content C:\paddock-test\buildtools.log -Tail 1) } else { "NOLOG the task has written nothing yet" } }' 2>/dev/null | grep -E '^(DONE|LOG|NOLOG)' | head -1) || true
+      case "$bt_out" in DONE\ [01]) bt_code=${bt_out#DONE } ;; esac
+      if [ $SECONDS -ge $bt_next ]; then echo "  buildtools ($(( (SECONDS - started) / 60 )) min): ${bt_out:-no answer from the guest (it may be busy)}" | cut -c1-240; bt_next=$((SECONDS + 60)); fi
+    done
+    ssh_to paddock-admin 'Get-Content C:\paddock-test\buildtools.log' 2>/dev/null | grep -E 'buildtools-setup:' || true
+    [ "$bt_code" = 0 ] || admin_fail "buildtools-setup.ps1 reported failure (exit $bt_code)"
+    echo "buildtools-setup took $((SECONDS - started)) s"
+    shutdown_guest 'Remove-Item C:\paddock-test\vs_BuildTools.exe, C:\paddock-test\buildtools-setup.ps1 -Force -ErrorAction SilentlyContinue; schtasks /delete /tn paddock-buildtools /f; shutdown /s /t 0'
+    wait_off "$off_deadline" "shutting down" || { reap_shutdown; admin_fail "clean shutdown (a snapshot of a hard power-off is not taken)"; }
+    reap_shutdown
+    vmx_vnc_free || admin_fail "the .vmx got RemoteDisplay.vnc.* lines during the run"
+    has_snapshot "$bt_snap" && { vmrun deleteSnapshot "$bt_snap" || admin_fail "delete the old $bt_snap"; }
+    vmrun snapshot "$bt_snap" || admin_fail "snapshot $bt_snap"
+    vmrun revertToSnapshot "$baseline" || admin_fail "final revert to $baseline"
+    admin_ok=1
+    echo "snapshot $bt_snap taken (clean-baseline + VS Build Tools); rollback point $pre_snap; reverted to $baseline; use: vm-win.sh revert --snapshot $bt_snap"
     ;;
   job)
     guard
