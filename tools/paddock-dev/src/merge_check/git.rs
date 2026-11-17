@@ -1,7 +1,7 @@
 //! The git reader of the merge check: every call is bounded, and a failure names the command and git's own words (ER-27), so a
 //! caller can turn it into "not measured" (ADR 0089) instead of an empty answer.
 
-use paddock_proc::{Limits, command, run_bounded};
+use paddock_proc::{Limits, run_bounded};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
@@ -80,7 +80,7 @@ impl<'a> Git<'a> {
     /// The git child of one call: stable output, hooks off, and none of the queue's credentials (`parent`: the names of this
     /// process's environment) - the merge check reads a merged tree that holds pull request code.
     pub(crate) fn command_for(&self, args: &[&str], parent: &[String]) -> std::process::Command {
-        let mut cmd = command("git");
+        let mut cmd = crate::git_env::git();
         // Stable, parseable output whatever the user's git config says.
         cmd.arg("-C")
             .arg(self.root)
@@ -131,6 +131,24 @@ impl<'a> Git<'a> {
     /// The paths that differ between two tree-ish revisions (no rename detection: both names of a rename are listed).
     pub fn changed_paths(&self, from: &str, to: &str) -> Result<Vec<String>, String> {
         self.paths(&["diff", "--name-only", "-z", "--no-renames", from, to])
+    }
+
+    /// Whether `ancestor` is reachable from `of` (`git merge-base --is-ancestor`: exit 0 yes, 1 no, anything else an error).
+    pub fn is_ancestor(&self, ancestor: &str, of: &str) -> Result<bool, String> {
+        let args = ["merge-base", "--is-ancestor", ancestor, of];
+        let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
+        let out = run_bounded(self.command_for(&args, &parent), Limits::new(TIMEOUT).max_output(1 << 16))
+            .map_err(|e| format!("git {} could not run: {e}", args.join(" ")))?;
+        match out.outcome {
+            paddock_proc::Outcome::Exited(st) if st.code() == Some(0) => Ok(true),
+            paddock_proc::Outcome::Exited(st) if st.code() == Some(1) => Ok(false),
+            _ => Err(format!(
+                "git {} failed ({:?}): {}",
+                args.join(" "),
+                out.outcome,
+                out.stderr_text().trim()
+            )),
+        }
     }
 
     /// Whether this clone is shallow (its history is cut, so parents may be missing).

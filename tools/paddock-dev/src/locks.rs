@@ -281,7 +281,7 @@ pub fn sync_all(runner: &dyn Runner, root: &Path, targets: &[Target]) -> Vec<Sta
 
 /// The tracked files that name lockfiles and hack configs, from git.
 fn tracked(root: &Path) -> Result<Vec<String>, CliError> {
-    let mut cmd = command("git");
+    let mut cmd = crate::git_env::git();
     cmd.arg("-C")
         .arg(root)
         .args(["ls-files", "--", "*Cargo.lock", "*Cargo.toml", "*package-lock.json", "*hakari.toml"]);

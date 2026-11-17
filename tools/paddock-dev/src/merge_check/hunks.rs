@@ -5,6 +5,10 @@
 //!
 //! A hunk counts when it adds at least two non-trivial lines; it is missing when at least half of them (and at least two) are
 //! among the lines the result removes from the parent's file and does not add back elsewhere in it, each line counted once.
+//! A smaller hunk (one non-trivial added line) that replaces lines counts too when the result undid it: its added line is gone
+//! and every non-blank line it removed is back in the result (a one-line fix the merge resolution dropped, the r3d shape: the
+//! result keeps the base's version of the line). One line that is merely absent, or a hunk that removed nothing, stays below the
+//! threshold: that is how a both-sides-edited line looks after a resolution, and it would flood.
 //! A file that every other parent lacks under its name in the base (deleted on the other side; for a file this parent
 //! renamed, the name it had before) is skipped: that is a modify/delete conflict, resolved on
 //! purpose. A file git merged cleanly, and the result is exactly its merge, is skipped. Generated files ([`super::generated`]) are skipped: they are regenerated, not merged.
@@ -61,7 +65,7 @@ pub fn check(cx: &Ctx, index: usize, base: &str, to_result: &[FileDiff]) -> Resu
             continue;
         }
         // Each hunk with at least MIN_LINES evidence lines: its parent-side line range and those lines.
-        let hunks: Vec<(String, Vec<&String>)> = file
+        let hunks: Vec<(String, Vec<&String>, &Vec<String>)> = file
             .hunks
             .iter()
             .map(|h| {
@@ -69,17 +73,45 @@ pub fn check(cx: &Ctx, index: usize, base: &str, to_result: &[FileDiff]) -> Resu
                 (
                     format!("lines {}-{}", h.new_start, end),
                     h.added.iter().filter(|l| !trivial(l)).collect::<Vec<_>>(),
+                    &h.removed,
                 )
             })
-            .filter(|(_, h)| h.len() >= MIN_LINES)
+            .filter(|(_, h, removed)| h.len() >= MIN_LINES || (h.len() == 1 && removed.iter().any(|l| !l.trim().is_empty())))
             .collect();
         if hunks.is_empty() {
             continue;
         }
         let mut left = gone(change);
+        let mut back: HashMap<&str, usize> = HashMap::new();
+        for l in change.hunks.iter().flat_map(|h| h.added.iter()) {
+            *back.entry(l.as_str()).or_insert(0) += 1;
+        }
         let (mut lost, mut worst) = (0usize, 0usize);
         let mut excerpts = Vec::new();
-        for (range, h) in &hunks {
+        for (range, h, removed) in &hunks {
+            if h.len() < MIN_LINES {
+                // The small-hunk rule: the added line is gone and every non-blank line the hunk removed is back in the result.
+                let undone = left.get(h[0].as_str()).is_some_and(|n| *n > 0)
+                    && removed
+                        .iter()
+                        .filter(|l| !l.trim().is_empty())
+                        .all(|l| back.get(l.as_str()).is_some_and(|n| *n > 0));
+                if undone {
+                    if let Some(n) = left.get_mut(h[0].as_str()) {
+                        *n -= 1;
+                    }
+                    lost += 1;
+                    worst = worst.max(1);
+                    if excerpts.len() < MAX_EXCERPTS {
+                        excerpts.push(format!(
+                            "parent {} {range}: its one-line change is undone (the base's line is back), was: {:?}",
+                            index + 1,
+                            clip(h[0].trim())
+                        ));
+                    }
+                }
+                continue;
+            }
             let mut missing_lines: Vec<&str> = Vec::new();
             for l in h {
                 match left.get_mut(l.as_str()) {

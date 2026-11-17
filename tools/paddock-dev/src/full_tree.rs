@@ -47,7 +47,7 @@ mod tests {
         let d = tree(&NEEDED);
         let git = |args: &[&str]| {
             assert!(
-                paddock_proc::command("git")
+                crate::git_env::git()
                     .arg("-C")
                     .arg(d.path())
                     .args(args)

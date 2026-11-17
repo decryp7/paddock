@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 fn git(dir: &Path, args: &[&str]) -> String {
-    let out = paddock_proc::command("git")
+    let out = crate::git_env::git()
         .arg("-C")
         .arg(dir)
         .args([
@@ -47,14 +47,14 @@ impl Repos {
         let tmp = tempfile::tempdir().unwrap();
         let origin = tmp.path().join("origin.git");
         let (queue, author) = (tmp.path().join("queue"), tmp.path().join("author"));
-        paddock_proc::command("git")
+        crate::git_env::git()
             .args(["init", "--quiet", "--bare", "-b", "main"])
             .arg(&origin)
             .output()
             .unwrap();
         let o = origin.to_str().unwrap();
         for d in [&queue, &author] {
-            paddock_proc::command("git").args(["clone", "--quiet", o]).arg(d).output().unwrap();
+            crate::git_env::git().args(["clone", "--quiet", o]).arg(d).output().unwrap();
         }
         std::fs::create_dir_all(author.join("crates/x")).unwrap();
         std::fs::write(author.join("crates/x/lib.rs"), "fn x() {}\n").unwrap();
@@ -88,7 +88,7 @@ impl Repos {
     }
 
     fn main_has(&self, file: &str) -> bool {
-        paddock_proc::command("git")
+        crate::git_env::git()
             .arg("-C")
             .arg(&self.origin)
             .args(["cat-file", "-e", &format!("main:{file}")])
@@ -576,7 +576,7 @@ fn a_hold_label_stops_the_tick_before_anything_changes() {
     assert_eq!(w.tick(), Tick::Held(2));
     assert_eq!(w.labels_of(1), vec!["state/approved"]);
     assert!(w.gitea.comments.is_empty());
-    let train = paddock_proc::command("git")
+    let train = crate::git_env::git()
         .arg("-C")
         .arg(&w.repos.origin)
         .args(["rev-parse", "--verify", "--quiet", "refs/heads/train/queue"])

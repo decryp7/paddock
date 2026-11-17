@@ -336,7 +336,8 @@ fn command_in(
         listings: Default::default(),
     };
     let root = root.to_path_buf();
-    let env: HashMap<String, String> = paddock_env::vars().collect();
+    // The hook's GIT_DIR names the pushing worktree; the gates run in another (crate::git_env).
+    let env: HashMap<String, String> = crate::git_env::without(&paddock_env::vars().collect());
     let accept = accepted_ids(&args.accept_not_measured, &env);
     let stop = Arc::new(AtomicBool::new(false));
     stop_on_signals(&stop);
@@ -365,6 +366,17 @@ fn command_in(
     }
     let (change, mut notes, extra) = discover(&root, &base, &args.files, &pushed)?;
     notes.insert(0, format!("base: {base} ({base_why})"));
+    let dropped: Vec<&str> = crate::git_env::REPO_VARS
+        .iter()
+        .copied()
+        .filter(|v| std::env::var_os(v).is_some())
+        .collect();
+    if !dropped.is_empty() {
+        notes.push(format!(
+            "git's hook environment names the pushing worktree ({}); not passed on, every git call names its own folder",
+            dropped.join(", ")
+        ));
+    }
     notes.extend(lookup_notes.into_iter().map(|l| format!("known-commit lookup: {l}")));
     // An empty diff passes on its own only for a person's run with no pushed commit; a push is always measured (or known).
     if pushed.is_empty() && change.files.is_empty() && change.ranges.is_empty() && extra.is_empty() {

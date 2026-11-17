@@ -26,9 +26,9 @@ pub use cargo::CargoCli;
 pub use cargo::{CargoMetadata, cargo_graph, parse_metadata};
 pub use error::GraphError;
 pub use graph::{Graph, Node};
-#[cfg(feature = "git-history")]
-pub use history::GitHistory;
 pub use history::{Commit, History, parse_log};
+#[cfg(feature = "git-history")]
+pub use history::{GIT_REPO_VARS, GitHistory};
 pub use lock::lock_diff;
 pub use npm::npm_graph;
 pub use paths::{dirname, join_normalized, relative};

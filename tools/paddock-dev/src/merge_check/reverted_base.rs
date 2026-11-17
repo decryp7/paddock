@@ -30,7 +30,7 @@ pub struct Names<'a> {
 }
 
 /// The commit names a message reverts, from git's own line `This reverts commit <hex>` (7 to 64 hex digits, as written).
-fn trailer_targets(message: &str) -> Vec<String> {
+pub(super) fn trailer_targets(message: &str) -> Vec<String> {
     const KEY: &str = "This reverts commit ";
     message
         .lines()
@@ -93,7 +93,7 @@ fn live_reverts(edges: &[(String, String)]) -> Vec<(String, String)> {
 
 /// The branch a merge commit's subject names: `Merge branch 'x'`, `... merge x into train N`, `Merge x (hex) into trial of y`;
 /// a trailing `(hex)` is dropped; else the subject itself.
-fn branch_of(subject: &str) -> String {
+pub(super) fn branch_of(subject: &str) -> String {
     let subject = strip_hex_suffix(subject.trim());
     if let Some(rest) = subject.split("Merge branch '").nth(1)
         && let Some((name, _)) = rest.split_once('\'')
@@ -146,7 +146,7 @@ struct Found {
 
 /// The full commit id `name` stands for (a full or abbreviated sha), `None` when this clone has no such commit; any other git
 /// failure is an error, never "absent" (ER-33).
-fn resolve(git: &Git, name: &str) -> Result<Option<String>, String> {
+pub(super) fn resolve(git: &Git, name: &str) -> Result<Option<String>, String> {
     let out = git.bytes_or_none(&["rev-parse", "--verify", "--quiet", &format!("{name}^{{commit}}")])?;
     let id = String::from_utf8_lossy(&out).trim().to_string();
     Ok((!id.is_empty()).then_some(id))
@@ -186,6 +186,17 @@ fn holds(git: &Git, merge: &str, member: &str) -> Result<bool, String> {
     Ok(count(true)? < count(false)?)
 }
 
+/// The live reverts of merges that `member` holds, as `(merge, revert, merge subject, branch)`, oldest revert first (the order
+/// they were made on the train): what `merge sync-member` lists. Reads the same history as the report-only step ([`run`]).
+pub(super) fn live_for_member(git: &Git, target: &str, member: &str) -> Result<Vec<(String, String, String, String)>, String> {
+    let found = find(git, target, member)?;
+    let mut out = Vec::new();
+    for r in found.reverted.iter().rev() {
+        out.push((r.merge.clone(), r.revert.clone(), subject_of(git, &r.merge)?, r.branch.clone()));
+    }
+    Ok(out)
+}
+
 fn find(git: &Git, target: &str, member: &str) -> Result<Found, String> {
     if git.is_shallow()? {
         return Err("this clone is shallow, so the history that shows a revert may be missing (run `git fetch --unshallow`)".into());
@@ -221,7 +232,10 @@ fn find(git: &Git, target: &str, member: &str) -> Result<Found, String> {
     }
     let position: HashMap<&str, usize> = commits.iter().enumerate().map(|(i, c)| (c.sha.as_str(), i)).collect();
     let mut reverted = Vec::new();
-    for (merge, revert) in live_reverts(&edges) {
+    // In the order of `member..target` (newest first there), not by sha: the output order is the history's order.
+    let mut live = live_reverts(&edges);
+    live.sort_by_key(|(_, revert)| position.get(revert.as_str()).copied().unwrap_or(usize::MAX));
+    for (merge, revert) in live {
         let line = git.text(&["rev-list", "--parents", "-n", "1", &merge])?;
         if line.split_whitespace().count() < 3 {
             continue; // not a merge: nothing was brought in

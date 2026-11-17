@@ -323,6 +323,9 @@ impl Exec for Real {
         };
         let mut cmd = proc_command(program);
         cmd.args(args).current_dir(cwd);
+        if program == "git" {
+            crate::git_env::remove_from(&mut cmd);
+        }
         let out = match stdin {
             None => {
                 let out = run_bounded(cmd, Limits::new(TIMEOUT)).map_err(|e| fail(e.to_string()))?;

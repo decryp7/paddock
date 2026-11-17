@@ -7,7 +7,7 @@
 
 use super::finding::Finding;
 use super::jsre::is_js_space;
-use paddock_proc::{Limits, command, run_bounded};
+use paddock_proc::{Limits, run_bounded};
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::Path;
 use std::time::Duration;
@@ -151,7 +151,7 @@ pub fn reconcile<T>(
 
 /// `git args` in `root`: standard output, or the error line the JavaScript reports (`Command failed: git ...`) and the standard error.
 fn git(root: &Path, args: &[&str]) -> Result<String, (String, String)> {
-    let mut cmd = command("git");
+    let mut cmd = crate::git_env::git();
     cmd.arg("-C").arg(root).args(args);
     let failed = |e: String| (format!("Command failed: git {}", args.join(" ")), e);
     match run_bounded(cmd, Limits::new(Duration::from_secs(120)).max_output(1 << 26)) {
