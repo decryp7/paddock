@@ -12,6 +12,11 @@ test('lets git-generated merge, revert and fixup commits pass', () => {
   for (const m of ['Merge branch main', 'Revert "feat: x"', 'fixup! feat: x']) assert.deepEqual(lint(m), []);
 });
 
+test('lets git\'s Reapply commit pass (a revert of a revert); a malformed one still fails', () => {
+  assert.deepEqual(lint('Reapply "feat: x"'), []);
+  for (const m of ['Reapply', 'Reapplied "feat: x"', 'reapply "feat: x"']) assert.match(lint(m)[0], /does not start with|empty/, m);
+});
+
 test('reports a bad type, an empty message, a long header and a missing blank line', () => {
   assert.match(lint('added stuff')[0], /does not start with/);
   assert.match(lint('feature: x')[0], /does not start with/);

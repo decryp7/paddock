@@ -11,6 +11,15 @@ test('lint good: Conventional Commits, scope, breaking mark, merge commits', () 
   for (const m of ['feat: add x', 'fix(core): y\n\nBody text.', 'fix(spotter,debrief): both apps', 'chore!: drop z', 'Merge branch main', 'docs: a [skip ci]']) assert.deepEqual(lint(m), [], m);
 });
 
+test('lint good: git\'s own Revert and Reapply subjects (a revert of a revert) pass the header rule', () => {
+  for (const m of ['Revert "feat: add x"', 'Revert "Revert "fix: y""\n\nThis reverts commit abc.', 'Reapply "feat: add x"', 'Reapply "Revert "fix: y""\n\nThis reverts commit abc.']) assert.deepEqual(lint(m), [], m);
+});
+
+test('lint bad (positive control): a malformed Reapply or Revert still fails, and a git subject still cannot carry attribution', () => {
+  for (const m of ['Reapply', 'Reapplied "feat: x"', 'reapply "feat: x"', 'Reapply"feat: x"', 'Revert']) assert.match(lint(m)[0], /does not start with|empty/, m);
+  assert.match(lint('Reapply "feat: x"\n\nCo-Authored-By: A <a@b.c>').join(), /Co-Authored-By/);
+});
+
 test('lint bad: header shape, long header, missing blank line, empty', () => {
   assert.match(lint('Added a thing')[0], /does not start with/);
   assert.match(lint('fix(a,): x')[0], /does not start with/);
@@ -70,6 +79,11 @@ test('C23 bad: a history with a Co-Authored-By commit and a free-form subject', 
   assert.equal(f.length, 2);
   assert.match(messages(f), /Co-Authored-By trailer/);
   assert.match(messages(f), /does not start with/);
+});
+
+test('C23 good: git\'s Reapply and Revert subjects in a history are accepted; a malformed one is still an error', async () => {
+  assert.deepEqual(await findingsOf('C23', repo(['feat: one', 'Revert "feat: one"', 'Reapply "feat: one"'])), []);
+  assert.match(messages(await findingsOf('C23', repo(['feat: one', 'Reapplied "feat: one"']))), /does not start with/);
 });
 
 test('C23 warns instead of passing silently when there is no history', async () => {
