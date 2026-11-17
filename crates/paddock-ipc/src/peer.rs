@@ -1458,7 +1458,12 @@ mod tests {
         )
         .unwrap();
         let guard = Duration::from_secs(30);
-        *lock(&peer.inner.after_drain) = Some(Box::new(|_: &Peer| {
+        // The closer that wins runs the seam: this test's `close`, or the reader once the writer has shut the socket (on
+        // Linux it won 1 of 118 stress runs, and the panic was then not this thread's).
+        let (panicked_tx, panicked) = mpsc::channel::<()>();
+        let panicked_tx = Mutex::new(panicked_tx);
+        *lock(&peer.inner.after_drain) = Some(Box::new(move |_: &Peer| {
+            let _ = lock(&panicked_tx).send(());
             panic!("a close that fails after taking the calls out")
         }));
         let (done_tx, done) = mpsc::channel();
@@ -1476,7 +1481,11 @@ mod tests {
             let peer = peer.clone();
             std::thread::spawn(move || peer.close())
         };
-        assert!(closer.join().is_err(), "the seam made the close panic");
+        panicked
+            .recv_timeout(guard)
+            .expect("the closer that won ran the seam and panicked after taking the calls out");
+        // silent: which closer panicked depends on who won (this one or the reader); either is the case under test
+        let _ = closer.join();
         let result = done.recv_timeout(guard);
         assert!(
             matches!(&result, Ok(Err(IpcError::Closed(m))) if m.contains("gone")),
