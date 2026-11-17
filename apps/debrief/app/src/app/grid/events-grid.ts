@@ -253,7 +253,12 @@ function viewKey(query: unknown, descending: boolean): string {
     .sort { border: 0; background: transparent; color: inherit; font-size: var(--fs-xs); padding: 0; text-align: left; cursor: pointer; }
     .sort:hover { color: var(--text); }
     .x { border: 0; background: transparent; color: var(--faint); cursor: pointer; padding: 0 2px; }
-    .viewport { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; position: relative; outline: none; }
+    /*
+     * overflow-anchor: none: the grid places its rows and writes scrollTop itself (ADR 0072). With CSS scroll anchoring the browser also moved
+     * scrollTop when the row layer above the spacer changed height on a resize, with no input, and the grid took it for the user's scroll.
+     * The Angular CDK virtual scroll viewport opts out the same way.
+     */
+    .viewport { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overflow-anchor: none; position: relative; outline: none; }
     .viewport:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
     .layer { /* conformance: not-a-header */ position: sticky; top: ${HEADER_H}px; overflow: hidden; }
     .row { position: absolute; left: 0; right: 0; height: var(--row-h, 26px); display: grid; align-items: center; column-gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--grid-line); cursor: default; }

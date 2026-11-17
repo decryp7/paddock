@@ -229,6 +229,12 @@ effect after a later user input. (G1, G2 and G9 are about the round's hold and t
   log shows a write of the top row, then a scroll event with no input and a read 59 px away (118632 to 118573), outside the layout delta band, classified `user`; the grid then
   keeps that position and the top row differs by two rows. Chromium: 0 of 340. The `Scroll origin` log line now carries `RecentInput`, `LayoutChanged`, `LayoutDelta` and `Max`
   for the next measurement. A rule that treats the first no-input event after a layout-driven write as the browser's would close it but changes decision 2 (find in page); it needs a decision.
+- Closed (2026-11-17): the open row above was the browser's CSS scroll anchoring, not a classifier gap. The spacer is the scroller's only in-flow
+  element, below the sticky row layer; a resize changes the layer's height and the browser moved `scrollTop` by that change with no input (shifts
+  of -132 and +132 px measured equal to the layer change). With `overflow-anchor: none` on the viewport (as the Angular CDK virtual scroll viewport
+  sets) a 20-resize probe went from 11 of 40 runs red to 0 of 80 in WebKit. WKWebView on macOS anchors too, so users were exposed. Decision 2 is
+  unchanged; no rule for a first no-input event was needed. Regression e2e: "the browser does not move the view when the row layer changes height".
+  Details and the cause list: `docs/lessons.md`, "resize while not pinned ... scroll anchoring".
 - Final matrix of the round (34 tests x 20 repeats = 680 runs per engine, `--workers 4`, idle machine, CPU idle 83% at the start): Chromium 680 of 680; WebKit 675 of 680: 4 are
   the real wheel of the smoke set (dropped input, see above), 1 is the open "resize while not pinned" row. The e2e row "a wheel at once after Follow on" failed 1 of 40 in an earlier
   full run in WebKit and 0 of 240 in isolation and 0 of 40 in this one; it was red 6 of 20 in Chromium with the stamp taken late.

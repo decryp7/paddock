@@ -2449,3 +2449,24 @@ late request pinned the view again (G10, unit spec first; closed, with the same 
 enough keys to take the focus out of the window and moves nothing. The classifier's second `spurious` rule also required no `layoutChanged`: in oldest-first keep mode the delta
 grows without any write, so a no-input scroll (find in page, assistive technology) within the band was written back; it now needs the layout to be changing (the total or the viewport
 changed and the frame that renders it has not passed, or the element's height differs from the last write's), table row first.
+
+## Debrief: "resize while not pinned keeps the top row" was two rows off in about 1 in 75 WebKit runs: the browser's scroll anchoring (2026-11-17)
+
+**Symptom.** The e2e row (oldest first) of `live-tail-follow.e2e.ts` failed 4, 6 and 3 of 300 WebKit runs, 0 of 340 in Chromium. The grid log showed its
+own write of the top row, then a scroll event with no input, 59 px away (in this round's repeats: -132 and +164 px), classified `user` and kept.
+**Causes listed (ER-28), with what each measurement showed:** (1) WebKit clamping a write against a stale `scrollHeight`: refuted, the reads
+were far from the maximum (118632 against a maximum of about 121900) and in both directions; (2) a second ResizeObserver pass: refuted, no
+second `Resize re-applied` line before the move; (3) the spacer height changing between write and paint: refuted, the shift equalled the change
+of the row layer's height (`.layer`, bound to `viewportH`), not of the spacer (a probe that logged each scroll event's layer and spacer heights:
+shift 132 = layer 278 - 146, spacer change unrelated); (4) `setViewportSize` itself: refuted by (5); (5) CSS scroll anchoring: confirmed. The
+spacer is the scroller's only in-flow element, below the sticky row layer; when the layer's height changes on a resize, the browser moves
+`scrollTop` by that change to keep the spacer still. A probe of 20 resizes per run, view not pinned, was red 11 of 40 runs with
+`overflow-anchor: auto` and 0 of 80 with `none` (computed style checked in each run), the same build. A WKWebView probe (macOS 27.2.1, the
+runtime Tauri uses) moved a scroller 1000 -> 1200 when an element above the anchor grew 200 px, and not with `overflow-anchor: none`: users
+were exposed, not only the tests. Safari Technology Preview 241 lists "Added stable support for CSS scroll anchoring" (310113@main).
+**Fix.** `.viewport { overflow-anchor: none }`, as the Angular CDK virtual scroll viewport does (`.cdk-virtual-scrollable`): the grid places
+its rows and writes `scrollTop` itself. ADR 0072 decision 2 is unchanged. Regression test first: "the browser does not move the view when the
+row layer changes height" grows the layer by 100 px and reads `scrollTop`; red in both engines (100 px), green after.
+**Why the logs showed it only partly.** The `Scroll origin` line showed a no-input move, not its size against the layer change; WebKit's
+console preview cut the line after five fields. **Class:** a browser default that moves the scroll position (clamping, bug 3 of ADR 0072;
+anchoring here).
