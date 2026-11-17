@@ -60,7 +60,7 @@ import { MatMenuModule } from '@angular/material/menu';
                   <ul class="reasons">@for (r of s.reasons; track r) { <li>It {{ r }}.</li> }</ul>
                 }
                 <dl>
-                  @if (s.exe) { <dt>Path</dt><dd class="sel mono" [dyFullText]="s.exe">{{ s.exe }}</dd> }
+                  @if (s.exe) { <dt>Path</dt><dd class="sel mono" [dyFullText]="s.exe">@for (part of pathParts(s.exe); track $index) {{{ part }}<wbr />}</dd> }
                   @if (s.publisher) { <dt>Publisher</dt><dd class="sel">{{ s.publisher }}</dd> }
                   <dt>First seen</dt><dd>{{ firstSeenFull(s) }}</dd>
                   <dt>Last seen</dt><dd>{{ s.lastSeen > 0 ? (s.running ? 'Running now' : ago(s.lastSeen)) : 'Has not run since' }}</dd>
@@ -112,7 +112,8 @@ import { MatMenuModule } from '@angular/material/menu';
     dl { margin: 0; display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 6px var(--sp-3); font-size: var(--fs-sm); }
     dt { color: var(--text-3); }
     dd { margin: 0; overflow-wrap: anywhere; }
-    dd.mono { font: var(--fw-regular) 12px / 1.4 var(--font-mono); }
+    /* A path breaks after a slash, not in the middle of a name; only a name wider than the pane breaks inside it. */
+    dd.mono { font: var(--fw-regular) 12px / 1.4 var(--font-mono); overflow-wrap: break-word; }
     .sel { user-select: text; cursor: text; }
     .dacts { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
     .hint { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
@@ -153,6 +154,11 @@ export class UnusualView {
 
   protected ago(at: number): string {
     return formatRelative(at, this.now());
+  }
+
+  /** A path in pieces that each end after a slash, so the pane can wrap it between names (a `<wbr>` follows each piece). */
+  protected pathParts(path: string): string[] {
+    return path.split(/(?<=[/\\])/);
   }
 
   protected firstSeenFull(i: UnusualItem): string {

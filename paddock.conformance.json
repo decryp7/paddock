@@ -4,7 +4,17 @@
   "docBlocks": {},
   "limitSkip": ["paddock-limits"],
   "screenshotDirs": [
-    "ui/docs/screenshots"
+    "ui/docs/screenshots",
+    "apps/dyno/docs/screenshots"
+  ],
+  "capturedOutside": [
+    { "path": "apps/dyno/docs/screenshots/windows-tray/", "reason": "Captures from a Windows machine at 100, 125 and 150 percent scaling (the tray icon and popup on a real desktop); the runner drives a browser on macOS and cannot make them." },
+    { "path": "apps/dyno/docs/screenshots/wp14/", "reason": "The evidence of the finished work package 14 (a fixed set of 1280x800 pages kept as it was reviewed); the runner no longer makes this set." },
+    { "path": "apps/dyno/docs/screenshots/helper/macos-password-dialog-repair.png", "reason": "A screenshot of the real macOS administrator password dialog; it is an OS window the runner cannot open." },
+    { "path": "apps/dyno/docs/screenshots/helper/macos-password-dialog-turn-on.png", "reason": "A screenshot of the real macOS administrator password dialog; it is an OS window the runner cannot open." },
+    { "path": "apps/dyno/docs/screenshots/helper/macos-password-dialog-update.png", "reason": "A screenshot of the real macOS administrator password dialog; it is an OS window the runner cannot open." },
+    { "path": "apps/dyno/docs/screenshots/helper/windows-uac-turn-off.png", "reason": "A screenshot of the real Windows UAC prompt; it is an OS window the runner cannot open." },
+    { "path": "apps/dyno/docs/screenshots/helper/windows-uac-turn-on.png", "reason": "A screenshot of the real Windows UAC prompt; it is an OS window the runner cannot open." }
   ],
   "ownTestBinaries": {
     "apps/pitwall/app/src-tauri/tests/picture_memory.rs": "a counting global allocator must run alone: it counts every allocation of its process, so no other test may share the binary",

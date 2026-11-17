@@ -63,7 +63,7 @@ interface IssueLine extends Issue {
         }
 
         <div class="bar" role="group" aria-label="Filters">
-          <dy-search-field label="Search issues" placeholder="Search apps and messages" [value]="filter().search" (valueChange)="setFilter({ search: $event })" />
+          <dy-search-field label="Search issues" placeholder="Search issues" [value]="filter().search" (valueChange)="setFilter({ search: $event })" />
           <pd-segmented-control label="Period" [options]="windowSegs" [value]="store.days() + ''" (valueChange)="store.setDays(+$event)" />
           @if (filter().app || filter().kind) {
             <button type="button" matButton="outlined" [attr.aria-label]="'Clear the filter ' + (filter().app ?? kindLabel(filter().kind!))" (click)="clear()">{{ filter().app ?? kindLabel(filter().kind!) }} <dy-icon name="close" /></button>

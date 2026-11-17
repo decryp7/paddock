@@ -93,7 +93,7 @@ suite tie-ins, session recording, a multi-PC view.
 
 ### Screenshots
 
-Taken against the mock backend (`docs/screenshots`, dark and light for every screen; `npm run screenshots` in `app/`).
+Taken against the mock backend (`docs/screenshots`, dark and light for every screen; `npm run screenshots` in `app/`). `npm run screenshots:check` in `app/` regenerates them into a scratch folder and says which tracked picture is stale (a pixel tolerance, not byte for byte: see `app/e2e/screenshot-tolerance.ts` for the limits and their measurement); a stale picture is regenerated from its spec, never edited.
 
 | | |
 | --- | --- |

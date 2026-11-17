@@ -370,7 +370,8 @@ const KINDS: { kind: BenchKind; text: string }[] = [
     .note, .why { display: flex; gap: var(--sp-2); align-items: flex-start; }
     .note dy-icon, .why dy-icon, .estimate dy-icon, .why-disabled dy-icon { flex: none; margin-top: 2px; }
     .metrics .label .badge { margin-left: var(--sp-2); }
-    .wrap { white-space: normal; overflow-wrap: anywhere; }
+    /* One line with an ellipsis (the full text is the tooltip): a two-line cell was clipped by the row's fixed height. */
+    .wrap { display: block; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .phase { display: grid; gap: var(--sp-1); margin: var(--sp-3) 0 0; padding: 0 var(--sp-4); color: var(--text-2); font-size: var(--fs-sm); }
     .bar-live { width: 100%; height: 6px; accent-color: var(--accent); border: 0; border-radius: 3px; background: var(--surface-active); }
     .bar-live::-webkit-progress-bar { background: var(--surface-active); border-radius: 3px; }

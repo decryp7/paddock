@@ -137,13 +137,23 @@ export function buildProcesses(start: number, specs: readonly AppSpec[] = APP_SP
   return out;
 }
 
+/**
+ * The movement of a reading at second `t`: the plain noise, or, with a reference second, the noise relative to that second (half the change),
+ * so the reading is exactly its declared base value at the reference and moves from there. The mock's machines are declared with the figures
+ * they have at the start of a session (mock/mac-machine.ts); the reference is that start.
+ */
+export function deviation(t: number, ref: number | null, salt: number, period: number): number {
+  return ref === null ? wobble(t, salt, period) : 0.5 * (wobble(t, salt, period) - wobble(ref, salt, period));
+}
+
 /** The live sample of a process at second `t`; suspended processes use no CPU and capped ones stay under the cap. */
-export function sampleProcess(p: MockProcess, t: number, cap: number | null, cpuScale: number): ProcessSample {
+export function sampleProcess(p: MockProcess, t: number, cap: number | null, cpuScale: number, ref: number | null = null): ProcessSample {
+  const w = (salt: number, period: number) => deviation(t, ref, salt, period);
   const suspended = p.state === 'suspended';
-  let cpu = suspended ? 0 : Math.max(0, p.cpu * cpuScale * (1 + p.swing * wobble(t, p.seed, 6)));
+  let cpu = suspended ? 0 : Math.max(0, p.cpu * cpuScale * (1 + p.swing * w(p.seed, 6)));
   if (cap !== null) cpu = Math.min(cpu, cap);
-  const memory = p.memory * (1 + 0.03 * wobble(t, p.seed + 3, 40));
-  const disk = suspended ? 0 : Math.max(0, p.disk * (1 + 0.8 * wobble(t, p.seed + 5, 4)));
+  const memory = p.memory * (1 + 0.03 * w(p.seed + 3, 40));
+  const disk = suspended ? 0 : Math.max(0, p.disk * (1 + 0.8 * w(p.seed + 5, 4)));
   return {
     pid: p.pid,
     parent: p.parent,
