@@ -239,7 +239,7 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
     // Conformance and its tests run on every push, whatever the plan says (ER-41); everything else a docs change does not reach.
     assert_eq!(
         ids(&planned),
-        ["conformance", "conformance-tests", "gates-register", "member-audits"],
+        ["conformance", "conformance-tests", "member-audits", "gates-register"],
         "{:?}",
         ids(&planned)
     );
@@ -371,7 +371,10 @@ fn a_failing_member_audit_fails_the_gate_and_a_missing_nextest_is_not_measured()
         .find(|l| l.contains("::error::member-audits"))
         .unwrap_or_else(|| panic!("{}", report.text));
     assert!(
-        line.contains("Re-run alone: cd tools/paddock-dev && cargo nextest run --config build.target-dir='/t' --profile member-audits"),
+        line.contains(&format!(
+            "Re-run alone: cd tools/paddock-dev && cargo nextest run --config {} --profile member-audits",
+            super::gates::shell_quote("build.target-dir='/t'")
+        )),
         "{line}"
     );
     let rows = run_all(

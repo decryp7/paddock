@@ -153,6 +153,7 @@ pub const ROW_SET: &[&str] = &[
     "dyno-wire-fixtures",
     "gates-register",
     "ipc-endpoints",
+    "member-audits",
     "pitwall-deny",
     "pitwall-scripts",
 ];
