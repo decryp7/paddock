@@ -90,9 +90,25 @@ Conventional Commits; one semver tag for the whole repo.
 - Windows: Stop on a console process without a window no longer fails; when the close request is not taken, the process is ended after the stop timeout.
 - A refused stop answers `badRequest`, not `busy`.
 
+### Growth of baselines and allow lists is measured against the branch's target (ADR 0098 amendment of 2026-11-16)
+- One function reads `PADDOCK_BASE_REF` (an empty value is unset): `check::baseline::target_ref` (Rust) and `targetRef` in `conformance/src/util/baseline.mjs` (JS), the run's own ref, else the variable, else `origin/main`. **The blocking baselines C53, C71, C104 and C115 stay errors and now measure growth against the branch's target instead of `origin/main`**, as do the shared allow-list readers of C121, C124, C125 and C130 (report-only checks, so a warning). CI sets it in the conformance job (`inputs.base || 'origin/main'`) and the train-gates job (`inputs.base`, the commit of main the train is built on); `./dev check --pre-push` passes the nearest of `<remote>/main` and `<remote>/train/*` that the pushed commit contains, never the remote's old tip (a second push hid growth) and never the incremental diff base, and prints it (`--dry-run` and `--json` too). In CI a target that cannot be resolved is a not-measured error (ADR 0089); locally a warning. A base list in an older format says so with its own fix (a typed reason, `Unmeasured`, never the message's words).
+
+### `paddock-testkit`: `StandIn`, check C130
+- New `paddock_testkit::StandIn` (with `Actions`, `Spawn`, `Installed`, `Invocation`) and the std-only binary `paddock-stand-in`: one stand-in
+  program for the programs a test plants, on Windows too, replacing `#!/bin/sh` fixtures. It prints lines, writes files, records its calls
+  (arguments with spaces and non-ASCII, chosen env vars, stdin), sleeps (bounded), starts a named grandchild, answers per argument and exits
+  with a code; `npm_like` and `git_like` give the common calls the real programs' shapes. New check C130 (report-only) lists the existing
+  shell fixtures in Rust tests in `conformance/c130-allow.json`. Every allow list read through the shared readers (C121, C124, C125, C130) now only shrinks: an entry or a raised `count` that the merge base lacks is one unwaivable finding (both hosts). Converted: Dyno's `smartctl` fakes, `paddock-dev`'s `df`, `git` and `heavy` fakes.
+
+### `paddock-env`, `paddock-proc`: `RESTRICTING` and `clear_env` (ER-47, rule 84)
+- New `paddock_env::RESTRICTING` (re-exported as `paddock_proc::RESTRICTING`): the variables no policy strips from a child, each with its restricting values (`RUSTUP_AUTO_INSTALL=0`, `CARGO_NET_OFFLINE=true|1`, `PADDOCK_DEV_DOWNLOAD=0`, `PADDOCK_TOOLCHAIN_FAILED=1`), and `paddock_env::{clear_env, clear_env_from, clear_env_pinned_from}`, the one function that clears a child's environment. `paddock_proc::clean_env` keeps them as the caller has them; `TestCommand` passes one only in a restricting value (a loosening `PADDOCK_DEV_DOWNLOAD=1` is dropped) and sets `RUSTUP_AUTO_INSTALL=0` when the caller's value does not restrict. Clippy forbids `Command::env_clear` elsewhere (`lint/clippy.toml` and every copy), and `std::env::set_var` / `remove_var` joined the preset.
+- New `paddock_env::vars()` and `vars_skipping`: the environment as text, built on `vars_os`, which skips a variable that is not valid Unicode and warns with its name instead of panicking like `std::env::vars`. paddock-dev's `process_env` re-exports it.
+- Clippy forbids `std::env::vars` in `lint/clippy.toml` and every copy (apps, tools, crates); `paddock-build`, `paddock-proc`'s test child, Debrief's collector (now depends on `paddock-env`) and paddock-dev read the environment through it.
+- Debrief's launcher, plugin host and elevated child, Pitwall's engine commands and the `paddock-dev` runners clear through it. The four app no-console constructors call `paddock_proc::command`; the remaining raw flags are in `docs/known-copies.toml` (`no-console-command`).
 
 ### `paddock-testkit`: `TestCommand`, check C123
 - New `paddock_testkit::TestCommand`: a `Command` that starts from an empty environment plus an allow-list (`process::allowed_names()`), with a private `HOME` and temp folder, a curated `PATH` and `path_first`, `cargo_target_dir` and `into_parts`. Every test that starts `./dev`, `cargo` or `node` uses it (ADR 0100); check C123 (report-only) flags any other way.
+- `paddock_env::command::{command, CREATE_NO_WINDOW}`: the canonical constructor a program is started from, moved from `paddock-proc` (which re-exports it, so `paddock_proc::command` callers are unchanged); `TestCommand` builds on it instead of its own `Command::new` and Windows flag, and starts through `paddock_testkit::exe`'s `ETXTBSY` retry (ADR 0100, "How `TestCommand` and `paddock_proc::command` relate").
 - `paddock-dev`: a named `ENGINEERING_RULES` is the only place the sibling `heavy.sh` lookup reads.
 
 ### `@decryp7/paddock-ui`: `shell/contributions`, the contribution registry without the root or Material

@@ -25,6 +25,10 @@ impl Build {
             // The sidecars are placeholders: tauri-build must not copy them over the programs cargo linked.
             // A build script is single-threaded at this point.
             #[allow(unsafe_code)]
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "a build script, one thread: tauri-build reads TAURI_CONFIG from this process's environment"
+            )]
             unsafe {
                 std::env::set_var("TAURI_CONFIG", config);
             }

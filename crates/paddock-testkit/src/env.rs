@@ -10,8 +10,11 @@ static LOCK: Mutex<()> = Mutex::new(());
 /// Takes the process-wide environment lock (waits for the holder; a lock poisoned by a failed test is recovered).
 /// Every test that reads or writes the environment of the process holds it for the whole test.
 pub fn env_lock() -> EnvLock {
+    let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // The machine values the kit reads are captured here, before any test changes the environment (`crate::ambient`).
+    crate::ambient::capture();
     EnvLock {
-        _guard: LOCK.lock().unwrap_or_else(|e| e.into_inner()),
+        _guard: guard,
         saved: Vec::new(),
     }
 }
@@ -28,6 +31,10 @@ pub struct EnvLock {
 
 impl EnvLock {
     /// Sets a variable for the rest of the test.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "EnvLock is the one place a test changes the environment: it holds the lock and puts every change back"
+    )]
     pub fn set(&mut self, key: impl AsRef<OsStr>, value: impl AsRef<OsStr>) {
         self.remember(key.as_ref());
         // SAFETY: the environment lock is held, so no other test changes the environment at the same time.
@@ -35,6 +42,10 @@ impl EnvLock {
     }
 
     /// Removes a variable for the rest of the test.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "EnvLock is the one place a test changes the environment: it holds the lock and puts every change back"
+    )]
     pub fn remove(&mut self, key: impl AsRef<OsStr>) {
         self.remember(key.as_ref());
         // SAFETY: as in `set`.
@@ -86,6 +97,10 @@ impl EnvLock {
 }
 
 impl Drop for EnvLock {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "EnvLock puts back what it changed, still holding the lock"
+    )]
     fn drop(&mut self) {
         for (key, old) in self.saved.drain(..).rev() {
             // SAFETY: the lock guard is still held (fields drop after this body).

@@ -1,10 +1,10 @@
 //! `inputs.txt` lists exactly what decides the binary: the tool's folder, the folders of its path dependencies (normal and
 //! build dependencies only; dev-dependencies change the hash only through Cargo.lock) and the files that configure the build.
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+use paddock_testkit::TestCommand;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::process::Command;
 
 /// Files outside the dependency folders that cargo reads for this build.
 const EXTRAS: [&str; 3] = ["tools/paddock-dev", "crates/Cargo.toml", ".cargo/config.toml"];
@@ -14,7 +14,7 @@ const HEAVY_EXTRAS: [&str; 3] = ["tools/heavy", "crates/Cargo.toml", ".cargo/con
 /// The triple this machine builds for. Metadata is read for it alone: the path dependencies are the same on every platform, and
 /// resolving the others would need registry crates (Windows, Android) that an offline machine never downloaded.
 fn host_triple() -> String {
-    let out = Command::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()))
+    let out = TestCommand::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()))
         .arg("-vV")
         .output()
         .unwrap();
@@ -27,7 +27,7 @@ fn host_triple() -> String {
 
 fn metadata(tool: &str) -> Value {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(tool);
-    let out = Command::new(env!("CARGO"))
+    let out = TestCommand::new(env!("CARGO"))
         .args([
             "metadata",
             "--format-version",

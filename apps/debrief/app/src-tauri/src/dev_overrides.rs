@@ -472,9 +472,10 @@ mod tests {
     #[test]
     fn release_builds_ignore_the_variables() {
         // No other test of this binary reads these variables in release builds.
-        std::env::set_var(BROWSER_ARGS_VAR, "not a flag");
-        std::env::set_var(DATA_DIR_VAR, "relative");
-        std::env::set_var(OPEN_PATHS_VAR, "relative");
+        let mut env = paddock_testkit::env_lock();
+        env.set(BROWSER_ARGS_VAR, "not a flag");
+        env.set(DATA_DIR_VAR, "relative");
+        env.set(OPEN_PATHS_VAR, "relative");
         assert_eq!(Overrides::from_env(), Ok(Overrides::default()));
     }
 

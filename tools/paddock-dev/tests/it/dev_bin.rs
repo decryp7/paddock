@@ -6,22 +6,24 @@
 //! way: the audit below fails on a direct use of `CARGO_BIN_EXE_paddock-dev`. A review found real tests (merge_check's hakari and
 //! member-gate modules) that started the shared server because they spawned the binary by hand.
 #![allow(clippy::unwrap_used)]
-use std::process::Command;
+use paddock_testkit::TestCommand;
 
 /// The path of the binary under test. For an argument or an environment value; to start it use [`command`].
+// conformance: test-env — a path for arguments and environment values; `command` below starts the binary through a TestCommand
 pub const PATH: &str = env!("CARGO_BIN_EXE_paddock-dev");
 
 /// The variable that turns the wrapper off.
 pub const OFF: (&str, &str) = ("PADDOCK_SCCACHE", "off");
 
 /// Sets the wrapper off on a command that starts the binary (or a fixture's command that may).
-pub fn harden(cmd: &mut Command) -> &mut Command {
+pub fn harden(cmd: &mut TestCommand) -> &mut TestCommand {
     cmd.env(OFF.0, OFF.1)
 }
 
-/// A command that starts the binary under test, with the wrapper off.
-pub fn command() -> Command {
-    let mut cmd = paddock_proc::command(PATH);
+/// A command that starts the binary under test: a [`TestCommand`] (ADR 0100: a listed environment and private folders, started
+/// through `paddock_env::command::command` like `paddock_proc::command`), with the wrapper off.
+pub fn command() -> TestCommand {
+    let mut cmd = TestCommand::new(PATH);
     harden(&mut cmd);
     cmd
 }
@@ -55,7 +57,8 @@ fn a_spawned_binary_has_the_wrapper_off() {
 }
 
 /// The audit: only this file names the binary, so every spawn is hardened. A new test file that names it directly fails here and
-/// is told what to use.
+/// is told what to use. `check_c123.rs` is the one other file that holds the name: as the text of C123's own samples, in strings
+/// that start nothing.
 #[test]
 fn no_test_file_starts_the_binary_without_the_helper() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/it");
@@ -63,7 +66,7 @@ fn no_test_file_starts_the_binary_without_the_helper() {
     let mut bad = Vec::new();
     for e in std::fs::read_dir(&dir).unwrap().flatten() {
         let p = e.path();
-        if p.extension().is_some_and(|x| x == "rs") && p.file_name().is_some_and(|n| n != "dev_bin.rs") {
+        if p.extension().is_some_and(|x| x == "rs") && p.file_name().is_some_and(|n| n != "dev_bin.rs" && n != "check_c123.rs") {
             let text = std::fs::read_to_string(&p).unwrap();
             if text.contains(&needle) || text.contains("CARGO_BIN_EXE_paddock-dev") {
                 bad.push(p.file_name().unwrap().to_string_lossy().into_owned());

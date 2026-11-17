@@ -425,7 +425,7 @@ pub fn command() -> Result<Report, CliError> {
     let root = Real
         .run("git", &["rev-parse", "--show-toplevel"], &cwd, None)
         .map_err(|e| e.with_hint("Run ./dev inside the Paddock repository."))?;
-    let vars: Vec<(String, String)> = std::env::vars().collect();
+    let vars: Vec<(String, String)> = crate::process_env::vars().collect();
     let h = compute(&Real, &env, &vars, Path::new(root.trim()))?;
     let wrapper = env("PADDOCK_DEV_WRAPPER_HASH");
     let text = format!(

@@ -392,6 +392,10 @@ jobs:
     env:
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+      # The ref the baselines' and allow lists' growth is measured against (ER-21; ADR 0098 amendment): the dispatch's `base` (the
+      # queue passes the commit of main the train is built on), else origin/main. This workflow has no pull_request trigger. One reader:
+      # check::baseline::target_ref (tools/paddock-dev/tests/it/growth_target.rs pins this line and the train-gates one).
+      PADDOCK_BASE_REF: ${{ inputs.base || 'origin/main' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1124,6 +1128,9 @@ jobs:
       # No secret at all in this job (the queue's contract): ./dev is built from the checkout, never downloaded, so it needs no
       # download credential either (conformance/test/ci-action-env.test.mjs exempts a job whose download is "0").
       PADDOCK_DEV_DOWNLOAD: "0"
+      # The dispatch's `base`: the commit of main the queue built the train on (ADR 0098), so the train's own entries are the train's, not the
+      # growth of the member under test. Pinned by tools/paddock-dev/tests/it/growth_target.rs.
+      PADDOCK_BASE_REF: ${{ inputs.base }}
     steps:
       - uses: actions/checkout@v4
         with:

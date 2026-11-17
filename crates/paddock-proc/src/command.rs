@@ -8,11 +8,10 @@
     )
 )]
 
-use std::ffi::OsStr;
 use std::process::Command;
 
-/// Windows process creation flag: no console window.
-pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// Windows process creation flag: no console window ([`paddock_env::command::CREATE_NO_WINDOW`]).
+pub use paddock_env::command::CREATE_NO_WINDOW;
 #[cfg(windows)]
 const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 
@@ -35,30 +34,19 @@ pub const KEPT_ENV: &[&str] = &[
     "XDG_RUNTIME_DIR",
 ];
 
-/// A command for `program` that opens no console window on Windows (a GUI app starting a console tool would flash one,
-/// or, under Remote Desktop, show it). The only place the apps start programs; clippy forbids `Command::new` elsewhere.
-#[allow(clippy::disallowed_methods)] // the single allowed place
-pub fn command(program: impl AsRef<OsStr>) -> Command {
-    let cmd = Command::new(program);
-    #[cfg(windows)]
-    let cmd = {
-        use std::os::windows::process::CommandExt;
-        let mut cmd = cmd;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-        cmd
-    };
-    cmd
-}
+/// The variables [`clean_env`] never strips ([`paddock_env::RESTRICTING`]).
+pub use paddock_env::RESTRICTING;
 
-/// Clears the child's environment and copies back only the variables in `keep` (use [`KEPT_ENV`]) that this process has.
-/// Variables added afterwards with `env` still reach the child.
+/// A command for `program` that opens no console window on Windows ([`paddock_env::command::command`], the one place programs
+/// are started from; clippy forbids `Command::new` elsewhere).
+pub use paddock_env::command::command;
+
+/// Clears the child's environment and copies back only the variables in `keep` (use [`KEPT_ENV`]) that this process has, and
+/// every restricting variable it has ([`paddock_env::RESTRICTING`]: a download ban, an offline switch; a child that lost one would
+/// do what this process forbade, ER-47). Variables added afterwards with `env` still reach the child. The one clearing function:
+/// clippy forbids `Command::env_clear` elsewhere.
 pub fn clean_env(cmd: &mut Command, keep: &[&str]) {
-    cmd.env_clear();
-    for key in keep {
-        if let Some(value) = std::env::var_os(key) {
-            cmd.env(key, value);
-        }
-    }
+    paddock_env::clear_env(cmd, keep);
 }
 
 /// Marks the command to start at lower priority so the app stays responsive: below-normal on Windows (this sets the whole
@@ -94,13 +82,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_command_is_for_the_program_and_nothing_else_is_added() {
-        let c = command("some-tool");
-        assert_eq!(c.get_program(), "some-tool");
-        assert_eq!(c.get_args().count(), 0);
-    }
-
-    #[test]
     fn the_environment_is_cleared_to_the_allow_list() {
         // The test process always has PATH; a name it surely lacks must not appear.
         let mut c = command("x");
@@ -123,6 +104,56 @@ mod tests {
             !envs.iter().any(|(k, _)| k == "PADDOCK_PROC_AMBIENT"),
             "env_clear drops what was set before"
         );
+    }
+
+    /// ER-47: a variable that restricts the child survives the clearing, though nobody listed it in `keep`, with the value the caller
+    /// has (a production child inherits it as it is, a loosening value too); a variable of the same shape that is not restricting
+    /// is dropped.
+    #[test]
+    fn restricting_variables_survive_the_clearing_without_being_kept() {
+        for (value_of, what) in [
+            (
+                Box::new(|r: &paddock_env::Restriction| r.pinned().to_string())
+                    as Box<dyn Fn(&paddock_env::Restriction) -> String>,
+                "restricting",
+            ),
+            (
+                Box::new(|_: &paddock_env::Restriction| "loosen".to_string()),
+                "loosening",
+            ),
+        ] {
+            let mut env = paddock_testkit::env_lock();
+            for r in paddock_env::RESTRICTING {
+                env.set(r.name, value_of(r));
+            }
+            env.set("PADDOCK_PROC_NOT_RESTRICTING", "0");
+            let mut c = command("x");
+            clean_env(&mut c, &["PATH"]);
+            let seen: Vec<(String, String)> = c
+                .get_envs()
+                .filter_map(|(k, v)| {
+                    v.map(|v| {
+                        (
+                            k.to_string_lossy().into_owned(),
+                            v.to_string_lossy().into_owned(),
+                        )
+                    })
+                })
+                .collect();
+            for r in paddock_env::RESTRICTING {
+                assert!(
+                    seen.contains(&(r.name.to_string(), value_of(r))),
+                    "{} ({what}) was stripped or changed: {seen:?}",
+                    r.name
+                );
+            }
+            assert!(
+                !seen
+                    .iter()
+                    .any(|(k, _)| k == "PADDOCK_PROC_NOT_RESTRICTING"),
+                "{seen:?}"
+            );
+        }
     }
 
     #[test]

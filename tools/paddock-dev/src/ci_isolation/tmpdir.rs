@@ -71,7 +71,7 @@ fn ours(ctx: &Ctx, b: &str) -> bool {
 /// On macOS: does `diskutil` say the volume holding the folder is not internal? The one rule is `ci_host::boot_volume` (ER-22): the
 /// folder's nearest existing parent, links resolved, its mount from `df`, `Internal=false` in `diskutil info -plist`.
 fn volume_is_external(folder: &str) -> bool {
-    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let env: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
     crate::ci_host::boot_volume::external_on_this_machine(&env, folder)
 }
 
