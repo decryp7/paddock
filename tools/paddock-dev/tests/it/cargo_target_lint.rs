@@ -99,44 +99,82 @@ fn only_the_listed_files_set_the_build_folder_as_a_variable() {
     );
 }
 
-/// Whether `current` adds an entry that `base` does not have.
-pub fn grown(base: &BTreeSet<String>, current: &BTreeSet<String>) -> Vec<String> {
-    current.difference(base).cloned().collect()
-}
-
-#[test]
-fn growth_is_found_by_comparing_with_a_base() {
-    let base = entries("# c\na | r\nb | r\n");
-    assert!(grown(&base, &entries("a | r\n")).is_empty(), "shrinking is fine");
-    assert_eq!(grown(&base, &entries("a | r\nc | new\n")), ["c"]);
-}
-
-fn git(root: &Path, args: &[&str]) -> Option<String> {
-    let out = paddock_proc::command("git").arg("-C").arg(root).args(args).output().ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
-
-/// ER-46: the list is compared with the merge base by its own check; growth needs the user's approval. Where the base cannot be read
-/// (no `origin/main`, a shallow clone) the check is not measured and says so, it does not pass.
+/// ER-46: the list is compared with the merge base by the shared comparison, `check::baseline::growth` (the one C53, C115 and the
+/// allow-list readers use; rule 55: no second copy), against the target ref the shared checks use (`PADDOCK_BASE_REF`, else
+/// `origin/main`). Growth needs the user's approval. Where the base cannot be seen (a host runner's kept clone has no `origin/main`; a
+/// shallow clone) the comparison is not measured and says so with a `::warning::`, as every other growth guard of this tree does
+/// (`Growth::Reason`: a warning, never silence); the Linux legs check out the whole history and measure. Once the shared
+/// `baseline::target_ref` of feat/testkit-stand-in is on the train, the two lines that read the ref become `baseline::target_ref(None)`.
 #[test]
 fn the_allow_list_does_not_grow_against_the_merge_base() {
+    use paddock_dev::check::baseline::{Growth, growth};
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let base_ref = std::env::var("PADDOCK_BASE_REF").unwrap_or_else(|_| "origin/main".into());
-    let Some(base) = git(&root, &["merge-base", "HEAD", &base_ref]) else {
-        panic!(
-            "NOT MEASURED: cannot find the merge base with {base_ref} (fetch it, or set PADDOCK_BASE_REF); the allow list's growth was not checked"
-        );
+    let base_ref = std::env::var("PADDOCK_BASE_REF")
+        .ok()
+        .filter(|r| !r.is_empty())
+        .unwrap_or_else(|| "origin/main".into());
+    let current: Vec<String> = entries(&std::fs::read_to_string(root.join(ALLOW)).unwrap()).into_iter().collect();
+    let entries_of = |text: &str| Some(entries(text).into_iter().collect::<Vec<String>>());
+    match growth(&root, &base_ref, ALLOW, &current, &entries_of, &|k: &String| k.clone(), None) {
+        Growth::Reason(why) => eprintln!(
+            "::warning::NOT MEASURED: the allow list's shrink-only rule ({ALLOW}) was not checked against {base_ref}: {why}. Next: fetch the target branch (`git fetch origin main`, full history) or set PADDOCK_BASE_REF"
+        ),
+        Growth::Added { added: 0, .. } => {}
+        Growth::Added { base, added, .. } => panic!(
+            "the allow list grew against {base_ref} (merge base {base}): {added} entr{} not in the list there; it may only shrink. A new call passes the folder as configuration; an entry needs the user's approval",
+            if added == 1 { "y is" } else { "ies are" }
+        ),
+    }
+}
+
+/// The comparison really sees growth: a branch that adds an entry to a list the base has is found, a branch that only shrinks it is not.
+#[test]
+fn the_shared_comparison_finds_an_added_entry_and_not_a_removed_one() {
+    use paddock_dev::check::baseline::{Growth, growth};
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = |args: &[&str]| {
+        let out = paddock_proc::command("git")
+            .arg("-C")
+            .arg(root)
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" })
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
     };
-    let current = entries(&std::fs::read_to_string(root.join(ALLOW)).unwrap());
-    // The commit that introduces the file has no earlier copy: every entry is its first.
-    let Some(old) = git(&root, &["show", &format!("{base}:{ALLOW}")]) else {
-        return;
+    let write = |text: &str| {
+        std::fs::create_dir_all(root.join("tools/paddock-dev/tests/it")).unwrap();
+        std::fs::write(root.join(ALLOW), text).unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "x"]);
     };
-    let grown = grown(&entries(&old), &current);
-    assert!(
-        grown.is_empty(),
-        "the allow list grew against {base_ref} ({base}); a new call passes the folder as configuration, and an entry needs the user's approval: {grown:?}"
-    );
+    git(&["init", "-q", "-b", "main"]);
+    write("a | r\nb | r\n");
+    git(&["checkout", "-q", "-b", "topic"]);
+    let run = |text: &str| {
+        let current: Vec<String> = entries(text).into_iter().collect();
+        let entries_of = |t: &str| Some(entries(t).into_iter().collect::<Vec<String>>());
+        growth(root, "main", ALLOW, &current, &entries_of, &|k: &String| k.clone(), None)
+    };
+    write("a | r\nb | r\nc | new\n");
+    assert!(matches!(run("a | r\nb | r\nc | new\n"), Growth::Added { added: 1, .. }));
+    write("a | r\n");
+    assert!(matches!(run("a | r\n"), Growth::Added { added: 0, .. }), "shrinking is fine");
+    // A ref that does not exist cannot be measured: a reason, never a pass.
+    let current: Vec<String> = vec!["a".into()];
+    let entries_of = |t: &str| Some(entries(t).into_iter().collect::<Vec<String>>());
+    assert!(matches!(
+        growth(root, "origin/nowhere", ALLOW, &current, &entries_of, &|k: &String| k.clone(), None),
+        Growth::Reason(_)
+    ));
 }
