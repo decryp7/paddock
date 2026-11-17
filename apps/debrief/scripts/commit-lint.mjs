@@ -23,6 +23,10 @@ const ATTRIBUTION = [
 export function lint(message) {
   const lines = message.replace(/\r\n/g, '\n').split('\n').filter((l) => !l.startsWith('#'));
   const header = (lines[0] ?? '').trim();
+  // A re-land names what it reverts (git's own line), or `./dev merge check --write-reverted` cannot tie its findings.
+  if (/^(?:Reapply "|revert(?:\([^)]*\))?!?: [Rr]eapply\b)/.test(header) && !/^This reverts commit [0-9a-f]{40}\.$/m.test(lines.join('\n'))) {
+    return ['a re-land commit must have a body line "This reverts commit <40-hex sha>."; write it with `git revert <sha>`, or add the line'];
+  }
   if (/^(Merge|Revert|Reapply|fixup!|squash!|amend!) /.test(header)) return [];
   const problems = [];
   if (!header) problems.push('the message is empty');
