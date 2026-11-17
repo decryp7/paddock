@@ -126,6 +126,8 @@ pub struct Facts {
     /// The Tauri crates each candidate workspace leaves out of the Linux Clippy ([`super::linux_inputs::left_out`]), or why cargo
     /// could not say. Filled for [`linux_candidates`] only.
     pub left_out: std::collections::BTreeMap<String, Result<Vec<String>, String>>,
+    /// The run is the member gate of `./dev merge check --gates` (`--member-gate`): the repository-wide audits run too.
+    pub member_gate: bool,
     /// A kept build folder per workspace (`<it>/<workspace>`), used when the caller sets no `CARGO_TARGET_DIR`: the throw-away
     /// worktree of a pushed commit must not hold the builds (they would start cold every run).
     pub kept_targets: Option<String>,
@@ -316,6 +318,7 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
     out.push(conformance(facts));
     out.push(conformance_tests(facts));
     out.extend(commit_lint(change));
+    out.push(member_audits(facts));
     if plan["apps"].as_array().is_some_and(|a| a.iter().any(|x| x == "pitwall")) {
         let mut args = vec!["--test".to_string()];
         args.extend(facts.pitwall_tests.iter().cloned());
@@ -609,6 +612,54 @@ fn conformance_tests(facts: &Facts) -> Planned {
     })
 }
 
+/// The nextest profile that selects the repository-wide audits (`tools/paddock-dev/.config/nextest.toml`, its `default-filter`): the
+/// one place that lists them (ER-42), so a new audit is one line there and the gate and its tests read the same list.
+pub const AUDIT_PROFILE: &str = "member-audits";
+
+/// The audits of `tools/paddock-dev/tests/it`: tests that read the whole tree (the allow-list parity, the cargo-target lint, the
+/// parity corpus, the plan against the tree, the golden checks). A member's own touched-file tests never see a clash between two
+/// members' changes in them; on the merged tree they do (train 13: local-sccache's audits against golden-checked-when-made's code, the
+/// allow-list parity against C135, the parity corpus against test-env-builder; each first showed in the train-wide nextest run, ER-8).
+///
+/// Runs only when the push gate is the member gate (`./dev merge check --gates` passes `--member-gate`), whatever changed (ER-41); a
+/// developer's push skips it with a reason, as the user wants no extra minutes there (2026-11-17). Blocking from the start: the audits are established tests, not a new check (user, 2026-11-17). `--no-tests=fail`
+/// makes a filter that selects nothing a failure, never a pass (ER-33); `RUSTUP_AUTO_INSTALL=0` stops a probe from installing a
+/// toolchain (ER-45). Measured in docs/benchmarks.md, "Member audits in the member gate".
+fn member_audits(facts: &Facts) -> Planned {
+    if !facts.member_gate {
+        return Planned::Skip {
+            id: "member-audits".into(),
+            reason: "they run in the member gate of `./dev merge check --gates` (`--member-gate`), not in a developer's push".into(),
+        };
+    }
+    let mut g = Gate {
+        heavy: true,
+        need: Need::Tool("cargo-nextest".into()),
+        env: vec![("RUSTUP_AUTO_INSTALL".into(), "0".into())],
+        ..gate(
+            "member-audits".into(),
+            "tools/paddock-dev",
+            "cargo",
+            &["nextest", "run", "--profile", AUDIT_PROFILE, "--locked", "--no-tests=fail"],
+            4,
+            format!(
+                "fix the audit it names, or the change that clashes with it; re-run `cd tools/paddock-dev && cargo nextest run --profile {AUDIT_PROFILE}` (the list is the profile's default-filter in tools/paddock-dev/.config/nextest.toml)"
+            ),
+        )
+    };
+    // The build folder goes in as cargo configuration, never as `CARGO_TARGET_DIR` (sccache hashes it: crate::cargo_target). `cargo nextest`
+    // is not a builtin cargo subcommand, so `with_target_dir` would not place it; nextest takes `--config` itself, after `run`.
+    let dir = match (&facts.target_dir, &facts.kept_targets) {
+        (Some(d), _) => Some(d.trim_end_matches('/').to_string()),
+        (None, Some(k)) => Some(format!("{}/tools-paddock-dev", k.trim_end_matches('/'))),
+        (None, None) => None,
+    };
+    if let Some(dir) = dir {
+        g.args.splice(2..2, ["--config".to_string(), cargo_target::config_value(&dir)]);
+    }
+    Planned::Run(g)
+}
+
 fn commit_lint(change: &Change) -> Vec<Planned> {
     if change.ranges.is_empty() {
         return vec![Planned::Skip {
@@ -671,7 +722,7 @@ pub const NOT_RUN: &[(&str, &str)] = &[
         "CI covers them (ER-9 overlap); only workspaces with a changed file of their own are linted here",
     ),
     (
-        "tests (nextest, vitest, Playwright)",
-        "slower local checks run beside CI after dispatch (ER-9), not in the push gate",
+        "tests (nextest, vitest, Playwright) other than the member audits",
+        "slower local checks run beside CI after dispatch (ER-9); the repository-wide audits of tools/paddock-dev run in the push gate (`member-audits`)",
     ),
 ];

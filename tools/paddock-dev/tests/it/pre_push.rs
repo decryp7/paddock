@@ -32,6 +32,11 @@ fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>, test_off: bool) -> 
         .args(args)
         .current_dir(root)
         .env("PATH", path)
+        // ER-47 named clearing, with a reason: the planner reads the caller's CARGO_TARGET_DIR to place the build folder, which adds
+        // `--config build.target-dir=...` to every cargo row, while these tests assert CI's exact command lines. The result of a test
+        // must not depend on the build folder the agent that runs it exports.
+        .env_remove("CARGO_TARGET_DIR")
+        .env_remove("CARGO_BUILD_TARGET_DIR")
         .env_remove("PADDOCK_HEAVY")
         .envs(heavy.map(|h| ("PADDOCK_HEAVY", h)))
         .envs(test_off.then_some(("PADDOCK_TEST_HEAVY_OFF", "1")))
