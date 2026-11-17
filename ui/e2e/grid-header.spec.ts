@@ -23,14 +23,19 @@ for (const theme of ['dark', 'light'] as const) {
     await expectHeaderOnTop(page.locator('[data-testid="table-virtual"] .pd-grid'), { from: 2500 * 32, steps: 8 });
   });
 
-  // Frame by frame: 300 px a frame for 60 frames, a jump of 2.5 viewports, then the end. The header must not move and must be
-  // on top in every frame (review P1-1: a header inside the virtual list's moving window left the top on fast scrolls).
-  test(`pd-table: the header stays put and on top in every frame of a fast scroll, a jump and End (${theme})`, async ({ page }) => {
-    await open(page, theme);
-    const frames = await headerTrack(page.locator('[data-testid="table-virtual"] .pd-grid'), { perFrame: 300, frames: 60 });
-    expect(frames.length).toBe(62);
-    expect(frames.at(-1)!.scrollTop).toBeGreaterThan(100_000);
-    expect(frames.filter((f) => f.moved !== 0 || !f.onTop)).toEqual([]);
+  test.describe('frame by frame', () => {
+    // pinned-clock: off — measures real frames: headerTrack samples on requestAnimationFrame, which the fake clock drives, and WebKit then read
+    // the header between the scroll and its paint (moved -28 in 312 frames, run 8212; green with the real clock)
+    test.use({ pinnedClock: false });
+    // Frame by frame: 300 px a frame for 60 frames, a jump of 2.5 viewports, then the end. The header must not move and must be
+    // on top in every frame (review P1-1: a header inside the virtual list's moving window left the top on fast scrolls).
+    test(`pd-table: the header stays put and on top in every frame of a fast scroll, a jump and End (${theme})`, async ({ page }) => {
+      await open(page, theme);
+      const frames = await headerTrack(page.locator('[data-testid="table-virtual"] .pd-grid'), { perFrame: 300, frames: 60 });
+      expect(frames.length).toBe(62);
+      expect(frames.at(-1)!.scrollTop).toBeGreaterThan(100_000);
+      expect(frames.filter((f) => f.moved !== 0 || !f.onTop)).toEqual([]);
+    });
   });
 }
 
