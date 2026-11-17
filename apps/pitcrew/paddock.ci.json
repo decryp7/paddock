@@ -13,7 +13,7 @@
   "ui": [
     "npm run build -w ui",
     "cd apps/pitcrew/app",
-    "npm audit --omit=dev --audit-level=high",
+    "node ../../../scripts/npm-audit.mjs",
     "npm run lint",
     "npx ng build",
     "npx ng test --watch=false --coverage"

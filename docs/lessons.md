@@ -2759,3 +2759,11 @@ container run, a review finding): each call now ends through one completion slot
 completion, no lost wake-up, an end when the sender is dropped). It also closed a hole the patch above left: a close that
 panicked after taking the calls out left a caller already waiting on the clock waiting for its whole timeout (red at
 4cb546db5).
+
+## Fix item: gallery data.spec:193 read the table's left edge while the columns still moved (2026-11-18, CI run 8215)
+`table: loading and empty say no count, and the columns do not move when rows arrive` (ui/e2e/data.spec.ts:193) failed once on
+Linux in ci.yml run 8215 (job 40623, reference apps shard 1/2): `box-loading` was at x 363 against 353 for the loaded table. It
+passed in runs 8218 and 8225 on the same tree and 20 of 20 locally (Chromium, 4 workers). FLAKY in code train 13 reaches (pd-table);
+recorded here and not blocking, by the coordinator's decision. Next: reproduce in the Linux CI container with a failing run first,
+then wait for the layout to settle (two reads agree, ER-12) before the comparison. **Class: an e2e read before the layout settled
+(the ready-read class; train 13's workbench palette, Dyno alarms, gallery menu, grid header, Pitwall tray and Manage-layouts rename).**
