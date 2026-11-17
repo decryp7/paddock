@@ -2553,3 +2553,17 @@ sweep's five specs moved onto the helpers. First count (`node scripts/e2e-ready-
 no waiver was added (ER-46), so the count only goes down as specs move or the rule flips to error after its first green run on the real tree. Many of
 the 74 are reads of a static element; a waiver `// conformance: e2e-ready — <why>` is for those.
 Debrief's `openApp` and `openAppWith` now wait on the dock signal (`expectDockPlanned`). Suite time on 9 related files (68 tests, Chromium, 4 workers, one run each, machine idle): 1.1 min with the wait, 1.0 min without; the difference is inside the run-to-run noise of one run each.
+## The start-up benchmark was red for starts a busy host had not slowed (Debrief, 2026-11-16, CI run 8175)
+
+Run 8175 said "NOT MEASURED: 1 of 5 starts ran with host load <= 12 (14 discarded in 15 attempts, peak 1-minute load 49.4)". The
+load average on the shared Mac counts OrbStack and build threads, and the gate threw away starts that were fine: under 14, 28
+and 84 CPU-bound `yes` loops (with `dd`) Debrief's start moved by under 5% and its tree CPU time not at all. **Two plans did not
+hold.** (1) Scaling wall time by a fixed Node reference workload: the reference ran 2.2 to 5.2 times slower under the same loops, so a
+regression of two times would have passed. (2) "CPU time barely moves with load", from those `yes` loops: under real build load (load
+97 to 177, 0% idle) the CPU time rose by up to 40% (530 to 720 ms against 515) and the wall time of a single start by up to 2.5 times,
+so a tight CPU threshold (561 ms) failed a busy host. The coarse limit that a busy host needs (875 ms) would let a 70% regression through on a quiet host, so the user chose "tighter when quiet": a 600 ms limit when the median host CPU idle is 30% or more. The first proposed cutoff, 50%, would never have applied (no invocation of 38 reached a median idle of 50%: other agents are always working on the host), so a cutoff is chosen from the readings the benchmark really sees. **Rule:** measure a gate in the condition it must survive, with the real
+neighbours (other agents' builds), not only a synthetic stress; thresholds come from that, and a quantity that is noisy under load is
+a note, with a ceiling only a broken run reaches. The user's rule (2026-11-17): always measure, record host load and CPU idle, never
+refuse for a busy host, fail only on a real regression. Results: apps/debrief/docs/performance.md, "Start-up benchmark on a busy
+host". **Class: a proxy gate (load average) stood in for a measured effect (second instance: ER-12's raised timeouts without a
+measured cause), and a synthetic stress stood in for the real neighbour (instance: this lesson's second plan).**
