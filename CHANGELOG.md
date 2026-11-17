@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Unit tests of live mock feeds
+- Debrief's live-tail, mock-live and mock-backend specs run the feed on a `ManualClock` the test moves (the `clock` option of
+  `MockBackend`) instead of waiting on the page's timers. C136 (report-only) flags a unit spec block that starts a ticking
+  `MockBackend` or `synthetic` feed (`liveMs` under one second) with no manual clock or fake timers. Instance of the class: run 8191
+  (the events-grid live tail, fixed on `fix/debrief-events-grid-live-tail`).
+
 ### `@decryp7/paddock-ui/testing`: the test leak detector
 - New `installLeakDetector({ mode })` for every app's and the ui's `test-setup.ts` (call it after `installTestKit()`), with
   `registerInFlight` (tracked start-up work, Debrief's load record generalised), `registerSingleton` (a page-wide singleton

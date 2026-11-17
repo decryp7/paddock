@@ -6,6 +6,7 @@ import { emptyReport, LEGACY_LIVE, MockAlertMutes, MockLiveSim, mockFamily, mock
 import { mockDurationMs, validateLiveSection } from './mock-live-profile';
 import { at } from '../../../testing/must';
 import { mockJobs } from '../../jobs/mock-jobs';
+import { ManualClock } from '../../../testing/manual-clock';
 
 describe('mock live tail helpers', () => {
   it('derives log families like the engine', () => {
@@ -123,8 +124,17 @@ describe('MockLiveSim', () => {
 });
 
 describe('MockBackend live tail', () => {
+  /** The feed runs on a clock the test moves, not on the page's timers. */
+  const liveClock = () => new ManualClock();
+  /** Moves the clock one `ms` step at a time until `done()` (a bounded number of steps). */
+  async function tickUntil(clock: ManualClock, ms: number, done: () => boolean) {
+    for (let i = 0; i < 200 && !done(); i++) await clock.advance(ms);
+    expect(done()).toBe(true);
+  }
+
   it('emits realistic reports and alerts, rotates, records set_live calls and reports tail status', async () => {
-    const b = new MockBackend({ latency: false, dataset: tinyDataset, liveMs: 20, liveRate: 200, liveRotateMs: 40, liveAlertMs: 40, exposeLiveCalls: true });
+    const clock = liveClock();
+    const b = new MockBackend({ latency: false, dataset: tinyDataset, clock, liveMs: 20, liveRate: 200, liveRotateMs: 40, liveAlertMs: 40, exposeLiveCalls: true });
     const reports: (TailReport | null)[] = [];
     const alerts: LiveAlert[] = [];
     const off = await b.onWorkspaceChanged((r) => reports.push(r));
@@ -132,8 +142,8 @@ describe('MockBackend live tail', () => {
     const before = (await b.workspaceSummary()).total;
     expect(await b.setLive(true, { watch: 'polling' })).toBe(2);
     expect((globalThis as Record<string, unknown>)['__debriefMockLiveCalls']).toBe(b.liveCalls);
-    await vi.waitFor(() => expect(reports.length).toBeGreaterThanOrEqual(3));
-    await vi.waitFor(() => expect(alerts.length).toBeGreaterThanOrEqual(1));
+    await tickUntil(clock, 20, () => reports.length >= 3);
+    await tickUntil(clock, 20, () => alerts.length >= 1);
     await b.setLive(false);
     off();
     offAlerts();
@@ -194,20 +204,22 @@ describe('MockBackend live tail', () => {
   });
 
   it('keeps the legacy one-event-per-tick simulation and the synthetic mode', async () => {
-    const b = new MockBackend({ latency: false, dataset: tinyDataset, liveMs: 10 });
+    const clock = liveClock();
+    const b = new MockBackend({ latency: false, dataset: tinyDataset, liveMs: 10, clock });
     const reports: (TailReport | null)[] = [];
     await b.onWorkspaceChanged((r) => reports.push(r));
     await b.setLive(true);
-    await vi.waitFor(() => expect(reports.length).toBeGreaterThanOrEqual(2));
+    await tickUntil(clock, 10, () => reports.length >= 2);
     await b.setLive(false);
     expect(reports[0]).toMatchObject({ appended: 1, alertsRaised: 0 });
     const page = await b.queryPage({ query: { ...EMPTY_QUERY, text: 'Live event' }, offset: 0, limit: 5, descending: false });
     expect(page.rows[0]?.message).toBe('Live event 1');
-    const synthetic = new MockBackend({ latency: false, syntheticTotal: 100, liveMs: 10 });
+    const syntheticClock = liveClock();
+    const synthetic = new MockBackend({ latency: false, syntheticTotal: 100, liveMs: 10, clock: syntheticClock });
     const s: (TailReport | null)[] = [];
     await synthetic.onWorkspaceChanged((r) => s.push(r));
     await synthetic.setLive(true);
-    await vi.waitFor(() => expect(s.length).toBeGreaterThanOrEqual(1));
+    await tickUntil(syntheticClock, 10, () => s.length >= 1);
     await synthetic.setLive(false);
     expect((await synthetic.workspaceSummary()).total).toBeGreaterThan(100);
   });

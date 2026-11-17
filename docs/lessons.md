@@ -2436,7 +2436,7 @@ timers with `DestroyRef`, each with a test that was red first. The ui, Pitcrew, 
 findings; Dyno and then Debrief joined the failing suites after its `MockBackend.dispose()` and two store fixes. **Class: a test fails for what an earlier test left in
 a shared page (earlier: runs 7257/7274/7276 fake-timer spy, run 8170 teardown chunk, the mock-jobs singleton, the leftover DOM).**
 
-## Debrief: the live tail "holds the rows while not following" read 120052 for 120028 once in four runs (tests, 2026-11-16, open)
+## Debrief: the live tail "holds the rows while not following" read 120052 for 120028 in about one full run in three (tests, 2026-11-16)
 
 `events-grid.spec.ts:913` failed once in four full runs of the leak-detector branch (120052 against 120028). Not fixed here; a fix item (ER-28). Causes to rule out, with the observation that would rule each out: (1) the detector (it wraps `setTimeout` and `setInterval` and clears timers only in fail mode; Debrief is report-only, so it changes nothing: rule out by running the spec 50 times with the detector off); (2) a live-tail push landing between the two reads (the 24-row difference equals one batch: check the tail's batch size and whether the test advances the mock clock); (3) a leaked mock-clock timer from an earlier test firing into this one (`core/mock/mock-clock.ts:30,32,34` are in the report list: the findings of the preceding tests in that worker show it); (4) a render frame (`requestAnimationFrame`) landing between reads. Measure all four in the failing run before changing anything. Class: **a test that reads a moving value without holding the source still** (earlier: the axe theme read, Dyno's row-menu redraw).
 
@@ -2567,3 +2567,53 @@ a note, with a ceiling only a broken run reaches. The user's rule (2026-11-17): 
 refuse for a busy host, fail only on a real regression. Results: apps/debrief/docs/performance.md, "Start-up benchmark on a busy
 host". **Class: a proxy gate (load average) stood in for a measured effect (second instance: ER-12's raised timeouts without a
 measured cause), and a synthetic stress stood in for the real neighbour (instance: this lesson's second plan).**
+`events-grid.spec.ts` "holds the rows while not following, counts the new events, and reveals the newest on request" failed
+twice in about six full runs (120052 against 120028), never in eight runs of the test alone. **Causes listed (ER-28), with what
+each measurement showed:** (1) the leak detector: refuted, Debrief was report-only then and the failing run had no finding for it, and the
+failure is the same with the detector's timer wrapper out of the picture (the 1 ms runs below); (2) a push moving the end between the
+reveal and the read: partly confirmed. At `liveMs: 1` the test failed 3 of 3 (126124/126148, 124468/124492, 123508/123532: one row of 24 px
+short, the same shape), at 25 ms 0 of 8 alone, so the rate follows the push rate; (3) a leaked mock-clock timer from an earlier test:
+refuted for the 1 ms runs (a single test); not excluded for the full-run rate; (4) a render frame between reads: refuted, the
+numbers stay put after another `flush` and `settle` (`top=126148 max=126172` at the assertion, after the flush and after the settle).
+**Sequence measured (temporary logging, `liveMs: 1`):** one `liveRefresh('end')` for the reveal, `applyLive mode=end newTotal=5270`,
+then the assertion reads `top` = the end of 5269 rows while `total` is 5270; events pushed after the reveal are held (`newEvents`
+counts them), so nothing moves the top afterwards. **Fix (spec):** the test's backend runs its pushes on a `ManualClock` (`clock.advance`
+makes the ticks), so no push can land in the reveal; 13 runs alone and 4 full Debrief runs were green. **Product cause, found and fixed in the same round (ER-44):** the reveal's refresh asks for several pages in one round (page 0, the
+pages in view, the page of the old last row). The first answer triggers `applyLive` and the scroll to the end of its total; an event pushed
+between two answers made a later page report a larger total, which `PagedRows` stored without scrolling, so the view stayed one row
+(24 px) short of the newest event (a user-visible bug: "reveal newest" stopping one row above it). The manual-clock pumping did not
+reproduce it because it never interleaved a push between two page answers; the deterministic test does that on purpose (the second page
+read of the reveal is answered after a push) and failed with 119836 against 119860 before the fix. **Fix:** `PagedRows.arriveLive`
+remembers the round and total of an arrival that scrolled to the end and, for a later answer of the same round with a larger total, calls
+`onLive` again in end mode (bounded by the pages of the round, no loop). Class: **a test reads a moving value without holding the source still** (earlier: the axe theme read, Dyno's row-menu redraw).
+
+**Rule (review of the first fix, same day):** a follow-up end arrival belongs to the reveal's own pages, not to the round. The first
+version of the fix kept `endArrival` for the whole round; after a reveal with following off the grid holds new events, so no new round
+starts, and pages fetched because the user scrolled later answered in the reveal's round: each larger total jumped the view back to the end
+(scroll to 60000 ended at top=120028). `PagedRows` now records the pages `liveRefresh` asked for, follows only answers to those, clears the
+follow-up when the last of them has arrived, and `endReveal()` (called by the grid for a scroll it did not write itself) ends it at the
+user's first scroll. Specs: the forced-order reveal and "does not pull the view back to the end after the user scrolls away" (red on the
+first fix at 120028 against under 70000). `flush` in `events-grid.spec.ts` no longer sleeps a fixed `SCROLL_IDLE_MS + 30`: it waits on the
+store's `scrollIdlePending`. C71 had caught that helper (its sites were in the baseline); the baseline was shrunk by the three sites.
+
+**Real browser (e2e, same day):** jsdom hid a second cause. `applyLive` wrote `scrollTop` before the spacer had grown to the new total; Chromium and
+WebKit clamp such a write, and the scroll event that follows reports the clamped position, which the grid took for the user's scroll
+(the reveal ended 21 rows short in Chromium, with or without a push between the pages). Fix: a live arrival writes the scroll after the render
+(`setTop(..., afterRender)`, `afterNextRender`), the position signal is still set at once. Playwright e2e `live tail: reveal newest ends on the
+newest row when events are pushed between the reveal pages` (new mock switch `mockPageStaggerMs` answers pages at different times, pinned
+clock moves them and the 50 ms ticks): red in both engines without the deferred write, green 3 of 3 in Chromium and in WebKit with it.
+
+2026-11-17, Debrief `helpers.spec.ts` leak (fixed, ER-28). Debrief runs the leak detector in fail mode, and the timeout spec of `settleUntil`
+failed 7 of 300 runs (one process, the spec repeated) with "left a live setTimeout(0) started at helpers.ts:191" (`settle()`). Causes listed
+before measuring: (1) `vi.waitFor` rejects at its timeout while an attempt is inside `settle()` waiting on its `setTimeout(0)`; (2) the test
+ends between the first `await` and the timer; (3) fake timers left by another spec of the file; (4) the detector counting the previous test's
+timer. (3) and (4) are out: the file installs no fake timers and the leak named this test's own call. (1) and (2) are the same race. Confirmed:
+a spec that stretches every zero-delay timer to 20 ms and times out at 5 ms fails every time without the fix (the timer is pending when the
+wait rejects) and passes with it; the repeated run went from 7 of 300 red to 0 of 300. Fix: `settleUntil` awaits its last attempt before it
+returns or throws, so no timer of its own outlives it. No sleep and no longer timeout (ER-12).
+
+2026-11-17, unit tests of live mock feeds. Only the Debrief events-grid live tail (run 8191) was a unit test asserting a value while a
+feed kept changing it; the Dyno row menu under live updates was an e2e case (the e2e kit has `pauseLive` and `withLivePaused`). Common
+practice for a feed on timers is a clock the test moves (`ManualClock` for the Debrief mock backends, `clock` option) or Vitest's fake
+timers, never the page's real timers; a hold on top of a manual clock added nothing, so no helper was built. C136 (report-only) flags a
+unit spec block that starts a ticking `MockBackend` or `synthetic` feed without one.

@@ -202,13 +202,24 @@ export async function settle<T>(fixture?: ComponentFixture<T>, rounds = 4): Prom
  * stub's resolver being captured, a dialog opening (rule 49). Returns as soon as the condition holds.
  */
 export async function settleUntil<T>(fixture: ComponentFixture<T> | undefined, condition: () => void, timeout = 10_000): Promise<void> {
-  await vi.waitFor(
-    async () => {
-      await settle(fixture, 1);
-      condition();
-    },
-    { timeout, interval: 10 },
-  );
+  // `vi.waitFor` rejects at its timeout while an attempt can still be inside `settle()`, waiting on its own `setTimeout(0)`; that
+  // timer would then outlive the test and the leak detector names it (ER-28: 7 of 300 runs of the timeout spec). The last attempt
+  // is awaited before returning, so no timer of ours is left behind.
+  let attempt: Promise<void> = Promise.resolve();
+  try {
+    await vi.waitFor(
+      () => {
+        attempt = (async () => {
+          await settle(fixture, 1);
+          condition();
+        })();
+        return attempt;
+      },
+      { timeout, interval: 10 },
+    );
+  } finally {
+    await attempt.catch(() => undefined);
+  }
 }
 
 /**

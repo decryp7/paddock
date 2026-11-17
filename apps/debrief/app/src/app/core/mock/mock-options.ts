@@ -45,6 +45,7 @@ export function mockFailuresFromSearch(search: string): Partial<Record<Failable,
  *   ?mockLiveRate=50          records per second while live tail is on (default 20 with mockLive)
  *   ?mockLiveRotateMs=30000   rotate the tailed file this often (0 = never)
  *   ?mockLiveAlertMs=10000    raise a live alert this often (0 = never)
+ *   ?mockPageStaggerMs=10     each page answers this many ms later per page index (pages of one request arrive at different times)
  *   ?mockLongNames=1          the demo files also include very long paths and file names
  *   ?mockSlowImport=600       opening is slow and cancellable: each path is a folder of files read this many ms apart
  *   ?mockSlowDiscovery=2000   with mockSlowImport: finding files takes this many ms per step
@@ -67,6 +68,8 @@ export function mockOptionsFromSearch(search: string): MockBackendOptions {
     const alert = nonNegativeInt(p.get('mockLiveAlertMs'));
     if (alert !== undefined) options.liveAlertMs = alert;
   }
+  const stagger = positiveInt(p.get('mockPageStaggerMs'));
+  if (stagger) options.pageStaggerMs = stagger;
   if (p.get('mockLatency') === '0') options.latency = false;
   if (p.get('mockCorrupt') === 'markers') options.corruptMarkers = true;
   if (p.get('mockLongNames') === '1') options.longNames = true;

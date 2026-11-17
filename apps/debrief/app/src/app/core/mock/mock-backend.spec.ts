@@ -5,6 +5,7 @@ import { MOCK_PROFILE_TOML } from './mock-profile';
 
 import { at } from '../../../testing/must';
 import { mockJobs } from '../../jobs/mock-jobs';
+import { ManualClock } from '../../../testing/manual-clock';
 describe('MockBackend', () => {
   let backend: MockBackend;
   beforeEach(() => (backend = tinyBackend()));
@@ -175,35 +176,41 @@ describe('MockBackend', () => {
     });
 
     it('emits workspace changes while live is on, with a new event each time', async () => {
-      const b = new MockBackend({ latency: false, dataset: tinyDataset, liveMs: 10 });
+      const clock = new ManualClock();
+      const b = new MockBackend({ latency: false, dataset: tinyDataset, liveMs: 10, clock });
       const changed = vi.fn();
       const off = await b.onWorkspaceChanged(changed);
       expect(await b.setLive(true)).toBe(2);
-      await vi.waitFor(() => expect(changed.mock.calls.length).toBeGreaterThanOrEqual(2));
+      await clock.advance(20);
+      expect(changed.mock.calls.length).toBeGreaterThanOrEqual(2);
       const summary = await b.workspaceSummary();
       expect(summary.total).toBeGreaterThan(11);
       expect((await b.queryPage({ query: query({ text: 'Live event' }), offset: 0, limit: 1, descending: true })).rows[0]?.message).toMatch(/Live event/);
       expect(await b.setLive(false)).toBe(0);
       const n = changed.mock.calls.length;
-      await new Promise((r) => setTimeout(r, 50));
+      await clock.advance(50);
       expect(changed.mock.calls.length).toBe(n);
       off();
       await b.setLive(true);
-      await new Promise((r) => setTimeout(r, 50));
+      await clock.advance(50);
       expect(changed.mock.calls.length).toBe(n);
       await b.setLive(false);
     });
 
     it('counts live events in a synthetic result and survives an empty workspace', async () => {
-      const synthetic = new MockBackend({ latency: false, dataset: tinyDataset, syntheticTotal: 100, liveMs: 10 });
+      const clock = new ManualClock();
+      const synthetic = new MockBackend({ latency: false, dataset: tinyDataset, syntheticTotal: 100, liveMs: 10, clock });
       await synthetic.setLive(true);
-      await vi.waitFor(async () => expect((await synthetic.workspaceSummary()).total).toBeGreaterThan(100));
+      await clock.advance(10);
+      expect((await synthetic.workspaceSummary()).total).toBeGreaterThan(100);
       await synthetic.setLive(false);
-      const empty = new MockBackend({ latency: false, dataset: () => ({ sources: [], unrecognized: [], records: [] }), liveMs: 10 });
+      const emptyClock = new ManualClock();
+      const empty = new MockBackend({ latency: false, dataset: () => ({ sources: [], unrecognized: [], records: [] }), liveMs: 10, clock: emptyClock });
       const changed = vi.fn();
       await empty.onWorkspaceChanged(changed);
       await empty.setLive(true);
-      await vi.waitFor(() => expect(changed).toHaveBeenCalled());
+      await emptyClock.advance(10);
+      expect(changed).toHaveBeenCalled();
       expect((await empty.workspaceSummary()).total).toBe(0);
       await empty.setLive(false);
     });

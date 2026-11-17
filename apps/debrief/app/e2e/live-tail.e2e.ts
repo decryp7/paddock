@@ -283,3 +283,37 @@ test.describe('live tail: status, sources and opening', () => {
     await expect(gridTotal(page)).toHaveText('0');
   });
 });
+
+test.describe('live tail: reveal newest', () => {
+  // A real browser clamps a scroll written before the spacer has grown, and the scroll event that follows differs from the written
+  // position: the grid must not take that for the user scrolling away (it would drop the follow-up of the reveal and stay one row short).
+  // `mockPageStaggerMs` answers the reveal's pages at different times, and the pinned clock moves them and the live ticks (every
+  // 50 ms) on in small steps, so events are pushed between the pages' answers.
+  test('reveal newest ends on the newest row when events are pushed between the reveal pages', async ({ page }) => {
+    test.slow();
+    await openOnClock(page, '?mockTotal=5000&mockLive=1&mockLiveRate=20&mockLiveMs=50&mockLiveRotateMs=0&mockLiveAlertMs=0&mockPageStaggerMs=10');
+    await liveOn(page);
+    await page.getByTestId('follow-toggle').click();
+    await expect(page.getByTestId('follow-toggle')).toHaveAttribute('aria-pressed', 'false');
+    await page.clock.runFor(1_000);
+    const pill = page.getByTestId('new-events');
+    await expect(pill).toBeVisible();
+    await pill.click();
+    // Move the clock on in small steps until the reveal's pages are all in (the answers are 20 to 220 ms apart, ticks every 50 ms).
+    const gap = () => page.locator('debrief-events-grid .viewport').evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop);
+    await expect
+      .poll(
+        async () => {
+          await page.clock.runFor(20);
+          return gap();
+        },
+        { timeout: 20_000 },
+      )
+      .toBeLessThanOrEqual(2);
+    // A last follow-up may still be due (the later pages answer up to 220 ms after the first): once everything has arrived, the view
+    // is on the last row and a further stretch of pushes (held now) leaves it there.
+    await page.clock.runFor(1_000);
+    await expect.poll(gap).toBeLessThanOrEqual(2);
+    await expect(gridRows(page).last()).not.toHaveClass(/placeholder/);
+  });
+});
