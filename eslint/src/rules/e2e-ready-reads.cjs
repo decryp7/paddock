@@ -63,7 +63,7 @@ function findRead(node, keys, parent = null) {
 }
 
 /** @type {import('eslint').Rule.RuleModule} */
-module.exports = {
+const rule = {
   meta: {
     type: 'suggestion',
     docs: { description: 'A read right after a bare visibility wait measures a page that may not be ready (use a ready helper).' },
@@ -95,3 +95,6 @@ module.exports = {
     };
   },
 };
+
+// The waiver pattern is shared with scripts/e2e-ready-report.mjs, which counts waivers per file against the merge base (ER-46).
+module.exports = Object.assign(rule, { WAIVER });

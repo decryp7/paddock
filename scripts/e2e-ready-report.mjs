@@ -6,17 +6,22 @@
 //   - a file with more sites than its baseline is a NEW site: `::error::` naming the file and the helper to use;
 //   - a file with fewer is a fixed site: `::error::` asking for `--update`, which rewrites the baseline and refuses growth;
 //   - a baseline entry that grew or appeared against the merge base (git, `--base`, default origin/main) fails with "needs the user's approval";
+//   - the waivers (`// conformance: e2e-ready — <why>`) are counted per spec file in scripts/e2e-ready-waivers.json the same way: a new waiver or one in a
+//     new place fails with "needs the user's approval" (it is an exception list in comment form, ER-46); fewer is fine (`--update`);
 //   - a project eslint could not measure fails (ER-33: not measured never passes).
 // Blocking (ER-41): the findings exit 1 only when scripts/e2e-ready-gate.json names `blockingSinceRun` (the CI run that was green on the real tree
 // with this gate in report-only mode). Until then they are printed as `::error::` lines and the script exits 0. To flip: write that run id there.
 //
 //   node scripts/e2e-ready-report.mjs [project ...]     default: every app with an e2e folder, and ui
 //   node scripts/e2e-ready-report.mjs --update          shrink the baseline to the current counts (never grows it); --init creates it
-//   options: --baseline <file>  --gate <file>  --base <git ref>
+//   options: --waivers <file>  --baseline <file>  --gate <file>  --base <git ref>
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+
+const { WAIVER } = createRequire(import.meta.url)('../eslint/src/rules/e2e-ready-reads.cjs');
 
 const RULE = 'paddock/e2e-ready-reads';
 
@@ -68,9 +73,31 @@ export function baselineGrowth(base, head) {
   return Object.entries(head).filter(([f, n]) => n > (base[f] ?? 0)).map(([f, n]) => ({ file: f, base: base[f] ?? 0, head: n }));
 }
 
+/** Waivers per spec file under `dir` (recursive, .ts): { relative path: count }, sorted. `rel` is the folder's path under the root. */
+export function waiversByFile(dir, rel) {
+  const out = {};
+  const walk = (d, r) => {
+    for (const name of readdirSync(d).sort()) {
+      const full = join(d, name);
+      const rr = `${r}/${name}`;
+      if (name === 'node_modules' || name.endsWith('-snapshots')) continue;
+      if (statSync(full).isDirectory()) walk(full, rr);
+      else if (name.endsWith('.ts')) {
+        const n = readFileSync(full, 'utf8').split('\n').filter((l) => WAIVER.test(l)).length;
+        if (n) out[rr] = n;
+      }
+    }
+  };
+  if (existsSync(dir)) walk(dir, rel);
+  return out;
+}
+
 /** The findings as `::error::` lines (and nothing else). */
-export function findings({ added, fixed, grown, unmeasured }) {
+export function findings({ added, fixed, grown, unmeasured, waiverAdded = [], waiverFixed = [], waiverGrown = [] }) {
   return [
+    ...waiverAdded.map((a) => `::error file=${a.file}::e2e ready-reads: ${a.now - a.recorded} new waiver(s) \`conformance: e2e-ready\` (${a.recorded} recorded, ${a.now} now): a new waiver, or one in a new place, needs the user's approval (ER-46). Wait with a ready helper instead.`),
+    ...waiverFixed.map((a) => `::error file=${a.file}::e2e ready-reads: ${a.recorded - a.now} waiver(s) removed (${a.recorded} recorded, ${a.now} now). Shrink the list: node scripts/e2e-ready-report.mjs --update`),
+    ...waiverGrown.map((g) => `::error file=${g.file}::e2e ready-reads waivers grew against the merge base (${g.base} to ${g.head}): the list only shrinks; growth needs the user's approval (ER-46).`),
     ...added.map((a) => `::error file=${a.file}::e2e ready-reads: ${a.now - a.recorded} new read(s) right after a bare visibility wait (${a.recorded} recorded, ${a.now} now). Wait with a ready helper from @decryp7/paddock-e2e (ui/projects/paddock-e2e/src/ready.ts) before the read; do not add a baseline entry.`),
     ...fixed.map((a) => `::error file=${a.file}::e2e ready-reads: ${a.recorded - a.now} site(s) fixed (${a.recorded} recorded, ${a.now} now). Shrink the baseline: node scripts/e2e-ready-report.mjs --update`),
     ...grown.map((g) => `::error file=${g.file}::e2e ready-reads baseline grew against the merge base (${g.base} to ${g.head}): a baseline only shrinks; growth needs the user's approval (ER-46).`),
@@ -113,6 +140,7 @@ function option(argv, name) {
 function main(argv) {
   const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
   const baselinePath = resolve(root, option(argv, '--baseline') ?? 'scripts/e2e-ready-baseline.json');
+  const waiversPath = resolve(root, option(argv, '--waivers') ?? 'scripts/e2e-ready-waivers.json');
   const gatePath = resolve(root, option(argv, '--gate') ?? 'scripts/e2e-ready-gate.json');
   const baseRef = option(argv, '--base') ?? 'origin/main';
   const update = argv.includes('--update');
@@ -146,27 +174,36 @@ function main(argv) {
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${table}\n`);
 
   const byFile = countsByFile(all, root);
-  const rel = baselinePath.startsWith(`${root}/`) ? baselinePath.slice(root.length + 1) : baselinePath;
+  const waiverCounts = {};
+  for (const project of names.length ? names : projects(root)) Object.assign(waiverCounts, waiversByFile(join(root, project, 'e2e'), `${project}/e2e`));
+  const relOf = (p) => (p.startsWith(`${root}/`) ? p.slice(root.length + 1) : p);
+  const rel = relOf(baselinePath);
   const baseline = readJson(baselinePath, init ? {} : undefined);
+  const waivers = readJson(waiversPath, init ? {} : undefined);
   if (update || init) {
     if (unmeasured.length) {
       console.log(`::error::e2e ready-reads: not rewriting the baseline, ${unmeasured.join(', ')} not measured`);
       return 1;
     }
     const { added } = compareToBaseline(byFile, baseline);
-    if (added.length && !init) {
-      console.log(findings({ added, fixed: [], grown: [], unmeasured: [] }).join('\n'));
+    const { added: waiverAdded } = compareToBaseline(waiverCounts, waivers);
+    if ((added.length || waiverAdded.length) && !init) {
+      console.log(findings({ added, fixed: [], grown: [], unmeasured: [], waiverAdded }).join('\n'));
       console.log('::error::e2e ready-reads: --update only shrinks the baseline; a new site is fixed with a ready helper, never recorded');
       return 1;
     }
     writeFileSync(baselinePath, `${JSON.stringify(byFile, null, 2)}\n`);
+    writeFileSync(waiversPath, `${JSON.stringify(waiverCounts, null, 2)}\n`);
     console.log(`e2e ready-reads: baseline written (${Object.values(byFile).reduce((a, b) => a + b, 0)} sites in ${Object.keys(byFile).length} files)`);
     return 0;
   }
   const { added, fixed } = compareToBaseline(byFile, baseline);
   const base = baselineAtBase(root, baseRef, rel);
   const grown = base ? baselineGrowth(base, baseline) : [];
-  const lines = findings({ added, fixed, grown, unmeasured });
+  const { added: waiverAdded, fixed: waiverFixed } = compareToBaseline(waiverCounts, waivers);
+  const waiverBase = baselineAtBase(root, baseRef, relOf(waiversPath));
+  const waiverGrown = waiverBase ? baselineGrowth(waiverBase, waivers) : [];
+  const lines = findings({ added, fixed, grown, unmeasured, waiverAdded, waiverFixed, waiverGrown });
   for (const l of lines) console.log(l);
   const since = readJson(gatePath, {}).blockingSinceRun ?? null;
   console.log(`e2e ready-reads: ${lines.length} finding(s); ${since ? `blocking since run ${since}` : 'report-only (ER-41): blockingSinceRun is not set in scripts/e2e-ready-gate.json'}`);

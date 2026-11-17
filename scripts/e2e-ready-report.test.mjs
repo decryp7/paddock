@@ -38,22 +38,24 @@ import { baselineGrowth, compareToBaseline, countsByFile, findings } from './e2e
 
 const FIXTURE_FILE = 'scripts/fixtures/e2e-ready/e2e/bad.ts';
 /** Runs the script over the fixture with a temp baseline and gate; returns { code, out, baseline }. */
-function gate(baseline, blockingSinceRun, extra = []) {
+function gate(baseline, blockingSinceRun, extra = [], waivers = {}, project = 'scripts/fixtures/e2e-ready') {
   const dir = mkdtempSync(join(tmpdir(), 'ready-gate-'));
   try {
     const b = join(dir, 'baseline.json');
     const g = join(dir, 'gate.json');
+    const w = join(dir, 'waivers.json');
+    writeFileSync(w, JSON.stringify(waivers));
     writeFileSync(b, JSON.stringify(baseline));
     writeFileSync(g, JSON.stringify({ blockingSinceRun }));
     let code = 0;
     let out = '';
     try {
-      out = execFileSync('node', ['scripts/e2e-ready-report.mjs', 'scripts/fixtures/e2e-ready', '--baseline', b, '--gate', g, '--base', 'HEAD', ...extra], { encoding: 'utf8', cwd: new URL('..', import.meta.url) });
+      out = execFileSync('node', ['scripts/e2e-ready-report.mjs', project, '--baseline', b, '--waivers', w, '--gate', g, '--base', 'HEAD', ...extra], { encoding: 'utf8', cwd: new URL('..', import.meta.url) });
     } catch (e) {
       code = e.status;
       out = e.stdout.toString();
     }
-    return { code, out, baseline: JSON.parse(readFileSync(b, 'utf8')) };
+    return { code, out, baseline: JSON.parse(readFileSync(b, 'utf8')), waivers: JSON.parse(readFileSync(w, 'utf8')) };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -115,9 +117,10 @@ test('a project eslint cannot measure fails the gate (ER-33)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ready-gate-'));
   try {
     writeFileSync(join(dir, 'b.json'), '{}');
+    writeFileSync(join(dir, 'w.json'), '{}');
     writeFileSync(join(dir, 'g.json'), '{"blockingSinceRun":1}');
     assert.throws(
-      () => execFileSync('node', ['scripts/e2e-ready-report.mjs', 'scripts/fixtures/no-such-project', '--baseline', join(dir, 'b.json'), '--gate', join(dir, 'g.json'), '--base', 'HEAD'], { cwd: new URL('..', import.meta.url), stdio: 'pipe' }),
+      () => execFileSync('node', ['scripts/e2e-ready-report.mjs', 'scripts/fixtures/no-such-project', '--baseline', join(dir, 'b.json'), '--waivers', join(dir, 'w.json'), '--gate', join(dir, 'g.json'), '--base', 'HEAD'], { cwd: new URL('..', import.meta.url), stdio: 'pipe' }),
       (e) => e.status === 1 && /no-such-project not measured/.test(e.stdout.toString()),
     );
   } finally {
@@ -128,6 +131,43 @@ test('a project eslint cannot measure fails the gate (ER-33)', () => {
 test('the committed baseline is a map of positive counts for e2e files', () => {
   const b = JSON.parse(readFileSync(new URL('./e2e-ready-baseline.json', import.meta.url), 'utf8'));
   for (const [f, n] of Object.entries(b)) {
+    assert.match(f, /e2e\//, f);
+    assert.ok(Number.isInteger(n) && n > 0, f);
+  }
+});
+
+const WAIVED = 'scripts/fixtures/e2e-ready-waived';
+const WAIVED_FILE = `${WAIVED}/e2e/waived.ts`;
+
+test('a waiver silences the site but is counted: an unrecorded waiver needs the user\'s approval (positive control, ER-46)', () => {
+  const none = gate({}, 8300, [], {}, WAIVED);
+  assert.equal(none.code, 1, none.out);
+  assert.match(none.out, new RegExp(`::error file=${WAIVED_FILE}::.*1 new waiver.*needs the user's approval`));
+  assert.doesNotMatch(none.out, /new read/, 'the waived read is not a site');
+  const recorded = gate({}, 8300, [], { [WAIVED_FILE]: 1 }, WAIVED);
+  assert.equal(recorded.code, 0, recorded.out);
+});
+
+test('removing a waiver asks to shrink the list; --update shrinks it and refuses a new waiver', () => {
+  const stale = gate({}, 8300, [], { [WAIVED_FILE]: 1, 'gone.e2e.ts': 2 }, WAIVED);
+  assert.equal(stale.code, 1, stale.out);
+  assert.match(stale.out, /gone\.e2e\.ts::.*2 waiver\(s\) removed/);
+  const shrunk = gate({}, null, ['--update'], { [WAIVED_FILE]: 1, 'gone.e2e.ts': 2 }, WAIVED);
+  assert.equal(shrunk.code, 0, shrunk.out);
+  assert.deepEqual(shrunk.waivers, { [WAIVED_FILE]: 1 });
+  const grew = gate({}, null, ['--update'], {}, WAIVED);
+  assert.equal(grew.code, 1, grew.out);
+  assert.deepEqual(grew.waivers, {});
+});
+
+test('findings: a waiver list that grew against the merge base needs the user\'s approval', () => {
+  const lines = findings({ added: [], fixed: [], grown: [], unmeasured: [], waiverGrown: [{ file: 'a.ts', base: 0, head: 1 }] });
+  assert.match(lines.join('\n'), /a\.ts::e2e ready-reads waivers grew against the merge base.*needs the user's approval/);
+});
+
+test('the committed waiver list is a map of positive counts for e2e files', () => {
+  const w = JSON.parse(readFileSync(new URL('./e2e-ready-waivers.json', import.meta.url), 'utf8'));
+  for (const [f, n] of Object.entries(w)) {
     assert.match(f, /e2e\//, f);
     assert.ok(Number.isInteger(n) && n > 0, f);
   }
