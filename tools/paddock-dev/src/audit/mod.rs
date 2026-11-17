@@ -14,12 +14,14 @@
 //! is `1`, which is set after the first green run of each job. The tools are `cargo deny` (every Cargo.lock that has a Cargo.toml
 //! and a deny.toml beside it) and `npm audit` (every package-lock.json).
 
+mod allow;
 mod judge;
 mod parse;
 #[cfg(test)]
 mod tests;
 
 use crate::locks::program_for;
+pub use allow::{ALLOW_FILE, Exception, parse_allow};
 use clap::{Args, Subcommand};
 pub use judge::{Mode, Verdict, lines};
 use paddock_cli::{CliError, Exit, Report};
@@ -281,9 +283,10 @@ pub fn judge_all(runner: &dyn Runner, root: &Path, targets: &[Target], npm: &Npm
 fn report(verdict: &Verdict, mode: Mode, enforce: bool, targets: usize) -> Report {
     let mut text: String = lines(verdict, mode, enforce).iter().map(|l| format!("{l}\n")).collect();
     text.push_str(&format!(
-        "audit: {targets} lockfile(s), {} new, {} already on main, {} not measured; {}\n",
+        "audit: {targets} lockfile(s), {} new, {} already on main, {} allowed by an exception, {} not measured; {}\n",
         verdict.new.len(),
         verdict.existing.len(),
+        verdict.allowed.len(),
         verdict.not_measured.len(),
         if enforce {
             "enforced"
@@ -405,7 +408,7 @@ pub fn command(c: AuditCommand) -> Result<Report, CliError> {
         AuditCommand::Nightly(a) => {
             let npm = a.npm();
             let root = root_of(a.root)?;
-            run(&Real, &root, &npm, a.enforce, None)
+            run(&Real, &root, &npm, &allow::today_utc(), a.enforce, None)
         }
         AuditCommand::Compare(a) => {
             let npm = a.common.npm();
@@ -414,13 +417,13 @@ pub fn command(c: AuditCommand) -> Result<Report, CliError> {
                 root: root.clone(),
                 base: a.base,
             };
-            run(&Real, &root, &npm, a.common.enforce, Some(&base))
+            run(&Real, &root, &npm, &allow::today_utc(), a.common.enforce, Some(&base))
         }
     }
 }
 
 /// Both commands, with the runner and the merge base given.
-pub fn run(runner: &dyn Runner, root: &Path, npm: &Npm, enforce: bool, base: Option<&dyn Base>) -> Result<Report, CliError> {
+pub fn run(runner: &dyn Runner, root: &Path, npm: &Npm, today: &str, enforce: bool, base: Option<&dyn Base>) -> Result<Report, CliError> {
     let targets = plan(&tracked(root)?);
     if targets.is_empty() {
         return Err(
@@ -428,7 +431,11 @@ pub fn run(runner: &dyn Runner, root: &Path, npm: &Npm, enforce: bool, base: Opt
                 .with_hint("Run it in the repository root, or pass --root."),
         );
     }
-    let verdict = judge_all(runner, root, &targets, npm, base);
+    let allow = allow::load(root).map_err(|e| {
+        CliError::failure(e).with_hint("Fix scripts/npm-audit-allow.json (id, reason, approvedBy, approved, reviewBy): it is the family's one list of npm audit exceptions.")
+    })?;
+    let mut verdict = judge_all(runner, root, &targets, npm, base);
+    verdict.apply_exceptions(&allow, today);
     Ok(report(
         &verdict,
         if base.is_some() { Mode::Compare } else { Mode::Nightly },

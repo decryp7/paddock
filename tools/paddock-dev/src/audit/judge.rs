@@ -2,6 +2,7 @@
 //! the change introduces fails; a run that did not look is not measured and never counts as a pass (ER-33). No list of accepted
 //! findings is kept: main's findings are measured again on the merge base's lockfiles each time, so no list can grow silently (ER-46).
 
+use super::allow::Exception;
 use super::parse::{Finding, Measure};
 use std::collections::BTreeSet;
 
@@ -14,6 +15,10 @@ pub struct Verdict {
     pub existing: Vec<Finding>,
     /// `(source, why)` of an audit that did not look, on the change or on the merge base.
     pub not_measured: Vec<(String, String)>,
+    /// Findings an approved, unexpired exception covers: they warn and do not fail.
+    pub allowed: Vec<(Finding, Exception)>,
+    /// Exceptions whose review day has come, for a finding that is still there: it fails again.
+    pub expired: Vec<Exception>,
 }
 
 impl Verdict {
@@ -49,7 +54,7 @@ impl Verdict {
                 Verdict {
                     new,
                     existing,
-                    not_measured: Vec::new(),
+                    ..Verdict::default()
                 }
             }
         }
@@ -67,6 +72,30 @@ impl Verdict {
         self.new.extend(other.new);
         self.existing.extend(other.existing);
         self.not_measured.extend(other.not_measured);
+    }
+
+    /// Applies the approved npm exceptions (scripts/npm-audit-allow.json) on `today`: a finding of an npm lockfile that a live exception
+    /// names moves to `allowed` (it warns); one that an expired exception names stays a failure and says so.
+    pub fn apply_exceptions(&mut self, allow: &[Exception], today: &str) {
+        let covering = |f: &Finding| allow.iter().find(|e| f.source.starts_with("npm ") && e.id == f.id);
+        let sort = |findings: Vec<Finding>, allowed: &mut Vec<(Finding, Exception)>, expired: &mut Vec<Exception>| {
+            let mut keep = Vec::new();
+            for f in findings {
+                match covering(&f) {
+                    Some(e) if e.live(today) => allowed.push((f, e.clone())),
+                    Some(e) => {
+                        if !expired.contains(e) {
+                            expired.push(e.clone());
+                        }
+                        keep.push(f);
+                    }
+                    None => keep.push(f),
+                }
+            }
+            keep
+        };
+        self.new = sort(std::mem::take(&mut self.new), &mut self.allowed, &mut self.expired);
+        self.existing = sort(std::mem::take(&mut self.existing), &mut self.allowed, &mut self.expired);
     }
 
     /// Whether the run passes when it is enforced: nothing new, and everything measured.
@@ -93,7 +122,7 @@ fn exception_step(f: &Finding) -> String {
         )
     } else {
         format!(
-            "decide it: record an exception for {} with a reason and a review date where the npm audit exceptions live (needs the user's approval, ER-46), or fix it by updating {} in package-lock.json",
+            "decide it: add {} to scripts/npm-audit-allow.json (id, reason, approvedBy, approved, reviewBy; the family's npm audit exceptions, needs the user's approval, ER-46), or fix it by updating {} in package-lock.json",
             f.id, f.package
         )
     }
@@ -122,10 +151,30 @@ pub fn lines(v: &Verdict, mode: Mode, enforce: bool) -> Vec<String> {
             Mode::Nightly => "is on main",
             Mode::Compare => "is new in this change (main does not have it)",
         };
+        let expired = v
+            .expired
+            .iter()
+            .find(|e| e.id == f.id && f.source.starts_with("npm "))
+            .map_or(String::new(), |e| {
+                format!(
+                    " Its exception in scripts/npm-audit-allow.json expired on {}; renew it with the user's approval (ER-46) or fix the dependency.",
+                    e.review_by
+                )
+            });
         out.push(format!(
-            "::{level}::{tag}{}; it {what}. Next step: {}.",
+            "::{level}::{tag}{}; it {what}.{expired} Next step: {}.",
             describe(f),
             exception_step(f)
+        ));
+    }
+    for (f, e) in &v.allowed {
+        out.push(format!(
+            "::warning::{}; allowed until {} in scripts/npm-audit-allow.json ({}; approved by {}, {}), so it does not fail.",
+            describe(f),
+            e.review_by,
+            e.reason,
+            e.approved_by,
+            e.approved
         ));
     }
     for f in &v.existing {

@@ -218,7 +218,11 @@ fn nightly_makes_every_finding_new_and_names_the_advisory_path_and_decision() {
         ..finding("GHSA-fc5q-39xc-vjpf", "picomatch")
     };
     let t = lines(&Verdict::nightly("n", &found(vec![npm])), Mode::Nightly, true);
-    assert!(t[0].contains("npm audit exceptions") && t[0].contains("review date"), "{}", t[0]);
+    assert!(
+        t[0].contains("scripts/npm-audit-allow.json") && t[0].contains("reviewBy"),
+        "{}",
+        t[0]
+    );
 }
 
 #[test]
@@ -436,4 +440,138 @@ fn npm_audit_leaves_dev_dependencies_out_by_default_and_audits_them_when_asked()
         },
     );
     assert!(!r.0.lock().unwrap().contains(&"--omit=dev".to_string()));
+}
+
+fn npm_finding() -> Finding {
+    Finding {
+        source: "npm package-lock.json".into(),
+        ..finding("GHSA-fc5q-39xc-vjpf", "picomatch")
+    }
+}
+
+fn exception(review_by: &str) -> Exception {
+    Exception {
+        id: "GHSA-fc5q-39xc-vjpf".into(),
+        reason: "build-time glob".into(),
+        approved_by: "user".into(),
+        approved: "2026-11-18".into(),
+        review_by: review_by.into(),
+    }
+}
+
+#[test]
+fn an_approved_exception_warns_with_its_review_date_and_does_not_fail() {
+    let mut v = Verdict::nightly("npm package-lock.json", &found(vec![npm_finding()]));
+    v.apply_exceptions(&[exception("2026-12-18")], "2026-11-20");
+    assert!(v.clean() && v.new.is_empty() && v.allowed.len() == 1);
+    let text = lines(&v, Mode::Nightly, true);
+    assert_eq!(text.len(), 1);
+    assert!(
+        text[0].starts_with("::warning::") && text[0].contains("allowed until 2026-12-18") && text[0].contains("approved by user"),
+        "{}",
+        text[0]
+    );
+}
+
+#[test]
+fn an_expired_exception_counts_as_a_finding_again_and_says_it_expired() {
+    // The review day itself no longer counts, as in npm-audit.mjs.
+    for today in ["2026-12-18", "2027-01-01"] {
+        let mut v = Verdict::nightly("npm package-lock.json", &found(vec![npm_finding()]));
+        v.apply_exceptions(&[exception("2026-12-18")], today);
+        assert!(!v.clean() && v.allowed.is_empty() && v.new.len() == 1, "{today}");
+        let text = lines(&v, Mode::Nightly, true);
+        assert!(
+            text[0].starts_with("::error::") && text[0].contains("expired on 2026-12-18"),
+            "{}",
+            text[0]
+        );
+    }
+}
+
+#[test]
+fn an_exception_covers_only_its_advisory_and_only_npm_findings() {
+    let mut other = npm_finding();
+    other.id = "GHSA-aaaa-bbbb-cccc".into();
+    let cargo = Finding {
+        id: "GHSA-fc5q-39xc-vjpf".into(),
+        ..finding("x", "y")
+    };
+    let mut v = Verdict::nightly("s", &found(vec![other, cargo]));
+    v.apply_exceptions(&[exception("2026-12-18")], "2026-11-20");
+    assert_eq!(v.new.len(), 2);
+    assert!(v.allowed.is_empty());
+}
+
+#[test]
+fn an_exception_also_covers_a_finding_main_has() {
+    let mut v = Verdict::compare("n", &found(vec![npm_finding()]), &mut || found(vec![npm_finding()]));
+    v.apply_exceptions(&[exception("2026-12-18")], "2026-11-20");
+    assert!(v.existing.is_empty() && v.allowed.len() == 1);
+}
+
+#[test]
+fn today_is_read_as_a_utc_day() {
+    assert_eq!(allow::day_of(0), "1970-01-01");
+    assert_eq!(allow::day_of(20_775), "2026-11-18");
+    assert_eq!(allow::day_of(11_016), "2000-02-29");
+}
+
+const VALID: &str = r#"{"allow":[
+ {"id":"GHSA-fc5q-39xc-vjpf","reason":"r","approvedBy":"user","approved":"2026-11-18","reviewBy":"2026-12-18"},
+ {"id":"GHSA-aaaa-bbbb-cccc","reason":"r","approvedBy":"user","approved":"2026-11-18","reviewBy":"2026-11-19"}]}"#;
+
+fn bad_lists() -> Vec<String> {
+    let e = |k: &str, v: &str| {
+        VALID.replace(
+            &format!("\"{k}\":\"{}\"", if k == "id" { "GHSA-aaaa-bbbb-cccc" } else { "r" }),
+            &format!("\"{k}\":\"{v}\""),
+        )
+    };
+    vec![
+        e("reason", ""),
+        e("id", "CVE-2026-1"),
+        e("id", "GHSA-fc5q-39xc-vjpf"),
+        VALID.replace("2026-12-18", "2026-11-18"),
+        VALID.replace("2026-11-19", "2026-1119"),
+        r#"{"allow":{}}"#.to_string(),
+        "not json".to_string(),
+    ]
+}
+
+/// Runs the script's own `parseAllow` on a text: `Ok(ids)` or `Err` when it throws.
+fn script_reads(text: &str) -> Result<Vec<String>, String> {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/npm-audit.mjs");
+    let code = "import(process.argv[1]).then((m) => { try { console.log(JSON.stringify(m.parseAllow(process.argv[2]).map((e) => e.id))); } catch (e) { console.log('THROWS ' + e.message); } });";
+    let mut cmd = paddock_proc::command("node");
+    cmd.args(["-e", code, &script.display().to_string(), text]);
+    let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(60))).expect("node runs");
+    let o = out.stdout_text();
+    match o.trim().strip_prefix("THROWS ") {
+        Some(why) => Err(why.to_string()),
+        None => Ok(serde_json::from_str(o.trim()).expect("ids")),
+    }
+}
+
+#[test]
+fn the_rust_reader_and_the_scripts_agree_on_the_same_lists() {
+    let ids = |t: &str| parse_allow(t).map(|v| v.into_iter().map(|e| e.id).collect::<Vec<_>>());
+    assert_eq!(ids(VALID).ok(), script_reads(VALID).ok());
+    assert!(ids(VALID).is_ok(), "the control: the valid list is accepted");
+    for bad in bad_lists() {
+        let (rust, js) = (ids(&bad), script_reads(&bad));
+        assert!(rust.is_err() && js.is_err(), "both refuse {bad}: rust {rust:?}, script {js:?}");
+    }
+}
+
+#[test]
+fn the_families_real_list_is_read_by_both_and_by_the_accessor() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let text = std::fs::read_to_string(root.join(ALLOW_FILE)).unwrap();
+    let from_file = allow::load(&root).unwrap();
+    assert!(!from_file.is_empty(), "the list names the picomatch exception");
+    assert_eq!(
+        from_file.iter().map(|e| e.id.clone()).collect::<Vec<_>>(),
+        script_reads(&text).unwrap()
+    );
 }

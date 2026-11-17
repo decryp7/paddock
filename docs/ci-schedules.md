@@ -55,8 +55,9 @@ apart, both answered by `./dev audit` (`tools/paddock-dev/src/audit`; `cargo den
 
 - **Does main have a finding?** The `audit` job of nightly.yml runs `./dev audit nightly` every night, outside the gate (an advisory
   appears while main is unchanged). One `::error::` per advisory names the advisory, the dependency path and the decision step: an
-  exception with a reason and a review date in the audit's own exception place (`deny.toml` `ignore` for cargo), which needs the user's
-  approval (ER-46), or a fix. The failed job is the nightly's failure path.
+  exception with a reason and a review date (`deny.toml` `ignore` for cargo; `scripts/npm-audit-allow.json` for npm, the family's list that
+  `scripts/npm-audit.mjs` also reads, which `./dev audit` reads in the same format: an approved entry warns, one on its review day counts as a finding
+  again), which needs the user's approval (ER-46), or a fix. The failed job is the nightly's failure path.
 - **Does this change add one?** The `audit` job of ci.yml runs `./dev audit compare --base <merge base ref>` on every change. It audits the
   merge base's lockfiles with the same tools, only when the change has a finding. An advisory main has too is a `::warning::` ("already
   present on main, decided there"); only an advisory the change introduces fails. No list of accepted findings is kept, so none can grow
