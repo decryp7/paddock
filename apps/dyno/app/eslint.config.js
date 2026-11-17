@@ -6,7 +6,7 @@ const { defineConfig } = require('eslint/config');
 const tseslint = require('typescript-eslint');
 const angular = require('angular-eslint');
 // The shared Paddock rule that a dialog's start-up load is a pending task (ADR 0026 §6).
-const { plugin: paddock } = require('../../../eslint/src/index.cjs');
+const { plugin: paddock, e2ePinnedClock } = require('../../../eslint/src/index.cjs');
 
 module.exports = defineConfig(
   {
@@ -31,4 +31,5 @@ module.exports = defineConfig(
     files: ['**/*.html'],
     extends: [angular.configs.templateRecommended, angular.configs.templateAccessibility],
   },
+  ...e2ePinnedClock(),
 );

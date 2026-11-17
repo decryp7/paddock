@@ -10,6 +10,7 @@ module.exports = {
   'dialog-load-tracked': require('./dialog-load-tracked.cjs'),
   'store-rules': require('./store-rules.cjs'),
   'no-raw-style-values': require('./no-raw-style-values.cjs'),
+  'e2e-pinned-clock': require('./e2e-pinned-clock.cjs'),
   ...templateRules,
   ...dialogRules,
 };

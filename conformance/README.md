@@ -106,6 +106,7 @@ The check index (generated from each module's id, title, scope, mode and needs):
 | C127 | A recursive delete of a computed path in a shell script goes through safe_rm | root | report-only | all |
 | C128 | Tests take a recorded pid's identity through the kit, never ProcessId::of | root | report-only | all |
 | C131 | A golden file holds no value of the machine that captured it | root | report-only | all |
+| C133 | E2E specs: opt-outs of the pinned clock say why, live steps are paused, waits are never vacuous | root | report-only | all |
 | C135 | The test leak detector is switched off only where listed | root | report-only | all |
 <!-- checks:end -->
 
