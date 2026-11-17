@@ -43,7 +43,7 @@ test('the palette ranks "AI" matches first, without loose ones or duplicates', a
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill('AI');
   const options = page.locator('debrief-command-palette').getByRole('option');
-  await expectListFiltered(options);
+  await expectListFiltered(options, 'AI');
   const texts = (await options.allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim());
   const setUp = texts.findIndex((t) => t.includes('Connect to Pitwall'));
   expect(setUp).toBeGreaterThanOrEqual(0);

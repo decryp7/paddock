@@ -15,18 +15,19 @@ export function overlayOffset(box: { x: number; width: number } | null, anchor: 
 }
 
 /**
- * Waits until a list is the filtered one: its first option carries `marker` (default `mark`, the highlight of the matched text, which the
- * unfiltered list has none of). A list read on "an option is visible" can be the one before the query was applied.
+ * Waits until a list is the filtered one for `query`: its first option highlights the match (a `mark` whose text is the query, in any case).
+ * The unfiltered list (recent and common commands) has no highlight, and a highlight of another query is not this one.
  */
-export async function expectListFiltered(options: Locator, marker = 'mark'): Promise<void> {
-  await expect(options.first().locator(marker), 'the list is the filtered one (its first option marks the match)').toBeVisible();
+export async function expectListFiltered(options: Locator, query: string): Promise<void> {
+  await expect(options.first().locator('mark').first(), `the list is filtered for "${query}" (its first option highlights it)`).toContainText(query, { ignoreCase: true });
 }
 
 /**
- * Waits until an overlay (a select list, a menu) lines up with its anchor within `tolerance` px in its left edge and its width. The panel is
- * visible a frame or two before the overlay positions it (at x 0, 131 px wide, then at the field's x and width). Fails with the last offset.
+ * Waits until an overlay (a select list, a menu) is aligned with its anchor: the same left edge and width within `tolerance` px (a select's list
+ * is as wide as its field and starts at its edge; this is not for a menu that opens below and to the side). The panel is visible a frame or two
+ * before the overlay positions it (at x 0, 131 px wide, then at the field's x and width). Fails with the last offset.
  */
-export async function expectOverlayPositioned(panel: Locator, anchor: Locator, tolerance = 1): Promise<void> {
+export async function expectOverlayAlignedWith(panel: Locator, anchor: Locator, tolerance = 1): Promise<void> {
   await expect
     .poll(async () => overlayOffset(await panel.boundingBox(), await anchor.boundingBox()) ?? Number.POSITIVE_INFINITY, {
       message: `the overlay lines up with its anchor: its left edge or width differs by more than ${tolerance} px (or one is not drawn)`,
@@ -42,9 +43,13 @@ export async function expectWired(control: Locator, attribute = 'aria-expanded',
   await expect(control, `the control is wired (${attribute} is set by the update pass)`).toHaveAttribute(attribute, value);
 }
 
-/** Waits until nothing in `busy` is shown any more (a Stop button, a "thinking" line): an answer that still streams moves what is above it. */
-export async function expectIdle(...busy: Locator[]): Promise<void> {
-  for (const b of busy) await expect(b, 'the stream has finished').toHaveCount(0);
+/**
+ * Waits until a stream has finished: its container's `aria-busy` is "false" (the standard ARIA pattern for a live region being updated; Debrief's
+ * chat log sets it while the turn runs). Precondition: the stream has started, so a turn is already drawn (the caller waited for it, as
+ * Debrief's `ask` does): before that `aria-busy` is "false" too, and this would pass at once.
+ */
+export async function expectStreamDone(stream: Locator): Promise<void> {
+  await expect(stream, 'the stream has finished (aria-busy is "false")').toHaveAttribute('aria-busy', 'false');
 }
 
 /** Waits until the dock has planned its arrangement for the window's current size (`data-dock-planned`, Debrief's DockService.planned). */

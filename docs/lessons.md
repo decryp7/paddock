@@ -2229,7 +2229,7 @@ rollout of 2026-11-12).
 
 ## Shared "ready" waits and a lint for reads after a bare visibility wait (2026-11-17)
 The class of the sweep entry (a spec reads or presses on "it is in the DOM") now has one wait per kind in `ui/projects/paddock-e2e/src/ready.ts`
-(`expectListFiltered`, `expectOverlayPositioned`, `expectWired`, `expectIdle`, `expectDockPlanned`, `expectNotMoving`), and an ESLint rule,
+(`expectListFiltered`, `expectOverlayAlignedWith`, `expectWired`, `expectStreamDone` (the chat log is `aria-busy` while a turn runs; an `expectIdle` over "no Stop button" passed before the stream started and was dropped), `expectDockPlanned`, `expectNotMoving`), and an ESLint rule,
 `paddock/e2e-ready-reads` (in the `e2ePinnedClock` block, AST, not a regex check; off by default because the lint commands run with `--max-warnings 0` and a warning blocked the pre-commit hook, read it with `PADDOCK_E2E_READY_LINT=warn`), that reports a read (`boundingBox`, `allInnerTexts`,
 `allTextContents`, `innerText`, `textContent`, `evaluate`, `evaluateAll`) in the statement right after a bare `toBeVisible()` or `waitFor()`. The
 sweep's five specs moved onto the helpers. First count (`PADDOCK_E2E_READY_LINT=warn`): 93 warnings in the other specs (Debrief 30, Dyno 26, ui 27, Pitwall 6, Spotter 3, Pitcrew 1);

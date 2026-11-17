@@ -145,3 +145,27 @@ test('e2e-ready-reads is off by default (report-only: the lint commands run with
   const found = await lint({ 'e2e/off.spec.ts': "test('a', async () => {\n  await expect(x).toBeVisible();\n  const t = await x.allInnerTexts();\n});\n" }, [], null);
   assert.deepEqual(readLines(found, 'e2e/off.spec.ts'), []);
 });
+
+test('e2e-ready-reads: evaluate and evaluateAll are reads only when their result is used', async () => {
+  const found = await lint({
+    'e2e/eval.spec.ts': [
+      "import { expect, test } from './test';",
+      "test('a', async ({ page }) => {",
+      '  await expect(x).toBeVisible();',
+      '  await page.evaluate(() => window.__ready);',
+      '  await expect(x).toBeVisible();',
+      '  await x.evaluate((e) => e.click());',
+      '  await expect(x).toBeVisible();',
+      '  await page.evaluateHandle(() => 1);',
+      '  await expect(x).toBeVisible();',
+      '  const n = await x.evaluate((e) => e.scrollTop);',
+      '  await expect(x).toBeVisible();',
+      '  expect(await x.evaluateAll((e) => e.length)).toBe(2);',
+      '  await expect(x).toBeVisible();',
+      '  return page.evaluate(() => 1);',
+      '});',
+      '',
+    ].join('\n'),
+  });
+  assert.deepEqual(readLines(found, 'e2e/eval.spec.ts'), [10, 12, 14], found.join(' | '));
+});

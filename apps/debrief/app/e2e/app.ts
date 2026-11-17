@@ -1,4 +1,5 @@
 import { expect, Page } from '@playwright/test';
+import { expectDockPlanned } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 /** How long the first load of the demo workspace may take (it is slower while the whole suite runs in parallel). */
 export const APP_LOAD_TIMEOUT = 15_000;
@@ -23,6 +24,7 @@ export async function openApp(page: Page): Promise<void> {
   await expect(page.locator('debrief-status-bar')).toContainText('events');
   await expect(page.locator('debrief-timeline-panel .lane').first()).toBeVisible();
   await expect(gridRows(page).first()).toBeVisible();
+  await expectDockPlanned(page);
 }
 
 /** Parses a count like "40,123" or "40.1k" shown in the UI into a number. */

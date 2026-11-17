@@ -3,6 +3,7 @@ import { expectNoSeriousViolations } from './axe';
 import { ask, openAiApp, openChat, runCommand, waitAnswered } from './ai-support';
 import { openMenu } from './menu-support';
 import { gridRows, hideInspectorFlyout } from './app';
+import { openAppWith } from './mock-url';
 
 // The assistant chat against the scripted AI mock (src/app/core/mock/mock-ai-backend.ts): streaming with tool
 // chips, evidence links, and proposals applied through the normal save paths.
@@ -110,6 +111,20 @@ test.describe('AI chat', () => {
     await expect(card).toContainText('Pipeline steps added to the profile');
     await openMenu(page, 'Edit');
     await expect(page.getByRole('menuitem', { name: /^Undo AI: pipeline steps/ })).toBeVisible();
+  });
+
+  test('the conversation is busy from the moment its turn is drawn until the answer is done', async ({ page }) => {
+    // Slow steps: the busy state lasts long enough to be seen. Without the aria-busy marker a wait for "no Stop button" passed before the stream began.
+    await openAppWith(page, '?mockAiStepMs=150');
+    await expect(gridRows(page).first()).toBeVisible();
+    const chat = await openChat(page);
+    const log = chat.getByRole('log', { name: 'Conversation' });
+    await expect(log).toHaveAttribute('aria-busy', 'false');
+    await ask(chat, 'What crashed?');
+    await expect(log, 'busy while the turn runs').toHaveAttribute('aria-busy', 'true');
+    await waitAnswered(chat);
+    await expect(log).toHaveAttribute('aria-busy', 'false');
+    await expect(chat.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
   });
 
   test('a long conversation scrolls in its list only: the panel has no extra scroll space and the composer stays at the bottom', async ({ page }) => {

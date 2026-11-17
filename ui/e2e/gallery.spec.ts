@@ -1,6 +1,6 @@
 import { expect, test } from './test';
 import AxeBuilder from '@axe-core/playwright';
-import { expectOverlayPositioned, Page } from '@decryp7/paddock-e2e';
+import { expectOverlayAlignedWith, Page } from '@decryp7/paddock-e2e';
 import { PD_ICON_DOTS } from '../projects/paddock-ui/icons/src/paths';
 
 const DOTS = Object.fromEntries(Object.entries(PD_ICON_DOTS).map(([k, v]) => [k, (v ?? []).map((d) => [d[0], d[1]])]));
@@ -228,7 +228,7 @@ test.describe('UI basics review fixes (regressions)', () => {
     const list = page.locator('#g-themed-panel');
     await expect(list).toBeVisible();
     // the list lines up with the field's outline, of which the trigger text is inset
-    await expectOverlayPositioned(list, page.locator('pd-select:has(#g-themed) .mat-mdc-text-field-wrapper'));
+    await expectOverlayAlignedWith(list, page.locator('pd-select:has(#g-themed) .mat-mdc-text-field-wrapper'));
   });
 
   test('hover changes the border of an input, a native select and the themed select, and a secondary button on a white card (review 2, N-P2-2, N-P3-3)', async ({ page }) => {
