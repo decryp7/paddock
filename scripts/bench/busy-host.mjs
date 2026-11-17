@@ -70,12 +70,16 @@ export function ceilingMs(t, ceilingFactor) {
  *   wallSamples    per sample: { mark: ms } wall marks (no sample at all: the app gave no timings)
  *   reference      { reps: [ms] }  the fixed workload's readings, a note only
  *   thresholds     { cpu: {baselineMs, noiseMs, quiet: {baselineMs, noiseMs, minIdle}}, marks: { mark: {baselineMs, noiseMs} }, wallCeilingFactor }
+ *   failures       [{ start, message }] starts that gave no timings. With at least one start that did, each is a FAIL (a broken
+ *                  start); with none, the result is NOT MEASURED
+ *   cpuExpected    true when this OS can read the tree CPU time (`canReadTreeCpu`): then a missing CPU time with a CPU limit
+ *                  defined is a broken check (ER-33), not a note
  *   idle           optional [{ idleBefore, idleAfter, loadBefore, loadAfter }] per sample, summarised in the notes
  *   tag, reportOnly (tag is not used by the verdict: a busy host and a tag run are judged alike; it is kept for callers)
  * Returns { status: 'pass' | 'fail' | 'not-measured', exitCode, over, notes, cpuMedian, ratio, sampleSpread, level }; `level`
  * is the annotation to print for a non-pass: 'error' | 'warning' | null.
  */
-export function verdict({ cpuMsSamples, wallSamples, reference, thresholds, idle, reportOnly = false }) {
+export function verdict({ cpuMsSamples, wallSamples, reference, thresholds, idle, failures = [], cpuExpected = false, reportOnly = false }) {
   const ref = referenceStats(reference?.reps ?? []);
   const cpuVals = (cpuMsSamples ?? []).filter((v) => Number.isFinite(v));
   const cpuMedian = cpuVals.length ? median(cpuVals) : NaN;
@@ -89,7 +93,8 @@ export function verdict({ cpuMsSamples, wallSamples, reference, thresholds, idle
   const base = { cpuMedian, wallMedian, ratio, sampleSpread, reference: ref };
 
   if (!cpuVals.length && !Object.values(wallMedian).some((v) => Number.isFinite(v))) {
-    return { ...base, status: 'not-measured', over: [], exitCode: reportOnly ? EXIT_OK : EXIT_NOT_MEASURED, level: reportOnly ? 'warning' : 'error', notes: ['the app produced no start-up timings'] };
+    const why = failures.length ? ` (${failures.map((f) => `start ${f.start}: ${f.message}`).join('; ')})` : '';
+    return { ...base, status: 'not-measured', over: [], exitCode: reportOnly ? EXIT_OK : EXIT_NOT_MEASURED, level: reportOnly ? 'warning' : 'error', notes: [`the app produced no start-up timings${why}`] };
   }
 
   const notes = [];
@@ -105,7 +110,14 @@ export function verdict({ cpuMsSamples, wallSamples, reference, thresholds, idle
   else if (!quiet && quietLimit !== null && Number.isFinite(cpuMedian) && cpuMedian > quietLimit) {
     notes.push(`tree CPU median ${cpuMedian.toFixed(0)} ms is over the quiet-host limit ${quietLimit.toFixed(0)} ms, under the busy-host limit ${cpuCoarse.toFixed(0)} ms: a note, because the host was not quiet (median CPU idle ${Number.isFinite(typicalIdle) ? `${typicalIdle.toFixed(0)}%` : 'not read'}, a quiet host needs ${minIdle}% or more)`);
   }
-  if (cpuCoarse !== null && !Number.isFinite(cpuMedian)) notes.push('tree CPU time is not readable on this OS: only the wall time was judged');
+  let broken = false;
+  if (cpuCoarse !== null && !Number.isFinite(cpuMedian)) {
+    if (cpuExpected) {
+      broken = true;
+      over.push({ kind: 'broken-cpu' });
+    } else notes.push('tree CPU time is not readable on this OS: no CPU limit is applied, only the wall time was judged');
+  }
+  for (const f of failures) over.push({ kind: 'broken-start', start: f.start, message: f.message });
   for (const m of markNames) {
     const ceiling = ceilingMs(thresholds.marks[m], thresholds.wallCeilingFactor);
     const soft = budgetMs(thresholds.marks[m]);
@@ -120,7 +132,7 @@ export function verdict({ cpuMsSamples, wallSamples, reference, thresholds, idle
   const hostNote = hostSummary(idle);
   if (hostNote) notes.push(hostNote);
   if (cpuCoarse === null && !markNames.length) notes.push('no thresholds are recorded for this OS: numbers only');
-  if (over.length && !reportOnly) return { ...base, status: 'fail', over, exitCode: EXIT_OVER, level: 'error', notes };
+  if (over.length && !reportOnly) return { ...base, status: 'fail', over, exitCode: broken && over.length === 1 ? EXIT_NOT_MEASURED : EXIT_OVER, level: 'error', notes };
   return { ...base, status: 'pass', over, exitCode: EXIT_OK, level: null, notes };
 }
 
@@ -142,21 +154,31 @@ export function hostSummary(idle) {
   return `host during the starts: ${i ? `CPU idle ${i[0].toFixed(0)} to ${i[1].toFixed(0)}%` : 'CPU idle n/a'}, ${l ? `1-minute load ${l[0].toFixed(1)} to ${l[1].toFixed(1)}` : 'load n/a'}`;
 }
 
-/** The annotation lines for a verdict, with the cause and the next step (ER-27). Pure. */
-export function annotations(v, { name, os }) {
+/**
+ * The annotation lines for a verdict, with the cause and the next step (ER-27). `nextSteps` is the app's own text:
+ * `{ notMeasured, regression, brokenCheck }` (each a sentence; neutral defaults). Pure.
+ */
+export function annotations(v, { name, os, nextSteps = {} }) {
+  const next = {
+    notMeasured: 'Next step: run the program by hand and read its log for why it gave no timings.',
+    regression: 'Next step: compare the steps of the start with the last green run.',
+    brokenCheck: 'Next step: the benchmark itself is broken on this OS, fix the reader before trusting any result.',
+    ...nextSteps,
+  };
   const out = [];
   if (v.status === 'not-measured') {
-    out.push(
-      `${v.level === 'error' ? '::error::' : '::warning::'}${name} NOT MEASURED (${os}): ${v.notes[0]}. Not a pass (ER-33). ` +
-        'Next step: run the app by hand with the same data folder and read its log for why it did not start or log "Startup timings".',
-    );
+    out.push(`${v.level === 'error' ? '::error::' : '::warning::'}${name} NOT MEASURED (${os}): ${v.notes[0]}. Not a pass (ER-33). ${next.notMeasured}`);
   }
   for (const o of v.over) {
-    out.push(
-      o.kind === 'cpu'
-        ? `::error::${name} CPU: median ${o.median.toFixed(0)} ms of tree CPU exceeds the ${o.budget.toFixed(0)} ms ${o.quiet ? 'quiet-host' : 'busy-host'} threshold (baseline + margin, ${os}). A real regression: ${o.quiet ? 'the host was quiet' : 'even a busy host does not need this much CPU'}. Next step: compare the steps of the start with the last green run.`
-        : `::error::${name} ${o.mark}: median ${o.median.toFixed(0)} ms exceeds the ${o.budget.toFixed(0)} ms ceiling (${os}), which only a broken start reaches. Next step: compare the steps of the start with the last green run.`,
-    );
+    if (o.kind === 'cpu') {
+      out.push(`::error::${name} CPU: median ${o.median.toFixed(0)} ms of tree CPU exceeds the ${o.budget.toFixed(0)} ms ${o.quiet ? 'quiet-host' : 'busy-host'} threshold (baseline + margin, ${os}). A real regression: ${o.quiet ? 'the host was quiet' : 'even a busy host does not need this much CPU'}. ${next.regression}`);
+    } else if (o.kind === 'wall') {
+      out.push(`::error::${name} ${o.mark}: median ${o.median.toFixed(0)} ms exceeds the ${o.budget.toFixed(0)} ms ceiling (${os}), which only a broken start reaches. ${next.regression}`);
+    } else if (o.kind === 'broken-start') {
+      out.push(`::error::${name}: start ${o.start} gave no timings: a broken start (${o.message}) while other starts did. ${next.notMeasured}`);
+    } else if (o.kind === 'broken-cpu') {
+      out.push(`::error::${name} check broken (${os}): the tree CPU time could not be read although this OS has a CPU limit (ER-33), so the CPU gate did not run. ${next.brokenCheck}`);
+    }
   }
   return out;
 }
@@ -224,10 +246,18 @@ export function treeCpuMs(psOutput, rootPid) {
   return sum;
 }
 
-/** The tree CPU time of `pid` now (macOS: 10 ms resolution; Linux: `ps` cputime has 1 s resolution, so null there), or null. */
+/** Can this OS's reader give the tree CPU time? macOS only (Linux `ps` cputime has a 1 s resolution). */
+export function canReadTreeCpu(platform = process.platform) {
+  return platform === 'darwin';
+}
+
+/**
+ * The tree CPU time of `pid` now, or null where the OS has no reader or it failed. `-S` adds the time of exited children to
+ * their parent, so a child that has already finished (debrief-plugins --manifests) still counts.
+ */
 export function readTreeCpuMs(pid, platform = process.platform, run = spawnSync) {
-  if (platform !== 'darwin') return null;
-  const r = run('ps', ['-axo', 'pid=,ppid=,cputime='], { encoding: 'utf8' });
+  if (!canReadTreeCpu(platform)) return null;
+  const r = run('ps', ['-S', '-axo', 'pid=,ppid=,cputime='], { encoding: 'utf8' });
   return r.status === 0 ? treeCpuMs(r.stdout, pid) : null;
 }
 

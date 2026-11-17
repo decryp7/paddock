@@ -1519,10 +1519,11 @@ Mechanism: [benchmarks.md](../../../docs/benchmarks.md#timing-benchmarks-on-a-bu
     would never apply; 40 leaves 4 invocations (CPU 480 to 530), 30 leaves 9, and every invocation whose CPU was above 540 ms had a
     median idle under 30%. The median, not the lowest reading, decides, so one dip while the app starts does not turn a quiet host
     busy. If the idle was not read, the busy limit applies.
-  - A wall mark fails only over **5 times its baseline** (`wallCeilingFactor`). The worst single start of the 110 was 2.52 times
-    its mark's baseline (setupDone, overloaded); 5 is twice that, and a broken start is far above it (the app waits 10 s for a first
-    paint, 16 times the firstInteractive baseline). A first try of 3 times was only 1.19 times the worst start. Over baseline + 3 sd
-    (the "noise threshold") but under the ceiling is a note.
+  - A wall mark fails only over **5 times its baseline** (`wallCeilingFactor`). The verdict judges the median of the starts, so
+    5 is compared with the worst invocation median: 2.28 times its baseline (setupDone, overloaded; 1.74 for firstInteractive),
+    so the ceiling is about 2.2 times that; the worst single start was 2.52 times. A broken start is far above it (the app waits
+    10 s for a first paint, 16 times the firstInteractive baseline). A first try of 3 times was only 1.3 times the worst invocation
+    median. Over baseline + 3 sd (the "noise threshold") but under the ceiling is a note.
   - The spread of the middle half of one invocation's five CPU times, `(P75 - P25) / median`, was at most 10.2% (2 to 6%
     unstressed). It is a note, never a failure.
 - **The reference workload:** a single-threaded integer loop of 25 M iterations (`referenceWork`), timed 5 times before and 5 times

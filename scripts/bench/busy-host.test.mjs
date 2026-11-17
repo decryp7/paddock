@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   annotations,
+  canReadTreeCpu,
   budgetMs,
   ceilingMs,
   hostSummary,
@@ -173,6 +174,39 @@ test('an OS with no readable tree CPU judges the wall time of the starts and say
   assert.equal(bad.status, 'fail');
 });
 
+test('a missing CPU time where the OS can read it is a broken check (ER-33), not a note', () => {
+  const v = verdict(input({ cpuMsSamples: [null, null, null], cpuExpected: true }));
+  assert.equal(v.status, 'fail');
+  assert.equal(v.exitCode, EXIT_NOT_MEASURED);
+  assert.deepEqual(v.over, [{ kind: 'broken-cpu' }]);
+  assert.match(annotations(v, { name: 'b', os: 'macos' })[0], /^::error::b check broken \(macos\).*could not be read.*ER-33/);
+  assert.equal(verdict(input({ cpuMsSamples: [null, null, null], cpuExpected: false })).status, 'pass', 'where the OS has no reader it is the note');
+  assert.equal(verdict(input({ cpuMsSamples: [null, null, null], cpuExpected: true, thresholds: { marks: thresholds.marks, wallCeilingFactor: 3 } })).status, 'pass', 'no CPU limit defined: nothing to read');
+  assert.equal(verdict(input({ cpuMsSamples: [null, null, null], cpuExpected: true, reportOnly: true })).status, 'pass', 'report-only never fails');
+  assert.equal(canReadTreeCpu('darwin'), true);
+  assert.equal(canReadTreeCpu('linux'), false);
+});
+
+test('a start with no timings among good ones fails the run; with no good start it is NOT MEASURED, naming the cause', () => {
+  const mixed = verdict(input({ failures: [{ start: 3, message: 'Debrief exited (code 3)' }] }));
+  assert.equal(mixed.status, 'fail');
+  assert.equal(mixed.exitCode, EXIT_OVER);
+  assert.match(annotations(mixed, { name: 'b', os: 'macos' })[0], /^::error::b: start 3 gave no timings: a broken start \(Debrief exited \(code 3\)\)/);
+  assert.equal(verdict(input({ failures: [{ start: 3, message: 'x' }], reportOnly: true })).status, 'pass');
+  const none = verdict(input({ cpuMsSamples: [], wallSamples: [], failures: [{ start: 1, message: 'no line within 60 s' }, { start: 2, message: 'exited' }] }));
+  assert.equal(none.status, 'not-measured');
+  assert.match(none.notes[0], /start 1: no line within 60 s; start 2: exited/);
+});
+
+test('annotations take the app\'s next steps and have neutral defaults', () => {
+  const v = verdict(input({ cpuMsSamples: [900, 900, 900] }));
+  assert.match(annotations(v, { name: 'b', os: 'macos' })[0], /Next step: compare the steps of the start/);
+  assert.match(annotations(v, { name: 'b', os: 'macos', nextSteps: { regression: 'Next step: open the profile.' } })[0], /Next step: open the profile\.$/);
+  const none = verdict(input({ cpuMsSamples: [], wallSamples: [] }));
+  assert.doesNotMatch(annotations(none, { name: 'b', os: 'x' })[0], /Debrief/);
+  assert.match(annotations(none, { name: 'b', os: 'x', nextSteps: { notMeasured: 'Next step: read app.log.' } })[0], /read app\.log\.$/);
+});
+
 test('host summary: ranges of idle and load, or nothing', () => {
   assert.equal(hostSummary([]), null);
   assert.equal(hostSummary([{ idleBefore: null }]), null);
@@ -215,9 +249,10 @@ test('the readers run the OS tools only where they exist', () => {
   const calls = [];
   const run = (cmd, args) => (calls.push([cmd, ...args]), { status: 0, stdout: '  42  1  0:00.30\n' });
   assert.equal(readTreeCpuMs(42, 'darwin', run), 300);
+  assert.deepEqual(calls[0], ['ps', '-S', '-axo', 'pid=,ppid=,cputime='], 'exited children are summed into their parent (-S)');
   assert.equal(readTreeCpuMs(42, 'linux', run), null, 'ps cputime has a 1 s resolution there: no reading');
   assert.equal(readTreeCpuMs(42, 'win32', run), null);
-  assert.deepEqual(calls.map((c) => c[0]), ['ps']);
+  assert.equal(calls.length, 1, 'only darwin runs ps');
   const top = '      cpu    load average\n us sy id   1m   5m   15m\n 34 13 53  68.69 57.08 40.94\n 79 21  0  68.69 57.08 40.94\n';
   assert.equal(readCpuIdle('darwin', () => ({ status: 0, stdout: top })), 0, 'the second sample is the one measured over the interval');
   assert.equal(readCpuIdle('darwin', () => ({ status: 1, stdout: '' })), null);

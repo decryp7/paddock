@@ -53,21 +53,30 @@ test('every start counts and carries the host CPU idle and load around it', asyn
   const idles = [90, 80, 70, 60];
   const loads = [1, 2, 3, 4];
   const runsMs = [230, 232];
-  const samples = await collectSamples({ want: 2, measure: async () => ({ marks: { setupDone: runsMs.shift() }, steps: '', cpuMs: 410 }), idle: () => idles.shift(), load: () => loads.shift() });
+  const { samples, failures } = await collectSamples({ want: 2, measure: async () => ({ marks: { setupDone: runsMs.shift() }, steps: '', cpuMs: 410 }), idle: () => idles.shift(), load: () => loads.shift() });
   assert.deepEqual(samples.map((s) => [s.idleBefore, s.idleAfter, s.loadBefore, s.loadAfter, s.cpuMs]), [[90, 80, 1, 2, 410], [70, 60, 3, 4, 410]]);
+  assert.deepEqual(failures, []);
 });
 
 test('a host that is at 0% idle and load 50 still gives every sample', async () => {
-  const samples = await collectSamples({ want: 5, measure: async () => ({ marks: {}, steps: '', cpuMs: 400 }), idle: () => 0, load: () => 50 });
+  const { samples } = await collectSamples({ want: 5, measure: async () => ({ marks: {}, steps: '', cpuMs: 400 }), idle: () => 0, load: () => 50 });
   assert.equal(samples.length, 5);
 });
 
-test('a start that fails propagates', async () => {
-  await assert.rejects(collectSamples({ want: 2, measure: async () => Promise.reject(new Error('no timings line')), idle: () => 50 }), /no timings line/);
+test('a start that fails is recorded and does not discard the good ones', async () => {
+  let n = 0;
+  const { samples, failures } = await collectSamples({
+    want: 4,
+    measure: async () => (++n === 2 ? Promise.reject(new Error('no timings line')) : { marks: {}, steps: '', cpuMs: 400 }),
+    idle: () => 50,
+  });
+  assert.equal(samples.length, 3);
+  assert.deepEqual(failures, [{ start: 2, message: 'no timings line' }]);
 });
 
-// Wiring: the real script, a fake app and a budgets file made for each case. Exit code, annotations and JSON.
-test('script: a busy-host number passes with a note, CPU over fails, wall over the ceiling fails, no timings is not measured', { skip: process.platform === 'win32' }, async () => {
+// Wiring: the real script, a fake app and a budgets file made for each case. Exit code, annotations and JSON. The host idle is
+// injected (DEBRIEF_BENCH_FAKE_IDLE) and the reference workload cut to 1 reading, so each run takes about a second.
+test('script: a busy-host number passes with a note, wall over the ceiling fails, a broken start fails, no timings is not measured', { skip: process.platform === 'win32' }, async () => {
   const { spawnSync } = await import('node:child_process');
   const { readFileSync } = await import('node:fs');
   const { fileURLToPath } = await import('node:url');
@@ -79,26 +88,29 @@ test('script: a busy-host number passes with a note, CPU over fails, wall over t
     const mute = join(dir, 'mute-app');
     writeFileSync(mute, '#!/bin/sh\necho starting\nexit 3\n');
     chmodSync(mute, 0o755);
+    const flaky = join(dir, 'flaky-app'); // its third launch (the second counted start) logs nothing
+    writeFileSync(flaky, `#!/bin/sh\nc="${dir}/count"; n=$(cat "$c" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$c"\n[ $n -eq 3 ] && exit 3\necho '${line()}'\nexec sleep 30\n`);
+    chmodSync(flaky, 0o755);
     const script = fileURLToPath(new URL('./startup-bench.mjs', import.meta.url));
     let n = 0;
-    const go = (budgets, env = {}, app = exe, ...extra) => {
+    const go = (budgets, env = {}, app = exe, os = 'macos', ...extra) => {
       const b = join(dir, `budgets-${++n}.json`);
-      writeFileSync(b, JSON.stringify({ macos: budgets }));
+      writeFileSync(b, JSON.stringify({ [os]: budgets }));
       const out = join(dir, `out-${n}.json`);
-      const r = spawnSync(process.execPath, [script, app, '--runs', '3', '--os', 'macos', '--budgets', b, '--out', out, ...extra], {
+      const r = spawnSync(process.execPath, [script, app, '--runs', '3', '--os', os, '--budgets', b, '--out', out, '--reference-reps', '1', ...extra], {
         encoding: 'utf8',
         timeout: 60_000,
-        env: { ...process.env, GITHUB_REF_TYPE: '', GITHUB_REF: '', ...env },
+        env: { ...process.env, GITHUB_REF_TYPE: '', GITHUB_REF: '', DEBRIEF_BENCH_FAKE_IDLE: '90', ...env },
       });
       return { r, json: JSON.parse(readFileSync(out, 'utf8')) };
     };
     const T = (baselineMs, noiseMs) => ({ baselineMs, noiseMs });
-    const under = go({ marks: { firstInteractive: T(100_000, 0) }, wallCeilingFactor: 3 });
+    const marks = { firstInteractive: T(100_000, 0) };
+    const under = go({ marks, wallCeilingFactor: 3 });
     assert.equal(under.r.status, 0, under.r.stderr);
     assert.equal(under.json.verdict.status, 'pass');
     assert.match(under.r.stdout, /run kind: not a tag/);
-    assert.match(under.r.stdout, /host cpu idle .* load /);
-    assert.match(under.r.stdout, /times it \(a note only\)/);
+    assert.match(under.r.stdout, /host cpu idle 90% -> 90%, load /);
     // firstInteractive 730 ms over a 100 ms noise threshold but under a 100 x ceiling: a note, on a train and on a tag
     for (const env of [{}, { GITHUB_REF_TYPE: 'tag' }]) {
       const busy = go({ marks: { firstInteractive: T(100, 0) }, wallCeilingFactor: 100 }, env);
@@ -106,32 +118,39 @@ test('script: a busy-host number passes with a note, CPU over fails, wall over t
       assert.match(busy.r.stdout, /note: firstInteractive median 730 ms is over its 100 ms noise threshold/);
       assert.doesNotMatch(busy.r.stderr, /::error::/);
     }
-    const cpu = go({ cpu: T(-10, 0), marks: { firstInteractive: T(100_000, 0) }, wallCeilingFactor: 3 });
-    assert.equal(cpu.r.status, 1);
-    assert.match(cpu.r.stderr, /::error::start-up benchmark CPU: median/);
-    if (process.platform === 'darwin') {
-      // the tight limit applies at a host idle of minIdle or more (-1: always), the busy limit otherwise (101: never)
-      const marks = { firstInteractive: T(100_000, 0) };
-      const quiet = go({ cpu: { ...T(1e9, 0), quiet: { ...T(-10, 0), minIdle: -1 } }, marks, wallCeilingFactor: 3 });
-      assert.equal(quiet.r.status, 1);
-      assert.match(quiet.r.stderr, /::error::start-up benchmark CPU: median .* quiet-host threshold/);
-      const busy = go({ cpu: { ...T(1e9, 0), quiet: { ...T(-10, 0), minIdle: 101 } }, marks, wallCeilingFactor: 3 });
-      assert.equal(busy.r.status, 0, busy.r.stderr);
-      assert.match(busy.r.stdout, /note: tree CPU median .* over the quiet-host limit -10 ms, under the busy-host limit/);
-    }
     const ceiling = go({ marks: { firstInteractive: T(100, 0) }, wallCeilingFactor: 3 });
     assert.equal(ceiling.r.status, 1);
     assert.match(ceiling.r.stderr, /::error::start-up benchmark firstInteractive: median 730 ms exceeds the 300 ms ceiling/);
+    // A CPU limit on an OS that cannot read the tree CPU time (--os linux): not applied, said so, the wall time still judged
+    const linux = go({ cpu: { ...T(-10, 0), quiet: { ...T(-10, 0), minIdle: 0 } }, marks, wallCeilingFactor: 3 }, {}, exe, 'linux');
+    assert.equal(linux.r.status, 0, linux.r.stderr);
+    assert.match(linux.r.stdout, /note: tree CPU time is not readable on this OS: no CPU limit is applied/);
+    if (process.platform === 'darwin') {
+      // the tight limit applies at a host idle of minIdle or more, the busy limit otherwise; CPU over the limit fails
+      const quiet = go({ cpu: { ...T(1e9, 0), quiet: { ...T(-10, 0), minIdle: 30 } }, marks, wallCeilingFactor: 3 });
+      assert.equal(quiet.r.status, 1);
+      assert.match(quiet.r.stderr, /::error::start-up benchmark CPU: median .* quiet-host threshold/);
+      const busy = go({ cpu: { ...T(1e9, 0), quiet: { ...T(-10, 0), minIdle: 30 } }, marks, wallCeilingFactor: 3 }, { DEBRIEF_BENCH_FAKE_IDLE: '5' });
+      assert.equal(busy.r.status, 0, busy.r.stderr);
+      assert.match(busy.r.stdout, /note: tree CPU median .* over the quiet-host limit -10 ms, under the busy-host limit/);
+      const over = go({ cpu: T(-10, 0), marks, wallCeilingFactor: 3 });
+      assert.equal(over.r.status, 1);
+      assert.match(over.r.stderr, /::error::start-up benchmark CPU: median .* busy-host threshold/);
+    }
+    const broken = go({ marks, wallCeilingFactor: 3 }, {}, flaky);
+    assert.equal(broken.r.status, 1, 'one start of three gave no timings');
+    assert.match(broken.r.stderr, /::error::start-up benchmark: start 2 gave no timings: a broken start/);
+    assert.equal(broken.json.runs.length, 2, 'the good starts are kept');
     for (const env of [{}, { GITHUB_REF_TYPE: 'tag' }]) {
-      const none = go({ marks: { firstInteractive: T(100_000, 0) }, wallCeilingFactor: 3 }, env, mute);
+      const none = go({ marks, wallCeilingFactor: 3 }, env, mute);
       assert.equal(none.r.status, 6);
       assert.match(none.r.stderr, /::error::start-up benchmark NOT MEASURED.*no start-up timings.*exited \(code 3\)/);
       assert.equal(none.json.verdict.status, 'not-measured');
     }
-    const report = go({ marks: { firstInteractive: T(100_000, 0) }, wallCeilingFactor: 3 }, {}, mute, '--report-only');
+    const report = go({ marks, wallCeilingFactor: 3 }, {}, mute, 'macos', '--report-only');
     assert.equal(report.r.status, 0);
     const summary = join(dir, 'summary.md');
-    go({ marks: { firstInteractive: T(100_000, 0) }, wallCeilingFactor: 3 }, { GITHUB_STEP_SUMMARY: summary });
+    go({ marks, wallCeilingFactor: 3 }, { GITHUB_STEP_SUMMARY: summary });
     assert.match(readFileSync(summary, 'utf8'), /### Start-up benchmark \(macos\): pass/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
