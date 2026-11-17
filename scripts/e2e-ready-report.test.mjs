@@ -10,5 +10,14 @@ test('sitesOf keeps the sites of the ready-reads rule only', () => {
 test('summaryTable lists each project and the total', () => {
   const t = summaryTable({ 'apps/debrief/app': 3, ui: 2 });
   assert.match(t, /\| apps\/debrief\/app \| 3 \|/);
-  assert.match(t, /\| \*\*total\*\* \| \*\*5\*\* \|/);
+  assert.match(t, /\| \*\*total \(measured projects\)\*\* \| \*\*5\*\* \|/);
+  assert.match(t, /projects not measured\*\* \| \*\*0\*\*/);
+});
+
+test('summaryTable shows a project eslint failed in as not measured, never as zero sites (ER-33)', () => {
+  const t = summaryTable({ ui: 2 }, ['apps/dyno/app', 'apps/pitwall/app']);
+  assert.match(t, /\| apps\/dyno\/app \| not measured \|/);
+  assert.match(t, /\| apps\/pitwall\/app \| not measured \|/);
+  assert.match(t, /projects not measured\*\* \| \*\*2\*\*/);
+  assert.doesNotMatch(t, /apps\/dyno\/app \| 0/);
 });

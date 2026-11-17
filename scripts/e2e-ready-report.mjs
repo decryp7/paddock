@@ -18,10 +18,23 @@ export function sitesOf(results) {
   return results.flatMap((f) => f.messages.filter((m) => m.ruleId === RULE).map((m) => ({ file: f.filePath, line: m.line, message: m.message })));
 }
 
-/** The markdown table for the step summary: project, sites. */
-export function summaryTable(counts) {
+/**
+ * The markdown table for the step summary: project, sites, and a "not measured" row for each project where eslint failed (ER-33: a failed project is
+ * never a project with no sites), with the count of unmeasured projects.
+ */
+export function summaryTable(counts, unmeasured = []) {
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
-  return ['### e2e ready-reads (report-only)', '', '| project | sites |', '| --- | ---: |', ...Object.entries(counts).map(([p, n]) => `| ${p} | ${n} |`), `| **total** | **${total}** |`, ''].join('\n');
+  return [
+    '### e2e ready-reads (report-only)',
+    '',
+    '| project | sites |',
+    '| --- | ---: |',
+    ...Object.entries(counts).map(([p, n]) => `| ${p} | ${n} |`),
+    ...unmeasured.map((p) => `| ${p} | not measured |`),
+    `| **total (measured projects)** | **${total}** |`,
+    `| **projects not measured** | **${unmeasured.length}** |`,
+    '',
+  ].join('\n');
 }
 
 function projects(root) {
@@ -32,6 +45,7 @@ function projects(root) {
 function main(argv) {
   const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
   const counts = {};
+  const unmeasured = [];
   for (const project of argv.length ? argv : projects(root)) {
     let out = '[]';
     try {
@@ -41,6 +55,7 @@ function main(argv) {
       out = e.stdout?.toString() || '';
       if (!out.trim().startsWith('[')) {
         console.log(`::warning::e2e ready-reads: eslint failed in ${project} (${String(e.message).split('\n')[0]}); not measured`);
+        unmeasured.push(project);
         continue;
       }
     }
@@ -48,7 +63,7 @@ function main(argv) {
     counts[project] = sites.length;
     for (const s of sites) console.log(`${s.file.replace(`${root}/`, '')}:${s.line}: ${s.message.split(':')[0]}`);
   }
-  const table = summaryTable(counts);
+  const table = summaryTable(counts, unmeasured);
   console.log(table);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${table}\n`);
   return 0;
