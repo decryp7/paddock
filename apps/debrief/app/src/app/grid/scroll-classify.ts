@@ -10,7 +10,11 @@ export interface ScrollRead {
   maxScroll: number;
   /** The user is in a gesture: an input event (wheel, pointer, touch, key) reached the grid since its last write, or the pointer is held. */
   recentInput: boolean;
-  /** The layout changed since the grid's last write (the total, the viewport height or the element's height). */
+  /**
+   * The layout is changing right now: the total or the viewport height changed and the frame that renders it has not passed yet, or the
+   * element's own height differs from the last write's. It is not "changed at some time since the last write": the total of a view that
+   * keeps its position grows all the time without a write.
+   */
   layoutChanged: boolean;
   /** How far the furthest scroll position moved since the grid's last write (`|maxScroll - maxScroll at the write|`): the size of the layout change. */
   layoutDelta: number;
@@ -34,6 +38,6 @@ export function classifyScroll({ read, pendingWrite, lastWrite, maxScroll, recen
   // position is not the browser's (a scrollbar drag has pointer input; find in page and assistive technology have none and may go anywhere),
   // so it stays the user's. The grid writes its own position back for the two shapes.
   if (!recentInput && layoutChanged && read <= 1 && Number.isFinite(lastWrite) && lastWrite > 1) return 'spurious';
-  if (!recentInput && layoutDelta > 0 && Number.isFinite(lastWrite) && Math.abs(read - lastWrite) <= layoutDelta + 1) return 'spurious';
+  if (!recentInput && layoutChanged && layoutDelta > 0 && Number.isFinite(lastWrite) && Math.abs(read - lastWrite) <= layoutDelta + 1) return 'spurious';
   return 'user';
 }

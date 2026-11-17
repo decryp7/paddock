@@ -1055,6 +1055,31 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       expect(grid.virtualTop()).toBe(grid.geometry().maxTop);
     });
 
+    // Found by the e2e (WebKit, wheel dispatched right after the click): the click's request is handled when the change detection runs,
+    // which can be after the user's wheel. The wheel came later and wins: the request still reloads the rows but does not pin the view.
+    it('G10: a wheel that arrives before the reveal request is handled is not undone by it', async () => {
+      TestBed.resetTestingModule();
+      const clock = new ManualClock();
+      const backend = synthetic(5000, { liveMs: 25, clock });
+      const { fixture, grid, vp } = await render(backend);
+      await flush(fixture);
+      TestBed.inject(LiveFollow).setFollow(false);
+      const feed = TestBed.inject(LiveFeed);
+      await TestBed.inject(LiveTail).toggle();
+      await clock.advance(100);
+      await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1));
+      await settle(fixture);
+      const before = grid.virtualTop();
+      el<HTMLButtonElement>(fixture, '[data-testid=new-events]').click();
+      vp.dispatchEvent(new WheelEvent('wheel', { deltaY: -900, cancelable: true, bubbles: true }));
+      vp.scrollTop = Math.max(0, vp.scrollTop - 900);
+      userScroll(vp);
+      await flush(fixture);
+      await settle(fixture);
+      expect(grid.virtualTop(), 'the view is not taken to the end').toBeLessThan(grid.geometry().maxTop - 5 * ROW);
+      expect(before).toBeLessThan(grid.geometry().maxTop - 5 * ROW);
+    });
+
     it('G2: a deferred write is dropped when the user moves the view in the same frame', async () => {
       const { fixture, grid, vp, release } = await revealWithHeldPage();
       // The held page answers (a larger total: a deferred write to the end is scheduled) and, before the render, the user presses PageUp.

@@ -381,14 +381,18 @@ export class EventsGrid {
   private pointerDown = false;
   /** The origin of the last scroll event that was logged (transitions only). */
   private lastOrigin: 'own' | 'user' | 'spurious' | null = null;
-  /** The layout (total rows and viewport height) when the grid last wrote the scroll position: a scroll after a change is the browser's unless an input moved the view. */
-  private writtenLayout = '';
+  /** The reveal request that was current at the user's last take-over: a request not yet handled then is older than the take-over. */
+  private takenOverAtNonce = -1;
+  /** The element's own height when the grid last wrote: a difference now is a resize the grid has not been told about yet. */
+  private writtenClient = Number.NaN;
+  /**
+   * The total or the viewport height changed and the frame that renders it has not passed: a browser adjusts a scroll position in that
+   * frame's scroll step (before the next animation frame), so a scroll with no input inside this window may be its adjustment; one outside
+   * it never is. Set when the total or the viewport height changes, cleared by the animation frame after the render that follows.
+   */
+  private layoutDirty = false;
   /** The furthest scroll position when the grid last wrote: a scroll after a layout change that moves by that much is the browser's shift. */
   private writtenMax = Number.NaN;
-  private layoutKey(el = this.viewport()?.nativeElement): string {
-    // The element's own height is read from the DOM: it changes before the resize is reported (`viewportH`).
-    return `${this.total()}x${this.viewportH()}x${el?.clientHeight ?? 0}`;
-  }
   /** An input event (wheel, pointer, touch, key) reached the grid since the grid last wrote the scroll position. */
   private inputSinceWrite = false;
 
@@ -498,7 +502,20 @@ export class EventsGrid {
     effect(() => {
       const nonce = this.feed.revealNonce();
       untracked(() => {
-        if (nonce > 0 && this.rows.query) this.liveRefresh(this.follow.holding() ? 'reveal' : 'followOn');
+        if (nonce <= 0 || !this.rows.query) return;
+        // A take-over after the request (the wheel came before this effect ran) wins: the rows reload, the view is not pinned or moved.
+        if (this.takenOverAtNonce === nonce) this.liveRefresh('data');
+        else this.liveRefresh(this.follow.holding() ? 'reveal' : 'followOn');
+      });
+    });
+
+    // The layout is changing (see `layoutDirty`): from the change until the animation frame after the render that shows it.
+    effect(() => {
+      this.total();
+      this.viewportH();
+      untracked(() => {
+        this.layoutDirty = true;
+        afterNextRender(() => requestAnimationFrame(() => (this.layoutDirty = false)), { injector: this.injector });
       });
     });
 
@@ -753,7 +770,7 @@ export class EventsGrid {
       this.writtenScroll = physical;
       // A write in the middle of a gesture (the pointer is held) does not end it: the drag's next scroll is still the user's.
       if (!this.pointerDown) this.inputSinceWrite = false;
-      this.writtenLayout = this.layoutKey();
+      this.writtenClient = el.clientHeight;
       this.writtenMax = el.scrollHeight - el.clientHeight;
       this.logger.debug('ui.grid', 'Scroll written', { Physical: physical, Read: read, Max: el.scrollHeight - el.clientHeight });
     };
@@ -791,6 +808,7 @@ export class EventsGrid {
    */
   protected userTookOver(input = 'input'): void {
     this.logger.debug('ui.grid', 'User took over', { Input: input, Pinned: this.followState.pinned });
+    this.takenOverAtNonce = this.feed.revealNonce();
     this.step({ type: 'userTookOver' });
   }
 
@@ -825,7 +843,7 @@ export class EventsGrid {
     this.rows.noteScroll();
     const g = this.geometry();
     const read = el.scrollTop;
-    const origin = classifyScroll({ read, pendingWrite: this.pendingWrite?.physical ?? null, lastWrite: this.writtenScroll, maxScroll: el.scrollHeight - el.clientHeight, recentInput: this.inputSinceWrite || this.pointerDown, layoutChanged: this.layoutKey(el) !== this.writtenLayout, layoutDelta: Math.abs(el.scrollHeight - el.clientHeight - this.writtenMax) });
+    const origin = classifyScroll({ read, pendingWrite: this.pendingWrite?.physical ?? null, lastWrite: this.writtenScroll, maxScroll: el.scrollHeight - el.clientHeight, recentInput: this.inputSinceWrite || this.pointerDown, layoutChanged: this.layoutDirty || el.clientHeight !== this.writtenClient, layoutDelta: Math.abs(el.scrollHeight - el.clientHeight - this.writtenMax) });
     // Only a change of origin is logged (each log line is an IPC call in the desktop app, and a drag fires many scroll events).
     if (origin !== this.lastOrigin) {
       this.lastOrigin = origin;

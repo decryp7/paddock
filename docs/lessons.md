@@ -2439,3 +2439,13 @@ failure in these runs is of one kind: an input (a key, a wheel, a scrollbar pres
 newest end"), or a top-row read taken while pages were still loading, not a view pulled back after a delivered gesture; the grid log of those runs shows no take-over, or a take-over
 with no scroll. The drag-across-rounds row fails on the code of 576b47507 in both engines (red 1 of 2) and is green 12 of 12 on this code. Input delivery in headless WebKit under load
 is the open measurement: it is not a claim of "460 of 460". The 300 ms window and its constant are gone.
+
+**Deterministic ownership rows (2026-11-17, third round).** A real wheel, key or scrollbar press in headless WebKit is sometimes dropped by the browser (measured: 517 of 520 on the
+idle machine, the reviewer's 259 of 260; the grid log shows the wheel received and the take-over logged, then no scroll event and no grid write), so the ownership claims cannot be
+proved by real input alone. The common practice (TanStack Virtual's and the CDK's tests) is an untrusted event dispatched on the element plus a scroll position set by the test; the
+ownership rows now do that and are 640 of 640 in Chromium and WebKit, and a small real-input smoke set keeps the real pipeline covered (WebKit 639 of 640, the failure a dropped wheel).
+Making the rows deterministic found two things the real input had hidden: (1) the reveal request is handled when change detection runs, which can be after the user's wheel; the
+late request pinned the view again (G10, unit spec first, `takenOverAtNonce`); (2) a dispatched key does not scroll natively and the grid handles keys itself, so the test presses
+enough keys to take the focus out of the window and moves nothing. The classifier's second `spurious` rule also required no `layoutChanged`: in oldest-first keep mode the delta
+grows without any write, so a no-input scroll (find in page, assistive technology) within the band was written back; it now needs the layout to be changing (the total or the viewport
+changed and the frame that renders it has not passed, or the element's height differs from the last write's), table row first.

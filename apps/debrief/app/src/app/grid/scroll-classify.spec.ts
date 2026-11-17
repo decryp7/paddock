@@ -20,6 +20,7 @@ describe('classifyScroll', () => {
     ['a scroll far from our write with no input while the layout changed is NOT the browser\'s shift: the user (a drag has pointer input; find in page and assistive technology have none)', { read: 18000, lastWrite: 755, maxScroll: 120286, recentInput: false, layoutChanged: true, layoutDelta: 59 }, 'user'],
     ['a scroll to a middle position with no input and no layout change is the user', { read: 3000, lastWrite: 120022, maxScroll: 119963, recentInput: false, layoutChanged: false, layoutDelta: 0 }, 'user'],
     ['oldest first, keep mode: the total grew without a write, an assistive scroll to a far row is the user', { read: 60000, lastWrite: 120000, maxScroll: 120300, recentInput: false, layoutChanged: true, layoutDelta: 300 }, 'user'],
+    ['oldest first, keep mode: the total grew over time without a write (the delta keeps growing), a no-input scroll within that band is the user (find in page, assistive technology)', { read: 119900, lastWrite: 119700, maxScroll: 120300, recentInput: false, layoutChanged: false, layoutDelta: 600 }, 'user'],
     ['an infinite maximum (not laid out yet): only an equal read is ours', { read: 10, lastWrite: 5000, maxScroll: Number.POSITIVE_INFINITY }, 'user'],
   ];
 

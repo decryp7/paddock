@@ -27,6 +27,10 @@ async function open(page: Page, order: Order, search = URL): Promise<void> {
   page.on('console', (m) => void (m.text().startsWith('[ui.grid]') && log.push(m.text())));
   await page.clock.install();
   await openAppWith(page, search);
+  await viewport(page).evaluate((el) => {
+    (window as unknown as { __scrolls: number }).__scrolls = 0;
+    el.addEventListener('scroll', () => ((window as unknown as { __scrolls: number }).__scrolls += 1));
+  });
   if (order === 'newest first') await page.getByRole('button', { name: /Oldest first/ }).click();
   await page.locator('debrief-status-bar').getByRole('button', { name: 'Live tail', exact: true }).click();
   await expect(page.locator('debrief-status-bar').getByRole('button', { name: 'Live tail', exact: true })).toHaveAttribute('aria-pressed', 'true');
@@ -95,20 +99,49 @@ async function onNewest(page: Page, order: Order): Promise<boolean> {
 
 /** Goes to the newest end with the keyboard (a user move: it pins the view there). */
 async function goNewest(page: Page, order: Order): Promise<void> {
-  await viewport(page).focus();
-  await page.keyboard.press(order === 'oldest first' ? 'End' : 'Home');
+  await pressKey(page, order === 'oldest first' ? 'End' : 'Home');
   expect(await runUntil(page, () => onNewest(page, order), 2_000), 'the view reaches the newest end').toBe(true);
+}
+
+/**
+ * Input the test dispatches itself (`isTrusted` false): a key, a wheel and a scrollbar press reach the grid's handlers the same way in every
+ * engine, and the scroll position is moved by the test, as the common practice for scroll code does (TanStack Virtual's and the CDK's own
+ * tests). The ownership rows use these; a small set of rows uses real input (see "real input" below).
+ */
+const pressKey = (page: Page, key: string) => viewport(page).dispatchEvent('keydown', { key, bubbles: true, cancelable: true });
+
+async function dispatchAway(page: Page, order: Order, how: 'wheel' | 'key' | 'scrollbar press'): Promise<void> {
+  const away = order === 'oldest first' ? -900 : 900;
+  if (how === 'key') {
+    // The grid handles a key itself (it cancels the native scroll and moves the focus, scrolling the focused row into view): enough
+    // presses take the focus out of the window, so the grid's own write moves the view. The test moves nothing.
+    for (let i = 0; i < 8; i++) await pressKey(page, order === 'oldest first' ? 'PageUp' : 'PageDown');
+    return;
+  }
+  if (how === 'wheel') await viewport(page).dispatchEvent('wheel', { deltaY: away, bubbles: true, cancelable: true });
+  else await viewport(page).dispatchEvent('pointerdown', { bubbles: true });
+  await viewport(page).evaluate((el, d) => {
+    el.scrollTop = Math.max(0, el.scrollTop + d);
+  }, away);
+  if (how === 'scrollbar press') await page.evaluate(() => document.dispatchEvent(new PointerEvent('pointerup')));
+}
+
+/** The view is away from the newest end after dispatched input: page time only, nothing to wait for in real time. */
+async function expectAway(page: Page, order: Order, how: string): Promise<void> {
+  expect(await runUntil(page, async () => !(await onNewest(page, order)), 1_000), `${how}: the view left the newest end`).toBe(true);
 }
 
 /** The user moves the view away from the newest end: with the wheel, a key or by dragging the real scrollbar. */
 async function leaveNewest(page: Page, order: Order, how: 'wheel' | 'key' | 'scrollbar drag'): Promise<void> {
   sentAt.set(page, takeOvers(page));
+  scrollsAt.set(page, await scrollEvents(page));
   const box = await viewport(page).boundingBox();
   if (how === 'wheel') {
     await page.mouse.move((box?.x ?? 0) + 200, (box?.y ?? 0) + 150);
     await page.mouse.wheel(0, order === 'oldest first' ? -900 : 900);
   } else if (how === 'key') {
     await viewport(page).focus();
+    await expect(viewport(page)).toBeFocused(); // the key presses go to the focused element
     await page.keyboard.press(order === 'oldest first' ? 'PageUp' : 'PageDown');
     await page.keyboard.press(order === 'oldest first' ? 'PageUp' : 'PageDown');
   } else {
@@ -116,19 +149,23 @@ async function leaveNewest(page: Page, order: Order, how: 'wheel' | 'key' | 'scr
   }
 }
 
+/** Scroll events the viewport has fired (a listener registered at the start of the test): a real wheel is applied by the browser later. */
+const scrollEvents = (page: Page) => viewport(page).evaluate(() => (window as unknown as { __scrolls?: number }).__scrolls ?? 0);
+const scrollsAt = new WeakMap<Page, number>();
+
 /** The number of take-overs the grid has logged on this page so far. */
 const takeOvers = (page: Page) => (gridLogs.get(page) ?? []).filter((l) => l.includes('User took over')).length;
 /** The number of take-overs logged when the last input was sent (a wheel or a scrollbar press). */
 const sentAt = new WeakMap<Page, number>();
 
 /**
- * The view left the newest end after an input. A wheel or scrollbar scroll is applied by the browser's scrolling machinery in real time, not
- * in page time (the pinned clock does not move it), and headless WebKit sometimes drops a wheel gesture altogether (measured: the grid's log
- * then shows no take-over). So this waits on the condition, polling in real time with page time moving beside it, and sends the input again
- * only when the grid's log shows no take-over since the last send, at most twice. When the grid did take over and the view still never left
- * (the browser delivered the event and did not scroll) the wait ends at its timeout and says so. The resends are attached to the test.
+ * The view left the newest end after a REAL input (the smoke set). The browser applies a real wheel or scrollbar scroll in real time, not
+ * in page time (the pinned clock does not move it), and headless WebKit sometimes drops the gesture: the log then shows the wheel received and
+ * the take-over, and no scroll event and no grid write (measured, see lessons.md). So this polls until the poll's timeout, with page time
+ * moving beside it, and sends the input again only when neither a take-over nor a scroll event followed the last send, at most twice. A
+ * gesture that was delivered and never scrolled ends the poll at its timeout and says so. The resends are attached to the test.
  */
-async function expectLeftNewest(page: Page, order: Order, how: 'wheel' | 'key' | 'scrollbar drag' | 'wheel (scaled)'): Promise<void> {
+async function expectLeftNewest(page: Page, order: Order, how: 'wheel' | 'key' | 'scrollbar drag'): Promise<void> {
   let resends = 0;
   let waited = 0;
   await expect
@@ -137,10 +174,10 @@ async function expectLeftNewest(page: Page, order: Order, how: 'wheel' | 'key' |
         await page.clock.runFor(20);
         waited += 1;
         if (!(await onNewest(page, order))) return 'left';
-        if (resends < 2 && waited >= 3 && takeOvers(page) <= (sentAt.get(page) ?? 0)) {
+        if (resends < 2 && waited >= 3 && takeOvers(page) <= (sentAt.get(page) ?? 0) && (await scrollEvents(page)) <= (scrollsAt.get(page) ?? 0)) {
           resends += 1;
           waited = 0;
-          await leaveNewest(page, order, how === 'wheel (scaled)' ? 'wheel' : how);
+          await leaveNewest(page, order, how);
         }
         return takeOvers(page) > (sentAt.get(page) ?? 0) ? 'taken over, the view never left' : 'waiting';
       },
@@ -174,16 +211,33 @@ for (const order of ORDERS) {
       await page.clock.runFor(1_000);
       expect(await runUntil(page, () => onNewest(page, order), 1_000), 'pinned: stays on the newest end').toBe(true);
       // Away from the newest end (a user key move): the same events stay in view while others arrive.
-      await leaveNewest(page, order, 'key');
-      await expectLeftNewest(page, order, 'key');
+      await dispatchAway(page, order, 'key');
+      await expectAway(page, order, 'key');
       const before = await stableTopEventId(page);
       await page.clock.runFor(1_200);
       expect(await runUntil(page, async () => (await topEventId(page)) === before, 1_000), `the top row is the same event (${before})`).toBe(true);
     });
 
-    // Each way the user can scroll away, in the middle of a reveal (the first page of its round has been answered, later ones not yet).
-    for (const how of ['wheel', 'key', 'scrollbar drag'] as const) {
+    // Ownership rows: each way the user can scroll away, in the middle of a reveal (the first page of its round has been answered, later
+    // ones not yet). The input is dispatched by the test and the position moved by the test (deterministic in both engines).
+    for (const how of ['wheel', 'key', 'scrollbar press'] as const) {
       test(`${how} during a reveal leaves the view where the user put it`, async ({ page }) => {
+        await open(page, order);
+        await holdWithEvents(page);
+        await page.getByTestId('new-events').click();
+        await page.clock.runFor(40);
+        await dispatchAway(page, order, how);
+        await expectAway(page, order, how);
+        const left = await stableTopEventId(page);
+        await page.clock.runFor(1_500);
+        expect(await onNewest(page, order), `${how}: and was not pulled back`).toBe(false);
+        expect(await runUntil(page, async () => (await topEventId(page)) === left, 1_000), `${how}: and the same event (${left}) is at the top`).toBe(true);
+      });
+    }
+
+    // Real input smoke set: the real wheel, the real keys and the real scrollbar thumb, with the capped, take-over-aware re-send.
+    for (const how of ['wheel', 'key', 'scrollbar drag'] as const) {
+      test(`${how} during a reveal (real input) leaves the view where the user put it`, async ({ page }) => {
         await open(page, order);
         await holdWithEvents(page);
         await page.getByTestId('new-events').click();
@@ -235,8 +289,8 @@ for (const order of ORDERS) {
       await holdWithEvents(page);
       // Away from the newest end first, then the reveal, then a wheel away without waiting.
       await page.getByTestId('new-events').click();
-      await leaveNewest(page, order, 'wheel');
-      await expectLeftNewest(page, order, 'wheel');
+      await dispatchAway(page, order, 'wheel');
+      await expectAway(page, order, 'wheel');
       await page.clock.runFor(1_500);
       expect(await onNewest(page, order), 'not pulled back to the newest end').toBe(false);
     });
@@ -244,9 +298,7 @@ for (const order of ORDERS) {
     test('a wheel toward the newest end while on it is a no-op: following goes on', async ({ page }) => {
       await open(page, order);
       await goNewest(page, order);
-      const box = await viewport(page).boundingBox();
-      await page.mouse.move((box?.x ?? 0) + 200, (box?.y ?? 0) + 150);
-      await page.mouse.wheel(0, order === 'oldest first' ? 600 : -600);
+      await viewport(page).dispatchEvent('wheel', { deltaY: order === 'oldest first' ? 600 : -600, bubbles: true, cancelable: true });
       await page.clock.runFor(1_200);
       expect(await runUntil(page, () => onNewest(page, order), 1_000), 'still following').toBe(true);
     });
@@ -256,10 +308,8 @@ for (const order of ORDERS) {
       await holdWithEvents(page);
       await page.getByTestId('new-events').click();
       await page.clock.runFor(40);
-      const box = await viewport(page).boundingBox();
-      await page.mouse.move((box?.x ?? 0) + 200, (box?.y ?? 0) + 150);
-      await page.mouse.wheel(0, order === 'oldest first' ? -1_200 : 1_200);
-      await expectLeftNewest(page, order, 'wheel (scaled)');
+      await dispatchAway(page, order, 'wheel');
+      await expectAway(page, order, 'wheel (scaled)');
       await page.clock.runFor(1_500);
       expect(await onNewest(page, order), 'not pulled back to the newest end').toBe(false);
     });
@@ -279,8 +329,8 @@ for (const order of ORDERS) {
     test('resize while not pinned keeps the top row', async ({ page }) => {
       await open(page, order);
       await goNewest(page, order);
-      await leaveNewest(page, order, 'key');
-      await expectLeftNewest(page, order, 'key');
+      await dispatchAway(page, order, 'key');
+      await expectAway(page, order, 'key');
       const before = await stableTopEventId(page);
       for (const height of [620, 900]) {
         await page.setViewportSize({ width: 1440, height });

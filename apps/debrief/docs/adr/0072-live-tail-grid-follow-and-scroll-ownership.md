@@ -195,6 +195,14 @@ No single gap costs more than 1 agent-day beyond common practice, so none needs 
   repeats = 520 runs per engine with 4 workers, on an idle machine Chromium 520 of 520 and WebKit 517 of 520 (dropped or undelivered inputs, see lessons.md), under heavy
   external load Chromium 519 of 520 and WebKit 511 of 520. The earlier 460-run result (460 of 460 per engine) was of the first review round's code. The first matrix (14 tests, 69e230d15) failed 3 of 14 in each engine on the
   code before this ADR and was green 14 of 14 afterwards, but the 20-repeat runs of the first implementation failed 3 to 5 times per engine (see lessons.md).
+- Input in the matrix (2026-11-17, after the third round). The ownership rows (a wheel, keys and a scrollbar press during a reveal, a wheel at once after the click, the scaled
+  wheel, resize not pinned, following over 20 pushes) dispatch untrusted `WheelEvent`, `KeyboardEvent` and `PointerEvent` on the viewport and move `scrollTop` from the test, as
+  TanStack Virtual's and the CDK's own tests do; they wait on page time only. A smoke set keeps real input: the real wheel, the real keys (the viewport is asserted focused first),
+  the real scrollbar thumb, and the drag across refresh rounds, with the capped re-send that only fires when neither a take-over nor a scroll event followed the last send. Matrix
+  of 32 tests x 20 repeats = 640 runs per engine, `--workers 4`, idle machine: Chromium 640 of 640; WebKit 639 of 640, the one failure a real wheel of the smoke set. Every
+  dispatched ownership row is 640 of 640 in both engines. The WebKit residue is measured and its cause is headless WebKit dropping input: on the earlier 520-run matrix 517 of 520
+  (the reviewer measured 259 of 260), and in those runs the grid log shows the wheel received and the take-over logged, then no scroll event and no grid write. It is not a view
+  pulled back by the grid. G10 (a wheel that arrives before the reveal request is handled; found by the dispatched rows) is `takenOverAtNonce` in `events-grid.ts`.
 - Lint, report-only (ER-41): `no-restricted-syntax` on assignments to `scrollTop`, `scrollTo`, `scrollBy`, `scrollIntoView` and `Object.assign(el, { scrollTop })`
   in `src/app/grid/`, and `no-restricted-imports` of `scroll-writer` outside `events-grid.ts`, in `npm run lint:report` (`DEBRIEF_LINT_REPORT=1`); first run on the
   real tree 2026-11-17: no findings, and a probe file with each shape is reported. It moves to the normal lint after its first green run in CI (run id to be recorded here).
