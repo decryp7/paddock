@@ -186,7 +186,10 @@ fn an_unreadable_file_is_not_measured_at_that_file_on_both_hosts() {
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
         if std::fs::read(&locked).is_ok() {
             std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
-            return skip("running as root, which reads a 000 file");
+            // CI's Linux container runs as root, which reads a 000 file: the case cannot be made there. A note, as C125's and
+            // C129's tests do; `skip` would fail the Linux CI leg (run 8208), which is for a comparison that cannot run at all.
+            eprintln!("not measured: running as root, which reads a 000 file");
+            return;
         }
         let (rust, js) = both(t.path(), check.id());
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
