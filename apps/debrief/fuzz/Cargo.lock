@@ -721,6 +721,7 @@ dependencies = [
  "anyhow",
  "debrief-ipc",
  "jiff",
+ "paddock-env",
  "regex",
  "serde",
  "serde_json",
