@@ -559,7 +559,7 @@ jobs:
       - uses: ./.gitea/actions/job-isolation
 
       - name: VM lock and Windows test VM guard rails
-        run: node --test scripts/vm-lock.test.mjs scripts/vm-win.test.mjs
+        run: node --test scripts/vm-lock.test.mjs scripts/vm-win.test.mjs scripts/member-gate.test.mjs
 
       - uses: ./.gitea/actions/job-isolation
         if: always()
