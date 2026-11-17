@@ -1112,6 +1112,39 @@ jobs:
           # shellcheck disable=SC2086 # the flags are zero or one fixed option
           node conformance/bin/paddock-conformance.mjs commit-lint $flags --range "$range"
 
+  # Dependency audits judged against main (docs/ci-schedules.md "Dependency audits"): an advisory that appeared outside the change
+  # (RUSTSEC-2026-0543 run 8214, GHSA-fc5q-39xc-vjpf run 8225) is a warning here, decided on main by the nightly `audit` job; only an
+  # advisory this change adds fails. `./dev audit compare` audits the merge base's lockfiles with the same tools (no list is kept, ER-46).
+  # Report-only until the repository variable PADDOCK_AUDIT_ENFORCE is 1 (ER-41: set after its first green run, recorded in
+  # docs/ci-schedules.md); the plain audit steps of the jobs below stay blocking until then.
+  audit:
+    name: audit (advisories this change adds)
+    needs: [plan]
+    if: ${{ !cancelled() && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["audit"]'), 'audit') }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+      # The merge base's reference: the dispatch's `base` (the commit of main a train is built on), else origin/main (as the conformance job).
+      PADDOCK_BASE_REF: ${{ inputs.base || 'origin/main' }}
+      PADDOCK_AUDIT_ENFORCE: ${{ vars.PADDOCK_AUDIT_ENFORCE }}
+    steps:
+      # The whole history: the merge base can be any older commit.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.gitea/actions/setup-rust
+      - name: Audit against the merge base
+        run: |
+          enforce=()
+          if [ "${PADDOCK_AUDIT_ENFORCE:-}" = "1" ]; then enforce=(--enforce); fi
+          ./dev audit compare --base "$PADDOCK_BASE_REF" ${enforce[@]+"${enforce[@]}"}
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
   # The merge queue's local gates (docs/plans/merge-queue.md). The queue's tick runs no code of any pull request, so what a train
   # needs checked on the merged tree runs here, in a job without the queue's token, as part of the train's dispatch run (a base
   # is set; a normal push or a full run has these gates in the jobs above). A failure is an ordinary CI failure, triaged like any

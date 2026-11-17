@@ -25,6 +25,7 @@
 //!   ([`ci_setup_rust`]), over [`ci_tool`], the wrapper contract for third-party programs a CI step runs (docs/plans/ci-in-rust.md);
 //! - `ci build-jobs [<split>]`: CARGO_BUILD_JOBS and NEXTEST_TEST_THREADS for a job, the port of `conformance/ci/build-jobs.sh`
 //!   ([`ci_build_jobs`]).
+//! - `audit nightly|compare`: advisory audits of every lockfile, main's nightly and a change's new findings only ([`audit`], ER-41).
 //! - `locks check|sync`: every lockfile and the workspace hack current, and the command that regenerates them ([`locks`]).
 //! - `ci stable-workspace|node-caches|host-tools|sccache-stats|build-folder|prune-build-folder|prune-folder|prune-agent-builds|
 //!   host-cleanup`: the host-runner steps of the kit, the ports of the actions of the same names and of `build-folder.sh`, the prune
@@ -43,6 +44,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod audit;
 pub mod brief_check;
 pub mod cargo_target;
 pub mod check;

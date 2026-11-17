@@ -1,5 +1,5 @@
 use crate::{
-    brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, disk, gates,
+    audit, brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, disk, gates,
     generators, golden_cmd, heavy_cmd, hook, input_hash, ipc_endpoints, load, local_sccache, locks, merge_check, places, plan, plan_cmd,
     pr, pre_push, queue, release_isolation, slots, wait, worktree,
 };
@@ -55,6 +55,11 @@ enum Command {
     Gates {
         #[command(subcommand)]
         command: GatesCommand,
+    },
+    /// Advisory audits (cargo deny, npm audit): `nightly` on main, `compare` judges only what a change adds.
+    Audit {
+        #[command(subcommand)]
+        command: audit::AuditCommand,
     },
     /// Lockfiles: are they all current, and regenerate them with cargo, cargo-hakari and npm (never by hand).
     Locks {
@@ -717,6 +722,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Load(a) => load::command(&a),
         Command::Places(a) => places::command(&a),
         Command::Brief { command } => brief_check::command(command),
+        Command::Audit { command } => audit::command(command),
         Command::Locks {
             command: LocksCommand::Check(a),
         } => locks::check(a.root),

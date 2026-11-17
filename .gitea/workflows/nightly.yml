@@ -532,7 +532,30 @@ jobs:
       - name: ./dev gen check --all
         run: ./dev gen check --all
 
-  # `generators` joins this list after its first green nightly run (docs/ci-schedules.md).
+  # Dependency audits on main (docs/ci-schedules.md "Dependency audits"): every workspace's `cargo deny` advisories and `npm audit`. It
+  # does not wait for the gate: an advisory appears while main is unchanged (RUSTSEC-2026-0543, GHSA-fc5q-39xc-vjpf), so the night
+  # looks even when the gate skips the rest. A finding is one `::error::` with the advisory, the dependency path and the decision
+  # step, and fails this job, which is the nightly's failure path. Report-only until the repository variable PADDOCK_AUDIT_ENFORCE is 1
+  # (ER-41); it joins `mark` after its first green run (record run id: not yet).
+  audit:
+    name: audit (advisories on main)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+      PADDOCK_AUDIT_ENFORCE: ${{ vars.PADDOCK_AUDIT_ENFORCE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.gitea/actions/setup-rust
+      - name: Audit main
+        run: |
+          enforce=()
+          if [ "${PADDOCK_AUDIT_ENFORCE:-}" = "1" ]; then enforce=(--enforce); fi
+          ./dev audit nightly ${enforce[@]+"${enforce[@]}"}
+
+  # `generators` and `audit` join this list after their first green nightly run (docs/ci-schedules.md).
   # A night the gate skipped (main unchanged, or a train in CI) measured nothing and is never marked.
   mark:
     name: mark the green nightly
