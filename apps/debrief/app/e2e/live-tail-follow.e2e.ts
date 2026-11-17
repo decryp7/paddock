@@ -374,3 +374,27 @@ test('a scroll with no input event is kept while live tail adds events (oldest f
   await page.clock.runFor(1_500);
   expect((await metrics(page)).top, 'kept where the scroll put it, though events arrived').toBeGreaterThan(29_000);
 });
+
+// A resize changes the height of the grid's row layer, which sits above the spacer in the scroller. With CSS scroll anchoring on (WebKit,
+// including the WKWebView the desktop app runs in, and Chromium), the browser then moves scrollTop by that change itself, with no input:
+// the grid cannot tell it from find in page (ADR 0072 decision 2) and kept it, two rows off (about 1 in 75 WebKit runs of "resize while
+// not pinned"). The grid positions its rows itself, so its scroller opts out of anchoring, as the Angular CDK virtual scroll viewport does.
+test('the browser does not move the view when the row layer changes height (no scroll anchoring)', async ({ page }) => {
+  await open(page, 'oldest first');
+  await goNewest(page, 'oldest first');
+  await dispatchAway(page, 'oldest first', 'key');
+  await expectAway(page, 'oldest first', 'key');
+  const moved = await viewport(page).evaluate((el) => {
+    const layer = el.querySelector<HTMLElement>('.layer');
+    if (!layer) return Number.NaN;
+    const before = el.scrollTop;
+    const height = layer.offsetHeight;
+    layer.style.height = `${height + 100}px`;
+    el.getBoundingClientRect(); // lay out: an anchoring browser adjusts scrollTop here
+    const after = el.scrollTop;
+    layer.style.height = `${height}px`;
+    el.getBoundingClientRect();
+    return after - before;
+  });
+  expect(moved, 'scrollTop moved by itself when the row layer grew by 100 px').toBe(0);
+});
