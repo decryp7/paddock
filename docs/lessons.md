@@ -2686,3 +2686,14 @@ row layer changes height" grows the layer by 100 px and reads `scrollTop`; red i
 **Why the logs showed it only partly.** The `Scroll origin` line showed a no-input move, not its size against the layer change; WebKit's
 console preview cut the line after five fields. **Class:** a browser default that moves the scroll position (clamping, bug 3 of ADR 0072;
 anchoring here).
+
+## Debrief's Explorer width jumped 920 to 934 px: a constant copied a number another module decides (layout, 2026-11-17)
+
+Symptom: the Explorer pane changed width by 14 px (920 to 934) when the layout settled. An earlier 51 px placeholder had the
+same cause.
+**Cause.** The Explorer's width constant re-typed the layout plan's rule, and the placeholder re-typed the filter bar's height.
+When the owner changed, or two reads disagreed, the copy did not follow.
+**Fix, one mechanism.** A value that another module decides is read from that module, by a call or an exported constant. Rule 42
+says so, and the pre-review checklist and the independent-review checks ask "does any number re-type a decision another module
+owns?" (ER-22).
+**Class: a copied value that drifts from its owner (earlier: the filter bar height placeholder; mechanism copies of rule 55 are the same shape).**
