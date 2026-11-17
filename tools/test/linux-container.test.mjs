@@ -283,18 +283,3 @@ test('the image built from PADDOCK_LINUX_BASE_IMAGE marks every directory safe i
   assert.match(readFileSync(join(bin, 'dockerfile'), 'utf8'), /^RUN rustup component add clippy rustfmt && git config --system --add safe\.directory "\*"$/m);
   assert.doesNotMatch(calls(bin).at(-1), / -e GIT_/);
 });
-
-test('--image-ready only probes: exit 3 when the native image is not built (no build, no volume, no run), 0 when it is, 0 for the registry image', () => {
-  const repo = ciRepo();
-  const missing = docker();
-  const r = go(missing, ['--id', 'paddock', '--root', repo, '--ci-image', '--image-ready'], { PADDOCK_LINUX_HOST_ARCH: 'arm64' });
-  assert.equal(r.status, 3, r.out);
-  assert.match(r.out, /paddock-ci-local:v3-arm64-[0-9a-f]{12} is not built/);
-  assert.deepEqual(calls(missing).filter((l) => /build|volume create|docker run/.test(l)), []);
-  const built = docker();
-  assert.equal(go(built, ['--id', 'paddock', '--root', repo, '--ci-image', '--image-ready'], { PADDOCK_LINUX_HOST_ARCH: 'arm64', HAVE_IMAGE: '1' }).status, 0);
-  assert.deepEqual(calls(built).filter((l) => /build|volume create|docker run/.test(l)), []);
-  const registry = docker();
-  assert.equal(go(registry, ['--id', 'paddock', '--root', repo, '--ci-image', '--image-ready'], { PADDOCK_LINUX_HOST_ARCH: 'x86_64' }).status, 0);
-  assert.equal(go(docker(), ['--id', 'paddock', '--root', repo, '--image-ready']).status, 2, '--image-ready needs --ci-image');
-});

@@ -11,7 +11,7 @@
 //! home folder; leftovers of ended runs are swept at the next start; builds go to a kept folder per workspace beside it)
 //! and every gate runs there, so a dirty tree or another checked-out commit cannot change the answer. Without it, the working tree
 //! as it is (a person's run). Only workspaces that hold a changed file themselves get Clippy and format; the ones reached through
-//! dependencies are CI's (ER-9 overlap), and the Linux Clippy in the CI image (native architecture) runs for every touched workspace.
+//! dependencies are CI's (ER-9 overlap), and the Linux Clippy in the CI image is opt-in (`--linux`).
 //!
 //! One table at the end: what ran, what was skipped and why, what could not be measured (ER-33: never a pass), and for each
 //! failure one line with its cause and the next step. Exit 0 all passed, accepted or skipped; 5 something failed; 6 only "not
@@ -26,9 +26,7 @@ pub mod exec;
 pub mod gates;
 pub mod heavy_tool;
 pub mod known;
-pub mod linux_inputs;
 pub mod outcome;
-pub mod warm;
 
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
@@ -73,6 +71,9 @@ pub struct PrePushArgs {
     /// per line) and check exactly that commit in a throw-away worktree, not the working tree. The hook passes it.
     #[arg(long)]
     pub refs_from_stdin: bool,
+    /// Also run the Linux Clippy of the shared crates in the CI image (off by default: CI covers it, and it needs Docker).
+    #[arg(long)]
+    pub linux: bool,
     /// Let these not-measured rows (their full ids, for example `clippy-windows apps/dyno`) pass the push; each use is logged.
     /// Also read from PADDOCK_ACCEPT_NOT_MEASURED (comma separated).
     #[arg(long, value_delimiter = ',')]
@@ -261,22 +262,17 @@ impl known::Lookups for RealLookups {
     }
 }
 
-/// The repository root: the given folder, else the top of the git checkout the current folder is in.
-pub(crate) fn repo_root(given: &Option<PathBuf>) -> Result<PathBuf, CliError> {
-    match given {
-        Some(r) => Ok(r.clone()),
+/// The command.
+pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
+    let root = match &args.root {
+        Some(r) => r.clone(),
         None => {
             let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
             git_text(&cwd, &["rev-parse", "--show-toplevel"])
                 .map(|t| PathBuf::from(t.trim()))
-                .ok_or_else(|| CliError::failure("This is not a git checkout.").with_hint("Run it inside the repository."))
+                .ok_or_else(|| CliError::failure("This is not a git checkout.").with_hint("Run it inside the repository."))?
         }
-    }
-}
-
-/// The command.
-pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
-    let root = repo_root(&args.root)?;
+    };
     let stdin = if args.refs_from_stdin { read_stdin()? } else { String::new() };
     // Prepared on first use by a cargo gate, never here and never in `command_in`: a push that runs no cargo gate, and the tests of
     // the push gate, must not start a server on the machine they run on (ER-45).
@@ -445,13 +441,7 @@ fn command_in(
     } else {
         node_env_problem(cfg!(windows) && work != root, &|p| std::fs::read_to_string(work.join(p)).ok())
     };
-    facts.left_out = gates::linux_candidates(&plan, &change)
-        .into_iter()
-        .map(|ws| {
-            let l = linux_inputs::left_out(&work, &ws);
-            (ws, l)
-        })
-        .collect();
+    facts.linux = args.linux;
     facts.kept_targets = kept_targets;
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     if !args.only.is_empty() {
@@ -1276,7 +1266,9 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts
             windows.insert(ws);
         }
     }
-    let version = linux_inputs::ci_version(root);
+    let image = std::fs::read_to_string(root.join("ci-image/VERSION"))
+        .map(|v| format!("dev.decryptology.net/decryp7/paddock-ci:v{}", v.trim()))
+        .map_err(|e| format!("ci-image/VERSION cannot be read: {e}"));
     let mut tests: Vec<String> = std::fs::read_dir(root.join("apps/pitwall/scripts/ci"))
         .map(|d| {
             d.flatten()
@@ -1291,8 +1283,8 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts
         conformance: Some(ci),
         conformance_env: None,
         windows_clippy: windows,
-        ci_version: Some(version),
-        left_out: Default::default(),
+        image: Some(image),
+        linux: false,
         kept_targets: None,
         pitwall_tests: tests,
         dev_exe: crate::tool_cache::self_exe().map_or_else(|_| "./dev".into(), |p| p.to_string_lossy().to_string()),

@@ -1,7 +1,7 @@
 // C124: a gate's result is built through the shared outcome, never by hand (ADR 0089 amendment 2026-11-13, WP-T6; ER-21: the class
 // "a gate gives its verdict from an indirect signal" recurred at rows 2 to 7 of the amendment's table).
 // Flagged, one site at a time, in the gate and check tools' Rust (`tools/paddock-dev/src/`, `crates/paddock-bench/src/`) outside test code (a `tests/`
-// folder, `tests.rs`, `*_test.rs`, and every `#[cfg(test)]` item, by item: code after a test module counts):
+// folder, `tests.rs`, `*_test.rs`, and everything after a file's first `#[cfg(test)]`):
 // - the `NotMeasured`, `Clean`, `Pass`, `Passed`, `Success`, `Current` or `Green` variants of a local enum that is a result type, one
 //   with a `NotMeasured` variant or two or more result words (those, and `Red`, `Stale`, `Fail`, `Failed`, `Findings`, `Dirty`,
 //   `Outdated`, `Broken`, `Error`, `Mismatch`, `Missing`, `Skipped`):
@@ -23,8 +23,6 @@
 // out as each gate migrates. Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
 import { warn } from '../finding.mjs';
 import { parseAllowList, readAllowList } from '../util/allow-list.mjs';
-import { withoutTestItems } from '../util/rust-test-items.mjs';
-import { maskRust } from './C39-freed-port.mjs';
 
 export const ALLOW = 'conformance/c124-allow.json';
 const RUST = /^(?:tools\/paddock-dev\/src|crates\/paddock-bench\/src)\/.*\.rs$/;
@@ -50,11 +48,9 @@ const FIX = 'Build the result with `paddock_cli::measure` (or `Evidence::adopt`)
 export function flaggedRust(path, text) {
   if (OWNER.test(path) || TEST_PATH.test(path)) return [];
   const out = [];
-  // Test items are blanked item by item (the shared `withoutTestItems`): a test module in the middle of a file hides nothing below it.
-  const masked = maskRust(text).split('\n');
-  const production = withoutTestItems(maskRust(text)).split('\n');
-  const body = text.split('\n').map((l, i) => (masked[i].trim() !== '' && production[i].trim() === '' ? '' : l));
-  const lines = body;
+  const lines = text.split('\n');
+  const end = lines.findIndex((l) => /^\s*#\[cfg\(test\)\]/.test(l));
+  const body = end < 0 ? lines : lines.slice(0, end);
   let depth = -1; // brace depth inside an enum, -1 outside
   let header = ''; // the enum's own line: its name is part of a variant's site, so `NotMeasured,` of two enums are two sites
   let candidates = []; // the enum's flaggable variants, kept until the enum closes and shows whether it is a result type

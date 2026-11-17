@@ -170,17 +170,6 @@ enum CheckCommand {
     /// is "not measured" (exit 6), never a pass; a failure is one line with its next step (exit 5). The pre-push hook runs it.
     #[command(name = "pre-push", long_flag = "pre-push")]
     PrePush(pre_push::PrePushArgs),
-    /// Builds the Linux Clippy's dependencies in the CI image's kept volume (one container run per workspace, no budget, live
-    /// output), so the pre-push row only sees warm runs. Default: every Cargo workspace. Run it once per
-    /// workspace, and again after a CI image bump (the target folder is keyed by ci-image/VERSION) or a large dependency change; a push that finds the volume cold is "not measured". The kept volume `paddock-linux-target-arm64` grows with every workspace and image version (size: docs/benchmarks.md, "Pre-push Linux Clippy"); `bash tools/linux-container.sh --id paddock --clean` removes it.
-    #[command(name = "warm-linux", long_flag = "warm-linux")]
-    WarmLinux {
-        /// Workspace folders to warm (`crates`, `apps/dyno`, ...).
-        workspaces: Vec<String>,
-        /// The repository root (default: the folder containing .git, found from the current folder).
-        #[arg(long)]
-        root: Option<PathBuf>,
-    },
     /// The next free conformance check id, read from the working tree, every local branch, every branch of origin as the
     /// remote has it now (git ls-remote) and conformance/reserved/ (ER-21: two branches took the same id five times). `--reserve <branch>` takes the id on origin at once (a push of refs/paddock/check-ids/C<n>, which only one agent can create) and writes the reservation file.
     NewId {
@@ -733,9 +722,6 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Check {
             command: CheckCommand::PrePush(a),
         } => pre_push::command(&a),
-        Command::Check {
-            command: CheckCommand::WarmLinux { workspaces, root },
-        } => pre_push::warm::command(&root, &workspaces),
         Command::Check {
             command: CheckCommand::NewId { reserve, root },
         } => check_ids::command(root, reserve),
