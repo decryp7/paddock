@@ -1308,6 +1308,25 @@ folder was warm, so cold build plus run was more than 1800 s there.
   1800 s for build plus run, and the bound is a hang guard, not a budget. The check's own guard stays 1800 s and now covers only
   the run. Not measured: a cold build at load 150 or more, and the other entries' builds (all smaller workspaces or crates).
 
+## C100 in the push gate (2026-11-17, feat/pre-push-unwired-check)
+
+Question: what does the `gates-register` row (`./dev gates check`, C100) add to `./dev check --pre-push` when a push changes a
+conformance check, `conformance/paddock.ci.json`, `docs/gates.toml` or a workflow? Other pushes skip it.
+
+- **Machine:** the shared Mac mini (arm64), other agents running; 1-minute load given per run
+- **Tree:** origin/main 97176067c plus this branch, warm `./dev`
+- **Runs:** 4 (the first rebuilt `./dev` after the edit, so its wall time is not the command's)
+
+  | What | Load (1 min) | Seconds (wall) | C100's own time |
+  |---|---:|---:|---:|
+  | `./dev gates check` (includes a `./dev` rebuild) | 4.9 | 40.7 | 4.9 s |
+  | `./dev gates check` | 9.8 | 5.4 | 4.9 s |
+  | `./dev gates check` | 9.1 | 5.5 | 4.9 s |
+  | `./dev gates check` (earlier, first look) | 8.7 | 7.7 | 6.9 s |
+
+- **Added time per push that changes C100's inputs:** about 5 to 8 s, one cheap row (rank 0) beside the conformance rows.
+- **Not measured:** a run under heavy load (above 20), and Linux or Windows.
+
 ## Conformance tests in the push gate (2026-11-14, ci/conformance-every-change)
 
 Question: what does running the conformance row and the conformance tests on every push (ER-41) add to `./dev check --pre-push`?

@@ -335,6 +335,27 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             reason: "no Rust file or docs/ipc-endpoints.toml changed".into(),
         });
     }
+    // C100 (ADR 0060): a conformance check that no CI line runs is dead weight; checks landed unwired on 2026-11-12 (four) and
+    // 2026-11-17 (C138). `./dev gates check` is CI's own command and takes about 8 s (docs/benchmarks.md, "C100 in the push gate").
+    // It blocks from its first run: C100 is long established and the user asked for the refusal (2026-11-17).
+    if change.files.iter().any(|f| gates_inputs(f)) {
+        out.push(Planned::Run(Gate {
+            args: strs(&["gates", "check"]),
+            ..gate(
+                "gates-register".into(),
+                "",
+                &facts.dev_exe,
+                &[],
+                0,
+                "C100 names the unwired check above: add its id to conformance/paddock.ci.json only, or give it a [[report_only]] entry in docs/gates.toml with a reason".into(),
+            )
+        }));
+    } else {
+        out.push(Planned::Skip {
+            id: "gates-register".into(),
+            reason: "no conformance check, conformance/paddock.ci.json, docs/gates.toml or workflow changed (C100's inputs)".into(),
+        });
+    }
     // Dyno's wire fixtures (the UI contract) are regenerated from the Rust types when dyno-core's sources changed; a stale one
     // fails the push with the files named (apps/dyno/scripts/regen-wire-fixtures.sh runs cargo test).
     if change
@@ -360,6 +381,14 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
         });
     }
     out
+}
+
+/// A file that can leave a conformance check unwired (C100 reads it): a check's own file, the list CI runs, the register, a workflow.
+fn gates_inputs(f: &str) -> bool {
+    (f.starts_with("conformance/src/checks/C") && f.ends_with(".mjs"))
+        || f == "conformance/paddock.ci.json"
+        || f == "docs/gates.toml"
+        || f.starts_with(".gitea/workflows/")
 }
 
 fn linux_clippy(change: &Change, facts: &Facts) -> Planned {

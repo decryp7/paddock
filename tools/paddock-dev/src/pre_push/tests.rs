@@ -149,6 +149,56 @@ fn a_dyno_core_change_regenerates_the_wire_fixtures_and_others_skip_it() {
     );
 }
 
+/// C100 in the push gate (user, 2026-11-17): a new conformance check that no CI line runs landed unwired twice (four checks on
+/// 2026-11-12, C138 on 2026-11-17). A change to what C100 reads runs `./dev gates check`, with the fix in its next step.
+#[test]
+fn a_change_to_what_c100_reads_runs_the_gates_check_and_names_the_fix() {
+    for file in [
+        "conformance/src/checks/C138-new.mjs",
+        "conformance/paddock.ci.json",
+        "docs/gates.toml",
+        ".gitea/workflows/ci.yml",
+    ] {
+        let planned = plan_gates(&plan(), &change(&[file]), &facts());
+        let g = run_gates(&planned)
+            .into_iter()
+            .find(|g| g.id == "gates-register")
+            .cloned()
+            .unwrap_or_else(|| panic!("gates-register is not planned for {file}: {planned:?}"));
+        assert_eq!(
+            (g.program.as_str(), g.args.join(" ")),
+            ("/x/dev", "gates check".to_string()),
+            "{file}"
+        );
+        assert!(!g.heavy && g.rank == 0, "a cheap gate: it starts before any Clippy");
+        assert!(
+            g.next.contains("conformance/paddock.ci.json") && g.next.contains("[[report_only]]") && g.next.contains("docs/gates.toml"),
+            "{}",
+            g.next
+        );
+    }
+}
+
+/// The negative: a push that touches none of C100's inputs skips the step, with a reason (not silently).
+#[test]
+fn an_untouched_range_skips_the_gates_check() {
+    for files in [
+        &["crates/paddock-proc/src/lib.rs"][..],
+        &["docs/x.md"],
+        &["conformance/src/lib/util.mjs"],
+        &[],
+    ] {
+        let planned = plan_gates(&plan(), &change(files), &facts());
+        assert!(!ids(&planned).contains(&"gates-register".to_string()), "{files:?}");
+        assert!(
+            planned
+                .iter()
+                .any(|p| matches!(p, Planned::Skip { id, reason } if id == "gates-register" && !reason.is_empty())),
+            "{files:?}: {planned:?}"
+        );
+    }
+}
+
 #[test]
 fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
     let docs = json!({"conformance": false, "apps": [], "packages": {}});

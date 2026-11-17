@@ -75,6 +75,19 @@ fn the_dry_run_lists_the_gates_ci_runs_for_a_crates_change_and_why_others_are_le
     );
 }
 
+/// The gates-register row reads the pushed files: a conformance check in the change plans it; the crates change above skips it.
+#[test]
+fn a_new_conformance_check_in_the_change_plans_the_gates_check_and_a_crates_change_skips_it() {
+    let d = tempfile::tempdir().unwrap();
+    let path = fake_bin(d.path(), "exit 0");
+    let (code, out, err) = dev(&path, &["--dry-run"]);
+    assert_eq!(code, 0, "{err}{out}");
+    assert!(out.contains("skip  gates-register"), "{out}");
+    let (code, out, err) = dev(&path, &["--dry-run", "--files", "conformance/src/checks/C999-new.mjs"]);
+    assert_eq!(code, 0, "{err}{out}");
+    assert!(out.contains("run   gates-register"), "{out}");
+}
+
 #[test]
 fn a_failing_fmt_is_exit_5_with_one_error_line_and_the_rerun_command() {
     let d = tempfile::tempdir().unwrap();
