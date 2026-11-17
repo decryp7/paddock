@@ -56,6 +56,7 @@ register_checks! {
     c122::C122,
     c124::C124,
     c125::C125,
+    c129::C129,
     c131::C131,
 }
 
@@ -116,8 +117,20 @@ impl<'a> Ctx<'a> {
             .unwrap_or_else(|| "origin/main".into())
     }
 
-    /// The tree's root folder.
+    /// Whether the tree is made of memory (a positive control): nothing may reach for git or the file system through it.
+    pub fn is_in_memory(&self) -> bool {
+        self.tree.is_in_memory()
+    }
+
+    /// The tree's root folder. An in-memory tree (a check's control) has none: asking for it panics, so a control that would run git
+    /// or read the file system fails loudly (the host's `control_holds` turns the panic into a failed control) instead of reading
+    /// whatever repository the process happens to be in.
+    #[allow(clippy::panic)]
     pub fn root(&self) -> &std::path::Path {
+        assert!(
+            !self.tree.is_in_memory(),
+            "an in-memory tree has no root: a control must not run git or read the file system"
+        );
         self.tree.root()
     }
 

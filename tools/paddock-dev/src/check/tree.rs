@@ -89,6 +89,11 @@ impl Tree {
         v
     }
 
+    /// Whether this tree is made of memory (a check's positive control): it has no folder, no git history and no base ref.
+    pub fn is_in_memory(&self) -> bool {
+        self.memory.is_some()
+    }
+
     /// The root folder.
     pub fn root(&self) -> &Path {
         &self.root
