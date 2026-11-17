@@ -89,6 +89,94 @@ fn a_child_sees_only_listed_names_whatever_the_machine_has() {
     );
 }
 
+/// ER-47: a variable that restricts a child (a download ban, an install ban, an offline switch, a failure marker) is never stripped
+/// by the clearing: the child that lost it would do what the caller forbade. The machine here is an `Ambient` that carries them.
+#[test]
+fn restricting_variables_the_machine_has_reach_the_child() {
+    let mut m = paddock_testkit::ambient().clone();
+    m.vars
+        .retain(|(k, _)| !paddock_env::RESTRICTING.contains(&k.to_str().unwrap_or_default()));
+    for k in paddock_env::RESTRICTING {
+        m.vars.push(((*k).into(), format!("{k}-restricts").into()));
+    }
+    let program = if cfg!(windows) { "cmd" } else { "env" };
+    let seen = child_env(&mut TestCommand::on(program, &m));
+    for k in paddock_env::RESTRICTING {
+        assert_eq!(
+            seen.get(*k).map(String::as_str),
+            Some(format!("{k}-restricts").as_str()),
+            "{k} did not reach the child: {seen:?}"
+        );
+    }
+}
+
+/// Positive control (ER-33): the same machine without the variables gives a child without them, so the test above sees the
+/// pass-through and not a value the child always has. `RUSTUP_AUTO_INSTALL` is the one the kit sets itself.
+#[test]
+fn a_machine_without_restricting_variables_gives_the_child_none_but_the_install_ban() {
+    let mut m = paddock_testkit::ambient().clone();
+    m.vars
+        .retain(|(k, _)| !paddock_env::RESTRICTING.contains(&k.to_str().unwrap_or_default()));
+    let program = if cfg!(windows) { "cmd" } else { "env" };
+    let seen = child_env(&mut TestCommand::on(program, &m));
+    for k in paddock_env::RESTRICTING
+        .iter()
+        .filter(|k| **k != "RUSTUP_AUTO_INSTALL")
+    {
+        assert!(
+            !seen.contains_key(*k),
+            "{k} appeared from nowhere: {seen:?}"
+        );
+    }
+    assert_eq!(
+        seen.get("RUSTUP_AUTO_INSTALL").map(String::as_str),
+        Some("0"),
+        "{seen:?}"
+    );
+}
+
+/// A child's rustup never installs a toolchain into the user's `~/.rustup` unless the caller allowed it (ER-45).
+#[test]
+fn the_install_ban_is_set_when_the_caller_has_none_and_the_callers_value_stands() {
+    let program = if cfg!(windows) { "cmd" } else { "env" };
+    let mut none = paddock_testkit::ambient().clone();
+    none.vars.retain(|(k, _)| k != "RUSTUP_AUTO_INSTALL");
+    let seen = child_env(&mut TestCommand::on(program, &none));
+    assert_eq!(
+        seen.get("RUSTUP_AUTO_INSTALL").map(String::as_str),
+        Some("0"),
+        "{seen:?}"
+    );
+    let mut allowed = none.clone();
+    allowed
+        .vars
+        .push(("RUSTUP_AUTO_INSTALL".into(), "1".into()));
+    let seen = child_env(&mut TestCommand::on(program, &allowed));
+    assert_eq!(
+        seen.get("RUSTUP_AUTO_INSTALL").map(String::as_str),
+        Some("1"),
+        "{seen:?}"
+    );
+}
+
+/// `env_clear` goes back to the listed set, and the restricting variables are in it.
+#[test]
+fn env_clear_keeps_the_restricting_variables() {
+    let mut m = paddock_testkit::ambient().clone();
+    m.vars.retain(|(k, _)| k != "PADDOCK_DEV_DOWNLOAD");
+    m.vars.push(("PADDOCK_DEV_DOWNLOAD".into(), "0".into()));
+    let program = if cfg!(windows) { "cmd" } else { "env" };
+    let mut c = TestCommand::on(program, &m);
+    c.env("ADDED", "1").env_clear();
+    let seen = child_env(&mut c);
+    assert_eq!(
+        seen.get("PADDOCK_DEV_DOWNLOAD").map(String::as_str),
+        Some("0"),
+        "{seen:?}"
+    );
+    assert!(!seen.contains_key("ADDED"), "{seen:?}");
+}
+
 #[test]
 fn home_and_temp_are_the_commands_private_folders_never_the_machines() {
     let mut env = env_lock();
@@ -155,14 +243,11 @@ fn the_curated_path_has_the_toolchain_and_the_system_but_not_the_machines_path()
 #[cfg(unix)]
 #[test]
 fn a_listed_tool_brings_its_machine_folder_and_an_unlisted_one_does_not() {
-    use std::os::unix::fs::PermissionsExt;
     let d = paddock_testkit::tempdir();
     let (tools, other) = (d.path().join("tools"), d.path().join("other"));
     for (dir, name) in [(&tools, "node"), (&other, "not-a-listed-tool")] {
         std::fs::create_dir(dir).unwrap();
-        let f = dir.join(name);
-        std::fs::write(&f, "#!/bin/sh\n").unwrap();
-        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::StandIn::new(dir, name).install().unwrap();
     }
     let m = machine_with(
         format!("{}:{}:/usr/bin:/bin", tools.display(), other.display()),
@@ -414,14 +499,13 @@ fn a_childs_shell_finds_the_tools_the_scripts_call() {
 #[cfg(unix)]
 #[test]
 fn an_installed_tool_beside_the_toolchain_is_not_reachable_and_the_toolchain_is() {
-    use std::os::unix::fs::PermissionsExt;
     let d = paddock_testkit::tempdir();
     let home_bin = d.path().join("cargo-home-bin");
     std::fs::create_dir(&home_bin).unwrap();
     for name in ["rustc", "rustup", "heavy"] {
-        let f = home_bin.join(name);
-        std::fs::write(&f, "#!/bin/sh\necho $0\n").unwrap();
-        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::StandIn::new(&home_bin, name)
+            .install()
+            .unwrap();
     }
     let m = machine_with(
         format!("{}:/usr/bin:/bin", home_bin.display()),
@@ -430,7 +514,7 @@ fn an_installed_tool_beside_the_toolchain_is_not_reachable_and_the_toolchain_is(
     let mut cmd = TestCommand::on("/bin/sh", &m);
     cmd.args([
         "-c",
-        "if command -v heavy; then exit 3; fi; command -v rustc && rustc",
+        "if command -v heavy; then exit 3; fi; found=$(command -v rustc) && test -x \"$found\" && echo \"$found\"",
     ]);
     let report = cmd.path_report();
     let out = cmd.output().unwrap();
@@ -508,7 +592,6 @@ fn git_for_windows_found_through_mingw64_brings_its_usr_bin() {
 #[cfg(unix)]
 #[test]
 fn a_child_cargos_build_script_does_not_reach_the_tools_of_cargo_home() {
-    use std::os::unix::fs::PermissionsExt;
     let d = paddock_testkit::tempdir();
     let crate_dir = d.path().join("probe");
     std::fs::create_dir_all(crate_dir.join("src")).unwrap();
@@ -526,9 +609,9 @@ fn a_child_cargos_build_script_does_not_reach_the_tools_of_cargo_home() {
     // The CARGO_HOME the child is given, with an installed tool in its bin (the real one's registry is not needed: no dependencies).
     let cargo_home = d.path().join("cargo-home");
     std::fs::create_dir_all(cargo_home.join("bin")).unwrap();
-    let tool = cargo_home.join("bin/cargo-hakari");
-    std::fs::write(&tool, "#!/bin/sh\n").unwrap();
-    std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    paddock_testkit::StandIn::new(&cargo_home.join("bin"), "cargo-hakari")
+        .install()
+        .unwrap();
     let mut cmd = TestCommand::new("cargo");
     cmd.args(["build", "--offline", "--quiet"])
         .current_dir(&crate_dir)

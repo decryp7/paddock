@@ -101,7 +101,7 @@ mod uid_tests {
     }
 }
 
-pub use command::{CREATE_NO_WINDOW, KEPT_ENV, clean_env, command, lower_priority};
+pub use command::{CREATE_NO_WINDOW, KEPT_ENV, RESTRICTING, clean_env, command, lower_priority};
 pub use detach::{
     DetachError, close_inherited, keep_handles_from_children, spawn_detached,
     spawn_detached_clearing_handles,

@@ -47,7 +47,8 @@ use std::sync::Arc;
 use crate::ambient::{Ambient, ambient};
 
 /// Variables copied from the test process when it has them: the toolchain cargo and rustup need to find themselves, and what
-/// Windows needs to start any program. Nothing ambient (no tokens, proxies, `CI`, `GITHUB_*`, `PADDOCK_*`, user variables).
+/// Windows needs to start any program. Nothing ambient (no tokens, proxies, `CI`, `GITHUB_*`, `PADDOCK_*`, user variables), except
+/// the restricting ones ([`paddock_env::RESTRICTING`]), which are passed too, whatever their names (ER-47).
 pub const PASSED_THROUGH: &[&str] = &[
     "RUSTUP_HOME",
     "CARGO_HOME",
@@ -114,6 +115,7 @@ pub fn allowed_names() -> Vec<&'static str> {
     names.push("PATH");
     names.extend(FIXED.iter().map(|(k, _)| *k));
     names.extend(PASSED_THROUGH.iter().copied());
+    names.extend(paddock_env::RESTRICTING.iter().copied());
     names.sort_unstable();
     names.dedup();
     names
@@ -226,10 +228,16 @@ impl TestCommand {
         })
         .flatten();
         let resolved = linked.map_or_else(|| resolve_on(program, machine), PathBuf::into_os_string);
-        // `paddock_env::command::command` is the one place a program is started from (no console window on Windows, as the
-        // product's children), and `paddock_proc::command` is the same function; C123 forbids a test's own `Command::new`.
+        // `paddock_env::command::command` is the canonical constructor (no console window on Windows, as the product's children),
+        // and `paddock_proc::command` is the same function; C123 forbids a test's own `Command::new`.
         let mut cmd = paddock_env::command::command(resolved);
-        cmd.env_clear();
+        // The one clearing function, over what the kit captured, never the live environment: it passes the restricting variables
+        // the caller has (`paddock_env::RESTRICTING`: a download ban, an offline switch, a failure marker) and nothing else (ER-47).
+        paddock_env::clear_env_from(&mut cmd, &[], |k| machine.var(k).map(OsStr::to_os_string));
+        // A child's rustup must never install a toolchain into the user's `~/.rustup` unless the caller allowed it (ER-45).
+        if machine.var("RUSTUP_AUTO_INSTALL").is_none() {
+            cmd.env("RUSTUP_AUTO_INSTALL", "0");
+        }
         let root = private.path().to_path_buf();
         let (home, tmp) = (root.join("home"), root.join("tmp"));
         for d in [&home, &tmp] {
@@ -398,7 +406,12 @@ impl TestCommand {
     /// Goes back to the environment a fresh command carries: the additions made so far are dropped, the listed set is never
     /// erased (a plain `Command::env_clear` would empty it, and the child would then read the machine's `PATH` for its lookups).
     pub fn env_clear(&mut self) -> &mut TestCommand {
-        self.cmd.env_clear();
+        // The wrapped command is already cleared at construction; dropping what was added is removing it, then the listed set
+        // (which holds the restricting variables) is set again. No second clearing site (ER-47).
+        let added: Vec<OsString> = self.cmd.get_envs().map(|(k, _)| k.to_os_string()).collect();
+        for k in added {
+            self.cmd.env_remove(k);
+        }
         for (k, v) in &self.base {
             self.cmd.env(k, v);
         }
@@ -1281,12 +1294,14 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_git_that_does_not_answer_its_exec_path_in_time_is_no_answer() {
-        use std::os::unix::fs::PermissionsExt;
         let d = crate::ambient::tempdir();
-        let git = d.path().join("git");
-        // It becomes the sleep that never answers: the process the handle ends is the one that waits.
-        std::fs::write(&git, "#!/bin/sh\nexec sleep 30\n").unwrap();
-        std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // A `git` that sleeps and never answers: the process the handle ends is the one that waits.
+        let git = crate::StandIn::new(d.path(), "git")
+            .sleeps(std::time::Duration::from_secs(30))
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         let limit = std::time::Duration::from_millis(300);
         let t = std::time::Instant::now();
         let answered = answer(&git, &["--exec-path"], &[], limit);
@@ -1314,9 +1329,14 @@ mod tests {
             None,
             "exec_path counts it as no answer"
         );
-        let answering = d.path().join("git-answers");
-        std::fs::write(&answering, "#!/bin/sh\necho /opt/git/libexec/git-core\n").unwrap();
-        std::fs::set_permissions(&answering, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let answering_dir = d.path().join("answers");
+        std::fs::create_dir(&answering_dir).unwrap();
+        let answering = crate::StandIn::new(&answering_dir, "git")
+            .stdout("/opt/git/libexec/git-core")
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         assert_eq!(
             exec_path(&answering, std::time::Duration::from_secs(10)),
             Some(PathBuf::from("/opt/git/libexec/git-core"))

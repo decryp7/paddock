@@ -583,7 +583,11 @@ fn source_hash() -> String {
 }
 
 fn locate_stub() -> Result<PathBuf, String> {
-    locate_from(std::env::var_os(STAND_IN_ENV))
+    locate_from(
+        crate::ambient::ambient()
+            .var(STAND_IN_ENV)
+            .map(std::ffi::OsStr::to_os_string),
+    )
 }
 
 /// [`locate_stub`] with the variable's value given (a test names a binary without touching the environment).
@@ -658,25 +662,22 @@ fn compile_stub(profile: &Path, built: &Path) -> Result<(), String> {
     let out = work
         .path()
         .join(format!("{STAND_IN_BIN}{}", std::env::consts::EXE_SUFFIX));
-    let result = TestCommand::new(rustc_program(
-        std::env::var_os("CARGO"),
-        std::env::var_os("RUSTC"),
-    ))
-    .env("RUSTUP_AUTO_INSTALL", "0")
-    .args([
-        "--edition",
-        "2021",
-        "--crate-name",
-        "paddock_stand_in",
-        "-C",
-        "debuginfo=0",
-        "-o",
-    ])
-    .arg(&out)
-    .arg(&main)
-    .current_dir(work.path())
-    .output()
-    .map_err(|e| format!("cannot run rustc to build {STAND_IN_BIN}: {e} ({hint})"))?;
+    let result = TestCommand::new(rustc_for(crate::ambient::ambient()))
+        .env("RUSTUP_AUTO_INSTALL", "0")
+        .args([
+            "--edition",
+            "2021",
+            "--crate-name",
+            "paddock_stand_in",
+            "-C",
+            "debuginfo=0",
+            "-o",
+        ])
+        .arg(&out)
+        .arg(&main)
+        .current_dir(work.path())
+        .output()
+        .map_err(|e| format!("cannot run rustc to build {STAND_IN_BIN}: {e} ({hint})"))?;
     if !result.status.success() {
         return Err(format!(
             "rustc failed on {STAND_IN_BIN} ({}); {hint}.\n{}",
@@ -699,6 +700,14 @@ fn publish_stub(out: &Path, built: &Path) -> Result<(), String> {
             built.display()
         )),
     }
+}
+
+/// [`rustc_program`] over what the kit captured (never the live `CARGO` or `RUSTC`: another test may have changed them, ADR 0100).
+fn rustc_for(machine: &crate::Ambient) -> std::ffi::OsString {
+    rustc_program(
+        machine.cargo.clone().map(PathBuf::into_os_string),
+        machine.var("RUSTC").map(std::ffi::OsStr::to_os_string),
+    )
 }
 
 /// The compiler for the stand-in, from the values of `CARGO` and `RUSTC` (parameters, so a test changes no environment): the real `rustc` beside the `cargo` that runs the tests (a rustup proxy could install a toolchain
@@ -724,6 +733,29 @@ fn rustc_program(
 mod tests {
     use super::*;
     use crate::Scratch;
+
+    /// The compiler comes from the captured values: a live `RUSTC` another test set is not read (it fails when the lookup is live).
+    #[test]
+    fn the_compiler_comes_from_the_captured_values_not_the_live_environment() {
+        let mut env = crate::env_lock();
+        env.set("RUSTC", "/live/rustc");
+        let mut machine = crate::ambient().clone();
+        machine.cargo = None;
+        machine.vars.retain(|(k, _)| k != "RUSTC");
+        machine
+            .vars
+            .push(("RUSTC".into(), "/captured/rustc".into()));
+        assert_eq!(
+            rustc_for(&machine),
+            std::ffi::OsString::from("/captured/rustc")
+        );
+        machine.vars.retain(|(k, _)| k != "RUSTC");
+        assert_eq!(
+            rustc_for(&machine),
+            std::ffi::OsString::from("rustc"),
+            "a live RUSTC must not be the fallback"
+        );
+    }
 
     #[test]
     fn a_rename_that_fails_onto_a_file_that_is_there_is_success_and_onto_nothing_is_an_error() {

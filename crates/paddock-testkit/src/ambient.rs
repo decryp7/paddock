@@ -28,7 +28,8 @@ pub struct Ambient {
     pub temp_dir: PathBuf,
     /// The user's home (`HOME`, `USERPROFILE` on Windows): only for the toolchain folders.
     pub home: Option<PathBuf>,
-    /// The toolchain and build variables a child may get ([`crate::process::PASSED_THROUGH`], [`crate::process::BUILD_VARS`]).
+    /// The toolchain and build variables a child may get ([`crate::process::PASSED_THROUGH`], [`crate::process::BUILD_VARS`],
+    /// [`paddock_env::RESTRICTING`]), and the variables the kit itself reads ([`KIT_VARS`]; never passed to a child).
     pub vars: Vec<(OsString, OsString)>,
     /// Where the shared toolchain link folders go: `<target>/paddock-test-toolchain` of the cargo target folder this program
     /// runs from (a folder with cargo's `CACHEDIR.TAG`), else `None` (each command links into its own folder).
@@ -45,6 +46,10 @@ impl Ambient {
             .map(|(_, v)| v.as_os_str())
     }
 }
+
+/// Variables the kit reads for itself (the compiler and the prebuilt stand-in a test names), captured with the others so no kit code
+/// reads the live environment. They are never passed to a child.
+pub const KIT_VARS: &[&str] = &["RUSTC", crate::stand_in::STAND_IN_ENV];
 
 static CAPTURED: OnceLock<Ambient> = OnceLock::new();
 
@@ -68,6 +73,8 @@ fn capture_now() -> Ambient {
     let vars: Vec<(OsString, OsString)> = crate::process::PASSED_THROUGH
         .iter()
         .chain(crate::process::BUILD_VARS)
+        .chain(paddock_env::RESTRICTING)
+        .chain(KIT_VARS)
         .filter_map(|k| std::env::var_os(k).map(|v| (OsString::from(k), v)))
         .collect();
     let cargo = std::env::var_os("CARGO")

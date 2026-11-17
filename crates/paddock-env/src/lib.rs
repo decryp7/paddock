@@ -11,6 +11,8 @@
 //!   folder, which is per user and verified, never a shared fixed path.
 //! - [`write_atomic`]: the atomic replace under it, for files that are not JSON state; [`write_atomic_created`] where
 //!   the caller creates the temporary file (an owner-only, unshared file for a secret on Windows).
+//! - [`command`]: the canonical no-console `Command` constructor, [`command::RESTRICTING`] (the variables no policy strips from a child,
+//!   ER-47) and [`command::clear_env`], the one function that clears a child's environment.
 //! - [`cargo_layout`]: the profile folder above a test program or `OUT_DIR`, in cargo's old and 1.100 build-folder layouts.
 //! - [`winpath`]: Windows paths without the verbatim `\\?\` prefix, in one place (`plain`, `for_tools`, `real*`, `same`).
 //! - [`home_guard`]: the one "is this folder inside the home folder" check (symlinks resolved), shared by `heavy` and `paddock-dev`.
@@ -35,6 +37,7 @@ pub mod winpath;
 
 pub use app::AppId;
 pub use atomic::{write_atomic, write_atomic_created};
+pub use command::{RESTRICTING, clear_env, clear_env_from};
 pub use dirs::{AppDirs, MapVars, Os, PORTABLE_FLAG, ProcessVars, Source, Vars};
 pub use error::{EnvError, Result};
 pub use folder::{

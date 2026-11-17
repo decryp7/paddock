@@ -34,19 +34,19 @@ pub const KEPT_ENV: &[&str] = &[
     "XDG_RUNTIME_DIR",
 ];
 
+/// The variables [`clean_env`] never strips ([`paddock_env::RESTRICTING`]).
+pub use paddock_env::RESTRICTING;
+
 /// A command for `program` that opens no console window on Windows ([`paddock_env::command::command`], the one place programs
 /// are started from; clippy forbids `Command::new` elsewhere).
 pub use paddock_env::command::command;
 
-/// Clears the child's environment and copies back only the variables in `keep` (use [`KEPT_ENV`]) that this process has.
-/// Variables added afterwards with `env` still reach the child.
+/// Clears the child's environment and copies back only the variables in `keep` (use [`KEPT_ENV`]) that this process has, and
+/// every restricting variable it has ([`paddock_env::RESTRICTING`]: a download ban, an offline switch; a child that lost one would
+/// do what this process forbade, ER-47). Variables added afterwards with `env` still reach the child. The one clearing function:
+/// clippy forbids `Command::env_clear` elsewhere.
 pub fn clean_env(cmd: &mut Command, keep: &[&str]) {
-    cmd.env_clear();
-    for key in keep {
-        if let Some(value) = std::env::var_os(key) {
-            cmd.env(key, value);
-        }
-    }
+    paddock_env::clear_env(cmd, keep);
 }
 
 /// Marks the command to start at lower priority so the app stays responsive: below-normal on Windows (this sets the whole
@@ -103,6 +103,30 @@ mod tests {
         assert!(
             !envs.iter().any(|(k, _)| k == "PADDOCK_PROC_AMBIENT"),
             "env_clear drops what was set before"
+        );
+    }
+
+    /// ER-47: a variable that restricts the child survives the clearing, though nobody listed it in `keep`; a positive control
+    /// (a variable of the same shape that is not restricting) is dropped.
+    #[test]
+    fn restricting_variables_survive_the_clearing_without_being_kept() {
+        let mut env = paddock_testkit::env_lock();
+        for k in paddock_env::RESTRICTING {
+            env.set(k, "0");
+        }
+        env.set("PADDOCK_PROC_NOT_RESTRICTING", "0");
+        let mut c = command("x");
+        clean_env(&mut c, &["PATH"]);
+        let seen: Vec<String> = c
+            .get_envs()
+            .map(|(k, _)| k.to_string_lossy().into_owned())
+            .collect();
+        for k in paddock_env::RESTRICTING {
+            assert!(seen.iter().any(|s| s == k), "{k} was stripped: {seen:?}");
+        }
+        assert!(
+            !seen.iter().any(|s| s == "PADDOCK_PROC_NOT_RESTRICTING"),
+            "{seen:?}"
         );
     }
 
