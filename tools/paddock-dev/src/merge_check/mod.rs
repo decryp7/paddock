@@ -126,6 +126,42 @@ pub struct Merge {
 }
 
 impl Merge {
+    /// A merge of `parents` (first parent first) with result `tree`: no message, no merge commit yet, and the parents' short ids as
+    /// their names. Every construction site starts here and sets what it knows with the `with_*` methods, so a new field gets its
+    /// default in one place and no site breaks.
+    pub fn new(parents: Vec<String>, tree: impl Into<String>, label: impl Into<String>) -> Self {
+        let name_of = |i: usize| parents.get(i).map(|p| short(p).to_string()).unwrap_or_default();
+        let (target_name, member_name) = (name_of(0), name_of(1));
+        Merge {
+            parents,
+            tree: tree.into(),
+            message: String::new(),
+            label: label.into(),
+            commit: None,
+            target_name,
+            member_name,
+        }
+    }
+
+    /// The merge commit's message.
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = message.into();
+        self
+    }
+
+    /// The merge commit, when it exists.
+    pub fn with_commit(mut self, commit: Option<String>) -> Self {
+        self.commit = commit;
+        self
+    }
+
+    /// The names of the target (first parent) and the member (second parent) for messages.
+    pub fn with_names(mut self, target: impl Into<String>, member: impl Into<String>) -> Self {
+        self.target_name = target.into();
+        self.member_name = member.into();
+        self
+    }
+
     /// What a check of this merge is about: the merge commit and its tree, or (before it exists) the two parents joined by `+`.
     pub fn subject(&self) -> Subject {
         let sha = self.commit.clone().unwrap_or_else(|| self.parents.join("+"));
@@ -307,18 +343,13 @@ fn resolve(git: &Git, req: &Request) -> Result<Merge, CliError> {
             }
             let tree = git.text(&["rev-parse", &format!("{c}^{{tree}}")]).map_err(gap)?.trim().to_string();
             let message = git.text(&["show", "-s", "--format=%B", c]).map_err(gap)?;
-            Ok(Merge {
-                target_name: short(&ids[0]).to_string(),
-                member_name: short(&ids[1]).to_string(),
-                parents: ids,
-                tree,
-                message,
-                label: format!("merge {}", short(c)),
-                commit: git
-                    .text(&["rev-parse", &format!("{c}^{{commit}}")])
-                    .ok()
-                    .map(|t| t.trim().to_string()),
-            })
+            let commit = git
+                .text(&["rev-parse", &format!("{c}^{{commit}}")])
+                .ok()
+                .map(|t| t.trim().to_string());
+            Ok(Merge::new(ids, tree, format!("merge {}", short(c)))
+                .with_message(message)
+                .with_commit(commit))
         }
         (None, Some(b), Some(t)) => {
             let first = git
@@ -348,15 +379,7 @@ fn resolve(git: &Git, req: &Request) -> Result<Merge, CliError> {
                     err
                 })?;
             let tree = tree.lines().next().unwrap_or("").trim().to_string();
-            Ok(Merge {
-                parents: vec![first, second],
-                tree,
-                message: String::new(),
-                label: format!("{b} into {t}"),
-                commit: None,
-                target_name: t.clone(),
-                member_name: b.clone(),
-            })
+            Ok(Merge::new(vec![first, second], tree, format!("{b} into {t}")).with_names(t.clone(), b.clone()))
         }
         _ => Err(CliError::usage("Give one merge commit, or --branch and --target together.")
             .with_hint("`./dev merge check <merge-commit>` or `./dev merge check --branch <b> --target <t>`.")),
@@ -557,5 +580,31 @@ pub fn command_json(req: &Request, out: &mut dyn std::io::Write, err: &mut dyn s
             let _ = writeln!(err, "error: {text}");
             Exit::Findings.code()
         }
+    }
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::Merge;
+
+    #[test]
+    fn a_new_merge_names_its_parents_by_short_id_and_has_no_message_or_commit() {
+        let m = Merge::new(vec!["1111111111111111".into(), "22222".into()], "tree", "label");
+        assert_eq!((m.target_name.as_str(), m.member_name.as_str()), ("111111111", "22222"));
+        assert_eq!(
+            (m.message.as_str(), m.commit.as_deref(), m.tree.as_str(), m.label.as_str()),
+            ("", None, "tree", "label")
+        );
+    }
+
+    #[test]
+    fn the_with_methods_set_only_their_own_field() {
+        let m = Merge::new(vec!["a".into(), "b".into()], "t", "l")
+            .with_message("msg")
+            .with_commit(Some("c".into()))
+            .with_names("main", "feat/x");
+        assert_eq!((m.message.as_str(), m.commit.as_deref()), ("msg", Some("c")));
+        assert_eq!((m.target_name.as_str(), m.member_name.as_str()), ("main", "feat/x"));
+        assert_eq!(m.parents, ["a", "b"]);
     }
 }
