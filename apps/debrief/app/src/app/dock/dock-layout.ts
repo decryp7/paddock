@@ -277,6 +277,17 @@ export class DockLayout {
   }
 
   /**
+   * Lays dockview out at its container's size now, when it differs. Dockview follows its container with an observer of its own, which showed
+   * drawn frames of the old size (the dock 580 px wide beside a 880 px stage, three frames, 49 ms); called from our own observer, in the same frame as
+   * the container's change and before the browser draws, the dock never lags it. A container without a box (not laid out) is ignored.
+   */
+  followContainer(api: DockviewApi): void {
+    const box = this.ctx.container?.getBoundingClientRect();
+    if (!box || box.width <= 0 || box.height <= 0) return;
+    if (Math.abs(api.width - box.width) > 0.5 || Math.abs(api.height - box.height) > 0.5) api.layout(box.width, box.height);
+  }
+
+  /**
    * Calls `onResize` (debounced) when the dock's size changes. Returns the disposer. Only used to re-plan, so a burst of
    * resize events costs one plan. `onPending(true)` comes with the first resize of a burst and `onPending(false)` once the re-plan has run
    * (or was dropped), so a reader can tell a settled layout from one that is about to be re-planned.
@@ -289,6 +300,7 @@ export class DockLayout {
     const start = container.getBoundingClientRect();
     let last = `${Math.round(start.width)}x${Math.round(start.height)}`;
     const observer = new ResizeObserver(() => {
+      this.followContainer(api);
       const box = container.getBoundingClientRect();
       const now = `${Math.round(box.width)}x${Math.round(box.height)}`;
       if (now === last) return;
