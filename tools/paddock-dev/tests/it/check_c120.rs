@@ -20,7 +20,7 @@ process.stdout.write(JSON.stringify({ findings: r.findings, waived: r.waived, er
 "#;
 
 fn js(root: &Path) -> Value {
-    let out = paddock_proc::command("node")
+    let out = paddock_testkit::TestCommand::new("node")
         .args(["--input-type=module", "-e", DRIVER])
         .current_dir(repo())
         .env("C120_ROOT", root)

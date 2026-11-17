@@ -8,11 +8,10 @@
     )
 )]
 
-use std::ffi::OsStr;
 use std::process::Command;
 
-/// Windows process creation flag: no console window.
-pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// Windows process creation flag: no console window ([`paddock_env::command::CREATE_NO_WINDOW`]).
+pub use paddock_env::command::CREATE_NO_WINDOW;
 #[cfg(windows)]
 const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 
@@ -35,20 +34,9 @@ pub const KEPT_ENV: &[&str] = &[
     "XDG_RUNTIME_DIR",
 ];
 
-/// A command for `program` that opens no console window on Windows (a GUI app starting a console tool would flash one,
-/// or, under Remote Desktop, show it). The only place the apps start programs; clippy forbids `Command::new` elsewhere.
-#[allow(clippy::disallowed_methods)] // the single allowed place
-pub fn command(program: impl AsRef<OsStr>) -> Command {
-    let cmd = Command::new(program);
-    #[cfg(windows)]
-    let cmd = {
-        use std::os::windows::process::CommandExt;
-        let mut cmd = cmd;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-        cmd
-    };
-    cmd
-}
+/// A command for `program` that opens no console window on Windows ([`paddock_env::command::command`], the one place programs
+/// are started from; clippy forbids `Command::new` elsewhere).
+pub use paddock_env::command::command;
 
 /// Clears the child's environment and copies back only the variables in `keep` (use [`KEPT_ENV`]) that this process has.
 /// Variables added afterwards with `env` still reach the child.
@@ -92,13 +80,6 @@ pub(crate) fn spawn_retrying(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_command_is_for_the_program_and_nothing_else_is_added() {
-        let c = command("some-tool");
-        assert_eq!(c.get_program(), "some-tool");
-        assert_eq!(c.get_args().count(), 0);
-    }
 
     #[test]
     fn the_environment_is_cleared_to_the_allow_list() {

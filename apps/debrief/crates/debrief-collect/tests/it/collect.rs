@@ -1,5 +1,6 @@
 use chrono::{Local, TimeZone};
 use debrief_collect::*;
+use paddock_testkit::TestCommand;
 use std::cell::RefCell;
 use std::fs::{self, File};
 use std::io::Read;
@@ -690,13 +691,10 @@ fn colliding_sanitised_names_unreadable_and_huge_files() {
 #[test]
 fn binary_runs_end_to_end() {
     let exe = env!("CARGO_BIN_EXE_debrief-collect");
-    let out = debrief_core::process::quiet_command(exe)
-        .arg("--print-default-plan")
-        .output()
-        .unwrap();
+    let out = TestCommand::new(exe).arg("--print-default-plan").output().unwrap();
     assert!(out.status.success());
     assert!(CollectPlan::parse(&String::from_utf8_lossy(&out.stdout)).is_ok());
-    let bad = debrief_core::process::quiet_command(exe).arg("--nope").output().unwrap();
+    let bad = TestCommand::new(exe).arg("--nope").output().unwrap();
     assert_eq!(bad.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&bad.stderr).contains("debrief-collect:"));
 }

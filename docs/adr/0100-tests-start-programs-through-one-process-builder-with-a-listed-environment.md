@@ -1,0 +1,246 @@
+# 100. Tests start programs through one process builder with a listed environment
+
+- Status: Accepted 2026-11-13 (user: the redesign was approved for building, ER-21); built on `feat/test-env-builder`, which
+  merged train 11 at its head `49e1a97cc` (2026-11-15) and ADR 0103's `feat/test-timing-redesign` at `031a11c3d`. Nothing else is
+  open except the follow-up in D3. Re-landed on `feat/test-env-builder-v2` on train 13 (2026-11-17, after train 12 merged and reverted
+  the first branch six times and train 13 moved the tools and shared crates onto `paddock_proc::command`; see the next section).
+- Date: 2026-11-13
+- Related: ER-14 (tests never touch the user's machine), ER-21 / rule 40 (a recurring class gets a redesign), ER-22 / rule 42
+  (share first), ER-24 (heavy slots), ER-37 / rule 76 (common practice), ER-41 (new checks start report-only); ADR 0077
+  (tests never reach system services), ADR 0095 (testkit helpers), ADR 0099 (the same shape of mechanism for paths).
+- Number: 0100. On 2026-11-13 the highest ADR on `origin/main` and on every `origin` branch was 0099 (`git ls-tree` of
+  `docs/adr/` over all remote branches; 0098 and 0099 are on `origin/feat/adr-0098-member-gates` and `origin/docs/adr-path-asserts`).
+- Check id: C123 (assigned centrally).
+
+## Context: the class
+
+A test that starts `./dev`, `cargo` or `node` with a plain `Command` hands the child the whole environment of the machine
+it runs on. Every new environment lookup in the program under test then reaches real machine state, and nothing in the
+test says so. Two instances in one day:
+
+1. The pre-push integration tests (`tools/paddock-dev/tests/it/pre_push.rs`) ran the real pre-push heavy steps (found when
+   `c25f3860a`, 2026-11-13, made the gate queue for the heavy slot and the tests then had to opt out with `PADDOCK_HEAVY=off`;
+   a local discovery, no CI run): the
+   child inherited `PATH`, so `heavy.sh` and `heavy` were found and the fake `cargo` was only one of the programs run.
+2. On `fix/precommit-heavy-slot` the new lookup of `heavy.sh` (`PADDOCK_HEAVY`, `PATH`, `$ENGINEERING_RULES`, then the
+   `engineering-rules` checkout beside the main checkout) made the test helper `dev()` find the real
+   `engineering-rules/scripts/heavy.sh` and take machine-wide slots in `~/.cache/heavy-slots` (ER-14). It was patched per
+   test (`2ff5f5072`, 2026-11-13, found locally while reworking the pre-commit hook of `78a536f94`; no CI run: a fixture `ENGINEERING_RULES`, a `HEAVY_LOCK_DIR` assertion). The next lookup added to any tool
+   fails the same way in every test that was not patched, and nothing finds those tests.
+
+The mechanism is the same both times: a test sets what it knows about, and everything else comes from the machine. A
+deny-list (unset the variables we know) can never be complete, because the variable that causes the next incident is by
+definition not known yet. An allow-list can: the child gets nothing it was not given.
+
+## Decision
+
+**One builder, `paddock_testkit::TestCommand`** (`crates/paddock-testkit/src/process.rs`). It wraps a `std::process::Command`
+and exposes only the safe methods (`arg`, `args`, `current_dir`, `env`, `envs`, `env_remove`, `stdin`, `stdout`, `stderr`,
+`output`, `status`, `spawn`); it derefs read-only (`get_program`, `get_envs`) and has **no `DerefMut`**, so no method can reach the
+wrapped `Command` (review of f39597fbb, P1-1: `Command::env_clear` through the deref erased the listed set at about 17 sites).
+Its own `env_clear` goes **back to the listed set**. It starts from an **empty environment** plus a listed set:
+
+- `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`,
+  `TMPDIR`, `TEMP` and `TMP` point into a **private folder** made for the command and removed when it
+  drops (`TestCommand::new_in` takes a folder the test owns). A slot tool that keeps its slots under `$HOME/.cache` then
+  keeps them in the private folder, never in `~/.cache/heavy-slots`.
+- `PATH` is **curated**: first a folder of **links to the toolchain's programs** (`cargo`, `rustc`, `rustup`,
+  `cargo-clippy`, `cargo-fmt`, `rustfmt`, `clippy-driver`, `rustdoc`: symbolic links on Unix, where rustup's proxies dispatch on
+  the name they were started as, hard links or copies on Windows; one folder per toolchain in the build's target folder,
+  `<target>/paddock-test-toolchain` (the practice of cargo's own test support and `CARGO_TARGET_TMPDIR`: nothing in a user's or a
+  shared temp folder, `cargo clean` removes it, every test program of the build shares it; only a folder with cargo's
+  `CACHEDIR.TAG` counts as a target folder, so a test program copied to `.../deps/x` elsewhere never writes there), made once
+  (a staging folder renamed into place; a refused rename leaves this process on its complete staging folder, logged, with no
+  retry: none was ever seen, docs/benchmarks.md "Rename retry") and shared by every command and test process, never inside a
+  command's or a `new_in` folder. Its record `links.txt` starts with a format header; a folder without it, of another format or
+  missing a link is made again, also when it disappears under a running process. The sweep removes, once an hour old, a crashed
+  run's staging folder and a folder whose recorded programs are all gone (a test's stand-in toolchain; tests give their
+  stand-ins a link root in their own folder). A test program run outside a target folder, or one whose link root cannot be
+  made (logged once), links into each command's own folder instead. ci.yml run 8152 measured the per-command version about 6
+  times slower on Windows, docs/benchmarks.md), never the folder they came from, because `cargo install`
+  puts other tools beside them in `$CARGO_HOME/bin` (`heavy`: the review of `7edb8cad6` measured `command -v heavy` finding it,
+  which reopened incident 1); then the folders of `node`, `npm`, `npx` and `git` as the test process finds them; on Windows Git
+  for Windows' `usr/bin` and `bin`, from `git --exec-path` (asked once per `git`; the layout around `git.exe` when it cannot
+  answer), because Git's bash puts `mingw64/bin` first and the shell tools live in `usr/bin` (ci.yml run 8138: 11 Windows tests
+  found no `grep`, `tr` or `touch`); then the system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, or `System32` and the
+  Windows folder; Windows folders compare without case). `TestCommand::path_report()` says what decided it (the child's and
+  the machine's `PATH`, where `git`, `sh`, `bash`, `node`, `cargo`, `rustc` and `rustup` were found, and the link folder and
+  Git's root this command was built with: a query that starts and changes nothing) for a failure message. **Remaining exposure, accepted:** the folders of `node` and `git` are added whole, so on a Homebrew Mac
+  `/opt/homebrew/bin` and its other tools are reachable, and on Windows all of Git's `usr/bin`; cargo itself still finds
+  `cargo-<name>` subcommands in `$CARGO_HOME/bin`, and rustup's proxy adds all of `$CARGO_HOME/bin` in front of its child's
+  `PATH` (measured in the review of `0916c8060`: a build script found `cargo-hakari`). So a bare `cargo`, `rustc` or `rustup`
+  starts through the command's own link (`cargo`: the cargo that runs the test, `CARGO`), never the proxy; a test that needs
+  the proxy (a `rust-toolchain.toml` that names a toolchain folder) names it by its path. A narrower PATH would need links for
+  `node` and `git` too, which is the next step if a tool there bites.
+  `path_first(dir)` puts a test's stand-in folder first; `.env("PATH", ..)` replaces it whole. A bare program name is
+  resolved once, at construction, against the **test process's** `PATH`: `path_first` and `env("PATH", ..)` change only the
+  child's own lookups, never which program starts (a test that starts a stand-in names it by its path).
+- **the machine values are captured once** (`paddock_testkit::ambient`): `PATH`, `CARGO`, the temp folder, the user's home and
+  the toolchain and build variables are read once per test process, under the environment lock before any test changes it,
+  and never live again. The plain harness runs a binary's tests on threads of one process, so a live read saw another test's
+  changes (`hermetic` points `TMPDIR` into its scratch; measured on `a9a7e6484`: a `Scratch` made there and removed with it, 5
+  of 40 runs). A test that needs other machine values passes an `Ambient` to `TestCommand::on`, never changes the process
+  environment for it, and the kit's temp folders (`Scratch`, `canonical_tempdir`, `private_tempdir`, `tempdir`) use the
+  captured temp folder. **The cargo** is `CARGO`, else the toolchain's own (`rustc --print sysroot` plus `bin/cargo`, asked once
+  with `RUSTUP_AUTO_INSTALL=0`): a test program started directly or copied has no `CARGO`, and rustup's proxy would put all of
+  `$CARGO_HOME/bin` in front of its child's `PATH` (the review of `a9a7e6484` measured the proxy 15 of 15 times).
+- the toolchain: `RUSTUP_HOME`, `CARGO_HOME`, `RUSTUP_TOOLCHAIN` and `CARGO_BUILD_JOBS` (a bound, ER-24) as the test process has them, and, when unset, the real
+  `~/.cargo` and `~/.rustup` named explicitly (a redirected `HOME` would otherwise hide the offline registry and the
+  toolchains); on Windows `SystemRoot`, `ComSpec`, `PATHEXT` and a few more. These are `PASSED_THROUGH` and the only
+  places a child reads the user's folders.
+- a private global git config, `.gitconfig` in the private home, found through `HOME` (no `GIT_CONFIG_GLOBAL`: with it set, a test
+  that names another home lost that home's `.gitconfig`, the P1 of fix/linux-container-gate 88c06e902): `maintenance.auto=false`,
+  `gc.auto=0`, a test identity and `safe.directory=*` (`GIT_CONFIG_NOSYSTEM` hides the system config, where the CI image and the
+  local Linux container trust a checkout another user owns), so no test's git starts background maintenance (a detached `git maintenance` held `objects/maintenance.lock` and a bare clone made
+  meanwhile copied it: the kept-clone fixture hit that 104 times in 1200 runs under load). It is written only when the home has
+  none, through a temporary file linked into place (`persist_noclobber`), so a `new_in` home the test prepared keeps its own and
+  children sharing a home never see half a file. Because every folder is trusted, `GIT_CEILING_DIRECTORIES` names the temp root:
+  git never looks for a repository above it (CVE-2022-24765, a `.git` planted in a shared `/tmp`), while a repository a test makes
+  below it is still found;
+- fixed values: a git author and committer, `GIT_CONFIG_NOSYSTEM=1`, `NO_COLOR=1`.
+
+`allowed_names()` lists every name a fresh command carries. Everything else a test needs is a **named addition**
+(`.env("NAME", value)`), visible in the test. `into_parts()` hands the plain `Command` and a guard to a runner that takes a
+`Command` by value (`paddock_proc::run_bounded`).
+
+**One check, C123** (Rust host `tools/paddock-dev/src/check/c123.rs`, JavaScript port
+`conformance/src/checks/C123-test-process-builder.mjs`, held equal by `tools/paddock-dev/tests/it/check_c123.rs`): in a Rust
+test file, a constructor (`Command::new`, `paddock_proc::command`, `quiet_command`) whose first argument is a built binary
+(`CARGO_BIN_EXE_*`, or a name bound to one: a `const`, `static`, `let` or a function returning one, in the file or `pub` in another
+test file of the same crate), cargo, rustc, rustup, `node`, `npm`, `npx`, `dev` or a path joined to `dev` (also spelled with `.exe`
+or `.cmd`) is a finding, and in `tools/paddock-dev` so is `sh` or `bash` (the wrapper script `./dev` and the CI scripts run under a
+shell); so is any other use of `env!("CARGO_BIN_EXE_paddock-dev")` or of cargo's path in a function whose code (comments left out)
+does not name `TestCommand`. In a file under `src/` the test part starts at the first `#[cfg(..)]` that names `test` (not
+`not(test)`). A justified case carries `conformance: test-env — <why>`. It is report-only (ER-41: a warning) until its first
+green run on main, recorded in `docs/gates.toml`.
+
+Known false negatives (accepted; a text check cannot see them without a Rust parser): a program held in a variable
+(`let p = "cargo"; Command::new(p)`), an alias (`use std::process::Command as Cmd`), a block comment that names `TestCommand` (only
+line comments are left out), and a spawn in a non-test helper module that tests call.
+
+**Every existing spawn site is migrated in the same change** (no baseline). The rule of 2026-11-13, run on the tree at `adf56b5e7`
+(`git archive`, `node conformance/bin/paddock-conformance.mjs --app paddock --root <archive> --only C123`), listed 118 findings in 49
+files (the first, narrower version of the rule listed 74 on the same tree; a reviewer's count of 101 in 36 files used another reading
+of "spawn"); 110 of them were spawn sites migrated in 50 files across 8 workspaces (the other 8 were uses of the binary in functions
+that already built a `TestCommand` once the rule read whole functions), and the rule ends at 0 there. Merging train 11 (`49e1a97cc`)
+brought 20 new sites in 9 files of `tools/paddock-dev/tests/it`, and the widened rule of the review of `a8fca0ebd` 8 more (6 in
+`crates/paddock-ipc` through its shared `child_program()`, `rustc` in `generators.rs` and `inputs.rs`); all are migrated, and the
+check counts 0 findings and 0 waivers on the branch. The migration is in the commits. Two checks keep the rule from decaying: the module's own test starts a real child
+under a machine environment full of poisoned variables and compares its environment with `allowed_names()`; and the
+pre-push test starts `./dev check --pre-push` with a machine that has a `heavy.sh` of its own (`ENGINEERING_RULES`,
+`HEAVY_LOCK_DIR`) and fails when that script runs, a slot folder is made, or the fake cargo sees a name nobody listed.
+
+## What exists (ER-22: look before adding)
+
+- `paddock_proc::clean_env(cmd, KEPT_ENV)` (`crates/paddock-proc/src/command.rs`): the production allow-list for the apps'
+  children (`PATH`, `HOME`, `TMPDIR`, `LANG`, ...). It keeps the machine's values; a test needs private ones and a curated
+  `PATH`, and `paddock-proc`'s own tests use the testkit, so the kit cannot depend on it (the testkit's existing rule).
+  The two lists are short and the testkit one is the superset the tests need; if `KEPT_ENV` grows a name, the testkit
+  tests do not notice, and that is accepted (production children and test children answer different questions).
+- `EnvLock::hermetic` (`env.rs`): the same private home and temp folders for the **test process's own** environment. The
+  builder is the child-process counterpart; both use the same folder names.
+- `Scratch` and `canonical_tempdir`: where a test's files go. `TestCommand` makes its private folder with `tempfile` and does
+  not need a `Scratch` (a leftover check on `tmp` would fail children that write there by design).
+
+## ER-37: how comparable software does it
+
+- **Cargo's own test support** (`crates/cargo-test-support/src/lib.rs`, read 2026-11-13): `TestEnvCommandExt::test_env`
+  redirects `HOME`, `CARGO_HOME` and `USERPROFILE` into a private test root, sets `CARGO_INCREMENTAL=0` and
+  `GIT_CONFIG_NOSYSTEM=1`, and **removes** every variable that starts with `CARGO_` and a list of named ones (`CI`,
+  `RUSTFLAGS`, `RUSTC_WRAPPER`, `GIT_AUTHOR_*`, proxies, `SSH_AUTH_SOCK`, ...). It does not call `env_clear`: it is a
+  deny-list. The brief for this ADR said cargo uses an empty environment; it does not, and this design is stricter on
+  purpose, because a deny-list is the shape that failed here twice (the variable that bites next is not on it).
+- **Bazel** (https://bazel.build/reference/test-encyclopedia, read 2026-11-13): a test runs with a defined initial
+  environment (`TEST_TMPDIR`, a fixed `TZ`, locale variables unset) and "should not depend on the presence, absence, or
+  value of any environment variable not listed"; `--test_env` forwards named ones. That is this design: a documented list,
+  named additions, a private temp folder.
+- **Nix** builds start from an empty environment plus what the derivation names, with a private `HOME` (`/homeless-shelter`)
+  and `TMPDIR`: the allow-list shape.
+- **git's** own `t/test-lib.sh` points `HOME` at the trash directory and fixes a few values (`TZ`, the author and committer),
+  but it keeps the environment it was started with and **unsets a list** of the `GIT_*` and locale variables it knows: a
+  deny-list, like Cargo's. Both own `HOME` and the git config.
+- The OS vendors give no test-environment standard; for `HOME`/`XDG_*` the XDG Base Directory specification is the contract
+  the redirected variables follow.
+
+Common practice is therefore split: Bazel and Nix list the environment, Cargo and git keep it and remove what they know;
+all of them give the test a private home. The deny-list of Cargo and git is the cheaper, weaker option and is offered as the
+common-practice decision below (D1).
+
+## Cost (ER-37)
+
+About 1.5 agent-days, measured on this change (1 for the first build, 0.5 for the review round: the safe-method wrapper, `PATH` and `CARGO_BIN_EXE_*` coverage): the builder and its tests (about 0.25), the check, its port and the parity
+test (about 0.25), migrating 110 spawn sites in 50 files across 8 workspaces and fixing what the cleaner environment
+exposed (about 0.4), this ADR and the gates (about 0.1). Running cost: each command makes two folders (a few hundred
+microseconds); nothing else. The cheaper common-practice option (Cargo's deny-list: redirect `HOME`/`TMPDIR`, remove a
+named list) is about 0.4 agent-day but does not stop the next lookup; it is not recommended.
+
+## Decisions
+
+- **D1 (decided): allow-list, not deny-list.** Empty environment plus `allowed_names()`. The common-practice option is
+  Cargo's and git's deny-list (keep the environment, redirect `HOME`/`TMPDIR`, remove a named list): about 0.4 agent-day, but
+  it does not stop the next lookup, which is the class this ADR exists for; not chosen.
+- **D2 (decided): migrate every site now, no baseline** (the user: the foundation is built complete and right). The check
+  lists no baseline file; `docs/gates.toml` carries the report-only entry (ER-41).
+- **D3 (open, follow-up): JavaScript tests.** About 50 test files in `conformance/test`, `scripts/*.test.mjs` and the apps'
+  `scripts/ci` start `node`, `cargo` or a script with `spawnSync` and inherit the environment the same way. They are not
+  judged by C123 and have no builder yet; a JavaScript `testProcess()` in `conformance/test/helpers.mjs` and a C123 arm that
+  reads `.mjs` would be about 0.5 agent-day. Not done here: the incidents were Rust tests, and a second builder needs the
+  parity rule applied once more.
+- **Follow-up (review of `0916c8060` and of `df9af3cda`):** done on this branch after ci.yml runs 8152 and 8154 (the user asked
+  for the whole fix in one round): one link folder per toolchain in the target folder, the logged Windows copy fallback and
+  rename retry, the time limit on `git --exec-path` with its test, `path_report()` from what the command was built with, links
+  named for their program, `path_report()` naming each link's program (recorded in the folder's `links.txt` when the links
+  are made), and the doc of `git_root_from` worded as the code reads. Nothing is open.
+- **D4 (decided): git is not in C123.** `git` reads `HOME` and the git config, which `TestCommand` redirects when it is
+  used; plain `Command::new("git")` fixtures (about 60) keep working. If a git-config incident appears, add it to the check.
+- **D5 (decided, review of f39597fbb P1-3): every `CARGO_BIN_EXE_*` binary a test starts itself.** The check judges a constructor
+  whose argument is `env!("CARGO_BIN_EXE_<any>")` or a name bound to one (see the check above), so the slot tool (`tools/heavy`, whose
+  tests removed a deny-list of `HEAVY_*` variables by hand), the apps' programs and the wiki tool are covered. A binary handed to the
+  code under test, which starts it through its own spawn API (`SpawnSpec`, `WorkerConfig`, `Builtins`), is the product's spawn and is
+  not judged. Cost: about 0.3 agent-day (`tools/heavy` and `debrief-collect` gain a dev-dependency on the testkit; the heavy
+  lockfile grows by about 285 lines of testkit dependencies).
+- **D6 (decided, same review): the machine's `PATH` is never spliced back.** `path_first(dir)` with an explicit folder replaces
+  `format!("{}:{}", dir, env::var("PATH"))`; check C123 flags `env::var("PATH")` in a function that builds a `TestCommand`.
+- **D7 (decided, same review): a test that builds a program** calls `cargo_build()`, which adds `CARGO_TARGET_DIR` and the variables
+  that decide how the child compiles (`BUILD_VARS`: `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`, `RUSTC_WRAPPER`, `RUSTC_WORKSPACE_WRAPPER`,
+  `LLVM_PROFILE_FILE`, the `CARGO_LLVM_COV*` variables, `CARGO_INCREMENTAL`), so a program built under coverage is the one the
+  run measures. Used by Debrief's store-worker build and Pitcrew's fake runner; the Dyno tests only run `cargo tree` and
+  `cargo metadata`, which compile nothing.
+- **D8 (decided, last review; amended after the review of `a8fca0ebd`): `spawn()` returns a `TestChild`.** It derefs to the
+  `Child`, holds the command's private folders until it is waited on or dropped (a child that writes to its `HOME` after the builder
+  dropped used to find it deleted), and kills and reaps a child still running when it drops, through the handle it owns (ADR 0033:
+  never a bare pid). **Descendants** are ADR 0103's: `paddock_testkit_start::Reaper::spawn_test(cmd)` starts a `TestCommand` through
+  the reaper (its token, its groups, never a new group while the test leads one under nextest) and hands back the `TestChild`
+  (`TestChild::from_parts`), so the child ends with its handle and everything below it with the reaper (rule 55: one
+  mechanism). `TestChild` does not end descendants itself because the testkit cannot use `paddock_proc` (that crate's tests use the
+  testkit; the dependency made a publish cycle, ci.yml 7989): a test whose child starts its own children uses `spawn_test`. Both
+  are tested by identity in `paddock-testkit-start` (`reap::tests`).
+
+## How `TestCommand` and `paddock_proc::command` relate (re-landing, 2026-11-17)
+
+One mechanism starts a program, and a test's child is made by the same function as the product's (ER-22, rule 55):
+
+- **The one constructor** is `paddock_env::command::command` (`crates/paddock-env/src/command.rs`: a `Command` with no console window
+  on Windows, nothing else). `paddock_proc::command` re-exports it (and `CREATE_NO_WINDOW`), so every shipped caller and clippy's
+  "`Command::new` is forbidden outside the shared crates" are unchanged. `TestCommand` builds on it: it used to hold its own copy of
+  the Windows flag and its own `Command::new`. The function lives in `paddock-env`, not in `paddock-proc`, because `paddock-proc`'s
+  tests use the testkit and the kit cannot depend on `paddock-proc` (publish cycle, ci.yml 7989); `paddock-env` is already below both
+  (it also holds `text_busy`, the other half of starting a program). The cheaper alternative, a second copy in the kit, was refused.
+- **Retrying `ETXTBSY`** is `paddock_testkit::exe` (train 13): `TestCommand::output`, `status` and `spawn` go through it, so a test
+  program written a moment ago is not reported as a crash.
+- **The environment is not shared, on purpose.** `paddock_proc::clean_env(cmd, KEPT_ENV)` keeps the machine's values for production
+  children; `TestCommand` replaces them with a private home, temp folder and curated `PATH` (this ADR's allow-list). The two answer
+  different questions (the first is a start-up policy, the second a test's isolation), so `KEPT_ENV` and `allowed_names()` stay two
+  lists.
+- **Tests use `TestCommand` for `./dev`, cargo, node, `sh` and `bash`; `paddock_proc::command` stays for everything else a test
+  starts** (git, a program a fixture names by path, a program of the product under test). C123 judges the first set only.
+  `tools/paddock-dev/tests/it/dev_bin.rs` (train 13's one door for the binary under test, which sets `PADDOCK_SCCACHE=off`, ER-45)
+  now returns a `TestCommand`, so the sccache switch and the listed environment come from one call.
+
+## Consequences
+
+- A new environment lookup in a tool shows up as a failing test that names the variable, instead of a quiet read of the
+  machine. Tests that need a variable say so.
+- `TestCommand` curates `PATH`: a test that needs a program outside the toolchain folders, `node`, `git` and the system
+  folders adds its folder with `path_first` or sets `PATH` itself.
+- `real` `~/.cargo` and `~/.rustup` stay readable (the offline registry, the toolchains). That is the one deliberate hole.

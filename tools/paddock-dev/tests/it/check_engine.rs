@@ -24,7 +24,7 @@ struct Ran {
 fn run_host(js: bool, args: &[&str], scratch: &Path) -> Ran {
     let (out, summary) = (scratch.join("out.json"), scratch.join("summary.md"));
     let mut c = if js {
-        let mut c = paddock_proc::command("node");
+        let mut c = paddock_testkit::TestCommand::new("node");
         c.arg("conformance/bin/paddock-conformance.mjs");
         c
     } else {
@@ -400,7 +400,7 @@ fn the_registry_is_one_list_and_list_json_agrees_with_the_javascript_host() {
     let reg = check::registry();
     let ids: Vec<String> = reg.iter().map(|c| c.id().to_string()).collect();
     assert_eq!(check::sources().iter().map(|(id, _)| id.to_string()).collect::<Vec<_>>(), ids);
-    let js = paddock_proc::command("node")
+    let js = paddock_testkit::TestCommand::new("node")
         .args(["conformance/bin/paddock-conformance.mjs", "list", "--json"])
         .current_dir(repo())
         .output()

@@ -22,6 +22,7 @@
 mod app;
 mod atomic;
 pub mod cargo_layout;
+pub mod command;
 pub mod dev_override;
 mod dirs;
 mod error;

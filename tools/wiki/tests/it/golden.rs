@@ -5,6 +5,7 @@
 //! same; `rust-only` cases are checks the Node lint did not have, with hand-checked expectations. The Paddock wiki case is a
 //! snapshot of docs/wiki at c3c6b0a08, so its links out of the wiki folder are reported as broken, as they were recorded.
 //! To compare another implementation, run it over the same arguments (see `shared_args`) and diff against `expected.txt`.
+use paddock_testkit::TestCommand;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -51,18 +52,16 @@ fn shared_args(name: &str) -> Vec<String> {
 
 /// The binary's exit code and its `error`/`warning` lines, sorted.
 fn run_binary(name: &str, strict: bool) -> (i32, Vec<String>) {
-    let mut cmd = paddock_proc::command(env!("CARGO_BIN_EXE_wiki"));
+    let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_wiki"));
     cmd.current_dir(golden())
         .args(shared_args(name))
         .args(["--config", "cases/config.json", "--cite-by-line", "merge-steward"]);
     if strict {
         cmd.arg("--strict");
     }
-    // The golden is the same everywhere: no CI annotations, no local settings, and no log file in the user's folders.
-    cmd.env_remove("CI")
-        .env_remove("GITHUB_ACTIONS")
-        .env_remove("GITEA_ACTIONS")
-        .env("WIKI_LOG_DIR", "off");
+    // The golden is the same everywhere: `TestCommand` carries no CI variables or local settings, and no log file goes to the user's folders.
+    cmd.env("WIKI_LOG_DIR", "off");
+    let (cmd, _private) = cmd.into_parts();
     let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(60))).unwrap();
     let code = match out.outcome {
         // paddock-cli's "findings" (5) is the Node lint's exit 1.

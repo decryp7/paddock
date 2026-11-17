@@ -10,8 +10,11 @@ static LOCK: Mutex<()> = Mutex::new(());
 /// Takes the process-wide environment lock (waits for the holder; a lock poisoned by a failed test is recovered).
 /// Every test that reads or writes the environment of the process holds it for the whole test.
 pub fn env_lock() -> EnvLock {
+    let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // The machine values the kit reads are captured here, before any test changes the environment (`crate::ambient`).
+    crate::ambient::capture();
     EnvLock {
-        _guard: LOCK.lock().unwrap_or_else(|e| e.into_inner()),
+        _guard: guard,
         saved: Vec::new(),
     }
 }

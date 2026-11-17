@@ -2,7 +2,7 @@
 //! a fake clock (nothing sleeps), and a second build replacing the first with real processes.
 
 use crate::common;
-use common::{GUARD, T, child_program};
+use common::{GUARD, T, child_command, child_program};
 use paddock_ipc::frame::ProtocolVersion;
 use paddock_ipc::link::{
     ClientConfig, Discovery, Found, Launcher, LinkClient, LinkServer, LinkState, Plan, Replace,
@@ -222,7 +222,7 @@ fn a_stale_discovery_file_is_ignored_and_removed() {
     let path = dir.path().join("agent.json");
     // A companion that exited: a real process id that is gone.
     let mut gone = paddock_proc::Supervised::spawn({
-        let mut c = paddock_proc::command(child_program());
+        let mut c = child_command(&path.with_extension("env"));
         c.arg("exit");
         c
     })
@@ -334,7 +334,7 @@ impl Launcher for Companions {
 
 /// A companion of `build`, returned once it printed `ready` (its discovery file is written).
 fn companion(discovery: &Path, build: &str) -> paddock_proc::Supervised {
-    let mut cmd = paddock_proc::command(child_program());
+    let mut cmd = child_command(&discovery.with_extension("env"));
     cmd.arg("companion")
         .arg(discovery)
         .arg(build)

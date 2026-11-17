@@ -90,7 +90,6 @@ fn setup_prints_the_environment_and_refuses_to_run_twice() {
         crate::dev_bin::command()
             .args(["ci", "release-isolation", "setup", "--env-file"])
             .arg(&envfile)
-            .env_clear()
             .env("RUNNER_TEMP", &temp)
             .output()
             .unwrap()

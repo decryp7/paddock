@@ -2,11 +2,12 @@
 //! production port, never the user's data folder or credential store: the data folder is a temp dir and the admin key
 //! comes from the environment).
 
+use paddock_testkit::TestCommand;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 use std::sync::{Arc, Mutex};
 
 const ADMIN: &str = "test-admin-key-0123456789";
@@ -92,18 +93,9 @@ fn rpc(m: &str) -> String {
 }
 
 /// The CLI with an empty environment, except what Windows sockets need to start (without SystemRoot every connect fails).
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the test starts the built binary directly: no console window concerns, each run is short and bounded"
-)]
-fn bare(args: &[&str]) -> Command {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_pitwall"));
-    c.args(args).env_clear();
-    for k in ["SystemRoot", "windir"] {
-        if let Some(v) = std::env::var_os(k) {
-            c.env(k, v);
-        }
-    }
+fn bare(args: &[&str]) -> TestCommand {
+    let mut c = TestCommand::new(env!("CARGO_BIN_EXE_pitwall"));
+    c.args(args);
     c
 }
 

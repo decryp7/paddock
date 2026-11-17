@@ -56,6 +56,7 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### `paddock-testkit`: `TestCommand`, check C123
 - New `paddock_testkit::TestCommand`: a `Command` that starts from an empty environment plus an allow-list (`process::allowed_names()`), with a private `HOME` and temp folder, a curated `PATH` and `path_first`, `cargo_target_dir` and `into_parts`. Every test that starts `./dev`, `cargo` or `node` uses it (ADR 0100); check C123 (report-only) flags any other way.
+- `paddock_env::command::{command, CREATE_NO_WINDOW}`: the one constructor a program is started from, moved from `paddock-proc` (which re-exports it, so `paddock_proc::command` callers are unchanged); `TestCommand` builds on it instead of its own `Command::new` and Windows flag, and starts through `paddock_testkit::exe`'s `ETXTBSY` retry (ADR 0100, "How `TestCommand` and `paddock_proc::command` relate").
 - `paddock-dev`: a named `ENGINEERING_RULES` is the only place the sibling `heavy.sh` lookup reads.
 
 

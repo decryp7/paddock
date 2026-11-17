@@ -5,6 +5,7 @@
 #![cfg(windows)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use paddock_testkit::TestCommand;
 use std::path::Path;
 use std::process::Output;
 
@@ -13,9 +14,6 @@ fn run(home: &Path, tables: &Path, args: &[&str]) -> Output {
     crate::dev_bin::command()
         .args(["ci", "isolation"])
         .args(args)
-        .env_clear()
-        .env("SystemRoot", std::env::var("SystemRoot").unwrap_or_default())
-        .env("PATH", std::env::var("PATH").unwrap_or_default())
         .env("RUNNER_OS", "Windows")
         .env("PADDOCK_CI_HOME", home)
         .env("PADDOCK_CI_TABLES", tables)
