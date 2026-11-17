@@ -1,3 +1,4 @@
+import { nextRequestSeq } from './request-seq';
 import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, effect, ElementRef, inject, Injector, linkedSignal, signal, untracked, viewChild } from '@angular/core';
 import { ErrorDetails } from '../ui/error-details';
 import { RecordView } from '../core/api.types';
@@ -372,7 +373,7 @@ export class EventsGrid {
   /** The scrollTop we last wrote ourselves; scroll events at that position carry no new information. */
   private writtenScroll = Number.NaN;
   /** The follow and hold state (ADR 0072): `pinned` is stored, not re-derived from the position at each round. */
-  private followState: FollowState = { holding: false, pinned: false };
+  private followState: FollowState = { holding: false, pinned: false, takeOver: 0 };
   /** The one scroll write that waits for the render, if any; a newer write replaces it and a user take-over drops it. */
   private pendingWrite: { physical: number } | null = null;
   /** The viewport was measured once (a later change is a resize). */
@@ -381,8 +382,6 @@ export class EventsGrid {
   private pointerDown = false;
   /** The origin of the last scroll event that was logged (transitions only). */
   private lastOrigin: 'own' | 'user' | 'spurious' | null = null;
-  /** The reveal request that was current at the user's last take-over: a request not yet handled then is older than the take-over. */
-  private takenOverAtNonce = -1;
   /** The element's own height when the grid last wrote: a difference now is a resize the grid has not been told about yet. */
   private writtenClient = Number.NaN;
   /**
@@ -503,9 +502,7 @@ export class EventsGrid {
       const nonce = this.feed.revealNonce();
       untracked(() => {
         if (nonce <= 0 || !this.rows.query) return;
-        // A take-over after the request (the wheel came before this effect ran) wins: the rows reload, the view is not pinned or moved.
-        if (this.takenOverAtNonce === nonce) this.liveRefresh('data');
-        else this.liveRefresh(this.follow.holding() ? 'reveal' : 'followOn');
+        this.liveRefresh(this.follow.holding() ? 'reveal' : 'followOn', this.feed.revealSeq);
       });
     });
 
@@ -566,7 +563,7 @@ export class EventsGrid {
         const first = !this.measured;
         this.measured = true;
         this.viewportH.set(height);
-        if (!first) this.step({ type: 'resize' });
+        if (!first) this.step({ type: 'resize', seq: nextRequestSeq() });
       };
       const ro = new ResizeObserver(measure);
       ro.observe(el);
@@ -587,7 +584,7 @@ export class EventsGrid {
     if (this.jumpErrorView !== viewKey(query, descending)) this.jumpError.set(null);
     this.selection.set(EMPTY_SELECTION);
     this.setTop(0);
-    this.step({ type: 'reset' }, descending);
+    this.step({ type: 'reset', seq: nextRequestSeq() }, descending);
     this.rows.reset(query, descending);
     void this.checkSelected(query, descending);
   }
@@ -624,10 +621,10 @@ export class EventsGrid {
   }
 
   /** Live tail changed the data, or the user asked for the newest events: refetch what is on screen (old rows stay until the new ones arrive). */
-  private liveRefresh(event: 'data' | 'reveal' | 'followOn'): void {
+  private liveRefresh(event: 'data' | 'reveal' | 'followOn', seq = 0): void {
     // A view that already is on the newest end (a result that fits the viewport) is pinned: the reducer decides, the position is its input.
     if (event === 'data') this.step({ type: 'positioned', atNewest: this.atNewest(this.virtualTop()), byUser: false });
-    const { round, goNewest } = this.step({ type: event });
+    const { round, goNewest } = this.step(event === 'data' ? { type: 'data' } : { type: event, seq });
     if (round === 'none') return;
     if (goNewest && this.rows.descending) this.setTop(0);
     const g = this.geometry();
@@ -808,8 +805,7 @@ export class EventsGrid {
    */
   protected userTookOver(input = 'input'): void {
     this.logger.debug('ui.grid', 'User took over', { Input: input, Pinned: this.followState.pinned });
-    this.takenOverAtNonce = this.feed.revealNonce();
-    this.step({ type: 'userTookOver' });
+    this.step({ type: 'userTookOver', seq: nextRequestSeq() });
   }
 
   /** The direction `up` or `down` is away from the newest end: oldest first the newest end is at the bottom, newest first at the top. */
@@ -859,7 +855,7 @@ export class EventsGrid {
     const top = scrollToTop(g, read);
     this.virtualTop.set(top);
     // The user moved the view. While the scrollbar is held the view is never re-pinned (the release decides).
-    this.step(this.pointerDown ? { type: 'userTookOver' } : { type: 'positioned', atNewest: this.atNewest(top, g), byUser: true });
+    this.step(this.pointerDown ? { type: 'userTookOver', seq: nextRequestSeq() } : { type: 'positioned', atNewest: this.atNewest(top, g), byUser: true });
   }
 
   /** With a scaled scrollbar the wheel moves by pixels of the true content, not of the compressed spacer. */

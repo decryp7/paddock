@@ -202,7 +202,20 @@ No single gap costs more than 1 agent-day beyond common practice, so none needs 
   of 32 tests x 20 repeats = 640 runs per engine, `--workers 4`, idle machine: Chromium 640 of 640; WebKit 639 of 640, the one failure a real wheel of the smoke set. Every
   dispatched ownership row is 640 of 640 in both engines. The WebKit residue is measured and its cause is headless WebKit dropping input: on the earlier 520-run matrix 517 of 520
   (the reviewer measured 259 of 260), and in those runs the grid log shows the wheel received and the take-over logged, then no scroll event and no grid write. It is not a view
-  pulled back by the grid. G10 (a wheel that arrives before the reveal request is handled; found by the dispatched rows) is `takenOverAtNonce` in `events-grid.ts`.
+  pulled back by the grid. G10 (a wheel that arrives before the reveal request is handled; found by the dispatched rows) is closed by the request-sequence rule below.
 - Lint, report-only (ER-41): `no-restricted-syntax` on assignments to `scrollTop`, `scrollTo`, `scrollBy`, `scrollIntoView` and `Object.assign(el, { scrollTop })`
   in `src/app/grid/`, and `no-restricted-imports` of `scroll-writer` outside `events-grid.ts`, in `npm run lint:report` (`DEBRIEF_LINT_REPORT=1`); first run on the
   real tree 2026-11-17: no findings, and a probe file with each shape is reported. It moves to the normal lint after its first green run in CI (run id to be recorded here).
+
+## Amendment 2026-11-17: one request-sequence rule (G1, G2, G9, G10)
+
+The four ordering findings had one shape: a request that moves the view was applied by an effect after a later user input. The rule that closes the class:
+- Every request that moves the view (a reveal, Follow on, a resize re-pin, a new query) carries a sequence stamp from `nextRequestSeq()` (`grid/request-seq.ts`), taken
+  when the request is made (the pill click stamps `LiveFeed.revealSeq`), not when an effect handles it. A user take-over is stamped when the input arrives and the reducer
+  keeps it as `FollowState.takeOver`.
+- `followStep` drops any request stamped before the last take-over: no write, no pin. A stale reveal or Follow on still reloads the rows, in a round that keeps the view where
+  it is. Nothing outside the reducer decides this, so no effect can apply a stale request.
+- Table rows in `follow-reducer.spec.ts` cover each request kind arriving after a take-over (and after, applied); the G10 unit spec in `events-grid.spec.ts` covers the real
+  order (the wheel before the effect). Without the rule, 7 of those tests fail.
+- Measured on the final code (sequence rule, real-input smoke set included): 32 tests x 20 repeats = 640 runs per engine, `--workers 4`, idle machine (CPU idle 74% at the start):
+  Chromium 640 of 640, WebKit 640 of 640. The earlier run of the same matrix before the rule had one headless-WebKit dropped real wheel (639 of 640), recorded above.

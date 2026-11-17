@@ -1,3 +1,4 @@
+import { nextRequestSeq } from '../grid/request-seq';
 import { DestroyRef, effect, inject, Injectable, signal, untracked } from '@angular/core';
 import { TailReport } from '../core/api.types';
 import { Logger } from '../core/logger';
@@ -32,6 +33,8 @@ export class LiveFeed {
   readonly newEvents = signal(0);
   /** Bumped when the grid should reload and show the newest events (pill click, Resume). */
   readonly revealNonce = signal(0);
+  /** The request sequence stamp (`nextRequestSeq`) of the last reveal: taken when the pill is clicked, not when the grid handles it. */
+  revealSeq = 0;
   /** Timestamp of the newest record reported by live tail. */
   readonly newestTs = signal<number | null>(null);
   /** Number of UI refreshes done (diagnostics, tests). */
@@ -89,6 +92,7 @@ export class LiveFeed {
   showNewEvents(): void {
     this.newEvents.set(0);
     this.gridMode = 'follow';
+    this.revealSeq = nextRequestSeq();
     this.revealNonce.update((n) => n + 1);
   }
 

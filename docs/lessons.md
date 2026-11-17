@@ -2445,7 +2445,7 @@ idle machine, the reviewer's 259 of 260; the grid log shows the wheel received a
 proved by real input alone. The common practice (TanStack Virtual's and the CDK's tests) is an untrusted event dispatched on the element plus a scroll position set by the test; the
 ownership rows now do that and are 640 of 640 in Chromium and WebKit, and a small real-input smoke set keeps the real pipeline covered (WebKit 639 of 640, the failure a dropped wheel).
 Making the rows deterministic found two things the real input had hidden: (1) the reveal request is handled when change detection runs, which can be after the user's wheel; the
-late request pinned the view again (G10, unit spec first, `takenOverAtNonce`); (2) a dispatched key does not scroll natively and the grid handles keys itself, so the test presses
+late request pinned the view again (G10, unit spec first; closed with the other ordering findings G1, G2 and G9 by one rule: requests and take-overs carry a sequence stamp and the reducer drops a request stamped before the last take-over, ADR 0072 amendment); (2) a dispatched key does not scroll natively and the grid handles keys itself, so the test presses
 enough keys to take the focus out of the window and moves nothing. The classifier's second `spurious` rule also required no `layoutChanged`: in oldest-first keep mode the delta
 grows without any write, so a no-input scroll (find in page, assistive technology) within the band was written back; it now needs the layout to be changing (the total or the viewport
 changed and the frame that renders it has not passed, or the element's height differs from the last write's), table row first.

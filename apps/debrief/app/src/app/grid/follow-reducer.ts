@@ -6,15 +6,17 @@
 export interface FollowState {
   holding: boolean;
   pinned: boolean;
+  /** The sequence stamp (`nextRequestSeq`) of the last user take-over; 0 when there was none. */
+  takeOver: number;
 }
 
 export type FollowEvent =
   /** New live data under the same query (a refresh round would start). */
   | { type: 'data' }
   /** The viewport changed size. */
-  | { type: 'resize' }
+  | { type: 'resize'; seq: number }
   /** An input event that moves the view away from the newest end (wheel, scrollbar press, touch, a key away). */
-  | { type: 'userTookOver' }
+  | { type: 'userTookOver'; seq: number }
   /**
    * The view is at a new position. `byUser`: the user moved it (a scroll event that was not the grid's own write, a key, a jump):
    * `pinned` becomes whether it is on the newest end, and the round lets go. Otherwise the grid moved it itself (a live write, a resize):
@@ -28,11 +30,11 @@ export type FollowEvent =
   /** Follow off, or a manual zoom or pan. */
   | { type: 'hold' }
   /** The pill: show the newest events; still holding. */
-  | { type: 'reveal' }
+  | { type: 'reveal'; seq: number }
   /** Follow on or Resume. */
-  | { type: 'followOn' }
+  | { type: 'followOn'; seq: number }
   /** A new query or sort order: the view goes to the top. */
-  | { type: 'reset' };
+  | { type: 'reset'; seq: number };
 
 /** What the grid must do for the event. */
 export interface FollowAction {
@@ -57,6 +59,11 @@ const NONE: FollowAction = { round: 'none', goNewest: false, writeNewest: false,
 /** The next state and the action for `event`; `descending` is the sort order (newest first puts the newest end at the top). */
 export function followStep(state: FollowState, event: FollowEvent, descending: boolean): { state: FollowState; action: FollowAction } {
   const newest: FollowAction['round'] = descending ? 'keep' : 'end';
+  // One rule for every request that moves the view: stamped before the last take-over, it is stale (an effect applied it late) and the
+  // user's move wins. A stale reveal or Follow on still means "reload the rows": a round that keeps the view where it is (as for a following view that is not pinned).
+  if ((event.type === 'reveal' || event.type === 'followOn' || event.type === 'resize' || event.type === 'reset') && event.seq < state.takeOver) {
+    return { state, action: event.type === 'reveal' || event.type === 'followOn' ? { ...NONE, round: descending ? 'shift' : 'keep' } : NONE };
+  }
   switch (event.type) {
     case 'data':
       if (state.holding) return { state, action: { ...NONE, count: true } };
@@ -65,7 +72,7 @@ export function followStep(state: FollowState, event: FollowEvent, descending: b
     case 'resize':
       return { state, action: state.pinned ? { ...NONE, writeNewest: true } : { ...NONE, keepTopRow: true } };
     case 'userTookOver':
-      return { state: { ...state, pinned: false }, action: { ...NONE, endHold: true } };
+      return { state: { ...state, pinned: false, takeOver: event.seq }, action: { ...NONE, endHold: true } };
     case 'positioned':
       if (event.byUser) return { state: { ...state, pinned: event.atNewest }, action: { ...NONE, endHold: true } };
       return { state: event.atNewest ? { ...state, pinned: true } : state, action: NONE };
@@ -84,7 +91,7 @@ export function followStep(state: FollowState, event: FollowEvent, descending: b
     case 'reveal':
       return { state: { ...state, pinned: true }, action: { ...NONE, round: newest, goNewest: true } };
     case 'followOn':
-      return { state: { holding: false, pinned: true }, action: { ...NONE, round: newest, goNewest: true } };
+      return { state: { ...state, holding: false, pinned: true }, action: { ...NONE, round: newest, goNewest: true } };
     case 'reset':
       return { state: { ...state, pinned: descending }, action: NONE };
   }
