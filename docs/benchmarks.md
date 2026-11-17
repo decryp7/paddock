@@ -1663,29 +1663,3 @@ screen over ui, Dyno and Pitwall, 409 tests) is in this branch's history, commit
   about 5 s more on a warm build than the local disk (37 against 32 s, 48 against 46 s) and needs the network and the key. The CI-like
   run hits the agents' entries only when `CARGO_INCREMENTAL=0` is cargo configuration: the variable is part of sccache's key. CI keeps
   its own per-slot caches (user decision 2026-11-17), so this is a measurement, not a setting.
-
-## Merge check: reverted-base warning (2026-11-17, feat/merge-check-reverted-base)
-
-Question: what does the report-only reverted-base step of `./dev merge check` (a member built on a merge the target reverted)
-cost on the real train history?
-
-- **Machine:** Mac mini (arm64), macOS 27.2.1, 14 cores, CPU idle at or above 30% on two readings before the runs, no CI run
-  measured against
-- **History:** `origin/train/2026-11-15-13` (8,492 commits, 18 whose subject starts with "Revert"), each member as
-  `origin/<branch>`, debug build of `paddock-dev`
-- **Command:** `paddock-dev merge check --branch origin/<b> --target origin/train/2026-11-15-13 --no-generators`, wall time by
-  `date`, one run each
-- **Numbers (after the review fixes: revert subjects, member forked from the reverted branch, per-branch lines):**
-
-  | What | Time (s) |
-  |---|---|
-  | whole `merge check`, feat/dev-vm-broker (no reverted base) | 0.48 |
-  | feat/dev-launch-rust (one reverted merge) | 3.8 before dropping a per-merge `git show` loop, then not re-measured |
-  | fix/testkit-ambient-hardening (6 reverted merges of feat/test-env-builder, one line) | 4.7 before that fix, 1.32 after |
-  | feat/pre-push-linux-clippy (trailer-less `Revert "..."` 3bbbfc7c7, found by subject) | 1.70 |
-
-- **Result:** the members that hold feat/test-env-builder (fix/testkit-ambient-hardening, diag/testkit-git-cost, feat/dev-launch-rust)
-  warn; feat/pre-push-linux-clippy warns through the revert that has no trailer; feat/dev-vm-broker and feat/debrief-duckdb-2 are
-  silent. The cost is about 0.2 s per live revert (rev-list, subject, containment: 3 to 5 git calls), one run each, debug build.
-- **Memory measure:** not measured
-- **Not measured:** a member that merges cleanly (the full detector run on top), Windows, a cold file cache, release build.
