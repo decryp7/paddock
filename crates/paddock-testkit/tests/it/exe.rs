@@ -16,7 +16,7 @@ fn program(path: &Path, said: Option<&str>, code: i32) {
         spec = spec.stdout(line);
     }
     let installed = spec.install().unwrap();
-    exe::write_program(path, &std::fs::read(installed.program()).unwrap()).unwrap();
+    exe::write_program(path, std::fs::read(installed.program()).unwrap()).unwrap();
     std::fs::copy(
         src.path().join(format!("{name}.stand-in.json")),
         path.with_file_name(format!("{name}.stand-in.json")),
