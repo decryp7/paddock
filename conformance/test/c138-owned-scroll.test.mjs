@@ -22,7 +22,27 @@ test('C138 good: a scroller with the directive, the class, the mixin, a CDK view
     'ui/projects/paddock-e2e/src/grid.ts': 'export const f = (el: HTMLElement) => { el.scrollTop = 9; };\n',
     'apps/one/app/src/app/commented.ts': component('<div></div>', '  // el.scrollTop = 3 was the old way\n  f() {}'),
   });
-  assert.deepEqual(await findingsOf('C138', root), []);
+  // The one reasoned waiver (helper.ts) is listed in a single warning; nothing else is found.
+  const f = await findingsOf('C138', root);
+  assert.equal(f.length, 1);
+  assert.equal(f[0].severity, 'warn');
+  assert.match(f[0].message, /^1 site waived by an owned-scroll comment: apps\/one\/app\/src\/app\/helper\.ts:3$/);
+});
+
+test('C138 lists every reasoned waiver in one warning, and a site without a reason is not in it', async () => {
+  const waive = (n) => `export function f${n}(el: HTMLElement) {\n  // conformance: owned-scroll — the caller owns this scroller\n  el.scrollTop = ${n};\n}\n`;
+  const f = await findingsOf('C138', makeApp({
+    'ui/projects/lib/a/src/one.ts': waive(1) + waive(2),
+    'ui/projects/lib/a/src/two.ts': waive(3),
+    'ui/projects/lib/a/src/bare.ts': 'export function g(el: HTMLElement) {\n  el.scrollTop = 1; // conformance: owned-scroll\n}\n',
+  }));
+  const list = f.filter((x) => /waived by an owned-scroll comment/.test(x.message));
+  assert.equal(list.length, 1);
+  assert.match(list[0].message, /^3 sites waived by an owned-scroll comment: /);
+  assert.match(list[0].message, /one\.ts:3, .*one\.ts:7/);
+  assert.match(list[0].message, /two\.ts:3/);
+  assert.doesNotMatch(list[0].message, /bare\.ts/);
+  assert.equal(f.filter((x) => /has no reason/.test(x.message)).length, 1);
 });
 
 test('C138 bad: each write shape in a component without the style is a warning on its line (report-only, ER-41)', async () => {

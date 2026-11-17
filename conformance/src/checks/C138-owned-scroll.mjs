@@ -11,7 +11,7 @@
 // assistant log, which keeps the browser's anchoring on purpose (ADR 0105 decision 2: it keeps the reader's place).
 // Accepted gaps (not seen): `scrollIntoView` (it scrolls every ancestor, and the element it reveals is not the scroller),
 // `Renderer2.setProperty(el, 'scrollTop', ..)`, and per file, not per element: a component with two scrollers passes when either carries
-// the style. ER-41: report-only (warnings) until its first green run on the real tree; ER-33: a positive control runs on in-memory text
+// the style. The reasoned waivers are listed in one warning, as C115 does. ER-41: report-only (warnings) until its first green run on the real tree; ER-33: a positive control runs on in-memory text
 // first.
 import { posix } from 'node:path';
 import { unwaivable, error, warn } from '../finding.mjs';
@@ -146,6 +146,7 @@ export default {
   run(ctx) {
     if (!positiveControl()) return [unwaivable(error('C138', 40, 'conformance/src/checks/C138-owned-scroll.mjs', 1, 'the positive control failed: the check cannot see a known scroll write', 'Fix the check before trusting its result.'))];
     const out = [];
+    const waived = [];
     for (const file of ctx.files()) {
       if (!SOURCE.test(file) || SKIP.test(file)) continue;
       const text = ctx.read(file);
@@ -153,6 +154,12 @@ export default {
       const dir = file.split('/').slice(0, -1).join('/');
       const read = (rel) => ctx.read(posix.normalize(posix.join(dir, rel)));
       for (const p of ownedScrollProblems(text, read)) out.push(SEVERITY('C138', 40, file, p.line, p.message, FIX));
+      for (const w of scrollWrites(text)) if (w.waived === 'reason') waived.push({ file, line: w.line });
+    }
+    // The reasoned waivers in one warning (as C115 does), so the summary shows them and a reviewer sees where they are.
+    if (waived.length) {
+      const list = waived.slice(0, 12).map((s) => `${s.file}:${s.line}`).join(', ');
+      out.push(warn('C138', 40, waived[0].file, waived[0].line, `${waived.length} site${waived.length === 1 ? '' : 's'} waived by an owned-scroll comment: ${list}${waived.length > 12 ? ', ...' : ''}`, 'Check that each reason still holds when the site changes.'));
     }
     return out;
   },
