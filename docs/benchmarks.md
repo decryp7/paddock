@@ -1475,3 +1475,25 @@ the single-machine runners busy.
   runners' own configured timeout was not read).
 - **Notes:** the span counts jobs queued behind the runner too (start is when a runner took the job). Raw output in the agent's
   scratch folder, not kept.
+
+## Member audits in the push gate (2026-11-17, feat/member-gate-audits)
+
+Question: what does the `member-audits` row (the repository-wide audits of `tools/paddock-dev/tests/it`, selected by the nextest
+profile `member-audits`) add to `./dev check --pre-push` and so to the member gate of `./dev merge check --gates`? The user had been
+told about a minute.
+
+- **Machine:** the shared Mac mini (arm64), other agents running; 1-minute load 18 at the start (CPU idle 36 to 61 % on two readings)
+- **Tree:** feat/member-gate-audits on feat/member-gate-other-os (72cf747e9), `CARGO_BUILD_JOBS=2`, a warm build folder (the test
+  binary had been built by an earlier run; one small recompile of the new test file is inside the first number)
+- **Runs:** 1 of the profile (`cargo nextest run --profile member-audits --locked --no-tests=fail`), 68 tests on this base
+
+  | What | Seconds |
+  |---|---:|
+  | whole command, recompile of the changed test file included | 127.8 |
+  | nextest's own run of the 68 tests | 122.5 |
+  | slowest test, `golden::live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history` | over 120 |
+
+- **Result:** about 2 minutes, not 1: the one golden test that replays the first-parent history against `affected.mjs` is nearly all
+  of it; the other 67 tests finish in the time it runs. The row is heavy (one machine-wide slot), rank 4, after the Clippy rows.
+- **Not measured:** a quiet machine, a second run (one run only), a cold build folder, and the three audits that have not landed
+  (`dev_bin`, `cargo_target_lint`, `parity_corpus`), which add their own tests to the 68.

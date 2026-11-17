@@ -30,6 +30,7 @@ mod inputs;
 mod ipc_endpoints;
 mod isolation;
 mod locks;
+mod member_audits;
 mod merge_check;
 mod pr;
 mod pre_push;

@@ -78,3 +78,20 @@ test-group = "repo-graph"
 [profile.ci.junit]
 # Written to <target>/nextest/ci/junit.xml.
 path = "junit.xml"
+
+# The member audits: the repository-wide tests of tests/it, run by the push gate and so by the member gate of `./dev merge check --gates`
+# on the merged tree (src/pre_push/gates.rs, `member_audits`). This filter is the one list of them (ER-42); `--no-tests=fail` makes a
+# list that selects nothing a failure. dev_bin, cargo_target_lint and parity_corpus land with their branches (feat/local-sccache,
+# feat/golden-checked-when-made): a name that matches no test yet selects nothing, and the profile still has the others. Each audit reads
+# every tracked file, so a clash between two members' changes shows here and not first in the train-wide run (ER-8).
+[profile.member-audits]
+default-filter = '''
+binary(it) & (
+    test(/^(dev_bin|cargo_target_lint|parity_corpus|tree|golden|host_steps_golden|build_jobs_golden|check_allow_list|safe_remove_lint)::/)
+    | test(/^check::live_/)
+    | test(/^check_c12[0-9]::live_/)
+    | test(/^ipc_endpoints::the_repository_register_is_complete/)
+    | test(/^contracts::every_markdown_file_that_code_reads/)
+    | test(/^generators::the_registry_of_the_repository/)
+)
+'''
