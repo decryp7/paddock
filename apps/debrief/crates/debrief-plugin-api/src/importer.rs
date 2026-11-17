@@ -5,7 +5,7 @@
 use crate::model::Record;
 use crate::time::TimestampParser;
 use anyhow::Result;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use std::path::Path;
 
 pub use crate::text::{decode, MAX_LINE_LEN};
@@ -23,7 +23,7 @@ pub struct ImportCtx<'a> {
     /// [`crate::manifest::Permission::OpenedFilePaths`].
     pub path: &'a Path,
     /// Date of the file's last modification, used for logs that only carry a time of day.
-    pub file_date: Option<NaiveDate>,
+    pub file_date: Option<Date>,
     /// The active profile's timestamp settings.
     pub timestamps: &'a TimestampParser,
     /// Whether Debrief gave up on the import (see [`ImportCtx::cancelled`]).
@@ -43,7 +43,7 @@ impl<'a> ImportCtx<'a> {
     }
 
     /// The context with a file name, date and timestamp settings (what the serve loop builds).
-    pub fn of(file_name: &'a str, path: &'a Path, file_date: Option<NaiveDate>, timestamps: &'a TimestampParser) -> ImportCtx<'a> {
+    pub fn of(file_name: &'a str, path: &'a Path, file_date: Option<Date>, timestamps: &'a TimestampParser) -> ImportCtx<'a> {
         ImportCtx {
             file_name,
             path,

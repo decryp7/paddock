@@ -2,16 +2,14 @@
 //! event-log follower) write and Debrief opens like any log.
 
 use crate::model::{Level, Record};
+use crate::time::{rfc3339_utc_ms, Fraction};
 use anyhow::Result;
-use chrono::{SecondsFormat, TimeZone, Utc};
 use serde_json::{Map, Value};
 use std::io::Write;
 
 /// ISO 8601 UTC with milliseconds, or "" without a time.
 pub fn iso(ts: Option<i64>) -> String {
-    ts.and_then(|ms| Utc.timestamp_millis_opt(ms).single())
-        .map(|t| t.to_rfc3339_opts(SecondsFormat::Millis, true))
-        .unwrap_or_default()
+    ts.and_then(|ms| rfc3339_utc_ms(ms, Fraction::Millis)).unwrap_or_default()
 }
 
 /// One record as a CLEF JSON object.

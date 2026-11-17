@@ -5,7 +5,10 @@
 use super::{ExifStamp, ImageTime, TimeEvidence, TimeSource};
 use crate::api::SourceInfo;
 use crate::time::TimestampParser;
-use chrono::{DateTime, FixedOffset, Local, NaiveDate, TimeZone, Utc};
+use debrief_plugin_api::strptime::parse_rfc3339_ms;
+use jiff::civil::Date;
+use jiff::tz::TimeZone;
+use jiff::Timestamp;
 use regex::Regex;
 use std::sync::OnceLock;
 
@@ -37,16 +40,18 @@ fn parser(tz: &str) -> TimestampParser {
 }
 
 /// The calendar date of `ms` in the zone `tz` (`UTC`, `local` or `+HH:MM`).
-pub fn date_in_zone(ms: i64, tz: &str) -> Option<NaiveDate> {
-    let utc: DateTime<Utc> = Utc.timestamp_millis_opt(ms).single()?;
-    Some(match tz.trim().to_ascii_lowercase().as_str() {
-        "" | "utc" | "z" => utc.date_naive(),
-        "local" => utc.with_timezone(&Local).date_naive(),
-        other => utc.with_timezone(&parse_offset(other)?).date_naive(),
-    })
+pub fn date_in_zone(ms: i64, tz: &str) -> Option<Date> {
+    let utc = Timestamp::from_millisecond(ms).ok()?;
+    let zone = match tz.trim().to_ascii_lowercase().as_str() {
+        "" | "utc" | "z" => TimeZone::UTC,
+        "local" => TimeZone::system(),
+        other => TimeZone::fixed(jiff::tz::Offset::from_seconds(parse_offset(other)?).ok()?),
+    };
+    Some(utc.to_zoned(zone).date())
 }
 
-fn parse_offset(s: &str) -> Option<FixedOffset> {
+/// Seconds east of UTC of `+HH:MM`, `-HHMM`; `None` unless under 24 hours.
+fn parse_offset(s: &str) -> Option<i32> {
     let b = s.as_bytes();
     let sign = match b.first()? {
         b'+' => 1,
@@ -59,7 +64,8 @@ fn parse_offset(s: &str) -> Option<FixedOffset> {
     }
     let h: i32 = digits[..2].parse().ok()?;
     let m: i32 = digits[2..].parse().ok()?;
-    FixedOffset::east_opt(sign * (h * 3600 + m * 60))
+    let seconds = sign * (h * 3600 + m * 60);
+    (seconds.abs() < 86_400).then_some(seconds)
 }
 
 /// A shown time of day with seconds and how exact it is: `10:41` becomes `10:41:00` (± 1 min).
@@ -86,8 +92,8 @@ fn dated_precision(text: &str) -> i64 {
 fn exif_ms(e: &ExifStamp, tz: &str) -> Option<i64> {
     let iso = e.local.replacen(' ', "T", 1);
     if let Some(o) = e.offset.as_deref() {
-        if let Ok(dt) = DateTime::parse_from_rfc3339(&format!("{iso}{o}")) {
-            return Some(dt.timestamp_millis());
+        if let Some(ms) = parse_rfc3339_ms(&format!("{iso}{o}")) {
+            return Some(ms);
         }
     }
     parser(tz).parse(&e.local)
@@ -103,7 +109,7 @@ fn file_name_ms(name: &str, tz: &str) -> Option<(i64, String)> {
 }
 
 /// The one date the loaded data covers (in `tz`), when it covers exactly one.
-fn data_day((from, to): (Option<i64>, Option<i64>), tz: &str) -> Option<NaiveDate> {
+fn data_day((from, to): (Option<i64>, Option<i64>), tz: &str) -> Option<Date> {
     let (a, b) = (date_in_zone(from?, tz)?, date_in_zone(to?, tz)?);
     (a == b).then_some(a)
 }
@@ -201,10 +207,7 @@ mod tests {
     use super::*;
 
     fn utc(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32) -> i64 {
-        NaiveDate::from_ymd_opt(y, mo, d)
-            .and_then(|d| d.and_hms_opt(h, mi, s))
-            .map(|t| t.and_utc().timestamp_millis())
-            .unwrap_or_default()
+        debrief_plugin_api::time::utc_epoch_ms(y, mo, d, h, mi, s, 0).unwrap_or_default()
     }
 
     fn shown(text: &str, has_date: bool) -> ShownTime {
@@ -318,11 +321,11 @@ mod tests {
     fn zones_and_machine_offsets() {
         assert_eq!(
             date_in_zone(utc(2026, 1, 1, 23, 30, 0), "+02:00"),
-            NaiveDate::from_ymd_opt(2026, 1, 2)
+            debrief_plugin_api::time::ymd(2026, 1, 2)
         );
         assert_eq!(
             date_in_zone(utc(2026, 1, 1, 0, 30, 0), "-0100"),
-            NaiveDate::from_ymd_opt(2025, 12, 31)
+            debrief_plugin_api::time::ymd(2025, 12, 31)
         );
         assert_eq!(date_in_zone(0, "Mars"), None);
         assert!(date_in_zone(0, "local").is_some());

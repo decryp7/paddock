@@ -9,7 +9,8 @@ publish = false
 description = "Debrief notes (ADR 0021): the user's observations anchored to events, times, sources, markers, chart points, the project or regions of images; their checks and limits, the versioned project record and the AI context block. Pure: no I/O."
 
 [dependencies]
-chrono.workspace = true
+# The shared RFC 3339 writer (`time::rfc3339_utc_ms`).
+debrief-plugin-api = { path = "../debrief-plugin-api" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

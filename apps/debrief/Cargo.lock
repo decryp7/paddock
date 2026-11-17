@@ -1001,10 +1001,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
- "js-sys",
  "num-traits",
  "serde",
- "wasm-bindgen",
  "windows-link",
 ]
 
@@ -1327,7 +1325,6 @@ version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b5b023fc2978536bbb2a3b71237964fc4630bec1eb31077b4977127f4cdb9c0"
 dependencies = [
- "chrono",
  "derive_builder",
  "jiff",
  "strum",
@@ -1571,7 +1568,6 @@ name = "debrief-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "croner",
  "ctrlc",
  "debrief-collect",
@@ -1579,6 +1575,7 @@ dependencies = [
  "debrief-monitor",
  "debrief-plugin-tools",
  "globset",
+ "jiff",
  "log",
  "paddock-testkit",
  "serde",
@@ -1639,7 +1636,6 @@ dependencies = [
  "block2",
  "cairo-rs",
  "chromium-driver",
- "chrono",
  "ctrlc",
  "debrief-agent",
  "debrief-ai",
@@ -1665,6 +1661,7 @@ dependencies = [
  "dirs",
  "gtk",
  "image",
+ "jiff",
  "keyring",
  "log",
  "notify-debouncer-mini",
@@ -1725,7 +1722,6 @@ dependencies = [
 name = "debrief-cli"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "ctrlc",
  "debrief-core",
  "debrief-ipc",
@@ -1744,9 +1740,9 @@ name = "debrief-collect"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "debrief-core",
  "globset",
+ "jiff",
  "log",
  "paddock-proc",
  "regex",
@@ -1766,7 +1762,6 @@ dependencies = [
  "anyhow",
  "base64 0.23.1",
  "chardetng",
- "chrono",
  "criterion",
  "csv",
  "debrief-alloc",
@@ -1777,6 +1772,7 @@ dependencies = [
  "getrandom 0.4.3",
  "globset",
  "insta",
+ "jiff",
  "libc",
  "log",
  "paddock-testkit",
@@ -1928,7 +1924,7 @@ dependencies = [
 name = "debrief-notes"
 version = "0.1.0"
 dependencies = [
- "chrono",
+ "debrief-plugin-api",
  "proptest",
  "serde",
  "serde_json",
@@ -1958,8 +1954,8 @@ name = "debrief-plugin-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "debrief-ipc",
+ "jiff",
  "paddock-testkit",
  "postcard",
  "regex",
@@ -2024,7 +2020,6 @@ name = "debrief-plugin-formats"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "debrief-plugin-api",
  "debrief-plugin-otel",
  "debrief-plugin-syslog",
@@ -2134,9 +2129,9 @@ name = "debrief-plugin-syslog"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "debrief-plugin-api",
  "insta",
+ "jiff",
  "proptest",
  "serde_json",
 ]
@@ -2159,7 +2154,6 @@ name = "debrief-plugin-tools"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "debrief-collect",
  "debrief-core",
  "debrief-ipc",
@@ -2179,7 +2173,6 @@ name = "debrief-plugin-web"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "debrief-plugin-api",
  "insta",
  "proptest",
@@ -2192,12 +2185,12 @@ name = "debrief-plugin-windows"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "csv",
  "debrief-ipc",
  "debrief-plugin-api",
  "evtx",
  "insta",
+ "jiff",
  "minidump",
  "paddock-proc",
  "proptest",
@@ -2212,7 +2205,6 @@ dependencies = [
 name = "debrief-plugins"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "debrief-alloc",
  "debrief-budget",
  "debrief-core",
@@ -2279,7 +2271,6 @@ name = "debrief-store-duck"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "csv",
  "debrief-alloc",
  "debrief-core",
@@ -2307,7 +2298,6 @@ dependencies = [
 name = "debrief-store-worker"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "debrief-alloc",
  "debrief-core",
  "debrief-ipc",
@@ -2341,7 +2331,6 @@ dependencies = [
 name = "debrief-video"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "debrief-ai",
  "debrief-core",
  "debrief-image",

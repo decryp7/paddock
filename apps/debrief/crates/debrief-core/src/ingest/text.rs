@@ -146,7 +146,6 @@ mod tests {
     use crate::ingest::chunk::{Encoding, ReaderChunks};
     use crate::ingest::problems::Problems;
     use crate::profile::{CompiledProfile, Profile};
-    use chrono::NaiveDate;
     use std::path::Path;
 
     #[derive(Default)]
@@ -169,7 +168,7 @@ mod tests {
         let ctx = ImportCtx {
             profile,
             path: Path::new("x.log"),
-            file_date: NaiveDate::from_ymd_opt(2026, 10, 14),
+            file_date: debrief_plugin_api::time::ymd(2026, 10, 14),
         };
         let fmt = crate::importers::lines::best_format(profile, content).unwrap();
         let mut src = ReaderChunks::with_limits(content.as_bytes(), Encoding::Utf8, 0, block, crate::importers::MAX_LINE_LEN);
@@ -190,7 +189,7 @@ mod tests {
         let ctx = ImportCtx {
             profile: &p,
             path: Path::new("x.log"),
-            file_date: NaiveDate::from_ymd_opt(2026, 10, 14),
+            file_date: debrief_plugin_api::time::ymd(2026, 10, 14),
         };
         let old = TextImporter.import(&ctx, LOG).unwrap();
         for block in [7, 64, 1 << 20] {

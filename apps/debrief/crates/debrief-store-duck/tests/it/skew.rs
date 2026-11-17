@@ -337,10 +337,7 @@ fn shift_of(store: &DuckStore, before: &[(String, Option<i64>)], m: &str) -> i64
 }
 
 fn utc(text: &str) -> i64 {
-    chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M:%S")
-        .unwrap()
-        .and_utc()
-        .timestamp_millis()
+    debrief_core::strptime::parse_utc_ms(text, "%Y-%m-%d %H:%M:%S").unwrap()
 }
 
 #[test]
@@ -462,8 +459,5 @@ fn aligning_two_events_and_suggesting_offsets_match_the_reference_store() {
 }
 
 fn iso(ms: i64) -> String {
-    chrono::DateTime::from_timestamp_millis(ms)
-        .unwrap()
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string()
+    debrief_core::time::rfc3339_utc_ms(ms, debrief_core::time::Fraction::Millis).unwrap()
 }

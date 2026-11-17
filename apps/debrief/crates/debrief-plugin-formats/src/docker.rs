@@ -6,7 +6,6 @@
 use crate::container::{path_fields, Joiner, Stream};
 use crate::first_line;
 use anyhow::Result;
-use chrono::DateTime;
 use debrief_plugin_api::importer::{ImportCtx, Imported, TextImporter, MAX_LINE_LEN};
 use debrief_plugin_api::model::Fields;
 use serde_json::{Map, Value};
@@ -81,10 +80,7 @@ fn import(ctx: &ImportCtx, content: &str) -> Imported {
             skipped += 1;
             continue;
         };
-        let ts = DateTime::parse_from_rfc3339(e.time)
-            .ok()
-            .map(|d| d.timestamp_millis())
-            .or_else(|| ctx.timestamps.parse(e.time));
+        let ts = debrief_plugin_api::strptime::parse_rfc3339_ms(e.time).or_else(|| ctx.timestamps.parse(e.time));
         let (text, last) = match e.log.strip_suffix('\n') {
             Some(t) => (t.strip_suffix('\r').unwrap_or(t), true),
             None => (e.log, false),

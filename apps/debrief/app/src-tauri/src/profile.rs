@@ -387,7 +387,7 @@ regex = '('
         assert_eq!(history.len(), 2, "the first save had nothing to archive");
         assert_eq!(history[0]["name"], "Two");
         let at = history[0]["savedAtMs"].as_i64().unwrap();
-        assert!((chrono::Utc::now().timestamp_millis() - at).abs() < 60_000, "saved just now");
+        assert!((debrief_core::time::now_ms() - at).abs() < 60_000, "saved just now");
         let file = history[1]["file"].as_str().unwrap().to_string();
         assert_eq!(profile_version(shared(), file).now().unwrap().name, "One");
         assert!(profile_version(shared(), "../x".into()).now().is_err());

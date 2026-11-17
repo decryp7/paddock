@@ -58,7 +58,7 @@ pub fn check(times: &[(u32, Option<i64>)], modified_ms: Option<i64>) -> Timestam
     out.plausible = match (out.first, out.last) {
         (Some(first), Some(last)) => match modified_ms {
             Some(m) => first >= OLDEST_MS && first >= m - PAST_SPAN_MS && last <= m + FUTURE_SLACK_MS,
-            None => first >= OLDEST_MS && last <= chrono::Utc::now().timestamp_millis() + FUTURE_SLACK_MS,
+            None => first >= OLDEST_MS && last <= debrief_plugin_api::time::now_ms() + FUTURE_SLACK_MS,
         },
         _ => false,
     };
@@ -96,7 +96,7 @@ pub fn uptime_boot(texts: &[String], modified_ms: i64) -> Option<i64> {
 /// [`uptime_boot`] as the RFC 3339 text of `[format] boot_time`.
 pub fn uptime_boot_time(texts: &[String], modified_ms: i64) -> Option<String> {
     let boot = uptime_boot(texts, modified_ms)?;
-    chrono::DateTime::from_timestamp_millis(boot).map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+    debrief_plugin_api::time::rfc3339_utc_ms(boot, debrief_plugin_api::time::Fraction::Millis)
 }
 
 /// A format that reads (nearly) all of `texts` with plausible times, when the parser's own formats do not.

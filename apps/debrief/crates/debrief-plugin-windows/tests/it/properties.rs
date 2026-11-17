@@ -198,7 +198,7 @@ fn procmon_with_file_date(bytes: &[u8]) {
     let Some(text) = debrief_plugin_api::text::decode(bytes) else {
         return;
     };
-    let date = chrono::NaiveDate::from_ymd_opt(2026, 10, 14);
+    let date = debrief_plugin_api::time::ymd(2026, 10, 14);
     if let Ok(out) = debrief_plugin_windows::procmon::parse_procmon(&text, timestamps(), date) {
         for r in &out.records {
             let _ = serde_json::to_string(&r.fields).unwrap();

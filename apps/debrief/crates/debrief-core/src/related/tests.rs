@@ -118,9 +118,7 @@ fn at(text: &str) -> TimeEvidence {
 }
 
 fn iso(ms: i64) -> String {
-    chrono::DateTime::from_timestamp_millis(ms)
-        .map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
-        .unwrap_or_default()
+    debrief_plugin_api::time::utc_text(ms, false).unwrap_or_default()
 }
 
 #[test]

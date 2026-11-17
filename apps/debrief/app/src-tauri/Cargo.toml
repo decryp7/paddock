@@ -60,7 +60,7 @@ serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 log = { workspace = true, features = ["kv"] }
-chrono.workspace = true
+jiff.workspace = true
 # "macos-private-api": a transparent webview for the drag ghost on macOS (`drag_ghost`; with `app.macOSPrivateApi`).
 tauri = { version = "2.12.4", features = ["tray-icon", "image-png", "unstable", "macos-private-api"] }
 tauri-plugin-dialog = "2"

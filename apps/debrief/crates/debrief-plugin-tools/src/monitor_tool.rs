@@ -64,7 +64,7 @@ impl MonitorTool {
                     .data_dir()
                     .ok_or_else(|| anyhow!("choose a folder for the monitor's files"))?
                     .join("monitor")
-                    .join(chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string()),
+                    .join(debrief_plugin_api::time::file_stamp(debrief_plugin_api::time::now_ms(), false).unwrap_or_default()),
             };
             let sink = ClefFileSink::new(&dir, "process-monitor", FILE_BYTES, FILES)?;
             let stop = Arc::new(AtomicBool::new(false));

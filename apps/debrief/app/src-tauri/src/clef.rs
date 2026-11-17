@@ -1,7 +1,7 @@
 //! Debrief's own logs in Serilog's compact JSON format (CLEF), one event per
 //! line, so they can be opened in Debrief itself or in Seq and other Serilog tools.
 
-use chrono::{DateTime, SecondsFormat, Utc};
+use jiff::Timestamp;
 use log::kv::{Key, Value as KvValue, VisitSource};
 use serde_json::{Map, Value};
 
@@ -32,7 +32,7 @@ impl Enrichment {
 /// Formats one record as a CLEF line (without the trailing newline). The app formats `tracing` events
 /// with [`format_event`]; this is its `log` counterpart, used by tests.
 #[cfg(test)]
-pub fn format(time: DateTime<Utc>, record: &log::Record, message: &str, enrich: &Enrichment) -> String {
+pub fn format(time: Timestamp, record: &log::Record, message: &str, enrich: &Enrichment) -> String {
     format_event(
         time,
         record.level(),
@@ -53,7 +53,7 @@ pub fn key_values(source: &dyn log::kv::Source) -> Map<String, Value> {
 /// Formats one event as a CLEF line (without the trailing newline): `target` is its `SourceContext`
 /// (a `SourceContext` property wins), `props` its properties.
 pub fn format_event(
-    time: DateTime<Utc>,
+    time: Timestamp,
     level: log::Level,
     target: &str,
     message: &str,
@@ -61,7 +61,10 @@ pub fn format_event(
     enrich: &Enrichment,
 ) -> String {
     let mut event = Map::new();
-    event.insert("@t".into(), Value::from(time.to_rfc3339_opts(SecondsFormat::Micros, true)));
+    event.insert(
+        "@t".into(),
+        Value::from(debrief_core::time::rfc3339_utc(time, debrief_core::time::Fraction::Micros)),
+    );
     // CLEF omits @l for Information.
     if let Some(level) = clef_level(level) {
         event.insert("@l".into(), Value::from(level));
@@ -126,7 +129,6 @@ impl<'kvs> VisitSource<'kvs> for Props {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
     fn enrich() -> Enrichment {
         Enrichment {
@@ -145,7 +147,7 @@ mod tests {
 
     #[test]
     fn formats_levels_and_enrichment() {
-        let t = Utc.with_ymd_and_hms(2026, 10, 17, 8, 30, 0).unwrap();
+        let t = Timestamp::from_millisecond(debrief_core::time::utc_epoch_ms(2026, 10, 17, 8, 30, 0, 0).unwrap()).unwrap();
         let info = log::Record::builder()
             .level(log::Level::Info)
             .target("debrief_app")
@@ -174,7 +176,7 @@ mod tests {
 
     #[test]
     fn includes_key_values() {
-        let t = Utc.with_ymd_and_hms(2026, 10, 17, 8, 30, 0).unwrap();
+        let t = Timestamp::from_millisecond(debrief_core::time::utc_epoch_ms(2026, 10, 17, 8, 30, 0, 0).unwrap()).unwrap();
         let kvs: &[(&str, KvValue)] = &[
             ("Sources", KvValue::from(6u64)),
             ("Ok", KvValue::from(true)),

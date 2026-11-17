@@ -34,7 +34,7 @@ fn line(json: &str) -> String {
 }
 
 fn ms(s: &str) -> i64 {
-    chrono::DateTime::parse_from_rfc3339(s).unwrap().timestamp_millis()
+    debrief_plugin_api::strptime::parse_rfc3339_ms(s).unwrap()
 }
 
 fn open(profile: Profile, d: &TempDir) -> Workspace {

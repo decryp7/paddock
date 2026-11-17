@@ -19,7 +19,6 @@
 
 use crate::MAX_FIELDS;
 use anyhow::Result;
-use chrono::DateTime;
 use debrief_plugin_api::importer::{ImportCtx, Imported, TextImporter, MAX_LINE_LEN};
 use debrief_plugin_api::model::{Level, Record};
 use quick_xml::events::{BytesStart, Event};
@@ -308,10 +307,7 @@ fn parse_timestamp(ctx: &ImportCtx, s: &str) -> Option<i64> {
     if !s.is_empty() && s.len() <= 16 && s.bytes().all(|b| b.is_ascii_digit()) {
         return s.parse::<i64>().ok();
     }
-    DateTime::parse_from_rfc3339(s)
-        .ok()
-        .map(|d| d.timestamp_millis())
-        .or_else(|| ctx.timestamps.parse(s))
+    debrief_plugin_api::strptime::parse_rfc3339_ms(s).or_else(|| ctx.timestamps.parse(s))
 }
 
 #[cfg(test)]

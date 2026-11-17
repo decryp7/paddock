@@ -11,7 +11,6 @@ publish = false
 debrief-plugin-api = { path = "../debrief-plugin-api" }
 anyhow.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
-chrono.workspace = true
 regex.workspace = true
 
 [dev-dependencies]

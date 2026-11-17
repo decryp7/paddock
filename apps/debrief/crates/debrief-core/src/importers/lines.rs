@@ -21,7 +21,7 @@ use crate::profile::CompiledProfile;
 use crate::profile::FormatCaptures;
 use crate::template::PROPERTIES_GROUP;
 use crate::time::TimestampParser;
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use serde_json::{Map, Value};
 
 /// A format lines of a text file can have.
@@ -173,7 +173,7 @@ pub struct LineParser<'p> {
 
 /// The day time-only timestamps fall on, rolled forward at midnight, and the last timestamp read.
 struct Clock {
-    date: Option<NaiveDate>,
+    date: Option<Date>,
     last_ts: Option<i64>,
 }
 
@@ -183,7 +183,7 @@ impl Clock {
         let ts = parser.parse(v).or_else(|| {
             let ts = self.date.filter(|_| time_only).and_then(|d| parser.parse_time_on(v, d))?;
             if self.last_ts.is_some_and(|prev| ts + 12 * 3_600_000 < prev) {
-                self.date = self.date.and_then(|d| d.succ_opt());
+                self.date = self.date.and_then(|d| d.tomorrow().ok());
                 return Some(ts + 86_400_000);
             }
             Some(ts)
@@ -201,16 +201,15 @@ impl Clock {
 
 impl<'p> LineParser<'p> {
     /// A parser trying `dominant` first, reading timestamps with the profile's parser and `day_first`.
-    pub fn new(profile: &'p CompiledProfile, dominant: LineFormat, day_first: Option<bool>, file_date: Option<NaiveDate>) -> Self {
+    pub fn new(profile: &'p CompiledProfile, dominant: LineFormat, day_first: Option<bool>, file_date: Option<Date>) -> Self {
         LineParser {
             profile,
             dominant,
             // Formats without a year are read near the file's date (rolling back over New Year), not near today.
-            parser: profile.timestamps.with_day_first(day_first).with_reference(
-                file_date
-                    .and_then(|d| d.and_hms_opt(23, 59, 59))
-                    .map(|t| t.and_utc().timestamp_millis()),
-            ),
+            parser: profile.timestamps.with_day_first(day_first).with_reference(file_date.and_then(|d| {
+                let end_of_day = debrief_plugin_api::strptime::Clock::new(23, 59, 59, 0)?;
+                debrief_plugin_api::strptime::epoch_ms(d, end_of_day, 0)
+            })),
             names: profile
                 .text_formats
                 .iter()
@@ -365,7 +364,7 @@ mod tests {
     }
 
     fn kinds(p: &CompiledProfile, dominant: LineFormat, lines: &[&str]) -> Vec<String> {
-        let mut parser = LineParser::new(p, dominant, None, NaiveDate::from_ymd_opt(2026, 10, 14));
+        let mut parser = LineParser::new(p, dominant, None, debrief_plugin_api::time::ymd(2026, 10, 14));
         lines
             .iter()
             .enumerate()
@@ -445,7 +444,7 @@ mod tests {
     fn time_only_formats_roll_over_midnight() {
         let p =
             profile("[format]\noutput_templates = [\"[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}\"]\nregexes = []");
-        let mut parser = LineParser::new(&p, LineFormat::Text(0), None, NaiveDate::from_ymd_opt(2026, 10, 14));
+        let mut parser = LineParser::new(&p, LineFormat::Text(0), None, debrief_plugin_api::time::ymd(2026, 10, 14));
         let ts = |l: Line| match l {
             Line::Event(r) => r.ts.unwrap(),
             other => panic!("{other:?}"),

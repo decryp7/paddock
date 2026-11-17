@@ -12,9 +12,9 @@
 
 use crate::first_line;
 use anyhow::Result;
-use chrono::{FixedOffset, NaiveDateTime, TimeZone};
 use debrief_plugin_api::importer::{ImportCtx, Imported, TextImporter, MAX_LINE_LEN};
 use debrief_plugin_api::model::{Level, Record};
+use debrief_plugin_api::strptime::Format;
 use regex::{Captures, Regex};
 use serde_json::Value;
 use std::sync::OnceLock;
@@ -75,13 +75,15 @@ impl TextImporter for SqlErrorLogImporter {
 }
 
 /// The server's offset from UTC, from `UTC adjustment: 2:00` near the start.
-fn utc_adjustment(head: &str) -> Option<FixedOffset> {
+/// Seconds east of UTC; `None` unless under 24 hours.
+fn utc_adjustment(head: &str) -> Option<i32> {
     static RE: OnceLock<Regex> = OnceLock::new();
     let re = RE.get_or_init(|| Regex::new(r"UTC adjustment: (-?)(\d{1,2}):(\d{2})").expect("static regex"));
     let head = &head[..head.char_indices().nth(64 * 1024).map_or(head.len(), |(i, _)| i)];
     let c = re.captures(head)?;
     let secs = c[2].parse::<i32>().ok()? * 3600 + c[3].parse::<i32>().ok()? * 60;
-    FixedOffset::east_opt(if &c[1] == "-" { -secs } else { secs })
+    let secs = if &c[1] == "-" { -secs } else { secs };
+    (secs.abs() < 86_400).then_some(secs)
 }
 
 /// Level for a SQL Server error severity.
@@ -119,7 +121,7 @@ impl ErrorLine {
 
 struct Builder<'a> {
     ctx: &'a ImportCtx<'a>,
-    offset: Option<FixedOffset>,
+    offset: Option<i32>,
     out: Imported,
     current: Option<Record>,
     error: Option<ErrorLine>,
@@ -129,10 +131,13 @@ impl Builder<'_> {
     fn header(&self, line: u32, c: &Captures) -> Record {
         let mut r = Record::new(line);
         r.ts = match self.offset {
-            Some(off) => NaiveDateTime::parse_from_str(&c[1], "%Y-%m-%d %H:%M:%S%.f")
-                .ok()
-                .and_then(|n| off.from_local_datetime(&n).single())
-                .map(|d| d.timestamp_millis()),
+            Some(off) => {
+                static LOCAL: OnceLock<Format> = OnceLock::new();
+                LOCAL
+                    .get_or_init(|| Format::new("%Y-%m-%d %H:%M:%S%.f"))
+                    .read_local(&c[1])
+                    .and_then(|(date, clock)| debrief_plugin_api::strptime::epoch_ms(date, clock, off))
+            }
             None => self.ctx.timestamps.parse(&c[1]),
         };
         let source = &c[2];

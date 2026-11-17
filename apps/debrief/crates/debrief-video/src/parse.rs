@@ -3,7 +3,6 @@
 //! damaged parts skipped.
 
 use crate::select::Candidate;
-use chrono::DateTime;
 use serde::Deserialize;
 
 /// Most frame entries read from one output (a 6 h video at 30 fps with nothing dropped would be 650 000; mpdecimate
@@ -80,9 +79,7 @@ fn rate(s: &str) -> Option<f64> {
 
 fn creation(t: &Tags) -> Option<i64> {
     let s = t.creation_time.as_deref()?.trim();
-    DateTime::parse_from_rfc3339(s)
-        .ok()
-        .map(|d| d.timestamp_millis())
+    debrief_core::strptime::parse_rfc3339_ms(s)
         // Some muxers write the epoch or 1904-01-01 when they know nothing.
         .filter(|ms| *ms > 0)
 }
@@ -223,7 +220,7 @@ mod tests {
         assert_eq!((v.duration_ms, v.width, v.height, v.codec.as_str()), (90_000, 1920, 1080, "h264"));
         assert!((v.fps.unwrap() - 29.97).abs() < 0.01);
         assert_eq!(v.frames, Some(2697));
-        let at = DateTime::parse_from_rfc3339("2026-10-21T08:41:00.25Z").unwrap().timestamp_millis();
+        let at = debrief_core::strptime::parse_rfc3339_ms("2026-10-21T08:41:00.25Z").unwrap();
         assert_eq!(v.creation_ms, Some(at));
         assert_eq!(v.format, "mov,mp4");
         let counted = PROBE.replace(r#""nb_frames": "2697""#, r#""nb_frames": "2697", "nb_read_frames": "6""#);

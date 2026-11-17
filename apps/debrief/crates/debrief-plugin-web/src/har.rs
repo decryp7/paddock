@@ -2,7 +2,6 @@
 
 use crate::level_for_status;
 use anyhow::{anyhow, Context, Result};
-use chrono::DateTime;
 use debrief_plugin_api::importer::{ImportCtx, Imported, TextImporter};
 use debrief_plugin_api::model::{Level, Record};
 use serde_json::Value;
@@ -56,8 +55,7 @@ fn record(line: u32, e: &Value) -> Record {
     r.ts = e
         .get("startedDateTime")
         .and_then(Value::as_str)
-        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-        .map(|d| d.timestamp_millis());
+        .and_then(debrief_plugin_api::strptime::parse_rfc3339_ms);
     let (req, resp) = (e.get("request").unwrap_or(&Value::Null), e.get("response").unwrap_or(&Value::Null));
     let method = req.get("method").and_then(Value::as_str).unwrap_or("");
     let url = req.get("url").and_then(Value::as_str).unwrap_or("");

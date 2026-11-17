@@ -60,7 +60,7 @@ pub fn resolve(report: &Report, redactor: Option<&Redactor>, lookup: &mut Lookup
     Ok(ResolvedReport {
         title,
         summary,
-        generated_at: chrono::Utc::now().timestamp_millis(),
+        generated_at: debrief_plugin_api::time::now_ms(),
         redacted: redactor.is_some(),
         redaction: redactor.map(|x| hits_of(x, &r.counts)).unwrap_or_default(),
         sections,

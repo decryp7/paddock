@@ -43,9 +43,7 @@ const BASE: i64 = 1_791_972_000_000; // 2026-10-14T10:00:00Z
 
 /// One CLEF line at `ms` after BASE.
 fn clef(ms: i64, msg: &str, corr: Option<&str>) -> String {
-    let t = chrono::DateTime::from_timestamp_millis(BASE + ms)
-        .unwrap()
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ");
+    let t = debrief_plugin_api::time::rfc3339_utc_ms(BASE + ms, debrief_plugin_api::time::Fraction::Millis).unwrap();
     match corr {
         Some(c) => format!("{{\"@t\":\"{t}\",\"@m\":\"{msg}\",\"CorrelationId\":\"{c}\"}}\n"),
         None => format!("{{\"@t\":\"{t}\",\"@m\":\"{msg}\"}}\n"),

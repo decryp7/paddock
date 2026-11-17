@@ -48,7 +48,7 @@ fn spread_names(corpus: &std::path::Path) {
             let mine = (0..total).filter(|i| i * n / total == k as u64).count();
             for j in 0..mine {
                 let t = 1_700_000_000_000i64 + (k as i64) * 86_400_000 + j as i64 * 1_000;
-                let ts = chrono::DateTime::from_timestamp_millis(t).unwrap().format("%Y-%m-%dT%H:%M:%S%.3fZ");
+                let ts = debrief_core::time::rfc3339_utc_ms(t, debrief_core::time::Fraction::Millis).unwrap();
                 writeln!(w, r#"{{"@t":"{ts}","@l":"Information","@m":"Started worker {name} session {j}"}}"#).unwrap();
             }
         }
@@ -144,9 +144,7 @@ fn name_reads_by_how_often_the_name_occurs() {
         std::fs::create_dir_all(&extra).unwrap();
         let mut w = std::io::BufWriter::new(std::fs::File::create(extra.join("local-day.clef")).unwrap());
         for j in 0..5i64 {
-            let ts = chrono::DateTime::from_timestamp_millis(mid + j * 60_000)
-                .unwrap()
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ");
+            let ts = debrief_core::time::rfc3339_utc_ms(mid + j * 60_000, debrief_core::time::Fraction::Millis).unwrap();
             writeln!(w, r#"{{"@t":"{ts}","@l":"Information","@m":"Started worker {local} session {j}"}}"#).unwrap();
         }
         drop(w);
