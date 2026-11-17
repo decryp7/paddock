@@ -1310,8 +1310,8 @@ folder was warm, so cold build plus run was more than 1800 s there.
 
 ## C100 in the push gate (2026-11-17, feat/pre-push-unwired-check)
 
-Question: what does the `gates-register` row (`./dev gates check`, C100) add to `./dev check --pre-push` when a push changes a
-conformance check, `conformance/paddock.ci.json`, `docs/gates.toml` or a workflow? Other pushes skip it.
+Question: what does the `gates-register` row (`./dev gates check`, C100) add to `./dev check --pre-push`? It runs on every push
+(ER-41; a hand list of C100's inputs missed `apps/*/paddock.ci.json`, so none is kept).
 
 - **Machine:** the shared Mac mini (arm64), other agents running; 1-minute load given per run
 - **Tree:** origin/main 97176067c plus this branch, warm `./dev`
@@ -1324,7 +1324,8 @@ conformance check, `conformance/paddock.ci.json`, `docs/gates.toml` or a workflo
   | `./dev gates check` | 9.1 | 5.5 | 4.9 s |
   | `./dev gates check` (earlier, first look) | 8.7 | 7.7 | 6.9 s |
 
-- **Added time per push that changes C100's inputs:** about 5 to 8 s, one cheap row (rank 0) beside the conformance rows.
+- **Added time per push:** the row takes 5 to 8 s and runs in parallel with the 70 s conformance tests (rank 0, three rows at a time
+  on a quiet machine), so it adds about no push wall time.
 - **Not measured:** a run under heavy load (above 20), and Linux or Windows.
 
 ## Conformance tests in the push gate (2026-11-14, ci/conformance-every-change)

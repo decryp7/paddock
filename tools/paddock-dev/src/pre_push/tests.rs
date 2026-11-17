@@ -150,16 +150,23 @@ fn a_dyno_core_change_regenerates_the_wire_fixtures_and_others_skip_it() {
 }
 
 /// C100 in the push gate (user, 2026-11-17): a new conformance check that no CI line runs landed unwired twice (four checks on
-/// 2026-11-12, C138 on 2026-11-17). A change to what C100 reads runs `./dev gates check`, with the fix in its next step.
+/// 2026-11-12, C138 on 2026-11-17). The row runs on every push, as the conformance row does (ER-41; review: a hand list of C100's
+/// inputs missed apps/dyno/paddock.ci.json, so a change from `--only C13` to C57 was skipped and passed, ER-42).
 #[test]
-fn a_change_to_what_c100_reads_runs_the_gates_check_and_names_the_fix() {
+fn the_gates_check_runs_on_every_push_whatever_changed_and_names_the_fix() {
+    let unrelated = json!({"conformance": false, "apps": [], "packages": {}});
     for file in [
+        "apps/dyno/paddock.ci.json",
         "conformance/src/checks/C138-new.mjs",
         "conformance/paddock.ci.json",
         "docs/gates.toml",
         ".gitea/workflows/ci.yml",
+        ".gitea/actions/app-gates/action.yml",
+        "package.json",
+        "crates/paddock-proc/src/lib.rs",
+        "docs/x.md",
     ] {
-        let planned = plan_gates(&plan(), &change(&[file]), &facts());
+        let planned = plan_gates(&unrelated, &change(&[file]), &facts());
         let g = run_gates(&planned)
             .into_iter()
             .find(|g| g.id == "gates-register")
@@ -171,32 +178,36 @@ fn a_change_to_what_c100_reads_runs_the_gates_check_and_names_the_fix() {
             "{file}"
         );
         assert!(!g.heavy && g.rank == 0, "a cheap gate: it starts before any Clippy");
-        assert!(
-            g.next.contains("conformance/paddock.ci.json") && g.next.contains("[[report_only]]") && g.next.contains("docs/gates.toml"),
-            "{}",
-            g.next
-        );
+        assert!(g.next.contains("::error") && g.next.contains("ADR 0060"), "{}", g.next);
     }
+    let none = plan_gates(&unrelated, &change(&[]), &facts());
+    assert!(ids(&none).contains(&"gates-register".to_string()), "also for an empty change");
 }
 
-/// The negative: a push that touches none of C100's inputs skips the step, with a reason (not silently).
+/// ROW_SET is what a pass record is compared with: it must list every row the planner can add besides the per-workspace ones, so a
+/// new row cannot leave an older pass usable.
 #[test]
-fn an_untouched_range_skips_the_gates_check() {
-    for files in [
-        &["crates/paddock-proc/src/lib.rs"][..],
-        &["docs/x.md"],
-        &["conformance/src/lib/util.mjs"],
-        &[],
-    ] {
-        let planned = plan_gates(&plan(), &change(files), &facts());
-        assert!(!ids(&planned).contains(&"gates-register".to_string()), "{files:?}");
-        assert!(
-            planned
+fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
+    let c = Change {
+        files: vec![
+            "crates/paddock-proc/src/lib.rs".into(),
+            "apps/dyno/crates/dyno-core/src/a.rs".into(),
+        ],
+        ranges: vec!["abc..HEAD".into()],
+    };
+    let planned = plan_gates(&plan(), &c, &facts());
+    let mut fixed: Vec<String> = ids(&planned)
+        .into_iter()
+        .filter(|id| {
+            !["fmt ", "lockfile ", "clippy ", "clippy-windows "]
                 .iter()
-                .any(|p| matches!(p, Planned::Skip { id, reason } if id == "gates-register" && !reason.is_empty())),
-            "{files:?}: {planned:?}"
-        );
-    }
+                .any(|p| id.starts_with(p))
+        })
+        .collect();
+    fixed.sort();
+    let mut want: Vec<String> = super::gates::ROW_SET.iter().map(|s| s.to_string()).collect();
+    want.sort();
+    assert_eq!(fixed, want, "add the new row to gates::ROW_SET");
 }
 
 #[test]
@@ -208,7 +219,12 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
     };
     let planned = plan_gates(&docs, &c, &facts());
     // Conformance and its tests run on every push, whatever the plan says (ER-41); everything else a docs change does not reach.
-    assert_eq!(ids(&planned), ["conformance", "conformance-tests"], "{:?}", ids(&planned));
+    assert_eq!(
+        ids(&planned),
+        ["conformance", "conformance-tests", "gates-register"],
+        "{:?}",
+        ids(&planned)
+    );
     let skipped: Vec<&String> = planned
         .iter()
         .filter_map(|p| if let Planned::Skip { reason, .. } = p { Some(reason) } else { None })
@@ -1124,6 +1140,26 @@ mod known_commit {
         std::fs::write(&rec, text.replace(&tree, &"0".repeat(40))).unwrap();
         let (found, _) = known::find(&r, &state(&r), None, &[two], &["origin/main"], &l);
         assert!(found.is_none(), "the tree id no longer matches");
+    }
+
+    /// A pass made by a tool with fewer rows is no evidence for one with more (review: a record from before `gates-register` existed
+    /// would have let a push skip it). The record carries the tool's fixed row set; a different one is refused with the reason.
+    #[test]
+    fn a_record_made_with_another_set_of_rows_is_no_evidence() {
+        let (_d, r, _one, two) = repo();
+        let l = fake(None, Err("no run"));
+        known::write_record(&r, &state(&r), &two, "origin/main", &["fmt crates".into()], 1, &pass_for(&r, &two)).unwrap();
+        let rec = state(&r).join("records").join(format!("{two}.json"));
+        let text = std::fs::read_to_string(&rec).unwrap();
+        assert!(text.contains("\"gate_rows\""), "the record names the rows: {text}");
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &["origin/main"], &l);
+        assert!(found.is_some(), "positive control: the same row set is evidence");
+        let old = text.replace("gates-register,", "");
+        assert_ne!(old, text, "the control changed the record");
+        std::fs::write(&rec, old).unwrap();
+        let (found, trail) = known::find(&r, &state(&r), None, &[two], &["origin/main"], &l);
+        assert!(found.is_none(), "a record of an older row set is refused");
+        assert!(trail.iter().any(|t| t.contains("rows")), "{trail:?}");
     }
 
     #[test]

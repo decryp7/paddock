@@ -91,6 +91,11 @@ fn tree_of(root: &Path, sha: &str) -> Option<String> {
     git_text(root, &["rev-parse", "--verify", "--quiet", &format!("{sha}^{{tree}}")]).map(|t| t.trim().to_string())
 }
 
+/// The tool's fixed row set as one string, stored in every record and compared when one is read.
+fn row_set() -> String {
+    super::gates::ROW_SET.join(",") + ","
+}
+
 /// How many records a base chain may follow: a record measured from a branch's old commit counts through that commit's own record.
 pub const MAX_CHAIN: usize = 8;
 
@@ -98,6 +103,13 @@ pub const MAX_CHAIN: usize = 8;
 /// about this commit and adopts against the tree the repository has now (`Evidence::adopt`, ADR 0089 amendment), and it was measured
 /// from `base` or an older commit ([`covers`]). `Err` says why not, for the trail.
 fn read_record(root: &Path, state: &Path, sha: &str, base: &str) -> Result<Evidence, String> {
+    if let Some(v) = std::fs::read_to_string(record_path(state, sha))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        && v["gate_rows"].as_str() != Some(row_set().as_str())
+    {
+        return Err("the pass record was made with another set of push-gate rows than this tool has (a row was added since)".into());
+    }
     let (id, outcome, from) = read_one(root, state, sha).ok_or("no valid pass record")?;
     covers(root, state, &from, base, MAX_CHAIN)?;
     Ok(Evidence::Record { id, outcome })
@@ -110,6 +122,10 @@ fn read_one(root: &Path, state: &Path, sha: &str) -> Option<(String, Outcome, St
         return None;
     }
     let from = v["base_commit"].as_str()?.to_string();
+    // A record made with another set of rows says nothing about a row added since (ER-33).
+    if v["gate_rows"].as_str() != Some(row_set().as_str()) {
+        return None;
+    }
     let proof = Proof::from_json(v.get("evidence")?).ok()?;
     if !matches!(proof.subject(), paddock_cli::Subject::Commit { sha: s, .. } if s.as_str() == sha) {
         return None;
@@ -158,7 +174,7 @@ pub fn write_record(root: &Path, state: &Path, sha: &str, base: &str, gates: &[S
     let tree = tree_of(root, sha).ok_or_else(|| format!("the tree of {sha} cannot be read"))?;
     let base_commit = commit_of(root, base).ok_or_else(|| format!("the base {base} is not a commit here"))?;
     let rec = json!({
-        "id": format!("{}@{now}", &sha[..sha.len().min(12)]), "sha": sha, "tree": tree, "base": base, "base_commit": base_commit, "gates": gates,
+        "id": format!("{}@{now}", &sha[..sha.len().min(12)]), "sha": sha, "tree": tree, "base": base, "base_commit": base_commit, "gates": gates, "gate_rows": row_set(),
         "tool_version": env!("CARGO_PKG_VERSION"), "time": now, "evidence": passed.evidence().to_json(),
     });
     let path = record_path(state, sha);

@@ -343,12 +343,19 @@ pub fn describe_code(code: i32) -> String {
     }
 }
 
-/// The last `n` lines of `text`, each indented, or nothing.
+/// How many `::error` lines before the last `n` lines [`tail`] keeps.
+const KEPT_ERRORS: usize = 10;
+
+/// The last `n` lines of `text`, each indented, or nothing. A line that starts with `::error` and falls before them is kept too (the
+/// last [`KEPT_ERRORS`] of them, in order, before the window): it names the cause, and a summary printed after it must not push it
+/// out (ER-27; C100's finding was cut off by its own table).
 pub fn tail(text: &str, n: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let from = lines.len().saturating_sub(n);
+    let mut earlier: Vec<&str> = lines[..from].iter().copied().filter(|l| l.starts_with("::error")).collect();
+    earlier.drain(..earlier.len().saturating_sub(KEPT_ERRORS));
     let mut out = String::new();
-    for l in &lines[from..] {
+    for l in earlier.into_iter().chain(lines[from..].iter().copied()) {
         let _ = writeln!(out, "  {l}");
     }
     out
@@ -426,6 +433,17 @@ mod tests {
     fn the_tail_is_the_last_lines_indented() {
         assert_eq!(tail("a\nb\nc\n", 2), "  b\n  c\n");
         assert_eq!(tail("", 5), "");
+    }
+
+    #[test]
+    fn an_error_line_before_the_window_is_kept_and_the_others_are_not() {
+        let text = "noise\n::error::first\nmore\n::error::second\n1\n2\n3\n";
+        assert_eq!(tail(text, 2), "  ::error::first\n  ::error::second\n  2\n  3\n");
+        assert_eq!(tail("::error::a\nb\n", 5), "  ::error::a\n  b\n", "inside the window: once");
+        let many: String = (0..30).map(|i| format!("::error::e{i}\n")).chain(["tail\n".to_string()]).collect();
+        let t = tail(&many, 1);
+        assert_eq!(t.lines().count(), 1 + KEPT_ERRORS + 1 - 1, "{t}");
+        assert!(t.contains("::error::e29") && !t.contains("::error::e5\n"), "{t}");
     }
 
     #[test]

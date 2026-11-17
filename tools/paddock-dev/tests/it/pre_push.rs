@@ -75,17 +75,16 @@ fn the_dry_run_lists_the_gates_ci_runs_for_a_crates_change_and_why_others_are_le
     );
 }
 
-/// The gates-register row reads the pushed files: a conformance check in the change plans it; the crates change above skips it.
+/// The gates-register row runs on every push (ER-41), including one that changes only a file C100 reads through its own globs.
 #[test]
-fn a_new_conformance_check_in_the_change_plans_the_gates_check_and_a_crates_change_skips_it() {
+fn the_gates_check_is_planned_for_a_crates_change_and_for_an_app_contract_change() {
     let d = tempfile::tempdir().unwrap();
     let path = fake_bin(d.path(), "exit 0");
-    let (code, out, err) = dev(&path, &["--dry-run"]);
-    assert_eq!(code, 0, "{err}{out}");
-    assert!(out.contains("skip  gates-register"), "{out}");
-    let (code, out, err) = dev(&path, &["--dry-run", "--files", "conformance/src/checks/C999-new.mjs"]);
-    assert_eq!(code, 0, "{err}{out}");
-    assert!(out.contains("run   gates-register"), "{out}");
+    for files in [CHANGE, "apps/dyno/paddock.ci.json"] {
+        let (code, out, err) = dev(&path, &["--dry-run", "--files", files]);
+        assert_eq!(code, 0, "{err}{out}");
+        assert!(out.contains("run   gates-register"), "{files}: {out}");
+    }
 }
 
 #[test]

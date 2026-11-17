@@ -956,6 +956,23 @@ exit $rc
             }
         }
 
+        /// The gates-register row's finding (C100's `::error` line, as `./dev gates check` prints it for a check no CI line runs) comes
+        /// before a 14-line table; it must be in the failed row's output, not cut off by the table (review of feat/pre-push-unwired-check).
+        #[test]
+        fn a_finding_printed_before_a_long_table_is_in_the_failed_rows_output() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = real(d.path(), &d.path().join("lock"));
+            let cmd = "echo '::error file=conformance/src/checks/C999.mjs,line=1::C100 conformance C999 is run by no reachable, resolved CI line'; \
+                       i=0; while [ $i -lt 14 ]; do echo \"| table row $i |\"; i=$((i+1)); done; exit 5";
+            let g = Gate {
+                heavy: false,
+                ..gate("gates-register", cmd)
+            };
+            let row = decide(&g, &ex, Duration::from_secs(60), &test_subject());
+            assert_eq!(row.kind(), Kind::Failed);
+            assert!(row.tail.contains("C100 conformance C999 is run by no reachable"), "{}", row.tail);
+        }
+
         #[test]
         fn two_pushes_at_once_take_the_slot_in_turn() {
             let d = tempfile::tempdir().unwrap();
