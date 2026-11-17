@@ -592,11 +592,13 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
     loop {
         let start_log = run.join(format!("start-{}.log", std::process::id()));
         // The server outlives this process and would hold a pipe open, so its starter writes to a file.
+        let mut started_here = false;
         let start = server
             .call("--start-server")
             .output(Output::File(start_log.clone()))
             .run(env, &mut std::io::sink())
             .map(|mut s| {
+                started_here = s.success;
                 s.success |= already_running(&s);
                 s
             });
@@ -636,6 +638,11 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
         if cache_mode(&stats.stdout) != Some("ReadOnly") {
             break;
         }
+        if !started_here {
+            // Another agent's or the user's server: stopping it would break their caching. Reads still hit, so it is kept.
+            eprintln!("{}", already_running_read_only_warning(env, &log));
+            break;
+        }
         if restarted {
             return off(
                 format!(
@@ -645,7 +652,7 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
             );
         }
         restarted = true;
-        eprintln!("local-sccache: the server came up read-only; stopping it (it is this cache's own) and starting it once more");
+        eprintln!("local-sccache: the server came up read-only; stopping it (this call started it) and starting it once more");
         let _ = server.call("--stop-server").run(env, &mut std::io::sink());
     }
     eprintln!(
@@ -659,6 +666,16 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
         vars: ready_vars(&bin, &backend),
         bin,
     })
+}
+
+/// The one warning for a server that was already running (not started by this call) and is read-only: it is somebody else's, so it
+/// is neither stopped nor restarted, and its reads still give hits.
+fn already_running_read_only_warning(env: &HashMap<String, String>, log: &Path) -> String {
+    format!(
+        "::warning::local-sccache: the sccache server already running on port {} is read-only (its startup write check failed), so no compile is stored, only read. It is not this call's, so it is not stopped. Its log: {}. Next: stop it yourself (`sccache --stop-server`) or wait for its owner; this build keeps using it read-only.",
+        server_port(env),
+        log.display()
+    )
 }
 
 /// [`prepare`], and the warning for a failure (once per call), as the tools that start builds use it.
@@ -951,7 +968,9 @@ d=$(dirname "$0")
 echo "$1" >> "$d/calls"
 case "$1" in
   --version) echo "sccache 0.19.0";;
-  --start-server) n=$(cat "$d/starts" 2>/dev/null || echo 0); echo $((n+1)) > "$d/starts";;
+  --start-server)
+    if [ -f "$d/address-in-use" ]; then echo "Address in use (os error 48)" >&2; exit 1; fi
+    n=$(cat "$d/starts" 2>/dev/null || echo 0); echo $((n+1)) > "$d/starts";;
   --stop-server) ;;
   --show-adv-stats)
     n=$(cat "$d/starts" 2>/dev/null || echo 0); ro=$(cat "$d/readonly-starts" 2>/dev/null || echo 0)
@@ -1014,6 +1033,27 @@ exit 0
         let (_h, e, bin) = fake(0, None);
         assert!(matches!(prepare(&e, Install::Never), Outcome::Ready(_)));
         assert_eq!(calls(&bin), ["--start-server"]);
+    }
+
+    /// A server that was already running (this call's `--start-server` failed with "Address in use") belongs to another agent or
+    /// the user: it is never stopped, and a read-only one is used as it is (reads still hit) with one warning.
+    #[cfg(unix)]
+    #[test]
+    fn an_already_running_read_only_server_is_never_stopped_and_is_warned_about() {
+        let (h, e, bin) = fake(5, None);
+        std::fs::write(bin.with_file_name("address-in-use"), "").unwrap();
+        std::fs::write(bin.with_file_name("starts"), "1").unwrap(); // the other owner's start: stats say read-only
+        assert!(
+            matches!(prepare(&e, Install::Never), Outcome::Ready(_)),
+            "read-only is still used for reads"
+        );
+        assert_eq!(calls(&bin), ["--start-server"], "no --stop-server: the server is not ours");
+        let warning = already_running_read_only_warning(&e, &h.path().join("sccache-run/sccache.log"));
+        assert!(warning.starts_with("::warning::"), "{warning}");
+        assert!(
+            warning.contains("read-only") && warning.contains("sccache.log") && warning.contains("stop it yourself"),
+            "{warning}"
+        );
     }
 
     /// A server of somebody else's (another cache) is neither used nor stopped, read-only or not.
