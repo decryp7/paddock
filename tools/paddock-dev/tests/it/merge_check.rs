@@ -1307,7 +1307,7 @@ mod member_gate {
     use super::*;
 
     const FAKE_GATES: &str = r#"#!/bin/sh
-# argv: check --pre-push --base <base> --root <root>; run in <root>. Logs its argv and the checkout's HEAD.
+# argv: check --pre-push --member-gate --base <base> --root <root>; run in <root>. Logs its argv and the checkout's HEAD.
 echo "$* HEAD=$(git rev-parse HEAD)" >> "$GATES_LOG"
 # What the real push gate prints with --json: an outcome whose evidence names this checkout's commit and tree (ADR 0089 WP-T5).
 sha=$(git rev-parse HEAD); tree=$(git rev-parse 'HEAD^{tree}')
@@ -1377,6 +1377,10 @@ exit 0
         let (code, out) = t.run(&["--gates", "HEAD"], "5");
         assert_eq!(code, 0, "{out}");
         assert!(out.contains("member gate: passed"), "{out}");
+        assert!(
+            out.contains("check --pre-push --member-gate --base"),
+            "the pass names the command that ran: {out}"
+        );
         assert!(!out.contains("FAILED"), "{out}");
     }
 
@@ -1410,6 +1414,10 @@ exit 0
         assert!(out.contains("::warning::member gate FAILED"), "{out}");
         assert!(out.contains("REPORT-ONLY"), "{out}");
         assert!(out.contains("take the member out") && out.contains("send it back"), "{out}");
+        assert!(
+            out.contains("`check --pre-push --member-gate --base") && !out.contains("`check --pre-push --base"),
+            "the next step names the member-gate command (a plain push skips the audits): {out}"
+        );
     }
 
     #[test]
@@ -1420,7 +1428,7 @@ exit 0
         t.run(&["--gates", "HEAD"], "5");
         let log = fs::read_to_string(t.log()).unwrap();
         assert!(
-            log.contains(&format!("check --pre-push --base {first_parent} --root")) && log.contains(&format!("HEAD={head}")),
+            log.contains(&format!("check --pre-push --member-gate --base {first_parent} --root")) && log.contains(&format!("HEAD={head}")),
             "{log}"
         );
     }

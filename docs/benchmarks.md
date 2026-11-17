@@ -1561,6 +1561,48 @@ the single-machine runners busy.
 - **Notes:** the span counts jobs queued behind the runner too (start is when a runner took the job). Raw output in the agent's
   scratch folder, not kept.
 
+## Member audits in the member gate (2026-11-17, feat/member-gate-audits)
+
+Question: what does the `member-audits` row (the repository-wide audits of `tools/paddock-dev/tests/it`, selected by the nextest
+profile `member-audits`) add to the member gate of `./dev merge check --gates`? The user had been told about a minute. The row runs
+only when the push gate is the member gate (`check --pre-push --member-gate`); a developer's push skips it with a reason.
+
+- **Machine:** the shared Mac mini (arm64), other agents running; `CARGO_BUILD_JOBS=2`, `RUSTUP_AUTO_INSTALL=0`
+- **Command:** `cargo nextest run --profile member-audits --locked --no-tests=fail` in `tools/paddock-dev`, run 1 time per row
+  below (one run each: a second run was not made)
+
+### Final: the positive list without the history replay (merged tree, train 13 plus this branch)
+
+The profile lists the audits (dev_bin, cargo_target_lint, parity_corpus, tree, golden, check_allow_list, safe_remove_lint, the live
+and working-tree checks of the check modules, the inputs-against-cargo-metadata tests, the ipc-endpoints, contracts and generators
+registry tests) and leaves out `golden::live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history` (over 120 s, it
+replays the first-parent history and audits no fresh code) and the fixture goldens (`build_jobs_golden`, `host_steps_golden`: they
+read no tracked tree).
+
+  | What | Load (1 min) | CPU idle | Tests | Seconds |
+  |---|---:|---:|---:|---:|
+  | warm build folder, nextest's own run | 6.6 | 89 % | 80 | 34.5 |
+  | warm build folder, whole command (a small recompile included) | 6.6 | 89 % | 80 | 41.8 |
+  | cold build folder (new empty target dir; the compile cache may have helped), whole command | 6 to 9 | not read | 80 | 113.3 (nextest 31.8) |
+
+### Option considered: the whole `it` binary minus the replay (a negative filter only)
+
+Review asked for it as the common-practice option (no list to drift), if warm took at most about 2 minutes. Same tree, one run, load 6.4
+to 9.4 (CPU idle 66 %): 572 tests, nextest 129.9 s, whole command 160.0 s (the build of the merged tree included, which is not a cold
+build). Not taken: warm is over the 2 minute line, and one test (`cli::a_trial_with_bad_arguments_is_refused_before_anything_is_cloned_or_pushed`)
+ran into its 120 s stop under load. That run also had 10 failures, which were not the option's: they came from the build folder
+exported in the shell that ran it (`CARGO_TARGET_DIR`; fixed in 05f72d31a, and the same tests pass with `RUSTUP_AUTO_INSTALL=0`
+exported, so the earlier note that the gate's own variable broke the wrapper tests was wrong and is withdrawn).
+The positive list is checked clause by clause against the binary's test names (`tests/it/member_audits.rs`).
+
+### Earlier runs (superseded by the table above)
+
+On feat/member-gate-other-os (72cf747e9), load 18, warm folder, 68 tests, the list then in the profile: nextest 122.5 s, whole command
+127.8 s, almost all of it the history replay (over 120 s). Without the replay (67 tests, load 10.6): nextest 24.9 s, whole command
+25.2 s. Those runs predate train 13's audits (dev_bin, cargo_target_lint, parity_corpus), which add tests to the list.
+
+- **Not measured:** a busier machine and a second run of any row.
+
 ## Prune size, one pass (2026-11-15, fix/c125-and-arm64-tests)
 
 Question: how long does `tools/prune-build-folders.sh` (the shell kit's `prune-folder`, the release path) take to size a large build
@@ -1593,6 +1635,71 @@ Superseded on 2026-11-16 before it landed: `axeViolations` no longer detects mot
 measured is gone). It turns transitions and animations off for a single scan instead (the user's decision after the fourth
 instance of the class; lessons.md, "axe read a table row half-way into the dark theme"). The measurement (at most 3 scans per
 screen over ui, Dyno and Pitwall, 409 tests) is in this branch's history, commit b661502f0.
+
+## Pre-push Linux Clippy by default, cold and warm (2026-11-16, feat/pre-push-linux-clippy)
+
+Question: what does the Linux Clippy row cost now that `./dev check --pre-push` runs it by default for a touched workspace with Linux-only code (a `cfg` on `target_os = "linux"`)?
+
+- **Machine:** Mac mini (arm64), OrbStack, CI image `paddock-ci:v3` as linux/amd64 (emulated), `CARGO_BUILD_JOBS=2`, 1-minute load 12 to 17, CPU idle 35 to 50% at the start.
+- **Command:** `paddock-dev check --pre-push --only clippy-linux` (one container run through `heavy`), workspace `tools/paddock-dev`, one run each.
+- **Numbers:**
+
+  | Run | Seconds |
+  |---|---:|
+  | cold (no `/target/tools-paddock-dev` in the container's kept volume yet) | 198.8 |
+  | warm, nothing changed | 3.2 |
+  | warm, one planted dead-code lint (red, exit 5) | 26.6 |
+
+- **More numbers (same machine, one run each; load 12 to 17 at the start):**
+
+  | Workspace and run | Seconds |
+  |---|---:|
+  | `crates` cold (`--all-features`) | 521.9 |
+  | `crates` warm | 3.2 |
+  | `apps/dyno` cold, Tauri crate included | over 899: cut short by the 15 minute budget, "not measured" (the compiled part stays in the volume) |
+  | `apps/dyno` with a planted Linux-only lint in dyno-agent (red, after the Tauri crate was left out, so a rebuild) | 292.6 |
+  | `apps/dyno` clean again | 86.5 |
+
+- **Apps:** the CI image has the Tauri system libraries (gdk, cairo, pango, atk compiled), but the `dyno-app` build script writes the sidecar placeholders into the read-only repository mount and fails (`Read-only file system`), so the row leaves the `src-tauri` crates out of an app workspace and prints a `::warning::`; CI lints them on Linux.
+- **`./dev check --warm-linux` (2026-11-16, same machine, idle 51 to 69% at the start, one run):** `crates tools/paddock-dev apps/debrief apps/dyno apps/pitcrew apps/pitwall apps/spotter` in one command, one container run each, no budget.
+
+  | Workspace | Seconds | Note |
+  |---|---:|---|
+  | `crates` | 4.3 | already warm from the runs above |
+  | `tools/paddock-dev` | 18.0 | already warm; stopped on two real lints in the new code (a disallowed `Command::new` and a missing doc), fixed |
+  | `apps/debrief` | 658.0 | cold, `debrief-app` left out |
+  | `apps/dyno` | 3.0 | already warm from the runs above, `dyno-app` left out |
+  | `apps/pitcrew` | 256.0 | cold, `pitcrew-app` left out |
+  | `apps/pitwall` | 326.0 | cold, `pitwall-app` left out |
+  | `apps/spotter` | 414.8 | cold, `spotter-app` left out |
+
+  Each app row printed the `::warning::` naming its Tauri crate, so the `cargo metadata` match found `debrief-app`, `pitcrew-app`, `pitwall-app` and `spotter-app` in the container.
+- **Not measured:** a push touching several workspaces, a quiet machine. The Linux code scan (text match over the touched workspaces' `.rs` files, no cache) is part of the 5.2 s wall time of the warm run beside the container start; it was not timed apart.
+- **Reading:** the cold cost is paid once per workspace, in the container's kept target volume; warm runs fit the 15 minute budget with room.
+
+### Pre-push Linux Clippy, native (2026-11-16, feat/pre-push-linux-clippy)
+
+The row now runs on the native arm64 CI image (the helper's `--ci-image`, built locally from ci-image/), not the x64 image under emulation (user decision: CI's x64 Linux legs and the member gate catch the rare arch-specific lint). The emulated numbers above are superseded.
+
+- **Machine:** Mac mini (arm64), OrbStack, `CARGO_BUILD_JOBS=2`, CPU idle 48 to 53% at the start, cargo registry volume already filled, target folders cold (a new `v3/<workspace>` folder each).
+- **Method:** `./dev check --warm-linux crates tools/paddock-dev apps/debrief apps/dyno apps/pitcrew apps/pitwall apps/spotter`, one cold run per workspace, the Tauri app crates left out.
+
+  | Workspace | Cold seconds |
+  |---|---:|
+  | `crates` | 100.3 |
+  | `tools/paddock-dev` | 39.7 |
+  | `apps/debrief` | 158.9 |
+  | `apps/dyno` | 173.7 |
+  | `apps/pitcrew` | 74.2 |
+  | `apps/pitwall` | 104.8 |
+  | `apps/spotter` | 116.1 |
+  | all seven | 767.6 |
+
+- **Warm, native:** `apps/dyno` with a planted dead-code lint in dyno-agent: red in 5.0 s; the clean tree: 4.7 s (row text `clippy-linux apps/dyno (left out: dyno-app)`).
+- **Limits set from this:** `--warm-linux` ends one workspace's run at 360 s (about twice the largest cold run, 173.7 s) and waits at most 15 minutes for the heavy slot (another agent's full warm-linux holds it for about 768 s). Recorded in `tools/paddock-dev/src/pre_push/warm.rs`.
+- **Size:** after these runs the kept volume `paddock-linux-target-arm64` is 10.2 GB and `paddock-cargo-registry` 644 MB (`docker system df -v`); each CI image version adds its own `v<version>/` folders. `bash tools/linux-container.sh --id paddock --clean` removes both volumes (and the local images); the next `--warm-linux` refills them. The older amd64 volume `paddock-linux-target` (12.6 GB, from the emulated runs) is no longer used.
+- **Local CI image build, cold (2026-11-17):** `linux-container.sh --id paddockimgprobe --ci-image -- true` on a copy of ci-image/ with one changed line (a fresh tag, so the existing image stayed) and `docker build --no-cache`: garage stage 167 s, ci-image/Dockerfile 212 s, 379 s in all; the two images are 4.32 GB and 6.64 GB (about 11 GB). The probe's images and volumes were removed with its own `--clean`. `./dev check --warm-linux` builds the image first as its own step (bound 760 s, about twice this) when `linux-container.sh --image-ready` says it is not built; the push row never builds it: it reports "local CI image missing" and names `./dev check --warm-linux`.
+- **Not measured:** a quiet machine, a push touching several workspaces.
 
 ## sccache 0.19.0 across worktrees, local disk cache (2026-11-16, docs/sccache-basedirs)
 
