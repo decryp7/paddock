@@ -50,8 +50,11 @@ served call's `Served { state: Mutex, cv }`, the one `Closing` state). This side
 2. **No lost wake-up.** A wait on the clock takes its token from the slot while it sees the slot empty, under the lock every
    post takes, and every post cancels the token in the slot. A post is therefore either before the look (the wait takes the
    event) or after it (it cancels the token the wait holds). Nothing is looked up in the pending map to be woken.
-3. **An end even without a post.** `SlotSender` dropped without a last event puts `Closed("the connection is gone")`, like a
-   channel whose sender hung up, so a close that panics half way still ends every caller, with or without a time limit.
+3. **An end even without a post.** A `Pending` dropped without a last event (only a close that took the calls out and then
+   failed does that) logs one line with the call id and the peer's label (ER-27) and ends the call with the reason the close
+   recorded; `SlotSender`'s own drop puts `Closed("the connection is gone")` as the backstop, like a channel whose sender hung
+   up. So a close that panics half way still ends every caller, with or without a time limit. A call its own caller gave up
+   (timed out, a dropped stream, a send that failed) is abandoned quietly instead.
 
 Waits stay on the injected clock (ADR 0031, ADR 0041): `take_within(clock, timeout)`; a wait without a limit blocks on the
 slot's condition variable (`take`). Nothing else in the peer changes: the close order of 381ca0d70 (calls out of the maps,
@@ -105,8 +108,8 @@ the channel and keeps the clock; the user approved it (above).
 |---|---|---|
 | 1 | `paddock-ipc::it peer::closing_fails_pending_calls_on_both_sides` (the caller's `Closed` comes through its slot) and the lib test of 123235de7 | 3 of 3 with the old close order (123235de7) |
 | 2 | `peer::tests::a_close_is_not_seen_until_it_has_ended_the_calls`, `closing_ends_calls_that_were_still_waiting_in_the_queue` | 44 of 200 widened (381ca0d70) |
-| 3 | `a_second_close_returns_only_when_the_close_under_way_is_done_and_no_queued_call_runs`, `a_close_that_panics_while_ending_the_calls_is_still_reported_done`, new `a_close_that_panics_after_taking_the_calls_out_still_ends_a_waiting_caller` | 20 of 20 (5bdefa19d); the new one at 4cb546db5 (stated in the commit) |
-| 4 | new `a_call_the_close_took_out_before_its_caller_waited_is_still_ended_by_that_close` | at 1ee5d2be6 with the equivalent seams (30 s guard, one waiter left on the fake clock; 4cb546db5's message) |
+| 3 | `a_second_close_returns_only_when_the_close_under_way_is_done_and_no_queued_call_runs`, `a_close_that_panics_while_ending_the_calls_is_still_reported_done`, new `a_close_that_panics_after_taking_the_calls_out_still_ends_a_waiting_caller` (the caller also gets the close's recorded reason) and new `a_call_ended_by_a_dropped_pending_is_logged_once_with_its_id_and_peer` (ER-27) | 20 of 20 (5bdefa19d); the panic test red when run on 4cb546db5 ("Err(Timeout) with 1 waiter(s) on the clock") |
+| 4 | new `a_call_the_close_took_out_before_its_caller_waited_is_still_ended_by_that_close` | the new test was not run on old code (its `before_wait` seam does not exist there). What was red is 4cb546db5's own regression test, `a_call_the_close_took_out_before_its_caller_looked_it_up_is_still_woken_by_that_close`, at 1ee5d2be6 (its 30 s guard, one waiter left on the fake clock; 4cb546db5's message); the new test replaces it with the same order of events |
 | slot | `slot::tests`: an end before the wait; an end after the wait took its token, before it blocks (the 8214 shape, the clock never moved); an end while blocked; one completion; a dropped sender ends a wait without a limit; a spent token is replaced so the next wait waits | new mechanism |
 
 Stress, on the slot: the e2e test of instance 4 and the two new peer tests, counts in the commit (Linux CI-image container with

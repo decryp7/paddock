@@ -87,6 +87,17 @@ impl<E> SlotSender<E> {
     pub(crate) fn post(&self, event: E, last: bool) -> bool {
         put(&self.shared, event, last)
     }
+
+    /// Whether a last event was put (or the call was abandoned).
+    pub(crate) fn is_ended(&self) -> bool {
+        lock(&self.shared.state).ended
+    }
+
+    /// Ends a call nobody reads any more (its caller gave it up) without putting an event.
+    pub(crate) fn abandon(&self) {
+        lock(&self.shared.state).ended = true;
+        self.shared.cv.notify_all();
+    }
 }
 
 impl<E> Drop for SlotSender<E> {

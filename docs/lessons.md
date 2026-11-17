@@ -2706,9 +2706,10 @@ timeout on the clock: for ever on the test's `FakeClock` (the plugin host runs i
 timeout in a real app, so a crashed plugin was noticed only when its call timed out. The crash test hits it because the plugin exits
 as soon as it reads the call: the close races the caller's step from sending to waiting.
 **Confirmation (ER-28).** With the window widened (a 20 ms pause after the send and a 50 ms pause between the drain and the post,
-env-gated, not committed) the e2e test hung 6 of 6 runs on macOS and 10 of 10 in the Linux CI-image container (the plugin a zombie,
-the guard's worker and timer threads parked on the fake clock); with the fix and the same widening it passed 20 of 20 on macOS and
-60 of 60 on Linux. Natural rate before the fix: 0 of 1,900 runs in the Linux container (arm64, 4 CPUs, CPU-bound
+env-gated, not committed) the e2e test hung 6 of 6 runs on macOS; with the fix and the same widening it passed 20 of 20 on macOS and
+60 of 60 in the Linux CI-image container. These are the numbers in 4cb546db5's message. One more run, made after that commit was
+written and so not in its message: without the fix, the widened e2e test hung 10 of 10 in the Linux container (the plugin a zombie,
+the guard's worker and timer threads parked on the fake clock). Natural rate before the fix: 0 of 1,900 runs in the Linux container (arm64, 4 CPUs, CPU-bound
 neighbours) and 0 of 200 on macOS, 1 of 78 in CI.
 **Fix.** A call no longer listed is not waited for on the clock: its end is already in the channel or is posted (or its sender
 dropped) by the close right after, so the caller blocks on the channel. Regression test first, through three test seams (the caller
