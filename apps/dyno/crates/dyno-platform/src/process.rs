@@ -1,5 +1,5 @@
 //! Child processes: every external program Dyno runs opens no console window and is bounded by a timeout. This is
-//! the only module that creates [`Command`]s.
+//! the only module of this crate that creates [`Command`]s (through [`paddock_proc::command`]).
 #![cfg_attr(
     not(test),
     deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
@@ -18,20 +18,11 @@ use std::time::Duration;
 pub const MAX_TOOL_OUTPUT: usize = 4 * 1024 * 1024;
 
 /// Windows process creation flag: no console window.
-pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+pub use paddock_proc::CREATE_NO_WINDOW;
 
-/// A command for `program` that opens no console window on Windows.
+/// A command for `program` that opens no console window on Windows ([`paddock_proc::command`], the canonical constructor).
 pub fn command(program: impl AsRef<OsStr>) -> Command {
-    #[allow(clippy::disallowed_methods)]
-    let cmd = Command::new(program);
-    #[cfg(windows)]
-    let cmd = {
-        use std::os::windows::process::CommandExt;
-        let mut cmd = cmd;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-        cmd
-    };
-    cmd
+    paddock_proc::command(program)
 }
 
 type Drain = Option<std::thread::JoinHandle<Vec<u8>>>;

@@ -1957,6 +1957,7 @@ dependencies = [
  "anyhow",
  "debrief-ipc",
  "jiff",
+ "paddock-env",
  "paddock-testkit",
  "postcard",
  "regex",

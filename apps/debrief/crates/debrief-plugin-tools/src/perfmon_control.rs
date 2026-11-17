@@ -476,7 +476,8 @@ Counters:             \\Process(*)\\Private Bytes
         let deep = root.join("1/2/3/4/5");
         std::fs::create_dir_all(&deep).unwrap();
         std::fs::write(deep.join("deep.csv"), "x").unwrap();
-        std::env::set_var("DEBRIEF_TEST_ROOT", &root);
+        let mut env = paddock_testkit::env_lock();
+        env.set("DEBRIEF_TEST_ROOT", &root);
         let s = parse_query("Debrief", QUERY);
         assert_eq!(output_files(&s), [new, old]);
         // The output location alone (a file) falls back to its folder.

@@ -35,6 +35,10 @@ pub fn data_dir_arg(args: &[String]) -> Option<String> {
 /// (`main` exits with it). Otherwise this prepares a *supervised* server (started by launchd, systemd or the Windows
 /// service: `PITWALL_SERVICE=1`): the user's login `PATH`, and the watcher that restarts it after an update once idle.
 /// A server started by hand is left alone. Returns `None` when `main` should go on.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the supervised server takes the user's login PATH once at start, before it starts any thread that reads the environment"
+)]
 pub fn dispatch() -> Option<i32> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if is_check_install(&args) {
@@ -684,11 +688,12 @@ mod tests {
             // Security review P2: the process and log code the elevated step reaches, too. paddock-proc: the command, the bounded
             // run, the process identity and the logged clean-up of a handle (not its file clean-ups, which the step never calls).
             (
-                "paddock-proc command",
-                code_of(between(
-                    include_str!("../../../../../../crates/paddock-proc/src/command.rs"),
+                // The constructor lives in paddock-env since ADR 0100 (paddock_proc::command re-exports it); the audit reads the
+                // function, ending at its closing brace, not the clearing function after it (which reads the environment).
+                "paddock-env command",
+                code_of(fn_item(
+                    include_str!("../../../../../../crates/paddock-env/src/command.rs"),
                     "pub fn command(",
-                    "pub fn clean_env(",
                 )),
             ),
             (
