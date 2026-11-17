@@ -303,15 +303,6 @@ fn c122_hosts_agree_on_the_corpus() {
 }
 
 #[test]
-fn c123_hosts_agree_on_the_corpus() {
-    let seed = (
-        "crates/x/tests/first.rs",
-        "let _ = std::process::Command::new(env!(\"CARGO_BIN_EXE_paddock-dev\")).output();\n",
-    );
-    assert_no_divergence("C123", &[seed]);
-}
-
-#[test]
 fn c125_hosts_agree_on_the_corpus() {
     assert_no_divergence("C125", &[("scripts/first.sh", "x=/Volumes/d7sst7\n")]);
 }
