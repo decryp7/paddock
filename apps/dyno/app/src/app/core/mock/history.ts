@@ -1,7 +1,6 @@
 import type { BootRecord, CoreBucket, DayCount, DiskTrend, History, HistoryPoint, HistoryRange, TimelineEvent } from '../api.types';
 import { clamp, hash01, smoothNoise, wobble } from './noise';
 import { round } from './processes';
-import { WIN_DAILY_FILL, WIN_DATA_FREE, WIN_DATA_TOTAL, WIN_DISK_FREE, WIN_DISK_NAME, WIN_DISK_TOTAL } from './windows-machine';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -72,7 +71,7 @@ function events(from: number, to: number, now: number): TimelineEvent[] {
     { at: now - 52 * MIN, kind: 'alert', label: 'VirtualBox service keeps restarting' },
     { at: now - 9 * HOUR, kind: 'network', label: 'Network changed: joined the Wi-Fi "Home"' },
     { at: now - 27 * HOUR, kind: 'alert', label: 'Memory pressure high' },
-    { at: now - 52 * HOUR, kind: 'alert', label: `${WIN_DISK_NAME} below 25% free` },
+    { at: now - 52 * HOUR, kind: 'alert', label: 'Drive C: below 25% free' },
     { at: now - 4 * DAY, kind: 'alert', label: 'CPU reached 98 °C' },
     { at: now - 12 * DAY, kind: 'boot', label: 'Windows started (boot 17.2 s)' },
     { at: now - 19 * DAY, kind: 'boot', label: 'Windows started (boot 15.8 s)' },
@@ -84,17 +83,17 @@ function events(from: number, to: number, now: number): TimelineEvent[] {
 
 /** C: loses ~5 GB a day to build output with scheduled cleanups giving some back; D: (media) barely moves. */
 function diskTrends(now: number): DiskTrend[] {
-  const cTotal = WIN_DISK_TOTAL;
-  const dTotal = WIN_DATA_TOTAL;
+  const cTotal = 953 * GB;
+  const dTotal = 1863 * GB;
   const c: DiskTrend = { disk: 'C:', total: cTotal, points: [], forecast: { fullInDays: 41 } };
   const d: DiskTrend = { disk: 'D:', total: dTotal, points: [], forecast: 'notFilling' };
   for (let i = 30; i >= 0; i--) {
     const at = now - i * DAY;
     // Before each cleanup (further back) there was less free space than the straight line suggests.
     const freedSince = (i > 2 ? 6.1 : 0) + (i > 9 ? 8.3 : 0) + (i > 16 ? 5.4 : 0);
-    const freeC = (i * WIN_DAILY_FILL) / 1e9 - freedSince + (i > 0 ? 3 * wobble(at / 1000, 21, 3 * 86400) : 0);
-    c.points.push({ at, free: Math.round(WIN_DISK_FREE + freeC * 1e9) });
-    d.points.push({ at, free: Math.round(WIN_DATA_FREE + (i > 0 ? 2 * wobble(at / 1000, 22, 5 * 86400) * GB : 0)) });
+    const freeC = 210 + i * 5.1 - freedSince + (i > 0 ? 3 * wobble(at / 1000, 21, 3 * 86400) : 0);
+    c.points.push({ at, free: Math.round(freeC * GB) });
+    d.points.push({ at, free: Math.round((1204 + 2 * wobble(at / 1000, 22, 5 * 86400)) * GB) });
   }
   return [c, d];
 }

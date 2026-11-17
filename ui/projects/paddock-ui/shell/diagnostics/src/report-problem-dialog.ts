@@ -6,7 +6,6 @@ import type { Saved } from '../generated/diagnostics';
 import { DiagnosticsStore } from './diagnostics.store';
 import { formatStorage, truncateMiddle } from './format';
 import { DIAGNOSTICS_STYLES } from './styles';
-import { REPORT_NOT_INCLUDED } from './not-included';
 
 /**
  * Report a problem (ADR 0026: a modeless form, wide, so the user can look at the app while writing). Its actions are declared:
@@ -41,9 +40,9 @@ import { REPORT_NOT_INCLUDED } from './not-included';
     <section aria-labelledby="pd-diag-not-title" class="pd-diag__field" data-testid="diag-not-in">
       <h3 id="pd-diag-not-title">{{ t.notIn }}</h3>
       <ul class="pd-diag__muted">
-        @for (line of notIncluded; track line) {
-          <li>{{ line }}</li>
-        }
+        <li>{{ t.notInContents }}</li>
+        <li>{{ t.notInSecrets }}</li>
+        <li>{{ t.notInPersonal }}</li>
       </ul>
       <p class="pd-diag__muted">{{ t.mayRemain }}</p>
     </section>
@@ -127,11 +126,13 @@ import { REPORT_NOT_INCLUDED } from './not-included';
   styles: DIAGNOSTICS_STYLES,
 })
 export class PdReportProblemDialog implements DialogContent<Saved> {
-  protected readonly notIncluded = REPORT_NOT_INCLUDED;
   protected readonly t = {
     lede: $localize`:@@pd.diag.lede:Nothing is sent anywhere. This makes a file on your computer that you can look through, and attach to your report yourself.`,
     public: $localize`:@@pd.diag.public:Issue reports are public. Look through the zip first.`,
     notIn: $localize`:@@pd.diag.not-in:Not in the report`,
+    notInContents: $localize`:@@pd.diag.not-in-contents:The contents of your documents and files.`,
+    notInSecrets: $localize`:@@pd.diag.not-in-secrets:Passwords, tokens and keys (they are replaced where the app can recognise them).`,
+    notInPersonal: $localize`:@@pd.diag.not-in-personal:Your user name, home folder, machine name, e-mail addresses and IP addresses (they are replaced), except loopback and unspecified addresses (127.0.0.1, 0.0.0.0) and private network addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x), which are kept for diagnosis.`,
     mayRemain: $localize`:@@pd.diag.may-remain:File names outside your home folder may remain, and so may other computers' names and text the app imported or showed.`,
     describe: $localize`:@@pd.diag.describe:What went wrong? (optional)`,
     hint: $localize`:@@pd.diag.hint:What you were doing, what you expected, what happened instead. It goes into the report as you write it.`,

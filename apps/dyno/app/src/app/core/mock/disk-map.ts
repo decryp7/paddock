@@ -19,7 +19,6 @@ import type {
   ScanState,
   Volume,
 } from '../api.types';
-import { MAC_DISK_FREE, MAC_DISK_TOTAL } from './mac-machine';
 
 const GB = 1024 ** 3;
 const MB = 1024 ** 2;
@@ -28,7 +27,7 @@ const MB = 1024 ** 2;
 export function mockVolumes(): Volume[] {
   const base = { rotational: false, readOnly: false, reachable: true, wholeVolume: true, measuredAt: null, freshness: 'fresh' as const };
   return [
-    { ...base, id: '/', name: 'Macintosh HD', mount: '/', fs: 'apfs', location: 'internal', capacity: MAC_DISK_TOTAL, free: MAC_DISK_FREE },
+    { ...base, id: '/', name: 'Macintosh HD', mount: '/', fs: 'apfs', location: 'internal', capacity: Math.round(953 * GB), free: Math.round(210 * GB) },
     {
       ...base,
       id: '/Volumes/Photos',

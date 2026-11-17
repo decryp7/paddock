@@ -59,22 +59,11 @@ describe('DiagnosisCard stats', () => {
     env();
     const f = TestBed.createComponent(DiagnosisCard);
     await settle(f);
-    const dds = [...(f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('.stats dd:not(.note)')];
+    const dds = [...(f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('.stats dd')];
     expect(dds.length).toBe(4);
     expect(dds.map((d) => d.classList.contains('name'))).toEqual([false, false, false, true]);
     expect(dds[3]!.getAttribute('data-full-text')).toBeTruthy();
     expect(dds[0]!.hasAttribute('data-full-text')).toBe(false);
-  });
-});
-
-describe('DiagnosisCard stats: what a figure sums up', () => {
-  it('says that Disk is read plus write, and gives the other figures no note', async () => {
-    env();
-    const f = TestBed.createComponent(DiagnosisCard);
-    await settle(f);
-    const cells = [...(f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('.stats > div')];
-    expect(cells.map((c) => c.querySelector('dt')?.textContent)).toEqual(['CPU', 'Memory', 'Disk', 'Busiest']);
-    expect(cells.map((c) => c.querySelector('dd.note')?.textContent ?? null)).toEqual([null, null, 'read + write', null]);
   });
 });
 

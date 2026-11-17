@@ -8,11 +8,6 @@ import type {
   StartupEntry,
 } from '../api.types';
 
-import { startupDisk, type StartupDisk } from './disk-facts';
-
-/** The startup disk as the Health reason and the alert name it. */
-export type DiskFact = Pick<StartupDisk, 'name' | 'freeText' | 'usedPercent'>;
-
 const MB = 1024 ** 2;
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -20,12 +15,12 @@ const DAY = 24 * HOUR;
 
 // -------------------------------------------------------------------------------------------- health
 
-export function healthReasons(disk: DiskFact = startupDisk('windows')): HealthReason[] {
+export function healthReasons(): HealthReason[] {
   return [
     {
       id: 'low-disk-c',
-      title: `${disk.name} is ${disk.usedPercent}% full`,
-      detail: `${disk.freeText}, and build output fills about 5 GB a day: full in about 41 days. 63 GB can be freed safely.`,
+      title: 'Drive C: is 78% full',
+      detail: '210 GB free of 953 GB, and build output fills about 5 GB a day: full in about 41 days. 63 GB can be freed safely.',
       impact: 8,
       severity: 'warning',
       since: null,
@@ -33,7 +28,7 @@ export function healthReasons(disk: DiskFact = startupDisk('windows')): HealthRe
     {
       id: 'uptime',
       title: 'Not restarted for 12 days',
-      detail: 'Long uptimes let memory fragment and caches grow: a restart clears them.',
+      detail: 'macOS installed an update that finishes on restart, and long uptimes let memory fragment.',
       impact: 6,
       severity: 'warning',
       since: null,
@@ -156,12 +151,12 @@ export function demoAnomalies(now: number): Anomaly[] {
   ];
 }
 
-export function demoAlerts(now: number, disk: DiskFact = startupDisk('windows')): Alert[] {
+export function demoAlerts(now: number): Alert[] {
   return [
     { id: 'al-6', at: now - 52 * MIN, kind: 'crashLoop', severity: 'warning', title: 'VirtualBox service keeps restarting', detail: '6 restarts in 2 hours.' },
     { id: 'al-5', at: now - 3 * HOUR, kind: 'longHighCpu', severity: 'info', title: 'rustc.exe used over 50% CPU for 12 minutes', detail: 'It stayed busy for a long time.' },
     { id: 'al-4', at: now - 27 * HOUR, kind: 'memoryPressure', severity: 'warning', title: 'Memory pressure high', detail: 'Commit reached 92% of the limit while VirtualBox and two browsers were open.' },
-    { id: 'al-3', at: now - 2 * DAY - 4 * HOUR, kind: 'lowDisk', severity: 'warning', title: `${disk.name} below 25% free`, detail: `${disk.freeText}.` },
+    { id: 'al-3', at: now - 2 * DAY - 4 * HOUR, kind: 'lowDisk', severity: 'warning', title: 'Drive C: below 25% free', detail: '210 GB free of 953 GB.' },
     { id: 'al-2', at: now - 4 * DAY, kind: 'overheating', severity: 'critical', title: 'CPU reached 98 °C', detail: 'Thermal throttling for 3 minutes during a build with the lid closed.' },
     { id: 'al-1', at: now - 6 * DAY, kind: 'longHighCpu', severity: 'info', title: 'MsMpEng.exe used 25% CPU for 9 minutes', detail: 'A scheduled Defender scan.' },
   ];

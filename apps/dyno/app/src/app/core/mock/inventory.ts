@@ -1,8 +1,5 @@
 import type { Hint, MemoryModule, SystemInventory } from '../api.types';
 import type { MockOs } from './os';
-import { MAC_DISK_TOTAL, MAC_MEMORY_TOTAL } from './mac-machine';
-import { LINUX_DISK_TOTAL } from './linux-machine';
-import { WIN_DISK_TOTAL, WIN_MEMORY_STICKS_GIB } from './windows-machine';
 
 const GB = 1024 ** 3;
 
@@ -17,7 +14,7 @@ export type InventoryVariant = 'ddr4' | 'ddr5' | 'sodimm' | 'sodimm-dual' | 'sol
 
 export const INVENTORY_VARIANTS: readonly InventoryVariant[] = ['ddr4', 'ddr5', 'sodimm', 'sodimm-dual', 'soldered', 'apple', 'generic'];
 
-const DEFAULT_VARIANT: Record<MockOs, InventoryVariant> = { windows: 'ddr4', macos: 'apple', linux: 'sodimm-dual' };
+const DEFAULT_VARIANT: Record<MockOs, InventoryVariant> = { windows: 'ddr4', macos: 'apple', linux: 'sodimm' };
 
 /** The `?inv=` variant of a query string, or null. */
 export function inventoryVariantFromSearch(search: string): InventoryVariant | null {
@@ -38,8 +35,6 @@ const stick = (slot: string, gb: number, kind: MemoryModule['kind'], mts: number
 });
 
 const disk = (name: string, gb: number) => ({ name, totalBytes: gb * GB, removable: false });
-/** The Mac's startup disk: its capacity is the one in the machine's fact sheet (mock/mac-machine.ts), not a size typed here. */
-const macDisk = (name: string) => ({ name, totalBytes: MAC_DISK_TOTAL, removable: false });
 
 function appleSilicon(): SystemInventory {
   return {
@@ -47,8 +42,8 @@ function appleSilicon(): SystemInventory {
     memoryVia: 'local',
     hostName: 'MacBook-Pro',
     cpu: { name: 'Apple M4 Pro', physicalCores: 14, logicalCores: 14, frequencyMhz: 4500 },
-    memory: { unified: { total: MAC_MEMORY_TOTAL, kind: 'lpddr5', manufacturer: 'Apple', upgradeable: false } },
-    disks: [macDisk('APPLE SSD AP1024Z')],
+    memory: { unified: { total: 48 * GB, kind: 'lpddr5', manufacturer: 'Apple', upgradeable: false } },
+    disks: [disk('APPLE SSD AP1024Z', 953)],
     hints: [{ kind: 'notUpgradeable', message: 'The memory is part of the chip package and cannot be upgraded. Choose the size when buying.', slot: null }],
   };
 }
@@ -106,7 +101,7 @@ function sodimmLaptop(dual: boolean): SystemInventory {
     hostName: 'dev-laptop',
     cpu: { name: 'AMD Ryzen 9 7940HS', physicalCores: 8, logicalCores: 16, frequencyMhz: 4000 },
     memory: { slots: { slots: 2, maxCapacityBytes: 64 * GB, modules } },
-    disks: [{ name: 'WD Blue SN570 NVMe', totalBytes: LINUX_DISK_TOTAL, removable: false }],
+    disks: [disk('WD Blue SN570 NVMe', 953)],
     hints,
   };
 }
@@ -141,10 +136,10 @@ function ddr4Desktop(): SystemInventory {
       slots: {
         slots: 4,
         maxCapacityBytes: 128 * GB,
-        modules: [stick('DIMM_A1', WIN_MEMORY_STICKS_GIB[0], 'ddr4', 3200, 2666, 'Corsair', 'CMK16GX4M1E3200C16'), stick('DIMM_A2', WIN_MEMORY_STICKS_GIB[1], 'ddr4', 2666, 2666, 'Kingston', 'KVR26N19S6/8')],
+        modules: [stick('DIMM_A1', 16, 'ddr4', 3200, 2666, 'Corsair', 'CMK16GX4M1E3200C16'), stick('DIMM_A2', 8, 'ddr4', 2666, 2666, 'Kingston', 'KVR26N19S6/8')],
       },
     },
-    disks: [{ name: 'Samsung PM9A1 NVMe', totalBytes: WIN_DISK_TOTAL, removable: false }, disk('Crucial MX500 SATA', 931)],
+    disks: [disk('Samsung PM9A1 NVMe', 953), disk('Crucial MX500 SATA', 931)],
     hints,
   };
 }

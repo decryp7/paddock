@@ -61,22 +61,12 @@ describe('LiveStore', () => {
   });
   it('receive stores the update and grows the series', () => {
     const { store, mock } = setup();
-    const first = mock.liveUpdate('summary');
-    store.receive(first);
-    store.receive({ ...first, system: { ...first.system, at: first.system.at + 1000 } });
+    store.receive(mock.liveUpdate('summary'));
+    store.receive(mock.liveUpdate('summary'));
     expect(store.connected()).toBe(true);
-    expect(store.system()?.at).toBe(first.system.at + 1000);
+    expect(store.system()?.at).toBe(Math.floor(NOW / 1000) * 1000);
     expect(store.overhead()).not.toBeNull();
     expect(store.series().cpu).toHaveLength(2);
-  });
-  it('adds a sample to the series once: the same second received again moves nothing', () => {
-    const { store, mock } = setup();
-    const u = mock.liveUpdate('summary');
-    store.receive(u);
-    store.receive(u);
-    store.receive({ ...u });
-    expect(store.series().cpu).toHaveLength(1);
-    expect(store.system()?.at).toBe(Math.floor(NOW / 1000) * 1000);
   });
   it('subscribes on init to live updates and the agent status, and unsubscribes on destroy', async () => {
     const mock = new MockBackend({ latencyMs: 0, now: () => NOW });

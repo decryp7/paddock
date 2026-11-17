@@ -40,4 +40,3 @@ export { formatStorage, truncateMiddle } from './src/format';
 export * from './generated/diagnostics';
 export { LOGGING_SECTION_FIXTURE } from './generated/diagnostics-fixtures';
 export { DIAGNOSTICS_COMMANDS, type DiagnosticsCommand } from './generated/diagnostics-commands';
-export { REPORT_NOT_INCLUDED } from './src/not-included';

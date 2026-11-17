@@ -15,8 +15,8 @@ test.describe('Report a problem', () => {
     // The report lists every file with its size before anything is saved: the dated log of each process, the agent's included
     // (the real engine reads both from disk, so they are there with the agent down).
     const files = dialog.getByTestId('diag-files');
-    await expect(files.getByText('logs/dyno.2026-10-22.log')).toBeVisible();
-    await expect(files.getByText('logs/dyno-agent.2026-10-22.log')).toBeVisible();
+    await expect(files.getByText('logs/dyno.2026-10-31.log')).toBeVisible();
+    await expect(files.getByText('logs/dyno-agent.2026-10-31.log')).toBeVisible();
     await expect(dialog.getByTestId('diag-total')).toContainText(/\d+ files/);
   });
 

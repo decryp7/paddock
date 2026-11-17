@@ -2,16 +2,12 @@
 // named in `screenshotDirs` of paddock.conformance.json, e.g. `ui/docs/screenshots`) each image
 // has an entry in `hashes.json` (written by @decryp7/paddock-e2e's captureDocScreens) equal to the file's SHA-256, and a row in
 // `docs/screenshots/REVIEWED.md` (| image | sha256 | reviewer | date |) whose hash equals the current one: a regenerated image
-// that changed needs a new review. Images the runner cannot make (a screenshot of a real OS dialog, a capture from a Windows machine, the evidence of
-// a finished work package) are listed in `capturedOutside` of paddock.conformance.json (`{ "path": "<folder/ or file>", "reason": "..." }`, a reason
-// required): they need the REVIEWED.md row but no hashes.json entry, and hashes.json lists none of them. Images under `docs/images` (diagrams) need only the REVIEWED.md row, in `docs/images/REVIEWED.md`.
+// that changed needs a new review. Images under `docs/images` (diagrams) need only the REVIEWED.md row, in `docs/images/REVIEWED.md`.
 import { createHash } from 'node:crypto';
 import { error } from '../finding.mjs';
 
 const IMAGE = /\.(?:png|jpe?g|webp|gif|svg)$/i;
 /** The folders checked: the screenshot folders (config `screenshotDirs`, default `docs/screenshots`) and `docs/images`. */
-/** The `capturedOutside` entries with a path and a reason: [{ path, reason }]. */
-const outside = (config) => (config.capturedOutside ?? []).filter((e) => e && typeof e.path === 'string' && typeof e.reason === 'string' && e.reason.trim());
 const roots = (config) => [...(config.screenshotDirs ?? ['docs/screenshots']).map((dir) => ({ dir, hashes: true })), { dir: 'docs/images', hashes: false }];
 
 /** Rows of a REVIEWED.md: Map image -> { hash, reviewer, date, line }. Later rows win; rows that are not 4 cells with a 64-digit hash are ignored. */
@@ -38,8 +34,6 @@ export default {
       const images = ctx.files().filter((f) => f.startsWith(`${dir}/`) && IMAGE.test(f)).sort();
       if (!images.length) continue;
       const rel = (f) => f.slice(dir.length + 1);
-      const captured = outside(ctx.config);
-      const isOutside = (f) => captured.some((e) => (e.path.endsWith('/') ? f.startsWith(e.path) : f === e.path));
       let manifest = {};
       if (hashes) {
         const text = ctx.read(`${dir}/hashes.json`);
@@ -60,7 +54,7 @@ export default {
       for (const f of images) {
         const name = rel(f);
         const actual = createHash('sha256').update(ctx.tree.readBuffer(f)).digest('hex');
-        if (hashes && ctx.exists(`${dir}/hashes.json`) && !isOutside(f)) {
+        if (hashes && ctx.exists(`${dir}/hashes.json`)) {
           if (!(name in manifest)) out.push(error('C24', 22, f, 1, 'has no entry in hashes.json', 'Regenerate with SCREENSHOTS=1.'));
           else if (String(manifest[name]).toLowerCase() !== actual) out.push(error('C24', 22, f, 1, 'differs from its hashes.json entry (edited or stale)', 'Regenerate with SCREENSHOTS=1 and have the new image reviewed.'));
         }

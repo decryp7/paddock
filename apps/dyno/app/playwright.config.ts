@@ -34,28 +34,9 @@ export default defineConfig({
     { name: 'webkit', testIgnore: /screenshots.*\.spec\.ts/, use: { ...devices['Desktop Safari'], viewport: { width: 1280, height: 800 } } },
     // Only on request, so a plain `npx playwright test` never rewrites the documentation images.
     ...(process.env['SCREENSHOTS']
-      ? [{ name: 'screenshots', testMatch: /screenshots.*\.spec\.ts/, testIgnore: /screenshots-check\.spec\.ts/, use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 } }]
-      : []),
-    // Whether the tracked pictures are current (e2e/screenshots-check.spec.ts): regenerates the two documentation specs into SCREENSHOT_DIR, then
-    // compares them with the tracked pictures by a pixel tolerance. `SCREENSHOTS_CHECK=1 SCREENSHOT_DIR=<scratch> npx playwright test --project=screenshots-check`.
-    ...(process.env['SCREENSHOTS_CHECK']
-      ? [
-          {
-            name: 'screenshots-made',
-            testMatch: /screenshots(-docs-dialogs|-helper)?\.spec\.ts$/,
-            use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 },
-          },
-          {
-            name: 'screenshots-check',
-            testMatch: /screenshots-check\.spec\.ts$/,
-            dependencies: ['screenshots-made'],
-            // The tracked picture is the expected one (<name>.png in the screenshots folder of apps/dyno/docs, found from the specs' folder); SCREENSHOTS_TRACKED names another folder (to measure).
-            snapshotPathTemplate: `${process.env['SCREENSHOTS_TRACKED'] ?? '{snapshotDir}/../../docs/screenshots'}/{arg}{ext}`,
-          },
-        ]
+      ? [{ name: 'screenshots', testMatch: /screenshots.*\.spec\.ts/, use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 } }]
       : []),
   ],
-  updateSnapshots: 'none',
   webServer: {
     command: `npx ng serve --port ${PORT} --poll 1500`,
     url: `http://localhost:${PORT}`,

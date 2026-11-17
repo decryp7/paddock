@@ -5,8 +5,6 @@ export interface PdColumn<T> {
   readonly key: string;
   /** Sentence-case header (rule 5: no uppercase tracking). Units belong here, not in the cells. */
   readonly header: string;
-  /** What the header means, as its tooltip (a native `title`): where the unit or the sum is not obvious ("read + write" on a Disk column, as Activity Monitor and Task Manager say it). */
-  readonly headerTitle?: string;
   readonly value: (row: T) => string | number | boolean | Date | null | undefined;
   readonly text?: (row: T) => string;
   /** A grid track (`2fr`, `120px`); default `minmax(0, 1fr)`. Use px or fr, never em: the header and the rows have different font sizes, so an em track would be a different width in each and the columns would not line up. */

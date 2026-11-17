@@ -91,11 +91,6 @@ function dayScore(list: Issue[]): number {
 const rating = (s: number): Stability => (s >= 90 ? 'stable' : s >= 70 ? 'someProblems' : 'unstable');
 
 /** The Issues page for `query`, the way the engine builds it (local days from the clock's own zone). */
-/** How many applications quit unexpectedly in [from, to], counted in the same events the Issues page lists, so a report and that page agree. */
-export function mockAppCrashes(from: number, to: number, now: number): number {
-  return SEEDS.filter((e) => e.kind === 'appCrash' && now - e.ago >= from && now - e.ago <= to).length;
-}
-
 export function mockIssuesOverview(query: IssuesQuery, now: number, sources: SourceStatus[]): IssuesOverview {
   const days = Math.min(90, Math.max(1, Math.trunc(query.days)));
   const dayStart = (t: number) => {

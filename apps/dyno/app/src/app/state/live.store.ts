@@ -78,9 +78,9 @@ export const LiveStore = signalStore(
     overhead: computed(() => update()?.overhead ?? null),
   })),
   withMethods((store) => ({
-    /** Applies one pushed update; a sample of the same second as the last adds nothing to the series (it is the same measurement, not a new point). */
+    /** Applies one pushed update. */
     receive(u: LiveUpdate): void {
-      patchState(store, (s) => ({ update: u, series: s.update?.system.at === u.system.at ? s.series : appendSeries(s.series, u) }));
+      patchState(store, (s) => ({ update: u, series: appendSeries(s.series, u) }));
     },
     /** Fills the sparklines from history; live samples that arrived first stay (they are newer than the history). */
     seed(points: readonly HistoryPoint[]): void {

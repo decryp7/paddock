@@ -4,7 +4,6 @@ import { dirname, join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { THEMES, type Theme } from './axe.ts';
 import { DOC_SCREEN_VIEWPORT, isOn } from './config.ts';
-import { pauseLive } from './live-page.ts';
 import { PINNED_AT } from './pinned-clock.ts';
 import { waitForStableFrame } from './screenshot.ts';
 
@@ -25,16 +24,12 @@ export interface DocScreen {
   readonly size?: { readonly width: number; readonly height: number };
   /** Grow the window to the page's height (up to {@link FRAME_MAX_HEIGHT}) so a long page is shown whole. */
   readonly frame?: 'page';
-  /** Steps before the page is opened (a route, an init script, a stored setting); runs after the clock and theme are set. */
-  readonly before?: (page: Page, theme: Theme) => Promise<void>;
   /** Steps after the page has loaded (open a menu, fill a field, advance the fake clock) until the screen shows what it documents. */
   readonly ready?: (page: Page, theme: Theme) => Promise<void>;
   /** Photograph one element instead of the window (scrolled into view; it wins over `clip`). */
   readonly element?: (page: Page, theme: Theme) => Locator;
   /** The area to keep (default: the whole window). */
   readonly clip?: (page: Page, theme: Theme) => Promise<{ x: number; y: number; width: number; height: number } | undefined>;
-  /** Keep the page's background transparent in the picture (a dialog window drawn on nothing, with its own shadow). */
-  readonly transparent?: boolean;
   /** Themes this screen is taken in (default: all). */
   readonly themes?: readonly Theme[];
 }
@@ -62,24 +57,6 @@ export interface DocScreensOptions {
   readonly clock?: 'ticking' | 'paused';
   /** Fake-clock time to run after loading, for apps whose live values are a function of the clock (default 0). */
   readonly warmupMs?: number;
-  /**
-   * Take every picture in the middle of a time bucket of this many milliseconds on the page clock (for an app whose mock rounds what its
-   * polled replies read of the clock down to that bucket, as Dyno's `?stable=60000`): the clock runs on to 30 s into the bucket (half of 60 s) before the
-   * picture, so every poll since the bucket began, whatever its phase against the clock, read the same time, and the real time the picture takes
-   * cannot move the clock into the next bucket (the clock is paused, below). Default: off.
-   */
-  readonly alignToBucketMs?: number;
-  /**
-   * Take every picture at this one instant on the page clock (epoch milliseconds, after the screens' own steps have finished: pick one with room), so the live
-   * values of a mock that is a function of the clock (CPU, memory, rates) are the same in every picture and one fact reads the same on every page.
-   * Default: off; wins over {@link DocScreensOptions.alignToBucketMs}.
-   */
-  readonly shotAtMs?: number;
-  /**
-   * Stop the page's live updates (`pauseLive`) once the page has drawn and just before the picture, so a poll or tick cannot change a value
-   * while the picture is taken (default true). The page does not draw while the clock is paused, so the frame is settled first.
-   */
-  readonly pauseLiveBeforeShot?: boolean;
   /** A selector that must be visible before `ready` runs (the shell element). */
   readonly appSelector?: string;
   /** The environment (default `process.env`). */
@@ -165,7 +142,6 @@ export function captureDocScreens(options: DocScreensOptions): void {
         } else await page.clock.install({ time: frozenAt });
         await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
         await options.prepare?.(page, theme);
-        await screen.before?.(page, theme);
         await page.goto(screen.url);
         if (options.appSelector) await expect(page.locator(options.appSelector).first()).toBeVisible();
         if (options.warmupMs) await page.clock.runFor(options.warmupMs);
@@ -175,23 +151,9 @@ export function captureDocScreens(options: DocScreensOptions): void {
           await page.setViewportSize({ width, height: Math.min(Math.max(height, full), FRAME_MAX_HEIGHT) });
         }
         await waitForStableFrame(page);
-        if (options.shotAtMs) {
-          const now = await page.evaluate(() => Date.now());
-          if (now > options.shotAtMs) throw new Error(`${screen.name} (${theme}): the page clock is already ${now - options.shotAtMs} ms past shotAtMs: pick a later instant`);
-          await page.clock.runFor(options.shotAtMs - now);
-          await waitForStableFrame(page);
-        } else if (options.alignToBucketMs) {
-          const bucket = options.alignToBucketMs;
-          const now = await page.evaluate(() => Date.now());
-          await page.clock.runFor((bucket / 2 - (now % bucket) + bucket) % bucket);
-          await waitForStableFrame(page);
-        }
-        if (options.pauseLiveBeforeShot ?? true) await pauseLive(page);
         const clip = await screen.clip?.(page, theme);
         const element = screen.element?.(page, theme);
-        // No animation and no caret in a picture: a transition caught half way or a blinking cursor differs from run to run.
-        const shot = { animations: 'disabled', caret: 'hide', omitBackground: screen.transparent === true } as const;
-        const bytes = element ? await element.screenshot(shot) : await page.screenshot(clip ? { clip, ...shot } : shot);
+        const bytes = element ? await element.screenshot() : await page.screenshot(clip ? { clip } : {});
         const path = join(out, file);
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, bytes);

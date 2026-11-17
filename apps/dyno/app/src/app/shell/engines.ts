@@ -169,8 +169,8 @@ export function diagnosticsBackend(): DiagnosticsBackend {
     files: [
       { name: 'system-info.json', kind: 'system-info', bytes: 412, summary: 'Dyno, your operating system and processor type, no hardware serial numbers' },
       { name: 'settings.json', kind: 'settings', bytes: 380, summary: 'Your settings; passwords, tokens and keys are replaced by ***' },
-      { name: 'logs/dyno.2026-10-22.log', kind: 'log', bytes: 182_400, summary: '1,204 log lines, the recent part of dyno.2026-10-22.log; file contents are never logged' },
-      { name: 'logs/dyno-agent.2026-10-22.log', kind: 'log', bytes: 36_100, summary: '240 log lines, all of dyno-agent.2026-10-22.log; file contents are never logged' },
+      { name: 'logs/dyno.2026-10-31.log', kind: 'log', bytes: 182_400, summary: '1,204 log lines, the recent part of dyno.2026-10-31.log; file contents are never logged' },
+      { name: 'logs/dyno-agent.2026-10-31.log', kind: 'log', bytes: 36_100, summary: '240 log lines, all of dyno-agent.2026-10-31.log; file contents are never logged' },
     ],
   });
   return diagnostics;
