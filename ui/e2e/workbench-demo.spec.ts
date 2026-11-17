@@ -1,4 +1,4 @@
-import { axeViolations, expect, expectNoHorizontalScroll, test, THEMES, WorkbenchApp } from '@decryp7/paddock-e2e';
+import { axeViolations, expect, expectNoHorizontalScroll, expectNoScrollMovesOfItsOwn, test, THEMES, WorkbenchApp } from '@decryp7/paddock-e2e';
 
 // The workbench demo is the reference consumer of @decryp7/paddock-ui/workbench (ADR 0013 §4; plan W4, W7). It uses only
 // the test kit (@decryp7/paddock-e2e): the workbench page objects and the shell's.
@@ -187,6 +187,14 @@ test.describe('assistant pane (plan W6)', () => {
       expect(pageErrors).toEqual([]);
     });
   }
+});
+
+// Family ADR 0105: the assistant's log is kept at its end by our code (`scrollTop = scrollHeight`), so it makes no scroll moves of its own.
+test('assistant pane: the log makes no scroll moves of its own when content above the view grows (no scroll anchoring)', async ({ page }) => {
+  const wb = new WorkbenchApp(page);
+  await wb.frame.open();
+  await wb.activity.item('pd.wb.assistant.activity').click();
+  await expectNoScrollMovesOfItsOwn(page.getByTestId('assistant-log'), 'the assistant log');
 });
 
 test.describe('pop-out (plan W3)', () => {

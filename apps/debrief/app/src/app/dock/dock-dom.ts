@@ -6,6 +6,7 @@
 export function keepGroupsUnscrolled(root: HTMLElement): { dispose(): void } {
   const onScroll = (e: Event) => {
     const t = e.target;
+    // conformance: owned-scroll — dockview's group element (third party, not our template); it resets a sideways scroll to 0 and reads nothing back
     if (t instanceof HTMLElement && t.classList.contains('dv-groupview') && t.scrollLeft !== 0) t.scrollLeft = 0;
   };
   root.addEventListener('scroll', onScroll, true);

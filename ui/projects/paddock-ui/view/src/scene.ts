@@ -6,6 +6,7 @@ import { toneGlyph, toneOf, toneWord } from './model';
 import { ViewRuntime } from './runtime';
 import { PdViewScroll, SCROLL_CSS } from './scroll';
 import { TONE_CSS, toneClass, VIEW_HOVER_FILL } from './tone';
+import { PdOwnedScroll } from '@decryp7/paddock-ui/scroll';
 
 let nextId = 0;
 
@@ -31,11 +32,11 @@ export function diagramScene(d: Diagram): Scene {
 @Component({
   selector: 'pd-view-scene',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdGlyph, PdViewScroll],
+  imports: [PdGlyph, PdViewScroll, PdOwnedScroll],
   template: `
     @let s = scene();
     <div class="pd-view-scene__frame">
-    <div class="pd-view-scene__scroll" role="region" pdViewScroll [attr.aria-label]="label()">
+    <div class="pd-view-scene__scroll" role="region" pdViewScroll pdOwnedScroll [attr.aria-label]="label()">
       <svg class="pd-view-scene__svg" [attr.viewBox]="'0 0 ' + s.width + ' ' + s.height" [attr.width]="s.width" [attr.height]="s.height" role="group" [attr.aria-label]="summary()" focusable="false">
         <defs>
           <marker [attr.id]="arrowId" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">

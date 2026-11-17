@@ -7,6 +7,7 @@ import { glyphSvg } from './dock-glyph';
 export function keepGroupsUnscrolled(root: HTMLElement): { dispose(): void } {
   const onScroll = (e: Event) => {
     const t = e.target;
+    // conformance: owned-scroll — dockview's group element (third party, not our template); it resets a sideways scroll to 0 and reads nothing back
     if (t instanceof HTMLElement && t.classList.contains('dv-groupview') && t.scrollLeft !== 0) t.scrollLeft = 0;
   };
   root.addEventListener('scroll', onScroll, true);
@@ -130,6 +131,7 @@ export function keepActiveTabVisible(root: HTMLElement): { refresh(): void; disp
       if (al < cur || ar - al >= width) start = al;
       else if (ar > cur + width) start = starts.find((b) => b <= al && ar - b <= width) ?? al;
       else start = Math.min(starts.find((b) => b >= cur - 0.5) ?? al, al);
+      // conformance: owned-scroll — dockview's tab strip (third party, not our template); the start is recomputed from the tabs on every change and never read back as the user's
       if (start !== cur) strip.scrollLeft = start;
     });
   const observer = new MutationObserver(refresh);

@@ -33,6 +33,7 @@ import { SourceColors, SourceMark } from '../sources/source-colors.store';
 import { stripeBackground } from '../sources/source-colors';
 import { LiveArrival, liveMode, PagedRowsStore } from './paged-rows.store';
 import { writeEventDrag } from '../core/event-drag';
+import { PdOwnedScroll } from '@decryp7/paddock-ui/scroll';
 
 export { SCROLL_IDLE_MS } from './paged-rows.store';
 
@@ -117,7 +118,7 @@ function viewKey(query: unknown, descending: boolean): string {
   selector: 'debrief-events-grid',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '[style.--row-h.px]': 'rowH()' },
-  imports: [Icon, MarkerIcon, ClickOutside, VirtualList, NewEventsPill, NextSteps, ErrorDetails],
+  imports: [Icon, MarkerIcon, ClickOutside, VirtualList, NewEventsPill, NextSteps, ErrorDetails, PdOwnedScroll],
   template: `
     <div class="bar">
       <span class="section-title" i18n="@@grid.title">Events</span>
@@ -151,6 +152,7 @@ function viewKey(query: unknown, descending: boolean): string {
     <debrief-new-events-pill />
     <div
       class="viewport"
+      pdOwnedScroll
       #viewport
       tabindex="0"
       role="grid"

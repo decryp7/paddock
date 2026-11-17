@@ -190,6 +190,7 @@ export class ConfigPanel {
     ta.focus();
     ta.setSelectionRange(offset, offset + (lines[line - 1]?.length ?? 0));
     const box = this.scroller()?.nativeElement;
+    // conformance: owned-scroll — Pitcrew is not on the shared UI package yet (family ADR 0105 decision 3); a one-off jump to an error line that keeps no position
     if (box) box.scrollTop = Math.max(0, (line - 3) * 20);
   }
 

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, InjectionToken, input, Signal, viewChild } from '@angular/core';
 import { ProfileDraft } from './profile-draft';
+import { PdOwnedScroll } from '@decryp7/paddock-ui/scroll';
 
 /** The text a `TomlEditor` edits and the problem to pin to a line. */
 export interface TomlDocument {
@@ -14,16 +15,18 @@ export const TOML_DOCUMENT = new InjectionToken<TomlDocument>('TOML_DOCUMENT');
 /** Plain TOML editing with line numbers; the backend's validation error is pinned to its line. */
 @Component({
   selector: 'debrief-toml-editor',
+  imports: [PdOwnedScroll],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="editor">
-      <div class="gutter mono" #gutter aria-hidden="true">
+      <div class="gutter mono" #gutter pdOwnedScroll aria-hidden="true">
         @for (n of lineNumbers(); track n) {
           <div [class.err]="n === errorLine()">{{ n }}</div>
         }
       </div>
       <textarea
         #area
+        pdOwnedScroll
         class="mono"
         spellcheck="false"
         [attr.aria-label]="label() || profileLabel"

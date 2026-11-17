@@ -25,6 +25,7 @@ import { AiCitations } from './citation-actions';
 import { QueryChip } from './query-chip';
 import { isNotFound } from './markdown';
 import { AiRichText } from './rich-text';
+import { PdOwnedScroll } from '@decryp7/paddock-ui/scroll';
 
 /**
  * The AI assistant chat (a dock view). Answers stream in with the tools the model used, proposals to
@@ -34,7 +35,7 @@ import { AiRichText } from './rich-text';
 @Component({
   selector: 'debrief-ai-chat-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [WaitingFor, QueryChip, AiRichText, AiProposalCard, AgentApprovalCard, LinkCard, AgentPaused, ChatBrowserBar, ResearchOfferCard, ChatComposer, Icon, CdkMenu, CdkMenuItem, CdkMenuTrigger],
+  imports: [WaitingFor, QueryChip, AiRichText, AiProposalCard, AgentApprovalCard, LinkCard, AgentPaused, ChatBrowserBar, ResearchOfferCard, ChatComposer, Icon, CdkMenu, CdkMenuItem, CdkMenuTrigger, PdOwnedScroll],
   template: `
     <div class="bar" role="toolbar" aria-label="Chat" i18n-aria-label="@@ai.chat.toolbar.label">
       <label class="sr-only" for="ai-chat-session" i18n="@@ai.chat.session.label">Chat</label>
@@ -62,7 +63,7 @@ import { AiRichText } from './rich-text';
       </div>
     }
 
-    <div class="log" role="log" aria-live="polite" aria-label="Conversation" i18n-aria-label="@@ai.chat.log.label" #log>
+    <div class="log" role="log" aria-live="polite" aria-label="Conversation" i18n-aria-label="@@ai.chat.log.label" #log pdOwnedScroll>
       @if (!store.activeTurns().length && !store.loading()) {
         <div class="empty">
           <p class="muted" i18n="@@ai.chat.empty">Ask about the loaded logs. Answers cite events and queries you can open.</p>

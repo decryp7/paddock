@@ -13,6 +13,7 @@ import { bytes, duration, int, rate } from '../../shared/format';
 import { Panel } from '../../shared/ui/panel';
 import { PlaygroundChat } from './playground-chat';
 import { PlaygroundStore, type TurnStats } from './playground.store';
+import { PdOwnedScroll } from '@decryp7/paddock-ui/scroll';
 
 const SUGGESTIONS = ['Explain what a KV cache is in two sentences.', 'Write a haiku about a pit stop.', 'Summarise: the service restarted twice after a pool timeout.'];
 
@@ -31,7 +32,7 @@ export function statsText(s: TurnStats): string {
  */
 @Component({
   selector: 'pw-playground-page',
-  imports: [MatButton, MatFormField, MatLabel, MatInput, MatSlider, MatSliderThumb, MatIconModule, MatTooltipModule, MatTabGroup, MatTab, MatTabContent, NgTemplateOutlet, Panel, PdSelect, PlaygroundChat],
+  imports: [MatButton, MatFormField, MatLabel, MatInput, MatSlider, MatSliderThumb, MatIconModule, MatTooltipModule, MatTabGroup, MatTab, MatTabContent, NgTemplateOutlet, Panel, PdSelect, PlaygroundChat, PdOwnedScroll],
   providers: [PlaygroundStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './playground-page.html',

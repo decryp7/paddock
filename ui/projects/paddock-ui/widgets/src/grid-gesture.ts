@@ -195,6 +195,7 @@ export class PdGridGesture {
     else if (s.py > box.bottom - EDGE) speed = MAX_SPEED * Math.min(1, (s.py - (box.bottom - EDGE)) / EDGE);
     if (speed === 0) return false;
     const before = el.scrollTop;
+    // conformance: owned-scroll — a drag's auto-scroll nudges the caller's scroller (or the page) from where it is now and reads it back at once; it keeps no position
     el.scrollTop = before + speed;
     return el.scrollTop !== before;
   }
