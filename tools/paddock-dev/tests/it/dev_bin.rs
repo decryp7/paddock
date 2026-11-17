@@ -48,7 +48,8 @@ fn a_spawned_binary_has_the_wrapper_off() {
 }
 
 /// The audit: only this file names the binary, so every spawn is hardened. A new test file that names it directly fails here and
-/// is told what to use.
+/// is told what to use. `check_c123.rs` is the one other file that holds the name: as the text of C123's own samples, in strings
+/// that start nothing.
 #[test]
 fn no_test_file_starts_the_binary_without_the_helper() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/it");
@@ -56,7 +57,7 @@ fn no_test_file_starts_the_binary_without_the_helper() {
     let mut bad = Vec::new();
     for e in std::fs::read_dir(&dir).unwrap().flatten() {
         let p = e.path();
-        if p.extension().is_some_and(|x| x == "rs") && p.file_name().is_some_and(|n| n != "dev_bin.rs") {
+        if p.extension().is_some_and(|x| x == "rs") && p.file_name().is_some_and(|n| n != "dev_bin.rs" && n != "check_c123.rs") {
             let text = std::fs::read_to_string(&p).unwrap();
             if text.contains(&needle) || text.contains("CARGO_BIN_EXE_paddock-dev") {
                 bad.push(p.file_name().unwrap().to_string_lossy().into_owned());
