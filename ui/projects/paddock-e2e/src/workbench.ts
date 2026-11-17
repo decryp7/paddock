@@ -130,7 +130,7 @@ export class WorkbenchPalette {
   /** Runs the option whose text contains `label` (Enter on it). */
   async run(label: string | RegExp): Promise<void> {
     await this.options.filter({ hasText: label }).first().click();
-    await expect(this.dialog).toHaveCount(0);
+    await expect(this.dialog, `the palette closes once "${label}" is chosen`).toHaveCount(0);
   }
 }
 

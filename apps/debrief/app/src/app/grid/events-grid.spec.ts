@@ -1,4 +1,5 @@
 import { splitInstance } from './events-grid';
+import { ManualClock } from '../../testing/manual-clock';
 import { TestBed } from '@angular/core/testing';
 import { all, buttonByText, el, provideTinyBackend, settle, testLogger, text, tinyBackend } from '../../testing/helpers';
 import { Page, PageRequest, RecordView } from '../core/api.types';
@@ -11,13 +12,27 @@ import { LiveFeed } from '../live/live-feed';
 import { LiveFollow } from '../live/live-follow.store';
 import { WorkspaceStore } from '../core/workspace.store';
 import { SettingsStore } from '../settings/settings.store';
-import { EventsGrid, SCROLL_IDLE_MS } from './events-grid';
+import { EventsGrid } from './events-grid';
 import { GridSelection } from './grid-selection';
 import { RecordActions } from '../context/record-actions';
 import { HighlightRules } from '../projects/bookmarks/highlight-rules.store';
 import { at } from '../../testing/must';
 
 const VIEWPORT_H = 260;
+
+/** A scroll by the user: a real one always comes with an input event (the grid tells it from the browser's own scroll adjustments by that). */
+function userScroll(vp: HTMLElement): void {
+  vp.dispatchEvent(new WheelEvent('wheel', { deltaY: 0, bubbles: true }));
+  vp.dispatchEvent(new Event('scroll'));
+}
+
+/** Pages are fetched once scrolling has paused: waits on that condition (the store's idle timer is no longer pending), not on a fixed time. */
+async function scrollIdle(f: { componentInstance: unknown; whenStable(): Promise<unknown> }): Promise<void> {
+  const rowsOf = (f.componentInstance as { rows: { scrollIdlePending: boolean } }).rows;
+  await settle(f as never); // the fill effect schedules the fetch
+  await vi.waitFor(() => expect(rowsOf.scrollIdlePending).toBe(false));
+  await settle(f as never);
+}
 
 function fakeRow(i: number): RecordView {
   return { id: i, ts: 1_700_000_000_000 + i, tsState: 'parsed', level: 'Information', message: `row ${i}`, template: null, exception: null, fields: { n: i }, source: 0, sourceName: 's.log', line: i + 1, byteOffset: 0, group: 'g', markers: [] };
@@ -38,18 +53,11 @@ class HugeBackend extends MockBackend {
 }
 
 describe('EventsGrid', () => {
-  let restore: PropertyDescriptor | undefined;
-  beforeAll(() => {
-    restore = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
-    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-      configurable: true,
-      get(this: HTMLElement) {
+  // Restored after each test (restoreMocks in vitest-base.config.mts).
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
         return this.classList?.contains('viewport') ? VIEWPORT_H : 0;
-      },
     });
-  });
-  afterAll(() => {
-    if (restore) Object.defineProperty(HTMLElement.prototype, 'clientHeight', restore);
   });
   beforeEach(() => localStorage.clear());
 
@@ -408,7 +416,8 @@ describe('EventsGrid', () => {
     expect(store.anchorMissed()).toBe(false);
     expect(all(fixture, '.row.sel')).toHaveLength(1);
     // The log shows the jump was asked again (ER-27), with no user content.
-    expect(testLogger().entries.filter((e) => e.category === 'ui.grid').map((e) => e.message)).toEqual(['Query changed during a jump; asking again', 'Jump resolved']);
+    // The scroll writes of the grid log too (ADR 0072): this is about the jump's own lines.
+    expect(testLogger().entries.filter((e) => e.category === 'ui.grid' && /jump/i.test(e.message)).map((e) => e.message)).toEqual(['Query changed during a jump; asking again', 'Jump resolved']);
   });
 
   it('a newer jump wins over an older one still on its way', async () => {
@@ -553,9 +562,8 @@ describe('EventsGrid', () => {
     expect(parseFloat(spacer.style.height)).toBeLessThanOrEqual(10_000_000);
     expect(rows(fixture).length).toBeLessThan(40);
     vp.scrollTop = parseFloat(spacer.style.height);
-    vp.dispatchEvent(new Event('scroll'));
-    await new Promise((r) => setTimeout(r, SCROLL_IDLE_MS + 30));
-    await settle(fixture);
+    userScroll(vp);
+    await scrollIdle(fixture);
     const last = rows(fixture).at(-1)!;
     expect(last.textContent).toContain('row 1999999');
     expect(backend.requests.some((r) => r.offset === 3999 * 500)).toBe(true);
@@ -593,18 +601,11 @@ describe('EventsGrid', () => {
 describe('EventsGrid at scale', { timeout: 30_000 }, () => {
   const ROW = 24;
   const BIG = 50_000_000;
-  let restore: PropertyDescriptor | undefined;
-  beforeAll(() => {
-    restore = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
-    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-      configurable: true,
-      get(this: HTMLElement) {
+  // Restored after each test (restoreMocks in vitest-base.config.mts).
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
         return this.classList?.contains('viewport') ? VIEWPORT_H + 28 : 0;
-      },
     });
-  });
-  afterAll(() => {
-    if (restore) Object.defineProperty(HTMLElement.prototype, 'clientHeight', restore);
   });
   beforeEach(() => localStorage.clear());
 
@@ -627,9 +628,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
   const key = (vp: HTMLElement, k: string) => vp.dispatchEvent(new KeyboardEvent('keydown', { key: k, cancelable: true }));
   const flush = async (f: Awaited<ReturnType<typeof render>>['fixture']) => {
     await settle(f);
-    // Pages are fetched once scrolling has paused.
-    await new Promise((r) => setTimeout(r, SCROLL_IDLE_MS + 30));
-    await settle(f);
+    await scrollIdle(f);
   };
 
   it('shows the full total and a capped spacer for 50 million rows', async () => {
@@ -643,7 +642,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
   it('jumps to the end with the scrollbar and shows the very last rows', async () => {
     const { fixture, grid, vp } = await render(synthetic());
     vp.scrollTop = grid.geometry().maxScroll;
-    vp.dispatchEvent(new Event('scroll'));
+    userScroll(vp);
     await flush(fixture);
     expect(grid.virtualTop()).toBe(grid.geometry().maxTop);
     const ids = visibleIds(fixture);
@@ -653,7 +652,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
   it('moves the scrollbar thumb proportionally', async () => {
     const { fixture, grid, vp } = await render(synthetic());
     vp.scrollTop = grid.geometry().maxScroll / 2;
-    vp.dispatchEvent(new Event('scroll'));
+    userScroll(vp);
     await flush(fixture);
     expect(Math.abs(grid.virtualTop() / ROW - BIG / 2)).toBeLessThan(VIEWPORT_H / ROW + 1);
     expect(visibleIds(fixture).some((i) => Math.abs(i - BIG / 2) < 40)).toBe(true);
@@ -749,11 +748,11 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     const e = new WheelEvent('wheel', { deltaY: 30, cancelable: true });
     vp.dispatchEvent(e);
     const top = grid.virtualTop();
-    vp.dispatchEvent(new Event('scroll'));
+    userScroll(vp);
     expect(grid.virtualTop()).toBe(top);
     // A scroll the user caused (somewhere else) is followed.
     vp.scrollTop = 5_000_000;
-    vp.dispatchEvent(new Event('scroll'));
+    userScroll(vp);
     await flush(fixture);
     expect(grid.virtualTop()).toBeGreaterThan(1e8);
   });
@@ -762,7 +761,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     const { fixture, grid, vp } = await render(synthetic());
     for (let i = 1; i <= 50; i++) {
       vp.scrollTop = i * 150_000;
-      vp.dispatchEvent(new Event('scroll'));
+      userScroll(vp);
       await settle(fixture, 2);
     }
     await flush(fixture);
@@ -802,7 +801,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     try {
       for (let i = 1; i <= 20; i++) {
         vp.scrollTop = i * 150_000;
-        vp.dispatchEvent(new Event('scroll'));
+        userScroll(vp);
         fixture.detectChanges();
         await vi.advanceTimersByTimeAsync(10);
       }
@@ -823,13 +822,13 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     const { fixture, vp } = await render(backend);
     const query = vi.spyOn(backend, 'queryPage').mockRejectedValue('engine down');
     vp.scrollTop = 4_000_000;
-    vp.dispatchEvent(new Event('scroll'));
+    userScroll(vp);
     await flush(fixture);
     expect(el(fixture, '.err-card').textContent).toContain('engine down');
     const failedCalls = query.mock.calls.length;
     for (const top of [4_000_010, 4_000_020, 4_000_030]) {
       vp.scrollTop = top;
-      vp.dispatchEvent(new Event('scroll'));
+      userScroll(vp);
       await flush(fixture);
     }
     expect(query.mock.calls.length).toBe(failedCalls);
@@ -845,7 +844,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     const { fixture, grid, vp } = await render(backend);
     vi.spyOn(backend, 'queryPage').mockRejectedValueOnce('far page failed');
     vp.scrollTop = 4_000_000;
-    vp.dispatchEvent(new Event('scroll'));
+    userScroll(vp);
     await flush(fixture);
     expect(el(fixture, '.err-card').textContent).toContain('far page failed');
     buttonByText(fixture, 'Retry').click();
@@ -856,22 +855,32 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
   });
 
   describe('live tail', () => {
+    /** Moves the feed's clock one tick at a time until `done()`, letting the grid take each batch (a bounded number of ticks). */
+    async function tickUntil(clock: ManualClock, fixture: Awaited<ReturnType<typeof render>>['fixture'], done: () => boolean) {
+      for (let i = 0; i < 40 && !done(); i++) {
+        await clock.advance(25);
+        await flush(fixture);
+      }
+      expect(done()).toBe(true);
+    }
+
     async function live(descending: boolean, scrollRows: number | 'end') {
-      const backend = synthetic(5000, { liveMs: 25 });
+      const clock = new ManualClock();
+      const backend = synthetic(5000, { liveMs: 25, clock });
       const { fixture, store, grid, vp } = await render(backend);
       if (descending) store.toggleSort();
       await flush(fixture);
       if (scrollRows === 'end') key(vp, 'End');
       else if (scrollRows > 0) {
         vp.scrollTop = scrollRows * ROW;
-        vp.dispatchEvent(new Event('scroll'));
+        userScroll(vp);
       }
       await flush(fixture);
       const before = { total: grid.total(), top: grid.virtualTop(), ids: visibleIds(fixture) };
       const tail = TestBed.inject(LiveTail);
       await tail.toggle();
       expect(tail.enabled()).toBe(true);
-      await vi.waitFor(() => expect(grid.total()).toBeGreaterThan(before.total + 1), { timeout: 3000 });
+      await tickUntil(clock, fixture, () => grid.total() > before.total + 1);
       await tail.toggle();
       await flush(fixture);
       return { fixture, store, grid, before, tail };
@@ -910,7 +919,11 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
     it('holds the rows while not following, counts the new events, and reveals the newest on request', async () => {
       for (const descending of [true, false]) {
         TestBed.resetTestingModule();
-        const backend = synthetic(5000, { liveMs: 25 });
+        // The backend's pushes run on a clock the test moves (ER-28; measured in 8a5ad864a on fix/debrief-events-grid-live-tail):
+        // the reveal scrolls to the end of the rows there are when it runs, and with a real timer a push after it moved that end
+        // by one row (24 px) before the assertion read it (120052 against 120028, once in about three full runs; run 8191 too).
+        const clock = new ManualClock();
+        const backend = synthetic(5000, { liveMs: 25, clock });
         const { fixture, store, grid } = await render(backend);
         if (descending) store.toggleSort();
         await flush(fixture);
@@ -918,6 +931,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
         const feed = TestBed.inject(LiveFeed);
         const tail = TestBed.inject(LiveTail);
         await tail.toggle();
+        await clock.advance(100);
         await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1), { timeout: 3000 });
         expect(grid.total()).toBe(5000);
         await settle(fixture);
@@ -929,13 +943,279 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       }
     });
 
+    // Product bug (lessons.md 2026-11-16): the reveal asks for several pages in one round; an event pushed between two of the
+    // answers made a later page report a larger total than the one the scroll to the end was made for, and the grid stayed one
+    // row (24 px) short of the newest event. The order is forced here: the second page of the reveal's round is answered after a push.
+    it('reveals the newest event even when a push lands between the pages of the reveal\'s refresh', async () => {
+      TestBed.resetTestingModule();
+      const clock = new ManualClock();
+      const backend = synthetic(5000, { liveMs: 25, clock });
+      const { fixture, grid } = await render(backend);
+      await flush(fixture);
+      TestBed.inject(LiveFollow).setFollow(false);
+      const feed = TestBed.inject(LiveFeed);
+      await TestBed.inject(LiveTail).toggle();
+      await clock.advance(100);
+      await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1));
+      await settle(fixture);
+      const answer = backend.queryPage.bind(backend);
+      let asked = 0;
+      vi.spyOn(backend, 'queryPage').mockImplementation(async (request) => {
+        // The reveal's first page is answered as asked; a push lands before the second page is read.
+        if (asked++ === 1) await clock.advance(25);
+        return answer(request);
+      });
+      el<HTMLButtonElement>(fixture, '[data-testid=new-events]').click();
+      await vi.waitFor(() => expect(asked).toBeGreaterThan(1));
+      await flush(fixture);
+      const total = grid.total();
+      expect(total).toBeGreaterThan(5000);
+      expect(grid.virtualTop(), `the view ends at the last of ${total} rows`).toBe(grid.geometry().maxTop);
+    });
+
+    // The follow-up of a reveal belongs to the reveal's own pages, not to its round: a page fetched because the user scrolled
+    // away later (the grid holds new events, so no new round starts) must not jump the view back to the end.
+    it('does not pull the view back to the end after the user scrolls away from a reveal', async () => {
+      TestBed.resetTestingModule();
+      const clock = new ManualClock();
+      const backend = synthetic(5000, { liveMs: 25, clock });
+      const { fixture, grid, vp } = await render(backend);
+      await flush(fixture);
+      TestBed.inject(LiveFollow).setFollow(false);
+      const feed = TestBed.inject(LiveFeed);
+      await TestBed.inject(LiveTail).toggle();
+      await clock.advance(100);
+      await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1));
+      await settle(fixture);
+      el<HTMLButtonElement>(fixture, '[data-testid=new-events]').click();
+      await flush(fixture);
+      expect(grid.virtualTop()).toBe(grid.geometry().maxTop);
+      // The user scrolls to the top; more events arrive and are held; then the user scrolls to the middle.
+      TestBed.inject(LiveFollow).setFollow(false);
+      await clock.advance(100);
+      await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(0));
+      vp.scrollTop = 0;
+      userScroll(vp);
+      await flush(fixture);
+      await clock.advance(100);
+      vp.scrollTop = 60_000;
+      userScroll(vp);
+      await flush(fixture);
+      await settle(fixture);
+      expect(grid.virtualTop()).toBeLessThan(70_000);
+    });
+
+    // ADR 0072. The reveal with its second page held back (answered after a push); `release()` answers it.
+    async function revealWithHeldPage() {
+      TestBed.resetTestingModule();
+      const clock = new ManualClock();
+      const backend = synthetic(5000, { liveMs: 25, clock });
+      const { fixture, grid, vp } = await render(backend);
+      await flush(fixture);
+      TestBed.inject(LiveFollow).setFollow(false);
+      const feed = TestBed.inject(LiveFeed);
+      await TestBed.inject(LiveTail).toggle();
+      await clock.advance(100);
+      await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1));
+      await settle(fixture);
+      const answer = backend.queryPage.bind(backend);
+      let asked = 0;
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      vi.spyOn(backend, 'queryPage').mockImplementation(async (request) => {
+        // The first page of the reveal is answered as asked; the second waits until the test lets it go (after a push).
+        if (asked++ === 1) await held;
+        return answer(request);
+      });
+      el<HTMLButtonElement>(fixture, '[data-testid=new-events]').click();
+      await vi.waitFor(() => expect(asked).toBeGreaterThan(1));
+      await settle(fixture);
+      return { fixture, grid, vp, clock, release: async () => { await clock.advance(25); release(); await flush(fixture); } };
+    }
+
+    it('G1: a key move during a reveal ends its hold: a later page with a larger total does not pull the view back', async () => {
+      const { fixture, grid, vp, release } = await revealWithHeldPage();
+      key(vp, 'PageUp');
+      await settle(fixture);
+      const left = grid.virtualTop();
+      expect(left).toBeLessThan(grid.geometry().maxTop);
+      await release();
+      expect(grid.virtualTop(), 'the view stays where the user moved it').toBeLessThan(grid.geometry().maxTop - 5 * ROW);
+    });
+
+    it('G1: a wheel in scaled mode and a click on the scrollbar are user take-overs too', async () => {
+      const { fixture, grid, vp, release } = await revealWithHeldPage();
+      vp.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      vp.dispatchEvent(new WheelEvent('wheel', { deltaY: -480, cancelable: true, bubbles: true }));
+      vp.scrollTop = Math.max(0, vp.scrollTop - 480);
+      userScroll(vp);
+      await settle(fixture);
+      await release();
+      expect(grid.virtualTop()).toBeLessThan(grid.geometry().maxTop - 5 * ROW);
+    });
+
+    it('G9: a page fetched after the reveal that reports a larger total keeps the pinned view on the newest row', async () => {
+      const { fixture, grid, clock, release } = await revealWithHeldPage();
+      await release();
+      expect(grid.virtualTop()).toBe(grid.geometry().maxTop);
+      // An event is pushed; a page the view did not ask for before is fetched (the engine reads the new total with it).
+      await clock.advance(25);
+      (grid as unknown as { rows: { ensurePage(page: number): void } }).rows.ensurePage(2);
+      await flush(fixture);
+      expect(grid.virtualTop()).toBe(grid.geometry().maxTop);
+    });
+
+    // Found by the e2e (WebKit, wheel dispatched right after the click): the click's request is handled when the change detection runs,
+    // which can be after the user's wheel. The wheel came later and wins: the request still reloads the rows but does not pin the view.
+    it('G10: a wheel that arrives before the reveal request is handled is not undone by it', async () => {
+      TestBed.resetTestingModule();
+      const clock = new ManualClock();
+      const backend = synthetic(5000, { liveMs: 25, clock });
+      const { fixture, grid, vp } = await render(backend);
+      await flush(fixture);
+      TestBed.inject(LiveFollow).setFollow(false);
+      const feed = TestBed.inject(LiveFeed);
+      await TestBed.inject(LiveTail).toggle();
+      await clock.advance(100);
+      await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1));
+      await settle(fixture);
+      const before = grid.virtualTop();
+      el<HTMLButtonElement>(fixture, '[data-testid=new-events]').click();
+      vp.dispatchEvent(new WheelEvent('wheel', { deltaY: -900, cancelable: true, bubbles: true }));
+      vp.scrollTop = Math.max(0, vp.scrollTop - 900);
+      userScroll(vp);
+      await flush(fixture);
+      await settle(fixture);
+      expect(grid.virtualTop(), 'the view is not taken to the end').toBeLessThan(grid.geometry().maxTop - 5 * ROW);
+      expect(before).toBeLessThan(grid.geometry().maxTop - 5 * ROW);
+    });
+
+    // G10b: Follow on and Resume are requests too: the stamp is taken when the user acts (in the store), not when the feed's effect runs.
+    for (const how of ['Follow on', 'Resume'] as const) {
+      it(`G10b: a wheel after ${how} is pressed but before its effect runs is not undone`, async () => {
+        TestBed.resetTestingModule();
+        const clock = new ManualClock();
+        const backend = synthetic(5000, { liveMs: 25, clock });
+        const { fixture, grid, vp } = await render(backend);
+        await flush(fixture);
+        const follow = TestBed.inject(LiveFollow);
+        if (how === 'Follow on') follow.setFollow(false);
+        else follow.pause();
+        const feed = TestBed.inject(LiveFeed);
+        await TestBed.inject(LiveTail).toggle();
+        await clock.advance(100);
+        await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1));
+        await settle(fixture);
+        if (how === 'Follow on') follow.setFollow(true);
+        else follow.resume();
+        vp.dispatchEvent(new WheelEvent('wheel', { deltaY: -900, cancelable: true, bubbles: true }));
+        vp.scrollTop = Math.max(0, vp.scrollTop - 900);
+        userScroll(vp);
+        await flush(fixture);
+        await settle(fixture);
+        expect(grid.virtualTop(), 'the view is not taken to the end').toBeLessThan(grid.geometry().maxTop - 5 * ROW);
+      });
+    }
+
+    // The classifier's wiring (scroll-classify.spec.ts holds its table): `onScroll` says whether the layout is changing. The browser's scroll metrics
+    // are stubbed (jsdom has none): the scrollable range is the spacer's height, and the grid's last write saw `grown` px less of it.
+    describe('a scroll with no input event', () => {
+      type Internals = { inputSinceWrite: boolean; layoutDirty: boolean; writtenScroll: number; writtenMax: number; writtenClient: number; pendingWrite: unknown };
+      async function viewAfterGrowth(grown: number) {
+        TestBed.resetTestingModule();
+        vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) {
+          return this.classList?.contains('viewport') ? parseFloat((this.lastElementChild as HTMLElement | null)?.style.height || '0') + VIEWPORT_H + 28 : 0;
+        });
+        const { fixture, grid, vp } = await render(synthetic(5000, { liveMs: 25 }));
+        await flush(fixture);
+        const internals = grid as unknown as Internals;
+        const start = 60 * ROW;
+        vp.scrollTop = start;
+        userScroll(vp);
+        await flush(fixture);
+        // The grid's last write saw `grown` px less to scroll: the total grew since, with no write (oldest first, keep mode).
+        internals.inputSinceWrite = false;
+        internals.writtenScroll = start;
+        internals.writtenMax = vp.scrollHeight - vp.clientHeight - grown;
+        internals.writtenClient = vp.clientHeight;
+        return { fixture, grid, vp, internals, start };
+      }
+
+      it('is kept once the frame that renders a layout change has passed (find in page, assistive technology)', async () => {
+        const { grid, vp, internals, start } = await viewAfterGrowth(600);
+        await vi.waitFor(() => expect(internals.layoutDirty, 'the frame after the render has passed').toBe(false));
+        vp.scrollTop = start + 300; // inside the growth band, no wheel, key or pointer before it
+        vp.dispatchEvent(new Event('scroll'));
+        expect(grid.virtualTop(), 'the user\'s position, not written back').toBe(start + 300);
+        expect(internals.pendingWrite).toBeNull();
+      });
+
+      it('is the browser\'s own adjustment while the layout is changing: the grid\'s position is written back', async () => {
+        const { grid, vp, internals, start } = await viewAfterGrowth(600);
+        internals.layoutDirty = true;
+        vp.scrollTop = start + 300;
+        vp.dispatchEvent(new Event('scroll'));
+        expect(grid.virtualTop(), 'the grid\'s own position stays').toBe(start);
+        expect(internals.pendingWrite).not.toBeNull();
+      });
+    });
+
+    it('G2: a deferred write is dropped when the user moves the view in the same frame', async () => {
+      const { fixture, grid, vp, release } = await revealWithHeldPage();
+      // The held page answers (a larger total: a deferred write to the end is scheduled) and, before the render, the user presses PageUp.
+      const settled = release();
+      key(vp, 'PageUp');
+      await settled;
+      await settle(fixture);
+      expect(vp.scrollTop, 'the scroll position is the user\'s, not the end').toBeLessThan(grid.geometry().maxTop - 5 * ROW);
+    });
+
+    // ADR 0072, G4: `pinned` is stored; a resize keeps a pinned view on the newest row and a following grid keeps following.
+    it('G4: a smaller viewport while pinned keeps the view on the newest row, and the next push still follows', async () => {
+      // `vi.stubGlobal` is not undone by `restoreMocks`: put the real ResizeObserver back when the test ends, pass or fail.
+      onTestFinished(() => void vi.unstubAllGlobals());
+      TestBed.resetTestingModule();
+      let height = VIEWPORT_H;
+      vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.classList?.contains('viewport') ? height : 0;
+      });
+      let measure: () => void = () => undefined;
+      vi.stubGlobal('ResizeObserver', class {
+        constructor(cb: () => void) {
+          measure = cb;
+        }
+        observe(): void {
+          measure();
+        }
+        unobserve(): void {}
+        disconnect(): void {}
+      });
+      const clock = new ManualClock();
+      const { fixture, grid, vp } = await render(synthetic(5000, { liveMs: 25, clock }));
+      await flush(fixture);
+      key(vp, 'End'); // to the newest end: the view is pinned
+      await flush(fixture);
+      await TestBed.inject(LiveTail).toggle();
+      await clock.advance(100);
+      await flush(fixture);
+      expect(grid.virtualTop()).toBe(grid.geometry().maxTop);
+      height = VIEWPORT_H - 120;
+      measure();
+      await flush(fixture);
+      expect(grid.virtualTop(), 'a smaller viewport moves the end: the pinned view stays on the newest row').toBe(grid.geometry().maxTop);
+      await clock.advance(100);
+      await flush(fixture);
+      expect(grid.virtualTop(), 'the next push still follows').toBe(grid.geometry().maxTop);
+    });
+
     it('keeps the same rows selected when new events are inserted above them', async () => {
-      const backend = synthetic(5000, { liveMs: 25 });
+      const clock = new ManualClock();
+      const backend = synthetic(5000, { liveMs: 25, clock });
       const { fixture, store, grid, vp } = await render(backend);
       store.toggleSort();
       await flush(fixture);
       vp.scrollTop = 1000 * ROW;
-      vp.dispatchEvent(new Event('scroll'));
+      userScroll(vp);
       await flush(fixture);
       const visible = all<HTMLElement>(fixture, '.row:not(.placeholder)');
       at(visible, 3).click();
@@ -948,7 +1228,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       const total = grid.total();
       const tail = TestBed.inject(LiveTail);
       await tail.toggle();
-      await vi.waitFor(() => expect(grid.total()).toBeGreaterThan(total + 1), { timeout: 3000 });
+      await tickUntil(clock, fixture, () => grid.total() > total + 1);
       await tail.toggle();
       await flush(fixture);
       expect(selectedIds()).toEqual(before);

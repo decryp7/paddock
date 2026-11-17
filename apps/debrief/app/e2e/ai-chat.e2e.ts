@@ -1,8 +1,9 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { expectNoSeriousViolations } from './axe';
 import { ask, openAiApp, openChat, runCommand, waitAnswered } from './ai-support';
 import { openMenu } from './menu-support';
 import { gridRows, hideInspectorFlyout } from './app';
+import { openAppWith } from './mock-url';
 
 // The assistant chat against the scripted AI mock (src/app/core/mock/mock-ai-backend.ts): streaming with tool
 // chips, evidence links, and proposals applied through the normal save paths.
@@ -103,10 +104,27 @@ test.describe('AI chat', () => {
     await ask(chat, 'drop health checks with a pipeline');
     const card = chat.getByTestId('ai-proposal');
     await expect(card).toContainText('keeps 52, drops 8, changes 0');
+    // The answer's text still streams in above the card and moves it; a press and release on a moving card is no click (8 of 100 in
+    // WebKit, the same at every pinned instant; 0 of 100 once the answer is done).
+    await waitAnswered(chat);
     await card.getByRole('button', { name: 'Add to profile' }).click();
     await expect(card).toContainText('Pipeline steps added to the profile');
     await openMenu(page, 'Edit');
     await expect(page.getByRole('menuitem', { name: /^Undo AI: pipeline steps/ })).toBeVisible();
+  });
+
+  test('the conversation is busy from the moment its turn is drawn until the answer is done', async ({ page }) => {
+    // Slow steps: the busy state lasts long enough to be seen. Without the aria-busy marker a wait for "no Stop button" passed before the stream began.
+    await openAppWith(page, '?mockAiStepMs=150');
+    await expect(gridRows(page).first()).toBeVisible();
+    const chat = await openChat(page);
+    const log = chat.getByRole('log', { name: 'Conversation' });
+    await expect(log).toHaveAttribute('aria-busy', 'false');
+    await ask(chat, 'What crashed?');
+    await expect(log, 'busy while the turn runs').toHaveAttribute('aria-busy', 'true');
+    await waitAnswered(chat);
+    await expect(log).toHaveAttribute('aria-busy', 'false');
+    await expect(chat.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
   });
 
   test('a long conversation scrolls in its list only: the panel has no extra scroll space and the composer stays at the bottom', async ({ page }) => {

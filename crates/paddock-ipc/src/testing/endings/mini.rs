@@ -506,6 +506,7 @@ fn owner_close(
         flushed.to_string()
     };
     let sent = write_under(sink, b"CLOSING stopping\n", &shared.clock, REASON_DEADLINE);
+    shared.log.push(format!("reason decided sent={sent}"));
     if !sent {
         // The peer is not reading: the closer closes the stream.
         drop(sink.inner.shutdown(Shutdown::Both));
@@ -591,6 +592,21 @@ pub fn run(
     fault: Option<MiniFault>,
     scenario: Scenario,
 ) -> Result<(Observed, Expect), &'static str> {
+    run_with(fault, scenario, &|_, _| ())
+}
+
+/// [`run`] with `after_reason_deadline`, called with the log and the log's length from just before the reason deadline of an
+/// owner close with a peer that is not reading passes on the clock. A test uses it to make the harness slow at that point:
+/// the endpoint's reaction to the deadline (the `reason decided` line) then happens before the harness does anything else,
+/// the order a loaded machine can produce (ER-28: run 8174 failed this scenario once in about 3000).
+///
+/// # Errors
+/// The scenario has no counterpart in the mini protocol.
+pub fn run_with(
+    fault: Option<MiniFault>,
+    scenario: Scenario,
+    after_reason_deadline: &dyn Fn(&LogCapture, usize),
+) -> Result<(Observed, Expect), &'static str> {
     if !applies(scenario) {
         return Err("the mini protocol has no counterpart for this scenario");
     }
@@ -660,7 +676,13 @@ pub fn run(
                         hung = !clock.wait_for_pending(1, wait);
                     }
                     if !hung {
+                        // The peer reads again before the reason deadline can pass: the endpoint's last try of the reason
+                        // (made when its wait ends) then finds a peer that takes it, whichever thread runs first. Letting
+                        // it read after the advance made the outcome a race (CI run 8174: `reasonUnsent`, `drain=none`).
+                        ep.limit_peer(0, usize::MAX);
+                        let before = log.len();
                         clock.advance(REASON_DEADLINE);
+                        after_reason_deadline(&log, before);
                     }
                     if hung {
                         // Unblock the broken endpoint's thread so the test leaves nothing behind.
@@ -672,8 +694,6 @@ pub fn run(
                         };
                         return Ok((o, Expect::optional_reason()));
                     }
-                    // Now the peer reads again.
-                    ep.limit_peer(0, usize::MAX);
                 }
             }
             let raw = read_to_end(&mut c, GUARD);

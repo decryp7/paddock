@@ -1,0 +1,75 @@
+# Whether Dyno's tracked documentation screenshots are current (apps/dyno/app/e2e/screenshots-check.spec.ts): regenerates the two documentation
+# specs on the Mac host runner and compares them with apps/dyno/docs/screenshots by a pixel tolerance (apps/dyno/app/e2e/screenshot-tolerance.ts,
+# limits with their measurement). A stale picture fails with the command that regenerates it (ER-40).
+# REPORT-ONLY until its first green run on the real tree (ER-41): `continue-on-error: true`; record the run id here, then remove it.
+# Recorded first green run: not yet.
+# Runs only when Dyno's UI, its mock or the pictures change (push to main, paths below), on demand, and in the nightly safety net.
+name: dyno-screenshots
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/dyno/app/src/**"
+      - "apps/dyno/app/e2e/**"
+      - "apps/dyno/app/playwright.config.ts"
+      - "apps/dyno/docs/screenshots/**"
+      - "ui/projects/paddock-ui/**"
+      - ".gitea/workflows/dyno-screenshots.yml"
+  workflow_dispatch:
+
+env:
+  # The fallback switch of conformance/ci/kit.sh (WP-1), as in ci.yml: the shared actions call kit.sh.
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  screenshots:
+    name: screenshots current (macOS)
+    runs-on: macos-latest
+    continue-on-error: true # report-only (ER-41)
+    timeout-minutes: 45
+    env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      # The tag rule for ./dev (job-isolation runs it): a tag run never downloads a stored tool binary.
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+    defaults:
+      run:
+        working-directory: apps/dyno/app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.gitea/actions/build-jobs
+      - uses: ./.gitea/actions/job-isolation
+      - uses: ./.gitea/actions/node-caches
+      - name: Install
+        working-directory: .
+        run: npm ci
+      - name: Build the shared packages the app consumes
+        working-directory: .
+        run: |
+          npm run build -w ui
+          npm run build:e2e -w ui
+      - name: Chromium
+        run: |
+          PW_VERSION=$(node -p "require('playwright-core/package.json').version")
+          BROWSERS="${RUNNER_TOOL_CACHE:-$HOME/.cache}/paddock-playwright/$PW_VERSION"
+          echo "PLAYWRIGHT_BROWSERS_PATH=$BROWSERS" >> "$GITHUB_ENV"
+          if [ ! -f "$BROWSERS/.installed-chromium" ]; then
+            PLAYWRIGHT_BROWSERS_PATH="$BROWSERS" npx playwright install chromium
+            touch "$BROWSERS/.installed-chromium"
+          fi
+      - name: Regenerate into a scratch folder and compare with the tracked pictures
+        run: |
+          # The job slot's own port (conformance/ci/ports.txt); the scratch folder is the runner's temp, never the checkout.
+          port=$(bash ../../../conformance/ci/kit.sh isolation port webkit)
+          export PW_PORT=$port SCREENSHOT_DIR="$RUNNER_TEMP/dyno-screenshots"
+          npm run screenshots:check
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release

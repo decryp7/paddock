@@ -18,6 +18,14 @@ The developer and CI tool of ADR 0022. Run it with `./dev <command>` (`dev.cmd` 
   `paddock-cli`'s (2 usage, 4 refused, ...).
 - When a path dependency in `crates/` changes its dependencies, regenerate this lockfile in the same change.
 
+## `sccache env` and the build folder (feat/local-sccache)
+
+`eval "$(./dev sccache env)"` installs the pinned sccache (the CI pin; `<tool cache>/tools/sccache/<version>/`), starts the one local
+server and prints `export` lines (`RUSTC_WRAPPER` and the cache settings; never a credential). The tools that start builds (push gate
+Clippy, `gen check`) use the installed copy and never download. A build folder reaches cargo as `--config build.target-dir=...` through
+`cargo_target.rs`, never as `CARGO_TARGET_DIR`: sccache hashes every `CARGO_*` variable. `PADDOCK_SCCACHE=off` turns it off; the backend
+is `PADDOCK_SCCACHE_BACKEND` (`local` or `s3`). Details: docs/dev-setup.md, "Local sccache".
+
 ## `worktree` and `check primary` (ADR 0083, RT-3)
 
 One tool makes, claims and removes agent worktrees, so every one is locked with an owner note and bound to its agent, and no

@@ -1,8 +1,6 @@
 //! ADR 0073 / rule 73: the shipped `pitwall-server` carries no test switch. The fake engine is its own test-only
 //! program (`pitwall-fake-engine`); the server's command line does not know its flags.
 
-use paddock_testkit::TestCommand;
-
 /// Hang guard, never a verdict: a server that accepted a test flag would serve forever, so the guard turns that into a
 /// failure (the held child is killed when its future is dropped) instead of a stuck run.
 const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(60);
@@ -11,18 +9,14 @@ const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(60);
 /// the user's and take no fixed port), then `extra`.
 #[allow(clippy::disallowed_methods)] // a test starting the built binary and waiting for it to end
 async fn run_server(data: &std::path::Path, extra: &[&str]) -> std::process::Output {
-    let mut built = TestCommand::new(env!("CARGO_BIN_EXE_pitwall-server"));
-    built
+    let child = tokio::process::Command::new(env!("CARGO_BIN_EXE_pitwall-server"))
         .arg("--data-dir")
         .arg(data)
         .args(["--port", "0"])
         .args(extra)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    // The private folder stays until the child has ended (`_private` lives to the end of the function).
-    let (std_cmd, _private) = built.into_parts();
-    let child = tokio::process::Command::from(std_cmd)
+        .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .expect("pitwall-server starts");

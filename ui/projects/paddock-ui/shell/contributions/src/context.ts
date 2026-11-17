@@ -1,4 +1,5 @@
 import {
+  DestroyRef,
   EnvironmentInjector,
   EnvironmentProviders,
   inject,
@@ -116,10 +117,31 @@ export function provideShellContext<T extends object>(
 /** Schedules work for when the window is idle (`requestIdleCallback`, else a macrotask). */
 export const SHELL_IDLE = new InjectionToken<(work: () => void) => void>('SHELL_IDLE', {
   providedIn: 'root',
-  factory: () => (work) => {
-    const w = globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number };
-    if (typeof w.requestIdleCallback === 'function') w.requestIdleCallback(work, { timeout: 2000 });
-    else setTimeout(work, 0);
+  factory: () => {
+    const destroy = inject(DestroyRef);
+    return (work) => {
+      // After teardown nothing is scheduled (`onDestroy` would throw NG0205 with the timer already armed).
+      if (destroy.destroyed) return;
+      const w = globalThis as {
+        requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+        cancelIdleCallback?: (id: number) => void;
+      };
+      // Work still waiting when the injector goes is dropped: it would run into whatever comes next.
+      let cancel: () => void;
+      let off: () => void = () => undefined;
+      const run = (): void => {
+        off();
+        work();
+      };
+      if (typeof w.requestIdleCallback === 'function') {
+        const id = w.requestIdleCallback(run, { timeout: 2000 });
+        cancel = () => w.cancelIdleCallback?.(id);
+      } else {
+        const id = setTimeout(run, 0);
+        cancel = () => clearTimeout(id);
+      }
+      off = destroy.onDestroy(cancel);
+    };
   },
 });
 

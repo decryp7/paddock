@@ -1,4 +1,5 @@
-import { axeEveryDialog, axeTargets, expect, pressMod, test, type AxeTarget } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeEveryDialog, axeTargets, pressMod, type AxeTarget } from '@decryp7/paddock-e2e';
 import { FIXTURES } from './dialog-fixtures';
 
 // Accessibility (C33): axe over every Dyno screen, dialog window and the tray popover, in both themes, against WCAG 2.2 AA.
@@ -15,6 +16,7 @@ const target = (p: string): AxeTarget => ({
     // Settled: nothing is loading and every finite CSS/Web animation (fades, skeleton to content) has finished, so axe sees
     // final colours. getAnimations() cannot see ECharts, which animates on canvas; the charts' own entry is short and the
     // chart text is not what axe measures there.
+    // conformance: e2e-wait — an empty set of animations is the settled state, not an early read: there is nothing to wait for
     await page.waitForFunction(
       () =>
         !document.querySelector('[aria-busy="true"]') &&

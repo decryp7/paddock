@@ -1,6 +1,6 @@
 import { Page, PageRequest, Query, RecordView } from '../core/api.types';
 import { EMPTY_QUERY } from '../core/workspace/query.store';
-import { liveMode, PagedRowsStore } from './paged-rows.store';
+import { PagedRowsStore } from './paged-rows.store';
 
 const row = (id: number) => ({ id }) as RecordView;
 
@@ -33,17 +33,6 @@ function fakeEngine(total: number) {
 }
 
 const q = (patch: Partial<Query> = {}): Query => ({ ...EMPTY_QUERY, ...patch });
-
-describe('liveMode', () => {
-  it('follows the end oldest-first, keeps the view newest-first, and obeys reveal requests', () => {
-    expect(liveMode(false, false, true)).toBe('end');
-    expect(liveMode(false, true, false)).toBe('keep');
-    expect(liveMode(true, true, false)).toBe('keep');
-    expect(liveMode(true, false, false)).toBe('shift');
-    expect(liveMode(true, false, false, 'end')).toBe('end');
-    expect(liveMode(false, false, true, 'start')).toBe('keep');
-  });
-});
 
 describe('PagedRowsStore', () => {
   it('fetches the first page on reset and serves rows from the cache', async () => {
@@ -212,6 +201,131 @@ describe('PagedRowsStore', () => {
     expect(store.rowAt(0)).toBeNull();
     await engine.flush();
     expect(store.rowAt(0)?.id).toBe(309);
+  });
+
+  // ADR 0072, decision 1: a round owns the pages it asked for.
+  describe('what a live round owns (ADR 0072)', () => {
+    /** A store with `total` rows (pageSize 100) that has loaded page 0 and is about to refresh. */
+    async function setup(total: number, descending: boolean) {
+      const engine = fakeEngine(total);
+      const arrivals: { mode: string; newTotal: number; delta: number }[] = [];
+      const store = new PagedRowsStore({ fetch: engine.fetch, pageSize: 100, onLive: (a) => arrivals.push(a) });
+      store.reset(q(), descending);
+      await engine.flush();
+      return { engine, store, arrivals };
+    }
+    const release = async (engine: ReturnType<typeof fakeEngine>, index: number) => {
+      const [call] = engine.calls.splice(index, 1);
+      call!.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+
+    it('shift mode re-applies the extra rows of a later page with a larger total (a push between the pages)', async () => {
+      const { engine, store, arrivals } = await setup(1000, true);
+      engine.setTotal(1010);
+      store.liveRefresh('shift', 300, 350);
+      expect(engine.calls.length).toBeGreaterThan(1);
+      await release(engine, 0);
+      expect(arrivals).toEqual([{ mode: 'shift', newTotal: 1010, delta: 10 }]);
+      engine.setTotal(1015);
+      await release(engine, 0);
+      expect(arrivals).toEqual([
+        { mode: 'shift', newTotal: 1010, delta: 10 },
+        { mode: 'shift', newTotal: 1015, delta: 5 },
+      ]);
+    });
+
+    it('a page the round did not ask for never moves the view, in end or shift mode', async () => {
+      for (const mode of ['end', 'shift'] as const) {
+        const { engine, store, arrivals } = await setup(1000, mode === 'shift');
+        engine.setTotal(1010);
+        store.liveRefresh(mode, 300, 350);
+        await engine.flush();
+        expect(arrivals).toHaveLength(1);
+        engine.setTotal(1020);
+        store.ensureRows([700]); // the user scrolled: this page is not the round's
+        await engine.flush();
+        expect(arrivals, mode).toHaveLength(1);
+      }
+    });
+
+    it('G9: a page fetched outside the round that reports a larger total reports the growth (the end moved while the view was pinned)', async () => {
+      const grown: { newTotal: number; delta: number }[] = [];
+      const engine = fakeEngine(1000);
+      const store = new PagedRowsStore({ fetch: engine.fetch, pageSize: 100, onGrow: (g) => grown.push(g) });
+      store.reset(q(), false);
+      await engine.flush();
+      expect(grown).toEqual([]);
+      engine.setTotal(1012);
+      store.ensureRows([700]); // a page the user's scrolling asked for
+      await engine.flush();
+      expect(grown).toEqual([{ newTotal: 1012, delta: 12 }]);
+      // Not for a page of a live round: that arrival is reported by the round.
+      engine.setTotal(1020);
+      store.liveRefresh('end', 300, 350);
+      await engine.flush();
+      expect(grown).toHaveLength(1);
+    });
+
+    // The reviewer's probes (ADR 0072, decision 1): the round's arrival starts from an owned page and ends with the user's take-over.
+    it('P1-2: the first answer of a page the round did not ask for does not start the round', async () => {
+      const { engine, store, arrivals } = await setup(1000, false);
+      engine.setTotal(1010);
+      store.liveRefresh('end', 900, 950);
+      const owned = engine.calls.splice(0);
+      store.ensureRows([450]); // not owned (the user scrolled, a fill)
+      const [other] = engine.calls.splice(0);
+      other!.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(arrivals, 'an answer to page 4 started the round').toEqual([]);
+      for (const c of owned) c.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(arrivals.map((a) => a.mode)).toEqual(['end']);
+    });
+
+    it('P1-2: a take-over before the first answer downgrades an end round to keep (and leaves shift alone)', async () => {
+      for (const [mode, expected] of [['end', 'keep'], ['shift', 'shift']] as const) {
+        const { engine, store, arrivals } = await setup(1000, mode === 'shift');
+        engine.setTotal(1010);
+        store.liveRefresh(mode, 900, 950);
+        store.endReveal(); // the grid calls this on a take-over
+        await engine.flush();
+        expect(arrivals.map((a) => a.mode), mode).toEqual([expected]);
+      }
+    });
+
+    it('P1-2: a failed first owned page ends the hold: the pages that answer later do not follow or start the round', async () => {
+      const { engine, store, arrivals } = await setup(1000, false);
+      engine.setTotal(1010);
+      store.liveRefresh('end', 900, 950);
+      const [first, ...rest] = engine.calls.splice(0);
+      first!.reject('engine down');
+      await Promise.resolve();
+      await Promise.resolve();
+      for (const c of rest) c.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(arrivals).toEqual([]);
+    });
+
+    it('a failed owned page ends the hold: a later owned page with a larger total no longer follows', async () => {
+      const { engine, store, arrivals } = await setup(1000, false);
+      engine.setTotal(1010);
+      store.liveRefresh('end', 300, 350);
+      expect(engine.calls.length).toBeGreaterThan(2);
+      await release(engine, 0);
+      expect(arrivals).toHaveLength(1);
+      engine.calls[0]!.reject('engine down');
+      engine.calls.splice(0, 1);
+      await Promise.resolve();
+      await Promise.resolve();
+      engine.setTotal(1020);
+      await engine.flush();
+      expect(arrivals).toHaveLength(1);
+    });
   });
 
   it('ignores a fetch before any query and accepts totals from jumps', () => {

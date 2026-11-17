@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { initialTotal, openApp } from './app';
 import { runCommand } from './analysis-support';
 import { openAppWith } from './mock-url';

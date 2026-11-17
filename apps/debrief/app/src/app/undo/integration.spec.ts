@@ -14,6 +14,10 @@ import { DashboardStore } from '../share/dashboard/dashboard.store';
 import { ReportStore } from '../share/report/report.store';
 import { UndoStack } from './undo-stack';
 import { at } from '../../testing/must';
+import { endMockJobs } from '../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 async function setup() {
   TestBed.configureTestingModule({ providers: [provideTinyBackend(), { provide: Platform, useValue: { pickProfileToOpen: async () => null, pickProfileToSave: async () => null, onFilesDropped: async () => () => undefined } }, ProfileDraft] });

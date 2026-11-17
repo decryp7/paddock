@@ -31,7 +31,7 @@ describe('TauriBackend commands', () => {
     ['previewRunnerConfig', (b) => b.previewRunnerConfig('r', { mode: 'raw', text: 'a' }), 'runner_config_preview', { runner: 'r', edit: { mode: 'raw', text: 'a' } }],
     ['saveRunnerConfig', (b) => b.saveRunnerConfig('r', { mode: 'raw', text: 'a' }, 'fp'), 'runner_config_save', { runner: 'r', edit: { mode: 'raw', text: 'a' }, base: 'fp' }],
     ['runnerProcesses', (b) => b.runnerProcesses('r'), 'runner_processes', { runner: 'r' }],
-    ['stopProcess', (b) => b.stopProcess('r', 7, null, false), 'runner_process_stop', { runner: 'r', pid: 7, startedAt: null, allowRunner: false }],
+    ['stopProcess', (b) => b.stopProcess('r', 7, 5, false), 'runner_process_stop', { runner: 'r', pid: 7, startedAt: 5, allowRunner: false }],
     ['keepProcess', (b) => b.keepProcess('r', 7, 5, { amount: 1, unit: 'hours' }), 'runner_process_keep', { runner: 'r', pid: 7, startedAt: 5, extra: { amount: 1, unit: 'hours' } }],
     ['engineReport', (b) => b.engineReport(), 'engine_report', undefined],
     ['previewEnginePrune', (b) => b.previewEnginePrune({ kinds: ['volumes'], olderThanDays: 0 }), 'engine_prune_preview', { selection: { kinds: ['volumes'], olderThanDays: 0 } }],
@@ -104,6 +104,17 @@ describe('TauriBackend platform', () => {
     expect(backend.platform()).toBe('browser');
     await backend.init();
     expect(backend.platform()).toBe('macos');
+  });
+
+  it('leaves no wait timer running once the shell has answered', async () => {
+    vi.useFakeTimers();
+    try {
+      const { backend } = setup('macos');
+      await backend.init();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('falls back to the user agent when the shell cannot answer', async () => {

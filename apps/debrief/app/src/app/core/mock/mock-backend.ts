@@ -103,6 +103,8 @@ export interface MockBackendOptions {
   slowImportMs?: number;
   /** With a slow import: finding the files takes this many ms per step (five steps each). */
   slowDiscoveryMs?: number;
+  /** Each page answers later by this many ms per page index: pages of one request are answered at different times (a push can land between them). */
+  pageStaggerMs?: number;
   /** The clock of every simulated delay, live tick and import step (default: the page's timers). */
   clock?: MockClock;
   /**
@@ -507,7 +509,7 @@ export class MockBackend implements DebriefBackend {
     return this.delay(() => {
       const page = this.redactPage(this.options.syntheticTotal ? syntheticPage(request, this.syntheticCount()) : this.engine.page(this.windowed(request)));
       return this.options.corruptMarkers ? { ...page, rows: page.rows.map((r) => ({ ...r, markers: undefined as never })) } : page;
-    }, 20);
+    }, 20 + (this.options.pageStaggerMs ?? 0) * Math.floor(request.offset / Math.max(1, request.limit)));
   }
 
   searchPartial(query: Query): Promise<PartialMatches | null> {

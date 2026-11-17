@@ -5,6 +5,8 @@ const eslint = require('@eslint/js');
 const { defineConfig } = require('eslint/config');
 const tseslint = require('typescript-eslint');
 const angular = require('angular-eslint');
+// Every e2e page runs on the pinned clock: specs reach `test` through e2e/test.ts only (C133).
+const { e2ePinnedClock } = require('../../../eslint/src/index.cjs');
 
 /**
  * Report-only rules (ER-41) run only in `npm run lint:report` (DEBRIEF_LINT_REPORT=1). `ng lint` fails on any
@@ -12,6 +14,12 @@ const angular = require('angular-eslint');
  * after its first green report on the real tree, recorded here by CI run id.
  */
 const REPORT = process.env['DEBRIEF_LINT_REPORT'] === '1' ? 'warn' : 'off';
+
+/** ADR 0071: the guard of a hand-rolled request counter: `mine !== this.seq`, `generation === store.generation()`, `gen !== this.gen`. */
+const REQUEST_COUNTER_SELECTORS = ['right.name', 'right.property.name', 'right.callee.property.name'].map((path) => ({
+  selector: `BinaryExpression[operator=/^[!=]==$/][left.name=/^(mine|seq|gen|generation)$/][${path}=/^(seq|gen|generation|\\w+Seq|\\w+Generation)$/]`,
+  message: 'A hand-rolled request counter: use LatestRequest from src/app/shared/latest-request.ts (ADR 0071).',
+}));
 
 /** Selectors that also match the grid's loading placeholder rows (see the e2e block below). */
 function rawRowSelectors() {
@@ -102,13 +110,64 @@ module.exports = defineConfig(
     files: ['src/**/*.ts'],
     ignores: ['src/**/*.spec.ts', 'src/app/shared/latest-request.ts'],
     rules: {
+      'no-restricted-syntax': [REPORT, ...REQUEST_COUNTER_SELECTORS],
+    },
+  },
+  {
+    // ADR 0072, decision 2: `EventsGrid.setTop` (through `scroll-writer.ts`) is the only code that writes `scrollTop` in the grid (a second writer breaks
+    // the one pending-write slot and the scroll classification). Report-only (`lint:report`) until its first green run (ER-41).
+    files: ['src/app/grid/**/*.ts'],
+    ignores: ['src/**/*.spec.ts', 'src/app/shared/latest-request.ts', 'src/app/grid/scroll-writer.ts'],
+    rules: {
       'no-restricted-syntax': [
         REPORT,
-        // The guard itself: `mine !== this.seq`, `generation === store.generation()`, `gen !== this.gen`.
-        ...['right.name', 'right.property.name', 'right.callee.property.name'].map((path) => ({
-          selector: `BinaryExpression[operator=/^[!=]==$/][left.name=/^(mine|seq|gen|generation)$/][${path}=/^(seq|gen|generation|\\w+Seq|\\w+Generation)$/]`,
-          message: 'A hand-rolled request counter: use LatestRequest from src/app/shared/latest-request.ts (ADR 0071).',
-        })),
+        ...REQUEST_COUNTER_SELECTORS,
+        {
+          selector: "AssignmentExpression[left.type='MemberExpression'][left.property.name='scrollTop']",
+          message: 'Write scrollTop only in EventsGrid.setTop (ADR 0072): a second writer breaks the single pending write and the scroll classification.',
+        },
+        {
+          selector: "CallExpression[callee.property.name=/^(scrollTo|scrollBy|scrollIntoView)$/]",
+          message: 'scrollTo, scrollBy and scrollIntoView write the scroll position too: only EventsGrid.setTop does (ADR 0072).',
+        },
+        {
+          selector: "CallExpression[callee.object.name='Object'][callee.property.name='assign'] Property[key.name='scrollTop']",
+          message: 'Object.assign(el, { scrollTop }) is a scrollTop write: only EventsGrid.setTop writes it (ADR 0072).',
+        },
+      ],
+    },
+  },
+  {
+    // ADR 0072: `writeScrollTop` is for EventsGrid.setTop only. Report-only (ER-41), like the writer rule above.
+    files: ['src/**/*.ts'],
+    ignores: ['src/**/*.spec.ts', 'src/app/grid/events-grid.ts', 'src/app/grid/scroll-writer.ts'],
+    rules: {
+      'no-restricted-imports': [REPORT, { patterns: [{ group: ['**/scroll-writer'], message: 'Only EventsGrid.setTop writes the grid scroll position (ADR 0072).' }] }],
+    },
+  },
+  {
+    // Specs share one module graph per bundle, so test state must not leak (ER-21). Unit specs only: an e2e spec keeps the
+    // e2e block's no-restricted-syntax (the raw-row selectors), which a later block for the same rule would replace.
+    files: ['src/**/*.spec.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "MemberExpression[optional=true][property.name='ref'][object.callee.property.name='at']",
+          message: 'use openDialog() so a missing dialog fails the test',
+        },
+        {
+          selector: "AssignmentExpression[left.type='MemberExpression'][left.object.property.name='prototype']",
+          message: 'use vi.spyOn so the patch is restored',
+        },
+        {
+          // A dialog may open after a lazy chunk or an engine call: a fixed number of turns (`settle`) before reading the stack
+          // is the flake of import-range.spec (rule 49). A check that no dialog is open (`toHaveLength(0)`) cannot wait on
+          // a condition and is not matched.
+          selector:
+            "ExpressionStatement:has(AwaitExpression > CallExpression[callee.name='settle']) + :matches(ExpressionStatement, VariableDeclaration):has(CallExpression[callee.property.name='stack']):not(:has(ArrowFunctionExpression)):not(:has(CallExpression[callee.property.name='toHaveLength'][arguments.0.value=0]))",
+          message: 'wait on the dialog with openDialog() (testing/helpers.ts), not a fixed settle() before reading stack()',
+        },
       ],
     },
   },
@@ -124,4 +183,5 @@ module.exports = defineConfig(
       '@angular-eslint/template/interactive-supports-focus': 'off',
     },
   },
+  ...e2ePinnedClock(),
 );

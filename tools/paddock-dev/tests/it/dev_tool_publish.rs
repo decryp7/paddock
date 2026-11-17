@@ -3,11 +3,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 // windows-twin: none: it runs a shell script that only runs on Linux and macOS
 #![cfg(unix)]
-use super::wrapper::{Fixture, fake_rustc, shim_cargo, write_script};
-use paddock_testkit::TestCommand;
+use super::wrapper::{Fixture, fake_rustc, shim_cargo, write_script_plain as write_script};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -110,6 +110,10 @@ impl Run {
 }
 
 /// Runs the publish script (with `bash -x`, so a leaked secret would show in the trace) in a fixture against `store`.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the script under test; nothing here ends a process by pid"
+)]
 fn publish(store: &Store) -> Run {
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
@@ -129,12 +133,12 @@ fn publish(store: &Store) -> Run {
     )
     .unwrap();
     let (consumer_hash, _) = f.both(&[("RUSTC", shims.join("rustc").display().to_string())]);
-    let shims_dir = shims.to_path_buf();
-    let out = TestCommand::new("bash")
+    let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
+    let out = Command::new("bash")
         .arg("-x")
         .arg(&script)
         .current_dir(f.root())
-        .path_first(&shims_dir)
+        .env("PATH", path)
         .env("CARGO_HOME", f.cargo_home.path())
         .env("PADDOCK_DEV_PACKAGES", format!("http://{}/generic", store.addr))
         .env("PUBLISH_TOKEN", SECRET)

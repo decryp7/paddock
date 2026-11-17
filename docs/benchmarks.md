@@ -58,7 +58,72 @@ that quotes a result links to the block instead of carrying the only copy.
 - **Notes:** noise, anomalies, what is not measured, where the raw output is kept
 ```
 
+## Timing benchmarks on a busy host
+
+A benchmark that gives a verdict on the shared Mac does not gate on the 1-minute load average (ER-24: it counts OrbStack and
+build threads, and run 8175 was red for starts that were not slowed), and it is never refused for a busy host (user, 2026-11-17).
+The one shared mechanism is `scripts/bench/busy-host.mjs` (tests: `busy-host.test.mjs`); Debrief's `scripts/ci/startup-bench.mjs`
+uses it, results in
+[Debrief performance.md](../apps/debrief/docs/performance.md#start-up-benchmark-on-a-busy-host-2026-11-16-and-17-featbench-busy-host).
+
+- It is always taken, and the host CPU idle (`iostat`) and 1-minute load are recorded with every start.
+- **Fails** when the CPU time (user + sys) of the started process tree is over its limit (a tight one when the median host CPU idle was
+  high enough, a coarse one on a busy host; between the two on a busy host is a note), or a wall mark is over its ceiling
+  (a factor of its baseline that only a broken start reaches), on a train and a tag alike. Thresholds are a recorded baseline plus
+  a measured noise margin (ER-12), in the app's budgets file with the results block that measured them.
+- **Notes, never a failure:** a wall mark over its noise threshold but under the ceiling, a high spread of the starts, the ratio of
+  start-up to a fixed reference workload, host idle and load. A reference workload cannot scale the wall time on the Mac (it slows
+  2 to 5 times under loads that leave the app's start unmoved).
+- **Not measured** only when the app gave no timings (it did not start, or logged no "Startup timings" line): `::error::` and exit 6
+  on every run (ER-33).
+- A new timing benchmark imports `verdict`, `annotations`, `readTreeCpuMs`, `readCpuIdle` and `hostSummary` from it and records its
+  thresholds the same way. Other load gates in the repo are admission gates (they decide whether to start work, they give no
+  verdict) and are not part of this: `scripts/vm-win.sh`, `scripts/vm-win/prepare.sh`, `scripts/vm-smoke/run.mjs` and
+  `tools/macos-vm-smoke.sh` (do not start a VM above a load), `tools/heavy` (the heavy-slot gate) and `./dev`'s queue reason
+  (`pre_push/exec.rs`).
+
 ## Results of shared tooling
+
+### 2026-11-16, unit suites with the test leak detector (feat/test-leak-detector)
+
+- **Commit:** the tip of `feat/test-leak-detector`; base `3585bcab1` (train 13) plus `fix/debrief-startup-loads-drain`
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** base runs at about 40 to 46% CPU idle; the runs after at about 56% idle (other agents' jobs were on the machine; a run at 0% idle was discarded)
+- **Build:** the Angular unit-test builder with Vitest 5.0.5 (jsdom), `ui/dist` built once
+- **Corpus:** the apps' and the ui's own specs (no data files)
+- **Command:** `npx ng test --watch=false` in each `apps/<app>/app`; `npx ng test <project> --watch=false` in `ui`
+- **Runs:** one run before and one or two after (not interleaved), Vitest's `Duration`; the fail-mode runs of Pitcrew, Pitwall and Spotter were repeated three times (no red)
+- **Numbers:**
+
+  | Suite (tests) | Before | After | Mode now | Verdict |
+  |---|---|---|---|---|
+  | Debrief (4989, 4992 after) | 33.19 s | 32.1 s to 38.1 s (five runs) | fail | no measurable change (the review timed it alternating with the base) |
+  | Dyno (1652) | 17.80 s | 16.16 s and 16.41 s | fail (follow-up) | within 10% |
+  | Pitcrew (642, 646 after) | 9.90 s | 9.34 s | fail | within 10% |
+  | Pitwall (959, 962 after) | 9.01 s | 6.61 s | fail | within 10% (noise: the earlier run was loaded) |
+  | Spotter (496, 500 after) | 6.20 s | 3.97 s | fail | within 10% (noise) |
+  | ui paddock-ui (3036, 3065 after) | 11.70 s | 8.01 s | fail | within 10% (noise) |
+  | ui workbench-demo (2) | 0.71 s | 0.61 s | fail | within 10% |
+
+- **Notes:** the detector wraps `setTimeout`/`setInterval` once per worker and reads `new Error().stack` (limit 12 frames)
+  per call that is not Vitest's own; no cost shows beyond noise. Detector findings for Debrief and Dyno (report mode, lines
+  `[leak-detector] <test>: <kind>: <what>` on stderr): the `Duration` figures above carry them. Raw logs are in the
+  agent's scratch folder only.
+
+#### Findings left, by file and line (none: Debrief and Dyno are in failing mode)
+
+Debrief: zero findings after `fix/debrief-test-leaks` (about 310 before), in failing mode, green in three runs (32.1 s,
+33.2 s, 38.1 s against 33.19 s before the detector; the slowest run overlapped other agents' jobs). Fixed there: the
+mock clock (`systemMockClock` tracks its timers and sleeps; the setup stops them after every test and halts it between tests),
+the stores and services that kept a timer past their injector (`query.store`, `profile-draft`, `query-session`,
+`engine-settings.store`, `recovery`, `session.service`, the copy-label resets in `shared/path-text`, `context-section` and
+`dock/angular-panel`, the dialog shell, the extractor editor, the tour's wait), `OpenRequests.start` (two callers overwrote the
+timer handle of the first), the retry timer of the start-up read, the pop-out backend's poll, the dock service's cue
+elements (detached with its injector), mock job state (drained after every test), the focus retry, and the body nodes some dock specs
+left. The mock backends' own latency timers go through `systemMockClock`.
+Dyno: zero findings after `MockBackend.dispose()` (disposed after every test by the setup), the counters store (it
+armed a second poll timer and one after destroy) and `scroll-to-section.spec.ts` (left a `<main>` in the body); Dyno runs in
+failing mode.
 
 ### 2026-11-08, `./dev gates check` (feat/gates-c100)
 
@@ -196,7 +261,7 @@ Not benchmarks, though the names suggest it:
 | Debrief CPU, memory and idle gates | idle ≤ 0.5% of a core and ≤ 1 wake-up/s; catalogue ≤ 512 MB; import ≤ 6 s and ≤ 32 CPU-s per GB; post-import ≤ 20 CPU-s/GB; name rebuild ≤ 1 s | Debrief [research/2026-10-28-cpu-memory.md](../apps/debrief/docs/research/2026-10-28-cpu-memory.md) §4; family [ADR 0024](adr/0024-background-work-contract.md) D7 | **nothing yet** (planned `bench/budgets.toml`) |
 | Debrief plugin memory | cap 1024 MB; import ≤ 512 MB (proposed) | Debrief ADR 0031; [plugins research](research/2026-10-plugins-memory-and-manager.md) | `evtx_memory.rs` (ignored, fails today) |
 | Debrief profile operations | 100–2000 ms each | Debrief [profiling.md](../apps/debrief/docs/profiling.md#performance) | `debrief-profile` `perf.rs` (CI, debug, budgets × 20) |
-| Debrief start-up marks (macOS) | windowCreated 325 … firstInteractive 940 ms | Rule 16, Debrief ADR 0058 | `startup-bench.mjs` (nightly) |
+| Debrief start-up (macOS) | fails over tree CPU 600 ms (host idle median 30% or more) or 875 ms (busy), or a mark over 5 times its baseline (firstInteractive 3100 ms); baselines windowCreated 208 … firstInteractive 620 ms (2026-11-17) | Rule 16, Debrief ADR 0058 | `startup-bench.mjs` (nightly, manual and every `debrief-v` tag) |
 | First-paint JS | Debrief main 1355 kB, About 480 kB; other apps not set | Rule 35 | `window-weight.mjs` (Debrief); C29 (not configured) |
 | Angular initial bundle | Debrief 185/192 kB; Dyno 900 kB/1.5 MB; Pitcrew 1/2 MB; Pitwall 1.2/2 MB; Spotter 1/2 MB; gallery 1.5/3 MB; shell-demo 500 kB/1 MB; workbench-demo 580 kB/1 MB | Rule 35 | `ng build` in CI |
 | Idle process | ≤ 0.5% of a core, ≤ 1 wake-up/s | [ADR 0024](adr/0024-background-work-contract.md) D7 | **nothing** shared; Debrief's gate is planned |
@@ -1510,3 +1575,106 @@ no fresh code, the train-wide run keeps it) is out of the profile.
 
 - **Not measured:** a quiet machine, a second run (one run only), a cold build folder, and the three audits that have not landed
   (`dev_bin`, `cargo_target_lint`, `parity_corpus`), which add their own tests to the 68.
+
+## Prune size, one pass (2026-11-15, fix/c125-and-arm64-tests)
+
+Question: how long does `tools/prune-build-folders.sh` (the shell kit's `prune-folder`, the release path) take to size a large build
+folder, now that the size is the regular files' own length and blocks from `kit.sh portable` instead of `du` (CI run 8138)? Before
+this change `size()` ran two kit passes (file-allocated, file-bytes) and the script called it twice under the cap (up to four times
+over it); now one `portable file-sizes` pass gives both numbers and the script measures once (and again only after the incremental
+caches went).
+
+- **Machine:** Mac mini (arm64), macOS 27.2.1, 14 cores, 1-minute load 6.5 to 9.6 (5-minute 10 to 15), no CI run active
+- **Folder:** a paddock-dev `CARGO_TARGET_DIR` (15,306 files, 3.1 GiB), warm in the file cache (one stat pass first)
+- **Command:** `bash <script> <folder> 100000` (a cap in GB far above the folder, so nothing is removed), wall time by
+  `Time::HiRes`, three runs interleaved
+- **Numbers:**
+
+  | What | Runs (s) |
+  |---|---|
+  | `du -sk <folder>` alone | 0.106, 0.113, 0.105 |
+  | one `kit.sh portable file-sizes` pass (find + BSD `stat -f`, sorted) | 7.16, 7.14, 7.31 |
+  | script at f51766792 (`du -sk` plus its own find + stat, two `size()` calls) | 16.0, 14.5, 14.7 |
+  | script at ffe91b1ac (two kit passes per `size()`, two calls) | 28.4, 28.4, 27.8 |
+  | script now (one pass) | 6.9, 9.0, 7.3 |
+
+- **Memory measure:** not measured
+- **Reading:** one pass costs about 70 times `du` on macOS, so the script now runs it once (four times faster than ffe91b1ac).
+  Not measured: GNU `find -printf` on the Linux runners (no `stat` per file), Windows (Git Bash) and a cold file cache.
+
+## axe scans per screen (2026-11-15, fix/main-webkit-e2e): superseded
+
+Superseded on 2026-11-16 before it landed: `axeViolations` no longer detects motion and scans again (the `MAX_SCANS` this
+measured is gone). It turns transitions and animations off for a single scan instead (the user's decision after the fourth
+instance of the class; lessons.md, "axe read a table row half-way into the dark theme"). The measurement (at most 3 scans per
+screen over ui, Dyno and Pitwall, 409 tests) is in this branch's history, commit b661502f0.
+
+## sccache 0.19.0 across worktrees, local disk cache (2026-11-16, docs/sccache-basedirs)
+
+- **Machine:** Mac mini (arm64), macOS 27.2, 14 cores, CPU idle 46 to 69% at each start (`top -l 2 -n 0 -s 2`), load
+  average 11 to 12 (other agents running), no CI run of mine
+- **Tool:** sccache 0.19.0 release binary (aarch64-apple-darwin, sha256 a35a0b7d...286af, checked against the release's
+  `.sha256`), one server on a private port, `SCCACHE_DIR` a scratch folder on the vault volume, `SCCACHE_BASEDIRS` set to the
+  three worktree roots (0.19.0 does not use it for Rust, see the note)
+- **Workspace:** `tools/paddock-dev` at 3585bcab1 (260 lockfile packages; 210 compile requests, 152 cacheable), Rust 1.100.0,
+  `cargo build --locked` (dev profile), `CARGO_BUILD_JOBS=2`, one shared scratch `CARGO_HOME`, target folder removed before
+  each run; three detached worktrees A, B, C of the same commit at different paths; single runs, run in the order listed
+- **Numbers:**
+
+  | Run | Target folder | Wall (s) | Rust hits |
+  |---|---|---|---|
+  | A, no sccache | `<A>/tools/paddock-dev/target` | 66 | n/a |
+  | B, no sccache | `<B>/...` | 64 | n/a |
+  | A, empty cache | `<A>/...` | 51 | 0 / 146 |
+  | A again, same path | `<A>/...` | 23 | 146 / 146 |
+  | B, other worktree | `<B>/...` | 28 | 120 / 146 (82%) |
+  | C, other worktree, `--config build.target-dir=<scratch>` | outside the worktree | 32 | 120 / 146 (82%) |
+  | C, `CARGO_TARGET_DIR=<scratch>` in the environment | outside the worktree | 58 | 0 / 146 |
+  | C, default target | `<C>/...` | 28 | 120 / 146 (82%) |
+
+- **Memory measure:** not measured; cache on disk 369 MiB after all runs, one target folder 1.4 GiB
+- **Reading:** across worktrees 0.19.0 hits 82% of the third-party Rust compiles (wall time 28 s against 64 s cold)
+  as long as the target folder is not given through `CARGO_TARGET_DIR` (every `CARGO_*` variable is part of the key, so
+  that gives 0%). The 26 misses are crates whose build scripts set `OUT_DIR` (proc-macro2, serde, serde_json, thiserror,
+  libsqlite3-sys, ...) and crates built on them. The workspace's own crates are never cached in a dev build
+  (`CannotCache(incremental)`), nor are build scripts, binaries and proc-macros. The empty-cache run being faster than the
+  no-sccache run is noise of single runs on a loaded machine, not a sccache effect. Not measured: an app workspace,
+  Linux, Windows, release profile.
+
+## Local sccache: local disk against RustFS, and the CI-like environment (2026-11-16, feat/local-sccache)
+
+- **Command:** `cargo build --locked --config build.target-dir='<scratch>'` with `RUSTC_WRAPPER=<sccache 0.19.0>`; `tools/paddock-dev` (dev
+  profile) and `cargo build -p dyno-cli` in `apps/dyno`; `CARGO_BUILD_JOBS=2`, `RUSTUP_AUTO_INSTALL=0`, the default `CARGO_HOME`; the
+  target folder removed before each run; `--zero-stats` before each; two sparse detached worktrees A and B of 3585bcab1 at different
+  paths; single runs. The CPU idle was 30% or more on two readings a minute apart before each series (38 and 41; 60 and 58; 60 and 59).
+  The scripts were in the scratch folder, not committed.
+- **Hardware / OS:** Mac mini, macOS 27.2 (Darwin 27.2.0), arm64; RustFS at 172.16.1.220:15000 on the LAN, plain HTTP, path-style.
+- **Numbers (wall seconds, Rust hits / Rust compiles):**
+
+  | Workspace | Run | Local disk | RustFS (S3) |
+  |---|---|---|---|
+  | paddock-dev | no sccache, cold | 70 | n/a |
+  | paddock-dev | empty cache, worktree A | 55, 0 / 152 | 58, 0 / 152 |
+  | paddock-dev | warm cache, worktree B | 32, 126 / 152 (83%) | 37, 126 / 152 (83%) |
+  | dyno-cli | no sccache, cold | 141 | n/a |
+  | dyno-cli | empty cache, worktree A | 92, 2 / 138 | 90, 2 / 138 |
+  | dyno-cli | warm cache, worktree B | 46, 111 / 138 (80%) | 48, 111 / 138 (80%) |
+
+- **CI-like environment, local disk, cache filled by the agent runs above (paddock-dev, worktree A's path, another build folder):**
+
+  | Setting of the CI-like run | Wall (s) | Hits |
+  |---|---|---|
+  | `CARGO_INCREMENTAL=0` as a variable (what `setup-rust` writes to `$GITHUB_ENV`) | 63 | 6 / 153 (4%) |
+  | the same setting as `--config build.incremental=false` | 38 | 126 / 159 (79%) |
+  | dyno-cli, `--config build.incremental=false` | 45 | 111 / 153 (73%) |
+
+- **Not measured:** the `CARGO_TARGET_DIR` control in this series (the script failed on bash 3's empty array; the earlier note measured it:
+  0 / 146); Linux, Windows, a release profile; a second machine; the cache's size on RustFS (the local cache was 625 MiB after all runs).
+- **First RustFS attempt:** the first series (prefix `bench-20261116233304`) had a write error on every compile (138 of 138 on Dyno) and so
+  0 hits; the cause is a read-only server: sccache 0.19.0 latches a failed startup write check for the server's lifetime (docs/lessons.md; found by
+  the later investigation, not measured here; a debug run a few minutes later, with the same settings and a small build, had none). The series above
+  is a second run from scratch with a new prefix and no write errors. Treat RustFS as unproven under load until it has run for days.
+- **Reading:** passing the folder as configuration gives the 80% across worktrees on both workspaces; the S3 backend on the LAN costs
+  about 5 s more on a warm build than the local disk (37 against 32 s, 48 against 46 s) and needs the network and the key. The CI-like
+  run hits the agents' entries only when `CARGO_INCREMENTAL=0` is cargo configuration: the variable is part of sccache's key. CI keeps
+  its own per-slot caches (user decision 2026-11-17), so this is a measurement, not a setting.

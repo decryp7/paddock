@@ -156,7 +156,8 @@ export class ExtractorEditor {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let seq = 0;
     // effect-state: debounced IPC preview; its result lands in state when the engine answers
-    effect(() => {
+    effect((onCleanup) => {
+      onCleanup(() => clearTimeout(timer)); // the pause ends with the effect (a destroyed editor sends nothing)
       const rule = this.rule();
       const toml = this.draft.text();
       const query = this.store.effectiveQuery();

@@ -287,7 +287,7 @@ export class MockJobs implements JobsBackend {
         entry.info = { ...entry.info, state: 'running', startedAt: Date.now() };
         this.emit();
         const ctx: MockJobCtx = {
-          cancelled: () => cancelled,
+          cancelled: () => cancelled || this.disposed,
           progress: (p) => {
             entry.info = { ...entry.info, progress: { ...entry.info.progress, ...p } };
           },
@@ -435,6 +435,11 @@ export class MockJobs implements JobsBackend {
     return () => this.handlers.delete(handler);
   }
 
+  /** How many jobs are queued or running. Read-only. */
+  activeCount(): number {
+    return this.entries.filter((e) => e.info.state === 'queued' || e.info.state === 'running').length;
+  }
+
   /** Stops the progress ticker and forgets listeners and waiters (an instance replaced by `resetMockJobs`). */
   dispose(): void {
     this.disposed = true;
@@ -454,13 +459,34 @@ export function mockJobs(): MockJobs {
   return instance;
 }
 
+/** What the shared instance still holds (queued or running jobs), or `null`; never creates the instance (the leak detector, `test-setup.ts`). */
+export function mockJobsLeftover(): string | null {
+  const active = instance?.activeCount() ?? 0;
+  return active > 0 ? `${active} queued or running job(s)` : null;
+}
+
 /** Replaces the shared instance (tests); the old one stops ticking, so its jobs cannot reach the next test. */
 export function resetMockJobs(next: MockJobs | null = null): void {
   if (instance !== next) instance?.dispose();
   instance = next;
+  // The steps of the old instance's jobs wake at once and find their job cancelled (`dispose` set it), so they end quietly.
+  for (const [timer, wake] of [...sleeps]) {
+    clearTimeout(timer);
+    sleeps.delete(timer);
+    wake();
+  }
 }
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** The sleeps of `mockSteps` still waiting: `resetMockJobs` ends them, so no job step outlives its test. */
+const sleeps = new Map<ReturnType<typeof setTimeout>, () => void>();
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      sleeps.delete(timer);
+      resolve();
+    }, ms);
+    sleeps.set(timer, resolve);
+  });
 
 /** Waits `ms` in small steps, reporting progress and stopping early when cancelled. */
 export async function mockSteps(ctx: MockJobCtx, ms: number, steps = 10): Promise<void> {

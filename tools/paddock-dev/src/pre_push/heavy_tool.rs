@@ -109,11 +109,17 @@ pub fn ensure(root: &Path, env: &HashMap<String, String>, left: Duration) -> Res
 /// Builds heavy into `target` and returns the binary's path there.
 fn build(root: &Path, env: &HashMap<String, String>, target: &Path, key: &str, limit: Duration) -> Result<PathBuf, String> {
     let built = target.join("release").join(exe("heavy"));
+    // The build folder as cargo configuration, never `CARGO_TARGET_DIR` (sccache hashes it: crate::cargo_target).
+    let args = crate::cargo_target::with_target_dir(
+        &["build", "--release", "--locked", "--quiet"].map(String::from),
+        &target.display().to_string(),
+    );
     let call = ToolCall::new("cargo")
-        .args(["build", "--release", "--locked", "--quiet"])
+        .args(args)
         .pass(PASS.iter().copied())
         .cwd(root.join("tools/heavy"))
-        .env("CARGO_TARGET_DIR", target.display().to_string())
+        .without("CARGO_TARGET_DIR")
+        .without("CARGO_BUILD_TARGET_DIR")
         .env("CARGO_BUILD_JOBS", "2")
         .timeout(limit);
     let ran = call.run(env, &mut std::io::sink()).map_err(|e| {
@@ -172,11 +178,7 @@ mod tests {
         std::fs::create_dir_all(&entry).unwrap();
         let bin = entry.join(exe("heavy"));
         // A probe that fails: `--version` prints nothing.
-        std::fs::write(&bin, "#!/bin/sh\nexit 1\n").unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        paddock_testkit::exe::write_program(&bin, "#!/bin/sh\nexit 1\n").unwrap();
         let two_days = std::time::SystemTime::now() - Duration::from_secs(2 * 86_400);
         std::fs::File::open(&entry).unwrap().set_modified(two_days).unwrap();
         // No budget left: ensure stops after the probe and builds nothing.

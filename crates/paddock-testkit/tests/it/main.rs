@@ -5,12 +5,12 @@ mod boot_volume;
 mod canonical_tempdir;
 mod cargo_layout;
 mod env;
+mod exe;
 mod golden;
 mod hostile;
 mod limits;
 mod net;
 mod path;
-mod process;
 mod runner;
 mod scratch;
 #[cfg(windows)]

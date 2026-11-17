@@ -62,7 +62,7 @@ import { AiRichText } from './rich-text';
       </div>
     }
 
-    <div class="log" role="log" aria-live="polite" aria-label="Conversation" i18n-aria-label="@@ai.chat.log.label" #log>
+    <div class="log" role="log" aria-live="polite" [attr.aria-busy]="store.running()" aria-label="Conversation" i18n-aria-label="@@ai.chat.log.label" #log>
       @if (!store.activeTurns().length && !store.loading()) {
         <div class="empty">
           <p class="muted" i18n="@@ai.chat.empty">Ask about the loaded logs. Answers cite events and queries you can open.</p>

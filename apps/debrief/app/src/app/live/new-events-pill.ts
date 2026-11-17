@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { formatCount } from '../core/format';
+import { nextRequestSeq } from '../core/request-seq';
 import { LiveFeed } from './live-feed';
 
 /** "N new events" over the grid while live tail runs but the grid is not following; click to show them. */
@@ -8,7 +9,7 @@ import { LiveFeed } from './live-feed';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (feed.newEvents() > 0) {
-      <button type="button" class="pill" data-testid="new-events" (click)="feed.showNewEvents()" i18n="@@live.newEvents.pill">
+      <button type="button" class="pill" data-testid="new-events" (click)="feed.showNewEvents(requestSeq())" i18n="@@live.newEvents.pill">
         <span aria-hidden="true">↑</span> {feed.newEvents(), plural, =1 {{{ fmt(feed.newEvents()) }} new event — show} other {{{ fmt(feed.newEvents()) }} new events — show}}
       </button>
     }
@@ -22,4 +23,6 @@ import { LiveFeed } from './live-feed';
 export class NewEventsPill {
   protected readonly feed = inject(LiveFeed);
   protected readonly fmt = formatCount;
+  /** The click's stamp, taken here when the user acts (the feed requires it). */
+  protected readonly requestSeq = nextRequestSeq;
 }

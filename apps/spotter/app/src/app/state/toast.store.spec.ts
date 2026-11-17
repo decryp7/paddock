@@ -22,4 +22,12 @@ describe('ToastStore', () => {
     expect(s.toasts().map((t) => t.id)).toEqual([err]);
     expect(s.toasts()[0]?.body).toBe('why');
   });
+
+  it('leaves no dismiss timer running once its injector is destroyed', () => {
+    const s = TestBed.inject(ToastStore);
+    s.show({ tone: 'success', icon: 'check', title: 'ok', body: null });
+    expect(vi.getTimerCount()).toBe(1);
+    TestBed.resetTestingModule();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

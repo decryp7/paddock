@@ -1,4 +1,5 @@
-import { expect, Locator, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Locator, Page } from '@playwright/test';
 import { APP_LOAD_TIMEOUT } from './app';
 import { openAiApp, openChat, runCommand } from './ai-support';
 import { expectGroupsAtMinimum, expectNoHorizontalScroll, expectNoOverlap, groupOf, measureGroups, paneWidths, resizeWindow, STANDARD_SIZES } from '../src/app/layout-plan/layout-scenarios.playwright';

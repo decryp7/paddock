@@ -941,7 +941,6 @@ dependencies = [
  "libc",
  "paddock-env",
  "paddock-proc",
- "paddock-testkit",
  "paddock-testkit-start",
  "proptest",
  "serde_json",
@@ -980,6 +979,7 @@ version = "0.2.0"
 dependencies = [
  "libc",
  "log",
+ "paddock-env",
  "paddock-workspace-hack",
  "sysinfo",
  "thiserror",

@@ -184,12 +184,10 @@ impl FakeBrowser {
             .iter()
             .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
             .collect();
-        std::fs::write(
+        paddock_testkit::exe::write_program(
             &f.exe,
             script(&dyld, &f, mode, tabs, &me, test_path, std::process::id()),
         )?;
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&f.exe, std::fs::Permissions::from_mode(0o755))?;
         Ok(f)
     }
 

@@ -10,6 +10,7 @@ description = "Self-contained Chromium renderer driver: discovery, supervised la
 
 [dependencies]
 tempfile.workspace = true
+paddock-testkit = { path = "../../../../crates/paddock-testkit", optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -25,7 +26,7 @@ paddock-proc = { path = "../../../../crates/paddock-proc" }
 
 [features]
 # A fake DevTools browser for tests of this crate and of the apps that drive it.
-test-support = []
+test-support = ["dep:paddock-testkit"]
 
 [dev-dependencies]
 # The real-browser tests wait for the browser until it is ready or ends, and set the test form of the answers (ADR 0071).

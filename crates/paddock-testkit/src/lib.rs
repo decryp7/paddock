@@ -9,8 +9,6 @@
 //!   write: owner-only on Windows too, whatever the temp folder's access list is (CI runners' is open to Authenticated Users).
 //! - [`EnvLock`]: one process-wide lock for tests that read or write environment variables, restoring every variable it
 //!   changed, and [`EnvLock::hermetic`], which points `HOME`, `APPDATA`, the XDG folders and `TMPDIR` into a [`Scratch`].
-//! - [`TestCommand`]: the one way a test starts `./dev`, `cargo` or `node`: an empty environment plus a listed one, a private
-//!   home and temp folder, a curated `PATH` (ADR 0100, check C123).
 //! - [`golden`]: expected-output files; a difference fails with the first differing line, `PADDOCK_UPDATE_GOLDEN=1`
 //!   rewrites them.
 //! - [`FakeRunner`]: a scripted stand-in for "run an OS command" seams (launchctl, systemctl, reg, ...), recording every call.
@@ -31,23 +29,26 @@
 //!   `paddock-proc`'s start judge, and `paddock-proc`'s own tests use this kit, so the kit cannot depend on it.
 //! - [`boot_volume`]: [`boot_volume::boot_volume_temp`], the folder for programs a test starts as their own responsible
 //!   process (disclaimed or by launchd): never on an external volume, where macOS prompts (TCC, Removable Volumes).
+//! - [`exe`]: `write_program`, `spawn`, `output` and `status`, the way a test writes a program and starts one (the Linux `ETXTBSY`
+//!   refusal of a file that was written or ended a moment ago is retried for a bounded time; plain `fs::write` plus `Command` is
+//!   not).
 //! - [`cargo_layout`]: `profile_dir()`, `sibling_bin` and `example_bin`, the programs cargo built for this test, found in both
 //!   build-folder layouts (before cargo 1.100 and after) and refusing any other shape.
 //!
-//! Nothing here touches the user's folders or starts a process, except [`TestCommand`] (a child with a listed environment) and [`boot_volume`], which runs the shared rule
+//! Nothing here touches the user's folders or starts a process on its own, except [`boot_volume`], which runs the shared rule
 //! (`conformance/ci/boot-volume.sh`) once per process on macOS; the only real time is [`wait`]'s poll interval.
 
 pub mod boot_volume;
 pub mod cargo_layout;
 pub mod cases;
 pub mod env;
+pub mod exe;
 pub mod golden;
 pub mod hostile;
 pub mod limits;
 pub mod net;
 pub mod path;
 pub mod private_temp;
-pub mod process;
 pub mod runner;
 pub mod scratch;
 pub mod wait;
@@ -59,7 +60,6 @@ pub use hostile::{assert_never_panics, corpus, never_panics};
 pub use paddock_env::winpath::{real_or_given, same};
 pub use paddock_jobs::time::{Clock, FakeClock};
 pub use private_temp::{PrivateTemp, private_tempdir};
-pub use process::{TestChild, TestCommand};
 pub use runner::{Call, FakeRunner, Reply};
 pub use scratch::{
     CanonicalTempDir, Leftovers, Scratch, ScratchError, canonical_tempdir, try_canonical_tempdir,

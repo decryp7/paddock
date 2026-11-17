@@ -1,5 +1,5 @@
+import { expect, test } from './test';
 import type { Locator, Page } from '@playwright/test';
-import { expect, test } from '@decryp7/paddock-e2e';
 
 // ER-21: the shared Material surfaces keep the family's control geometry and type under a hostile host theme.
 //

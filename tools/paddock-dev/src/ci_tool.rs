@@ -83,6 +83,7 @@ pub struct ToolCall {
     timeout: Duration,
     output: Output,
     cwd: Option<PathBuf>,
+    unset: Vec<String>,
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
@@ -111,6 +112,7 @@ impl ToolCall {
             timeout: Duration::from_secs(120),
             output: Output::Capture,
             cwd: None,
+            unset: Vec::new(),
             cancel: None,
         }
     }
@@ -134,6 +136,13 @@ impl ToolCall {
         self
     }
 
+    /// A variable of the caller's environment this program never gets, though a passed name matches it (the build folder as
+    /// `CARGO_TARGET_DIR`, which sccache hashes: [`crate::cargo_target`]).
+    pub fn without(mut self, name: impl Into<String>) -> ToolCall {
+        self.unset.push(name.into());
+        self
+    }
+
     /// The child's environment: the base list and the passed names from `parent`, then the call's own variables.
     pub fn child_env(&self, parent: &HashMap<String, String>) -> Vec<(String, String)> {
         let keep = |k: &str| {
@@ -146,7 +155,7 @@ impl ToolCall {
         };
         let mut env: Vec<(String, String)> = parent
             .iter()
-            .filter(|(k, _)| keep(k))
+            .filter(|(k, _)| keep(k) && !self.unset.iter().any(|u| u == k.as_str()))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         env.sort();
@@ -370,7 +379,8 @@ pub fn error_line(cause: &str, next: &str) -> String {
     format!("::error::{cause} Next step: {next}")
 }
 
-fn quote(arg: &str) -> String {
+/// `arg` as one `sh` word: as it is when plain, else in single quotes with a `'` written `'\''`.
+pub fn quote(arg: &str) -> String {
     let plain = !arg.is_empty()
         && arg
             .chars()

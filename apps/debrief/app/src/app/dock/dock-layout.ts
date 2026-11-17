@@ -278,9 +278,10 @@ export class DockLayout {
 
   /**
    * Calls `onResize` (debounced) when the dock's size changes. Returns the disposer. Only used to re-plan, so a burst of
-   * resize events costs one plan.
+   * resize events costs one plan. `onPending(true)` comes with the first resize of a burst and `onPending(false)` once the re-plan has run
+   * (or was dropped), so a reader can tell a settled layout from one that is about to be re-planned.
    */
-  watchResize(api: DockviewApi, onResize: () => void, delayMs = 150): () => void {
+  watchResize(api: DockviewApi, onResize: () => void, onPending: (pending: boolean) => void = () => undefined, delayMs = 150): () => void {
     const container = this.ctx.container;
     if (!container || typeof ResizeObserver === 'undefined') return () => undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -293,8 +294,12 @@ export class DockLayout {
       if (now === last) return;
       last = now;
       clearTimeout(timer);
+      onPending(true);
       const run = (retries: number) => {
-        if (this.ctx.api !== api) return;
+        if (this.ctx.api !== api) {
+          onPending(false);
+          return;
+        }
         // dockview measures the container with an observer of its own: planning before it has caught up would fit the
         // old size, and no later resize event comes to correct it (WebKit sometimes delivers ours first and is slow with
         // the other). Wait until it agrees with the container, a bounded number of times.
@@ -304,6 +309,7 @@ export class DockLayout {
           return;
         }
         if (!this.ctx.restoring) onResize();
+        onPending(false);
       };
       timer = setTimeout(() => run(RESIZE_SETTLE_TRIES), delayMs);
     });

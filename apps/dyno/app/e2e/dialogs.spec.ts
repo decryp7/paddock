@@ -1,5 +1,6 @@
+import { expect, test } from './test';
 import { FIXTURES } from './dialog-fixtures';
-import { dialogContracts, dialogFitProblems, dialogWindowUrl, expect, expectLoopSettles, SIZE_SCALES, test } from '@decryp7/paddock-e2e';
+import { dialogContracts, dialogFitProblems, dialogWindowUrl, expectLoopSettles, SIZE_SCALES } from '@decryp7/paddock-e2e';
 
 // Dyno's dialogs as windows opened by URL (what Rust loads): the app's own contract (src-tauri/src/dialogs.rs) and the
 // shell's, which Dyno registers (About, What's new, Updates, the shared confirmation). ADR 0026 §6.

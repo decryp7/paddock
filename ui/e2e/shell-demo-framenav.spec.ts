@@ -1,4 +1,5 @@
-import { axeViolations, expect, installTauriFake, test, THEMES } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, installTauriFake, THEMES } from '@decryp7/paddock-e2e';
 
 // Frame navigation on Angular Material and the CDK (Material migration WP-4): the sidebar's arrow keys come from the CDK
 // FocusKeyManager, the badges are matBadge, the rail and status bar tooltips are matTooltip, and the copy menu is a CDK

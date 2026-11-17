@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { openApp } from './app';
 import { chooseMenu } from './menu-support';
 import { openAppWith } from './mock-url';

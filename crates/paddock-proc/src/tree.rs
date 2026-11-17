@@ -258,6 +258,13 @@ pub fn descendants_of(root: ProcessId) -> Vec<ProcessId> {
 /// Asks one process (not its group, which may contain the caller) to stop: SIGTERM, or a close request on Windows. Only
 /// while its pid still belongs to it. Returns whether the request was delivered.
 pub fn ask(id: ProcessId) -> bool {
+    ask_outcome(id) == Ending::Ended
+}
+
+/// [`ask`] with what it found: `Ended` when the request was delivered, `Refused` when the process is the one named but the OS
+/// did not take the request (Windows: a console process without a window cannot be closed politely; the caller may
+/// [`end`] it), `Gone` or `NotOurs` when nothing was sent because the pid is free or was handed on.
+pub fn ask_outcome(id: ProcessId) -> Ending {
     #[cfg(target_os = "linux")]
     let (found, sent) = match crate::sys::signal_by_pidfd(id, crate::sys::SIGTERM) {
         Some(Ending::Ended) => (Holder::Same, true),
@@ -273,7 +280,7 @@ pub fn ask(id: ProcessId) -> bool {
     if let Holder::Other(now) = found {
         warn_not_ours(id, now);
     }
-    sent
+    Ending::of(found, sent)
 }
 
 /// SIGTERM after the identity check (macOS, and Linux without pidfds).

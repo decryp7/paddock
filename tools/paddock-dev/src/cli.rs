@@ -1,7 +1,7 @@
 use crate::{
     brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, disk, gates,
-    generators, heavy_cmd, hook, input_hash, ipc_endpoints, load, locks, merge_check, places, plan, plan_cmd, pr, pre_push, queue,
-    release_isolation, slots, wait, worktree,
+    generators, golden_cmd, heavy_cmd, hook, input_hash, ipc_endpoints, load, local_sccache, locks, merge_check, places, plan, plan_cmd,
+    pr, pre_push, queue, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -36,6 +36,11 @@ enum Command {
     Wait(wait::WaitArgs),
     /// Run a command through the machine-wide heavy slot (ER-24), found the way `check --pre-push` finds it; git hooks use it.
     Heavy(heavy_cmd::HeavyArgs),
+    /// Golden files: `confirm <test filter>` runs the tests on this machine and in the CI image as root; passes only if both pass.
+    Golden {
+        #[command(subcommand)]
+        command: golden_cmd::GoldenCommand,
+    },
     /// One line for the coordinator: start, hold or stop for new agents, from the load, the free disk of the dev-targets folder and the CI queue (ER-24).
     Load(load::LoadArgs),
     /// The machine's dev folders, derived from `git config paddock.worktreeRoot` (docs/dev-setup.md): dev-targets, dev-disk,
@@ -75,6 +80,13 @@ enum Command {
     Worktree {
         #[command(subcommand)]
         command: worktree::WorktreeCommand,
+    },
+    /// The local sccache for an agent's own cargo calls: `eval "$(./dev sccache env)"` installs the pinned release when needed,
+    /// starts the one local server and prints the `export` lines (RUSTC_WRAPPER and the cache settings). Warns and prints nothing
+    /// when sccache cannot be used (the build then runs without it).
+    Sccache {
+        #[command(subcommand)]
+        command: SccacheCommand,
     },
     /// Disk watch and clean-up: free-space check, usage report, scan, owner records, clean.
     Disk {
@@ -164,9 +176,9 @@ enum CheckCommand {
     #[command(name = "pre-push", long_flag = "pre-push")]
     PrePush(pre_push::PrePushArgs),
     /// The next free conformance check id, read from the working tree, every local branch, every branch of origin as the
-    /// remote has it now (git ls-remote) and conformance/reserved/ (ER-21: two branches took the same id four times). `--reserve <branch>` creates the reservation file.
+    /// remote has it now (git ls-remote) and conformance/reserved/ (ER-21: two branches took the same id five times). `--reserve <branch>` takes the id on origin at once (a push of refs/paddock/check-ids/C<n>, which only one agent can create) and writes the reservation file.
     NewId {
-        /// Create conformance/reserved/C<n>-<branch-slug> (commit it: the commit is the reservation).
+        /// Reserve on origin (refs/paddock/check-ids/C<n>), then create conformance/reserved/C<n>-<branch-slug> (commit it: the record).
         #[arg(long)]
         reserve: Option<String>,
         /// The repository root (default: the folder containing .git, found from the current folder).
@@ -354,6 +366,12 @@ struct LocksArgs {
     /// The repository root (default: the folder containing .git, found from the current folder).
     #[arg(long)]
     root: Option<PathBuf>,
+}
+
+#[derive(Subcommand)]
+enum SccacheCommand {
+    /// Print `export` lines for the shell: `eval "$(./dev sccache env)"`.
+    Env,
 }
 
 #[derive(Subcommand)]
@@ -661,6 +679,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         } => ci_runs::trial_prune(&a),
         Command::Wait(a) => wait::command(&a),
         Command::Heavy(a) => heavy_cmd::command(&a),
+        Command::Golden { command } => golden_cmd::command(command),
         Command::Load(a) => load::command(&a),
         Command::Places(a) => places::command(&a),
         Command::Brief { command } => brief_check::command(command),
@@ -719,6 +738,16 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CheckCommand::Primary(a),
         } => worktree::check_primary(&a),
         Command::Worktree { command } => worktree::command(command),
+        Command::Sccache {
+            command: SccacheCommand::Env,
+        } => {
+            let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+            for w in local_sccache::shell_warnings(&env) {
+                eprintln!("{w}");
+            }
+            let lines = local_sccache::prepare_and_say(&env, local_sccache::Install::OnDemand).map(|r| local_sccache::shell_lines(&r)).unwrap_or_default();
+            Ok(Report::new(serde_json::json!({ "lines": lines }), lines.join("\n")))
+        }
         Command::Disk { command } => disk::command(command),
         Command::Pr { command } => pr::command(command),
         Command::Queue { command } => queue::command(command),

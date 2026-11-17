@@ -767,16 +767,14 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_runner_calls_npm_ci_for_the_conformance_member_from_the_root_and_reports_its_failure() {
-        use std::os::unix::fs::PermissionsExt;
         let d = tempfile::tempdir().unwrap();
         let log = d.path().join("log");
         let fake = d.path().join("npm");
-        std::fs::write(
+        paddock_testkit::exe::write_program(
             &fake,
             format!("#!/bin/sh\necho \"$PWD $*\" >> '{}'\nexit ${{FAKE_NPM_EXIT:-0}}\n", log.display()),
         )
         .unwrap();
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let root = d.path().join("wt");
         std::fs::create_dir(&root).unwrap();
         assert!(super::npm_ci_with(fake.to_str().unwrap(), &root).is_ok());

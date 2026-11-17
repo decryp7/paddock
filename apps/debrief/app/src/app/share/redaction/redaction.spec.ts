@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { all, buttonByText, el, settle, text, tinyBackend, typeInto } from '../../../testing/helpers';
+import { all, buttonByText, el, settle, text, tinyBackend, typeInto, openDialog } from '../../../testing/helpers';
 import { DebriefBackend } from '../../core/backend';
 import { mockUnsupported } from '../../core/mock/mock-unsupported';
 import { RedactionSummary } from '../../core/api.types';
@@ -16,6 +16,10 @@ import { RedactionSummaryView } from './redaction-summary';
 import { provideMockShare } from './share-testing';
 import { ShareBackend } from '../share-backend';
 import { at } from '../../../testing/must';
+import { endMockJobs } from '../../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 const closed = vi.fn();
 
@@ -255,6 +259,7 @@ describe('RedactionBanner', () => {
     await settle(fixture);
     buttonByText(fixture, 'Settings…').click();
     await settle(fixture);
+    await openDialog(TestBed.inject(DialogService));
     expect(TestBed.inject(DialogService).stack()).toHaveLength(1);
     buttonByText(fixture, 'Turn off').click();
     await settle(fixture);

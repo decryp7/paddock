@@ -67,7 +67,14 @@ checks that the pid still belongs to the process it means (pid plus start time).
      - Linux: the boot time plus the start tick in `/proc/<pid>/stat`.
    - `ProcessId::of(pid)` reads the current holder of a pid. `ProcessId::of_recorded(pid, written_ms)` is for a pid
      read from a file whose process wrote it after it started; a holder that started later is someone else.
-   - `Holder` and `Ending` say what a check or a kill found.
+   - `ProcessId::of_reported(pid, started_ms, resolution_ms)` is for a pid another program reported with the start time it
+     read (a test's service list): the holder must have started in `[started_ms, started_ms + resolution_ms)`, with a
+     second of slack on each side on Linux only, whose start times are counted from a boot time read in whole seconds. A
+     program that lists processes itself reads `ProcessId::of` when it lists them and holds the value; it acts on that and
+     no tolerance is involved (Pitcrew, 2026-11-16: its process list carries the exact start the service held, and a stop
+     names it).
+   - `Holder` and `Ending` say what a check or a kill found. `ask_outcome` is `ask` with that answer: `Refused` is a process
+     that is the one named but did not take the request (Windows: a console process without a window; the caller may `end` it).
 
 2. **Every kill checks identity, as tightly as the OS allows.** `kill_tree`, `end`, `ask` and `terminate` take a
    `ProcessId`.

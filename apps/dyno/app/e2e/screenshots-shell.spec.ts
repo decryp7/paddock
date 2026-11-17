@@ -1,5 +1,6 @@
+import { expect, test } from './test';
 import { mkdirSync } from 'node:fs';
-import { dialogWindowUrl, expect, test } from '@decryp7/paddock-e2e';
+import { dialogWindowUrl } from '@decryp7/paddock-e2e';
 import { chartsDrawn } from './charts-drawn';
 
 // Every Dyno page and shell surface, light and dark, for the independent review (rule 22). The dialogs are in

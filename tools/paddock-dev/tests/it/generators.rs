@@ -2,7 +2,6 @@
 //! `./dev gen check` and the generator step of `./dev merge check` run real (harmless) commands in an invented repository.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::generators::registry::Registry;
-use paddock_testkit::TestCommand;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -54,8 +53,10 @@ impl Repo {
 
     // Starts git and the tool under test.
     #[allow(clippy::disallowed_methods)]
-    fn cmd(&self, program: &str) -> TestCommand {
-        let mut c = TestCommand::new(program);
+    fn cmd(&self, program: &str) -> Command {
+        let mut c = Command::new(program);
+        // Whatever this starts may be the binary under test: never a compile-cache server on this machine (ER-45).
+        crate::dev_bin::harden(&mut c);
         let empty = if cfg!(windows) { "NUL" } else { "/dev/null" };
         c.current_dir(self.dir.path())
             .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -65,11 +66,6 @@ impl Repo {
             .env("GIT_COMMITTER_NAME", "t")
             .env("GIT_COMMITTER_EMAIL", "t@example.invalid");
         c
-    }
-
-    /// The tool under test, started like git above.
-    fn dev_cmd(&self) -> TestCommand {
-        self.cmd(env!("CARGO_BIN_EXE_paddock-dev"))
     }
 
     fn git(&self, args: &[&str]) -> String {
@@ -102,7 +98,7 @@ impl Repo {
 
     fn dev(&self, args: &[&str]) -> (i32, String) {
         let out = self
-            .dev_cmd()
+            .cmd(crate::dev_bin::PATH)
             .env("PADDOCK_DEV_TARGET_DIR", self.builds.path())
             .env("HOME", self.home.path())
             .args(args)
@@ -281,7 +277,7 @@ fn every_cargo_test_target_and_package_the_registry_names_exists() {
 fn a_tool_lockfile_entry_marks_the_manifest_of_every_shared_crate_the_tool_depends_on() {
     let root = repo_root();
     let reg = Registry::parse(&fs::read_to_string(root.join("docs/generators.toml")).unwrap()).unwrap();
-    let rustc = TestCommand::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()))
+    let rustc = Command::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()))
         .arg("-vV")
         .output()
         .unwrap();
@@ -290,7 +286,7 @@ fn a_tool_lockfile_entry_marks_the_manifest_of_every_shared_crate_the_tool_depen
         .find_map(|l| l.strip_prefix("host: ").map(str::to_string))
         .unwrap();
     for tool in ["tools/paddock-dev", "tools/heavy", "tools/wiki"] {
-        let out = TestCommand::new(env!("CARGO"))
+        let out = Command::new(env!("CARGO"))
             .args([
                 "metadata",
                 "--format-version",
@@ -350,7 +346,7 @@ fn the_conformance_line_entry_reads_ci_yml_through_the_one_reader() {
 #[allow(clippy::disallowed_methods, reason = "a test starts the built binary; it ends it itself")]
 fn ci_conformance_args_prints_the_line_ci_runs_and_is_not_measured_without_one() {
     let root = repo_root();
-    let out = paddock_testkit::TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = crate::dev_bin::command()
         .args(["ci", "conformance-args", "--root"])
         .arg(&root)
         .output()
@@ -363,7 +359,7 @@ fn ci_conformance_args_prints_the_line_ci_runs_and_is_not_measured_without_one()
         "{text}"
     );
     let empty = tempfile::tempdir().unwrap();
-    let out = paddock_testkit::TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = crate::dev_bin::command()
         .args(["ci", "conformance-args", "--root"])
         .arg(empty.path())
         .output()

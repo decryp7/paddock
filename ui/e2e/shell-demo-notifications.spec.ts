@@ -1,4 +1,5 @@
-import { axeViolations, expect, expectNoHorizontalScroll, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, expectNoHorizontalScroll } from '@decryp7/paddock-e2e';
 
 // The "Notifications" settings page (plan X8) in the shell demo: the section Rust wrote into its fixture, over the demo's
 // in-memory engine. The OS side (policy, limits, quiet hours, digest, clicks) is tested once in paddock-health.

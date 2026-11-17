@@ -3,7 +3,7 @@ import { patchState, signalStore, withComputed, withMethods, withState } from '@
 import type { AppGroup, CommandError, LiveVia, LockerList, OtherUsers, ProcessDetails, ProcessRef, ProcessSample } from '../core/api.types';
 import { BACKEND, type Unsubscribe } from '../core/backend';
 import { toCommandError } from '../core/command-error';
-import { type Row, type Sort, type ViewMode, buildRows, collapseAllKeys, expandAllKeys } from '../features/processes/process-rows';
+import { type Row, type Sort, type ViewMode, buildRows, carryStarts, collapseAllKeys, expandAllKeys, sameProcess } from '../features/processes/process-rows';
 
 interface ProcessesState {
   processes: ProcessSample[];
@@ -23,6 +23,9 @@ interface ProcessesState {
   /** The last request that failed, with the engine's message (shown inline above the table). */
   actionError: CommandError | null;
 }
+
+/** Whether the process selected now is the one a reply is for (the pid alone could be a new process that reused it). */
+const sameSelected = (selected: ProcessRef | null, ref: ProcessRef): boolean => selected !== null && sameProcess(selected, ref);
 
 /** The task manager's state: the live process list (subscribed only while the screen is open) and view settings. */
 export const ProcessesStore = signalStore(
@@ -54,7 +57,7 @@ export const ProcessesStore = signalStore(
       start(): void {
         if (stop) return;
         stop = backend.onLive('processes', (u) => {
-          if (u.processes) patchState(store, { processes: u.processes, groups: u.groups ?? [], otherUsers: u.otherUsers, via: u.via ?? null, connected: true });
+          if (u.processes) patchState(store, { processes: carryStarts(u.processes, store.processes()), groups: u.groups ?? [], otherUsers: u.otherUsers, via: u.via ?? null, connected: true });
         });
       },
       stop(): void {
@@ -100,9 +103,9 @@ export const ProcessesStore = signalStore(
         if (!ref) return;
         try {
           const details = await backend.processDetails(ref);
-          if (store.selected()?.pid === ref.pid) patchState(store, { details, detailsLoading: false });
+          if (sameSelected(store.selected(), ref)) patchState(store, { details, detailsLoading: false });
         } catch (e) {
-          if (store.selected()?.pid === ref.pid) patchState(store, { detailsLoading: false, detailsError: toCommandError(e) });
+          if (sameSelected(store.selected(), ref)) patchState(store, { detailsLoading: false, detailsError: toCommandError(e) });
         }
       },
       /** Which processes hold a file or folder open; rejects with a `CommandError`. */

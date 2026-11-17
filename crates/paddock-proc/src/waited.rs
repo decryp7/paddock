@@ -46,7 +46,7 @@ pub fn run_waited_cancellable(
         cmd.stdout(file).stderr(copy);
     }
     crate::sys::own_group(&mut cmd);
-    let mut child = cmd.spawn().map_err(|e| match e.kind() {
+    let mut child = crate::command::spawn_retrying(&mut cmd).map_err(|e| match e.kind() {
         std::io::ErrorKind::NotFound => RunError::NotFound(name.clone()),
         std::io::ErrorKind::PermissionDenied => RunError::PermissionDenied(name.clone()),
         _ => RunError::Spawn(name.clone(), e),

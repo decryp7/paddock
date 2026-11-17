@@ -5,6 +5,7 @@
 //! docs/plans/ci-in-rust.md; it needs the user's yes and is not built): it calls [`plan_gates`] once per commit with that commit's
 //! files and no ranges, in a worktree of its own. Nothing in this file depends on the push as a whole.
 
+use crate::cargo_target;
 use serde_json::Value;
 use std::collections::BTreeSet;
 
@@ -217,9 +218,11 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             "fix the lints it printed (a Clippy that needs `--fix` runs on your own files only)".into(),
         );
         g.heavy = true;
-        if let (None, Some(k)) = (&facts.target_dir, &facts.kept_targets) {
-            g.env
-                .push(("CARGO_TARGET_DIR".into(), format!("{}/{}", k.trim_end_matches('/'), slug(&ws))));
+        // The build folder goes in as cargo configuration, never as `CARGO_TARGET_DIR` (sccache hashes it: crate::cargo_target).
+        match (&facts.target_dir, &facts.kept_targets) {
+            (Some(dir), _) => g.args = cargo_target::with_target_dir(&g.args, dir.trim_end_matches('/')),
+            (None, Some(k)) => g.args = cargo_target::with_target_dir(&g.args, &format!("{}/{}", k.trim_end_matches('/'), slug(&ws))),
+            (None, None) => {}
         }
         out.push(Planned::Run(g));
         if all_features || facts.windows_clippy.contains(&ws) {
@@ -246,12 +249,10 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             g.heavy = true;
             g.need = Need::Tool("cargo-xwin".into());
             match (&facts.target_dir, &facts.kept_targets) {
-                (Some(dir), _) => g
-                    .env
-                    .push(("CARGO_TARGET_DIR".into(), format!("{}/xwin", dir.trim_end_matches('/')))),
-                (None, Some(k)) => g
-                    .env
-                    .push(("CARGO_TARGET_DIR".into(), format!("{}/{}/xwin", k.trim_end_matches('/'), slug(&ws)))),
+                (Some(dir), _) => g.args = cargo_target::with_target_dir(&g.args, &format!("{}/xwin", dir.trim_end_matches('/'))),
+                (None, Some(k)) => {
+                    g.args = cargo_target::with_target_dir(&g.args, &format!("{}/{}/xwin", k.trim_end_matches('/'), slug(&ws)));
+                }
                 (None, None) => {}
             }
             out.push(Planned::Run(g));

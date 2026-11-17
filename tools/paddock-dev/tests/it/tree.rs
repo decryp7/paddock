@@ -139,7 +139,7 @@ fn a_ui_change_marks_the_tauri_shells_that_embed_a_ui_build_both_halves() {
     // Spotter and Dyno do, so its UI half is marked too (scripts/affected.test.mjs says the same).
     assert_eq!(
         names(&r["apps"]),
-        ["debrief", "dyno", "pitwall", "shell-demo", "spotter", "workbench-demo"]
+        ["debrief", "dyno", "pitcrew", "pitwall", "shell-demo", "spotter", "workbench-demo"]
     );
     assert_eq!(r["kinds"]["debrief"], json!(["ui"]));
     assert_eq!(r["kinds"]["spotter"], json!(["ui"]));

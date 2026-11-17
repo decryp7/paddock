@@ -2,19 +2,15 @@
 //! owner folder that disappears.
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
 use paddock_slots::{FsLocks, SlotId, SlotLocks};
-use paddock_testkit::TestCommand;
 use serde_json::Value;
 use std::path::Path;
+use std::process::Command;
 use std::time::Duration;
 
 const POLL: &str = "20";
 
 fn dev(args: &[&str]) -> (i32, Value, String) {
-    let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
-        .args(["--json"])
-        .args(args)
-        .output()
-        .unwrap();
+    let out = crate::dev_bin::command().args(["--json"]).args(args).output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     (
         out.status.code().unwrap(),
@@ -221,7 +217,7 @@ fn eight_parallel_acquires_get_eight_distinct_slots() {
 }
 
 fn idle_run(root: &Path, slot: &str, command: &[&str]) -> std::process::Output {
-    TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    crate::dev_bin::command()
         .args(["ci", "slot", "idle-run", "--slot", slot, "--root", root.to_str().unwrap(), "--"])
         .args(command)
         .output()
@@ -235,8 +231,7 @@ fn idle_run_runs_only_on_an_idle_slot_and_holds_it_until_the_command_ends() {
     let d = tempfile::tempdir().unwrap();
     let (root, job) = (d.path().join("ci"), d.path().join("job"));
     std::fs::create_dir(&job).unwrap();
-    // conformance: test-env — the path is an argument that `idle_run` (a TestCommand) runs under `ci slot idle-run`
-    let bin = env!("CARGO_BIN_EXE_paddock-dev");
+    let bin = crate::dev_bin::PATH;
     let r = root.to_str().unwrap();
     // Free: the command runs, and while it runs the slot is busy (it looks at the slot itself).
     let out = idle_run(&root, "s1", &[bin, "ci", "slot", "status", "--max", "1", "--root", r]);
@@ -277,17 +272,10 @@ fn the_holder_does_not_keep_an_inherited_pipe_open() {
     std::fs::create_dir(&job).unwrap();
     let script = r#"exec 7>&1 1>/dev/null; exec "$0" ci slot acquire --max 1 --owner "$1" --root "$2" --poll-ms 20 --max-hold-secs 120"#;
     let (tx, rx) = std::sync::mpsc::channel();
-    let (bin, job_arg, root_arg) = (
-        env!("CARGO_BIN_EXE_paddock-dev"),
-        job.display().to_string(),
-        root.display().to_string(),
-    );
+    let (bin, job_arg, root_arg) = (crate::dev_bin::PATH, job.display().to_string(), root.display().to_string());
     std::thread::spawn(move || {
         // `output()` returns only when every holder of the pipe's write end has closed it.
-        let out = TestCommand::new("sh")
-            .args(["-c", script, bin, &job_arg, &root_arg])
-            .output()
-            .unwrap();
+        let out = Command::new("sh").args(["-c", script, bin, &job_arg, &root_arg]).output().unwrap();
         let _ = tx.send(out.status.code());
     });
     let code = rx
@@ -309,14 +297,10 @@ fn the_step_output_pipe_closes_when_acquire_ends_even_though_the_holder_lives_on
     let (root, job) = (d.path().join("ci"), d.path().join("job"));
     std::fs::create_dir(&job).unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
-    let (bin, job_arg, root_arg) = (
-        env!("CARGO_BIN_EXE_paddock-dev"),
-        job.display().to_string(),
-        root.display().to_string(),
-    );
+    let (bin, job_arg, root_arg) = (crate::dev_bin::PATH, job.display().to_string(), root.display().to_string());
     std::thread::spawn(move || {
         // `output()` returns only when every holder of the stdout and stderr pipes has closed it.
-        let out = TestCommand::new(bin)
+        let out = Command::new(bin)
             .args([
                 "ci",
                 "slot",
@@ -412,8 +396,8 @@ fn a_program_inside_the_job_folder_cannot_hold_a_slot() {
     let (root, job) = (d.path().join("ci"), d.path().join("job"));
     std::fs::create_dir_all(job.join("bin")).unwrap();
     let copy = job.join("bin").join(if cfg!(windows) { "paddock-dev.exe" } else { "paddock-dev" });
-    std::fs::copy(env!("CARGO_BIN_EXE_paddock-dev"), &copy).unwrap();
-    let out = TestCommand::new(&copy)
+    std::fs::copy(crate::dev_bin::PATH, &copy).unwrap();
+    let out = Command::new(&copy)
         .args([
             "--json",
             "ci",

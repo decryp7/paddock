@@ -33,4 +33,12 @@ describe('ToastStore', () => {
     for (let i = 0; i < 6; i++) store.show(toast('danger', `t${i}`));
     expect(store.toasts().map((t) => t.title)).toEqual(['t2', 't3', 't4', 't5']);
   });
+
+  it('leaves no dismiss timer running once its injector is destroyed', () => {
+    const s = TestBed.inject(ToastStore);
+    s.show({ tone: 'success', icon: 'check', title: 'ok', body: null });
+    expect(vi.getTimerCount()).toBe(1);
+    TestBed.resetTestingModule();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

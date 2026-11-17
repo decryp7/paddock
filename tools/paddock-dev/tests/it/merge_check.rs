@@ -3,9 +3,9 @@
 //! `tests/fixtures/merge-check/087570da4` holds the real contents of those files at the merge base (e16df7328), the first
 //! parent (80f1021a8) and the second (d3ec06cac), and the real merge message. The others are invented histories.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use paddock_testkit::TestCommand;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 struct Repo {
     dir: tempfile::TempDir,
@@ -25,8 +25,10 @@ impl Repo {
 
     // Starts git and the tool under test, never a process by pid.
     #[allow(clippy::disallowed_methods)]
-    fn cmd(&self, program: &str) -> TestCommand {
-        let mut c = TestCommand::new(program);
+    fn cmd(&self, program: &str) -> Command {
+        let mut c = Command::new(program);
+        // Whatever this starts may be the binary under test: never a compile-cache server on this machine (ER-45).
+        crate::dev_bin::harden(&mut c);
         let empty = if cfg!(windows) { "NUL" } else { "/dev/null" };
         c.current_dir(self.path())
             .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -36,11 +38,6 @@ impl Repo {
             .env("GIT_COMMITTER_NAME", "t")
             .env("GIT_COMMITTER_EMAIL", "t@example.invalid");
         c
-    }
-
-    /// The tool under test, started like git above.
-    fn dev_cmd(&self) -> TestCommand {
-        self.cmd(env!("CARGO_BIN_EXE_paddock-dev"))
     }
 
     fn git(&self, args: &[&str]) -> String {
@@ -69,7 +66,7 @@ impl Repo {
     /// The same for the repository at `root`.
     fn check_at(&self, root: &Path, args: &[&str]) -> (i32, String) {
         let out = self
-            .dev_cmd()
+            .cmd(crate::dev_bin::PATH)
             .args(["merge", "check", "--root"])
             .arg(root)
             .args(args)
@@ -1121,7 +1118,6 @@ fn a_dropped_hunk_finding_shows_where_it_was_and_what_it_said() {
 #[cfg(unix)]
 mod hakari {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
     const FAKE_CARGO: &str = r#"#!/bin/sh
 # argv: hakari generate --diff, run in <tree>/crates. Like cargo-hakari 0.9.39, it prints the diff on STANDARD ERROR.
@@ -1135,8 +1131,7 @@ exit 0
 
     fn fake_cargo(dir: &Path) -> PathBuf {
         let p = dir.join("cargo");
-        fs::write(&p, FAKE_CARGO).unwrap();
-        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&p, FAKE_CARGO).unwrap();
         p
     }
 
@@ -1203,7 +1198,7 @@ exit 0
     fn a_hakari_that_cannot_run_keeps_the_other_detectors_findings_and_says_it_was_not_measured() {
         let r = dropped_hunk_and_hakari();
         let out = r
-            .dev_cmd()
+            .cmd(crate::dev_bin::PATH)
             .env("PADDOCK_MERGE_CHECK_CARGO", "/nonexistent/cargo")
             .args(["merge", "check", "--root"])
             .arg(r.path())
@@ -1220,7 +1215,7 @@ exit 0
         let bin = tempfile::tempdir().unwrap();
         fake_cargo(bin.path());
         let out = r
-            .dev_cmd()
+            .cmd(crate::dev_bin::PATH)
             .env("PADDOCK_MERGE_CHECK_CARGO", bin.path().join("cargo"))
             .args(["merge", "check", "--root"])
             .arg(r.path())
@@ -1262,7 +1257,7 @@ exit 0
     fn a_hakari_that_cannot_run_is_not_measured_never_a_pass() {
         let r = train(true, false);
         let out = r
-            .dev_cmd()
+            .cmd(crate::dev_bin::PATH)
             .env("PADDOCK_MERGE_CHECK_CARGO", "/nonexistent/cargo")
             .args(["merge", "check", "--root"])
             .arg(r.path())
@@ -1283,7 +1278,7 @@ exit 0
         let bin = tempfile::tempdir().unwrap();
         fake_cargo(bin.path());
         let out = r
-            .dev_cmd()
+            .cmd(crate::dev_bin::PATH)
             .env("PADDOCK_MERGE_CHECK_CARGO", bin.path().join("cargo"))
             .args(["merge", "check", "--json", "--root"])
             .arg(r.path())
@@ -1310,7 +1305,6 @@ exit 0
 #[cfg(unix)]
 mod member_gate {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
     const FAKE_GATES: &str = r#"#!/bin/sh
 # argv: check --pre-push --base <base> --root <root>; run in <root>. Logs its argv and the checkout's HEAD.
@@ -1341,7 +1335,7 @@ exit 0
         fn run(&self, args: &[&str], gates_exit: &str) -> (i32, String) {
             let out = self
                 .repo
-                .dev_cmd()
+                .cmd(crate::dev_bin::PATH)
                 .env("PADDOCK_MERGE_CHECK_GATES", self.gates.path().join("gates"))
                 .env("GATES_LOG", self.log())
                 .env("GATES_EXIT", gates_exit)
@@ -1373,8 +1367,7 @@ exit 0
         }
         let gates = tempfile::tempdir().unwrap();
         let p = gates.path().join("gates");
-        fs::write(&p, FAKE_GATES).unwrap();
-        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&p, FAKE_GATES).unwrap();
         Train { repo, gates }
     }
 
@@ -1395,8 +1388,7 @@ exit 0
         let t = train(false);
         let script = |body: &str| {
             let p = t.gates.path().join("gates");
-            fs::write(&p, format!("#!/bin/sh\n{body}\nexit 0\n")).unwrap();
-            fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+            paddock_testkit::exe::write_program(&p, format!("#!/bin/sh\n{body}\nexit 0\n")).unwrap();
         };
         let stale = r#"printf '{"outcome":{"status":"clean","evidence":{"check":"pre-push","subject":{"kind":"commit","sha":"0000000000000000000000000000000000000001","tree":"0000000000000000000000000000000000000002"},"tool":"x","at":1}}}\n'"#;
         for body in ["echo fine", "echo '{\"outcome\":{\"status\":\"clean\"}}'", stale] {

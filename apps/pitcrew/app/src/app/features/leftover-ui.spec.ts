@@ -38,8 +38,8 @@ describe('leftover processes in the UI', () => {
     const el = f.nativeElement as HTMLElement;
     expect(el.querySelectorAll('a.leftover')).toHaveLength(1);
     expect(el.querySelector('a.leftover')?.getAttribute('aria-label')).toBe('3 leftover processes');
-    await mock.stopProcess('build-win', 12408, null, false);
-    await mock.stopProcess('build-win', 13370, null, false);
+    const tree = (await mock.runnerProcesses('build-win')).entries;
+    for (const pid of [12408, 13370]) await mock.stopProcess('build-win', pid, tree.find((x) => x.pid === pid)!.startedAt!, false);
     await settle(f, 6);
     expect(el.querySelector('a.leftover')?.getAttribute('aria-label')).toBe('1 leftover process');
   });

@@ -36,6 +36,7 @@ app	dyno	ubuntu-latest	apps/dyno/app	npx ng lint
 app	dyno	ubuntu-latest	apps/dyno/app	npx ng test --watch=false --coverage
 app	dyno	windows-latest	apps/dyno	cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper
 app	pitcrew	ubuntu-latest		node conformance/bin/paddock-conformance.mjs --app pitcrew --root apps/pitcrew --only C13 --paddock .
+app	pitcrew	ubuntu-latest		npm run build -w ui
 app	pitcrew	ubuntu-latest	apps/pitcrew/app	npm audit --omit=dev --audit-level=high
 app	pitcrew	ubuntu-latest	apps/pitcrew/app	npm run lint
 app	pitcrew	ubuntu-latest	apps/pitcrew/app	npx ng build
@@ -446,6 +447,8 @@ job	e2e			{
 job	e2e			} >> "$GITHUB_ENV"
 job	e2e		ui	npx playwright test --shard=1/2
 job	e2e		ui	npx playwright test --shard=2/2
+job	e2e		ui	npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=chromium --shard=1/2
+job	e2e		ui	npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=chromium --shard=2/2
 job	eslint-preset			"$PADDOCK_DEV" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	eslint-preset			*) echo "::error::sccache-backend must be auto, redis or local (got 'local')"
 job	eslint-preset			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
@@ -916,6 +919,7 @@ job	ui			missing=1
 job	ui			mkdir -p "$DEST"
 job	ui			mkdir -p "$DIR"
 job	ui			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
+job	ui			node scripts/e2e-ready-report.mjs
 job	ui			npm ci
 job	ui			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	ui			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"

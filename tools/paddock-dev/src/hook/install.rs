@@ -448,11 +448,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn an_existing_commit_msg_hook_still_runs_after_install() {
-        use std::os::unix::fs::PermissionsExt;
         let f = fixture();
         let hook = f.root.join(".git/hooks/commit-msg");
-        std::fs::write(&hook, "#!/bin/sh\necho ran > \"$(dirname \"$0\")/marker\"\nexit 0\n").unwrap();
-        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&hook, "#!/bin/sh\necho ran > \"$(dirname \"$0\")/marker\"\nexit 0\n").unwrap();
         install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
         std::fs::write(f.root.join("x.txt"), "x\n").unwrap();
         git(&f, &["add", "-A"]);
@@ -705,11 +703,7 @@ mod tests {
         let dir = f.root.join(".git/paddock/hooks");
         std::fs::create_dir_all(&dir).unwrap();
         let exe = dir.join("paddock-dev.exe");
-        std::fs::write(&exe, BUILTIN_BINARY).unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        paddock_testkit::exe::write_program(&exe, BUILTIN_BINARY).unwrap();
         assert_eq!(
             shim_without_path(&f, &shim, &f.root, None, "INPUT\n"),
             "args: hook pre-tool-use <INPUT>\n"

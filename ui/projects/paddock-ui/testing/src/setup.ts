@@ -1,3 +1,5 @@
+import { leakDetectorInstalled } from './leaks';
+
 /** The test globals the kit uses when a test runner defines them (Vitest through the Angular unit-test builder does). */
 interface HookGlobals {
   beforeEach?: (fn: () => void) => void;
@@ -130,13 +132,15 @@ export function installTestKit(options: TestKitOptions = {}): void {
   const hooks = globalThis as unknown as HookGlobals;
   const real = realTimers(win);
   const isSpy = (fn: unknown) => hooks.vi?.isMockFunction(fn) ?? false;
-  const drop = (): string[] => {
+  // The leak detector judges the page after every afterEach: while one is installed the afterEach leaves the body for it to read
+  // (it empties the body itself once it has judged; the next beforeEach empties it in any case).
+  const drop = (keepBody = false): string[] => {
     for (const key of keys) delete win[key];
     // Spies first, then the clock: a spy on a faked timer restored after the clock is gone would write the dead fake back.
     hooks.vi?.restoreAllMocks();
     hooks.vi?.useRealTimers();
     hooks.vi?.unstubAllGlobals();
-    if (typeof document !== 'undefined') document.body?.replaceChildren();
+    if (!keepBody && typeof document !== 'undefined') document.body?.replaceChildren();
     clearStorage('localStorage');
     clearStorage('sessionStorage');
     return putBackTimers(win, real, isSpy);
@@ -160,6 +164,6 @@ export function installTestKit(options: TestKitOptions = {}): void {
     });
   });
   hooks.afterEach?.(() => {
-    left = drop();
+    left = drop(leakDetectorInstalled());
   });
 }

@@ -1,4 +1,5 @@
-import { axeViolations, expect, expectNoHorizontalScroll, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, expectNoHorizontalScroll } from '@decryp7/paddock-e2e';
 
 // The shared "needs local AI" state (paddock-pitwall, ADR 0004) in the shell demo: <pd-needs-ai> over the demo's in-memory
 // engine, which plays the app's Rust `Link` (the same snapshots, pairing steps and repair). Nothing talks to a real Pitwall.

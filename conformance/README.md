@@ -16,7 +16,7 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 
 ## Checks
 
-**A new check gets its id from `./dev check new-id --reserve <branch>`** (ER-21): it prints the next id free across the working tree, every local branch, every branch of origin as the remote has it now (read live with `git ls-remote`; a remote it cannot read is an error) and `conformance/reserved/`, and adds one file `conformance/reserved/C<n>-<branch>` (one file per reservation, so branches never conflict); commit that file with the branch's first commit. Without `--reserve` it only prints. Never pick a number by hand: C110, C113 and C119 were each taken by two parallel branches.
+**A new check gets its id from `./dev check new-id --reserve <branch>`** (ER-21): it prints the next id free across the working tree, every local branch, every branch of origin as the remote has it now (read live with `git ls-remote`; a remote it cannot read is an error) and `conformance/reserved/`, takes the id on origin at once by pushing a blob to `refs/paddock/check-ids/C<n>` (a push that creates a ref fails when it exists, so the server decides and two agents reserving before either pushes a branch get different ids; two branches took one id that way on 2026-11-16), and then adds one file `conformance/reserved/C<n>-<branch>` as the record; commit that file with the branch's first commit. Without `--reserve` it only prints. Never pick a number by hand: C110, C113 and C119 were each taken by two parallel branches.
 
 **Adding a check is two steps: write the module, run the regenerate.**
 
@@ -100,12 +100,17 @@ The check index (generated from each module's id, title, scope, mode and needs):
 | C120 | No guessing of the cargo build-folder layout | both | report-only | all |
 | C121 | Declared data is read through its accessor, not by searching a workflow's text | root | report-only | all |
 | C122 | Tests compare paths as paths | root | report-only | all |
-| C123 | a Rust test starts ./dev, cargo or node only through paddock_testkit::TestCommand | root | report-only | all |
 | C124 | A gate's result is built through the shared outcome, never by hand | root | report-only | all |
 | C125 | No hard-coded machine disk paths | root | report-only | all |
 | C126 | Tests bound each step on progress and end every process they start | root | report-only | all |
 | C127 | A recursive delete of a computed path in a shell script goes through safe_rm | root | report-only | all |
 | C128 | Tests take a recorded pid's identity through the kit, never ProcessId::of | root | report-only | all |
+| C129 | No new shell | root | report-only | all |
+| C131 | A golden file holds no value of the machine that captured it | root | report-only | all |
+| C133 | E2E specs: opt-outs of the pinned clock say why, live steps are paused, waits are never vacuous | root | report-only | all |
+| C135 | The test leak detector is switched off only where listed | root | report-only | all |
+| C136 | A unit test that starts a live mock feed runs it on a clock the test moves | root | report-only | all |
+| C137 | An app e2e spec imports the kit by package name only when its CI job builds it | root | report-only | all |
 <!-- checks:end -->
 
 Notes per check (written by hand; the index above is the complete list):

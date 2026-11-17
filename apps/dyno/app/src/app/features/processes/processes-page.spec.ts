@@ -6,6 +6,7 @@ import { LiveStore } from '../../state/live.store';
 import { ProcessesStore } from '../../state/processes.store';
 import { nextFrame } from '../../testing/frame';
 import { ProcessesPage } from './processes-page';
+import type { Row } from './process-rows';
 
 const NOW = 1_700_000_000_000;
 
@@ -71,6 +72,12 @@ describe('ProcessesPage', () => {
     expect(el.querySelector('[data-key="other-users"] .pd-icon-btn')).toBeNull();
     f.destroy();
   });
+  it('says in the Disk header that the figure is read plus write', async () => {
+    const r = await make();
+    const disk = [...r.el.querySelectorAll('[role="columnheader"] .pd-th-text')].find((h) => h.textContent?.trim() === 'Disk')!;
+    expect(disk.getAttribute('title')).toBe('Read + write together, per second');
+  });
+
   it('shows where the list came from: the chip when the helper read it, the reason and the button when it did not', async () => {
     const withVia = async (via: unknown) =>
       make((m) => {
@@ -170,5 +177,17 @@ describe('ProcessesPage', () => {
     f.destroy();
     expect(stop).toHaveBeenCalled();
     expect(mock).toBeDefined();
+  });
+  it('highlights only the row of the process selected, not a new process that reused its pid', async () => {
+    const { f, store } = await make();
+    store.setMode('flat');
+    const page = f.componentInstance as unknown as { rows(): Row[] };
+    const row = page.rows().find((r) => r.ref !== null)!;
+    const isSelected = (r: typeof row) => (f.componentInstance as unknown as { isSelected(r: typeof row): boolean }).isSelected(r);
+    await store.select(row.ref);
+    expect(isSelected(row)).toBe(true);
+    await store.select({ pid: row.ref!.pid, started: (row.ref!.started ?? 0) + 1 });
+    expect(isSelected(row)).toBe(false);
+    f.destroy();
   });
 });

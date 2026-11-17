@@ -3,6 +3,7 @@
  * proposals that work against the mock workspace (applying them changes its lanes and markers). It mimics
  * the contract only; the engine (`crates/debrief-core/src/survey`) is the reference for behaviour.
  */
+import { systemMockClock } from '../../core/mock/mock-clock';
 import { Injector } from '@angular/core';
 import { DebriefBackend } from '../../core/backend';
 import { spanRules } from '../../core/mock/mock-runs';
@@ -259,7 +260,7 @@ export class MockFolderSetupBackend extends FolderSetupBackend {
   }
 
   private wait(ms: number): Promise<void> {
-    return ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve();
+    return ms > 0 ? systemMockClock.sleep(ms) : Promise.resolve();
   }
 
   /** Like the engine: an analysis job, returned at once; its result is the survey's outcome. */

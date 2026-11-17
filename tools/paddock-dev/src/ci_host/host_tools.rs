@@ -297,7 +297,6 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
     /// The Windows member gate's aarch64 cargo-nextest (scripts/vm-win/member-gate-tools.lock) is the release of this pin.
     #[test]
@@ -321,8 +320,7 @@ mod tests {
 
     fn script(path: &Path, body: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(path, format!("#!/bin/sh\n{body}\n")).unwrap();
     }
 
     struct Scene {

@@ -35,7 +35,9 @@ use std::io::{Read, Write};
 /// The protocol version this build speaks. 2: push events, maintenance, settings, registration, history, disk.
 /// 3: the runner's configuration file (get, preview, save) and the processes a runner started.
 /// 4: holds, update deadlines and loops in the snapshot; container engine hygiene and the Actions cache folder.
-pub const PROTOCOL_VERSION: u32 = 4;
+/// 5: `StopProcess.started_at` is required (a stop names the process by pid and start time, never by pid alone), and the
+/// start times of the process list are the exact milliseconds the service read, not whole seconds.
+pub const PROTOCOL_VERSION: u32 = 5;
 /// Largest frame either side sends or accepts.
 pub const MAX_FRAME: usize = 1024 * 1024;
 /// Longest secret (registration token) accepted.
@@ -259,8 +261,9 @@ pub enum Request {
         runner: RunnerName,
         /// The process.
         pid: u32,
-        /// When the app saw it start (guards against a reused process id).
-        started_at: Option<Timestamp>,
+        /// When the app saw it start. Required: the service ends the process only while its id still belongs to the
+        /// process that started at this time (a reused process id is refused; rule 53, ADR 0033).
+        started_at: Timestamp,
         /// The runner process itself may be stopped (the user chose it explicitly).
         allow_runner: bool,
     },
@@ -970,7 +973,7 @@ mod tests {
             Request::StopProcess {
                 runner: name("a"),
                 pid: 5,
-                started_at: None,
+                started_at: Timestamp(1),
                 allow_runner: false,
             },
             Request::KeepProcess {
@@ -1006,7 +1009,7 @@ mod tests {
         let r = Request::StopProcess {
             runner: name("a"),
             pid: 7,
-            started_at: Some(Timestamp(5)),
+            started_at: Timestamp(5),
             allow_runner: false,
         };
         assert_eq!(
@@ -1024,6 +1027,16 @@ mod tests {
             r#"{"type":"keepProcess","runner":"a","pid":7,"startedAt":5,"extra":{"amount":2,"unit":"hours"}}"#
         );
         assert_eq!(serde_json::to_string(&RestartPlan::AfterJob).unwrap(), r#""afterJob""#);
+    }
+
+    #[test]
+    fn a_stop_request_without_a_start_time_does_not_decode() {
+        for json in [
+            r#"{"type":"stopProcess","runner":"a","pid":7,"allowRunner":false}"#,
+            r#"{"type":"stopProcess","runner":"a","pid":7,"startedAt":null,"allowRunner":false}"#,
+        ] {
+            assert!(serde_json::from_str::<Request>(json).is_err(), "{json}");
+        }
     }
 
     #[test]

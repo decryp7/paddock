@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { expectEscapeReturnsFocus, expectReachableByKeyboard } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 import { openApp } from './app';
 

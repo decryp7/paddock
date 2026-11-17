@@ -14,6 +14,8 @@
 //! - [`cargo_layout`]: the profile folder above a test program or `OUT_DIR`, in cargo's old and 1.100 build-folder layouts.
 //! - [`winpath`]: Windows paths without the verbatim `\\?\` prefix, in one place (`plain`, `for_tools`, `real*`, `same`).
 //! - [`home_guard`]: the one "is this folder inside the home folder" check (symlinks resolved), shared by `heavy` and `paddock-dev`.
+//! - [`text_busy`]: the bounded retry of `ETXTBSY` for a program that was written or ended a moment ago (shared by `paddock-proc`
+//!   and the test kit).
 //!
 //! Tests use temporary folders only and never read or write the user's real folders.
 
@@ -26,6 +28,7 @@ mod error;
 mod folder;
 pub mod home_guard;
 pub mod private;
+pub mod text_busy;
 mod versioned;
 pub mod winpath;
 

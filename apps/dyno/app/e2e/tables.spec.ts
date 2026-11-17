@@ -1,4 +1,5 @@
-import { expectHeaderOnTop, expect, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { expectHeaderOnTop } from '@decryp7/paddock-e2e';
 
 /** The grids of Dyno are the shared pd-table: their headers stay above the rows while they scroll (C43), and the keyboard is the table's. */
 const url = (path: string) => `/?latency=0#${path}`;
@@ -75,7 +76,6 @@ test.describe('keyboard on the shared grids', () => {
 
   test('processes: Enter on a row far down opens the details, the row keeps the focus, every drawn row has the header\'s cells, and Escape closes the panel', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 600 });
-    await page.clock.install();
     await page.goto(url('/processes'));
     await page.getByRole('radio', { name: 'All', exact: true }).click();
     const grid = page.getByRole('treegrid', { name: 'Processes' });
@@ -103,7 +103,6 @@ test.describe('keyboard on the shared grids', () => {
 test.describe('live updates keep the keyboard where it was', () => {
   test('processes sorted by CPU: a focused row keeps the focus while the rows reorder, the keys keep working, Escape closes the details', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.clock.install();
     await page.goto(url('/processes'));
     await page.getByRole('radio', { name: 'All', exact: true }).click();
     const grid = page.getByRole('treegrid', { name: 'Processes' });
@@ -136,8 +135,6 @@ test.describe('live updates keep the keyboard where it was', () => {
 test.describe('the row menu from the keyboard', () => {
   test('processes: after switching Apps to All, Shift+F10 opens the focused row\'s menu and Escape gives the focus back', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 800 });
-    // The page's clock stands still: no live update reorders the rows between the focus and the key.
-    await page.clock.install();
     await page.goto(url('/processes'));
     const grid = page.getByRole('treegrid', { name: 'Processes' });
     await expect(grid).toBeVisible();
@@ -160,6 +157,31 @@ test.describe('the row menu from the keyboard', () => {
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);
     await expect(row).toBeFocused();
+  });
+});
+
+test.describe('a live update redraws no row that did not change', () => {
+  // Guards the pd-table workaround for the CDK's recycled-view regression (lessons.md, "Dyno's row-menu e2e failed once in about 100
+  // runs"): without it the first live update after the rows came and went redraws the reused row views as new elements.
+  test('processes: after switching Apps to All, an open row menu and its row element survive the next live updates', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 800 });
+    await page.goto(url('/processes'));
+    const grid = page.getByRole('treegrid', { name: 'Processes' });
+    await expect(grid).toBeVisible();
+    const all = page.getByRole('radio', { name: 'All', exact: true });
+    await all.click();
+    await expect(all).toBeChecked();
+    const row = grid.locator('.pd-body [role=row][data-key]:not([aria-expanded])').first();
+    await expect(row).toBeVisible();
+    // Mark the elements drawn so far: a row redrawn by a later update is another element and has no mark.
+    await grid.locator('.pd-body [role=row][data-key]').evaluateAll((els) => els.forEach((el) => el.setAttribute('data-drawn-once', 'y')));
+    await row.focus();
+    await page.keyboard.press('Shift+F10');
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    for (let i = 0; i < 3; i++) await page.clock.runFor(1000);
+    await expect(row).toHaveAttribute('data-drawn-once', 'y');
+    await expect(menu).toBeVisible();
   });
 });
 

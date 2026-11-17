@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { FakeDock, provideFakeDock, provideTinyBackend, settle } from '../../testing/helpers';
 import { WorkspaceStore } from '../core/workspace.store';
-import { focusRegion, RegionNavigator, regionIndex, regionsOf } from './regions';
+import { cancelFocusRetries, focusRegion, focusWhenThere, RegionNavigator, regionIndex, regionsOf } from './regions';
 
 const all = () => true;
 
@@ -99,5 +99,35 @@ describe('regions (G1)', () => {
       ['view.focusSidebar', 'Mod+0'],
       ['view.focusEvents', 'Mod+Shift+G'],
     ]);
+  });
+});
+
+describe('focusWhenThere', () => {
+  afterEach(() => {
+    cancelFocusRetries();
+    document.body.replaceChildren();
+    vi.useRealTimers();
+  });
+
+  it('retries until the element is there; the latest request wins and replaces the earlier retry', () => {
+    vi.useFakeTimers();
+    focusWhenThere('#first');
+    focusWhenThere('#second');
+    expect(vi.getTimerCount()).toBe(1);
+    const first = Object.assign(document.createElement('button'), { id: 'first' });
+    const second = Object.assign(document.createElement('button'), { id: 'second' });
+    document.body.append(first, second);
+    vi.advanceTimersByTime(50);
+    expect(document.activeElement).toBe(second);
+    vi.advanceTimersByTime(500);
+    expect(document.activeElement).toBe(second); // the replaced request for #first never ran
+  });
+
+  it('cancelFocusRetries ends the pending retry', () => {
+    vi.useFakeTimers();
+    focusWhenThere('#never');
+    expect(vi.getTimerCount()).toBe(1);
+    cancelFocusRetries();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

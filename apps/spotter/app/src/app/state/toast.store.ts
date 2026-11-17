@@ -1,3 +1,4 @@
+import { DestroyRef, inject } from '@angular/core';
 import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
 import type { Tone } from '../shared/labels';
 
@@ -23,12 +24,24 @@ export const ToastStore = signalStore(
   withState<ToastState>({ toasts: [] }),
   withMethods((store) => {
     let next = 1;
+    // The dismiss timers end with the injector: one left running fires into whatever test or window comes next.
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    inject(DestroyRef).onDestroy(() => {
+      for (const timer of timers) clearTimeout(timer);
+      timers.clear();
+    });
     const dismiss = (id: number) => patchState(store, { toasts: store.toasts().filter((t) => t.id !== id) });
     return {
       show(toast: Omit<Toast, 'id'>): number {
         const id = next++;
         patchState(store, { toasts: [...store.toasts(), { ...toast, id }].slice(-MAX) });
-        if (toast.tone !== 'danger') setTimeout(() => dismiss(id), TOAST_MS);
+        if (toast.tone !== 'danger') {
+          const timer = setTimeout(() => {
+            timers.delete(timer);
+            dismiss(id);
+          }, TOAST_MS);
+          timers.add(timer);
+        }
         return id;
       },
       success(title: string, body: string | null = null): number {

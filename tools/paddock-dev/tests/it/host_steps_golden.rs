@@ -6,7 +6,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 // conformance: file-layout-guess — the prune code never names `deps`; its tests use it only as filler data for a build folder to prune
-use paddock_testkit::TestCommand;
 use std::path::{Path, PathBuf};
 
 struct Run {
@@ -19,8 +18,8 @@ struct Run {
 #[allow(clippy::disallowed_methods)]
 fn dev(dir: &Path, args: &[&str], vars: &[(&str, String)]) -> Run {
     let env_file: PathBuf = dir.join("github-env");
-    let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
-    cmd.arg("ci").args(args).current_dir(dir);
+    let mut cmd = crate::dev_bin::command();
+    cmd.arg("ci").args(args).current_dir(dir).env_clear();
     for key in [
         "PATH",
         "SystemRoot",

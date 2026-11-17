@@ -459,3 +459,20 @@ describe('fault injection (test hook)', () => {
     expect(() => new InjectedFault()).toThrow('Injected fault');
   });
 });
+
+describe('ActivityRuntime.endTaskNow', () => {
+  it('runs the end-of-task callbacks that still wait and cancels their timers', () => {
+    const setTimeout = vi.fn((_fn: () => void, _ms: number) => 7);
+    const clearTimeout = vi.fn();
+    const runtime = new ActivityRuntime({ now: () => 0, setTimeout, clearTimeout });
+    runtime.triggers.note('keyboard');
+    runtime.triggers.consume();
+    expect(setTimeout).toHaveBeenCalledTimes(1);
+    runtime.endTaskNow();
+    expect(clearTimeout).toHaveBeenCalledWith(7);
+    // The task ended: the next input is explained again, which schedules a new end of task.
+    runtime.triggers.note('keyboard');
+    runtime.triggers.consume();
+    expect(setTimeout).toHaveBeenCalledTimes(2);
+  });
+});

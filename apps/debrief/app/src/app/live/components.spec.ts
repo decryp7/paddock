@@ -255,10 +255,8 @@ describe('provideLive', () => {
   it('registers the views, commands and saved state, keeps the alerts tab count', async () => {
     const backend = new MockBackend({ latency: false, dataset: tinyDataset, liveMs: 100_000 });
     const sub = vi.spyOn(backend, 'onLiveAlert');
-    const setTitle = vi.fn();
-    // Put back, not deleted: the method is the fake's own and other specs in the same bundle use it.
-    const original = FakeDock.prototype.setTitle;
-    (FakeDock.prototype as unknown as { setTitle: typeof setTitle }).setTitle = setTitle;
+    // A spy, restored after the test even when an expect fails: the method is the fake's own and other specs use it.
+    const setTitle = vi.spyOn(FakeDock.prototype, 'setTitle').mockImplementation(() => undefined);
     const { dock, live } = setup(backend, [provideLive()]);
     TestBed.inject(CommandRegistry);
     await settle();
@@ -309,7 +307,6 @@ describe('provideLive', () => {
     registry.restore({ live: null });
     expect(live.options()).toEqual(DEFAULT_LIVE_OPTIONS);
     await live.set(false);
-    FakeDock.prototype.setTitle = original;
   });
 
   it('sanitizes saved live options', () => {

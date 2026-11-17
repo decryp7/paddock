@@ -2,8 +2,14 @@
 import '@angular/localize/init';
 import * as mocks from './app/mock-backends';
 import { installBrowserMocks } from './app/core/mock-registry';
-import { resetMockJobs } from './app/jobs/mock-jobs';
+import { mockJobsLeftover, resetMockJobs } from './app/jobs/mock-jobs';
 import { resetMockNotifications } from './app/notifications/mock-notifications';
+import { activity } from './app/core/activity';
+import { cancelFocusRetries } from './app/shell/regions';
+import { resumeSystemMockClock, stopSystemMockClock } from './app/core/mock/mock-clock';
+import { unsettledStartupLoads } from './app/extensions/startup-loads';
+import { installLeakDetector, registerInFlight, registerSingleton } from '@decryp7/paddock-ui/testing';
+import { settleBootedStartup } from './testing/startup';
 import { testEnded, testStarted } from './testing/test-lifetime';
 
 // The app loads the mock backends before bootstrapping in a browser; specs get them at once.
@@ -20,13 +26,26 @@ afterEach(dropTauriStub);
 beforeEach(testStarted);
 afterEach(testEnded);
 
+// A test that booted the app's lazy registrations waits for their chunks before TestBed tears the module down (testing/startup.ts).
+afterEach(settleBootedStartup);
+// ... and a load started after the last test's hook, before the file's environment is torn down.
+afterAll(settleBootedStartup);
+
 // The mock jobs service and notification centre are page-wide singletons, and spec files share the page (the Angular
 // builder runs Vitest with `isolate: false`). A job one test left running held its kind's slot (one import at a time)
-// for whatever spec the worker ran next, so a profile save there never re-imported. Every test starts with fresh ones.
-beforeEach(() => {
-  resetMockJobs();
-  resetMockNotifications();
+// for whatever spec the worker ran next, so a profile save there never re-imported. The leak detector resets both before
+// every test and names a test that left jobs running; the start-up load record is read the same way (testing/startup.ts).
+registerSingleton({ name: 'mock jobs', leftover: mockJobsLeftover, reset: resetMockJobs });
+registerSingleton({ name: 'mock notifications', leftover: () => null, reset: resetMockNotifications });
+registerInFlight({ name: 'start-up loads', pending: unsettledStartupLoads });
+// The page-wide activity runtime ends its current task with a zero-delay timer; end it now so none outlives its test.
+beforeEach(resumeSystemMockClock);
+afterEach((ctx) => {
+  activity.endTaskNow();
+  stopSystemMockClock((ctx.task as { fullName?: string }).fullName ?? ctx.task.name);
+  cancelFocusRetries();
 });
+installLeakDetector({ mode: 'fail' });
 
 // The page is shared the same way: elements a spec left in the body (a dock with an active tab, an overlay) were read by
 // the next spec (the error logger records the active view's title). TestBed has removed its fixtures by now; every test

@@ -1,0 +1,25 @@
+{
+ "_comment": "What stays shell, and why (docs/plans/shell-to-rust.md section 2, E1 to E7). Exact paths only. C129 reads it; an entry that names no file is stale. May only shrink: an added or widened entry is a finding and needs the user's approval (C129 compares it with the merge base).",
+ "exceptions": [
+  {"path": "dev", "id": "E1", "reason": "stage-0 launcher: something must start before any Rust binary exists; about 20 lines once WP-1 lands", "owner": "shell-to-rust plan section 2"},
+  {"path": "dev.cmd", "id": "E1", "reason": "stage-0 launcher for Windows: needs no Git Bash once WP-1 lands", "owner": "shell-to-rust plan section 2"},
+  {"path": "tools/githooks/claude-pre-tool-use", "id": "E3", "reason": "Claude Code runs a command line per tool call; the shim only finds the installed binary and execs it (about 10 ms)", "owner": "shell-to-rust plan section 2"},
+  {"path": "tools/paddock-dev/src/hook/claude-pre-tool-use.sh", "id": "E3", "reason": "the source of the shim above, embedded by hook/install.rs", "owner": "shell-to-rust plan section 2"},
+  {"path": "ci-image/fetch-verified.sh", "id": "E4", "reason": "runs in RUN lines while the CI image is built, before Rust is in it", "owner": "shell-to-rust plan section 2"},
+  {"path": "scripts/vm-win/firstlogon.ps1", "id": "E5", "reason": "PowerShell inside a fresh Windows guest at first logon, before anything is installed", "owner": "shell-to-rust plan section 2"},
+  {"path": "scripts/vm-win/admin-setup.ps1", "id": "E5", "reason": "PowerShell inside the Windows guest: admin setup before any tool is installed", "owner": "shell-to-rust plan section 2"},
+  {"path": "scripts/vm-win/gui-setup.ps1", "id": "E5", "reason": "PowerShell inside the Windows guest: GUI setup before any tool is installed", "owner": "shell-to-rust plan section 2"},
+  {"path": "scripts/vm-win/logon-runner.ps1", "id": "E5", "reason": "PowerShell inside the Windows guest: the logon runner that starts the guest's work", "owner": "shell-to-rust plan section 2"},
+  {"path": "apps/dyno/app/src-tauri/linux/postinst", "id": "E7", "reason": "Debian maintainer script: dpkg runs it (Debian Policy section 6), a few lines", "owner": "shell-to-rust plan section 2"},
+  {"path": "apps/dyno/app/src-tauri/linux/postrm", "id": "E7", "reason": "Debian maintainer script: dpkg runs it (Debian Policy section 6), a few lines", "owner": "shell-to-rust plan section 2"},
+  {"path": "apps/dyno/app/src-tauri/linux/prerm", "id": "E7", "reason": "Debian maintainer script: dpkg runs it (Debian Policy section 6), a few lines", "owner": "shell-to-rust plan section 2"},
+  {"path": "tools/heavy/tests/fixtures/plock.sh", "id": "E6", "reason": "reference shell lock for mixed shell and Rust runs on one lock folder; deleted when no machine runs the shell plock", "owner": "shell-to-rust plan section 2"},
+  {"path": "tools/paddock-dev/src/hook/fixtures/no-force-push.sh", "id": "E6", "reason": "oracle copy of the old hook for hook/oracle_tests.rs; deleted in WP-5 when the corpus holds its cases", "owner": "shell-to-rust plan section 2"},
+  {"path": "tools/paddock-dev/src/hook/fixtures/no-pgrep-wait.sh", "id": "E6", "reason": "oracle copy of the old hook for hook/oracle_tests.rs; deleted in WP-5 when the corpus holds its cases", "owner": "shell-to-rust plan section 2"},
+  {"path": "tools/paddock-dev/tests/golden/fixture/conformance/ci/build-folder.sh", "id": "E6", "reason": "planner golden input, not a tool", "owner": "shell-to-rust plan section 2"},
+  {"path": "tools/paddock-dev/tests/golden/fixture/conformance/src/util/paths.sh", "id": "E6", "reason": "planner golden input, not a tool", "owner": "shell-to-rust plan section 2"},
+  {"path": "tools/paddock-dev/tests/golden/steps/03-helper-script/conformance/src/util/paths.sh", "id": "E6", "reason": "planner golden input, not a tool", "owner": "shell-to-rust plan section 2"},
+  {"path": "crates/paddock-service/tests/golden/dyno-helper.sc.cmd", "id": "E6", "reason": "golden output of the Windows service installer tests, not a tool", "owner": "shell-to-rust plan section 2"},
+  {"path": "crates/paddock-service/tests/golden/pitwall.sc.cmd", "id": "E6", "reason": "golden output of the Windows service installer tests, not a tool", "owner": "shell-to-rust plan section 2"}
+ ]
+}

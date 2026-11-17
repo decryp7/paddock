@@ -1,4 +1,5 @@
 import { EncodingOption } from '../../../core/api.types';
+import { systemMockClock } from '../../../core/mock/mock-clock';
 import type { DebriefBackend } from '../../../core/backend';
 import { CmdError } from '../../../core/cmd-error';
 import { MockBackend } from '../../../core/mock/mock-backend';
@@ -47,7 +48,7 @@ export class MockEncodingBackend implements EncodingBackend {
   /** Like a command: resolves on a later task; a throw becomes a rejection. */
   setSourceEncoding(sourceId: number, encoding: string | null): Promise<number> {
     return new Promise<number>((resolve, reject) =>
-      setTimeout(() => {
+      systemMockClock.setTimeout(() => {
         try {
           if (!(this.debrief instanceof MockBackend)) throw new CmdError({ code: 'invalid', message: 'this backend cannot read a file again', retryable: false });
           const label = encoding === 'auto' ? null : encoding;

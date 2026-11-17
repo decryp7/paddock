@@ -1,15 +1,5 @@
-import {
-  axeViolations,
-  expect,
-  expectNoHorizontalScroll,
-  expectWithinWidth,
-  installTauriFake,
-  LAYOUT_WIDTHS,
-  pressTab,
-  test,
-  THEMES,
-  type Page,
-} from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, expectNoHorizontalScroll, expectWithinWidth, installTauriFake, LAYOUT_WIDTHS, pressTab, THEMES, type Page } from '@decryp7/paddock-e2e';
 
 // The pages frame (plan S14) in the shell demo: navigation, lazy pages with their own providers, conditions and badges,
 // the status bar's items, the sidebar by the layout plan at every width, F6 regions, axe in both themes. Only the test

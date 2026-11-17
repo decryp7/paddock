@@ -899,11 +899,10 @@ mod tests {
 
     #[cfg(unix)]
     fn fake_smartctl(dir: &Path, scan: &str, drive: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
         std::fs::write(dir.join("scan.json"), scan).unwrap();
         std::fs::write(dir.join("drive.json"), drive).unwrap();
         let script = dir.join("smartctl");
-        std::fs::write(
+        paddock_testkit::exe::write_program(
             &script,
             format!(
                 "#!/bin/sh\nif [ \"$1\" = \"--scan\" ]; then cat '{0}'; else cat '{1}'; fi\nexit 4\n",
@@ -912,7 +911,6 @@ mod tests {
             ),
         )
         .unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         script
     }
 
@@ -945,13 +943,12 @@ mod tests {
     /// A smartctl that answers per drive: the USB entries fail to open (as on macOS, no USB SMART passthrough), the rest read.
     #[cfg(unix)]
     fn usb_failing_smartctl(dir: &Path, scan: &str, drive: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
         let usb = r#"{"smartctl":{"exit_status":2,"messages":[{"string":"Smartctl open device: IOService:/x/usb-drd1@B000000/IOBlockStorageServices failed: IOCreatePlugInInterfaceForService failed","severity":"error"}]}}"#;
         std::fs::write(dir.join("scan.json"), scan).unwrap();
         std::fs::write(dir.join("drive.json"), drive).unwrap();
         std::fs::write(dir.join("usb.json"), usb).unwrap();
         let script = dir.join("smartctl");
-        std::fs::write(
+        paddock_testkit::exe::write_program(
             &script,
             format!(
                 "#!/bin/sh\nif [ \"$1\" = \"--scan\" ]; then cat '{0}'; exit 0; fi\ncase \"$*\" in *usb-*) cat '{1}'; exit 2;; *) cat '{2}'; exit 4;; esac\n",
@@ -959,9 +956,7 @@ mod tests {
                 dir.join("usb.json").display(),
                 dir.join("drive.json").display()
             ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        ).unwrap();
         script
     }
 
@@ -1038,12 +1033,12 @@ mod tests {
     #[test]
     fn the_device_type_of_the_scan_is_passed_to_smartctl() {
         let _serial = script_tests();
-        use std::os::unix::fs::PermissionsExt;
+
         let dir = temp("smart-d");
         let script = dir.join("smartctl");
         let log = dir.join("args.log");
         let scan = r#"{"devices":[{"name":"/dev/sdb","type":"sat"},{"name":"/dev/nvme0"}]}"#;
-        std::fs::write(
+        paddock_testkit::exe::write_program(
             &script,
             format!(
                 "#!/bin/sh\necho \"$@\" >> '{log}'\nif [ \"$1\" = \"--scan\" ]; then echo '{scan}'; else echo '{drive}'; fi\nexit 4\n",
@@ -1052,7 +1047,6 @@ mod tests {
             ),
         )
         .unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         let _ = SmartctlWear::new(vec![script]).read();
         let seen = std::fs::read_to_string(&log).unwrap();
         assert!(seen.lines().any(|l| l == "-a -j -d sat /dev/sdb"), "{seen}");
@@ -1067,16 +1061,15 @@ mod tests {
     #[test]
     fn a_drive_that_prints_nothing_is_explained() {
         let _serial = script_tests();
-        use std::os::unix::fs::PermissionsExt;
+
         let dir = temp("smart-run");
         let script = dir.join("smartctl");
         // The scan works; the drive run exits without any output at all.
-        std::fs::write(
+        paddock_testkit::exe::write_program(
             &script,
             "#!/bin/sh\nif [ \"$1\" = \"--scan\" ]; then echo '{\"devices\":[{\"name\":\"/dev/sda\"}]}'; fi\nexit 1\n",
         )
         .unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(matches!(SmartctlWear::new(vec![script]).read(), Reading::Unavailable(m) if m.contains("No SSD")));
         assert!(matches!(
             SmartctlWear::new(vec![dir.join("not-executable-dir")]).read(),

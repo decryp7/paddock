@@ -4,6 +4,8 @@ describe('scrollToSection', () => {
   let resize: (() => void) | null = null;
   let disconnected = false;
 
+  afterEach(() => void (document.body.innerHTML = ''));
+
   beforeEach(() => {
     document.body.innerHTML = '<main><h3 id="target">Popup widgets</h3></main>';
     Element.prototype.scrollIntoView = () => undefined;

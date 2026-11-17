@@ -585,15 +585,13 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_failed_start_reports_the_browsers_stderr() {
-        use std::os::unix::fs::PermissionsExt;
         let base = tempfile::tempdir().unwrap();
         let exe_path = base.path().join("fake-chrome.sh");
-        std::fs::write(
+        paddock_testkit::exe::write_program(
             &exe_path,
             "#!/bin/sh\necho 'Running as root without --no-sandbox is not supported' >&2\nexit 1\n",
         )
         .unwrap();
-        std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         let exe = Browser {
             flavor: crate::discover::Flavor::Chromium,
             path: exe_path,
@@ -721,15 +719,13 @@ mod tests {
     /// file while the start runs, or only after it failed (`look_late`).
     #[cfg(unix)]
     fn never_ready_is_ended(look_late: bool) {
-        use std::os::unix::fs::PermissionsExt;
         let base = tempfile::tempdir().unwrap();
         let exe_path = base.path().join("silent-chrome.sh");
-        std::fs::write(
+        paddock_testkit::exe::write_program(
             &exe_path,
             "#!/bin/sh\necho 'still warming up' >&2\necho $$ > \"$(dirname \"$0\")/pid\"\nexec sleep 300\n",
         )
         .unwrap();
-        std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         let exe = Browser {
             flavor: crate::discover::Flavor::Chromium,
             path: exe_path,
@@ -774,11 +770,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_browser_that_exits_ends_the_wait_with_its_status_not_at_the_guard() {
-        use std::os::unix::fs::PermissionsExt;
         let base = tempfile::tempdir().unwrap();
         let exe_path = base.path().join("dying-chrome.sh");
-        std::fs::write(&exe_path, "#!/bin/sh\necho 'out of memory' >&2\nexit 3\n").unwrap();
-        std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&exe_path, "#!/bin/sh\necho 'out of memory' >&2\nexit 3\n").unwrap();
         let exe = Browser {
             flavor: crate::discover::Flavor::Chromium,
             path: exe_path,
@@ -833,20 +827,18 @@ mod tests {
     #[cfg(unix)]
     fn exited_browser_leaves_no_helper_with(helper_delay: &str, prepare: impl FnOnce(&Path)) {
         use std::io::Write as _;
-        use std::os::unix::fs::PermissionsExt;
+
         let base = tempfile::tempdir().unwrap();
         prepare(base.path());
         let exe_path = base.path().join("leaving-chrome.sh");
-        std::fs::write(
+        paddock_testkit::exe::write_program(
             &exe_path,
             format!(
                 "#!/bin/sh\nd=\"$(dirname \"$0\")\"\nmkfifo \"$d/go\" || exit 4\n\
                  sh -c 'sleep {helper_delay}; echo $$ > \"$1.tmp\" && mv \"$1.tmp\" \"$1\"; exec sleep 300' helper \"$d/helper\" >/dev/null 2>&1 &\n\
                  read go < \"$d/go\"\nexit 3\n"
             ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        ).unwrap();
         let exe = Browser {
             flavor: crate::discover::Flavor::Chromium,
             path: exe_path,
@@ -915,12 +907,10 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn warm_up_waits_for_a_slow_first_run_without_a_budget() {
-        use std::os::unix::fs::PermissionsExt;
         let base = tempfile::tempdir().unwrap();
         let exe_path = base.path().join("slow-chrome.sh");
         // conformance: hang-guard — the stand-in's own delay is 2 s; nothing in `warm_up` is a clock
-        std::fs::write(&exe_path, "#!/bin/sh\nsleep 2\necho 'Fake Chrome 1.0'\n").unwrap();
-        std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&exe_path, "#!/bin/sh\nsleep 2\necho 'Fake Chrome 1.0'\n").unwrap();
         let exe = Browser {
             flavor: crate::discover::Flavor::Chromium,
             path: exe_path,
@@ -933,11 +923,9 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn warm_up_failures_name_the_status_and_the_output() {
-        use std::os::unix::fs::PermissionsExt;
         let base = tempfile::tempdir().unwrap();
         let exe_path = base.path().join("broken-chrome.sh");
-        std::fs::write(&exe_path, "#!/bin/sh\necho 'bundle damaged' >&2\nexit 5\n").unwrap();
-        std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&exe_path, "#!/bin/sh\necho 'bundle damaged' >&2\nexit 5\n").unwrap();
         let broken = Browser {
             flavor: crate::discover::Flavor::Chromium,
             path: exe_path,

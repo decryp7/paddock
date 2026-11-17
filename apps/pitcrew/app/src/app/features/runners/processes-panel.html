@@ -88,9 +88,12 @@
                             <mat-icon svgIcon="pc:more" aria-hidden="true" />
                           </button>
                         } @else {
-                          <button type="button" class="btn icon sm ghost" [attr.aria-label]="'Stop ' + e.name + ' now (pid ' + e.pid + ')'" [disabled]="store.busy() === e.pid" (click)="stop(e)">
+                          <button type="button" class="btn icon sm ghost" [attr.aria-label]="'Stop ' + e.name + ' now (pid ' + e.pid + ')'" [attr.aria-disabled]="e.startedAt === null ? 'true' : null" [attr.aria-describedby]="e.startedAt === null ? 'nostart-' + e.pid : null" [matTooltip]="e.startedAt === null ? noStartTime : ''" [disabled]="store.busy() === e.pid" (click)="stop(e)">
                             <mat-icon svgIcon="pc:stop-circle" aria-hidden="true" />
                           </button>
+                          @if (e.startedAt === null) {
+                            <span class="visually-hidden" [id]="'nostart-' + e.pid">{{ noStartTime }}</span>
+                          }
                         }
                       </td>
                     </tr>
@@ -131,6 +134,6 @@
 </ng-template>
 <ng-template #runnerMenu let-e>
   <div class="pc-menu" cdkMenu>
-    <button type="button" class="pc-menu-item danger" cdkMenuItem (cdkMenuItemTriggered)="stop(e)"><mat-icon svgIcon="pc:stop-circle" aria-hidden="true" />Stop the runner process…</button>
+    <button type="button" class="pc-menu-item danger" cdkMenuItem [cdkMenuItemDisabled]="e.startedAt === null" [attr.title]="e.startedAt === null ? noStartTime : null" (cdkMenuItemTriggered)="stop(e)"><mat-icon svgIcon="pc:stop-circle" aria-hidden="true" />Stop the runner process…</button>
   </div>
 </ng-template>

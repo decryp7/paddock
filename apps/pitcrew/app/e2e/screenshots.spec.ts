@@ -1,4 +1,5 @@
-import { type Page, test } from '@playwright/test';
+import { test } from './test';
+import type { Page } from '@playwright/test';
 import { join } from 'node:path';
 
 /**

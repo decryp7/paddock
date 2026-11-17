@@ -1,4 +1,5 @@
-import { expect, test, WorkbenchApp, type Locator, type Page } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { WorkbenchApp, Locator, Page } from '@decryp7/paddock-e2e';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 

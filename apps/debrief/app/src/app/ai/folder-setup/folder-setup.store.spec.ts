@@ -17,6 +17,10 @@ import { recommendedSelection, toggleSelection, withoutDependents, withRequireme
 import { SetupProposal } from './folder-setup.types';
 import { mockSetup, MockFolderSetupBackend, MockFolderSetupOptions } from './mock-folder-setup-backend';
 import { MOCK_WORKSPACE } from '../../core/mock-workspace';
+import { endMockJobs } from '../../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 function p(id: string, extra: Partial<SetupProposal> = {}): SetupProposal {
   return {

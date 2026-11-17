@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { openAppWith, openView } from './tools-support';
 
 test.describe('saved queries and highlight rules', () => {

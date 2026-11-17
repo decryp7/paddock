@@ -1,9 +1,9 @@
 //! The `paddock-bench` command end to end, on files in a temporary folder.
 
-use paddock_testkit::TestCommand;
+use std::process::Command;
 
-fn bin() -> TestCommand {
-    TestCommand::new(env!("CARGO_BIN_EXE_paddock-bench"))
+fn bin() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_paddock-bench"))
 }
 
 fn write(dir: &std::path::Path, name: &str, text: &str) -> String {

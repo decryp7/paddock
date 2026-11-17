@@ -1,4 +1,5 @@
-import { clickShape, expect, hoverShape, test } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { clickShape, hoverShape } from '@decryp7/paddock-e2e';
 
 /** The disk map against the mock backend: scan, drill, up, table view (chromium only). */
 const url = (query = '') => `/?latency=0${query}#/disk-map`;

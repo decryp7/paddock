@@ -107,15 +107,9 @@ pub fn printed(pid: u32, spawned: Stamp) -> Recorded {
 /// `[started_ms, started_ms + resolution_ms)`, with the clock's slack on both sides. A pid handed on within the same window
 /// cannot be told apart, so keep the resolution as fine as the reporter's.
 pub fn reported(pid: u32, started_ms: u64, resolution_ms: u64) -> Recorded {
-    let slack = START_SLACK_MS.unsigned_abs();
-    let earliest = started_ms.saturating_sub(slack).saturating_mul(1000);
-    let latest = started_ms
-        .saturating_add(resolution_ms)
-        .saturating_add(slack)
-        .saturating_mul(1000);
-    match ProcessId::of(pid) {
-        Some(id) if (earliest..latest).contains(&id.started().as_micros()) => Recorded::Running(id),
-        _ => Recorded::Ended { pid },
+    match ProcessId::of_reported(pid, started_ms, resolution_ms) {
+        Some(id) => Recorded::Running(id),
+        None => Recorded::Ended { pid },
     }
 }
 

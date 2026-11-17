@@ -6,7 +6,6 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use paddock_testkit::TestCommand;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Output;
@@ -55,9 +54,11 @@ impl Host {
     // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
     #[allow(clippy::disallowed_methods)]
     fn run(&self, args: &[&str], envs: &[(&str, &str)], later: bool) -> Output {
-        let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        let mut cmd = crate::dev_bin::command();
         cmd.args(["ci", "isolation"])
             .args(args)
+            .env_clear()
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("HOME", &self.home)
             .env("RUNNER_OS", "macOS")
             .env("RUNNER_TEMP", &self.temp)
@@ -95,8 +96,7 @@ fn acquires_uses_releases_and_sweeps_with_the_real_binary() {
     assert!(env.get("PADDOCK_CI_SLOT_TOKEN").is_some_and(|t| !t.is_empty()));
     assert_eq!(
         env.get("PADDOCK_DEV").map(String::as_str),
-        // conformance: test-env — the path is compared with the job's PADDOCK_DEV; no process starts here
-        Some(env!("CARGO_BIN_EXE_paddock-dev")),
+        Some(crate::dev_bin::PATH),
         "the job pins this very binary"
     );
     assert!(
@@ -118,10 +118,9 @@ fn acquires_uses_releases_and_sweeps_with_the_real_binary() {
 
 /// A stand-in for `heavy` that records its arguments (a throw-away script, never a real queue).
 fn fake_heavy(root: &Path, exit: i32) -> (PathBuf, PathBuf) {
-    use std::os::unix::fs::PermissionsExt;
     let log = root.join("heavy-calls");
     let bin = root.join("fake-heavy");
-    std::fs::write(
+    paddock_testkit::exe::write_program(
         &bin,
         format!(
             "#!/bin/sh\necho \"$@\" >> '{}'\necho 'fake heavy says no' >&2\nexit {exit}\n",
@@ -129,7 +128,6 @@ fn fake_heavy(root: &Path, exit: i32) -> (PathBuf, PathBuf) {
         ),
     )
     .unwrap();
-    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
     (bin, log)
 }
 
@@ -321,17 +319,11 @@ fn a_disk_that_cannot_be_measured_is_said_so_and_the_floor_is_not_pretended_chec
 // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
 #[allow(clippy::disallowed_methods)]
 fn the_binary_answers_print_binary_with_its_own_path() {
-    let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
-        .arg("--print-binary")
-        .output()
-        .unwrap();
+    let out = crate::dev_bin::command().arg("--print-binary").output().unwrap();
     assert!(out.status.success());
     assert_eq!(
         text(&out.stdout).trim(),
-        std::env::current_exe()
-            .ok()
-            .map(|_| env!("CARGO_BIN_EXE_paddock-dev").to_string())
-            .unwrap()
+        std::env::current_exe().ok().map(|_| crate::dev_bin::PATH.to_string()).unwrap()
     );
 }
 
@@ -364,10 +356,12 @@ fn git_bash_paths_drive_path_and_owns_and_source_key_end_to_end() {
     std::fs::create_dir_all(cwd.join("C:/ci")).unwrap();
     std::fs::create_dir_all(cwd.join("C:/w")).unwrap();
     let run = |args: &[&str], later: bool| {
-        let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        let mut cmd = crate::dev_bin::command();
         cmd.args(["ci", "isolation"])
             .args(args)
             .current_dir(&cwd)
+            .env_clear()
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("HOME", &h.home)
             .env("RUNNER_OS", "Windows")
             .env("RUNNER_TEMP", &h.temp)

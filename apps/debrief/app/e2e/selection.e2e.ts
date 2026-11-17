@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { gridRows, initialTotal, openApp } from './app';
 
 test.describe('selection and inspector', () => {

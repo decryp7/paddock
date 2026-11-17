@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 
 test.describe('Spotter against the mock backend', () => {
   test('the first load shows content, not a blank window', async ({ page }) => {

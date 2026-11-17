@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import { Component, EnvironmentProviders, Provider, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MarkerKind, PluginInfo, Query } from '../app/core/api.types';
@@ -13,6 +14,7 @@ import { DockService } from '../app/dock/dock.service';
 import { provideWorkspace } from '../app/core/workspace/provide-workspace';
 import { ConsumerGate } from '../app/core/panel-visibility';
 import { assertSameTest, currentTest } from './test-lifetime';
+import { DialogService, OpenDialog } from '../app/ui/dialog.service';
 
 export const T0 = DEMO_START;
 export const SEC = 1000;
@@ -200,13 +202,36 @@ export async function settle<T>(fixture?: ComponentFixture<T>, rounds = 4): Prom
  * stub's resolver being captured, a dialog opening (rule 49). Returns as soon as the condition holds.
  */
 export async function settleUntil<T>(fixture: ComponentFixture<T> | undefined, condition: () => void, timeout = 10_000): Promise<void> {
-  await vi.waitFor(
-    async () => {
-      await settle(fixture, 1);
-      condition();
-    },
-    { timeout, interval: 10 },
-  );
+  // `vi.waitFor` rejects at its timeout while an attempt can still be inside `settle()`, waiting on its own `setTimeout(0)`; that
+  // timer would then outlive the test and the leak detector names it (ER-28: 7 of 300 runs of the timeout spec). The last attempt
+  // is awaited before returning, so no timer of ours is left behind.
+  let attempt: Promise<void> = Promise.resolve();
+  try {
+    await vi.waitFor(
+      () => {
+        attempt = (async () => {
+          await settle(fixture, 1);
+          condition();
+        })();
+        return attempt;
+      },
+      { timeout, interval: 10 },
+    );
+  } finally {
+    await attempt.catch(() => undefined);
+  }
+}
+
+/**
+ * Waits until an in-page dialog is open and returns the topmost one. Dialogs load lazily (`openLazy`), so a test must wait
+ * on the condition, never on a number of event-loop turns; it fails (the wait times out) when no dialog opens, where
+ * `stack().at(-1)?.ref` would silently do nothing.
+ */
+export async function openDialog(dialogs: DialogService): Promise<OpenDialog> {
+  await vi.waitFor(() => {
+    if (dialogs.stack().length === 0) throw new Error('No dialog is open');
+  });
+  return dialogs.stack().at(-1)!;
 }
 
 export function el<T extends Element = HTMLElement>(fixture: ComponentFixture<unknown>, selector: string): T {

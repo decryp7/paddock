@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { gridRows, openApp } from './app';
 
 // The app should feel like a desktop app: no browser context menu on its chrome, no reload, page zoom or other

@@ -268,7 +268,7 @@ mod real {
     use super::super::registry::Cost;
     use super::super::run::{Ran, Real, Runner, Spec};
     use std::collections::HashMap;
-    use std::os::unix::fs::PermissionsExt;
+
     use std::path::{Path, PathBuf};
     use std::time::Duration;
 
@@ -279,8 +279,7 @@ mod real {
     }
 
     fn script(path: &Path, body: &str) {
-        std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(path, format!("#!/bin/sh\n{body}\n")).unwrap();
     }
 
     fn fixture(heavy_body: &str) -> Fixture {
@@ -295,7 +294,7 @@ mod real {
         script(
             &bin.join("cargo"),
             &format!(
-                "echo \"cargo jobs=$CARGO_BUILD_JOBS target=$CARGO_TARGET_DIR cwd=$(pwd)\" >> {}",
+                "echo \"cargo jobs=$CARGO_BUILD_JOBS env_target=[$CARGO_TARGET_DIR] args=$* cwd=$(pwd)\" >> {}",
                 calls.display()
             ),
         );
@@ -342,7 +341,12 @@ mod real {
         let c = calls(&f);
         let want = f.builds.join("gen-check/apps-dyno-app-src-tauri");
         assert!(c.contains("jobs=2"), "{c}");
-        assert!(c.contains(&format!("target={}", want.display())), "{c}");
+        // The folder goes in as cargo configuration after the subcommand, and never as the variable sccache would hash.
+        assert!(
+            c.contains(&format!("args=metadata --config build.target-dir='{}'", want.display())),
+            "{c}"
+        );
+        assert!(c.contains("env_target=[]"), "{c}");
         assert!(
             want.is_dir() && want.join(".paddock-dir").exists() || want.is_dir(),
             "kept and recorded"

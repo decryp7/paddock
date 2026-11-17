@@ -14,7 +14,7 @@ import { LiveStore } from '../../state/live.store';
 import { Lookups } from '../lookup/lookups';
 import { ProcessesStore } from '../../state/processes.store';
 import { ProcessDetailsPanel } from './process-details';
-import { type Row, type SortKey, type ViewMode } from './process-rows';
+import { type Row, type SortKey, type ViewMode, sameProcess } from './process-rows';
 import { MatButton, MatIconButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
@@ -209,7 +209,7 @@ export class ProcessesPage implements OnInit, OnDestroy {
     { key: 'name', header: 'Name', value: (r) => r.name, required: true, width: 'minmax(200px, 1fr)' },
     { key: 'cpu', sortStart: 'desc', header: 'CPU', value: (r) => r.cpu, align: 'end', width: '84px' },
     { key: 'memory', sortStart: 'desc', header: 'Memory', value: (r) => r.memory, align: 'end', width: '96px' },
-    { key: 'disk', sortStart: 'desc', header: 'Disk', value: (r) => r.disk, align: 'end', width: '96px', hideBelow: 640 },
+    { key: 'disk', sortStart: 'desc', header: 'Disk', headerTitle: 'Read + write together, per second', value: (r) => r.disk, align: 'end', width: '96px', hideBelow: 640 },
     { key: 'user', header: 'Account', value: (r) => r.user, text: (r) => r.user ?? '—', width: '130px', hideBelow: 520 },
     { key: 'pid', header: 'PID', value: (r) => r.pid, text: (r) => (r.pid === null ? '' : String(r.pid)), align: 'end', width: '64px', hideBelow: 760 },
   ];
@@ -258,7 +258,8 @@ export class ProcessesPage implements OnInit, OnDestroy {
     if (sort) this.store.setSort({ key: sort.key as SortKey, dir: sort.direction });
   }
   protected isSelected(r: Row): boolean {
-    return r.ref !== null && this.store.selected()?.pid === r.ref.pid;
+    const selected = this.store.selected();
+    return r.ref !== null && selected !== null && sameProcess(selected, r.ref);
   }
   protected rowClick(r: Row): void {
     if (r.ref) void this.store.select(r.ref);

@@ -1,4 +1,4 @@
-import type { BackendEvent, CommandError, Config, RegisterRequest, RunnerConfig } from './api.types';
+import type { BackendEvent, CommandError, Config, ProcessList, RegisterRequest, RunnerConfig } from './api.types';
 import { MockBackend, type MockOptions } from './mock-backend';
 
 const NOW = new Date(2026, 9, 22, 12, 0, 0).getTime();
@@ -114,6 +114,16 @@ describe('MockBackend runner actions', () => {
     vi.useRealTimers();
   });
   const runner = async (name: string) => (await mock.status()).runners.find((r) => r.name === name)!;
+
+  it('leaves no timer running for a call still waiting out its latency once disposed', async () => {
+    const slow = make({ latencyMs: 5_000 });
+    const call = slow.status();
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    slow.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+    // The call is let go, not left hanging.
+    await expect(call).resolves.toBeDefined();
+  });
 
   it('stop on a busy runner is pending; on an idle one it stops', async () => {
     await mock.stop('build-win');
@@ -579,21 +589,25 @@ describe('MockBackend processes', () => {
     mock = make();
     const l = await mock.runnerProcesses('build-win');
     const e = l.entries.find((x) => x.leftover?.rule === '*GradleDaemon*')!;
-    await mock.stopProcess('build-win', e.pid, e.startedAt, false);
+    await mock.stopProcess('build-win', e.pid, e.startedAt!, false);
     const after = await mock.runnerProcesses('build-win');
     expect(after.entries.some((x) => x.pid === e.pid)).toBe(false);
     expect((await mock.status()).runners.find((r) => r.name === 'build-win')!.leftovers).toBe(2);
     expect((await mock.activity('build-win', 1)).events[0]).toMatchObject({ kind: 'processStopped', by: 'user', pid: e.pid });
-    const gone = await rejection(mock.stopProcess('build-win', e.pid, e.startedAt, false));
+    const gone = await rejection(mock.stopProcess('build-win', e.pid, e.startedAt!, false));
     expect(gone).toMatchObject({ code: 'badRequest' });
     expect(gone.message).toContain('not part of this runner’s process tree');
-    expect((await rejection(mock.stopProcess('build-win', l.runnerPid!, null, false))).message).toContain('runner process itself');
+    expect((await rejection(mock.stopProcess('build-win', l.runnerPid!, runnerStart(l), false))).message).toContain('runner process itself');
+    // A process id that now names another process (another start time) is not stopped.
+    const other = l.entries.find((x) => x.leftover && x.startedAt !== null && x.pid !== e.pid)!;
+    expect((await rejection(mock.stopProcess('build-win', other.pid, other.startedAt! + 3_600_000, false))).message).toContain('not part of this runner’s process tree');
+    expect((await mock.runnerProcesses('build-win')).entries.some((x) => x.pid === other.pid)).toBe(true);
   });
 
   it('restarts the runner when the user ends its process', async () => {
     mock = make();
     const l = await mock.runnerProcesses('ui-tests');
-    await mock.stopProcess('ui-tests', l.runnerPid!, null, true);
+    await mock.stopProcess('ui-tests', l.runnerPid!, runnerStart(l), true);
     expect((await mock.status()).runners.find((r) => r.name === 'ui-tests')!.status).toBe('starting');
   });
 
@@ -694,3 +708,8 @@ describe('MockBackend insights, storage, Debrief and channels', () => {
     expect((await rejection(mock.saveChannels({ channels: many }))).message).toContain('at most 8');
   });
 });
+
+/** The start time of the runner's own row. */
+function runnerStart(l: ProcessList): number {
+  return l.entries.find((x) => x.pid === l.runnerPid)!.startedAt!;
+}

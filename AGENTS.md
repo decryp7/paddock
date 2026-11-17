@@ -37,8 +37,14 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   missing folders (measurements: [benchmarks](docs/benchmarks.md#2026-11-12-full-against-sparse-worktree-checkout-fixworktree-gates-profile));
   `--sparse` is only for a `--detach` review copy, and `-b <branch>` attaches to a branch that already exists.
   Never work in the main checkout; never `git stash`.
-- **Build folders.** One `CARGO_TARGET_DIR` per app per worktree, kept between tasks for the same app (reusing it is
-  what makes rebuilds fast; sccache gives almost nothing across worktrees, ADR 0014 §1). Worktrees and build folders go in
+- **Build folders.** One build folder per app per worktree, kept between tasks for the same app (reusing it is what makes
+  rebuilds fast). Pass it to cargo as `--config build.target-dir='<dir>'` (or `build.target-dir` in a `.cargo/config.toml`),
+  **never as `CARGO_TARGET_DIR` or `CARGO_BUILD_TARGET_DIR`**: sccache 0.19 puts every `CARGO_*` variable into its cache key, so
+  the variable gives 0% hits across worktrees and the configuration gives about 82% (ADR 0014 §1; docs/benchmarks.md). The
+  tools do this themselves (push gates, `./dev gen check`, `./dev`'s own build). For your own cargo calls run
+  `eval "$(./dev sccache env)"` once per shell: it installs the pinned sccache, starts the one local server and sets
+  `RUSTC_WRAPPER` for that shell only ([docs/dev-setup.md](docs/dev-setup.md#local-sccache)); it warns and builds without
+  it when sccache cannot be used. Worktrees and build folders go in
   `<dev-targets>` (the parent of the worktree root; this machine's folders are in
   [docs/dev-setup.md](docs/dev-setup.md#where-things-live), the one place that names a disk, C125). The worktree root is
   machine config, not code: `git config paddock.worktreeRoot <dev-targets>/wt` (repo-local, so it covers every worktree), or
@@ -80,7 +86,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   plan job asks `node scripts/affected.mjs --ci --app <app>`; extra jobs are `<app>-<what>.yml` (Debrief's fuzz, bench,
   corpus, mutants). An app whose gates fit one Linux job (the demos) is a leg of ci.yml and releases through
   `<app>-release.yml`. Any of these files marks only its app in the plan.
-- **A new conformance check** gets its id from `./dev check new-id --reserve <branch>` (next free id across all branches and `conformance/reserved/`; commit the reservation file), never a hand-picked number.
+- **A new conformance check** gets its id from `./dev check new-id --reserve <branch>` (the next free id across all branches and `conformance/reserved/`; it takes the id on origin at once by pushing a ref `refs/paddock/check-ids/C<n>`, which a second agent cannot create, so two agents never get one id; commit the reservation file as the record), never a hand-picked number.
 - **A new app** gets `apps/<app>/paddock.ci.json` (`workflow` for its own workflow, or its leg: Cargo workspace,
   prepare, checks, UI commands), a CODEOWNERS line and its workflow. `scripts/affected.test.mjs` checks all three.
 
@@ -173,7 +179,7 @@ Apply these deliberately. They are not decoration:
   workspace `Cargo.toml`, the wire types and DTOs) are changed by the integrating agent only, or by adding a single
   declared line.
 - Don't run `cargo fmt --all` / `cargo clippy --fix` across the workspace while others are editing; format your own
-  files (`rustfmt <files>`). Use a private `CARGO_TARGET_DIR`.
+  files (`rustfmt <files>`). Use a private build folder, passed as `--config build.target-dir=...` (never `CARGO_TARGET_DIR`).
 - Before committing, check the subject: `node conformance/bin/paddock-conformance.mjs commit-lint --subject "<subject>"` (at
   most 100 characters; detail goes in the body). A rejected commit commits nothing and leaves your staged files as they are:
   shorten the subject and commit again, never amend an earlier commit.
@@ -207,7 +213,7 @@ Apply these deliberately. They are not decoration:
 - Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
   `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
 - Specs never wait a fixed number of event-loop turns and never leave a patch behind (rule 49): wait on the condition
-  (Debrief's `openDialog()`, once `fix/debrief-import-range-flake` lands), never let an optional chain perform a test's
+  (Debrief's `openDialog()` in `testing/helpers.ts`), never let an optional chain perform a test's
   action, and patch a prototype only with `vi.spyOn` (restored after each test).
 - Spend CI only on what a change needs (rule 50): one run per branch head, none while review fixes are pending or for a
   branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.

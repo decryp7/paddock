@@ -9,7 +9,6 @@ use crate::ci_runs::verdict::Verdict;
 use crate::pr::fake::FakeGitea;
 use crate::pr::gitea::{Api, Pull};
 use crate::pr::labels;
-use paddock_testkit::TestCommand;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -1120,9 +1119,7 @@ fn a_fast_forward_after_which_main_is_not_the_train_head_is_an_error_not_a_landi
     // The server accepts the push and then moves main back (a hook, a mirror): what the queue pushed is not what main is.
     let main = w.repos.origin_ref("refs/heads/main");
     let hook = w.repos.origin.join("hooks/post-receive");
-    std::fs::write(&hook, format!("#!/bin/sh\ngit update-ref refs/heads/main {main}\n")).unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    paddock_testkit::exe::write_program(&hook, format!("#!/bin/sh\ngit update-ref refs/heads/main {main}\n")).unwrap();
     let e = w.try_tick_hour(Some(12)).unwrap_err();
     assert!(e.contains("not the train head"), "{e}");
     assert_eq!(w.labels_of(1), vec!["state/in-train"], "nothing is marked landed");
@@ -1303,13 +1300,11 @@ fn booby_trapped(w: &World, name: &str, sentinel: &Path) -> String {
     let put = |path: &str, text: &str, exec: bool| {
         let p = dir.join(path);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(&p, text).unwrap();
-        #[cfg(unix)]
         if exec {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            paddock_testkit::exe::write_program(&p, text).unwrap();
+        } else {
+            std::fs::write(&p, text).unwrap();
         }
-        let _ = exec;
     };
     for hook in [
         "pre-commit",
@@ -1388,7 +1383,7 @@ fn a_train_full_of_things_that_run_executes_nothing_during_a_tick() {
     w.approve(1, &head);
     // Positive control: the files do run when something runs them, so the sentinel can see a violation.
     git(&w.repos.author, &["checkout", "--quiet", "feat/pr1"]);
-    let ran = TestCommand::new("sh")
+    let ran = paddock_proc::command("sh")
         .arg("scripts/gate.sh")
         .current_dir(&w.repos.author)
         .status()
@@ -1999,17 +1994,12 @@ fn the_lockfile_loop_of_the_train_gates_runs_on_the_real_repository_and_visits_n
     let shim = tempfile::tempdir().unwrap();
     let log = shim.path().join("visited");
     let cargo = shim.path().join("cargo");
-    std::fs::write(&cargo, format!("#!/bin/sh\npwd >> '{}'\nexit 0\n", log.display())).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    let shims_dir = shim.path().to_path_buf();
-    let out = TestCommand::new("sh")
+    paddock_testkit::exe::write_program(&cargo, format!("#!/bin/sh\npwd >> '{}'\nexit 0\n", log.display())).unwrap();
+    let path = format!("{}:{}", shim.path().display(), std::env::var("PATH").unwrap_or_default());
+    let out = paddock_proc::command("sh")
         .args(["-ec", &script])
         .current_dir(repo_root())
-        .path_first(&shims_dir)
+        .env("PATH", path)
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
@@ -2085,7 +2075,7 @@ fn the_commits_job_lints_a_real_train_with_the_base_the_tick_dispatches() {
     assert_eq!(range.range, format!("{base}..{head}"));
     git(&w.repos.queue, &["fetch", "--quiet", "origin"]);
     let lint = repo_root().join("conformance/bin/paddock-conformance.mjs");
-    let out = TestCommand::new("node")
+    let out = paddock_proc::command("node")
         .arg(&lint)
         .args(["commit-lint", "--range", &range.range])
         .current_dir(&w.repos.queue)
@@ -2655,7 +2645,7 @@ static PLANNER_DIRS: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec:
 /// it is given. Run in a pull request's tree it would execute the pull request.
 fn cargo_planner(trusted: &Path, _main: &str, _head: &str) -> Result<serde_json::Value, String> {
     PLANNER_DIRS.lock().unwrap().push(trusted.to_path_buf());
-    let _ = TestCommand::new("cargo")
+    let _ = paddock_proc::command("cargo")
         .args(["check", "--offline", "--quiet"])
         .current_dir(trusted)
         .output();
@@ -2672,7 +2662,7 @@ fn the_planner_runs_cargo_only_in_the_checkout_of_main_never_in_the_merge_clone(
     w.approve(1, &head);
     // Positive control: cargo check in the pull request's own tree runs its build script and its toolchain wrapper.
     git(&w.repos.author, &["checkout", "--quiet", "feat/pr1"]);
-    let _ = TestCommand::new("cargo")
+    let _ = paddock_proc::command("cargo")
         .args(["check", "--offline", "--quiet"])
         .current_dir(&w.repos.author)
         .output();

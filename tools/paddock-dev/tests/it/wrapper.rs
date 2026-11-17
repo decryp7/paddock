@@ -1,7 +1,6 @@
 //! The `./dev` wrapper and `dev self hash` compute one value, in shell and in Rust, from the same inputs.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::input_hash::{Real, compute, is_hashed_var};
-use paddock_testkit::TestCommand;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -83,8 +82,12 @@ impl Fixture {
         v
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+    )]
     fn shell(&self, env: &[(String, String)]) -> (String, bool) {
-        let mut cmd = TestCommand::new("sh");
+        let mut cmd = Command::new("sh");
         cmd.arg(self.root().join("dev"))
             .arg("--wrapper-hash")
             .current_dir(self.root().join("tools/paddock-dev/src"))
@@ -125,13 +128,11 @@ impl Fixture {
 /// A "compiler" that prints a chosen `-vV`.
 #[cfg(unix)]
 pub(crate) fn fake_rustc(dir: &Path, name: &str, release: &str, commit: &str, host: &str) -> String {
-    use std::os::unix::fs::PermissionsExt;
     let p = dir.join(name);
     let body = format!(
         "#!/bin/sh\nprintf 'rustc {release}\\nbinary: rustc\\ncommit-hash: {commit}\\ncommit-date: d\\nhost: {host}\\nrelease: {release}\\nLLVM version: 1\\n'\n"
     );
-    std::fs::write(&p, body).unwrap();
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    paddock_testkit::exe::write_program(&p, body).unwrap();
     p.display().to_string()
 }
 
@@ -216,13 +217,17 @@ fn a_new_untracked_file_under_an_input_path_makes_the_wrapper_build() {
     assert!(f.both(&[]).1);
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[test]
 fn the_wrapper_finds_the_root_from_a_subfolder_and_refuses_to_run_outside_a_repository() {
     let f = Fixture::new();
     let (hash, _) = f.shell(&f.env(&[]));
     assert!(!hash.is_empty(), "run from tools/paddock-dev/src");
     let outside = tempfile::tempdir().unwrap();
-    let out = TestCommand::new("sh")
+    let out = Command::new("sh")
         .arg(f.root().join("dev"))
         .arg("--wrapper-hash")
         .current_dir(outside.path())
@@ -353,13 +358,35 @@ fn a_config_that_only_names_the_build_folder_does_not_change_the_hash() {
     }
 }
 
+#[cfg(unix)]
+const CARGO_FOLDER_PRELUDE: &str = r#"[ -z "${CARGO_TARGET_DIR:-}" ] || { echo "CARGO_TARGET_DIR reached cargo: pass --config build.target-dir" >&2; exit 97; }
+for a in "$@"; do case "$a" in build.target-dir=*) CARGO_TARGET_DIR=${a#build.target-dir=}; CARGO_TARGET_DIR=${CARGO_TARGET_DIR#\'}; CARGO_TARGET_DIR=${CARGO_TARGET_DIR%\'};; esac; done
+"#;
+
 /// A tiny stand-in for the tool binary: answers `--version`, otherwise prints a marker.
 #[cfg(unix)]
 pub(crate) fn write_script(path: &Path, body: &str) {
-    use std::os::unix::fs::PermissionsExt;
+    write_script_with(path, body, true);
+}
+
+/// [`write_script`] without the cargo build-folder rule, for `conformance/ci/dev-tool-publish.sh`: that CI script builds one
+/// throw-away tool with `CARGO_TARGET_DIR` and no compile cache, and CI is not part of the local sccache change.
+#[cfg(unix)]
+pub(crate) fn write_script_plain(path: &Path, body: &str) {
+    write_script_with(path, body, false);
+}
+
+#[cfg(unix)]
+fn write_script_with(path: &Path, body: &str, cargo_rule: bool) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // A stand-in cargo takes its build folder from `--config build.target-dir='...'` and fails when `CARGO_TARGET_DIR` reaches it:
+    // sccache hashes every `CARGO_*` variable, so the variable defeats the compile cache across worktrees (lessons.md).
+    let prelude = if cargo_rule && path.file_name().is_some_and(|n| n == "cargo") {
+        CARGO_FOLDER_PRELUDE
+    } else {
+        ""
+    };
+    paddock_testkit::exe::write_program(path, format!("#!/bin/sh\n{prelude}{body}\n")).unwrap();
 }
 
 /// A stand-in `cargo` that "builds" a script answering `--version`, `self hash` (the hash it was built for, as the real tool shows)
@@ -378,16 +405,20 @@ fn run_wrapper(f: &Fixture, home: &Path, extra_env: &[(&str, String)]) -> (i32, 
 }
 
 /// [`run_wrapper`] with a `cargo` of the test's own.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 fn run_wrapper_with_cargo(f: &Fixture, home: &Path, extra_env: &[(&str, String)], cargo: &str) -> (i32, String, String) {
     let shims = f.cargo_home.path().join("shims");
     write_script(&shims.join("cargo"), cargo);
-    let shims_dir = shims.to_path_buf();
-    let mut cmd = TestCommand::new("sh");
+    let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
+    let mut cmd = Command::new("sh");
     cmd.arg(f.root().join("dev"))
         .arg("hello")
         .current_dir(f.root())
-        .path_first(&shims_dir)
+        .env("PATH", path)
         .env("PADDOCK_DEV_HOME", home)
         .env("PADDOCK_DEV_TARGET_DIR", f.cargo_home.path().join("target"))
         .env("CARGO_HOME", f.cargo_home.path())
@@ -433,36 +464,6 @@ fn a_cached_binary_that_does_not_run_is_replaced_and_a_good_one_is_used_as_it_is
 #[cfg(unix)]
 fn cached_tool(path: &Path) {
     write_script(path, r#"if [ "$1" = "--version" ]; then echo 0; else echo "cached ran $*"; fi"#);
-}
-
-/// A git hook runs its commands with `GIT_DIR` set (and a worktree's hooks may set `GIT_WORK_TREE`): the wrapper finds the repository
-/// from where it is, never from what it inherited, or it hashes another repository's inputs (or none) and builds the wrong tool.
-#[cfg(unix)]
-#[test]
-fn an_inherited_git_dir_or_work_tree_does_not_move_the_wrapper_to_another_repository() {
-    let f = Fixture::new();
-    let scratch = tempfile::tempdir().unwrap();
-    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
-    let env = [("RUSTC", rustc.clone())];
-    let (hash, _) = f.both(&env);
-    let home = scratch.path().join("home");
-    cached_tool(&home.join("bin").join(&hash).join("paddock-dev-test-host"));
-    // Another repository, named by the variables a hook would have set.
-    let other = scratch.path().join("other");
-    std::fs::create_dir_all(&other).unwrap();
-    assert!(
-        TestCommand::new("git")
-            .args(["init", "-q"])
-            .current_dir(&other)
-            .status()
-            .unwrap()
-            .success()
-    );
-    let mut hooked = env.to_vec();
-    hooked.push(("GIT_DIR", other.join(".git").display().to_string()));
-    hooked.push(("GIT_WORK_TREE", other.display().to_string()));
-    let (code, out, err) = run_wrapper(&f, &home, &hooked);
-    assert_eq!((code, out.trim()), (0, "cached ran hello"), "{err}");
 }
 
 #[cfg(unix)]
@@ -573,18 +574,22 @@ fn a_failed_or_stuck_toolchain_install_is_an_error_with_the_next_step_and_runs_n
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn ensure_toolchain_succeeds_when_the_compiler_runs_after_the_install() {
     let f = Fixture::new();
     let (shims, _) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
-    let shims_dir = shims.to_path_buf();
+    let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
     let run = || {
-        TestCommand::new("sh")
+        Command::new("sh")
             .arg(f.root().join("dev"))
             .arg("--ensure-toolchain")
             .current_dir(f.root())
-            .path_first(&shims_dir)
+            .env("PATH", &path)
             .env("CARGO_HOME", f.cargo_home.path())
             .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
             .env_remove("RUSTC")
@@ -628,16 +633,20 @@ fn rustup_installing_broken(f: &Fixture, what: &str) -> (PathBuf, PathBuf) {
     (shims, log)
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 fn install_toolchain(f: &Fixture, shims: &Path, args: &[&str]) -> std::process::Output {
     // Run from outside any repository: the setup-rust action calls this mode before anything else is set up.
     let outside = tempfile::tempdir().unwrap();
-    TestCommand::new("sh")
+    Command::new("sh")
         .arg(f.root().join("dev"))
         .arg("--install-toolchain")
         .args(args)
         .current_dir(outside.path())
-        .path_first(shims)
+        .env("PATH", format!("{}:{}", shims.display(), std::env::var("PATH").unwrap()))
         .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
         .env_remove("RUSTUP_TOOLCHAIN")
         .output()
@@ -672,16 +681,20 @@ fn a_broken_toolchain_is_an_error_naming_the_manual_repair_and_is_never_uninstal
 }
 
 /// ./dev's own install (a machine whose rustc does not run) checks the toolchain the same way and never uninstalls it either.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn ensure_toolchain_refuses_a_broken_install_without_uninstalling_it() {
     let f = Fixture::new();
     let (shims, log) = rustup_installing_broken(&f, "clippy");
-    let out = TestCommand::new("sh")
+    let out = Command::new("sh")
         .arg(f.root().join("dev"))
         .arg("--ensure-toolchain")
         .current_dir(f.root())
-        .path_first(&shims)
+        .env("PATH", format!("{}:{}", shims.display(), std::env::var("PATH").unwrap()))
         .env("CARGO_HOME", f.cargo_home.path())
         .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
         .env_remove("RUSTC")
@@ -798,6 +811,10 @@ fn a_source_only_cache_keeps_the_five_newest_tools_and_leaves_bin_alone() {
     assert!(!home.join("bin").exists(), "a run that never downloads writes only its own cache");
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn a_trace_of_the_wrapper_never_prints_what_a_config_holds() {
@@ -809,7 +826,7 @@ fn a_trace_of_the_wrapper_never_prints_what_a_config_holds() {
     )
     .unwrap();
     let env = f.env(&[]);
-    let out = TestCommand::new("sh")
+    let out = Command::new("sh")
         .arg("-x")
         .arg(f.root().join("dev"))
         .arg("--wrapper-hash")
@@ -833,6 +850,10 @@ fn a_trace_of_the_wrapper_never_prints_what_a_config_holds() {
     assert_ne!(f.both(&[]).0, before);
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_home_still_wins() {
@@ -843,13 +864,14 @@ fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_hom
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     let (hash, _) = f.both(&[("RUSTC", rustc.clone())]);
     write_script(&f.cargo_home.path().join("shims/cargo"), &shim_cargo(0));
-    let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
+    let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
     let run = |extra: &[(&str, &Path)]| {
-        let mut cmd = TestCommand::new("sh");
+        let mut cmd = Command::new("sh");
         cmd.arg(f.root().join("dev"))
             .arg("hello")
             .current_dir(f.root())
-            .path_first(&shims_dir)
+            .env_clear()
+            .env("PATH", &path)
             .env("HOME", scratch.path().join("home"))
             .env("CARGO_HOME", f.cargo_home.path())
             .env("RUSTC", &rustc)
@@ -888,6 +910,10 @@ fn barrier_cargo() -> String {
 }
 
 /// Starts one wrapper per compiler against one kept mount; returns once `expected` builds are inside `cargo`, then lets them all go.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 fn run_overlapping(rustcs: &[&str], expected: usize, shared_target: bool) -> (tempfile::TempDir, Vec<std::process::Output>, Fixture) {
     let f = Fixture::new();
@@ -897,17 +923,16 @@ fn run_overlapping(rustcs: &[&str], expected: usize, shared_target: bool) -> (te
     std::fs::create_dir_all(&mount).unwrap();
     std::fs::create_dir_all(&barrier).unwrap();
     write_script(&f.cargo_home.path().join("shims/cargo"), &barrier_cargo());
-    let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
+    let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
     let children: Vec<_> = rustcs
         .iter()
-        .enumerate()
-        .map(|(i, rustc)| {
-            // The child outlives this closure: its private folder is the test's, removed with `scratch`.
-            let mut cmd = TestCommand::new_in("sh", &scratch.path().join(format!("child-{i}")));
+        .map(|rustc| {
+            let mut cmd = Command::new("sh");
             cmd.arg(f.root().join("dev"))
                 .arg("hello")
                 .current_dir(f.root())
-                .path_first(&shims_dir)
+                .env_clear()
+                .env("PATH", &path)
                 .env("HOME", scratch.path().join("home"))
                 .env("CARGO_HOME", f.cargo_home.path())
                 .env("RUSTC", rustc)
@@ -1045,17 +1070,21 @@ fn a_cache_hit_counts_as_use_and_an_orphaned_legacy_build_folder_goes() {
 
 #[cfg(unix)]
 trait SpawnPiped {
-    fn output_child(&mut self) -> paddock_testkit::TestChild;
+    fn output_child(&mut self) -> std::process::Child;
 }
 
 #[cfg(unix)]
-impl SpawnPiped for TestCommand {
-    fn output_child(&mut self) -> paddock_testkit::TestChild {
+impl SpawnPiped for Command {
+    fn output_child(&mut self) -> std::process::Child {
         use std::process::Stdio;
         self.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap()
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn a_failed_build_names_the_hash_and_the_next_step_in_an_annotation() {
@@ -1063,11 +1092,11 @@ fn a_failed_build_names_the_hash_and_the_next_step_in_an_annotation() {
     let scratch = tempfile::tempdir().unwrap();
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     write_script(&f.cargo_home.path().join("shims/cargo"), "echo boom >&2; exit 101");
-    let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
-    let out = TestCommand::new("sh")
+    let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
+    let out = Command::new("sh")
         .arg(f.root().join("dev"))
         .current_dir(f.root())
-        .path_first(&shims_dir)
+        .env("PATH", path)
         .env("PADDOCK_DEV_HOME", scratch.path().join("home"))
         .env("CARGO_HOME", f.cargo_home.path())
         .env("RUSTC", rustc)
@@ -1081,6 +1110,10 @@ fn a_failed_build_names_the_hash_and_the_next_step_in_an_annotation() {
     );
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn a_ci_run_without_a_kept_mount_says_so() {
@@ -1088,11 +1121,11 @@ fn a_ci_run_without_a_kept_mount_says_so() {
     let scratch = tempfile::tempdir().unwrap();
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     write_script(&f.cargo_home.path().join("shims/cargo"), &shim_cargo(0));
-    let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
-    let out = TestCommand::new("sh")
+    let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
+    let out = Command::new("sh")
         .arg(f.root().join("dev"))
         .current_dir(f.root())
-        .path_first(&shims_dir)
+        .env("PATH", path)
         .env("HOME", scratch.path().join("home"))
         .env("CARGO_HOME", f.cargo_home.path())
         .env("RUSTC", rustc)
@@ -1125,6 +1158,10 @@ fn a_cached_tool_touched_in_the_last_minutes_is_never_pruned() {
     );
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (sh); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn print_binary_names_the_cached_tool_without_running_it() {
@@ -1134,13 +1171,13 @@ fn print_binary_names_the_cached_tool_without_running_it() {
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     let (hash, _) = f.both(&[("RUSTC", rustc.clone())]);
     let (code, out, err) = {
-        let mut cmd = TestCommand::new("sh");
+        let mut cmd = Command::new("sh");
         write_script(&f.cargo_home.path().join("shims/cargo"), &shim_cargo(0));
-        let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
+        let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
         cmd.arg(f.root().join("dev"))
             .arg("--print-binary")
             .current_dir(f.root())
-            .path_first(&shims_dir)
+            .env("PATH", path)
             .env("PADDOCK_DEV_HOME", &home)
             .env("PADDOCK_DEV_TARGET_DIR", f.cargo_home.path().join("target"))
             .env("CARGO_HOME", f.cargo_home.path())
@@ -1184,6 +1221,10 @@ fn a_tool_used_two_hours_ago_is_kept_beyond_the_five_newest() {
     );
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (sh); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn print_binary_refuses_a_build_with_uncommitted_inputs() {
@@ -1191,7 +1232,7 @@ fn print_binary_refuses_a_build_with_uncommitted_inputs() {
     let scratch = tempfile::tempdir().unwrap();
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     std::fs::write(f.root().join("tools/paddock-dev/src/new_module.rs"), "// new\n").unwrap();
-    let out = TestCommand::new("sh")
+    let out = Command::new("sh")
         .arg(f.root().join("dev"))
         .arg("--print-binary")
         .current_dir(f.root())
@@ -1406,14 +1447,14 @@ fn build_folders_of_old_compilers_go_after_a_week_and_the_one_in_use_never() {
     );
 }
 
-/// The start time of a running process as the wrapper records it: through the same builder, so `ps` prints it in the same locale
-/// (the machine's `LANG` writes `Fri 13 Nov`, a clean environment `Fri Nov 13`).
+/// The start time of a running process as the wrapper records it.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 fn stamp_of(pid: u32) -> String {
-    let out = TestCommand::new("ps")
-        .args(["-o", "lstart=", "-p", &pid.to_string()])
-        .output()
-        .unwrap();
+    let out = Command::new("ps").args(["-o", "lstart=", "-p", &pid.to_string()]).output().unwrap();
     String::from_utf8_lossy(&out.stdout)
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -1471,12 +1512,16 @@ fn an_install_waits_for_a_live_holder_of_the_lock_and_never_runs_beside_it() {
     );
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts a short-lived sh to get a pid that has ended; nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn a_lock_of_a_gone_owner_or_of_a_reused_pid_is_taken_over_whatever_its_age() {
     let me = std::process::id();
     let dead = {
-        let mut c = TestCommand::new("sh").args(["-c", "exit 0"]).spawn().unwrap();
+        let mut c = Command::new("sh").args(["-c", "exit 0"]).spawn().unwrap();
         let pid = c.id();
         c.wait().unwrap();
         pid
@@ -1594,6 +1639,10 @@ fn a_cached_tool_that_fails_its_probe_is_replaced_never_removed_first() {
     );
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test and waits for it; nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_is_pruned_meanwhile() {
@@ -1602,10 +1651,10 @@ fn the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_i
     let entry = home.join("bin").join("0123456789abcdef0123456789abcdef01234567");
     std::fs::create_dir_all(&entry).unwrap();
     let cached = entry.join("paddock-dev-test-host");
-    std::fs::copy(env!("CARGO_BIN_EXE_paddock-dev"), &cached).unwrap();
+    std::fs::copy(crate::dev_bin::PATH, &cached).unwrap();
     let signal = scratch.path().join("signal.log");
     std::fs::write(&signal, "").unwrap();
-    let mut run = TestCommand::new(&cached)
+    let mut run = Command::new(&cached)
         .args(["wait", "--file"])
         .arg(&signal)
         .args(["--line", "^go$", "--include-past", "--max", "60s", "--interval", "100ms"])

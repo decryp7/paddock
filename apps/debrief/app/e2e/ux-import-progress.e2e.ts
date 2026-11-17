@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
 import { runCommand } from './tools-support';
@@ -13,7 +13,6 @@ const FILE_MS = 60_000;
 
 test.describe('import progress', () => {
   test('over a workspace the status bar is the one progress surface; it opens the job in Jobs; cancelling leaves a banner', async ({ page }, testInfo) => {
-    await page.clock.install();
     await openAppWith(page, SLOW_IMPORT);
     await page.locator('debrief-sidebar').getByRole('button', { name: 'Open files' }).click();
 
@@ -46,7 +45,6 @@ test.describe('import progress', () => {
   });
 
   test('on the welcome page a long import also shows a card with Cancel', async ({ page }, testInfo) => {
-    await page.clock.install();
     await openAppWith(page, SLOW_IMPORT);
     // Typed only once the palette is open and lists the command: keys pressed before that are lost.
     await runCommand(page, 'Close workspace');
@@ -64,7 +62,6 @@ test.describe('import progress', () => {
   });
 
   test('the status bar Cancel works too, and Dismiss hides the banner', async ({ page }) => {
-    await page.clock.install();
     await openAppWith(page, SLOW_IMPORT);
     await page.locator('debrief-sidebar').getByRole('button', { name: 'Open folder' }).click();
     const status = page.getByTestId('import-status');
@@ -87,7 +84,6 @@ test.describe('import progress', () => {
   });
 
   test('the phases explain themselves: a growing found count, then files; Cancel works while finding', async ({ page }) => {
-    await page.clock.install();
     await openAppWith(page, `${SLOW_IMPORT}&mockSlowDiscovery=60000`);
     await page.locator('debrief-sidebar').getByRole('button', { name: 'Open folder' }).click();
     const status = page.getByTestId('import-status');
@@ -108,7 +104,6 @@ test.describe('import progress', () => {
   });
 
   test('Cancel during the finding phase stops the import without reading files', async ({ page }) => {
-    await page.clock.install();
     await openAppWith(page, `${SLOW_IMPORT}&mockSlowDiscovery=60000`);
     await page.locator('debrief-sidebar').getByRole('button', { name: 'Open folder' }).click();
     const status = page.getByTestId('import-status');

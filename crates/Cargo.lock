@@ -3777,6 +3777,7 @@ version = "0.2.0"
 dependencies = [
  "libc",
  "log",
+ "paddock-env",
  "paddock-testkit",
  "paddock-workspace-hack",
  "sysinfo",
@@ -3934,7 +3935,6 @@ dependencies = [
  "paddock-siblings",
  "paddock-startup",
  "paddock-storage",
- "paddock-testkit",
  "paddock-updater",
  "paddock-window",
  "paddock-workspace-hack",

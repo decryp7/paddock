@@ -1,4 +1,4 @@
-import { computed, inject } from '@angular/core';
+import { computed, DestroyRef, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import { FieldFilter, Level, Query } from '../api.types';
 import { FilterSetStore } from '../../lenses/filter-set.store';
@@ -49,6 +49,8 @@ export const QueryStore = signalStore(
   }),
   withMethods((store, data = inject(WorkspaceDataStore)) => {
     let textTimer: ReturnType<typeof setTimeout> | undefined;
+    // A pause still running when the injector goes would fire into whatever runs next.
+    inject(DestroyRef).onDestroy(() => clearTimeout(textTimer));
     const setQuery = (patch: Partial<Query>) => patchState(store, { query: { ...store.query(), ...patch } });
     return {
       patchQuery: (patch: Partial<Query>) => setQuery(patch),

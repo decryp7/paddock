@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { all, buttonByText, el, markerKind, provideTinyBackend, settle, text, tinyDataset, typeInto } from '../../testing/helpers';
+import { all, buttonByText, el, markerKind, provideTinyBackend, settle, text, tinyDataset, typeInto, openDialog } from '../../testing/helpers';
 import { MockBackend } from '../core/mock/mock-backend';
 import { ProfileModel } from '../core/profile.model';
 import { parseProfile } from '../profile/toml';
@@ -125,6 +125,7 @@ describe('MarkersManager plugin kinds', () => {
     const { fixture, backend, dialogs } = await mount();
     el<HTMLButtonElement>(fixture, '[aria-label="Restyle Application crash"]').click();
     await settle(fixture);
+    await openDialog(dialogs);
     const open = dialogs.stack().at(-1)!;
     expect(open.component).toBe(MarkerOverrideDialog);
     open.ref.close({ color: '#00ff00', badge: 'Z', label: undefined });
@@ -139,6 +140,7 @@ describe('MarkersManager plugin kinds', () => {
     // Cancelling the dialog writes nothing.
     el<HTMLButtonElement>(fixture, '[aria-label="Restyle Application crash"]').click();
     await settle(fixture);
+    await openDialog(dialogs);
     dialogs.stack().at(-1)!.ref.close();
     await settle(fixture, 6);
     expect((await model(backend)).marker_override).toBeUndefined();

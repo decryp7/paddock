@@ -5,6 +5,12 @@
 
 use regex::Regex;
 
+#[cfg(test)]
+thread_local! {
+    /// How many patterns [`rx`] compiled on this thread: a test asserts a hot path compiles each pattern once, not its time (ER-12).
+    pub(crate) static COMPILED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The characters JavaScript's `\s` matches, as the inside of a character class.
 pub const WS: &str = "\\t\\n\\x0B\\x0C\\r \\u{a0}\\u{1680}\\u{2000}-\\u{200a}\\u{2028}\\u{2029}\\u{202f}\\u{205f}\\u{3000}\\u{feff}";
 
@@ -12,6 +18,8 @@ pub const WS: &str = "\\t\\n\\x0B\\x0C\\r \\u{a0}\\u{1680}\\u{2000}-\\u{200a}\\u
 /// Use them outside character classes only. A pattern that does not compile is a bug of the caller: it panics on first use.
 #[allow(clippy::expect_used)]
 pub fn rx(pattern: &str) -> Regex {
+    #[cfg(test)]
+    COMPILED.with(|c| c.set(c.get() + 1));
     let mut out = String::with_capacity(pattern.len() * 2);
     let mut chars = pattern.chars();
     while let Some(c) = chars.next() {

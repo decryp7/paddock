@@ -84,4 +84,13 @@ describe('DashboardStore', () => {
     vi.useRealTimers();
     await flush();
   });
+
+  it('leaves no reload timer running once its injector is destroyed', () => {
+    vi.useFakeTimers();
+    const { store } = setup();
+    store.scheduleReload();
+    expect(vi.getTimerCount()).toBe(1);
+    TestBed.resetTestingModule();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'v
 import { FakeChart, FakeECharts } from './fake-chart';
 import { all, at, buttonByText, byText, manualFrames, must, one, press, text, typeInto } from './dom';
 import { installTestKit } from './setup';
+import { installLeakDetector } from './leaks';
 
 /** The smallest TestBed component, for the tests of what the kit does around TestBed's own clean-up. */
 @Component({ selector: 'pd-kit-probe', template: '<p>probe</p>', changeDetection: ChangeDetectionStrategy.OnPush })
@@ -65,6 +66,8 @@ describe('installTestKit', () => {
   // failed before its own clean-up (fake timers, a spy on a DOM prototype, a stubbed global, a node on the page, a stored
   // value) broke whichever spec file ran next in that worker: order-dependent failures seen in full runs only.
   describe('what a test leaves behind', () => {
+    // These tests leave things behind on purpose, to show that the kit cleans them: the leak detector judges nothing here.
+    installLeakDetector({ mode: 'off' });
     const realAppend = Node.prototype.appendChild;
     const realNavigator = globalThis.navigator;
     it('leaves fake timers, a spy, a stubbed global, a node and a stored value behind', () => {
@@ -91,6 +94,8 @@ describe('installTestKit', () => {
   // whose timers never fire, so every later spec in the worker that waited on a real timer (the panel snapshot's "too
   // slow" case, the notify reference app's repairs) hung until the 5 s test timeout.
   describe('a spy on a faked timer', () => {
+    // These tests leave things behind on purpose, to show that the kit cleans them: the leak detector judges nothing here.
+    installLeakDetector({ mode: 'off' });
     const realSetTimeout = globalThis.setTimeout;
     it('is left behind with the fake clock', () => {
       vi.useFakeTimers();
@@ -109,6 +114,8 @@ describe('installTestKit', () => {
   // TestBed clean-up, and the next TestBed test failed with "Cannot configure the test module when the test module has
   // already been instantiated".
   describe('a spy on a faked timer outliving a spec’s own switch to real timers, in TestBed tests', () => {
+    // These tests leave things behind on purpose, to show that the kit cleans them: the leak detector judges nothing here.
+    installLeakDetector({ mode: 'off' });
     const realSetTimeout = globalThis.setTimeout;
     const failure = { message: '' };
     // As in a spec whose afterEach calls vi.useRealTimers(): it runs before the kit's, so the kit finds the dead fake.
@@ -135,6 +142,8 @@ describe('installTestKit', () => {
   });
 
   describe('a spy on the real timer made before fake timers', () => {
+    // These tests leave things behind on purpose, to show that the kit cleans them: the leak detector judges nothing here.
+    installLeakDetector({ mode: 'off' });
     const realSetTimeout = globalThis.setTimeout;
     it('is left behind by the uninstalled clock and put back without failing the test', () => {
       vi.spyOn(globalThis, 'setTimeout');

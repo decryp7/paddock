@@ -1,4 +1,5 @@
-import { axeViolations, expect, test, type Page } from '@decryp7/paddock-e2e';
+import { expect, test } from './test';
+import { axeViolations, type Page, settledLayout } from '@decryp7/paddock-e2e';
 
 // The data parts of paddock-ui (plan X21) in the gallery: the table's sorting, filter, keyboard, menus and virtual rows, the
 // chart wrapper over a real ECharts, and the forms helpers, in both themes, with axe and without horizontal scroll at 320 px.
@@ -97,6 +98,8 @@ test('table: 5,000 rows are drawn by the virtual viewport, a few at a time', asy
   await open(page);
   const big = page.locator('[data-testid="table-virtual"]');
   await expect(big.locator('cdk-virtual-scroll-viewport')).toBeVisible();
+  // The viewport draws its rows a frame after it shows: wait for them, never read the count at once.
+  await expect(big.locator('[role=row][data-index]').first()).toBeVisible();
   const drawn = await big.locator('[role=row][data-index]').count();
   expect(drawn).toBeGreaterThan(0);
   expect(drawn).toBeLessThan(100);
@@ -191,9 +194,23 @@ test('table: loading and empty say no count, and the columns do not move when ro
   await open(page);
   await expect(page.locator('[data-testid="box-loading"] [data-testid="table-count"]')).toHaveCount(0);
   await expect(page.locator('[data-testid="box-empty"] [data-testid="table-count"]')).toHaveCount(0);
-  const left = (id: string) => page.locator(`[data-testid="${id}"]`).getByRole('columnheader', { name: 'Size (KiB)' }).evaluate((e) => Math.round(e.getBoundingClientRect().left - (e.closest('.pd-grid') as HTMLElement).getBoundingClientRect().left));
-  const loaded = await left('box-selected');
-  for (const id of ['box-loading', 'box-empty', 'box-error']) expect(await left(id), id).toBe(loaded);
+  // A box renders its grid and settles its column widths over a few frames (box-selected read 353 px, then 363): read header and grid in
+  // one step; the loaded box is taken once the layout settles (two reads agree), and every other box must come to the same position.
+  const left = (id: string) =>
+    page.locator(`[data-testid="${id}"]`).evaluate((box) => {
+      const grid = box.querySelector('.pd-grid');
+      const header = [...box.querySelectorAll('[role=columnheader]')].find((h) => h.textContent?.includes('Size (KiB)'));
+      return grid && header ? Math.round(header.getBoundingClientRect().left - grid.getBoundingClientRect().left) : null;
+    });
+  const settled = await settledLayout(
+    async () => {
+      const x = await left('box-selected');
+      return { count: x === null ? 0 : 1, widths: [x ?? 0], fits: x !== null };
+    },
+    { what: 'box-selected: the Size (KiB) header inside its grid' },
+  );
+  const loaded = settled.widths[0];
+  for (const id of ['box-loading', 'box-empty', 'box-error']) await expect.poll(() => left(id), { message: id }).toBe(loaded);
 });
 
 test('table: an unsorted header hides its arrow, the sorted one shows it solid', async ({ page }) => {

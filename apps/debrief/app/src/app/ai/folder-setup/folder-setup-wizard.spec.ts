@@ -23,6 +23,10 @@ import { folderSetupCommands } from './folder-setup.commands';
 import { FolderSetupLauncher, hasOpenFiles } from './provide-folder-setup';
 import { ProposalPreview } from './folder-setup.types';
 import { MOCK_WORKSPACE } from '../../core/mock-workspace';
+import { endMockJobs } from '../../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 function setup(aiMode: 'ready' | 'setup' | 'off' = 'off') {
   const workspace = new MockBackend({ latency: false });

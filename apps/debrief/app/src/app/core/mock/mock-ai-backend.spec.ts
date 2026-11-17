@@ -3,6 +3,10 @@ import { ChatEventEnvelope } from '../../ai/ai.types';
 import { AI_FAILABLE, MockAiBackend, mockAiOptionsFromSearch } from './mock-ai-backend';
 import { resetMockJobs, mockJobs } from '../../jobs/mock-jobs';
 import { demoRecordIds } from './mock-ai-data';
+import { endMockJobs } from '../../../testing/jobs';
+
+// The jobs this spec starts end with each test: none holds a slot or a step for the next one.
+afterEach(endMockJobs);
 
 const code = (p: Promise<unknown>) =>
   p.then(

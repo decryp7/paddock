@@ -9,9 +9,8 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use paddock_testkit::TestCommand;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn repo() -> PathBuf {
     paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
@@ -71,8 +70,7 @@ impl Runner {
         // apt-get and sudo always have shims first on PATH, so no test can reach the machine's own.
         for (name, body) in [("sudo", "exec \"$@\""), ("apt-get", "exit 0")] {
             let p = bin.join(name);
-            std::fs::write(&p, format!("#!/bin/sh\necho \"{name} $*\" >> '{}'\n{body}\n", calls.display())).unwrap();
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            paddock_testkit::exe::write_program(&p, format!("#!/bin/sh\necho \"{name} $*\" >> '{}'\n{body}\n", calls.display())).unwrap();
         }
         Runner {
             root,
@@ -147,9 +145,10 @@ impl Runner {
         for body in steps {
             let script = self.root.join("step.sh");
             std::fs::write(&script, body).unwrap();
-            let r = TestCommand::new("bash")
+            let r = Command::new("bash")
                 .args(["-e", "-o", "pipefail"])
                 .arg(&script)
+                .env_clear()
                 .envs(self.base_env(extra))
                 .env("BACKEND", input.backend)
                 .env("REDIS_ENDPOINT", input.endpoint)
@@ -169,7 +168,7 @@ impl Runner {
     #[allow(clippy::disallowed_methods)]
     fn rust(&self, input: &Input, extra: &[(&str, &str)]) -> Result {
         self.reset();
-        let r = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        let r = crate::dev_bin::command()
             .args([
                 "ci",
                 "setup-rust",
@@ -181,6 +180,7 @@ impl Runner {
                 if input.tauri { "true" } else { "false" },
             ])
             .current_dir(repo())
+            .env_clear()
             .envs(self.base_env(extra))
             .env("PADDOCK_SCCACHE_REDIS_ENDPOINT", input.endpoint)
             .output()
@@ -196,8 +196,7 @@ fn write_shim(path: &Path, calls: &Path, shim: &str) {
         calls.display(),
         tokens = calls.with_file_name("tokens").display()
     );
-    std::fs::write(path, body).unwrap();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    paddock_testkit::exe::write_program(path, body).unwrap();
 }
 
 struct Input {

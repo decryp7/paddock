@@ -78,6 +78,7 @@ export const CountersStore = signalStore(
     let timer: ReturnType<typeof setTimeout> | null = null;
     let running = false;
     let searchToken = 0;
+    let destroyed = false;
 
     const stop = () => {
       if (timer !== null) clearTimeout(timer);
@@ -108,7 +109,9 @@ export const CountersStore = signalStore(
       } finally {
         running = false;
       }
-      if (users > 0) timer = setTimeout(() => void tick(), COUNTERS_POLL_MS);
+      // Only one read is armed: an explicit `tick` beside the polling one must not leave the first timer unreachable.
+      stop();
+      if (users > 0 && !destroyed) timer = setTimeout(() => void tick(), COUNTERS_POLL_MS);
     };
 
     const saveCounters = async (patch: (c: { pinned: string[]; sets: CounterSet[] }) => { pinned: string[]; sets: CounterSet[] }, message: string | null): Promise<boolean> => {
@@ -118,7 +121,11 @@ export const CountersStore = signalStore(
       return settings.save({ ...s, counters: patch(current) } satisfies Settings, message);
     };
 
-    destroyRef?.onDestroy(stop);
+    // A read in flight when the injector goes must not arm the next one.
+    destroyRef?.onDestroy(() => {
+      destroyed = true;
+      stop();
+    });
 
     return {
       /** Starts reading (a page or a dashboard needs it); call the returned function when done. */

@@ -84,9 +84,8 @@ describe('source colour markers in the views', () => {
   });
 
   it('the grid draws a stripe per row with a legend, and none when off', async () => {
-    const restore = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
-    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 400 });
-    try {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400);
+    {
       const { settings } = await setup();
       const fixture = TestBed.createComponent(EventsGrid);
       await settle(fixture);
@@ -99,8 +98,6 @@ describe('source colour markers in the views', () => {
       await settle(fixture);
       expect(all(fixture, '[data-testid=source-stripe]')).toHaveLength(0);
       expect(all(fixture, '.row.marked')).toHaveLength(0);
-    } finally {
-      if (restore) Object.defineProperty(HTMLElement.prototype, 'clientHeight', restore);
     }
   });
 

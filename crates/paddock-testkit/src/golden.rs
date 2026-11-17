@@ -1,4 +1,15 @@
 //! Golden files: the expected output of a function kept in a file, compared on every run.
+//!
+//! A golden is captured on one machine and checked on every other: the Mac, the Linux CI image (which runs as root) and Windows. A
+//! value that belongs to the capturing machine (a uid, a home folder, the RAM, a temp path, the host name) makes it fail elsewhere
+//! (train 14 WP-2 had six such goldens). Normalise such a value in the test, before the comparison (for example `norm()` in
+//! `tools/paddock-dev/tests/it/host_steps.rs`), so the file says `<uid>` and every machine writes the same; conformance C131 reads
+//! the tracked golden folders for these literals.
+//!
+//! **Rewriting.** With [`UPDATE_VAR`] set, a differing golden is rewritten, and the run prints [`confirm_command`]: the exact command
+//! that runs that test on Linux as root in the CI image (`tools/linux-container.sh --ci-image`). Run it before committing the file.
+//! `./dev golden confirm <test filter>` does both runs, on this machine and in that image, and passes only if both pass
+//! (docs/dev-setup.md, "Golden files").
 
 use std::fmt;
 use std::fs;
@@ -100,6 +111,83 @@ impl fmt::Display for GoldenError {
 
 impl std::error::Error for GoldenError {}
 
+/// The name of the running test: nextest's `NEXTEST_TEST_NAME` (the bare test path), else a libtest thread's name (`main` under
+/// `--test-threads=1` is no test path). A name with a character other than letters, digits, `_` and `:` is no name.
+pub fn test_name_of<'a>(nextest: Option<&'a str>, thread: Option<&'a str>) -> Option<&'a str> {
+    let ok = |n: &&str| {
+        !n.is_empty()
+            && *n != "main"
+            && n.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ':'))
+    };
+    nextest.filter(ok).or(thread.filter(ok))
+}
+
+/// `text` as one `sh` word: in single quotes, a `'` inside written as `'\''`.
+fn sh_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+/// The command that confirms the test `test` of the package `package` at `manifest_dir` on Linux as root in the CI image: run from the
+/// repository root (the folder with `ci-image/VERSION` above `manifest_dir`), every word safe to paste into `sh`. A name that is not a
+/// test path (`main`, as `--test-threads=1` names the thread, or nothing) leaves `<test name>` to fill in; so does a missing package or
+/// folder. On an arm64 Mac the CI image is a local arm64 build (`tools/linux-container.sh --ci-image`), not the registry's amd64 one.
+pub fn confirm_command(
+    manifest_dir: Option<&Path>,
+    package: Option<&str>,
+    test: Option<&str>,
+) -> String {
+    let test = test
+        .filter(|t| {
+            *t != "main"
+                && !t.is_empty()
+                && t.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ':'))
+        })
+        .unwrap_or("<test name>");
+    let package = package
+        .filter(|p| {
+            !p.is_empty()
+                && p.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+        })
+        .map_or(String::new(), |p| format!("-p {p} "));
+    let rel = manifest_dir
+        .and_then(|dir| {
+            let root = dir
+                .ancestors()
+                .find(|d| d.join("ci-image/VERSION").is_file())?;
+            let rel = dir
+                .strip_prefix(root)
+                .ok()?
+                .to_string_lossy()
+                .replace('\\', "/");
+            Some(if rel.is_empty() { ".".to_string() } else { rel })
+        })
+        .unwrap_or_else(|| "<the package folder>".to_string());
+    let inner = format!("cd {} && cargo nextest run {package}{test}", sh_quote(&rel));
+    format!(
+        "tools/linux-container.sh --id paddock --ci-image -- sh -c {}",
+        sh_quote(&inner)
+    )
+}
+
+/// What a rewrite prints: the file, why it matters and [`confirm_command`] (a Mac-only rewrite that was never run as root on Linux is
+/// how a golden with the Mac's uid reaches CI). The test is [`test_name_of`] of `NEXTEST_TEST_NAME` and the name of the thread.
+pub fn rewritten_notice(
+    path: &Path,
+    manifest_dir: Option<&Path>,
+    package: Option<&str>,
+    nextest: Option<&str>,
+    thread: Option<&str>,
+) -> String {
+    format!(
+        "golden: rewrote {}\n  Confirm it on Linux as root in the CI image before you commit it (a value of this machine fails there):\n    {}\n  or both runs at once: ./dev golden confirm [-p <package>] <test filter>",
+        path.display(),
+        confirm_command(manifest_dir, package, test_name_of(nextest, thread))
+    )
+}
+
 /// Line endings as `\n`, so a Windows checkout with `core.autocrlf` still matches.
 fn normalise(text: &str) -> String {
     text.replace("\r\n", "\n")
@@ -124,6 +212,20 @@ pub fn check_golden(path: &Path, actual: &str, mode: GoldenMode) -> Result<Golde
         // The folder of a bare file name is empty, and making an empty folder is a no-op.
         fs::create_dir_all(path.parent().unwrap_or(Path::new(""))).map_err(io_err)?;
         fs::write(path, actual.as_bytes()).map_err(io_err)?;
+        let manifest_dir = std::env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from);
+        let package = std::env::var("CARGO_PKG_NAME").ok();
+        let nextest = std::env::var("NEXTEST_TEST_NAME").ok();
+        let thread = std::thread::current();
+        eprintln!(
+            "{}",
+            rewritten_notice(
+                path,
+                manifest_dir.as_deref(),
+                package.as_deref(),
+                nextest.as_deref(),
+                thread.name()
+            )
+        );
         return Ok(Golden::Updated);
     }
     let Some(expected) = expected else {

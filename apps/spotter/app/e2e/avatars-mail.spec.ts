@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 
 test.describe('avatars, e-mail settings and the upgrade command', () => {
   test('watch rows, the feed and the detail hero show the engine pictures, and the wizard shows a monogram tile for each preset', async ({ page }) => {

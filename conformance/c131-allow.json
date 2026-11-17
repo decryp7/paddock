@@ -1,0 +1,5 @@
+{"allow": [
+  {"path": "crates/paddock-service/tests/golden/dyno.run-value.txt", "site": "Users\\Ana", "reason": "Ana is the invented user the test passes in; the golden is the same on every machine"},
+  {"path": "crates/paddock-service/tests/golden/pitcrew.agent-file.plist", "site": "/Users/ana", "reason": "ana is the invented user the test passes in; the golden is the same on every machine", "count": 4},
+  {"path": "crates/paddock-service/tests/golden/pitwall.service", "site": "/home/ana", "reason": "ana is the invented user the test passes in; the golden is the same on every machine", "count": 2}
+]}

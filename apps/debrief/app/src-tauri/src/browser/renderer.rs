@@ -925,7 +925,7 @@ mod tests {
             // A browser that starts only when the test lets it.
             let go = r._dir.path().join("go");
             let gated = r._dir.path().join("gated.sh");
-            std::fs::write(
+            paddock_testkit::exe::write_program(
                 &gated,
                 format!(
                     "#!/bin/sh\nwhile [ ! -f '{}' ]; do sleep 0.01; done\nexec '{}' \"$@\"\n",
@@ -934,7 +934,6 @@ mod tests {
                 ),
             )
             .unwrap();
-            std::fs::set_permissions(&gated, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
             r.renderers.set_sources(Sources {
                 configured: Some(gated),
                 installed: None,

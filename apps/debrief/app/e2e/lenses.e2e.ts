@@ -1,4 +1,5 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, test } from './test';
+import type { Page } from '@playwright/test';
 import { gridTotal, initialTotal, openApp, parseCount } from './app';
 
 /** Opens the Lens menu and picks an item by its text. */
