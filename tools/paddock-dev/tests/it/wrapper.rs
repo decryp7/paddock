@@ -460,6 +460,36 @@ fn a_cached_binary_that_does_not_run_is_replaced_and_a_good_one_is_used_as_it_is
     assert!(!f.cargo_home.path().join("target").exists(), "no second build");
 }
 
+/// Git Bash on Windows: the build folder reaches cargo inside `--config build.target-dir='...'`, where MSYS does not turn a
+/// `/c/Users/...` path into `C:/Users/...`, so cargo built into `C:\\c\\Users\\...` and the wrapper found an old binary in the
+/// folder it named (run 8208: "built a paddock-dev that is not for hash ... three times in a row", five Windows jobs). Where
+/// `cygpath` exists the folder is passed in its mixed form (`cygpath -m`). A stand-in `cygpath` records the call; it answers the
+/// same path, so the build still lands where the wrapper looks.
+#[cfg(unix)]
+#[test]
+fn where_cygpath_exists_the_build_folder_reaches_cargo_in_its_windows_form() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let calls = scratch.path().join("cygpath-calls");
+    write_script(
+        &f.cargo_home.path().join("shims").join("cygpath"),
+        &format!(
+            "echo \"$*\" >> '{}'\n[ \"$1\" = -m ] && shift\nprintf '%s\\n' \"$1\"",
+            calls.display()
+        ),
+    );
+    let home = scratch.path().join("home");
+    let (code, out, err) = run_wrapper(&f, &home, &[("RUSTC", rustc)]);
+    assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
+    let seen = std::fs::read_to_string(&calls).unwrap_or_default();
+    let target = f.cargo_home.path().join("target");
+    assert!(
+        seen.lines().any(|l| l.starts_with("-m ") && l.contains(&*target.to_string_lossy())),
+        "the build folder went to cargo without cygpath -m: {seen:?}"
+    );
+}
+
 /// A cached tool that answers `--version` and otherwise says it ran (what an old cached binary would do).
 #[cfg(unix)]
 fn cached_tool(path: &Path) {
