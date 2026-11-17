@@ -5,7 +5,7 @@
 // writing). The next statement of the same block that READS the page (`boundingBox`, `allInnerTexts`, `allTextContents`, `innerText`, `textContent`,
 // and `evaluate` / `evaluateAll` when their result is used) is reported, unless a ready helper (@decryp7/paddock-e2e `ready.ts`: expectListFiltered, expectOverlayAlignedWith,
 // expectWired, expectStreamDone, expectDockPlanned, expectNotMoving) or any other wait stands between the two. Report-only (ER-41; off unless PADDOCK_E2E_READY_LINT=warn or error, see src/e2e.cjs) until its first green
-// run on the real tree is recorded here (the gate register lists conformance checks only). Recorded: not yet. First count 2026-11-17: 93 warnings (Debrief 30, Dyno 26, ui 27, Pitwall 6, Spotter 3, Pitcrew 1); no waivers added (ER-46: a waiver list only shrinks).
+// run on the real tree is recorded here (the gate register lists conformance checks only). Recorded: not yet. First count 2026-11-17: 74 sites (Debrief 26, Dyno 17, ui 23, Pitwall 5, Spotter 3, Pitcrew 0; measured with `node scripts/e2e-ready-report.mjs` after the evaluate rule; the first count of 93 predates it, and an earlier version of the script measured 2 of 6 projects); no waivers added (ER-46: a waiver list only shrinks).
 // The window is one statement: only the next statement of the same block is read. A read two statements later, a read after a `waitForTimeout`
 // (itself a C71 finding), or one inside a callback is not seen; that keeps false positives low and is the limit of the rule.
 // `evaluate` and `evaluateAll` are reads only when their result is used (an assignment, an argument, a return, a chain): a bare `await x.evaluate(...)`

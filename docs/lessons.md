@@ -2240,5 +2240,5 @@ The class of the sweep entry (a spec reads or presses on "it is in the DOM") now
 `allTextContents`, `innerText`, `textContent`, `evaluate`, `evaluateAll`) in the statement right after a bare `toBeVisible()` or `waitFor()`. The
 sweep's five specs moved onto the helpers. First count (`PADDOCK_E2E_READY_LINT=warn`): 93 warnings in the other specs (Debrief 30, Dyno 26, ui 27, Pitwall 6, Spotter 3, Pitcrew 1);
 no waiver was added (ER-46), so the count only goes down as specs move or the rule flips to error after its first green run on the real tree. Many of
-the 93 are reads of a static element; a waiver `// conformance: e2e-ready — <why>` is for those.
+the 74 are reads of a static element; a waiver `// conformance: e2e-ready — <why>` is for those.
 Debrief's `openApp` and `openAppWith` now wait on the dock signal (`expectDockPlanned`). Suite time on 9 related files (68 tests, Chromium, 4 workers, one run each, machine idle): 1.1 min with the wait, 1.0 min without; the difference is inside the run-to-run noise of one run each.

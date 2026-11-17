@@ -49,7 +49,9 @@ function main(argv) {
   for (const project of argv.length ? argv : projects(root)) {
     let out = '[]';
     try {
-      out = execFileSync('npx', ['eslint', 'e2e/**/*.ts', '--rule', `{"${RULE}":"warn"}`, '-f', 'json'], { cwd: join(root, project), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      // The rule's severity comes from the environment (eslint/src/e2e.cjs): a `--rule` override cannot find the plugin where it is registered only inside
+      // the e2e block ("could not find plugin paddock" in every app but two), because the override also applies to files the block ignores.
+      out = execFileSync('npx', ['eslint', 'e2e/**/*.ts', '-f', 'json'], { cwd: join(root, project), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, PADDOCK_E2E_READY_LINT: 'warn' } });
     } catch (e) {
       // eslint exits 1 when it finds errors of other rules and still prints the JSON; anything else is reported and counted as unmeasured.
       out = e.stdout?.toString() || '';

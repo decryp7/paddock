@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
 import { sitesOf, summaryTable } from './e2e-ready-report.mjs';
 
@@ -20,4 +21,11 @@ test('summaryTable shows a project eslint failed in as not measured, never as ze
   assert.match(t, /\| apps\/pitwall\/app \| not measured \|/);
   assert.match(t, /projects not measured\*\* \| \*\*2\*\*/);
   assert.doesNotMatch(t, /apps\/dyno\/app \| 0/);
+});
+
+test('the script measures a project whose plugin is registered only inside the e2e block (a --rule override cannot find it: "could not find plugin paddock")', () => {
+  const out = execFileSync('node', ['scripts/e2e-ready-report.mjs', 'scripts/fixtures/e2e-ready'], { encoding: 'utf8', cwd: new URL('..', import.meta.url) });
+  assert.match(out, /scripts\/fixtures\/e2e-ready\/e2e\/bad\.ts:6/, out);
+  assert.match(out, /\| scripts\/fixtures\/e2e-ready \| 1 \|/);
+  assert.match(out, /projects not measured\*\* \| \*\*0\*\*/);
 });
