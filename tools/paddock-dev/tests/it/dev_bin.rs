@@ -35,7 +35,15 @@ fn a_spawned_binary_has_the_wrapper_off() {
         "{envs:?}"
     );
     // And it really declines: no warning, no server, nothing printed.
-    let out = command().args(["sccache", "env"]).env_remove("CI").output().unwrap();
+    // ER-47 named clearing: the one variable this probe is not about. A caller that exports CARGO_TARGET_DIR (an agent's build folder)
+    // makes the wrapper print its own warning about that variable, which is not what "off" is asked to show; the child is cleared of it,
+    // and of CI, and keeps everything else.
+    let out = command()
+        .args(["sccache", "env"])
+        .env_remove("CI")
+        .env_remove("CARGO_TARGET_DIR")
+        .output()
+        .unwrap();
     assert!(out.status.success());
     assert!(out.stdout.is_empty(), "{}", String::from_utf8_lossy(&out.stdout));
     assert!(
