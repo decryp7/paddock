@@ -2191,8 +2191,11 @@ in a format, a timezone) were refuted by those equal rates and by failures that 
   frames have passed since the last plan started, because what a plan's listeners do resizes the dock once more). The spec records the dock's top and
   the groups' heights from the first moment with resize observers, waits on the signal, and asserts that nothing changes after it, at 1440 and
   900 px: red in 20 of 20 runs on the old code (10 runs per engine, 5 workers), 80 of 80 green after (20 runs, 4 workers, both engines, both widths).
-  **Open:** in a window narrower than 1000 px the Explorer is open for the first frames and `NarrowWindow` closes it by the dock's first plan; the bar
-  then widens and the dock's top moves by one bar row before the signal. The spec asserts a constant top from the first drawn bar only for wide windows.
+  **Narrow windows (fixed in a later commit):** below 1000 px the Explorer was open for the first frames and `NarrowWindow` closed it by the dock's
+  first plan, so the bar widened (123 to 87 px) and the dock top moved. A narrow window (under 920 px, measured: the plan keeps the Explorer from
+  920 px up and closes it at 912 px and below) now starts with the Explorer closed, before the first draw, and the plan can bring it back; the Explorer's
+  open flag was never saved, so there is no saved choice to honour. The spec asserts a constant top at 1440, 1100, 900 and 700 px (red on 8 of 10 runs
+  at 900 px before; 160 of 160 green after: 20 runs, 4 workers, 2 engines, 4 widths).
 - **A reader that compares a read with the one two polls before (found in review).** `settledLayout` kept `previous` and `last` and compared the new
   read with `previous`, so A, B, A passed as "two reads in a row". It now compares with the read just before; the test is red on the old code (settled on
   the third read) and green after (the fourth).
@@ -2212,3 +2215,14 @@ A second find of the review: the dock spec imported the kit by package name, whi
 **Class: a spec that acts or reads on "it is in the DOM" while the page is not ready or still moving** (earlier: the toast whose Show missed
 its click, the Dyno Firewall layout read before it settled (`settledLayout`), the Debrief menu that ran its neighbour's command; ER-21 candidate:
 a shared "ready" per kind of check, with a lint over `waitForTimeout` and first-visible reads).
+
+## A broad `pkill -f` by an agent, with the kill guard not wired (2026-11-17)
+While cleaning up its own e2e servers an implementer ran `pkill -f "ng serve"` (and later `pkill -f "ng serve gallery --port 4701"`, own ports). The first
+pattern matches every agent's dev server on the machine, so it may have ended other agents' runs; nobody reported one, and none can be ruled out.
+Hypotheses: the guard did not fire because it only covers `kill PID` (refuted: `.claude/hooks/kill-guard.py` refuses `pkill`, `killall` and `killall5`
+for agents, with a test) or because the pattern was inside a `&&` chain (refuted: lib/shellscan.py scans every command of a chain). **Cause:** the
+main checkout's local `.claude/settings.json` wires six hooks (docker-guard, no-force-push, no-pgrep-wait, recurring-guard, scratch-root-guard,
+worktree-guard) and not `kill-guard.sh`, whose header says the coordinator wires it after the train lands. **Rule for agents:** end only what you
+started, through the tool that started it (`run_in_background` with TaskStop, or `kill %job`), or by the port you picked after `lsof` shows your own
+process in your own folder; never by a pattern on a program name. **Class: a guard that exists, is tested and is not wired** (earlier: the coordinator-hook
+rollout of 2026-11-12).

@@ -20,7 +20,9 @@ interface Reading {
 
 for (const size of [
   { width: 1440, height: 900 },
+  { width: 1100, height: 900 },
   { width: 900, height: 900 },
+  { width: 700, height: 900 },
 ]) {
   test(`the default layout does not move after the app is ready at ${size.width} px wide`, async ({ page }) => {
     await page.setViewportSize(size);
@@ -57,9 +59,9 @@ for (const size of [
     // From the first reading with the filter bar and all groups, the dock's top never changes.
     const withBar = log.filter((r) => r.bar && r.heights.length >= GROUPS);
     expect(withBar.length, `no reading had the filter bar and ${GROUPS} groups: ${log.map(shown).join(' ')}`).toBeGreaterThan(0);
-    // Not in a window narrower than the filter bar's compact width: there the Explorer is open for the first frames and NarrowWindow closes it
-    // by the dock's first plan, which widens the bar and moves the dock's top by one bar row (open finding; the check after the plan holds).
-    if (size.width >= 1000) expect(new Set(withBar.map((r) => r.top)).size, `the dock's top moved: ${withBar.map(shown).join(' ')}`).toBe(1);
+    // From the first reading with the filter bar and the groups, the dock's top never changes, at any width: the Explorer's state (closed in a
+    // narrow window) is decided before the first draw, so nothing above or beside the dock changes once it is drawn.
+    expect(new Set(withBar.map((r) => r.top)).size, `the dock's top moved: ${withBar.map(shown).join(' ')}`).toBe(1);
     // From the first reading with the dock planned (and the bar drawn), neither the top nor a group's height changes.
     const planned = log.slice(log.findIndex((r) => r.planned && r.bar && r.heights.length >= GROUPS));
     expect(planned.length, `the dock was never planned with the bar and ${GROUPS} groups: ${log.map(shown).join(' ')}`).toBeGreaterThan(0);

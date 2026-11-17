@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceStore } from '../core/workspace.store';
 import { provideTinyBackend } from '../../testing/helpers';
 import { DockService } from '../dock/dock.service';
-import { NarrowWindow } from './narrow-window';
+import { EXPLORER_MIN_WINDOW_PX, NarrowWindow } from './narrow-window';
 
 type Verdict = 'hide' | 'show' | 'keep';
 
@@ -70,5 +70,26 @@ describe('NarrowWindow (the Explorer follows the layout plan)', () => {
     listeners[0]?.();
     expect(store.sidebarOpen()).toBe(false);
     expect(verdicts).toHaveBeenCalled();
+  });
+
+  describe('the state before the first draw', () => {
+    const withWidth = (width: number) => vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(width);
+
+    it('starts a narrow window without the Explorer, and brings it back when the plan has room', () => {
+      withWidth(EXPLORER_MIN_WINDOW_PX - 1);
+      const { narrow, store, set } = setup();
+      narrow.start();
+      expect(store.sidebarOpen()).toBe(false);
+      set('show');
+      narrow.evaluate();
+      expect(store.sidebarOpen()).toBe(true);
+    });
+
+    it('starts a window of the minimum width and wider with the Explorer open', () => {
+      withWidth(EXPLORER_MIN_WINDOW_PX);
+      const { narrow, store } = setup();
+      narrow.start();
+      expect(store.sidebarOpen()).toBe(true);
+    });
   });
 });

@@ -11,6 +11,15 @@ import { DockService } from '../dock/dock.service';
  * windows yield first (the dock tabs or auto-hides them in the same plan). The user's choice wins: an Explorer opened
  * by hand (Ctrl+B) stays open until the plan has room again; one the user closed is never reopened.
  */
+/**
+ * Windows narrower than this start with the Explorer closed. Measured 2026-11-17 (Chromium, 900 px high): the layout plan keeps the Explorer
+ * from 920 px up at 700 to 900 px high and closes it at 904 to 912 px; at 1000 px and wider it keeps it at every height from 500 px. The plan
+ * stays the authority after the first draw; this only stops the first draw showing an Explorer the plan closes a frame later, which moved the
+ * dock and the filter bar. A sliver of 4 px (916 to 919) can still flip once. The Explorer's open flag is not saved anywhere (only the sections'
+ * state is), so there is no saved choice to honour at start.
+ */
+export const EXPLORER_MIN_WINDOW_PX = 920;
+
 @Injectable({ providedIn: 'root' })
 export class NarrowWindow {
   private readonly store = inject(WorkspaceStore);
@@ -27,6 +36,12 @@ export class NarrowWindow {
   start(): void {
     if (this.started) return;
     this.started = true;
+    // Before the first draw: a narrow window starts without the Explorer (and may bring it back when the plan has room, as if it had closed it).
+    const width = this.doc.defaultView?.innerWidth ?? Infinity;
+    if (width < EXPLORER_MIN_WINDOW_PX && this.store.sidebarOpen()) {
+      this.closedByNarrowing = true;
+      this.store.toggleSidebar();
+    }
     this.destroyRef.onDestroy(this.dock.onWindowPlan(() => this.evaluate()));
     this.evaluate();
   }
