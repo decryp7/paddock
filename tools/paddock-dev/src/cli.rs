@@ -205,6 +205,20 @@ enum MergeCommand {
     /// checks the merge makes due (docs/generators.toml; `--no-generators` skips them). Exit 5 on findings; a check that could not
     /// look is an error, never a pass.
     Check(MergeCheckArgs),
+    /// Author's step before handing a member over: merge the train into the member branch you are on, then re-apply the member's
+    /// own work the train reverted (a revert of a merge of this member that the train carries would otherwise silently delete it
+    /// again): one `revert: reapply "..."` commit per such revert. Needs a clean worktree on the member's branch; fetch the
+    /// train first. A conflict stops it with the merge left for you to finish.
+    SyncMember(SyncMemberArgs),
+}
+
+#[derive(Args)]
+struct SyncMemberArgs {
+    /// The train to merge in (for example `origin/train/2026-11-17-14`).
+    train: String,
+    /// The member's worktree (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -769,6 +783,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             gates: a.gates,
             write_reverted: a.write_reverted,
         }),
+        Command::Merge {
+            command: MergeCommand::SyncMember(a),
+        } => merge_check::sync_member::command(a.root.as_deref(), &a.train),
         Command::Gen {
             command: GenCommand::Check(a),
         } => generators::command(&generators::CheckArgs {

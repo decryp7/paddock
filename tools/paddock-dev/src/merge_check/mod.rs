@@ -47,6 +47,7 @@ mod lost_tests;
 mod other_os;
 mod reland;
 mod reverted_base;
+pub mod sync_member;
 mod testnames;
 mod trailers;
 mod whole_file;

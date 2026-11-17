@@ -186,6 +186,17 @@ fn holds(git: &Git, merge: &str, member: &str) -> Result<bool, String> {
     Ok(count(true)? < count(false)?)
 }
 
+/// The live reverts of merges that `member` holds, as `(merge, revert, merge subject)`, oldest revert first: what
+/// `merge sync-member` re-applies. Reads the same history as the report-only step ([`run`]) and judges it the same way.
+pub(super) fn live_for_member(git: &Git, target: &str, member: &str) -> Result<Vec<(String, String, String)>, String> {
+    let found = find(git, target, member)?;
+    let mut out = Vec::new();
+    for r in found.reverted.iter().rev() {
+        out.push((r.merge.clone(), r.revert.clone(), subject_of(git, &r.merge)?));
+    }
+    Ok(out)
+}
+
 fn find(git: &Git, target: &str, member: &str) -> Result<Found, String> {
     if git.is_shallow()? {
         return Err("this clone is shallow, so the history that shows a revert may be missing (run `git fetch --unshallow`)".into());

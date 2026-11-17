@@ -280,6 +280,11 @@ changes here, every app's copy is updated in the same change.
     do); a run on another architecture, under emulation or as another user counts only as not measured, or as a finding only when
     compared with the base's own result on that machine (ER-9; 2026-11-16: the Windows-on-Arm VM and an amd64 container failed 22
     paddock-dev tests on a base the real runner passed).
+    A member the train pulled out with a revert keeps its work when its author catches up: `./dev merge sync-member <train>`
+    (in the member's worktree) merges the train and adds one `revert: reapply "..."` commit for each train revert of a merge of
+    this member; a plain merge of the train would delete the member's work again, as the revert is the newer change (three times,
+    the last c156ba72a). The merge check's `--write-reverted <file>` then writes the `Reverted:` lines of that re-land for the
+    train side (a re-land only; every other finding stays a person's).
 
 ## Performance analysis (user, 2026-10-29)
 51. **Retired 2026-11-12 (user): merged into rule 13** (more parallelism, or a cheaper operation).

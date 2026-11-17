@@ -1881,3 +1881,91 @@ fn a_reland_that_names_a_commit_that_is_not_a_revert_ties_nothing() {
     assert_eq!(code, 5, "{text}");
     assert!(written.is_empty(), "{written}");
 }
+
+// ---- `merge sync-member` ----
+
+/// `dev merge sync-member <train>` in this repository's checkout.
+fn sync_member(r: &Repo, train: &str) -> (i32, String) {
+    let out = r
+        .cmd(crate::dev_bin::PATH)
+        .args(["merge", "sync-member", "--root"])
+        .arg(r.path())
+        .arg(train)
+        .output()
+        .unwrap();
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    (out.status.code().unwrap(), text)
+}
+
+/// The train (`main`) took feat/x as a merge and reverted it; `member` starts at `from` ("x": the reverted branch itself,
+/// "base": before the merge) and adds `member.txt`. HEAD ends on `member`, clean.
+fn pulled_member(from: &str) -> Repo {
+    let r = reverted_base_from(from, |r, m| {
+        revert_merge(r, m);
+    });
+    r.git(&["checkout", "-q", "member"]);
+    r
+}
+
+#[test]
+fn sync_member_merges_the_train_and_gives_back_the_work_the_trains_revert_would_delete() {
+    // The control (ER-33): a plain merge of the train into the same member loses x.txt, which is the bug.
+    let plain = pulled_member("x");
+    plain.git(&["merge", "-q", "--no-edit", "main"]);
+    assert!(
+        !plain.path().join("x.txt").exists(),
+        "control: the plain merge deletes the member's work"
+    );
+
+    let r = pulled_member("x");
+    let (code, text) = sync_member(&r, "main");
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains("1 revert(s) of this member's work re-applied"), "{text}");
+    assert!(r.path().join("x.txt").exists(), "the work is back");
+    assert!(
+        r.path().join("member.txt").exists() && r.path().join("other.txt").exists(),
+        "the train's and the member's files stay"
+    );
+    let subject = r.git(&["log", "-1", "--format=%s"]);
+    assert_eq!(subject, "revert: reapply \"Merge branch 'feat/x'\"");
+    let body = r.git(&["log", "-1", "--format=%b"]);
+    assert!(body.contains("This reverts commit "), "{body}");
+    // Run again: nothing left to do.
+    let (code, text) = sync_member(&r, "main");
+    assert_eq!(code, 0, "{text}");
+    assert!(
+        text.contains("already contains the train") && text.contains("0 revert(s)"),
+        "{text}"
+    );
+}
+
+#[test]
+fn sync_member_leaves_a_member_alone_that_the_trains_revert_does_not_concern() {
+    // Forked before the merge: the train's revert says nothing about this member's work.
+    let r = pulled_member("base");
+    let before = r.git(&["rev-parse", "HEAD"]);
+    let (code, text) = sync_member(&r, "main");
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains("0 revert(s)"), "{text}");
+    assert_ne!(r.git(&["rev-parse", "HEAD"]), before, "the train is merged");
+    assert!(!r.git(&["log", "--format=%s"]).contains("revert: reapply"));
+}
+
+#[test]
+fn sync_member_refuses_a_dirty_tree_and_a_detached_head_with_the_next_step() {
+    let r = pulled_member("x");
+    let head = r.git(&["rev-parse", "HEAD"]);
+    r.write("scratch.txt", "dirty\n");
+    let (code, text) = sync_member(&r, "main");
+    assert_ne!(code, 0);
+    assert!(
+        text.contains("::error::merge sync-member: the worktree has uncommitted changes. Next step:"),
+        "{text}"
+    );
+    assert_eq!(r.git(&["rev-parse", "HEAD"]), head, "nothing was merged");
+    fs::remove_file(r.path().join("scratch.txt")).unwrap();
+    r.git(&["checkout", "-q", "--detach"]);
+    let (code, text) = sync_member(&r, "main");
+    assert_ne!(code, 0);
+    assert!(text.contains("HEAD is not on a branch. Next step:"), "{text}");
+}
