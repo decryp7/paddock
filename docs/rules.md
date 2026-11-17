@@ -391,6 +391,9 @@ changes here, every app's copy is updated in the same change.
 
 ## Release checks (user, 2026-11-05; ER-33)
 71. **Retired 2026-11-12 (user): merged into ER-33** (a release check counts only if its precondition was verified and its probe has shown it can see the thing; otherwise `not measured`).
+    Every new check, gate, test assertion over a signal, and shared wait helper lands with a positive control: a test that
+    removes or hides the thing it watches (the signal, element, attribute or job step) and shows it goes red. A review
+    rejects one that has none (ER-33, user, 2026-11-17).
 
 ## Design decisions (user, 2026-11-11; ER-37)
 76. **Measure a design against common practice before paying for it.** Before an ADR or design is accepted, it states how

@@ -2413,3 +2413,12 @@ a shared page (earlier: runs 7257/7274/7276 fake-timer spy, run 8170 teardown ch
 ## Debrief: the live tail "holds the rows while not following" read 120052 for 120028 once in four runs (tests, 2026-11-16, open)
 
 `events-grid.spec.ts:913` failed once in four full runs of the leak-detector branch (120052 against 120028). Not fixed here; a fix item (ER-28). Causes to rule out, with the observation that would rule each out: (1) the detector (it wraps `setTimeout` and `setInterval` and clears timers only in fail mode; Debrief is report-only, so it changes nothing: rule out by running the spec 50 times with the detector off); (2) a live-tail push landing between the two reads (the 24-row difference equals one batch: check the tail's batch size and whether the test advances the mock clock); (3) a leaked mock-clock timer from an earlier test firing into this one (`core/mock/mock-clock.ts:30,32,34` are in the report list: the findings of the preceding tests in that worker show it); (4) a render frame (`requestAnimationFrame`) landing between reads. Measure all four in the failing run before changing anything. Class: **a test that reads a moving value without holding the source still** (earlier: the axe theme read, Dyno's row-menu redraw).
+
+Positive controls (2026-11-17, ER-33)
+**What happened.** Three checks passed without ever being able to fail. A Debrief dock spec's "nothing moves after planned"
+check never ran (24 of 24 runs green, the signal it waited for was never logged). The shared `expectIdle` helper passed before
+the stream had started. Conformance C137 passed on the text of an unrelated ci.yml job.
+**Rule:** every new check, gate, test assertion over a signal and shared wait helper lands with a positive control: a test that
+removes or hides what it watches (the signal, element, attribute or job step) and shows it goes red. A review rejects one
+that has none (rule 71 merged into ER-33).
+**Class: a check that cannot see the thing it guards (earlier: the Dyno 1.1.0 menu-bar probe and tray count, ER-33).**
