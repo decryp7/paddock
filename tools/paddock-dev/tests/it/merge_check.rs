@@ -1757,7 +1757,7 @@ fn a_shallow_clone_on_the_conflict_path_is_not_measured() {
     r.commit("feat: member edits x");
     r.git(&["checkout", "-q", "main"]);
     let clone = tempfile::tempdir().unwrap();
-    let url = format!("file://{}", r.path().display());
+    let url = format!("file://{}", paddock_testkit::path::text(r.path()));
     r.git(&[
         "clone",
         "-q",
