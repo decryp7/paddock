@@ -108,6 +108,8 @@ pub struct Facts {
     /// Run the Linux Clippy in the CI image too (`--linux`): off by default, CI covers it (ER-9's overlap model) and in the
     /// measured run it did not fit the budget.
     pub linux: bool,
+    /// The run is the member gate of `./dev merge check --gates` (`--member-gate`): the repository-wide audits run too.
+    pub member_gate: bool,
     /// A kept build folder per workspace (`<it>/<workspace>`), used when the caller sets no `CARGO_TARGET_DIR`: the throw-away
     /// worktree of a pushed commit must not hold the builds (they would start cold every run).
     pub kept_targets: Option<String>,
@@ -494,11 +496,19 @@ pub const AUDIT_PROFILE: &str = "member-audits";
 /// members' changes in them; on the merged tree they do (train 13: local-sccache's audits against golden-checked-when-made's code, the
 /// allow-list parity against C135, the parity corpus against test-env-builder; each first showed in the train-wide nextest run, ER-8).
 ///
-/// Runs on every push, whatever changed (ER-41), and so in the member gate of `./dev merge check --gates`, which is this gate on the
-/// merge commit. Blocking from the start: the audits are established tests, not a new check (user, 2026-11-17). `--no-tests=fail`
+/// Runs only when the push gate is the member gate (`./dev merge check --gates` passes `--member-gate`), whatever changed (ER-41); a
+/// developer's push skips it with a reason, as the user wants no extra 2 minutes there (2026-11-17). Blocking from the start: the audits are established tests, not a new check (user, 2026-11-17). `--no-tests=fail`
 /// makes a filter that selects nothing a failure, never a pass (ER-33); `RUSTUP_AUTO_INSTALL=0` stops a probe from installing a
 /// toolchain (ER-45). Measured in docs/benchmarks.md, "Member audits in the push gate".
 fn member_audits(facts: &Facts) -> Planned {
+    if !facts.member_gate {
+        return Planned::Skip {
+            id: "member-audits".into(),
+            reason:
+                "they run in the member gate of `./dev merge check --gates` (`--member-gate`), not in a developer's push (about 2 minutes)"
+                    .into(),
+        };
+    }
     let mut g = Gate {
         heavy: true,
         need: Need::Tool("cargo-nextest".into()),

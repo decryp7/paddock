@@ -84,10 +84,13 @@ path = "junit.xml"
 # list that selects nothing a failure. dev_bin, cargo_target_lint and parity_corpus land with their branches (feat/local-sccache,
 # feat/golden-checked-when-made): a name that matches no test yet selects nothing, and the profile still has the others. Each audit reads
 # every tracked file, so a clash between two members' changes shows here and not first in the train-wide run (ER-8).
+# golden::live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history is left out: over 120 s (measured 2026-11-17), it
+# replays the whole first-parent history and audits no fresh code; the train-wide run keeps it.
 [profile.member-audits]
 default-filter = '''
 binary(it) & (
-    test(/^(dev_bin|cargo_target_lint|parity_corpus|tree|golden|host_steps_golden|build_jobs_golden|check_allow_list|safe_remove_lint)::/)
+    (test(/^(dev_bin|cargo_target_lint|parity_corpus|tree|golden|host_steps_golden|build_jobs_golden|check_allow_list|safe_remove_lint)::/)
+        & !test(/^golden::live_range_plans_match_affected_mjs/))
     | test(/^check::live_/)
     | test(/^check_c12[0-9]::live_/)
     | test(/^ipc_endpoints::the_repository_register_is_complete/)

@@ -34,6 +34,7 @@ fn facts() -> Facts {
         windows_clippy: BTreeSet::from(["apps/dyno".to_string(), "apps/pitwall".to_string()]),
         image: Some(Ok("registry/paddock-ci:v7".into())),
         linux: true,
+        member_gate: true,
         kept_targets: None,
         pitwall_tests: vec!["scripts/ci/a.test.mjs".into()],
         dev_exe: "/x/dev".into(),
@@ -211,7 +212,7 @@ fn conformance_and_its_tests_run_on_every_push_whatever_changed() {
 /// The member gate of `./dev merge check --gates` runs this push gate on the merge commit, so the audits are in the member gate
 /// when they are in this plan for every change (ER-41; user, 2026-11-17).
 #[test]
-fn the_member_audits_run_on_every_push_through_the_one_declared_profile_and_block() {
+fn the_member_audits_run_in_the_member_gate_whatever_changed_through_the_one_declared_profile_and_block() {
     let unrelated = json!({"conformance": false, "apps": [], "packages": {}});
     for files in [&["docs/x.md"][..], &["tools/paddock-dev/src/a.rs"], &["Mystery"], &[]] {
         let planned = plan_gates(&unrelated, &change(files), &facts());
@@ -242,6 +243,28 @@ fn the_member_audits_run_on_every_push_through_the_one_declared_profile_and_bloc
         );
         assert!(g.next.contains(AUDIT_PROFILE), "{}", g.next);
     }
+}
+
+/// A developer's push does not run the audits (about 2 minutes would be added to every push); it says why. The member gate does.
+#[test]
+fn a_developers_push_skips_the_member_audits_with_a_reason_and_the_member_gate_runs_them() {
+    let off = Facts {
+        member_gate: false,
+        ..facts()
+    };
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &off);
+    assert!(!ids(&planned).contains(&"member-audits".to_string()), "{:?}", ids(&planned));
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "member-audits" && reason.contains("--member-gate"))),
+        "skipped with its reason: {planned:?}"
+    );
+    let on = Facts {
+        member_gate: true,
+        ..facts()
+    };
+    assert!(ids(&plan_gates(&plan(), &change(&["crates/a.rs"]), &on)).contains(&"member-audits".to_string()));
 }
 
 /// A failing audit fails the gate (exit 1, one `::error::` line with the rerun command), and a runner without nextest or one that
@@ -1064,6 +1087,7 @@ mod known_commit {
             files: vec![],
             refs_from_stdin: true,
             linux: false,
+            member_gate: false,
             accept_not_measured: vec![],
         }
     }
@@ -1656,6 +1680,7 @@ mod base_choice {
             files: vec![],
             refs_from_stdin: true,
             linux: false,
+            member_gate: false,
             accept_not_measured: vec![],
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));

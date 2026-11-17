@@ -59,7 +59,7 @@ pub struct Real;
 impl Gates for Real {
     fn run(&self, root: &Path, base: &str) -> Result<GateRun, String> {
         let mut cmd = command(program()?);
-        cmd.args(["--json", "check", "--pre-push", "--base", base, "--root"])
+        cmd.args(["--json", "check", "--pre-push", "--member-gate", "--base", base, "--root"])
             .arg(root)
             .current_dir(root);
         let out = run_bounded(cmd, Limits::new(TIMEOUT)).map_err(|e| format!("`check --pre-push` could not run: {e}"))?;

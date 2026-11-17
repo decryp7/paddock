@@ -1495,5 +1495,18 @@ told about a minute.
 
 - **Result:** about 2 minutes, not 1: the one golden test that replays the first-parent history against `affected.mjs` is nearly all
   of it; the other 67 tests finish in the time it runs. The row is heavy (one machine-wide slot), rank 4, after the Clippy rows.
+### Without the history replay, and only in the member gate (2026-11-17, same branch, after review)
+
+The row now runs only when the push gate is the member gate (`./dev merge check --gates` passes `--member-gate`); a developer's push
+skips it with a reason. `golden::live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history` (over 120 s, it audits
+no fresh code, the train-wide run keeps it) is out of the profile.
+
+- **Machine:** the shared Mac mini, 1-minute load 10.6 (15-minute 20.6), CPU idle 47 and 56 % on two readings; `CARGO_BUILD_JOBS=2`
+- **Run:** 1 of `cargo nextest run --profile member-audits --locked --no-tests=fail`, warm build folder: 67 tests, nextest 24.9 s,
+  whole command 25.2 s (against 122.5 s and 127.8 s with the replay)
+- **Not measured:** a second run, a cold build folder, a busier machine, and the three audits that have not landed.
+
+**Earlier run, with the replay:**
+
 - **Not measured:** a quiet machine, a second run (one run only), a cold build folder, and the three audits that have not landed
   (`dev_bin`, `cargo_target_lint`, `parity_corpus`), which add their own tests to the 68.

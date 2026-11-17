@@ -74,6 +74,10 @@ pub struct PrePushArgs {
     /// Also run the Linux Clippy of the shared crates in the CI image (off by default: CI covers it, and it needs Docker).
     #[arg(long)]
     pub linux: bool,
+    /// Also run the repository-wide audits (`member-audits`, about 2 minutes): set by the member gate of `./dev merge check --gates`
+    /// on the merge commit, not by a developer's push, whose time budget it would grow.
+    #[arg(long)]
+    pub member_gate: bool,
     /// Let these not-measured rows (their full ids, for example `clippy-windows apps/dyno`) pass the push; each use is logged.
     /// Also read from PADDOCK_ACCEPT_NOT_MEASURED (comma separated).
     #[arg(long, value_delimiter = ',')]
@@ -421,6 +425,7 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
         node_env_problem(cfg!(windows) && work != root, &|p| std::fs::read_to_string(work.join(p)).ok())
     };
     facts.linux = args.linux;
+    facts.member_gate = args.member_gate;
     facts.kept_targets = kept_targets;
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     if !args.only.is_empty() {
@@ -1237,6 +1242,7 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts
         windows_clippy: windows,
         image: Some(image),
         linux: false,
+        member_gate: false,
         kept_targets: None,
         pitwall_tests: tests,
         dev_exe: crate::tool_cache::self_exe().map_or_else(|_| "./dev".into(), |p| p.to_string_lossy().to_string()),

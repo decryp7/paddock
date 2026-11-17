@@ -1428,7 +1428,7 @@ exit 0
         t.run(&["--gates", "HEAD"], "5");
         let log = fs::read_to_string(t.log()).unwrap();
         assert!(
-            log.contains(&format!("check --pre-push --base {first_parent} --root")) && log.contains(&format!("HEAD={head}")),
+            log.contains(&format!("check --pre-push --member-gate --base {first_parent} --root")) && log.contains(&format!("HEAD={head}")),
             "{log}"
         );
     }

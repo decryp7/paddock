@@ -64,5 +64,9 @@ fn the_profile_names_the_repository_wide_audits_and_every_name_is_a_module_or_wa
     for plain in ["slots", "locks", "worktree", "member_audits"] {
         assert!(!named.iter().any(|n| n == plain), "`{plain}` is not an audit");
     }
+    assert!(
+        f.contains("!test(/^golden::live_range_plans_match_affected_mjs"),
+        "the over-120-s history replay stays out of the member audits: {f}"
+    );
     assert!(f.contains("binary(it)"), "the audits live in the `it` binary: {f}");
 }
