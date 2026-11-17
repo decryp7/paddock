@@ -528,19 +528,19 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     let mut trial = None;
     // The train always goes first (2026-11-16): while a train's CI sequence holds its reservation, a run that is not a train's
     // (a trial, a member, a manual run) waits, at most --max, before anything is pushed. A `train/*` dispatch never waits here.
-    if a.trial.is_some() || !dispatch::is_train(&git_ref) {
+    // It runs after the arguments are parsed: bad arguments are refused at once, wherever the tool runs (run 8208).
+    let waits = a.trial.is_some() || !dispatch::is_train(&git_ref);
+    let wait_for_trains = || -> Result<(), CliError> {
         let max = crate::wait::parse_duration(&a.max).map_err(|e| CliError::usage(e).with_hint(hint))?;
         match reservation::wait_real(max, &mut std::io::stderr()) {
-            Ok(reservation::Free::Yes { .. }) => {}
-            Ok(reservation::Free::StillHeld { holder }) => {
-                return Err(
-                    CliError::failure(format!("not dispatched: a train's CI sequence holds the runners ({holder})."))
-                        .with_hint("Wait for the train's sequence to end, then dispatch again; the train always goes first."),
-                );
-            }
-            Err(e) => return Err(CliError::failure(e).with_hint("Set PADDOCK_TRAIN_CI_LOCK_ROOT, or check `./dev places`.")),
+            Ok(reservation::Free::Yes { .. }) => Ok(()),
+            Ok(reservation::Free::StillHeld { holder }) => Err(CliError::failure(format!(
+                "not dispatched: a train's CI sequence holds the runners ({holder})."
+            ))
+            .with_hint("Wait for the train's sequence to end, then dispatch again; the train always goes first.")),
+            Err(e) => Err(CliError::failure(e).with_hint("Set PADDOCK_TRAIN_CI_LOCK_ROOT, or check `./dev places`.")),
         }
-    }
+    };
     if let Some(branch) = &a.trial {
         // Everything that can be refused is refused before `trial/<branch>` is pushed: the branch name, the inputs, --max and
         // --interval (parsed with a stand-in ref and base), and the workflow (readable, its runner classes known).
@@ -561,6 +561,7 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         )
         .map_err(|e| CliError::usage(e).with_hint(hint))?;
         dispatch::classes_of(&a.workflow, &read).map_err(|e| CliError::usage(e).with_hint("Check the workflow name and --root."))?;
+        wait_for_trains()?;
         let (g, trial_ref, base) = trial_merge(a, branch, &token)?;
         git_ref = trial_ref.clone();
         inputs.push(format!("base={base}"));
@@ -568,6 +569,9 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     }
     let mut req = dispatch::parse_request(&a.workflow, &git_ref, &inputs, &a.max, a.interval.as_deref())
         .map_err(|e| CliError::usage(e).with_hint(hint))?;
+    if waits && trial.is_none() {
+        wait_for_trains()?;
+    }
     // The Linux slot count is declared once (conformance/ci/runner-slots.json); without it a train dispatch waits here.
     match dispatch::train_waiters(&root) {
         Ok(n) => req.train_waiters = n,

@@ -245,10 +245,16 @@ fn a_trial_with_bad_arguments_is_refused_before_anything_is_cloned_or_pushed() {
     let scratch = tempfile::tempdir().unwrap();
     let run = |extra: &[&str]| {
         let mut cmd = crate::dev_bin::command();
-        cmd.args(["ci", "dispatch", "ci.yml", "--trial", "feat/x"])
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        cmd.args(["ci", "dispatch", "ci.yml", "--trial", "feat/x", "--root"])
+            .arg(&repo)
             .args(extra)
             .env("GITEA_TOKEN", "not-a-real-token")
-            .env("PADDOCK_TRIAL_DIR", scratch.path());
+            .env("PADDOCK_TRIAL_DIR", scratch.path())
+            // A machine with no derivable train reservation (CI's runners, run 8208): bad arguments are refused before the
+            // reservation is read, so the answer does not depend on where the tool runs.
+            .env_remove("PADDOCK_TRAIN_CI_LOCK_ROOT")
+            .current_dir(scratch.path());
         let out = cmd.output().unwrap();
         (out.status.code().unwrap(), String::from_utf8_lossy(&out.stderr).into_owned())
     };
