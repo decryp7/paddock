@@ -9,6 +9,9 @@
 
 use super::finding::Finding;
 use super::jsre::{is_js_space, rx, units};
+use regex::Regex;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 /// What the comment near a site says.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,8 +86,25 @@ impl CommentView {
 
 /// The waiver comment for `tag` in `near` (the site's line and the line above, as the check defines them).
 pub fn recognise(near: &str, tag: &str) -> InlineWaiver {
-    let tag = regex::escape(tag);
-    let marker = rx(&format!(r"conformance:[ \t]*{tag}[ \t]*([—–-]+)"));
+    // The patterns hold Unicode classes and cost milliseconds to build: one pair per tag, kept for the thread (a check asks per site,
+    // the parity test 12 000 times; run 8198).
+    thread_local! {
+        static PATTERNS: RefCell<HashMap<String, (Regex, Regex)>> = RefCell::new(HashMap::new());
+    }
+    PATTERNS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let (marker, plain) = cache.entry(tag.to_string()).or_insert_with(|| {
+            let tag = regex::escape(tag);
+            (
+                rx(&format!(r"conformance:[ \t]*{tag}[ \t]*([—–-]+)")),
+                rx(&format!(r"conformance:[ \t]*{tag}")),
+            )
+        });
+        read(near, marker, plain)
+    })
+}
+
+fn read(near: &str, marker: &Regex, plain: &Regex) -> InlineWaiver {
     for caps in marker.captures_iter(near) {
         let Some(run) = caps.get(1) else { continue };
         let dashes: Vec<usize> = run.as_str().char_indices().map(|(i, _)| run.start() + i).collect();
@@ -107,7 +127,7 @@ pub fn recognise(near: &str, tag: &str) -> InlineWaiver {
             }
         }
     }
-    if rx(&format!(r"conformance:[ \t]*{tag}")).is_match(near) {
+    if plain.is_match(near) {
         InlineWaiver::NoReason
     } else {
         InlineWaiver::No
@@ -129,6 +149,22 @@ impl InlineWaiver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognise_compiles_its_patterns_once_per_tag_not_once_per_call() {
+        // The parity test asks 12 000 times; each call built two Unicode-class regexes, which a loaded debug build cannot do in 60 s
+        // (run 8198). The mechanism is asserted, not the time (ER-12).
+        let before = super::super::jsre::COMPILED.with(std::cell::Cell::get);
+        for i in 0..200 {
+            recognise(&format!("// conformance: cache-tag-a — reason {i}"), "cache-tag-a");
+            recognise("no marker here", "cache-tag-b");
+        }
+        let compiled = super::super::jsre::COMPILED.with(std::cell::Cell::get) - before;
+        assert!(
+            compiled <= 4,
+            "400 calls over 2 tags compiled {compiled} patterns; expected at most 2 per tag"
+        );
+    }
 
     #[test]
     fn a_reason_follows_the_dashes_on_the_same_line() {
