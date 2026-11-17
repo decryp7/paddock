@@ -538,7 +538,8 @@ jobs:
       - name: Install
         run: |
           (cd ../../.. && npm ci)
-          npm audit --omit=dev --audit-level=high
+          # The family's npm audit with its approved exceptions (scripts/npm-audit-allow.json, ER-46).
+          node ../../../scripts/npm-audit.mjs
 
       # The app imports the shared library from ui/dist (tsconfig paths), which lint, the build and the tests need.
       - name: Build the shared UI
