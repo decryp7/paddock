@@ -1413,7 +1413,9 @@ auto-hide bar) and a "lagged frame" is a sampled frame with another offset. Thre
 | lagged frames (dock not as wide as its stage) | 33, 52, 33 | 24, 18, 16 |
 | wall time of the loop | 5.0, 7.8, 5.0 s | 5.6, 6.6, 5.4 s |
 
-Run to run the noise is as large as any difference (run 2 of each set was the slow one); the medians of script time are 0.265 s before and 0.344 s after, about
-+2 ms per resize, with the layout and style times and the number of layouts per resize (6 to 7) the same. No slower resize was measured. What changed is
+The runs were not alternated (three before, then three after) and n is 3 per side, so no cost difference is claimed: the script-time medians are 0.265 s
+(range 0.251 to 0.457) before and 0.344 s (range 0.303 to 0.495) after, about +2 ms per resize, and the ranges overlap; layout and style times and the number of
+layouts per resize (6 to 7) look the same. A resize that is slower by more than about 5 ms was not seen, and a smaller one cannot be excluded with n = 3. The lagged-frame
+result below does not depend on that. What changed is
 the lagged frames, from 0.8 to 1.3 per resize to 0.4 to 0.5: the three frames the dock drew at the old width after the Explorer closed are gone; the lag
 that remains (the dock's own first plan changing group sizes) is not width lag of the container.

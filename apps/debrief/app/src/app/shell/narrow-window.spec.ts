@@ -1,3 +1,4 @@
+import { afterNextRender, ApplicationRef, Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceStore } from '../core/workspace.store';
@@ -70,6 +71,20 @@ describe('NarrowWindow (the Explorer follows the layout plan)', () => {
     listeners[0]?.();
     expect(store.sidebarOpen()).toBe(false);
     expect(verdicts).toHaveBeenCalled();
+  });
+
+  it('Angular renders again in the same tick when an afterNextRender hook changes state (decideAtStart toggles the Explorer in one, before the browser draws)', () => {
+    @Component({ selector: 'debrief-tick-probe', template: '{{ n() }}' })
+    class TickProbe {
+      readonly n = signal(0);
+      constructor() {
+        afterNextRender(() => this.n.set(1));
+      }
+    }
+    TestBed.configureTestingModule({});
+    const fixture = TestBed.createComponent(TickProbe);
+    TestBed.inject(ApplicationRef).tick();
+    expect((fixture.nativeElement as HTMLElement).textContent).toBe('1');
   });
 
   describe('the state when data first arrives (the layout plan decides, no constant of ours)', () => {

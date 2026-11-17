@@ -51,6 +51,8 @@ export class NarrowWindow {
    * removes it also happens before the first draw, and the dock follows its container in the same frame (`DockLayout.followContainer`), so nothing is drawn
    * at the old size. Returns whether it closed the Explorer. The Explorer's open flag is not saved anywhere (only the sections' state is), so there is no
    * saved choice to honour.
+   * Relies on Angular rendering again, in the same tick, when an `afterNextRender` hook changes state (the toggle is made in one); pinned by the test
+   * `Angular renders again in the same tick ...` in narrow-window.spec.ts.
    */
   decideAtStart(): boolean {
     if (!this.store.sidebarOpen()) return false;
