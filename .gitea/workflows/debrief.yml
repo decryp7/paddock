@@ -892,9 +892,11 @@ jobs:
       # first run, each one's "Startup timings" line read and the medians checked against scripts/ci/startup-budgets.json.
       # Nightly and manual runs, and on macOS every debrief-v tag (a release needs a measured benchmark). macOS has measured
       # budgets; Linux reports until its first nightly numbers are in.
-      # Verdict on a busy host (docs/benchmarks.md): the gate is the tree CPU time and the wall marks against a baseline plus
-      # a measured noise margin, not the load average. Over a threshold exits 1 on every run; NOT MEASURED (the starts' own
-      # spread over its limit) is a ::warning:: and exit 0, and on a tag run (ER-33) an ::error:: and exit 6.
+      # Verdict on a busy host (scripts/bench/busy-host.mjs; apps/debrief/docs/performance.md, "Start-up benchmark on a busy
+      # host"): the benchmark is always taken, and the host's CPU idle and load are recorded with every start. It fails (exit 1,
+      # on every run, tag or not) only when the started tree's CPU time is over its limit (the tight one on a quiet host, else
+      # the coarse one) or a wall mark is over its ceiling; a slow wall mark, a wide spread and the host load are notes. NOT
+      # MEASURED (exit 6, an ::error::) only when the app produced no timings (ER-33).
       - name: Start-up benchmark (macOS)
         timeout-minutes: 20
         if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/debrief-v')) && !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'macOS'
@@ -917,7 +919,7 @@ jobs:
             --out "${RUNNER_TEMP:-/tmp}/startup-timings.json"
 
       - name: Start-up timings
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os != 'Windows'
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/debrief-v')) && !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os != 'Windows'
         uses: actions/upload-artifact@v3
         with:
           name: startup-timings-${{ runner.os }}
