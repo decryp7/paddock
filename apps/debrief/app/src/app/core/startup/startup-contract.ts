@@ -28,6 +28,8 @@ export interface RetryOptions {
   attempts: number;
   /** Timer (tests). */
   setTimer?: (fn: () => void, ms: number) => unknown;
+  /** Cancels a timer `setTimer` returned (tests); the real `clearTimeout` by default. */
+  clearTimer?: (handle: unknown) => void;
 }
 
 /**
@@ -38,9 +40,16 @@ export interface RetryOptions {
  */
 export function retryUntilAnswered<T>(call: () => Promise<T>, options: RetryOptions): Promise<T> {
   const setTimer = options.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+  const clearTimer = options.clearTimer ?? ((handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>));
   return new Promise<T>((resolve, reject) => {
     let settled = false;
     let sent = 0;
+    // The next attempt's timer: an answer ends it (a timer left running outlives the call and fires into whatever runs next).
+    let next: unknown;
+    const finish = (): void => {
+      settled = true;
+      clearTimer(next);
+    };
     const attempt = () => {
       if (settled) return;
       sent++;
@@ -53,16 +62,16 @@ export function retryUntilAnswered<T>(call: () => Promise<T>, options: RetryOpti
       p.then(
         (v) => {
           if (settled) return;
-          settled = true;
+          finish();
           resolve(v);
         },
         (e: unknown) => {
           if (settled) return;
-          settled = true;
+          finish();
           reject(e);
         },
       );
-      if (sent < options.attempts) setTimer(attempt, options.timeoutMs);
+      if (sent < options.attempts) next = setTimer(attempt, options.timeoutMs);
     };
     attempt();
   });

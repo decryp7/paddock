@@ -1,4 +1,4 @@
-import { computed, inject } from '@angular/core';
+import { computed, DestroyRef, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { errorMessage } from '@decryp7/paddock-ui/shell/store';
@@ -58,6 +58,8 @@ export const UndoStore = signalStore(
   })),
   withMethods((store, ports = inject(SHELL_PORTS), clock = inject(UNDO_CLOCK)) => {
     let cancelToast: (() => void) | null = null;
+    // The toast's timer ends with the injector: one left running fires into whatever runs next.
+    inject(DestroyRef).onDestroy(() => cancelToast?.());
 
     const hideToast = (): void => {
       cancelToast?.();

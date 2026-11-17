@@ -1,0 +1,10 @@
+{
+  "allow": [
+    {
+      "path": "ui/projects/paddock-ui/testing/src/testing.spec.ts",
+      "site": "mode: 'off'",
+      "reason": "These suites leave fake timers, a spy and a node behind on purpose, to show that the test kit cleans them",
+      "count": 4
+    }
+  ]
+}

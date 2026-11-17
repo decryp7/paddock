@@ -1948,9 +1948,10 @@ test('every release workflow whose app imports @decryp7/paddock-ui builds the sh
   const callers = readdirSync(WORKFLOWS).filter((f) => f !== 'app-release.yml' && /-release\.yml$/.test(f) && read(join(WORKFLOWS, f)).includes('./.gitea/workflows/app-release.yml'));
   assert.ok(callers.includes('dyno-release.yml'), 'the callers of app-release.yml are found');
   const importsShared = (dir) => {
+    // The app build's own imports: the specs and the test setup are not built into the installer (Pitcrew's specs use the shared test kit only).
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, e.name);
-      if (e.isDirectory() ? importsShared(p) : /\.ts$/.test(e.name) && read(p).includes('@decryp7/paddock-ui')) return true;
+      if (e.isDirectory() ? importsShared(p) : /\.ts$/.test(e.name) && !/\.spec\.ts$|^test-setup\.ts$/.test(e.name) && read(p).includes('@decryp7/paddock-ui')) return true;
     }
     return false;
   };

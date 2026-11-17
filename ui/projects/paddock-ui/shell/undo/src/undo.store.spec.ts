@@ -181,6 +181,14 @@ describe('UndoStore', () => {
     expect([store.size(), store.canUndo(), store.canRedo()]).toEqual([0, false, false]);
   });
 
+  it('cancels the toast timer once its injector is destroyed', async () => {
+    const { store, clock } = setup();
+    await store.execute(counter().edit(2, { announce: true }));
+    expect(clock.pending).toBe(1);
+    TestBed.resetTestingModule();
+    expect(clock.pending).toBe(0);
+  });
+
   it('announces an action with a toast that undoes it, and the toast goes by itself', async () => {
     const { store, clock } = setup();
     const c = counter();

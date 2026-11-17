@@ -1,4 +1,4 @@
-import { InjectionToken, computed, inject } from '@angular/core';
+import { DestroyRef, InjectionToken, computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import type { SettingsCloseVerdict } from '@decryp7/paddock-ui/shell/settings/window';
 import type { CacheClearScope, CacheInfo, CommandError, Preset, Settings } from '../../core/api.types';
@@ -164,6 +164,11 @@ export const SettingsStore = signalStore(
     const refused = new Map<string, Edit>();
     /** Typed values waiting for their pause. */
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
+    // A pause still running when the injector goes would fire into whatever runs next (the edit is in the journal).
+    inject(DestroyRef).onDestroy(() => {
+      for (const t of timers.values()) clearTimeout(t);
+      timers.clear();
+    });
     /** Unsent edits whose setting changed on the server since, by field id (`unsent` shows them). */
     const conflicts = new Map<string, Edit>();
     /** The edit on its way to the server. */

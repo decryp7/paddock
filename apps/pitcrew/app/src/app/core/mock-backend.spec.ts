@@ -115,6 +115,16 @@ describe('MockBackend runner actions', () => {
   });
   const runner = async (name: string) => (await mock.status()).runners.find((r) => r.name === name)!;
 
+  it('leaves no timer running for a call still waiting out its latency once disposed', async () => {
+    const slow = make({ latencyMs: 5_000 });
+    const call = slow.status();
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    slow.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+    // The call is let go, not left hanging.
+    await expect(call).resolves.toBeDefined();
+  });
+
   it('stop on a busy runner is pending; on an idle one it stops', async () => {
     await mock.stop('build-win');
     expect((await runner('build-win')).pending).toBe('stop');

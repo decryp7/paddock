@@ -219,6 +219,14 @@ describe('panels: width flag, failures and the missing view', () => {
     await settle(rendered.fixture);
     await settle(rendered.fixture);
     const copy = [...rendered.element.querySelectorAll<HTMLButtonElement>('.pd-panel-actions button')].find((b) => b.dataset['testid'] !== 'pd-panel-retry')!;
+    // The handles of the 1.5 s label resets the panel arms.
+    const armed: unknown[] = [];
+    const realSet = globalThis.setTimeout;
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) => {
+      const handle = realSet(fn, ms, ...rest);
+      if (ms === 1500) armed.push(handle);
+      return handle;
+    }) as typeof setTimeout);
     writeText.mockResolvedValueOnce();
     copy.click();
     await settle(rendered.fixture);
@@ -228,6 +236,10 @@ describe('panels: width flag, failures and the missing view', () => {
     copy.click();
     await settle(rendered.fixture);
     expect(copy.textContent).toBe('Copy failed');
+    // The label's reset timer (the 1.5 s one copyDetails armed) is cleared with its own handle when the panel goes.
+    const clear = vi.spyOn(globalThis, 'clearTimeout');
+    TestBed.resetTestingModule();
+    expect(clear.mock.calls.map((c) => c[0])).toContain(armed.at(-1));
   });
 
   it('puts a placeholder where the view of a saved panel no longer exists', () => {

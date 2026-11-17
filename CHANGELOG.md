@@ -4,6 +4,19 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui/testing`: the test leak detector
+- New `installLeakDetector({ mode })` for every app's and the ui's `test-setup.ts` (call it after `installTestKit()`), with
+  `registerInFlight` (tracked start-up work, Debrief's load record generalised), `registerSingleton` (a page-wide singleton
+  that is reset before every test and named when a test leaves state in it), `LeakDetector` and `timerOwner`. Per test, after
+  every `afterEach` (Angular's clean-up included) has run, it names what the test left: live timers and intervals (not
+  Angular's, Vitest's or jsdom's), fake timers still installed, nodes in `document.body` beyond TestBed's roots and the CDK
+  containers, singleton state and pending tracked work. `report` mode prints one stderr line per finding with the test name;
+  `fail` mode fails the leaking test and clears its timers. The hook never throws inside the `afterEach` chain.
+- Rolled out report-only (ER-41); failing mode in the ui, Pitcrew, Pitwall, Spotter and Dyno, which had no findings once their
+  leaks were fixed. Debrief stays report-only, with the list in `docs/benchmarks.md`. `SHELL_IDLE`'s default now drops idle work still
+  waiting when its injector is destroyed. C135 keeps the opt-outs (`mode: 'off'`, `skip`) to a shrink-only list.
+- Pitcrew's specs (not its app build) resolve `@decryp7/paddock-ui` through `ui/dist` (`tsconfig.spec.json`), and its ui gate builds `ui` first.
+
 ### `@decryp7/paddock-e2e`: `axeViolations` holds the page still while axe reads it
 - Before its scan, `axeViolations` holds the page still: a constructed stylesheet sets `transition: none !important;
   animation-duration: 0s !important; animation-delay: -1ms !important` on `*, *::before, *::after` (finite animations jump to

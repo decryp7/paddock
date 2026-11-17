@@ -1196,3 +1196,11 @@ owner = "Dyno 1.1.1"
 since = 2026-11-12
 review_by = 2026-12-20
 approved = "coordinator"
+
+[[report_only]]
+id = "C135"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C135-leak-detector-opt-outs.mjs, then flip the warnings to errors and the mode to gate. First count 2026-11-16: one listed file (the test kit's own spec, four suites that leak on purpose); conformance/c135-allow.json is held to shrink-only against the merge base by the check itself (ER-46)"
+owner = "ER-21 class: a test fails for what an earlier test left behind (feat/test-leak-detector)"
+since = 2026-11-16
+review_by = 2026-12-16
+approved = "coordinator"

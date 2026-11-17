@@ -1,4 +1,4 @@
-import { computed, inject } from '@angular/core';
+import { DestroyRef, computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import type { DiscoveredFeed, ImportFormat, ImportResult, LatestBy, Preset, ProductSetting, SchemePreset, Schedule, SchedulePreview, SourceKind, SourcePreview, WatchDraft, WatchSummary } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
@@ -94,6 +94,11 @@ export const EditorStore = signalStore(
     let run = 0;
     let scheduleTimer: ReturnType<typeof setTimeout> | undefined;
     let scheduleRun = 0;
+    // Previews still waiting when the injector goes would fire into whatever runs next.
+    inject(DestroyRef).onDestroy(() => {
+      clearTimeout(timer);
+      clearTimeout(scheduleTimer);
+    });
 
     /** The wizard's test that is running, so a newer one (or leaving) can stop it instead of leaving it to run on. */
     let runningTest: string | null = null;

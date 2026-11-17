@@ -67,6 +67,18 @@ describe('ServiceStore', () => {
       expect(spy).toHaveBeenCalledTimes(3);
     });
 
+    it('leaves no look scheduled once its injector is destroyed', async () => {
+      const s = setup('demo');
+      mock = s.mock;
+      await flush();
+      vi.useFakeTimers();
+      vi.spyOn(mock, 'serviceInstall').mockResolvedValueOnce({ ...base, repair: working });
+      await s.store.load();
+      expect(vi.getTimerCount()).toBe(1);
+      TestBed.resetTestingModule();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
     it('shows a failed repair with its next steps as an error', async () => {
       const s = setup('demo');
       mock = s.mock;

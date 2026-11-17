@@ -84,6 +84,17 @@ describe('EditorStore', () => {
     expect(store.preview().value?.releases.length).toBeGreaterThan(0);
   });
 
+  it('leaves no preview timer running once its injector is destroyed', async () => {
+    vi.useFakeTimers();
+    const { store } = setup();
+    await store.loadCatalog();
+    store.pickKind(github(store));
+    store.setValue('repo', 'owner/tool');
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    TestBed.resetTestingModule();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('does not test while required fields are missing or on other steps', async () => {
     vi.useFakeTimers();
     const { backend, store } = setup();

@@ -107,6 +107,16 @@ describe('SettingsStore', () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
+  it('leaves no pause timer running once its injector is destroyed', async () => {
+    vi.useFakeTimers();
+    const { store } = setup(new MockBackend(), 500);
+    await store.load();
+    store.edit(CONC, 'server', { maxConcurrent: 3 }, 'typed');
+    expect(vi.getTimerCount()).toBe(1);
+    TestBed.resetTestingModule();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('saves a typed number at close when that comes before the pause, and the close waits for it', async () => {
     vi.useFakeTimers();
     const { store, backend } = setup(new MockBackend(), 500);

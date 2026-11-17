@@ -128,4 +128,18 @@ describe('PatternHelper', () => {
     await settle(f);
     expect(text(f.nativeElement)).toContain('No names yet');
   });
+
+  it('leaves no test timer running once its view is destroyed', () => {
+    vi.useFakeTimers();
+    try {
+      const f = make();
+      f.componentInstance.pattern.set('(?<id>[A-Z]+)');
+      f.detectChanges();
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      TestBed.resetTestingModule();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

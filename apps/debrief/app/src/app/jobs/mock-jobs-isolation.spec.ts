@@ -1,6 +1,6 @@
 import { tinyBackend } from '../../testing/helpers';
 import { mockNotifications } from '../notifications/mock-notifications';
-import { mockJobs, resetMockJobs } from './mock-jobs';
+import { MockJobCancelled, mockJobs, mockSteps, resetMockJobs } from './mock-jobs';
 
 // Spec files share one window and one module graph (the Angular builder runs Vitest with `isolate: false`), so the mock
 // jobs service is shared by every spec a worker runs. An import job one spec left running (its fake timers were thrown
@@ -56,5 +56,20 @@ describe('mock jobs between tests', () => {
     finish();
     await job.done;
     expect((await mockNotifications().list()).notices).toEqual([]);
+  });
+
+  it('a job step still waiting when the instance is replaced leaves no timer and ends quietly', async () => {
+    vi.useFakeTimers();
+    const job = mockJobs().start({ kind: 'import', title: 'Stepping' }, async (ctx) => {
+      await mockSteps(ctx, 1000, 10);
+      return { value: null };
+    });
+    const outcome = job.done.then(() => null, (e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    resetMockJobs();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(await outcome).toBeInstanceOf(MockJobCancelled);
   });
 });

@@ -106,6 +106,17 @@ describe('TauriBackend platform', () => {
     expect(backend.platform()).toBe('macos');
   });
 
+  it('leaves no wait timer running once the shell has answered', async () => {
+    vi.useFakeTimers();
+    try {
+      const { backend } = setup('macos');
+      await backend.init();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('falls back to the user agent when the shell cannot answer', async () => {
     const call = vi.fn(async () => {
       throw new Error('no');

@@ -36,6 +36,26 @@ describe('CountersStore', () => {
     expect(store.opened()).toBeNull();
   });
 
+  it('arms no next read when its injector is destroyed while one is in flight', async () => {
+    vi.useFakeTimers();
+    const { store } = await setup();
+    store.use();
+    TestBed.resetTestingModule();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps one read armed when `tick` is called beside the polling one', async () => {
+    vi.useFakeTimers();
+    const { store } = await setup();
+    store.use();
+    await vi.advanceTimersByTimeAsync(0);
+    await store.tick();
+    expect(vi.getTimerCount()).toBe(1);
+    TestBed.resetTestingModule();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('reports a failed object list', async () => {
     const { store } = await setup(['counterObjects']);
     await store.loadObjects();
