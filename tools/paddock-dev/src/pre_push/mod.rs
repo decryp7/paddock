@@ -303,6 +303,17 @@ impl known::Lookups for OnceLookups<'_> {
 
 /// [`command`] with the repository, git's pre-push lines and the outside lookups given.
 fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lookups) -> Result<Report, CliError> {
+    if args.refs_from_stdin
+        && only_reservation_refs(stdin, &|sha| {
+            git_text(root, &["cat-file", "-t", sha]).is_some_and(|t| t.trim() == "blob")
+        })
+    {
+        return Ok(Report::new(
+            json!({"gates": [], "changed": 0, "outcome": outcome::reservation_push().json()}),
+            "pre-push: the push only creates or deletes refs under refs/paddock/check-ids/ that hold a blob (check-id reservations, no commit); nothing to check."
+                .to_string(),
+        ));
+    }
     let look = &OnceLookups {
         inner: look,
         listings: Default::default(),
@@ -937,6 +948,23 @@ fn nearest_base(
             format!("{notes}no commit of {tracking_of} that the pushed commit contains is usable ({took})"),
         ),
     }
+}
+
+/// True when git's pre-push lines all create or delete a ref under `refs/paddock/check-ids/` and every created one holds a blob
+/// (`./dev check new-id --reserve` pushes a blob there; `is_blob` asks git for the object's type). A commit pushed to such a ref,
+/// or any other ref, goes through the gates (ER-39).
+pub fn only_reservation_refs(input: &str, is_blob: &dyn Fn(&str) -> bool) -> bool {
+    let mut any = false;
+    for l in input.lines().filter(|l| !l.trim().is_empty()) {
+        let f: Vec<&str> = l.split_whitespace().collect();
+        let [_, sha, remote_ref, _] = f[..] else { return false };
+        let deletion = sha.chars().all(|c| c == '0');
+        if !remote_ref.starts_with("refs/paddock/check-ids/") || !(deletion || is_blob(sha)) {
+            return false;
+        }
+        any = true;
+    }
+    any
 }
 
 /// The commits a push sends, from git's pre-push input: the local sha of every ref that is not a deletion.

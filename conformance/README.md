@@ -16,7 +16,7 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 
 ## Checks
 
-**A new check gets its id from `./dev check new-id --reserve <branch>`** (ER-21): it prints the next id free across the working tree, every local branch, every branch of origin as the remote has it now (read live with `git ls-remote`; a remote it cannot read is an error) and `conformance/reserved/`, and adds one file `conformance/reserved/C<n>-<branch>` (one file per reservation, so branches never conflict); commit that file with the branch's first commit. Without `--reserve` it only prints. Never pick a number by hand: C110, C113 and C119 were each taken by two parallel branches.
+**A new check gets its id from `./dev check new-id --reserve <branch>`** (ER-21): it prints the next id free across the working tree, every local branch, every branch of origin as the remote has it now (read live with `git ls-remote`; a remote it cannot read is an error) and `conformance/reserved/`, takes the id on origin at once by pushing a blob to `refs/paddock/check-ids/C<n>` (a push that creates a ref fails when it exists, so the server decides and two agents reserving before either pushes a branch get different ids; two branches took one id that way on 2026-11-16), and then adds one file `conformance/reserved/C<n>-<branch>` as the record; commit that file with the branch's first commit. Without `--reserve` it only prints. Never pick a number by hand: C110, C113 and C119 were each taken by two parallel branches.
 
 **Adding a check is two steps: write the module, run the regenerate.**
 
