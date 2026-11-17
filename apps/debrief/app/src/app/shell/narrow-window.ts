@@ -12,11 +12,11 @@ import { DockService } from '../dock/dock.service';
  * by hand (Ctrl+B) stays open until the plan has room again; one the user closed is never reopened.
  */
 /**
- * Windows narrower than this start with the Explorer closed. Measured 2026-11-17 (Chromium, 900 px high): the layout plan keeps the Explorer
- * from 920 px up at 700 to 900 px high and closes it at 904 to 912 px; at 1000 px and wider it keeps it at every height from 500 px. The plan
- * stays the authority after the first draw; this only stops the first draw showing an Explorer the plan closes a frame later, which moved the
- * dock and the filter bar. A sliver of 4 px (916 to 919) can still flip once. The Explorer's open flag is not saved anywhere (only the sections'
- * state is), so there is no saved choice to honour at start.
+ * Windows narrower than this start with the Explorer closed. A hand copy of a decision the layout plan makes (an open finding, docs/lessons.md; the plan
+ * cannot be asked before the first draw because its input includes the dock's height, which the filter bar of the first data takes a part of):
+ * measured 2026-11-17 (Chromium), the plan closes the Explorer at 904 to 912 px and keeps it from 920 px at 700 to 900 px high, but between 920 and
+ * 934 px it still closes it after the first draw at heights of 600 to 900 px, so the dock's left edge moves 320 to 48 there. The plan stays the
+ * authority after the first draw. The Explorer's open flag is not saved anywhere (only the sections' state is), so there is no saved choice to honour.
  */
 export const EXPLORER_MIN_WINDOW_PX = 920;
 
