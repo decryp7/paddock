@@ -51,7 +51,7 @@ five separate callers: nightly chains them with `needs:` instead.
 External advisories turned main and every train red with no code change twice in 12 hours (RUSTSEC-2026-0543 on chrono, run 8214;
 GHSA-fc5q-39xc-vjpf on picomatch, run 8225). As Dependabot and Renovate alerts and a scheduled `cargo deny` do, two questions are kept
 apart, both answered by `./dev audit` (`tools/paddock-dev/src/audit`; `cargo deny check advisories` for every `Cargo.lock` with a
-`Cargo.toml` and a `deny.toml` beside it, `npm audit` for every `package-lock.json`, npm findings of severity `high` and above):
+`Cargo.toml` and a `deny.toml` beside it, `npm audit --omit=dev` for every `package-lock.json` (severity `high` and above, as the apps' plain steps; `--npm-level` and `--npm-omit-dev` declare both)):
 
 - **Does main have a finding?** The `audit` job of nightly.yml runs `./dev audit nightly` every night, outside the gate (an advisory
   appears while main is unchanged). One `::error::` per advisory names the advisory, the dependency path and the decision step: an
