@@ -2197,3 +2197,14 @@ script and then set its mode now call `write_program`.
 **Rule:** a test writes a program with `paddock_testkit::exe::write_program` and starts one it did not write with `exe::spawn`,
 `output` or `status`; product code starts programs through `paddock-proc`.
 **Class: a test or harness whose outcome depended on which thread ran first (earlier: the Debrief Stop-button probe and the row-menu e2e above), and Linux's text-busy refusal of a file written or run a moment ago (no earlier lesson).**
+
+## Debrief's Explorer width jumped 920 to 934 px: a constant copied a number another module decides (layout, 2026-11-17)
+
+Symptom: the Explorer pane changed width by 14 px (920 to 934) when the layout settled. An earlier 51 px placeholder had the
+same cause.
+**Cause.** The Explorer's width constant re-typed the layout plan's rule, and the placeholder re-typed the filter bar's height.
+When the owner changed, or two reads disagreed, the copy did not follow.
+**Fix, one mechanism.** A value that another module decides is read from that module, by a call or an exported constant. Rule 42
+says so, and the pre-review checklist and the independent-review checks ask "does any number re-type a decision another module
+owns?" (ER-22).
+**Class: a copied value that drifts from its owner (earlier: the filter bar height placeholder; mechanism copies of rule 55 are the same shape).**

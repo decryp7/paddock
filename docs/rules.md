@@ -137,6 +137,10 @@ changes here, every app's copy is updated in the same change.
     same thing (rule 39), build it in Paddock and consume the published version instead of writing an app copy. Every
     work brief includes this check; every app move and every few releases a survey looks for copies that drifted apart
     and turns them into shared work packages. App-specific domain logic stays in the app.
+    A value that another module decides (a size, a threshold, a count, a layout verdict) is read from that module, by a
+    call or an exported constant, and never re-typed. Reviews check for it (ER-22; user, 2026-11-17). *Why:* Debrief's
+    Explorer width constant copied the layout plan's rule and caused a 920-934 px jump, and an earlier 51 px placeholder
+    had copied the filter bar's height.
 
 **Testing shared code (user, 2026-10-24)**
 43. **Shared behaviour is tested once, in Paddock.** A shared crate or package carries the full tests of its behaviour
