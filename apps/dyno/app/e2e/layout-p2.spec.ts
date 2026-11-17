@@ -78,6 +78,10 @@ test('firewall: the administrator-readings button is not the card width at 1280'
 
 test('alarms: every title of the Active list shows in full at 1280, and State is as wide as its longest word needs', async ({ page }) => {
   await open(page, { width: 1280, height: 800 }, '/alarms');
+  // The rows are read once they are there: a read right after the page opened found none on Linux WebKit (run 8209).
+  await expect(
+    page.locator('#pd-main [role=gridcell], #pd-main [role=cell]').filter({ hasText: /GPU load is over|node started listening|rustc has used|Macintosh HD is|VirtualBox service/ }),
+  ).toHaveCount(5);
   const m = await page.evaluate(() => {
     const titles = [...document.querySelectorAll<HTMLElement>('#pd-main [role=gridcell], #pd-main [role=cell]')].filter((c) =>
       /GPU load is over|node started listening|rustc has used|Macintosh HD is|VirtualBox service/.test(c.textContent ?? ''),
