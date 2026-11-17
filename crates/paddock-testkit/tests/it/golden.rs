@@ -160,3 +160,76 @@ fn every_error_reads_as_a_sentence_naming_the_file() {
         "assert_golden rewrites in update mode"
     );
 }
+
+/// A rewrite tells the author how to confirm the golden on Linux as root in the CI image (the Mac-only capture is how a golden with
+/// the Mac's uid reached a Linux leg, train 14 WP-2).
+#[test]
+fn a_rewrite_prints_the_command_that_confirms_it_in_the_ci_image() {
+    use paddock_testkit::golden::{confirm_command, rewritten_notice};
+    let s = Scratch::new();
+    let pkg = s.path("repo/tools/paddock-dev");
+    std::fs::create_dir_all(&pkg).expect("package folder");
+    s.write("repo/ci-image/VERSION", "3\n").expect("version");
+    assert_eq!(
+        confirm_command(
+            Some(&pkg),
+            Some("paddock-dev"),
+            Some("check::c131::tests::a_test")
+        ),
+        "tools/linux-container.sh --id paddock --ci-image -- sh -c 'cd '\\''tools/paddock-dev'\\'' && cargo nextest run -p paddock-dev check::c131::tests::a_test'"
+    );
+    // the repository root itself, and the names that are not a test path or package
+    assert!(
+        confirm_command(Some(&s.path("repo")), None, Some("main"))
+            .contains("cargo nextest run <test name>")
+    );
+    assert!(confirm_command(None, Some("a b"), Some("a b; rm")).contains("<the package folder>"));
+    assert!(!confirm_command(None, Some("a b"), Some("t")).contains("-p"));
+    let notice = rewritten_notice(&s.path("x.txt"), Some(&pkg), None, Some("t"), Some("main"));
+    assert!(
+        notice.contains("Confirm it on Linux as root in the CI image")
+            && notice.contains("./dev golden confirm"),
+        "{notice}"
+    );
+    assert!(
+        notice.contains(&s.path("x.txt").display().to_string()),
+        "{notice}"
+    );
+    // a thread named `main` is no test: no `main` filter is printed, nextest's name wins, a thread's name is the fallback
+    let main = rewritten_notice(&s.path("x.txt"), Some(&pkg), None, None, Some("main"));
+    assert!(
+        main.contains("cargo nextest run <test name>") && !main.contains("run main"),
+        "{main}"
+    );
+    assert!(
+        rewritten_notice(&s.path("x.txt"), Some(&pkg), None, None, Some("a::b"))
+            .contains("cargo nextest run a::b'")
+    );
+    assert!(notice.contains("cargo nextest run t'"), "{notice}");
+    // a quote in a folder name stays inside its word
+    let odd = s.path("repo/it's here");
+    std::fs::create_dir_all(&odd).expect("odd folder");
+    let cmd = confirm_command(Some(&odd), None, Some("t"));
+    assert!(
+        cmd.contains("s here") && !cmd.contains("cd 'it's here'"),
+        "{cmd}"
+    );
+}
+
+#[test]
+fn the_test_name_is_nextests_whole_name_else_the_thread_s() {
+    use paddock_testkit::golden::test_name_of;
+    assert_eq!(
+        test_name_of(Some("a::b::c_1"), Some("x::y")),
+        Some("a::b::c_1")
+    );
+    assert_eq!(test_name_of(None, Some("x::y")), Some("x::y"));
+    assert_eq!(test_name_of(None, Some("main")), None);
+    assert_eq!(
+        test_name_of(Some("a b"), None),
+        None,
+        "a name with a space is no test path"
+    );
+    assert_eq!(test_name_of(Some("a b"), Some("x::y")), Some("x::y"));
+    assert_eq!(test_name_of(None, None), None);
+}

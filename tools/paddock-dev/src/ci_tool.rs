@@ -379,7 +379,8 @@ pub fn error_line(cause: &str, next: &str) -> String {
     format!("::error::{cause} Next step: {next}")
 }
 
-fn quote(arg: &str) -> String {
+/// `arg` as one `sh` word: as it is when plain, else in single quotes with a `'` written `'\''`.
+pub fn quote(arg: &str) -> String {
     let plain = !arg.is_empty()
         && arg
             .chars()

@@ -1,7 +1,7 @@
 use crate::{
     brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, disk, gates,
-    generators, heavy_cmd, hook, input_hash, ipc_endpoints, load, local_sccache, locks, merge_check, places, plan, plan_cmd, pr, pre_push,
-    queue, release_isolation, slots, wait, worktree,
+    generators, golden_cmd, heavy_cmd, hook, input_hash, ipc_endpoints, load, local_sccache, locks, merge_check, places, plan, plan_cmd,
+    pr, pre_push, queue, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -36,6 +36,11 @@ enum Command {
     Wait(wait::WaitArgs),
     /// Run a command through the machine-wide heavy slot (ER-24), found the way `check --pre-push` finds it; git hooks use it.
     Heavy(heavy_cmd::HeavyArgs),
+    /// Golden files: `confirm <test filter>` runs the tests on this machine and in the CI image as root; passes only if both pass.
+    Golden {
+        #[command(subcommand)]
+        command: golden_cmd::GoldenCommand,
+    },
     /// One line for the coordinator: start, hold or stop for new agents, from the load, the free disk of the dev-targets folder and the CI queue (ER-24).
     Load(load::LoadArgs),
     /// The machine's dev folders, derived from `git config paddock.worktreeRoot` (docs/dev-setup.md): dev-targets, dev-disk,
@@ -674,6 +679,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         } => ci_runs::trial_prune(&a),
         Command::Wait(a) => wait::command(&a),
         Command::Heavy(a) => heavy_cmd::command(&a),
+        Command::Golden { command } => golden_cmd::command(command),
         Command::Load(a) => load::command(&a),
         Command::Places(a) => places::command(&a),
         Command::Brief { command } => brief_check::command(command),

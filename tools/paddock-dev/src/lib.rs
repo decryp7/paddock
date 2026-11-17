@@ -61,6 +61,7 @@ pub mod disk;
 pub mod full_tree;
 pub mod gates;
 pub mod generators;
+pub mod golden_cmd;
 pub mod heavy_cmd;
 pub mod hook;
 pub mod input_hash;

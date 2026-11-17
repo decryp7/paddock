@@ -2448,3 +2448,17 @@ the stream had started. Conformance C137 passed on the text of an unrelated ci.y
 removes or hides what it watches (the signal, element, attribute or job step) and shows it goes red. A review rejects one
 that has none (rule 71 merged into ER-33).
 **Class: a check that cannot see the thing it guards (earlier: the Dyno 1.1.0 menu-bar probe and tray count, ER-33).**
+
+## Goldens captured on one machine failed on another; they are now checked when they are made (2026-11-15, train 14 WP-2; C131 added 2026-11-16)
+On WP-2 alone six goldens captured on the Mac failed elsewhere: macOS-only git config keys, the CI image's `/sccache` mount, RAM
+from `sysctl` against a file, the host OS paired with its pin, root against a normal uid, and a guardian golden with the Mac's uid
+501 baked in that would have turned the Linux leg red. Each was found by CI or by a later review, after the golden had been
+committed. Now the check runs when the golden is made: conformance C131 (report-only, ER-41) reads the golden folders for uid and
+gid numbers, `/Users`, `/home` and `C:\Users` paths and temp paths; a rewrite with `PADDOCK_UPDATE_GOLDEN` prints the command that
+runs the test on Linux as root in the CI image; and `./dev golden confirm <test filter>` runs both and passes only if both pass.
+The first version also read the user, host, RAM and CPU count of the machine that ran it; review found that made its result differ
+per machine (a waiver for the account name was stale on CI, a RAM figure in KiB collided with other numbers, a non-ASCII host name
+panicked the Rust host), so it reads fixed patterns only. The first run on the tree found no real value, only invented users. The same review found the JS and Rust hosts of C131 could differ on text shape; the shared parity corpus (conformance/test/parity-corpus, run over every dual-host check through `tests/it/parity_corpus.rs`) is the mechanism that keeps them equal, and it found three more divergences (C119, C121, C124: a BOM, `\r` in a waiver, prepended lines). A lint that asks for the `u` flag was tried and dropped: `u` alone does not make the hosts agree (`\w`, `\b`, `\d`, `\s`, `trim()` and U+FEFF, `\r` and line handling differ even with it), so its fix text misled; ESLint's `require-unicode-regexp` is the standard rule if conformance ever gets ESLint.
+**Rule:** a golden holds nothing of the machine that captured it; normalise the value in the test's `norm()`, and confirm a rewritten
+golden on Linux as root before committing it; a check's result never depends on the machine that runs it. **Class: a golden captured
+on one machine fails on another (second and later sightings: the six WP-2 cases above; ER-21).**
