@@ -10,7 +10,8 @@
     "lint": "ng lint",
     "tauri": "tauri",
     "e2e": "playwright test --workers=1",
-    "screenshots": "SCREENSHOTS=1 playwright test --project=screenshots --workers=1"
+    "screenshots": "SCREENSHOTS=1 playwright test --project=screenshots --workers=1",
+    "screenshots:check": "SCREENSHOTS=1 SCREENSHOTS_CHECK=1 SCREENSHOT_DIR=${SCREENSHOT_DIR:-$(mktemp -d)} playwright test --project=screenshots-check --workers=1"
   },
   "private": true,
   "license": "MIT OR Apache-2.0",

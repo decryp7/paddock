@@ -1,14 +1,11 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { SHELL_PORTS } from '@decryp7/paddock-ui/shell/contributions';
+import { REPORT_NOT_INCLUDED } from '@decryp7/paddock-ui/shell/diagnostics';
 import { MatButton } from '@angular/material/button';
 import { Icon } from '../../shared/icon';
 
-const NEVER = [
-  'The contents of your documents or any file outside Dyno',
-  'Browser data: history, cookies, saved logins',
-  'Passwords, keys and tokens (they are replaced where Dyno can recognise them)',
-  'Command lines of the programs you run',
-];
+/** What a report never holds: the report dialog's own list, then what is only true of Dyno. */
+const NEVER = [...REPORT_NOT_INCLUDED, 'Browser data: history, cookies, saved logins', 'Command lines of the programs you run'];
 
 /**
  * The diagnostics page: one explanation and one button. There is one problem report (Help, Report a problem…); this page opens

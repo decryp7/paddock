@@ -70,6 +70,14 @@ const STATES: State[] = [
       await expect(page.getByRole('grid', { name: 'Charted counters' })).toBeVisible();
     },
   },
+  {
+    name: 'network detail open',
+    path: 'network',
+    setup: async (page) => {
+      await page.getByRole('row', { name: /142.250.74.46/ }).click();
+      await expect(page.getByRole('complementary', { name: 'Details' })).toBeVisible();
+    },
+  },
   { name: 'network listening', path: 'network', setup: (page) => page.getByRole('radio', { name: 'Listening' }).click() },
   {
     name: 'network listening, ungrouped',
@@ -123,6 +131,35 @@ async function openState(page: Page, state: State): Promise<void> {
     { what: `the ${state.name} state`, timeout: 45_000, minCount: NO_ROWS.has(state.name) ? 0 : 1 },
   );
 }
+
+test.describe('a search field shows its whole placeholder', () => {
+  test.setTimeout(300_000);
+  // The network search was cut to "For example" in a 96 px field (since 942363c4e, and again before): every search field of every state shows the
+  // text it invites you to type, at the narrowest window the app supports and at the width of the documentation pictures (the network details pane
+  // narrows the bar there).
+  for (const width of [900, 1440]) test(`at a ${width} px window, in every state`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    const cut: string[] = [];
+    for (const state of STATES) {
+      await openState(page, state);
+      const found = await page.evaluate(() => {
+        const out: string[] = [];
+        const canvas = document.createElement('canvas').getContext('2d')!;
+        for (const input of Array.from(document.querySelectorAll<HTMLInputElement>('dy-search-field input'))) {
+          if (!input.clientWidth || !input.placeholder) continue;
+          const style = getComputedStyle(input);
+          canvas.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+          const room = input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+          const need = canvas.measureText(input.placeholder).width;
+          if (need > room + 0.5) out.push(`"${input.placeholder}" needs ${Math.ceil(need)}px, the field has ${Math.floor(room)}px`);
+        }
+        return out;
+      });
+      if (found.length) cut.push(`${state.name}: ${found.join('; ')}`);
+    }
+    expect(cut).toEqual([]);
+  });
+});
 
 test.describe('rows never clip their content, and text that is cut says so with an ellipsis', () => {
   test.setTimeout(300_000);

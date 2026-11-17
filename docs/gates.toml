@@ -731,13 +731,13 @@ review_by = 2026-12-20
 approved = "coordinator"
 
 [[ignored]]
-path = "apps/dyno/app/e2e/screenshots-helper.spec.ts"
-tests = ["Administrator readings card screenshots"]
+path = "apps/dyno/app/e2e/screenshots-check.spec.ts"
+tests = ["there is a list of the pictures the runner makes"]
 gate = "not-gated"
-reason = "documentation screenshot capture, skipped without its output folder variable; run by hand to regenerate the images"
+reason = "ER-41, report-only: skipped without SCREENSHOT_DIR (`npm run screenshots:check` regenerates the documentation pictures into a scratch folder and compares them with the tracked ones by a measured pixel tolerance, e2e/screenshot-tolerance.ts). The macOS CI job that runs it is proposed (dyno-screenshots.yml, report-only until its first green run, recorded by run id); until it is declared it is run by hand."
 owner = "Dyno 1.1.1"
-since = 2026-11-08
-review_by = 2026-12-20
+since = 2026-11-16
+review_by = 2026-12-16
 approved = "coordinator"
 
 [[ignored]]
