@@ -2717,3 +2717,8 @@ fake clock, green after. Debrief's copy (`debrief-ipc`, rule 55) waits on the ch
 **Why the logs did not show it.** A hung test prints nothing; the end line of the connection (`pending=1`) was written, but nothing
 said that a caller then waited on the clock. **Class:** a waiter registers its wake-up after the waker fired (a lost wake-up), here
 created by moving a post out of the lock that orders it against the waiter's registration.
+**Redesign (ADR 0106, same day).** The fourth connection-end race in `paddock-ipc` in nine days (runs 7761 and 8214, a
+container run, a review finding): each call now ends through one completion slot that the caller and the closer share (one
+completion, no lost wake-up, an end when the sender is dropped). It also closed a hole the patch above left: a close that
+panicked after taking the calls out left a caller already waiting on the clock waiting for its whole timeout (red at
+4cb546db5).

@@ -32,6 +32,7 @@ pub mod limit_rows;
 pub mod limits;
 pub mod link;
 pub mod peer;
+mod slot;
 #[cfg(feature = "testing")]
 pub mod testing;
 pub mod token;
