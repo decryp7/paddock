@@ -7,7 +7,6 @@
 //! 2. hunks a parent added since the merge base that the result lacks ([`hunks`]); answered by `Hunks-dropped: <path>: <reason>`;
 //! 3. tests a parent has that the result lacks, three-way ([`lost_tests`]); answered by `Tests-removed: <name>: <reason>`;
 //! 4. files taken whole from one parent although the other changed them too ([`whole_file`]); answered by `Hunks-dropped`;
-//!    (and, report-only, a member built on a merge the target reverted: [`reverted_base`], a `::warning::` per merge);
 //! 5. a stale workspace-hack, which no merge message can excuse ([`hakari`]): the fix is `cargo hakari generate` (the check compares the
 //!    generated file only; refreshing the lockfiles is the author's step and is not verified).
 //!
@@ -45,7 +44,6 @@ mod hakari;
 mod hunks;
 mod lost_tests;
 mod other_os;
-mod reverted_base;
 mod testnames;
 mod trailers;
 mod whole_file;
@@ -119,10 +117,6 @@ pub struct Merge {
     pub label: String,
     /// The merge commit, when it exists (a branch checked before it is merged has none).
     pub commit: Option<String>,
-    /// What to call the first parent (the target) and the second (the member) in messages: their names, or short hashes.
-    pub target_name: String,
-    /// See `target_name`.
-    pub member_name: String,
 }
 
 impl Merge {
@@ -308,8 +302,6 @@ fn resolve(git: &Git, req: &Request) -> Result<Merge, CliError> {
             let tree = git.text(&["rev-parse", &format!("{c}^{{tree}}")]).map_err(gap)?.trim().to_string();
             let message = git.text(&["show", "-s", "--format=%B", c]).map_err(gap)?;
             Ok(Merge {
-                target_name: short(&ids[0]).to_string(),
-                member_name: short(&ids[1]).to_string(),
                 parents: ids,
                 tree,
                 message,
@@ -333,20 +325,7 @@ fn resolve(git: &Git, req: &Request) -> Result<Merge, CliError> {
                 .to_string();
             let tree = git
                 .text(&["merge-tree", "--write-tree", "--no-messages", &first, &second])
-                .map_err(|e| {
-                    let mut err = gap(format!("{b} does not merge cleanly into {t}, so there is no result to check: {e}"));
-                    // The usual cause is a member built on a merge the target reverted: say so (report-only warnings).
-                    let names = reverted_base::Names {
-                        target: t,
-                        member: b,
-                        merged: false,
-                    };
-                    if let Some(step) = reverted_base::of_refs(git, &format!("{b} into {t}"), &first, &second, &names) {
-                        err.message.push('\n');
-                        err.message.push_str(&step.text.join("\n"));
-                    }
-                    err
-                })?;
+                .map_err(|e| gap(format!("{b} does not merge cleanly into {t}, so there is no result to check: {e}")))?;
             let tree = tree.lines().next().unwrap_or("").trim().to_string();
             Ok(Merge {
                 parents: vec![first, second],
@@ -354,8 +333,6 @@ fn resolve(git: &Git, req: &Request) -> Result<Merge, CliError> {
                 message: String::new(),
                 label: format!("{b} into {t}"),
                 commit: None,
-                target_name: t.clone(),
-                member_name: b.clone(),
             })
         }
         _ => Err(CliError::usage("Give one merge commit, or --branch and --target together.")
@@ -464,8 +441,6 @@ fn check(req: &Request) -> Result<Checked, CliError> {
             };
             let mut steps = Steps::default();
             steps.push("generators", step);
-            // Report-only (ER-41): a member built on a merge the target reverted; never a finding, never an exit code.
-            steps.push("reverted-base", reverted_base::run(&git, &merge));
             if req.gates {
                 steps.push(
                     "gates",
