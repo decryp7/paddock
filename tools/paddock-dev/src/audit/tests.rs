@@ -120,6 +120,13 @@ fn npm_that_answered_with_an_error_or_no_json_is_not_measured() {
     assert!(matches!(parse_npm("n", "{}", "high"), Measure::NotMeasured(_)));
 }
 
+fn npm() -> Npm {
+    Npm {
+        level: "high".into(),
+        omit_dev: true,
+    }
+}
+
 fn found(v: Vec<Finding>) -> Measure {
     Measure::Found(v)
 }
@@ -316,7 +323,7 @@ fn judge_all_audits_the_tree_and_then_the_merge_base_once_and_cleans_up() {
         result: Ok(PathBuf::from("/base/")),
     };
     let targets = [cargo_target("crates"), cargo_target("apps/dyno")];
-    let v = judge_all(&runner, Path::new("/head/"), &targets, "high", Some(&base));
+    let v = judge_all(&runner, Path::new("/head/"), &targets, &npm(), Some(&base));
     assert_eq!(v.existing.len(), 2, "both workspaces have it on main too");
     assert!(v.clean());
     assert_eq!((base.prepared.get(), base.released.get()), (1, 1), "extracted once, removed once");
@@ -333,7 +340,7 @@ fn judge_all_does_not_extract_the_merge_base_when_nothing_is_found() {
         released: Cell::new(0),
         result: Err("unused".into()),
     };
-    let v = judge_all(&runner, Path::new("/head/"), &[cargo_target("crates")], "high", Some(&base));
+    let v = judge_all(&runner, Path::new("/head/"), &[cargo_target("crates")], &npm(), Some(&base));
     assert!(v.clean());
     assert_eq!((base.prepared.get(), base.released.get()), (0, 0));
 }
@@ -349,14 +356,14 @@ fn judge_all_without_a_merge_base_is_not_measured_and_a_missing_tool_is_not_a_pa
         released: Cell::new(0),
         result: Err("origin/main is not fetched".into()),
     };
-    let v = judge_all(&runner, Path::new("/head/"), &[cargo_target("crates")], "high", Some(&base));
+    let v = judge_all(&runner, Path::new("/head/"), &[cargo_target("crates")], &npm(), Some(&base));
     assert!(!v.clean() && v.not_measured[0].1.contains("origin/main is not fetched"));
     // cargo-deny not installed: the runner could not start it.
     let none = Fake {
         answers: vec![],
         ran_in: Mutex::new(vec![]),
     };
-    let v = judge_all(&none, Path::new("/head/"), &[cargo_target("crates")], "high", None);
+    let v = judge_all(&none, Path::new("/head/"), &[cargo_target("crates")], &npm(), None);
     assert!(!v.clean() && v.new.is_empty());
 }
 
@@ -371,8 +378,8 @@ fn judge_all_in_a_nightly_run_fails_on_a_new_advisory_and_passes_without_it() {
         ran_in: Mutex::new(vec![]),
     };
     let t = [cargo_target("crates")];
-    assert_eq!(judge_all(&with, Path::new("/head/"), &t, "high", None).new.len(), 1);
-    assert!(judge_all(&without, Path::new("/head/"), &t, "high", None).clean());
+    assert_eq!(judge_all(&with, Path::new("/head/"), &t, &npm(), None).new.len(), 1);
+    assert!(judge_all(&without, Path::new("/head/"), &t, &npm(), None).clean());
 }
 
 #[test]
@@ -396,4 +403,37 @@ fn the_plan_audits_a_lockfile_only_with_its_manifest_and_deny_toml_and_skips_gol
     .collect();
     let sources: Vec<String> = plan(&tracked).iter().map(Target::source).collect();
     assert_eq!(sources, ["cargo crates/Cargo.lock", "npm package-lock.json"]);
+}
+
+#[test]
+fn npm_audit_leaves_dev_dependencies_out_by_default_and_audits_them_when_asked() {
+    struct Args(Mutex<Vec<String>>);
+    impl Runner for Args {
+        fn run(&self, _: &Path, argv: &[String]) -> Ran {
+            *self.0.lock().unwrap() = argv.to_vec();
+            Ran {
+                code: Some(0),
+                stdout: npm_json("moderate"),
+                stderr: String::new(),
+            }
+        }
+    }
+    let t = Target {
+        kind: Kind::Npm,
+        dir: "".into(),
+        file: "package-lock.json".into(),
+    };
+    let r = Args(Mutex::new(vec![]));
+    audit_target(&r, Path::new("/x"), &t, &npm());
+    assert!(r.0.lock().unwrap().contains(&"--omit=dev".to_string()));
+    audit_target(
+        &r,
+        Path::new("/x"),
+        &t,
+        &Npm {
+            level: "high".into(),
+            omit_dev: false,
+        },
+    );
+    assert!(!r.0.lock().unwrap().contains(&"--omit=dev".to_string()));
 }

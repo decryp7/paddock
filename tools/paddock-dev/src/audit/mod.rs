@@ -55,6 +55,27 @@ pub struct AuditArgs {
     /// The lowest npm severity that counts (the plain audit step of debrief.yml uses `high`).
     #[arg(long, default_value = "high", value_parser = NPM_LEVELS)]
     pub npm_level: String,
+    /// Leave devDependencies out of the npm audit, as the apps' plain `npm audit --omit=dev` steps do: what ships (`--npm-omit-dev false` audits all).
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    pub npm_omit_dev: bool,
+}
+
+/// The npm audit's scope.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Npm {
+    /// The lowest severity that counts.
+    pub level: String,
+    /// Dev dependencies are left out.
+    pub omit_dev: bool,
+}
+
+impl AuditArgs {
+    fn npm(&self) -> Npm {
+        Npm {
+            level: self.npm_level.clone(),
+            omit_dev: self.npm_omit_dev,
+        }
+    }
 }
 
 /// Arguments of `compare`.
@@ -203,7 +224,7 @@ fn argv(parts: &[&str]) -> Vec<String> {
 }
 
 /// Audits one target in the tree at `tree` (the checkout, or the merge base's folder).
-pub fn audit_target(runner: &dyn Runner, tree: &Path, t: &Target, npm_level: &str) -> Measure {
+pub fn audit_target(runner: &dyn Runner, tree: &Path, t: &Target, npm: &Npm) -> Measure {
     let dir = tree.join(&t.dir);
     match t.kind {
         Kind::Cargo => {
@@ -217,28 +238,32 @@ pub fn audit_target(runner: &dyn Runner, tree: &Path, t: &Target, npm_level: &st
             parse_deny(&t.source(), &format!("{}\n{}", r.stderr, r.stdout))
         }
         Kind::Npm => {
-            let r = runner.run(&dir, &argv(&["npm", "audit", "--json", "--package-lock-only"]));
+            let mut args = argv(&["npm", "audit", "--json", "--package-lock-only"]);
+            if npm.omit_dev {
+                args.push("--omit=dev".into());
+            }
+            let r = runner.run(&dir, &args);
             if r.code.is_none() {
                 return Measure::NotMeasured(format!("npm could not run ({})", r.stderr.trim()));
             }
-            parse_npm(&t.source(), &r.stdout, npm_level)
+            parse_npm(&t.source(), &r.stdout, &npm.level)
         }
     }
 }
 
 /// Runs the audit of every target and judges it.
-pub fn judge_all(runner: &dyn Runner, root: &Path, targets: &[Target], npm_level: &str, base: Option<&dyn Base>) -> Verdict {
+pub fn judge_all(runner: &dyn Runner, root: &Path, targets: &[Target], npm: &Npm, base: Option<&dyn Base>) -> Verdict {
     let mut verdict = Verdict::default();
     let mut prepared: Option<Result<PathBuf, String>> = None;
     for t in targets {
         let source = t.source();
-        let head = audit_target(runner, root, t, npm_level);
+        let head = audit_target(runner, root, t, npm);
         let v = match base {
             None => Verdict::nightly(&source, &head),
             Some(b) => Verdict::compare(&source, &head, &mut || {
                 let tree = prepared.get_or_insert_with(|| b.prepare());
                 match tree {
-                    Ok(tree) => audit_target(runner, tree, t, npm_level),
+                    Ok(tree) => audit_target(runner, tree, t, npm),
                     Err(why) => Measure::NotMeasured(why.clone()),
                 }
             }),
@@ -378,22 +403,24 @@ fn root_of(given: Option<PathBuf>) -> Result<PathBuf, CliError> {
 pub fn command(c: AuditCommand) -> Result<Report, CliError> {
     match c {
         AuditCommand::Nightly(a) => {
+            let npm = a.npm();
             let root = root_of(a.root)?;
-            run(&Real, &root, &a.npm_level, a.enforce, None)
+            run(&Real, &root, &npm, a.enforce, None)
         }
         AuditCommand::Compare(a) => {
+            let npm = a.common.npm();
             let root = root_of(a.common.root)?;
             let base = GitBase {
                 root: root.clone(),
                 base: a.base,
             };
-            run(&Real, &root, &a.common.npm_level, a.common.enforce, Some(&base))
+            run(&Real, &root, &npm, a.common.enforce, Some(&base))
         }
     }
 }
 
 /// Both commands, with the runner and the merge base given.
-pub fn run(runner: &dyn Runner, root: &Path, npm_level: &str, enforce: bool, base: Option<&dyn Base>) -> Result<Report, CliError> {
+pub fn run(runner: &dyn Runner, root: &Path, npm: &Npm, enforce: bool, base: Option<&dyn Base>) -> Result<Report, CliError> {
     let targets = plan(&tracked(root)?);
     if targets.is_empty() {
         return Err(
@@ -401,7 +428,7 @@ pub fn run(runner: &dyn Runner, root: &Path, npm_level: &str, enforce: bool, bas
                 .with_hint("Run it in the repository root, or pass --root."),
         );
     }
-    let verdict = judge_all(runner, root, &targets, npm_level, base);
+    let verdict = judge_all(runner, root, &targets, npm, base);
     Ok(report(
         &verdict,
         if base.is_some() { Mode::Compare } else { Mode::Nightly },
