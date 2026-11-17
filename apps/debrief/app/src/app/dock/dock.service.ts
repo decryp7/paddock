@@ -70,6 +70,7 @@ export class DockService {
   /** True when the layout was built from defaults rather than restored from the store. */
   private fresh = false;
   /** The arrangement before the last fit to a small window (the saved one), for Undo; null when nothing was fitted. */
+  private plannedToken = 0;
   private fitted: SavedLayout | null = null;
   /** Conditional views that were available at the last check, to detect "became available". */
   private readonly wasAvailable = new Set<string>();
@@ -103,6 +104,11 @@ export class DockService {
   readonly activeViewId = this.activeView.asReadonly();
   /** True once the dock has its layout (restored or default): a view shown before then would be dropped. */
   readonly ready = this.ctx.apiReady.asReadonly();
+  /**
+   * True when the arrangement is planned for the window's current size: the first fit has run and no resize waits for its re-plan. A layout read
+   * (a spec, a screenshot) is final from then until the window or the user changes it again; the dock host shows it as `data-dock-planned`.
+   */
+  readonly planned = computed(() => this.ctx.firstPlanned() && !this.ctx.replanPending());
   /** Ticks on every layout change of the dock (panels that keep native content in place follow it). */
   readonly layoutChanged = this.ctx.layoutVersion.asReadonly();
 
@@ -325,7 +331,9 @@ export class DockService {
     this.evaluated = false;
     this.wasAvailable.clear();
     this.ctx.apiReady.set(true);
-    const stopResize = this.layout.watchResize(api, () => this.fitToWindow(api, null));
+    this.ctx.firstPlanned.set(false);
+    this.ctx.replanPending.set(false);
+    const stopResize = this.layout.watchResize(api, () => this.fitToWindow(api, null), (pending) => (pending ? this.holdPlanned() : this.releasePlannedAfterFrames()));
     const stopDrag = this.layout.watchSashDrag(() => {
       this.layout.rememberSizes(api);
       this.persistence.schedule();
@@ -334,7 +342,11 @@ export class DockService {
       stopResize();
       stopDrag();
     };
-    this.layout.whenSized(api, () => this.fitToWindow(api, loaded));
+    this.layout.whenSized(api, () => {
+      this.fitToWindow(api, loaded);
+      this.ctx.firstPlanned.set(true);
+      this.releasePlannedAfterFrames();
+    });
     if (extras.poppedOut.length) void this.ctx.windows()?.restore(extras.poppedOut);
   }
 
@@ -351,6 +363,9 @@ export class DockService {
     this.ctx.container = null;
     this.ctx.guides = null;
     this.ctx.apiReady.set(false);
+    this.plannedToken++;
+    this.ctx.firstPlanned.set(false);
+    this.ctx.replanPending.set(false);
     this.ctx.docked.set(new Set());
     this.ctx.autoHide.set(EMPTY_AUTO_HIDE);
   }
@@ -851,6 +866,27 @@ export class DockService {
     this.growBack(api);
     this.keepFullScreen();
     this.windowListeners.forEach((l) => l());
+  }
+
+  /** A plan is on its way: `planned` is false until it has run and the window's reaction to it has settled. */
+  private holdPlanned(): void {
+    this.plannedToken++;
+    this.ctx.replanPending.set(true);
+  }
+
+  /**
+   * A plan has run. What its listeners did (the Explorer closing in a narrow window, a view tabbed) resizes the dock in the next frame, which
+   * starts another plan: `planned` comes back after two frames in which no new plan was started.
+   */
+  private releasePlannedAfterFrames(): void {
+    const token = ++this.plannedToken;
+    this.ctx.replanPending.set(true);
+    const frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb: () => void) => setTimeout(cb, 16);
+    frame(() =>
+      frame(() => {
+        if (token === this.plannedToken) this.ctx.replanPending.set(false);
+      }),
+    );
   }
 
   /** A fit moves panels, which makes dockview leave the maximized state: full screen keeps its document well maximized. */

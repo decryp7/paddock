@@ -305,4 +305,18 @@ describe('watchResize', () => {
     vi.advanceTimersByTime(150 + 50 * 20 + 50);
     expect(onResize).toHaveBeenCalledTimes(1);
   });
+
+  it('says a re-plan is pending from the first resize until it has run, and not before', () => {
+    vi.useFakeTimers();
+    const { layout, api, size, fire } = resizing({ width: 1440, height: 800 });
+    const pending: boolean[] = [];
+    layout.watchResize(api, vi.fn(), (p) => pending.push(p));
+    expect(pending).toEqual([]);
+    size.width = 900;
+    fire();
+    expect(pending).toEqual([true]);
+    (api as { width: number }).width = 900;
+    vi.advanceTimersByTime(150);
+    expect(pending).toEqual([true, false]);
+  });
 });

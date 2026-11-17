@@ -31,10 +31,9 @@ describe('App', () => {
     return { fixture, store: TestBed.inject(WorkspaceStore), dock: TestBed.inject(DockService) };
   }
 
-  // Regression: the side bar and the filter bar are deferred (start-up, ADR 0058); without a placeholder of their size
-  // the dock moved by the filter bar's height (and the grid by the side bar's width) when their code arrived after the
-  // window was ready (dock-default-split.e2e under load: 300/540/840 became 282/507/789).
-  it('reserves the room of the deferred side bar and filter bar until their code arrives', async () => {
+  // Regression: the side bar is deferred (start-up, ADR 0058); without a placeholder of its size the grid moved by its width when its code
+  // arrived after the window was ready. The filter bar is not deferred: it is above the dock, and its height depends on the window width.
+  it('reserves the room of the deferred side bar until its code arrives, and has the filter bar at once', async () => {
     TestBed.configureTestingModule({
       deferBlockBehavior: DeferBlockBehavior.Manual,
       providers: [provideDockTesting(), provideToolsBackend(), { provide: AnalysisBackend, useFactory: () => new MockAnalysisBackend(recordsFrom(inject(DebriefBackend))) }],
@@ -42,13 +41,12 @@ describe('App', () => {
     const fixture = TestBed.createComponent(App);
     await settle(fixture, 8);
     const el = fixture.nativeElement as HTMLElement;
-    await vi.waitFor(() => expect(el.querySelector('[data-testid=filter-bar-placeholder]')).not.toBeNull(), { timeout: 10_000 });
-    expect(el.querySelector('[data-testid=sidebar-placeholder]')).not.toBeNull();
-    expect(el.querySelector('debrief-filter-bar')).toBeNull();
-    for (const block of await fixture.getDeferBlocks()) await block.render(DeferBlockState.Complete);
-    await settle(fixture);
+    await vi.waitFor(() => expect(el.querySelector('[data-testid=sidebar-placeholder]')).not.toBeNull());
     expect(el.querySelector('[data-testid=filter-bar-placeholder]')).toBeNull();
     expect(el.querySelector('debrief-filter-bar')).not.toBeNull();
+    for (const block of await fixture.getDeferBlocks()) await block.render(DeferBlockState.Complete);
+    await settle(fixture);
+    expect(el.querySelector('[data-testid=sidebar-placeholder]')).toBeNull();
   });
 
   it('lays out the workbench with the default dock panels', async () => {

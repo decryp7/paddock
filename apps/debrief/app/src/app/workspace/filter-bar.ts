@@ -1,4 +1,4 @@
-import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, ElementRef, inject, Injector, signal, viewChildren } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, ElementRef, inject, Injector, OnInit, signal, viewChildren } from '@angular/core';
 import { RovingFocusNavigation } from '../shared/list-navigation';
 import { FilterOp, LEVELS, Level } from '../core/api.types';
 import { formatCompact, formatDateTime, formatDuration, tzLabel } from '../core/format';
@@ -215,7 +215,7 @@ const OP_LABELS: Record<FilterOp, string> = {
     .small { font-size: var(--fs-xs); }
   `,
 })
-export class FilterBar {
+export class FilterBar implements OnInit {
   protected readonly store = inject(WorkspaceStore);
   protected readonly field = inject(SearchField);
   private readonly levelCounts = inject(LevelCountsStore);
@@ -283,8 +283,18 @@ export class FilterBar {
     return q.from != null && q.to != null ? formatDuration(q.to - q.from) : '';
   });
 
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+
+  /**
+   * The host is in the document here, before the first render of the template: measure it now, so a narrow window's first drawn frame is
+   * the compact bar and not a wide one (three rows, 123 px) that the resize observer folds a frame later (87 px) while the dock below moves.
+   */
+  ngOnInit(): void {
+    this.compact.set(this.host.getBoundingClientRect().width < COMPACT_WIDTH_PX);
+  }
+
   constructor() {
-    const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+    const host = this.host;
     const destroyRef = inject(DestroyRef);
     afterNextRender(() => {
       if (typeof ResizeObserver !== 'function') return;

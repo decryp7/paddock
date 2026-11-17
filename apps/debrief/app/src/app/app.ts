@@ -45,11 +45,8 @@ import { RegionNavigator } from './shell/regions';
       <main class="center">
         <!-- Nothing to filter until data is open: the welcome page is the whole first screen. -->
         @if (hasData()) {
-          @defer (on immediate) {
-            <debrief-filter-bar data-debrief-region="filters" role="search" aria-label="Filters" i18n-aria-label="@@app.region.filters" tabindex="-1" />
-          } @placeholder {
-            <div class="filter-bar-placeholder" data-testid="filter-bar-placeholder" aria-hidden="true"></div>
-          }
+          <!-- Not deferred: it is above the dock, and a bar that arrives later moves the dock by its height, which depends on the window width (wrapping). -->
+          <debrief-filter-bar data-debrief-region="filters" role="search" aria-label="Filters" i18n-aria-label="@@app.region.filters" tabindex="-1" />
         }
         <div class="stage">
           <debrief-dock-host />
@@ -90,9 +87,8 @@ import { RegionNavigator } from './shell/regions';
     :host { display: flex; flex-direction: column; height: 100vh; min-width: 600px; background: var(--bg-1); }
     .body { flex: 1; min-height: 0; display: flex; }
     .center { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-    /* The deferred side bar's and filter bar's room (their host sizes: shell/sidebar.ts, workspace/filter-bar.ts). */
+    /* The deferred side bar's room (its host size: shell/sidebar.ts). */
     .sidebar-placeholder { width: 272px; flex: none; background: var(--bg-2); border-inline-end: 1px solid var(--border); }
-    .filter-bar-placeholder { flex: none; height: 51px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg-1); }
     .stage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
     /* dockview gives its sashes and floating groups high z-indexes; keep them inside the dock so the
        welcome screen (and anything else stacked over the dock) covers them. */

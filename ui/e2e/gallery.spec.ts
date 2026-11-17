@@ -233,9 +233,10 @@ test.describe('UI basics review fixes (regressions)', () => {
     await expect
       .poll(async () => {
         const [t, l] = [(await field.boundingBox())!, (await list.boundingBox())!];
-        return { dx: Math.abs(l.x - t.x) <= 1, dw: Math.abs(l.width - t.width) <= 1 };
-      }, { message: 'the open list lines up with its field' })
-      .toEqual({ dx: true, dw: true });
+        // The larger of the list's offset from the field's left edge and its width difference, in px.
+        return Math.max(Math.abs(l.x - t.x), Math.abs(l.width - t.width));
+      }, { message: 'the open list lines up with its field: its offset or width differs from the field by more than 1 px' })
+      .toBeLessThanOrEqual(1);
   });
 
   test('hover changes the border of an input, a native select and the themed select, and a secondary button on a white card (review 2, N-P2-2, N-P3-3)', async ({ page }) => {

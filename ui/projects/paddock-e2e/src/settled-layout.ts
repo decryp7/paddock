@@ -52,7 +52,8 @@ export async function settledLayout(read: () => Promise<LayoutReading>, options:
       .poll(
         async () => {
           const now = await read();
-          settled = layoutSettled(previous, now, minCount) ? now : null;
+          // Against the read just before this one (`last`): two reads in a row. `previous` only keeps the read before that for the failure message.
+          settled = layoutSettled(last, now, minCount) ? now : null;
           previous = last;
           last = now;
           return settled !== null;
