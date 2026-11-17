@@ -228,12 +228,18 @@ named list) is about 0.4 agent-day but does not stop the next lookup; it is not 
 
 One mechanism starts a program, and a test's child is made by the same function as the product's (ER-22, rule 55):
 
-- **The one constructor** is `paddock_env::command::command` (`crates/paddock-env/src/command.rs`: a `Command` with no console window
+- **The canonical constructor** is `paddock_env::command::command` (`crates/paddock-env/src/command.rs`: a `Command` with no console window
   on Windows, nothing else). `paddock_proc::command` re-exports it (and `CREATE_NO_WINDOW`), so every shipped caller and clippy's
   "`Command::new` is forbidden outside the shared crates" are unchanged. `TestCommand` builds on it: it used to hold its own copy of
   the Windows flag and its own `Command::new`. The function lives in `paddock-env`, not in `paddock-proc`, because `paddock-proc`'s
   tests use the testkit and the kit cannot depend on `paddock-proc` (publish cycle, ci.yml 7989); `paddock-env` is already below both
   (it also holds `text_busy`, the other half of starting a program). The cheaper alternative, a second copy in the kit, was refused.
+  It is the canonical one, not the only one: four app constructors (`debrief-plugin-api`, `dyno-platform`, `pitcrew-service`,
+  `pitwall-server`) kept their own `Command::new` and flag until this review round; they now call `paddock_proc::command` (or
+  `paddock_env::command::command`, for `debrief-plugin-api`, which has no `paddock-proc`). Three raw `0x0800_0000` flags remain
+  (`paddock-download`'s proxy lookup, Spotter's notifier, Pitcrew's hand-off, none with the dependency yet): they are registered in
+  `docs/known-copies.toml` (mechanism `no-console-command`, canonical `paddock-env/src/command.rs`, rule 55) with a delete-by tag.
+
 - **Retrying `ETXTBSY`** is `paddock_testkit::exe` (train 13): `TestCommand::output`, `status` and `spawn` go through it, so a test
   program written a moment ago is not reported as a crash.
 - **The environment is not shared, on purpose.** `paddock_proc::clean_env(cmd, KEPT_ENV)` keeps the machine's values for production
@@ -244,6 +250,35 @@ One mechanism starts a program, and a test's child is made by the same function 
   starts** (git, a program a fixture names by path, a program of the product under test). C123 judges the first set only.
   `tools/paddock-dev/tests/it/dev_bin.rs` (train 13's one door for the binary under test, which sets `PADDOCK_SCCACHE=off`, ER-45)
   now returns a `TestCommand`, so the sccache switch and the listed environment come from one call.
+
+## ER-47: children inherit the environment (review round, 2026-11-17)
+
+`TestCommand` starts from an empty environment on purpose (this ADR's allow-list), and `paddock_proc::clean_env` does the same for
+production children (`KEPT_ENV`). Both cleared the environment with no exception, so a variable that *restricts* the child was
+lost on the way: `RUSTUP_AUTO_INSTALL=0` (a probe's rustup could then install a toolchain into `~/.rustup`, ER-45),
+`CARGO_NET_OFFLINE`, `PADDOCK_DEV_DOWNLOAD=0` (the release jobs' download ban: on 2026-11-15/16 a stripped value re-enabled release
+downloads) and `PADDOCK_TOOLCHAIN_FAILED`. ER-47 says clearing needs a named policy, a reason and a kept list, and never strips a
+variable that restricts the child. The decision:
+
+- **One shared list**, `paddock_env::RESTRICTING` (`crates/paddock-env/src/command.rs`, re-exported as `paddock_proc::RESTRICTING`),
+  with the reason in its doc comment. A variable joins it when it only ever makes a child do less.
+- **One clearing function**, `paddock_env::clear_env_from(cmd, keep, lookup)` (`clear_env` over the process's environment;
+  `paddock_proc::clean_env` calls it). It sets `keep` and `RESTRICTING` from `lookup`, which is the caller's environment: the live
+  process for a tool, the kit's captured `Ambient` for `TestCommand` (never a live read, this ADR's capture rule), a job's map for
+  `paddock-dev`'s `ToolCall`.
+- **`TestCommand`** passes every `RESTRICTING` variable the `Ambient` has, whatever else it lists, and sets `RUSTUP_AUTO_INSTALL=0`
+  when the caller has none (the caller's own value stands). `TestCommand::env_clear` goes back to that set and no longer calls
+  `Command::env_clear` at all.
+- **The lint over every clearing site** is Clippy: `std::process::Command::env_clear` (and tokio's) is in `lint/clippy.toml`, in
+  every app's and tool's `clippy.toml` (C13 compares the apps; `conformance/test/c13-rust-lints.test.mjs` checks every tracked
+  `clippy.toml` and shows C13 reporting a copy that dropped it), and the one allowed call is `clear_env_from`. A new site that clears
+  by hand fails clippy; the sites that cleared before now call the function (`paddock_proc::clean_env` in Debrief's launcher and
+  plugin host, Pitwall's engine commands, `paddock-dev`'s `ToolCall`, CI step runner, generators, release isolation and places).
+  The same round added `std::env::set_var` / `remove_var` to the preset and to every copy (they were in `crates/` and
+  `paddock-dev` only); the sites it flagged use `EnvLock` or carry an `#[expect]` with their reason.
+- **Common practice (ER-37):** cargo's own test support and rustup keep `CARGO_*` and `RUSTUP_*` settings in a child; Docker and
+  GitHub Actions pass a job's variables by default. A restricting variable is the one kind where a default-deny list must be
+  overridden, which is the whole of this decision. Cost: about half an agent-day beyond the first landing.
 
 ## Consequences
 
