@@ -680,6 +680,15 @@ fn slug(id: &str) -> String {
     id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
+/// The log's file name for a gate id: a short readable prefix plus a hash of the whole id, so it stays well under the 255 bytes
+/// of a file name however many workspaces the id names, and two ids never share a log. The full id goes to the `.id` file beside it.
+fn log_name(id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let prefix: String = slug(id).chars().take(48).collect();
+    let hash: String = Sha256::digest(id.as_bytes()).iter().take(6).map(|b| format!("{b:02x}")).collect();
+    format!("{prefix}-{hash}")
+}
+
 impl RealExec {
     /// The command that puts a heavy gate through the slot: `PADDOCK_HEAVY`, `heavy.sh` or `heavy` on PATH, else the `heavy`
     /// built from this tree ([`super::heavy_tool`]). Empty for `PADDOCK_HEAVY=off` (hermetic tests only); `Err` when the build failed.
@@ -811,7 +820,8 @@ impl Exec for RealExec {
 
     fn run(&self, gate: &Gate, limits: Limits) -> Result<Done, String> {
         let _ = std::fs::create_dir_all(&self.logs);
-        let log = self.logs.join(format!("{}.log", slug(&gate.id)));
+        let log = self.logs.join(format!("{}.log", log_name(&gate.id)));
+        let _ = std::fs::write(log.with_extension("id"), format!("{}\n", gate.id));
         let label = matches!(gate.need, Need::Docker | Need::LocalCiImage).then(run_token);
         let mut ran = self
             .call(gate, limits, &log, label.as_deref())
@@ -1002,6 +1012,40 @@ exit $rc
                 next: "fix it".into(),
                 workspaces: Vec::new(),
             }
+        }
+
+        /// A row naming many workspaces has an id longer than a file name may be (255 bytes): the log still gets written under a short
+        /// name, the full id is kept beside it, and two long ids that share a prefix do not share a log.
+        #[test]
+        fn a_gate_with_a_very_long_id_still_gets_a_log() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = real(d.path(), &d.path().join("slot.lock"));
+            let ws = |tail: &str| {
+                (0..40)
+                    .map(|i| format!("apps/some-long-workspace-{i}"))
+                    .chain([tail.to_string()])
+                    .collect::<Vec<_>>()
+                    .join(" + ")
+            };
+            let (a, b) = (format!("clippy-linux {}", ws("x")), format!("clippy-linux {}", ws("y")));
+            assert!(a.len() > 255);
+            let mut g = gate(&a, "echo from-a");
+            g.heavy = false;
+            let done = ex
+                .run(
+                    &g,
+                    Limits {
+                        run: Duration::from_secs(30),
+                        queue: Duration::from_secs(30),
+                    },
+                )
+                .expect("runs");
+            let log = PathBuf::from(done.log.expect("a log path"));
+            assert!(log.file_name().unwrap().len() <= 100, "{log:?}");
+            assert!(std::fs::read_to_string(&log).unwrap().contains("from-a"));
+            assert_eq!(std::fs::read_to_string(log.with_extension("id")).unwrap().trim(), a);
+            assert_ne!(log_name(&a), log_name(&b));
+            assert_eq!(log_name(&a), log_name(&a), "stable");
         }
 
         #[test]
