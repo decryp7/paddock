@@ -320,7 +320,7 @@ pub struct Request {
     /// Run the generator checks of `docs/generators.toml` that the merge makes due (the commit form only; the checkout must be
     /// the merge result). `--no-generators` turns it off.
     pub generators: bool,
-    /// Run the member gate (`./dev check --pre-push --base <merge>^1`) on the merge (the commit form only; the checkout must be
+    /// Run the member gate (`./dev check --pre-push --member-gate --base <merge>^1`) on the merge (the commit form only; the checkout must be
     /// the merge result). ADR 0098 WP-1; report-only until its first green run ([`gates::ENFORCED`]).
     pub gates: bool,
 }

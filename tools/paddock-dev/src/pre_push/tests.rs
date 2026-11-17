@@ -2,7 +2,7 @@
 
 use super::budget::Timing;
 use super::exec::{Done, Exec, Kind, Limits, QUEUE_MAX, Row, RunOpts, decide, run_all_timed, run_all_with, test_subject};
-use super::gates::{Change, Facts, Gate, Need, Planned, plan_gates};
+use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates};
 use super::{accept_not_measured, parse_refs, render, render_timed};
 use paddock_cli::Exit;
 use serde_json::json;
@@ -25,6 +25,13 @@ fn plan() -> serde_json::Value {
     })
 }
 
+fn crates_of(left_out: &[&str], lintable: usize) -> super::linux_inputs::WsCrates {
+    super::linux_inputs::WsCrates {
+        left_out: left_out.iter().map(|c| c.to_string()).collect(),
+        lintable,
+    }
+}
+
 fn facts() -> Facts {
     Facts {
         conformance: Some(Ok(["conformance/bin/paddock-conformance.mjs", "--app", "paddock", "--only", "C06"]
@@ -32,8 +39,15 @@ fn facts() -> Facts {
             .to_vec())),
         conformance_env: None,
         windows_clippy: BTreeSet::from(["apps/dyno".to_string(), "apps/pitwall".to_string()]),
-        image: Some(Ok("registry/paddock-ci:v7".into())),
-        linux: true,
+        ci_version: Some(Ok("7".into())),
+        left_out: [
+            ("crates".to_string(), Ok(crates_of(&[], 3))),
+            ("apps/dyno".to_string(), Ok(crates_of(&["dyno-app"], 2))),
+            ("apps/pitwall".to_string(), Ok(crates_of(&["pitwall-app"], 2))),
+            ("apps/debrief".to_string(), Ok(crates_of(&["debrief-app"], 2))),
+        ]
+        .into(),
+        member_gate: true,
         kept_targets: None,
         pitwall_tests: vec!["scripts/ci/a.test.mjs".into()],
         dev_exe: "/x/dev".into(),
@@ -72,7 +86,7 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
         "lockfile crates",
         "clippy crates",
         "clippy-windows crates",
-        "clippy-linux crates",
+        "clippy-linux apps/dyno (left out: dyno-app) + apps/pitwall (left out: pitwall-app) + crates",
         "conformance",
         "commit-lint",
         "ipc-endpoints",
@@ -122,12 +136,15 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
             .next
             .contains("rustup target add x86_64-pc-windows-msvc --toolchain")
     );
-    assert_eq!(by("clippy-linux crates").need, Need::Docker);
+    assert_eq!(
+        by("clippy-linux apps/dyno (left out: dyno-app) + apps/pitwall (left out: pitwall-app) + crates").need,
+        Need::LocalCiImage
+    );
     assert!(
-        by("clippy-linux crates")
+        by("clippy-linux apps/dyno (left out: dyno-app) + apps/pitwall (left out: pitwall-app) + crates")
             .args
             .join(" ")
-            .contains("--image registry/paddock-ci:v7 --platform linux/amd64")
+            .contains("tools/linux-container.sh --id paddock --ci-image --")
     );
     assert_eq!(
         (by("conformance").program.as_str(), by("conformance").args.join(" ")),
@@ -210,11 +227,7 @@ fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
     let planned = plan_gates(&plan(), &c, &facts());
     let mut fixed: Vec<String> = ids(&planned)
         .into_iter()
-        .filter(|id| {
-            !["fmt ", "lockfile ", "clippy ", "clippy-windows "]
-                .iter()
-                .any(|p| id.starts_with(p))
-        })
+        .filter(|id| !super::gates::PER_WORKSPACE_PREFIXES.iter().any(|p| id.starts_with(p)))
         .collect();
     fixed.sort();
     let mut want: Vec<String> = super::gates::ROW_SET.iter().map(|s| s.to_string()).collect();
@@ -233,7 +246,7 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
     // Conformance and its tests run on every push, whatever the plan says (ER-41); everything else a docs change does not reach.
     assert_eq!(
         ids(&planned),
-        ["conformance", "conformance-tests", "gates-register"],
+        ["conformance", "conformance-tests", "member-audits", "gates-register"],
         "{:?}",
         ids(&planned)
     );
@@ -281,6 +294,111 @@ fn conformance_and_its_tests_run_on_every_push_whatever_changed() {
     }
 }
 
+/// The member gate of `./dev merge check --gates` runs this push gate on the merge commit, so the audits are in the member gate
+/// when they are in this plan for every change (ER-41; user, 2026-11-17).
+#[test]
+fn the_member_audits_run_in_the_member_gate_whatever_changed_through_the_one_declared_profile_and_block() {
+    let unrelated = json!({"conformance": false, "apps": [], "packages": {}});
+    for files in [&["docs/x.md"][..], &["tools/paddock-dev/src/a.rs"], &["Mystery"], &[]] {
+        let planned = plan_gates(&unrelated, &change(files), &facts());
+        let g = run_gates(&planned)
+            .into_iter()
+            .find(|g| g.id == "member-audits")
+            .cloned()
+            .unwrap_or_else(|| panic!("the member audits are not run for {files:?}: {planned:?}"));
+        assert_eq!(
+            (g.program.as_str(), g.cwd.as_str(), g.args.join(" ")),
+            (
+                "cargo",
+                "tools/paddock-dev",
+                format!("nextest run --config build.target-dir='/t' --profile {AUDIT_PROFILE} --locked --no-tests=fail")
+            ),
+            "the audits are selected by the profile's declared filter, not by a list here (ER-42); an empty selection fails (ER-33)"
+        );
+        assert!(
+            !g.env.iter().any(|(k, _)| k == "CARGO_TARGET_DIR" || k == "CARGO_BUILD_TARGET_DIR"),
+            "the build folder is cargo configuration, never a CARGO_TARGET_DIR variable (sccache hashes it; cargo_target_lint): {:?}",
+            g.env
+        );
+        assert!(g.heavy, "it compiles the test binary: through heavy with its core cap (ER-24)");
+        assert_eq!(
+            g.need,
+            Need::Tool("cargo-nextest".into()),
+            "no nextest is not measured, never a pass"
+        );
+        assert!(
+            g.env.contains(&("RUSTUP_AUTO_INSTALL".to_string(), "0".to_string())),
+            "ER-45: {:?}",
+            g.env
+        );
+        assert!(g.next.contains(AUDIT_PROFILE), "{}", g.next);
+    }
+}
+
+/// A developer's push does not run the audits (minutes would be added to every push); it says why. The member gate does.
+#[test]
+fn a_developers_push_skips_the_member_audits_with_a_reason_and_the_member_gate_runs_them() {
+    let off = Facts {
+        member_gate: false,
+        ..facts()
+    };
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &off);
+    assert!(!ids(&planned).contains(&"member-audits".to_string()), "{:?}", ids(&planned));
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "member-audits" && reason.contains("--member-gate"))),
+        "skipped with its reason: {planned:?}"
+    );
+    let on = Facts {
+        member_gate: true,
+        ..facts()
+    };
+    assert!(ids(&plan_gates(&plan(), &change(&["crates/a.rs"]), &on)).contains(&"member-audits".to_string()));
+}
+
+/// A failing audit fails the gate (exit 1, one `::error::` line with the rerun command), and a runner without nextest or one that
+/// cannot start it is never a pass.
+#[test]
+fn a_failing_member_audit_fails_the_gate_and_a_missing_nextest_is_not_measured() {
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
+    let rows = run_all(
+        &planned,
+        &Fake {
+            fail: vec!["member-audits".into()],
+            ..Fake::default()
+        },
+        2,
+    );
+    let report = render("h", &rows);
+    assert_eq!(report.exit, Exit::Findings, "{}", report.text);
+    let line = report
+        .text
+        .lines()
+        .find(|l| l.contains("::error::member-audits"))
+        .unwrap_or_else(|| panic!("{}", report.text));
+    assert!(
+        line.contains(&format!(
+            "Re-run alone: cd tools/paddock-dev && cargo nextest run --config {} --profile member-audits",
+            super::gates::shell_quote("build.target-dir='/t'")
+        )),
+        "{line}"
+    );
+    let rows = run_all(
+        &planned,
+        &Fake {
+            no_tools: vec!["cargo-nextest".into()],
+            ..Fake::default()
+        },
+        2,
+    );
+    assert!(nm(&verdicts(&rows)["member-audits"]).is_some(), "not measured, never passed");
+    assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
+    // The positive control: with every gate green the row passes, so the two verdicts above come from the audit and not from the harness.
+    let rows = run_all(&planned, &Fake::default(), 2);
+    assert!(passed(&verdicts(&rows)["member-audits"]));
+}
+
 #[test]
 fn a_unreadable_conformance_line_makes_the_check_broken_not_passed() {
     let mut f = facts();
@@ -298,6 +416,8 @@ fn a_unreadable_conformance_line_makes_the_check_broken_not_passed() {
 #[derive(Default)]
 struct Fake {
     no_docker: bool,
+    no_image: bool,
+    probe_broken: bool,
     no_tools: Vec<String>,
     fail: Vec<String>,
     unstartable: Vec<String>,
@@ -318,6 +438,16 @@ impl Exec for Fake {
     }
     fn docker_up(&self) -> bool {
         !self.no_docker
+    }
+    fn ci_image(&self) -> super::linux_inputs::ImageProbe {
+        use super::linux_inputs::ImageProbe;
+        if self.probe_broken {
+            ImageProbe::Broken("exit 2".into())
+        } else if self.no_image {
+            ImageProbe::Missing
+        } else {
+            ImageProbe::Ready
+        }
     }
     fn run(&self, g: &Gate, limits: Limits) -> Result<Done, String> {
         self.limits.lock().unwrap().push((g.id.clone(), limits));
@@ -699,8 +829,7 @@ fn the_table_names_what_ci_runs_that_this_gate_does_not() {
         "cargo deny outside Pitwall",
         "wiki lint",
         "TypeScript",
-        "Linux Clippy of the apps",
-        "Linux Clippy of the shared crates",
+        "Linux Clippy of the apps' Tauri crates",
         "reached only through dependencies",
     ] {
         assert!(report.text.contains(what), "{what} missing:\n{}", report.text);
@@ -759,7 +888,7 @@ fn several_pushed_ranges_are_linted_each() {
 }
 
 #[test]
-fn only_workspaces_with_a_changed_file_of_their_own_are_linted_and_the_linux_clippy_is_opt_in() {
+fn only_workspaces_with_a_changed_file_of_their_own_are_linted() {
     let planned = plan_gates(&plan(), &change(&["crates/paddock-proc/src/lib.rs"]), &facts());
     let got = ids(&planned);
     for want in [
@@ -800,16 +929,162 @@ fn only_workspaces_with_a_changed_file_of_their_own_are_linted_and_the_linux_cli
         ],
     );
     assert_eq!(own.into_iter().collect::<Vec<_>>(), ["apps/debrief", "apps/dyno"]);
-    // Off by default: the Linux Clippy is a skipped row that says why, never a pass.
-    let mut f = facts();
-    f.linux = false;
-    let planned = plan_gates(&plan(), &change(&["crates/paddock-proc/src/lib.rs"]), &f);
-    assert!(!ids(&planned).contains(&"clippy-linux crates".to_string()));
-    assert!(
-        planned
-            .iter()
-            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "clippy-linux crates" && reason.contains("CI covers it")))
+}
+
+fn linux_row(files: &[&str], f: &Facts) -> Planned {
+    plan_gates(&plan(), &change(files), f)
+        .into_iter()
+        .find(|p| match p {
+            Planned::Run(g) => g.id.starts_with("clippy-linux"),
+            Planned::Skip { id, .. } | Planned::NotMeasured { id, .. } | Planned::Broken { id, .. } => id.starts_with("clippy-linux"),
+        })
+        .expect("the plan always has a Linux Clippy row")
+}
+
+#[test]
+fn the_linux_clippy_runs_for_every_touched_workspace_and_names_what_it_leaves_out() {
+    let Planned::Run(g) = linux_row(&["crates/paddock-proc/src/lib.rs"], &facts()) else {
+        panic!("a touched workspace gets the row")
+    };
+    assert_eq!(g.id, "clippy-linux crates");
+    // An app too, whatever its sources say: the row does not guess from a text scan. Its Tauri crate is named in the row.
+    let Planned::Run(g) = linux_row(&["apps/pitwall/src/a.rs"], &facts()) else {
+        panic!("an app workspace gets the row")
+    };
+    assert_eq!(g.id, "clippy-linux apps/pitwall (left out: pitwall-app)");
+    assert_eq!(
+        g.workspaces,
+        ["apps/pitwall"],
+        "the workspaces are carried, not parsed back from the id"
     );
+    assert!(
+        !g.id.contains(','),
+        "no comma in an id: --accept-not-measured lists are comma-separated"
+    );
+    // Documentation alone reaches no workspace.
+    assert!(matches!(linux_row(&["docs/x.md"], &facts()), Planned::Skip { .. }));
+    // Cargo could not say what to leave out: the row is broken (ER-45), never a pass or a guess.
+    let mut f = facts();
+    f.left_out
+        .insert("apps/pitwall".into(), Err("cargo metadata for apps/pitwall failed: x".into()));
+    assert!(matches!(linux_row(&["apps/pitwall/src/a.rs"], &f), Planned::Broken { cause, .. } if cause.contains("cargo metadata")));
+}
+
+#[test]
+fn a_passing_linux_clippy_names_the_crates_it_never_linted() {
+    let planned = plan_gates(&plan(), &change(&["apps/dyno/src/a.rs"]), &facts());
+    let report = render("h", &run_all(&planned, &Fake::default(), 3));
+    assert!(
+        report.text.contains("clippy-linux apps/dyno (left out: dyno-app)"),
+        "a green row must not claim the Tauri crate: {}",
+        report.text
+    );
+    assert!(
+        report.text.contains("Linux Clippy of the apps' Tauri crates") && report.text.contains("CI's Linux legs lint them"),
+        "{}",
+        report.text
+    );
+}
+
+#[test]
+fn one_container_run_covers_every_touched_workspace_and_a_failing_one_fails_the_row_not_the_next() {
+    let Planned::Run(g) = linux_row(&["crates/a/src/lib.rs", "apps/dyno/src/a.rs"], &facts()) else {
+        panic!("row")
+    };
+    assert_eq!(g.id, "clippy-linux apps/dyno (left out: dyno-app) + crates");
+    assert_eq!(
+        g.args.iter().filter(|a| a.as_str() == "tools/linux-container.sh").count(),
+        1,
+        "one container run"
+    );
+    assert!(g.heavy, "through the heavy queue and the load gate");
+    // The real script, with a stub rustc and cargo on PATH: each workspace gets its own folder in the version's target folder,
+    // the left-out crate is excluded, a failing workspace does not hide the next, and the exit code is the worst.
+    let dir = tempfile::tempdir().unwrap();
+    for ws in ["crates", "apps/dyno"] {
+        std::fs::create_dir_all(dir.path().join(ws)).unwrap();
+    }
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let log = dir.path().join("calls.log");
+    let stub = format!(
+        "#!/bin/sh\necho \"$PWD|$CARGO_TARGET_DIR|$*\" >> '{}'\ncase \"$PWD\" in */apps/dyno) [ \"$1\" = clippy ] && [ \"$2\" = --version ] || exit 1;; esac\nexit 0\n",
+        log.display()
+    );
+    for tool in ["cargo", "rustc"] {
+        let p = bin.join(tool);
+        std::fs::write(&p, &stub).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    let script = g.args.last().unwrap();
+    let mut cmd = paddock_proc::command("sh");
+    cmd.args(["-c", script])
+        .current_dir(dir.path())
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
+    let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(30))).unwrap();
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        matches!(out.outcome, paddock_proc::Outcome::Exited(s) if s.code() == Some(1)),
+        "worst exit wins: {calls}"
+    );
+    let lines: Vec<&str> = calls.lines().filter(|l| l.contains("|/target/")).collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "both workspaces ran, the failing one did not stop the next: {calls}"
+    );
+    assert!(
+        lines[0].ends_with("|/target/v7/apps-dyno|clippy --workspace --exclude dyno-app --all-targets --locked -- -D warnings"),
+        "{}",
+        lines[0]
+    );
+    assert!(
+        lines[1].ends_with("|/target/v7/crates|clippy --workspace --all-targets --all-features --locked -- -D warnings"),
+        "{}",
+        lines[1]
+    );
+}
+
+#[test]
+fn the_printed_rerun_can_be_pasted() {
+    let Planned::Run(g) = linux_row(&["crates/a/src/lib.rs"], &facts()) else {
+        panic!("row")
+    };
+    let line = g.rerun();
+    assert!(
+        line.contains("-- sh -c 'rustc --version && cargo clippy --version || exit 1;"),
+        "the script is one quoted word: {line}"
+    );
+    assert_eq!(super::gates::shell_quote("a b"), "'a b'");
+    assert_eq!(super::gates::shell_quote("it's"), "'it'\\''s'");
+    assert_eq!(super::gates::shell_quote("plain-1.2/x"), "plain-1.2/x");
+}
+
+#[test]
+fn the_tauri_crates_are_the_packages_with_a_writing_build_dependency() {
+    use super::linux_inputs::{ci_version, split_crates};
+    let json = r#"{"packages":[
+        {"name":"dyno-app","dependencies":[{"name":"tauri-build","kind":"build"},{"name":"serde","kind":null}]},
+        {"name":"pitwall-app","dependencies":[{"name":"paddock-build","kind":"build"}]},
+        {"name":"dyno-core","dependencies":[{"name":"serde","kind":null}]},
+        {"name":"dev-only","dependencies":[{"name":"tauri-build","kind":"dev"}]},
+        {"name":"in-src-tauri-but-no-build-script","dependencies":[]}]}"#;
+    let split = split_crates(json).unwrap();
+    assert_eq!(split.left_out, ["dyno-app", "pitwall-app"]);
+    assert_eq!(split.lintable, 3, "the other packages stay lintable");
+    assert!(split_crates("{}").is_err() && split_crates("x").is_err());
+    // A workspace whose only package is a Tauri crate (apps/workbench-demo/src-tauri) has nothing left for cargo to compile.
+    let only = r#"{"packages":[{"name":"workbench-demo-app","dependencies":[{"name":"tauri-build","kind":"build"}]}]}"#;
+    assert_eq!(split_crates(only).unwrap().lintable, 0);
+    let d = tempfile::tempdir().unwrap();
+    assert!(ci_version(d.path()).is_err());
+    std::fs::create_dir_all(d.path().join("ci-image")).unwrap();
+    std::fs::write(d.path().join("ci-image/VERSION"), "7\n").unwrap();
+    assert_eq!(ci_version(d.path()).unwrap(), "7");
 }
 
 #[test]
@@ -1066,7 +1341,7 @@ mod known_commit {
             dry_run: false,
             files: vec![],
             refs_from_stdin: true,
-            linux: false,
+            member_gate: false,
             accept_not_measured: vec![],
         }
     }
@@ -1681,7 +1956,7 @@ mod base_choice {
             dry_run: true,
             files: vec![],
             refs_from_stdin: true,
-            linux: false,
+            member_gate: false,
             accept_not_measured: vec![],
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
@@ -2106,6 +2381,7 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
         need: Need::Nothing,
         rank,
         next: "fix it".into(),
+        workspaces: Vec::new(),
     })
 }
 
@@ -2530,4 +2806,164 @@ fn shape_train_on_the_remote_through_a_sibling_with_a_non_ascii_path() {
             ..NONE
         },
     );
+}
+
+/// A cold build that runs out of the push budget names `./dev check --warm-linux <workspaces>` as the next step (not a finding, not a pass).
+#[test]
+fn a_cold_linux_clippy_cut_short_names_the_warm_command() {
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
+    let fake = Fake {
+        cut_short: vec!["clippy-linux crates".into()],
+        ..Fake::default()
+    };
+    let v = verdicts(&run_all(&planned, &fake, 3));
+    let (_, next) = nm(&v["clippy-linux crates"]).expect("not measured");
+    assert!(
+        next.contains("./dev check --warm-linux crates") && next.contains("kept volume"),
+        "{next}"
+    );
+}
+
+#[test]
+fn warm_linux_runs_the_push_rows_own_command_once_per_workspace() {
+    use super::warm::{runs, targets};
+    let rows = runs(&["crates".to_string(), "apps/dyno".to_string()], "7", &|ws| {
+        Ok(if ws == "crates" {
+            crates_of(&[], 2)
+        } else {
+            crates_of(&["dyno-app"], 1)
+        })
+    })
+    .unwrap()
+    .into_iter()
+    .map(|(_, g)| g.expect("both have crates to lint"))
+    .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 2, "one container run per workspace");
+    let Planned::Run(row) = linux_row(&["crates/a.rs"], &facts()) else {
+        panic!("row")
+    };
+    assert_eq!(rows[0].args, row.args, "what it warms is what the push row reuses");
+    assert_eq!(rows[0].program, row.program);
+    assert!(rows[1].id.contains("left out: dyno-app"), "{}", rows[1].id);
+    assert!(runs(&["x".to_string()], "7", &|_| Err("cargo metadata for x failed".into())).is_err());
+    // Named workspaces must be Cargo workspaces; none named means every one.
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("b")).unwrap();
+    std::fs::write(d.path().join("b/Cargo.toml"), "[workspace]\n").unwrap();
+    let all = ["a".to_string(), "b".to_string()];
+    assert_eq!(targets(d.path(), &[], &all).unwrap(), ["a", "b"]);
+    assert_eq!(targets(d.path(), &["b/".to_string()], &all).unwrap(), ["b"]);
+    assert!(targets(d.path(), &["nope".to_string()], &all).is_err());
+}
+
+/// The local CI image is built by `./dev check --warm-linux` with its own bound, never under the push budget: a missing image is
+/// "not measured" with that command as the next step, and the container is never started.
+#[test]
+fn a_missing_local_ci_image_is_not_measured_and_names_warm_linux() {
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
+    let fake = Fake {
+        no_image: true,
+        ..Fake::default()
+    };
+    let rows = run_all(&planned, &fake, 3);
+    let v = verdicts(&rows);
+    let (reason, next) = nm(&v["clippy-linux crates"]).expect("not measured");
+    assert!(reason.contains("local CI image missing"), "{reason}");
+    assert!(
+        next.contains("./dev check --warm-linux") && next.contains("never started under the push budget"),
+        "{next}"
+    );
+    assert!(
+        !fake.ran.lock().unwrap().iter().any(|r| r.starts_with("clippy-linux")),
+        "no build under the push budget"
+    );
+}
+
+/// A row with several workspaces has a full id with no comma, so the accept list (comma-separated) can name it.
+#[test]
+fn a_multi_workspace_linux_row_can_be_accepted_by_its_id() {
+    let state = tempfile::tempdir().unwrap();
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs", "apps/dyno/src/a.rs"]), &facts());
+    let fake = Fake {
+        no_docker: true,
+        ..Fake::default()
+    };
+    let mut rows = run_all(&planned, &fake, 3);
+    let id = "clippy-linux apps/dyno (left out: dyno-app) + crates";
+    accept_not_measured(&mut rows, &[id.to_string()], state.path());
+    let report = render("h", &rows);
+    assert!(report.text.contains(&format!("ACCEPTED      {id}")), "{}", report.text);
+    assert_eq!(
+        super::accepted_ids(&["x".into()], &[("PADDOCK_ACCEPT_NOT_MEASURED".to_string(), id.to_string())].into()),
+        ["x", id]
+    );
+}
+
+/// ER-33: a probe that says neither "built" (0) nor "not built" (3) is broken, never read as one of them.
+#[test]
+fn an_image_probe_that_neither_succeeds_nor_says_missing_is_broken_not_measured() {
+    use super::linux_inputs::{ImageProbe, image_probe};
+    assert_eq!(image_probe(Some(0)), ImageProbe::Ready);
+    assert_eq!(image_probe(Some(3)), ImageProbe::Missing);
+    for code in [Some(1), Some(2), Some(127), Some(137), None] {
+        assert!(matches!(image_probe(code), ImageProbe::Broken(_)), "{code:?}");
+    }
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
+    let fake = Fake {
+        probe_broken: true,
+        ..Fake::default()
+    };
+    let rows = run_all(&planned, &fake, 3);
+    let v = verdicts(&rows);
+    let (reason, next) = nm(&v["clippy-linux crates"]).expect("not measured");
+    assert!(reason.contains("image probe broken"), "{reason}");
+    assert!(next.contains("--image-ready") && next.contains("broken"), "{next}");
+    assert!(
+        !fake.ran.lock().unwrap().iter().any(|r| r.starts_with("clippy-linux")),
+        "nothing started"
+    );
+}
+
+/// A workspace whose only package is a Tauri crate (apps/workbench-demo/src-tauri) leaves nothing for `cargo clippy --workspace
+/// --exclude ..` to compile: cargo stops with "no packages to compile" (the integrator's `--warm-linux`, train 14). The row skips
+/// it and says so; what is left of the other workspaces still runs.
+#[test]
+fn a_workspace_with_only_tauri_crates_is_skipped_and_named_not_linted() {
+    let mut f = facts();
+    let mut plan = plan();
+    plan["packages"]["apps/demo/src-tauri"] = json!(["demo-app"]);
+    let linux_row = |files: &[&str], f: &Facts| {
+        plan_gates(&plan, &change(files), f)
+            .into_iter()
+            .find(|p| {
+                matches!(p, Planned::Run(g) if g.id.starts_with("clippy-linux"))
+                    || matches!(p, Planned::Skip { id, .. } if id.starts_with("clippy-linux"))
+            })
+            .expect("a Linux Clippy row")
+    };
+    f.left_out.insert("apps/demo/src-tauri".into(), Ok(crates_of(&["demo-app"], 0)));
+    // Alone: the row is a skip that names the workspace and why.
+    let Planned::Skip { id, reason } = linux_row(&["apps/demo/src-tauri/src/a.rs"], &f) else {
+        panic!("a workspace with nothing to lint is skipped")
+    };
+    assert!(id.starts_with("clippy-linux") && id.contains("apps/demo/src-tauri"), "{id}");
+    assert!(reason.contains("only Tauri crates") && reason.contains("demo-app"), "{reason}");
+    // Beside a lintable one: that one runs, and the id names the skipped workspace.
+    let Planned::Run(g) = linux_row(&["crates/a/src/lib.rs", "apps/demo/src-tauri/src/a.rs"], &f) else {
+        panic!("the lintable workspace still runs")
+    };
+    assert!(
+        g.id.contains("apps/demo/src-tauri (skipped: only Tauri crates: demo-app)"),
+        "{}",
+        g.id
+    );
+    assert!(
+        g.args.join(" ").contains("cd crates") && !g.args.join(" ").contains("cd apps/demo/src-tauri"),
+        "{:?}",
+        g.args
+    );
+    assert_eq!(g.workspaces, ["crates"]);
+    // `--warm-linux` skips it too.
+    let rows = super::warm::runs(&["apps/demo/src-tauri".to_string()], "7", &|_| Ok(crates_of(&["demo-app"], 0))).unwrap();
+    assert!(rows[0].1.is_none());
 }
