@@ -5,7 +5,6 @@
 #![cfg(windows)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use paddock_testkit::TestCommand;
 use std::path::Path;
 use std::process::Output;
 
