@@ -406,7 +406,7 @@ mod tests {
         assert!(runs(None, &d).unwrap_err().contains("save the schedules first"));
         save_doc(None, &AgentConfigFile::starter(&d.output.to_string_lossy()), false, &d).unwrap();
         assert!(runs(None, &d).unwrap().runs.is_empty());
-        let now = chrono::Utc::now();
+        let now = jiff::Timestamp::now();
         let (id, dir) = create_run_dir(&d.output, "nightly", now).unwrap();
         write_manifest(&dir, &RunManifest::start(&id, "nightly", RunReason::Manual, now)).unwrap();
         let listing = runs(None, &d).unwrap();

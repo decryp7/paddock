@@ -12,7 +12,7 @@ use crate::activity::Breadcrumb;
 use crate::{err, CmdResult};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
-use chrono::{SecondsFormat, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::{BuildHasher, Hasher};
@@ -138,7 +138,9 @@ pub fn is_valid_id(id: &str) -> bool {
 
 fn new_id() -> String {
     let random = std::collections::hash_map::RandomState::new().build_hasher().finish();
-    format!("{}-{:08x}", Utc::now().format("%Y%m%dT%H%M%S%3f"), random as u32)
+    let ms = debrief_core::time::now_ms();
+    let stamp = debrief_core::time::file_stamp(ms, false).unwrap_or_default().replace('-', "T");
+    format!("{stamp}{:03}-{:08x}", ms.rem_euclid(1000), random as u32)
 }
 
 /// What the UI says about the error (untrusted: lengths are capped when stored).
@@ -308,7 +310,7 @@ impl SnapshotStore {
         let sidecar = Sidecar {
             version: 1,
             id: id.clone(),
-            created_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+            created_at: debrief_core::time::rfc3339_utc(Timestamp::now(), debrief_core::time::Fraction::Millis),
             reason: truncate(&ctx.reason, MAX_REASON),
             message: truncate(&ctx.message, MAX_MESSAGE),
             stack: ctx.stack.as_deref().map(|s| truncate(s, MAX_STACK)),
@@ -412,18 +414,18 @@ impl SnapshotStore {
 
     /// Applies the retention limits now.
     pub fn prune(&self) {
-        self.prune_at(Utc::now());
+        self.prune_at(Timestamp::now());
     }
 
     /// Deletes, oldest first, whatever exceeds the age, count or size limit. The newest snapshot is kept
     /// unless it is itself older than the age limit.
-    pub fn prune_at(&self, now: chrono::DateTime<Utc>) {
+    pub fn prune_at(&self, now: Timestamp) {
         let all = self.list();
         let too_old = |info: &SnapshotInfo| {
             self.limits.max_age.is_some_and(|max| {
-                chrono::DateTime::parse_from_rfc3339(&info.created_at)
-                    .ok()
-                    .and_then(|t| (now - t.with_timezone(&Utc)).to_std().ok())
+                debrief_core::strptime::parse_rfc3339_ms(&info.created_at)
+                    .and_then(|ms| Timestamp::from_millisecond(ms).ok())
+                    .and_then(|t| std::time::Duration::try_from(now.duration_since(t)).ok())
                     .is_some_and(|age| age > max)
             })
         };
@@ -793,6 +795,11 @@ mod tests {
         }
     }
 
+    /// Now plus whole days.
+    fn day_later(days: i64) -> Timestamp {
+        Timestamp::now().checked_add(jiff::SignedDuration::from_hours(24 * days)).unwrap()
+    }
+
     fn store_in(d: &Path, limits: Limits) -> SnapshotStore {
         SnapshotStore::new(d.join("snapshots"), Some(d.join("debrief.log")), limits)
     }
@@ -1127,10 +1134,10 @@ mod tests {
         let store = store_in(&d, limits);
         let a = store.save(ImageFormat::Png, &png(1), &ctx("x"), &env()).unwrap();
         let b = store.save(ImageFormat::Png, &png(2), &ctx("y"), &env()).unwrap();
-        store.prune_at(Utc::now() + chrono::Duration::days(1));
+        store.prune_at(day_later(1));
         assert_eq!(store.list().len(), 2);
         // Three days later both are past the limit, even the newest.
-        store.prune_at(Utc::now() + chrono::Duration::days(3));
+        store.prune_at(day_later(3));
         assert!(store.list().is_empty(), "{a} {b}");
         // 0 means no age limit.
         let forever = Limits::from(&crate::diagnostics::SnapshotLimits {
@@ -1140,7 +1147,7 @@ mod tests {
         assert_eq!(forever.max_age, None);
         let store = store_in(&d, forever);
         store.save(ImageFormat::Png, &png(1), &ctx("x"), &env()).unwrap();
-        store.prune_at(Utc::now() + chrono::Duration::days(3650));
+        store.prune_at(day_later(3650));
         assert_eq!(store.list().len(), 1);
         // Limits convert from the shared settings: count and megabytes.
         let l = Limits::from(&crate::diagnostics::SnapshotLimits {

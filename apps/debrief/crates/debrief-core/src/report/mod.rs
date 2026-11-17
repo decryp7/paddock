@@ -355,9 +355,8 @@ pub trait ReportRenderer: Send + Sync {
 
 /// UTC timestamp as `2026-10-14 10:00:00.123Z` (reports are read anywhere).
 pub fn format_ts(ts: Option<i64>) -> String {
-    use chrono::TimeZone;
-    ts.and_then(|ms| chrono::Utc.timestamp_millis_opt(ms).single())
-        .map(|t| t.format("%Y-%m-%d %H:%M:%S%.3fZ").to_string())
+    ts.and_then(|ms| debrief_plugin_api::time::utc_text(ms, true))
+        .map(|t| format!("{t}Z"))
         .unwrap_or_else(|| "—".into())
 }
 

@@ -75,10 +75,9 @@ pub fn video_time(ms: u64) -> String {
 }
 
 /// A moment (epoch ms) as the `YYYY-MM-DD HH:MM:SS` + `+00:00` pair an image's time evidence takes, so "find related
-/// logs" for a frame searches around the frame's aligned moment. `None` for a moment chrono cannot show.
+/// logs" for a frame searches around the frame's aligned moment. `None` for a moment outside years 0..=9999.
 pub fn utc_stamp(epoch_ms: i64) -> Option<(String, String)> {
-    let t = chrono::DateTime::from_timestamp_millis(epoch_ms)?;
-    Some((t.format("%Y-%m-%d %H:%M:%S").to_string(), "+00:00".to_string()))
+    Some((debrief_core::time::utc_text(epoch_ms, false)?, "+00:00".to_string()))
 }
 
 /// The question for one frame.

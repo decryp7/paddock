@@ -65,7 +65,7 @@ struct Planned {
     size: u64,
     plan: FilePlan,
     profile_ctx: (std::sync::Arc<crate::profile::CompiledProfile>, crate::ports::ParserRef),
-    file_date: Option<chrono::NaiveDate>,
+    file_date: Option<jiff::civil::Date>,
 }
 
 /// Why `plan` cannot be read from the middle, if it cannot.

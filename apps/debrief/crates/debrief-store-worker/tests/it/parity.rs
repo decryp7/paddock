@@ -359,10 +359,7 @@ fn live_session<S: debrief_core::ports::Store>(s: &S, logs: &std::path::Path) ->
     let clef = |host: &str, n: i64, skew: i64| {
         format!("{{\"@t\":\"{}\",\"@m\":\"{host} {n}\",\"CorrelationId\":\"c{n}\"}}\n", {
             let ms = 1_791_972_000_000 + n * 7_000 + skew;
-            chrono::DateTime::from_timestamp_millis(ms)
-                .unwrap()
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string()
+            debrief_plugin_api::time::rfc3339_utc_ms(ms, debrief_plugin_api::time::Fraction::Millis).unwrap()
         })
     };
     let mut out = Vec::new();
@@ -428,10 +425,7 @@ fn clock_skew_and_live_tail_over_the_worker_answer_like_the_store() {
             let text: String = (0..8i64)
                 .map(|n| {
                     let ms = 1_791_972_000_000 + n * 7_000 + skew;
-                    let t = chrono::DateTime::from_timestamp_millis(ms)
-                        .unwrap()
-                        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                        .to_string();
+                    let t = debrief_plugin_api::time::rfc3339_utc_ms(ms, debrief_plugin_api::time::Fraction::Millis).unwrap();
                     format!("{{\"@t\":\"{t}\",\"@m\":\"{host} {n}\",\"CorrelationId\":\"c{n}\"}}\n")
                 })
                 .collect();

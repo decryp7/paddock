@@ -1,4 +1,3 @@
-use chrono::{Local, TimeZone};
 use debrief_collect::*;
 use std::cell::RefCell;
 use std::fs::{self, File};
@@ -88,7 +87,10 @@ fn collector<'a>(plan: CollectPlan, r: &'a dyn CommandRunner, p: &'a dyn Progres
     let mut c = Collector::new(plan, r, p);
     c.platform = platform;
     c.host = "SRV-01".into();
-    c.now = Local.with_ymd_and_hms(2026, 3, 4, 5, 6, 7).unwrap();
+    c.now = jiff::civil::date(2026, 3, 4)
+        .at(5, 6, 7, 0)
+        .to_zoned(jiff::tz::TimeZone::system())
+        .unwrap();
     c
 }
 

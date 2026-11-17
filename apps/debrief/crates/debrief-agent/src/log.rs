@@ -54,7 +54,7 @@ impl AgentLog {
             return;
         }
         let mut r = Record::new(0);
-        r.ts = Some(chrono::Utc::now().timestamp_millis());
+        r.ts = Some(debrief_core::time::now_ms());
         r.level = level;
         r.message = message.to_string();
         r.fields.insert("SourceContext".into(), Value::from("Debrief.Agent"));

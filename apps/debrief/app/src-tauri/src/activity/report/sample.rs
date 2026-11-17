@@ -12,8 +12,8 @@
 
 use super::{breadcrumbs_from_log, write, PluginLine, ReportInputs};
 use crate::snapshots::{Limits, LogRef, Sidecar, SnapshotStore};
-use chrono::{TimeZone, Utc};
 use debrief_ipc::child_log::{ChildEvent, ChildKind, ChildLog, ChildLogSpec, Exit};
+use jiff::Timestamp;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -299,7 +299,7 @@ pub fn build(work: &Path) -> PathBuf {
         breadcrumbs: crumbs,
         live_children: live,
         previous_crash: Some(false),
-        created_at: Utc.with_ymd_and_hms(2026, 10, 14, 13, 6, 0).unwrap(),
+        created_at: Timestamp::from_millisecond(debrief_core::time::utc_epoch_ms(2026, 10, 14, 13, 6, 0, 0).unwrap()).unwrap(),
         system_override: Some(system_info()),
         include_screenshots: true,
         // Fixed, so the sample does not depend on who builds it.

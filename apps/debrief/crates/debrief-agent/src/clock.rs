@@ -1,14 +1,14 @@
 //! Time as a dependency, so schedules, triggers and the service loop are
 //! testable with a fixed clock.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// Contract: `now` is the wall clock; `sleep` waits up to `d` and returns
 /// early once `stop` is set.
 pub trait Clock: Send + Sync {
-    fn now(&self) -> DateTime<Utc>;
+    fn now(&self) -> Timestamp;
     fn sleep(&self, d: Duration, stop: &AtomicBool);
 }
 
@@ -16,8 +16,8 @@ pub trait Clock: Send + Sync {
 pub struct SystemClock;
 
 impl Clock for SystemClock {
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
+    fn now(&self) -> Timestamp {
+        Timestamp::now()
     }
 
     fn sleep(&self, d: Duration, stop: &AtomicBool) {
@@ -33,8 +33,8 @@ impl Clock for SystemClock {
 }
 
 /// Milliseconds since the Unix epoch.
-pub fn ms(t: DateTime<Utc>) -> i64 {
-    t.timestamp_millis()
+pub fn ms(t: Timestamp) -> i64 {
+    t.as_millisecond()
 }
 
 #[cfg(test)]

@@ -171,7 +171,7 @@ fn uptime_events_count_from_the_boot_time() {
     let v = run(&parser(regex, "timestamp_formats = ['uptime']"), content, &facts, &[]);
     assert!(!v.timestamps.accepted, "1970 without a boot time");
     let boot = timestamps::uptime_boot(&["12.500000".to_string()], modified).unwrap();
-    let boot_time = chrono::DateTime::from_timestamp_millis(boot).unwrap().to_rfc3339();
+    let boot_time = debrief_plugin_api::time::rfc3339_utc_ms(boot, debrief_plugin_api::time::Fraction::Millis).unwrap();
     let v = run(
         &parser(regex, &format!("timestamp_formats = ['uptime']\nboot_time = '{boot_time}'")),
         content,

@@ -541,7 +541,7 @@ mod tests {
 
     #[test]
     fn the_wall_clock_is_the_current_time() {
-        let before = chrono::Utc::now().timestamp_millis();
+        let before = debrief_plugin_api::time::now_ms();
         let now = wall_ms();
         assert!(now >= before && now - before < 5_000);
     }

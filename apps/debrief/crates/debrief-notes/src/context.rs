@@ -4,7 +4,7 @@
 //! more project knowledge file, so it gets the knowledge preamble and budgets (ADR 0029).
 
 use crate::{Anchor, Note};
-use chrono::{DateTime, SecondsFormat, Utc};
+use debrief_plugin_api::time::{rfc3339_utc_ms, Fraction};
 
 /// Most bytes of notes in one AI request.
 pub const MAX_CONTEXT_BYTES: usize = 16 * 1024;
@@ -36,7 +36,7 @@ impl Focus {
 }
 
 fn time(ms: i64) -> String {
-    DateTime::<Utc>::from_timestamp_millis(ms).map_or_else(|| format!("{ms} ms"), |t| t.to_rfc3339_opts(SecondsFormat::Millis, true))
+    rfc3339_utc_ms(ms, Fraction::Millis).unwrap_or_else(|| format!("{ms} ms"))
 }
 
 /// What a note is attached to, in a few words.

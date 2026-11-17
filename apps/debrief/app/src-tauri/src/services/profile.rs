@@ -72,11 +72,18 @@ impl ProfileFiles {
             return;
         }
         // Two saves within one millisecond must not overwrite each other: take the next free stamp.
-        let mut at = chrono::Utc::now();
-        let mut target = dir.join(format!("{}.debriefprofile.toml", at.format("%Y%m%d-%H%M%S%3f")));
+        let stamp = |ms: i64| {
+            format!(
+                "{}{:03}.debriefprofile.toml",
+                debrief_core::time::file_stamp(ms, false).unwrap_or_default(),
+                ms.rem_euclid(1000)
+            )
+        };
+        let mut at = debrief_core::time::now_ms();
+        let mut target = dir.join(stamp(at));
         while target.exists() {
-            at += chrono::TimeDelta::milliseconds(1);
-            target = dir.join(format!("{}.debriefprofile.toml", at.format("%Y%m%d-%H%M%S%3f")));
+            at += 1;
+            target = dir.join(stamp(at));
         }
         let _ = std::fs::copy(active, target);
         let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
@@ -141,8 +148,7 @@ impl ProfileFiles {
 /// Epoch ms of a history stamp (`YYYYMMDD-HHMMSSmmm`, UTC); `None` when it is not one.
 pub fn stamp_ms(stamp: &str) -> Option<i64> {
     let (date_time, millis) = stamp.split_at_checked(stamp.len().checked_sub(3)?)?;
-    let t = chrono::NaiveDateTime::parse_from_str(date_time, "%Y%m%d-%H%M%S").ok()?;
-    Some(t.and_utc().timestamp_millis() + millis.parse::<i64>().ok()?)
+    Some(debrief_core::strptime::parse_utc_ms(date_time, "%Y%m%d-%H%M%S")? + millis.parse::<i64>().ok()?)
 }
 
 #[cfg(test)]

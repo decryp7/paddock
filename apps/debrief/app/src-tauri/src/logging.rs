@@ -17,7 +17,9 @@
 
 use crate::activity::ActivityLogger;
 use crate::diagnostics::{LogLevel, LogLimits, LOG_NAME};
-use chrono::{NaiveDate, Utc};
+use jiff::civil::Date;
+use jiff::tz::TimeZone;
+use jiff::Timestamp;
 use serde_json::{Map, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -57,11 +59,16 @@ pub fn set_level(level: LogLevel) {
 
 /// The daily file Debrief writes to today in `dir`.
 pub fn active_log_file(dir: &Path) -> PathBuf {
-    dir.join(file_for(Utc::now().date_naive()))
+    dir.join(file_for(utc_today()))
 }
 
-fn file_for(day: NaiveDate) -> String {
-    format!("{LOG_NAME}.{}.log", day.format("%Y-%m-%d"))
+/// Today's date in UTC (the daily files are named by it).
+fn utc_today() -> Date {
+    Timestamp::now().to_zoned(TimeZone::UTC).date()
+}
+
+fn file_for(day: Date) -> String {
+    format!("{LOG_NAME}.{day}.log")
 }
 
 /// Daily files in `dir`, keeping the current one plus `keep_files` old ones.
@@ -81,7 +88,7 @@ pub trait LineSink: Send + Sync + 'static {
 
 /// Today's bytes so far, against the daily limit.
 struct Budget {
-    day: NaiveDate,
+    day: Date,
     written: u64,
     warned: bool,
 }
@@ -96,7 +103,7 @@ pub struct FileSink {
 impl FileSink {
     pub fn new(dir: &Path, limits: &LogLimits) -> Result<FileSink, tracing_appender::rolling::InitError> {
         let files = rolling_files(dir, limits)?;
-        let day = Utc::now().date_naive();
+        let day = utc_today();
         let written = std::fs::metadata(dir.join(file_for(day))).map(|m| m.len()).unwrap_or(0);
         Ok(FileSink {
             files: Mutex::new(files),
@@ -111,7 +118,7 @@ impl FileSink {
 
     /// Whether a line of `len` bytes at `level` may be written today, and the one-time notice to write
     /// first when the limit was just reached.
-    fn admit(&self, level: log::Level, len: usize, today: NaiveDate) -> (bool, Option<String>) {
+    fn admit(&self, level: log::Level, len: usize, today: Date) -> (bool, Option<String>) {
         let mut b = crate::sync::lock(&self.budget);
         if b.day != today {
             *b = Budget {
@@ -127,7 +134,7 @@ impl FileSink {
         let notice = (!b.warned).then(|| {
             b.warned = true;
             crate::clef::format_event(
-                Utc::now(),
+                Timestamp::now(),
                 log::Level::Warn,
                 "debrief_app_lib::logging",
                 &format!(
@@ -144,7 +151,7 @@ impl FileSink {
 
 impl LineSink for FileSink {
     fn write_line(&self, level: log::Level, line: &str) {
-        let (ok, notice) = self.admit(level, line.len() + 1, Utc::now().date_naive());
+        let (ok, notice) = self.admit(level, line.len() + 1, utc_today());
         let mut files = crate::sync::lock(&self.files);
         // A full disk or a locked file must not take the app down: the line is dropped.
         if let Some(n) = notice {
@@ -271,7 +278,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for ClefLayer {
         let meta = event.metadata();
         let level = log_level(meta.level());
         let line = crate::clef::format_event(
-            Utc::now(),
+            Timestamp::now(),
             level,
             v.target.as_deref().unwrap_or(meta.target()),
             v.message.as_deref().unwrap_or_default(),
@@ -613,7 +620,7 @@ mod tests {
         assert_eq!(text.matches("daily limit of 1 MB").count(), 1, "the notice is written once");
         assert!(text.ends_with("an error\n"));
         // A new day starts a new budget.
-        let tomorrow = Utc::now().date_naive().succ_opt().unwrap();
+        let tomorrow = utc_today().tomorrow().unwrap();
         assert_eq!(sink.admit(log::Level::Info, 10, tomorrow), (true, None));
         assert!(active_log_file(&dir.0)
             .file_name()

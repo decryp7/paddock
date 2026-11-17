@@ -205,7 +205,7 @@ fn import_source<R: Read + Seek>(
     src: NewSource,
     file_kind: FileKind,
     path: &Path,
-    file_date: Option<chrono::NaiveDate>,
+    file_date: Option<jiff::civil::Date>,
     sink: &mut dyn BatchSink,
     split: Option<Split<'_>>,
 ) -> Outcome {

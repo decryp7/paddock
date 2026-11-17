@@ -4,7 +4,8 @@
 //! patterns with an optional seconds field, `@daily`-style aliases, `L`, `W`
 //! and `#`, evaluated in local time or UTC. Everything here is pure.
 
-use chrono::{DateTime, Local, Utc};
+use jiff::tz::TimeZone;
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::time::Duration;
@@ -81,23 +82,23 @@ impl Timer {
 
     /// The first time strictly after `after` when the timer fires, or `None`
     /// when a cron pattern never matches again.
-    pub fn next_after(&self, after: DateTime<Utc>, tz: TimeZoneChoice) -> Option<DateTime<Utc>> {
+    pub fn next_after(&self, after: Timestamp, tz: TimeZoneChoice) -> Option<Timestamp> {
         match self {
-            Timer::Every(d) => Some(after + chrono::Duration::from_std(*d).ok()?),
-            Timer::Cron(c) => match tz {
-                TimeZoneChoice::Utc => c.find_next_occurrence(&after, false).ok(),
-                TimeZoneChoice::Local => c
-                    .find_next_occurrence(&after.with_timezone(&Local), false)
-                    .ok()
-                    .map(|t| t.with_timezone(&Utc)),
-            },
+            Timer::Every(d) => after.checked_add(*d).ok(),
+            Timer::Cron(c) => {
+                let zone = match tz {
+                    TimeZoneChoice::Utc => TimeZone::UTC,
+                    TimeZoneChoice::Local => TimeZone::system(),
+                };
+                c.find_next_occurrence(&after.to_zoned(zone), false).ok().map(|t| t.timestamp())
+            }
         }
     }
 
     /// Whether a timer anchored at `anchor` (the last run, or when the agent
     /// started) is due at `now`. Runs missed while the agent was down are
     /// caught up once, not once per missed slot.
-    pub fn is_due(&self, anchor: DateTime<Utc>, now: DateTime<Utc>, tz: TimeZoneChoice) -> bool {
+    pub fn is_due(&self, anchor: Timestamp, now: Timestamp, tz: TimeZoneChoice) -> bool {
         self.next_after(anchor, tz).is_some_and(|next| next <= now)
     }
 
@@ -132,10 +133,8 @@ mod tests {
             parse_duration(&String::from_utf8_lossy(bytes))
         });
     }
-    use chrono::TimeZone;
-
-    fn at(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(y, mo, d, h, mi, s).unwrap()
+    fn at(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32) -> Timestamp {
+        crate::testing::utc_at(y, mo, d, h, mi, s)
     }
 
     #[test]
@@ -179,7 +178,7 @@ mod tests {
         assert!(!t.describe().is_empty());
         // Local time is converted back to UTC.
         let local = t.next_after(at(2026, 3, 1, 0, 0, 0), TimeZoneChoice::Local).unwrap();
-        assert_eq!(local.with_timezone(&Local).format("%H:%M").to_string(), "02:00");
+        assert_eq!(local.to_zoned(TimeZone::system()).strftime("%H:%M").to_string(), "02:00");
     }
 
     #[test]

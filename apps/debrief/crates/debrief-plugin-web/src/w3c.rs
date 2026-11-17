@@ -3,7 +3,6 @@
 
 use crate::level_for_status;
 use anyhow::Result;
-use chrono::NaiveDateTime;
 use debrief_plugin_api::importer::{ImportCtx, Imported, TextImporter};
 use debrief_plugin_api::model::{auto_value, Record};
 use serde_json::Value;
@@ -101,10 +100,8 @@ fn record(line: u32, columns: &[&str], values: &[&str]) -> Record {
         }
     }
     r.ts = match date_time {
-        "" => NaiveDateTime::parse_from_str(&format!("{date} {time}"), "%Y-%m-%d %H:%M:%S%.f")
-            .ok()
-            .map(|d| d.and_utc().timestamp_millis()),
-        dt => chrono::DateTime::parse_from_rfc3339(dt).ok().map(|d| d.timestamp_millis()),
+        "" => debrief_plugin_api::strptime::parse_utc_ms(&format!("{date} {time}"), "%Y-%m-%d %H:%M:%S%.f"),
+        dt => debrief_plugin_api::strptime::parse_rfc3339_ms(dt),
     };
     let text = |k: &str| r.fields.get(k).map(|v| debrief_plugin_api::model::value_text(v).into_owned());
     let status = r.fields.get("sc-status").and_then(Value::as_i64);

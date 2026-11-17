@@ -557,7 +557,7 @@ fn detachable_profile(profile: &CompiledProfile) -> Profile {
 fn import_owned<T>(
     profile: Profile,
     path: &std::path::Path,
-    file_date: Option<chrono::NaiveDate>,
+    file_date: Option<jiff::civil::Date>,
     import: impl FnOnce(&ImportCtx) -> Result<T>,
 ) -> Result<T> {
     let profile = CompiledProfile::compile(profile)?;

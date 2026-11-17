@@ -404,8 +404,8 @@ fn parser_samples_keep_the_details_of_their_format() {
         .iter()
         .all(|r| r.ts == crash[0].ts && r.fields["Pid"] == 4211 && r.fields["Tag"] == "AndroidRuntime"));
     assert_eq!(crash[8].message, "\t... 12 more");
-    let when = chrono::DateTime::from_timestamp_millis(crash[0].ts.unwrap()).unwrap();
-    assert_eq!(when.format("%m-%d %H:%M:%S%.3f").to_string(), "10-14 10:41:24.460");
+    let when = debrief_plugin_api::time::utc_text(crash[0].ts.unwrap(), true).unwrap();
+    assert_eq!(&when[5..], "10-14 10:41:24.460");
     // logcat's buffer divider and a line cut short are kept with the event before them, never an event of their own.
     assert!(
         logcat[fatal - 1].message.ends_with("\n--------- beginning of crash"),

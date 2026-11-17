@@ -3,7 +3,6 @@
 
 use crate::model::Record;
 use anyhow::Result;
-use chrono::{SecondsFormat, TimeZone, Utc};
 use serde_json::Value;
 use std::io::Write;
 
@@ -29,9 +28,7 @@ pub trait Exporter: Send + Sync {
 }
 
 fn iso(ts: Option<i64>) -> String {
-    ts.and_then(|ms| Utc.timestamp_millis_opt(ms).single())
-        .map(|t| t.to_rfc3339_opts(SecondsFormat::Millis, true))
-        .unwrap_or_default()
+    debrief_plugin_api::clef::iso(ts)
 }
 
 /// CSV with fixed columns; event properties go into one JSON column so no

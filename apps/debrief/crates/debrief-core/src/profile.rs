@@ -484,9 +484,9 @@ impl CompiledProfile {
 
         let mut timestamps = TimestampParser::new(&format.timestamp_formats, &format.assume_timezone, format.day_first.resolve()?)?;
         if !format.boot_time.trim().is_empty() {
-            let boot = chrono::DateTime::parse_from_rfc3339(format.boot_time.trim())
-                .map_err(|e| anyhow!("format.boot_time must be an RFC 3339 time like \"2026-10-14T08:00:00Z\": {e}"))?;
-            timestamps = timestamps.with_boot(boot.timestamp_millis());
+            let boot = debrief_plugin_api::strptime::parse_rfc3339_ms(format.boot_time.trim())
+                .ok_or_else(|| anyhow!("format.boot_time must be an RFC 3339 time like \"2026-10-14T08:00:00Z\""))?;
+            timestamps = timestamps.with_boot(boot);
         }
 
         let mut extractors = Vec::new();

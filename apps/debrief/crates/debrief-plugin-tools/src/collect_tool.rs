@@ -151,10 +151,10 @@ mod tests {
         let first = tool.invoke("collect", args(false), &ctx).unwrap();
         let bundle = first["bundle"].as_str().unwrap().to_string();
         let prefix = &bundle[..bundle.len() - "yyyyMMdd-HHmmss.debriefz".len()];
-        let now = chrono::Local::now();
+        let now = debrief_plugin_api::time::now_ms();
         for s in 0..10 {
-            let at = now + chrono::Duration::seconds(s);
-            let _ = std::fs::write(format!("{prefix}{}.debriefz", at.format("%Y%m%d-%H%M%S")), "mine");
+            let at = debrief_plugin_api::time::file_stamp(now + s * 1000, true).unwrap();
+            let _ = std::fs::write(format!("{prefix}{at}.debriefz"), "mine");
         }
         let refused = format!("{:#}", tool.invoke("collect", args(false), &ctx).unwrap_err());
         assert!(refused.starts_with(prefix) && refused.ends_with(FILE_EXISTS_SUFFIX), "{refused}");

@@ -5,7 +5,6 @@
 use crate::container::{path_fields, Joiner, Stream};
 use crate::first_line;
 use anyhow::Result;
-use chrono::DateTime;
 use debrief_plugin_api::importer::{ImportCtx, Imported, TextImporter, MAX_LINE_LEN};
 use debrief_plugin_api::model::Fields;
 
@@ -62,7 +61,7 @@ fn parse_line(line: &str) -> Option<Line<'_>> {
         return None;
     }
     Some(Line {
-        ts: DateTime::parse_from_rfc3339(time).ok()?.timestamp_millis(),
+        ts: debrief_plugin_api::strptime::parse_rfc3339_ms(time)?,
         stream: Stream::parse(stream)?,
         last,
         text,

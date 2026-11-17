@@ -8,7 +8,6 @@
 
 use crate::common;
 
-use chrono::NaiveDate;
 use debrief_core::model::{Level, Record};
 use debrief_core::{Profile, Workspace};
 use debrief_plugin_api::importer::{ImportCtx, Imported, TextImporter};
@@ -37,7 +36,7 @@ fn import(rel: &str, importer: &dyn TextImporter) -> Imported {
     let content = decode(&bytes).unwrap();
     let ts = TimestampParser::default();
     let mut ctx = ImportCtx::new(Path::new(rel), &ts);
-    ctx.file_date = NaiveDate::from_ymd_opt(2026, 10, 14);
+    ctx.file_date = debrief_plugin_api::time::ymd(2026, 10, 14);
     let head: String = content.chars().take(64 * 1024).collect();
     assert!(importer.sniff(&ctx, &head) > 0, "{rel} is not recognised by {}", importer.id());
     importer.import(&ctx, &content).unwrap()
