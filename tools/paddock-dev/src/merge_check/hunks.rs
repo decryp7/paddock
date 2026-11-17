@@ -90,6 +90,11 @@ pub fn check(cx: &Ctx, index: usize, base: &str, to_result: &[FileDiff]) -> Resu
         let mut excerpts = Vec::new();
         for (range, h, removed) in &hunks {
             if h.len() < MIN_LINES {
+                // A whitespace-only change (the same line, re-indented or with trailing space) is not a fix; its excerpt, trimmed,
+                // would read like the base line. A multi-line reformat is not skipped here: it is judged by the rules above.
+                if removed.len() == 1 && removed[0].trim() == h[0].trim() {
+                    continue;
+                }
                 // The small-hunk rule: the added line is gone and every non-blank line the hunk removed is back in the result.
                 let undone = left.get(h[0].as_str()).is_some_and(|n| *n > 0)
                     && removed
