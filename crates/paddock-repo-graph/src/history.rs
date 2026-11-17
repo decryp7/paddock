@@ -36,6 +36,21 @@ pub fn parse_log(text: &str) -> Vec<Commit> {
         .collect()
 }
 
+/// The variables that select a repository, work tree, index or object store. `git -C <root>` does not override them, so a
+/// reader of `root` removes them from its child: git sets `GIT_DIR` for a hook, and a tool the hook starts that reads another
+/// worktree (a pushed commit's throw-away copy) would otherwise read the pushing worktree.
+#[cfg(feature = "git-history")]
+pub const GIT_REPO_VARS: [&str; 8] = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_COMMON_DIR",
+    "GIT_PREFIX",
+    "GIT_NAMESPACE",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+];
+
 /// `git` through `paddock-proc`, every call bounded by a timeout.
 #[cfg(feature = "git-history")]
 pub struct GitHistory {
@@ -61,9 +76,18 @@ impl GitHistory {
         self
     }
 
-    fn git(&self, args: &[&str]) -> Result<paddock_proc::Output, GraphError> {
+    /// The child of one call: `git -C root args` with no repository-selecting variable of ours.
+    fn command(&self, args: &[&str]) -> std::process::Command {
         let mut cmd = paddock_proc::command(&self.program);
         cmd.arg("-C").arg(&self.root).args(args);
+        for v in GIT_REPO_VARS {
+            cmd.env_remove(v);
+        }
+        cmd
+    }
+
+    fn git(&self, args: &[&str]) -> Result<paddock_proc::Output, GraphError> {
+        let cmd = self.command(args);
         paddock_proc::run_bounded(
             cmd,
             paddock_proc::Limits::new(self.timeout).max_output(1 << 28),
@@ -135,6 +159,27 @@ impl History for GitHistory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Git's hook environment (`GIT_DIR` of the pushing worktree) must not reach a call that names another folder.
+    #[cfg(feature = "git-history")]
+    #[test]
+    fn a_call_removes_every_variable_that_selects_a_repository_and_keeps_the_arguments() {
+        let h = GitHistory::new("/some/worktree", std::time::Duration::from_secs(5));
+        let cmd = h.command(&["ls-files"]);
+        let removed: std::collections::BTreeSet<String> = cmd
+            .get_envs()
+            .filter(|(_, v)| v.is_none())
+            .map(|(k, _)| k.to_string_lossy().into_owned())
+            .collect();
+        let want: std::collections::BTreeSet<String> =
+            GIT_REPO_VARS.iter().map(|s| s.to_string()).collect();
+        assert!(!want.is_empty() && removed == want, "{removed:?}");
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args, ["-C", "/some/worktree", "ls-files"]);
+    }
 
     #[cfg(feature = "git-history")]
     #[test]

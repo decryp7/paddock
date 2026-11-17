@@ -95,6 +95,7 @@ impl<'a> Git<'a> {
             .args(["-c", "core.hooksPath=/dev/null"])
             .args(args);
         crate::child_env::scrub(&mut cmd, parent);
+        crate::git_env::remove_from(&mut cmd);
         cmd
     }
 
