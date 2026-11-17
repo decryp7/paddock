@@ -31,3 +31,14 @@ test('C128: a test module behind cfg(all(unix, test)) or cfg(any(test, ...)) is 
   assert.deepEqual(lines(`fn p() {}\n#[cfg(any(test, feature = "testing"))]\n${body}`, 'crates/a/src/lib.rs'), [5]);
   assert.deepEqual(lines(`fn p() {}\n#[cfg(all(unix, not(windows)))]\n${body}`, 'crates/a/src/lib.rs'), [], 'a cfg without test is production code');
 });
+
+test('C128: by item, in both directions: production code after a test module is not read, a test fn or a second test module is', () => {
+  const site = 'let id = ProcessId::of(s.parse().unwrap());';
+  const prod = `fn p() {\n    ${site}\n}\n`;
+  const testMod = `#[cfg(test)]\nmod tests {\n    fn t() {\n        ${site}\n    }\n}\n`;
+  // Over-flag direction: production code AFTER the test module was read as test code (everything from the module onwards).
+  assert.deepEqual(lines(`${testMod}${prod}`, 'crates/a/src/lib.rs'), [4], 'only the line inside the test module');
+  // Hide direction: a test-only fn and a later test module in the same file are test code too.
+  const helper = `#[cfg(all(unix, test))]\nfn helper() {\n    ${site}\n}\n`;
+  assert.deepEqual(lines(`${prod}${helper}${testMod}`, 'crates/a/src/lib.rs'), [6, 11], 'the production site on line 2 is not read');
+});

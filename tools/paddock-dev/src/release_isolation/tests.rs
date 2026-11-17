@@ -337,7 +337,7 @@ mod path_door {
             "the probe sources are not exported"
         );
         for (name, text) in crate::release_isolation::PROBE_SOURCES {
-            let code = text.split("#[cfg(test)]").next().unwrap();
+            let code = crate::check::lex::rust::production_lines(text).join("\n");
             assert!(
                 !code.contains("winpath::real("),
                 "{name} resolves with winpath::real: use PathOps::real"

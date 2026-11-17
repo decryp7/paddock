@@ -1,4 +1,7 @@
 //! The `./dev` wrapper and `dev self hash` compute one value, in shell and in Rust, from the same inputs.
+//!
+//! Every child these tests start has CARGO_TARGET_DIR and CARGO_BUILD_TARGET_DIR removed (ER-47, a named clearing): the wrapper warns about
+//! them and the toolchain checks fail on that warning, so a test's result would depend on the build folder the agent running it exports.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::input_hash::{Real, compute, is_hashed_var};
 use std::path::{Path, PathBuf};
@@ -92,7 +95,9 @@ impl Fixture {
             .arg("--wrapper-hash")
             .current_dir(self.root().join("tools/paddock-dev/src"))
             .env_remove("RUSTC")
-            .env_remove("CARGO_BUILD_RUSTC");
+            .env_remove("CARGO_BUILD_RUSTC")
+            .env_remove("CARGO_TARGET_DIR")
+            .env_remove("CARGO_BUILD_TARGET_DIR");
         // The hash reads the environment: start from none of the variables it uses, as `rust` does.
         std::env::vars().filter(|(k, _)| is_hashed_var(k)).for_each(|(k, _)| {
             cmd.env_remove(k);
@@ -426,6 +431,8 @@ fn run_wrapper_with_cargo(f: &Fixture, home: &Path, extra_env: &[(&str, String)]
         .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
         .env_remove("RUSTC")
         .env_remove("CARGO_BUILD_RUSTC")
+        .env_remove("CARGO_TARGET_DIR")
+        .env_remove("CARGO_BUILD_TARGET_DIR")
         // `dev` changes its messages and defaults on a CI runner; a test opts in through `extra_env`.
         .env_remove("GITHUB_ACTIONS");
     cmd.envs(extra_env.iter().map(|(k, v)| (*k, v.as_str())));
@@ -624,6 +631,8 @@ fn ensure_toolchain_succeeds_when_the_compiler_runs_after_the_install() {
             .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
             .env_remove("RUSTC")
             .env_remove("CARGO_BUILD_RUSTC")
+            .env_remove("CARGO_TARGET_DIR")
+            .env_remove("CARGO_BUILD_TARGET_DIR")
             .output()
             .unwrap()
     };
@@ -679,6 +688,8 @@ fn install_toolchain(f: &Fixture, shims: &Path, args: &[&str]) -> std::process::
         .env("PATH", format!("{}:{}", shims.display(), std::env::var("PATH").unwrap()))
         .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
         .env_remove("RUSTUP_TOOLCHAIN")
+        .env_remove("CARGO_TARGET_DIR")
+        .env_remove("CARGO_BUILD_TARGET_DIR")
         .output()
         .unwrap()
 }
@@ -729,6 +740,8 @@ fn ensure_toolchain_refuses_a_broken_install_without_uninstalling_it() {
         .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
         .env_remove("RUSTC")
         .env_remove("CARGO_BUILD_RUSTC")
+        .env_remove("CARGO_TARGET_DIR")
+        .env_remove("CARGO_BUILD_TARGET_DIR")
         .output()
         .unwrap();
     let err = String::from_utf8_lossy(&out.stderr);
@@ -863,6 +876,8 @@ fn a_trace_of_the_wrapper_never_prints_what_a_config_holds() {
         .current_dir(f.root())
         .env_remove("RUSTC")
         .env_remove("CARGO_BUILD_RUSTC")
+        .env_remove("CARGO_TARGET_DIR")
+        .env_remove("CARGO_BUILD_TARGET_DIR")
         .envs(env.iter().cloned())
         .env("PADDOCK_DEV_HOME", f.cargo_home.path().join("dev-home"))
         .output()
