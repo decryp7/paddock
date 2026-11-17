@@ -56,6 +56,15 @@ test('C136 fake timers cover the it() block and an enclosing beforeEach, not ano
   assert.deepEqual(liveStarts(usedElsewhere).map((f) => f.line), [6]);
 });
 
+test('C136 a one-line beforeEach hook covers its own describe only; clock: systemMockClock covers nothing', () => {
+  const oneLine = "describe('x', () => {\n  beforeEach(() => vi.useFakeTimers());\n  it('a', () => {});\n});\ndescribe('y', () => {\n  it('b', () => {\n    new MockBackend({ liveMs: 25 });\n  });\n});\n";
+  assert.deepEqual(liveStarts(oneLine).map((f) => f.line), [7]);
+  const inside = "describe('x', () => {\n  beforeEach(() => vi.useFakeTimers());\n  it('a', () => {\n    new MockBackend({ liveMs: 25 });\n  });\n});\n";
+  assert.deepEqual(liveStarts(inside), []);
+  assert.deepEqual(liveStarts("it('a', () => {\n  new MockBackend({ liveMs: 25, clock: systemMockClock });\n});\n").map((f) => f.line), [2]);
+  assert.deepEqual(liveStarts("it('a', () => {\n  new MockBackend({ liveMs: 25, clock: manual });\n});\n"), []);
+});
+
 test('C136 reads literals only: a liveMs held in a constant is not judged', () => {
   assert.deepEqual(liveStarts("const LIVE_MS = 25;\nit('a', () => {\n  new MockBackend({ liveMs: LIVE_MS });\n});\n"), []);
 });

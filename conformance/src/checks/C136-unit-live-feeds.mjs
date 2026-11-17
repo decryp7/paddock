@@ -7,7 +7,7 @@
 // number of lines) have `liveMs: <literal>` below one second, a feed that ticks on the page's own timers (a long `liveMs` never ticks and
 // is not flagged; only literals are judged, a `liveMs` held in a constant is not read). Each call is judged by itself: it is covered when
 // its own options have `clock:` or the shorthand `clock`, or when its `it(` / `test(` block, or a `beforeEach` that encloses it, calls
-// `useFakeTimers`. A mention of `ManualClock` elsewhere in the file (an import) covers nothing. Findings are warnings: report-only until
+// `useFakeTimers`. A mention of `ManualClock` elsewhere in the file (an import) covers nothing, and neither does `clock: systemMockClock` (the page's real timers). Findings are warnings: report-only until
 // its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
 import { warn } from '../finding.mjs';
 
@@ -15,6 +15,7 @@ const SPEC = /^(?:apps|ui)\/.*\.spec\.ts$/;
 const SKIP = /(?:^|\/)(?:node_modules|dist|e2e)\//;
 const FAKES = /\buseFakeTimers\s*\(/;
 const CLOCK_OPTION = /\bclock\b\s*[:,}]/;
+const SYSTEM_CLOCK = /\bclock\s*:\s*systemMockClock\b/;
 const BEFORE_EACH = /^(\s*)beforeEach\s*\(/;
 const BLOCK = /^\s*(?:it|test)(?:\.\w+)*\s*\(/;
 const CALL = /(?:\bMockBackend\b\s*\(|\bsynthetic\s*\()/g;
@@ -41,8 +42,12 @@ function fakedScopes(lines) {
     if (!m) return;
     const indent = m[1].length;
     const closes = (j) => /^\s*\}/.test(lines[j]) && lines[j].length - lines[j].trimStart().length <= indent;
+    // A hook whose parentheses balance on its own line (`beforeEach(() => vi.useFakeTimers());`) is one line long.
+    const open = l.indexOf('(', l.indexOf('beforeEach')) + 1;
+    const inner = span(l, open);
+    const oneLine = (inner.match(/\(/g) ?? []).length + 1 === (inner.match(/\)/g) ?? []).length;
     let end = i;
-    while (end < lines.length - 1 && !(end > i && closes(end)) && !(end === i && /\}\)\s*;?\s*$/.test(l))) end++;
+    while (!oneLine && end < lines.length - 1 && !(end > i && closes(end))) end++;
     if (!FAKES.test(lines.slice(i, end + 1).join('\n'))) return;
     let scope = end + 1;
     while (scope < lines.length && !(closes(scope) && lines[scope].length - lines[scope].trimStart().length < indent)) scope++;
@@ -67,7 +72,8 @@ export function liveStarts(text) {
     if (lineOfComment(lines, callLine)) continue;
     const opts = span(text, m.index + m[0].length);
     const live = /\bliveMs\s*:\s*(\d{1,3})\b(?![_\d])/.exec(opts);
-    if (!live || CLOCK_OPTION.test(opts)) continue;
+    // `clock: systemMockClock` runs on the page's real timers: it covers nothing.
+    if (!live || (CLOCK_OPTION.test(opts) && !SYSTEM_CLOCK.test(opts))) continue;
     const i = callLine - 1;
     const block = blocks.find((b) => i >= b.from && i < b.to);
     if (block && FAKES.test(lines.slice(block.from, block.to).join('\n'))) continue;
