@@ -38,6 +38,23 @@ fn member_name(git: &Git, member: Option<&str>) -> Result<String, String> {
         .map_err(|_| "HEAD is not on a branch, so the member's name is unknown".to_string())
 }
 
+/// The member's tip before it merged the train: the first parent of the oldest merge on HEAD's first-parent line that brought the
+/// train in (the train is an ancestor of its second parent and not of its first). `HEAD` itself when no merge did (a fast-forward).
+fn pre_merge_tip(git: &Git, train: &str, head: &str) -> Result<String, String> {
+    let log = git.text(&["log", "--first-parent", "--merges", "--format=%H %P", head])?;
+    let mut found = None;
+    for line in log.lines() {
+        let ids: Vec<&str> = line.split_whitespace().collect();
+        if let [_, first, second, ..] = ids.as_slice()
+            && git.is_ancestor(train, second)?
+            && !git.is_ancestor(train, first)?
+        {
+            found = Some((*first).to_string());
+        }
+    }
+    Ok(found.unwrap_or_else(|| head.to_string()))
+}
+
 /// Lists the commands and warnings; runs nothing.
 pub fn command(root: Option<&Path>, train: &str, member: Option<&str>) -> Result<Report, CliError> {
     let root = crate::gates::command::repo_root(root)?;
@@ -57,19 +74,64 @@ pub fn command(root: Option<&Path>, train: &str, member: Option<&str>) -> Result
         .text(&["rev-parse", "--verify", "HEAD^{commit}"])
         .map(|t| t.trim().to_string())
         .map_err(|e| step(e, "run it inside the member's worktree"))?;
-    let reverts = live_for_member(&git, &train_tip, &head).map_err(|e| step(e, "fix what is named, then run it again"))?;
+    // After `git merge <train>` the train is in HEAD and `member..train` is empty: read from the train merge's first parent, the
+    // member's pre-merge tip, and leave out what a later commit of HEAD already re-applied.
+    let (basis, after) = if git.is_ancestor(&train_tip, &head).map_err(|e| step(e, "run `git status`"))? {
+        (
+            pre_merge_tip(&git, &train_tip, &head).map_err(|e| step(e, "run `git log --first-parent` to find the merge"))?,
+            true,
+        )
+    } else {
+        (head.clone(), false)
+    };
+    let mut reverts = live_for_member(&git, &train_tip, &basis).map_err(|e| step(e, "fix what is named, then run it again"))?;
+    let mut done = 0;
+    if after {
+        let mut open = Vec::new();
+        for r in reverts {
+            let hits = git
+                .text(&[
+                    "log",
+                    "-n",
+                    "1",
+                    "--format=%H",
+                    "--fixed-strings",
+                    "--grep",
+                    &format!("This reverts commit {}", r.1),
+                    &format!("{train_tip}..{head}"),
+                ])
+                .map_err(|e| step(e, "run `git log` to see why"))?;
+            if hits.trim().is_empty() {
+                open.push(r);
+            } else {
+                done += 1;
+            }
+        }
+        reverts = open;
+    }
     let (own, other): (Vec<_>, Vec<_>) = reverts.into_iter().partition(|(_, _, _, branch)| is_own(branch, &name));
     let mut text = vec![format!(
-        "merge sync-member: {name} against {} ({}): {} revert(s) of this member's own merges to re-apply, {} of other branches.",
+        "merge sync-member: {name} against {} ({}): {} revert(s) of this member's own merges to re-apply, {} of other branches.{}",
         train,
         short(&train_tip),
         own.len(),
-        other.len()
+        other.len(),
+        if after {
+            format!(
+                " The train is already merged: read from its merge's first parent {}; {done} already re-applied.",
+                short(&basis)
+            )
+        } else {
+            String::new()
+        }
     )];
     if !own.is_empty() {
-        text.push(format!(
-            "Merge the train first (`git merge {train}`), then re-apply the member's work, oldest first (git's howto \"revert a faulty merge\": revert the revert):"
-        ));
+        let lead = if after {
+            "The train is merged; re-apply the member's work, oldest first".to_string()
+        } else {
+            format!("Merge the train first (`git merge {train}`), then re-apply the member's work, oldest first")
+        };
+        text.push(format!("{lead} (git's howto \"revert a faulty merge\": revert the revert):"));
         text.extend(
             own.iter()
                 .map(|(m, r, s, _)| format!("  git revert {r}   # {} reverted the merge {} \"{s}\"", short(r), short(m))),

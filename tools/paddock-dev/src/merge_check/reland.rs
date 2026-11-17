@@ -140,6 +140,8 @@ pub fn lines(git: &Git, merge: &Merge, found: &[Finding]) -> Result<Vec<String>,
     let all = relands(git, target, member, base.trim())?;
     let mut out = Vec::new();
     for f in wanted {
+        // Defence in depth: the guard below (the target's diff since the revert) covers this one whenever the member contains the
+        // revert; this one also holds when a whole-file take or a dropped hunk is the finding that explains the loss.
         let other_kind = found
             .iter()
             .any(|g| matches!(g.kind, Kind::WholeFile | Kind::DroppedHunk) && g.subject == f.subject);

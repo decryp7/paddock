@@ -38,16 +38,28 @@ fn is_main_name(name: &str) -> bool {
     matches!(name.trim(), "main" | "origin/main" | "refs/heads/main" | "refs/remotes/origin/main")
 }
 
-/// The earlier train a re-merge subject names (`train/<name>`), `None` when the subject is no re-merge of a train. Any case; the
-/// token after `merge ` must be `train/...` (a trailing `(sha)` is not part of it).
+/// The earlier train a re-merge subject names (`train/<name>`), `None` when the subject is no re-merge of a train. Any case. After
+/// `merge ` comes the name, in one of three spellings: `train/<name>` (the integrator's), `branch 'train/<name>'` (git's default
+/// message) or `remote-tracking branch 'origin/train/<name>'` (the remote prefix is dropped); a trailing `(sha)` is not part of it.
 fn remerged_line(subject: &str) -> Option<String> {
     let lower = subject.to_ascii_lowercase();
-    let at = lower.find("merge ")? + "merge ".len();
-    let token = subject[at..].split_whitespace().next()?;
-    token
-        .to_ascii_lowercase()
-        .starts_with("train/")
-        .then(|| token.trim_matches('\'').to_string())
+    let mut at = lower.find("merge ")? + "merge ".len();
+    let mut remote = false;
+    for noise in ["remote-tracking branch ", "branch "] {
+        if lower[at..].starts_with(noise) {
+            at += noise.len();
+            remote = noise.starts_with("remote");
+            break;
+        }
+    }
+    let token = subject[at..].split_whitespace().next()?.trim_matches('\'');
+    let lower_token = token.to_ascii_lowercase();
+    if lower_token.starts_with("train/") {
+        return Some(token.to_string());
+    }
+    // `origin/train/<name>`, only in the remote-tracking spelling: one remote name, then the train.
+    let (_, rest) = token.split_once('/').filter(|_| remote)?;
+    rest.to_ascii_lowercase().starts_with("train/").then(|| rest.to_string())
 }
 
 /// `Some(full sha)` of `name`, `None` when this clone has no such commit.
@@ -63,9 +75,19 @@ pub fn base_of(git: &Git, head: &str, target_name: &str) -> Result<Base, String>
         return Ok(Base::NotATrain);
     }
     let main = resolve(git, "origin/main")?;
-    let mut args = vec!["log", "--first-parent", "-n", DEPTH, "--format=%H%x00%P%x00%s", head];
-    let not_main = main.as_ref().map(|m| format!("^{m}"));
-    args.extend(not_main.as_deref());
+    // The walk stops at main: `origin/main`, and the local `main` too (in the commit form the target has no name to say it is main,
+    // and a local main ahead of origin carries re-merges of its own).
+    let local_main = resolve(git, "main")?;
+    let mut args = vec![
+        "log".to_string(),
+        "--first-parent".into(),
+        "-n".into(),
+        DEPTH.into(),
+        "--format=%H%x00%P%x00%s".into(),
+        head.into(),
+    ];
+    args.extend(main.iter().chain(local_main.iter()).map(|m| format!("^{m}")));
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
     for rec in git.text(&args)?.lines() {
         let mut f = rec.splitn(3, '\0');
         let (Some(_), Some(parents), Some(subject)) = (f.next(), f.next(), f.next()) else {
@@ -136,8 +158,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_remerge_subject_names_its_train_in_any_case_and_both_spellings() {
+    fn a_remerge_subject_names_its_train_in_any_case_and_every_spelling() {
         for (s, want) in [
+            ("Merge branch 'train/2026-11-15-13' into train/2026-11-17-14", "train/2026-11-15-13"),
+            ("Merge remote-tracking branch 'origin/train/x' into train/y", "train/x"),
             (
                 "chore(train): merge train/2026-11-15-13 (bc9b9dc22) into train 14",
                 "train/2026-11-15-13",
@@ -151,6 +175,9 @@ mod tests {
             "chore(train): merge feat/x (abc1234) into train 14",
             "feat: train/x merge",
             "merge main into train",
+            "Merge branch 'feat/train/x' into train/y",
+            "Merge remote-tracking branch 'origin/feat/x' into train/y",
+            "Merge branch 'origin/train/x' into train/y",
         ] {
             assert_eq!(remerged_line(s), None, "{s}");
         }
