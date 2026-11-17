@@ -732,16 +732,15 @@ mod tests {
     }
 
     fn merge() -> Merge {
-        Merge {
-            parents: vec![
+        Merge::new(
+            vec![
                 "1111111111111111111111111111111111111111".into(),
                 "2222222222222222222222222222222222222222".into(),
             ],
-            tree: "t".into(),
-            message: String::new(),
-            label: "m".into(),
-            commit: Some("abcdef0123456789abcdef0123456789abcdef01".into()),
-        }
+            "t",
+            "m",
+        )
+        .with_commit(Some("abcdef0123456789abcdef0123456789abcdef01".into()))
     }
 
     #[test]
