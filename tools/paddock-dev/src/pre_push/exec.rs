@@ -3,6 +3,7 @@
 
 use super::budget::{BudgetClock, Timing, parse_heavy_timing, with_heavy_flags};
 use super::gates::{Gate, Need, Planned};
+use super::linux_inputs::{ImageProbe, PROBE_NEXT, image_probe};
 use crate::ci_tool::{Output, ToolCall, tail};
 use paddock_cli::{CheckId, Finding, Outcome, Reason, Subject, ToolVersion, UnixSeconds, measure};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -67,6 +68,10 @@ pub trait Exec: Sync {
     fn has_tool(&self, program: &str) -> bool;
     /// Does a Docker daemon answer? Never starts one.
     fn docker_up(&self) -> bool;
+    /// Whether the local CI image the Linux Clippy runs in is built. Never builds it.
+    fn ci_image(&self) -> super::linux_inputs::ImageProbe {
+        super::linux_inputs::ImageProbe::Ready
+    }
     /// Runs the gate within `limits` (a heavy step: at most `limits.run` of running and `limits.queue` of waiting for the slot).
     /// `Err`: it could not be started (the program is missing).
     fn run(&self, gate: &Gate, limits: Limits) -> Result<Done, String>;
@@ -223,13 +228,27 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
                 ),
             );
         }
-        Need::Docker if !exec.docker_up() => {
+        Need::Docker | Need::LocalCiImage if !exec.docker_up() => {
             return Row::not_measured(
                 "Docker (OrbStack) is not running",
                 "start it yourself and re-run; an agent reports this to the coordinator and never starts or restarts it (ER-14)",
             );
         }
         _ => {}
+    }
+    if gate.need == Need::LocalCiImage {
+        match exec.ci_image() {
+            ImageProbe::Ready => {}
+            ImageProbe::Missing => {
+                return Row::not_measured(
+                    "local CI image missing",
+                    "run `./dev check --warm-linux` (it builds the local CI image first, with its own bound, then warms the workspaces), then push again; the image build is never started under the push budget",
+                );
+            }
+            ImageProbe::Broken(how) => {
+                return Row::not_measured(format!("image probe broken ({how})"), PROBE_NEXT);
+            }
+        }
     }
     if gate.heavy
         && let Some(why) = exec.heavy_unavailable()
@@ -269,16 +288,23 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
                 done.how,
                 done.log.as_ref().map_or(String::new(), |l| format!("; output so far in {l}"))
             ),
-            format!(
-                "re-run it alone: {} (the whole gate has a budget of {} min)",
-                gate.rerun(),
-                BUDGET.as_secs() / 60
-            ),
+            if gate.id.starts_with("clippy-linux") {
+                format!(
+                    "run `./dev check --warm-linux {}` once (no budget, live output; the first run of a workspace builds all its dependencies in the container's kept volume, minutes per workspace; docs/benchmarks.md), then push again",
+                    gate.workspaces.join(" ")
+                )
+            } else {
+                format!(
+                    "re-run it alone: {} (the whole gate has a budget of {} min)",
+                    gate.rerun(),
+                    BUDGET.as_secs() / 60
+                )
+            },
         ),
         Ok(done) => {
             let hint = match (gate.id.starts_with("clippy-linux"), done.how.as_str()) {
                 (true, "exit 125") => {
-                    "docker could not start the container (usually the image cannot be pulled): `docker login dev.decryptology.net`"
+                    "docker could not start the container or build the local CI image (read the output above; `docker login dev.decryptology.net` if a base image cannot be pulled)"
                         .to_string()
                 }
                 (true, "exit 137") => {
@@ -766,6 +792,27 @@ impl Exec for RealExec {
         self.heavy_command().err()
     }
 
+    fn ci_image(&self) -> ImageProbe {
+        let ran = ToolCall::new("bash")
+            .args([
+                "tools/linux-container.sh",
+                "--id",
+                "paddock",
+                "--ci-image",
+                "--image-ready",
+                "--root",
+            ])
+            .args([self.root.to_string_lossy().to_string()])
+            .cwd(&self.root)
+            .pass(PASS.iter().copied())
+            .timeout(Duration::from_secs(60))
+            .run(&self.env, &mut std::io::sink());
+        match ran {
+            Ok(r) => image_probe(r.how.strip_prefix("exit ").and_then(|n| n.trim().parse().ok())),
+            Err(e) => ImageProbe::Broken(format!("could not start: {e}")),
+        }
+    }
+
     fn load(&self) -> Option<f64> {
         let ran = ToolCall::new("uptime")
             .timeout(Duration::from_secs(10))
@@ -777,7 +824,7 @@ impl Exec for RealExec {
     fn run(&self, gate: &Gate, limits: Limits) -> Result<Done, String> {
         let _ = std::fs::create_dir_all(&self.logs);
         let log = self.logs.join(format!("{}.log", slug(&gate.id)));
-        let label = (gate.need == Need::Docker).then(run_token);
+        let label = matches!(gate.need, Need::Docker | Need::LocalCiImage).then(run_token);
         let mut ran = self
             .call(gate, limits, &log, label.as_deref())
             .run(&self.env, &mut std::io::sink())?;
@@ -824,7 +871,7 @@ fn exists(dir: &Path, program: &str) -> bool {
 /// Whether a Docker daemon is listening, asked without waking one: OrbStack's `docker` starts its VM on any command (ER-14: a
 /// start of shared infrastructure by an agent), so on Unix the socket is connected to instead. Windows has no such launcher.
 #[cfg(unix)]
-fn docker_answers(env: &HashMap<String, String>) -> bool {
+pub(crate) fn docker_answers(env: &HashMap<String, String>) -> bool {
     docker_sockets(env)
         .iter()
         .any(|p| std::os::unix::net::UnixStream::connect(p).is_ok())
@@ -849,7 +896,7 @@ pub fn docker_sockets(env: &HashMap<String, String>) -> Vec<PathBuf> {
 }
 
 #[cfg(not(unix))]
-fn docker_answers(env: &HashMap<String, String>) -> bool {
+pub(crate) fn docker_answers(env: &HashMap<String, String>) -> bool {
     let docker = env.get("DOCKER").cloned().unwrap_or_else(|| "docker".into());
     ToolCall::new(docker)
         .args(["info"])
@@ -966,6 +1013,7 @@ exit $rc
                 need: Need::Nothing,
                 rank: 2,
                 next: "fix it".into(),
+                workspaces: Vec::new(),
             }
         }
 
