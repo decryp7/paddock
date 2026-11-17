@@ -186,13 +186,13 @@ fn holds(git: &Git, merge: &str, member: &str) -> Result<bool, String> {
     Ok(count(true)? < count(false)?)
 }
 
-/// The live reverts of merges that `member` holds, as `(merge, revert, merge subject)`, oldest revert first: what
-/// `merge sync-member` re-applies. Reads the same history as the report-only step ([`run`]) and judges it the same way.
-pub(super) fn live_for_member(git: &Git, target: &str, member: &str) -> Result<Vec<(String, String, String)>, String> {
+/// The live reverts of merges that `member` holds, as `(merge, revert, merge subject, branch)`, oldest revert first (the order
+/// they were made on the train): what `merge sync-member` lists. Reads the same history as the report-only step ([`run`]).
+pub(super) fn live_for_member(git: &Git, target: &str, member: &str) -> Result<Vec<(String, String, String, String)>, String> {
     let found = find(git, target, member)?;
     let mut out = Vec::new();
     for r in found.reverted.iter().rev() {
-        out.push((r.merge.clone(), r.revert.clone(), subject_of(git, &r.merge)?));
+        out.push((r.merge.clone(), r.revert.clone(), subject_of(git, &r.merge)?, r.branch.clone()));
     }
     Ok(out)
 }
@@ -232,7 +232,10 @@ fn find(git: &Git, target: &str, member: &str) -> Result<Found, String> {
     }
     let position: HashMap<&str, usize> = commits.iter().enumerate().map(|(i, c)| (c.sha.as_str(), i)).collect();
     let mut reverted = Vec::new();
-    for (merge, revert) in live_reverts(&edges) {
+    // In the order of `member..target` (newest first there), not by sha: the output order is the history's order.
+    let mut live = live_reverts(&edges);
+    live.sort_by_key(|(_, revert)| position.get(revert.as_str()).copied().unwrap_or(usize::MAX));
+    for (merge, revert) in live {
         let line = git.text(&["rev-list", "--parents", "-n", "1", &merge])?;
         if line.split_whitespace().count() < 3 {
             continue; // not a merge: nothing was brought in

@@ -7,7 +7,10 @@
 //! - `L` names a commit `S` of the target as the one it reverts (`This reverts commit S`, a full or abbreviated sha), or names a
 //!   commit `X` it re-applies (`(cherry picked from commit X)`) that a commit `S` of the target reverts, and
 //! - `S` is itself a revert (it has a `This reverts commit` line or a `Revert "..."` subject), and
-//! - the finding's file is changed by both `L` and `S`.
+//! - the finding's file is changed by both `L` and `S`,
+//! - no other finding names that file (a whole-file take or a dropped hunk of it is not the re-land's), and
+//! - the target has not changed the file since `S` (`git diff S <target> -- <path>` is empty): a later change on the target,
+//!   a fix for example, is not part of what the re-land undoes, and a merge that lost it must not be excused here.
 //!
 //! Every other finding (a file the re-land does not touch, a member that only looks like one, a revert `S` of something else) is
 //! left for a person; this never answers a finding it cannot tie. It reads and prints; it changes no merge.
@@ -26,10 +29,11 @@ struct Reland {
     files: HashSet<String>,
 }
 
-/// Whether a subject says the commit re-applies work: `revert: reapply ...` or git's `Reapply "..."` (any case).
+/// Whether a subject says the commit re-applies work (any case): `revert: reapply ...`, git's `Reapply "..."`, or the default
+/// subject of `git revert` of a revert, `Revert "Revert ..."` (what `merge sync-member` tells the author to run).
 pub fn is_reland_subject(subject: &str) -> bool {
     let s = subject.trim().to_ascii_lowercase();
-    s.starts_with("revert: reapply") || s.starts_with("reapply \"") || s.starts_with("reapply:")
+    s.starts_with("revert: reapply") || s.starts_with("reapply \"") || s.starts_with("revert \"revert ")
 }
 
 /// The commit names `(cherry picked from commit <hex>)` lines give.
@@ -136,6 +140,12 @@ pub fn lines(git: &Git, merge: &Merge, found: &[Finding]) -> Result<Vec<String>,
     let all = relands(git, target, member, base.trim())?;
     let mut out = Vec::new();
     for f in wanted {
+        let other_kind = found
+            .iter()
+            .any(|g| matches!(g.kind, Kind::WholeFile | Kind::DroppedHunk) && g.subject == f.subject);
+        if other_kind {
+            continue;
+        }
         let tie = all.iter().find_map(|l| {
             if !l.files.contains(&f.subject) {
                 return None;
@@ -143,6 +153,13 @@ pub fn lines(git: &Git, merge: &Merge, found: &[Finding]) -> Result<Vec<String>,
             l.undoes.iter().find(|(_, files)| files.contains(&f.subject)).map(|(s, _)| (l, s))
         });
         if let Some((l, s)) = tie {
+            // The target has changed the file since the revert: not only the re-land's undoing is in this finding.
+            if !git
+                .paths(&["diff", "--name-only", "-z", "--no-renames", s, target, "--", &f.subject])?
+                .is_empty()
+            {
+                continue;
+            }
             out.push(format!(
                 "Reverted: {}: {} re-lands the work the revert {} took out ({})",
                 f.subject,
@@ -166,10 +183,17 @@ mod tests {
             "Reapply \"feat: x\"",
             "REAPPLY \"x\"",
             "  revert: Reapply x",
+            "Revert \"Revert \"feat: x\"\"",
         ] {
             assert!(is_reland_subject(yes), "{yes}");
         }
-        for no in ["Revert \"feat: x\"", "feat: reapply x", "fix: reapplying", "revert: x"] {
+        for no in [
+            "Revert \"feat: x\"",
+            "feat: reapply x",
+            "fix: reapplying",
+            "revert: x",
+            "reapply: x",
+        ] {
             assert!(!is_reland_subject(no), "{no}");
         }
     }

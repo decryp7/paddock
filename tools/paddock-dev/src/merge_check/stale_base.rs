@@ -1,19 +1,23 @@
-//! A member must be built on the train's base: the newest commit of the train's base line that the train has merged so far.
+//! A member should be built on the train's base: the newest commit of the train's base line that the train has merged so far.
+//! **Report-only** ([`ENFORCED`] is false, ER-41, like `gates::ENFORCED`): a member that lacks it gets a `::warning::` and the
+//! exit code is unchanged, until the check has run green on a real train and the change that records it flips the switch.
 //!
 //! The base line is declared by the train's own history, not by a second list (ER-42): a train stacked on another carries
-//! re-merge commits `chore(train): merge train/<previous> (<sha>) into train N`, and the newest one on the train's first-parent
-//! line names the line (`train/<previous>`) and, as its second parent, the commit of it merged so far. A train with none is cut
-//! from main (the queue's `base` is main's commit, docs/plans/merge-queue.md): the base is then the merge base of the train and
-//! `origin/main`. Other members merged ahead of this one are not required: members are merged one after another and never
-//! contain each other.
+//! re-merge commits `chore(train): merge train/<previous> (<sha>) into train N` (also `Merge train/<previous> (<sha>) into
+//! train/<n>`, any case). The newest one on the train's own first-parent line, the commits not on `origin/main` (`--first-parent
+//! <head> ^origin/main`: an older train's re-merge that landed on main is not this train's), names the line and, as its second
+//! parent, the commit of it merged so far. A train with none is cut from main (the queue's `base` is main's commit,
+//! docs/plans/merge-queue.md): the base is then the merge base of the train and `origin/main`. Other members merged ahead of
+//! this one are not required: members are merged one after another and never contain each other.
 //!
-//! A member that lacks that commit is refused (`::error::`, exit 5) with the missing commit and `./dev merge sync-member`, which
-//! merges the train and keeps the member's own reverted work. Nothing declares a base (no re-merge commit and no `origin/main`):
-//! the check says so and does not guess ([`Base::Unknown`], reported, never silent: ER-33). A target that is not ahead of main
-//! (a merge into main itself) has no train and no base to demand.
+//! Not judged, and said so: nothing declares a base (no re-merge commit and no `origin/main`), or the train and main share no
+//! commit ([`Base::Unknown`], ER-33); a target that is main or `origin/main` by name, or not ahead of `origin/main`
+//! ([`Base::NotATrain`]).
 
 use super::git::{Git, short};
-use super::reverted_base::branch_of;
+
+/// Whether a member without the base fails the check. False until a green run on a real train is recorded (ER-41).
+pub const ENFORCED: bool = false;
 
 /// The newest commits of the first-parent line that are read for a re-merge commit.
 const DEPTH: &str = "2000";
@@ -21,12 +25,29 @@ const DEPTH: &str = "2000";
 /// What the train says its base is.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Base {
-    /// The commit every member must contain, and the line it belongs to (`train/<name>` or `main`).
+    /// The commit every member should contain, and the line it belongs to (`train/<name>` or `main`).
     Commit { sha: String, line: String },
-    /// Nothing declares a base: why.
+    /// Nothing declares a base, or it cannot be measured: why.
     Unknown(String),
-    /// The target is not ahead of main: a merge into main itself, not a train.
+    /// The target is main, or not ahead of main: a merge into main itself, not a train.
     NotATrain,
+}
+
+/// Whether a name is main by name (the local branch or the remote one, with or without `refs/...`).
+fn is_main_name(name: &str) -> bool {
+    matches!(name.trim(), "main" | "origin/main" | "refs/heads/main" | "refs/remotes/origin/main")
+}
+
+/// The earlier train a re-merge subject names (`train/<name>`), `None` when the subject is no re-merge of a train. Any case; the
+/// token after `merge ` must be `train/...` (a trailing `(sha)` is not part of it).
+fn remerged_line(subject: &str) -> Option<String> {
+    let lower = subject.to_ascii_lowercase();
+    let at = lower.find("merge ")? + "merge ".len();
+    let token = subject[at..].split_whitespace().next()?;
+    token
+        .to_ascii_lowercase()
+        .starts_with("train/")
+        .then(|| token.trim_matches('\'').to_string())
 }
 
 /// `Some(full sha)` of `name`, `None` when this clone has no such commit.
@@ -36,60 +57,119 @@ fn resolve(git: &Git, name: &str) -> Result<Option<String>, String> {
     Ok((!id.is_empty()).then_some(id))
 }
 
-/// Whether `ancestor` is reachable from `of` (the merge base of the two is `ancestor`).
-fn is_ancestor(git: &Git, ancestor: &str, of: &str) -> Result<bool, String> {
-    Ok(git.text(&["merge-base", ancestor, of])?.trim() == ancestor)
-}
-
-/// The base of the train whose head is `head`.
-pub fn base_of(git: &Git, head: &str) -> Result<Base, String> {
-    let log = git.text(&["log", "--first-parent", "-n", DEPTH, "--format=%H%x00%P%x00%s", head])?;
-    for rec in log.lines() {
+/// The base of the train whose head is `head` and whose name is `target_name`.
+pub fn base_of(git: &Git, head: &str, target_name: &str) -> Result<Base, String> {
+    if is_main_name(target_name) {
+        return Ok(Base::NotATrain);
+    }
+    let main = resolve(git, "origin/main")?;
+    let mut args = vec!["log", "--first-parent", "-n", DEPTH, "--format=%H%x00%P%x00%s", head];
+    let not_main = main.as_ref().map(|m| format!("^{m}"));
+    args.extend(not_main.as_deref());
+    for rec in git.text(&args)?.lines() {
         let mut f = rec.splitn(3, '\0');
         let (Some(_), Some(parents), Some(subject)) = (f.next(), f.next(), f.next()) else {
             continue;
         };
         let parents: Vec<&str> = parents.split_whitespace().collect();
-        let line = branch_of(subject);
-        if parents.len() == 2 && line.starts_with("train/") && subject.contains("merge ") {
+        if parents.len() == 2
+            && let Some(line) = remerged_line(subject)
+        {
             return Ok(Base::Commit {
                 sha: parents[1].to_string(),
                 line,
             });
         }
     }
-    let Some(main) = resolve(git, "origin/main")? else {
+    let Some(main) = main else {
         return Ok(Base::Unknown(
             "the train has no re-merge commit of an earlier train and this clone has no origin/main to measure it from".into(),
         ));
     };
-    if is_ancestor(git, head, &main)? {
+    if git.is_ancestor(head, &main)? {
         return Ok(Base::NotATrain);
     }
-    let sha = git.text(&["merge-base", head, &main])?.trim().to_string();
+    // Exit 1 of `merge-base` (no common commit) is an answer, not a failure.
+    let sha = String::from_utf8_lossy(&git.bytes_or_none(&["merge-base", head, &main])?)
+        .trim()
+        .to_string();
     if sha.is_empty() {
         return Ok(Base::Unknown("the train and origin/main share no commit".into()));
     }
     Ok(Base::Commit { sha, line: "main".into() })
 }
 
-/// The refusal for a member that lacks the train's base; `None` when it has it. `train` and `member` are names for the message.
-pub fn refusal(git: &Git, head: &str, member_commit: &str, train: &str, member: &str) -> Result<Option<String>, String> {
-    match base_of(git, head)? {
-        Base::Commit { sha, line } if !is_ancestor(git, &sha, member_commit)? => Ok(Some(format!(
-            "::error::merge check: {member} is built on an old base: it does not contain {}, the newest commit of {line} that {train} has merged. Next step: run `./dev merge sync-member {train}` in the member's worktree (it merges the train and keeps the member's own reverted work), push, then check it again.",
-            short(&sha)
-        ))),
+/// The text of the problem: a warning with the report-only note, or (`enforced`) an error.
+fn render(sha: &str, line: &str, train: &str, member: &str, enforced: bool) -> String {
+    let level = if enforced { "error" } else { "warning" };
+    format!(
+        "::{level}::merge check: {member} is built on an old base: it does not contain {}, the newest commit of {line} that {train} has merged. Next step: run `./dev merge sync-member {train}` before you merge the train into it (it lists what to re-apply), merge the train, push, then check it again.{}",
+        short(sha),
+        if enforced {
+            ""
+        } else {
+            " (report-only: the exit code is unchanged)"
+        }
+    )
+}
+
+/// The warning (or, when [`ENFORCED`], the error) for a member that lacks the train's base; `None` when it has it.
+pub fn problem(git: &Git, head: &str, member_commit: &str, train: &str, member: &str) -> Result<Option<String>, String> {
+    match base_of(git, head, train)? {
+        Base::Commit { sha, line } if !git.is_ancestor(&sha, member_commit)? => Ok(Some(render(&sha, &line, train, member, ENFORCED))),
         _ => Ok(None),
     }
 }
 
 /// The notice for a train whose base nothing declares (the check did not judge), `None` otherwise.
-pub fn unknown(git: &Git, head: &str) -> Result<Option<String>, String> {
-    Ok(match base_of(git, head)? {
+pub fn unknown(git: &Git, head: &str, train: &str) -> Result<Option<String>, String> {
+    Ok(match base_of(git, head, train)? {
         Base::Unknown(why) => Some(format!(
-            "::notice::stale-base check did not run (the base is not declared): {why}. Next step: `git fetch origin` so origin/main exists; members are not refused for an old base until it does."
+            "::notice::stale-base check did not run (the base is not declared): {why}. Next step: `git fetch origin` so origin/main exists; no member is judged for an old base until it does."
         )),
         _ => None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_remerge_subject_names_its_train_in_any_case_and_both_spellings() {
+        for (s, want) in [
+            (
+                "chore(train): merge train/2026-11-15-13 (bc9b9dc22) into train 14",
+                "train/2026-11-15-13",
+            ),
+            ("Merge train/x (abc1234) into train/y", "train/x"),
+            ("CHORE(TRAIN): MERGE TRAIN/Old (abc1234) INTO TRAIN 3", "TRAIN/Old"),
+        ] {
+            assert_eq!(remerged_line(s).as_deref(), Some(want), "{s}");
+        }
+        for s in [
+            "chore(train): merge feat/x (abc1234) into train 14",
+            "feat: train/x merge",
+            "merge main into train",
+        ] {
+            assert_eq!(remerged_line(s), None, "{s}");
+        }
+    }
+
+    #[test]
+    fn report_only_is_a_warning_with_the_note_and_enforced_is_an_error_without_it() {
+        let w = render("0123456789abcdef", "main", "train", "m", false);
+        assert!(
+            w.starts_with("::warning::") && w.contains("report-only") && w.contains("012345678"),
+            "{w}"
+        );
+        let e = render("0123456789abcdef", "main", "train", "m", true);
+        assert!(e.starts_with("::error::") && !e.contains("report-only"), "{e}");
+    }
+
+    #[test]
+    fn main_is_main_by_name_only_for_its_spellings() {
+        assert!(is_main_name("main") && is_main_name("origin/main") && is_main_name("refs/heads/main"));
+        assert!(!is_main_name("train/main") && !is_main_name("mainline") && !is_main_name("train"));
+    }
 }

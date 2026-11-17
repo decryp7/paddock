@@ -205,10 +205,9 @@ enum MergeCommand {
     /// checks the merge makes due (docs/generators.toml; `--no-generators` skips them). Exit 5 on findings; a check that could not
     /// look is an error, never a pass.
     Check(MergeCheckArgs),
-    /// Author's step before handing a member over: merge the train into the member branch you are on, then re-apply the member's
-    /// own work the train reverted (a revert of a merge of this member that the train carries would otherwise silently delete it
-    /// again): one `revert: reapply "..."` commit per such revert. Needs a clean worktree on the member's branch; fetch the
-    /// train first. A conflict stops it with the merge left for you to finish.
+    /// Before merging the train into a member branch: list the commands that re-apply the member's own work the train reverted
+    /// (`git revert <sha>`, git's "revert a faulty merge"; run them after `git merge <train>`), and warn about reverts of other
+    /// branches' merges the member holds. Read-only: runs nothing. Run it before the merge of the train.
     SyncMember(SyncMemberArgs),
 }
 
@@ -219,6 +218,9 @@ struct SyncMemberArgs {
     /// The member's worktree (default: the folder containing .git, found from the current folder).
     #[arg(long)]
     root: Option<PathBuf>,
+    /// The member's branch name (default: the branch HEAD is on).
+    #[arg(long)]
+    member: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -785,7 +787,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         }),
         Command::Merge {
             command: MergeCommand::SyncMember(a),
-        } => merge_check::sync_member::command(a.root.as_deref(), &a.train),
+        } => merge_check::sync_member::command(a.root.as_deref(), &a.train, a.member.as_deref()),
         Command::Gen {
             command: GenCommand::Check(a),
         } => generators::command(&generators::CheckArgs {

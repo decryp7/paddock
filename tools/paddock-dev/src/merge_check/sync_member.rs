@@ -1,13 +1,16 @@
-//! `./dev merge sync-member <train>`: the author's step that keeps a member's own work when the train carries a revert of it.
+//! `./dev merge sync-member <train>`: lists what the author re-applies after merging the train into a member branch (read-only).
 //!
-//! The failure it ends (three times, the last c156ba72a): the train merged a member, reverted it (a member pulled out), and the
-//! author then merged the train into the member branch to catch up. Git takes the train's revert as the newer change, so the
-//! member's own work is silently deleted from the member branch. This merges the train, then finds each live train revert whose
-//! `This reverts commit X` names a merge of this member ([`super::reverted_base`]'s reading of `member..train`) and adds the
-//! revert of that revert, `revert: reapply "<merge subject>"`, the commit [`super::reland`] ties to when the member is merged back.
+//! The failure it prevents (three times, the last c156ba72a): the train merged a member and reverted it, and the author then
+//! merged the train into the member branch. Git takes the train's revert as the newer change, so the member's own work is deleted
+//! again. Common practice for it is git's howto "revert a faulty merge": revert the revert after the merge of the train. This
+//! prints those commands and runs nothing, so no step can half-finish and no conflict can lose work.
 //!
-//! It writes only in the author's worktree and runs git with its hooks on (ER-39). A conflict, a dirty tree or a detached HEAD
-//! stops it with the cause and the next step; it never forces. Run twice, the second run finds nothing to do.
+//! Run it BEFORE `git merge <train>`: it reads `member..train`, and a merged revert is no longer in that range. It lists
+//!
+//! - for each live train revert of a merge of this member's own branch (`branch_of(subject)` equals the branch, with or without a
+//!   remote prefix such as `origin/`): the `git revert <revert>` to run after the merge, oldest revert first;
+//! - for a revert of another branch's merge that this member holds: a `::warning::` (re-base on the train, or land that branch
+//!   first): that work is not this member's to re-apply.
 
 use super::git::{Git, short};
 use super::reverted_base::live_for_member;
@@ -15,48 +18,34 @@ use paddock_cli::{CliError, Report};
 use serde_json::json;
 use std::path::Path;
 
-fn run(root: &Path, args: &[&str]) -> Result<String, String> {
-    let mut cmd = crate::git_env::git();
-    cmd.arg("-C").arg(root).args(args);
-    let out = paddock_proc::run_bounded(
-        cmd,
-        paddock_proc::Limits::new(std::time::Duration::from_secs(600)).max_output(1 << 24),
-    )
-    .map_err(|e| format!("git {} could not run: {e}", args.join(" ")))?;
-    if !out.success() {
-        let err = out.stderr_text();
-        let msg = if err.trim().is_empty() { out.stdout_text() } else { err };
-        return Err(format!("git {} failed: {}", args.join(" "), msg.trim()));
+/// Whether the merge of `branch` (from a train merge subject) is the member's own, with or without a remote prefix.
+pub fn is_own(branch: &str, member: &str) -> bool {
+    let strip = |s: &str| {
+        s.split_once('/')
+            .filter(|(remote, _)| *remote == "origin")
+            .map_or(s.to_string(), |(_, r)| r.to_string())
+    };
+    strip(branch) == strip(member)
+}
+
+/// The member's branch name: `member` as given, else the branch HEAD is on.
+fn member_name(git: &Git, member: Option<&str>) -> Result<String, String> {
+    if let Some(m) = member {
+        return Ok(m.to_string());
     }
-    Ok(out.stdout_text())
-}
-
-/// The commit message of the revert of a revert.
-pub fn reapply_message(merge_subject: &str, revert: &str) -> String {
-    format!("revert: reapply \"{merge_subject}\"\n\nThis reverts commit {revert}.\n")
-}
-
-/// Merges `train` into the branch checked out in `root` and re-applies the member's reverted work.
-pub fn command(root: Option<&Path>, train: &str) -> Result<Report, CliError> {
-    let root = crate::gates::command::repo_root(root)?;
-    let step = |why: String, next: &str| CliError::failure(format!("::error::merge sync-member: {why}. Next step: {next}"));
-    let git = Git::new(&root);
-    let branch = run(&root, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+    git.text(&["symbolic-ref", "--quiet", "--short", "HEAD"])
         .map(|b| b.trim().to_string())
-        .map_err(|_| {
-            step(
-                "HEAD is not on a branch".into(),
-                "check out the member's branch in your worktree, then run it again",
-            )
-        })?;
-    let dirty = run(&root, &["status", "--porcelain"]).map_err(|e| step(e, "run `git status` to see why"))?;
-    if !dirty.trim().is_empty() {
-        return Err(step(
-            "the worktree has uncommitted changes".into(),
-            "commit them (a merge needs a clean tree), then run it again",
-        ));
-    }
-    let train_tip = run(&root, &["rev-parse", "--verify", &format!("{train}^{{commit}}")])
+        .map_err(|_| "HEAD is not on a branch, so the member's name is unknown".to_string())
+}
+
+/// Lists the commands and warnings; runs nothing.
+pub fn command(root: Option<&Path>, train: &str, member: Option<&str>) -> Result<Report, CliError> {
+    let root = crate::gates::command::repo_root(root)?;
+    let git = Git::new(&root);
+    let step = |why: String, next: &str| CliError::failure(format!("::error::merge sync-member: {why}. Next step: {next}"));
+    let name = member_name(&git, member).map_err(|e| step(e, "check out the member's branch, or pass --member <branch>"))?;
+    let train_tip = git
+        .text(&["rev-parse", "--verify", &format!("{train}^{{commit}}")])
         .map(|t| t.trim().to_string())
         .map_err(|e| {
             step(
@@ -64,52 +53,38 @@ pub fn command(root: Option<&Path>, train: &str) -> Result<Report, CliError> {
                 "run `git fetch origin` and give the train's full ref, for example origin/train/<date>-<n>",
             )
         })?;
-    let before = run(&root, &["rev-parse", "HEAD"])
-        .map_err(|e| step(e, "run `git status`"))?
-        .trim()
-        .to_string();
-    // What the member holds that the train reverted, read before the merge: `member..train` is the train's side only then.
-    let reverts = live_for_member(&git, &train_tip, &before).map_err(|e| step(e, "fix what is named, then run it again"))?;
-    let merged = if run(&root, &["merge-base", "--is-ancestor", &train_tip, "HEAD"]).is_ok() {
-        false
-    } else {
-        run(&root, &["merge", "--no-edit", &train_tip]).map_err(|e| {
-            step(
-                e,
-                "resolve the conflicts and commit the merge (git's usual way), then run `./dev merge sync-member` again to re-apply what the train reverted",
-            )
-        })?;
-        true
-    };
-    let mut applied = Vec::new();
-    for (merge, revert, subject) in &reverts {
-        let message = reapply_message(subject, revert);
-        let tried = run(&root, &["revert", "--no-commit", revert]).and_then(|_| run(&root, &["commit", "-q", "-m", &message]));
-        if let Err(e) = tried {
-            let _ = run(&root, &["revert", "--abort"]);
-            return Err(step(
-                format!("re-applying {} (the revert of {}) failed: {e}", short(revert), short(merge)),
-                &format!("run `git revert {revert}` yourself, resolve it, and commit it with the subject `revert: reapply \"{subject}\"`"),
-            ));
-        }
-        applied.push(json!({"merge": merge, "revert": revert, "subject": subject}));
-    }
+    let head = git
+        .text(&["rev-parse", "--verify", "HEAD^{commit}"])
+        .map(|t| t.trim().to_string())
+        .map_err(|e| step(e, "run it inside the member's worktree"))?;
+    let reverts = live_for_member(&git, &train_tip, &head).map_err(|e| step(e, "fix what is named, then run it again"))?;
+    let (own, other): (Vec<_>, Vec<_>) = reverts.into_iter().partition(|(_, _, _, branch)| is_own(branch, &name));
     let mut text = vec![format!(
-        "merge sync-member: {} {} (train {}); {} revert(s) of this member's work re-applied.",
-        branch,
-        if merged { "merged the train" } else { "already contains the train" },
+        "merge sync-member: {name} against {} ({}): {} revert(s) of this member's own merges to re-apply, {} of other branches.",
+        train,
         short(&train_tip),
-        applied.len()
+        own.len(),
+        other.len()
     )];
-    text.extend(reverts.iter().map(|(m, r, s)| {
-        format!(
-            "  re-applied {} (it reverted the merge {}): revert: reapply \"{s}\"",
+    if !own.is_empty() {
+        text.push(format!(
+            "Merge the train first (`git merge {train}`), then re-apply the member's work, oldest first (git's howto \"revert a faulty merge\": revert the revert):"
+        ));
+        text.extend(
+            own.iter()
+                .map(|(m, r, s, _)| format!("  git revert {r}   # {} reverted the merge {} \"{s}\"", short(r), short(m))),
+        );
+    }
+    for (m, r, s, branch) in &other {
+        text.push(format!(
+            "::warning::{} reverted the merge {} of {branch} (\"{s}\"), work this member holds but did not make: re-base on the train, or land {branch} first.",
             short(r),
             short(m)
-        )
-    }));
+        ));
+    }
+    let item = |(m, r, s, b): &(String, String, String, String)| json!({"merge": m, "revert": r, "subject": s, "branch": b});
     Ok(Report::new(
-        json!({"branch": branch, "train": train_tip, "merged": merged, "reapplied": applied}),
+        json!({"member": name, "train": train_tip, "own": own.iter().map(item).collect::<Vec<_>>(), "other": other.iter().map(item).collect::<Vec<_>>()}),
         text.join("\n"),
     ))
 }
@@ -119,9 +94,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_message_has_the_subject_the_reland_check_reads_and_git_s_own_revert_line() {
-        let m = reapply_message("Merge branch 'feat/x'", "abc1234");
-        assert!(super::super::reland::is_reland_subject(m.lines().next().unwrap()), "{m}");
-        assert_eq!(super::super::reverted_base::trailer_targets(&m), ["abc1234"]);
+    fn a_branch_is_the_members_own_with_or_without_the_remote_prefix_and_no_other() {
+        assert!(is_own("feat/x", "feat/x"));
+        assert!(is_own("feat/x", "origin/feat/x"));
+        assert!(is_own("origin/feat/x", "feat/x"));
+        assert!(!is_own("feat/y", "feat/x"));
+        assert!(!is_own("feat/x2", "feat/x"));
+        assert!(!is_own("fix/feat/x", "feat/x"));
     }
 }

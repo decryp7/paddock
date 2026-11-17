@@ -1882,14 +1882,15 @@ fn a_reland_that_names_a_commit_that_is_not_a_revert_ties_nothing() {
     assert!(written.is_empty(), "{written}");
 }
 
-// ---- `merge sync-member` ----
+// ---- `merge sync-member` (read-only) ----
 
-/// `dev merge sync-member <train>` in this repository's checkout.
-fn sync_member(r: &Repo, train: &str) -> (i32, String) {
+/// `dev merge sync-member <train> <extra>` in this repository's checkout.
+fn sync_member(r: &Repo, train: &str, extra: &[&str]) -> (i32, String) {
     let out = r
         .cmd(crate::dev_bin::PATH)
         .args(["merge", "sync-member", "--root"])
         .arg(r.path())
+        .args(extra)
         .arg(train)
         .output()
         .unwrap();
@@ -1897,80 +1898,146 @@ fn sync_member(r: &Repo, train: &str) -> (i32, String) {
     (out.status.code().unwrap(), text)
 }
 
-/// The train (`main`) took feat/x as a merge and reverted it; `member` starts at `from` ("x": the reverted branch itself,
-/// "base": before the merge) and adds `member.txt`. HEAD ends on `member`, clean.
-fn pulled_member(from: &str) -> Repo {
-    let r = reverted_base_from(from, |r, m| {
+/// The train (`main`) merged `feat/x` and reverted the merge; main then moved on. HEAD ends on `feat/x` (the reverted branch itself).
+/// Returns the repository and the revert commit.
+fn reverted_own_branch() -> (Repo, String) {
+    let r = Repo::new();
+    r.write("base.txt", "base\n");
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "feat/x"]);
+    r.write("x.txt", "x\n");
+    r.commit("feat: x");
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge branch 'feat/x'", "feat/x"]);
+    let m = r.git(&["rev-parse", "HEAD"]);
+    let s = revert_merge(&r, &m);
+    r.write("other.txt", "other\n");
+    r.commit("feat: other");
+    r.git(&["checkout", "-q", "feat/x"]);
+    (r, s)
+}
+
+#[test]
+fn sync_member_lists_the_git_revert_of_the_members_own_merge_and_runs_nothing() {
+    let (r, s) = reverted_own_branch();
+    r.write("scratch.txt", "dirty\n"); // read-only: a dirty tree is no reason to refuse
+    let head = r.git(&["rev-parse", "HEAD"]);
+    let (code, text) = sync_member(&r, "main", &[]);
+    assert_eq!(code, 0, "{text}");
+    assert!(
+        text.contains(&format!("git revert {s}")) && text.contains("1 revert(s) of this member's own merges"),
+        "{text}"
+    );
+    assert_eq!(r.git(&["rev-parse", "HEAD"]), head, "nothing committed");
+    assert!(
+        r.path().join("scratch.txt").exists() && !r.git(&["status", "--porcelain"]).is_empty(),
+        "nothing touched"
+    );
+    // The control (ER-33): the plain merge of the train deletes the work; the printed command gives it back (git's howto).
+    fs::remove_file(r.path().join("scratch.txt")).unwrap();
+    r.git(&["merge", "-q", "--no-edit", "main"]);
+    assert!(
+        !r.path().join("x.txt").exists(),
+        "control: the plain merge deletes the member's work"
+    );
+    r.git(&["revert", "--no-edit", &s]);
+    assert!(r.path().join("x.txt").exists(), "the printed command re-applies it");
+}
+
+#[test]
+fn sync_member_takes_the_member_name_with_or_without_the_remote_prefix_or_from_the_option() {
+    let (r, s) = reverted_own_branch();
+    for name in ["origin/feat/x", "feat/x"] {
+        let (code, text) = sync_member(&r, "main", &["--member", name]);
+        assert_eq!(code, 0, "{text}");
+        assert!(text.contains(&format!("git revert {s}")), "{name}: {text}");
+    }
+    r.git(&["checkout", "-q", "--detach"]);
+    let (code, text) = sync_member(&r, "main", &[]);
+    assert_ne!(code, 0);
+    assert!(
+        text.contains("HEAD is not on a branch, so the member's name is unknown. Next step:"),
+        "{text}"
+    );
+    let (code, text) = sync_member(&r, "main", &["--member", "feat/x"]);
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains("git revert "), "{text}");
+}
+
+#[test]
+fn sync_member_warns_for_the_revert_of_another_branchs_merge_and_prints_no_command_for_it() {
+    // `member` is forked from feat/x (it holds the merge's commits) but is not feat/x.
+    let (r, _) = reverted_own_branch();
+    r.git(&["checkout", "-q", "-b", "member", "feat/x"]);
+    r.write("member.txt", "member\n");
+    r.commit("feat: member");
+    let (code, text) = sync_member(&r, "main", &[]);
+    assert_eq!(code, 0, "{text}");
+    assert!(
+        text.contains("::warning::") && text.contains("re-base on the train, or land feat/x first") && !text.contains("git revert "),
+        "{text}"
+    );
+    assert!(
+        text.contains("0 revert(s) of this member's own merges to re-apply, 1 of other branches"),
+        "{text}"
+    );
+}
+
+#[test]
+fn sync_member_names_nothing_for_a_member_forked_before_the_reverted_merge() {
+    let r = reverted_base_from("base", |r, m| {
         revert_merge(r, m);
     });
     r.git(&["checkout", "-q", "member"]);
-    r
-}
-
-#[test]
-fn sync_member_merges_the_train_and_gives_back_the_work_the_trains_revert_would_delete() {
-    // The control (ER-33): a plain merge of the train into the same member loses x.txt, which is the bug.
-    let plain = pulled_member("x");
-    plain.git(&["merge", "-q", "--no-edit", "main"]);
-    assert!(
-        !plain.path().join("x.txt").exists(),
-        "control: the plain merge deletes the member's work"
-    );
-
-    let r = pulled_member("x");
-    let (code, text) = sync_member(&r, "main");
-    assert_eq!(code, 0, "{text}");
-    assert!(text.contains("1 revert(s) of this member's work re-applied"), "{text}");
-    assert!(r.path().join("x.txt").exists(), "the work is back");
-    assert!(
-        r.path().join("member.txt").exists() && r.path().join("other.txt").exists(),
-        "the train's and the member's files stay"
-    );
-    let subject = r.git(&["log", "-1", "--format=%s"]);
-    assert_eq!(subject, "revert: reapply \"Merge branch 'feat/x'\"");
-    let body = r.git(&["log", "-1", "--format=%b"]);
-    assert!(body.contains("This reverts commit "), "{body}");
-    // Run again: nothing left to do.
-    let (code, text) = sync_member(&r, "main");
+    let (code, text) = sync_member(&r, "main", &[]);
     assert_eq!(code, 0, "{text}");
     assert!(
-        text.contains("already contains the train") && text.contains("0 revert(s)"),
+        text.contains("0 revert(s) of this member's own merges to re-apply, 0 of other branches") && !text.contains("git revert "),
         "{text}"
     );
 }
 
 #[test]
-fn sync_member_leaves_a_member_alone_that_the_trains_revert_does_not_concern() {
-    // Forked before the merge: the train's revert says nothing about this member's work.
-    let r = pulled_member("base");
-    let before = r.git(&["rev-parse", "HEAD"]);
-    let (code, text) = sync_member(&r, "main");
+fn sync_member_lists_other_branches_reverts_in_the_order_the_train_made_them() {
+    // Four merges reverted one after another (c, a, d, b): the order is the history's, not the sha order.
+    let r = Repo::new();
+    r.write("base.txt", "base\n");
+    r.commit("base");
+    let mut merges = Vec::new();
+    for b in ["c", "a", "d", "b"] {
+        r.git(&["checkout", "-q", "-b", &format!("feat/{b}"), "main"]);
+        r.write(&format!("{b}.txt"), "x\n");
+        r.commit(&format!("feat: {b}"));
+        r.git(&["checkout", "-q", "main"]);
+        r.git(&[
+            "merge",
+            "-q",
+            "--no-ff",
+            "-m",
+            &format!("Merge branch 'feat/{b}'"),
+            &format!("feat/{b}"),
+        ]);
+        merges.push(r.git(&["rev-parse", "HEAD"]));
+    }
+    // The member holds all four (forked from the train head), then the train reverts them in the order c, a, d, b.
+    r.git(&["checkout", "-q", "-b", "member"]);
+    r.write("member.txt", "m\n");
+    r.commit("feat: member");
+    r.git(&["checkout", "-q", "main"]);
+    for m in &merges {
+        revert_merge(&r, m);
+    }
+    r.git(&["checkout", "-q", "member"]);
+    let (code, text) = sync_member(&r, "main", &[]);
     assert_eq!(code, 0, "{text}");
-    assert!(text.contains("0 revert(s)"), "{text}");
-    assert_ne!(r.git(&["rev-parse", "HEAD"]), before, "the train is merged");
-    assert!(!r.git(&["log", "--format=%s"]).contains("revert: reapply"));
+    let at = |b: &str| {
+        text.find(&format!("of feat/{b} ("))
+            .unwrap_or_else(|| panic!("feat/{b} missing: {text}"))
+    };
+    assert!(at("c") < at("a") && at("a") < at("d") && at("d") < at("b"), "{text}");
 }
 
-#[test]
-fn sync_member_refuses_a_dirty_tree_and_a_detached_head_with_the_next_step() {
-    let r = pulled_member("x");
-    let head = r.git(&["rev-parse", "HEAD"]);
-    r.write("scratch.txt", "dirty\n");
-    let (code, text) = sync_member(&r, "main");
-    assert_ne!(code, 0);
-    assert!(
-        text.contains("::error::merge sync-member: the worktree has uncommitted changes. Next step:"),
-        "{text}"
-    );
-    assert_eq!(r.git(&["rev-parse", "HEAD"]), head, "nothing was merged");
-    fs::remove_file(r.path().join("scratch.txt")).unwrap();
-    r.git(&["checkout", "-q", "--detach"]);
-    let (code, text) = sync_member(&r, "main");
-    assert_ne!(code, 0);
-    assert!(text.contains("HEAD is not on a branch. Next step:"), "{text}");
-}
-
-// ---- a member must contain the train's base (stale_base) ----
+// ---- a member should contain the train's base (stale_base, report-only) ----
 
 /// A train cut from main (m1) that merged `feat/a`; main then moved to m2. `merged_m2`: the train has merged main up to m2.
 /// Branches `old` (built on m1) and `new` (built on m2) each add one file. HEAD is on the train; `origin/main` is main's tip.
@@ -2007,33 +2074,35 @@ fn check_member(r: &Repo, member: &str) -> (i32, String) {
 }
 
 #[test]
-fn a_member_built_before_the_commit_of_main_the_train_has_merged_is_refused_with_the_next_step() {
+fn a_member_built_before_the_commit_of_main_the_train_has_merged_gets_a_warning_and_the_exit_is_unchanged() {
     let (r, m2) = train_on_main(true);
     let (code, text) = check_member(&r, "old");
-    assert_eq!(code, 5, "{text}");
+    assert_eq!(code, 0, "report-only: {text}");
     assert!(
-        text.contains("::error::merge check: old is built on an old base: it does not contain ")
+        text.contains("::warning::merge check: old is built on an old base: it does not contain ")
             && text.contains(&m2[..9])
             && text.contains("the newest commit of main that train has merged")
-            && text.contains("Next step: run `./dev merge sync-member train`"),
+            && text.contains("Next step: run `./dev merge sync-member train`")
+            && text.contains("report-only"),
         "{text}"
     );
-    // The member built on that commit passes; the other member merged ahead of it (feat/a) is not required.
+    // The member built on that commit gets none; the other member merged ahead of it (feat/a) is not required.
     let (code, text) = check_member(&r, "new");
     assert_eq!(code, 0, "{text}");
     assert!(!text.contains("old base"), "{text}");
 }
 
 #[test]
-fn the_same_member_passes_while_the_train_has_not_merged_the_newer_commit_of_main() {
-    // The positive control of the refusal: identical history without the train's merge of m2.
+fn the_same_member_gets_no_warning_while_the_train_has_not_merged_the_newer_commit_of_main() {
+    // The positive control of the warning: identical history without the train's merge of m2.
     let (r, _) = train_on_main(false);
     let (code, text) = check_member(&r, "old");
     assert_eq!(code, 0, "{text}");
+    assert!(!text.contains("old base"), "{text}");
 }
 
-/// A train stacked on `train/prev`: prev has p1 and p2; train2 re-merged prev up to p1 (subject as the integrator writes it).
-fn stacked_train() -> (Repo, String, String) {
+/// A train stacked on `train/prev`: prev has p1 and p2; `tr2` re-merged prev up to p1 with the given subject.
+fn stacked_train(subject: impl Fn(&str) -> String) -> (Repo, String) {
     let r = Repo::new();
     r.write("base.txt", "base\n");
     r.commit("base");
@@ -2049,42 +2118,97 @@ fn stacked_train() -> (Repo, String, String) {
     r.commit("feat: built on p1");
     r.git(&["checkout", "-q", "train/prev"]);
     r.write("p2.txt", "p2\n");
-    let p2 = r.commit("feat: p2");
+    r.commit("feat: p2");
     r.git(&["checkout", "-q", "-b", "on_p2"]);
     r.write("d.txt", "d\n");
     r.commit("feat: built on p2");
     r.git(&["checkout", "-q", "main"]);
+    r.git(&["update-ref", "refs/remotes/origin/main", "main"]);
     r.git(&["checkout", "-q", "-b", "tr2"]);
+    r.git(&["merge", "-q", "--no-ff", "-m", &subject(&p1[..9]), &p1]);
+    (r, p1)
+}
+
+fn tr2(r: &Repo, member: &str) -> (i32, String) {
+    r.check(&["--branch", member, "--target", "tr2", "--no-generators"])
+}
+
+#[test]
+fn on_a_stacked_train_a_member_should_contain_the_previous_trains_commit_the_train_has_merged() {
+    let (r, p1) = stacked_train(|h| format!("chore(train): merge train/prev ({h}) into train 2"));
+    let (code, text) = tr2(&r, "before_p1");
+    assert_eq!(code, 0, "{text}");
+    assert!(
+        text.contains(&p1[..9]) && text.contains("the newest commit of train/prev that tr2 has merged"),
+        "{text}"
+    );
+    // Built on p1 (the merged commit) and built on p2 (newer, contains p1) get none.
+    for member in ["on_p1", "on_p2"] {
+        let (code, text) = tr2(&r, member);
+        assert_eq!(code, 0, "{member}: {text}");
+        assert!(!text.contains("old base"), "{member}: {text}");
+    }
+}
+
+#[test]
+fn the_remerge_subject_is_read_in_any_case_and_in_the_train_slash_spelling() {
+    for subject in [
+        (|h: &str| format!("CHORE(TRAIN): MERGE TRAIN/PREV ({h}) INTO TRAIN 2")) as fn(&str) -> String,
+        |h: &str| format!("Merge train/prev ({h}) into train/2"),
+    ] {
+        let (r, p1) = stacked_train(subject);
+        let (code, text) = tr2(&r, "before_p1");
+        assert_eq!(code, 0, "{text}");
+        assert!(text.contains(&p1[..9]) && text.contains("old base"), "{text}");
+    }
+}
+
+#[test]
+fn a_re_merge_that_landed_on_main_is_not_this_trains_base_and_main_ahead_of_origin_is_no_train() {
+    // main carries an older train's re-merge (as 0a78cae1f does); the train is cut from main afterwards and merges main up to m2.
+    let r = Repo::new();
+    r.write("base.txt", "base\n");
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "train/old"]);
+    r.write("o.txt", "o\n");
+    let o = r.commit("feat: o");
+    r.git(&["checkout", "-q", "main"]);
     r.git(&[
         "merge",
         "-q",
         "--no-ff",
         "-m",
-        &format!("chore(train): merge train/prev ({}) into train 2", &p1[..9]),
-        &p1,
+        &format!("chore(train): merge train/old ({}) into train 12", &o[..9]),
+        &o,
     ]);
-    (r, p1, p2)
-}
-
-#[test]
-fn on_a_stacked_train_a_member_must_contain_the_previous_trains_commit_the_train_has_merged() {
-    let (r, p1, _p2) = stacked_train();
-    let (code, text) = r.check(&["--branch", "before_p1", "--target", "tr2", "--no-generators"]);
-    assert_eq!(code, 5, "{text}");
+    r.git(&["checkout", "-q", "-b", "stale"]);
+    r.write("stale.txt", "s\n");
+    r.commit("feat: built on the old main");
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["checkout", "-q", "-b", "tr3"]);
+    r.git(&["checkout", "-q", "main"]);
+    r.write("m2.txt", "m2\n");
+    let m2 = r.commit("feat: m2");
+    r.git(&["update-ref", "refs/remotes/origin/main", &m2]);
+    r.git(&["checkout", "-q", "tr3"]);
+    r.git(&["merge", "-q", "--no-ff", "-m", "chore(train): merge main into train", "main"]);
+    let (code, text) = r.check(&["--branch", "stale", "--target", "tr3", "--no-generators"]);
+    assert_eq!(code, 0, "{text}");
     assert!(
-        text.contains(&p1[..9]) && text.contains("the newest commit of train/prev that tr2 has merged"),
-        "{text}"
+        text.contains("the newest commit of main that tr3 has merged") && text.contains(&m2[..9]) && !text.contains("train/old that"),
+        "the base is main's m2, not the re-merge that landed on main: {text}"
     );
-    // Built on p1 (the merged commit) and built on p2 (newer, contains p1) both pass.
-    for member in ["on_p1", "on_p2"] {
-        let (code, text) = r.check(&["--branch", member, "--target", "tr2", "--no-generators"]);
-        assert_eq!(code, 0, "{member}: {text}");
-    }
+    // Local main ahead of origin/main: a merge into main by name has no train, whatever the commits say.
+    r.git(&["checkout", "-q", "main"]);
+    r.write("m3.txt", "m3\n");
+    r.commit("feat: m3, not pushed");
+    let (code, text) = r.check(&["--branch", "stale", "--target", "main", "--no-generators"]);
+    assert_eq!(code, 0, "{text}");
+    assert!(!text.contains("old base"), "{text}");
 }
 
 #[test]
 fn a_merge_into_main_itself_and_a_clone_without_origin_main_are_not_judged_and_the_second_says_so() {
-    // Main has no train: no base to demand (a merge into main).
     let (r, _) = train_on_main(false);
     let (code, text) = r.check(&["--branch", "old", "--target", "main", "--no-generators"]);
     assert_eq!(code, 0, "{text}");
@@ -2097,46 +2221,111 @@ fn a_merge_into_main_itself_and_a_clone_without_origin_main_are_not_judged_and_t
 }
 
 #[test]
-fn a_synced_member_chains_into_write_reverted_for_the_train_side() {
-    // sync-member re-applies the member's work after the train's revert; merging that member into the train then goes backwards
-    // on the lines the train's revert restored, and --write-reverted answers them from the revert commits.
+fn a_train_and_main_with_no_common_commit_are_not_judged_and_not_an_abort() {
+    let (r, _) = train_on_main(false);
+    r.git(&["checkout", "-q", "--orphan", "island"]);
+    r.git(&["rm", "-rfq", "."]);
+    r.write("island.txt", "i\n");
+    r.commit("island");
+    r.git(&["checkout", "-q", "-b", "island_member"]);
+    r.write("member.txt", "m\n");
+    r.commit("feat: member");
+    r.git(&["checkout", "-q", "island"]);
+    r.write("island2.txt", "i2\n");
+    r.commit("island again");
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge island_member into island", "island_member"]);
+    let (code, text) = r.check(&["HEAD", "--no-generators"]);
+    assert_eq!(code, 0, "{text}");
+    assert!(
+        text.contains("stale-base check did not run") && text.contains("share no commit"),
+        "{text}"
+    );
+    assert!(!text.contains("NOT MEASURED"), "no abort: {text}");
+}
+
+// ---- the chain: sync-member, the merge, then --write-reverted ----
+
+fn written_lines(r: &Repo, args: &[&str]) -> (i32, String, String) {
+    let file = r
+        .path()
+        .join("..")
+        .join(format!("w-{}.txt", r.path().file_name().unwrap().to_string_lossy()));
+    let mut all = args.to_vec();
+    let f = file.to_str().unwrap().to_string();
+    all.extend(["--write-reverted", &f]);
+    let (code, text) = r.check(&all);
+    let written = fs::read_to_string(&file).unwrap_or_default();
+    let _ = fs::remove_file(&file);
+    (code, text, written)
+}
+
+/// main took `feat/shots` (shot.txt: three lines replaced) as a merge and reverted it. With `z_fix` main then fixes the `foot`
+/// line of the same file. Returns the repository and the revert S; HEAD is on `feat/shots`.
+fn shots(z_fix: bool) -> (Repo, String) {
     let r = Repo::new();
-    r.write("shot.txt", "old1\nold2\nold3\n");
+    r.write("shot.txt", "old1\nold2\nold3\nkeep\nfoot\n");
     r.commit("base");
     r.git(&["checkout", "-q", "-b", "feat/shots"]);
-    r.write("shot.txt", "new1\nnew2\nnew3\n");
+    r.write("shot.txt", "new1\nnew2\nnew3\nkeep\nfoot\n");
     r.commit("feat: refresh screenshots");
     r.git(&["checkout", "-q", "main"]);
     r.git(&["merge", "-q", "--no-ff", "-m", "Merge branch 'feat/shots'", "feat/shots"]);
     let m = r.git(&["rev-parse", "HEAD"]);
-    r.git(&["revert", "-m", "1", "--no-edit", &m]);
-    r.git(&["checkout", "-q", "-b", "member", "feat/shots"]);
-    r.write("member.txt", "member\n");
-    r.commit("feat: member");
-    r.git(&["checkout", "-q", "main"]);
-    r.write("unrelated.txt", "u\n");
-    r.commit("feat: unrelated");
-    r.git(&["checkout", "-q", "member"]);
-    let (code, text) = sync_member(&r, "main");
+    let s = revert_merge(&r, &m);
+    if z_fix {
+        r.write("shot.txt", "old1\nold2\nold3\nkeep\nfoot-fixed\n");
+        r.commit("fix: foot");
+    } else {
+        r.write("unrelated.txt", "u\n");
+        r.commit("feat: unrelated");
+    }
+    r.git(&["checkout", "-q", "feat/shots"]);
+    (r, s)
+}
+
+#[test]
+fn the_chain_sync_member_then_the_merge_then_write_reverted_answers_the_train_side() {
+    let (r, s) = shots(false);
+    let (code, text) = sync_member(&r, "main", &[]);
     assert_eq!(code, 0, "{text}");
-    assert_eq!(
-        fs::read_to_string(r.path().join("shot.txt")).unwrap(),
-        "new1\nnew2\nnew3\n",
+    assert!(text.contains(&format!("git revert {s}")), "{text}");
+    r.git(&["merge", "-q", "--no-edit", "main"]);
+    r.git(&["revert", "--no-edit", &s]); // git's default message: Revert "Revert ..."
+    assert!(
+        fs::read_to_string(r.path().join("shot.txt")).unwrap().starts_with("new1\n"),
         "the work is back"
     );
     r.git(&["checkout", "-q", "main"]);
-    let file = r
-        .path()
-        .join("..")
-        .join(format!("sync-{}.txt", r.path().file_name().unwrap().to_string_lossy()));
-    let (code, text) = r.check(&["--branch", "member", "--target", "main", "--write-reverted", file.to_str().unwrap()]);
-    let written = fs::read_to_string(&file).unwrap_or_default();
-    let _ = fs::remove_file(&file);
+    let (code, text, written) = written_lines(&r, &["--branch", "feat/shots", "--target", "main", "--no-generators"]);
     assert_eq!(code, 5, "{text}");
     assert!(written.contains("Reverted: shot.txt: "), "{written}\n{text}");
-    let msg = r.path().join("..").join("sync-final.txt");
+    let msg = r.path().join("..").join("chain-final.txt");
     fs::write(&msg, &written).unwrap();
-    r.git(&["merge", "-q", "--no-ff", "-F", msg.to_str().unwrap(), "member"]);
+    r.git(&["merge", "-q", "--no-ff", "-F", msg.to_str().unwrap(), "feat/shots"]);
     let (code, text) = r.check(&["HEAD", "--no-generators"]);
     assert_eq!(code, 0, "{text}");
+}
+
+#[test]
+fn a_merge_that_lost_a_fix_the_train_made_after_the_revert_gets_no_reverted_line() {
+    // The reviewer's case: the train fixed `foot` after the revert (S), the re-land is merged taking the member's whole file, and
+    // the fix is lost. The findings must stay, with no `Reverted:` line for the file.
+    let (r, s) = shots(true);
+    r.git(&["checkout", "-q", "-b", "reland", &s]);
+    r.git(&["revert", "--no-edit", &s]);
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["merge", "-q", "--no-ff", "--no-commit", "reland"]);
+    r.git(&["checkout", "reland", "--", "shot.txt"]);
+    r.git(&["commit", "-q", "-m", "Merge branch 'reland'"]);
+    assert!(
+        !fs::read_to_string(r.path().join("shot.txt")).unwrap().contains("foot-fixed"),
+        "setup: the fix is lost"
+    );
+    let (code, text, written) = written_lines(&r, &["HEAD", "--no-generators"]);
+    assert_eq!(code, 5, "{text}");
+    assert!(text.contains("shot.txt"), "the finding stays: {text}");
+    assert!(
+        !written.contains("Reverted: shot.txt"),
+        "no line for a file the merge lost a fix in: {written}"
+    );
 }

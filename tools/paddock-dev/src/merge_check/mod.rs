@@ -522,13 +522,6 @@ fn check(req: &Request) -> Result<Checked, CliError> {
     let root = crate::gates::command::repo_root(req.root.as_deref())?;
     let git = Git::new(&root);
     let merge = resolve(&git, req)?;
-    // A member must contain the train's base (stale_base): refused before any detector reads it.
-    if let [train, member] = merge.parents.as_slice() {
-        let gap = |e: String| CliError::new(Exit::NotMeasured, not_measured(&e));
-        if let Some(text) = stale_base::refusal(&git, train, member, &merge.target_name, &merge.member_name).map_err(gap)? {
-            return Err(CliError::new(Exit::Findings, text));
-        }
-    }
     let analysis = analyze(&git, &merge);
     let result = analysis.outcome.json();
     match analysis.outcome {
@@ -557,7 +550,32 @@ fn check(req: &Request) -> Result<Checked, CliError> {
             steps.push("generators", step);
             // Report-only (ER-41): a member built on a merge the target reverted; never a finding, never an exit code.
             steps.push("reverted-base", reverted_base::run(&git, &merge));
-            if let Some(Ok(Some(notice))) = merge.parents.first().map(|t| stale_base::unknown(&git, t)) {
+            // Report-only (ER-41, stale_base::ENFORCED): a member that lacks the train's base, and a train with no declared base.
+            if let [train, member] = merge.parents.as_slice() {
+                match stale_base::problem(&git, train, member, &merge.target_name, &merge.member_name) {
+                    Ok(Some(text)) if stale_base::ENFORCED => return Err(CliError::new(Exit::Findings, text)),
+                    Ok(Some(text)) => steps.push(
+                        "stale-base",
+                        Some(generator_step::Step {
+                            text: vec![text],
+                            data: json!({"outcome": "warning"}),
+                            exit: Exit::Ok,
+                        }),
+                    ),
+                    Ok(None) => {}
+                    Err(why) => steps.push(
+                        "stale-base",
+                        Some(generator_step::Step {
+                            text: vec![format!(
+                                "::warning::stale-base check NOT MEASURED: {why}. Next step: run it again; this check is report-only."
+                            )],
+                            data: json!({"outcome": "not measured", "why": why}),
+                            exit: Exit::Ok,
+                        }),
+                    ),
+                }
+            }
+            if let Some(Ok(Some(notice))) = merge.parents.first().map(|t| stale_base::unknown(&git, t, &merge.target_name)) {
                 steps.push(
                     "stale-base",
                     Some(generator_step::Step {
