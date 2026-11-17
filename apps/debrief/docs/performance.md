@@ -1478,8 +1478,9 @@ Mechanism: [benchmarks.md](../../../docs/benchmarks.md#timing-benchmarks-on-a-bu
 - **Command:** `node scripts/ci/startup-bench.mjs <Debrief.app> --runs 5 --report-only --budgets <file that records only>` once per
   invocation; stress by `yes > /dev/null &` loops (14, 28, and 84 together with 4 `dd if=/dev/zero bs=1m count=1500` loops), started
   5 s before the first invocation and killed after the last, deliberately and for a few minutes only
-- **Runs:** 22 invocations of 5 starts (110 starts): 6 unstressed, 6 with 14 `yes`, 4 with 28 `yes`, 3 with 84 `yes` + 4 `dd`, 3
-  overloaded (no stress of ours). Reported: the median of each invocation's 5 starts, then the median and standard deviation of those 22
+- **Runs:** 38 invocations of 5 starts (190 starts): 6 unstressed, 6 with 14 `yes`, 4 with 28 `yes`, 3 with 84 `yes` + 4 `dd`, 3
+  overloaded (no stress of ours), and 16 on 2026-11-17 at a moderate to light real load (8 at load 40 to 50, 8 at load 20 to 25) for the quiet limit. The baseline and
+  3 sd table below uses the first 22; the quiet limit uses all 38. Reported: the median of each invocation's 5 starts, then the median and standard deviation of those 22
 - **Numbers:**
 
   | Measure | Min | Baseline (median of 22) | Max | Std dev | Used for |
@@ -1504,12 +1505,20 @@ Mechanism: [benchmarks.md](../../../docs/benchmarks.md#timing-benchmarks-on-a-bu
   | overloaded, load 97 to 177, 0% idle (3) | 630 (540 to 700) | 972 (about 880 to 1100) | 620 and up (about 5 times) |
 
 - **Thresholds and why (ER-12):**
-  - CPU fails over **875 ms** (`baselineMs` 515 + `noiseMs` 360): 1.25 times the worst invocation median measured (700 ms, load 150).
-    Under `yes` and `dd` loops the CPU did not move (470 to 540 ms); under real build load (many processes, memory and cache
-    contention) it rose by up to 40% (530 to 720 ms per start). A tighter threshold (baseline + 3 sd of the calm conditions was
-    561 ms) failed on the first overloaded run (650 ms), which is a busy host and not a regression. The cost: a CPU regression under
-    about 70% is not caught. If that is too coarse, the alternative is a tight threshold that applies only when the recorded CPU
-    idle was above some value (a decision for the user).
+  - CPU on a busy host fails over **875 ms** (`baselineMs` 515 + `noiseMs` 360): 1.25 times the worst invocation median measured
+    (700 ms, load 150). Under `yes` and `dd` loops the CPU did not move (470 to 540 ms); under real build load (many processes,
+    memory and cache contention) it rose by up to 40% (530 to 720 ms per start), and at a moderate real load (load 40 to 50, CPU
+    idle about 5 to 15%) it was 550 to 640 ms. A tight threshold applied always (baseline + 3 sd of the calm conditions, 561 ms)
+    failed the first overloaded run (650 ms), which is a busy host and not a regression.
+  - CPU on a quiet host (user, 2026-11-17, "tighter when quiet") fails over **600 ms** (`cpu.quiet`: baseline 500 + 20%). It
+    applies when the **median** of the host CPU idle readings around the starts (before and after each start, `iostat`) is **30%
+    or more**; else the busy-host limit applies, and a CPU between 600 and 875 ms is a note naming both limits and the idle seen.
+    Baseline 500 ms is the median of the 9 of 38 invocations whose median idle was 30% or more (they ranged 480 to 530 ms; 16 more
+    invocations were taken on 2026-11-17 for this). The cutoff is 30%, not the 50% first proposed: no invocation of 38 had a median
+    idle of 50% or more (best 49%), because other agents work on the host all day and the start itself uses about a core, so 50
+    would never apply; 40 leaves 4 invocations (CPU 480 to 530), 30 leaves 9, and every invocation whose CPU was above 540 ms had a
+    median idle under 30%. The median, not the lowest reading, decides, so one dip while the app starts does not turn a quiet host
+    busy. If the idle was not read, the busy limit applies.
   - A wall mark fails only over **5 times its baseline** (`wallCeilingFactor`). The worst single start of the 110 was 2.52 times
     its mark's baseline (setupDone, overloaded); 5 is twice that, and a broken start is far above it (the app waits 10 s for a first
     paint, 16 times the firstInteractive baseline). A first try of 3 times was only 1.19 times the worst start. Over baseline + 3 sd

@@ -4,8 +4,11 @@
 // the readers at the end touch the OS. The rule (user, 2026-11-17): always take the benchmark and record the host load and
 // CPU idle with it; never refuse to measure because the host is busy; fail only on a real regression.
 // (apps/debrief/docs/performance.md, "Start-up benchmark on a busy host", has the measurements.)
-//   1. FAIL when the tree CPU time (user + sys of the started process tree, read when the start is done) is over
-//      `baselineMs + noiseMs`: CPU time barely moves with host load.
+//   1. FAIL when the tree CPU time (user + sys of the started process tree, read when the start is done) is over its
+//      limit. There are two: the coarse one (`cpu.baselineMs + cpu.noiseMs`) covers a busy host, where CPU time rises
+//      (real build load raised it up to 40%); the tight one (`cpu.quiet`: its own baseline + margin) applies only when the
+//      median of the host's CPU idle readings around the starts was at least `cpu.quiet.minIdle` percent (user, 2026-11-17:
+//      "tighter when quiet"). Between the two limits on a busy host is a note.
 //   2. FAIL when a wall mark is over its ceiling, `ceilingFactor` times its baseline: a limit only a broken start reaches,
 //      well above anything a busy host produced.
 //   3. NOTE (never a failure): a wall mark over `baselineMs + noiseMs` but under the ceiling, a high spread of the starts,
@@ -66,7 +69,7 @@ export function ceilingMs(t, ceilingFactor) {
  *   cpuMsSamples   tree CPU time per sample in ms (null entries: not readable on this OS)
  *   wallSamples    per sample: { mark: ms } wall marks (no sample at all: the app gave no timings)
  *   reference      { reps: [ms] }  the fixed workload's readings, a note only
- *   thresholds     { cpu: {baselineMs, noiseMs}, marks: { mark: {baselineMs, noiseMs} }, wallCeilingFactor }
+ *   thresholds     { cpu: {baselineMs, noiseMs, quiet: {baselineMs, noiseMs, minIdle}}, marks: { mark: {baselineMs, noiseMs} }, wallCeilingFactor }
  *   idle           optional [{ idleBefore, idleAfter, loadBefore, loadAfter }] per sample, summarised in the notes
  *   tag, reportOnly (tag is not used by the verdict: a busy host and a tag run are judged alike; it is kept for callers)
  * Returns { status: 'pass' | 'fail' | 'not-measured', exitCode, over, notes, cpuMedian, ratio, sampleSpread, level }; `level`
@@ -91,9 +94,18 @@ export function verdict({ cpuMsSamples, wallSamples, reference, thresholds, idle
 
   const notes = [];
   const over = [];
-  const cpuMax = budgetMs(thresholds?.cpu);
-  if (cpuMax !== null && Number.isFinite(cpuMedian) && cpuMedian > cpuMax) over.push({ kind: 'cpu', median: cpuMedian, budget: cpuMax });
-  if (cpuMax !== null && !Number.isFinite(cpuMedian)) notes.push('tree CPU time is not readable on this OS: only the wall time was judged');
+  const cpuCoarse = budgetMs(thresholds?.cpu);
+  const quietLimit = budgetMs(thresholds?.cpu?.quiet);
+  const minIdle = thresholds?.cpu?.quiet?.minIdle;
+  const typicalIdle = medianIdleOf(idle);
+  const quiet = quietLimit !== null && Number.isFinite(minIdle) && Number.isFinite(typicalIdle) && typicalIdle >= minIdle;
+  base.quiet = quiet;
+  base.cpuLimit = quiet ? quietLimit : cpuCoarse;
+  if (base.cpuLimit !== null && Number.isFinite(cpuMedian) && cpuMedian > base.cpuLimit) over.push({ kind: 'cpu', median: cpuMedian, budget: base.cpuLimit, quiet });
+  else if (!quiet && quietLimit !== null && Number.isFinite(cpuMedian) && cpuMedian > quietLimit) {
+    notes.push(`tree CPU median ${cpuMedian.toFixed(0)} ms is over the quiet-host limit ${quietLimit.toFixed(0)} ms, under the busy-host limit ${cpuCoarse.toFixed(0)} ms: a note, because the host was not quiet (median CPU idle ${Number.isFinite(typicalIdle) ? `${typicalIdle.toFixed(0)}%` : 'not read'}, a quiet host needs ${minIdle}% or more)`);
+  }
+  if (cpuCoarse !== null && !Number.isFinite(cpuMedian)) notes.push('tree CPU time is not readable on this OS: only the wall time was judged');
   for (const m of markNames) {
     const ceiling = ceilingMs(thresholds.marks[m], thresholds.wallCeilingFactor);
     const soft = budgetMs(thresholds.marks[m]);
@@ -107,9 +119,15 @@ export function verdict({ cpuMsSamples, wallSamples, reference, thresholds, idle
   if (Number.isFinite(ratio)) notes.push(`start-up is ${ratio.toFixed(1)} times the reference workload (median ${ref.median.toFixed(0)} ms, spread ${(ref.spread * 100).toFixed(0)}%)`);
   const hostNote = hostSummary(idle);
   if (hostNote) notes.push(hostNote);
-  if (cpuMax === null && !markNames.length) notes.push('no thresholds are recorded for this OS: numbers only');
+  if (cpuCoarse === null && !markNames.length) notes.push('no thresholds are recorded for this OS: numbers only');
   if (over.length && !reportOnly) return { ...base, status: 'fail', over, exitCode: EXIT_OVER, level: 'error', notes };
   return { ...base, status: 'pass', over, exitCode: EXIT_OK, level: null, notes };
+}
+
+/** The median CPU idle percentage over every reading of every sample (before and after), or NaN when none was read. Pure. */
+export function medianIdleOf(idle) {
+  const v = (idle ?? []).flatMap((s) => [s.idleBefore, s.idleAfter]).filter(Number.isFinite);
+  return v.length ? median(v) : NaN;
 }
 
 /** "host CPU idle min-max%, load min-max" over the samples' readings, or null. Pure. */
@@ -136,7 +154,7 @@ export function annotations(v, { name, os }) {
   for (const o of v.over) {
     out.push(
       o.kind === 'cpu'
-        ? `::error::${name} CPU: median ${o.median.toFixed(0)} ms of tree CPU exceeds the ${o.budget.toFixed(0)} ms threshold (baseline + noise margin, ${os}). A real regression: CPU time does not grow on a busy host. Next step: compare the steps of the start with the last green run.`
+        ? `::error::${name} CPU: median ${o.median.toFixed(0)} ms of tree CPU exceeds the ${o.budget.toFixed(0)} ms ${o.quiet ? 'quiet-host' : 'busy-host'} threshold (baseline + margin, ${os}). A real regression: ${o.quiet ? 'the host was quiet' : 'even a busy host does not need this much CPU'}. Next step: compare the steps of the start with the last green run.`
         : `::error::${name} ${o.mark}: median ${o.median.toFixed(0)} ms exceeds the ${o.budget.toFixed(0)} ms ceiling (${os}), which only a broken start reaches. Next step: compare the steps of the start with the last green run.`,
     );
   }

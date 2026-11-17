@@ -6,6 +6,7 @@ import {
   budgetMs,
   ceilingMs,
   hostSummary,
+  medianIdleOf,
   iqrSpread,
   quantile,
   EXIT_NOT_MEASURED,
@@ -68,8 +69,50 @@ test('the CPU time over its threshold fails, on a busy host and a quiet one', ()
   const v = verdict(input({ cpuMsSamples: [500, 510, 505, 520, 515], idle: [{ idleBefore: 0, idleAfter: 0 }] }));
   assert.equal(v.status, 'fail');
   assert.equal(v.exitCode, EXIT_OVER);
-  assert.deepEqual(v.over, [{ kind: 'cpu', median: 510, budget: 460 }]);
+  assert.deepEqual(v.over, [{ kind: 'cpu', median: 510, budget: 460, quiet: false }]);
   assert.match(annotations(v, { name: 'start-up benchmark', os: 'macos' })[0], /^::error::.*CPU.*510 ms.*460 ms/);
+});
+
+// Tight when quiet: the quiet limit is 400 + 20 = 420 (minIdle 50); the busy limit is 460.
+const withQuiet = { ...thresholds, cpu: { ...T(400, 60), quiet: { ...T(350, 70), minIdle: 50 } } };
+const hostIdle = (...v) => v.map((x) => ({ idleBefore: x, idleAfter: x }));
+
+test('a quiet host over the tight CPU limit fails, though it is under the busy limit', () => {
+  const v = verdict(input({ thresholds: withQuiet, cpuMsSamples: [440, 445, 450, 440, 442], idle: hostIdle(80, 70, 60, 90, 75) }));
+  assert.equal(v.status, 'fail');
+  assert.equal(v.quiet, true);
+  assert.deepEqual(v.over, [{ kind: 'cpu', median: 442, budget: 420, quiet: true }]);
+  assert.match(annotations(v, { name: 'start-up', os: 'macos' })[0], /exceeds the 420 ms quiet-host threshold.*the host was quiet/);
+});
+
+test('a busy host between the tight and the busy limit passes with a note naming both and the idle seen', () => {
+  const v = verdict(input({ thresholds: withQuiet, cpuMsSamples: [440, 445, 450, 440, 442], idle: hostIdle(40, 30, 10, 20, 15) }));
+  assert.equal(v.status, 'pass');
+  assert.equal(v.quiet, false);
+  assert.match(v.notes.join('\n'), /442 ms is over the quiet-host limit 420 ms, under the busy-host limit 460 ms: a note.*median CPU idle 20%.*50% or more/);
+});
+
+test('a busy host over the busy limit still fails, with the busy-host wording', () => {
+  const v = verdict(input({ thresholds: withQuiet, cpuMsSamples: [500, 510, 505, 520, 515], idle: hostIdle(0, 0, 0) }));
+  assert.equal(v.status, 'fail');
+  assert.match(annotations(v, { name: 'b', os: 'macos' })[0], /460 ms busy-host threshold/);
+});
+
+test('the idle cutoff is on the median reading: exactly minIdle is quiet, below is busy, no reading is busy', () => {
+  const cpu = [440, 440, 440];
+  const q = (idle) => verdict(input({ thresholds: withQuiet, cpuMsSamples: cpu, idle }));
+  assert.equal(q(hostIdle(50, 50)).status, 'fail', 'at the cutoff: quiet');
+  assert.equal(q(hostIdle(49.9, 49.9)).status, 'pass', 'just below: busy');
+  assert.equal(q(hostIdle(10, 90, 90, 90, 90)).status, 'fail', 'one dip among high readings does not make the host busy');
+  assert.equal(q(hostIdle(90, 10, 10, 10, 10)).status, 'pass', 'one high reading among low ones does not make it quiet');
+  assert.equal(q([{ idleBefore: 90, idleAfter: 49 }, { idleBefore: 49, idleAfter: 49 }]).status, 'pass', 'before and after are both readings');
+  assert.equal(q(undefined).status, 'pass', 'idle not read: the busy limit');
+  assert.equal(q([{ idleBefore: null, idleAfter: null }]).status, 'pass');
+  assert.equal(verdict(input({ thresholds: withQuiet, cpuMsSamples: [420, 420, 420], idle: hostIdle(90) })).status, 'pass', 'exactly at the tight limit is not over');
+  assert.equal(verdict(input({ thresholds: withQuiet, cpuMsSamples: [421, 421, 421], idle: hostIdle(90) })).status, 'fail');
+  assert.equal(medianIdleOf([{ idleBefore: 5, idleAfter: 7 }, { idleBefore: 3 }]), 5);
+  assert.ok(Number.isNaN(medianIdleOf([])));
+  assert.equal(verdict(input({ thresholds, cpuMsSamples: cpu, idle: hostIdle(90) })).quiet, false, 'no quiet limit recorded: only the busy one');
 });
 
 test('a threshold is the recorded baseline plus the noise margin; the ceiling is a factor of the baseline', () => {

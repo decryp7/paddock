@@ -67,7 +67,8 @@ uses it, results in
 [Debrief performance.md](../apps/debrief/docs/performance.md#start-up-benchmark-on-a-busy-host-2026-11-16-and-17-featbench-busy-host).
 
 - It is always taken, and the host CPU idle (`iostat`) and 1-minute load are recorded with every start.
-- **Fails** when the CPU time (user + sys) of the started process tree is over its threshold, or a wall mark is over its ceiling
+- **Fails** when the CPU time (user + sys) of the started process tree is over its limit (a tight one when the median host CPU idle was
+  high enough, a coarse one on a busy host; between the two on a busy host is a note), or a wall mark is over its ceiling
   (a factor of its baseline that only a broken start reaches), on a train and a tag alike. Thresholds are a recorded baseline plus
   a measured noise margin (ER-12), in the app's budgets file with the results block that measured them.
 - **Notes, never a failure:** a wall mark over its noise threshold but under the ceiling, a high spread of the starts, the ratio of
@@ -219,7 +220,7 @@ Not benchmarks, though the names suggest it:
 | Debrief CPU, memory and idle gates | idle ≤ 0.5% of a core and ≤ 1 wake-up/s; catalogue ≤ 512 MB; import ≤ 6 s and ≤ 32 CPU-s per GB; post-import ≤ 20 CPU-s/GB; name rebuild ≤ 1 s | Debrief [research/2026-10-28-cpu-memory.md](../apps/debrief/docs/research/2026-10-28-cpu-memory.md) §4; family [ADR 0024](adr/0024-background-work-contract.md) D7 | **nothing yet** (planned `bench/budgets.toml`) |
 | Debrief plugin memory | cap 1024 MB; import ≤ 512 MB (proposed) | Debrief ADR 0031; [plugins research](research/2026-10-plugins-memory-and-manager.md) | `evtx_memory.rs` (ignored, fails today) |
 | Debrief profile operations | 100–2000 ms each | Debrief [profiling.md](../apps/debrief/docs/profiling.md#performance) | `debrief-profile` `perf.rs` (CI, debug, budgets × 20) |
-| Debrief start-up (macOS) | fails over tree CPU 875 ms or a mark over 5 times its baseline (firstInteractive 3100 ms); baselines windowCreated 208 … firstInteractive 620 ms (2026-11-17) | Rule 16, Debrief ADR 0058 | `startup-bench.mjs` (nightly) |
+| Debrief start-up (macOS) | fails over tree CPU 600 ms (host idle median 30% or more) or 875 ms (busy), or a mark over 5 times its baseline (firstInteractive 3100 ms); baselines windowCreated 208 … firstInteractive 620 ms (2026-11-17) | Rule 16, Debrief ADR 0058 | `startup-bench.mjs` (nightly) |
 | First-paint JS | Debrief main 1355 kB, About 480 kB; other apps not set | Rule 35 | `window-weight.mjs` (Debrief); C29 (not configured) |
 | Angular initial bundle | Debrief 185/192 kB; Dyno 900 kB/1.5 MB; Pitcrew 1/2 MB; Pitwall 1.2/2 MB; Spotter 1/2 MB; gallery 1.5/3 MB; shell-demo 500 kB/1 MB; workbench-demo 580 kB/1 MB | Rule 35 | `ng build` in CI |
 | Idle process | ≤ 0.5% of a core, ≤ 1 wake-up/s | [ADR 0024](adr/0024-background-work-contract.md) D7 | **nothing** shared; Debrief's gate is planned |

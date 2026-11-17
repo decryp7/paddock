@@ -14,7 +14,7 @@
 // Verdict on a busy host (user rule 2026-11-17; the mechanism is scripts/bench/busy-host.mjs, shared): the benchmark is always
 // taken and the host's CPU idle and load are recorded with every start; a busy host never makes it "not measured".
 //   - FAIL: the CPU time (user + sys) of the started process tree, read when the "Startup timings" line arrives, over its
-//     threshold (baseline + measured noise margin); or a wall mark over its ceiling (5 times its baseline), which only a
+//     limit: the tight quiet-host one when the median host CPU idle was high enough, else the coarse busy-host one; or a wall mark over its ceiling (5 times its baseline), which only a
 //     broken start reaches. Both on every run, tag or not.
 //   - NOTE, never a failure: a wall mark over its noise threshold but under the ceiling, a high spread of the starts, the
 //     ratio to a fixed reference workload, host CPU idle and load.
@@ -186,7 +186,7 @@ async function main() {
   const num = (x) => (Number.isFinite(x) ? fmt(x) : '-');
   const lines = [
     `reference workload: median ${fmt(ref.median)} ms, spread ${(ref.spread * 100).toFixed(1)}% over ${ref.n} readings (before ${fmt(referenceStats(repsBefore).median)} ms, after ${fmt(referenceStats(repsAfter).median)} ms; idle baseline ${budgets?.reference?.baselineMs ?? '-'} ms); start-up is ${num(v.ratio)} times it (a note only)`,
-    `starts: tree cpu median ${num(v.cpuMedian)} ms (threshold ${num(budgetMs(budgets?.cpu) ?? NaN)}), spread of the middle half ${num(v.sampleSpread * 100)}%, median of ${samples.length} starts (${os}):`,
+    `starts: tree cpu median ${num(v.cpuMedian)} ms (limit ${num(v.cpuLimit ?? NaN)}: ${v.quiet ? 'quiet host' : 'busy host'}; quiet-host limit ${num(budgetMs(budgets?.cpu?.quiet) ?? NaN)} needs median CPU idle of ${budgets?.cpu?.quiet?.minIdle ?? '-'}% or more, busy-host limit ${num(budgetMs(budgets?.cpu) ?? NaN)}), spread of the middle half ${num(v.sampleSpread * 100)}%, median of ${samples.length} starts (${os}):`,
     ...MARKS.map(([m]) => `  ${m.padEnd(17)} wall ${String(medians[m]).padStart(6)} ms   noise threshold ${num(budgetMs(budgets?.marks?.[m]) ?? NaN)}   ceiling ${num(budgets?.marks?.[m] && budgets?.wallCeilingFactor ? budgets.marks[m].baselineMs * budgets.wallCeilingFactor : NaN)}`),
     `verdict: ${v.status.toUpperCase()}`,
     ...v.notes.map((n) => `  note: ${n}`),

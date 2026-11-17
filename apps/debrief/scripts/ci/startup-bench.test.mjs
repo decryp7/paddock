@@ -109,6 +109,16 @@ test('script: a busy-host number passes with a note, CPU over fails, wall over t
     const cpu = go({ cpu: T(-10, 0), marks: { firstInteractive: T(100_000, 0) }, wallCeilingFactor: 3 });
     assert.equal(cpu.r.status, 1);
     assert.match(cpu.r.stderr, /::error::start-up benchmark CPU: median/);
+    if (process.platform === 'darwin') {
+      // the tight limit applies at a host idle of minIdle or more (-1: always), the busy limit otherwise (101: never)
+      const marks = { firstInteractive: T(100_000, 0) };
+      const quiet = go({ cpu: { ...T(1e9, 0), quiet: { ...T(-10, 0), minIdle: -1 } }, marks, wallCeilingFactor: 3 });
+      assert.equal(quiet.r.status, 1);
+      assert.match(quiet.r.stderr, /::error::start-up benchmark CPU: median .* quiet-host threshold/);
+      const busy = go({ cpu: { ...T(1e9, 0), quiet: { ...T(-10, 0), minIdle: 101 } }, marks, wallCeilingFactor: 3 });
+      assert.equal(busy.r.status, 0, busy.r.stderr);
+      assert.match(busy.r.stdout, /note: tree CPU median .* over the quiet-host limit -10 ms, under the busy-host limit/);
+    }
     const ceiling = go({ marks: { firstInteractive: T(100, 0) }, wallCeilingFactor: 3 });
     assert.equal(ceiling.r.status, 1);
     assert.match(ceiling.r.stderr, /::error::start-up benchmark firstInteractive: median 730 ms exceeds the 300 ms ceiling/);
