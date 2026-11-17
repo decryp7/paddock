@@ -821,6 +821,7 @@ impl Exec for RealExec {
     fn run(&self, gate: &Gate, limits: Limits) -> Result<Done, String> {
         let _ = std::fs::create_dir_all(&self.logs);
         let log = self.logs.join(format!("{}.log", log_name(&gate.id)));
+        // Best-effort: the .id file only helps a reader; a failed write never stops the gate.
         let _ = std::fs::write(log.with_extension("id"), format!("{}\n", gate.id));
         let label = matches!(gate.need, Need::Docker | Need::LocalCiImage).then(run_token);
         let mut ran = self
@@ -1045,7 +1046,11 @@ exit $rc
             assert!(std::fs::read_to_string(&log).unwrap().contains("from-a"));
             assert_eq!(std::fs::read_to_string(log.with_extension("id")).unwrap().trim(), a);
             assert_ne!(log_name(&a), log_name(&b));
-            assert_eq!(log_name(&a), log_name(&a), "stable");
+            assert_eq!(
+                log_name("clippy a"),
+                "clippy-a-8985c681c020",
+                "a pinned name: the hash is part of the contract"
+            );
         }
 
         #[test]
