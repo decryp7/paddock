@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMain } from '../conformance/src/util/is-main.mjs';
 
 export const ALLOW_FILE = join(dirname(fileURLToPath(import.meta.url)), 'npm-audit-allow.json');
 const LEVELS = ['high', 'critical'];
@@ -116,4 +117,4 @@ function main(argv) {
   return bad ? 1 : 0;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) process.exitCode = main(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = main(process.argv.slice(2));
