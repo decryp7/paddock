@@ -227,6 +227,15 @@ struct Inner {
     /// A test's look at a second closer as it starts waiting for the close under way (runs with the close state locked).
     #[cfg(test)]
     close_waits: Mutex<Option<tests::Hook>>,
+    /// A test's look at the closing thread after the pending calls left the map, before their end is posted to them.
+    #[cfg(test)]
+    after_drain: Mutex<Option<tests::Hook>>,
+    /// A test's look at a caller about to look its call up for the wake-up of its wait on the clock.
+    #[cfg(test)]
+    before_lookup: Mutex<Option<tests::Hook>>,
+    /// A test's look at a caller right after that look-up.
+    #[cfg(test)]
+    after_lookup: Mutex<Option<tests::Hook>>,
 }
 
 /// How far the connection has closed.
@@ -414,6 +423,12 @@ impl Peer {
                 while_closing: Mutex::new(None),
                 #[cfg(test)]
                 close_waits: Mutex::new(None),
+                #[cfg(test)]
+                after_drain: Mutex::new(None),
+                #[cfg(test)]
+                before_lookup: Mutex::new(None),
+                #[cfg(test)]
+                after_lookup: Mutex::new(None),
             }),
         };
         if let Some(f) = on_push {
@@ -547,6 +562,10 @@ impl Peer {
         // Out of the maps first: a call no longer listed is never started from the queue and gets no reply.
         let pending: Vec<Pending> = lock(&self.inner.pending).drain().map(|(_, p)| p).collect();
         let served: Vec<Arc<Served>> = lock(&self.inner.served).drain().map(|(_, s)| s).collect();
+        #[cfg(test)]
+        if let Some(f) = lock(&self.inner.after_drain).as_ref() {
+            f(self);
+        }
         for s in &served {
             lock(&s.state).cancelled = true;
             s.cv.notify_all();
@@ -706,8 +725,26 @@ impl Peer {
             return rx.recv().map(Some).map_err(|_| self.closed_reason());
         };
         let arrived = CancelToken::new();
-        if let Some(p) = lock(&self.inner.pending).get_mut(&id) {
-            p.arrived = arrived.clone();
+        #[cfg(test)]
+        if let Some(f) = lock(&self.inner.before_lookup).as_ref() {
+            f(self);
+        }
+        let listed = match lock(&self.inner.pending).get_mut(&id) {
+            Some(p) => {
+                p.arrived = arrived.clone();
+                true
+            }
+            None => false,
+        };
+        #[cfg(test)]
+        if let Some(f) = lock(&self.inner.after_lookup).as_ref() {
+            f(self);
+        }
+        if !listed {
+            // No longer listed, so nothing will cancel `arrived`: a last event is already in the channel, or a close took the
+            // call out and posts its end (or drops its sender) right after. Waiting on the clock here waited for the whole
+            // timeout, and for ever on a test's fake clock (CI run 8214); the channel answers as soon as the close does.
+            return rx.recv().map(Some).map_err(|_| self.closed_reason());
         }
         // An event posted before the new token was in place is already in the channel.
         if let Ok(e) = rx.try_recv() {
@@ -1365,6 +1402,77 @@ mod tests {
              closer would return while a queued call could still start"
         );
         assert!(peer.is_closed() && peer.wait_closed(Some(Duration::ZERO)));
+        drop(theirs);
+    }
+
+    /// Regression (CI run 8214, the crates job on Linux: paddock-plugin-host's
+    /// `a_crashing_plugin_is_restarted_after_the_back_off_and_then_quarantined` hung until nextest stopped it at 60 s, and
+    /// passed in 0.7 s on its retry). A call whose connection closed after the call was sent but before the caller looked it
+    /// up to be woken waited for its whole timeout: the close had already taken the call out of the map, so the caller's
+    /// new wake-up token was never placed where the close could cancel it, and the close cancelled the old one. On a test's
+    /// fake clock that wait never ends; on the system clock a crashed plugin is noticed only when the call times out.
+    /// The seams hold the caller before its look-up and the closer between taking the calls out and posting their end.
+    #[test]
+    fn a_call_the_close_took_out_before_its_caller_looked_it_up_is_still_woken_by_that_close() {
+        use paddock_jobs::time::FakeClock;
+        let (ours, theirs) = endpoint::pair().unwrap();
+        let clock = FakeClock::new();
+        let mut opts = PeerOptions::new("the other side");
+        opts.clock = Arc::new(clock.clone());
+        let peer = Peer::start(
+            Connection::raw(ours, FrameLimit::default()),
+            Arc::new(NoCalls),
+            opts,
+        )
+        .unwrap();
+        let guard = Duration::from_secs(30);
+        let (begun_tx, begun) = mpsc::channel::<()>();
+        let (go_tx, go) = mpsc::channel::<()>();
+        *lock(&peer.inner.before_lookup) = Some(Box::new(move |_: &Peer| {
+            let _ = begun_tx.send(());
+            let _ = go.recv_timeout(guard);
+        }));
+        let (looked_tx, looked) = mpsc::channel::<()>();
+        *lock(&peer.inner.after_lookup) = Some(Box::new(move |_: &Peer| {
+            let _ = looked_tx.send(());
+        }));
+        let (drained_tx, drained) = mpsc::channel::<()>();
+        let (post_tx, post) = mpsc::channel::<()>();
+        *lock(&peer.inner.after_drain) = Some(Box::new(move |_: &Peer| {
+            let _ = drained_tx.send(());
+            let _ = post.recv_timeout(guard);
+        }));
+        let (done_tx, done) = mpsc::channel();
+        let caller = {
+            let peer = peer.clone();
+            std::thread::spawn(move || {
+                let _ = done_tx.send(peer.call(b"crash".to_vec(), Some(Duration::from_secs(3600))));
+            })
+        };
+        begun
+            .recv_timeout(guard)
+            .expect("the call was sent and its caller came to its wait");
+        let closer = {
+            let peer = peer.clone();
+            std::thread::spawn(move || peer.close())
+        };
+        drained
+            .recv_timeout(guard)
+            .expect("the close took the pending call out");
+        go_tx.send(()).unwrap();
+        looked
+            .recv_timeout(guard)
+            .expect("the caller looked its call up");
+        post_tx.send(()).unwrap();
+        let result = done.recv_timeout(guard);
+        assert!(
+            matches!(result, Ok(Err(IpcError::Closed(_)))),
+            "the call the close ended was not woken by that close: it waits for its timeout on the clock instead, which a \
+             test's fake clock never reaches (CI run 8214); got {result:?} with {} waiter(s) on the clock",
+            clock.waiters()
+        );
+        caller.join().unwrap();
+        closer.join().unwrap();
         drop(theirs);
     }
 

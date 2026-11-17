@@ -2686,3 +2686,34 @@ row layer changes height" grows the layer by 100 px and reads `scrollTop`; red i
 **Why the logs showed it only partly.** The `Scroll origin` line showed a no-input move, not its size against the layer change; WebKit's
 console preview cut the line after five fields. **Class:** a browser default that moves the scroll position (clamping, bug 3 of ADR 0072;
 anchoring here).
+
+## paddock-ipc: a call whose connection closed before its caller looked it up waited for its whole timeout (CI run 8214, 2026-11-17)
+
+**Symptom.** In ci.yml run 8214 (train 13, the crates job on Linux) paddock-plugin-host's
+`faults::a_crashing_plugin_is_restarted_after_the_back_off_and_then_quarantined` ran until nextest stopped it at 60 s, with no
+output, and passed in 0.7 s on its retry. It was the only such failure in the 78 crates jobs of the last 135 ci.yml runs (1.3 %).
+**First hypothesis and what refuted it.** The brief named ETXTBSY (the "plugin-host ETXTBSY" of run 8174). Run 8174's failure was
+another test (`a_program_changed_after_install...`, an ETXTBSY panic in under a second); a busy program file fails a start within
+the 1.3 s bound of `paddock_env::text_busy::retry`, so it cannot hang a test for 60 s. Also listed and refuted: the plugin stuck in
+`exit` or its socket held open by another process (the fixture's `crash` is `process::exit`, the host spawns with close-on-exec and
+this binary starts no guardian); a lost wake-up in `FakeClock::wait` (its generation check orders the token's waker against the wait);
+the memory watcher or the tree kill blocking (they wait on the real clock or a reaped child).
+**Root cause.** `Peer::wait_event` installs a fresh wake-up token in the call's `Pending` entry, then waits on the peer's clock.
+Since 381ca0d70 (2026-11-10, "a close is reported only once it has ended the calls"; in no tag) `mark_closed` takes the pending calls
+out of the map under the lock and posts their end later, after the close is reported. A caller that looked its call up in that
+window found nothing, so its new token was never cancelled; the close cancelled the old one. The caller then waited for the call's
+timeout on the clock: for ever on the test's `FakeClock` (the plugin host runs its peers on the app's clock), and for the whole call
+timeout in a real app, so a crashed plugin was noticed only when its call timed out. The crash test hits it because the plugin exits
+as soon as it reads the call: the close races the caller's step from sending to waiting.
+**Confirmation (ER-28).** With the window widened (a 20 ms pause after the send and a 50 ms pause between the drain and the post,
+env-gated, not committed) the e2e test hung 6 of 6 runs on macOS and 10 of 10 in the Linux CI-image container (the plugin a zombie,
+the guard's worker and timer threads parked on the fake clock); with the fix and the same widening it passed 20 of 20 on macOS and
+60 of 60 on Linux. Natural rate before the fix: 0 of 1,900 runs in the Linux container (arm64, 4 CPUs, CPU-bound
+neighbours) and 0 of 200 on macOS, 1 of 78 in CI.
+**Fix.** A call no longer listed is not waited for on the clock: its end is already in the channel or is posted (or its sender
+dropped) by the close right after, so the caller blocks on the channel. Regression test first, through three test seams (the caller
+before and after its look-up, the closer between the drain and the post): red at its 30 s hang guard with one waiter left on the
+fake clock, green after. Debrief's copy (`debrief-ipc`, rule 55) waits on the channel itself, so it does not have the window.
+**Why the logs did not show it.** A hung test prints nothing; the end line of the connection (`pending=1`) was written, but nothing
+said that a caller then waited on the clock. **Class:** a waiter registers its wake-up after the waker fired (a lost wake-up), here
+created by moving a post out of the lock that orders it against the waiter's registration.
