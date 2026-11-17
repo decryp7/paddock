@@ -8,7 +8,6 @@
 #   bash paddock/tools/linux-container.sh --id dyno [--root <repo>] [--packages dyno-platform] -- [command...]
 #   bash paddock/tools/linux-container.sh --id paddock --image <ref> [--platform linux/amd64] -- command...   # a ready image, run as it is
 #   bash paddock/tools/linux-container.sh --id paddock --ci-image [--platform linux/amd64] -- command...   # the CI image, native by default
-#   bash paddock/tools/linux-container.sh --id paddock --ci-image --image-ready   # probe only: exit 0 the image is built, 3 it is not (never builds)
 #   bash paddock/tools/linux-container.sh --id dyno --clean              # stop labelled containers, delete its volumes and local CI images
 #
 # With no command: `cargo test -p <packages> && cargo clippy -p <packages> --all-targets -- -D warnings`.
@@ -34,7 +33,7 @@
 # PADDOCK_LINUX_RUN_LABEL (an extra label, `key=value`, on the container: `dev check --pre-push` finds and stops its own container by it), PADDOCK_LINUX_MEMORY (12g; ER-14 wants every test container capped), PADDOCK_LINUX_USER (e.g. 1000:1000 to exercise the "other users' processes" paths; builds into the container's /tmp).
 set -euo pipefail
 
-id=""; root="$PWD"; packages=""; clean=0; ready_image=""; platform=""; ci_image=0; image_ready=0
+id=""; root="$PWD"; packages=""; clean=0; ready_image=""; platform=""; ci_image=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --id) id="${2:?--id needs a value}"; shift ;;
@@ -43,7 +42,6 @@ while [ $# -gt 0 ]; do
     --image) ready_image="${2:?--image needs a value}"; shift ;;
     --platform) platform="${2:?--platform needs a value}"; shift ;;
     --ci-image) ci_image=1 ;;
-    --image-ready) image_ready=1 ;;
     --clean) clean=1 ;;
     --) shift; break ;;
     *) echo "linux-container: unknown option $1 (a command goes after --)" >&2; exit 2 ;;
@@ -85,12 +83,11 @@ if [ "$clean" = 1 ]; then
   exit 0
 fi
 
-if [ $# -eq 0 ] && [ -z "$packages" ] && [ "$image_ready" = 0 ]; then
+if [ $# -eq 0 ] && [ -z "$packages" ]; then
   echo "linux-container: no command and no --packages: nothing to run" >&2
   exit 2
 fi
 
-[ "$image_ready" = 0 ] || [ "$ci_image" = 1 ] || { echo "linux-container: --image-ready needs --ci-image" >&2; exit 2; }
 [ "$ci_image" = 0 ] || [ -z "$ready_image" ] || { echo "linux-container: --ci-image and --image exclude each other" >&2; exit 2; }
 
 case "${PADDOCK_LINUX_HOST_ARCH:-$(uname -m)}" in
@@ -115,13 +112,6 @@ if [ "$ci_image" = 1 ]; then
     if command -v sha256sum >/dev/null 2>&1; then hash=(sha256sum); else hash=(shasum -a 256); fi
     sum=$(cat "$root/ci-image/Dockerfile" "$root/ci-image/garage-arm64.Dockerfile" "$root/ci-image/fetch-verified.sh" "$root/ci-image/verify.sh" | "${hash[@]}" | cut -c1-12)
     image="paddock-ci-local:v$version-arm64-$sum"
-    if [ "$image_ready" = 1 ]; then
-      # A probe, never a build: the arm64 image is minutes and gigabytes, so `dev check --pre-push` asks first and leaves the build
-      # to `dev check --warm-linux` (exit 3: not built).
-      "$docker" image inspect "$image" >/dev/null 2>&1 && { echo "linux-container: $image is built" >&2; exit 0; }
-      echo "linux-container: $image is not built (it is built by a --ci-image run, or by ./dev check --warm-linux)" >&2
-      exit 3
-    fi
     if ! "$docker" image inspect "$image" >/dev/null 2>&1; then
       garage="paddock-garage-local:arm64-$sum"
       started=$SECONDS
@@ -136,7 +126,6 @@ if [ "$ci_image" = 1 ]; then
     fi
   else
     image="${PADDOCK_LINUX_CI_REGISTRY:-dev.decryptology.net/decryp7/paddock-ci}:v$version"
-    [ "$image_ready" = 0 ] || { echo "linux-container: $image is pulled when it runs" >&2; exit 0; } # nothing is built for it
   fi
 elif [ -n "$ready_image" ]; then
   image="$ready_image" # a ready image (for example the CI image) is run as it is: no layer of ours, no rustup

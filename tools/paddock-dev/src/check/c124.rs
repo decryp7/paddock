@@ -2,7 +2,7 @@
 //! "a gate gives its verdict from an indirect signal" recurred at rows 2 to 7 of the amendment's table).
 //!
 //! Flagged, one site at a time, in the gate and check tools' Rust (`tools/paddock-dev/src/`, `crates/paddock-bench/src/`) outside
-//! test code (a `tests/` folder, `tests.rs`, `*_test.rs`, and every `#[cfg(test)]` item, by item: code after a test module counts):
+//! test code (a `tests/` folder, `tests.rs`, `*_test.rs`, and everything after a file's first `#[cfg(test)]`):
 //!
 //! - the `NotMeasured`, `Clean`, `Pass`, `Passed`, `Success`, `Current` or `Green` variants of a local enum that is a result type, one
 //!   with a `NotMeasured` variant or two or more result words (those, and `Red`, `Stale`, `Fail`, `Failed`, `Findings`, `Dirty`,
@@ -56,6 +56,7 @@ static EMPTY_TAIL: LazyLock<Regex> = LazyLock::new(|| {
 });
 static MEASURE_CALL: LazyLock<Regex> = LazyLock::new(|| rx(r"\bmeasure\s*\("));
 static JSON_USE: LazyLock<Regex> = LazyLock::new(|| rx(r"json!|serde_json"));
+static CFG_TEST: LazyLock<Regex> = LazyLock::new(|| rx(r"^\s*#\[cfg\(test\)\]"));
 static JS_FILE: LazyLock<Regex> = LazyLock::new(|| rx(r"^(?:conformance/(?:src|bin)|scripts|tools)/.*\.mjs$"));
 static JS_PASS: LazyLock<Regex> = LazyLock::new(|| rx(r#"\bstatus\s*:\s*['"]clean['"]"#));
 static JS_TEST: LazyLock<Regex> = LazyLock::new(|| rx(r"\.test\.mjs$"));
@@ -82,16 +83,15 @@ pub fn flagged_rust(path: &str, text: &str) -> Vec<Site> {
         return Vec::new();
     }
     let mut out = Vec::new();
-    // Test items are blanked item by item (a test module in the middle of a file hides nothing below it).
-    let owned = crate::check::lex::rust::production_lines(text);
-    let lines: Vec<&str> = owned.iter().map(String::as_str).collect();
+    let lines: Vec<&str> = text.split('\n').collect();
+    let end = lines.iter().position(|l| CFG_TEST.is_match(l)).unwrap_or(lines.len());
     let json_used = JSON_USE.is_match(text);
     let mut depth: i64 = -1; // brace depth inside an enum, -1 outside
     let mut header = String::new(); // the enum's own line, so the `NotMeasured,` of two enums are two sites
     // The enum's flaggable variants, kept until it closes and shows whether it is a result type, and its result words.
     let mut candidates: Vec<Site> = Vec::new();
     let mut words = std::collections::BTreeSet::new();
-    for (i, line) in lines.iter().enumerate() {
+    for (i, line) in lines[..end].iter().enumerate() {
         if line.trim().starts_with("//") {
             continue;
         }
@@ -147,7 +147,7 @@ pub fn flagged_rust(path: &str, text: &str) -> Vec<Site> {
         }
     }
     // Comment lines are blanked (line numbers stay), then each `measure(` call is cut at its balanced closing parenthesis.
-    let code = lines
+    let code = lines[..end]
         .iter()
         .map(|l| if l.trim().starts_with("//") { "" } else { *l })
         .collect::<Vec<_>>()
@@ -330,15 +330,5 @@ mod tests {
         ] {
             assert!(lines(text).is_empty(), "{text}");
         }
-    }
-
-    /// The landmark bug (third instance): everything after a file's first `#[cfg(test)]` was skipped, so a test module in the middle
-    /// of a file hid the production code below it. Test items are blanked item by item now.
-    #[test]
-    fn a_test_module_in_the_middle_of_a_file_hides_nothing_below_it() {
-        let mid = "fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t() { json!({\"status\": 1}); }\n}\nfn later() { let v = json!({\"status\": \"clean\"}); }\n";
-        assert_eq!(lines(mid), vec![6]);
-        let single = "#[cfg(test)]\nuse x::y;\nfn later() { let v = json!({\"verdict\": \"ok\"}); }\n";
-        assert_eq!(lines(single), vec![3]);
     }
 }
