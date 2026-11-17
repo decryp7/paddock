@@ -18,10 +18,6 @@ on:
       - ".gitea/workflows/dyno-screenshots.yml"
   workflow_dispatch:
 
-env:
-  # The fallback switch of conformance/ci/kit.sh (WP-1), as in ci.yml: the shared actions call kit.sh.
-  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -34,8 +30,6 @@ jobs:
     timeout-minutes: 45
     env:
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-      # The tag rule for ./dev (job-isolation runs it): a tag run never downloads a stored tool binary.
-      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     defaults:
       run:
         working-directory: apps/dyno/app
