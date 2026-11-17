@@ -145,7 +145,6 @@ pub struct Change {
 /// The rows that do not depend on a workspace, as the pass record stores them (`known::write_record`): a record made by a tool with
 /// another set is refused, so a row added here is never skipped through an older pass. A test checks it against the planner.
 pub const ROW_SET: &[&str] = &[
-    "clippy-linux crates",
     "commit-lint",
     "conformance",
     "conformance-tests",
@@ -155,6 +154,10 @@ pub const ROW_SET: &[&str] = &[
     "pitwall-deny",
     "pitwall-scripts",
 ];
+
+/// The id prefixes of the rows planned per workspace (the Linux Clippy names the workspaces it covers and those it leaves out): they
+/// are not in [`ROW_SET`], and the planner's test tells the fixed rows from these.
+pub const PER_WORKSPACE_PREFIXES: &[&str] = &["fmt ", "lockfile ", "clippy ", "clippy-windows ", "clippy-linux "];
 
 /// Workspaces whose lints are not a push gate: they have a CI job of their own that is not part of a branch run.
 const OWN_JOB: &[&str] = &["/fuzz", "/templates/"];

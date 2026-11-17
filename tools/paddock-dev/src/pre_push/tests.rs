@@ -219,11 +219,7 @@ fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
     let planned = plan_gates(&plan(), &c, &facts());
     let mut fixed: Vec<String> = ids(&planned)
         .into_iter()
-        .filter(|id| {
-            !["fmt ", "lockfile ", "clippy ", "clippy-windows "]
-                .iter()
-                .any(|p| id.starts_with(p))
-        })
+        .filter(|id| !super::gates::PER_WORKSPACE_PREFIXES.iter().any(|p| id.starts_with(p)))
         .collect();
     fixed.sort();
     let mut want: Vec<String> = super::gates::ROW_SET.iter().map(|s| s.to_string()).collect();
