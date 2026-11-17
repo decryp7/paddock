@@ -85,6 +85,26 @@ fn file_and_outcome(v: &Value) -> Vec<(String, Option<String>)> {
         .collect()
 }
 
+/// The allow-list users the two hosts disagree on, among the checks that have a twin on the other host: `rust` and `js` are each
+/// host's `(check, allow file)` pairs and `rust_ids` the ids of the Rust registry. A JavaScript-only check (no Rust twin, such as C135)
+/// keeps its allow list on its own host and is not asked for on the other; a twinned check that names one on one host only, or another
+/// file, is a difference.
+fn twinned_differences(rust: &[(String, String)], js: &[(String, String)], rust_ids: &[String]) -> Vec<String> {
+    let js_twinned: Vec<&(String, String)> = js.iter().filter(|(id, _)| rust_ids.contains(id)).collect();
+    let mut out = Vec::new();
+    for r in rust {
+        if !js_twinned.contains(&r) {
+            out.push(format!("{} reads {} on the Rust host only", r.0, r.1));
+        }
+    }
+    for j in &js_twinned {
+        if !rust.contains(j) {
+            out.push(format!("{} reads {} on the JavaScript host only", j.0, j.1));
+        }
+    }
+    out
+}
+
 #[test]
 fn the_checks_that_name_an_allow_list_are_the_same_on_both_hosts() {
     let rust: Vec<(String, String)> = users().iter().map(|(c, f)| (c.id().to_string(), f.to_string())).collect();
@@ -93,7 +113,33 @@ fn the_checks_that_name_an_allow_list_are_the_same_on_both_hosts() {
         return skip("node is not installed");
     }
     let js: Vec<(String, String)> = serde_json::from_str(&node(JS_USERS, &[])).unwrap();
-    assert_eq!(rust, js);
+    // The twins are the checks the Rust registry has (the registry is the one accessor of that list, ER-42).
+    let rust_ids: Vec<String> = registry().iter().map(|c| c.id().to_string()).collect();
+    let diff = twinned_differences(&rust, &js, &rust_ids);
+    assert!(diff.is_empty(), "the hosts disagree on the allow lists of twinned checks: {diff:?}");
+}
+
+#[test]
+fn a_javascript_only_allow_list_is_not_asked_for_on_rust_but_a_twin_missing_one_side_fails() {
+    let pair = |id: &str, f: &str| (id.to_string(), f.to_string());
+    let rust_ids = vec!["C121".to_string(), "C124".to_string()];
+    // C135 has no Rust twin: its JavaScript allow list is not required on Rust.
+    let rust = vec![pair("C121", "a.json")];
+    let js = vec![pair("C121", "a.json"), pair("C135", "c.json")];
+    assert!(twinned_differences(&rust, &js, &rust_ids).is_empty());
+    // C124 is twinned: an allow list on one host only, either way, or under another file, is a difference.
+    let js_only = vec![pair("C121", "a.json"), pair("C124", "b.json")];
+    assert_eq!(
+        twinned_differences(&rust, &js_only, &rust_ids),
+        ["C124 reads b.json on the JavaScript host only"]
+    );
+    let rust_only = vec![pair("C121", "a.json"), pair("C124", "b.json")];
+    assert_eq!(
+        twinned_differences(&rust_only, &[pair("C121", "a.json")], &rust_ids),
+        ["C124 reads b.json on the Rust host only"]
+    );
+    let other_file = vec![pair("C121", "z.json")];
+    assert_eq!(twinned_differences(&rust, &other_file, &rust_ids).len(), 2);
 }
 
 /// "Delete the check": a missing allow file, one that is not JSON, one without its list, or one with a malformed entry is one
