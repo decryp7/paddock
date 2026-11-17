@@ -92,8 +92,8 @@ A row is valid only while its hash equals the image; a regenerated image that ch
 | settings-menu-bar-light.png | 5272cd8e254f609dc4b59d6916be69e784424818159b14238d2c9a77331c8fab | independent reviewer | 2026-11-16 | approved; 6 of 32 items shown |
 | throttling-dark.png | a707131cfa03fda2cd6b71e25c410947efe98085951cc31d40be2186f2fa7151 | independent reviewer | 2026-11-16 | approved; load 75%, clock 4.40 of 4.50 GHz, 74 C, matching the dashboard |
 | throttling-light.png | 5e26655321cc568f3a676b33908a67255f72229121d0579ed8afb9793920930c | independent reviewer | 2026-11-16 | approved; load 75%, clock 4.40 of 4.50 GHz, 74 C, matching the dashboard |
-| tray-dark.png | 43d6813c7a18442449c03b6a6d385de14d9d535e18b3ff7ea79d12cd3744ecc9 | independent reviewer | 2026-11-16 | approved; clock 14:30, CPU 75%, memory 24.8 of 48 GB, disk 225 of 995 GB, alarms match |
-| tray-light.png | 67870afd8be60621a104591ae621ca8bc5aac8128cbd3df74fa11e7fba9f2cfc | independent reviewer | 2026-11-16 | approved; clock 14:30, CPU 75%, memory 24.8 of 48 GB, disk 225 of 995 GB, alarms match |
+| tray-dark.png | a91967148cebc6d2eac0a61589e3767e3468699c32527830258f52f56e123302 | independent reviewer | 2026-11-17 | approved; CPU sparkline 20 px high, nothing clipped, facts as the fact sheet (CPU 75%, 24.8 of 48 GB, 225 of 995 GB, two alarms) |
+| tray-light.png | d48b0a799a12b2d6da59a4e43f7e23c23031c156e0c992287b9ecbce4f9051f9 | independent reviewer | 2026-11-17 | approved; CPU sparkline 20 px high, nothing clipped, facts as the fact sheet (CPU 75%, 24.8 of 48 GB, 225 of 995 GB, two alarms) |
 | unusual-dark.png | 6edfd820e4e89f644da30a311a5db02f3bb4e23385e2f84dc0ebc3ec5957f794 | independent reviewer | 2026-11-16 | approved; path breaks after a slash (fixed) |
 | unusual-light.png | d412795725c9768f179f78312f5a28da77c1dae70d3cbd4eb858905a048cda1e | independent reviewer | 2026-11-16 | approved; path breaks after a slash (fixed) |
 | web-search-dark.png | 4484f8d4ed7a8e13fa113e401b3b9cc38464cbce6052594aebec795a9f12a32a | independent reviewer | 2026-11-16 | approved |
