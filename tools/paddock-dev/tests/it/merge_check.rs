@@ -2497,3 +2497,36 @@ fn the_commit_form_with_a_local_main_ahead_of_origin_does_not_take_the_re_merge_
         "the base is origin/main's m1, not the re-merge on the local main: {text}"
     );
 }
+
+#[test]
+fn an_undone_indentation_only_change_is_not_a_dropped_hunk_and_a_real_one_line_fix_still_is() {
+    // The train re-indented a line (whitespace only); the member appended a comment to it; the hand-made result keeps the base's
+    // indentation. The one-line rule must not call that a lost fix (its excerpt, trimmed, would read like the base line).
+    let build = |fixed: &str| {
+        let r = Repo::new();
+        r.write("f.rs", "fn a() {\n    let v = compute(1);\n    other();\n}\n");
+        r.commit("base");
+        r.git(&["checkout", "-q", "-b", "member"]);
+        r.write("f.rs", "fn a() {\n    let v = compute(1); // m\n    other();\n}\n");
+        r.commit("feat: member");
+        r.git(&["checkout", "-q", "main"]);
+        r.write("f.rs", &format!("fn a() {{\n{fixed}\n    other();\n}}\n"));
+        r.commit("fix: main");
+        r.git(&["merge", "-q", "-s", "ours", "--no-ff", "--no-commit", "member"]);
+        r.write(
+            "f.rs",
+            "fn a() {\n    let v = compute(1);\n    let v = compute(1); // m\n    other();\n}\n",
+        );
+        r.git(&["add", "f.rs"]);
+        r.git(&["commit", "-q", "-m", "Merge branch 'member'"]);
+        r
+    };
+    // The control (ER-33): the same shape with a real change (not whitespace) is flagged.
+    let (code, text) = build("    let v = compute(2);").check(&["HEAD", "--no-generators"]);
+    assert_eq!(code, 5, "{text}");
+    assert!(text.contains("[dropped-hunk] f.rs"), "{text}");
+    // The whitespace-only change is not.
+    let (code, text) = build("  let v = compute(1);").check(&["HEAD", "--no-generators"]);
+    assert!(!text.contains("[dropped-hunk]"), "{text}");
+    let _ = code;
+}
