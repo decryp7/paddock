@@ -1739,3 +1739,24 @@ starts `git` many times through its own `PATH`, which `TestCommand` curates. Whi
   that are not this branch's (`places::` and `brief_check::` with `/srv` paths, `build_jobs_golden` memory probe, the
   `safe_remove` guard's verbatim-path parity), the same 9 in every run.
 - **Not measured:** the CI runner itself with these trees (the train's next Windows run).
+
+## paddock-dev on the Windows test VM, TestCommand re-landed on train 13 (2026-11-17, feat/test-env-builder-v2)
+
+- **Machine:** the test VM (Windows 11 Arm, 4 vCPU, x86_64 programs under emulation, the toolchain without rustup) on the Mac mini; the host's
+  load was 20 to 33 and its CPU idle 0 to 30% during the runs (other agents and a CI run), so the absolute times are noisy. Not the CI
+  runner (ER-9: a different machine counts as a comparison with the base on the same machine, not as a result for CI).
+- **Method:** `scripts/member-gate-windows.sh <tree> "nextest tools/paddock-dev paddock-dev"`, one run per tree, the same VM image.
+- **Numbers (merge_check tests are the ones run 8161 slowed, 26.9 s median against 4.54 s in run 8138):**
+
+  | Tree | tests | failed (distinct) | suite wall | merge_check median | merge_check total | max |
+  |---|---:|---:|---:|---:|---:|---:|
+  | train 13 head 3f6428b89 (base) | 1511 | 6 | 987 s | 3.36 s | 230 s | 16.7 s |
+  | v2 before the hardening and stand-in picks (888907c4f) | 1523 | 20 | 1138 s | 3.92 s | 274 s | 19.0 s |
+  | v2 final (da4ef6eda) | 1546 | 4 | 843 s | 3.20 s | 238 s | 17.1 s |
+
+- **Result:** the re-landed TestCommand costs merge_check no measurable time on the VM (3.20 s against 3.36 s median), and run 8161's
+  slowdown is **still not reproduced and its cause is still not found**. The failures of v2 final (`build_jobs_golden` probe,
+  `local_sccache` twice, `safe_remove` parity) are a subset of the base's 6 on the same VM (Unix paths in expectations, the memory
+  probe). The first v2 run's 20 failures were the toolchain lookups that `85c21b7d6` fixes.
+- **Not measured:** the CI Windows runner with this tree (the train's next Windows run); a repeat run for variance (one run per tree).
+
