@@ -57,8 +57,6 @@ impl Host {
         let mut cmd = crate::dev_bin::command();
         cmd.args(["ci", "isolation"])
             .args(args)
-            .env_clear()
-            .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("HOME", &self.home)
             .env("RUNNER_OS", "macOS")
             .env("RUNNER_TEMP", &self.temp)
@@ -360,8 +358,6 @@ fn git_bash_paths_drive_path_and_owns_and_source_key_end_to_end() {
         cmd.args(["ci", "isolation"])
             .args(args)
             .current_dir(&cwd)
-            .env_clear()
-            .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("HOME", &h.home)
             .env("RUNNER_OS", "Windows")
             .env("RUNNER_TEMP", &h.temp)

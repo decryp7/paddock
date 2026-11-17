@@ -16,6 +16,10 @@ set -eu
 restarted=${PADDOCK_DEV_RESTARTED:-}
 unset PADDOCK_DEV_RESTARTED
 
+# A git hook runs its commands with GIT_DIR (and GIT_WORK_TREE) set; inherited, they make `--show-toplevel` answer the
+# folder the hook runs in, or name another repository. The repository is the one this folder is in, for the wrapper and the tool.
+unset GIT_DIR GIT_WORK_TREE
+
 # run_bounded <seconds> <command...>: runs it in the background and ends it at the limit (ER-32: no wait without a maximum). The
 # command is ended by the pid this function started, never by a name.
 run_bounded() {

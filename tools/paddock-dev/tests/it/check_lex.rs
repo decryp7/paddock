@@ -20,7 +20,7 @@ fn node(driver: &str, input: &Value) -> Value {
         "import {{ readFileSync as __read }} from 'node:fs';\nconst __input = JSON.parse(__read(0, 'utf8'));\n{}",
         driver.replace("JSON.parse(process.env.UTIL_INPUT)", "__input")
     );
-    let mut child = paddock_proc::command("node")
+    let mut child = paddock_testkit::TestCommand::new("node")
         .args(["--input-type=module", "-e", &driver])
         .current_dir(repo())
         .stdin(std::process::Stdio::piped())

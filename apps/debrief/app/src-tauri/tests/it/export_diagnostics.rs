@@ -1,6 +1,7 @@
 //! `debrief-app --export-diagnostics` end to end: the real binary, Debrief's folders under `DEBRIEF_DATA_DIR` (debug
 //! builds), no window. Checks the exit codes, the printed path and the zip.
 
+use paddock_testkit::TestCommand;
 use std::path::{Path, PathBuf};
 
 /// A fresh folder for one test, removed when the guard is dropped (also after a failed assert).
@@ -12,7 +13,7 @@ fn temp(tag: &str) -> tempfile::TempDir {
 }
 
 fn run(root: &Path, args: &[&str]) -> std::process::Output {
-    debrief_core::process::quiet_command(env!("CARGO_BIN_EXE_debrief-app"))
+    TestCommand::new(env!("CARGO_BIN_EXE_debrief-app"))
         .args(args)
         .env("DEBRIEF_DATA_DIR", root)
         .current_dir(root)

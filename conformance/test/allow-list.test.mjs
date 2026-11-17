@@ -84,6 +84,7 @@ const SAMPLE = {
   C121: ['docs/g.toml', `check = ["sh", "-c", "sed -n p .gitea/${'workflows'}/ci.yml"]\n`],
   C124: ['tools/paddock-dev/src/x.rs', 'pub enum V {\n    NotMeasured,\n}\n'],
   C125: ['scripts/a.sh', `x=/${'Volumes'}/d7sst7\n`],
+  C130: ['tools/t/tests/it/a.rs', 'let s = "#!/bin/sh\\n";\n'],
   C131: ['x/tests/golden/a.json', '{"uid": 501}\n'],
   C135: ['apps/a/src/x.spec.ts', "installLeakDetector({ mode: 'off' });\n"],
 };
@@ -129,4 +130,153 @@ test('allow list: a file the check cannot read is a not-measured error at that f
       chmodSync(join(root, file), 0o644);
     }
   }
+});
+
+// ---- the list only shrinks: every entry, counted `count` times, against the merge base (C121, C124, C125 and C130 all get it) ----
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+
+const allowJson = (entries) => JSON.stringify({ allow: entries });
+const sh = (root, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: root, stdio: 'ignore' });
+/** A repository whose merge base (`main`) has the allow list `base` and whose `topic` commit has `now`. */
+function growthRepo(base, now) {
+  const SHELL = 'let s = "#!/bin/sh\\n";\n';
+  const root = makeApp({ 'conformance/c130-allow.json': allowJson(base), 'tools/t/tests/it/ok.rs': SHELL.repeat(3) });
+  sh(root, 'init', '-q', '-b', 'main');
+  sh(root, 'add', '.');
+  sh(root, 'commit', '-q', '-m', 'base');
+  sh(root, 'checkout', '-q', '-b', 'topic');
+  writeFileSync(join(root, 'conformance/c130-allow.json'), allowJson(now));
+  sh(root, 'commit', '-q', '-a', '--allow-empty', '-m', 'topic');
+  return root;
+}
+const ok = (count) => ({ path: 'tools/t/tests/it/ok.rs', site: '#!/bin/sh', reason: 'baseline: planted before StandIn', count });
+const grew = async (root) => (await findingsOf('C130', root, { options: { baseRef: 'main' } })).filter((f) => /allow list (grew|.s shrink-only)/.test(f.message));
+
+test('allow list growth: an unchanged or shrunk list says nothing, a raised count or a new entry is one unwaivable finding at the allow file', async () => {
+  assert.deepEqual(await grew(growthRepo([ok(3)], [ok(3)])), []);
+  assert.deepEqual(await grew(growthRepo([ok(3)], [ok(2)])), [], 'a lowered count is shrinking');
+  const raised = await grew(growthRepo([ok(2)], [ok(3)]));
+  assert.deepEqual(raised.map((f) => [f.file, f.line, f.unwaivable]), [['conformance/c130-allow.json', 1, true]]);
+  assert.match(raised[0].message, /the allow list grew: 1 entry is \(counting each `count`\) not in conformance\/c130-allow\.json at the merge base [0-9a-f]{9}; it may only shrink/);
+  const added = await grew(growthRepo([ok(1)], [ok(1), { ...ok(2), site: '#!/bin/bash' }]));
+  assert.match(added[0].message, /grew: 2 entries are/);
+  assert.match(added[0].fix, /user's approval/);
+});
+
+test('allow list growth: a list new at the merge base, a fixture folder without .git and an unmeasurable base are not growth', async () => {
+  const first = makeApp({ 'conformance/c130-allow.json': allowJson([ok(3)]), 'tools/t/tests/it/ok.rs': 'x\n' });
+  sh(first, 'init', '-q', '-b', 'main');
+  sh(first, 'add', '.');
+  sh(first, 'commit', '-q', '-m', 'only');
+  assert.deepEqual((await grew(first)).map((f) => f.message.slice(0, 40)), [], 'the first introduction adds nothing');
+  assert.deepEqual(await grew(makeApp({ 'conformance/c130-allow.json': allowJson([ok(3)]) })), [], 'no .git: nothing to compare, nothing said');
+  const none = growthRepo([ok(1)], [ok(1)]);
+  const w = (await findingsOf('C130', none, { options: { baseRef: 'no-such-ref' } })).filter((f) => /shrink-only rule is not enforced/.test(f.message));
+  assert.equal(w.length, 1, 'a checkout where git cannot give a base says so, never silence');
+});
+
+// ---- the target ref: a member branch of a train is measured against the train, not main (ER-21; ADR 0098 amendment of 2026-11-16) ----
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { isCi, targetRef } from '../src/util/baseline.mjs';
+
+/** main has the list `base`; `train` (off main) has `trainList`; `member` (off train) has `memberList`. */
+function trainRepo(base, trainList, memberList) {
+  const root = makeApp({ 'conformance/c130-allow.json': allowJson(base), 'tools/t/tests/it/ok.rs': 'let s = "#!/bin/sh\\n";\n'.repeat(4) });
+  sh(root, 'init', '-q', '-b', 'main');
+  sh(root, 'add', '.');
+  sh(root, 'commit', '-q', '-m', 'main');
+  sh(root, 'checkout', '-q', '-b', 'train');
+  writeFileSync(join(root, 'conformance/c130-allow.json'), allowJson(trainList));
+  sh(root, 'commit', '-q', '-a', '-m', 'train member 1');
+  sh(root, 'checkout', '-q', '-b', 'member');
+  writeFileSync(join(root, 'conformance/c130-allow.json'), allowJson(memberList));
+  sh(root, 'commit', '-q', '-a', '--allow-empty', '-m', 'member');
+  return root;
+}
+const growthOn = async (root, baseRef) => (await findingsOf('C130', root, { options: { baseRef } })).filter((f) => /allow list grew/.test(f.message));
+
+test('target ref: the train\'s own entries are not growth of a member branch measured against the train, but are against main', async () => {
+  const root = trainRepo([ok(1)], [ok(3)], [ok(3)]);
+  assert.equal((await growthOn(root, 'main')).length, 1, 'against main the train\'s raised count shows up as the member\'s growth');
+  assert.deepEqual(await growthOn(root, 'train'), [], 'against the train the member added nothing');
+  const grew = trainRepo([ok(1)], [ok(3)], [ok(4)]);
+  const own = await growthOn(grew, 'train');
+  assert.equal(own.length, 1, 'the member\'s own raise counts');
+  assert.match(own[0].message, /the allow list grew: 1 entry is/);
+});
+
+test('target ref: the run\'s own, else PADDOCK_BASE_REF, else origin/main, and nothing else reads the variable', () => {
+  const saved = process.env.PADDOCK_BASE_REF;
+  try {
+    delete process.env.PADDOCK_BASE_REF;
+    assert.equal(targetRef({}), 'origin/main');
+    assert.equal(targetRef(undefined), 'origin/main');
+    process.env.PADDOCK_BASE_REF = 'origin/train/x';
+    assert.equal(targetRef({}), 'origin/train/x');
+    assert.equal(targetRef({ baseRef: 'topic' }), 'topic');
+  } finally {
+    if (saved === undefined) delete process.env.PADDOCK_BASE_REF;
+    else process.env.PADDOCK_BASE_REF = saved;
+  }
+  // A source audit over the host's own code (not declared data): outside util/baseline.mjs no code line names the variable (a read by
+  // `process.env.X`, `process.env['X']`, a destructuring or `env[...]` all name it), over src, bin and the CI scripts.
+  const offenders = [];
+  const walk = (dir) => {
+    for (const f of readdirSync(dir)) {
+      const p = join(dir, f);
+      if (f === 'node_modules' || f === 'test' || f === 'fixtures') continue;
+      if (statSync(p).isDirectory()) walk(p);
+      else if (/\.(?:mjs|js|cjs)$/.test(f) && !p.endsWith('conformance/src/util/baseline.mjs')) {
+        const code = readFileSync(p, 'utf8').split('\n').filter((l) => !/^\s*(?:\/\/|\*|\/\*)/.test(l)).map((l) => l.replace(/\s\/\/.*$/, ''));
+        if (code.some((l) => l.includes('PADDOCK_BASE_REF'))) offenders.push(p.slice(p.indexOf('conformance/')));
+      }
+    }
+  };
+  walk(new URL('..', import.meta.url).pathname);
+  assert.deepEqual(offenders, []);
+});
+
+test('target ref: an empty PADDOCK_BASE_REF or run ref is unset', () => {
+  const saved = process.env.PADDOCK_BASE_REF;
+  try {
+    process.env.PADDOCK_BASE_REF = '';
+    assert.equal(targetRef({}), 'origin/main');
+    assert.equal(targetRef({ baseRef: '' }), 'origin/main');
+    process.env.PADDOCK_BASE_REF = 'origin/train/x';
+    assert.equal(targetRef({ baseRef: '' }), 'origin/train/x');
+  } finally {
+    if (saved === undefined) delete process.env.PADDOCK_BASE_REF;
+    else process.env.PADDOCK_BASE_REF = saved;
+  }
+});
+
+test('allow list growth: a target ref that cannot be seen is a warning locally and a not-measured error in CI (ADR 0089)', async () => {
+  const root = growthRepo([ok(1)], [ok(1)]);
+  const said = async (ci) => (await findingsOf('C130', root, { options: { baseRef: 'no-such-ref', ci } })).filter((f) => /shrink-only rule/.test(f.message));
+  const local = await said(false);
+  assert.deepEqual(local.map((f) => [f.severity, f.unwaivable ?? false]), [['warn', false]]);
+  const ci = await said(true);
+  assert.deepEqual(ci.map((f) => [f.severity, f.unwaivable, f.outcome]), [['error', true, 'not-measured']]);
+  assert.match(ci[0].message, /^not measured: the allow list's shrink-only rule cannot be checked/);
+  assert.match(ci[0].fix, /ADR 0089/);
+  // The older format at the base is not a missing target: a warning with its own fix even in CI.
+  assert.equal(isCi({ CI: 'true' }), true);
+  assert.equal(isCi({ CI: 'false' }), false);
+  assert.equal(isCi({ GITEA_ACTIONS: 'true' }), true);
+  assert.equal(isCi({}), false);
+});
+
+test('allow list growth: a base in the older format says so with its own fix', async () => {
+  const root = makeApp({ 'conformance/c130-allow.json': JSON.stringify({ allow: [{ path: 'tools/t/tests/it/ok.rs', reason: 'an older entry without a site' }] }), 'tools/t/tests/it/ok.rs': 'x\n' });
+  sh(root, 'init', '-q', '-b', 'main');
+  sh(root, 'add', '.');
+  sh(root, 'commit', '-q', '-m', 'old');
+  sh(root, 'checkout', '-q', '-b', 'topic');
+  writeFileSync(join(root, 'conformance/c130-allow.json'), allowJson([ok(1)]));
+  sh(root, 'commit', '-q', '-a', '-m', 'new');
+  const w = (await findingsOf('C130', root, { options: { baseRef: 'main' } })).filter((f) => /shrink-only rule is not enforced/.test(f.message));
+  assert.equal(w.length, 1);
+  assert.match(w[0].message, /cannot be parsed/);
+  assert.match(w[0].fix, /older format/);
 });

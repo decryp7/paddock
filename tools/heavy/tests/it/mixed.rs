@@ -4,7 +4,7 @@
 #![cfg(target_os = "macos")]
 
 use crate::procutil::*;
-use paddock_proc::command;
+use paddock_testkit::TestCommand;
 use std::fs;
 use std::process::Stdio;
 
@@ -13,7 +13,7 @@ fn script() -> String {
 }
 
 fn shell(w: &World, args: &[&str], env: &[(&str, &str)]) -> Guard {
-    let mut c = command("bash");
+    let mut c = TestCommand::new("bash");
     c.arg(script());
     base_env(&mut c, w);
     c.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());

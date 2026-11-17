@@ -73,11 +73,8 @@ pub fn load_manifests(exe: &Path) -> Result<Vec<Manifest>, String> {
 pub fn load_manifests_within(exe: &Path, bound: Duration) -> Result<Vec<Manifest>, String> {
     // The plugins binary is Debrief's own; it runs with a cleared environment and no stdin, without a console window.
     let mut cmd = paddock_proc::command(exe);
-    cmd.arg(MANIFESTS_FLAG).env_clear().envs(
-        debrief_ipc::process::KEPT_ENV
-            .iter()
-            .filter_map(|k| std::env::var_os(k).map(|v| (k, v))),
-    );
+    cmd.arg(MANIFESTS_FLAG);
+    paddock_proc::clean_env(&mut cmd, debrief_ipc::process::KEPT_ENV);
     // How it ended and how long it took is paddock_proc's `tool.run` line (a warning when it failed, with its error output).
     let limits = paddock_proc::Limits::new(bound).max_output(MAX_MANIFESTS_BYTES).stop_on_cap();
     let out = paddock_proc::run_bounded(cmd, limits).map_err(|e| match e {

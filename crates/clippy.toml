@@ -2,6 +2,16 @@
 # (lint/clippy.toml) apply here: the shared crates are where the process helpers live, so `Command::new` and `temp_dir`
 # stay allowed in them, and paddock-secrets is the one door to the OS credential store, so keyring::Entry stays allowed.
 disallowed-methods = [
+    { path = "std::env::vars", reason = "panics on a variable that is not valid Unicode: read the environment through paddock_env::vars (skips and names it)" },
+    # ER-47 / rule 84 (ADR 0100): clearing a child's environment strips the variables that restrict it (a download ban, an install ban,
+    # an offline switch). paddock_env::clear_env (paddock_proc::clean_env) is the one function that clears, and it passes them.
+    { path = "std::process::Command::env_clear", reason = "clear a child's environment through paddock_proc::clean_env (paddock_env::clear_env): it keeps the restricting variables (ER-47)" },
+    { path = "tokio::process::Command::env_clear", allow-invalid = true, reason = "build the command with paddock_proc::command and clear it through paddock_proc::clean_env, which keeps the restricting variables (ER-47)" },
+    # ADR 0100 amendment 2026-11-16: the environment is process-wide, and tests share one process under the plain harness; a
+    # change made outside the test kit's lock is seen by every other test thread (the hermetic flake, fixed in 9ac185c24). Change
+    # it through paddock_testkit::EnvLock (the one site that may), or a justified site carries #[expect(..., reason = "...")].
+    { path = "std::env::set_var", reason = "the environment is process-wide: change it through paddock_testkit::EnvLock (ADR 0100), or justify the site with #[expect]" },
+    { path = "std::env::remove_var", reason = "the environment is process-wide: change it through paddock_testkit::EnvLock (ADR 0100), or justify the site with #[expect]" },
     # ADR 0021 amendment 2026-11-11 (D-P2): a canonical path keeps Windows' verbatim `\\?\` prefix and later meets git, cargo, text or a plain path. Go through paddock_env::winpath, which holds the one #[expect].
     { path = "std::fs::canonicalize", reason = "use paddock_env::winpath::real_for_tools (programs), real (display, Rust file APIs) or real_verbatim (Win32 long paths, compared only with verbatim paths); ADR 0021 amendment 2026-11-11" },
     { path = "std::path::Path::canonicalize", reason = "use paddock_env::winpath::real_for_tools (programs), real (display, Rust file APIs) or real_verbatim (Win32 long paths, compared only with verbatim paths); ADR 0021 amendment 2026-11-11" },

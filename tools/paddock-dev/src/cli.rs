@@ -778,7 +778,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Sccache {
             command: SccacheCommand::Env,
         } => {
-            let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+            let env: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
             for w in local_sccache::shell_warnings(&env) {
                 eprintln!("{w}");
             }

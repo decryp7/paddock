@@ -20,7 +20,7 @@ process.stdout.write(JSON.stringify({ findings: r.findings, waived: r.waived, er
 "#;
 
 fn js(root: &Path) -> Value {
-    let out = paddock_proc::command("node")
+    let out = paddock_testkit::TestCommand::new("node")
         .args(["--input-type=module", "-e", DRIVER])
         .current_dir(repo())
         .env("C120_ROOT", root)
@@ -39,6 +39,7 @@ fn rust(root: &Path) -> Value {
         files: None,
         today: paddock_dev::check::today_utc(),
         base_ref: None,
+        ci: Some(false),
     };
     let r = run_checks(&opts, &registry()).unwrap().json();
     json!({"findings": r["findings"], "waived": r["waived"], "errors": r["errors"], "warnings": r["warnings"]})
@@ -197,6 +198,7 @@ fn an_unwaivable_finding_is_never_waived_by_a_comment_and_an_inline_waived_one_c
         files: None,
         today: "2026-11-13".into(),
         base_ref: None,
+        ci: Some(false),
     };
     let r = run_checks(&opts, &[Box::new(Fake)]).unwrap();
     assert_eq!(r.waived.len(), 1);

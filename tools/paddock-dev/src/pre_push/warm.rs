@@ -128,7 +128,7 @@ fn step(root: &Path, id: &str, argv: &[String], what: &str) -> (String, Row, boo
 /// Runs `./dev check --warm-linux`.
 pub fn command(root: &Option<PathBuf>, named: &[String]) -> Result<Report, CliError> {
     let root = repo_root(root)?;
-    let env: HashMap<String, String> = std::env::vars().collect();
+    let env: HashMap<String, String> = paddock_env::vars().collect();
     let version = ci_version(&root).map_err(|e| CliError::failure(format!("{e}.")).with_hint("Run it from a full checkout."))?;
     let all = if named.is_empty() {
         let history = GitHistory::new(&root, Duration::from_secs(60));

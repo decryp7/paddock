@@ -60,7 +60,7 @@ fn git_head(env: &HashMap<String, String>) -> Option<String> {
 
 /// `dev ci build-env`: the two assignments to `$GITHUB_ENV` and standard output. Exit 0 always (the script's contract).
 pub fn run(_args: &BuildEnvArgs, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
-    let env: HashMap<String, String> = std::env::vars().collect();
+    let env: HashMap<String, String> = crate::process_env::vars().collect();
     let pairs = build_env(&env, &|| git_head(&env), SystemTime::now());
     let text: String = pairs.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
     if let Some(file) = env.get("GITHUB_ENV").filter(|f| !f.is_empty()) {

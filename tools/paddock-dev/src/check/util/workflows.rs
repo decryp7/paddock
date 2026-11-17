@@ -19,6 +19,31 @@ pub struct Job {
     pub text: String,
 }
 
+/// The job's own `env:` entries (the block directly under the job id, not a step's), in order, comments and blank lines skipped. A value
+/// keeps its text as written (`${{ ... }}` expressions included).
+pub fn job_env(job: &Job) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut inside = false;
+    for line in job.text.lines().skip(1) {
+        let t = line.trim_start();
+        let indent = line.len() - t.len();
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        if indent == 4 {
+            inside = t.trim_end() == "env:";
+            continue;
+        }
+        if inside
+            && indent == 6
+            && let Some((k, v)) = t.split_once(':')
+        {
+            out.push((k.trim().to_string(), v.trim().to_string()));
+        }
+    }
+    out
+}
+
 /// One step. `run`, `uses` and `name` are `None` when the step has no such key; `env` keeps the order of first appearance.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Step {

@@ -107,7 +107,8 @@ fn git(env: &Env, dir: &Path, args: &[&str]) -> Result<(Option<i32>, String, Str
     // The working folder is spelled for a program (no `\\?\` prefix); a folder with no plain spelling is a finding, not a guess.
     let dir = winpath::for_tools(dir, Os::current()).map_err(|e| format!("git cannot be run in {}: {e}", dir.display()))?;
     let mut cmd = crate::git_env::git();
-    cmd.args(args).current_dir(dir).env_clear();
+    cmd.args(args).current_dir(dir);
+    env.clear_into(&mut cmd);
     for (k, v) in &env.0 {
         if !crate::git_env::REPO_VARS.contains(&k.as_str()) {
             cmd.env(k, v);
@@ -382,7 +383,8 @@ fn npm_get(env: &Env, clone: &Path, key: &str) -> Result<Option<String>, String>
     // it was broken; seen on the Windows runner, run 7904).
     let program = which(env, "npm").ok_or_else(|| "cannot be run (npm is not on the job's PATH)".to_string())?;
     let mut cmd = command(program);
-    cmd.args(["config", "get", key]).current_dir(clone).env_clear();
+    cmd.args(["config", "get", key]).current_dir(clone);
+    env.clear_into(&mut cmd);
     for (k, v) in &env.0 {
         cmd.env(k, v);
     }

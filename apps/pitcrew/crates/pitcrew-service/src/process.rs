@@ -10,22 +10,13 @@ use std::time::{Duration, Instant};
 pub const MAX_TOOL_OUTPUT: usize = 64 * 1024;
 
 /// Windows process creation flag: no console window.
-pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+pub use paddock_proc::CREATE_NO_WINDOW;
 /// Windows process creation flag: a new process group (so Ctrl+Break reaches the runner only).
 pub const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
-/// A command that opens no console window on Windows. The one place the service creates `Command`s.
+/// A command that opens no console window on Windows ([`paddock_proc::command`], the canonical constructor).
 pub fn quiet_command(program: &Path) -> Command {
-    #[allow(clippy::disallowed_methods)]
-    let cmd = Command::new(program);
-    #[cfg(windows)]
-    let cmd = {
-        use std::os::windows::process::CommandExt;
-        let mut cmd = cmd;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-        cmd
-    };
-    cmd
+    paddock_proc::command(program)
 }
 
 /// The finished tool's output (bounded) and whether it succeeded.

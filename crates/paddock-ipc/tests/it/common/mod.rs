@@ -54,3 +54,11 @@ pub fn raw(
 pub fn child_program() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_paddock-ipc-test-child"))
 }
+
+/// The test child with a listed environment (ADR 0100), its private home and temp folders under `env_dir`: a folder the test
+/// owns, so they outlive the command for a child the test hands to `Supervised` and keeps running.
+pub fn child_command(env_dir: &std::path::Path) -> std::process::Command {
+    paddock_testkit::TestCommand::new_in(child_program(), env_dir)
+        .into_parts()
+        .0
+}

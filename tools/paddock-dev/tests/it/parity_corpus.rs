@@ -101,6 +101,7 @@ fn options(root: &Path, id: &str) -> RunOptions {
         files: None,
         today: "2026-11-16".into(),
         base_ref: Some("origin/main".into()),
+        ci: Some(false),
     }
 }
 

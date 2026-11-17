@@ -44,7 +44,8 @@ fn a_lock_poisoned_by_a_failed_test_is_recovered_and_the_variable_restored() {
 #[test]
 fn hermetic_points_the_user_folders_and_tmp_into_the_scratch() {
     let scratch = Scratch::new();
-    let before = std::env::var_os("HOME");
+    // Read under the lock: another thread's test may hold a changed HOME (it puts it back before it releases the lock).
+    let before = env_lock().get("HOME");
     {
         let mut env = env_lock();
         env.hermetic(&scratch);
@@ -73,7 +74,7 @@ fn hermetic_points_the_user_folders_and_tmp_into_the_scratch() {
             );
         }
     }
-    assert_eq!(std::env::var_os("HOME"), before);
+    assert_eq!(env_lock().get("HOME"), before);
     scratch.finish().expect("nothing was left in tmp");
 }
 
@@ -96,5 +97,37 @@ fn two_tests_never_hold_the_lock_at_once() {
         .collect();
     for w in workers {
         assert!(w.join().is_ok());
+    }
+}
+
+/// The kit's own folders go to the temp folder captured for the process, never to a `TMPDIR` a test has changed. Under the plain
+/// harness another thread's hermetic test points `TMPDIR` into its scratch and removes it at its end: a `Scratch` made there
+/// failed with "scratch folder: No such file or directory", and a folder the kit made there was that test's leftover (measured
+/// on a9a7e6484: `hermetic_points_the_user_folders_and_tmp_into_the_scratch` failed 5 of 40 runs, `Leftovers([".tmp…/"])`).
+#[test]
+fn the_kits_folders_use_the_captured_temp_folder_not_a_changed_tmpdir() {
+    let elsewhere = paddock_testkit::tempdir();
+    let changed = paddock_testkit::real_or_given(elsewhere.path());
+    let mut env = env_lock();
+    for k in ["TMPDIR", "TEMP", "TMP"] {
+        env.set(k, &changed);
+    }
+    let scratch = Scratch::new();
+    let canonical = paddock_testkit::canonical_tempdir();
+    let private = paddock_testkit::private_tempdir().unwrap();
+    let cmd = paddock_testkit::TestCommand::new("git");
+    for made in [
+        scratch.work(),
+        canonical.path().to_path_buf(),
+        private.path().to_path_buf(),
+        cmd.private_dir().to_path_buf(),
+    ] {
+        let made = paddock_testkit::real_or_given(&made);
+        assert!(
+            !made.starts_with(&changed),
+            "{} is in the changed TMPDIR {}",
+            made.display(),
+            changed.display()
+        );
     }
 }
