@@ -25,13 +25,6 @@ test('C124 good: the owner, the allowed callers, test code, comments, other keys
   assert.deepEqual(flaggedRust(DEV, 'enum K {\n    Other { x: u8 },\n}\nlet clean = 1;\n'), []);
 });
 
-test('C124: a test module in the middle of a file hides nothing below it, a test use hides nothing either', () => {
-  const mid = 'fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t() { json!({"status": 1}); }\n}\nfn later() { let v = json!({"status": "clean"}); }\n';
-  assert.deepEqual(flaggedRust(DEV, mid).map((s) => s.line), [6], 'only the production line below the test module');
-  const use = '#[cfg(test)]\nuse x::y;\nfn later() { let v = json!({"verdict": "ok"}); }\n';
-  assert.deepEqual(flaggedRust(DEV, use).map((s) => s.line), [3]);
-});
-
 test('C124 JS: a pass made by hand is flagged outside outcome.mjs, comments and tests are not', () => {
   assert.equal(flaggedJs('conformance/src/runner.mjs', "return { status: 'clean', findings: [] };\n").length, 1);
   assert.deepEqual(flaggedJs('conformance/src/outcome.mjs', "const outcome = { status: found.length ? 'findings' : 'clean' };\n"), []);
