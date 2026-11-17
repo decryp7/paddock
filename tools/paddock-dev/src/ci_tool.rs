@@ -103,8 +103,15 @@ pub struct Ran {
 impl ToolCall {
     /// A call of `program` with the default limits: captured output, a two-minute timeout.
     pub fn new(program: impl Into<String>) -> ToolCall {
+        let program: String = program.into();
+        // Whatever a caller passes through, git never gets the variables that select a repository (crate::git_env).
+        let unset = if program == "git" {
+            crate::git_env::REPO_VARS.iter().map(|v| v.to_string()).collect()
+        } else {
+            Vec::new()
+        };
         ToolCall {
-            program: program.into(),
+            program,
             args: Vec::new(),
             env: Vec::new(),
             pass: Vec::new(),
@@ -112,7 +119,7 @@ impl ToolCall {
             timeout: Duration::from_secs(120),
             output: Output::Capture,
             cwd: None,
-            unset: Vec::new(),
+            unset,
             cancel: None,
         }
     }

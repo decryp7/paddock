@@ -1,6 +1,6 @@
 //! The git side of `./dev worktree`: running git, finding the repository and reading `git worktree list --porcelain`.
 
-use paddock_proc::{Limits, command, run_bounded};
+use paddock_proc::{Limits, run_bounded};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -47,7 +47,7 @@ impl Git {
 
     /// Runs git and returns what it printed whatever its status.
     pub fn run(&self, args: &[&str]) -> Result<Out, GitError> {
-        let mut cmd = command("git");
+        let mut cmd = crate::git_env::git();
         // Never take git's optional locks (`status` refreshing the index): a reader must not collide with the work it reads.
         cmd.arg("-C").arg(&self.dir).args(args).env("GIT_OPTIONAL_LOCKS", "0");
         let out = run_bounded(cmd, Limits::new(TIMEOUT).max_output(1 << 26)).map_err(|e| GitError {

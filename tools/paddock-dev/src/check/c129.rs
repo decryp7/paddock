@@ -162,7 +162,7 @@ pub fn exception_keys(text: &str) -> Result<Vec<ExcKey>, String> {
 
 /// Whether the list at `base` holds the exception (for naming the added ones).
 fn known_at_base(root: &std::path::Path, base: &str, k: &ExcKey) -> bool {
-    let mut cmd = paddock_proc::command("git");
+    let mut cmd = crate::git_env::git();
     cmd.arg("-C").arg(root).args(["show", &format!("{base}:{EXCEPTIONS}")]);
     let out = paddock_proc::run_bounded(
         cmd,

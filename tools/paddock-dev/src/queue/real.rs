@@ -254,7 +254,7 @@ impl GitTrain {
     /// The git child: hooks off, no file transport, no global or system configuration, no prompt, and no token unless this is the
     /// push. `dir` is the checkout to work in (the clone when `None`).
     pub fn command(&self, dir: Option<&Path>, kind: Child) -> std::process::Command {
-        let mut c = paddock_proc::command("git");
+        let mut c = crate::git_env::git();
         c.arg("-C").arg(dir.unwrap_or(&self.root));
         c.args(IDENT);
         c.args(["-c", "core.hooksPath=/dev/null"]);

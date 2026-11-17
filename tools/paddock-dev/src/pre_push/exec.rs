@@ -1156,7 +1156,7 @@ exit $rc
         /// its arguments and runs the gate's command), found first on the PATH of the run (ER-14: no real build).
         fn repo_with_fake_cargo(d: &Path, cargo_ok: bool) -> RealExec {
             let git = |args: &[&str]| {
-                let ok = paddock_proc::command("git")
+                let ok = crate::git_env::git()
                     .args(args)
                     .current_dir(d)
                     .env("GIT_CONFIG_GLOBAL", "/dev/null")
