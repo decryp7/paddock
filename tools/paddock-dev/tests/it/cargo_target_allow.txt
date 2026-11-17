@@ -8,3 +8,4 @@ src/ci_host/cleanup.rs | a test fixture of the host-cleanup prune (the step read
 src/ci_host/guardian_as_user.rs | a list of variable names the guardian keeps for a child (names, not a value being set)
 src/input_hash.rs | a test helper that builds a variable list to show the hash ignores the folder
 src/local_sccache.rs | the list of the two variable names `./dev sccache env` warns a shell about, and a test of that warning (it reads them; it sets nothing)
+src/golden_cmd.rs | `dev golden confirm` passes the caller's CARGO_TARGET_DIR on to the CI-image container on purpose (ER-47: children inherit the environment); added with the user's approval, 2026-11-17 (ER-46)
