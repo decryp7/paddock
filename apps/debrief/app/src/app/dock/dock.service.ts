@@ -69,8 +69,12 @@ export class DockService {
   private readonly windowListeners = new Set<() => void>();
   /** True when the layout was built from defaults rather than restored from the store. */
   private fresh = false;
-  /** The arrangement before the last fit to a small window (the saved one), for Undo; null when nothing was fitted. */
+  /**
+   * Counts the plans started or finished since attach: a settle that was scheduled for an earlier count is dropped (`releasePlannedAfterFrames`), so
+   * `planned` never comes back from a settle that a newer plan has overtaken.
+   */
   private plannedToken = 0;
+  /** The arrangement before the last fit to a small window (the saved one), for Undo; null when nothing was fitted. */
   private fitted: SavedLayout | null = null;
   /** Conditional views that were available at the last check, to detect "became available". */
   private readonly wasAvailable = new Set<string>();
@@ -877,6 +881,10 @@ export class DockService {
   /**
    * A plan has run. What its listeners did (the Explorer closing in a narrow window, a view tabbed) resizes the dock in the next frame, which
    * starts another plan: `planned` comes back after two frames in which no new plan was started.
+   * Limit: two frames is a heuristic. A reaction that takes longer (a lazy load that resizes the dock after a few frames, a slow machine delivering the
+   * resize observer late) can start a plan after `planned` came back, and a reader then sees a layout that moves once more. Every such plan raises
+   * `planned` to false again (`holdPlanned`), so a reader that waits for the attribute to be present and stays present for two frames is safe; one that
+   * reads the instant it appears is not.
    */
   private releasePlannedAfterFrames(): void {
     const token = ++this.plannedToken;

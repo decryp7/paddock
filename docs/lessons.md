@@ -2191,11 +2191,17 @@ in a format, a timezone) were refuted by those equal rates and by failures that 
   frames have passed since the last plan started, because what a plan's listeners do resizes the dock once more). The spec records the dock's top and
   the groups' heights from the first moment with resize observers, waits on the signal, and asserts that nothing changes after it, at 1440 and
   900 px: red in 20 of 20 runs on the old code (10 runs per engine, 5 workers), 80 of 80 green after (20 runs, 4 workers, both engines, both widths).
-  **Narrow windows (fixed in a later commit):** below 1000 px the Explorer was open for the first frames and `NarrowWindow` closed it by the dock's
-  first plan, so the bar widened (123 to 87 px) and the dock top moved. A narrow window (under 920 px, measured: the plan keeps the Explorer from
-  920 px up and closes it at 912 px and below) now starts with the Explorer closed, before the first draw, and the plan can bring it back; the Explorer's
-  open flag was never saved, so there is no saved choice to honour. The spec asserts a constant top at 1440, 1100, 900 and 700 px (red on 8 of 10 runs
-  at 900 px before; 160 of 160 green after: 20 runs, 4 workers, 2 engines, 4 widths).
+  **Narrow windows (partly fixed, open):** below 1000 px the Explorer was open for the first frames and `NarrowWindow` closed it by the dock's
+  first plan, so the bar widened (123 to 87 px) and the dock top moved. Windows under 920 px now start with the Explorer closed (`EXPLORER_MIN_WINDOW_PX`;
+  the Explorer's open flag was never saved, so there is no saved choice to honour). The spec asserts a constant dock top, left edge and width at 1440,
+  1100, 1000, 900 and 700 px. **Open (review of 1ba208da9):** the constant is a hand copy of the plan's decision and is wrong at 920 to 934 px, where the
+  plan closes the Explorer after the first draw (the dock's left edge 320 to 48, at heights of 600 to 900 px, both engines). Three attempts to ask the
+  plan itself (a pure `planLayout` call for the default arrangement before the dock exists; the dock's own `explorerVerdict` after the render that draws
+  the filter bar and the Explorer; the same with a synchronous `api.layout` afterwards) did not remove the move: the pure call says "fits" because the
+  dock's height includes the filter bar, which only the first data brings, and the real verdict closes the Explorer one plan later; after a container change
+  dockview's inline size follows three frames later in drawn frames (`requestAnimationFrame` samples: stage 48+880 with the dock 48+580, 49 ms
+  later 48+852). The fix that makes the class impossible is a dock that follows its container in the same frame (dockview's `layout` called from a
+  resize observer of ours, or a CSS-sized root) and a first plan that runs before the Explorer is drawn; about one agent-day, and a product decision.
 - **A reader that compares a read with the one two polls before (found in review).** `settledLayout` kept `previous` and `last` and compared the new
   read with `previous`, so A, B, A passed as "two reads in a row". It now compares with the read just before; the test is red on the old code (settled on
   the third read) and green after (the fourth).
