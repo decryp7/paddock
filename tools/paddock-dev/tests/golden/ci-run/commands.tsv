@@ -36,6 +36,7 @@ app	dyno	ubuntu-latest	apps/dyno/app	npx ng lint
 app	dyno	ubuntu-latest	apps/dyno/app	npx ng test --watch=false --coverage
 app	dyno	windows-latest	apps/dyno	cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper
 app	pitcrew	ubuntu-latest		node conformance/bin/paddock-conformance.mjs --app pitcrew --root apps/pitcrew --only C13 --paddock .
+app	pitcrew	ubuntu-latest		npm run build -w ui
 app	pitcrew	ubuntu-latest	apps/pitcrew/app	npm audit --omit=dev --audit-level=high
 app	pitcrew	ubuntu-latest	apps/pitcrew/app	npm run lint
 app	pitcrew	ubuntu-latest	apps/pitcrew/app	npx ng build
