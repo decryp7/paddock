@@ -138,6 +138,12 @@ pub fn remove_under(root: &Path, target: &Path, home: Option<&Path>) -> Result<b
     // The path that is checked and removed is the target's names joined again: a trailing `/`, `//` or `/.` would make the OS
     // read a final link as the folder it names (`root/link/` is what `link` points at), so `symlink_metadata` would see a folder
     // and `remove_dir_all` would empty it (review of 2026-11-15; the shared parity table, tests/fixtures/safe-remove-parity.tsv).
+    // A `..` is refused as the target was given, before the names are joined again: on Windows, pushing `..` onto a verbatim
+    // `\\?\` path normalizes it away (`PathBuf::push`), so `root\a\..\a` would come back as `root\a` and pass (run 8209, the
+    // Windows parity table's "a .. that stays inside is refused too").
+    if let Err(e) = strictly_under(root, target, Rules::host()) {
+        return Err(RemoveError::Refused(format!("{e}; it is not removed")));
+    }
     let target: PathBuf = target.components().collect();
     let target = target.as_path();
     match strictly_under(root, target, Rules::host()) {
