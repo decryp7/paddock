@@ -74,6 +74,18 @@ fn the_dry_run_lists_the_gates_ci_runs_for_a_crates_change_and_why_others_are_le
     );
 }
 
+/// The gates-register row runs on every push (ER-41), including one that changes only a file C100 reads through its own globs.
+#[test]
+fn the_gates_check_is_planned_for_a_crates_change_and_for_an_app_contract_change() {
+    let d = tempfile::tempdir().unwrap();
+    let path = fake_bin(d.path(), "exit 0");
+    for files in [CHANGE, "apps/dyno/paddock.ci.json"] {
+        let (code, out, err) = dev(&path, &["--dry-run", "--files", files]);
+        assert_eq!(code, 0, "{err}{out}");
+        assert!(out.contains("run   gates-register"), "{files}: {out}");
+    }
+}
+
 #[test]
 fn a_failing_fmt_is_exit_5_with_one_error_line_and_the_rerun_command() {
     let d = tempfile::tempdir().unwrap();

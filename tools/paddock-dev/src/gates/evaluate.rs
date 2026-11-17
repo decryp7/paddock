@@ -870,6 +870,39 @@ mod tests {
         )
     }
 
+    /// Positive control for the push gate's `gates-register` row (ER-33): the command it runs does see a root conformance check that
+    /// no CI line names, says which one, and stays silent for the wired one (C06; CI's line names only C06).
+    #[test]
+    fn a_conformance_check_no_ci_line_runs_is_a_finding_that_names_it_and_a_wired_one_is_not() {
+        let list = r#"[{"id":"C06","scope":"root","mode":"gate","needs":"all","file":"conformance/src/checks/C06.mjs"},{"id":"C999","scope":"root","mode":"gate","needs":"all","file":"conformance/src/checks/C999.mjs"}]"#;
+        let tree = MemTree::new(&[]);
+        let mut sources = Sources::default();
+        sources.workflows.insert(".gitea/workflows/ci.yml".into(), CI.into());
+        let o = evaluate(&Input {
+            tree: &tree,
+            sources: &sources,
+            conformance_list: Ok(list.into()),
+            conformance_commands: Some(r#"["list","commands"]"#.into()),
+            dev_commands: ["gates", "gates check"].iter().map(|s| s.to_string()).collect(),
+            register_text: Some(REG_HEAD.to_string()),
+            base_register_text: None,
+            history: Vec::new(),
+            today: Date::parse("2026-11-10").unwrap(),
+            release_tag: None,
+            planner: &AllMarks,
+            history_error: None,
+            warn: false,
+            shallow: false,
+        });
+        let m = messages(&o);
+        assert!(
+            m.iter()
+                .any(|x| x.contains("C999") && x.contains("is run by no reachable, resolved CI line")),
+            "C999 is unwired and must be named: {m:?}"
+        );
+        assert!(!m.iter().any(|x| x.contains("C06")), "C06 is wired: {m:?}");
+    }
+
     #[test]
     fn a_report_only_test_step_is_registered_by_step_id_and_the_flip_is_enforced() {
         let step = |o: &Outcome| {

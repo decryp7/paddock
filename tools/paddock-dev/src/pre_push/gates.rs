@@ -125,6 +125,20 @@ pub struct Change {
     pub ranges: Vec<String>,
 }
 
+/// The rows that do not depend on a workspace, as the pass record stores them (`known::write_record`): a record made by a tool with
+/// another set is refused, so a row added here is never skipped through an older pass. A test checks it against the planner.
+pub const ROW_SET: &[&str] = &[
+    "clippy-linux crates",
+    "commit-lint",
+    "conformance",
+    "conformance-tests",
+    "dyno-wire-fixtures",
+    "gates-register",
+    "ipc-endpoints",
+    "pitwall-deny",
+    "pitwall-scripts",
+];
+
 /// Workspaces whose lints are not a push gate: they have a CI job of their own that is not part of a branch run.
 const OWN_JOB: &[&str] = &["/fuzz", "/templates/"];
 
@@ -336,6 +350,22 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             reason: "no Rust file or docs/ipc-endpoints.toml changed".into(),
         });
     }
+    // C100 (ADR 0060) on every push, like the conformance row (ER-41; ER-42: a hand list of its inputs missed apps/*/paddock.ci.json,
+    // so that is not kept). Checks landed unwired on 2026-11-12 (four) and 2026-11-17 (C138). `./dev gates check` is CI's own command;
+    // 5 to 8 s, in parallel with the conformance tests (docs/benchmarks.md, "C100 in the push gate"). It blocks from its first run:
+    // C100 is long established (0 findings on the real tree at 97176067c, `./dev gates check`, 2026-11-17) and the user asked for the
+    // refusal (2026-11-17).
+    out.push(Planned::Run(Gate {
+        args: strs(&["gates", "check"]),
+        ..gate(
+            "gates-register".into(),
+            "",
+            &facts.dev_exe,
+            &[],
+            0,
+            "fix the C100 finding printed above: its ::error line names the check and the fix (ADR 0060)".into(),
+        )
+    }));
     // Dyno's wire fixtures (the UI contract) are regenerated from the Rust types when dyno-core's sources changed; a stale one
     // fails the push with the files named (apps/dyno/scripts/regen-wire-fixtures.sh runs cargo test).
     if change
