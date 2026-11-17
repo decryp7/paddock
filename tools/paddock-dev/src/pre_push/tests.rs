@@ -1532,6 +1532,7 @@ mod known_commit {
             &push_line(&two),
             &fake(None, Err("x")),
             crate::local_sccache::Lazy::off(),
+            Some(&super::Fake::default()),
         )
         .unwrap();
         assert_eq!(rep.exit, Exit::Ok);
@@ -1566,6 +1567,7 @@ mod known_commit {
             &push_line(&two),
             &fake(None, Err("x")),
             crate::local_sccache::Lazy::off(),
+            Some(&super::Fake::default()),
         )
         .unwrap();
         let tree = git_text(&r, &["rev-parse", &format!("{two}^{{tree}}")]).unwrap().trim().to_string();
@@ -1627,6 +1629,9 @@ mod known_commit {
         known::write_record(&r, &state(&r), &two, "origin/main", &[], 5, &pass_for(&r, &two)).unwrap();
         let l = fake(None, Err("x"));
         let delete = format!("(delete) {} refs/heads/old {}\n", "0".repeat(40), two);
+        // The gates run on a fake: on the real executor the gates-register row starts the test binary itself (exec.rs,
+        // `harness_as_gate`), a nested test run that took this test past nextest's 60 s under load (2026-11-18).
+        let gates = super::Fake::default();
         let got = command_in(
             &PrePushArgs {
                 root: Some(r.clone()),
@@ -1636,15 +1641,21 @@ mod known_commit {
             &delete,
             &l,
             crate::local_sccache::Lazy::off(),
+            Some(&gates),
         );
         assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
+        // Measured, not skipped: the gates of the run went to the executor (the positive control of the verdict above).
+        assert!(gates.ran.lock().unwrap().contains(&"gates-register".to_string()), "{got:?}");
         let a = PrePushArgs {
             root: Some(r.clone()),
             base: Some("origin/main".into()),
             ..args()
         };
-        let got = command_in(&a, &r, &push_line(&two), &l, crate::local_sccache::Lazy::off());
+        let gates = super::Fake::default();
+        let got = command_in(&a, &r, &push_line(&two), &l, crate::local_sccache::Lazy::off(), Some(&gates));
         assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
+        assert!(gates.ran.lock().unwrap().contains(&"gates-register".to_string()), "{got:?}");
+        assert!(!format!("{got:?}").contains("its own test binary"), "{got:?}");
     }
 
     /// A record measured from a nearer base (a local train, a branch's old commit) checked less than a push from an older base
@@ -1960,7 +1971,14 @@ mod base_choice {
             accept_not_measured: vec![],
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
-        let got = command_in(&args, &r, &line, &live(&r), crate::local_sccache::Lazy::off());
+        let got = command_in(
+            &args,
+            &r,
+            &line,
+            &live(&r),
+            crate::local_sccache::Lazy::off(),
+            Some(&super::Fake::default()),
+        );
         assert!(got.as_ref().map_or(true, |rep| !rep.text.contains("nothing to check")), "{got:?}");
     }
 }

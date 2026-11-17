@@ -809,6 +809,17 @@ impl RealExec {
     }
 }
 
+/// In a unit test the dev binary ([`crate::tool_cache::self_exe`]) is the test harness itself: started as a gate, `<harness> gates
+/// check` is a nested run of every unit test whose name holds `gates` or `check` (about 335), 10 s alone and over 30 s under load,
+/// with the fixture repository as its folder (2026-11-18, `a_delete_only_push_and_an_explicit_base_never_use_evidence` stopped at
+/// nextest's 60 s twice in a row). Refused with its cause, so a test that reaches the real executor fails fast and named.
+#[cfg(test)]
+fn harness_as_gate(program: &str) -> Option<String> {
+    let me = std::env::current_exe().ok()?;
+    (Path::new(program) == me)
+        .then(|| format!("a unit test would start its own test binary ({program}) as a gate: give command_in a fake executor (exec::Exec)"))
+}
+
 /// A token no other run has: process id and clock.
 fn run_token() -> String {
     let nanos = std::time::SystemTime::now()
@@ -860,6 +871,10 @@ impl Exec for RealExec {
     }
 
     fn run(&self, gate: &Gate, limits: Limits) -> Result<Done, String> {
+        #[cfg(test)]
+        if let Some(why) = harness_as_gate(&gate.program) {
+            return Err(why);
+        }
         let _ = std::fs::create_dir_all(&self.logs);
         let log = self.logs.join(format!("{}.log", log_name(&gate.id)));
         // Best-effort: the .id file only helps a reader; a failed write never stops the gate.
