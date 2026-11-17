@@ -1080,6 +1080,76 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
       expect(before).toBeLessThan(grid.geometry().maxTop - 5 * ROW);
     });
 
+    // G10b: Follow on and Resume are requests too: the stamp is taken when the user acts (in the store), not when the feed's effect runs.
+    for (const how of ['Follow on', 'Resume'] as const) {
+      it(`G10b: a wheel after ${how} is pressed but before its effect runs is not undone`, async () => {
+        TestBed.resetTestingModule();
+        const clock = new ManualClock();
+        const backend = synthetic(5000, { liveMs: 25, clock });
+        const { fixture, grid, vp } = await render(backend);
+        await flush(fixture);
+        const follow = TestBed.inject(LiveFollow);
+        if (how === 'Follow on') follow.setFollow(false);
+        else follow.pause();
+        const feed = TestBed.inject(LiveFeed);
+        await TestBed.inject(LiveTail).toggle();
+        await clock.advance(100);
+        await vi.waitFor(() => expect(feed.newEvents()).toBeGreaterThan(1));
+        await settle(fixture);
+        if (how === 'Follow on') follow.setFollow(true);
+        else follow.resume();
+        vp.dispatchEvent(new WheelEvent('wheel', { deltaY: -900, cancelable: true, bubbles: true }));
+        vp.scrollTop = Math.max(0, vp.scrollTop - 900);
+        userScroll(vp);
+        await flush(fixture);
+        await settle(fixture);
+        expect(grid.virtualTop(), 'the view is not taken to the end').toBeLessThan(grid.geometry().maxTop - 5 * ROW);
+      });
+    }
+
+    // The classifier's wiring (scroll-classify.spec.ts holds its table): `onScroll` says whether the layout is changing. The browser's scroll metrics
+    // are stubbed (jsdom has none): the scrollable range is the spacer's height, and the grid's last write saw `grown` px less of it.
+    describe('a scroll with no input event', () => {
+      type Internals = { inputSinceWrite: boolean; layoutDirty: boolean; writtenScroll: number; writtenMax: number; writtenClient: number; pendingWrite: unknown };
+      async function viewAfterGrowth(grown: number) {
+        TestBed.resetTestingModule();
+        vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) {
+          return this.classList?.contains('viewport') ? parseFloat((this.lastElementChild as HTMLElement | null)?.style.height || '0') + VIEWPORT_H + 28 : 0;
+        });
+        const { fixture, grid, vp } = await render(synthetic(5000, { liveMs: 25 }));
+        await flush(fixture);
+        const internals = grid as unknown as Internals;
+        const start = 60 * ROW;
+        vp.scrollTop = start;
+        userScroll(vp);
+        await flush(fixture);
+        // The grid's last write saw `grown` px less to scroll: the total grew since, with no write (oldest first, keep mode).
+        internals.inputSinceWrite = false;
+        internals.writtenScroll = start;
+        internals.writtenMax = vp.scrollHeight - vp.clientHeight - grown;
+        internals.writtenClient = vp.clientHeight;
+        return { fixture, grid, vp, internals, start };
+      }
+
+      it('is kept once the frame that renders a layout change has passed (find in page, assistive technology)', async () => {
+        const { grid, vp, internals, start } = await viewAfterGrowth(600);
+        await vi.waitFor(() => expect(internals.layoutDirty, 'the frame after the render has passed').toBe(false));
+        vp.scrollTop = start + 300; // inside the growth band, no wheel, key or pointer before it
+        vp.dispatchEvent(new Event('scroll'));
+        expect(grid.virtualTop(), 'the user\'s position, not written back').toBe(start + 300);
+        expect(internals.pendingWrite).toBeNull();
+      });
+
+      it('is the browser\'s own adjustment while the layout is changing: the grid\'s position is written back', async () => {
+        const { grid, vp, internals, start } = await viewAfterGrowth(600);
+        internals.layoutDirty = true;
+        vp.scrollTop = start + 300;
+        vp.dispatchEvent(new Event('scroll'));
+        expect(grid.virtualTop(), 'the grid\'s own position stays').toBe(start);
+        expect(internals.pendingWrite).not.toBeNull();
+      });
+    });
+
     it('G2: a deferred write is dropped when the user moves the view in the same frame', async () => {
       const { fixture, grid, vp, release } = await revealWithHeldPage();
       // The held page answers (a larger total: a deferred write to the end is scheduled) and, before the render, the user presses PageUp.

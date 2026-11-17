@@ -43,15 +43,15 @@ describe('followStep', () => {
     // The holding bit
     ['holding released without a Follow on (live tail came back, a pause was cleared): following, pinned unchanged', state(true, false), { type: 'released' }, false, { round: 'none', state: state(false, false) }],
     // Any state
-    ['a new query or sort order, oldest first: the top is not the newest end', state(false, true), { type: 'reset', seq: 5 }, false, { round: 'none', state: state(false, false) }],
-    ['a new query or sort order, newest first: the top is the newest end', state(true, false), { type: 'reset', seq: 5 }, true, { round: 'none', state: state(true, true) }],
+    ['a new query or sort order, oldest first: the top is not the newest end', state(false, true), { type: 'reset' }, false, { round: 'none', state: state(false, false) }],
+    ['a new query or sort order, newest first: the top is the newest end', state(true, false), { type: 'reset' }, true, { round: 'none', state: state(true, true) }],
     // G1, G2, G9, G10 as one rule: a request stamped before the last take-over (an effect applied it late) is dropped; the user's move wins.
     ['a reveal stamped before the take-over, oldest first: only a reload that keeps the view, not pinned again', state(true, false, 7), { type: 'reveal', seq: 6 }, false, { round: 'keep', goNewest: false, state: state(true, false, 7) }],
     ['a reveal stamped before the take-over, newest first: a shift reload, no move', state(true, false, 7), { type: 'reveal', seq: 6 }, true, { round: 'shift', goNewest: false, state: state(true, false, 7) }],
     ['Follow on stamped before the take-over: no move, not pinned again', state(false, false, 7), { type: 'followOn', seq: 6 }, false, { round: 'keep', goNewest: false, state: state(false, false, 7) }],
     ['a resize stamped before the take-over: dropped, no re-pin', state(false, false, 7), { type: 'resize', seq: 3 }, false, { keepTopRow: false, writeNewest: false, state: state(false, false, 7) }],
     ['a resize stamped before the take-over while the state says pinned: dropped', state(false, true, 7), { type: 'resize', seq: 3 }, false, { writeNewest: false, state: state(false, true, 7) }],
-    ['a new query stamped before the take-over: dropped', state(false, true, 7), { type: 'reset', seq: 2 }, false, { round: 'none', state: state(false, true, 7) }],
+    ['a new query after a take-over always applies: the view goes to the top', state(false, false, 7), { type: 'reset' }, true, { round: 'none', state: state(false, true, 7) }],
     ['a reveal stamped after the take-over is applied', state(true, false, 7), { type: 'reveal', seq: 8 }, false, { round: 'end', goNewest: true, state: state(true, true, 7) }],
     ['a resize stamped after the take-over is applied', state(false, true, 7), { type: 'resize', seq: 8 }, false, { writeNewest: true, state: state(false, true, 7) }],
   ];

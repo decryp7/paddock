@@ -33,8 +33,8 @@ export type FollowEvent =
   | { type: 'reveal'; seq: number }
   /** Follow on or Resume. */
   | { type: 'followOn'; seq: number }
-  /** A new query or sort order: the view goes to the top. */
-  | { type: 'reset'; seq: number };
+  /** A new query or sort order: the view goes to the top. It always applies: the rows are new, a take-over on the old ones does not carry over. */
+  | { type: 'reset' };
 
 /** What the grid must do for the event. */
 export interface FollowAction {
@@ -61,7 +61,7 @@ export function followStep(state: FollowState, event: FollowEvent, descending: b
   const newest: FollowAction['round'] = descending ? 'keep' : 'end';
   // One rule for every request that moves the view: stamped before the last take-over, it is stale (an effect applied it late) and the
   // user's move wins. A stale reveal or Follow on still means "reload the rows": a round that keeps the view where it is (as for a following view that is not pinned).
-  if ((event.type === 'reveal' || event.type === 'followOn' || event.type === 'resize' || event.type === 'reset') && event.seq < state.takeOver) {
+  if ((event.type === 'reveal' || event.type === 'followOn' || event.type === 'resize') && event.seq < state.takeOver) {
     return { state, action: event.type === 'reveal' || event.type === 'followOn' ? { ...NONE, round: descending ? 'shift' : 'keep' } : NONE };
   }
   switch (event.type) {

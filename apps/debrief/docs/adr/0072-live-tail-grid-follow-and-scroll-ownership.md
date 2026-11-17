@@ -207,15 +207,29 @@ No single gap costs more than 1 agent-day beyond common practice, so none needs 
   in `src/app/grid/`, and `no-restricted-imports` of `scroll-writer` outside `events-grid.ts`, in `npm run lint:report` (`DEBRIEF_LINT_REPORT=1`); first run on the
   real tree 2026-11-17: no findings, and a probe file with each shape is reported. It moves to the normal lint after its first green run in CI (run id to be recorded here).
 
-## Amendment 2026-11-17: one request-sequence rule (G1, G2, G9, G10)
+## Amendment 2026-11-17: one request-sequence rule
 
-The four ordering findings had one shape: a request that moves the view was applied by an effect after a later user input. The rule that closes the class:
-- Every request that moves the view (a reveal, Follow on, a resize re-pin, a new query) carries a sequence stamp from `nextRequestSeq()` (`grid/request-seq.ts`), taken
-  when the request is made (the pill click stamps `LiveFeed.revealSeq`), not when an effect handles it. A user take-over is stamped when the input arrives and the reducer
-  keeps it as `FollowState.takeOver`.
-- `followStep` drops any request stamped before the last take-over: no write, no pin. A stale reveal or Follow on still reloads the rows, in a round that keeps the view where
-  it is. Nothing outside the reducer decides this, so no effect can apply a stale request.
-- Table rows in `follow-reducer.spec.ts` cover each request kind arriving after a take-over (and after, applied); the G10 unit spec in `events-grid.spec.ts` covers the real
-  order (the wheel before the effect). Without the rule, 7 of those tests fail.
+G10 (a wheel that arrives before a reveal request is handled) and the same race for Follow on and Resume had one shape: a request that moves the view was applied by an
+effect after a later user input. (G1, G2 and G9 are about the round's hold and the pending write, and stay as described in their rows; only G10 and Follow on/Resume depend on the stamp.)
+- A request that moves the view (a reveal, Follow on or Resume, a resize re-pin) carries a sequence stamp from `nextRequestSeq()` (`core/request-seq.ts`), taken when the user acts:
+  the pill click (`new-events-pill.ts`), `LiveFollow.setFollow(true)` and `resume()` (`resumeSeq`), and for a resize when the observer reports it. The stamp is a required
+  argument of `LiveFeed.showNewEvents(seq)` and of every such `FollowEvent`, so no effect can take a stamp itself. A user take-over is stamped when the input arrives and the
+  reducer keeps it as `FollowState.takeOver`.
+- `followStep` drops any such request stamped before the last take-over: no write, no pin. A stale reveal or Follow on still reloads the rows, in a round that keeps the view
+  where it is, and the pill's count has been cleared by the request (`showNewEvents` zeroes it when the user acts), so the held events are shown by the reload.
+- A new query or sort order always wins: it resets the view to the top (`setTop(0)` in `reset`), the rows are new, and a take-over on the old rows does not carry over. It is not
+  stamped. A resize is stamped when it is observed; it cannot be late the way an effect can.
+- Tests: `follow-reducer.spec.ts` rows for each request kind before and after a take-over; the G10 and G10b unit specs (reveal, Follow on, Resume) in `events-grid.spec.ts`
+  (without the rule they fail), the e2e row "a wheel at once after Follow on" (6 of 20 red in Chromium with the stamp taken late). The classifier's wiring has two grid specs
+  (a no-input scroll kept once the layout frame has passed; written back while the layout is changing), red with `layoutChanged` hard-coded either way.
 - Measured on the final code (sequence rule, real-input smoke set included): 32 tests x 20 repeats = 640 runs per engine, `--workers 4`, idle machine (CPU idle 74% at the start):
   Chromium 640 of 640, WebKit 640 of 640. The earlier run of the same matrix before the rule had one headless-WebKit dropped real wheel (639 of 640), recorded above.
+- Open, measured (2026-11-17): the row "resize while not pinned keeps the top row", oldest first, fails about 1 to 2% of WebKit runs (4 of 300 and 6 of 300 at 150 repeats x 2
+  orders, 4 workers; with `layoutChanged` hard-coded `true`, the older behaviour, 4 of 300, so it does not come from the sequence rule or from requiring `layoutChanged`). The grid
+  log shows a write of the top row, then a scroll event with no input and a read 59 px away (118632 to 118573), outside the layout delta band, classified `user`; the grid then
+  keeps that position and the top row differs by two rows. Chromium: 0 of 340. The `Scroll origin` log line now carries `RecentInput`, `LayoutChanged`, `LayoutDelta` and `Max`
+  for the next measurement. A rule that treats the first no-input event after a layout-driven write as the browser's would close it but changes decision 2 (find in page); it needs a decision.
+- Final matrix of the round (34 tests x 20 repeats = 680 runs per engine, `--workers 4`, idle machine, CPU idle 83% at the start): Chromium 680 of 680; WebKit 675 of 680: 4 are
+  the real wheel of the smoke set (dropped input, see above), 1 is the open "resize while not pinned" row. The e2e row "a wheel at once after Follow on" failed 1 of 40 in an earlier
+  full run in WebKit and 0 of 240 in isolation and 0 of 40 in this one; it was red 6 of 20 in Chromium with the stamp taken late.
+

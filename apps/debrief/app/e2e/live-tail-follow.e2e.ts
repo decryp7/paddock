@@ -295,6 +295,16 @@ for (const order of ORDERS) {
       expect(await onNewest(page, order), 'not pulled back to the newest end').toBe(false);
     });
 
+    test('a wheel at once after Follow on (before its request is handled) is not pulled back', async ({ page }) => {
+      await open(page, order);
+      await holdWithEvents(page);
+      await follow(page).click();
+      await dispatchAway(page, order, 'wheel');
+      await expectAway(page, order, 'wheel');
+      await page.clock.runFor(1_500);
+      expect(await onNewest(page, order), 'not pulled back to the newest end').toBe(false);
+    });
+
     test('a wheel toward the newest end while on it is a no-op: following goes on', async ({ page }) => {
       await open(page, order);
       await goNewest(page, order);

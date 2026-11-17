@@ -1,8 +1,8 @@
-import { nextRequestSeq } from './request-seq';
 import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, effect, ElementRef, inject, Injector, linkedSignal, signal, untracked, viewChild } from '@angular/core';
 import { ErrorDetails } from '../ui/error-details';
 import { RecordView } from '../core/api.types';
 import { DebriefBackend } from '../core/backend';
+import { nextRequestSeq } from '../core/request-seq';
 import { formatCount, formatDateTime } from '../core/format';
 import { describeError, Logger } from '../core/logger';
 import { LatestRequest } from '../shared/latest-request';
@@ -584,7 +584,7 @@ export class EventsGrid {
     if (this.jumpErrorView !== viewKey(query, descending)) this.jumpError.set(null);
     this.selection.set(EMPTY_SELECTION);
     this.setTop(0);
-    this.step({ type: 'reset', seq: nextRequestSeq() }, descending);
+    this.step({ type: 'reset' }, descending);
     this.rows.reset(query, descending);
     void this.checkSelected(query, descending);
   }
@@ -839,11 +839,20 @@ export class EventsGrid {
     this.rows.noteScroll();
     const g = this.geometry();
     const read = el.scrollTop;
-    const origin = classifyScroll({ read, pendingWrite: this.pendingWrite?.physical ?? null, lastWrite: this.writtenScroll, maxScroll: el.scrollHeight - el.clientHeight, recentInput: this.inputSinceWrite || this.pointerDown, layoutChanged: this.layoutDirty || el.clientHeight !== this.writtenClient, layoutDelta: Math.abs(el.scrollHeight - el.clientHeight - this.writtenMax) });
+    const metrics = {
+      read,
+      pendingWrite: this.pendingWrite?.physical ?? null,
+      lastWrite: this.writtenScroll,
+      maxScroll: el.scrollHeight - el.clientHeight,
+      recentInput: this.inputSinceWrite || this.pointerDown,
+      layoutChanged: this.layoutDirty || el.clientHeight !== this.writtenClient,
+      layoutDelta: Math.abs(el.scrollHeight - el.clientHeight - this.writtenMax),
+    };
+    const origin = classifyScroll(metrics);
     // Only a change of origin is logged (each log line is an IPC call in the desktop app, and a drag fires many scroll events).
     if (origin !== this.lastOrigin) {
       this.lastOrigin = origin;
-      this.logger.debug('ui.grid', 'Scroll origin', { Origin: origin, Read: read, Written: this.writtenScroll, Pending: this.pendingWrite?.physical ?? null });
+      this.logger.debug('ui.grid', 'Scroll origin', { Origin: origin, Read: read, Written: this.writtenScroll, Pending: this.pendingWrite?.physical ?? null, RecentInput: metrics.recentInput, LayoutChanged: metrics.layoutChanged, LayoutDelta: metrics.layoutDelta, Max: metrics.maxScroll });
     }
     // Our own write (or its clamped echo): the position signal already says where the view is; reading it back would lose the row-exact position.
     if (origin === 'own') return;
