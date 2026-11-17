@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 import { expectNoScrollMovesOfItsOwn } from '../../../../ui/projects/paddock-e2e/src/index.ts';
 import { openApp } from './app';
 import { viewport } from './mock-url';
