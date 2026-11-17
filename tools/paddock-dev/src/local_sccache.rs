@@ -783,7 +783,8 @@ mod tests {
         assert_eq!(cache_dir(&e).unwrap(), "/v/sccache");
         assert_eq!(cache_size(&e), "60G");
         let e = env(&[("PADDOCK_DEV_HOME", "/h")]);
-        assert_eq!(cache_dir(&e).unwrap(), "/h/sccache");
+        // Joined by the OS's separator (`/h\\sccache` on Windows, run 8209): compare as paths, not as text.
+        assert_eq!(Path::new(&cache_dir(&e).unwrap()), Path::new("/h").join("sccache"));
         assert_eq!(cache_size(&e), DEFAULT_SIZE);
         assert_eq!(
             install_path(&e).unwrap(),
@@ -910,8 +911,8 @@ mod tests {
         ]);
         let child = child_of("--start-server", &local, &parent);
         assert_eq!(
-            last(&child, "SCCACHE_ERROR_LOG").as_deref(),
-            Some("/h/sccache-run/sccache.log"),
+            last(&child, "SCCACHE_ERROR_LOG").map(std::path::PathBuf::from),
+            Some(Path::new("/h/sccache-run").join("sccache.log")),
             "{child:?}"
         );
         assert_eq!(last(&child, "SCCACHE_IDLE_TIMEOUT").as_deref(), Some("0"), "{child:?}");
