@@ -751,6 +751,7 @@ export class PdAssistant {
       const el = this.log()?.nativeElement;
       if (!el) return;
       // After the new turn's DOM is rendered (an effect runs before the view updates), else the last block stays below.
+      // conformance: owned-scroll — a chat log keeps the browser's scroll anchoring on purpose: it keeps the reader's place while they read scrolled up (family ADR 0105 decision 2)
       if (this.pinned) afterNextRender(() => (el.scrollTop = el.scrollHeight), { injector: this.injector });
       // The pill is state of this effect's scroll decision (the user's position is not a signal): set only, never read.
       else this.unseen.set(true);
@@ -769,6 +770,7 @@ export class PdAssistant {
       const watch = new ResizeObserver(() => {
         // An empty conversation has nothing to follow: its empty state stays whole from the top when the composer grows
         // (files attached on a short window).
+        // conformance: owned-scroll — a chat log keeps the browser's scroll anchoring on purpose: it keeps the reader's place while they read scrolled up (family ADR 0105 decision 2)
         if (this.pinned && this.store.turns().length) el.scrollTop = el.scrollHeight;
       });
       watch.observe(el);
@@ -834,6 +836,7 @@ export class PdAssistant {
 
   protected jumpToLatest(): void {
     const el = this.log()?.nativeElement;
+    // conformance: owned-scroll — a chat log keeps the browser's scroll anchoring on purpose: it keeps the reader's place while they read scrolled up (family ADR 0105 decision 2)
     if (el) el.scrollTop = el.scrollHeight;
     this.pinned = true;
     this.unseen.set(false);

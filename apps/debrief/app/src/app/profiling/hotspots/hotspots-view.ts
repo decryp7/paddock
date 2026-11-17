@@ -9,6 +9,7 @@ import { CaptureNotes, MeasurementLegend, MeasurementTag, NoCapture, ProfileBar 
 import { PROFILING_STYLES } from '../profiling-styles';
 import { GROUP_LABELS, GROUP_NOUNS, HotspotColumn, hotspotColumns, sameSort } from './hotspot-columns';
 import { HotspotsStore } from './hotspots.store';
+import { PdOwnedScroll } from '@decryp7/paddock-ui/scroll';
 
 export const ROW_H = 26;
 const OVERSCAN = 8;
@@ -29,7 +30,7 @@ export function rowWindow(total: number, scrollTop: number, height: number, rowH
 @Component({
   selector: 'debrief-hotspots-view',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [AnalysisState, ProfileBar, MeasurementTag, MeasurementLegend, CaptureNotes, NoCapture],
+  imports: [AnalysisState, ProfileBar, MeasurementTag, MeasurementLegend, CaptureNotes, NoCapture, PdOwnedScroll],
   providers: [HotspotsStore],
   template: `
     @if (active.profile(); as p) {
@@ -50,7 +51,7 @@ export function rowWindow(total: number, scrollTop: number, height: number, rowH
         <debrief-measurement-legend />
       </div>
       <debrief-analysis-state [loading]="store.loading()" [error]="store.error()" [hasData]="!!store.meta()" [empty]="store.meta()?.totalRows === 0" emptyText="No samples match this view (range, threads or search)." i18n-emptyText="@@profiling.hotspots.empty" (retry)="store.retry()">
-        <div class="viewport" #viewport tabindex="0" role="region" aria-label="Hotspot rows" i18n-aria-label="@@profiling.hotspots.rowsRegion" (scroll)="onScroll($event)">
+        <div class="viewport" #viewport pdOwnedScroll tabindex="0" role="region" aria-label="Hotspot rows" i18n-aria-label="@@profiling.hotspots.rowsRegion" (scroll)="onScroll($event)">
           <table class="grid" [attr.aria-rowcount]="(store.meta()?.totalRows ?? 0) + 1" aria-label="Hotspots" i18n-aria-label="@@profiling.hotspots.tableLabel">
             <thead>
               <tr aria-rowindex="1">

@@ -159,6 +159,17 @@ code {
   background: transparent;
 }
 
+// A scroller whose position our code sets makes no scroll moves of its own (family ADR 0105): no scroll anchoring, writes land at once.
+// Templates use the `pdOwnedScroll` directive (it binds the same two properties, so it also works where paddock.css is not loaded).
+@mixin owned-scroll {
+  overflow-anchor: none;
+  scroll-behavior: auto;
+}
+
+.pd-owned-scroll {
+  @include owned-scroll;
+}
+
 .pd-visually-hidden {
   position: absolute !important;
   width: 1px;

@@ -4,6 +4,22 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui`: `scroll`, scrollers our code positions make no scroll moves of their own (family ADR 0105)
+- New entry `@decryp7/paddock-ui/scroll` with `PdOwnedScroll` (`[pdOwnedScroll]`): binds `overflow-anchor: none` and `scroll-behavior: auto`
+  on the element and adds the `pd-owned-scroll` class. Put it on every scroller whose position the code computes (virtual lists, grids
+  and tails). CSS scroll anchoring otherwise moves the position by itself when content above the view changes size (Debrief's events
+  grid was two rows off after a resize in WebKit). Chat and assistant logs keep anchoring on purpose (it keeps the reader's place) and
+  carry a C138 waiver instead. It depends on `@angular/core` only.
+- `_base.scss` (in `paddock.css`): the `owned-scroll` mixin and the `.pd-owned-scroll` class, the same two properties for stylesheets.
+- `pd-table`'s body carries it (the CDK viewport already set both properties; now it is explicit).
+- Adopted by Debrief (events grid, config diff, context lines, TOML editor, query field, flame chart, hotspots) and the shared view
+  scene.
+- `@decryp7/paddock-e2e`: `scrollAnchoringShift` and `expectNoScrollMovesOfItsOwn` measure that a scroller does not anchor, with a
+  positive control (anchoring forced on must move it) so a scroller the probe cannot see fails as not measured; `anchoringVerdict` is
+  the pure verdict.
+- Conformance C138 (report-only, wired in CI and `docs/gates.toml`): a scroll-position write in a component whose template carries
+  none of the shared style.
+
 ### Unit tests of live mock feeds
 - Debrief's live-tail, mock-live and mock-backend specs run the feed on a `ManualClock` the test moves (the `clock` option of
   `MockBackend`) instead of waiting on the page's timers. C136 (report-only) flags a unit spec block that starts a ticking
@@ -57,7 +73,6 @@ Conventional Commits; one semver tag for the whole repo.
 ### `paddock-testkit`: `TestCommand`, check C123
 - New `paddock_testkit::TestCommand`: a `Command` that starts from an empty environment plus an allow-list (`process::allowed_names()`), with a private `HOME` and temp folder, a curated `PATH` and `path_first`, `cargo_target_dir` and `into_parts`. Every test that starts `./dev`, `cargo` or `node` uses it (ADR 0100); check C123 (report-only) flags any other way.
 - `paddock-dev`: a named `ENGINEERING_RULES` is the only place the sibling `heavy.sh` lookup reads.
-
 
 ### `@decryp7/paddock-ui`: `shell/contributions`, the contribution registry without the root or Material
 - New entry `@decryp7/paddock-ui/shell/contributions`: `define*`, `provideContributions`, `provideContributionKinds`, `SHELL_CONTRIBUTIONS`, the

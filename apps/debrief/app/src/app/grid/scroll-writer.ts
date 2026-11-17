@@ -4,6 +4,7 @@
  * of `src/app/grid` exempts this file.
  */
 export function writeScrollTop(el: HTMLElement, physical: number): number {
+  // conformance: owned-scroll — the grid's single writer; its scroller is events-grid.ts's .viewport (pdOwnedScroll)
   el.scrollTop = physical;
   return el.scrollTop;
 }

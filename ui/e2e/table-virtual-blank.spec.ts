@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { Locator, Page } from '@decryp7/paddock-e2e';
+import { expectNoScrollMovesOfItsOwn, type Locator, type Page } from '@decryp7/paddock-e2e';
 
 // The user's report (Dyno 1.1.0 RC, Processes, 458 rows sorted by CPU): scrolled near the end, the table showed blank space
 // under the last drawn row while more rows existed. The body must always be filled to its bottom edge while rows remain.
@@ -47,4 +47,11 @@ test('table: the body grows taller than the rows drawn for its old height, and n
   await vp.evaluate((e) => e.scrollTo({ top: e.scrollHeight }));
   await expect.poll(async () => (await gap(box)).atEnd).toBe(true);
   await expect.poll(async () => (await gap(box)).gap).toBeLessThanOrEqual(1);
+});
+
+// Family ADR 0105: a scroller our code positions (`scrollToOffset` for the focused row) makes no scroll moves of its own. With CSS scroll
+// anchoring on, content growing above the view moves scrollTop by itself (Debrief's events grid was two rows off after a resize).
+test('table: the body makes no scroll moves of its own when content above the view grows (no scroll anchoring)', async ({ page }) => {
+  const box = await open(page);
+  await expectNoScrollMovesOfItsOwn(box.locator('cdk-virtual-scroll-viewport'), 'the table body');
 });

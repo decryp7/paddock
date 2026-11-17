@@ -55,6 +55,7 @@ export class PlaygroundPage implements OnInit {
     // Follow the stream: keep each conversation scrolled to its newest text.
     afterRenderEffect(() => {
       this.store.panes();
+      // conformance: owned-scroll — a chat log keeps the browser's scroll anchoring on purpose: it keeps the reader's place while they read scrolled up (family ADR 0105 decision 2)
       for (const l of this.lists()) l.nativeElement.scrollTop = l.nativeElement.scrollHeight;
     });
   }

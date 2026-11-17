@@ -14,6 +14,7 @@ import { AiLauncher } from '../ai/ai-launcher';
 import { AiStatusStore } from '../ai/ai-status.store';
 import { SavedQueryStore } from '../projects/bookmarks/saved-query.store';
 import { CommandRegistry } from '../extensions/command-registry';
+import { PdOwnedScroll } from '@decryp7/paddock-ui/scroll';
 
 /** Lines the field grows to while focused before it scrolls. */
 export const MAX_FIELD_LINES = 6;
@@ -46,7 +47,7 @@ export function focusSoon(el: HTMLElement, attempts = 20): void {
 @Component({
   selector: 'debrief-query-field',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ClickOutside, Icon],
+  imports: [ClickOutside, Icon, PdOwnedScroll],
   host: { '[class.focused]': 'focused()', '[class.query]': "field.kind() === 'query'" },
   template: `
     <div class="box" [class.invalid]="invalid()" [class.expanded]="expanded()" (debriefClickOutside)="closePopups()">
@@ -57,6 +58,7 @@ export function focusSoon(el: HTMLElement, attempts = 20): void {
         }
         <textarea
           #input
+          pdOwnedScroll
           class="qinput mono"
           role="combobox"
           rows="1"

@@ -1,5 +1,6 @@
 import { CdkFixedSizeVirtualScroll, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
 import { PdViewportFollowsSize } from './viewport-follows-size';
+import { PdOwnedScroll } from '@decryp7/paddock-ui/scroll';
 import { NgTemplateOutlet } from '@angular/common';
 import {
   afterNextRender,
@@ -138,6 +139,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
     NgTemplateOutlet,
     CdkVirtualScrollViewport,
     CdkFixedSizeVirtualScroll,
+    PdOwnedScroll,
     PdViewportFollowsSize,
     MatTable,
     MatColumnDef,
@@ -226,7 +228,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
         }
         <mat-header-row *matHeaderRowDef="displayed()" class="pd-header" aria-rowindex="1" />
       </mat-table>
-      <cdk-virtual-scroll-viewport pdViewportFollowsSize class="pd-body" [itemSize]="rowPx()" [minBufferPx]="bufferPx()" [maxBufferPx]="bufferPx() * 2" [style.height.px]="bodyHeight()" [style.min-height.px]="fillMin()" [attr.data-testid]="state() === 'loading' ? 'table-loading' : null">
+      <cdk-virtual-scroll-viewport pdViewportFollowsSize pdOwnedScroll class="pd-body" [itemSize]="rowPx()" [minBufferPx]="bufferPx()" [maxBufferPx]="bufferPx() * 2" [style.height.px]="bodyHeight()" [style.min-height.px]="fillMin()" [attr.data-testid]="state() === 'loading' ? 'table-loading' : null">
         <!-- A row group only while it has rows anyone can read: not when empty (the state is said below) or loading (placeholders are hidden). -->
         <mat-table class="pd-body-table" [attr.role]="state() === 'ready' && lines().length ? 'rowgroup' : null" [dataSource]="lines()" #bodyTable [trackBy]="trackLine" (contentChanged)="onRowsDrawn()">
           @for (c of columns2(); track c.key; let k = $index) {

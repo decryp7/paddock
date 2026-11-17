@@ -182,6 +182,14 @@ review_by = 2026-12-15
 approved = "user"
 
 [[report_only]]
+id = "C138"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY in C138-owned-scroll.mjs and the mode to gate. 0 sites on this branch (21 on origin/main 97176067c, each moved onto pdOwnedScroll or waived with a reason: dockview elements, the widget grid's drag auto-scroll, Pitcrew's config editor, and the chat and assistant logs, which keep anchoring on purpose)"
+owner = "ADR 0105"
+since = 2026-11-17
+review_by = 2026-12-17
+approved = "coordinator"
+
+[[report_only]]
 id = "C118"
 reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in C118-floating-tools.mjs and the mode to gate. 16 floating-tool warnings today (7 cargo install without a pinned version, 5 dtolnay/rust-toolchain at a channel ref, 2 taiki-e/install-action refs without a digest, 1 install-action tool without @x.y.z, 1 npx --yes of a package that is not in the lockfile); an npx of a binary of a top-level package-lock.json package is not a finding"
 owner = "ER-26 (2026-11-13)"

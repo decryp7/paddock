@@ -5,6 +5,7 @@ import { makeGeometry, scrollToTop, visibleWindow } from '../grid/scroll-map';
 import { baseName } from '../tools/tool-errors';
 import { ConfigDiffStore } from './config-diff.store';
 import { ActiveDescendantNavigation } from '../shared/list-navigation';
+import { PdOwnedScroll } from '@decryp7/paddock-ui/scroll';
 
 /** Height of one diff row, px. */
 export const ROW_H = 24;
@@ -164,6 +165,7 @@ export function valueText(v: ValueDto | null): string {
         <div class="tree-box">
         <div
           #scroller
+          pdOwnedScroll
           class="tree"
           [class.unified]="store.layout() === 'unified'"
           role="treegrid"
@@ -245,7 +247,7 @@ export function valueText(v: ValueDto | null): string {
       }
     </ng-template>
   `,
-  imports: [NgTemplateOutlet],
+  imports: [NgTemplateOutlet, PdOwnedScroll],
   styles: `
     :host { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg-1); }
     .wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; }

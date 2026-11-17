@@ -255,6 +255,7 @@ export class AiChatPanel {
     effect(() => {
       this.store.activeTurns();
       const el = this.logEl()?.nativeElement;
+      // conformance: owned-scroll — a chat log keeps the browser's scroll anchoring on purpose: it keeps the reader's place while they read scrolled up (family ADR 0105 decision 2)
       if (el) queueMicrotask(() => (el.scrollTop = el.scrollHeight));
     });
   }

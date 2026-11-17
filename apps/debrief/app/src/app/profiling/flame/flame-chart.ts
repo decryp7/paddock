@@ -5,6 +5,7 @@ import { buildFlameModel, chainTo, FlameModel, FlameOrientation, flameKey, hitTe
 import { ColorBy, diffColor, FALLBACK_PALETTE, FlamePalette, frameColor, KIND_LABEL, KIND_SLOT, maxAbsDelta, modulesByValue, resolvePalette, stickySlots } from './flame-colors';
 import { depthAt, drawFlame, FLAME_ROW_H, FlameCtx, rowY } from './flame-draw';
 import { MeasurementTag, nextTagId } from '../profiling-shared';
+import { PdOwnedScroll } from '@decryp7/paddock-ui/scroll';
 
 /** How many frames the accessible list shows. */
 const LIST_LIMIT = 100;
@@ -23,7 +24,7 @@ interface Tip {
 @Component({
   selector: 'debrief-flame-chart',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MeasurementTag],
+  imports: [MeasurementTag, PdOwnedScroll],
   template: `
     <div class="legend" role="group" aria-label="Colour legend" i18n-aria-label="@@profiling.flame.legendLabel">
       @if (diff()) {
@@ -41,7 +42,7 @@ interface Tip {
         <debrief-measurement [m]="g.measurement" />
       }
     </div>
-    <div class="scroll" #scroll>
+    <div class="scroll" #scroll pdOwnedScroll>
       <div
         class="surface"
         #surface

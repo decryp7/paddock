@@ -4,6 +4,7 @@ import { DebriefBackend } from '../core/backend';
 import { describeError } from '../core/logger';
 import { Debouncer } from '../shared/throttle';
 import { LatestRequest } from '../shared/latest-request';
+import { PdOwnedScroll } from '@decryp7/paddock-ui/scroll';
 
 /** Lines shown on each side of the event at first, and the steps "More" takes up to the cap (the engine caps at 500). */
 export const CONTEXT_STEPS = [10, 50, 200, 500] as const;
@@ -17,6 +18,7 @@ export const CONTEXT_SETTLE_MS = 120;
 
 @Component({
   selector: 'debrief-context-section',
+  imports: [PdOwnedScroll],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="head">
@@ -35,7 +37,7 @@ export const CONTEXT_SETTLE_MS = 120;
             <button class="btn" (click)="load()" i18n="@@inspector.context.retry">Retry</button>
           </div>
         } @else if (data(); as d) {
-          <div #box class="lines mono" role="region" tabindex="0" aria-label="Source lines around the event" i18n-aria-label="@@inspector.context.linesAria" data-testid="context-lines">
+          <div #box pdOwnedScroll class="lines mono" role="region" tabindex="0" aria-label="Source lines around the event" i18n-aria-label="@@inspector.context.linesAria" data-testid="context-lines">
             @for (l of d.lines; track l.line) {
               <div class="line" [class.hit]="l.line === d.line" [attr.aria-current]="l.line === d.line ? 'true' : null">
                 <span class="ln">{{ l.line }}</span><span class="lt">{{ l.text }}</span>
