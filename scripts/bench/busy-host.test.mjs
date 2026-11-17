@@ -176,7 +176,7 @@ test('an OS with no readable tree CPU judges the wall time of the starts and say
 
 test('a missing CPU time where the OS can read it is a broken check (ER-33), not a note', () => {
   const v = verdict(input({ cpuMsSamples: [null, null, null], cpuExpected: true }));
-  assert.equal(v.status, 'fail');
+  assert.equal(v.status, 'check-broken', 'the step summary shows what the annotation says');
   assert.equal(v.exitCode, EXIT_NOT_MEASURED);
   assert.deepEqual(v.over, [{ kind: 'broken-cpu' }]);
   assert.match(annotations(v, { name: 'b', os: 'macos' })[0], /^::error::b check broken \(macos\).*could not be read.*ER-33/);

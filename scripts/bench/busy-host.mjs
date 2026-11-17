@@ -76,7 +76,7 @@ export function ceilingMs(t, ceilingFactor) {
  *                  defined is a broken check (ER-33), not a note
  *   idle           optional [{ idleBefore, idleAfter, loadBefore, loadAfter }] per sample, summarised in the notes
  *   tag, reportOnly (tag is not used by the verdict: a busy host and a tag run are judged alike; it is kept for callers)
- * Returns { status: 'pass' | 'fail' | 'not-measured', exitCode, over, notes, cpuMedian, ratio, sampleSpread, level }; `level`
+ * Returns { status: 'pass' | 'fail' | 'not-measured' | 'check-broken', exitCode, over, notes, cpuMedian, ratio, sampleSpread, level }; `level`
  * is the annotation to print for a non-pass: 'error' | 'warning' | null.
  */
 export function verdict({ cpuMsSamples, wallSamples, reference, thresholds, idle, failures = [], cpuExpected = false, reportOnly = false }) {
@@ -132,7 +132,7 @@ export function verdict({ cpuMsSamples, wallSamples, reference, thresholds, idle
   const hostNote = hostSummary(idle);
   if (hostNote) notes.push(hostNote);
   if (cpuCoarse === null && !markNames.length) notes.push('no thresholds are recorded for this OS: numbers only');
-  if (over.length && !reportOnly) return { ...base, status: 'fail', over, exitCode: broken && over.length === 1 ? EXIT_NOT_MEASURED : EXIT_OVER, level: 'error', notes };
+  if (over.length && !reportOnly) return { ...base, status: broken ? 'check-broken' : 'fail', over, exitCode: broken && over.length === 1 ? EXIT_NOT_MEASURED : EXIT_OVER, level: 'error', notes };
   return { ...base, status: 'pass', over, exitCode: EXIT_OK, level: null, notes };
 }
 

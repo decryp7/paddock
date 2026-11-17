@@ -121,8 +121,8 @@ test('script: a busy-host number passes with a note, wall over the ceiling fails
     const ceiling = go({ marks: { firstInteractive: T(100, 0) }, wallCeilingFactor: 3 });
     assert.equal(ceiling.r.status, 1);
     assert.match(ceiling.r.stderr, /::error::start-up benchmark firstInteractive: median 730 ms exceeds the 300 ms ceiling/);
-    // A CPU limit on an OS that cannot read the tree CPU time (--os linux): not applied, said so, the wall time still judged
-    const linux = go({ cpu: { ...T(-10, 0), quiet: { ...T(-10, 0), minIdle: 0 } }, marks, wallCeilingFactor: 3 }, {}, exe, 'linux');
+    // A CPU limit on a host with no tree CPU reader (a stand-in reader; --os only picks the budgets row): not applied, said so, the wall time still judged
+    const linux = go({ cpu: { ...T(-10, 0), quiet: { ...T(-10, 0), minIdle: 0 } }, marks, wallCeilingFactor: 3 }, { DEBRIEF_BENCH_FAKE_CPU: 'unreadable' }, exe, 'linux');
     assert.equal(linux.r.status, 0, linux.r.stderr);
     assert.match(linux.r.stdout, /note: tree CPU time is not readable on this OS: no CPU limit is applied/);
     if (process.platform === 'darwin') {

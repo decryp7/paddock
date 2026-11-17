@@ -102,7 +102,7 @@ function executable(path) {
 }
 
 /** Starts `exe` once with data folder `data` and resolves with its timings; rejects after `limitMs` without the line. */
-export function runOnce(exe, data, limitMs, platform = process.platform) {
+export function runOnce(exe, data, limitMs, readCpu = (pid) => readTreeCpuMs(pid)) {
   const child = spawn(exe, [], { env: { ...process.env, DEBRIEF_DATA_DIR: data }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stderr.resume();
   const done = () =>
@@ -124,7 +124,7 @@ export function runOnce(exe, data, limitMs, platform = process.platform) {
     };
     createInterface({ input: child.stdout }).on('line', (line) => {
       const t = parseTimingsLine(line);
-      if (t) void finish(null, { ...t, cpuMs: readTreeCpuMs(child.pid, platform) });
+      if (t) void finish(null, { ...t, cpuMs: readCpu(child.pid) });
     });
     child.once('exit', (code) => void finish(new Error(`Debrief exited (code ${code}) before logging its start-up timings`)));
   });
@@ -147,7 +147,10 @@ async function main() {
   const budgets = JSON.parse(readFileSync(budgetsFile, 'utf8'))[os] ?? null;
   const reportOnly = args.includes('--report-only');
   const tag = isTagRun();
-  const platform = { macos: 'darwin', windows: 'win32', linux: 'linux' }[os] ?? process.platform;
+  // The OS readers follow the host (process.platform); --os only picks the budgets row. DEBRIEF_BENCH_FAKE_CPU=unreadable is for
+  // the wiring test: a stand-in for a host with no tree CPU reader.
+  const noCpuReader = process.env.DEBRIEF_BENCH_FAKE_CPU === 'unreadable';
+  const readCpu = noCpuReader ? () => null : (pid) => readTreeCpuMs(pid);
   const refReps = Number(opt('--reference-reps', '5'));
   const exe = executable(exePath);
   const data = mkdtempSync(join(tmpdir(), 'debrief-startup-bench-'));
@@ -173,14 +176,14 @@ async function main() {
     referenceReps(1); // warm-up of the engine's JIT, not counted
     repsBefore = referenceReps(refReps);
     try {
-      first = await runOnce(exe, data, 60_000, platform);
+      first = await runOnce(exe, data, 60_000, readCpu);
       show('first run (not counted)', first);
     } catch (e) {
       failures.push({ start: 'first-run', message: e.message });
       console.log(`first run gave no timings: ${e.message}`);
     }
-    const idle = () => (process.env.DEBRIEF_BENCH_FAKE_IDLE !== undefined ? Number(process.env.DEBRIEF_BENCH_FAKE_IDLE) : readCpuIdle(platform)); // the env var is for the wiring test
-    const collected = await collectSamples({ want: runs, measure: () => runOnce(exe, data, 60_000, platform), idle, load: () => (process.platform === 'win32' ? null : loadavg()[0]) });
+    const idle = () => (process.env.DEBRIEF_BENCH_FAKE_IDLE !== undefined ? Number(process.env.DEBRIEF_BENCH_FAKE_IDLE) : readCpuIdle()); // the env var is for the wiring test
+    const collected = await collectSamples({ want: runs, measure: () => runOnce(exe, data, 60_000, readCpu), idle, load: () => (process.platform === 'win32' ? null : loadavg()[0]) });
     samples = collected.samples;
     failures.push(...collected.failures);
     samples.forEach((r, i) => show(`run ${i + 1}`, r));
@@ -198,7 +201,7 @@ async function main() {
     thresholds: { cpu: budgets?.cpu, marks: budgets?.marks, wallCeilingFactor: budgets?.wallCeilingFactor },
     idle: samples,
     failures,
-    cpuExpected: canReadTreeCpu(platform),
+    cpuExpected: !noCpuReader && canReadTreeCpu(),
     reportOnly: reportOnly || !budgets,
   });
   const ref = referenceStats(reps);
