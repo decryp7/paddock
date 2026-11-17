@@ -74,7 +74,7 @@ pub struct PrePushArgs {
     /// Also run the Linux Clippy of the shared crates in the CI image (off by default: CI covers it, and it needs Docker).
     #[arg(long)]
     pub linux: bool,
-    /// Also run the repository-wide audits (`member-audits`, about 2 minutes): set by the member gate of `./dev merge check --gates`
+    /// Also run the repository-wide audits (`member-audits`): set by the member gate of `./dev merge check --gates`
     /// on the merge commit, not by a developer's push, whose time budget it would grow.
     #[arg(long)]
     pub member_gate: bool,

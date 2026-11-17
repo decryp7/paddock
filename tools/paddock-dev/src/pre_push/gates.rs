@@ -498,16 +498,14 @@ pub const AUDIT_PROFILE: &str = "member-audits";
 /// allow-list parity against C135, the parity corpus against test-env-builder; each first showed in the train-wide nextest run, ER-8).
 ///
 /// Runs only when the push gate is the member gate (`./dev merge check --gates` passes `--member-gate`), whatever changed (ER-41); a
-/// developer's push skips it with a reason, as the user wants no extra 2 minutes there (2026-11-17). Blocking from the start: the audits are established tests, not a new check (user, 2026-11-17). `--no-tests=fail`
+/// developer's push skips it with a reason, as the user wants no extra minutes there (2026-11-17). Blocking from the start: the audits are established tests, not a new check (user, 2026-11-17). `--no-tests=fail`
 /// makes a filter that selects nothing a failure, never a pass (ER-33); `RUSTUP_AUTO_INSTALL=0` stops a probe from installing a
-/// toolchain (ER-45). Measured in docs/benchmarks.md, "Member audits in the push gate".
+/// toolchain (ER-45). Measured in docs/benchmarks.md, "Member audits in the member gate".
 fn member_audits(facts: &Facts) -> Planned {
     if !facts.member_gate {
         return Planned::Skip {
             id: "member-audits".into(),
-            reason:
-                "they run in the member gate of `./dev merge check --gates` (`--member-gate`), not in a developer's push (about 2 minutes)"
-                    .into(),
+            reason: "they run in the member gate of `./dev merge check --gates` (`--member-gate`), not in a developer's push ".into(),
         };
     }
     let mut g = Gate {
@@ -525,9 +523,15 @@ fn member_audits(facts: &Facts) -> Planned {
             ),
         )
     };
-    if let (None, Some(k)) = (&facts.target_dir, &facts.kept_targets) {
-        g.env
-            .push(("CARGO_TARGET_DIR".into(), format!("{}/tools-paddock-dev", k.trim_end_matches('/'))));
+    // The build folder goes in as cargo configuration, never as `CARGO_TARGET_DIR` (sccache hashes it: crate::cargo_target). `cargo nextest`
+    // is not a builtin cargo subcommand, so `with_target_dir` would not place it; nextest takes `--config` itself, after `run`.
+    let dir = match (&facts.target_dir, &facts.kept_targets) {
+        (Some(d), _) => Some(d.trim_end_matches('/').to_string()),
+        (None, Some(k)) => Some(format!("{}/tools-paddock-dev", k.trim_end_matches('/'))),
+        (None, None) => None,
+    };
+    if let Some(dir) = dir {
+        g.args.splice(2..2, ["--config".to_string(), cargo_target::config_value(&dir)]);
     }
     Planned::Run(g)
 }

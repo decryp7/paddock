@@ -41,7 +41,7 @@ pub struct GateRun {
 
 /// Starts the fast gates of a checkout against a base.
 pub trait Gates {
-    /// Runs `check --pre-push --base <base>` in `root`; an error is a failure to start.
+    /// Runs `check --pre-push --member-gate --base <base>` in `root`; an error is a failure to start.
     fn run(&self, root: &Path, base: &str) -> Result<GateRun, String>;
 }
 
@@ -53,7 +53,7 @@ fn program() -> Result<std::path::PathBuf, String> {
     }
 }
 
-/// The real gates: `<this tool> check --pre-push --base <base> --root <root>`.
+/// The real gates: `<this tool> check --pre-push --member-gate --base <base> --root <root>`.
 pub struct Real;
 
 impl Gates for Real {
@@ -140,7 +140,10 @@ fn passed(base: &str, run: &GateRun) -> Step {
         Exit::Ok,
         "passed",
         base,
-        vec![format!("member gate: passed (`check --pre-push --base {base}`)"), run.text.clone()],
+        vec![
+            format!("member gate: passed (`check --pre-push --member-gate --base {base}`)"),
+            run.text.clone(),
+        ],
         &run.text,
     )
 }
@@ -154,7 +157,7 @@ fn interpret(answer: Result<GateRun, String>, base: &str, enforced: bool, subjec
     let not_measured = |why: String, text: Vec<String>, rows: &str| {
         let mut lines = text;
         lines.push(format!(
-            "{level}::member gate NOT MEASURED: {why}. Next step: run `./dev check --pre-push --base {base}` yourself in this worktree and fix what it prints; a member whose gates did not give a verdict on this merge is not a member that passed, and not a member that failed.{report_only}"
+            "{level}::member gate NOT MEASURED: {why}. Next step: run `./dev check --pre-push --member-gate --base {base}` yourself in this worktree and fix what it prints; a member whose gates did not give a verdict on this merge is not a member that passed, and not a member that failed.{report_only}"
         ));
         step(report(enforced, Exit::NotMeasured), "not measured", base, lines, rows)
     };
@@ -167,7 +170,7 @@ fn interpret(answer: Result<GateRun, String>, base: &str, enforced: bool, subjec
             .code
             .map_or("was ended before it finished".to_string(), |c| format!("exited {c}"));
         return not_measured(
-            format!("`check --pre-push --base {base}` {how} and printed no outcome (an exit code alone proves nothing)"),
+            format!("`check --pre-push --member-gate --base {base}` {how} and printed no outcome (an exit code alone proves nothing)"),
             vec![run.text.clone()],
             &run.text,
         );
@@ -185,7 +188,7 @@ fn interpret(answer: Result<GateRun, String>, base: &str, enforced: bool, subjec
             vec![
                 run.text.clone(),
                 format!(
-                    "{level}::member gate FAILED: `check --pre-push --base {base}` found problems on the combined tree. Next step: take the member out (reset the train to {base} in your own worktree) and send it back to its author with the rows above; do not fix it on the train.{report_only}"
+                    "{level}::member gate FAILED: `check --pre-push --member-gate --base {base}` found problems on the combined tree. Next step: take the member out (reset the train to {base} in your own worktree) and send it back to its author with the rows above; do not fix it on the train.{report_only}"
                 ),
             ],
             &run.text,
@@ -272,6 +275,8 @@ mod tests {
                 "{text}"
             );
             assert_eq!(text.contains("REPORT-ONLY"), !enforced);
+            // The next step names the member-gate command: a plain `check --pre-push` skips the audits and would not reproduce the finding.
+            assert!(text.contains("`check --pre-push --member-gate --base "), "{text}");
         }
     }
 
@@ -279,7 +284,10 @@ mod tests {
     fn a_gate_that_could_not_look_is_not_a_pass_even_while_report_only() {
         let s = map(&answer(Some(6), nm()), false);
         assert_eq!(s.exit, Exit::Ok);
-        assert!(s.text.join("\n").contains("NOT MEASURED"));
+        let text = s.text.join("\n");
+        assert!(text.contains("NOT MEASURED"));
+        assert!(text.contains("run `./dev check --pre-push --member-gate --base "), "{text}");
+        assert!(!text.contains("./dev check --pre-push --base"), "{text}");
         assert_eq!(map(&answer(Some(6), nm()), true).exit, Exit::NotMeasured);
         assert_eq!(map(&Fake(Err("no tool".into())), true).exit, Exit::NotMeasured);
         // Only findings with evidence for this merge are a failed gate. A broken tool (7), a usage error (2), any other exit and a
@@ -297,6 +305,10 @@ mod tests {
     fn a_pass_needs_evidence_for_this_merge_and_an_exit_code_alone_is_never_one() {
         let s = map(&answer(Some(0), clean()), true);
         assert_eq!((s.exit, s.data["outcome"].as_str()), (Exit::Ok, Some("passed")));
+        assert!(
+            s.text.join("\n").contains("`check --pre-push --member-gate --base "),
+            "the pass names the command that ran"
+        );
     }
 
     /// "Skip the gate": a stand-in that exits 0 with no JSON, JSON without evidence, evidence for another commit, a known commit,

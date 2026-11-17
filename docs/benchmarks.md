@@ -1541,40 +1541,46 @@ the single-machine runners busy.
 - **Notes:** the span counts jobs queued behind the runner too (start is when a runner took the job). Raw output in the agent's
   scratch folder, not kept.
 
-## Member audits in the push gate (2026-11-17, feat/member-gate-audits)
+## Member audits in the member gate (2026-11-17, feat/member-gate-audits)
 
 Question: what does the `member-audits` row (the repository-wide audits of `tools/paddock-dev/tests/it`, selected by the nextest
-profile `member-audits`) add to `./dev check --pre-push` and so to the member gate of `./dev merge check --gates`? The user had been
-told about a minute.
+profile `member-audits`) add to the member gate of `./dev merge check --gates`? The user had been told about a minute. The row runs
+only when the push gate is the member gate (`check --pre-push --member-gate`); a developer's push skips it with a reason.
 
-- **Machine:** the shared Mac mini (arm64), other agents running; 1-minute load 18 at the start (CPU idle 36 to 61 % on two readings)
-- **Tree:** feat/member-gate-audits on feat/member-gate-other-os (72cf747e9), `CARGO_BUILD_JOBS=2`, a warm build folder (the test
-  binary had been built by an earlier run; one small recompile of the new test file is inside the first number)
-- **Runs:** 1 of the profile (`cargo nextest run --profile member-audits --locked --no-tests=fail`), 68 tests on this base
+- **Machine:** the shared Mac mini (arm64), other agents running; `CARGO_BUILD_JOBS=2`, `RUSTUP_AUTO_INSTALL=0`
+- **Command:** `cargo nextest run --profile member-audits --locked --no-tests=fail` in `tools/paddock-dev`, run 1 time per row
+  below (one run each: a second run was not made)
 
-  | What | Seconds |
-  |---|---:|
-  | whole command, recompile of the changed test file included | 127.8 |
-  | nextest's own run of the 68 tests | 122.5 |
-  | slowest test, `golden::live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history` | over 120 |
+### Final: the positive list without the history replay (merged tree, train 13 plus this branch)
 
-- **Result:** about 2 minutes, not 1: the one golden test that replays the first-parent history against `affected.mjs` is nearly all
-  of it; the other 67 tests finish in the time it runs. The row is heavy (one machine-wide slot), rank 4, after the Clippy rows.
-### Without the history replay, and only in the member gate (2026-11-17, same branch, after review)
+The profile lists the audits (dev_bin, cargo_target_lint, parity_corpus, tree, golden, check_allow_list, safe_remove_lint, the live
+and working-tree checks of the check modules, the inputs-against-cargo-metadata tests, the ipc-endpoints, contracts and generators
+registry tests) and leaves out `golden::live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history` (over 120 s, it
+replays the first-parent history and audits no fresh code) and the fixture goldens (`build_jobs_golden`, `host_steps_golden`: they
+read no tracked tree).
 
-The row now runs only when the push gate is the member gate (`./dev merge check --gates` passes `--member-gate`); a developer's push
-skips it with a reason. `golden::live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history` (over 120 s, it audits
-no fresh code, the train-wide run keeps it) is out of the profile.
+  | What | Load (1 min) | CPU idle | Tests | Seconds |
+  |---|---:|---:|---:|---:|
+  | warm build folder, nextest's own run | 6.6 | 89 % | 80 | 34.5 |
+  | warm build folder, whole command (a small recompile included) | 6.6 | 89 % | 80 | 41.8 |
+  | cold build folder (new empty target dir; the compile cache may have helped), whole command | 6 to 9 | not read | 80 | 113.3 (nextest 31.8) |
 
-- **Machine:** the shared Mac mini, 1-minute load 10.6 (15-minute 20.6), CPU idle 47 and 56 % on two readings; `CARGO_BUILD_JOBS=2`
-- **Run:** 1 of `cargo nextest run --profile member-audits --locked --no-tests=fail`, warm build folder: 67 tests, nextest 24.9 s,
-  whole command 25.2 s (against 122.5 s and 127.8 s with the replay)
-- **Not measured:** a second run, a cold build folder, a busier machine, and the three audits that have not landed.
+### Option considered: the whole `it` binary minus the replay (a negative filter only)
 
-**Earlier run, with the replay:**
+Review asked for it as the common-practice option (no list to drift), if warm took at most about 2 minutes. Same tree, one run, load 6.4
+to 9.4 (CPU idle 66 %): 572 tests, nextest 129.9 s, whole command 160.0 s (the build of the merged tree included, which is not a cold
+build). Not taken: warm is over the 2 minute line, 10 tests failed or timed out in that environment (five `wrapper::` tests fail
+under the gate's own `RUSTUP_AUTO_INSTALL=0`, `cli::a_trial_with_bad_arguments_is_refused_before_anything_is_cloned_or_pushed` ran into
+its 120 s stop under load, and four more are the findings this branch fixes), so a negative filter would have made the gate's own
+environment a finding. The positive list is checked clause by clause against the binary's test names (`tests/it/member_audits.rs`).
 
-- **Not measured:** a quiet machine, a second run (one run only), a cold build folder, and the three audits that have not landed
-  (`dev_bin`, `cargo_target_lint`, `parity_corpus`), which add their own tests to the 68.
+### Earlier runs (superseded by the table above)
+
+On feat/member-gate-other-os (72cf747e9), load 18, warm folder, 68 tests, the list then in the profile: nextest 122.5 s, whole command
+127.8 s, almost all of it the history replay (over 120 s). Without the replay (67 tests, load 10.6): nextest 24.9 s, whole command
+25.2 s. Those runs predate train 13's audits (dev_bin, cargo_target_lint, parity_corpus), which add tests to the list.
+
+- **Not measured:** a busier machine and a second run of any row.
 
 ## Prune size, one pass (2026-11-15, fix/c125-and-arm64-tests)
 

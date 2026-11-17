@@ -238,9 +238,14 @@ fn the_member_audits_run_in_the_member_gate_whatever_changed_through_the_one_dec
             (
                 "cargo",
                 "tools/paddock-dev",
-                format!("nextest run --profile {AUDIT_PROFILE} --locked --no-tests=fail")
+                format!("nextest run --config build.target-dir='/t' --profile {AUDIT_PROFILE} --locked --no-tests=fail")
             ),
             "the audits are selected by the profile's declared filter, not by a list here (ER-42); an empty selection fails (ER-33)"
+        );
+        assert!(
+            !g.env.iter().any(|(k, _)| k == "CARGO_TARGET_DIR" || k == "CARGO_BUILD_TARGET_DIR"),
+            "the build folder is cargo configuration, never a CARGO_TARGET_DIR variable (sccache hashes it; cargo_target_lint): {:?}",
+            g.env
         );
         assert!(g.heavy, "it compiles the test binary: through heavy with its core cap (ER-24)");
         assert_eq!(
@@ -257,7 +262,7 @@ fn the_member_audits_run_in_the_member_gate_whatever_changed_through_the_one_dec
     }
 }
 
-/// A developer's push does not run the audits (about 2 minutes would be added to every push); it says why. The member gate does.
+/// A developer's push does not run the audits (minutes would be added to every push); it says why. The member gate does.
 #[test]
 fn a_developers_push_skips_the_member_audits_with_a_reason_and_the_member_gate_runs_them() {
     let off = Facts {
@@ -300,7 +305,7 @@ fn a_failing_member_audit_fails_the_gate_and_a_missing_nextest_is_not_measured()
         .find(|l| l.contains("::error::member-audits"))
         .unwrap_or_else(|| panic!("{}", report.text));
     assert!(
-        line.contains("Re-run alone: cd tools/paddock-dev && cargo nextest run --profile member-audits"),
+        line.contains("Re-run alone: cd tools/paddock-dev && cargo nextest run --config build.target-dir='/t' --profile member-audits"),
         "{line}"
     );
     let rows = run_all(
