@@ -20,6 +20,8 @@ changes here, every app's copy is updated in the same change.
    raised without a named, measured cause recorded next to it (ER-12); otherwise the cause is fixed. A new gate, CI job or
    check starts report-only and blocks only after its first green run on the real tree, recorded by run id where the
    gate is defined (ER-41).
+   A FLAKY test (fails, then passes on its one retry) blocks a landing only when the change reaches its code per the affected
+   plan; see rule 50 (k) (ER-12, user, 2026-11-16).
    A reviewer of a bug fix runs a mutation check on it (user, 2026-10-30), in their own worktree: for Rust,
    `cargo mutants --in-diff <diff> -p <crate> --timeout-multiplier 3` with `CARGO_BUILD_JOBS=2` (install once with
    `cargo install cargo-mutants --locked`); for TypeScript, revert the fix and run the new test. The review reports whether
@@ -198,6 +200,13 @@ changes here, every app's copy is updated in the same change.
     for specs) enforces (b) and (c); the other apps follow. *Why:* a fixed wait and a leaked patch each made a spec
     fail now and then, only in the full run
     ([lessons.md](lessons.md#test-isolation-debrief-2026-10-29)).
+    (d) A wait or assertion over a set of elements requires the set to be non-empty, or names why empty is expected (an `every()`
+    over nothing passes), and a layout check counts only when two reads agree (ER-12; 2026-11-16: Dyno's layout check passed on
+    zero rows and failed 31 of 240 runs under the pinned clock).
+    (e) A claim that a timing-sensitive spec passes or is stable states its runs, workers and engines (or OS). An e2e timing fix
+    needs at least 20 runs per engine at 4 workers, or more when the measured failure rate requires it; a bare "N of N green" is
+    rejected in review (ER-28, user, 2026-11-17). *Why:* on 2026-11-16 a Debrief live-tail fix was reported "3 of 3" and was 3 of 7
+    red, and "12 of 12" was 4 of 150 red (`fix/debrief-events-grid-live-tail`, `fix/debrief-live-tail-adr`).
 
 ## CI economy (user, 2026-10-29)
 50. **CI runs only what a change needs, once.**
@@ -250,6 +259,23 @@ changes here, every app's copy is updated in the same change.
     rows; it is not fixed on the train. The gate is report-only (printed, exit unchanged) until its first green run on a real
     train is recorded in ADR 0098, and sends members back from then on. For a failed train run, `./dev ci triage <run> --members
     <train-base>` names the members whose change reaches each new failure (the queue's own rule). Tests stay once per train.
+    The train's sequence (user, 2026-11-16): (1) each member's one short review runs at the same time as the train's CI, not
+    before the merge; a P1 cancels the train's run and pulls the member, so a review never delays a green train. (2) The next
+    train is assembled during the current train's CI: its integrator merges members on top of the running train's head, runs
+    all local gates, and re-merges the running train's final head when it lands, so the next CI starts at once. (3) The
+    train dispatches an app's release gate only when the plan marks it (rule 54 (a2)), and with `gates=false` once the counting
+    full `ci.yml` run is green on that exact commit (rule 54 (a3)).
+    (4) A test that fails and then passes on its one retry (FLAKY) blocks the landing only when the train's change reaches that
+    test's code (`./dev plan` over the train's diff). Otherwise the landing goes ahead: the flake is recorded with its log as a
+    fix item and fixed in the next train or batch, with a failing reproduction first (rule 5). A test that fails both tries always
+    blocks, and a retry never turns the run itself green: the report still marks it FLAKY. *Why (ER-12):* on 2026-11-16 two old
+    races in unchanged shared crates (run 8174: `paddock-ipc` endings, plugin-host ETXTBSY) held train 12 for hours. *Why:* release gates cost about 77 minutes of the Mac runner
+    on train 12 (runs 8164, 8165, 8167, 8169); the review before the merge and the serial assembly after the green run were
+    waits with nothing running (their minutes are not yet measured; the landing report records them from the next train).
+    The gate that decides on a branch runs on the same kind of machine as CI (the real runners, as merge queues and merge trains
+    do); a run on another architecture, under emulation or as another user counts only as not measured, or as a finding only when
+    compared with the base's own result on that machine (ER-9; 2026-11-16: the Windows-on-Arm VM and an amd64 container failed 22
+    paddock-dev tests on a base the real runner passed).
 
 ## Performance analysis (user, 2026-10-29)
 51. **Retired 2026-11-12 (user): merged into rule 13** (more parallelism, or a cheaper operation).
@@ -316,6 +342,19 @@ changes here, every app's copy is updated in the same change.
     packages.
     (a) The batch dispatches `<app>-release.yml` with gates on and the installers (bundle) built; passing tests alone is
     not enough.
+    (a2) A train dispatches an app's release gate only when the plan (`./dev plan` or `scripts/affected.mjs`, over the train's
+    diff against main) marks that app's release workflow or release path (user, 2026-11-16). Otherwise it skips the gate and
+    records the plan output in the landing report. The counting full `ci.yml` run always runs. This is also how rule 50's train
+    sequence reads. *Why:* each unaffected release gate cost up to 34 minutes of the single Mac runner per train (train 12:
+    runs 8164, 8165, 8167, 8169, about 77 minutes in total).
+    (a3) When the counting full `ci.yml` run is green on the exact commit, the affected release gates run with `gates=false`:
+    they build and check the installers, which is what rule 54 needs, and do not rerun the tests `ci.yml` just ran on that sha.
+    If `ci.yml` is not yet green on that sha, `gates=true`. Checked 2026-11-16 in the workflows: in `dyno-`, `pitwall-`,
+    `pitcrew-` and `spotter-release.yml` the `installers` job does not need the `gates` job, and calls `app-release.yml`
+    with the same inputs either way, so the bundle check, the Windows bundle and installer checks and the macOS verify
+    (sidecars started with `--version`) run with `gates=false`. The version and notes checks of `app-release.yml` run only on a
+    tag, so a dispatch never ran them with `gates` on or off. `shell-demo-release.yml` and `workbench-demo-release.yml` have no
+    `gates` input (their `gates` job always runs and `bundle` needs it), so (a3) does not apply to them.
     (b) Partly enforced: the ci-actions test (added on fix/dyno-bundle-ui) checks that every release workflow whose app
     imports `@decryp7/paddock-ui` builds the UI.
     (c) Amendment of 2026-11-09 (ADR 0080 D13, accepted by the user): the release workflow dispatched for this rule
@@ -418,6 +457,16 @@ changes here, every app's copy is updated in the same change.
     *Why:* on train 8 (2026-11-13) eight fixes after the merges were combination failures; `bddd2947c` was a second reader of
     data that already had an accessor (`./dev ci conformance-args` now), `0308201b4` a span ended at a comment the author
     remembered, `11c365fc4` a path into another area's layout, `be69a31f6` a hand list that had to equal `cargo metadata`.
+
+## Waiting, fixes, checks, lists and environments (user, 2026-11-15 and 2026-11-16; ER-43 to ER-47)
+Status is as of train 14 planning: "planned" is not built, "in progress" is on a branch. Rules 80 to 84 map the engineering rules to Paddock's mechanisms.
+80. **A waiter never holds the capacity the work it waits for needs** (ER-43). Paddock: `./dev wait` and the heavy-slot queue take no slot for the wait; the waiter guard (duplicate waits, grep polling) and the scheduled-runs-yield rule follow. Status: planned, train 14.
+81. **A complete fix, not a quick one** (ER-44). A review's or incident's cause, its fix and its copies in `docs/known-copies.toml` (rule 55) land in one round; ask the user only above 1 agent-day beyond common practice (rule 76). Status: in force.
+82. **Checks have no side effects** (ER-45). Paddock: launcher probes and `setup-rust` set `RUSTUP_AUTO_INSTALL=0`, shell checks print the cause before exiting under `set -e`, and a check's positive control runs on in-memory data (planned: the check that reads the exceptions list). Container runs go through `tools/linux-container.sh` only (ER-14); tests use `StandIn` programs, never installed apps or `~/.rustup`. Status: in progress, train 14.
+83. **Lists only shrink; goldens hold no machine** (ER-46). Paddock: planned growth checks compare each list with the merge base and fail on growth without the user's approval (one each for the exceptions list, the allow list and the baselines; the ids are reserved with `./dev check new-id`); goldens are normalised (uid, names, paths, sizes) and the e2e suites use the fixed clock. Status: the three checks are planned (report-only first, ER-41); fixed e2e clock in progress.
+84. **Children inherit the environment** (ER-47). Paddock: `TestCommand` and the `paddock_proc` environment policy pass the caller's environment; clearing needs a named policy with a kept list and never strips restricting variables such as `PADDOCK_DEV_DOWNLOAD=0`. Status: in progress, train 14.
+
+Amendments of the same date, no new number: the member gate runs each member's affected tests on every target OS in a fresh CI-like clone before it joins a train (ER-9; planned, train 14); agents start on the 15-minute load and CPU idle, count container runs and run at most 5 builders while containers run (ER-24); agents never start the user's installed apps or touch `~/.rustup` and `~/.cargo` (ER-14).
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
