@@ -13,6 +13,8 @@
 //!   the caller creates the temporary file (an owner-only, unshared file for a secret on Windows).
 //! - [`command`]: the canonical no-console `Command` constructor, [`command::RESTRICTING`] (the variables no policy strips from a child,
 //!   ER-47) and [`command::clear_env`], the one function that clears a child's environment.
+//! - [`vars`]: this process's environment as text, skipping (and naming) a variable that is not valid Unicode instead of panicking
+//!   like `std::env::vars`, which Clippy forbids everywhere.
 //! - [`cargo_layout`]: the profile folder above a test program or `OUT_DIR`, in cargo's old and 1.100 build-folder layouts.
 //! - [`winpath`]: Windows paths without the verbatim `\\?\` prefix, in one place (`plain`, `for_tools`, `real*`, `same`).
 //! - [`home_guard`]: the one "is this folder inside the home folder" check (symlinks resolved), shared by `heavy` and `paddock-dev`.
@@ -31,6 +33,7 @@ mod error;
 mod folder;
 pub mod home_guard;
 pub mod private;
+mod process_vars;
 pub mod text_busy;
 mod versioned;
 pub mod winpath;
@@ -50,6 +53,7 @@ pub use private::{
     PrivateDir, PrivateError, PrivateFile, check_temp_parent, private_fallback_dir,
     private_fallback_dir_as,
 };
+pub use process_vars::{vars, vars_skipping};
 pub use versioned::{
     DEFAULT_KEEP_CORRUPT, DEFAULT_MAX_BYTES, FIRST_VERSION, Loaded, Migration, Problem,
     VersionedFile,

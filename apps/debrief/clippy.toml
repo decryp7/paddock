@@ -1,6 +1,7 @@
 # Every child process Debrief starts goes through `debrief_core::process::quiet_command` (or the ipc crate's spawner),
 # so none opens a console window on Windows. Tests and build scripts may allow this lint.
 disallowed-methods = [
+    { path = "std::env::vars", reason = "panics on a variable that is not valid Unicode: read the environment through paddock_env::vars (skips and names it)" },
     # ADR 0100 amendment 2026-11-16: the environment is process-wide, and tests share one process under the plain harness; a
     # change made outside the test kit's lock is seen by every other test thread (the hermetic flake, fixed in 9ac185c24). Change
     # it through paddock_testkit::EnvLock (the one site that may), or a justified site carries #[expect(..., reason = "...")].

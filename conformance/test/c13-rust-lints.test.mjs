@@ -136,9 +136,9 @@ test('C13 ratchet: clippy paths listed in clippy_not_yet may be missing from cli
 // ER-47 / rule 84: clearing a child's environment goes through paddock_env::clear_env, which keeps the restricting variables. The
 // one lint over every clearing site is Clippy's ban on `Command::env_clear`; this test says the ban is in the preset and in every
 // workspace's clippy.toml, and the positive control says C13 sees a copy that dropped it (so the ban cannot be lost quietly).
-const BANNED = ['std::process::Command::env_clear', 'std::env::set_var', 'std::env::remove_var'];
+const BANNED = ['std::process::Command::env_clear', 'std::env::set_var', 'std::env::remove_var', 'std::env::vars'];
 
-test('the preset and every workspace clippy.toml ban Command::env_clear and the process-wide env writes', () => {
+test('the preset and every workspace clippy.toml ban Command::env_clear, the process-wide env writes and std::env::vars', () => {
   const tracked = execFileSync('git', ['ls-files', '*clippy.toml'], { cwd: PADDOCK, encoding: 'utf8' }).split('\n').filter(Boolean);
   assert.ok(tracked.includes('lint/clippy.toml') && tracked.length >= 8, `too few clippy.toml files tracked: ${tracked}`);
   for (const f of tracked) {

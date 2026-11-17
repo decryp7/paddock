@@ -1744,6 +1744,7 @@ dependencies = [
  "globset",
  "jiff",
  "log",
+ "paddock-env",
  "paddock-proc",
  "paddock-testkit",
  "regex",
