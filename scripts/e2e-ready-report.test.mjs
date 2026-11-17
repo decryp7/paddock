@@ -29,3 +29,106 @@ test('the script measures a project whose plugin is registered only inside the e
   assert.match(out, /\| scripts\/fixtures\/e2e-ready \| 1 \|/);
   assert.match(out, /projects not measured\*\* \| \*\*0\*\*/);
 });
+
+// The gate (baseline that only shrinks, ER-46; blocking switch, ER-41).
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { baselineGrowth, compareToBaseline, countsByFile, findings } from './e2e-ready-report.mjs';
+
+const FIXTURE_FILE = 'scripts/fixtures/e2e-ready/e2e/bad.ts';
+/** Runs the script over the fixture with a temp baseline and gate; returns { code, out, baseline }. */
+function gate(baseline, blockingSinceRun, extra = []) {
+  const dir = mkdtempSync(join(tmpdir(), 'ready-gate-'));
+  try {
+    const b = join(dir, 'baseline.json');
+    const g = join(dir, 'gate.json');
+    writeFileSync(b, JSON.stringify(baseline));
+    writeFileSync(g, JSON.stringify({ blockingSinceRun }));
+    let code = 0;
+    let out = '';
+    try {
+      out = execFileSync('node', ['scripts/e2e-ready-report.mjs', 'scripts/fixtures/e2e-ready', '--baseline', b, '--gate', g, '--base', 'HEAD', ...extra], { encoding: 'utf8', cwd: new URL('..', import.meta.url) });
+    } catch (e) {
+      code = e.status;
+      out = e.stdout.toString();
+    }
+    return { code, out, baseline: JSON.parse(readFileSync(b, 'utf8')) };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('countsByFile counts per file with the root stripped, sorted', () => {
+  assert.deepEqual(countsByFile([{ file: '/r/b.ts' }, { file: '/r/a.ts' }, { file: '/r/b.ts' }], '/r'), { 'a.ts': 1, 'b.ts': 2 });
+});
+
+test('compareToBaseline: more sites than recorded (or an unrecorded file) is added, fewer is fixed', () => {
+  assert.deepEqual(compareToBaseline({ 'a.ts': 2, 'c.ts': 1 }, { 'a.ts': 1, 'b.ts': 1 }), {
+    added: [{ file: 'a.ts', now: 2, recorded: 1 }, { file: 'c.ts', now: 1, recorded: 0 }],
+    fixed: [{ file: 'b.ts', now: 0, recorded: 1 }],
+  });
+});
+
+test('baselineGrowth: a grown or new entry against the merge base is growth; a shrunk or removed one is not (ER-46)', () => {
+  assert.deepEqual(baselineGrowth({ 'a.ts': 2, 'b.ts': 1 }, { 'a.ts': 3, 'b.ts': 0, 'c.ts': 1 }), [{ file: 'a.ts', base: 2, head: 3 }, { file: 'c.ts', base: 0, head: 1 }]);
+  assert.deepEqual(baselineGrowth({ 'a.ts': 2 }, { 'a.ts': 1 }), []);
+});
+
+test('findings: growth asks for the user\'s approval, a new site names the helper, an unmeasured project is an error (ER-33)', () => {
+  const lines = findings({ added: [{ file: 'a.ts', now: 2, recorded: 1 }], fixed: [], grown: [{ file: 'b.ts', base: 1, head: 2 }], unmeasured: ['ui'] });
+  assert.match(lines.join('\n'), /a\.ts::e2e ready-reads: 1 new read.*ready helper/);
+  assert.match(lines.join('\n'), /b\.ts::.*needs the user's approval/);
+  assert.match(lines.join('\n'), /ui not measured/);
+});
+
+test('positive control: a new unready read (an empty baseline) is reported, and blocks once blockingSinceRun is set', () => {
+  const report = gate({}, null);
+  assert.equal(report.code, 0, report.out);
+  assert.match(report.out, new RegExp(`::error file=${FIXTURE_FILE}::.*1 new read`));
+  assert.match(report.out, /report-only \(ER-41\)/);
+  const blocking = gate({}, 8300);
+  assert.equal(blocking.code, 1, blocking.out);
+  assert.match(blocking.out, /blocking since run 8300/);
+});
+
+test('the recorded site passes; a baseline above the count (a fixed site) asks to shrink it', () => {
+  const same = gate({ [FIXTURE_FILE]: 1 }, 8300);
+  assert.equal(same.code, 0, same.out);
+  assert.match(same.out, /0 finding/);
+  const stale = gate({ [FIXTURE_FILE]: 2 }, 8300);
+  assert.equal(stale.code, 1, stale.out);
+  assert.match(stale.out, /--update/);
+});
+
+test('--update shrinks the baseline and refuses growth', () => {
+  const shrunk = gate({ [FIXTURE_FILE]: 3, 'gone.ts': 1 }, null, ['--update']);
+  assert.equal(shrunk.code, 0, shrunk.out);
+  assert.deepEqual(shrunk.baseline, { [FIXTURE_FILE]: 1 });
+  const grew = gate({}, null, ['--update']);
+  assert.equal(grew.code, 1, grew.out);
+  assert.match(grew.out, /only shrinks/);
+  assert.deepEqual(grew.baseline, {});
+});
+
+test('a project eslint cannot measure fails the gate (ER-33)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ready-gate-'));
+  try {
+    writeFileSync(join(dir, 'b.json'), '{}');
+    writeFileSync(join(dir, 'g.json'), '{"blockingSinceRun":1}');
+    assert.throws(
+      () => execFileSync('node', ['scripts/e2e-ready-report.mjs', 'scripts/fixtures/no-such-project', '--baseline', join(dir, 'b.json'), '--gate', join(dir, 'g.json'), '--base', 'HEAD'], { cwd: new URL('..', import.meta.url), stdio: 'pipe' }),
+      (e) => e.status === 1 && /no-such-project not measured/.test(e.stdout.toString()),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the committed baseline is a map of positive counts for e2e files', () => {
+  const b = JSON.parse(readFileSync(new URL('./e2e-ready-baseline.json', import.meta.url), 'utf8'));
+  for (const [f, n] of Object.entries(b)) {
+    assert.match(f, /e2e\//, f);
+    assert.ok(Number.isInteger(n) && n > 0, f);
+  }
+});
