@@ -2245,7 +2245,10 @@ fn a_step_that_never_got_a_slot_is_not_measured_with_its_queue_time_never_passed
     let Some((reason, next)) = nm(&v["clippy crates"]) else {
         panic!("{:?}", v["clippy crates"])
     };
-    assert!(reason.contains("never got a heavy slot") && reason.contains("31.0 s"), "{reason}");
+    assert!(
+        reason.contains("never got a heavy slot (queue allowance spent") && reason.contains("31.0 s"),
+        "{reason}"
+    );
     assert!(next.contains("heavy status") && next.contains("PADDOCK_QUEUE_MAX"), "{next}");
     let report = render_timed("h", &rows, &timings);
     assert_eq!(report.exit, Exit::NotMeasured);

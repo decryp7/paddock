@@ -424,7 +424,6 @@ fn command_in(
         logs: state.join("logs"),
         stop: Arc::clone(&stop),
         built_heavy: Default::default(),
-        budget_end: std::time::Instant::now() + BUDGET,
         priority: pushes.iter().any(|p| budget::is_landing_ref(&p.remote_ref)),
         wrapper,
     };
