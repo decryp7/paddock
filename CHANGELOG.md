@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### jiff is the family's one date and time library (outside Debrief's own crates)
+- RUSTSEC-2026-0543 marks chrono unmaintained, which fails `cargo deny` wherever a workspace crate names it. The shared crates and
+  apps leave chrono and the `time` crate for `jiff`. Breaking shared API: `paddock_diag` (`Collected::collect`, `Context::now`,
+  `export::resolve`, `suggested_name`) and `paddock_log` (`now_utc`, `format_event`, `Breadcrumb::from_props`, `ErrorDedup::check`,
+  `DEDUP_WINDOW`) take a `jiff::Timestamp` (and a `jiff::SignedDuration`) instead of a chrono time. New `paddock_jobs::stamp`
+  (`rfc3339`, `Precision`, `wall_timestamp`) is the one fixed-precision RFC 3339 formatter. Time text on the wire, in logs and in the
+  report manifest is unchanged. Debrief's own crates still name chrono (its own change).
+
 ### `@decryp7/paddock-ui`: `scroll`, scrollers our code positions make no scroll moves of their own (family ADR 0105)
 - New entry `@decryp7/paddock-ui/scroll` with `PdOwnedScroll` (`[pdOwnedScroll]`): binds `overflow-anchor: none` and `scroll-behavior: auto`
   on the element and adds the `pd-owned-scroll` class. Put it on every scroller whose position the code computes (virtual lists, grids

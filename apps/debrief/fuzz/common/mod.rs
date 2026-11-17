@@ -15,7 +15,7 @@ pub fn ctx() -> ImportCtx<'static> {
     ImportCtx {
         profile: default_profile(),
         path: Path::new("fuzz"),
-        file_date: chrono::NaiveDate::from_ymd_opt(2026, 10, 14),
+        file_date: debrief_plugin_api::time::ymd(2026, 10, 14),
     }
 }
 
@@ -40,7 +40,7 @@ fn timestamps() -> &'static debrief_plugin_api::time::TimestampParser {
 
 fn plugin_ctx() -> debrief_plugin_api::ImportCtx<'static> {
     let mut c = debrief_plugin_api::ImportCtx::new(Path::new("fuzz"), timestamps());
-    c.file_date = chrono::NaiveDate::from_ymd_opt(2026, 10, 14);
+    c.file_date = debrief_plugin_api::time::ymd(2026, 10, 14);
     c
 }
 

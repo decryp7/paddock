@@ -6,6 +6,7 @@
 
 use crate::clock::{Clock, now_utc};
 use paddock_env::write_atomic;
+use paddock_jobs::stamp::{Precision, rfc3339};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -151,7 +152,7 @@ impl PanicReport {
                 version: CrashMarker::VERSION,
                 process: self.process.clone(),
                 pid: std::process::id(),
-                time: now_utc(&*self.clock).to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                time: rfc3339(now_utc(&*self.clock), Precision::Millis),
                 thread: facts.thread.clone(),
                 message: crate::redact::cap(&facts.message, MAX_MARKER_MESSAGE),
                 location: facts.location.clone(),
@@ -177,7 +178,7 @@ pub(crate) fn install_hook(report: PanicReport) {
 mod tests {
     use super::*;
     use crate::clock::FakeClock;
-    use chrono::{TimeZone, Utc};
+    use jiff::Timestamp;
 
     #[test]
     fn marker_round_trips_and_clears() {
@@ -234,7 +235,7 @@ mod tests {
             marker: Some(path.clone()),
             log_file: Some(t.path().join("app.log")),
             clock: Arc::new(FakeClock::at_wall(
-                Utc.with_ymd_and_hms(2026, 10, 20, 9, 0, 0).unwrap().into(),
+                "2026-10-20T09:00:00Z".parse::<Timestamp>().unwrap().into(),
             )),
         };
         report.record(&PanicFacts {

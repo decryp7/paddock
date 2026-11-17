@@ -45,8 +45,8 @@ impl Document {
     ) -> Self {
         let captured_at = i64::try_from(captured_at_ms)
             .ok()
-            .and_then(chrono::DateTime::from_timestamp_millis)
-            .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+            .and_then(|ms| jiff::Timestamp::from_millisecond(ms).ok())
+            .map(|t| paddock_jobs::stamp::rfc3339(t, paddock_jobs::stamp::Precision::Secs))
             .unwrap_or_default();
         Document {
             schema: SCHEMA,

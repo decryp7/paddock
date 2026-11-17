@@ -9,7 +9,7 @@ use crate::job::{run_schedule, JobDeps, Outcome};
 use crate::run::{RunReason, RunStatus};
 use crate::state::{AgentState, Loaded};
 use crate::trigger::{LogWatch, ProcessWatch, Sampler};
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -51,7 +51,7 @@ pub struct Agent {
     deps: Deps,
     state: AgentState,
     /// Timers are due relative to this (the last run, or when the agent started).
-    anchors: HashMap<String, DateTime<Utc>>,
+    anchors: HashMap<String, Timestamp>,
     watches: HashMap<String, Watch>,
     running: HashMap<String, JoinHandle<Outcome>>,
     stop: Arc<AtomicBool>,
@@ -70,7 +70,7 @@ impl Agent {
         for s in cfg.schedules.iter().filter(|s| s.enabled) {
             match &s.when {
                 When::Timer(_) => {
-                    let last = state.get(&s.name).last_run_ms.and_then(DateTime::from_timestamp_millis);
+                    let last = state.get(&s.name).last_run_ms.and_then(|ms| Timestamp::from_millisecond(ms).ok());
                     anchors.insert(s.name.clone(), last.unwrap_or(now));
                 }
                 When::Trigger(TriggerSpec::Process(p)) => match ProcessWatch::new(p.clone(), (deps.sampler)()) {
@@ -120,8 +120,8 @@ impl Agent {
                 }
                 When::Trigger(_) => {
                     let fired = match self.watches.get_mut(&s.name) {
-                        Some(Watch::Process(w)) => Ok(w.poll(now.timestamp_millis())),
-                        Some(Watch::Log(w)) => w.poll(now.timestamp_millis()),
+                        Some(Watch::Process(w)) => Ok(w.poll(now.as_millisecond())),
+                        Some(Watch::Log(w)) => w.poll(now.as_millisecond()),
                         None => Ok(None),
                     };
                     match fired {
@@ -150,7 +150,7 @@ impl Agent {
         let now = self.clock().now();
         let name = self.cfg.schedules[i].name.clone();
         self.anchors.insert(name.clone(), now);
-        self.state.entry(&name).last_run_ms = Some(now.timestamp_millis());
+        self.state.entry(&name).last_run_ms = Some(now.as_millisecond());
         self.save_state();
         let (cfg, deps, stop) = (self.cfg.clone(), self.deps.job.clone(), self.stop.clone());
         let handle = std::thread::spawn(move || run_schedule(&cfg, &cfg.schedules[i], reason, &deps, &stop));
@@ -226,7 +226,7 @@ impl Agent {
                 break;
             }
             let s = &self.cfg.schedules[i];
-            self.state.entry(&s.name).last_run_ms = Some(self.clock().now().timestamp_millis());
+            self.state.entry(&s.name).last_run_ms = Some(self.clock().now().as_millisecond());
             let outcome = run_schedule(&self.cfg, s, RunReason::Manual, &self.deps.job, &self.stop);
             let name = s.name.clone();
             self.record(&name, &outcome);

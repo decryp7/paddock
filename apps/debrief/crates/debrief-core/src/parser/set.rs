@@ -103,7 +103,7 @@ pub struct Candidate<'a> {
     pub path: &'a Path,
     /// The path relative to the opened folder (the display name).
     pub rel: &'a str,
-    pub file_date: Option<chrono::NaiveDate>,
+    pub file_date: Option<jiff::civil::Date>,
     /// The file's first bytes (binary importers sniff them).
     pub bytes: &'a [u8],
     /// Its decoded start, at most [`SCORE_CHARS`]; `None` when it is not text.

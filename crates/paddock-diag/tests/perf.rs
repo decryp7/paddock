@@ -2,7 +2,7 @@
 //! `init` runs once per process): a ring left by an earlier run is read back and cleaned, recording and flushing from many
 //! threads, a background flush, the bundle with no content and a JSON that survives the redactor.
 
-use chrono::Utc;
+use jiff::Timestamp;
 use paddock_diag::perf::{self, Loaded, ring::Ring};
 use paddock_diag::{AppInfo, Collected, Redactor, Section};
 use paddock_env::{AppDirs, AppId, MapVars, Os};
@@ -17,7 +17,7 @@ fn forged(text: String) -> &'static str {
 }
 
 fn now_ms() -> u64 {
-    u64::try_from(Utc::now().timestamp_millis()).unwrap()
+    u64::try_from(Timestamp::now().as_millisecond()).unwrap()
 }
 
 #[test]
@@ -118,7 +118,7 @@ fn recording_to_a_bundle() {
         &dirs,
         &sections,
         &Redactor::new(),
-        Utc::now(),
+        Timestamp::now(),
     );
     assert!(c.notes().is_empty(), "{:?}", c.notes());
 

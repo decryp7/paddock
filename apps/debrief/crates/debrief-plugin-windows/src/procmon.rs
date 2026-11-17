@@ -200,7 +200,7 @@ struct Clock {
     parser: TimestampParser,
     /// Parses the bare date (midnight UTC) so its calendar date can be read back.
     date_parser: TimestampParser,
-    fallback_date: Option<chrono::NaiveDate>,
+    fallback_date: Option<jiff::civil::Date>,
     /// Day offset added after a time-of-day rollover (only without `Date & Time`).
     days: i64,
     last: Option<i64>,
@@ -239,7 +239,7 @@ impl Clock {
 
 /// Parses a ProcMon CSV export. `zone` supplies the time zone (and custom formats) of
 /// the profile; `file_date` dates files that only have `Time of Day`.
-pub fn parse_procmon(content: &str, zone: &TimestampParser, file_date: Option<chrono::NaiveDate>) -> Result<Imported> {
+pub fn parse_procmon(content: &str, zone: &TimestampParser, file_date: Option<jiff::civil::Date>) -> Result<Imported> {
     let content = content.trim_start_matches('\u{feff}');
     let mut reader = csv::ReaderBuilder::new()
         .has_headers(true)
@@ -341,7 +341,6 @@ pub fn parse_procmon(content: &str, zone: &TimestampParser, file_date: Option<ch
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDate;
     use debrief_plugin_api::time::TimestampParser;
     use std::path::Path;
 
@@ -355,19 +354,14 @@ mod tests {
         TimestampParser::new(&[], zone, day_first).unwrap()
     }
 
-    fn ctx<'a>(p: &'a TimestampParser, date: Option<NaiveDate>) -> ImportCtx<'a> {
+    fn ctx<'a>(p: &'a TimestampParser, date: Option<jiff::civil::Date>) -> ImportCtx<'a> {
         let mut c = ImportCtx::new(Path::new("Logfile.CSV"), p);
         c.file_date = date;
         c
     }
 
     fn utc(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32, ms: u32) -> i64 {
-        NaiveDate::from_ymd_opt(y, mo, d)
-            .unwrap()
-            .and_hms_milli_opt(h, mi, s, ms)
-            .unwrap()
-            .and_utc()
-            .timestamp_millis()
+        debrief_plugin_api::time::utc_epoch_ms(y, mo, d, h, mi, s, ms).unwrap()
     }
 
     #[test]
@@ -392,7 +386,7 @@ mod tests {
     fn default_columns_with_the_file_date_and_midnight_rollover() {
         let p = profile("UTC", None);
         let out = ProcmonCsvImporter
-            .import(&ctx(&p, NaiveDate::from_ymd_opt(2026, 10, 14)), DEFAULT_EXPORT)
+            .import(&ctx(&p, debrief_plugin_api::time::ymd(2026, 10, 14)), DEFAULT_EXPORT)
             .unwrap();
         assert_eq!((out.records.len(), out.skipped), (3, 0));
         let r = &out.records[0];
@@ -493,7 +487,7 @@ mod tests {
         let mut clock = Clock {
             parser: TimestampParser::default(),
             date_parser: TimestampParser::default(),
-            fallback_date: NaiveDate::from_ymd_opt(2026, 10, 14),
+            fallback_date: debrief_plugin_api::time::ymd(2026, 10, 14),
             days: i64::MAX,
             last: None,
         };

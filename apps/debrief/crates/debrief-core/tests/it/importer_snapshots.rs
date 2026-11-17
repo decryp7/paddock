@@ -6,7 +6,6 @@
 //! `tests/it/snapshots/`. After an intended change to parsing, review and accept
 //! the new output with `cargo insta review` (or `INSTA_UPDATE=always cargo test`).
 
-use chrono::{DateTime, NaiveDate, SecondsFormat};
 use debrief_core::importers::{decode, ImportCtx, Importers};
 use debrief_core::model::{Level, Record};
 use debrief_core::profile::CompiledProfile;
@@ -93,7 +92,7 @@ struct RecordSnapshot {
 }
 
 fn iso(ms: i64) -> String {
-    DateTime::from_timestamp_millis(ms).map_or_else(|| format!("invalid({ms})"), |t| t.to_rfc3339_opts(SecondsFormat::Millis, true))
+    debrief_plugin_api::time::rfc3339_utc_ms(ms, debrief_plugin_api::time::Fraction::Millis).unwrap_or_else(|| format!("invalid({ms})"))
 }
 
 /// The value with every object's keys sorted, recursively, so the snapshot never depends on map order.
@@ -131,7 +130,7 @@ fn snapshot_of(rel: &str, profile: &CompiledProfile, importers: &Importers) -> S
     let ctx = ImportCtx {
         profile,
         path: Path::new(rel),
-        file_date: NaiveDate::from_ymd_opt(y, m, d),
+        file_date: debrief_plugin_api::time::ymd(y, m, d),
     };
     let head: String = content.chars().take(64 * 1024).collect();
     let importer = importers

@@ -29,7 +29,7 @@ pub struct SystemClock;
 
 impl Clock for SystemClock {
     fn now_ms(&self) -> i64 {
-        chrono::Utc::now().timestamp_millis()
+        debrief_core::time::now_ms()
     }
 }
 

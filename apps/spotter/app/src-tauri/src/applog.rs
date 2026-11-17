@@ -49,7 +49,7 @@ fn append(path: &std::path::Path, message: &str) {
         let _ = std::fs::rename(path, path.with_extension("log.1"));
     }
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-        let _ = writeln!(f, "{} {}", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ"), one_line(message));
+        let _ = writeln!(f, "{} {}", jiff::Timestamp::now().strftime("%Y-%m-%dT%H:%M:%SZ"), one_line(message));
     }
 }
 

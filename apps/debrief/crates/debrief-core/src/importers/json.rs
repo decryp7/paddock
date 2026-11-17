@@ -369,12 +369,7 @@ mod tests {
         assert_eq!(out.records.len(), 1);
         let r = &out.records[0];
         // 10:20:30.1234567 at +08:00 is 02:20:30.123 UTC (milliseconds kept).
-        let want = chrono::NaiveDate::from_ymd_opt(2021, 4, 3)
-            .unwrap()
-            .and_hms_milli_opt(2, 20, 30, 123)
-            .unwrap()
-            .and_utc()
-            .timestamp_millis();
+        let want = debrief_plugin_api::time::utc_epoch_ms(2021, 4, 3, 2, 20, 30, 123).unwrap();
         assert_eq!(r.ts, Some(want));
         assert_eq!(r.level, Level::Error);
         assert_eq!(r.message, "Error during Sync.Fetch");

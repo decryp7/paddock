@@ -11,7 +11,8 @@
 use super::{breadcrumbs_from_log, ReportInputs, REPORT_BREADCRUMBS};
 use crate::app_dirs::{under, AppDir};
 use crate::snapshots::{Limits, SnapshotStore};
-use chrono::{DateTime, Local, Utc};
+use jiff::tz::TimeZone;
+use jiff::{Timestamp, Zoned};
 use std::path::{Path, PathBuf};
 
 /// The flag.
@@ -59,13 +60,13 @@ pub fn parse<S: AsRef<str>>(args: &[S]) -> Option<Result<ExportArgs, String>> {
 }
 
 /// `debrief-diagnostics-20261014-091503.zip` (local time).
-pub fn default_file_name(now: &DateTime<Local>) -> String {
-    format!("debrief-diagnostics-{}.zip", now.format("%Y%m%d-%H%M%S"))
+pub fn default_file_name(now: &Zoned) -> String {
+    format!("debrief-diagnostics-{}.zip", debrief_core::time::file_stamp_zoned(now))
 }
 
 /// The absolute path to write: relative paths are taken from `cwd`; the folder must exist (it is
 /// canonicalised); the name must end in `.zip`; an existing file is refused unless `force`.
-pub fn resolve(args: &ExportArgs, cwd: &Path, default_dirs: &[PathBuf], now: &DateTime<Local>) -> Result<PathBuf, String> {
+pub fn resolve(args: &ExportArgs, cwd: &Path, default_dirs: &[PathBuf], now: &Zoned) -> Result<PathBuf, String> {
     let path = match &args.destination {
         Destination::Path(p) if p.is_absolute() => p.clone(),
         Destination::Path(p) => cwd.join(p),
@@ -125,7 +126,7 @@ pub fn folders(root: Option<&Path>) -> Option<Folders> {
 }
 
 /// The inputs of a report made from the folders alone (no running app).
-pub fn inputs(f: &Folders, now: DateTime<Utc>) -> ReportInputs {
+pub fn inputs(f: &Folders, now: Timestamp) -> ReportInputs {
     let logs = super::log_window(&f.log);
     let breadcrumbs = breadcrumbs_from_log(&super::activity_lines(&logs), REPORT_BREADCRUMBS);
     ReportInputs {
@@ -149,8 +150,8 @@ pub struct Exported {
 }
 
 /// Writes the report for `args`. Pure but for the file system: folders, working directory and time are given.
-pub fn export(args: &ExportArgs, f: &Folders, cwd: &Path, default_dirs: &[PathBuf], now: DateTime<Utc>) -> Result<Exported, String> {
-    let dest = resolve(args, cwd, default_dirs, &now.with_timezone(&Local))?;
+pub fn export(args: &ExportArgs, f: &Folders, cwd: &Path, default_dirs: &[PathBuf], now: Timestamp) -> Result<Exported, String> {
+    let dest = resolve(args, cwd, default_dirs, &now.to_zoned(TimeZone::system()))?;
     let inputs = inputs(f, now);
     let unreadable = super::unreadable_settings(&super::system_info(&inputs));
     if dest.exists() {
@@ -186,7 +187,7 @@ pub fn run_if_requested() -> Option<i32> {
     let result = parsed.and_then(|a| {
         let f = folders(crate::dev_overrides::current().data_dir.as_deref()).ok_or("cannot find Debrief's folders (no home folder)")?;
         let cwd = std::env::current_dir().map_err(|e| format!("cannot read the current folder: {e}"))?;
-        export(&a, &f, &cwd, &defaults, Utc::now())
+        export(&a, &f, &cwd, &defaults, Timestamp::now())
     });
     Some(match result {
         Ok(done) => {
@@ -207,10 +208,8 @@ pub fn run_if_requested() -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
-
-    fn now() -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 10, 14, 9, 15, 3).unwrap()
+    fn now() -> Timestamp {
+        Timestamp::from_millisecond(debrief_core::time::utc_epoch_ms(2026, 10, 14, 9, 15, 3, 0).unwrap()).unwrap()
     }
 
     #[test]
@@ -241,7 +240,7 @@ mod tests {
     #[test]
     fn destinations_are_validated() {
         let d = crate::activity::report::tests::temp("cli-dest");
-        let local = now().with_timezone(&Local);
+        let local = now().to_zoned(TimeZone::system());
         let args = |p: &str, force: bool| ExportArgs {
             destination: Destination::Path(p.into()),
             force,

@@ -4,7 +4,8 @@
 use crate::clef::{Enrichment, format_event};
 use crate::clock::{Clock, now_utc};
 use crate::error::lock;
-use chrono::{Duration, NaiveDate};
+use jiff::civil::Date;
+use jiff::{SignedDuration, Timestamp, tz::TimeZone};
 use serde_json::Map;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -29,18 +30,18 @@ impl LineSink for StdoutSink {
 }
 
 /// A failed open is retried at most this often (a broken disk must not make every line slow).
-const RETRY_AFTER: Duration = Duration::seconds(30);
+const RETRY_AFTER: SignedDuration = SignedDuration::from_secs(30);
 
 /// Most bytes the daily files of one process keep in all (today's included): the oldest days go first. 30 days at a normal rate are far
 /// below it; it is the bound that makes keeping a month safe.
 pub const TOTAL_CAP_BYTES: u64 = 100 * 1024 * 1024;
 
 struct State {
-    day: Option<NaiveDate>,
+    day: Option<Date>,
     file: Option<File>,
     written: u64,
     warned: bool,
-    failed_at: Option<chrono::DateTime<chrono::Utc>>,
+    failed_at: Option<Timestamp>,
     problem: Option<String>,
     dropped: u64,
 }
@@ -91,7 +92,7 @@ impl DailyFiles {
     /// The file lines go to today.
     pub fn active_file(&self) -> PathBuf {
         self.dir
-            .join(file_name(&self.prefix, now_utc(&*self.clock).date_naive()))
+            .join(file_name(&self.prefix, utc_date(now_utc(&*self.clock))))
     }
 
     /// Another total cap than [`TOTAL_CAP_BYTES`] (tests, and apps that keep less).
@@ -111,7 +112,7 @@ impl DailyFiles {
     }
 
     /// Opens (or rotates to) today's file; on failure remembers why.
-    fn open_today(&self, st: &mut State, today: NaiveDate) {
+    fn open_today(&self, st: &mut State, today: Date) {
         st.day = None;
         st.file = None;
         let path = self.dir.join(file_name(&self.prefix, today));
@@ -138,11 +139,11 @@ impl DailyFiles {
     }
 
     /// Removes the days beyond the newest `keep_files` older ones. Only this process's files are touched.
-    fn prune(&self, today: NaiveDate) {
+    fn prune(&self, today: Date) {
         let Ok(entries) = std::fs::read_dir(&self.dir) else {
             return;
         };
-        let mut days: Vec<(NaiveDate, PathBuf)> = entries
+        let mut days: Vec<(Date, PathBuf)> = entries
             .filter_map(Result::ok)
             .filter_map(|e| {
                 parse_day(&self.prefix, &e.file_name().to_string_lossy()).map(|d| (d, e.path()))
@@ -170,12 +171,12 @@ impl DailyFiles {
 impl LineSink for DailyFiles {
     fn write_line(&self, level: log::Level, line: &str) {
         let now = now_utc(&*self.clock);
-        let today = now.date_naive();
+        let today = utc_date(now);
         let mut st = lock(&self.state);
         if st.day != Some(today) {
             let retry_ok = st
                 .failed_at
-                .is_none_or(|t| now - t >= RETRY_AFTER || now < t);
+                .is_none_or(|t| now.duration_since(t) >= RETRY_AFTER || now < t);
             if retry_ok {
                 self.open_today(&mut st, today);
             }
@@ -240,17 +241,22 @@ impl LineSink for DailyFiles {
     }
 }
 
-fn file_name(prefix: &str, day: NaiveDate) -> String {
-    format!("{prefix}.{}.log", day.format("%Y-%m-%d"))
+/// The UTC calendar day of a stamp (the day a file is named for).
+fn utc_date(ts: Timestamp) -> Date {
+    ts.to_zoned(TimeZone::UTC).date()
+}
+
+fn file_name(prefix: &str, day: Date) -> String {
+    format!("{prefix}.{}.log", day.strftime("%Y-%m-%d"))
 }
 
 /// The day of a file named `<prefix>.<day>.log`; other files, and other prefixes (`app` vs `app-server`), give `None`.
-fn parse_day(prefix: &str, name: &str) -> Option<NaiveDate> {
+fn parse_day(prefix: &str, name: &str) -> Option<Date> {
     let rest = name
         .strip_prefix(prefix)?
         .strip_prefix('.')?
         .strip_suffix(".log")?;
-    NaiveDate::parse_from_str(rest, "%Y-%m-%d").ok()
+    Date::strptime("%Y-%m-%d", rest).ok()
 }
 
 #[cfg(test)]
@@ -258,11 +264,11 @@ mod tests {
     use super::*;
     use crate::clef::test_enrichment;
     use crate::clock::FakeClock;
-    use chrono::{TimeZone, Utc};
+    use std::time::Duration;
 
     fn clock() -> Arc<FakeClock> {
         Arc::new(FakeClock::at_wall(
-            Utc.with_ymd_and_hms(2026, 10, 20, 9, 0, 0).unwrap().into(),
+            "2026-10-20T09:00:00Z".parse::<Timestamp>().unwrap().into(),
         ))
     }
 
@@ -352,7 +358,7 @@ mod tests {
         std::fs::write(t.path().join("notes.txt"), "mine").unwrap();
         for _ in 0..5 {
             f.write_line(log::Level::Info, "day");
-            c.advance(Duration::days(1).to_std().unwrap());
+            c.advance(Duration::from_secs(86_400));
         }
         f.write_line(log::Level::Info, "today");
         let mut names: Vec<String> = std::fs::read_dir(t.path())
@@ -388,7 +394,7 @@ mod tests {
         assert_eq!(text.matches("daily limit").count(), 1);
         assert!(text.ends_with("an error\n"));
         // Tomorrow has a fresh budget and a fresh notice.
-        c.advance(Duration::days(1).to_std().unwrap());
+        c.advance(Duration::from_secs(86_400));
         f.write_line(log::Level::Info, &big);
         assert_eq!(
             std::fs::read_to_string(f.active_file()).unwrap(),
@@ -421,7 +427,7 @@ mod tests {
         std::fs::remove_file(t.path().join("blocker")).unwrap();
         f.write_line(log::Level::Info, "still waiting");
         assert_eq!(f.dropped(), 3, "no retry before the delay");
-        c.advance(Duration::seconds(31).to_std().unwrap());
+        c.advance(Duration::from_secs(31));
         f.write_line(log::Level::Info, "back");
         assert_eq!(std::fs::read_to_string(f.active_file()).unwrap(), "back\n");
         assert_eq!(f.problem(), None);
@@ -437,7 +443,7 @@ mod tests {
         // On Unix an open file survives its folder being removed, so only the reopen path is exercised there.
         std::fs::remove_dir_all(&dir).unwrap();
         f.write_line(log::Level::Info, "second");
-        c.advance(Duration::days(1).to_std().unwrap());
+        c.advance(Duration::from_secs(86_400));
         f.write_line(log::Level::Info, "third");
         assert_eq!(std::fs::read_to_string(f.active_file()).unwrap(), "third\n");
     }
@@ -463,7 +469,7 @@ mod tests {
         assert_eq!(f.dropped(), 1);
         assert!(f.problem().unwrap().contains("check free space"));
         // The failure is retried after the back-off, and the file is reopened.
-        c.advance(Duration::seconds(31).to_std().unwrap());
+        c.advance(Duration::from_secs(31));
         f.write_line(log::Level::Info, "again");
         assert_eq!(f.problem(), None);
         assert_eq!(

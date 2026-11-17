@@ -1216,7 +1216,7 @@ struct FileRef<'a> {
     source: &'a str,
     path: &'a Path,
     name: &'a str,
-    file_date: Option<chrono::NaiveDate>,
+    file_date: Option<jiff::civil::Date>,
 }
 
 fn import_bytes(importers: &Importers, parsers: &crate::parser::ParserSet, file: &FileRef, bytes: &[u8], plain: bool) -> ImportResult {

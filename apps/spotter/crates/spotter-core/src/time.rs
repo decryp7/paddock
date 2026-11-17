@@ -1,9 +1,8 @@
 //! Time as values: the core never reads a clock. [`Timestamp`] is milliseconds since the Unix epoch; [`ClockTime`]
 //! is a local time of day for quiet hours.
 
+use jiff::fmt::rfc2822;
 use serde::{Deserialize, Serialize};
-use time::format_description::well_known::{Rfc2822, Rfc3339};
-use time::OffsetDateTime;
 
 /// Milliseconds since the Unix epoch (UTC).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -29,17 +28,21 @@ impl Timestamp {
         if t.is_empty() || t.len() > 64 {
             return None;
         }
-        let ms = |d: OffsetDateTime| Timestamp((d.unix_timestamp_nanos() / 1_000_000) as i64);
-        if let Ok(d) = OffsetDateTime::parse(t, &Rfc3339) {
+        let ms = |d: jiff::Timestamp| Timestamp(d.as_millisecond());
+        if let Ok(d) = t.parse::<jiff::Timestamp>() {
             return Some(ms(d));
         }
-        if let Ok(d) = OffsetDateTime::parse(t, &Rfc2822) {
-            return Some(ms(d));
+        // Only a numeric zone: jiff would read an unknown zone name such as "XYZ" as UTC; the family refuses it.
+        let numeric_zone = t.rsplit(' ').next().is_some_and(|z| z.starts_with(['+', '-']));
+        if numeric_zone {
+            if let Ok(d) = rfc2822::parse(t) {
+                return Some(ms(d.timestamp()));
+            }
         }
         // "GMT"/"UTC" zone names in RFC 822 dates, which the strict parser refuses.
         if let Some(stripped) = t.strip_suffix(" GMT").or_else(|| t.strip_suffix(" UTC")) {
-            if let Ok(d) = OffsetDateTime::parse(&format!("{stripped} +0000"), &Rfc2822) {
-                return Some(ms(d));
+            if let Ok(d) = rfc2822::parse(&format!("{stripped} +0000")) {
+                return Some(ms(d.timestamp()));
             }
         }
         let iso = t.replacen(' ', "T", 1);
@@ -48,7 +51,7 @@ impl Timestamp {
         } else {
             format!("{iso}Z")
         };
-        OffsetDateTime::parse(&date_time, &Rfc3339).ok().map(ms)
+        date_time.parse::<jiff::Timestamp>().ok().map(ms)
     }
 }
 

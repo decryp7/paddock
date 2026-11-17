@@ -30,12 +30,7 @@ fn store() -> &'static (dyn LogStore + 'static) {
 }
 
 fn ms(h: u32, m: u32, s: u32) -> i64 {
-    chrono::NaiveDate::from_ymd_opt(2026, 10, 14)
-        .unwrap()
-        .and_hms_opt(h, m, s)
-        .unwrap()
-        .and_utc()
-        .timestamp_millis()
+    debrief_plugin_api::time::utc_epoch_ms(2026, 10, 14, h, m, s, 0).unwrap()
 }
 
 fn q(ql: &str) -> Query {

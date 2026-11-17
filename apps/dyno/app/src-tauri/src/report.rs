@@ -156,7 +156,7 @@ pub fn export_cli(args: &[String], app: &paddock_diag::AppInfo) -> Option<i32> {
     let outcome = parsed.and_then(|a| {
         let id = paddock_env::AppId::new(&app.id, &app.name).map_err(|e| e.to_string())?;
         let dirs = paddock_env::AppDirs::for_app(&id).map_err(|e| e.to_string())?;
-        let now = chrono::Utc::now();
+        let now = jiff::Timestamp::now();
         let cwd = std::env::current_dir().unwrap_or_default();
         let dest = paddock_diag::export::resolve(&a, app, &cwd, &default_dirs(), now)?;
         let mut sections = paddock_diag::builtin::all();
@@ -235,7 +235,7 @@ pub fn save_report_from_question<R: tauri::Runtime>(app: &tauri::AppHandle<R>, a
 
 fn save_report_inner<R: tauri::Runtime>(app: &tauri::AppHandle<R>, app_info: &paddock_diag::AppInfo) -> Result<(), String> {
     use tauri_plugin_dialog::DialogExt;
-    let now = chrono::Utc::now();
+    let now = jiff::Timestamp::now();
     let Some(chosen) = app
         .dialog()
         .file()
@@ -645,7 +645,7 @@ mod tests {
 
     fn collect(sections: Vec<Arc<dyn Section>>, root: &Path) -> Collected {
         let info = AppInfo::new("dyno", "Dyno", "1.1.0", "abc1234");
-        let now = chrono::DateTime::from_timestamp(1_762_333_200, 0).unwrap();
+        let now = jiff::Timestamp::from_second(1_762_333_200).unwrap();
         Collected::collect(&info, &dirs(root), &sections, &Redactor::new(), now)
     }
 
@@ -885,7 +885,7 @@ mod tests {
         );
         let info = AppInfo::new("dyno", "Dyno", "1.1.0", "abc1234");
         let dest = root.path().join("bundle.zip");
-        let now = chrono::DateTime::from_timestamp(1_762_333_200, 0).unwrap();
+        let now = jiff::Timestamp::from_second(1_762_333_200).unwrap();
         let saved = paddock_diag::export::write(&info, &d, &sections, &redactor, &dest, now).unwrap();
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
         let names: Vec<String> = (0..zip.len())

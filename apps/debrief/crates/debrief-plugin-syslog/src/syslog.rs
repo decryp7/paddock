@@ -2,9 +2,9 @@
 
 use super::{facility_name, severity_level, severity_name};
 use anyhow::Result;
-use chrono::{Datelike, NaiveDate, Utc};
 use debrief_plugin_api::importer::{ImportCtx, Imported, TextImporter, MAX_LINE_LEN};
 use debrief_plugin_api::model::{auto_value, Level, Record};
+use jiff::civil::Date;
 use serde_json::Value;
 
 pub struct SyslogImporter;
@@ -105,13 +105,13 @@ impl TextImporter for SyslogImporter {
 /// BSD timestamps carry no year: take it from the file's date and move to the
 /// next year when the month wraps from December to January.
 struct YearTracker {
-    file_date: Option<NaiveDate>,
+    file_date: Option<Date>,
     year: Option<i32>,
     last_month: u32,
 }
 
 impl YearTracker {
-    fn new(file_date: Option<NaiveDate>) -> Self {
+    fn new(file_date: Option<Date>) -> Self {
         YearTracker {
             file_date,
             year: None,
@@ -123,8 +123,8 @@ impl YearTracker {
         let year = match self.year {
             None => {
                 let (base, file_month) = match self.file_date {
-                    Some(d) => (d.year(), d.month()),
-                    None => (Utc::now().year(), 12),
+                    Some(d) => (i32::from(d.year()), d.month() as u32),
+                    None => (debrief_plugin_api::time::utc_year_now(), 12),
                 };
                 // The file was last written in January but starts in December.
                 if month > file_month {
@@ -374,18 +374,18 @@ mod tests {
     const RFC5424: &str = include_str!("../tests/fixtures/rfc5424.log");
     const BSD: &str = include_str!("../tests/fixtures/auth.log");
 
-    fn with_ctx<T>(date: Option<NaiveDate>, f: impl FnOnce(&ImportCtx) -> T) -> T {
+    fn with_ctx<T>(date: Option<Date>, f: impl FnOnce(&ImportCtx) -> T) -> T {
         let ts = TimestampParser::default();
         let mut ctx = ImportCtx::new(Path::new("syslog"), &ts);
         ctx.file_date = date;
         f(&ctx)
     }
 
-    fn ymd(y: i32, m: u32, d: u32) -> Option<NaiveDate> {
-        NaiveDate::from_ymd_opt(y, m, d)
+    fn ymd(y: i32, m: u32, d: u32) -> Option<Date> {
+        debrief_plugin_api::time::ymd(y, m, d)
     }
 
-    fn import(content: &str, date: Option<NaiveDate>) -> Imported {
+    fn import(content: &str, date: Option<Date>) -> Imported {
         with_ctx(date, |ctx| SyslogImporter.import(ctx, content).unwrap())
     }
 
@@ -394,7 +394,7 @@ mod tests {
     }
 
     fn utc(s: &str) -> i64 {
-        chrono::DateTime::parse_from_rfc3339(s).unwrap().timestamp_millis()
+        debrief_plugin_api::strptime::parse_rfc3339_ms(s).unwrap()
     }
 
     #[test]
@@ -485,7 +485,7 @@ mod tests {
             ]
         );
         // without a file date the current year is used
-        let year = Utc::now().year();
+        let year = debrief_plugin_api::time::utc_year_now();
         let out = import("Jan  1 00:00:00 h a: x\n", None);
         assert_eq!(out.records[0].ts, Some(utc(&format!("{year}-01-01T00:00:00Z"))));
         // Feb 30 is not a date

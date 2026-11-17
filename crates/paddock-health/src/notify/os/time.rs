@@ -82,12 +82,12 @@ pub struct SystemLocalTime;
 
 impl LocalTime for SystemLocalTime {
     fn clock_time(&self, epoch_ms: i64) -> ClockTime {
-        use chrono::{Local, TimeZone, Timelike};
-        Local
-            .timestamp_millis_opt(epoch_ms)
-            .single()
+        use jiff::{Timestamp, tz::TimeZone};
+        Timestamp::from_millisecond(epoch_ms)
+            .ok()
             .and_then(|t| {
-                ClockTime::new(u8::try_from(t.hour()).ok()?, u8::try_from(t.minute()).ok()?)
+                let z = t.to_zoned(TimeZone::system());
+                ClockTime::new(u8::try_from(z.hour()).ok()?, u8::try_from(z.minute()).ok()?)
             })
             .unwrap_or_default()
     }

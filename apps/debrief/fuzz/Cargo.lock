@@ -286,10 +286,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
- "js-sys",
  "num-traits",
  "serde",
- "wasm-bindgen",
  "windows-link",
 ]
 
@@ -580,9 +578,9 @@ name = "debrief-collect"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "debrief-core",
  "globset",
+ "jiff",
  "log",
  "regex",
  "serde",
@@ -601,7 +599,6 @@ dependencies = [
  "anyhow",
  "base64",
  "chardetng",
- "chrono",
  "csv",
  "debrief-batch",
  "debrief-plugin-api",
@@ -609,6 +606,7 @@ dependencies = [
  "flate2",
  "getrandom 0.4.3",
  "globset",
+ "jiff",
  "libc",
  "log",
  "quick-xml",
@@ -654,7 +652,6 @@ dependencies = [
 name = "debrief-fuzz"
 version = "0.0.0"
 dependencies = [
- "chrono",
  "debrief-ai",
  "debrief-core",
  "debrief-dump",
@@ -710,7 +707,7 @@ dependencies = [
 name = "debrief-notes"
 version = "0.1.0"
 dependencies = [
- "chrono",
+ "debrief-plugin-api",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -722,8 +719,8 @@ name = "debrief-plugin-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "debrief-ipc",
+ "jiff",
  "regex",
  "serde",
  "serde_json",
@@ -759,7 +756,6 @@ name = "debrief-plugin-formats"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "debrief-plugin-api",
  "quick-xml",
  "regex",
@@ -817,8 +813,8 @@ name = "debrief-plugin-syslog"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "debrief-plugin-api",
+ "jiff",
  "serde_json",
 ]
 
@@ -827,7 +823,6 @@ name = "debrief-plugin-web"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "debrief-plugin-api",
  "regex",
  "serde_json",
@@ -838,10 +833,10 @@ name = "debrief-plugin-windows"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "csv",
  "debrief-plugin-api",
  "evtx",
+ "jiff",
  "minidump",
  "quick-xml",
  "serde",
@@ -2166,7 +2161,6 @@ dependencies = [
  "base64",
  "bitflags 2.13.2",
  "block2",
- "chrono",
  "crc32fast",
  "crossbeam-utils",
  "deranged",
@@ -2179,6 +2173,7 @@ dependencies = [
  "http",
  "httparse",
  "idna",
+ "jiff",
  "libc",
  "linux-raw-sys",
  "log",

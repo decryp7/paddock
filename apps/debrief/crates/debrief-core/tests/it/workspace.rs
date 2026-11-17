@@ -667,9 +667,7 @@ fn moment_users_carry_the_field_they_were_read_from() {
     d.file("app.clef", text);
     let mut ws = Workspace::new(Profile::default_profile()).unwrap();
     ws.open(&[d.path().to_path_buf()]).unwrap();
-    let from = chrono::DateTime::parse_from_rfc3339("2026-10-14T10:00:00Z")
-        .unwrap()
-        .timestamp_millis();
+    let from = debrief_plugin_api::strptime::parse_rfc3339_ms("2026-10-14T10:00:00Z").unwrap();
     let m = ws
         .moment(&MomentRequest {
             query: Query::default(),

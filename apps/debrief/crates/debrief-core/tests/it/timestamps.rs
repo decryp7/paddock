@@ -2,7 +2,6 @@
 //! cannot be read is flagged on its source with a format the engine verified (fixtures in
 //! `tests/fixtures/timestamps`).
 
-use chrono::{NaiveDate, TimeZone, Utc};
 use debrief_core::api::SourceInfo;
 use debrief_core::{Profile, Workspace};
 use std::path::{Path, PathBuf};
@@ -26,8 +25,7 @@ fn source(ws: &Workspace, name: &str) -> SourceInfo {
 }
 
 fn utc(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32, ms: u32) -> i64 {
-    let t = NaiveDate::from_ymd_opt(y, mo, d).unwrap().and_hms_milli_opt(h, mi, s, ms).unwrap();
-    Utc.from_utc_datetime(&t).timestamp_millis()
+    debrief_plugin_api::time::utc_epoch_ms(y, mo, d, h, mi, s, ms).unwrap()
 }
 
 #[test]

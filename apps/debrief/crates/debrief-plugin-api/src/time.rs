@@ -6,8 +6,11 @@
 //! (`Tue Oct 14 10:00:03 2026`, format `asctime`) and numeric clocks: `epoch_s`, `epoch_ms`, `epoch_us`, `epoch_ns`, `dotnet_ticks`, `filetime` and `uptime`
 //! (seconds since boot, `[ 12.345]`, anchored at a boot time).
 
+use crate::strptime::{epoch_ms, local_epoch_ms, parse_rfc2822_ms, parse_rfc3339_ms, Clock, Format};
 use anyhow::{bail, Result};
-use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use jiff::civil::Date;
+use jiff::tz::TimeZone;
+use jiff::Timestamp;
 use regex::Regex;
 use std::sync::OnceLock;
 
@@ -18,14 +21,14 @@ pub enum AssumedZone {
     Utc,
     /// The machine's local time zone.
     Local,
-    /// A fixed offset from UTC.
-    Fixed(FixedOffset),
+    /// A fixed offset from UTC, in seconds east (under 24 hours).
+    Fixed(i32),
 }
 
 /// Parses timestamp text in many log formats to milliseconds since the Unix epoch (UTC).
 #[derive(Debug, Clone)]
 pub struct TimestampParser {
-    custom: Vec<String>,
+    custom: Vec<Custom>,
     /// Numeric clocks named in the formats, tried before them.
     clocks: Vec<NumberClock>,
     /// The formats name `asctime`.
@@ -37,6 +40,24 @@ pub struct TimestampParser {
     boot_ms: i64,
     /// The time formats without a year are read near (the file's modification time); `None` = now.
     reference_ms: Option<i64>,
+}
+
+/// A user format, compiled once: as written, and with a year in front for the formats that carry none.
+#[derive(Debug, Clone)]
+struct Custom {
+    format: Format,
+    /// `%Y <format>`, for a format without `%Y` or `%y` (BSD syslog "Oct 14 10:41:00").
+    with_year: Option<Format>,
+}
+
+impl Custom {
+    fn new(strftime: &str) -> Custom {
+        let yearless = !strftime.contains("%Y") && !strftime.contains("%y");
+        Custom {
+            format: Format::new(strftime),
+            with_year: yearless.then(|| Format::new(&format!("%Y {strftime}"))),
+        }
+    }
 }
 
 /// A timestamp written as one number, named in `timestamp_formats`.
@@ -188,7 +209,7 @@ impl TimestampParser {
         let custom = formats
             .iter()
             .filter(|f| NumberClock::named(f).is_none() && !is_asctime(f))
-            .map(|f| to_strftime(f))
+            .map(|f| Custom::new(&to_strftime(f)))
             .collect();
         Ok(TimestampParser {
             custom,
@@ -217,7 +238,7 @@ impl TimestampParser {
     /// C `asctime` text (`Tue Oct 14 10:00:03 2026`, also with a fraction, AM/PM or an offset before the year).
     fn parse_asctime(&self, s: &str) -> Option<i64> {
         let c = asctime_re().captures(s)?;
-        let date = NaiveDate::from_ymd_opt(c["y"].parse().ok()?, month_number(&c["m"])?, c["d"].parse().ok()?)?;
+        let date = ymd(c["y"].parse().ok()?, month_number(&c["m"])?, c["d"].parse().ok()?)?;
         self.finish(
             date,
             Some(&c["time"]),
@@ -254,7 +275,7 @@ impl TimestampParser {
             clocks.extend(self.clocks.iter().copied());
             return TimestampParser { clocks, ..self.clone() };
         }
-        let mut custom = vec![to_strftime(format)];
+        let mut custom = vec![Custom::new(&to_strftime(format))];
         custom.extend(self.custom.iter().cloned());
         TimestampParser { custom, ..self.clone() }
     }
@@ -270,16 +291,16 @@ impl TimestampParser {
                 return Some(ms);
             }
         }
-        for fmt in &self.custom {
-            if let Some(ms) = self.parse_with_format(s, fmt) {
+        for custom in &self.custom {
+            if let Some(ms) = self.parse_with_format(s, custom) {
                 return Some(ms);
             }
         }
         if let Some(ms) = parse_epoch(s) {
             return Some(ms);
         }
-        if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
-            return Some(dt.timestamp_millis());
+        if let Some(ms) = parse_rfc3339_ms(s) {
+            return Some(ms);
         }
         if let Some(c) = numeric_date_re().captures(s) {
             let a = &c["a"];
@@ -301,7 +322,7 @@ impl TimestampParser {
                     (year, first, b)
                 }
             };
-            let date = NaiveDate::from_ymd_opt(y, m, d)?;
+            let date = ymd(y, m, d)?;
             return self.finish(
                 date,
                 c.name("time").map(|m| m.as_str()),
@@ -314,7 +335,7 @@ impl TimestampParser {
                 Some(d) => (d.as_str(), &c["m1"], &c["y1"]),
                 None => (&c["d2"], &c["m2"], &c["y2"]),
             };
-            let date = NaiveDate::from_ymd_opt(y.parse().ok()?, month_number(m)?, d.parse().ok()?)?;
+            let date = ymd(y.parse().ok()?, month_number(m)?, d.parse().ok()?)?;
             return self.finish(
                 date,
                 c.name("time").map(|m| m.as_str()),
@@ -322,8 +343,8 @@ impl TimestampParser {
                 c.name("zone").map(|m| m.as_str()),
             );
         }
-        if let Ok(dt) = DateTime::parse_from_rfc2822(s) {
-            return Some(dt.timestamp_millis());
+        if let Some(ms) = parse_rfc2822_ms(s) {
+            return Some(ms);
         }
         if self.asctime {
             if let Some(ms) = self.parse_asctime(s) {
@@ -331,7 +352,7 @@ impl TimestampParser {
             }
         }
         if let Some(c) = japanese_re().captures(s) {
-            let date = NaiveDate::from_ymd_opt(c["y"].parse().ok()?, c["m"].parse().ok()?, c["d"].parse().ok()?)?;
+            let date = ymd(c["y"].parse().ok()?, c["m"].parse().ok()?, c["d"].parse().ok()?)?;
             let mut time = format!("{}:{}:{}", &c["h"], &c["mi"], c.name("s").map_or("0", |m| m.as_str()));
             if let Some(f) = c.name("f") {
                 time.push('.');
@@ -345,39 +366,39 @@ impl TimestampParser {
 
     /// Parses a time of day ("10:41:22.318") on a given date. Used for console
     /// style logs that carry no date.
-    pub fn parse_time_on(&self, s: &str, date: NaiveDate) -> Option<i64> {
+    pub fn parse_time_on(&self, s: &str, date: Date) -> Option<i64> {
         let s = s.trim();
         let c = time_only_re().captures(s)?;
         self.finish(date, Some(&c[1]), c.get(2).map(|m| m.as_str()), None)
     }
 
-    fn parse_with_format(&self, s: &str, fmt: &str) -> Option<i64> {
-        if let Ok(dt) = DateTime::parse_from_str(s, fmt) {
-            return Some(dt.timestamp_millis());
+    fn parse_with_format(&self, s: &str, custom: &Custom) -> Option<i64> {
+        let fmt = &custom.format;
+        if let Some(ms) = fmt.read_with_offset(s) {
+            return Some(ms);
         }
-        if let Ok(ndt) = NaiveDateTime::parse_from_str(s, fmt) {
-            return self.localize(ndt);
+        if let Some((date, clock)) = fmt.read_local(s) {
+            return self.localize(date, clock);
         }
-        if let Ok(date) = NaiveDate::parse_from_str(s, fmt) {
-            return self.localize(date.and_hms_opt(0, 0, 0)?);
+        if let Some(date) = fmt.read_date(s) {
+            return self.localize(date, MIDNIGHT);
         }
-        if !fmt.contains("%Y") && !fmt.contains("%y") {
-            return self.parse_without_year(s, fmt, self.reference_ms.unwrap_or_else(|| Utc::now().timestamp_millis()));
+        if custom.with_year.is_some() {
+            return self.parse_without_year(s, custom, self.reference_ms.unwrap_or_else(now_ms));
         }
         None
     }
 
     /// A format without a year (BSD syslog "Oct 14 10:41:00"): the current year, or the
     /// previous one when that would put the event more than a day in the future.
-    fn parse_without_year(&self, s: &str, fmt: &str, now_ms: i64) -> Option<i64> {
-        let year = DateTime::from_timestamp_millis(now_ms)?.year();
-        let at = |y: i32| {
+    fn parse_without_year(&self, s: &str, custom: &Custom, now_ms: i64) -> Option<i64> {
+        let year = i64::from(Timestamp::from_millisecond(now_ms).ok()?.to_zoned(TimeZone::UTC).year());
+        let with_year = custom.with_year.as_ref()?;
+        let at = |y: i64| {
             let text = format!("{y} {s}");
-            let with_year = format!("%Y {fmt}");
-            DateTime::parse_from_str(&text, &with_year)
-                .map(|d| d.timestamp_millis())
-                .ok()
-                .or_else(|| NaiveDateTime::parse_from_str(&text, &with_year).ok().and_then(|n| self.localize(n)))
+            with_year
+                .read_with_offset(&text)
+                .or_else(|| with_year.read_local(&text).and_then(|(date, clock)| self.localize(date, clock)))
         };
         let ms = at(year)?;
         if ms > now_ms + 86_400_000 {
@@ -386,28 +407,190 @@ impl TimestampParser {
         Some(ms)
     }
 
-    fn finish(&self, date: NaiveDate, time: Option<&str>, ampm: Option<&str>, zone: Option<&str>) -> Option<i64> {
-        let time = match time {
+    fn finish(&self, date: Date, time: Option<&str>, ampm: Option<&str>, zone: Option<&str>) -> Option<i64> {
+        let clock = match time {
             Some(t) => parse_time(t, ampm)?,
-            None => NaiveTime::from_hms_opt(0, 0, 0)?,
+            None => MIDNIGHT,
         };
-        let ndt = date.and_time(time);
         match zone {
-            Some(z) => {
-                let offset = parse_offset(z)?;
-                Some(offset.from_local_datetime(&ndt).single()?.timestamp_millis())
-            }
-            None => self.localize(ndt),
+            Some(z) => epoch_ms(date, clock, parse_offset(z)?),
+            None => self.localize(date, clock),
         }
     }
 
-    fn localize(&self, ndt: NaiveDateTime) -> Option<i64> {
+    fn localize(&self, date: Date, clock: Clock) -> Option<i64> {
         match self.zone {
-            AssumedZone::Utc => Some(ndt.and_utc().timestamp_millis()),
-            AssumedZone::Local => Some(Local.from_local_datetime(&ndt).earliest()?.timestamp_millis()),
-            AssumedZone::Fixed(o) => Some(o.from_local_datetime(&ndt).single()?.timestamp_millis()),
+            AssumedZone::Utc => epoch_ms(date, clock, 0),
+            AssumedZone::Local => local_epoch_ms(date, clock),
+            AssumedZone::Fixed(seconds) => epoch_ms(date, clock, seconds),
         }
     }
+}
+
+const MIDNIGHT: Clock = Clock {
+    hour: 0,
+    minute: 0,
+    second: 0,
+    nano: 0,
+};
+
+/// How many fraction digits [`rfc3339_utc`] writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fraction {
+    /// `2026-10-14T10:41:22Z`.
+    Secs,
+    /// `2026-10-14T10:41:22.318Z`.
+    Millis,
+    /// `2026-10-14T10:41:22.318123Z`.
+    Micros,
+}
+
+/// `ts` as RFC 3339 in UTC with a `Z`, the fraction always written to the digits asked for.
+pub fn rfc3339_utc(ts: Timestamp, fraction: Fraction) -> String {
+    use std::fmt::Write;
+    let z = ts.to_zoned(TimeZone::UTC);
+    let year = z.year();
+    let mut out = String::with_capacity(32);
+    let _ = write!(
+        out,
+        "{}{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+        if year < 0 { "-" } else { "" },
+        year.unsigned_abs(),
+        z.month(),
+        z.day(),
+        z.hour(),
+        z.minute(),
+        z.second()
+    );
+    let nanos = ts.subsec_nanosecond().rem_euclid(1_000_000_000);
+    match fraction {
+        Fraction::Secs => {}
+        Fraction::Millis => {
+            let _ = write!(out, ".{:03}", nanos / 1_000_000);
+        }
+        Fraction::Micros => {
+            let _ = write!(out, ".{:06}", nanos / 1_000);
+        }
+    }
+    out.push('Z');
+    out
+}
+
+/// [`rfc3339_utc`] of milliseconds since the Unix epoch; `None` outside years -9999..=9999.
+pub fn rfc3339_utc_ms(ms: i64, fraction: Fraction) -> Option<String> {
+    Some(rfc3339_utc(Timestamp::from_millisecond(ms).ok()?, fraction))
+}
+
+/// Milliseconds since the Unix epoch of a UTC date and time of day; `None` for one that does not exist.
+pub fn utc_epoch_ms(year: i32, month: u32, day: u32, hour: u32, minute: u32, second: u32, milli: u32) -> Option<i64> {
+    epoch_ms(
+        ymd(year, month, day)?,
+        Clock::new(hour, minute, second, milli.checked_mul(1_000_000)?)?,
+        0,
+    )
+}
+
+/// `z` as RFC 3339 with its own offset (`2026-03-04T05:06:07+01:00`), the fraction written only when there is one, in 3, 6
+/// or 9 digits; `Z` is never used (a zero offset is `+00:00`).
+pub fn rfc3339_zoned(z: &jiff::Zoned) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(35);
+    let year = z.year();
+    let _ = write!(
+        out,
+        "{}{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+        if year < 0 { "-" } else { "" },
+        year.unsigned_abs(),
+        z.month(),
+        z.day(),
+        z.hour(),
+        z.minute(),
+        z.second()
+    );
+    let nanos = z.subsec_nanosecond();
+    if nanos != 0 {
+        if nanos % 1_000_000 == 0 {
+            let _ = write!(out, ".{:03}", nanos / 1_000_000);
+        } else if nanos % 1_000 == 0 {
+            let _ = write!(out, ".{:06}", nanos / 1_000);
+        } else {
+            let _ = write!(out, ".{nanos:09}");
+        }
+    }
+    let offset = z.offset().seconds();
+    let _ = write!(
+        out,
+        "{}{:02}:{:02}",
+        if offset < 0 { '-' } else { '+' },
+        offset.abs() / 3600,
+        offset.abs() % 3600 / 60
+    );
+    out
+}
+
+/// `z` as a `yyyyMMdd-HHmmss` file-name stamp in its own zone.
+pub fn file_stamp_zoned(z: &jiff::Zoned) -> String {
+    format!(
+        "{:04}{:02}{:02}-{:02}{:02}{:02}",
+        z.year(),
+        z.month(),
+        z.day(),
+        z.hour(),
+        z.minute(),
+        z.second()
+    )
+}
+
+/// `ms` since the Unix epoch as `yyyyMMdd-HHmmss` (a file-name stamp) in UTC, or in the machine's time zone when `local`;
+/// `None` outside years 0..=9999.
+pub fn file_stamp(ms: i64, local: bool) -> Option<String> {
+    let t = Timestamp::from_millisecond(ms)
+        .ok()?
+        .to_zoned(if local { TimeZone::system() } else { TimeZone::UTC });
+    (0..=9999).contains(&t.year()).then(|| file_stamp_zoned(&t))
+}
+
+/// The UTC year now.
+pub fn utc_year_now() -> i32 {
+    i32::from(Timestamp::now().to_zoned(TimeZone::UTC).year())
+}
+
+/// Epoch seconds as RFC 3339 in UTC written with an offset, `2026-10-14T10:00:00+00:00`; `None` outside years -9999..=9999.
+pub fn rfc3339_utc_offset_secs(secs: i64) -> Option<String> {
+    let text = rfc3339_utc(Timestamp::from_second(secs).ok()?, Fraction::Secs);
+    Some(format!("{}+00:00", text.trim_end_matches('Z')))
+}
+
+/// `ms` since the Unix epoch as UTC text `2026-10-14 10:41:22`, with `.318` after the seconds when `millis`; `None` outside
+/// years 0..=9999.
+pub fn utc_text(ms: i64, millis: bool) -> Option<String> {
+    let t = Timestamp::from_millisecond(ms).ok()?.to_zoned(TimeZone::UTC);
+    let year = t.year();
+    if !(0..=9999).contains(&year) {
+        return None;
+    }
+    let mut out = format!(
+        "{year:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        t.month(),
+        t.day(),
+        t.hour(),
+        t.minute(),
+        t.second()
+    );
+    if millis {
+        out.push_str(&format!(".{:03}", ms.rem_euclid(1000)));
+    }
+    Some(out)
+}
+
+/// The current time in milliseconds since the Unix epoch.
+pub fn now_ms() -> i64 {
+    Timestamp::now().as_millisecond()
+}
+
+/// A calendar date; `None` for one that does not exist (or a year jiff cannot hold: outside -9999..=9999).
+pub fn ymd(year: i32, month: u32, day: u32) -> Option<Date> {
+    Date::new(i16::try_from(year).ok()?, i8::try_from(month).ok()?, i8::try_from(day).ok()?).ok()
 }
 
 /// Looks at sample timestamps written as `a/b/yyyy` and decides whether the
@@ -431,7 +614,7 @@ pub fn detect_day_first<'a>(samples: impl IntoIterator<Item = &'a str>) -> Optio
     None
 }
 
-fn parse_time(t: &str, ampm: Option<&str>) -> Option<NaiveTime> {
+fn parse_time(t: &str, ampm: Option<&str>) -> Option<Clock> {
     let (hms, frac) = match t.find(['.', ',']) {
         Some(i) => (&t[..i], &t[i + 1..]),
         None => (t, ""),
@@ -455,13 +638,14 @@ fn parse_time(t: &str, ampm: Option<&str>) -> Option<NaiveTime> {
         let scale = 10u32.pow(9 - digits.len() as u32);
         digits.parse::<u32>().ok()? * scale
     };
-    NaiveTime::from_hms_nano_opt(h, m, s.min(59), nanos)
+    Clock::new(h, m, s.min(59), nanos)
 }
 
-fn parse_offset(z: &str) -> Option<FixedOffset> {
+/// An offset in seconds east of UTC (`Z`, `UTC`, `GMT`, `+08`, `-0530`, `+08:00`); `None` unless under 24 hours.
+fn parse_offset(z: &str) -> Option<i32> {
     let z = z.trim();
     if z.eq_ignore_ascii_case("z") || z.eq_ignore_ascii_case("utc") || z.eq_ignore_ascii_case("gmt") {
-        return FixedOffset::east_opt(0);
+        return Some(0);
     }
     let sign = match z.chars().next()? {
         '+' => 1,
@@ -474,7 +658,8 @@ fn parse_offset(z: &str) -> Option<FixedOffset> {
         4 => (digits[..2].parse::<i32>().ok()?, digits[2..].parse::<i32>().ok()?),
         _ => return None,
     };
-    FixedOffset::east_opt(sign * (h * 3600 + m * 60))
+    let seconds = sign * (h * 3600 + m * 60);
+    (seconds.abs() < 86_400).then_some(seconds)
 }
 
 fn parse_epoch(s: &str) -> Option<i64> {
@@ -526,7 +711,7 @@ fn month_number(m: &str) -> Option<u32> {
 }
 
 /// Converts a .NET custom date format ("dd/MM/yyyy HH:mm:ss.fff zzz") to a
-/// chrono strftime format. Strings containing '%' are assumed to be strftime
+/// strftime format (the one [`crate::strptime`] reads). Strings containing '%' are assumed to be strftime
 /// already.
 pub fn to_strftime(fmt: &str) -> String {
     if fmt.contains('%') {
@@ -574,7 +759,7 @@ pub fn to_strftime(fmt: &str) -> String {
             's' => out.push_str("%S"),
             'f' | 'F' => {
                 if out.ends_with(',') {
-                    // ",fff": chrono's "%.f" only reads a dot, so the comma stays literal before fixed digits.
+                    // ",fff": "%.f" only reads a dot, so the comma stays literal before fixed digits.
                     out.push_str(match n {
                         1..=3 => "%3f",
                         4..=6 => "%6f",
@@ -603,8 +788,8 @@ pub fn to_strftime(fmt: &str) -> String {
 }
 
 /// The UTC calendar date of a time in milliseconds since the Unix epoch; `None` when out of range.
-pub fn utc_date_of(ms: i64) -> Option<NaiveDate> {
-    Utc.timestamp_millis_opt(ms).single().map(|d| d.date_naive())
+pub fn utc_date_of(ms: i64) -> Option<Date> {
+    Timestamp::from_millisecond(ms).ok().map(|t| t.to_zoned(TimeZone::UTC).date())
 }
 
 #[cfg(test)]
@@ -616,12 +801,7 @@ mod tests {
     }
 
     fn ms(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32, milli: u32) -> i64 {
-        NaiveDate::from_ymd_opt(y, mo, d)
-            .unwrap()
-            .and_hms_milli_opt(h, mi, s, milli)
-            .unwrap()
-            .and_utc()
-            .timestamp_millis()
+        epoch_ms(ymd(y, mo, d).unwrap(), Clock::new(h, mi, s, milli * 1_000_000).unwrap(), 0).unwrap()
     }
 
     #[test]
@@ -706,7 +886,7 @@ mod tests {
         assert_eq!(epoch_from_number(1_792_000_000_123_000.0), Some(1_792_000_000_123));
         assert_eq!(epoch_from_number(1.792e18), Some(1_792_000_000_000));
         assert_eq!(epoch_from_number(5.0), None);
-        let d = NaiveDate::from_ymd_opt(2026, 10, 14).unwrap();
+        let d = ymd(2026, 10, 14).unwrap();
         assert_eq!(p().parse_time_on("10:41:22,5", d), Some(ms(2026, 10, 14, 10, 41, 22, 500)));
         assert_eq!(p().parse_time_on("12:00:00 AM", d), Some(ms(2026, 10, 14, 0, 0, 0, 0)));
         assert_eq!(p().parse_time_on("not a time", d), None);
@@ -717,24 +897,24 @@ mod tests {
     #[test]
     fn formats_without_a_year_use_the_current_or_previous_year() {
         let p = TimestampParser::new(&["%b %e %H:%M:%S".to_string()], "UTC", None).unwrap();
-        let utc = |y, mo, d, h| Utc.with_ymd_and_hms(y, mo, d, h, 0, 0).unwrap().timestamp_millis();
-        let fmt = "%b %e %H:%M:%S";
+        let utc = |y, mo, d, h| ms(y, mo, d, h, 0, 0, 0);
+        let fmt = Custom::new("%b %e %H:%M:%S");
         assert_eq!(
-            p.parse_without_year("Oct 14 10:00:00", fmt, utc(2026, 10, 17, 0)),
+            p.parse_without_year("Oct 14 10:00:00", &fmt, utc(2026, 10, 17, 0)),
             Some(utc(2026, 10, 14, 10))
         );
         // Just after new year, December is last year.
         assert_eq!(
-            p.parse_without_year("Dec 31 23:00:00", fmt, utc(2027, 1, 2, 0)),
+            p.parse_without_year("Dec 31 23:00:00", &fmt, utc(2027, 1, 2, 0)),
             Some(utc(2026, 12, 31, 23))
         );
-        assert_eq!(p.parse_without_year("not a date", fmt, utc(2027, 1, 2, 0)), None);
-        assert_eq!(p.parse_without_year("Oct 14 10:00:00", fmt, i64::MAX), None);
+        assert_eq!(p.parse_without_year("not a date", &fmt, utc(2027, 1, 2, 0)), None);
+        assert_eq!(p.parse_without_year("Oct 14 10:00:00", &fmt, i64::MAX), None);
         // Through the public parser (the current year).
         assert!(p.parse("Oct  4 09:00:00").is_some());
         let zoned = TimestampParser::new(&["%b %e %H:%M:%S %z".to_string()], "UTC", None).unwrap();
         assert_eq!(
-            zoned.parse_without_year("Oct 14 18:00:00 +0800", "%b %e %H:%M:%S %z", utc(2026, 10, 17, 0)),
+            zoned.parse_without_year("Oct 14 18:00:00 +0800", &Custom::new("%b %e %H:%M:%S %z"), utc(2026, 10, 17, 0)),
             Some(utc(2026, 10, 14, 10))
         );
     }
@@ -811,7 +991,7 @@ mod tests {
         assert_eq!(to_strftime("ddd MMM HH:mm:ss,FFF"), "%a %b %H:%M:%S,%3f");
         assert_eq!(to_strftime("HH:mm:ss,ffffff"), "%H:%M:%S,%6f");
         assert_eq!(to_strftime("HH:mm:ss,fffffffff"), "%H:%M:%S,%9f");
-        // A comma before the fraction stays a comma (chrono's "%.f" reads only a dot).
+        // A comma before the fraction stays a comma ("%.f" reads only a dot).
         assert_eq!(
             f("dd.MM.yyyy HH:mm:ss,fff", "14.10.2026 10:00:00,250"),
             Some(ms(2026, 10, 14, 10, 0, 0, 250))
@@ -839,6 +1019,40 @@ mod tests {
         assert_eq!(p().parse("2025/11/08,,00:04:37"), None);
         assert_eq!(p().parse("2025/11/08,"), None);
         assert_eq!(detect_day_first(["25/11/2025,00:04:37"]), Some(true));
+    }
+
+    #[test]
+    fn utc_text_and_stamps_write_what_chrono_wrote() {
+        let at = ms(2026, 10, 14, 10, 41, 22, 318);
+        assert_eq!(rfc3339_utc_ms(at, Fraction::Secs).as_deref(), Some("2026-10-14T10:41:22Z"));
+        assert_eq!(rfc3339_utc_ms(at, Fraction::Millis).as_deref(), Some("2026-10-14T10:41:22.318Z"));
+        assert_eq!(rfc3339_utc_ms(at, Fraction::Micros).as_deref(), Some("2026-10-14T10:41:22.318000Z"));
+        assert_eq!(rfc3339_utc_ms(-1, Fraction::Millis).as_deref(), Some("1969-12-31T23:59:59.999Z"));
+        assert_eq!(rfc3339_utc_ms(i64::MAX, Fraction::Secs), None, "out of range is not a time");
+        assert_eq!(utc_text(at, false).as_deref(), Some("2026-10-14 10:41:22"));
+        assert_eq!(utc_text(at, true).as_deref(), Some("2026-10-14 10:41:22.318"));
+        assert_eq!(utc_text(-1, true).as_deref(), Some("1969-12-31 23:59:59.999"));
+        assert_eq!(file_stamp(at, false).as_deref(), Some("20261014-104122"));
+        assert_eq!(rfc3339_utc_offset_secs(0).as_deref(), Some("1970-01-01T00:00:00+00:00"));
+        assert_eq!(rfc3339_utc_offset_secs(at / 1000).as_deref(), Some("2026-10-14T10:41:22+00:00"));
+        assert_eq!(utc_epoch_ms(2026, 2, 30, 0, 0, 0, 0), None);
+        assert_eq!(utc_date_of(at), ymd(2026, 10, 14));
+    }
+
+    #[test]
+    fn zoned_times_keep_their_offset_and_only_the_fraction_they_have() {
+        use jiff::tz::{Offset, TimeZone};
+        let zone = |secs: i32| TimeZone::fixed(Offset::from_seconds(secs).unwrap());
+        let at = |nanos: i64, secs: i32| {
+            Timestamp::from_nanosecond(i128::from(1_772_597_167_i64) * 1_000_000_000 + i128::from(nanos))
+                .unwrap()
+                .to_zoned(zone(secs))
+        };
+        assert_eq!(rfc3339_zoned(&at(0, 3600)), "2026-03-04T05:06:07+01:00");
+        assert_eq!(rfc3339_zoned(&at(500_000_000, 3600)), "2026-03-04T05:06:07.500+01:00");
+        assert_eq!(rfc3339_zoned(&at(123_456_000, -19_800)), "2026-03-03T22:36:07.123456-05:30");
+        assert_eq!(rfc3339_zoned(&at(123_456_789, 0)), "2026-03-04T04:06:07.123456789+00:00");
+        assert_eq!(file_stamp_zoned(&at(0, 3600)), "20260304-050607");
     }
 
     #[test]

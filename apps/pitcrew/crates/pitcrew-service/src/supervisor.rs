@@ -151,21 +151,24 @@ pub struct Env {
 
 /// The local time of the machine.
 pub fn system_local(t: Timestamp) -> (LocalMoment, i32) {
-    use chrono::{Datelike, Local, TimeZone, Timelike};
+    use jiff::civil::Weekday as W;
     let ms = i64::try_from(t.0).unwrap_or(i64::MAX);
-    let dt = Local.timestamp_millis_opt(ms).single().unwrap_or_else(Local::now);
+    let tz = jiff::tz::TimeZone::system();
+    let dt = jiff::Timestamp::from_millisecond(ms)
+        .map(|ts| ts.to_zoned(tz.clone()))
+        .unwrap_or_else(|_| jiff::Zoned::now().with_time_zone(tz));
     let weekday = match dt.weekday() {
-        chrono::Weekday::Mon => Weekday::Mon,
-        chrono::Weekday::Tue => Weekday::Tue,
-        chrono::Weekday::Wed => Weekday::Wed,
-        chrono::Weekday::Thu => Weekday::Thu,
-        chrono::Weekday::Fri => Weekday::Fri,
-        chrono::Weekday::Sat => Weekday::Sat,
-        chrono::Weekday::Sun => Weekday::Sun,
+        W::Monday => Weekday::Mon,
+        W::Tuesday => Weekday::Tue,
+        W::Wednesday => Weekday::Wed,
+        W::Thursday => Weekday::Thu,
+        W::Friday => Weekday::Fri,
+        W::Saturday => Weekday::Sat,
+        W::Sunday => Weekday::Sun,
     };
     let time =
         TimeOfDay::new(u16::try_from(dt.hour()).unwrap_or(0), u16::try_from(dt.minute()).unwrap_or(0)).unwrap_or_else(unreachable_time);
-    (LocalMoment { weekday, time }, dt.offset().local_minus_utc() / 60)
+    (LocalMoment { weekday, time }, dt.offset().seconds() / 60)
 }
 
 #[allow(clippy::unwrap_used)]
@@ -2079,6 +2082,24 @@ impl RunnerProcess for Adopted {
 mod adopted_tests {
     use super::*;
     use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn the_local_moment_agrees_with_its_utc_offset() {
+        // Whatever zone the machine has, weekday and time of day must be the UTC instant moved by the reported offset.
+        for ms in [0u64, 1_762_333_200_000, 1_783_000_000_000, 1_792_656_000_000] {
+            let (moment, offset) = system_local(Timestamp(ms));
+            let local_min = i64::try_from(ms / 60_000).unwrap() + i64::from(offset);
+            assert_eq!(i64::from(moment.time.minutes()), local_min.rem_euclid(1440), "time of day at {ms}");
+            // 1970-01-01 was a Thursday.
+            let names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+            let day = (local_min.div_euclid(1440) + 3).rem_euclid(7);
+            assert_eq!(
+                format!("{:?}", moment.weekday),
+                names[usize::try_from(day).unwrap()],
+                "weekday at {ms}"
+            );
+        }
+    }
 
     #[test]
     fn an_unreadable_process_table_leaves_an_adopted_runner_running_and_warns_once() {

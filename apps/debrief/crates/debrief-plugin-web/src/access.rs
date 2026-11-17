@@ -2,9 +2,9 @@
 
 use crate::level_for_status;
 use anyhow::Result;
-use chrono::DateTime;
 use debrief_plugin_api::importer::{ImportCtx, Imported, TextImporter};
 use debrief_plugin_api::model::Record;
+use debrief_plugin_api::strptime::Format;
 use regex::Regex;
 use serde_json::Value;
 use std::sync::OnceLock;
@@ -55,9 +55,8 @@ impl TextImporter for AccessLogImporter {
 
 fn record(line: u32, c: &regex::Captures) -> Record {
     let mut r = Record::new(line);
-    r.ts = DateTime::parse_from_str(&c["ts"], "%d/%b/%Y:%H:%M:%S %z")
-        .ok()
-        .map(|d| d.timestamp_millis());
+    static TS: OnceLock<Format> = OnceLock::new();
+    r.ts = TS.get_or_init(|| Format::new("%d/%b/%Y:%H:%M:%S %z")).read_with_offset(&c["ts"]);
     let ip = &c["ip"];
     match ip.split_once(", ") {
         // The first address of a forwarded-for list is the original client.

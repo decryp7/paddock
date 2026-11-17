@@ -9,6 +9,7 @@
 //! * [`JobPool`] runs job bodies on a bounded worker pool so command handlers return at once ([`assert_nonblocking`] tests that).
 //! * [`journal`] is the activity journal (a bounded, persisted log of what the app did, with undo states).
 //! * [`schedule`] is the family's schedules (every N, times of day, cron; zones, DST, catch-up) and pause windows.
+//! * [`stamp`] formats a `jiff::Timestamp` as RFC 3339 UTC with a fixed precision, and reads a clock as one.
 //! * [`time`] is the family's clock port ([`Clock`], [`SystemClock`], [`FakeClock`]), deadlines and restart back-off.
 //! * [`wire`] is the postcard-safe form of a snapshot, for apps whose jobs run in an agent process and are relayed to the UI.
 //! * [`CancelToken`] is checked cooperatively; [`par_walk`], [`par_map_ordered`], [`pipeline_ordered`] and [`HashingWriter`] honour it
@@ -26,6 +27,7 @@ mod pipeline;
 mod pool;
 mod reporter;
 pub mod schedule;
+pub mod stamp;
 #[cfg(feature = "tauri")]
 pub mod tauri;
 #[cfg(feature = "tauri")]

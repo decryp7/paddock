@@ -29,7 +29,6 @@ debrief-plugin-native = { path = "../debrief-plugin-native" }
 serde_json.workspace = true
 
 [dev-dependencies]
-chrono.workspace = true
 # The idle measurement after an event-log import (tests/it/evtx_idle.rs) imports through the store the app ships.
 debrief-store-duck = { path = "../debrief-store-duck" }
 libc.workspace = true

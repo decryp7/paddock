@@ -182,7 +182,7 @@ fn ctx(p: &CompiledProfile) -> ImportCtx<'_> {
     ImportCtx {
         profile: p,
         path: Path::new("fuzz.log"),
-        file_date: chrono::NaiveDate::from_ymd_opt(2026, 10, 14),
+        file_date: debrief_plugin_api::time::ymd(2026, 10, 14),
     }
 }
 
@@ -204,12 +204,12 @@ proptest! {
 
     #[test]
     fn timestamp_parse_arbitrary(s in any::<String>()) {
-        guard(move || for p in parsers() { let _ = p.parse(&s); let _ = p.parse_time_on(&s, chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()); });
+        guard(move || for p in parsers() { let _ = p.parse(&s); let _ = p.parse_time_on(&s, debrief_plugin_api::time::ymd(2026, 1, 1).unwrap()); });
     }
 
     #[test]
     fn timestamp_parse_timestamp_like(s in timestamp_like()) {
-        guard(move || for p in parsers() { let _ = p.parse(&s); let _ = p.parse_time_on(&s, chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()); });
+        guard(move || for p in parsers() { let _ = p.parse(&s); let _ = p.parse_time_on(&s, debrief_plugin_api::time::ymd(2026, 1, 1).unwrap()); });
     }
 
     #[test]
@@ -247,8 +247,7 @@ proptest! {
     /// Milliseconds formatted as RFC3339 parse back to the same instant.
     #[test]
     fn rfc3339_roundtrip(ms in -2_000_000_000_000i64..4_000_000_000_000i64) {
-        use chrono::{SecondsFormat, TimeZone, Utc};
-        let text = Utc.timestamp_millis_opt(ms).single().unwrap().to_rfc3339_opts(SecondsFormat::Millis, true);
+        let text = debrief_plugin_api::time::rfc3339_utc_ms(ms, debrief_plugin_api::time::Fraction::Millis).unwrap();
         let p = TimestampParser::new(&[], "UTC", None).unwrap();
         prop_assert_eq!(p.parse(&text), Some(ms), "text {}", text);
     }
@@ -439,7 +438,7 @@ proptest! {
             use debrief_core::importers::lines::{begins_event, looks_like_event_start, Line, LineFormat, LineParser};
             for profile in [default_ctx_profile(), sample_ctx_profile()] {
                 let fmt = if dominant == 7 { LineFormat::Json } else { LineFormat::Text(dominant) };
-                let mut parser = LineParser::new(profile, fmt, None, chrono::NaiveDate::from_ymd_opt(2026, 10, 14));
+                let mut parser = LineParser::new(profile, fmt, None, debrief_plugin_api::time::ymd(2026, 10, 14));
                 for (i, l) in lines.iter().enumerate() {
                     let _ = looks_like_event_start(l);
                     let event = matches!(parser.line(l, i as u32 + 1), Line::Event(_));

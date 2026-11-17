@@ -132,7 +132,7 @@ impl Ctx {
             } else {
                 path_tail(ctx.path).to_string_lossy().into_owned()
             },
-            date: ctx.file_date.map(|d| d.format("%Y-%m-%d").to_string()),
+            date: ctx.file_date.map(|d| d.to_string()),
             timestamps: TimestampSettings {
                 formats: parse.timestamp_formats.clone(),
                 zone: parse.assume_timezone.clone(),

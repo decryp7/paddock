@@ -181,7 +181,7 @@ impl log::Log for ActivityLogger {
         let props = props.0;
         let context = props.get("SourceContext").map(String::as_str).unwrap_or(record.target());
         if context == SOURCE_CONTEXT {
-            let time = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
+            let time = debrief_core::time::rfc3339_utc(jiff::Timestamp::now(), debrief_core::time::Fraction::Micros);
             if let Some(b) = Breadcrumb::from_props(time, &props) {
                 crate::sync::lock(ring()).push(b);
             }

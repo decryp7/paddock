@@ -25,12 +25,17 @@ pub struct Trace<'a> {
     start: Instant,
 }
 
+/// `2026-10-31T09:00:00.123Z`: UTC, always three fractional digits (the CLEF time of a trace line).
+fn stamp_millis(t: jiff::Timestamp) -> String {
+    t.strftime("%Y-%m-%dT%H:%M:%S.%3fZ").to_string()
+}
+
 /// A fresh id for one run: time and process, enough to tell runs and their files apart.
 pub fn new_operation_id() -> String {
-    let now = chrono::Utc::now();
+    let now = jiff::Timestamp::now();
     format!(
         "{:08x}{:04x}",
-        now.timestamp_subsec_nanos() ^ (now.timestamp() as u32),
+        u32::try_from(now.subsec_nanosecond()).unwrap_or(0) ^ (now.as_second() as u32),
         std::process::id() & 0xffff
     )
 }
@@ -71,7 +76,7 @@ pub fn default_log_file(dir: &Path, operation_id: &str) -> Option<PathBuf> {
     for p in old.iter().take(old.len().saturating_sub(KEEP_LOG_FILES - 1)) {
         let _ = std::fs::remove_file(p);
     }
-    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let stamp = jiff::Timestamp::now().strftime("%Y%m%d-%H%M%S");
     Some(dir.join(format!("wiki-{stamp}-{operation_id}.log")))
 }
 
@@ -117,10 +122,7 @@ impl<'a> Trace<'a> {
             return;
         }
         let mut obj = Map::new();
-        obj.insert(
-            "@t".into(),
-            json!(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
-        );
+        obj.insert("@t".into(), json!(stamp_millis(jiff::Timestamp::now())));
         obj.insert("@l".into(), json!(level));
         obj.insert("@m".into(), json!(message));
         obj.insert("Tool".into(), json!("wiki"));
@@ -172,6 +174,16 @@ impl<'a> Trace<'a> {
 mod tests {
     use super::*;
     use std::rc::Rc;
+
+    #[test]
+    fn the_trace_time_is_utc_with_three_digits() {
+        let t = jiff::Timestamp::new(1_792_486_800, 5_000_000).unwrap();
+        assert_eq!(stamp_millis(t), "2026-10-20T09:00:00.005Z");
+        assert_eq!(
+            stamp_millis(jiff::Timestamp::new(1_792_486_800, 0).unwrap()),
+            "2026-10-20T09:00:00.000Z"
+        );
+    }
 
     /// A sink that records each write as it happens.
     struct Recorder(Rc<RefCell<Vec<String>>>);

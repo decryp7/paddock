@@ -8,8 +8,8 @@ use crate::redact::{Counts, Redactor};
 use crate::runner::{CommandError, CommandOutput, CommandRunner};
 use crate::select::select_logs;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local};
 use debrief_core::overwrite::check_overwrite;
+use jiff::Zoned;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
@@ -71,7 +71,7 @@ pub struct Collector<'a> {
     pub runner: &'a dyn CommandRunner,
     pub progress: &'a dyn Progress,
     pub platform: Platform,
-    pub now: DateTime<Local>,
+    pub now: Zoned,
     pub host: String,
     /// Reported as the installed Debrief version in the environment snapshot.
     pub debrief_version: String,
@@ -87,7 +87,7 @@ impl<'a> Collector<'a> {
             runner,
             progress,
             platform: Platform::current(),
-            now: Local::now(),
+            now: Zoned::now(),
             host: env::host_name().unwrap_or_else(|| "unknown-host".into()),
             debrief_version: env!("CARGO_PKG_VERSION").into(),
             overwrite: false,
@@ -100,7 +100,7 @@ impl<'a> Collector<'a> {
             "{}-{}-{}.debriefz",
             safe_segment(&self.plan.name),
             safe_segment(&self.host),
-            self.now.format("%Y%m%d-%H%M%S")
+            debrief_core::time::file_stamp_zoned(&self.now)
         )
     }
 
@@ -177,7 +177,7 @@ impl<'a> Collector<'a> {
             name: self.plan.name.clone(),
             host: self.host.clone(),
             platform: self.platform.label().into(),
-            created_at: self.now.to_rfc3339(),
+            created_at: debrief_core::time::rfc3339_zoned(&self.now),
             tool_versions: versions,
             items: Vec::new(),
             skipped: Vec::new(),
@@ -461,7 +461,7 @@ impl Run<'_, '_> {
     }
 
     fn logs(&mut self) -> Result<()> {
-        let now: SystemTime = self.c.now.into();
+        let now = SystemTime::from(self.c.now.timestamp());
         let mut files = Vec::new();
         let mut labels: HashSet<String> = HashSet::new();
         let c = self.c;

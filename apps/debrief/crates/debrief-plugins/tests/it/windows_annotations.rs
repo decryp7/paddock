@@ -25,9 +25,7 @@ fn line(t: &str, provider: &str, id: u32, extra: &str) -> String {
 }
 
 fn ms(t: &str) -> i64 {
-    chrono::DateTime::parse_from_rfc3339(&format!("2026-10-14T{t}Z"))
-        .unwrap()
-        .timestamp_millis()
+    debrief_plugin_api::strptime::parse_rfc3339_ms(&format!("2026-10-14T{t}Z")).unwrap()
 }
 
 #[test]

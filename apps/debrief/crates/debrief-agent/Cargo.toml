@@ -23,9 +23,9 @@ debrief-monitor = { path = "../debrief-monitor" }
 # PerfMon Data Collector Set control (`logman`), shared with the tools plugin.
 debrief-plugin-tools = { path = "../debrief-plugin-tools" }
 anyhow.workspace = true
-chrono.workspace = true
-# Cron expressions (MIT): 5/6-field POSIX/Vixie patterns, aliases, L/W/#, time zones via chrono.
-croner = "4.0.1"
+jiff.workspace = true
+# Cron expressions (MIT): 5/6-field POSIX/Vixie patterns, aliases, L/W/#, time zones via jiff.
+croner = { version = "4.0.1", default-features = false, features = ["jiff"] }
 globset.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }

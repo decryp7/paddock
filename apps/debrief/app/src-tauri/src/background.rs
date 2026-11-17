@@ -84,7 +84,7 @@ impl BackgroundTasks {
             let mut entries = self.entries();
             let label: String = spec.label.chars().filter(|c| !c.is_control()).take(MAX_LABEL).collect();
             let existing = entries.iter().position(|e| e.info.id == spec.id);
-            let started_at = existing.map_or_else(|| chrono::Utc::now().timestamp_millis(), |i| entries[i].info.started_at);
+            let started_at = existing.map_or_else(debrief_core::time::now_ms, |i| entries[i].info.started_at);
             let entry = Entry {
                 info: TaskInfo {
                     id: spec.id,

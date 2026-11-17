@@ -1,9 +1,9 @@
 //! Test doubles shared by the unit tests.
 
 use crate::clock::Clock;
-use chrono::{DateTime, TimeZone, Utc};
 use debrief_core::export::{clef_value, EventSink};
 use debrief_core::model::Record;
+use jiff::Timestamp;
 use serde_json::Value;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -46,22 +46,28 @@ impl EventSink for MemorySink {
     }
 }
 
+/// A UTC time as an instant.
+pub fn utc_at(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32) -> Timestamp {
+    let ms = debrief_core::time::utc_epoch_ms(y, mo, d, h, mi, s, 0).unwrap();
+    Timestamp::from_millisecond(ms).unwrap()
+}
+
 /// A clock that only moves when told to (or when slept on).
-pub struct FakeClock(pub Mutex<DateTime<Utc>>);
+pub struct FakeClock(pub Mutex<Timestamp>);
 
 impl FakeClock {
     pub fn at(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> Arc<FakeClock> {
-        Arc::new(FakeClock(Mutex::new(Utc.with_ymd_and_hms(y, mo, d, h, mi, 0).unwrap())))
+        Arc::new(FakeClock(Mutex::new(utc_at(y, mo, d, h, mi, 0))))
     }
 
     pub fn advance(&self, d: Duration) {
         let mut t = self.0.lock().unwrap();
-        *t += chrono::Duration::from_std(d).unwrap();
+        *t = t.checked_add(d).unwrap();
     }
 }
 
 impl Clock for FakeClock {
-    fn now(&self) -> DateTime<Utc> {
+    fn now(&self) -> Timestamp {
         *self.0.lock().unwrap()
     }
 
