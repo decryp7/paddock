@@ -39,6 +39,8 @@ export const HW_TOKENS = `
     --hw-pkg-b: #1a1c20;
     --hw-pkg-edge: #4a515c;
     --hw-pkg-mark: #7d8593;
+    /* The ring of the legend's memory swatch: the package's own edge disappears on a dark card, so the swatch in the legend uses a ring that shows in both themes. */
+    --hw-swatch-ring: light-dark(#4a515c, #8c8f98);
     --hw-passive: #b9bfc9;
 
     --hw-gold-a: #ecd28a;

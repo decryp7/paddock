@@ -212,11 +212,11 @@ const VIRTUAL_BUFFER_ROWS = 8;
           <ng-container [matColumnDef]="c.key">
             @if (c.sortable !== false) {
               <mat-header-cell *matHeaderCellDef mat-sort-header class="pd-th pd-sort" [class.pd-end]="c.align === 'end'" [class.pd-sorted]="sort()?.key === c.key" [arrowPosition]="c.align === 'end' ? 'before' : 'after'" [start]="c.sortStart ?? 'asc'" [sortActionDescription]="sortLabel(c)">
-                <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
+                <span class="pd-th-text" [class.pd-sr]="c.headerHidden" [attr.title]="c.headerTitle ?? null">{{ c.header }}</span>
               </mat-header-cell>
             } @else {
               <mat-header-cell *matHeaderCellDef class="pd-th" [class.pd-end]="c.align === 'end'">
-                <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
+                <span class="pd-th-text" [class.pd-sr]="c.headerHidden" [attr.title]="c.headerTitle ?? null">{{ c.header }}</span>
               </mat-header-cell>
             }
           </ng-container>

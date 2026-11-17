@@ -1,6 +1,7 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { bodyIndentProblems, checkboxLayoutProblems, pressMod, rowPinProblems } from '@decryp7/paddock-e2e';
+import { MAC_CPU_TOTAL } from '../src/app/core/mock/mac-machine';
 
 /** Browser flows against the mock backend (a macOS laptop; `?mock=desktop` has no battery or sensors). */
 const url = (path = '/', query = '') => `/?latency=0${query}#${path}`;
@@ -426,6 +427,8 @@ test.describe('notifications', () => {
     await page.evaluate(() => {
       location.hash = '#/why-slow';
     });
+    // The hash change routes asynchronously: until the page is Why slow, the network grid's own "Copy as text" row buttons are still on screen.
+    await expect(page.getByRole('heading', { level: 1, name: 'Why is my computer slow?' })).toBeVisible();
     await page.getByRole('button', { name: 'Copy as text' }).click();
     await page.getByRole('button', { name: /notifications/i }).first().click();
     const selects = page.locator('[data-testid^=notice-select-] input');
@@ -567,7 +570,8 @@ test.describe('network', () => {
     await page.goto(url('/'));
     const card = page.getByRole('region', { name: 'Is this normal?' });
     await expect(card.getByText('Higher than usual for Thursday afternoons').first()).toBeVisible();
-    await expect(card.getByText('71% now · usually 14%')).toBeVisible();
+    // The mock Mac's one declared CPU total (mac-machine.ts), read from there, not copied (ER-42).
+    await expect(card.getByText(`${MAC_CPU_TOTAL}% now · usually 14%`)).toBeVisible();
     await expect(card.getByText(/^Usual for/)).toHaveCount(0);
   });
 
