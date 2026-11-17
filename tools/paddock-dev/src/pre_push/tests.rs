@@ -2514,9 +2514,17 @@ fn a_remote_train_that_diverged_still_gives_its_merge_base_as_the_base() {
     let f1 = r.commit("f1");
     let (base, why) = r.choose(&new_ref("fix", &f1));
     assert_eq!(base, t1, "{why}");
-    assert!(why.contains("merge base with origin/train/2026-11-17-14") && why.contains("fewest new commits, 2"), "{why}");
+    assert!(
+        why.contains("merge base with origin/train/2026-11-17-14") && why.contains("fewest new commits, 2"),
+        "{why}"
+    );
     // Positive control: without the merge-base candidates (only refs the pushed commit contains) the base is the far one, main.
-    let contained = r.git(&["for-each-ref", &format!("--merged={f1}"), "--format=%(refname)", "refs/remotes/origin/"]);
+    let contained = r.git(&[
+        "for-each-ref",
+        &format!("--merged={f1}"),
+        "--format=%(refname)",
+        "refs/remotes/origin/",
+    ]);
     assert_eq!(contained.trim(), "refs/remotes/origin/main", "the old selection sees only main");
     // A diverged remote branch that is neither main nor a train is no candidate.
     let r2 = Repo::new();
@@ -2540,7 +2548,11 @@ fn the_first_line_counts_the_commits_beyond_the_base() {
     r.commit("b");
     r.commit("c");
     assert_eq!(super::commit_count(&r.root, &c1, "HEAD"), "2");
-    assert_eq!(super::commit_count(&r.root, "no-such-ref", "HEAD"), "?", "an unreadable base is shown, not counted as 0");
+    assert_eq!(
+        super::commit_count(&r.root, "no-such-ref", "HEAD"),
+        "?",
+        "an unreadable base is shown, not counted as 0"
+    );
 }
 
 /// A branch stacked on another pushed branch is measured from that branch (a remote-tracking ref it contains), not from main.

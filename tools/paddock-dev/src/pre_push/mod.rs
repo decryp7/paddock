@@ -901,7 +901,10 @@ fn nearest_base(
         // The commit this ref contributes: itself when the pushed commit contains it, else its merge base with the pushed commit.
         let (sha, merge_base_of) = if contained {
             (ref_sha.to_string(), false)
-        } else if let Some(mb) = git(&["merge-base", ref_sha, &p.sha]).map(|t| t.trim().to_string()).filter(|m| !m.is_empty()) {
+        } else if let Some(mb) = git(&["merge-base", ref_sha, &p.sha])
+            .map(|t| t.trim().to_string())
+            .filter(|m| !m.is_empty())
+        {
             (mb, true)
         } else {
             continue;
