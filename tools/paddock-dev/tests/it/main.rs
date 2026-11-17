@@ -33,7 +33,6 @@ mod inputs;
 mod ipc_endpoints;
 mod isolation;
 mod locks;
-mod member_audits;
 mod merge_check;
 mod parity_corpus;
 mod pr;

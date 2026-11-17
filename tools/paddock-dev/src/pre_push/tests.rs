@@ -2,7 +2,7 @@
 
 use super::budget::Timing;
 use super::exec::{Done, Exec, Kind, Limits, QUEUE_MAX, Row, RunOpts, decide, run_all_timed, run_all_with, test_subject};
-use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates};
+use super::gates::{Change, Facts, Gate, Need, Planned, plan_gates};
 use super::{accept_not_measured, parse_refs, render, render_timed};
 use paddock_cli::Exit;
 use serde_json::json;
@@ -40,7 +40,6 @@ fn facts() -> Facts {
             ("apps/debrief".to_string(), Ok(vec!["debrief-app".to_string()])),
         ]
         .into(),
-        member_gate: true,
         kept_targets: None,
         pitwall_tests: vec!["scripts/ci/a.test.mjs".into()],
         dev_exe: "/x/dev".into(),
@@ -243,7 +242,7 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
     // Conformance and its tests run on every push, whatever the plan says (ER-41); everything else a docs change does not reach.
     assert_eq!(
         ids(&planned),
-        ["conformance", "conformance-tests", "gates-register", "member-audits"],
+        ["conformance", "conformance-tests", "gates-register"],
         "{:?}",
         ids(&planned)
     );
@@ -289,108 +288,6 @@ fn conformance_and_its_tests_run_on_every_push_whatever_changed() {
             "a share of the machine beside the Clippy rows (ER-24), not one test process per core"
         );
     }
-}
-
-/// The member gate of `./dev merge check --gates` runs this push gate on the merge commit, so the audits are in the member gate
-/// when they are in this plan for every change (ER-41; user, 2026-11-17).
-#[test]
-fn the_member_audits_run_in_the_member_gate_whatever_changed_through_the_one_declared_profile_and_block() {
-    let unrelated = json!({"conformance": false, "apps": [], "packages": {}});
-    for files in [&["docs/x.md"][..], &["tools/paddock-dev/src/a.rs"], &["Mystery"], &[]] {
-        let planned = plan_gates(&unrelated, &change(files), &facts());
-        let g = run_gates(&planned)
-            .into_iter()
-            .find(|g| g.id == "member-audits")
-            .cloned()
-            .unwrap_or_else(|| panic!("the member audits are not run for {files:?}: {planned:?}"));
-        assert_eq!(
-            (g.program.as_str(), g.cwd.as_str(), g.args.join(" ")),
-            (
-                "cargo",
-                "tools/paddock-dev",
-                format!("nextest run --config build.target-dir='/t' --profile {AUDIT_PROFILE} --locked --no-tests=fail")
-            ),
-            "the audits are selected by the profile's declared filter, not by a list here (ER-42); an empty selection fails (ER-33)"
-        );
-        assert!(
-            !g.env.iter().any(|(k, _)| k == "CARGO_TARGET_DIR" || k == "CARGO_BUILD_TARGET_DIR"),
-            "the build folder is cargo configuration, never a CARGO_TARGET_DIR variable (sccache hashes it; cargo_target_lint): {:?}",
-            g.env
-        );
-        assert!(g.heavy, "it compiles the test binary: through heavy with its core cap (ER-24)");
-        assert_eq!(
-            g.need,
-            Need::Tool("cargo-nextest".into()),
-            "no nextest is not measured, never a pass"
-        );
-        assert!(
-            g.env.contains(&("RUSTUP_AUTO_INSTALL".to_string(), "0".to_string())),
-            "ER-45: {:?}",
-            g.env
-        );
-        assert!(g.next.contains(AUDIT_PROFILE), "{}", g.next);
-    }
-}
-
-/// A developer's push does not run the audits (minutes would be added to every push); it says why. The member gate does.
-#[test]
-fn a_developers_push_skips_the_member_audits_with_a_reason_and_the_member_gate_runs_them() {
-    let off = Facts {
-        member_gate: false,
-        ..facts()
-    };
-    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &off);
-    assert!(!ids(&planned).contains(&"member-audits".to_string()), "{:?}", ids(&planned));
-    assert!(
-        planned
-            .iter()
-            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "member-audits" && reason.contains("--member-gate"))),
-        "skipped with its reason: {planned:?}"
-    );
-    let on = Facts {
-        member_gate: true,
-        ..facts()
-    };
-    assert!(ids(&plan_gates(&plan(), &change(&["crates/a.rs"]), &on)).contains(&"member-audits".to_string()));
-}
-
-/// A failing audit fails the gate (exit 1, one `::error::` line with the rerun command), and a runner without nextest or one that
-/// cannot start it is never a pass.
-#[test]
-fn a_failing_member_audit_fails_the_gate_and_a_missing_nextest_is_not_measured() {
-    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
-    let rows = run_all(
-        &planned,
-        &Fake {
-            fail: vec!["member-audits".into()],
-            ..Fake::default()
-        },
-        2,
-    );
-    let report = render("h", &rows);
-    assert_eq!(report.exit, Exit::Findings, "{}", report.text);
-    let line = report
-        .text
-        .lines()
-        .find(|l| l.contains("::error::member-audits"))
-        .unwrap_or_else(|| panic!("{}", report.text));
-    assert!(
-        line.contains("Re-run alone: cd tools/paddock-dev && cargo nextest run --config build.target-dir='/t' --profile member-audits"),
-        "{line}"
-    );
-    let rows = run_all(
-        &planned,
-        &Fake {
-            no_tools: vec!["cargo-nextest".into()],
-            ..Fake::default()
-        },
-        2,
-    );
-    assert!(nm(&verdicts(&rows)["member-audits"]).is_some(), "not measured, never passed");
-    assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
-    // The positive control: with every gate green the row passes, so the two verdicts above come from the audit and not from the harness.
-    let rows = run_all(&planned, &Fake::default(), 2);
-    assert!(passed(&verdicts(&rows)["member-audits"]));
 }
 
 #[test]
@@ -1330,7 +1227,6 @@ mod known_commit {
             dry_run: false,
             files: vec![],
             refs_from_stdin: true,
-            member_gate: false,
             accept_not_measured: vec![],
         }
     }
@@ -1945,7 +1841,6 @@ mod base_choice {
             dry_run: true,
             files: vec![],
             refs_from_stdin: true,
-            member_gate: false,
             accept_not_measured: vec![],
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
