@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceStore } from '../core/workspace.store';
 import { provideTinyBackend } from '../../testing/helpers';
 import { DockService } from '../dock/dock.service';
-import { EXPLORER_MIN_WINDOW_PX, NarrowWindow } from './narrow-window';
+import { NarrowWindow } from './narrow-window';
 
 type Verdict = 'hide' | 'show' | 'keep';
 
@@ -72,24 +72,42 @@ describe('NarrowWindow (the Explorer follows the layout plan)', () => {
     expect(verdicts).toHaveBeenCalled();
   });
 
-  describe('the state before the first draw', () => {
-    const withWidth = (width: number) => vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(width);
+  describe('the state when data first arrives (the layout plan decides, no constant of ours)', () => {
+    const withVerdict = (v: Verdict) => {
+      const base = setup();
+      const follow = vi.spyOn(TestBed.inject(DockService), 'followContainer').mockImplementation(() => undefined);
+      base.set(v);
+      return { ...base, follow };
+    };
 
-    it('starts a narrow window without the Explorer, and brings it back when the plan has room', () => {
-      withWidth(EXPLORER_MIN_WINDOW_PX - 1);
-      const { narrow, store, set } = setup();
-      narrow.start();
+    it('lays the dock out first, asks the plan with the Explorer open, and closes it when the plan has no room', () => {
+      const { narrow, store, follow, verdicts } = withVerdict('hide');
+      expect(narrow.decideAtStart()).toBe(true);
+      expect(follow).toHaveBeenCalled();
+      expect(verdicts).toHaveBeenCalledWith(true, expect.any(Number));
+      expect(store.sidebarOpen()).toBe(false);
+    });
+
+    it('leaves the Explorer open when the plan keeps it', () => {
+      const { narrow, store } = withVerdict('keep');
+      expect(narrow.decideAtStart()).toBe(false);
+      expect(store.sidebarOpen()).toBe(true);
+    });
+
+    it('brings the Explorer back later when the plan allows, as if the service had closed it', () => {
+      const { narrow, store, set } = withVerdict('hide');
+      narrow.decideAtStart();
       expect(store.sidebarOpen()).toBe(false);
       set('show');
       narrow.evaluate();
       expect(store.sidebarOpen()).toBe(true);
     });
 
-    it('starts a window of the minimum width and wider with the Explorer open', () => {
-      withWidth(EXPLORER_MIN_WINDOW_PX);
-      const { narrow, store } = setup();
-      narrow.start();
-      expect(store.sidebarOpen()).toBe(true);
+    it('does nothing when the Explorer is closed already', () => {
+      const { narrow, store, follow } = withVerdict('hide');
+      store.toggleSidebar();
+      expect(narrow.decideAtStart()).toBe(false);
+      expect(follow).not.toHaveBeenCalled();
     });
   });
 });
