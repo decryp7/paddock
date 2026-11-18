@@ -1,13 +1,22 @@
 //! How long `TestCommand::new` takes, and its parts (docs/benchmarks.md, "TestCommand construction"; ADR 0100). Not a test:
 //! run it by hand, on the machine whose numbers you want (the Windows test VM through `scripts/vm-win.sh run --ci-like`).
 //!
-//!     measure_test_command [--fake-toolchain <empty folder>] [--saturate] [--runs <n>] [--git-calls <n>]
+//!     measure_test_command [--fake-toolchain <empty folder>] [--saturate] [--runs <n>] [--git-calls <n>] [--ab <n>] [--first]
 //!
 //! `--fake-toolchain` makes a toolchain of the shape rustup installs in the folder (one 15 MB `rustup` with its proxies as hard
 //! links of it, and a separate `cargo`) and puts it first on this process's `PATH` and in `CARGO`, so the command links real
 //! files; `--saturate` first gives the `rustup` file 1020 more hard links, near NTFS's limit of 1024, so a further link fails
 //! as it does once many commands hold links to it. It prints one line per measure.
+//!
+//! `--ab <n>`: the merge_check fixture's git sequence (`init`, `add`, `commit`, `rev-parse`: four starts) in a new repository,
+//! n rounds, each round running every variant once in a rotated order, so a busy moment costs all of them alike (ci.yml run 8245:
+//! merge_check 19 times slower on the Windows runner once its fixture moved to `TestCommand`, not reproduced on the VM). The
+//! variants each change one thing against the plain start main's fixture used; the table gives the median and p90 per sequence.
+//! `--first`: only the first `TestCommand::new` of this process (what every nextest test process pays once), one line.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stdout)]
+
+#[path = "measure_test_command/ab.rs"]
+mod ab;
 
 use paddock_testkit::TestCommand;
 use std::path::{Path, PathBuf};
@@ -59,6 +68,25 @@ fn ms(t: Instant) -> f64 {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let flag = |f: &str| args.iter().position(|a| a == f);
+    if flag("--first").is_some() {
+        let t = Instant::now();
+        let c = TestCommand::new("git");
+        let built = ms(t);
+        let t = Instant::now();
+        drop(c);
+        println!(
+            "first TestCommand::new in this process: {built:.1} ms, drop {:.1} ms",
+            ms(t)
+        );
+        return;
+    }
+    if let Some(n) = flag("--ab")
+        .and_then(|i| args.get(i + 1))
+        .map(|v| v.parse::<usize>().unwrap())
+    {
+        ab::run(n);
+        return;
+    }
     let runs: usize = flag("--runs")
         .and_then(|i| args.get(i + 1))
         .map_or(10, |v| v.parse().unwrap());
