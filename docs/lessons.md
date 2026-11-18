@@ -2831,3 +2831,90 @@ complete line and never completed on it: both new tests hung 40 s before that fi
 2026-11-15, above; found both times by ADR 0103's reaper and the parity tests under load). Open, not done here: `kill_tree` reads the
 whole process table before it signals; signalling the group first and reading the table for escapees would cut the 1.8 s but changes
 what a tree kill can find (a child whose parent was killed is no longer below it), so it needs its own design.
+
+## Fix items from the bulk-API inventory: four possible bugs read from code (2026-11-18, ADR 0108)
+The inventory for ADR 0108 read four defects from code. None is reproduced yet; each fix starts with a failing test (ER-11).
+- **Pitcrew `job-outcomes.json` loses outcomes when runners refresh together.** `runner_activity`
+  (`apps/pitcrew/app/src-tauri/src/commands.rs`, an async command on the blocking pool) calls `gitea::outcomes`
+  (`apps/pitcrew/app/src-tauri/src/gitea.rs`), which loads the shared cache file, adds its runner's lookups and saves the whole
+  file. The dashboard asks for every runner at once (`dashboard.store.ts`, `Promise.all`), so the last save wins and the other
+  runners' new outcomes are looked up again on the next refresh. Fix with ADR 0108 WP-9 (one outcomes pass for all runners in
+  one command), or a lock around load-modify-save. Test: two concurrent `outcomes` calls with disjoint new jobs keep both.
+- **Spotter avatar writes share one temporary name.** `write_atomic` (`apps/spotter/crates/spotter-engine/src/avatar.rs`)
+  writes `path.with_extension("tmp")`, so `<key>.img` and `<key>.json` both use `<key>.tmp`. Two `watch_avatar` calls (async
+  commands) storing the same key at once can rename one's bytes into the other's file. Fix: a unique temporary name per write
+  (the full file name plus `.tmp` and a random or process-unique suffix). Test: two concurrent stores of one key leave a
+  readable image and meta.
+- **Dyno's two smartctl readers are not registered.** The local `SmartctlWear::read`
+  (`apps/dyno/crates/dyno-platform/src/hardware.rs`) and the helper's `smart_reader.rs` each run `smartctl` scan plus one run
+  per drive; `docs/known-copies.toml` lists neither (rule 55). Fix with ADR 0108 WP-2 (DY-4: one shared reader, bounded
+  parallel), or register the pair first with a delete-by tag.
+- **`RepoGit::run` in paddock-dev starts git with no timeout.** `tools/paddock-dev/src/pr/mod.rs` runs
+  `git_env::git()...output()`, so a hung git hangs `./dev pr` for ever. Fix: run it through the bounded runner
+  (`paddock_proc::run_bounded`) with a limit, as the other git readers do; with ADR 0108 WP-11 (TD-10). Test: a stand-in git
+  that never exits ends at the limit with an error naming the command.
+Class (the first two): per-item calls (ADR 0108) bring their own races when they run in parallel against one shared file; the bulk form (one
+pass, one write) removes the race with the calls.
+
+## Fix item: job-isolation's orphan-days test failed once in the push gate (2026-11-18)
+`disk: kept folders no job used for PADDOCK_CI_ORPHAN_DAYS ... go when their slot is idle; used ones stay`
+(conformance/test/job-isolation.test.mjs:357, "an old-layout folder nobody took over: gone") failed once in the pre-push row
+`conformance-tests` of `docs/adr-bulk-apis` (machine load 22 to 27, the row at concurrency 4 beside the other rows), and passed in
+two runs right after on the same tree (`npm test` in conformance, then `./dev ci run conformance tests` at concurrency 4). The
+change being pushed was docs only and does not reach `job-isolation.sh` or its test, so the push went ahead (ER-12: a FLAKY test
+outside the change's plan is recorded, not blocking). Causes to rule out, with the observation that rules each out: (1) `release`
+returns before the orphan sweep of unslotted folders has finished (rule out: the sweep runs inside `release`'s own process and
+`release` waits on it); (2) the unslotted folder is swept only under a lock another concurrent test file can hold (rule out: the
+lock path is under the test's own `host()` root); (3) the 20-day time stamp is renewed by something before the sweep (rule out: the
+folder's mtime just before `release`). Next: reproduce under load with a failing run first (ER-28), then fix the cause.
+## paddock-assistant: "Stop ends a slow Pitwall within 2 s" timed the turn's save, not Stop (CI run 8241, Windows, 2026-11-18)
+**Symptom.** `pitwall::stop_ends_a_slow_pitwall_within_a_read_slice_in_every_phase` failed once on main's Windows crate job
+(run 8241, job 41141; 2.8 s against its 2 s limit) and passed on its retry (FLAKY). It measured from Stop to the turn's end event.
+**Causes listed (ER-28), with what each measurement showed** (probe on the real Windows runner, branch
+`wip/assistant-stop-windows-probe`, run 8264: 40 turns x 3 conditions x 2 tries = 240, split at the moment the provider's chat
+returned): (1) the cancel acting late (read slice, socket timeout, close): refuted, Stop to the generation's end was at most 65 ms
+in every condition (idle, every core busy, four fsync writers); (2) the save before the end event (`ConversationStore::append`,
+an atomic write with fsync): load-sensitive, median 16 ms idle and 75 ms with the fsync writers, at most 349 ms; in the failing run
+a test that runs a real cargo build, pack and sign (`cargo-paddock-plugin::it flow`) ended next to it; (3) a connect retry (Windows
+reports a refused loopback connect after about 2 s): refuted, nothing connects after Stop on this path (code read:
+`PitwallProvider::chat`, `loopback::send_via`). The 2.8 s was not reproduced in isolation (0 of 240); a held save reproduces the
+failure deterministically (the old assertion with the save taking 2.1 s: red, Stop itself 41 ms).
+**Root cause.** The test asserted a wall-clock limit (rule 40, C30 flagged it) over an interval that included the disk.
+**Fix (test).** The world's store and provider are wrapped (`HeldSaves`, `Watched`): the test holds the save, stops, waits for
+the generation to end (the testkit's hang guard only), checks that no end event came before the save, then lets the save go. No wall-clock
+assertion; the read slice's promptness stays with `paddock_pitwall`'s own `cancel_acts_while_the_server_is_silent`. The sibling
+`stop_takes_effect_within_100_ms_and_keeps_what_was_said` (turns.rs, the same class, the other C30 finding in the crate) now asserts
+that the blocked generation saw the stop, without its 100 ms limit. Positive control: with the provider's cancel not passed on,
+the new test fails at its hang guard ("the generation never ended after Stop"). Stress: 300 of 300 (macOS, load 30).
+**Why the logs did not show it.** The test printed only the total; the split needed the probe. **Class: a test asserts a wall-clock
+limit** (rule 40; earlier: Debrief 1.1.1's three cancel tests, 2026-10-25, above).
+## Debrief: two live-tail e2e timed out in WebKit because every live tick costs the page about a second (CI run 8243, 2026-11-18)
+**Symptom.** `live-tail.e2e.ts:207` (the tail status panel and Settings ▸ Live tail) and `:247` (rolling files) failed both tries in
+WebKit on main (debrief.yml run 8243, shard 3/4): the Settings form not visible after 5 s ("Loading settings…" in the snapshot), an
+axe scan cut by the 60 s test timeout, a 60 s timeout, and `data-dock-planned` missing after 5 s. In the same job
+`main-layout.e2e.ts:113` and in shard 4 `windowing.e2e.ts:93` were FLAKY, the first on the same `data-dock-planned` wait.
+**Evidence.** The traces: every step slow while live tail ran (a click 1 to 3 s, `page.clock.runFor(2500)` 34 s); the green
+main run 8229 already took 30.3 s and 24.5 s for these two tests (of 60 s), and its shard ran in 15.2 min against 26.9 min in 8243
+(the runner 1.8 times slower). In the CI image (4 CPUs, WebKit, 2 workers) the two took 32 to 37 s; Chromium 5 to 6 s; macOS WebKit 7 s.
+**Causes listed (ER-28), with what each measurement showed** (CI image, WebKit): (1) the mock live tail's ticks (every 250 ms)
+saturate the page: confirmed, 3 to 18 frames in 3 s with ticks against 184 with live tail on and no ticks; JS in timer callbacks
+was 12 % of the time, so most of it is the page's own update and rendering after each tick; (2) the pinned page clock (new between
+the green and the red run): refuted, the page is saturated with and without it, and the tests were already at 30 s before it;
+(3) CSS animations (two infinite pulses while live): refuted, pausing them changed nothing, and with no ticks the page ran 184 frames
+with them; (4) forced synchronous layout: refuted, 11 k `scrollTop`/`scrollLeft` reads cost 9 ms in 5 s; (5) Intl formatting:
+refuted, 2 ms; (6) the mock's settings load stuck: refuted, it loads within 1 to 2.3 s on an idle page; (7) the app load's dock
+planning (`data-dock-planned`, a 5 s wait after the status bar): load-dependent, not stuck (no settle retries ran out): 0.05 to
+1.9 s at 1 worker, 3.9 to 6.5 s at 4 workers (8 loads each), 3.8 to 5.2 s in run 8243, where it failed twice at 5 s.
+**Fix (specs).** The status test opens a live tail whose first tick is two minutes away (`QUIET_LIVE`): it checks files, status and
+set_live, not new lines (the options go to set_live only while live tail is on, so turning it off was no answer). The rolling-files
+test ticks every 500 ms (5 ticks in its 2.5 s, not 10) and turns live tail off (`liveOff`) once the two rotations are in. Holding the
+page clock does not work: axe and the live toggle wait on page timers (tried: both tests hung). The app load (`openApp`,
+`openAppWith`) now gives its waits one budget, `APP_LOAD_TIMEOUT` (15 s, the status bar's already), each wait never less than the
+5 s it had; the measurement is recorded next to the constant (ER-12). `expectDockPlanned` takes an optional `timeout`.
+**Counts** (CI image, 4 CPUs, WebKit, `--workers=4 --repeat-each=20`, the two tests, 40 runs each way): before 29 of 40 failed
+(9 at `data-dock-planned`, the others at the Settings form, the members count, an axe scan or a 60 s timeout); after 40 of 40 passed (median 30.7 s, at most 48.5 s with
+four workers on four CPUs). macOS, both engines: green before and after (not the failing environment).
+**Open (not done here).** Whether a live tick is this costly in the desktop app's WebKitGTK on Linux (GPU compositing, not the
+headless software renderer) is not measured; the per-tick work (what re-renders) is a product question for Debrief's live tail.
+**Class: a test runs a moving source it does not need while it reads** (earlier: the events-grid fix item, 2026-11-17, and the
+live-tail toast clicks, 2026-11-12, above).
