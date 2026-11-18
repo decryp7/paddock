@@ -16,6 +16,14 @@ on:
         description: "Probe rounds per folder."
         required: false
         default: "3"
+      spike:
+        description: "Also run tools/git-read-spike (per-call git, one cat-file --batch, gix), on the job's temp folder: true or false."
+        required: false
+        default: "false"
+      tests:
+        description: "Run the serial merge_check set: true or false."
+        required: false
+        default: "true"
 
 env:
   PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
@@ -87,8 +95,21 @@ jobs:
             ./dev ci host-probe --dir "$PADDOCK_WORKSPACE" --label "$LABEL-workspace-$i" --starts 200 --repos 50 --files 500
           done
 
+      - name: git read spike
+        if: ${{ inputs.spike == 'true' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/git-read-spike
+        run: |
+          cargo build --release --locked --config "build.target-dir='$RUNNER_TEMP/spike-target'" || {
+            echo "::error::the spike did not build. Next step: build it locally with cargo xwin"; exit 1; }
+          for files in 2000 12000; do
+            "$RUNNER_TEMP/spike-target/release/git-read-spike.exe" --files "$files" --commits 20 --blobs 300 --reps 3 --dir "$TEMP" \
+              | tee -a "$RUNNER_TEMP/spike.txt"
+          done
+          { echo '### git read spike'; grep -E '^(repo:|\|)' "$RUNNER_TEMP/spike.txt"; } >> "$GITHUB_STEP_SUMMARY"
+
       - name: merge_check, one thread
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        if: ${{ inputs.tests != 'false' }}
         run: |
           start=$SECONDS
           cargo nextest run --profile ci --locked --no-fail-fast --test-threads 1 \

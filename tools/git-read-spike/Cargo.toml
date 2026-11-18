@@ -1,0 +1,12 @@
+[package]
+name = "git-read-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "One-off measurement (exp/windows-host-probe, never merged): per-call git, one cat-file --batch-command process, or gix in process, for the reads paddock-dev's merge check and pre-push make"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+gix = { version = "0.90.0", default-features = false, features = ["sha1"] }
+
+[workspace]
