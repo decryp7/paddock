@@ -172,10 +172,6 @@ pub fn locate_executable(root: &Path, os: Os) -> Option<Browser> {
 }
 
 /// Runs `<exe> --version` with a timeout and returns its output; the self-test of an installed browser.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the browser's self-test: a try_wait poll on a child it started (the try_wait class)"
-)]
 pub fn self_test(exe: &Path) -> Result<String> {
     let mut child = paddock_proc::command(exe)
         .arg("--version")
