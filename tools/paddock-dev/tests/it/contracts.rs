@@ -663,8 +663,13 @@ fn the_checks_the_rust_host_runs_in_ci_are_in_the_plan_for_every_input_they_read
     let args = paddock_dev::ci_run::contract::conformance_rust_args_at(&root).unwrap();
     let ids: Vec<&str> = args[args.iter().position(|a| a == "--only").unwrap() + 1].split(',').collect();
     assert!(ids.len() >= 12, "the 12 checks of pair P3: {ids:?}");
-    let history = paddock_repo_graph::GitHistory::new(&root, std::time::Duration::from_secs(60));
-    let graph = paddock_dev::plan::read_graph(&root, &history).unwrap();
+    // An empty graph: no `cargo metadata` (this test runs in the conformance job), and the conformance job does not depend on it.
+    let graph = paddock_dev::plan::RepoGraph {
+        cargo: paddock_repo_graph::Graph::new(),
+        npm: paddock_repo_graph::Graph::new(),
+        apps: BTreeSet::new(),
+        configs: Default::default(),
+    };
     let registry = paddock_dev::check::registry();
     let mut inputs = BTreeSet::new();
     for id in &ids {
@@ -676,15 +681,11 @@ fn the_checks_the_rust_host_runs_in_ci_are_in_the_plan_for_every_input_they_read
     }
     assert!(inputs.len() >= 20, "the controls name the inputs the checks read: {inputs:?}");
     for path in &inputs {
-        let req = paddock_dev::plan::Request {
-            files: vec![path.clone()],
-            all: false,
+        let opts = paddock_dev::plan::Options {
             explain: true,
-            root: None,
-            base: None,
-            head: "HEAD".into(),
+            ..Default::default()
         };
-        let plan = paddock_dev::plan::plan_on_graph(&root, &history, &req, &graph).unwrap();
+        let plan = paddock_dev::plan::affected(&[path.clone()], &graph, &opts).unwrap();
         assert_eq!(
             plan["conformance"], true,
             "a change to {path} (read by a check of the Rust host) must run the conformance job"
