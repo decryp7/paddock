@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { startServers, ServerNotReady } from './server-ready.ts';
+import { killGroup, reraisedAs, startServers, ServerNotReady } from './server-ready.ts';
 
 const here = import.meta.dirname;
 const node = (code: string) => `${JSON.stringify(process.execPath)} -e ${JSON.stringify(code)}`;
@@ -78,7 +78,7 @@ test('positive control: a command that exits at once fails fast with one ::error
   assert.ok(Date.now() - started < 10_000, 'failed fast, not at the 30 s limit');
 });
 
-test('positive control: a server that never answers fails at its timeout, naming URL and probe, and its whole tree is killed', async () => {
+test('positive control: a server that never answers fails at its timeout, naming URL and probe, and its whole tree is killed', { skip: process.platform === 'win32' && 'POSIX process groups and ps; Windows kills by taskkill (see the injected-platform test)' }, async () => {
   const dir = scratch();
   const file = join(dir, 'pids');
   const port = await freePort();
@@ -93,7 +93,7 @@ test('positive control: a server that never answers fails at its timeout, naming
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('a server that answers is ready, its start-up output is logged, and stop ends the process and its grandchild', async () => {
+test('a server that answers is ready, its start-up output is logged, and stop ends the process and its grandchild', { skip: process.platform === 'win32' && 'POSIX process groups and ps; Windows kills by taskkill (see the injected-platform test)' }, async () => {
   const dir = scratch();
   const file = join(dir, 'pids');
   const port = await freePort();
@@ -138,7 +138,7 @@ test('stderr stays in the log after the server is ready, and a server that ends 
   assert.match(errors[0]!, /ended during the run \(exit status 7\).*stderr tail: late warning/);
 });
 
-test('stop signals the group even when the leader has already exited: its orphaned child is killed too', async () => {
+test('stop signals the group even when the leader has already exited: its orphaned child is killed too', { skip: process.platform === 'win32' && 'POSIX process groups and ps; Windows kills by taskkill (see the injected-platform test)' }, async () => {
   const dir = scratch();
   const file = join(dir, 'pids');
   const port = await freePort();
@@ -161,14 +161,14 @@ test('the command runs in baseDir, and a relative cwd resolves against it', asyn
   const port = await freePort();
   const code = `require('fs').writeFileSync('cwd.txt', process.cwd()); require('http').createServer((q,r)=>r.end('ok')).listen(${port})`;
   const sub = join(dir, 'sub');
-  spawnSync('mkdir', [sub]);
+  mkdirSync(sub);
   const running = await startServers([{ command: node(code), url: `http://localhost:${port}`, timeoutMs: 20_000, reuseExisting: false, cwd: 'sub' }], { ...quiet, baseDir: dir });
   await running.stop();
-  assert.equal(readFileSync(join(sub, 'cwd.txt'), 'utf8'), spawnSync('realpath', [sub], { encoding: 'utf8' }).stdout.trim());
+  assert.equal(readFileSync(join(sub, 'cwd.txt'), 'utf8'), realpathSync(sub));
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('a process that is interrupted while the servers start leaves none running (SIGTERM, SIGINT and SIGHUP), the whole tree', async () => {
+test('a process that is interrupted while the servers start leaves none running (SIGTERM, SIGINT and SIGHUP), the whole tree', { skip: process.platform === 'win32' && 'POSIX process groups and ps; Windows kills by taskkill (see the injected-platform test)' }, async () => {
   for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
     const dir = scratch();
     const file = join(dir, 'pids');
@@ -189,7 +189,7 @@ test('a process that is interrupted while the servers start leaves none running 
   }
 });
 
-test('a process that exits normally while its server still runs leaves none running (the exit handler)', async () => {
+test('a process that exits normally while its server still runs leaves none running (the exit handler)', { skip: process.platform === 'win32' && 'POSIX process groups and ps; Windows kills by taskkill (see the injected-platform test)' }, async () => {
   const dir = scratch();
   const file = join(dir, 'pids');
   const port = await freePort();
@@ -212,5 +212,55 @@ test('a process that exits normally while its server still runs leaves none runn
   const tree = await treeOf(file);
   await new Promise((r) => child.once('exit', r));
   await allGone(tree, 'after the parent exited');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('on Windows a server that has already exited makes no taskkill call (its pid may be reused, rule 53); a running one makes exactly one', () => {
+  const calls: string[][] = [];
+  const deps = { platform: 'win32' as const, taskkill: (args: string[]) => void calls.push(args), signal: () => assert.fail('no POSIX signal on Windows') };
+  killGroup({ pid: 4242, exitCode: 0, signalCode: null }, deps);
+  killGroup({ pid: 4242, exitCode: null, signalCode: 'SIGKILL' }, deps);
+  assert.deepEqual(calls, []);
+  killGroup({ pid: 4242, exitCode: null, signalCode: null }, deps);
+  assert.deepEqual(calls, [['/pid', '4242', '/T', '/F']]);
+});
+
+test('on POSIX the group is signalled even when the leader has exited', () => {
+  const sent: Array<[number, string]> = [];
+  killGroup({ pid: 4242, exitCode: 0, signalCode: null }, { platform: 'linux', taskkill: () => assert.fail('no taskkill on POSIX'), signal: (pid, sig) => void sent.push([pid, sig]) });
+  assert.deepEqual(sent, [[-4242, 'SIGKILL']]);
+});
+
+test('on Windows SIGHUP is re-raised as SIGTERM; elsewhere every signal is re-raised as itself', () => {
+  assert.equal(reraisedAs('SIGHUP', 'win32'), 'SIGTERM');
+  assert.equal(reraisedAs('SIGINT', 'win32'), 'SIGINT');
+  assert.equal(reraisedAs('SIGHUP', 'linux'), 'SIGHUP');
+});
+
+test('after a signal removed the handlers, the next start installs them again', { skip: process.platform === 'win32' && 'POSIX signals' }, async () => {
+  const dir = scratch();
+  const out = join(dir, 'counts.json');
+  const port = await freePort();
+  const parent = join(dir, 'parent.ts');
+  writeFileSync(
+    parent,
+    `import { writeFileSync } from 'node:fs';\n` +
+      `import { startServers } from ${JSON.stringify(join(here, 'server-ready.ts'))};\n` +
+      `const spec = { command: ${JSON.stringify(node(`require('http').createServer((q,r)=>r.end('ok')).listen(${port})`))}, url: 'http://localhost:${port}', timeoutMs: 20000, reuseExisting: false };\n` +
+      `let got: () => void = () => undefined; const arrived = new Promise<void>((r) => (got = r)); process.on('SIGTERM', () => got());\n` +
+      `const counts: number[] = [];\n` +
+      `const first = await startServers([spec], { log: () => undefined });\n` +
+      `counts.push(process.listenerCount('SIGTERM'));\n` +
+      `process.kill(process.pid, 'SIGTERM'); await arrived; await new Promise((r) => setImmediate(r));\n` +
+      `counts.push(process.listenerCount('SIGTERM'));\n` +
+      `await first.stop();\n` +
+      `const second = await startServers([spec], { log: () => undefined });\n` +
+      `counts.push(process.listenerCount('SIGTERM'));\n` +
+      `await second.stop();\n` +
+      `writeFileSync(${JSON.stringify(out)}, JSON.stringify(counts));\n`,
+  );
+  const child = spawn(process.execPath, ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', parent], { stdio: 'ignore' });
+  await new Promise((r) => child.once('exit', r));
+  assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), [2, 1, 2], 'own + ours, own only after the signal, own + ours again');
   rmSync(dir, { recursive: true, force: true });
 });

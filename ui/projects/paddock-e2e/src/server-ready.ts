@@ -62,24 +62,46 @@ async function probe(url: string): Promise<{ ok: boolean; what: string }> {
   }
 }
 
-// Every server group this process started and has not ended. The children are held (not looked up by a name read earlier), so a
-// group id is signalled only while its leader is ours (rule 53).
+// Every server this process started and has not ended. The children are held, never looked up by a name read earlier (rule 53).
+// On POSIX the server is its own process group, and a group id stays reserved while any member runs, so signalling `-pid` after the
+// leader exited can only reach that group's remaining members. Windows has no such reservation: a pid whose process exited may
+// already belong to another program, so nothing is signalled for a child that has ended (as Playwright's processLauncher does).
 const live = new Set<ChildProcess>();
-let installed = false;
+let uninstall: (() => void) | undefined;
 
-/** Kills one server's whole group at once (SIGKILL, as Playwright's own default does; `taskkill /T /F` on Windows). */
-function killGroup(child: ChildProcess): void {
+/** What `killGroup` needs from the platform; tests inject it. */
+export interface KillDeps {
+  readonly platform: NodeJS.Platform;
+  readonly taskkill: (args: string[]) => void;
+  readonly signal: (pid: number, signal: 'SIGKILL') => void;
+}
+const realDeps: KillDeps = {
+  get platform() {
+    return process.platform;
+  },
+  taskkill: (args) => void spawnSync('taskkill', args, { stdio: 'ignore' }),
+  signal: (pid, signal) => process.kill(pid, signal),
+};
+
+/** Kills one server's whole group at once (SIGKILL, as Playwright's own default does; `taskkill /T /F` on Windows, only while the child runs). */
+export function killGroup(child: Pick<ChildProcess, 'pid' | 'exitCode' | 'signalCode'>, deps: KillDeps = realDeps): void {
   const pid = child.pid;
   if (pid === undefined) return;
-  if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
+  if (deps.platform === 'win32') {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    deps.taskkill(['/pid', String(pid), '/T', '/F']);
     return;
   }
   try {
-    process.kill(-pid, 'SIGKILL');
+    deps.signal(-pid, 'SIGKILL');
   } catch {
     /* the group is already gone */
   }
+}
+
+/** The signal to re-raise for `signal`: Windows delivers no SIGHUP, so its console close is ended as SIGTERM. */
+export function reraisedAs(signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP', platform: NodeJS.Platform = process.platform): 'SIGINT' | 'SIGTERM' | 'SIGHUP' {
+  return platform === 'win32' && signal === 'SIGHUP' ? 'SIGTERM' : signal;
 }
 
 function killAll(): void {
@@ -88,16 +110,23 @@ function killAll(): void {
 }
 
 function installCleanup(): void {
-  if (installed) return;
-  installed = true;
-  process.once('exit', killAll);
+  if (uninstall) return;
+  const handlers: Array<[NodeJS.Signals, () => void]> = [];
+  const remove = () => {
+    process.off('exit', killAll);
+    for (const [signal, h] of handlers) process.off(signal, h);
+    uninstall = undefined; // a long-lived host that starts servers again gets its handlers again
+  };
+  uninstall = remove;
+  process.on('exit', killAll);
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
     const onSignal = () => {
       killAll();
-      process.off(signal, onSignal);
+      remove();
       // With no other handler (Playwright's own, which then ends the run) the signal's default action must still end this process.
-      if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
+      if (process.listenerCount(signal) === 0) process.kill(process.pid, reraisedAs(signal));
     };
+    handlers.push([signal, onSignal]);
     process.on(signal, onSignal);
   }
 }
@@ -136,6 +165,7 @@ async function startOne(spec: ServerSpec, log: (line: string) => void, baseDir: 
   let stopping = false;
   let ready = false;
   const ended = new Promise<void>((done) => child.once('close', () => done()));
+  child.once('exit', () => live.delete(child)); // an ended child's pid may be reused: never signalled again from the exit handlers
   child.on('error', (e) => (exit = `could not start: ${e.message}`));
   child.on('exit', (code, signal) => {
     exit = signal ? `ended by ${signal}` : `exit status ${code}`;
