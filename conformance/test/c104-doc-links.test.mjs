@@ -53,7 +53,8 @@ test('C104 baseline: a listed dead link passes, a fixed one is a warning, a grow
   const w = await findingsOf('C104', fixed, { options: { git: (a) => (a[0] === 'show' ? JSON.stringify({ links: [dead] }) : 'x') } });
   assert.deepEqual(w.map((x) => x.severity), ['warn']);
   const intro = await findingsOf('C104', makeApp(files), { options: { git: (a) => { if (a[0] === 'show') throw new Error('fatal: path does not exist in x'); return 'x'; } } });
-  assert.deepEqual(intro, [], 'a baseline absent at the base is its introduction');
+  assert.deepEqual(intro.map((x) => x.severity), ['error'], 'a baseline absent at the base is an empty base: its entries are growth');
+  assert.match(intro[0].message, /baseline grew/);
 });
 
 test('C104 named mechanisms: a missing ./dev command, hook, script or C-number is an error unless the sentence says planned', async () => {

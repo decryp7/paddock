@@ -81,8 +81,8 @@ export function isWorkTree(root, git = defaultGit(root)) {
 
 /**
  * The entries of `current` that the baseline at the merge base does not have (a multiset difference by `keyOf`), or `{ reason }` when
- * it cannot be measured (no git, no merge base, an unreadable file). A baseline absent at the merge base is the first introduction:
- * nothing was added. With `looseKeyOf` an entry whose loose key (say the hash) is in the base but whose full key is not is `moved`, not
+ * it cannot be measured (no git, no merge base, an unreadable file). A baseline absent at the merge base is an empty base (every entry is growth, ER-46).
+ * With `looseKeyOf` an entry whose loose key (say the hash) is in the base but whose full key is not is `moved`, not
  * added (`moved: [{ item, from }]`). `entriesOf(json)` reads the list out of the parsed file; `git` and `baseRef` are injectable for tests.
  */
 export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = defaultGit(root), baseRef = targetRef(), looseKeyOf }) {
@@ -98,7 +98,12 @@ export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = de
   try {
     text = git(['show', `${base}:${path}`]);
   } catch (e) {
-    if (/does not exist|exists on disk, but not in|not in/.test(String(e.stderr ?? e.message))) return { base, added: [], moved: [] };
+    // A list absent at the merge base is an empty base: every current entry is growth (ER-46). Treating it as the "first introduction" let a new list with any
+    // number of entries in silently (a new apps/<app>/app/eslint-suppressions.json with count 5, the second time this class was found).
+    if (/does not exist|exists on disk, but not in|not in/.test(String(e.stderr ?? e.message))) {
+      const { fresh, moved } = reconcile(current, [], keyOf, looseKeyOf);
+      return { base, added: fresh, moved };
+    }
     return { kind: 'unreadable', reason: `the baseline at ${base.slice(0, 9)} cannot be read` };
   }
   let entries;

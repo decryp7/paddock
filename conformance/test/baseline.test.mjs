@@ -21,8 +21,9 @@ test('growth: entries the merge base lacks are added; a second copy of a known e
   assert.deepEqual(baselineGrowth(opts(base, ['a', 'a', 'b'])).added, ['a']);
 });
 
-test('growth: no baseline at the merge base is the first introduction; no merge base or a broken file is not measured, never a pass', () => {
-  assert.deepEqual(baselineGrowth(opts(null, ['x'])).added, []);
+test('growth: a baseline absent at the merge base is an empty base, so every entry is growth (ER-46); no merge base or a broken file is not measured, never a pass', () => {
+  assert.deepEqual(baselineGrowth(opts(null, ['x', 'x', 'y'])).added, ['x', 'x', 'y'], 'a new list with entries is growth, however many');
+  assert.deepEqual(baselineGrowth(opts(null, [])).added, [], 'a new empty list adds nothing');
   const noGit = baselineGrowth({ ...opts('{}', []), git: () => { throw new Error('not a git repository'); } });
   assert.match(noGit.reason, /no merge base/);
   assert.match(baselineGrowth(opts('not json', [])).reason, /cannot be parsed/);

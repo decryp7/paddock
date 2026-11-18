@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { entriesOf } from '../src/checks/C139-e2e-ready-directives.mjs';
@@ -49,7 +49,21 @@ test('C139 growth: a file new at the merge base, and a checkout where git cannot
   writeFileSync(join(first, 'ui/eslint-suppressions.json'), supp(3));
   sh(first, 'add', '.');
   sh(first, 'commit', '-q', '-m', 'the list is introduced');
-  assert.deepEqual(await run(first), [], 'the first introduction adds nothing');
+  const intro = await run(first);
+  assert.deepEqual(intro.map((f) => [f.file, f.severity, f.unwaivable]), [['ui/eslint-suppressions.json', 'warn', true]], 'a list new at the merge base is an empty base: its 3 entries are growth');
+  assert.match(intro[0].message, /grew: 3 entries are/);
+  // The same for a list in another app (a new apps/pitwall/app/eslint-suppressions.json with count 5 gave no finding).
+  const other = makeApp(SPEC);
+  sh(other, 'init', '-q', '-b', 'main');
+  sh(other, 'add', '.');
+  sh(other, 'commit', '-q', '-m', 'base');
+  sh(other, 'checkout', '-q', '-b', 'topic');
+  mkdirSync(join(other, 'apps/pitwall/app'), { recursive: true });
+  writeFileSync(join(other, 'apps/pitwall/app/eslint-suppressions.json'), supp(5));
+  sh(other, 'add', '.');
+  sh(other, 'commit', '-q', '-m', 'a new exception list');
+  const pw = await run(other);
+  assert.match(pw[0].message, /grew: 5 entries are/);
   const w = await run(repo(supp(1), supp(1)), { baseRef: 'no-such-ref' });
   assert.equal(w.length, 1);
   assert.match(w[0].message, /shrink-only rule is not enforced here/);

@@ -165,12 +165,18 @@ test('allow list growth: an unchanged or shrunk list says nothing, a raised coun
   assert.match(added[0].fix, /user's approval/);
 });
 
-test('allow list growth: a list new at the merge base, a fixture folder without .git and an unmeasurable base are not growth', async () => {
-  const first = makeApp({ 'conformance/c130-allow.json': allowJson([ok(3)]), 'tools/t/tests/it/ok.rs': 'x\n' });
+test('allow list growth: a list new at the merge base is an empty base, so its entries are growth (ER-46); a fixture folder without .git and an unmeasurable base are not', async () => {
+  const first = makeApp({ 'tools/t/tests/it/ok.rs': 'x\n', 'conformance/.keep': '' });
   sh(first, 'init', '-q', '-b', 'main');
   sh(first, 'add', '.');
-  sh(first, 'commit', '-q', '-m', 'only');
-  assert.deepEqual((await grew(first)).map((f) => f.message.slice(0, 40)), [], 'the first introduction adds nothing');
+  sh(first, 'commit', '-q', '-m', 'main: no list');
+  sh(first, 'checkout', '-q', '-b', 'topic');
+  writeFileSync(join(first, 'conformance/c130-allow.json'), allowJson([ok(3)]));
+  sh(first, 'add', '.');
+  sh(first, 'commit', '-q', '-m', 'topic: the list appears with 3 entries');
+  const intro = await grew(first);
+  assert.equal(intro.length, 1, 'a new list is growth');
+  assert.match(intro[0].message, /the allow list grew: 3 entries are/);
   assert.deepEqual(await grew(makeApp({ 'conformance/c130-allow.json': allowJson([ok(3)]) })), [], 'no .git: nothing to compare, nothing said');
   const none = growthRepo([ok(1)], [ok(1)]);
   const w = (await findingsOf('C130', none, { options: { baseRef: 'no-such-ref' } })).filter((f) => /shrink-only rule is not enforced/.test(f.message));

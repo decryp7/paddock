@@ -84,6 +84,20 @@ fn growth_tree(base: u32, now: u32) -> tempfile::TempDir {
     d
 }
 
+/// A repository whose merge base (`main`) has no suppressions file and whose `topic` commit adds `apps/pitwall/app/eslint-suppressions.json` with count 5.
+fn new_list_tree() -> tempfile::TempDir {
+    let d = tempfile::tempdir().unwrap();
+    write(d.path(), &[("ui/e2e/a.spec.ts", "const a = 1;\n".to_string())]);
+    git(d.path(), &["init", "-q", "-b", "main"]);
+    git(d.path(), &["add", "."]);
+    git(d.path(), &["commit", "-q", "-m", "base: no list"]);
+    git(d.path(), &["checkout", "-q", "-b", "topic"]);
+    write(d.path(), &[("apps/pitwall/app/eslint-suppressions.json", supp(5))]);
+    git(d.path(), &["add", "."]);
+    git(d.path(), &["commit", "-q", "-m", "a new exception list"]);
+    d
+}
+
 const JS_RUN_C139: &str = r#"
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
@@ -161,15 +175,35 @@ fn c139_a_raised_count_is_growth_and_a_lowered_one_is_not() {
 }
 
 #[test]
+fn c139_a_new_exception_list_is_growth_however_many_entries_it_has() {
+    let d = new_list_tree();
+    let r = run_checks(&c139_options(d.path(), "fixture", Some("main")), &registry()).unwrap();
+    assert_eq!(
+        r.findings.len(),
+        1,
+        "{:?}",
+        r.findings.iter().map(|f| &f.message).collect::<Vec<_>>()
+    );
+    assert_eq!(r.findings[0].file, "apps/pitwall/app/eslint-suppressions.json");
+    assert!(
+        r.findings[0].unwaivable && r.findings[0].message.contains("grew: 5 entries are"),
+        "{}",
+        r.findings[0].message
+    );
+}
+
+#[test]
 fn live_c139_findings_equal_the_js_port_on_fixture_trees_and_on_this_tree() {
     if !has_node() {
         return skip("node is not installed");
     }
     let shapes = shapes_tree();
     let grown = growth_tree(1, 3);
+    let fresh = new_list_tree();
     let cases: Vec<(std::path::PathBuf, &str, Option<&str>)> = vec![
         (shapes.path().to_path_buf(), "fixture", None),
         (grown.path().to_path_buf(), "fixture", Some("main")),
+        (fresh.path().to_path_buf(), "fixture", Some("main")),
         (repo_root(), "paddock", None),
     ];
     for (root, app, base) in cases {
