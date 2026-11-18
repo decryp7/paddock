@@ -213,7 +213,7 @@ mod tests {
 
     #[test]
     fn the_writer_stores_one_raw_point_per_step_and_the_minutes_top_apps() {
-        let mut store = Store::memory().unwrap();
+        let store = Store::memory().unwrap();
         let mut w = HistoryWriter::default();
         let mut s = dyno_platform::fake::quiet_sample(Timestamp(0));
         s.disks.push(dyno_core::metrics::DiskSample {
@@ -237,7 +237,7 @@ mod tests {
         for i in 0..30 {
             s.at = Timestamp(i * 1_000);
             let g = vec![group("busy", 80.0), group("idle", 1.0)];
-            w.record(&mut store, &s, &g).unwrap();
+            w.record(&store, &s, &g).unwrap();
         }
         assert_eq!(store.core_points(Tier::Raw, Timestamp(0), Timestamp(MINUTE)).unwrap().len(), 6);
         assert_eq!(
@@ -249,7 +249,7 @@ mod tests {
         // 30 s of ticks at 1 s: 6 raw points.
         assert_eq!(store.points(Tier::Raw, Timestamp(0), Timestamp(MINUTE)).unwrap().len(), 6);
         s.at = Timestamp(MINUTE + 1);
-        w.record(&mut store, &s, &[]).unwrap();
+        w.record(&store, &s, &[]).unwrap();
         let rows = store.app_minutes(Timestamp(0), Timestamp(MINUTE)).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].app, "busy");
@@ -288,12 +288,12 @@ mod tests {
         }];
         for i in 0..(HOUR / RAW_STEP_MS) {
             s.at = Timestamp(i * RAW_STEP_MS);
-            w.record(&mut store, &s, &apps).unwrap();
+            w.record(&store, &s, &apps).unwrap();
         }
         let commits = store.count_commits();
         // An hour boundary: a raw point, the last minute's apps, and the minute, quarter-hour and hour rollups with their marks.
         s.at = Timestamp(HOUR + 1);
-        w.record(&mut store, &s, &apps).unwrap();
+        w.record(&store, &s, &apps).unwrap();
         assert!(!store.points(Tier::Hour, Timestamp(0), Timestamp(2 * HOUR)).unwrap().is_empty());
         assert_eq!(commits.take(), 1, "one tick, one transaction");
         w.record_disks(&store, &s).unwrap();

@@ -712,7 +712,7 @@ mod tests {
 
     #[test]
     fn app_minutes_disks_boots_and_starts() {
-        let mut s = Store::memory().unwrap();
+        let s = Store::memory().unwrap();
         s.put_app_minutes(&[AppMinute {
             at: Timestamp(MINUTE),
             app: "Chrome".into(),

@@ -185,6 +185,9 @@ pub fn parse_msacpi(text: &str) -> Vec<ThermalZone> {
         .collect()
 }
 
+/// What one `powermetrics` run gave: the CPU power domains and the fans.
+type PowerReading = Result<(Vec<EnergyDomain>, Vec<FanSpeed>), PlatformError>;
+
 /// The real reader of this system.
 pub struct SystemCounters {
     host: HelperHost,
@@ -213,7 +216,7 @@ impl SystemCounters {
 
     /// `powermetrics` with the samplers this Mac has: Intel Macs offer `smc` (fans), Apple silicon does not ("unrecognized
     /// sampler"), so the call is repeated with `cpu_power` alone, and later calls ask for `cpu_power` alone at once.
-    fn powermetrics(&self) -> Result<(Vec<EnergyDomain>, Vec<FanSpeed>), PlatformError> {
+    fn powermetrics(&self) -> PowerReading {
         use std::sync::atomic::Ordering;
         let run = |samplers: &str| {
             let args = ["--samplers", samplers, "-n", "1", "-i", "200"].map(String::from);
@@ -235,11 +238,7 @@ impl SystemCounters {
     }
 
     /// One reading. `powermetrics` is the shared run of a macOS query, read at most once by [`CounterReader::read_many`].
-    fn read_one(
-        &self,
-        id: CounterId,
-        powermetrics: &mut Option<Result<(Vec<EnergyDomain>, Vec<FanSpeed>), PlatformError>>,
-    ) -> Result<CounterValue, PlatformError> {
+    fn read_one(&self, id: CounterId, powermetrics: &mut Option<PowerReading>) -> Result<CounterValue, PlatformError> {
         let mut shared = || powermetrics.get_or_insert_with(|| self.powermetrics()).clone();
         match (self.host, id) {
             (HelperHost::Linux, CounterId::Thermal) => Ok(CounterValue::Thermal(linux_thermal(&self.sys))),

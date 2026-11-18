@@ -262,7 +262,11 @@ impl Dispatcher {
                     .for_page((self.monotonic)(), q.after.is_some(), || self.processes.sweep())
                     .map_err(|e| remote(&e))?;
                 let page = build_page(&sweep, &who, ctx.view.scope, &q);
-                log::info!(items = page.items.len(), more = page.next.is_some(); "Helper: processes answered");
+                // `sweep_at` tells the pages of one read apart from pages of separate sweeps (ER-27).
+                log::info!(
+                    items = page.items.len(), more = page.next.is_some(), follow_up = q.after.is_some(), sweep_at = sweep.taken_at;
+                    "Helper: processes answered"
+                );
                 Ok(HelperReply::Processes(page))
             }
             HelperRequest::SocketOwners => {
