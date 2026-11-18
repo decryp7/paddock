@@ -307,3 +307,11 @@ fn an_object_over_the_cap_is_an_error_in_process_and_through_git() {
     );
     assert_eq!(r.starts(), 2);
 }
+
+/// A tree's mode digits come from the repository, which the caller may not trust: no input makes the parser panic (C36).
+#[test]
+fn a_mode_never_panics_on_hostile_bytes() {
+    paddock_testkit::assert_never_panics(&[b"100644".as_slice(), b"040000", b"160000"], |b| {
+        paddock_git::Mode::parse(b)
+    });
+}

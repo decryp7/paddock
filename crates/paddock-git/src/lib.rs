@@ -736,6 +736,18 @@ mod tests {
         );
     }
 
+    /// A tree's bytes come from the repository: no input makes the tree parser panic, whatever the id length (C36).
+    #[test]
+    fn a_tree_never_panics_on_hostile_bytes() {
+        let mut t = b"100644 a.txt\0".to_vec();
+        t.extend([0x11; 20]);
+        t.extend(b"40000 d\0");
+        t.extend([0x22; 20]);
+        for id_len in [0, 1, 20, 32] {
+            paddock_testkit::assert_never_panics(&[t.as_slice()], |b| parse_tree(b, id_len));
+        }
+    }
+
     /// Two names that are not UTF-8 would both decode to U+FFFD and become one path: such a tree is an error, never merged.
     #[test]
     fn a_name_that_is_not_utf8_is_an_error_not_a_lossy_path() {
