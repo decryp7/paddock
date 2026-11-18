@@ -473,23 +473,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(empty);
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_fake_engine_is_asked_for_a_preview_and_a_prune() {
         let d = temp("fake");
-        let script = d.join("docker");
-        paddock_testkit::exe::write_program(
-            &script,
-            "#!/bin/sh\ncase \"$1 $2\" in\n\
-             'system df') printf 'Images\\t3\\t1\\t1GB\\t600MB (60%%)\\nBuild Cache\\t4\\t0\\t2GB\\t2GB\\n';;\n\
-             'images --filter') printf 'abc\\t<none>:<none>\\t100MB\\n';;\n\
-             'images --format') printf 'abc\\t<none>:<none>\\t100MB\\nddd\\tnode:20\\t1GB\\neee\\told:1\\t50MB\\n';;\n\
-             'ps -a') printf 'old:1\\n';;\n\
-             'image prune') echo 'Total reclaimed space: 100MB';;\n\
-             'volume prune') echo 'boom' >&2; exit 1;;\n\
-             *) exit 0;;\nesac\n",
-        )
-        .unwrap();
+        use paddock_testkit::Actions;
+        paddock_testkit::StandIn::new(&d, "docker")
+            .exit(0)
+            .when_args(
+                &["system", "df"],
+                Actions::new()
+                    .stdout("Images\t3\t1\t1GB\t600MB (60%)")
+                    .stdout("Build Cache\t4\t0\t2GB\t2GB"),
+            )
+            .when_args(&["images", "--filter"], Actions::new().stdout("abc\t<none>:<none>\t100MB"))
+            .when_args(
+                &["images", "--format"],
+                Actions::new()
+                    .stdout("abc\t<none>:<none>\t100MB")
+                    .stdout("ddd\tnode:20\t1GB")
+                    .stdout("eee\told:1\t50MB"),
+            )
+            .when_args(&["ps", "-a"], Actions::new().stdout("old:1"))
+            .when_args(&["image", "prune"], Actions::new().stdout("Total reclaimed space: 100MB"))
+            .when_args(&["volume", "prune"], Actions::new().stderr("boom").exit(1))
+            .install()
+            .unwrap();
         let path = d.display().to_string();
         let r = report(Some(&path), None, Timestamp(1));
         assert_eq!(r.engine, Some(EngineKind::Docker));

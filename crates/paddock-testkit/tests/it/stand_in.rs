@@ -1183,3 +1183,85 @@ fn a_bundled_install_runs_under_any_name_it_is_copied_to() {
         (Some(5), "built a b\nnone\n")
     );
 }
+
+#[test]
+fn reads_one_stdin_line_without_waiting_for_the_end_of_stdin() {
+    use std::io::{BufRead, Write};
+    let s = Scratch::new();
+    let p = StandIn::new(&s.work(), "runner")
+        .answers(
+            Actions::new()
+                .reads_stdin_line()
+                .stdout_with("got <{stdin_line}>"),
+        )
+        .install()
+        .unwrap();
+    let mut child = TestCommand::new(p.program())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(b"go\nmore").unwrap();
+    // stdin stays open: the line alone is enough.
+    let mut line = String::new();
+    std::io::BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    assert_eq!(line.trim_end(), "got <go>");
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
+fn repeats_its_steps_until_it_is_ended_and_burns_cpu_until_it_is_ended() {
+    use std::io::BufRead;
+    let s = Scratch::new();
+    let p = StandIn::new(&s.work(), "ticker")
+        .answers(
+            Actions::new().repeats(
+                &Actions::new()
+                    .stdout("tick")
+                    .sleeps(Duration::from_millis(10)),
+            ),
+        )
+        .install()
+        .unwrap();
+    let mut child = TestCommand::new(p.program())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut lines = std::io::BufReader::new(child.stdout.take().unwrap()).lines();
+    for _ in 0..3 {
+        assert_eq!(lines.next().unwrap().unwrap(), "tick");
+    }
+    child.kill().unwrap();
+    child.wait().unwrap();
+
+    let b = StandIn::new(&s.work(), "burner")
+        .answers(Actions::new().burns_cpu())
+        .install()
+        .unwrap();
+    let mut burner = TestCommand::new(b.program()).spawn().unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(burner.try_wait().unwrap().is_none(), "it ended by itself");
+    burner.kill().unwrap();
+    burner.wait().unwrap();
+}
+
+#[test]
+fn the_nice_token_is_a_number_and_the_cgroup_token_falls_back_when_the_file_is_not_there() {
+    let s = Scratch::new();
+    let p = StandIn::new(&s.work(), "probe")
+        .answers(Actions::new().stdout_with("ni={nice} mh={cgroup:no-such-file.here|none}"))
+        .install()
+        .unwrap();
+    let o = run(p.program(), &[]);
+    let text = out(&o);
+    let ni = text
+        .trim_end()
+        .strip_prefix("ni=")
+        .and_then(|t| t.strip_suffix(" mh=none"))
+        .unwrap_or_else(|| panic!("{text}"));
+    assert!(ni.parse::<i32>().is_ok(), "{text}");
+}

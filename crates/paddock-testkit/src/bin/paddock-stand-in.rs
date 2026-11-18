@@ -90,6 +90,7 @@ fn run() -> Result<i32, String> {
         dir: dir.clone(),
         name: name.to_string(),
         stdin,
+        line: std::cell::RefCell::new(None),
     };
     let mut actions = script.get("actions");
     for case in script.get("cases").and_then(Value::as_arr).unwrap_or(&[]) {
@@ -189,11 +190,13 @@ struct Ctx {
     dir: PathBuf,
     name: String,
     stdin: Option<String>,
+    /// The line a `read_line` step took from stdin (one line, no more), which `{stdin_line}` then gives.
+    line: std::cell::RefCell<Option<String>>,
 }
 
 /// Fills a template: `{args}` (the arguments, joined by spaces), `{arg:N}` (the N-th, from 1; empty when absent), `{cwd}`, `{dir}` (the
 /// stand-in's own folder), `{name}`, `{pid}`, `{environ}` (every variable as a `NAME=value` line, as `env` prints them), `{env:NAME}` and `{env:NAME|fallback}` (empty or the fallback when unset),
-/// `{flag_unquoted:PREFIX}` (the same without one pair of single quotes around it, as cargo's `--config key='value'` has), `{flag:PREFIX}` or `{flag:PREFIX|SUFFIX}` (what follows PREFIX in the last argument that starts with it, as `${a#PREFIX}` does, without a trailing SUFFIX when it has one), `{lines:PATH}` or `{lines:PATH|MAX}` (how many lines the file has, 0 when it is missing, at most MAX: `wc -l`), `{run:program|arg|arg}` (what that program prints in the working folder, without its last newline; empty when it fails; no `|` or `}` inside an argument), `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
+/// `{flag_unquoted:PREFIX}` (the same without one pair of single quotes around it, as cargo's `--config key='value'` has), `{flag:PREFIX}` or `{flag:PREFIX|SUFFIX}` (what follows PREFIX in the last argument that starts with it, as `${a#PREFIX}` does, without a trailing SUFFIX when it has one), `{lines:PATH}` or `{lines:PATH|MAX}` (how many lines the file has, 0 when it is missing, at most MAX: `wc -l`), `{run:program|arg|arg}` (what that program prints in the working folder, without its last newline; empty when it fails; no `|` or `}` inside an argument), `{nice}` (its own nice value), `{cgroup:FILE|fallback}` (that file of its own cgroup v2), `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
 fn expand(text: &str, ctx: &Ctx) -> Result<String, String> {
     let mut out = String::new();
     let mut rest = text;
@@ -235,7 +238,11 @@ fn token(t: &str, ctx: &Ctx) -> Result<String, String> {
         "name" => ctx.name.clone(),
         "pid" => std::process::id().to_string(),
         "stdin" => stdin.to_string(),
-        "stdin_line" => stdin.lines().next().unwrap_or("").to_string(),
+        "stdin_line" => match ctx.line.borrow().as_deref() {
+            Some(l) => l.to_string(),
+            None => stdin.lines().next().unwrap_or("").to_string(),
+        },
+        "nice" => own_nice()?,
         _ => {
             if let Some(prefix) = t.strip_prefix("flag_unquoted:") {
                 let v = ctx
@@ -284,6 +291,9 @@ fn token(t: &str, ctx: &Ctx) -> Result<String, String> {
                     .and_then(|i| ctx.argv.get(i))
                     .cloned()
                     .unwrap_or_default()
+            } else if let Some(v) = t.strip_prefix("cgroup:") {
+                let (file, fallback) = v.split_once('|').unwrap_or((v, ""));
+                own_cgroup_file(file).unwrap_or_else(|| fallback.to_string())
             } else if let Some(v) = t.strip_prefix("env:") {
                 let (name, fallback) = v.split_once('|').unwrap_or((v, ""));
                 std::env::var(name)
@@ -338,6 +348,16 @@ fn record_call(
 }
 
 fn act(actions: &Value, ctx: &Ctx) -> Result<i32, String> {
+    if let Some(code) = run_steps(actions, ctx)? {
+        return Ok(code);
+    }
+    let code = actions.get("exit").and_then(Value::as_i64).unwrap_or(0);
+    let _ = std::io::stdout().flush();
+    i32::try_from(code).map_err(|_| format!("exit code {code} does not fit"))
+}
+
+/// Runs the steps in order; `Some(code)` when a step ended the program (`exit_env`, `exec`), `None` when they all ran.
+fn run_steps(actions: &Value, ctx: &Ctx) -> Result<Option<i32>, String> {
     for step in actions.get("steps").and_then(Value::as_arr).unwrap_or(&[]) {
         let Some((kind, arg)) = step.as_obj().and_then(|m| m.first()) else {
             return Err("a step is not an object with one member".into());
@@ -397,21 +417,91 @@ fn act(actions: &Value, ctx: &Ctx) -> Result<i32, String> {
                     None => default,
                 };
                 let _ = std::io::stdout().flush();
-                return i32::try_from(code).map_err(|_| format!("exit code {code} does not fit"));
+                return i32::try_from(code)
+                    .map(Some)
+                    .map_err(|_| format!("exit code {code} does not fit"));
             }
-            "exec" => return exec(arg, ctx),
+            "exec" => return exec(arg, ctx).map(Some),
             "run" => {
                 let (mut cmd, program) = command_of(arg, ctx)?;
                 let _ = std::io::stdout().flush();
                 cmd.status()
                     .map_err(|e| format!("cannot start {program}: {e}"))?;
             }
+            "read_line" => read_stdin_line(ctx)?,
+            "burn" => loop {
+                std::hint::black_box(0u64);
+            },
+            "repeat" => loop {
+                if let Some(code) = run_steps(arg, ctx)? {
+                    return Ok(Some(code));
+                }
+            },
             other => return Err(format!("unknown step `{other}`")),
         }
     }
-    let code = actions.get("exit").and_then(Value::as_i64).unwrap_or(0);
-    let _ = std::io::stdout().flush();
-    i32::try_from(code).map_err(|_| format!("exit code {code} does not fit"))
+    Ok(None)
+}
+
+/// Reads one line of stdin, byte by byte so nothing after it is taken, and keeps it for `{stdin_line}`.
+fn read_stdin_line(ctx: &Ctx) -> Result<(), String> {
+    let mut line = Vec::new();
+    let mut byte = [0u8; 1];
+    let mut stdin = std::io::stdin().lock();
+    while stdin
+        .read(&mut byte)
+        .map_err(|e| format!("cannot read stdin: {e}"))?
+        == 1
+    {
+        if byte[0] == b'\n' {
+            break;
+        }
+        line.push(byte[0]);
+    }
+    let text = String::from_utf8_lossy(&line)
+        .trim_end_matches('\r')
+        .to_string();
+    *ctx.line.borrow_mut() = Some(text);
+    Ok(())
+}
+
+/// The stand-in's own nice value (Linux: field 19 of `/proc/self/stat`; elsewhere `ps -o ni=`).
+fn own_nice() -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let stat = std::fs::read_to_string("/proc/self/stat")
+            .map_err(|e| format!("cannot read /proc/self/stat: {e}"))?;
+        // The name in field 2 may hold spaces and parentheses: fields count from the last `)`.
+        let after = stat
+            .rsplit_once(')')
+            .map(|(_, r)| r)
+            .ok_or("/proc/self/stat has no `)`")?;
+        after
+            .split_whitespace()
+            .nth(16)
+            .map(str::to_string)
+            .ok_or_else(|| "/proc/self/stat is too short".to_string())
+    }
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        let out = Command::new("ps")
+            .args(["-o", "ni=", "-p", &std::process::id().to_string()])
+            .output()
+            .map_err(|e| format!("cannot run ps: {e}"))?;
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+    #[cfg(not(unix))]
+    {
+        Err("{nice} exists only on Unix".into())
+    }
+}
+
+/// `file` of the stand-in's own cgroup (v2), trimmed; `None` when it cannot be read (not Linux, no cgroup v2).
+fn own_cgroup_file(file: &str) -> Option<String> {
+    let cgroup = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    let path = cgroup.lines().next()?.splitn(3, ':').nth(2)?.to_string();
+    let text = std::fs::read_to_string(format!("/sys/fs/cgroup{path}/{file}")).ok()?;
+    Some(text.trim().to_string())
 }
 
 fn line(to: &mut impl Write, text: &Value, ctx: &Ctx, template: bool) -> Result<(), String> {
