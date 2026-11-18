@@ -153,6 +153,14 @@ class TauriLikeBackend {
 describe('countingInvoke (the IPC call itself, under a tauri-backend)', () => {
   const fakeInvoke = async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => ({ cmd, args }) as T;
 
+  it('passes every argument through, the invoke options too', async () => {
+    const seen: unknown[][] = [];
+    const inner = async (...a: unknown[]): Promise<unknown> => (seen.push(a), null);
+    const counter = countingInvoke(inner as (cmd: string, args?: never, options?: never) => Promise<unknown>);
+    await (counter.invoke as (...a: unknown[]) => Promise<unknown>)('get_items', { ids: [1] }, { headers: { a: '1' } });
+    expect(seen).toEqual([['get_items', { ids: [1] }, { headers: { a: '1' } }]]);
+  });
+
   it('counts every invoke by command and passes it through', async () => {
     const counter = countingInvoke(fakeInvoke);
     const backend = new TauriLikeBackend({ invoke: counter.invoke });

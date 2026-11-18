@@ -131,9 +131,10 @@ export interface CountingInvoke<F> {
 /** Wraps an `invoke` function (Tauri's `invoke(cmd, args)` or a fake of it) so every call is recorded, then passed through. */
 export function countingInvoke<F extends (command: string, args?: never) => unknown>(invoke: F): CountingInvoke<F> {
   const calls: RecordedInvoke[] = [];
-  const counted = ((command: string, args?: unknown) => {
-    calls.push({ command, args });
-    return (invoke as (c: string, a?: unknown) => unknown)(command, args);
+  // Every argument goes through (Tauri's invoke takes options third), whatever the counter records.
+  const counted = ((command: string, ...rest: unknown[]) => {
+    calls.push({ command, args: rest[0] });
+    return (invoke as (c: string, ...r: unknown[]) => unknown)(command, ...rest);
   }) as unknown as F;
   return {
     invoke: counted,

@@ -14,7 +14,6 @@ export function isItemOk<T>(r: ItemResult<T>): r is { ok: T } {
 
 const bad = (message: string): CommandFailure => new CommandFailure({ code: 'internal', message, retryable: false });
 
-/**
 /** The value check that accepts every value: pass it to `parseItemResults` to say so, when the caller checks the values itself. */
 export const acceptAny = (_v: unknown): _v is unknown => true;
 
