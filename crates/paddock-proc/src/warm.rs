@@ -142,9 +142,7 @@ mod tests {
 
     use std::path::Path;
 
-    fn script(path: &Path, body: &str) {
-        paddock_testkit::exe::write_program(path, format!("#!/bin/sh\n{body}")).unwrap();
-    }
+    use paddock_testkit::{Actions, StandIn};
 
     fn fifo(path: &Path) {
         let status = crate::command("mkfifo").arg(path).status().unwrap();
@@ -160,15 +158,17 @@ mod tests {
         let (up, go) = (dir.path().join("up"), dir.path().join("go"));
         fifo(&up);
         fifo(&go);
-        let exe = dir.path().join("slow.sh");
-        script(
-            &exe,
-            &format!(
-                "echo up > '{}'\ncat '{}' > /dev/null\necho 'Fake 1.0'\n",
-                up.display(),
-                go.display()
-            ),
-        );
+        let exe = StandIn::new(dir.path(), "slow")
+            .answers(
+                Actions::new()
+                    .writes(&up, "up\n")
+                    .reads_file(&go.to_string_lossy())
+                    .stdout("Fake 1.0"),
+            )
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         std::thread::scope(|s| {
             let run = s.spawn(|| warm_up(&exe, &["--version"]));
             let mut line = String::new();
@@ -194,14 +194,22 @@ mod tests {
     #[test]
     fn warm_up_names_a_failure_and_does_not_remember_it() {
         let dir = tempfile::tempdir().unwrap();
-        let bad = dir.path().join("bad.sh");
-        script(&bad, "echo 'bundle damaged' >&2\nexit 5\n");
+        let bad = StandIn::new(dir.path(), "bad")
+            .stderr("bundle damaged")
+            .exit(5)
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         let e = warm_up(&bad, &["--version"]).unwrap_err();
         assert!(
             e.contains("exit status: 5") && e.contains("bundle damaged"),
             "{e}"
         );
-        script(&bad, "echo 'fixed'\n");
+        StandIn::new(dir.path(), "bad")
+            .stdout("fixed")
+            .install()
+            .unwrap();
         assert!(
             warm_up(&bad, &["--version"]).is_ok(),
             "a repaired program is started again"
@@ -216,12 +224,13 @@ mod tests {
     fn warm_up_starts_a_program_once_per_identity_and_again_after_it_is_replaced() {
         let dir = tempfile::tempdir().unwrap();
         let runs = dir.path().join("runs");
-        let exe = dir.path().join("count.sh");
-        let body = format!(
-            "echo run >> '{}'\nhead -c 300000 /dev/zero >&2\n",
-            runs.display()
-        );
-        script(&exe, &body);
+        // One long line on stderr: more than the tail that is kept.
+        let stand_in = StandIn::new(dir.path(), "count")
+            .appends(&runs, "run\n")
+            .stderr(&"x".repeat(300_000))
+            .install()
+            .unwrap();
+        let exe = stand_in.program().to_path_buf();
         let count = || std::fs::read_to_string(&runs).map_or(0, |t| t.lines().count());
         let first = warm_up(&exe, &["--version"]).unwrap();
         assert_eq!(count(), 1);
@@ -231,7 +240,8 @@ mod tests {
             "the recorded time, no second start"
         );
         assert_eq!(count(), 1);
-        script(&exe, &format!("{body}# replaced\n"));
+        // A new file in the old one's place (a new inode and time), with the same script beside it.
+        paddock_testkit::exe::write_program(&exe, std::fs::read(&exe).unwrap()).unwrap();
         warm_up(&exe, &["--version"]).unwrap();
         assert_eq!(count(), 2, "a replaced file is a new program");
     }

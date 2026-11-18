@@ -660,7 +660,7 @@ mod tests {
     fn a_program_that_may_not_run_is_reported() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("not-executable");
-        std::fs::write(&p, "#!/bin/sh\n").unwrap();
+        std::fs::write(&p, "a file without the execute bit\n").unwrap();
         let e = run_bounded(crate::command(&p), limits()).unwrap_err();
         assert!(matches!(e, RunError::PermissionDenied(_)), "{e}");
         assert!(e.to_string().contains("Not allowed to run not-executable"));
