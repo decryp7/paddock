@@ -88,6 +88,13 @@ pub trait Exec: Sync {
     fn heavy_unavailable(&self, _left: Duration) -> Option<String> {
         None
     }
+    /// This program as the rows `./dev` runs itself start it ([`crate::tool_cache::self_exe`]), or why it cannot be started again.
+    /// A test's executor gives a stand-in, so those rows reach it instead of being not measured in a test process.
+    fn dev_program(&self) -> Result<String, String> {
+        crate::tool_cache::self_exe()
+            .map(|p| p.to_string_lossy().to_string())
+            .map_err(|e| e.to_string())
+    }
 }
 
 /// One table row: a shared [`Outcome`] (ADR 0089 amendment, WP-T3) plus what the table prints around it. A pass or a failure is
