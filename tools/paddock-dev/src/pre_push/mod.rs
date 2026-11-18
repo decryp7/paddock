@@ -22,6 +22,7 @@
 //! announced at the top of every run it is set in, shown in the table and logged next to the gate logs.
 
 pub mod budget;
+pub mod deny;
 pub mod exec;
 pub mod gates;
 pub mod heavy_tool;
@@ -481,6 +482,11 @@ fn command_in(
             args.only.iter().any(|w| id.split(' ').next() == Some(w.as_str()))
         });
     }
+    notes.extend(
+        planned
+            .iter()
+            .filter_map(|p| if let gates::Planned::Run(g) = p { g.notice.clone() } else { None }),
+    );
     if args.dry_run {
         return Ok(dry_run(&planned));
     }
@@ -1321,7 +1327,15 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
     }
     changed.sort();
     changed.dedup();
-    Ok((Change { files: changed, ranges }, notes, extra))
+    Ok((
+        Change {
+            files: changed,
+            ranges,
+            base: Some(base.to_string()),
+        },
+        notes,
+        extra,
+    ))
 }
 
 /// What the repository says that the plan does not: the conformance contract's check list, the apps that lint Windows, the CI image.
