@@ -124,7 +124,7 @@ function c23Waivers(cwd) {
  * commit named by a live C23 waiver in paddock.waivers.toml is printed as "waived: ..." and does not fail; an expired or
  * malformed waiver applies to nothing and only warns, and a waiver for a commit outside the range is ignored.
  */
-export function commitLintMain(argv, cwd = process.cwd(), log = console.error, now = new Date(), { relandRule = RELAND_RULE_COMMIT } = {}) {
+export function commitLintMain(argv, cwd = process.cwd(), log = console.error, now = new Date(), { relandRule = RELAND_RULE_COMMIT, strictUnmeasured = Boolean(process.env.CI) } = {}) {
   const flags = argv[0] === '--first-parent' ? ['--first-parent'] : [];
   const [flag, value] = flags.length ? argv.slice(1) : argv;
   let items;
@@ -158,7 +158,11 @@ export function commitLintMain(argv, cwd = process.cwd(), log = console.error, n
     }
     for (const p of lint(message, { landed: flag === '--range', reland })) findings.push({ check: 'C23', severity: 'error', file: flag === '--range' ? `commit ${id}` : id, id, message: p });
   }
-  if (unmeasured) log(`warning: re-lands were not judged (not measured): the commit that introduces the rule (${relandRule.slice(0, 10)}) is not in this clone; fetch the full history.`);
+  if (unmeasured) {
+    const msg = `re-lands were not judged (not measured): the commit that introduces the rule (${relandRule.slice(0, 10)}) is not in this clone; fetch the full history (fetch-depth: 0).`;
+    if (strictUnmeasured) findings.push({ check: 'C23', severity: 'error', file: 'clone', id: 'clone', message: msg });
+    else log(`warning: ${msg}`);
+  }
   let bad = 0;
   let kept = findings;
   if (flag === '--range') {

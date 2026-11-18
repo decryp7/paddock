@@ -106,7 +106,8 @@ test('C23 good: git\'s Reapply and Revert subjects in a history are accepted; a 
   // C23 scans a window of landed history, which holds re-lands from before the rule: it does not judge them (the commit-msg hook and the range check judge new commits).
   const old = repo(['feat: one', 'feat: the rule lands', 'Reapply "feat: one"', 'revert: reapply feat: one']);
   const ruleOfOld = execFileSync('git', ['rev-parse', 'HEAD~2'], { cwd: old, encoding: 'utf8' }).trim();
-  assert.deepEqual(await findingsOf('C23', repo(['feat: one', 'Reapply "feat: one"', 'revert: reapply feat: one']), { options: { relandRule: '1'.repeat(40) } }).then((f) => f.map((x) => x.severity)), ['warn'], 'the rule commit missing from the clone: said, not passed silently');
+  assert.deepEqual(await findingsOf('C23', repo(['feat: one', 'Reapply "feat: one"', 'revert: reapply feat: one']), { options: { relandRule: '1'.repeat(40), strictUnmeasured: false } }).then((f) => f.map((x) => x.severity)), ['warn'], 'the rule commit missing from the clone: said, not passed silently');
+  assert.deepEqual(await findingsOf('C23', repo(['feat: one', 'Reapply "feat: one"']), { options: { relandRule: '1'.repeat(40), strictUnmeasured: true } }).then((f) => f.map((x) => x.severity)), ['error'], 'in CI (a shallow clone would hide the rule) it fails');
   assert.deepEqual(await findingsOf('C23', old, { options: { relandRule: ruleOfOld } }).then((f) => f.map((x) => x.severity)), ['error', 'error'], 'descending from the rule commit: judged');
   assert.match(messages(await findingsOf('C23', repo(['feat: one', 'Reapplied "feat: one"']))), /does not start with/);
 });
@@ -279,6 +280,19 @@ test('commit-lint --range and C23 judge a re-land that descends from the rule co
   assert.equal(commitLintMain(['--range', 'HEAD~2..HEAD'], clean, () => {}, new Date(), { relandRule: cleanRule }), 0);
   // The rule's commit missing from the clone is "not measured", said aloud, and does not pass silently.
   const lost = [];
-  assert.equal(commitLintMain(['--range', 'HEAD~4..HEAD'], dir, (m) => lost.push(m), new Date(), { relandRule: '1'.repeat(40) }), 0);
+  assert.equal(commitLintMain(['--range', 'HEAD~4..HEAD'], dir, (m) => lost.push(m), new Date(), { relandRule: '1'.repeat(40), strictUnmeasured: false }), 0);
   assert.match(lost.join('\n'), /not measured/);
+  const ci = [];
+  assert.equal(commitLintMain(['--range', 'HEAD~4..HEAD'], dir, (m) => ci.push(m), new Date(), { relandRule: '1'.repeat(40), strictUnmeasured: true }), 1, 'in CI it fails');
+  assert.match(ci.join('\n'), /not measured.*fetch-depth: 0/s);
+});
+
+test('CI: every job that runs commit-lint --range or C23 checks out full history (a shallow clone would make the re-land rule not measured)', () => {
+  const wf = readFileSync(new URL('../../.gitea/workflows/ci.yml', import.meta.url), 'utf8');
+  const job = (name) => wf.split(/^  (?=[a-z0-9-]+:\n)/m).find((j) => j.startsWith(`${name}:`)) ?? '';
+  for (const name of ['conformance', 'commits', 'train-gates']) {
+    const j = job(name);
+    assert.ok(j.length > 100, `${name} job found`);
+    assert.match(j, /actions\/checkout@v4[\s\S]*?fetch-depth: 0/, `${name} checks out with fetch-depth: 0`);
+  }
 });

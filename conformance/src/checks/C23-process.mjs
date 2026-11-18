@@ -60,7 +60,11 @@ function commitFindings(ctx) {
     }
     for (const p of lint(message, { landed: true, reland })) out.push(error('C23', 8, `commit ${id}`, 1, p, 'Reword the commit (git commit --amend / rebase) before it is pushed.'));
   }
-  if (unmeasured) out.push(warn('C23', 8, '.git', 1, 're-lands were not judged (not measured): the commit that introduces the re-land rule is not in this clone', 'Fetch the full history (fetch-depth: 0).'));
+  if (unmeasured) {
+    // CI must measure it: a shallow clone would otherwise make the re-land rule never run there (ER-33).
+    const strict = ctx.options.strictUnmeasured ?? Boolean(process.env.CI);
+    out.push((strict ? error : warn)('C23', 8, '.git', 1, 're-lands were not judged (not measured): the commit that introduces the re-land rule is not in this clone', 'Fetch the full history (fetch-depth: 0).'));
+  }
   return out;
 }
 
