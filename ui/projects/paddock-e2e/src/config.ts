@@ -2,8 +2,10 @@ import { defineConfig, devices, type PlaywrightTestConfig, type ReporterDescript
 import { assertChromeForTesting, pinnedChrome } from './browser.ts';
 import { assertFreshBuilds, reuseServer, type BuildGuard } from './build-guard.ts';
 import { e2ePort, isOn } from './env.ts';
+import { paddockServers } from './servers.ts';
 
 export { isOn };
+export { paddockServers };
 
 /**
  * The Playwright config every Paddock app starts from (plan X39): `export default paddockConfig({ app: 'dyno', portEnv:
@@ -97,10 +99,24 @@ export function paddockConfig(options: PaddockConfigOptions): PlaywrightTestConf
         ? [{ name: 'screenshots', testMatch: shots, use: { ...chromium, viewport: DOC_SCREEN_VIEWPORT, deviceScaleFactor: 2 } }]
         : []),
     ],
-    ...(options.serve
-      ? { webServer: { command: options.serve(port), url: `http://localhost:${port}`, reuseExistingServer: reuseServer(env), timeout: options.serveTimeoutMs ?? 180_000 } }
-      : {}),
     ...options.extend,
+    ...mergedServers(
+      options.serve
+        ? paddockServers([{ command: options.serve(port), url: `http://localhost:${port}`, timeoutMs: options.serveTimeoutMs ?? 180_000, reuseExisting: reuseServer(env) }])
+        : {},
+      options.extend,
+    ),
   });
   return assertChromeForTesting(config, env);
+}
+
+/**
+ * The preset's global setup and server list together with `extend`'s own: neither side loses its global setup (Playwright takes an
+ * array), and a second server list under `metadata.paddockServers` is an error, since one would silently replace the other.
+ */
+function mergedServers(servers: Pick<PlaywrightTestConfig, 'globalSetup' | 'metadata'>, extend: PlaywrightTestConfig | undefined): Pick<PlaywrightTestConfig, 'globalSetup' | 'metadata'> {
+  if (servers.globalSetup === undefined) return {};
+  if (extend?.metadata && 'paddockServers' in extend.metadata) throw new Error("paddock-e2e: `extend.metadata.paddockServers` would replace the server list of `serve`; name the servers in one place");
+  const theirs = extend?.globalSetup === undefined ? [] : Array.isArray(extend.globalSetup) ? extend.globalSetup : [extend.globalSetup];
+  return { globalSetup: [servers.globalSetup as string, ...theirs], metadata: { ...extend?.metadata, ...servers.metadata } };
 }

@@ -166,7 +166,7 @@ pub fn isolation(env: &HashMap<String, String>, windows: bool, args: &[&str]) ->
 pub fn isolation_full(env: &HashMap<String, String>, windows: bool, args: &[&str]) -> (i32, String, String) {
     let cwd = std::env::current_dir().unwrap_or_default();
     let tables = ci_isolation::find_tables(None, env, &cwd);
-    let mut ctx = Ctx::new(env.clone(), tables, std::env::current_exe().unwrap_or_default());
+    let mut ctx = Ctx::new(env.clone(), tables, crate::tool_cache::self_exe().unwrap_or_default());
     ctx.windows |= windows;
     let (mut o, mut e) = (Vec::new(), Vec::new());
     let argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();

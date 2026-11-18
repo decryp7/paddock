@@ -242,7 +242,7 @@ pub fn run(a: &IsolationArgs, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let env: HashMap<String, String> = crate::process_env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_default();
     let tables = find_tables(a.tables.clone(), &env, &cwd);
-    let exe = std::env::current_exe().unwrap_or_default();
+    let exe = crate::tool_cache::self_exe().unwrap_or_default();
     let mut ctx = Ctx::new(env, tables, exe);
     // A test hook for the integration tests: Git-bash path handling on any OS.
     ctx.windows |= ctx.get("PADDOCK_CI_ASSUME_WINDOWS") == Some("1");

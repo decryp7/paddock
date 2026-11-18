@@ -111,7 +111,7 @@ pub enum Planned {
 }
 
 /// What the plan alone cannot say; read from the repository once by the caller.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Facts {
     /// The conformance command's arguments after `node`, read from conformance/paddock.ci.json, or why that failed.
     pub conformance: Option<Result<Vec<String>, String>>,
@@ -123,11 +123,14 @@ pub struct Facts {
     pub ci_version: Option<Result<String, String>>,
     /// Pitwall's script tests (`scripts/ci/*.test.mjs`, relative to `apps/pitwall`): no shell expands a glob here.
     pub pitwall_tests: Vec<String>,
-    /// This program, for the checks `./dev` runs itself.
-    pub dev_exe: String,
+    /// This program, for the checks `./dev` runs itself ([`crate::tool_cache::self_exe`]), or why it cannot be started again (a test
+    /// program is never started as paddock-dev: its harness would run its tests again).
+    pub dev_exe: Result<String, String>,
     /// The Tauri crates each candidate workspace leaves out of the Linux Clippy ([`super::linux_inputs::left_out`]), or why cargo
     /// could not say. Filled for [`linux_candidates`] only.
     pub left_out: std::collections::BTreeMap<String, Result<super::linux_inputs::WsCrates, String>>,
+    /// The members of the `crates` workspace (name, folder, dependencies), or why cargo could not say; None when not read.
+    pub crates_members: Option<Result<Vec<super::members::Member>, String>>,
     /// The run is the member gate of `./dev merge check --gates` (`--member-gate`): the repository-wide audits run too.
     pub member_gate: bool,
     /// A kept build folder per workspace (`<it>/<workspace>`), used when the caller sets no `CARGO_TARGET_DIR`: the throw-away
@@ -164,10 +167,26 @@ pub const ROW_SET: &[&str] = &[
 
 /// The id prefixes of the rows planned per workspace (the Linux Clippy names the workspaces it covers and those it leaves out): they
 /// are not in [`ROW_SET`], and the planner's test tells the fixed rows from these.
-pub const PER_WORKSPACE_PREFIXES: &[&str] = &["fmt ", "lockfile ", "clippy ", "clippy-windows ", "clippy-linux "];
+pub const PER_WORKSPACE_PREFIXES: &[&str] = &["fmt ", "lockfile ", "clippy ", "clippy-windows ", "clippy-linux ", "doctest "];
 
 /// Workspaces whose lints are not a push gate: they have a CI job of their own that is not part of a branch run.
 const OWN_JOB: &[&str] = &["/fuzz", "/templates/"];
+
+/// `g` run by this program ([`Facts::dev_exe`]), or not measured when it cannot be started again: never a guessed `./dev`, never
+/// a test program (whose harness would take the arguments as test filters and run its tests again).
+fn dev_run(facts: &Facts, g: Gate) -> Planned {
+    match &facts.dev_exe {
+        Ok(program) => Planned::Run(Gate {
+            program: program.clone(),
+            ..g
+        }),
+        Err(why) => Planned::NotMeasured {
+            id: g.id,
+            reason: format!("this program cannot be started again: {why}"),
+            next: "run the push gate through ./dev (the paddock-dev binary); this is not a finding in your change".into(),
+        },
+    }
+}
 
 fn gate(id: String, cwd: &str, program: &str, args: &[&str], rank: u8, next: String) -> Gate {
     Gate {
@@ -227,6 +246,61 @@ pub(super) fn windows_skip_reason(ws: &str) -> String {
     }
 }
 
+/// The doctests of the crates a change reaches (`cargo test --doc`). nextest does not run doctests, so a broken example passed the
+/// local gates and failed CI (paddock-testkit's `StandIn` doctest, E0308, 2026-11-18). The flags are CI's own: `crates` with
+/// `--all-features` (ci.yml, "Doc tests (workspace, every feature)"), an app workspace as the app-gates action runs it (no feature flag).
+/// In `crates` only the touched crates and their dependents inside `crates` (`-p`, names and dependencies from `cargo metadata`, see
+/// [`super::members::reached`]; a changed file in no member, or a metadata failure, widens to `--workspace`), on every push; in an app
+/// workspace the whole workspace (cargo skips packages with no library), only in the member gate (`--member-gate`).
+/// `RUSTUP_AUTO_INSTALL=0` stops a probe from installing a toolchain (ER-45). Blocking from the start: CI already runs these tests, so
+/// this is an established check moved earlier (as the member audits are, ER-41). On 1be287647 (2026-11-18) `cargo test --doc --all-features
+/// --workspace --no-fail-fast` in `crates` ran 63 test programs and 62 passed; the failure is paddock-testkit's `StandIn` doctest (E0308),
+/// which fix/testkit-doctest (47ef26a47) fixes and that base lacks. Costs: docs/benchmarks.md, "Doctest row of the push gate".
+fn doctest(ws: &str, files: &[String], facts: &Facts) -> Planned {
+    if ws != "crates" && !facts.member_gate {
+        return Planned::Skip {
+            id: format!("doctest {ws}"),
+            reason: "an app workspace's doctests run in the member gate of `./dev merge check --gates` (`--member-gate`), not in a developer's push (a whole-workspace test build); the doctests of the touched crates (and their dependents) run on every push".into(),
+        };
+    }
+    let mut args: Vec<String> = strs(&["test", "--doc"]);
+    if ws == "crates" {
+        args.push("--all-features".into());
+    }
+    args.push("--locked".into());
+    let reached = match (ws, &facts.crates_members) {
+        ("crates", Some(Ok(members))) => super::members::reached(members, ws, files).filter(|r| !r.is_empty()),
+        _ => None,
+    };
+    match reached {
+        Some(names) => {
+            for n in names {
+                args.extend(["-p".to_string(), n]);
+            }
+        }
+        None => args.push("--workspace".into()),
+    }
+    let mut g = Gate {
+        heavy: true,
+        env: vec![("RUSTUP_AUTO_INSTALL".into(), "0".into())],
+        args,
+        ..gate(
+            format!("doctest {ws}"),
+            ws,
+            "cargo",
+            &[],
+            4,
+            format!("fix the example it names (`cd {ws} && cargo test --doc`; nextest does not run doctests, CI's tests do)"),
+        )
+    };
+    match (&facts.target_dir, &facts.kept_targets) {
+        (Some(dir), _) => g.args = cargo_target::with_target_dir(&g.args, dir.trim_end_matches('/')),
+        (None, Some(k)) => g.args = cargo_target::with_target_dir(&g.args, &format!("{}/{}", k.trim_end_matches('/'), slug(ws))),
+        (None, None) => {}
+    }
+    Planned::Run(g)
+}
+
 /// The gates `change` reaches under `plan`, in table order. Each is CI's own command (the one source is named in `next` or the
 /// doc of the check that reads it).
 pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
@@ -276,6 +350,7 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             (None, None) => {}
         }
         out.push(Planned::Run(g));
+        out.push(doctest(&ws, &change.files, facts));
         if all_features || facts.windows_clippy.contains(&ws) {
             let mut args: Vec<&str> = vec![
                 "xwin",
@@ -374,17 +449,20 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
         });
     }
     if change.files.iter().any(|f| f.ends_with(".rs") || f == "docs/ipc-endpoints.toml") {
-        out.push(Planned::Run(Gate {
-            args: strs(&["check", "ipc-endpoints"]),
-            ..gate(
-                "ipc-endpoints".into(),
-                "",
-                &facts.dev_exe,
-                &[],
-                0,
-                "add the listen site to docs/ipc-endpoints.toml with an ending test or a reason (C102)".into(),
-            )
-        }));
+        out.push(dev_run(
+            facts,
+            Gate {
+                args: strs(&["check", "ipc-endpoints"]),
+                ..gate(
+                    "ipc-endpoints".into(),
+                    "",
+                    "",
+                    &[],
+                    0,
+                    "add the listen site to docs/ipc-endpoints.toml with an ending test or a reason (C102)".into(),
+                )
+            },
+        ));
     } else {
         out.push(Planned::Skip {
             id: "ipc-endpoints".into(),
@@ -396,17 +474,20 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
     // 5 to 8 s, in parallel with the conformance tests (docs/benchmarks.md, "C100 in the push gate"). It blocks from its first run:
     // C100 is long established (0 findings on the real tree at 97176067c, `./dev gates check`, 2026-11-17) and the user asked for the
     // refusal (2026-11-17).
-    out.push(Planned::Run(Gate {
-        args: strs(&["gates", "check"]),
-        ..gate(
-            "gates-register".into(),
-            "",
-            &facts.dev_exe,
-            &[],
-            0,
-            "fix the C100 finding printed above: its ::error line names the check and the fix (ADR 0060)".into(),
-        )
-    }));
+    out.push(dev_run(
+        facts,
+        Gate {
+            args: strs(&["gates", "check"]),
+            ..gate(
+                "gates-register".into(),
+                "",
+                "",
+                &[],
+                0,
+                "fix the C100 finding printed above: its ::error line names the check and the fix (ADR 0060)".into(),
+            )
+        },
+    ));
     // Dyno's wire fixtures (the UI contract) are regenerated from the Rust types when dyno-core's sources changed; a stale one
     // fails the push with the files named (apps/dyno/scripts/regen-wire-fixtures.sh runs cargo test).
     if change
@@ -604,8 +685,7 @@ fn conformance(facts: &Facts) -> Planned {
     match &facts.conformance {
         // The contract was read and is well-formed; the gate runs it through the executor, as CI does (`./dev ci run conformance paddock`),
         // so a flag or field added to the contract reaches the push gate with no change here.
-        Some(Ok(_)) => Planned::Run(Gate {
-            program: facts.dev_exe.clone(),
+        Some(Ok(_)) => dev_run(facts, Gate {
             args: strs(&["ci", "run", "conformance", "paddock"]),
             ..gate(id, "", "", &[], 0, "fix the finding it printed; the list of checks is the `conformance` field of conformance/paddock.ci.json (CI's \"Paddock itself\" step runs the same)".into())
         }),
@@ -631,19 +711,21 @@ const CONFORMANCE_TEST_CONCURRENCY: &str = "4";
 fn conformance_tests(facts: &Facts) -> Planned {
     let id = "conformance-tests";
     conformance_not_ready(id, facts).unwrap_or_else(|| {
-        Planned::Run(Gate {
-            program: facts.dev_exe.clone(),
-            args: strs(&["ci", "run", "conformance", "tests"]),
-            env: vec![("PADDOCK_TEST_CONCURRENCY".into(), CONFORMANCE_TEST_CONCURRENCY.into())],
-            ..gate(
-                id.into(),
-                "",
-                "",
-                &[],
-                0,
-                "fix the test it names (`cd conformance && npm test`; CI's conformance job runs the same)".into(),
-            )
-        })
+        dev_run(
+            facts,
+            Gate {
+                args: strs(&["ci", "run", "conformance", "tests"]),
+                env: vec![("PADDOCK_TEST_CONCURRENCY".into(), CONFORMANCE_TEST_CONCURRENCY.into())],
+                ..gate(
+                    id.into(),
+                    "",
+                    "",
+                    &[],
+                    0,
+                    "fix the test it names (`cd conformance && npm test`; CI's conformance job runs the same)".into(),
+                )
+            },
+        )
     })
 }
 
@@ -757,7 +839,7 @@ pub const NOT_RUN: &[(&str, &str)] = &[
         "CI covers them (ER-9 overlap); only workspaces with a changed file of their own are linted here",
     ),
     (
-        "tests (nextest, vitest, Playwright) other than the member audits",
-        "slower local checks run beside CI after dispatch (ER-9); the repository-wide audits of tools/paddock-dev run in the push gate (`member-audits`)",
+        "tests (nextest, vitest, Playwright) other than the member audits and the doctests of touched crates and their dependents",
+        "slower local checks run beside CI after dispatch (ER-9); the repository-wide audits of tools/paddock-dev run in the push gate (`member-audits`), and `doctest <workspace>` runs `cargo test --doc`",
     ),
 ];

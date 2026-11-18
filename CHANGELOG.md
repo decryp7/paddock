@@ -25,6 +25,10 @@ Conventional Commits; one semver tag for the whole repo.
   it started (`None`: its start time is unreadable), so a caller that gives up on the run can end the tree itself. `run_bounded` is
   unchanged. Used by paddock-dev's bounded phases (`Held`), which end the programs of an abandoned phase before the step goes on.
 
+### `paddock-env`: `cachedir`, cargo's `CACHEDIR.TAG` for a target folder cargo did not make (ADR 0107)
+
+- `cachedir::{FILE_NAME, SIGNATURE, CONTENT, is_tag, ensure}`: `./dev ci isolation path target` writes the tag into a kept build folder, and the test kit shares its toolchain link folder only in a folder that has it (also one level up, for `target/<triple>/<profile>`). `is_tag` checks the signature line; `ensure` repairs a missing, empty or partial tag by writing a temporary file and renaming it, and never rewrites a good one. Without the tag every `TestCommand` linked the toolchain into its own folder (testcommand-ab.yml run 8246, Windows); the kit now prints one `TestCommand:` line when it falls back.
+
 ### jiff is the family's one date and time library (outside Debrief's own crates)
 - RUSTSEC-2026-0543 marks chrono unmaintained, which fails `cargo deny` wherever a workspace crate names it. The shared crates and
   apps leave chrono and the `time` crate for `jiff`. Breaking shared API: `paddock_diag` (`Collected::collect`, `Context::now`,

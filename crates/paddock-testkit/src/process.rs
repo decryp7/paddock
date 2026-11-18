@@ -794,7 +794,7 @@ fn curated(machine: &Ambient) -> Curated {
 }
 
 /// Prints `line` on stderr the first time it is given in this process.
-fn log_once(line: &str) {
+pub(crate) fn log_once(line: &str) {
     use std::sync::{Mutex, OnceLock};
     static SAID: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
     let mut said = SAID

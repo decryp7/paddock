@@ -8,7 +8,7 @@
 //! ```no_run
 //! # use paddock_testkit::{Scratch, StandIn};
 //! # fn demo(scratch: &Scratch) -> std::io::Result<()> {
-//! let cargo = StandIn::new(scratch.work(), "cargo").stdout("added 3 packages").exit(0).records_args().install()?;
+//! let cargo = StandIn::new(&scratch.work(), "cargo").stdout("added 3 packages").exit(0).records_args().install()?;
 //! // put cargo.dir() first on the PATH of the code under test, run it, then:
 //! assert_eq!(cargo.calls()?, vec![vec!["build".to_string(), "--locked".to_string()]]);
 //! # Ok(()) }

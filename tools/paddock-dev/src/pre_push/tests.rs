@@ -32,6 +32,31 @@ fn crates_of(left_out: &[&str], lintable: usize) -> super::linux_inputs::WsCrate
     }
 }
 
+/// The `crates` workspace as `cargo metadata` would list it: ipc and cli depend on proc (cli through ipc too), solo on nothing.
+fn members() -> Vec<super::members::Member> {
+    let m = |name: &str, deps: &[&str]| super::members::Member {
+        name: name.to_string(),
+        dir: format!("crates/{name}"),
+        deps: deps.iter().map(|d| d.to_string()).collect(),
+    };
+    vec![
+        m("paddock-proc", &[]),
+        m("paddock-ipc", &["paddock-proc", "serde"]),
+        m("paddock-cli", &["paddock-ipc"]),
+        m("paddock-solo", &[]),
+    ]
+}
+
+fn doctest_args(files: &[&str]) -> String {
+    let planned = plan_gates(&plan(), &change(files), &facts());
+    let g = run_gates(&planned)
+        .into_iter()
+        .find(|g| g.id == "doctest crates")
+        .cloned()
+        .expect("the doctest row is planned");
+    g.args.join(" ")
+}
+
 fn facts() -> Facts {
     Facts {
         conformance: Some(Ok(["conformance/bin/paddock-conformance.mjs", "--app", "paddock", "--only", "C06"]
@@ -47,10 +72,11 @@ fn facts() -> Facts {
             ("apps/debrief".to_string(), Ok(crates_of(&["debrief-app"], 2))),
         ]
         .into(),
+        crates_members: Some(Ok(members())),
         member_gate: true,
         kept_targets: None,
         pitwall_tests: vec!["scripts/ci/a.test.mjs".into()],
-        dev_exe: "/x/dev".into(),
+        dev_exe: Ok("/x/dev".into()),
         target_dir: Some("/t/".into()),
     }
 }
@@ -216,6 +242,144 @@ fn the_gates_check_runs_on_every_push_whatever_changed_and_names_the_fix() {
     }
     let none = plan_gates(&unrelated, &change(&[]), &facts());
     assert!(ids(&none).contains(&"gates-register".to_string()), "also for an empty change");
+}
+
+/// The rows `./dev` runs itself never start a test program as paddock-dev (train 14, runs 8245 and 8248: `gates check` started the
+/// unit-test harness, which ran every test named `gates` or `check` again inside the test that started it). In a test process the
+/// program is unknown, so the rows are not measured, with the reason; never a guessed `./dev`.
+#[test]
+fn the_rows_dev_runs_itself_are_not_measured_when_this_program_is_a_test_program() {
+    let why = crate::tool_cache::self_exe()
+        .expect_err("a unit-test process is a test program")
+        .to_string();
+    let f = Facts {
+        dev_exe: Err(why.clone()),
+        ..facts()
+    };
+    let unrelated = json!({"conformance": false, "apps": [], "packages": {}});
+    let planned = plan_gates(&unrelated, &change(&["crates/paddock-proc/src/lib.rs"]), &f);
+    let rows = ["gates-register", "ipc-endpoints", "conformance", "conformance-tests"];
+    assert!(!ids(&planned).iter().any(|i| rows.contains(&i.as_str())), "{planned:?}");
+    for id in rows {
+        assert!(
+            planned
+                .iter()
+                .any(|p| matches!(p, Planned::NotMeasured { id: i, reason, .. } if i == id && reason.contains(&why))),
+            "{id} is not 'not measured' with the reason: {planned:?}"
+        );
+    }
+    // Positive control: with the program known, the same plan runs all four.
+    let known = plan_gates(&unrelated, &change(&["crates/paddock-proc/src/lib.rs"]), &facts());
+    for id in rows {
+        assert!(ids(&known).contains(&id.to_string()), "{id}: {known:?}");
+    }
+}
+
+/// nextest does not run doctests, so a broken example in a crate's docs passed the member gate and failed CI (paddock-testkit's
+/// `StandIn` doctest, E0308, 2026-11-18). The push gate runs `cargo test --doc` for the crates a change reaches.
+#[test]
+fn a_change_to_a_crates_source_plans_its_doctests() {
+    let planned = plan_gates(
+        &plan(),
+        &change(&["crates/paddock-proc/src/lib.rs", "crates/paddock-ipc/fuzz/src/a.rs"]),
+        &facts(),
+    );
+    let g = run_gates(&planned)
+        .into_iter()
+        .find(|g| g.id == "doctest crates")
+        .cloned()
+        .expect("the doctest row is planned");
+    assert_eq!(g.program, "cargo");
+    assert_eq!(g.cwd, "crates");
+    // The build folder is configuration right after the subcommand; only the touched crates, never the whole workspace.
+    assert_eq!(
+        g.args.join(" "),
+        "test --config build.target-dir='/t' --doc --all-features --locked -p paddock-cli -p paddock-ipc -p paddock-proc"
+    );
+    assert_eq!(g.env, vec![("RUSTUP_AUTO_INSTALL".to_string(), "0".to_string())]);
+    assert!(g.heavy);
+}
+
+/// A file under `crates/` that is no member's (`.config/nextest.toml`, `.cargo/config.toml`) is not a package: `-p .config` is a cargo
+/// error. It, and the workspace manifest and lockfile, widen the row to the workspace (review of 1be287647, P1-1).
+#[test]
+fn a_file_outside_every_member_widens_the_doctests_to_the_workspace() {
+    let ws = "test --config build.target-dir='/t' --doc --all-features --locked --workspace";
+    for f in [
+        "crates/.config/nextest.toml",
+        "crates/.cargo/config.toml",
+        "crates/Cargo.lock",
+        "crates/Cargo.toml",
+    ] {
+        assert_eq!(doctest_args(&[f]), ws, "{f}");
+    }
+    assert_eq!(
+        doctest_args(&["crates/paddock-solo/src/lib.rs", "crates/.config/nextest.toml"]),
+        ws,
+        "one stray file widens the lot"
+    );
+}
+
+/// A deleted or renamed crate's files are in the change but its folder is no member any more: `-p <gone>` is a cargo error, so the
+/// row widens to the workspace (P1-2).
+#[test]
+fn a_deleted_crate_widens_the_doctests_to_the_workspace() {
+    assert_eq!(
+        doctest_args(&["crates/paddock-gone/src/lib.rs"]),
+        "test --config build.target-dir='/t' --doc --all-features --locked --workspace"
+    );
+    // A folder that merely starts with a member's name is not that member.
+    assert!(doctest_args(&["crates/paddock-proc-old/src/lib.rs"]).ends_with("--workspace"));
+}
+
+/// A public API change in a crate breaks a dependent's doctest, so the dependents (transitively) run too, and only they (P2-2).
+#[test]
+fn the_doctest_row_adds_the_dependents_of_a_touched_crate() {
+    assert!(doctest_args(&["crates/paddock-ipc/src/lib.rs"]).ends_with("-p paddock-cli -p paddock-ipc"));
+    assert!(doctest_args(&["crates/paddock-solo/src/lib.rs"]).ends_with("--locked -p paddock-solo"));
+    // Nothing read from cargo: the whole workspace, never a guess.
+    let blind = Facts {
+        crates_members: Some(Err("cargo metadata for crates failed".into())),
+        ..facts()
+    };
+    let planned = plan_gates(&plan(), &change(&["crates/paddock-solo/src/lib.rs"]), &blind);
+    let g = run_gates(&planned).into_iter().find(|g| g.id == "doctest crates").cloned().unwrap();
+    assert!(g.args.join(" ").ends_with("--workspace"));
+}
+
+/// Positive control for the row above: it is planned from the change, not always. A change that reaches no crate source of the
+/// workspace has no row for it, and a file outside any crate (the workspace manifest) widens it to the workspace.
+#[test]
+fn the_doctest_row_follows_the_change() {
+    let got = ids(&plan_gates(&plan(), &change(&["apps/dyno/src/a.rs"]), &facts()));
+    assert!(!got.iter().any(|g| g == "doctest crates"), "{got:?}");
+    assert!(got.iter().any(|g| g == "doctest apps/dyno"), "{got:?}");
+    // A developer's push (no member gate) skips an app workspace's doctests with a reason, and still runs the crates' own.
+    let dev = Facts {
+        member_gate: false,
+        ..facts()
+    };
+    let planned = plan_gates(&plan(), &change(&["apps/dyno/src/a.rs", "crates/paddock-proc/src/lib.rs"]), &dev);
+    let got = ids(&planned);
+    assert!(
+        got.iter().any(|g| g == "doctest crates") && !got.iter().any(|g| g == "doctest apps/dyno"),
+        "{got:?}"
+    );
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "doctest apps/dyno" && reason.contains("--member-gate"))),
+        "{planned:?}"
+    );
+    let planned = plan_gates(&plan(), &change(&["crates/Cargo.toml"]), &facts());
+    let g = run_gates(&planned).into_iter().find(|g| g.id == "doctest crates").cloned().unwrap();
+    assert_eq!(
+        g.args.join(" "),
+        "test --config build.target-dir='/t' --doc --all-features --locked --workspace"
+    );
+    let none = json!({"conformance": false, "apps": [], "packages": {}});
+    let got = ids(&plan_gates(&none, &change(&["docs/x.md"]), &facts()));
+    assert!(!got.iter().any(|g| g.starts_with("doctest")), "{got:?}");
 }
 
 /// ROW_SET is what a pass record is compared with: it must list every row the planner can add besides the per-workspace ones, so a

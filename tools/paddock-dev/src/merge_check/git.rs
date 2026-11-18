@@ -2,7 +2,7 @@
 //! caller can turn it into "not measured" (ADR 0089) instead of an empty answer.
 
 use paddock_proc::{Limits, run_bounded};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
@@ -25,6 +25,54 @@ pub struct Git<'a> {
     max_output: usize,
     /// Texts already read, by revision and path: the detectors read the same file at the same revision more than once.
     texts: RefCell<HashMap<(String, String), Option<String>>>,
+    /// Answers of the reads [`cacheable`] allows, by arguments: they depend only on immutable objects.
+    memo: RefCell<HashMap<MemoKey, Vec<u8>>>,
+    /// How many git processes this reader started (tests read it).
+    starts: Cell<usize>,
+}
+
+/// A remembered read: its arguments, and whether exit status 1 was an answer.
+type MemoKey = (Vec<String>, bool);
+
+/// The read commands whose answer depends only on the objects their full ids name, when every revision they name is one.
+const IMMUTABLE_READS: &[&str] = &["ls-tree", "diff", "merge-base", "merge-tree", "log", "cat-file"];
+
+/// Whether `git <args>` may be answered from memory within one check: a command of [`IMMUTABLE_READS`] whose revisions are all
+/// full object ids (`<id>`, `^<id>`, `<id>..<id>`, `<id>^{commit}`, `<id>:<path>`), or `rev-parse --is-shallow-repository`. A ref,
+/// `HEAD` or a short id can move or become ambiguous, so a read that names one runs git again.
+pub(crate) fn cacheable(args: &[&str]) -> bool {
+    if args == ["rev-parse", "--is-shallow-repository"] {
+        return true;
+    }
+    let Some((cmd, rest)) = args.split_first() else {
+        return false;
+    };
+    if !IMMUTABLE_READS.contains(cmd) {
+        return false;
+    }
+    let is_id = |s: &str| matches!(s.len(), 40 | 64) && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase());
+    let is_rev = |r: &str| {
+        let r = r.strip_prefix('^').unwrap_or(r);
+        let r = r.split_once(':').map_or(r, |(rev, _path)| rev);
+        let r = r.split_once("^{").map_or(r, |(rev, _peel)| rev);
+        is_id(r)
+    };
+    let mut saw_rev = false;
+    for a in rest.iter().take_while(|a| **a != "--") {
+        if a.starts_with('-') || a.bytes().all(|b| b.is_ascii_digit()) || (*cmd == "cat-file" && matches!(*a, "blob" | "tree" | "commit")) {
+            continue;
+        }
+        let parts: Vec<&str> = if let Some((x, y)) = a.split_once("...").or_else(|| a.split_once("..")) {
+            vec![x, y]
+        } else {
+            vec![a]
+        };
+        if !parts.iter().all(|p| is_rev(p)) {
+            return false;
+        }
+        saw_rev = true;
+    }
+    saw_rev
 }
 
 impl<'a> Git<'a> {
@@ -34,7 +82,14 @@ impl<'a> Git<'a> {
             root,
             max_output: MAX_OUTPUT,
             texts: RefCell::new(HashMap::new()),
+            memo: RefCell::new(HashMap::new()),
+            starts: Cell::new(0),
         }
+    }
+
+    /// How many git processes this reader has started.
+    pub fn starts(&self) -> usize {
+        self.starts.get()
     }
 
     /// The same reader with another output cap (a read longer than it is an error, never a cut answer).
@@ -99,6 +154,19 @@ impl<'a> Git<'a> {
     }
 
     fn run(&self, args: &[&str], status_1_is_empty: bool) -> Result<Vec<u8>, String> {
+        let key = cacheable(args).then(|| (args.iter().map(|a| a.to_string()).collect::<Vec<_>>(), status_1_is_empty));
+        if let Some(hit) = key.as_ref().and_then(|k| self.memo.borrow().get(k).cloned()) {
+            return Ok(hit);
+        }
+        let out = self.run_git(args, status_1_is_empty)?;
+        if let Some(k) = key {
+            self.memo.borrow_mut().insert(k, out.clone());
+        }
+        Ok(out)
+    }
+
+    fn run_git(&self, args: &[&str], status_1_is_empty: bool) -> Result<Vec<u8>, String> {
+        self.starts.set(self.starts.get() + 1);
         let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
         let cmd = self.command_for(args, &parent);
         let shown = args.join(" ");
@@ -136,6 +204,7 @@ impl<'a> Git<'a> {
     /// Whether `ancestor` is reachable from `of` (`git merge-base --is-ancestor`: exit 0 yes, 1 no, anything else an error).
     pub fn is_ancestor(&self, ancestor: &str, of: &str) -> Result<bool, String> {
         let args = ["merge-base", "--is-ancestor", ancestor, of];
+        self.starts.set(self.starts.get() + 1);
         let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
         let out = run_bounded(self.command_for(&args, &parent), Limits::new(TIMEOUT).max_output(1 << 16))
             .map_err(|e| format!("git {} could not run: {e}", args.join(" ")))?;
@@ -213,6 +282,61 @@ pub fn short(rev: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A repository with one commit; its full id.
+    fn one_commit() -> (tempfile::TempDir, String) {
+        let d = tempfile::tempdir().unwrap();
+        let git = |a: &[&str]| {
+            let out = crate::git_env::git().arg("-C").arg(d.path()).args(a).output().unwrap();
+            assert!(out.status.success(), "git {a:?}: {}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        git(&["init", "-q", "-b", "main"]);
+        std::fs::write(d.path().join("a.txt"), "1\n").unwrap();
+        git(&["add", "a.txt"]);
+        git(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "one",
+        ]);
+        let sha = git(&["rev-parse", "HEAD"]);
+        (d, sha)
+    }
+
+    /// A read whose answer depends only on object ids (a full hash, no ref or `HEAD`) runs git once per check: the detectors asked
+    /// the same `ls-tree`, `diff`, `merge-base` and `log` twice each, 33 git starts for a two-commit merge (about 60 ms each on the
+    /// Windows runner). A read that names a ref, and a failed read, run again.
+    #[test]
+    fn a_read_of_immutable_objects_runs_git_once_and_a_ref_or_a_failure_runs_it_again() {
+        let (d, sha) = one_commit();
+        let g = Git::new(d.path());
+        let first = g.text(&["ls-tree", "-r", "-z", &sha]).unwrap();
+        assert_eq!(g.text(&["ls-tree", "-r", "-z", &sha]).unwrap(), first);
+        assert_eq!(g.starts(), 1, "the same read of a full id is answered from memory");
+        assert!(g.is_shallow().is_ok() && g.is_shallow().is_ok());
+        assert_eq!(g.starts(), 2, "whether the clone is shallow is asked once");
+        g.text(&["ls-tree", "-r", "-z", "HEAD"]).unwrap();
+        g.text(&["ls-tree", "-r", "-z", "HEAD"]).unwrap();
+        assert_eq!(g.starts(), 4, "a ref can move: asked each time");
+        let missing = "0".repeat(40);
+        assert!(g.text(&["ls-tree", "-r", "-z", &missing]).is_err());
+        assert!(g.text(&["ls-tree", "-r", "-z", &missing]).is_err());
+        assert_eq!(g.starts(), 6, "a failure is never remembered");
+        // Positive control of the rule itself.
+        assert!(cacheable(&["diff", "--name-only", "-z", &sha, &sha]));
+        assert!(cacheable(&["log", "--format=%H", &format!("{sha}..{sha}")]));
+        assert!(cacheable(&["cat-file", "blob", &format!("{sha}:a.txt")]));
+        assert!(!cacheable(&["diff", "--name-only", "main", &sha]));
+        assert!(!cacheable(&["rev-parse", "--verify", "HEAD"]));
+        assert!(!cacheable(&["show", "-s", &sha]), "a command off the list");
+    }
 
     #[test]
     fn a_read_longer_than_the_cap_is_an_error_never_a_cut_answer() {

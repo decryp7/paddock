@@ -83,6 +83,17 @@ layout() {
   printf '%s\n' "$line"
 }
 
+# cachedir_tag <folder>: cargo's CACHEDIR.TAG in a target folder cargo did not make (ADR 0107 D1; the twin of
+# paddock_env::cachedir::ensure). A file whose first line is the signature is a tag and is kept; a missing, empty or partial one
+# is written to a temporary file and renamed over it.
+cachedir_tag() {
+  local sig='Signature: 8a477f597d28d172789f06886806bc55' f="$1/CACHEDIR.TAG" tmp
+  [ "$(head -c "${#sig}" "$f" 2>/dev/null)" = "$sig" ] && return 0
+  tmp="$f.tmp$$"
+  printf '%s\n# This file is a cache directory tag created by cargo.\n# For information about cache directory tags see https://bford.info/cachedir/\n' "$sig" > "$tmp" \
+    && mv -f "$tmp" "$f" || { rm -f "$tmp"; die "cannot write $f"; }
+}
+
 cmd_path() {
   local kind="${1:?usage: job-isolation.sh path <kind> [<name>]}" name="${2:-}" spec lay scope home rel
   spec="$(layout "$kind")"; lay="${spec% *}"; scope="${spec#* }"
@@ -103,6 +114,7 @@ cmd_path() {
     fi
   fi
   mkdir -p "$home/$rel"
+  if [ "$kind" = target ]; then cachedir_tag "$home/$rel"; fi
   touch "$home/$rel" 2>/dev/null || true  # in use: the orphan sweep removes only folders no job asked for in ORPHAN_DAYS
   printf '%s\n' "$home/$rel"
 }
