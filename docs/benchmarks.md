@@ -2085,7 +2085,7 @@ save more, on each OS? And did the user's Defender process exclusions for git ch
 - **`GitHistory::file_at` (TD-1):** 121 reads of 60 files at two revisions start the reader 0 times (gix in process) plus one
   `rev-parse` per revision (`file_at_for_many_files_starts_no_git_per_file`); before, one `git show` per read.
 - **Cold debug build, paddock-proc alone against paddock-git with gix, `CARGO_BUILD_JOBS=2`, no sccache:** Mac 44 s against 37 s at a
-  load of 32 to 80 (other agents' builds): **not measured** (the order and the load decided it). Windows runner: below.
+  load of 32 to 80 (other agents' builds): **not measured** (the order and the load decided it). Windows runner: not measured yet.
 - **Windows runner, the whole paddock-dev suite at 8 test threads** (`windows-host-probe.yml`, nothing else on the runner; host probes
   the same in all three: empty start 29 to 41 ms, git start 33 to 44 ms, a small repository 238 to 323 ms):
 
