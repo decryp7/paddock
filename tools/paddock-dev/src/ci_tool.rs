@@ -85,66 +85,7 @@ pub struct ToolCall {
     cwd: Option<PathBuf>,
     unset: Vec<String>,
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    held: Option<std::sync::Arc<Held>>,
-}
-
-/// The programs a caller may have to give up on: a captured run tells the set who it started, and [`Held::end_all`] ends them all
-/// by identity and closes the set, so a run that starts after that is ended at its start. A caller that abandons the thread that
-/// runs a program (a phase of a step that hit its bound) ends the programs with this before it goes on: the thread's own timeout
-/// may be late (ending a tree takes time on a loaded machine), and a step that ends with a program still running leaves it behind.
-#[derive(Debug, Default)]
-pub struct Held {
-    state: std::sync::Mutex<HeldState>,
-}
-
-#[derive(Debug, Default)]
-struct HeldState {
-    closed: bool,
-    running: Vec<paddock_proc::ProcessId>,
-}
-
-/// How long [`Held::end_all`] waits for the OS to finish ending what it signalled (SIGKILL is delivered at once and the process
-/// goes a moment later). The wait is on the state, with this deadline, and a process that outlasts it is logged.
-const ENDED_WITHIN: Duration = Duration::from_secs(10);
-
-impl Held {
-    fn note(&self, id: paddock_proc::ProcessId) {
-        let ended_at_once = {
-            let mut s = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            if !s.closed {
-                s.running.push(id);
-            }
-            s.closed
-        };
-        if ended_at_once {
-            let _ = paddock_proc::kill_tree(id);
-        }
-    }
-
-    /// Ends every program noted so far and every one noted later; returns once they are gone (at most [`ENDED_WITHIN`]) with the
-    /// ones that are still running by then (none, unless the OS refuses to end one).
-    pub fn end_all(&self) -> Vec<paddock_proc::ProcessId> {
-        let running = {
-            let mut s = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            s.closed = true;
-            std::mem::take(&mut s.running)
-        };
-        let mut below = Vec::new();
-        for id in &running {
-            below.extend(paddock_proc::descendants_of(*id));
-            let _ = paddock_proc::kill_tree(*id);
-        }
-        let deadline = Instant::now() + ENDED_WITHIN;
-        let mut pause = Duration::from_millis(1);
-        loop {
-            let left: Vec<_> = running.iter().chain(below.iter()).copied().filter(|id| !id.has_ended()).collect();
-            if left.is_empty() || Instant::now() >= deadline {
-                return left;
-            }
-            std::thread::sleep(pause);
-            pause = (pause * 2).min(Duration::from_millis(20));
-        }
-    }
+    held: Option<std::sync::Arc<crate::ci_host::phase::Held>>,
 }
 
 /// How a run ended.
@@ -256,7 +197,7 @@ impl ToolCall {
     }
 
     /// Tells `held` who this program is when it starts, so its caller can end it (captured runs only).
-    pub fn held_by(mut self, held: std::sync::Arc<Held>) -> ToolCall {
+    pub fn held_by(mut self, held: std::sync::Arc<crate::ci_host::phase::Held>) -> ToolCall {
         self.held = Some(held);
         self
     }
@@ -341,7 +282,7 @@ impl ToolCall {
     }
 
     fn run_captured(&self, cmd: std::process::Command) -> Result<Ran, String> {
-        let note = |id| {
+        let note = |id: Option<paddock_proc::ProcessId>| {
             if let Some(h) = &self.held {
                 h.note(id);
             }
@@ -362,6 +303,10 @@ impl ToolCall {
 
     /// Streamed or file output, through `paddock_proc::run_waited` (bounded, the whole tree ended at the timeout).
     fn run_to(&self, cmd: std::process::Command, sink: Sink, file: Option<&PathBuf>) -> Result<Ran, String> {
+        debug_assert!(
+            self.held.is_none(),
+            "held_by is for captured runs: a streamed or file run is ended through cancel_on"
+        );
         let idle = std::sync::atomic::AtomicBool::new(false);
         let flag: &std::sync::atomic::AtomicBool = self.cancel.as_deref().unwrap_or(&idle);
         let (outcome, cancelled) = run_waited_cancellable(cmd, self.timeout, sink, flag).map_err(|e| self.not_started(e))?;

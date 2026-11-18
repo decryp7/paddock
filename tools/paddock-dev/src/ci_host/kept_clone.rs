@@ -24,10 +24,10 @@
 //! `refs/replace` are removed, and a local config key outside an allow-list makes the clone be made again.
 //! The checkout's credentials (its http extra header) reach git through the environment, never a command line, never kept.
 
-use super::phase::{ClockMark, Phase, bounded_marked};
+use super::phase::{ClockMark, Held, Phase, bounded_marked};
 use super::{Step, folder_name, isolation_full};
 use crate::ci_isolation::home;
-use crate::ci_tool::{Held, NETWORK_ENV, ToolCall};
+use crate::ci_tool::{NETWORK_ENV, ToolCall};
 use crate::safe_remove;
 use clap::Args as ClapArgs;
 use std::collections::HashMap;
@@ -130,13 +130,13 @@ struct PhaseOut {
     /// file any more ([`Kc::live`]), because the next phase may already be removing or making the same folder. The shell's `bounded`
     /// ends the whole function's process tree instead.
     abandoned: AtomicBool,
-    /// The programs this phase's git commands started: ended with the phase when it is abandoned, whatever its commands' own limits.
-    held: Arc<Held>,
 }
 
 thread_local! {
     /// Set on a phase's own thread: where its git commands and notes write.
     static PHASE_OUT: std::cell::RefCell<Option<Arc<PhaseOut>>> = const { std::cell::RefCell::new(None) };
+    /// Set on a phase's own thread: the programs its git commands start, which the phase ends if it is abandoned.
+    static PHASE_HELD: std::cell::RefCell<Option<Arc<Held>>> = const { std::cell::RefCell::new(None) };
 }
 
 /// What the phases share: the job's environment, the credentials for git, the folders, and the step's own output: what was written
@@ -220,7 +220,7 @@ impl Kc {
             .pass(["GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_SSL_CAINFO", "GIT_SSL_CAPATH"])
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_NO_REPLACE_OBJECTS", "1")
-            .held_by(self.out().held.clone())
+            .held_by(PHASE_HELD.with(|h| h.borrow().clone()).unwrap_or_default())
             .timeout(IN_PHASE.with(std::cell::Cell::get).unwrap_or(OUTSIDE_PHASE_LIMIT));
         if let Some(h) = &self.header {
             call = call
@@ -803,8 +803,9 @@ impl Flow {
         let mark_file = self.kc.env.get(CLOCK_MARK).filter(|v| !v.is_empty()).map(PathBuf::from);
         let mark = mark_file.as_deref().map(|file| ClockMark { file, wait: self.limit });
         let bound = limit + Duration::from_secs(1);
-        let (r, before_mark) = bounded_marked(step, label, bound, Some(&out.timed_out), mark, move || {
+        let (r, before_mark) = bounded_marked(step, label, bound, Some(&out.timed_out), mark, move |held| {
             IN_PHASE.with(|p| p.set(Some(limit)));
+            PHASE_HELD.with(|h| *h.borrow_mut() = Some(held));
             PHASE_OUT.with(|p| *p.borrow_mut() = Some(mine));
             f(&kc)
         });
@@ -813,13 +814,6 @@ impl Flow {
         if matches!(r, Err(Phase::Timeout)) {
             // Its thread may still be running: from now on it changes nothing (`Kc::live`), and writes only to `out`.
             out.abandoned.store(true, Ordering::SeqCst);
-            // Its git commands end at their own limit, but ending a tree takes time on a loaded machine, and when that outlasts the
-            // bound the step would go on, and end, with a git still running. They end now, and the step goes on once they are gone.
-            for id in out.held.end_all() {
-                step.warn(format!(
-                    "{id} was still running after the phase was abandoned and its tree was ended"
-                ));
-            }
         }
         self.kc.adopt(&out);
         self.flush(step);
@@ -1116,10 +1110,13 @@ mod tests {
     ];
 
     /// The step's shared context with a `git` of the test's own (a script in `bin`) first on PATH.
-    #[cfg(unix)]
     fn kc_with_git(bin: &Path, env: &[(&str, &str)]) -> Arc<Kc> {
         let mut env: HashMap<String, String> = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
-        env.insert("PATH".into(), format!("{}:/usr/bin:/bin", bin.display()));
+        let mut path = vec![bin.to_path_buf()];
+        if cfg!(unix) {
+            path.extend(["/usr/bin", "/bin"].map(PathBuf::from));
+        }
+        env.insert("PATH".into(), std::env::join_paths(path).unwrap().to_string_lossy().into_owned());
         Arc::new(Kc {
             env,
             windows: false,
@@ -1131,7 +1128,6 @@ mod tests {
         })
     }
 
-    #[cfg(unix)]
     fn flow_of(kc: Arc<Kc>) -> Flow {
         Flow {
             kc,
@@ -1203,21 +1199,26 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_phase_abandoned_at_its_bound_leaves_no_program_of_its_own_running() {
-        use std::os::unix::fs::PermissionsExt;
         // The git command ends itself at the phase's limit, one second before the phase's bound; but ending it takes time (a loaded
-        // machine: up to 0.9 s measured, 2026-11-18), and when it outlasts that second the phase is abandoned with its git still
-        // running, and the step ends with it: the program outlives the step (the reaper's "below a child", run 2026-11-18 of
-        // `kept_clone_the_create_phase_is_bounded_by_its_own_limit`). Stood in here by a git whose own limit is far past the bound.
+        // machine), and when it outlasts that second the phase is abandoned with its git still running, and the step ends with it:
+        // the program outlives the step (the reaper's "below a child", run 2026-11-18 of
+        // `kept_clone_the_create_phase_is_bounded_by_its_own_limit`). Stood in here by a git whose own limit is far past the bound, with
+        // a program below it (a `git fetch` has helpers); both must be gone when `phase` returns.
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
-        let pid_file = dir.path().join("git.pid");
-        let git = bin.join("git");
-        std::fs::write(&git, format!("#!/bin/sh\necho $$ > '{}'\nexec /bin/sleep 30\n", pid_file.display())).unwrap();
-        std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let pid_file = dir.path().join("below.pid");
+        paddock_testkit::StandIn::new(&bin, "sleeper")
+            .sleeps(Duration::from_secs(30))
+            .install()
+            .unwrap();
+        paddock_testkit::StandIn::new(&bin, "git")
+            .spawns(&paddock_testkit::Spawn::new("sleeper").pid_file(&pid_file))
+            .sleeps(Duration::from_secs(30))
+            .install()
+            .unwrap();
         let kc = kc_with_git(&bin, &[(PhaseId::Fetch.var(), "1")]);
         let flow = flow_of(kc);
         let mut out = Vec::new();
@@ -1232,14 +1233,11 @@ mod tests {
             kc.git(true, &["fetch"])
         });
         assert!(matches!(r, Err(Hung)), "the phase is abandoned at its bound");
-        let pid: u32 = std::fs::read_to_string(&pid_file)
-            .expect("the git started before the phase was abandoned")
-            .trim()
-            .parse()
-            .unwrap();
+        let below = paddock_testkit_start::recorded::read_pid_file(&pid_file, "the program below the abandoned phase's git");
         assert!(
-            paddock_proc::ProcessId::of(pid).is_none_or(paddock_proc::ProcessId::has_ended),
-            "the abandoned phase's git (pid {pid}) still runs when the phase returns"
+            below.has_ended(),
+            "a program below the abandoned phase's git ({}) still runs when the phase returns",
+            below.pid()
         );
     }
 

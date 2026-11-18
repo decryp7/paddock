@@ -20,7 +20,7 @@
 //! phase, and each phase logs its duration (ER-27). Any other problem only costs cache hits and never fails the job.
 
 use super::links::{Links, OsLinks};
-use super::phase::{Phase, bounded};
+use super::phase::{Held, Phase, bounded};
 use super::{Step, folder_name, isolation_full, tail_flat};
 use crate::ci_isolation::home;
 use crate::ci_tool::ToolCall;
@@ -60,8 +60,9 @@ pub trait Ops: Send + Sync {
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
     /// Whether `p` is a folder.
     fn is_dir(&self, p: &Path) -> bool;
-    /// `git <args>`: its standard output (trimmed), or its error output.
-    fn git(&self, args: &[String]) -> Result<String, String>;
+    /// `git <args>`: its standard output (trimmed), or its error output. `held` is told who the git is, so a phase that is abandoned
+    /// can end it ([`Held`]).
+    fn git(&self, args: &[String], held: &Arc<Held>) -> Result<String, String>;
     /// The link at `link` to `target`.
     fn link_dir(&self, target: &Path, link: &Path) -> Result<(), String>;
 }
@@ -116,8 +117,11 @@ impl Ops for RealOps {
         p.is_dir()
     }
 
-    fn git(&self, args: &[String]) -> Result<String, String> {
-        let call = ToolCall::new("git").args(args.iter().cloned()).timeout(self.git_limit);
+    fn git(&self, args: &[String], held: &Arc<Held>) -> Result<String, String> {
+        let call = ToolCall::new("git")
+            .args(args.iter().cloned())
+            .held_by(held.clone())
+            .timeout(self.git_limit);
         let ran = call.run(&self.env, &mut io::sink())?;
         if ran.success {
             Ok(ran.stdout.trim().to_string())
@@ -202,7 +206,7 @@ pub fn run_with(env: &HashMap<String, String>, windows: bool, args: &Args, ops: 
     let resolved = {
         let (env2, win) = (env.clone(), windows);
         let folder = folder.clone();
-        bounded(&mut step, "resolve the job slot's kept folder", limit, move || {
+        bounded(&mut step, "resolve the job slot's kept folder", limit, move |_| {
             let (code, o, e) = isolation_full(&env2, win, &["path", "src", &folder]);
             // The isolation's messages (a migration notice, an error) go to the log either way.
             if code == 0 { Ok((o, e)) } else { Err(e) }
@@ -248,7 +252,7 @@ pub fn run_with(env: &HashMap<String, String>, windows: bool, args: &Args, ops: 
             &mut step,
             &format!("compare the volumes of {ws_text} and {root_text}"),
             limit,
-            move || {
+            move |_| {
                 ops.create_dir_all(&root)
                     .map_err(|e| format!("cannot create {}: {e}", root.display()))?;
                 match (ops.volume_of(&ws), ops.volume_of(&root)) {
@@ -278,7 +282,7 @@ pub fn run_with(env: &HashMap<String, String>, windows: bool, args: &Args, ops: 
     // step with the error above).
     let moved = {
         let (ops, ws, stable, root) = (ops.clone(), ws.clone(), stable.clone(), root.clone());
-        bounded(&mut step, &format!("move the checkout to {stable_text}"), limit, move || {
+        bounded(&mut step, &format!("move the checkout to {stable_text}"), limit, move |_| {
             ops.create_dir_all(&root).map_err(|e| e.to_string())?;
             ops.remove(&root, &stable)?;
             ops.rename(&ws, &stable).map_err(|e| e.to_string())
@@ -296,12 +300,17 @@ pub fn run_with(env: &HashMap<String, String>, windows: bool, args: &Args, ops: 
             let label = format!("keep a clone of the checkout at {stable_text}");
             let cloned = {
                 let (ops, ws, stable, root) = (ops.clone(), ws.clone(), stable.clone(), root.clone());
-                bounded(&mut step, &label, limit, move || clone_checkout(ops.as_ref(), &ws, &stable, &root))
+                bounded(&mut step, &label, limit, move |held| {
+                    clone_checkout(ops.as_ref(), &ws, &stable, &root, &held)
+                })
             };
             match cloned {
                 Ok(()) => {
                     let head = ops
-                        .git(&["-C".into(), stable_text.clone(), "rev-parse".into(), "HEAD".into()])
+                        .git(
+                            &["-C".into(), stable_text.clone(), "rev-parse".into(), "HEAD".into()],
+                            &Arc::default(),
+                        )
                         .unwrap_or_default();
                     let why = if why.is_empty() { "no message".to_string() } else { why };
                     step.say(format!(
@@ -324,7 +333,7 @@ pub fn run_with(env: &HashMap<String, String>, windows: bool, args: &Args, ops: 
     // A link (a junction on Windows: Git bash's `ln -s` copies there) resolves the old path to the stable folder.
     let linked = {
         let (ops, ws, stable) = (ops.clone(), ws.clone(), stable.clone());
-        bounded(&mut step, &format!("link {ws_text} to {stable_text}"), limit, move || {
+        bounded(&mut step, &format!("link {ws_text} to {stable_text}"), limit, move |_| {
             ops.link_dir(&stable, &ws)
         })
     };
@@ -350,45 +359,54 @@ pub fn run_with(env: &HashMap<String, String>, windows: bool, args: &Args, ops: 
 
 /// A local clone of the checkout at the stable path, at the checkout's commit, with every file that is not git's removed
 /// (ignored files stay: no build output lives there, the build folder is elsewhere).
-fn clone_checkout(ops: &dyn Ops, ws: &Path, stable: &Path, root: &Path) -> Result<(), String> {
+fn clone_checkout(ops: &dyn Ops, ws: &Path, stable: &Path, root: &Path, held: &Arc<Held>) -> Result<(), String> {
     let s = |p: &Path| p.display().to_string();
-    let sha = ops.git(&["-C".into(), s(ws), "rev-parse".into(), "HEAD".into()])?;
+    let sha = ops.git(&["-C".into(), s(ws), "rev-parse".into(), "HEAD".into()], held)?;
     if !ops.is_dir(&stable.join(".git")) {
         ops.remove(root, stable)?;
-        ops.git(&[
-            "clone".into(),
-            "-q".into(),
-            "--no-checkout".into(),
-            "--no-tags".into(),
-            s(ws),
-            s(stable),
-        ])?;
+        ops.git(
+            &[
+                "clone".into(),
+                "-q".into(),
+                "--no-checkout".into(),
+                "--no-tags".into(),
+                s(ws),
+                s(stable),
+            ],
+            held,
+        )?;
     }
     // The checkout is shallow: --update-shallow lets the clone take a commit whose parents it does not have.
-    ops.git(&[
-        "-C".into(),
-        s(stable),
-        "fetch".into(),
-        "-q".into(),
-        "--no-tags".into(),
-        "--update-shallow".into(),
-        s(ws),
-        "HEAD".into(),
-    ])?;
-    let fetched = ops.git(&["-C".into(), s(stable), "rev-parse".into(), "FETCH_HEAD".into()])?;
+    ops.git(
+        &[
+            "-C".into(),
+            s(stable),
+            "fetch".into(),
+            "-q".into(),
+            "--no-tags".into(),
+            "--update-shallow".into(),
+            s(ws),
+            "HEAD".into(),
+        ],
+        held,
+    )?;
+    let fetched = ops.git(&["-C".into(), s(stable), "rev-parse".into(), "FETCH_HEAD".into()], held)?;
     if fetched != sha {
         return Err(format!("the clone fetched {fetched}, not {sha}"));
     }
-    ops.git(&[
-        "-C".into(),
-        s(stable),
-        "checkout".into(),
-        "-q".into(),
-        "-f".into(),
-        "--detach".into(),
-        sha,
-    ])?;
-    ops.git(&["-C".into(), s(stable), "clean".into(), "-q".into(), "-ffd".into()])?;
+    ops.git(
+        &[
+            "-C".into(),
+            s(stable),
+            "checkout".into(),
+            "-q".into(),
+            "-f".into(),
+            "--detach".into(),
+            sha,
+        ],
+        held,
+    )?;
+    ops.git(&["-C".into(), s(stable), "clean".into(), "-q".into(), "-ffd".into()], held)?;
     Ok(())
 }
 
@@ -464,7 +482,7 @@ mod tests {
         fn is_dir(&self, _: &Path) -> bool {
             false
         }
-        fn git(&self, args: &[String]) -> Result<String, String> {
+        fn git(&self, args: &[String], _: &Arc<Held>) -> Result<String, String> {
             let a = args.join(" ");
             self.log.lock().unwrap().push(format!("git {a}"));
             if self.git_fails_on.is_some_and(|f| a.contains(f)) {
@@ -661,6 +679,86 @@ mod tests {
     }
 
     #[test]
+    fn a_hung_git_of_an_abandoned_phase_is_ended_with_the_programs_below_it() {
+        // The clone's `git fetch` hangs (a stand-in that starts a helper and sleeps) and the phase meets its 1 s bound: the git's own
+        // limit (here far past the bound: ending a tree takes time on a loaded machine, and the git limit equals the phase's) is not
+        // what ends it. Both the git and the helper below it must be gone when the step returns, or the step leaves them behind.
+        struct NoMove(RealOps);
+        impl Ops for NoMove {
+            fn is_symlink(&self, p: &Path) -> bool {
+                self.0.is_symlink(p)
+            }
+            fn canonical(&self, p: &Path) -> io::Result<PathBuf> {
+                self.0.canonical(p)
+            }
+            fn volume_of(&self, p: &Path) -> Option<String> {
+                self.0.volume_of(p)
+            }
+            fn create_dir_all(&self, p: &Path) -> io::Result<()> {
+                self.0.create_dir_all(p)
+            }
+            fn remove(&self, r: &Path, t: &Path) -> Result<bool, String> {
+                self.0.remove(r, t)
+            }
+            fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+                Err(io::Error::other("Access is denied. (os error 5)"))
+            }
+            fn is_dir(&self, p: &Path) -> bool {
+                self.0.is_dir(p)
+            }
+            fn git(&self, args: &[String], held: &Arc<Held>) -> Result<String, String> {
+                self.0.git(args, held)
+            }
+            fn link_dir(&self, t: &Path, l: &Path) -> Result<(), String> {
+                self.0.link_dir(t, l)
+            }
+        }
+        let mut sc = scene("macOS");
+        let bin = sc.dir.path().join("bin");
+        let work = sc.dir.path().join("work");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+        let pid_file = sc.dir.path().join("below.pid");
+        paddock_testkit::StandIn::new(&bin, "sleeper")
+            .sleeps(Duration::from_secs(30))
+            .install()
+            .unwrap();
+        paddock_testkit::StandIn::new(&bin, "git")
+            .stdout("abc123")
+            .when_arg_contains(
+                "fetch",
+                paddock_testkit::Actions::new()
+                    .spawns(&paddock_testkit::Spawn::new("sleeper").pid_file(&pid_file))
+                    .sleeps(Duration::from_secs(30)),
+            )
+            .install()
+            .unwrap();
+        let mut path = vec![bin];
+        if cfg!(unix) {
+            path.extend(["/usr/bin", "/bin"].map(PathBuf::from));
+        }
+        sc.env
+            .insert("PATH".into(), std::env::join_paths(path).unwrap().to_string_lossy().into_owned());
+        sc.env.insert("GITHUB_WORKSPACE".into(), work.display().to_string());
+        let ops: Arc<dyn Ops> = Arc::new(NoMove(RealOps {
+            env: sc.env.clone(),
+            windows: false,
+            git_limit: Duration::from_secs(60),
+        }));
+        let mut out = Vec::new();
+        let code = run_with(&sc.env, false, &Args { name: "n".into() }, ops, Duration::from_secs(1), &mut out);
+        let out = String::from_utf8(out).unwrap();
+        assert_ne!(code, 0, "the hung clone phase ends the step: {out}");
+        assert!(out.contains("did not finish within 1 s"), "{out}");
+        let below = paddock_testkit_start::recorded::read_pid_file(&pid_file, "the program below the hung git fetch");
+        assert!(
+            below.has_ended(),
+            "the program below the abandoned phase's git ({}) still runs: {out}",
+            below.pid()
+        );
+    }
+
+    #[test]
     fn a_clone_that_fetched_another_commit_than_the_checkouts_is_an_error_never_a_silent_wrong_tree() {
         struct Skewed(Fake);
         impl Ops for Skewed {
@@ -685,7 +783,7 @@ mod tests {
             fn is_dir(&self, p: &Path) -> bool {
                 self.0.is_dir(p)
             }
-            fn git(&self, args: &[String]) -> Result<String, String> {
+            fn git(&self, args: &[String], _: &Arc<Held>) -> Result<String, String> {
                 let a = args.join(" ");
                 Ok(if a.contains("FETCH_HEAD") {
                     "def456".into()

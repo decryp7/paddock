@@ -97,6 +97,9 @@ fn norm(text: &str, fx: &Fx) -> String {
     let timed_out_last = regex::Regex::new(r"Last output: kept-clone: git [a-z-]+ failed \(timed out after \d+ s\)\.").unwrap();
     let timed_out_why = regex::Regex::new(r"\(kept-clone: git [a-z-]+ failed \(timed out after \d+ s\)\)").unwrap();
     let timed_out_line = regex::Regex::new(r"^kept-clone: git [a-z-]+ failed \(timed out after \d+ s\)$").unwrap();
+    // The Rust phase says how many programs of an abandoned phase it ended and how long that took (ER-27); the shell's `bounded` ends
+    // the function's tree and says nothing.
+    let ended_line = regex::Regex::new(r": ended \d+ program\(s\) of the abandoned phase in \d+ ms$").unwrap();
     text.replace(&root, "<ROOT>")
         .lines()
         // The wrapper contract's lines, and the one line per pattern the Rust clean-up adds (ER-27).
@@ -112,6 +115,7 @@ fn norm(text: &str, fx: &Fx) -> String {
                 && !bash_killed.is_match(l)
                 // The Rust phase's error output names the git it ended at its limit; the shell's is empty (it killed the process).
                 && !timed_out_line.is_match(l)
+                && !ended_line.is_match(l)
         })
         .map(|l| {
             let l = dur.replace_all(l, " in N s").to_string();

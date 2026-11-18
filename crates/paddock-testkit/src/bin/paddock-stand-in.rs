@@ -201,7 +201,7 @@ fn write_file(arg: &Value) -> Result<(), String> {
 }
 
 /// Starts `program` with `args` and does not wait. A bare name that is also a file next to the stand-in is that file (a second
-/// stand-in installed beside it). `pid_file`, when given, gets the child's pid. Its output goes nowhere unless `inherit_output`.
+/// stand-in installed beside it). `pid_file`, when given, gets the child's pid and a newline (a complete record). Its output goes nowhere unless `inherit_output`.
 fn spawn(arg: &Value, dir: &Path) -> Result<(), String> {
     let program = arg
         .get("program")
@@ -228,7 +228,7 @@ fn spawn(arg: &Value, dir: &Path) -> Result<(), String> {
         .spawn()
         .map_err(|e| format!("cannot start {program}: {e}"))?;
     if let Some(pid_file) = arg.get("pid_file").and_then(Value::as_str) {
-        std::fs::write(pid_file, child.id().to_string())
+        std::fs::write(pid_file, format!("{}\n", child.id()))
             .map_err(|e| format!("cannot write {pid_file}: {e}"))?;
     }
     // Not waited for: a grandchild outliving its parent is the point of the step.
