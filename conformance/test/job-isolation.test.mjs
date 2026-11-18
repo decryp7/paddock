@@ -3,7 +3,7 @@
 // that no CI file reaches a CI-home folder except through the script.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -245,6 +245,28 @@ test('path: every kind of kept-folders.txt resolves; an unknown kind, a missing 
   const none = h.job('b'.repeat(16)).exec(['path', 'target', 'x']);
   assert.notEqual(none.status, 0);
   assert.match(none.stderr, /holds no slot/);
+});
+
+test('path target: the kept build folder carries cargo\'s CACHEDIR.TAG; a good tag is kept, a partial one is repaired, other kinds get none (ADR 0107 D1)', () => {
+  const SIG = 'Signature: 8a477f597d28d172789f06886806bc55';
+  const CONTENT = `${SIG}\n# This file is a cache directory tag created by cargo.\n# For information about cache directory tags see https://bford.info/cachedir/\n`;
+  const h = host();
+  const a = h.job('a'.repeat(16));
+  a.exec(['acquire']);
+  const dir = a.later(['path', 'target', 'x']).stdout.trim();
+  const tag = join(dir, 'CACHEDIR.TAG');
+  assert.equal(read(tag), CONTENT, 'the exact bytes cargo writes');
+  writeFileSync(tag, `${SIG}\n# cargo's own\n`);
+  a.later(['path', 'target', 'x']);
+  assert.equal(read(tag), `${SIG}\n# cargo's own\n`, 'a good tag is never rewritten');
+  for (const bad of ['', 'Signature: 8a477f597d28d172', 'not a tag\n']) {
+    writeFileSync(tag, bad);
+    a.later(['path', 'target', 'x']);
+    assert.equal(read(tag), CONTENT, `repaired: ${JSON.stringify(bad)}`);
+  }
+  assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith('CACHEDIR')), ['CACHEDIR.TAG'], 'no temporary file is left');
+  const src = a.later(['path', 'src', 'x']).stdout.trim();
+  assert.ok(!existsSync(join(src, 'CACHEDIR.TAG')), 'only a target folder is tagged');
 });
 
 test('the CI home follows PADDOCK_CI_HOME (ci-home.sh), and a missing relocated home stops the job instead of filling the internal disk', () => {

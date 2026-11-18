@@ -1376,7 +1376,9 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts
         member_gate: false,
         kept_targets: None,
         pitwall_tests: tests,
-        dev_exe: crate::tool_cache::self_exe().map_or_else(|_| "./dev".into(), |p| p.to_string_lossy().to_string()),
+        dev_exe: crate::tool_cache::self_exe()
+            .map(|p| p.to_string_lossy().to_string())
+            .map_err(|e| e.to_string()),
         target_dir: env.get("CARGO_TARGET_DIR").cloned(),
     }
 }

@@ -50,7 +50,7 @@ fn facts() -> Facts {
         member_gate: true,
         kept_targets: None,
         pitwall_tests: vec!["scripts/ci/a.test.mjs".into()],
-        dev_exe: "/x/dev".into(),
+        dev_exe: Ok("/x/dev".into()),
         target_dir: Some("/t/".into()),
     }
 }
@@ -216,6 +216,37 @@ fn the_gates_check_runs_on_every_push_whatever_changed_and_names_the_fix() {
     }
     let none = plan_gates(&unrelated, &change(&[]), &facts());
     assert!(ids(&none).contains(&"gates-register".to_string()), "also for an empty change");
+}
+
+/// The rows `./dev` runs itself never start a test program as paddock-dev (train 14, runs 8245 and 8248: `gates check` started the
+/// unit-test harness, which ran every test named `gates` or `check` again inside the test that started it). In a test process the
+/// program is unknown, so the rows are not measured, with the reason; never a guessed `./dev`.
+#[test]
+fn the_rows_dev_runs_itself_are_not_measured_when_this_program_is_a_test_program() {
+    let why = crate::tool_cache::self_exe()
+        .expect_err("a unit-test process is a test program")
+        .to_string();
+    let f = Facts {
+        dev_exe: Err(why.clone()),
+        ..facts()
+    };
+    let unrelated = json!({"conformance": false, "apps": [], "packages": {}});
+    let planned = plan_gates(&unrelated, &change(&["crates/paddock-proc/src/lib.rs"]), &f);
+    let rows = ["gates-register", "ipc-endpoints", "conformance", "conformance-tests"];
+    assert!(!ids(&planned).iter().any(|i| rows.contains(&i.as_str())), "{planned:?}");
+    for id in rows {
+        assert!(
+            planned
+                .iter()
+                .any(|p| matches!(p, Planned::NotMeasured { id: i, reason, .. } if i == id && reason.contains(&why))),
+            "{id} is not 'not measured' with the reason: {planned:?}"
+        );
+    }
+    // Positive control: with the program known, the same plan runs all four.
+    let known = plan_gates(&unrelated, &change(&["crates/paddock-proc/src/lib.rs"]), &facts());
+    for id in rows {
+        assert!(ids(&known).contains(&id.to_string()), "{id}: {known:?}");
+    }
 }
 
 /// ROW_SET is what a pass record is compared with: it must list every row the planner can add besides the per-workspace ones, so a

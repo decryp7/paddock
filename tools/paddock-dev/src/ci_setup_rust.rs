@@ -634,7 +634,7 @@ pub fn run(args: &SetupRustArgs, out: &mut dyn Write, err: &mut dyn Write) -> i3
     let env: HashMap<String, String> = crate::process_env::vars().collect();
     let cwd = std::env::current_dir().unwrap_or_default();
     let tables = ci_isolation::find_tables(None, &env, &cwd);
-    let exe = std::env::current_exe().unwrap_or_default();
+    let exe = crate::tool_cache::self_exe().unwrap_or_default();
     let mut ctx = Ctx::new(env, tables, exe);
     ctx.windows |= ctx.get("PADDOCK_CI_ASSUME_WINDOWS") == Some("1");
     run_with(ctx, args, out, err)
