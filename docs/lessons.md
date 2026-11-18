@@ -2946,7 +2946,8 @@ with a clock mark a git in a phase has the general limit and the phase's bound, 
 test and `stable_workspace`'s hung-git test (which had the same shape, its `run_with` now takes an optional `ClockMark`; red before:
 no pid file after 40 s) use the one mechanism, `phase::bounded_marked`; the parity normaliser treats `signal 9` like `timed out`.
 **Measured:** natural rate on the old code 0 of 200 runs (28 processes x 1 thread, 40 CPU burners, load 33), so the injected delay is
-the proof, as the failure is rare; the heavy run was stopped at the coordinator's request (ER-24). Capped runs after the fix: see
-below. **Rule:** a timed hung-phase test counts every limit it asserts from the stand-in's mark, setup calls included, and proves it
+the proof, as the failure is rare; the heavy run was stopped at the coordinator's request (ER-24). Capped runs after the fix (coordinator's cap: 4 processes x 1 thread, no burners,
+ambient load 35 to 40 from other agents): 200 runs of the 4 kept_clone unit tests plus stable_workspace's hung-git test, 1,000 test
+executions, 0 failed. **Rule:** a timed hung-phase test counts every limit it asserts from the stand-in's mark, setup calls included, and proves it
 with a stand-in that is slow before its hang. **Class: work before the hang point of a hung-phase test meeting its limit under load
 (fourth sighting; ADR 0103, second amendment).**

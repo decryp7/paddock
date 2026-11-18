@@ -351,7 +351,7 @@ command before the hang taking longer than the phase's own limit"); it is closed
   `host_steps::kept_clone_reads_of_the_work_folder_are_not_bound_by_the_phase_limit` (the sleep is the thing under test),
   `paddock-testkit`'s `a_git_that_does_not_answer_its_exec_path_in_time_is_no_answer` (any outcome of a start that is slow is the same
   `TimedOut`).
-- **Stress (ER-28):** see lessons.md, "A slow-to-start stand-in git met the phase limit".
+- **Stress (ER-28):** 200 runs x 4 processes x 1 thread (1,000 test executions, 0 failed); lessons.md, "A slow-to-start stand-in git met the phase limit".
 
 **Cost (ER-37).** About 0.4 agent-day, on the mark and `Held` this ADR already has; a virtual clock stays not chosen.
 
