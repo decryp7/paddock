@@ -81,6 +81,7 @@ test('allow list: a whole float count is its integer, as the Rust host reads it'
  * built from parts so that C121 and C125 do not flag this file itself.
  */
 const SAMPLE = {
+  C30: ['crates/a/tests/t.rs', '#[test]\nfn t() {\n    let s = std::time::Instant::now();\n    assert!(s.elapsed() < std::time::Duration::from_secs(1));\n}\n'],
   C121: ['docs/g.toml', `check = ["sh", "-c", "sed -n p .gitea/${'workflows'}/ci.yml"]\n`],
   C124: ['tools/paddock-dev/src/x.rs', 'pub enum V {\n    NotMeasured,\n}\n'],
   C125: ['scripts/a.sh', `x=/${'Volumes'}/d7sst7\n`],

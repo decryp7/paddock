@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Conformance C30: today's wall-clock sites are an allow list that may only shrink
+- `conformance/c30-allow.json` lists the 189 sites C30 found on 2026-11-18 (176 entries, the flagged line's text as `site`, read by the
+  shared allow-list reader). A listed site passes; an unlisted one is still a warning, and so is an entry the merge base's list lacks
+  (growth, unwaivable) until the list is on main, when C30 blocks both (`BLOCKING`). Stale entries warn. C30's scope is now the
+  Paddock root, as for every check with an allow list. The shared JavaScript reader takes `growth: 'error'` for a check that blocks.
+
 ### Bulk APIs: counting seams, one per-item result type and a report-only lint (bulk-API redesign WP-0, G3 to G5)
 - New `paddock_env::starts` (also `paddock_proc::starts`): the constructors `paddock_env::command::command` and the new
   `attached_command` (no creation flags: a child that shares this console, or the app relaunching itself) note every command they
