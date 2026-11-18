@@ -13,8 +13,7 @@
 //! error at that file); an allow file that cannot be read makes the check broken (one finding, nothing else). **Report-only
 //! (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet.
 //!
-//! The JavaScript check `conformance/src/checks/C125-machine-paths.mjs` is the original; `tests/it/check_c125.rs` compares the two
-//! finding for finding.
+//! The JavaScript check (`conformance/src/checks/C125-*.mjs`) was the original; it was retired with pair P3 (ADR 0022 amendment 2026-11-19) and the Rust host is the only one. The answers it gave are recorded in `tests/fixtures/check/recorded` and `units` and ``tests/it/check_c125.rs`` holds the check to them.
 
 use super::allow_list::{self, Admit};
 use super::finding::Finding;
@@ -26,9 +25,7 @@ use std::sync::LazyLock;
 /// The allow file both hosts read.
 pub const ALLOW: &str = "conformance/c125-allow.json";
 /// The check's own files: they name the pattern.
-pub const IMPLEMENTATION: [&str; 5] = [
-    "conformance/src/checks/C125-machine-paths.mjs",
-    "conformance/test/c125-machine-paths.test.mjs",
+pub const IMPLEMENTATION: [&str; 3] = [
     "tools/paddock-dev/src/check/c125.rs",
     "tools/paddock-dev/tests/it/check_c125.rs",
     ALLOW,

@@ -158,9 +158,12 @@ test('the command: --root without a folder and an unknown argument are usage err
 test('every row of the README notes table names a check that exists (no stale rows; the table need not be complete)', () => {
   const text = read(README_PATH);
   const notes = text.slice(text.indexOf(README_END));
-  const ids = new Set(checks.map((c) => c.id));
+  // A check with no module here may be one the Rust host runs alone (`conformance.rust` of the contract, pair P3).
+  const rust = JSON.parse(read(CONTRACT_PATH)).conformance.rust;
+  assert.ok(rust.length >= 12, 'the contract names the Rust-only checks: the probe sees them');
+  const ids = new Set([...checks.map((c) => c.id), ...rust]);
   const rows = [...notes.matchAll(/^\| (C\d+) \|/gm)].map((m) => m[1]);
   assert.ok(rows.length > 0, 'the notes table has rows: the probe sees them');
   const stale = rows.filter((id) => !ids.has(id));
-  assert.deepEqual(stale, [], `conformance/README.md notes rows for checks with no module: ${stale.join(', ')}; remove them`);
+  assert.deepEqual(stale, [], `conformance/README.md notes rows for checks with no module and not in conformance.rust: ${stale.join(', ')}; remove them`);
 });

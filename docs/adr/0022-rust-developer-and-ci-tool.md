@@ -1082,6 +1082,18 @@ the `PLAN_PLANNER=node` fallback are deleted. `./dev plan` is the one planner, a
 Its reference is the recorded answers in `tools/paddock-dev/tests/golden` (first made by `affected.mjs`, since rewritten by the
 planner with `PADDOCK_GOLDEN_BLESS=1`); a changed answer is a reviewed edit.
 
+## Amendment (2026-11-19): twelve conformance checks run only in Rust
+
+Pair P3 of the same retirement (docs/research/2026-11-18-tool-twin-pairs.md, option A). C39, C53, C119, C120, C121, C122, C123,
+C124, C125, C129, C130 and C131 had a JavaScript module and a Rust one. Their JavaScript modules, tests and `paddock-shell-baseline.mjs`
+are deleted; the Rust host runs them (`./dev conformance`, the second line of the `paddock` phase of `conformance/paddock.ci.json`,
+the ids in `conformance.rust`, read through `./dev ci conformance-args --host rust`). Before the deletion the JavaScript answers were
+recorded through the one bless of the golden tests (`PADDOCK_GOLDEN_BLESS=1`, refused in CI): `tests/fixtures/check/recorded` (the cases
+of the Rust tests), `tests/fixtures/check/units` (every input the JavaScript tests gave their detection functions or the runner, 310 cases)
+and `expected.json`; the whole-tree answers are a ceiling per check and file, since the tree changes. The shell baseline tool is now
+`./dev check shell-baseline`. The other checks, the engine and the helpers they share stay in JavaScript until WP-10 of
+docs/plans/ci-in-rust.md (register entry `conformance-check-host`); C139 is the one check left with a module in both hosts.
+
 ## Sources
 
 - Features research note: [2026-10-dev-tooling-features.md](../research/2026-10-dev-tooling-features.md)

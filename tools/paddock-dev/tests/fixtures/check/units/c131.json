@@ -1,0 +1,629 @@
+[
+ {
+  "name": "goldenSites-0",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "x/tests/golden/a.json",
+    "{\n  \"uid\": 501,\n  \"gid\": 20\n}\n"
+   ],
+   [
+    "conformance/c131-allow.json",
+    "{\"allow\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 2,
+     "message": "golden holds a machine-specific id `uid\": 501`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    },
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 3,
+     "message": "golden holds a machine-specific id `gid\": 20`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 2
+  }
+ },
+ {
+  "name": "goldenSites-1",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "x/tests/golden/a.json",
+    "uid=501(mia) gid=20(staff)\nEUID: 0\n"
+   ],
+   [
+    "conformance/c131-allow.json",
+    "{\"allow\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 1,
+     "message": "golden holds a machine-specific id `uid=501`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    },
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 2,
+     "message": "golden holds a machine-specific id `EUID: 0`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 2
+  }
+ },
+ {
+  "name": "goldenSites-2",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "x/tests/golden/a.json",
+    "owner: Some(uid 1000)"
+   ],
+   [
+    "conformance/c131-allow.json",
+    "{\"allow\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 1,
+     "message": "golden holds a machine-specific id `uid 1000`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "goldenSites-3",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "x/tests/golden/a.json",
+    "cwd=/Users/someone/work\nx=/home/runner/x\n"
+   ],
+   [
+    "conformance/c131-allow.json",
+    "{\"allow\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 1,
+     "message": "golden holds a machine-specific home `/Users/someone`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    },
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 2,
+     "message": "golden holds a machine-specific home `/home/runner`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 2
+  }
+ },
+ {
+  "name": "goldenSites-4",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "x/tests/golden/a.json",
+    "\"C:\\\\Users\\\\Bo\\\\AppData\" C:\\Users\\Bo\\x"
+   ],
+   [
+    "conformance/c131-allow.json",
+    "{\"allow\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 1,
+     "message": "golden holds a machine-specific home `C:\\\\Users\\\\Bo`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "goldenSites-5",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "x/tests/golden/a.json",
+    "/var/folders/zz/abc/T/x\n/private/tmp/run1\n/tmp/work-1\nC:\\Users\\a\\AppData\\Local\\Temp\\x"
+   ],
+   [
+    "conformance/c131-allow.json",
+    "{\"allow\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 1,
+     "message": "golden holds a machine-specific temp `/var/folders/`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    },
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 2,
+     "message": "golden holds a machine-specific temp `/private/tmp/r`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    },
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 3,
+     "message": "golden holds a machine-specific temp `/tmp/w`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    },
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 4,
+     "message": "golden holds a machine-specific home `C:\\Users\\a`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    },
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 4,
+     "message": "golden holds a machine-specific temp `\\Temp\\`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 5
+  }
+ },
+ {
+  "name": "goldenSites-6",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "x/tests/golden/a.json",
+    "uid😀😀😀😀=1\nuſer_id=5\nK uid: 3\n"
+   ],
+   [
+    "conformance/c131-allow.json",
+    "{\"allow\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 1,
+     "message": "golden holds a machine-specific id `uid😀😀😀😀=1`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    },
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 2,
+     "message": "golden holds a machine-specific id `uſer_id=5`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    },
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 3,
+     "message": "golden holds a machine-specific id `uid: 3`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 3
+  }
+ },
+ {
+  "name": "goldenSites-7",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "x/tests/golden/a.json",
+    "é😀 uid=1\r\nclean\r\n/home/bï\r\n"
+   ],
+   [
+    "conformance/c131-allow.json",
+    "{\"allow\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 1,
+     "message": "golden holds a machine-specific id `uid=1`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    },
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 3,
+     "message": "golden holds a machine-specific home `/home/b`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 2
+  }
+ },
+ {
+  "name": "goldenSites-8",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "x/tests/golden/a.json",
+    "/Users/<name>/x /home/$USER /home/ /Users/ and uid=<uid>"
+   ],
+   [
+    "conformance/c131-allow.json",
+    "{\"allow\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "goldenSites-9",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "x/tests/golden/a.json",
+    "a guid 501, a squid 20, the uid_max setting"
+   ],
+   [
+    "conformance/c131-allow.json",
+    "{\"allow\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "goldenSites-10",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "x/tests/golden/a.json",
+    "user mia on host m9-mac-mini with 17179869184 bytes and cpus: 10"
+   ],
+   [
+    "conformance/c131-allow.json",
+    "{\"allow\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "run-11",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "conformance/c131-allow.json",
+    "{\"allow\":[{\"path\":\"x/tests/golden/b.json\",\"site\":\"/Users/ana\",\"reason\":\"an invented user the test passes in\",\"count\":2}]}"
+   ],
+   [
+    "x/tests/f.snap",
+    "uid: 7\n"
+   ],
+   [
+    "x/tests/fixtures/d.json",
+    "{\"uid\": 501}\n"
+   ],
+   [
+    "x/tests/golden/a.json",
+    "{\"uid\": 501}\n"
+   ],
+   [
+    "x/tests/golden/b.json",
+    "\"/Users/ana/a\"\n\"/Users/ana/b\"\n\"/Users/ana/c\"\n"
+   ],
+   [
+    "x/tests/golden/c.json",
+    "{\"uid\": \"<uid>\"}\n"
+   ],
+   [
+    "x/tests/golden/e.png",
+    "uid 501"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/f.snap",
+     "line": 1,
+     "message": "golden holds a machine-specific id `uid: 7`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    },
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 1,
+     "message": "golden holds a machine-specific id `uid\": 501`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    },
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/b.json",
+     "line": 3,
+     "message": "golden holds a machine-specific home `/Users/ana` beyond the count of its allow entry: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 3
+  }
+ },
+ {
+  "name": "run-12",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "x/tests/golden/a.json",
+    "{\"uid\": 501}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "conformance/c131-allow.json",
+     "line": 1,
+     "message": "the check cannot look: conformance/c131-allow.json cannot be read",
+     "fix": "Restore conformance/c131-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"...\", \"reason\": \"...\", \"count\": 1}]}.",
+     "unwaivable": true,
+     "outcome": "check-broken"
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "run-13",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "conformance/c131-allow.json",
+    "nope"
+   ],
+   [
+    "x/tests/golden/a.json",
+    "{\"uid\": 501}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "conformance/c131-allow.json",
+     "line": 1,
+     "message": "the check cannot look: conformance/c131-allow.json is not JSON: Unexpected token 'o', \"nope\" is not valid JSON",
+     "fix": "Restore conformance/c131-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"...\", \"reason\": \"...\", \"count\": 1}]}.",
+     "unwaivable": true,
+     "outcome": "check-broken"
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "run-14",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "conformance/c131-allow.json",
+    "{}"
+   ],
+   [
+    "x/tests/golden/a.json",
+    "{\"uid\": 501}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "conformance/c131-allow.json",
+     "line": 1,
+     "message": "the check cannot look: conformance/c131-allow.json has no `allow` array",
+     "fix": "Restore conformance/c131-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"...\", \"reason\": \"...\", \"count\": 1}]}.",
+     "unwaivable": true,
+     "outcome": "check-broken"
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "run-15",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "conformance/c131-allow.json",
+    "{\"allow\":[{\"path\":\"x/tests/golden/a.json\",\"site\":\"gone\",\"reason\":\"a stale entry here\"}]}"
+   ],
+   [
+    "x/tests/golden/a.json",
+    "fine\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "conformance/c131-allow.json",
+     "line": 1,
+     "message": "stale allow entry (x/tests/golden/a.json: gone) matches no site",
+     "fix": "Remove it from conformance/c131-allow.json."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "run-16",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "conformance/c131-allow.json",
+    "{\"allow\": []}"
+   ],
+   [
+    "x/tests/golden/a.json",
+    "{\"user\": \"decryp7\", \"uid\": 9}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C131",
+     "severity": "warn",
+     "rule": 40,
+     "file": "x/tests/golden/a.json",
+     "line": 1,
+     "message": "golden holds a machine-specific id `uid\": 9`: it fails on a machine that differs",
+     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ }
+]

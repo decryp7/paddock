@@ -389,11 +389,17 @@ fn conformance_run(inv: &Invocation) -> Option<ConfRun> {
         .split_whitespace()
         .map(|t| t.trim_matches(|c| c == '"' || c == '\''))
         .collect();
-    let at = tokens.iter().position(|t| {
-        t.rsplit('/')
-            .next()
-            .is_some_and(|b| b == "paddock-conformance.mjs" || b == "paddock-conformance")
-    })?;
+    // The JavaScript host (`node conformance/bin/paddock-conformance.mjs`, `paddock-conformance`) or the Rust one (`./dev conformance`,
+    // the checks ported in pair P3): both take the same options and run the checks `--only` names.
+    let is_dev = |t: &str| t == "dev" || t.ends_with("/dev");
+    let at = tokens
+        .iter()
+        .position(|t| {
+            t.rsplit('/')
+                .next()
+                .is_some_and(|b| b == "paddock-conformance.mjs" || b == "paddock-conformance")
+        })
+        .or_else(|| tokens.windows(2).position(|w| is_dev(w[0]) && w[1] == "conformance").map(|i| i + 1))?;
     let rest = &tokens[at + 1..];
     if rest.first().is_some_and(|t| !t.starts_with("--")) {
         return None; // a subcommand: commit-lint, sync, run, list, window-weight
@@ -434,7 +440,7 @@ fn gate_conformance(check: &Check, idx: &Index, apps: &AppFacts, sat: &Option<BT
     let mut per_app: BTreeMap<String, Gating> = BTreeMap::new();
     for inv in &idx.invocations {
         let Some(run) = conformance_run(inv) else {
-            if inv.unresolved && mentions(inv, "paddock-conformance") && mentions(inv, &check.id) {
+            if inv.unresolved && (mentions(inv, "paddock-conformance") || mentions(inv, "dev conformance")) && mentions(inv, &check.id) {
                 root.unresolved.push(format!("{}:{}", inv.file, inv.line));
             }
             continue;
@@ -907,6 +913,32 @@ mod tests {
         c14.scope = Scope::Root;
         c14.report_only = true;
         assert_eq!(ask(&w, &c14).gated, BTreeSet::from([Level::Branch]));
+    }
+
+    /// Pair P3: the checks the Rust host runs (`./dev conformance --only ...`) are gated by that line as the JavaScript host's are, and
+    /// a `./dev` subcommand that only has the word `conformance` in it is not a run of the checks.
+    #[test]
+    fn a_dev_conformance_line_gates_only_the_ids_it_names() {
+        let ci = ROOT_CI.replace(
+            "node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14 --strict C14",
+            "./dev conformance --app paddock --root . --only C39,C53",
+        );
+        let w = world(&[(".gitea/workflows/ci.yml", &ci)], &[], &[]);
+        let mut c39 = check(Kind::Conformance, "C39");
+        c39.scope = Scope::Root;
+        assert_eq!(ask(&w, &c39).gated, BTreeSet::from([Level::Branch]));
+        let mut c06 = check(Kind::Conformance, "C06");
+        c06.scope = Scope::Root;
+        assert!(ask(&w, &c06).gated.is_empty(), "an id the line does not name");
+        let other = ROOT_CI.replace(
+            "node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14 --strict C14",
+            "./dev check run --only C39",
+        );
+        let w = world(&[(".gitea/workflows/ci.yml", &other)], &[], &[]);
+        assert!(
+            ask(&w, &c39).gated.is_empty(),
+            "`./dev check run` is not the conformance command line"
+        );
     }
 
     #[test]

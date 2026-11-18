@@ -20,7 +20,7 @@
 //!
 //! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet.
 //!
-//! Rust host; `conformance/src/checks/C130-stand-in-fixtures.mjs` is the port and `tests/it/check_c130.rs` compares them.
+//! Rust host; the JavaScript port was retired with pair P3 (ADR 0022 amendment 2026-11-19) and `tests/it/check_c130.rs` holds the check to the answers it recorded.
 
 use super::allow_list::{self, Admit, Entry, Spec};
 use super::finding::Finding;
@@ -33,9 +33,7 @@ use std::sync::LazyLock;
 pub const ALLOW: &str = "conformance/c130-allow.json";
 
 /// The check's own files: they name the pattern, their invented lines are test data.
-pub const IMPLEMENTATION: [&str; 5] = [
-    "conformance/src/checks/C130-stand-in-fixtures.mjs",
-    "conformance/test/c130-stand-in-fixtures.test.mjs",
+pub const IMPLEMENTATION: [&str; 3] = [
     "tools/paddock-dev/src/check/c130.rs",
     "tools/paddock-dev/tests/it/check_c130.rs",
     ALLOW,

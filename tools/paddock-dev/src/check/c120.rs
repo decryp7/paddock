@@ -4,7 +4,7 @@
 //! `crates/`, `tools/`, `apps/` and `scripts/`, outside that module, this flags `current_exe()` or `OUT_DIR` followed by two or more
 //! parent or `..` hops, and a literal `deps` folder segment. Report-only (warnings) until its first green run (ER-41).
 //!
-//! The port of `conformance/src/checks/C120-layout-guess.mjs`, finding for finding (the oracle test compares them). Lines that start with a
+//! The JavaScript check (`C120-layout-guess.mjs`) was retired with pair P3 (ADR 0022 amendment 2026-11-19); `tests/it/check_c120.rs` holds this one to the answers it recorded. Lines that start with a
 //! comment are not read; a justified site carries `// conformance: layout-guess — <reason>` on the line or the line above.
 //! A waiver that waives no site is a warning of its own, at the comment ([`unused_waivers`]).
 

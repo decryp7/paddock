@@ -8,7 +8,7 @@
 import { buildEnv } from '../../ci/build-env.mjs';
 import { error } from '../finding.mjs';
 import { withoutTestItems } from '../util/rust-test-items.mjs';
-import { maskRust } from './C39-freed-port.mjs';
+import { maskRust } from '../util/mask-rust.mjs';
 
 /** The names build-env sets, in order: [commit, date]. */
 export const buildEnvNames = () => Object.keys(buildEnv({ env: {}, head: () => null, now: () => new Date(0) }));

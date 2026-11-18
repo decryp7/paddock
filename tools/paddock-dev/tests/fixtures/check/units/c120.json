@@ -1,0 +1,904 @@
+[
+ {
+  "name": "layoutGuesses-0",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "let d = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap();\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "layoutGuesses-1",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "let o = PathBuf::from(env!(\"OUT_DIR\"))\n    .parent()\n    .unwrap()\n    .parent();\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "layoutGuesses-2",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "let d = current_exe().unwrap().join(\"../..\");\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "reaches the profile folder by two or more `..` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "layoutGuesses-3",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "let p = \"target/debug/deps/x\";\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "layoutGuesses-4",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "let p = r\"C:\\b\\deps\\x\";\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "layoutGuesses-5",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "let q = base.join(\"deps\");\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "layoutGuesses-6",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "scripts/x.sh",
+    "b=\"$OUT_DIR/../../x\"\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "scripts/x.sh",
+     "line": 1,
+     "message": "reaches the profile folder by two or more hops from `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "layoutGuesses-7",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "scripts/x.sh",
+    "x=target/debug/deps/y\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "scripts/x.sh",
+     "line": 1,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "layoutGuesses-8",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "let h = current_exe().unwrap().parent().unwrap();\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "layoutGuesses-9",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "let e = current_exe().unwrap();\nlet d = e.parent().unwrap().parent();\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "layoutGuesses-10",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// current_exe().parent().parent() and /deps/\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "layoutGuesses-11",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "scripts/x.sh",
+    "# $OUT_DIR/../.. and /deps/\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "layoutGuesses-12",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "let d = cargo_layout::profile_dir_of_exe(&current_exe()?);\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "unusedWaivers-13",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// conformance: layout-guess — pinned layout\nlet q = base.join(\"deps\");\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+     "waiver": {
+      "reason": "pinned layout",
+      "expires": "inline"
+     }
+    }
+   ],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "layoutGuesses-14",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// conformance: layout-guess\nlet q = base.join(\"deps\");\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "the layout-guess waiver gives no reason",
+     "fix": "Write `// conformance: layout-guess — <why this cannot be the other cargo layout>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "layoutGuesses-15",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// conformance: file-layout-guess — filler data\nlet a = \"x/deps/y\";\n// conformance: layout-guess — own reason\nlet b = base.join(\"deps\");\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+    },
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "this layout-guess waiver waives no site: the guess it was for is gone or moved",
+     "fix": "Remove the comment, or move it to the line it is for; an unused waiver would waive a new guess written under it."
+    }
+   ],
+   "waived": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 4,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+     "waiver": {
+      "reason": "own reason",
+      "expires": "inline"
+     }
+    }
+   ],
+   "errors": 0,
+   "warnings": 2
+  }
+ },
+ {
+  "name": "layoutGuesses-16",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// conformance: file-layout-guess\nlet a = \"x/deps/y\";\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "layoutGuesses-17",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it.rs",
+    "// conformance: file-layout-guess — filler data\nlet a = \"x/deps/y\";\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/a/tests/it.rs",
+     "line": 2,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+     "waiver": {
+      "reason": "filler data",
+      "expires": "inline"
+     }
+    }
+   ],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "layoutGuesses-18",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// conformance: file-layout-guess — filler data\nfn p() { let a = \"x/deps/y\"; }\n#[cfg(test)]\nmod tests {\n    fn t() { let b = \"x/deps/y\"; }\n}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+    }
+   ],
+   "waived": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 5,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+     "waiver": {
+      "reason": "filler data",
+      "expires": "inline"
+     }
+    }
+   ],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "layoutGuesses-19",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// conformance: file-layout-guess — filler data\n#[cfg(all(test, unix))]\nmod tests {\n    fn t() { let b = \"x/deps/y\"; }\n}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 4,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+    },
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "this layout-guess waiver waives no site: the guess it was for is gone or moved",
+     "fix": "Remove the comment, or move it to the line it is for; an unused waiver would waive a new guess written under it."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 2
+  }
+ },
+ {
+  "name": "unusedWaivers-20",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "let q = base.join(\"deps\"); // conformance: layout-guess — pinned layout\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+     "waiver": {
+      "reason": "pinned layout",
+      "expires": "inline"
+     }
+    }
+   ],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "unusedWaivers-21",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// conformance: layout-guess — pinned layout\nlet q = base.join(\"cache\");\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "this layout-guess waiver waives no site: the guess it was for is gone or moved",
+     "fix": "Remove the comment, or move it to the line it is for; an unused waiver would waive a new guess written under it."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "unusedWaivers-22",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// conformance: layout-guess — pinned layout\n\nlet q = base.join(\"deps\");\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 3,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+    },
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "this layout-guess waiver waives no site: the guess it was for is gone or moved",
+     "fix": "Remove the comment, or move it to the line it is for; an unused waiver would waive a new guess written under it."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 2
+  }
+ },
+ {
+  "name": "unusedWaivers-23",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// conformance: layout-guess\nlet q = base.join(\"cache\");\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "unusedWaivers-24",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// conformance: file-layout-guess — filler data\n#[cfg(test)]\nmod tests {\n    fn t() { let b = \"x/deps/y\"; }\n}\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 4,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+     "waiver": {
+      "reason": "filler data",
+      "expires": "inline"
+     }
+    }
+   ],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "unusedWaivers-25",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// conformance: file-layout-guess — filler data\nfn p() { let a = 1; }\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "this layout-guess waiver waives no site: the guess it was for is gone or moved",
+     "fix": "Remove the comment, or move it to the line it is for; an unused waiver would waive a new guess written under it."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "unusedWaivers-26",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// conformance: file-layout-guess — filler data\nlet a = \"x/deps/y\";\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+    },
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "this layout-guess waiver waives no site: the guess it was for is gone or moved",
+     "fix": "Remove the comment, or move it to the line it is for; an unused waiver would waive a new guess written under it."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 2
+  }
+ },
+ {
+  "name": "unusedWaivers-27",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// conformance: file-layout-guess — filler data\n// conformance: file-layout-guess — filler data\n#[cfg(test)]\nmod tests {\n    fn t() { let b = \"x/deps/y\"; }\n}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "this layout-guess waiver waives no site: the guess it was for is gone or moved",
+     "fix": "Remove the comment, or move it to the line it is for; an unused waiver would waive a new guess written under it."
+    }
+   ],
+   "waived": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 5,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+     "waiver": {
+      "reason": "filler data",
+      "expires": "inline"
+     }
+    }
+   ],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "unusedWaivers-28",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// conformance: file-layout-guess — filler data\n#[cfg(test)]\nmod tests {\n    // conformance: layout-guess — own reason\n    fn t() { let b = \"x/deps/y\"; }\n}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "this layout-guess waiver waives no site: the guess it was for is gone or moved",
+     "fix": "Remove the comment, or move it to the line it is for; an unused waiver would waive a new guess written under it."
+    }
+   ],
+   "waived": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/x/src/a.rs",
+     "line": 5,
+     "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+     "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+     "waiver": {
+      "reason": "own reason",
+      "expires": "inline"
+     }
+    }
+   ],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "unusedWaivers-29",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "scripts/x.sh",
+    "# conformance: layout-guess — searches both\necho hi\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "scripts/x.sh",
+     "line": 1,
+     "message": "this layout-guess waiver waives no site: the guess it was for is gone or moved",
+     "fix": "Remove the comment, or move it to the line it is for; an unused waiver would waive a new guess written under it."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "unusedWaivers-30",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "let s = \"// conformance: layout-guess — not a comment\";\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "run-31",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "crates/c/src/a.rs",
+    "// conformance: layout-guess — pinned layout\nfn f() {}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C120",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/c/src/a.rs",
+     "line": 1,
+     "message": "this layout-guess waiver waives no site: the guess it was for is gone or moved",
+     "fix": "Remove the comment, or move it to the line it is for; an unused waiver would waive a new guess written under it."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ }
+]

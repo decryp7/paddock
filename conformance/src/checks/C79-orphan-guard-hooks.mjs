@@ -10,7 +10,7 @@
 // a main missing from it is an error, a listed one is a warning, and a listed one that calls it already is an error until
 // it leaves the list. A `#![no_main]` binary (a fuzz target) has no `main` and is skipped.
 import { error, warn } from '../finding.mjs';
-import { maskRust } from './C39-freed-port.mjs';
+import { maskRust } from '../util/mask-rust.mjs';
 
 /** `fn main` (any attributes, `async`, a return type), then its body's first statement. */
 const MAIN_FN = /\bfn\s+main\s*\(\s*\)[^{;]*\{/;

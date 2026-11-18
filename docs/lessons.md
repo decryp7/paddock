@@ -2918,3 +2918,18 @@ four workers on four CPUs). macOS, both engines: green before and after (not the
 headless software renderer) is not measured; the per-tick work (what re-renders) is a product question for Debrief's live tail.
 **Class: a test runs a moving source it does not need while it reads** (earlier: the events-grid fix item, 2026-11-17, and the
 live-tail toast clicks, 2026-11-12, above).
+
+## Retiring the JavaScript twins of 12 checks: an oracle test cannot outlive the oracle (pair P3, 2026-11-19)
+
+Every Rust check test that compared with `conformance/src/checks/C*.mjs` ran the live JS host, so deleting the modules would have
+deleted the proof with them. Order that worked: (1) give each comparison a case name and record the JS answer through the one bless of
+`golden.rs` (`tests/it/recorded.rs`, files in `tests/fixtures/check/recorded`), (2) harvest every input the 12 JS test files gave their
+functions and `runChecks` (a loader hook wrapped them; 310 cases in `tests/fixtures/check/units`) and record the JS answer for each as
+a one-file tree, (3) only then delete. Harvesting found nothing the Rust host answered differently except wording (a JSON parser's
+error text, the regenerate command, "check broken" against "not measured" for a run that looks at nothing). Three things a recorded
+answer must not hold: a run's timestamp (`at`), a commit in a message (`merge base 8a41...`) and a stale disk name that C125 would then
+find in the recording itself. A whole-tree answer is a ceiling per check and file (the tree changes under the test), never an exact copy.
+Also: `maskRust` and 14 other imports lived in the deleted C39 module; check what else imports a module before deleting it. The trigger
+needed no new rule (the conformance job is in every plan), but a test now says so for every input these checks read.
+**Class: a retired side takes its trigger, its helper exports or its oracle with it** (earlier: the P1 planner retirement, 2026-11-18, where
+`CONTRACT_INPUT` had to be added for the tests the script's own tests had covered).

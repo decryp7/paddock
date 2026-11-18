@@ -1140,6 +1140,9 @@ impl Walker<'_> {
                         && let Some(a) = contract.and_then(|c| crate::ci_run::contract::conformance_args(c).ok())
                     {
                         env.insert("PADDOCK_CONFORMANCE_ARGS".into(), a[1..].join(" "));
+                        if let Some(r) = contract.and_then(|c| crate::ci_run::contract::conformance_rust_args(c).ok()) {
+                            env.insert("PADDOCK_CONFORMANCE_RUST_ARGS".into(), r.join(" "));
+                        }
                     }
                     for c in shell::commands(&list.join("\n"), Some(String::new())) {
                         self.emit(

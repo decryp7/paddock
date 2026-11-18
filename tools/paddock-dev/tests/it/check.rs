@@ -1,10 +1,12 @@
-//! `./dev check run` (RT-5): the Rust host and its first two checks against the JavaScript ones, the oracle.
+//! `./dev check run` (RT-5): the Rust host and its first checks, held to the answers the JavaScript host gave before C39, C53 and
+//! C124 were retired from it (pair P3, ADR 0022 amendment 2026-11-19).
 //!
-//! - `fixture_*`: the recorded answers of the JS runner on `tests/fixtures/check/cases` (`expected.json`, `masked.json`, made by
-//!   `generate.mjs`); these need no node, so they outlive the JS host.
-//! - `live_*`: the JS host itself as the oracle, on the fixtures and on this working tree (every tracked `.rs` file masked, and the
-//!   findings of C39 and C53). When node is missing: a note on a workstation, a failure in CI on Linux (so a missing oracle cannot
-//!   let the comparison pass unseen), a `::notice::` on the other CI legs (the Linux leg runs it).
+//! - `fixture_*`: the recorded answers of the JS runner on `tests/fixtures/check/cases` (`expected.json`, written by `generate.mjs`
+//!   before the JS modules were retired, and `masked.json`); these need no node.
+//! - the recorded cases of `tests/fixtures/check/recorded` (`c39-c53-*`, `c124-*`): token soup, baselines against a merge base, this
+//!   tree's findings as a ceiling. `live_mask_*` still runs the JS `maskRust` helper (`conformance/src/util/mask-rust.mjs`, which the
+//!   checks left on the JS host share) over every tracked `.rs` file; when node is missing: a note on a workstation, a failure in CI on
+//!   Linux (so a missing oracle cannot let the comparison pass unseen), a `::notice::` on the other CI legs.
 //! - the host: `--only`, `--files`, run records, `not measured`, `check broken`, the report shape and the CLI.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::check::mask::mask_rust;
@@ -204,25 +206,6 @@ pub(crate) fn node_ticking(driver: &str, env: &[(&str, String)], progress: &padd
     answer
 }
 
-/// [`JS_RUN`] printing a `.` line for every file the conformance runner reads (it reads the tree through `readFileSync`, which
-/// the prefix wraps before the runner is imported), so [`node_ticking`] sees the JS host at work, as it does the Rust one.
-const JS_RUN_TICKING: &str = r#"
-import fs from 'node:fs';
-import { syncBuiltinESMExports } from 'node:module';
-const read = fs.readFileSync;
-fs.readFileSync = (...args) => { process.stdout.write('.\n'); return read(...args); };
-syncBuiltinESMExports();
-"#;
-
-const JS_RUN: &str = r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const now = process.env.RT5_NOW ? new Date(process.env.RT5_NOW) : undefined;
-const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C39', 'C53'], options: { now } });
-process.stdout.write(JSON.stringify(r));
-"#;
-
 #[test]
 fn live_tree_findings_stay_within_the_recorded_js_answer() {
     let root = repo_root();
@@ -242,18 +225,7 @@ fn live_tree_findings_stay_within_the_recorded_js_answer() {
             run_checks_in(&tree, &opts, &legacy_registry()).unwrap()
         }
     });
-    crate::recorded::assert_tree_within(
-        "c39-c53-real-tree",
-        || {
-            // The JS host prints a line per file it reads and the Rust host ticks per file: both are judged on progress.
-            paddock_testkit::guarded("the JS check host over the live tree", LIVE_STALL, move |progress| {
-                let driver = format!("{JS_RUN_TICKING}{JS_RUN}");
-                let env = [("RT5_ROOT", root.display().to_string()), ("RT5_APP", "paddock".into())];
-                serde_json::from_str::<Value>(node_ticking(&driver, &env, &progress).trim()).unwrap()
-            })
-        },
-        &r.json(),
-    );
+    crate::recorded::assert_tree_within("c39-c53-real-tree", &r.json());
     assert!(r.waived.len() > 5, "the tree's own waivers must be exercised");
 }
 
@@ -287,7 +259,7 @@ fn live_mask_equals_the_js_mask_on_every_tracked_rust_file() {
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { readFileSync, writeFileSync } from 'node:fs';
-const { maskRust } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/checks/C39-freed-port.mjs')).href);
+const { maskRust } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/util/mask-rust.mjs')).href);
 const files = JSON.parse(readFileSync(process.env.RT5_LIST, 'utf8'));
 files.forEach((f, i) => { writeFileSync(join(process.env.RT5_OUT, `${i}.txt`), maskRust(readFileSync(f, 'utf8')), 'utf8'); process.stdout.write('.\n'); });
 "#;
@@ -882,22 +854,14 @@ fn soup(seed: u64, files: usize, root: &Path) {
 }
 
 #[test]
-fn live_token_soup_findings_equal_the_js_host() {
+fn live_token_soup_findings_equal_the_recorded_js_answers() {
     for seed in [1u64, 2, 3] {
         let d = tempfile::tempdir().unwrap();
         soup(seed, 250, d.path());
-        let js: Value = crate::recorded::js_answer(&format!("c39-c53-soup-{seed}"), || {
-            shared_part(
-                &serde_json::from_str::<Value>(&node(
-                    JS_RUN,
-                    &[("RT5_ROOT", d.path().display().to_string()), ("RT5_APP", "soup".into())],
-                ))
-                .unwrap(),
-            )
-        });
         let mut o = options(d.path());
         o.config = paddock_dev::check::config::Config::bare("soup");
         let r = run_checks(&o, &legacy_registry()).unwrap();
+        let js = crate::recorded::expect(&format!("c39-c53-soup-{seed}"), &shared_part(&r.json()));
         assert_eq!(shared_part(&r.json())["findings"], js["findings"], "seed {seed}");
         assert!(
             js["findings"].as_array().unwrap().len() > 20,
@@ -966,21 +930,10 @@ fn baseline_findings(r: &paddock_dev::check::RunResult) -> Vec<String> {
 #[test]
 fn live_baseline_growth_equals_the_js_host_in_a_git_repository() {
     let tree = grown_baseline_repo();
-    let js: Value = crate::recorded::js_answer(&"c39-c53-baseline-grown".to_string(), || {
-        shared_part(
-            &serde_json::from_str::<Value>(&node(
-                JS_RUN,
-                &[
-                    ("RT5_ROOT", tree.path().display().to_string()),
-                    ("RT5_APP", "fixture".into()),
-                    ("RT5_NOW", "2026-11-10T12:00:00Z".into()),
-                ],
-            ))
-            .unwrap(),
-        )
-    });
     let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
-    assert_eq!(crate::recorded::scrub(shared_part(&r.json())), js);
+    let got = crate::recorded::scrub(shared_part(&r.json()));
+    let want = crate::recorded::expect("c39-c53-baseline-grown", &got);
+    assert_eq!(got, want);
     let grew = baseline_findings(&r);
     assert_eq!(grew.len(), 1, "{grew:?}");
     assert!(grew[0].contains("the baseline grew: 1 entry is"), "{grew:?}");
@@ -1001,21 +954,10 @@ fn a_moved_site_is_not_growth_on_either_host_but_a_new_one_beside_it_is() {
             1,
         ),
     ] {
-        let js: Value = crate::recorded::js_answer(&format!("c39-c53-baseline-{}", name.replace(' ', "-")), || {
-            shared_part(
-                &serde_json::from_str::<Value>(&node(
-                    JS_RUN,
-                    &[
-                        ("RT5_ROOT", tree.path().display().to_string()),
-                        ("RT5_APP", "fixture".into()),
-                        ("RT5_NOW", "2026-11-10T12:00:00Z".into()),
-                    ],
-                ))
-                .unwrap(),
-            )
-        });
         let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
-        assert_eq!(crate::recorded::scrub(shared_part(&r.json())), js, "{name}: the hosts agree");
+        let got = crate::recorded::scrub(shared_part(&r.json()));
+        let want = crate::recorded::expect(&format!("c39-c53-baseline-{}", name.replace(' ', "-")), &got);
+        assert_eq!(got, want, "{name}: the hosts agree");
         let msgs = baseline_findings(&r);
         let grown: Vec<_> = msgs.iter().filter(|m| m.contains("the baseline grew")).collect();
         assert_eq!(grown.len(), grew, "{name}: {msgs:?}");
@@ -1041,21 +983,10 @@ fn a_site_moved_from_a_live_file_is_an_error_and_from_a_gone_file_a_warning_on_b
         let mut doc: Value = read_json(&tree.path().join(BASELINE));
         doc["sites"][0]["file"] = json!(from);
         std::fs::write(tree.path().join(BASELINE), serde_json::to_string_pretty(&doc).unwrap()).unwrap();
-        let js: Value = crate::recorded::js_answer(&format!("c39-c53-moved-{}", if errors { "live-file" } else { "gone-file" }), || {
-            shared_part(
-                &serde_json::from_str::<Value>(&node(
-                    JS_RUN,
-                    &[
-                        ("RT5_ROOT", tree.path().display().to_string()),
-                        ("RT5_APP", "fixture".into()),
-                        ("RT5_NOW", "2026-11-10T12:00:00Z".into()),
-                    ],
-                ))
-                .unwrap(),
-            )
-        });
         let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
-        assert_eq!(crate::recorded::scrub(shared_part(&r.json())), js, "{name}: the hosts agree");
+        let got = crate::recorded::scrub(shared_part(&r.json()));
+        let want = crate::recorded::expect(&format!("c39-c53-moved-{}", if errors { "live-file" } else { "gone-file" }), &got);
+        assert_eq!(got, want, "{name}: the hosts agree");
         let site = r
             .findings
             .iter()
@@ -1113,20 +1044,9 @@ fn an_invalid_baseline_fails_closed_with_one_error_on_both_hosts() {
         assert_eq!(msgs.len(), 1, "{bad}: {msgs:?}");
         assert!(msgs[0].contains("is not JSON with a `sites` list"), "{msgs:?}");
         {
-            let js: Value = crate::recorded::js_answer(&format!("c39-c53-invalid-baseline-{i}"), || {
-                shared_part(
-                    &serde_json::from_str::<Value>(&node(
-                        JS_RUN,
-                        &[
-                            ("RT5_ROOT", tree.path().display().to_string()),
-                            ("RT5_APP", "fixture".into()),
-                            ("RT5_NOW", "2026-11-10T12:00:00Z".into()),
-                        ],
-                    ))
-                    .unwrap(),
-                )
-            });
-            assert_eq!(crate::recorded::scrub(shared_part(&r.json())), js, "{bad}");
+            let got = crate::recorded::scrub(shared_part(&r.json()));
+            let want = crate::recorded::expect(&format!("c39-c53-invalid-baseline-{i}"), &got);
+            assert_eq!(got, want, "{bad}");
         }
     }
 }
@@ -1181,14 +1101,6 @@ fn c124_tree() -> tempfile::TempDir {
     }
     d
 }
-
-const JS_RUN_C124: &str = r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C124'], options: {} });
-process.stdout.write(JSON.stringify(r));
-"#;
 
 fn c124_options(root: &Path, app: &str) -> RunOptions {
     RunOptions {
@@ -1247,20 +1159,12 @@ fn c124_without_its_allow_list_cannot_look() {
 }
 
 #[test]
-fn c124_findings_equal_the_recorded_js_answers_on_a_fixture_tree_and_on_this_tree() {
-    let live = |root: &Path, app: &str| {
-        let js: Value = serde_json::from_str(&node(
-            JS_RUN_C124,
-            &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", app.into())],
-        ))
-        .unwrap();
-        shared_part(&js)
-    };
+fn live_c124_findings_equal_the_recorded_js_answers_on_a_fixture_tree_and_on_this_tree() {
     let tree = c124_tree();
-    let want = crate::recorded::js_answer("c124-fixture", || live(tree.path(), "fixture"));
     let r = run_checks(&c124_options(tree.path(), "fixture"), &registry()).unwrap();
-    assert_eq!(shared_part(&r.json()), want, "C124 on the fixture tree");
+    let got = shared_part(&r.json());
+    assert_eq!(got, crate::recorded::expect("c124-fixture", &got), "C124 on the fixture tree");
     let root = repo_root();
     let r = run_checks(&c124_options(&root, "paddock"), &registry()).unwrap();
-    crate::recorded::assert_tree_within("c124-real-tree", || live(&root, "paddock"), &r.json());
+    crate::recorded::assert_tree_within("c124-real-tree", &r.json());
 }

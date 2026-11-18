@@ -25,6 +25,7 @@ pub mod mask;
 pub mod outcome;
 pub mod record;
 pub mod report;
+pub mod shell_baseline;
 pub mod tree;
 pub mod util;
 pub mod waivers;

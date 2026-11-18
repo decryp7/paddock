@@ -38,7 +38,7 @@
 import { createHash } from 'node:crypto';
 import { baselineGrowth as sharedGrowth, reconcile, targetRef, unmeasuredFinding } from '../util/baseline.mjs';
 import { error, warn } from '../finding.mjs';
-import { maskRust } from './C39-freed-port.mjs';
+import { maskRust } from '../util/mask-rust.mjs';
 
 export const BASELINE_PATH = 'conformance/baselines/C71.json';
 export const WAITS_BASELINE_PATH = 'conformance/baselines/C71-waits.json';

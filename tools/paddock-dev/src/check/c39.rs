@@ -12,7 +12,7 @@
 //! The fix: `paddock_testkit::net::HeldPort` keeps the port taken. A justified case carries
 //! `// conformance: freed-port — <reason>` on the line or the line above.
 //!
-//! The port of `conformance/src/checks/C39-freed-port.mjs`, finding for finding (the oracle test compares them).
+//! The JavaScript check (`C39-freed-port.mjs`) was retired with pair P3 (ADR 0022 amendment 2026-11-19); `tests/it/check.rs` holds this one to the answers it recorded (`expected.json`, `recorded/c39-c53-*`).
 
 use super::finding::Finding;
 use super::inline_waiver::{CommentView, InlineWaiver, Kind as CommentKind};

@@ -38,7 +38,10 @@ Adding a check changes no row of the CI golden (`tools/paddock-dev/tests/golden/
 Never edit generated files by hand (ER-40): `./dev gen check` runs both checks (`conformance-check-lists`, `ci-run-golden` in
 `docs/generators.toml`) and prints the command when one is stale. A Rust port of a check (`tools/paddock-dev/src/check/c<n>.rs`)
 adds its line to `register_checks!` in `tools/paddock-dev/src/check/mod.rs`; the registry test prints the block to paste when the
-macro and the module files or the JavaScript order disagree, and `tests/it/main.rs` prints the `mod` line a new test file needs.
+macro and the module files disagree, and `tests/it/main.rs` prints the `mod` line a new test file needs. A check with a Rust port
+and no module here (C39, C53, C119-C125 and C129-C131 since 2026-11-19, ADR 0022) is listed in `conformance.rust` of
+`conformance/paddock.ci.json` and runs as `./dev conformance --only <ids>`; `./dev conformance list` lists the Rust host's checks, and
+the index below holds only the JavaScript ones.
 
 The check index (generated from each module's id, title, scope, mode and needs):
 
@@ -66,13 +69,11 @@ The check index (generated from each module's id, title, scope, mode and needs):
 | C35 | Untimed calls are declared job-starting or user-waiting commands | both | gate | all |
 | C36 | Parser crates have a fuzz target or a never-panics test | both | report-only | all |
 | C37 | One integration-test binary per crate; every workspace member tested in CI and on the workspace hack | root | gate | all |
-| C39 | Tests never free a port they probe | both | gate | all |
 | C43 | sticky table headers stay above their rows | both | gate | all |
 | C45 | Dialog contracts use the dialog_callable markers, never the hidden constructors | both | gate | all |
 | C48 | Apps on the shared shell grant their dialog windows paddock-shell:dialog | both | gate | all |
 | C50 | Every app on the shell lets the shell open its start, and tests it | both | gate | all |
 | C51 | Starts are judged on run state, not on a fixed wait (report-only) | both | report-only | all |
-| C53 | Nothing is ended by a bare pid | both | gate | all |
 | C54 | Work a person waits for never runs at an OS starvable background level | both | gate | all |
 | C56 | Every app reads the build commit and date under the names build-env sets | both | gate | all |
 | C57 | No tracked file is a symlink | root | gate | all |
@@ -96,19 +97,9 @@ The check index (generated from each module's id, title, scope, mode and needs):
 | C116 | Every generated or pinned file is covered by the generator registry | root | gate | all |
 | C117 | steps that run after a failure also stop when the job setup failed | root | report-only | all |
 | C118 | No compiler or tool in CI floats | root | report-only | all |
-| C119 | no workflow job runs ./dev before its toolchain is set up | root | report-only | all |
-| C120 | No guessing of the cargo build-folder layout | both | report-only | all |
-| C121 | Declared data is read through its accessor, not by searching a workflow's text | root | report-only | all |
-| C122 | Tests compare paths as paths | root | report-only | all |
-| C123 | a Rust test starts ./dev, cargo or node only through paddock_testkit::TestCommand | root | report-only | all |
-| C124 | A gate's result is built through the shared outcome, never by hand | root | report-only | all |
-| C125 | No hard-coded machine disk paths | root | report-only | all |
 | C126 | Tests bound each step on progress and end every process they start | root | report-only | all |
 | C127 | A recursive delete of a computed path in a shell script goes through safe_rm | root | report-only | all |
 | C128 | Tests take a recorded pid's identity through the kit, never ProcessId::of | root | report-only | all |
-| C129 | No new shell | root | report-only | all |
-| C130 | Rust tests install the testkit stand-in, not a #!/bin/sh fixture | root | report-only | all |
-| C131 | A golden file holds no value of the machine that captured it | root | report-only | all |
 | C133 | E2E specs: opt-outs of the pinned clock say why, live steps are paused, waits are never vacuous | root | report-only | all |
 | C135 | The test leak detector is switched off only where listed | root | report-only | all |
 | C136 | A unit test that starts a live mock feed runs it on a clock the test moves | root | report-only | all |

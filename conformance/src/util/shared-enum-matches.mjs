@@ -1,7 +1,7 @@
 // The `match` expressions on a shared enum in Rust source, and which of them end in a catch-all arm. A catch-all (`_ =>` or a bare
 // binding) on a shared enum means a variant added later (Dyno WP-8's `Interrupted`) compiles everywhere and is handled by whatever
 // the default does. Without one, the compiler names every app's match that must change in the same change (rule 39).
-import { maskRust } from '../checks/C39-freed-port.mjs';
+import { maskRust } from './mask-rust.mjs';
 import { rustTestRanges } from '../checks/C71-test-timing.mjs';
 
 const KEYWORDS = new Set(['ref', 'mut', 'box']);

@@ -161,7 +161,7 @@ approved = "coordinator"
 
 [[report_only]]
 id = "C122"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY in C122-test-path-text.mjs (and c122.rs) and the mode to gate. Rules A and B start with no sites on the tree (all 63 migrated onto paddock_testkit::path in the same change, ADR 0099 WP-3b); rule C only ever warns"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY in tools/paddock-dev/src/check/c122.rs and the mode to gate. Rules A and B start with no sites on the tree (all 63 migrated onto paddock_testkit::path in the same change, ADR 0099 WP-3b); rule C only ever warns"
 owner = "ADR 0099"
 since = 2026-11-13
 review_by = 2026-12-13
@@ -201,7 +201,7 @@ approved = "user"
 
 [[report_only]]
 id = "C119"
-reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in C119-dev-before-toolchain.mjs (and its Rust port, tools/paddock-dev/src/check/c119.rs) and the mode to gate. Today's findings are the plan jobs of ci.yml, debrief.yml, dyno-release.yml and pitcrew-release.yml, the commits job and tag.yml's check job (they run ./dev before any setup-rust; their compiler is the image's)"
+reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in tools/paddock-dev/src/check/c119.rs and the mode to gate. Today's findings are the plan jobs of ci.yml, debrief.yml, dyno-release.yml and pitcrew-release.yml, the commits job and tag.yml's check job (they run ./dev before any setup-rust; their compiler is the image's)"
 owner = "CI-in-Rust WP-3 review (2026-11-13)"
 since = 2026-11-13
 review_by = 2026-12-13
@@ -209,7 +209,7 @@ approved = "coordinator"
 
 [[report_only]]
 id = "C120"
-reason = "ER-41: report-only until its first green run on main, then change warn to error in C120-layout-guess.mjs (and its Rust port, tools/paddock-dev/src/check/c120.rs) and the mode to gate. 0 warnings today: the 24 sites found (prune test data, cargo-output samples, old-layout tests) are waived with a reason and counted as waived"
+reason = "ER-41: report-only until its first green run on main, then change warn to error in tools/paddock-dev/src/check/c120.rs and the mode to gate. 0 warnings today: the 24 sites found (prune test data, cargo-output samples, old-layout tests) are waived with a reason and counted as waived"
 owner = "build-folder layout (ER-21, paddock_env::cargo_layout)"
 since = 2026-11-13
 review_by = 2026-12-13
@@ -217,7 +217,7 @@ approved = "coordinator"
 
 [[report_only]]
 id = "C121"
-reason = "ER-41: report-only until its first green run on the real tree is recorded in ADR 0098 (WP-2), then flip the findings to errors in C121-declared-data.mjs and c121.rs. first count 2026-11-13: 10 findings, all the parity fixtures of C121 (now in tools/paddock-dev/tests/it/check_c121.rs, one of the check's own files it does not read since 2026-11-15); it flags a registry entry or test that runs grep, sed, awk or a regular expression over a workflow file"
+reason = "ER-41: report-only until its first green run on the real tree is recorded in ADR 0098 (WP-2), then flip the findings to errors in tools/paddock-dev/src/check/c121.rs. first count 2026-11-13: 10 findings, all the parity fixtures of C121 (now in tools/paddock-dev/tests/it/check_c121.rs, one of the check's own files it does not read since 2026-11-15); it flags a registry entry or test that runs grep, sed, awk or a regular expression over a workflow file"
 owner = "ADR 0098 WP-2"
 since = 2026-11-13
 review_by = 2027-01-07
@@ -225,7 +225,7 @@ approved = "user"
 
 [[report_only]]
 id = "C124"
-reason = "ER-41: report-only until its first green run on the real tree is recorded in ADR 0089 (amendment 2026-11-13, WP-T6), then flip the warnings to errors in C124-gate-outcomes.mjs and the mode to gate. First count 2026-11-13: 18 files, every one listed with a reason in conformance/c124-allow.json (a shrink-only seed that empties as each gate migrates); it flags a gate result built by hand outside paddock_cli::Outcome"
+reason = "ER-41: report-only until its first green run on the real tree is recorded in ADR 0089 (amendment 2026-11-13, WP-T6), then flip the warnings to errors in tools/paddock-dev/src/check/c124.rs and the mode to gate. First count 2026-11-13: 18 files, every one listed with a reason in conformance/c124-allow.json (a shrink-only seed that empties as each gate migrates); it flags a gate result built by hand outside paddock_cli::Outcome"
 owner = "ADR 0089 amendment WP-T6"
 since = 2026-11-13
 review_by = 2027-01-07
@@ -233,7 +233,7 @@ approved = "user"
 
 [[report_only]]
 id = "C123"
-reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in C123-test-process-builder.mjs (and its Rust port, tools/paddock-dev/src/check/c123.rs) and the mode to gate. Every existing Rust test spawn of ./dev, cargo or node is migrated onto paddock_testkit::TestCommand in the same change (no baseline); JavaScript tests are not judged (ADR 0100 follow-up)"
+reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in tools/paddock-dev/src/check/c123.rs and the mode to gate. Every existing Rust test spawn of ./dev, cargo or node is migrated onto paddock_testkit::TestCommand in the same change (no baseline); JavaScript tests are not judged (ADR 0100 follow-up)"
 owner = "ADR 0100 (2026-11-13)"
 since = 2026-11-13
 review_by = 2026-12-13
@@ -241,7 +241,7 @@ approved = "user"
 
 [[report_only]]
 id = "C125"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C125-machine-paths.mjs and c125.rs, then flip the warnings to errors and the mode to gate. First count 2026-11-14: 105 warnings in 40 files (92 in 34 after the review of 2026-11-15), every one a path on the d7sst7 or d8sst7 disk (stale disk names: guards, VM scripts, dev-tool defaults, briefs, dev docs); invented test volumes are listed per site in conformance/c125-allow.json, history documents are skipped by path there. Even while report-only, a file C125 cannot read is an unwaivable not-measured error at that file (ER-33), not a warning"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in tools/paddock-dev/src/check/c125.rs, then flip the warnings to errors and the mode to gate. First count 2026-11-14: 105 warnings in 40 files (92 in 34 after the review of 2026-11-15), every one a path on the d7sst7 or d8sst7 disk (stale disk names: guards, VM scripts, dev-tool defaults, briefs, dev docs); invented test volumes are listed per site in conformance/c125-allow.json, history documents are skipped by path there. Even while report-only, a file C125 cannot read is an unwaivable not-measured error at that file (ER-33), not a warning"
 owner = "ER-21 class: stale machine paths after a disk move (fix/guard-paths-derived)"
 since = 2026-11-14
 review_by = 2026-12-14
@@ -257,7 +257,7 @@ approved = "coordinator"
 
 [[report_only]]
 id = "C130"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in C130-stand-in-fixtures.mjs and c130.rs. It flags a Rust test that plants a #!/bin/sh (bash, zsh) fixture program instead of installing paddock_testkit::StandIn (a script cannot run on Windows; ER-21 class: train 12's planner control, run 8138, WP-7's windows-twin waivers). Today's sites are the shrink-only allow list conformance/c130-allow.json: 73 sites in 41 entries on 2026-11-16 (after the first conversions on feat/testkit-stand-in). It reads the Rust text that C129 (no new shell, shell files) names as its known gap, so the two never report the same line. Allow-list growth is compared with the merge base through the shared reader (ADR 0098 amendment of 2026-11-16); a shebang built from pieces is not seen"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c130.rs. It flags a Rust test that plants a #!/bin/sh (bash, zsh) fixture program instead of installing paddock_testkit::StandIn (a script cannot run on Windows; ER-21 class: train 12's planner control, run 8138, WP-7's windows-twin waivers). Today's sites are the shrink-only allow list conformance/c130-allow.json: 73 sites in 41 entries on 2026-11-16 (after the first conversions on feat/testkit-stand-in). It reads the Rust text that C129 (no new shell, shell files) names as its known gap, so the two never report the same line. Allow-list growth is compared with the merge base through the shared reader (ADR 0098 amendment of 2026-11-16); a shebang built from pieces is not seen"
 owner = "ER-21 class: a fixture program that exists only on Unix (feat/testkit-stand-in)"
 since = 2026-11-16
 review_by = 2026-12-16
@@ -265,7 +265,7 @@ approved = "coordinator"
 
 [[report_only]]
 id = "C131"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in C131-golden-machine.mjs and c131.rs. It may not block before the shared allow-list reader has its merge-base growth guard (being added on origin/feat/testkit-stand-in: reuse it when it lands, do not copy C129's, rule 55). It reads the golden folders (and *.golden and *.snap files) for fixed patterns only: uid and gid numbers, /Users, /home and C:\\Users paths and temp paths, so it gives the same result on every machine; the ER-21 class 'a golden captured on one machine fails on another' (train 14 WP-2: six goldens, among them the Mac's uid 501 in a guardian golden). It walks the working folder today; reading git's tracked list is the approved train-14 item. First count 2026-11-16 on feat/golden-checked-when-made: 7 sites in 310 files, the same on the Mac and as root in the CI image (the test check_c131 runs on both through ./dev golden confirm), all invented users, waived with a reason in conformance/c131-allow.json. It found no real value; a real host name in a wiki fixture was replaced as housekeeping, not as a catch. Known gap: this machine's own user, host, RAM and CPU count are not read (they made the result differ per machine)"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c131.rs. It may not block before the shared allow-list reader has its merge-base growth guard (being added on origin/feat/testkit-stand-in: reuse it when it lands, do not copy C129's, rule 55). It reads the golden folders (and *.golden and *.snap files) for fixed patterns only: uid and gid numbers, /Users, /home and C:\\Users paths and temp paths, so it gives the same result on every machine; the ER-21 class 'a golden captured on one machine fails on another' (train 14 WP-2: six goldens, among them the Mac's uid 501 in a guardian golden). It walks the working folder today; reading git's tracked list is the approved train-14 item. First count 2026-11-16 on feat/golden-checked-when-made: 7 sites in 310 files, the same on the Mac and as root in the CI image (the test check_c131 runs on both through ./dev golden confirm), all invented users, waived with a reason in conformance/c131-allow.json. It found no real value; a real host name in a wiki fixture was replaced as housekeeping, not as a catch. Known gap: this machine's own user, host, RAM and CPU count are not read (they made the result differ per machine)"
 owner = "ER-21 class: a golden holds a value of its capturing machine (feat/golden-checked-when-made)"
 since = 2026-11-15
 review_by = 2026-12-15
@@ -1257,7 +1257,7 @@ approved = "coordinator"
 
 [[report_only]]
 id = "C129"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in C129-no-new-shell.mjs and c129.rs, then flip the warnings to errors and the mode to gate. It keeps new shell and Python files out (shell-to-rust plan WP-0): a file not in the shrink-only baseline conformance/baselines/C129-shell.json or in the exceptions conformance/shell-exceptions.json is a finding, so is one that grew; it also reports callers of scripts the tree lacks and the count of inline run lines in .gitea. First count 2026-11-15: 149 baselined files (15,559 lines) and 20 exact exceptions, 1 warning (inline shell in .gitea: 1269 lines in 333 blocks); no caller names a missing script. Recorded: not yet"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c129.rs, then flip the warnings to errors and the mode to gate. It keeps new shell and Python files out (shell-to-rust plan WP-0): a file not in the shrink-only baseline conformance/baselines/C129-shell.json or in the exceptions conformance/shell-exceptions.json is a finding, so is one that grew; it also reports callers of scripts the tree lacks and the count of inline run lines in .gitea. First count 2026-11-15: 149 baselined files (15,559 lines) and 20 exact exceptions, 1 warning (inline shell in .gitea: 1269 lines in 333 blocks); no caller names a missing script. Recorded: not yet"
 owner = "shell-to-rust plan WP-0, approved by the user 2026-11-15 (ER-21 class: a shell script behaves differently on macOS, Linux and Git Bash, run 8138)"
 since = 2026-11-15
 review_by = 2026-12-15

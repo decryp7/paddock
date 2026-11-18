@@ -130,6 +130,54 @@ pub fn conformance_args(contract: &Value) -> Result<Vec<String>, String> {
     Ok(args)
 }
 
+/// The arguments after `./dev conformance` of the checks the Rust host runs on Paddock itself (pair P3, ADR 0022 amendment
+/// 2026-11-19): `--app <app> --root <root> --only <ids>` with the ids of `conformance.rust`. The list is the checks that have no
+/// JavaScript module any more; one in `conformance.only` as well would run in both hosts, so that is an error, and an empty list is
+/// one too (no check would run: ER-33).
+pub fn conformance_rust_args(contract: &Value) -> Result<Vec<String>, String> {
+    let js = conformance_args(contract)?;
+    let c = &contract["conformance"];
+    let ids: Vec<String> = c
+        .get("rust")
+        .and_then(Value::as_array)
+        .ok_or("conformance/paddock.ci.json: `conformance.rust` is not an array of check ids")?
+        .iter()
+        .map(|i| {
+            i.as_str()
+                .filter(|s| !s.is_empty() && !s.contains(',') && !s.contains(char::is_whitespace))
+                .map(str::to_string)
+                .ok_or("conformance/paddock.ci.json: `conformance.rust` holds an invalid check id")
+        })
+        .collect::<Result<_, _>>()?;
+    if ids.is_empty() {
+        return Err("conformance/paddock.ci.json: `conformance.rust` is empty (no check would run on the Rust host: ER-33)".into());
+    }
+    let only = js
+        .iter()
+        .position(|a| a == "--only")
+        .and_then(|i| js.get(i + 1))
+        .map_or("", String::as_str);
+    if let Some(both) = ids.iter().find(|id| only.split(',').any(|o| o == id.as_str())) {
+        return Err(format!(
+            "conformance/paddock.ci.json: {both} is in `conformance.only` and in `conformance.rust`: it would run in both hosts"
+        ));
+    }
+    let text = |k: &str| c.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+    Ok(vec![
+        "--app".into(),
+        text("app"),
+        "--root".into(),
+        text("root"),
+        "--only".into(),
+        ids.join(","),
+    ])
+}
+
+/// [`conformance_rust_args`] read from the repository at `root`.
+pub fn conformance_rust_args_at(root: &Path) -> Result<Vec<String>, String> {
+    conformance_rust_args(&load(root, "conformance")?)
+}
+
 /// [`conformance_args`] read from the repository at `root`.
 pub fn conformance_args_at(root: &Path) -> Result<Vec<String>, String> {
     conformance_args(&load(root, "conformance")?)
@@ -159,6 +207,27 @@ mod tests {
         );
         let no_strict = json!({"conformance": {"app": "p", "root": ".", "only": ["C06"], "strict": []}});
         assert!(!conformance_args(&no_strict).unwrap().contains(&"--strict".to_string()));
+    }
+
+    #[test]
+    fn the_rust_hosts_arguments_come_from_the_rust_list_and_never_overlap_the_javascript_one() {
+        let c = json!({"conformance": {"app": "paddock", "root": ".", "only": ["C06", "C14"], "strict": [], "rust": ["C39", "C53"]}});
+        assert_eq!(
+            conformance_rust_args(&c).unwrap().join(" "),
+            "--app paddock --root . --only C39,C53"
+        );
+        let both = json!({"conformance": {"app": "p", "root": ".", "only": ["C06", "C39"], "strict": [], "rust": ["C39"]}});
+        assert!(
+            conformance_rust_args(&both)
+                .unwrap_err()
+                .contains("C39 is in `conformance.only` and in `conformance.rust`")
+        );
+        let none = json!({"conformance": {"app": "p", "root": ".", "only": ["C06"], "strict": [], "rust": []}});
+        assert!(conformance_rust_args(&none).unwrap_err().contains("ER-33"));
+        let missing = json!({"conformance": {"app": "p", "root": ".", "only": ["C06"], "strict": []}});
+        assert!(conformance_rust_args(&missing).is_err());
+        let comma = json!({"conformance": {"app": "p", "root": ".", "only": ["C06"], "strict": [], "rust": ["C39,C53"]}});
+        assert!(conformance_rust_args(&comma).unwrap_err().contains("invalid check id"));
     }
 
     #[test]

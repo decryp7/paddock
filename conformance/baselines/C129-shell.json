@@ -1,5 +1,5 @@
 {
- "_comment": "Shell and Python files of the tree that no exception covers (C129), with their line counts. May only shrink: port the script to Rust, delete its entry. Regenerate with: node conformance/bin/paddock-shell-baseline.mjs --shrink",
+ "_comment": "Shell and Python files of the tree that no exception covers (C129), with their line counts. May only shrink: port the script to Rust, delete its entry. Regenerate with: ./dev check shell-baseline --shrink",
  "files": [
   {"path":".claude/hooks/docker-guard.py","lines":211},
   {"path":".claude/hooks/docker-guard.sh","lines":19},

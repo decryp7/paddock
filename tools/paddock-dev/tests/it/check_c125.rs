@@ -1,7 +1,7 @@
-//! C125 (no hard-coded machine disk paths): the Rust host against the conformance host as the oracle, on a fixture tree and on this
+//! C125 (no hard-coded machine disk paths): the Rust host against the answers the JavaScript check gave (recorded in `tests/fixtures/check/recorded`; the JS module is retired, pair P3), on a fixture tree and on this
 //! working tree.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{LIVE_STALL, node, node_ticking, repo_root};
+use super::check::{LIVE_STALL, repo_root};
 use paddock_dev::check::tree::Tree;
 use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
 use serde_json::{Value, json};
@@ -54,14 +54,6 @@ fn shared_part(v: &Value) -> Value {
     json!({"app": v["app"], "checks": v["checks"], "findings": v["findings"], "waived": v["waived"], "errors": v["errors"], "warnings": v["warnings"]})
 }
 
-const JS_RUN: &str = r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C125'], options: {} });
-process.stdout.write(JSON.stringify(r));
-"#;
-
 fn tree_of(files: &[(&str, &str)]) -> tempfile::TempDir {
     let d = tempfile::tempdir().unwrap();
     for (rel, text) in files {
@@ -76,19 +68,12 @@ fn fixture_tree() -> tempfile::TempDir {
     tree_of(CASES)
 }
 
-/// Both hosts over `root`: the shared part of each report, the Rust one first.
+/// The Rust host over `root` and the answer recorded for `case`: the shared part of each report, the Rust one first.
 fn both(case: &str, root: &Path) -> (Value, Value) {
-    let js: Value = crate::recorded::js_answer(case, || {
-        shared_part(
-            &serde_json::from_str::<Value>(&node(
-                JS_RUN,
-                &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", "fixture".into())],
-            ))
-            .unwrap(),
-        )
-    });
     let r = run_checks(&options(root, "fixture"), &registry()).unwrap();
-    (shared_part(&r.json()), js)
+    let got = shared_part(&r.json());
+    let want = crate::recorded::expect(case, &got);
+    (got, want)
 }
 
 #[test]
@@ -204,7 +189,7 @@ fn c125_an_unreadable_file_is_not_measured_on_both_hosts() {
 }
 
 #[test]
-fn c125_fixture_findings_equal_the_recorded_js_answer() {
+fn live_c125_fixture_findings_equal_the_recorded_js_answer() {
     let tree = fixture_tree();
     let (got, want) = both("c125-fixture", tree.path());
     assert_eq!(got["findings"], want["findings"]);
@@ -212,7 +197,7 @@ fn c125_fixture_findings_equal_the_recorded_js_answer() {
 }
 
 #[test]
-fn c125_tree_findings_stay_within_the_recorded_js_answer() {
+fn live_c125_tree_findings_stay_within_the_recorded_js_answer() {
     let root = repo_root();
     let r = paddock_testkit::guarded("the Rust C125 over the live tree", LIVE_STALL, {
         let root = root.clone();
@@ -221,20 +206,7 @@ fn c125_tree_findings_stay_within_the_recorded_js_answer() {
             run_checks_in(&tree, &options(&root, "paddock"), &registry()).unwrap()
         }
     });
-    crate::recorded::assert_tree_within(
-        "c125-real-tree",
-        || {
-            let js_root = root.clone();
-            paddock_testkit::guarded("the JS C125 over the live tree", LIVE_STALL, move |progress| {
-                let driver = format!(
-                    "import fs from 'node:fs';\nimport {{ syncBuiltinESMExports }} from 'node:module';\nconst read = fs.readFileSync;\nfs.readFileSync = (...a) => {{ process.stdout.write('.\\n'); return read(...a); }};\nsyncBuiltinESMExports();\n{JS_RUN}"
-                );
-                let env = [("RT5_ROOT", js_root.display().to_string()), ("RT5_APP", "paddock".into())];
-                serde_json::from_str::<Value>(node_ticking(&driver, &env, &progress).trim()).unwrap()
-            })
-        },
-        &r.json(),
-    );
+    crate::recorded::assert_tree_within("c125-real-tree", &r.json());
 }
 
 /// A file the check reads and then passes over (a NUL byte) is not read: an entry for it says so, and it is no probe.

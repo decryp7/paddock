@@ -1,6 +1,7 @@
-//! The conformance engine of the Rust host (WP-10 batch 1) against the JavaScript host, the oracle: the same command line gives the
-//! same stdout, the same `--out` and `--summary` files and the same exit code, over this working tree and over fixture trees,
-//! including the inline waivers of every ported check. Node is required: a missing oracle fails the test (ER-33).
+//! The conformance engine of the Rust host (WP-10 batch 1) against the answers the JavaScript host gave (recorded in
+//! `tests/fixtures/check/recorded`, `engine-*`, before the checks it ran were retired, pair P3): the same command line gives the same
+//! stdout, the same `--out` and `--summary` files and the same exit code, over fixture trees, including the inline waivers of every
+//! ported check; this working tree's findings are held to the recorded ones as a ceiling.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_dev::check::{self, Check, CheckOutput, Control, Ctx, RunOptions, record::Precondition, run_checks};
@@ -21,17 +22,10 @@ struct Ran {
     summary: Option<String>,
 }
 
-fn run_host(js: bool, args: &[&str], scratch: &Path) -> Ran {
+fn run_host(args: &[&str], scratch: &Path) -> Ran {
     let (out, summary) = (scratch.join("out.json"), scratch.join("summary.md"));
-    let mut c = if js {
-        let mut c = paddock_testkit::TestCommand::new("node");
-        c.arg("conformance/bin/paddock-conformance.mjs");
-        c
-    } else {
-        let mut c = crate::dev_bin::command();
-        c.arg("conformance");
-        c
-    };
+    let mut c = crate::dev_bin::command();
+    c.arg("conformance");
     c.args(args)
         .arg("--out")
         .arg(&out)
@@ -73,18 +67,15 @@ fn ran_json(r: &Ran, scratch: &Path, root: &str) -> Value {
 /// standard error, byte for byte); returns the Rust answer.
 fn same(case: &str, args: &[&str]) -> Ran {
     let b = tempfile::tempdir().unwrap();
-    let rust = run_host(false, args, b.path());
+    let rust = run_host(args, b.path());
     let root = args
         .iter()
         .position(|a| *a == "--root")
         .and_then(|i| args.get(i + 1))
         .copied()
         .unwrap_or("");
-    let want = crate::recorded::js_answer(case, || {
-        let a = tempfile::tempdir().unwrap();
-        ran_json(&run_host(true, args, a.path()), a.path(), root)
-    });
     let got = ran_json(&rust, b.path(), root);
+    let want = crate::recorded::expect(case, &got);
     for k in ["code", "stdout", "out", "summary", "stderr"] {
         assert_eq!(got[k], want[k], "{k} of {args:?} ({case})");
     }
@@ -104,19 +95,15 @@ fn tree(files: &[(&str, &str)]) -> tempfile::TempDir {
 }
 
 #[test]
-fn this_working_tree_gives_the_report_files_the_js_host_gave() {
+fn this_working_tree_gives_the_report_files_within_what_the_js_host_gave() {
     let root = repo();
     // The tree changes under the tests: its findings are held to the recorded JS answer as a ceiling (`recorded::assert_tree_within`),
     // the shape of the report and its files exactly.
     let scratch = tempfile::tempdir().unwrap();
     let args = ["--app", "paddock", "--root", root.to_str().unwrap(), "--only", PORTED];
-    let r = run_host(false, &args, scratch.path());
+    let r = run_host(&args, scratch.path());
     crate::recorded::assert_tree_within(
         "engine-real-tree",
-        || {
-            let a = tempfile::tempdir().unwrap();
-            serde_json::from_str(run_host(true, &args, a.path()).out.as_deref().unwrap()).unwrap()
-        },
         &serde_json::from_str::<Value>(r.out.as_deref().unwrap()).unwrap(),
     );
     assert!(r.stdout.contains("paddock: 4 checks"), "{}", r.stdout);
@@ -134,7 +121,6 @@ fn json_mode_strict_and_the_exit_statuses_agree() {
     let root = root.to_str().unwrap();
     let scratch = tempfile::tempdir().unwrap();
     let json_run = run_host(
-        false,
         &["--app", "paddock", "--root", root, "--only", "C119,C120", "--json"],
         scratch.path(),
     );
@@ -427,7 +413,7 @@ fn rust_check_modules() -> Vec<String> {
     out
 }
 
-/// The `register_checks!` lines for these ids, in the JavaScript host's order, as a mismatch prints them.
+/// The `register_checks!` lines for these ids, as a mismatch prints them.
 fn macro_lines(ids: &[String]) -> String {
     ids.iter()
         .map(|id| format!("    {}::{id},", id.to_lowercase()))
@@ -435,62 +421,81 @@ fn macro_lines(ids: &[String]) -> String {
         .join("\n")
 }
 
-/// What `register_checks!` must hold: every `src/check/c<n>.rs` module, in the order of the JavaScript registry (`list --json`,
-/// generated from the check modules). An id the JavaScript host lacks is put last, so the message still names it.
-fn expected_registry(modules: &[String], js_ids: &[String]) -> Vec<String> {
-    let mine: Vec<String> = modules.iter().map(|m| m.to_uppercase()).collect();
-    let mut out: Vec<String> = js_ids.iter().filter(|id| mine.contains(id)).cloned().collect();
-    out.extend(mine.into_iter().filter(|id| !js_ids.contains(id)));
-    out
+/// What `register_checks!` must hold: every `src/check/c<n>.rs` module, in id order (the order of `conformance/src/checks/index.mjs`
+/// while the JavaScript host had the checks).
+fn expected_registry(modules: &[String]) -> Vec<String> {
+    let mut mine: Vec<(u32, String)> = modules.iter().map(|m| (m[1..].parse().unwrap(), m.to_uppercase())).collect();
+    mine.sort();
+    mine.into_iter().map(|(_, id)| id).collect()
 }
 
-#[test]
-fn the_registry_is_one_list_and_list_json_agrees_with_the_javascript_host() {
-    let reg = check::registry();
-    let ids: Vec<String> = reg.iter().map(|c| c.id().to_string()).collect();
-    assert_eq!(check::sources().iter().map(|(id, _)| id.to_string()).collect::<Vec<_>>(), ids);
+/// The ids `conformance.rust` of `conformance/paddock.ci.json` names, through the one accessor of that contract.
+fn contract_rust_ids() -> Vec<String> {
+    let args = paddock_dev::ci_run::contract::conformance_rust_args_at(&repo()).unwrap();
+    let only = args.iter().position(|a| a == "--only").and_then(|i| args.get(i + 1)).unwrap();
+    only.split(',').map(str::to_string).collect()
+}
+
+/// The checks the JavaScript host still lists (`list --json`).
+fn js_list() -> Vec<Value> {
     let js = paddock_testkit::TestCommand::new("node")
         .args(["conformance/bin/paddock-conformance.mjs", "list", "--json"])
         .current_dir(repo())
         .output()
-        .expect("node must be installed: the oracle cannot be skipped");
+        .expect("node must be installed: the JavaScript host's list cannot be skipped");
     assert!(js.status.success(), "{}", String::from_utf8_lossy(&js.stderr));
-    let js: Vec<Value> = serde_json::from_slice(&js.stdout).unwrap();
-    let js_ids: Vec<String> = js.iter().filter_map(|j| j["id"].as_str().map(str::to_string)).collect();
-    // The macro stays hand-written (Rust has no glob of modules): it is checked against the module files and the JavaScript
-    // registry, and a mismatch prints the whole block to paste (ER-42).
-    let want = expected_registry(&rust_check_modules(), &js_ids);
+    serde_json::from_slice(&js.stdout).unwrap()
+}
+
+#[test]
+fn the_registry_is_one_list_in_id_order_and_names_every_check_module() {
+    let reg = check::registry();
+    let ids: Vec<String> = reg.iter().map(|c| c.id().to_string()).collect();
+    assert_eq!(check::sources().iter().map(|(id, _)| id.to_string()).collect::<Vec<_>>(), ids);
+    // The macro stays hand-written (Rust has no glob of modules): it is checked against the module files, and a mismatch prints the
+    // whole block to paste (ER-42).
+    let want = expected_registry(&rust_check_modules());
     assert!(
         ids == want,
-        "register_checks! in tools/paddock-dev/src/check/mod.rs must name every src/check/c<n>.rs in the order of \
-         conformance/src/checks/index.mjs; replace its lines with\n{}",
+        "register_checks! in tools/paddock-dev/src/check/mod.rs must name every src/check/c<n>.rs in id order; replace its lines with\n{}",
         macro_lines(&want)
     );
-    for id in &ids {
-        assert!(
-            js_ids.contains(id),
-            "{id} is a Rust check without a JavaScript module: write conformance/src/checks/{id}-<slug>.mjs, then run \
-             `node conformance/bin/paddock-check-lists.mjs`"
-        );
+    for entry in check::conformance::list_checks(&reg).as_array().unwrap() {
+        assert!(entry["file"].as_str().unwrap().ends_with(".rs"));
     }
-    let rust = check::conformance::list_checks(&reg);
-    for entry in rust.as_array().unwrap() {
-        let theirs = js
-            .iter()
-            .find(|j| j["id"] == entry["id"])
-            .expect("the JavaScript host has the check");
+}
+
+/// Pair P3: a check that the JavaScript host no longer lists runs on the Rust host through `conformance.rust` of the contract, and that
+/// list holds nothing else; a check both hosts have (C139 until it is retired) stays in `conformance.only` and agrees on its metadata.
+#[test]
+fn the_contracts_rust_list_is_the_registry_less_what_the_javascript_host_still_lists() {
+    let js = js_list();
+    let js_ids: Vec<&str> = js.iter().filter_map(|j| j["id"].as_str()).collect();
+    let rust_only: Vec<String> = check::registry()
+        .iter()
+        .map(|c| c.id().to_string())
+        .filter(|id| !js_ids.contains(&id.as_str()))
+        .collect();
+    let listed = contract_rust_ids();
+    assert!(
+        rust_only == listed,
+        "`conformance.rust` of conformance/paddock.ci.json must be the checks only the Rust host has, in id order; set it to\n{}",
+        serde_json::to_string(&rust_only).unwrap()
+    );
+    for entry in check::conformance::list_checks(&check::registry()).as_array().unwrap() {
+        let Some(theirs) = js.iter().find(|j| j["id"] == entry["id"]) else {
+            continue;
+        };
         for k in ["title", "rule", "scope", "mode", "needs"] {
             assert_eq!(entry[k], theirs[k], "{} {k}", entry["id"]);
         }
-        assert!(entry["file"].as_str().unwrap().ends_with(".rs"));
     }
 }
 
 #[test]
 fn a_new_rust_check_file_is_named_in_the_registry_message() {
-    let js: Vec<String> = ["C39", "C53", "C119", "C999"].map(String::from).to_vec();
     let modules: Vec<String> = ["c119", "c39", "c53", "c999", "c1000"].map(String::from).to_vec();
-    let want = expected_registry(&modules, &js);
+    let want = expected_registry(&modules);
     assert_eq!(want, ["C39", "C53", "C119", "C999", "C1000"]);
     assert_eq!(
         macro_lines(&want[3..]),
@@ -499,32 +504,31 @@ fn a_new_rust_check_file_is_named_in_the_registry_message() {
     );
 }
 
-/// Checks whose parity with the JavaScript host is tested outside [`PORTED`] and outside a `tests/it/check_c<n>.rs` of their own:
-/// the id and the file that runs the JavaScript check on the same tree.
-const PARITY_ELSEWHERE: [(&str, &str); 2] = [("C121", "tests/it/check.rs"), ("C124", "tests/it/check.rs")];
-
+/// Every check the Rust host has and the JavaScript host does not has recorded JS answers to be held to: at least one file in
+/// `tests/fixtures/check/recorded`, `units` or the `expected.json` of C39 and C53, named after it (a check with none was ported without
+/// a parity proof).
 #[test]
-fn every_rust_check_has_a_parity_test_with_the_javascript_host() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let ported: Vec<&str> = PORTED.split(',').collect();
+fn every_rust_only_check_has_recorded_js_answers() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/check");
+    let recorded: Vec<String> = std::fs::read_dir(dir.join("recorded"))
+        .unwrap()
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .collect();
+    let js = js_list();
     for c in check::registry() {
         let id = c.id();
-        let own = dir.join(format!("tests/it/check_{}.rs", id.to_lowercase()));
-        let elsewhere = PARITY_ELSEWHERE.iter().find(|(i, _)| *i == id).map(|(_, f)| dir.join(f));
-        let ok = ported.contains(&id)
-            || own.is_file()
-            || elsewhere.is_some_and(|f| std::fs::read_to_string(f).is_ok_and(|t| t.contains(&format!("only: ['{id}']"))));
+        if js.iter().any(|j| j["id"] == id) {
+            continue;
+        }
+        let low = id.to_lowercase();
+        let ok = recorded
+            .iter()
+            .any(|f| f.starts_with(&format!("{low}-")) || f == &format!("corpus-{low}.json"))
+            || dir.join("units").join(format!("{low}.json")).is_file()
+            || matches!(id, "C39" | "C53") && dir.join("expected.json").is_file();
         assert!(
             ok,
-            "{id} is a Rust check with no parity test: add it to PORTED, write tests/it/check_{}.rs (it runs both hosts on one \
-             tree), or name the file that does in PARITY_ELSEWHERE",
-            id.to_lowercase()
-        );
-    }
-    for (id, _) in PARITY_ELSEWHERE {
-        assert!(
-            check::registry().iter().any(|c| c.id() == id),
-            "PARITY_ELSEWHERE names {id}, which is not a Rust check: remove it"
+            "{id} has no recorded JS answer: record its cases with `PADDOCK_GOLDEN_BLESS=1` (tests/it/recorded.rs)"
         );
     }
 }

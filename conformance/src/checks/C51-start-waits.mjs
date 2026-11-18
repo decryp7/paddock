@@ -10,7 +10,7 @@
 // `benches/`, `examples/`, `fuzz/` and in-file `#[cfg(test)]` modules are skipped. The waiver list may only shrink; the check
 // turns to errors when the apps have adopted the judge (ADR 0031 section 8).
 import { warn } from '../finding.mjs';
-import { maskRust } from './C39-freed-port.mjs';
+import { maskRust } from '../util/mask-rust.mjs';
 
 const WAIVER = /\/\/\s*(?:cap|external|shutdown|ui|pace):\s*\S.{2,}/;
 const SCOPE = /^(?:crates\/|tools\/|apps\/[^/]+\/crates\/|apps\/[^/]+\/app\/src-tauri\/)/;

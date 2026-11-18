@@ -15,14 +15,39 @@ fn path(case: &str) -> PathBuf {
         .join(format!("{case}.json"))
 }
 
-/// What the JS host answered for `case`. With `PADDOCK_GOLDEN_BLESS=1` the answer is first recorded from the live host (`live`), so
-/// the file is the JS host's and not ours; otherwise it is read. A case that was never recorded is a failure naming the command.
-pub(crate) fn js_answer(case: &str, live: impl FnOnce() -> Value) -> Value {
-    scrub(raw_js_answer(case, live))
+/// What the JS host answered for `case`, to hold `ours` to. With `PADDOCK_GOLDEN_BLESS=1` (the one bless of `golden.rs`, refused in CI) the
+/// file is first rewritten from `ours`: a changed answer is a reviewed edit of a recorded file, never a silent one. The files were first
+/// recorded from the JavaScript host (retired 2026-11-19), by the same call with that host's answer. Returns the recorded answer; a case
+/// that was never recorded fails naming the command.
+pub(crate) fn expect(case: &str, ours: &Value) -> Value {
+    let p = path(case);
+    if crate::golden::bless() {
+        write(&p, &scrub(ours.clone()));
+    }
+    read(case, &p)
+}
+
+fn write(p: &std::path::Path, v: &Value) {
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    crate::golden::record(p, v);
+    // C125 reads every file of the tree for a stale disk name, and a recording quotes the fixtures that plant one: the file spells
+    // the slash of `/Volumes/` as the JSON escape `\u002f` (the same value once read), so it names no disk.
+    let text = std::fs::read_to_string(p).unwrap().replace("/Volumes/", "\\u002fVolumes\\u002f");
+    std::fs::write(p, text).unwrap();
+}
+
+fn read(case: &str, p: &std::path::Path) -> Value {
+    let text = std::fs::read_to_string(p).unwrap_or_else(|e| {
+        panic!(
+            "no recorded answer for {case} ({e}). Record it with `PADDOCK_GOLDEN_BLESS=1 cargo nextest run -E 'test({case})'`, review it and commit {}",
+            p.display()
+        )
+    });
+    scrub(serde_json::from_str(&text).unwrap())
 }
 
 /// A commit named in a message (`merge base 8a4141d37`) is a machine value: a throw-away repository has a new one every run (ER-46).
-/// Both sides of a comparison go through this, the recorded one inside [`js_answer`].
+/// Both sides of a comparison go through this, the recorded one inside [`expect`].
 pub(crate) fn scrub(v: Value) -> Value {
     match v {
         Value::String(s) => {
@@ -46,25 +71,6 @@ pub(crate) fn scrub(v: Value) -> Value {
         Value::Object(o) => Value::Object(o.into_iter().map(|(k, v)| (k, scrub(v))).collect()),
         other => other,
     }
-}
-
-fn raw_js_answer(case: &str, live: impl FnOnce() -> Value) -> Value {
-    let p = path(case);
-    if crate::golden::bless() {
-        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        crate::golden::record(&p, &scrub(live()));
-        // C125 reads every file of the tree for a stale disk name, and a recording quotes the fixtures that plant one: the file
-        // spells the slash of `/Volumes/` as the JSON escape `\u002f` (the same value once read), so it names no disk.
-        let text = std::fs::read_to_string(&p).unwrap().replace("/Volumes/", "\\u002fVolumes\\u002f");
-        std::fs::write(&p, text).unwrap();
-    }
-    let text = std::fs::read_to_string(&p).unwrap_or_else(|e| {
-        panic!(
-            "no recorded answer for {case} ({e}). Record it from the JS host with `PADDOCK_GOLDEN_BLESS=1 cargo nextest run -E 'test({case})'` and commit {}",
-            p.display()
-        )
-    });
-    serde_json::from_str(&text).unwrap()
 }
 
 /// The part of a report of the whole tree that is stable under unrelated edits: the number of errors and, per check, the files that
@@ -98,9 +104,9 @@ fn tree_excess(want: &Value, got: &Value) -> Vec<String> {
 }
 
 /// Holds `ours`, a report of this working tree, to the answer the JS host gave on the whole tree (`case`): the same errors and no
-/// file with a finding that the JS host did not have. With `PADDOCK_GOLDEN_BLESS=1` the answer is first recorded from the live host.
-pub(crate) fn assert_tree_within(case: &str, live: impl FnOnce() -> Value, ours: &Value) {
-    let want = js_answer(case, || tree_summary(&live()));
+/// file with a finding that the JS host did not have. A bless rewrites the answer from `ours`, which can only shrink it in review.
+pub(crate) fn assert_tree_within(case: &str, ours: &Value) {
+    let want = expect(case, &tree_summary(ours));
     let excess = tree_excess(&want, &tree_summary(ours));
     assert!(
         excess.is_empty(),

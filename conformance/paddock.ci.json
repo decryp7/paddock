@@ -1,5 +1,5 @@
 {
-  "$comment": "The CI contract of the conformance package and of Paddock's own conformance run (ADR 0038 §1). `conformance` is the one copy of the checks Paddock runs on itself (plan X9): ci.yml's conformance job, the merge queue's train-gates job (`./dev ci run conformance paddock`) and `./dev check --pre-push` all read it. `conformance.only` is generated (ER-40): every check module in conformance/src/checks less the ones `conformance.skip` names, each with the reason it does not run here; after adding a check module or changing `skip`, run `node conformance/bin/paddock-check-lists.mjs` (it also rewrites conformance/src/checks/index.mjs; `./dev gen check` runs its --check). C23 checks commit messages and doc blocks; Paddock's AGENTS.md is the source of the blocks. C24 needs every committed image reviewed (the REVIEWED.md list beside the images). C37 needs one test binary per crate and every crate tested here and on the workspace hack (paddock.conformance.json). C14 (hermetic wrapper), C29 (window weight) and C30 (wall clock) report warnings; C36 (parser hardening) is strict here (a new parser needs its never-panics test); C15 has a dated waiver (paddock.waivers.toml). C71 (tests do not settle on real time) compares its baseline with the merge base's with origin/main, so the job's checkout has the full history (a one-commit clone has no merge base and C71 would only warn that it did not measure).",
+  "$comment": "The CI contract of the conformance package and of Paddock's own conformance run (ADR 0038 §1). `conformance` is the one copy of the checks Paddock runs on itself (plan X9): ci.yml's conformance job, the merge queue's train-gates job (`./dev ci run conformance paddock`) and `./dev check --pre-push` all read it. `conformance.rust` lists the checks that only the Rust host has (pair P3, ADR 0022 amendment 2026-11-19: C39, C53, C119-C125, C129-C131 have no JavaScript module); the second `paddock` line runs them as `./dev conformance` with `./dev ci conformance-args --host rust`'s arguments, and tools/paddock-dev's contracts test holds the list equal to the Rust registry minus the JavaScript one. `conformance.only` is generated (ER-40): every check module in conformance/src/checks less the ones `conformance.skip` names, each with the reason it does not run here; after adding a check module or changing `skip`, run `node conformance/bin/paddock-check-lists.mjs` (it also rewrites conformance/src/checks/index.mjs; `./dev gen check` runs its --check). C23 checks commit messages and doc blocks; Paddock's AGENTS.md is the source of the blocks. C24 needs every committed image reviewed (the REVIEWED.md list beside the images). C37 needs one test binary per crate and every crate tested here and on the workspace hack (paddock.conformance.json). C14 (hermetic wrapper), C29 (window weight) and C30 (wall clock) report warnings; C36 (parser hardening) is strict here (a new parser needs its never-panics test); C15 has a dated waiver (paddock.waivers.toml). C71 (tests do not settle on real time) compares its baseline with the merge base's with origin/main, so the job's checkout has the full history (a one-commit clone has no merge base and C71 would only warn that it did not measure).",
   "conformance": {
     "app": "paddock",
     "root": ".",
@@ -35,11 +35,9 @@
       "C35",
       "C36",
       "C37",
-      "C39",
       "C43",
       "C45",
       "C48",
-      "C53",
       "C54",
       "C56",
       "C57",
@@ -57,19 +55,9 @@
       "C116",
       "C117",
       "C118",
-      "C119",
-      "C120",
-      "C121",
-      "C122",
-      "C123",
-      "C124",
-      "C125",
       "C126",
       "C127",
       "C128",
-      "C129",
-      "C130",
-      "C131",
       "C133",
       "C135",
       "C136",
@@ -79,6 +67,20 @@
     ],
     "strict": [
       "C36"
+    ],
+    "rust": [
+      "C39",
+      "C53",
+      "C119",
+      "C120",
+      "C121",
+      "C122",
+      "C123",
+      "C124",
+      "C125",
+      "C129",
+      "C130",
+      "C131"
     ]
   },
   "tests": [
@@ -86,6 +88,7 @@
     "npm test"
   ],
   "paddock": [
-    "node conformance/bin/paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS"
+    "node conformance/bin/paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS",
+    "./dev conformance $PADDOCK_CONFORMANCE_RUST_ARGS"
   ]
 }

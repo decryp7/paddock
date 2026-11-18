@@ -1,0 +1,601 @@
+[
+ {
+  "name": "pathTextSites-0",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "fn t() {\n    let e = format!(\"{}/x\", p.display());\n}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C122",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/a/tests/it/x.rs",
+     "line": 2,
+     "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+     "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "pathTextSites-1",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "let e = format!(\"{}\\\\x\", p.display());"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C122",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/a/tests/it/x.rs",
+     "line": 1,
+     "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+     "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "pathTextSites-2",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "let e = format!(\"a/{}\", p.display());"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C122",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/a/tests/it/x.rs",
+     "line": 1,
+     "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+     "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "pathTextSites-3",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "let e = format!(\"{}/{}\", base.display(), name);"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C122",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/a/tests/it/x.rs",
+     "line": 1,
+     "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+     "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "pathTextSites-4",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "let e = format!(\"{}/x\", name);"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pathTextSites-5",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "let e = format!(\"{}\\n\", p.display());"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pathTextSites-6",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "let e = format!(\"{} {}\", a.display(), b);"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pathTextSites-7",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "// let e = format!(\"{}/x\", p.display());\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pathTextSites-8",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "let s = \"format!(\\\"{}/x\\\", p.display())\";"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pathTextSites-9",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "let t = p.to_string_lossy().replace('\\\\', \"/\");"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C122",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/a/tests/it/x.rs",
+     "line": 1,
+     "message": "folds path separators by hand with `.replace` (rule B: the same place is spelled differently on Windows)",
+     "fix": "Use `paddock_testkit::path::text` (the tools' spelling) or compare with `same_path` / `assert_same_path!`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "pathTextSites-10",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "let t = s.replace(\"\\\\\", \"/\");"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C122",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/a/tests/it/x.rs",
+     "line": 1,
+     "message": "folds path separators by hand with `.replace` (rule B: the same place is spelled differently on Windows)",
+     "fix": "Use `paddock_testkit::path::text` (the tools' spelling) or compare with `same_path` / `assert_same_path!`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "pathTextSites-11",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "let t = s.replace(r\"\\\", \"/\");"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C122",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/a/tests/it/x.rs",
+     "line": 1,
+     "message": "folds path separators by hand with `.replace` (rule B: the same place is spelled differently on Windows)",
+     "fix": "Use `paddock_testkit::path::text` (the tools' spelling) or compare with `same_path` / `assert_same_path!`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "pathTextSites-12",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "let t = s.replace(\"a\", \"/\");"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pathTextSites-13",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "// s.replace('\\\\', \"/\")\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pathTextSites-14",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "assert_eq!(p.display().to_string(), \"x\");"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C122",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/a/tests/it/x.rs",
+     "line": 1,
+     "message": "compares path text, not paths (rule C: the same place is spelled differently on Windows)",
+     "fix": "Compare `Path`s, or use `paddock_testkit::assert_same_path!`; keep text only for what a program printed (`path::text`). A site that is not a path comparison carries `// conformance: path-text — <why>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "pathTextSites-15",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "assert_eq!(p.to_str().unwrap(), \"x\");"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C122",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/a/tests/it/x.rs",
+     "line": 1,
+     "message": "compares path text, not paths (rule C: the same place is spelled differently on Windows)",
+     "fix": "Compare `Path`s, or use `paddock_testkit::assert_same_path!`; keep text only for what a program printed (`path::text`). A site that is not a path comparison carries `// conformance: path-text — <why>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "pathTextSites-16",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "assert_ne!(p.to_string_lossy(), \"x\");"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C122",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/a/tests/it/x.rs",
+     "line": 1,
+     "message": "compares path text, not paths (rule C: the same place is spelled differently on Windows)",
+     "fix": "Compare `Path`s, or use `paddock_testkit::assert_same_path!`; keep text only for what a program printed (`path::text`). A site that is not a path comparison carries `// conformance: path-text — <why>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "pathTextSites-17",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "assert_eq!(p.file_name().unwrap().to_string_lossy(), \"x\");"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pathTextSites-18",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/lib.rs",
+    "fn f() { let e = format!(\"{}/x\", p.display()); }\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pathTextSites-19",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/lib.rs",
+    "fn f() { let e = format!(\"{}/x\", p.display()); }\n#[cfg(test)]\nmod tests {\nfn f() { let e = format!(\"{}/x\", p.display()); }\n}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C122",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/a/src/lib.rs",
+     "line": 4,
+     "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+     "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "pathTextSites-20",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/tests.rs",
+    "fn f() { let e = format!(\"{}/x\", p.display()); }\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C122",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/a/src/tests.rs",
+     "line": 1,
+     "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+     "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "pathTextSites-21",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x_tests.rs",
+    "fn f() { let e = format!(\"{}/x\", p.display()); }\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C122",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/a/src/x_tests.rs",
+     "line": 1,
+     "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+     "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "pathTextSites-22",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "tools/t/tests/fixtures/x.rs",
+    "fn f() { let e = format!(\"{}/x\", p.display()); }\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pathTextSites-23",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "apps/d/vendor/s/tests/x.rs",
+    "fn f() { let e = format!(\"{}/x\", p.display()); }\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pathTextSites-24",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "// conformance: path-text — a URL path, not a file\nlet e = format!(\"{}/x\", p.display());"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pathTextSites-25",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "let e = format!(\"{}/x\", p.display()); // conformance: path-text — a URL path"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pathTextSites-26",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/tests/it/x.rs",
+    "// conformance: path-text\nlet e = format!(\"{}/x\", p.display());"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C122",
+     "severity": "warn",
+     "rule": 40,
+     "file": "crates/a/tests/it/x.rs",
+     "line": 2,
+     "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (the waiver comment has no reason) (rule A: the same place is spelled differently on Windows)",
+     "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ }
+]

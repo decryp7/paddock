@@ -82,6 +82,7 @@ job	conformance			"$PADDOCK_DEV" ci setup-rust --sccache-backend "local" --sccac
 job	conformance			*) echo "::error::sccache-backend must be auto, redis or local (got 'local')"
 job	conformance			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
 job	conformance			*[!0-9]*) TOTAL=40
+job	conformance			./dev conformance --app paddock --root . --only $RUST_ONLY
 job	conformance			./dev gates check
 job	conformance			BIN=sccache
 job	conformance			BIN=sccache.exe

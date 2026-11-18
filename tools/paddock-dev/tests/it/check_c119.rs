@@ -1,38 +1,13 @@
-//! C119 (no workflow job runs `./dev` before its toolchain is set up): the Rust host against the JavaScript check, the oracle, on a
-//! tree of every shape the check knows and on this working tree. Node is required: a missing oracle fails the test (ER-33).
+//! C119 (no workflow job runs `./dev` before its toolchain is set up): the Rust host against the answers the JavaScript check gave
+//! (recorded, `tests/fixtures/check/recorded`; the JS module is retired, pair P3) on a tree of every shape the check knows and on this tree.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_dev::check::{RunOptions, registry, run_checks};
-use paddock_testkit::TestCommand;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 fn repo() -> PathBuf {
     paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
-}
-
-const DRIVER: &str = r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const r = await runChecks({ root: process.env.C119_ROOT, app: 'paddock', only: ['C119'] });
-process.stdout.write(JSON.stringify({ findings: r.findings, errors: r.errors, warnings: r.warnings }));
-"#;
-
-/// The JS host's answer for `case` (recorded: tests/fixtures/check/recorded).
-fn js(case: &str, root: &Path) -> Value {
-    crate::recorded::js_answer(case, || js_live(root))
-}
-
-fn js_live(root: &Path) -> Value {
-    let out = TestCommand::new("node")
-        .args(["--input-type=module", "-e", DRIVER])
-        .current_dir(repo())
-        .env("C119_ROOT", root)
-        .output()
-        .expect("node must be installed: the oracle cannot be skipped");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    serde_json::from_slice(&out.stdout).unwrap()
 }
 
 fn rust(root: &Path) -> Value {
@@ -77,7 +52,8 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
             "jobs:\n  w:\n    steps:\n      # conformance: dev-before-toolchain — the image has the only compiler\n      - run: ./dev x\n  bare:\n    steps:\n      # conformance: dev-before-toolchain\n      - run: ./dev x\n  c:\n    steps:\n      # ./dev x\n      - run: echo ./dev\n      - run: ./devx\n  d:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n      - run: ./dev ok\n",
         ),
     ]);
-    let (a, b) = (js("c119-every-shape", d.path()), rust(d.path()));
+    let b = rust(d.path());
+    let a = crate::recorded::expect("c119-every-shape", &b);
     assert_eq!(a, b);
     assert_eq!(a["warnings"], 4, "bad, plainjob, bare and c: {a}");
 }
@@ -85,12 +61,13 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
 #[test]
 fn a_tree_without_workflows_is_check_broken_in_both_never_a_pass() {
     let d = tree(&[("README.md", "x")]);
-    let (a, b) = (js("c119-no-workflows", d.path()), rust(d.path()));
+    let b = rust(d.path());
+    let a = crate::recorded::expect("c119-no-workflows", &b);
     assert!(a["errors"].as_u64().unwrap() >= 1 && b["errors"].as_u64().unwrap() >= 1, "{a} {b}");
 }
 
 #[test]
-fn this_working_tree_gives_the_same_findings_in_both_hosts() {
+fn this_working_tree_gives_findings_within_the_recorded_js_answer() {
     let root = repo();
-    crate::recorded::assert_tree_within("c119-real-tree", || js_live(&root), &rust(&root));
+    crate::recorded::assert_tree_within("c119-real-tree", &rust(&root));
 }

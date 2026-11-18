@@ -1,25 +1,13 @@
-//! The shared parity corpus (`conformance/test/parity-corpus/variants.json`): every check that has both a JavaScript host and a Rust
-//! twin is run over the same file in many spellings (a byte order mark, CRLF, astral characters and emoji, Unicode case-folding
-//! letters, no-break spaces, line separators, a very long line) and the two hosts' findings are compared. The seed is the check's own
-//! control tree (`Check::control`), so a new dual-host check needs one line in its parity test: `assert_no_divergence("C1xx")`.
+//! The shared parity corpus (`conformance/test/parity-corpus/variants.json`): every check that had a JavaScript host as well as a Rust
+//! one is run over the same file in many spellings (a byte order mark, CRLF, astral characters and emoji, Unicode case-folding
+//! letters, no-break spaces, line separators, a very long line) and the Rust findings are compared with what the JavaScript host
+//! answered (recorded in `tests/fixtures/check/recorded/corpus-c<n>.json` before the module was retired, pair P3). The seed is the check's own
+//! control tree (`Check::control`), so a check with a recorded answer needs one line here: `assert_no_divergence("C1xx")`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{node, repo_root};
+use super::check::repo_root;
 use paddock_dev::check::{RunOptions, registry, run_checks};
 use serde_json::{Value, json};
 use std::path::Path;
-
-const JS_RUN: &str = r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const jobs = JSON.parse(process.env.RT5_JOBS);
-const out = {};
-for (const { name, root } of jobs) {
-  const r = await runChecks({ root, app: 'paddock', only: [process.env.RT5_ONLY], options: {} });
-  out[name] = r;
-}
-process.stdout.write(JSON.stringify(out));
-"#;
 
 /// One way of writing a file.
 struct Variant {
@@ -156,38 +144,31 @@ pub(crate) fn divergences_with(id: &str, seeds: &[Seed], rust_view: RustView) ->
     expected.extend(seeds.iter().map(|(f, _)| (f.to_string(), 1)));
     let mut trees = Vec::new();
     for v in variants() {
-        let view = |apply: bool, mapper: Option<RustView>| -> Vec<(String, String)> {
+        let view = |_: bool, mapper: Option<RustView>| -> Vec<(String, String)> {
             seed_files
                 .iter()
                 .map(|(rel, text)| {
                     let body = if Some(*rel) == data { (*text).to_string() } else { v.apply(text) };
-                    let body = if apply { mapper.map_or(body.clone(), |m| m(&body)) } else { body };
+                    let body = mapper.map_or(body.clone(), |m| m(&body));
                     (rel.to_string(), body)
                 })
                 .collect()
         };
-        trees.push((
-            v.name.clone(),
-            v.may_empty,
-            write_tree(&view(true, Some(rust_view))),
-            write_tree(&view(false, None)),
-        ));
+        trees.push((v.name.clone(), v.may_empty, write_tree(&view(true, Some(rust_view)))));
     }
-    let jobs: Vec<Value> = trees
+    let runs: Vec<_> = trees
         .iter()
-        .map(|(n, _, _, j)| json!({"name": n, "root": j.path().display().to_string()}))
+        .map(|(_, _, rust_dir)| run_checks(&options(rust_dir.path(), id), &registry()).unwrap())
         .collect();
-    let js: Value = crate::recorded::js_answer(&format!("corpus-{}", id.to_lowercase()), || {
-        let all: Value = serde_json::from_str(&node(
-            JS_RUN,
-            &[("RT5_JOBS", Value::Array(jobs).to_string()), ("RT5_ONLY", id.to_string())],
-        ))
-        .unwrap();
-        Value::Object(all.as_object().unwrap().iter().map(|(k, v)| (k.clone(), shared(v))).collect())
-    });
+    // What the JS host answered on every variant (recorded before it was retired); a bless takes the Rust answers in their place.
+    let ours: serde_json::Map<String, Value> = trees
+        .iter()
+        .zip(&runs)
+        .map(|((n, ..), run)| (n.clone(), shared(&run.json())))
+        .collect();
+    let js = crate::recorded::expect(&format!("corpus-{}", id.to_lowercase()), &Value::Object(ours));
     let mut out = Vec::new();
-    for (name, may_empty, rust_dir, _) in &trees {
-        let run = run_checks(&options(rust_dir.path(), id), &registry()).unwrap();
+    for ((name, may_empty, ..), run) in trees.iter().zip(&runs) {
         let held: Vec<(&str, usize)> = run.findings.iter().map(|f| (f.file.as_str(), f.line)).collect();
         if name == "plain" {
             let mut want: Vec<(&str, usize)> = expected.iter().map(|(f, l)| (f.as_str(), *l)).collect();

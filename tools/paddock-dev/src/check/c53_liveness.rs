@@ -1,5 +1,5 @@
 //! C53, liveness half: asking whether a RAW pid is alive has the same reuse problem as ending it (ADR 0033, rule 53), in tests as
-//! much as in product code. The port of `pidLiveness` and `livenessFindings` in `conformance/src/checks/C53-pid-kills.mjs`, finding
+//! much as in product code. The JavaScript `pidLiveness` and `livenessFindings` of `C53-pid-kills.mjs` were retired with pair P3; finding
 //! for finding (the oracle tests compare them). Ask a `paddock_proc::ProcessId` instead. Existing sites sit in
 //! `conformance/baselines/C53.json` (file and hash of the normalised line; it may only shrink); a new justified one carries
 //! `// conformance: pid-liveness — <reason>` on the line or the line above.

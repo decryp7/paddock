@@ -1,7 +1,7 @@
-//! C131 (a golden file holds no value of the machine that captured it): the Rust host against the conformance host as the oracle, on a fixture tree and on this
+//! C131 (a golden file holds no value of the machine that captured it): the Rust host against the answers the JavaScript check gave (recorded in `tests/fixtures/check/recorded`; the JS module is retired, pair P3), on a fixture tree and on this
 //! working tree.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{LIVE_STALL, node, node_ticking, repo_root};
+use super::check::{LIVE_STALL, repo_root};
 use paddock_dev::check::tree::Tree;
 use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
 use serde_json::{Value, json};
@@ -57,14 +57,6 @@ fn shared_part(v: &Value) -> Value {
     json!({"app": v["app"], "checks": v["checks"], "findings": v["findings"], "waived": v["waived"], "errors": v["errors"], "warnings": v["warnings"]})
 }
 
-const JS_RUN: &str = r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C131'], options: {} });
-process.stdout.write(JSON.stringify(r));
-"#;
-
 fn tree_of(files: &[(&str, &str)]) -> tempfile::TempDir {
     let d = tempfile::tempdir().unwrap();
     for (rel, text) in files {
@@ -75,19 +67,12 @@ fn tree_of(files: &[(&str, &str)]) -> tempfile::TempDir {
     d
 }
 
-/// Both hosts over `root`: the shared part of each report, the Rust one first.
+/// The Rust host over `root` and the answer recorded for `case`: the shared part of each report, the Rust one first.
 fn both(case: &str, root: &Path) -> (Value, Value) {
-    let js: Value = crate::recorded::js_answer(case, || {
-        shared_part(
-            &serde_json::from_str::<Value>(&node(
-                JS_RUN,
-                &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", "fixture".into())],
-            ))
-            .unwrap(),
-        )
-    });
     let r = run_checks(&options(root, "fixture"), &registry()).unwrap();
-    (shared_part(&r.json()), js)
+    let got = shared_part(&r.json());
+    let want = crate::recorded::expect(case, &got);
+    (got, want)
 }
 
 #[test]
@@ -177,7 +162,7 @@ fn c131_with_a_broken_allow_file_is_one_check_broken_finding_on_both_hosts() {
 }
 
 #[test]
-fn c131_fixture_findings_equal_the_recorded_js_answer() {
+fn live_c131_fixture_findings_equal_the_recorded_js_answer() {
     let tree = fixture_tree();
     let (got, want) = both("c131-fixture", tree.path());
     assert_eq!(got["findings"], want["findings"]);
@@ -185,7 +170,7 @@ fn c131_fixture_findings_equal_the_recorded_js_answer() {
 }
 
 #[test]
-fn c131_tree_findings_stay_within_the_recorded_js_answer() {
+fn live_c131_tree_findings_stay_within_the_recorded_js_answer() {
     let root = repo_root();
     let r = paddock_testkit::guarded("the Rust C131 over the live tree", LIVE_STALL, {
         let root = root.clone();
@@ -194,20 +179,7 @@ fn c131_tree_findings_stay_within_the_recorded_js_answer() {
             run_checks_in(&tree, &options(&root, "paddock"), &registry()).unwrap()
         }
     });
-    crate::recorded::assert_tree_within(
-        "c131-real-tree",
-        || {
-            let js_root = root.clone();
-            paddock_testkit::guarded("the JS C131 over the live tree", LIVE_STALL, move |progress| {
-                let driver = format!(
-                    "import fs from 'node:fs';\nimport {{ syncBuiltinESMExports }} from 'node:module';\nconst read = fs.readFileSync;\nfs.readFileSync = (...a) => {{ process.stdout.write('.\\n'); return read(...a); }};\nsyncBuiltinESMExports();\n{JS_RUN}"
-                );
-                let env = [("RT5_ROOT", js_root.display().to_string()), ("RT5_APP", "paddock".into())];
-                serde_json::from_str::<Value>(node_ticking(&driver, &env, &progress).trim()).unwrap()
-            })
-        },
-        &r.json(),
-    );
+    crate::recorded::assert_tree_within("c131-real-tree", &r.json());
 }
 
 /// The shared parity corpus (a byte order mark, CRLF, astral text, case-folding letters, no-break spaces, long lines).

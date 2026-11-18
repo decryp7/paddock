@@ -10,7 +10,7 @@
 //! A site that is not a path comparison carries `// conformance: path-text — <why>` on the line or the line above. Report-only
 //! (ER-41): A and B are warnings until the first green run on the real tree; flip [`SEVERITY_AB`] then.
 //!
-//! The port of `conformance/src/checks/C122-test-path-text.mjs`, finding for finding (`tests/it/check_c122.rs` compares them).
+//! The JavaScript check (`conformance/src/checks/C122-*.mjs`) was the original; it was retired with pair P3 (ADR 0022 amendment 2026-11-19) and the Rust host is the only one. The answers it gave are recorded in `tests/fixtures/check/recorded` and `units` and ``tests/it/check_c122.rs`` holds the check to them.
 //! Positions are UTF-16 offsets, as in the JavaScript.
 
 use super::finding::{Finding, Severity};
