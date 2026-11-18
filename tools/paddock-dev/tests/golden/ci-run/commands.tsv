@@ -31,8 +31,8 @@ app	dyno	ubuntu-latest	apps/dyno/app	PW_PORT=4362 npx playwright test --project=
 app	dyno	ubuntu-latest	apps/dyno/app	TZ=Pacific/Auckland npx ng test --watch=false
 app	dyno	ubuntu-latest	apps/dyno/app	node ../../../conformance/ci/check-index.mjs dist/dyno-app/browser/index.html
 app	dyno	ubuntu-latest	apps/dyno/app	node ../../../scripts/npm-audit.mjs
+app	dyno	ubuntu-latest	apps/dyno/app	npm run lint
 app	dyno	ubuntu-latest	apps/dyno/app	npx ng build
-app	dyno	ubuntu-latest	apps/dyno/app	npx ng lint
 app	dyno	ubuntu-latest	apps/dyno/app	npx ng test --watch=false --coverage
 app	dyno	windows-latest	apps/dyno	cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper
 app	pitcrew	ubuntu-latest		node conformance/bin/paddock-conformance.mjs --app pitcrew --root apps/pitcrew --only C13 --paddock .
