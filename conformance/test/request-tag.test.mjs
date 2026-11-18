@@ -35,6 +35,14 @@ test('a heavy-v tag is checked against the version of tools/heavy/Cargo.toml', (
   assert.equal(crate['continue-on-error'], true);
   assert.match(run('crate'), /cargo publish --locked --registry decryp7 \|\| \{ echo "::error::/);
   assert.match(run('crate'), /crate not published/);
+  // Every build job checks the compiler against the pin right before it builds: the step before `cargo build` is `./dev ci rust-pin`.
+  for (const id of ['build-linux', 'build-host']) {
+    const steps = wf.jobs[id].steps;
+    const at = steps.findIndex((s) => /cargo build --release --locked/.test(s.run ?? ''));
+    assert.ok(at > 0, `${id} builds`);
+    assert.match(steps[at - 1].run ?? '', /^\.\/dev ci rust-pin$/, `${id}: the compiler is checked right before the build`);
+    assert.ok(steps.findIndex((s) => /setup-rust/.test(s.uses ?? '')) < at - 1, `${id}: setup-rust settles the toolchain before the check`);
+  }
   assert.ok(!(wf.jobs['build-host'].steps ?? []).some((s) => /Cross linker/.test(s.name ?? '')), 'no dead cross-linker step on the host jobs');
 });
 
