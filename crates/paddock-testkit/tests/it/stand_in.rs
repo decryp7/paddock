@@ -791,6 +791,7 @@ fn copies_a_binary_file_to_the_place_the_call_names() {
     );
 }
 
+#[test]
 fn the_flag_token_is_what_follows_a_prefix_in_the_last_argument_that_has_it() {
     let s = Scratch::new();
     let f = s.work().join("port");
