@@ -52,9 +52,12 @@ export async function expectStreamDone(stream: Locator): Promise<void> {
   await expect(stream, 'the stream has finished (aria-busy is "false")').toHaveAttribute('aria-busy', 'false');
 }
 
-/** Waits until the dock has planned its arrangement for the window's current size (`data-dock-planned`, Debrief's DockService.planned). */
-export async function expectDockPlanned(page: Page): Promise<void> {
-  await expect(page.locator('[data-dock-planned]'), 'the dock has planned for the current window size').toBeAttached();
+/**
+ * Waits until the dock has planned its arrangement for the window's current size (`data-dock-planned`, Debrief's DockService.planned).
+ * `timeout` (default: the expect timeout) is for a caller whose wait is part of a longer phase with its own budget, such as an app's first load.
+ */
+export async function expectDockPlanned(page: Page, options: { timeout?: number } = {}): Promise<void> {
+  await expect(page.locator('[data-dock-planned]'), 'the dock has planned for the current window size').toBeAttached(options);
 }
 
 /** Waits until an element's box (left, top, width, height) is the same in two reads in a row: it is drawn and not moving (`settledLayout`). */

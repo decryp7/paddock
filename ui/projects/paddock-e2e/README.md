@@ -135,7 +135,7 @@ axe helpers in both engines with `--project=chromium --project=webkit`.
 | `expectOverlayAlignedWith(panel, anchor, tolerance = 1)` | the overlay has the anchor's left edge and width (a select's list) | a select list visible at x 0 before the overlay positions it |
 | `expectWired(control, attribute = 'aria-expanded', value = 'false')` | an attribute only the update pass sets | a click on a control the framework has not wired ("onContainerClick of undefined") |
 | `expectStreamDone(stream)` | `aria-busy` is "false" (call it after the stream has started: a turn is drawn) | a card that moves while the answer still streams |
-| `expectDockPlanned(page)` | `data-dock-planned` (Debrief's DockService.planned) | a layout read before the dock planned for the window |
+| `expectDockPlanned(page, { timeout? })` | `data-dock-planned` (Debrief's DockService.planned) | a layout read before the dock planned for the window (`timeout`: a caller whose load phase has its own budget) |
 | `expectNotMoving(locator)` | the same box in two reads in a row | an element still settling |
 
 Apps import the source relatively (`../../../../ui/projects/paddock-e2e/src/ready.ts`) unless their workflow builds the kit (conformance C137).

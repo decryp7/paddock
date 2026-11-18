@@ -1,8 +1,26 @@
 import { expect, Locator, Page } from '@playwright/test';
 import { expectDockPlanned } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
-/** How long the first load of the demo workspace may take (it is slower while the whole suite runs in parallel). */
+/**
+ * How long the first load of the demo workspace may take, from navigation until the dock has planned (it is slower while the
+ * whole suite runs in parallel). One budget for the whole load, its waits included (`loadWait`). The dock's planning is the load's
+ * last phase and grows with CPU contention, in WebKit most: debrief.yml run 8243 (2 workers on a loaded runner) planned 3.8 to 5.2 s
+ * after the status bar showed the events and failed twice at the default 5 s; in the CI image with 4 CPUs, 1 worker took 0.05 to 1.9 s
+ * and 4 workers 3.9 to 6.5 s, the whole load 7.1 to 10.5 s (8 loads each; docs/lessons.md, 2026-11-18).
+ */
 export const APP_LOAD_TIMEOUT = 15_000;
+
+/**
+ * The waits of one app load: each may use what is left of {@link APP_LOAD_TIMEOUT} from the moment this is called (just before
+ * navigating), and never less than the project's expect timeout it had before.
+ */
+export function loadWait(): { timeout: () => number } {
+  const deadline = Date.now() + APP_LOAD_TIMEOUT;
+  return { timeout: () => Math.max(EXPECT_TIMEOUT, deadline - Date.now()) };
+}
+
+/** Playwright's own expect timeout, which Debrief's config keeps (it sets no `expect.timeout`). */
+const EXPECT_TIMEOUT = 5_000;
 
 /**
  * How long an error snapshot may take to appear: html-to-image clones and styles the whole window, which takes
@@ -19,12 +37,13 @@ export const gridRows = (page: Page) => page.locator('debrief-events-grid [role=
 
 /** Opens the app in the browser build (MockBackend) and waits for the demo workspace to load. */
 export async function openApp(page: Page): Promise<void> {
+  const load = loadWait();
   await page.goto('/');
-  await expect(page.getByRole('grid', { name: 'Events' })).toBeVisible({ timeout: APP_LOAD_TIMEOUT });
-  await expect(page.locator('debrief-status-bar')).toContainText('events');
-  await expect(page.locator('debrief-timeline-panel .lane').first()).toBeVisible();
-  await expect(gridRows(page).first()).toBeVisible();
-  await expectDockPlanned(page);
+  await expect(page.getByRole('grid', { name: 'Events' })).toBeVisible({ timeout: load.timeout() });
+  await expect(page.locator('debrief-status-bar')).toContainText('events', { timeout: load.timeout() });
+  await expect(page.locator('debrief-timeline-panel .lane').first()).toBeVisible({ timeout: load.timeout() });
+  await expect(gridRows(page).first()).toBeVisible({ timeout: load.timeout() });
+  await expectDockPlanned(page, { timeout: load.timeout() });
 }
 
 /**

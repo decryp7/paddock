@@ -2888,3 +2888,33 @@ that the blocked generation saw the stop, without its 100 ms limit. Positive con
 the new test fails at its hang guard ("the generation never ended after Stop"). Stress: 300 of 300 (macOS, load 30).
 **Why the logs did not show it.** The test printed only the total; the split needed the probe. **Class: a test asserts a wall-clock
 limit** (rule 40; earlier: Debrief 1.1.1's three cancel tests, 2026-10-25, above).
+## Debrief: two live-tail e2e timed out in WebKit because every live tick costs the page about a second (CI run 8243, 2026-11-18)
+**Symptom.** `live-tail.e2e.ts:207` (the tail status panel and Settings ▸ Live tail) and `:247` (rolling files) failed both tries in
+WebKit on main (debrief.yml run 8243, shard 3/4): the Settings form not visible after 5 s ("Loading settings…" in the snapshot), an
+axe scan cut by the 60 s test timeout, a 60 s timeout, and `data-dock-planned` missing after 5 s. In the same job
+`main-layout.e2e.ts:113` and in shard 4 `windowing.e2e.ts:93` were FLAKY, the first on the same `data-dock-planned` wait.
+**Evidence.** The traces: every step slow while live tail ran (a click 1 to 3 s, `page.clock.runFor(2500)` 34 s); the green
+main run 8229 already took 30.3 s and 24.5 s for these two tests (of 60 s), and its shard ran in 15.2 min against 26.9 min in 8243
+(the runner 1.8 times slower). In the CI image (4 CPUs, WebKit, 2 workers) the two took 32 to 37 s; Chromium 5 to 6 s; macOS WebKit 7 s.
+**Causes listed (ER-28), with what each measurement showed** (CI image, WebKit): (1) the mock live tail's ticks (every 250 ms)
+saturate the page: confirmed, 3 to 18 frames in 3 s with ticks against 184 with live tail on and no ticks; JS in timer callbacks
+was 12 % of the time, so most of it is the page's own update and rendering after each tick; (2) the pinned page clock (new between
+the green and the red run): refuted, the page is saturated with and without it, and the tests were already at 30 s before it;
+(3) CSS animations (two infinite pulses while live): refuted, pausing them changed nothing, and with no ticks the page ran 184 frames
+with them; (4) forced synchronous layout: refuted, 11 k `scrollTop`/`scrollLeft` reads cost 9 ms in 5 s; (5) Intl formatting:
+refuted, 2 ms; (6) the mock's settings load stuck: refuted, it loads within 1 to 2.3 s on an idle page; (7) the app load's dock
+planning (`data-dock-planned`, a 5 s wait after the status bar): load-dependent, not stuck (no settle retries ran out): 0.05 to
+1.9 s at 1 worker, 3.9 to 6.5 s at 4 workers (8 loads each), 3.8 to 5.2 s in run 8243, where it failed twice at 5 s.
+**Fix (specs).** The status test opens a live tail whose first tick is two minutes away (`QUIET_LIVE`): it checks files, status and
+set_live, not new lines (the options go to set_live only while live tail is on, so turning it off was no answer). The rolling-files
+test ticks every 500 ms (5 ticks in its 2.5 s, not 10) and turns live tail off (`liveOff`) once the two rotations are in. Holding the
+page clock does not work: axe and the live toggle wait on page timers (tried: both tests hung). The app load (`openApp`,
+`openAppWith`) now gives its waits one budget, `APP_LOAD_TIMEOUT` (15 s, the status bar's already), each wait never less than the
+5 s it had; the measurement is recorded next to the constant (ER-12). `expectDockPlanned` takes an optional `timeout`.
+**Counts** (CI image, 4 CPUs, WebKit, `--workers=4 --repeat-each=20`, the two tests, 40 runs each way): before 29 of 40 failed
+(9 at `data-dock-planned`, the others at the Settings form, the members count, an axe scan or a 60 s timeout); after 40 of 40 passed (median 30.7 s, at most 48.5 s with
+four workers on four CPUs). macOS, both engines: green before and after (not the failing environment).
+**Open (not done here).** Whether a live tick is this costly in the desktop app's WebKitGTK on Linux (GPU compositing, not the
+headless software renderer) is not measured; the per-tick work (what re-renders) is a product question for Debrief's live tail.
+**Class: a test runs a moving source it does not need while it reads** (earlier: the events-grid fix item, 2026-11-17, and the
+live-tail toast clicks, 2026-11-12, above).
