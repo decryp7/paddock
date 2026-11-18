@@ -11,6 +11,7 @@ description = "heavy: one heavy step (cargo, npm, playwright, ...) at a time per
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://dev.decryptology.net/decryp7/paddock"
+readme = "README.md"
 publish = ["decryp7"]
 
 [lib]

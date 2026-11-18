@@ -2089,3 +2089,27 @@ Question: what do the source audits of `tools/paddock-dev` (`tool_cache::tests::
 - **Machine:** the shared Mac mini (arm64), other agents running (15-minute load 16 at the time); `CARGO_BUILD_JOBS=2`
 - **Command:** `cargo nextest run -E 'test(/no_source_file_/)'` in `tools/paddock-dev`, warm build folder, 1 run
 - **Result:** 2 tests, 0.17 s of nextest time; the row's compile is the one the `it` audits already need (same test binaries).
+
+## Load-aware heavy slots (2026-11-18, feat/heavy-load-aware-slots)
+
+Question: with the slot count following the load, how long does a queue of 4 clippy-sized jobs take, against the single slot?
+
+- **Job:** a stand-in for a clippy run: two CPU-bound processes for 15 s (`perl` busy loops), 4 jobs started together through
+  `heavy run --no-gate` in a private `HEAVY_DIR` (the real queue was not touched), the debug build of `tools/heavy`, 1 run per row.
+- **Machine:** the shared 14-core Mac mini, other agents running. The load was NOT low (a build storm had run: 1-minute load 137
+  twenty minutes earlier), so the 15-minute load was 44 to 48 during every row: the rule must stay at 1 here, and it did.
+
+  | Row | Setting | 15-min load | Wall time of 4 jobs |
+  |---|---|---:|---:|
+  | before | `HEAVY_SLOTS=1` (the old default) | 48 | 61 s |
+  | before, again | `HEAVY_SLOTS=1` | 41 | 60 s |
+  | after, real state | `HEAVY_SLOTS=auto` | 44 | 60 s (held at 1: the 15-minute load fills the cores) |
+  | after, a machine with room | `HEAVY_SLOTS=auto HEAVY_CPUS=64` (the cores are an override, load and idle are real) | 44 | 17 s (4 together; the idle share was above 30 %) |
+
+- **Not measured:** the rule at a really low 15-minute load on this machine (it was not low at any point of this run); the row with
+  `HEAVY_CPUS=64` stands in for it and shows the mechanism, not the machine. The deterministic cases (two jobs together at low load,
+  serialised at high load, busy CPU, unknown load, container) are tests in `tools/heavy/tests/it/slots.rs`.
+- **Rule after review:** the rule also closes on a 1-minute load at the core count (the fast brake) and primes the CPU reading when heavy starts;
+  neither changes these rows (the 15-minute load decided them).
+- **Cost to note:** the 15-minute load lags, so after a spike the count stays at 1 for up to a quarter of an hour; the 1-minute
+  load had fallen to 7 while the 15-minute was still 44 (second `after` row's neighbours).

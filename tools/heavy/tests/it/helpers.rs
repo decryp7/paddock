@@ -54,6 +54,9 @@ impl Rig {
         c.poll = Duration::from_millis(200);
         c.wait_log = Duration::from_secs(1);
         c.unreadable_limit = 3;
+        // One at a time unless a test asks for more (slots) on a machine of 16 cores.
+        c.slots = 1;
+        c.cpus = 16;
         c
     }
 

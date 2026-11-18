@@ -474,8 +474,8 @@ enum Start {
     QueueSpent,
 }
 
-/// The rows left and whether a heavy step of the push is in flight. One heavy step at a time: heavy has one machine-wide slot (more
-/// only with `HEAVY_DIR` and `HEAVY_SLOTS`), so a second heavy step of the same push would only queue behind the first, and that
+/// The rows left and whether a heavy step of the push is in flight. One heavy step at a time: heavy's slots follow the machine's
+/// load (several when it is low), so a second heavy step of the same push would queue behind the first at high load, and that
 /// wait could not be told from waiting for other agents (ADR 0102). With one in flight, every second a heavy step queues is time
 /// spent waiting for others, and the next heavy step is decided only after the one before has ended and its queue time is on the
 /// clock. While a heavy step is in flight, a free worker takes the next light row instead of waiting.
@@ -676,17 +676,14 @@ pub fn parse_load(uptime: &str) -> Option<f64> {
         .ok()
 }
 
-/// The command that puts a heavy step through the machine-wide slot (ER-24): `PADDOCK_HEAVY` as given, else `heavy.sh` or `heavy`
-/// on PATH. Empty when there is none (the caller says so).
+/// The command that puts a heavy step through the machine-wide slot (ER-24): `PADDOCK_HEAVY` as given, else `heavy` on PATH (the
+/// shell `heavy.sh` is retired: engineering-rules' script is a thin wrapper of `heavy`). Empty when there is none (the caller says so).
 pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -> Vec<String> {
     if let Some(h) = env.get("PADDOCK_HEAVY").filter(|h| !h.trim().is_empty()) {
         if h.trim() == "off" {
             return Vec::new();
         }
         return h.split_whitespace().map(str::to_string).collect();
-    }
-    if has("heavy.sh") {
-        return vec!["heavy.sh".into()];
     }
     if has("heavy") {
         return ["heavy", "run", "pre-push", "--"].map(String::from).to_vec();
@@ -815,7 +812,7 @@ fn log_name(id: &str) -> String {
 }
 
 impl RealExec {
-    /// The command that puts a heavy gate through the slot: `PADDOCK_HEAVY`, `heavy.sh` or `heavy` on PATH, else the `heavy`
+    /// The command that puts a heavy gate through the slot: `PADDOCK_HEAVY` or `heavy` on PATH, else the `heavy`
     /// built from this tree ([`super::heavy_tool`]). Empty for `PADDOCK_HEAVY=off` (hermetic tests only); `Err` when the build failed.
     ///
     /// `left` is the run time the push has left on its credited clock ([`BudgetClock`]): the build of heavy is cut off there, so
@@ -1315,7 +1312,10 @@ mod tests {
     fn heavy_is_found_when_the_variable_is_not_set() {
         let env = HashMap::new();
         assert!(heavy_prefix(&env, &|_| false).is_empty());
-        assert_eq!(heavy_prefix(&env, &|p| p == "heavy.sh"), ["heavy.sh"]);
+        assert!(
+            heavy_prefix(&env, &|p| p == "heavy.sh").is_empty(),
+            "the shell heavy.sh is retired: it is no slot tool of ours"
+        );
         assert_eq!(heavy_prefix(&env, &|p| p == "heavy"), ["heavy", "run", "pre-push", "--"]);
         let set = HashMap::from([("PADDOCK_HEAVY".to_string(), "my-heavy --x".to_string())]);
         assert_eq!(heavy_prefix(&set, &|_| true), ["my-heavy", "--x"]);

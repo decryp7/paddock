@@ -514,7 +514,7 @@ fn command_in(
             "OVERRIDE SET: PADDOCK_HEAVY=off is not allowed outside the tests; every compile (clippy, xwin, Linux) is not measured\n"
                 .into();
     } else if exec::heavy_prefix(&env, &|p| ex.has_tool(p)).is_empty() {
-        notes.push("no heavy.sh or heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
+        notes.push("no heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
         "{overridden}pre-push: base {} ({}), {} commit(s) beyond it; {} changed file(s); {} gate(s) at a time (1-minute load {}); budget {} min of run time (time queued for the heavy slot behind other agents is reported apart and bounded on its own: {} min for the whole push; {}); logs in {}\n{}",

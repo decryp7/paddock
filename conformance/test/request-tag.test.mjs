@@ -11,6 +11,41 @@ const SHA = 'a'.repeat(40);
 const files = (o) => (p) => o[p] ?? null;
 const conf = (v) => JSON.stringify({ version: v });
 
+// heavy-vX.Y.Z publishes the tool (heavy-release.yml): its version source is tools/heavy/Cargo.toml, not an app folder.
+test('a heavy-v tag is checked against the version of tools/heavy/Cargo.toml', () => {
+  const cargo = 'tools/heavy/Cargo.toml';
+  const toml = (v) => `[package]\nname = "paddock-heavy"\nversion = "${v}"\n`;
+  assert.equal(checkVersion('heavy', 'heavy-v0.2.0', files({ [cargo]: toml('0.2.0') })), '0.2.0');
+  assert.throws(() => checkVersion('heavy', 'heavy-v0.2.0', files({ [cargo]: toml('0.1.0') })), /says 0\.2\.0, tools\/heavy\/Cargo\.toml says 0\.1\.0/);
+  assert.throws(() => checkVersion('heavy', 'heavy-v0.2.0', files({})), /tools\/heavy\/Cargo\.toml is missing/);
+  assert.equal(gateWorkflow('heavy', files({})), 'ci.yml');
+  // The release workflow, read through the workflow accessor (not by text): it runs on that tag only, builds the four targets, attaches
+  // SHA256SUMS through the release script, keeps its notes out of the assets and publishes the crate last.
+  const wf = loadWorkflow('heavy-release.yml');
+  assert.deepEqual(wf.on?.push?.tags ?? wf.true?.push?.tags, ['heavy-v*']);
+  const targets = ['build-linux', 'build-host'].flatMap((id) => (wf.jobs[id].strategy.matrix.include ?? []).map((m) => m.target)).sort();
+  assert.deepEqual(targets, ['aarch64-apple-darwin', 'aarch64-unknown-linux-gnu', 'x86_64-pc-windows-msvc', 'x86_64-unknown-linux-gnu']);
+  const run = (id) => (wf.jobs[id].steps ?? []).map((s) => s.run ?? '').join('\n');
+  assert.match(run('release'), /sha256sum heavy-\* > SHA256SUMS/);
+  assert.match(run('release'), /conformance\/release\/publish\.mjs .*--dir release\b/);
+  assert.doesNotMatch(run('release'), /release\/NOTES\.md/, 'the notes are not an uploaded asset');
+  assert.deepEqual(wf.jobs.release.needs, ['build-linux', 'build-host']);
+  const crate = wf.jobs.crate;
+  assert.deepEqual(crate.needs, ['release']);
+  assert.equal(crate['continue-on-error'], true);
+  assert.match(run('crate'), /cargo publish --locked --registry decryp7 \|\| \{ echo "::error::/);
+  assert.match(run('crate'), /crate not published/);
+  // Every build job checks the compiler against the pin right before it builds: the step before `cargo build` is `./dev ci rust-pin`.
+  for (const id of ['build-linux', 'build-host']) {
+    const steps = wf.jobs[id].steps;
+    const at = steps.findIndex((s) => /cargo build --release --locked/.test(s.run ?? ''));
+    assert.ok(at > 0, `${id} builds`);
+    assert.match(steps[at - 1].run ?? '', /^\.\/dev ci rust-pin$/, `${id}: the compiler is checked right before the build`);
+    assert.ok(steps.findIndex((s) => /setup-rust/.test(s.uses ?? '')) < at - 1, `${id}: setup-rust settles the toolchain before the check`);
+  }
+  assert.ok(!(wf.jobs['build-host'].steps ?? []).some((s) => /Cross linker/.test(s.name ?? '')), 'no dead cross-linker step on the host jobs');
+});
+
 test('tag names: <app>-vX.Y.Z and vX.Y.Z, nothing else', () => {
   assert.deepEqual(parseTag('pitcrew-v1.2.3'), { app: 'pitcrew', version: '1.2.3' });
   assert.deepEqual(parseTag('shell-demo-v0.1.0-rc.1'), { app: 'shell-demo', version: '0.1.0-rc.1' });

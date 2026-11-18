@@ -95,7 +95,7 @@ fn real_main() -> i32 {
         say(w);
         log.warn("heavy.config", w, &[]);
     }
-    let h = Heavy::new(cfg, clock, Arc::new(OsProcs), Arc::new(SysLoad), log, pid, say);
+    let h = Heavy::new(cfg, clock, Arc::new(OsProcs), Arc::new(SysLoad::default()), log, pid, say);
     match parsed {
         Cli::Status => {
             print!("{}", h.status());
