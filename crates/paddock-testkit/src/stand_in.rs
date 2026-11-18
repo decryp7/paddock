@@ -505,6 +505,7 @@ pub struct StandIn {
     record: bool,
     record_env: Vec<String>,
     read_stdin: bool,
+    exact_name: bool,
 }
 
 impl StandIn {
@@ -518,7 +519,38 @@ impl StandIn {
             record: false,
             record_env: Vec::new(),
             read_stdin: false,
+            exact_name: false,
         }
+    }
+
+    /// The program file is named exactly `name`, which may end in `.exe`, with no platform suffix added: for a test of code that looks a
+    /// program up by its Windows name (`sccache.exe`) on a Unix host.
+    #[must_use]
+    pub fn exact_name(mut self) -> StandIn {
+        self.exact_name = true;
+        self
+    }
+
+    /// The program's file name, and the name its script and record are kept under (the stand-in drops a `.exe` on Windows).
+    fn file_and_stem(&self) -> (String, String) {
+        if !self.exact_name {
+            return (
+                format!("{}{}", self.name, std::env::consts::EXE_SUFFIX),
+                self.name.clone(),
+            );
+        }
+        let stem = match self
+            .name
+            .len()
+            .checked_sub(4)
+            .and_then(|at| self.name.get(at..))
+        {
+            Some(ext) if cfg!(windows) && ext.eq_ignore_ascii_case(".exe") => {
+                self.name[..self.name.len() - 4].to_string()
+            }
+            _ => self.name.clone(),
+        };
+        (self.name.clone(), stem)
     }
 
     /// Prints `line` on stdout for any call no [`StandIn::when_args`] case answers.
@@ -737,9 +769,9 @@ impl StandIn {
         }
         let stub = stub_binary().map_err(io::Error::other)?;
         Ok(Files {
-            program_name: format!("{}{}", self.name, std::env::consts::EXE_SUFFIX),
+            program_name: self.file_and_stem().0,
             program: std::fs::read(&stub)?,
-            script_name: format!("{}.stand-in.json", self.name),
+            script_name: format!("{}.stand-in.json", self.file_and_stem().1),
             script: self.script(Path::new("")).to_json().into_bytes(),
         })
     }
@@ -747,7 +779,7 @@ impl StandIn {
     fn check_name(&self) -> io::Result<()> {
         let bad_name = self.name.is_empty()
             || self.name.contains(['/', '\\'])
-            || self.name.to_ascii_lowercase().ends_with(".exe");
+            || (!self.exact_name && self.name.to_ascii_lowercase().ends_with(".exe"));
         if bad_name {
             return Err(invalid(format!(
                 "`{}` is not a bare program name (no folder, no `.exe`)",
@@ -775,10 +807,9 @@ impl StandIn {
             )));
         }
         let stub = stub_binary().map_err(io::Error::other)?;
-        let program = self
-            .dir
-            .join(format!("{}{}", self.name, std::env::consts::EXE_SUFFIX));
-        let record = self.dir.join(format!("{}.stand-in.calls", self.name));
+        let (file, stem) = self.file_and_stem();
+        let program = self.dir.join(file);
+        let record = self.dir.join(format!("{stem}.stand-in.calls"));
         let _ = std::fs::remove_file(&program);
         let _ = std::fs::remove_file(&record);
         if std::fs::hard_link(&stub, &program).is_err() {
@@ -794,7 +825,7 @@ impl StandIn {
             })?;
         }
         std::fs::write(
-            self.dir.join(format!("{}.stand-in.json", self.name)),
+            self.dir.join(format!("{stem}.stand-in.json")),
             self.script(&record).to_json(),
         )?;
         Ok(Installed {

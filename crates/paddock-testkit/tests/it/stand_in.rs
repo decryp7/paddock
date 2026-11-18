@@ -916,3 +916,28 @@ fn the_run_token_is_what_a_program_prints_in_the_working_folder() {
         .unwrap();
     assert_eq!(out(&o), "inside=<true> bad=<>\n");
 }
+
+#[test]
+fn an_exact_name_may_end_in_exe_on_any_host_and_answers_for_itself() {
+    let s = Scratch::new();
+    let work = s.work();
+    assert!(
+        StandIn::new(&work, "sccache.exe").install().is_err(),
+        "a plain name still refuses `.exe`"
+    );
+    let p = StandIn::new(&work, "sccache.exe")
+        .exact_name()
+        .stdout("sccache 0.19.0")
+        .install()
+        .unwrap();
+    assert!(p.program().ends_with("sccache.exe"));
+    assert_eq!(out(&run(p.program(), &[])), "sccache 0.19.0\n");
+    let files = StandIn::new(&work, "sccache.exe")
+        .exact_name()
+        .files()
+        .unwrap();
+    assert!(
+        files.program_name.ends_with("sccache.exe")
+            && files.script_name.ends_with(".stand-in.json")
+    );
+}
