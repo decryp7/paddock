@@ -22,7 +22,7 @@
 //! with [`StandIn::records_env`] and, with [`StandIn::reads_stdin`], what was written to stdin (at most 1 MiB).
 //!
 //! More, for the fixtures that were shell scripts: output filled from the call ([`Actions::stdout_with`] and the other `_with`
-//! methods name `{args}`, `{arg:N}`, `{flag:PREFIX}`, `{cwd}`, `{dir}`, `{name}`, `{pid}`, `{environ}`, `{run:program|arg|arg}`, `{env:NAME}` / `{env:NAME|fallback}`, `{stdin}` and
+//! methods name `{args}`, `{arg:N}`, `{flag:PREFIX}`, `{cwd}`, `{dir}`, `{name}`, `{pid}`, `{environ}`, `{flag:PREFIX|SUFFIX}`, `{lines:PATH|MAX}`, `{run:program|arg|arg}`, `{env:NAME}` / `{env:NAME|fallback}`, `{stdin}` and
 //! `{stdin_line}`; `{{` and `}}` are braces), [`Actions::writes_atomically`], [`Actions::waits_for_file`], named pipes
 //! ([`Actions::makes_fifo`], [`Actions::reads_file`]), [`Actions::ignores_term`] (Unix), [`Actions::installs`] (a second stand-in
 //! written at run time, as a fake `cargo` that "builds" a tool does), [`Actions::exits_with_env`] and [`Actions::execs`] (run another
@@ -483,6 +483,24 @@ impl Case {
         )
     }
 
+    /// The variable is set and not empty when the call is made.
+    #[must_use]
+    pub fn env_is_set(self, name: &str) -> Case {
+        self.with("env_set", Value::Str(name.to_string()))
+    }
+
+    /// As [`Case::file_exists`], with the path a template filled from the call (`{flag:...}`, `{env:...}`, `{cwd}`).
+    #[must_use]
+    pub fn file_exists_with(self, path_template: &str) -> Case {
+        self.with("file_t", Value::Str(path_template.to_string()))
+    }
+
+    /// As [`Case::file_missing`], with the path a template filled from the call.
+    #[must_use]
+    pub fn file_missing_with(self, path_template: &str) -> Case {
+        self.with("no_file_t", Value::Str(path_template.to_string()))
+    }
+
     /// The working folder ends with this text (compared with `/` as the separator).
     #[must_use]
     pub fn cwd_ends_with(self, tail: &str) -> Case {
@@ -781,6 +799,39 @@ impl StandIn {
             script_name: format!("{}.stand-in.json", self.file_and_stem().1),
             script: self.script(Path::new("")).to_json().into_bytes(),
         })
+    }
+
+    /// The program as one self-contained file: the stand-in binary with its script appended, which a test serves or copies on its own
+    /// (a "tool" a download test hands out, or a program the code under test moves). A recording stand-in is refused, as in
+    /// [`StandIn::files`].
+    ///
+    /// # Errors
+    ///
+    /// As [`StandIn::files`].
+    pub fn single_file_bytes(&self) -> io::Result<Vec<u8>> {
+        let files = self.files()?;
+        let mut bytes = files.program;
+        let script = files.script;
+        bytes.extend_from_slice(&script);
+        bytes.extend_from_slice(&(script.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(b"PDSTNDIN");
+        Ok(bytes)
+    }
+
+    /// Writes [`StandIn::single_file_bytes`] to `path` and makes it executable (a Unix mode of 755).
+    ///
+    /// # Errors
+    ///
+    /// As [`StandIn::files`], or when the file cannot be written.
+    pub fn write_single_file(&self, path: &Path) -> io::Result<()> {
+        let _ = std::fs::remove_file(path);
+        std::fs::write(path, self.single_file_bytes()?)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
+        }
+        Ok(())
     }
 
     fn check_name(&self) -> io::Result<()> {

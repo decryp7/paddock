@@ -704,6 +704,16 @@ fn installs_a_second_stand_in_that_answers_for_itself() {
         "embedded abc\n",
         "the token was filled when it was installed"
     );
+    // One self-contained file: copied alone, to another name, it still answers (a wrapper that caches a built tool does this).
+    let copy = s.work().join("copy");
+    std::fs::create_dir_all(&copy).unwrap();
+    let copied = copy.join("elsewhere");
+    std::fs::copy(&made, &copied).unwrap();
+    assert_eq!(out(&run(&copied, &["--version"])), "0\n");
+    assert!(
+        !out_dir.join("paddock-dev.stand-in.json").exists(),
+        "no script is left beside it"
+    );
 }
 
 #[cfg(unix)]
@@ -990,4 +1000,91 @@ fn runs_starts_a_program_and_goes_on_with_the_next_step() {
     );
     // The helper's output goes to the stand-in's own stdout, before the next step's line.
     assert_eq!(out(&o), "helper first\nafter\n");
+}
+
+#[test]
+fn an_env_condition_a_templated_file_condition_lines_and_a_flag_suffix_read_the_call() {
+    let s = Scratch::new();
+    let work = s.work();
+    let count = work.join("runs");
+    let p = StandIn::new(&work, "cargo")
+        .answers(
+            Actions::new()
+                .appends_with(&count.to_string_lossy(), "run\n")
+                .stdout_with("target={flag:build.target-dir='|'} runs={lines:%COUNT%|2} none={lines:%COUNT%.missing}"
+                    .replace("%COUNT%", &count.to_string_lossy())
+                    .as_str()),
+        )
+        .when(
+            &Case::new().env_is_set("STAND_IN_FORBIDDEN"),
+            Actions::new().stderr("forbidden").exit(97),
+        )
+        .when(
+            &Case::new().file_missing_with("{flag:build.target-dir='|'}/marker"),
+            Actions::new().stdout("cold").exit(3),
+        )
+        .install()
+        .unwrap();
+    let marker_dir = work.join("t");
+    std::fs::create_dir_all(&marker_dir).unwrap();
+    let arg = format!("build.target-dir='{}'", marker_dir.display());
+    let call = |env: Option<(&str, &str)>| {
+        let mut c = TestCommand::new(p.program());
+        c.args(["--config", &arg]);
+        if let Some((k, v)) = env {
+            c.env(k, v);
+        }
+        c.output().unwrap()
+    };
+    let cold = call(None);
+    assert_eq!(
+        (cold.status.code(), out(&cold)),
+        (Some(3), "cold\n".to_string()),
+        "no marker yet"
+    );
+    std::fs::write(marker_dir.join("marker"), "").unwrap();
+    for runs in 1..=3 {
+        let o = call(None);
+        let want = format!(
+            "target={} runs={} none=0\n",
+            marker_dir.display(),
+            runs.min(2)
+        );
+        assert_eq!(
+            out(&o),
+            want,
+            "the suffix quote is dropped and the count is capped"
+        );
+    }
+    let o = call(Some(("STAND_IN_FORBIDDEN", "1")));
+    assert_eq!(
+        (o.status.code(), err(&o)),
+        (Some(97), "forbidden\n".to_string())
+    );
+    let o = call(Some(("STAND_IN_FORBIDDEN", "")));
+    assert_eq!(o.status.code(), Some(0), "an empty variable is not set");
+}
+
+#[test]
+fn a_single_file_stand_in_answers_from_its_own_bytes_when_copied_alone() {
+    let s = Scratch::new();
+    let work = s.work();
+    let tool = StandIn::new(&work, "ignored")
+        .answers(Actions::new().stdout_with("name={name} args={args}"))
+        .exit(5);
+    let first = work.join("one");
+    tool.write_single_file(&first).unwrap();
+    let elsewhere = work.join("sub");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let second = elsewhere.join("renamed-tool");
+    std::fs::copy(&first, &second).unwrap();
+    let o = run(&second, &["a", "b"]);
+    assert_eq!(
+        (o.status.code(), out(&o)),
+        (Some(5), "name=renamed-tool args=a b\n".to_string())
+    );
+    assert_eq!(
+        std::fs::read(&first).unwrap(),
+        tool.single_file_bytes().unwrap()
+    );
 }
