@@ -161,7 +161,7 @@ struct Ctx {
 
 /// Fills a template: `{args}` (the arguments, joined by spaces), `{arg:N}` (the N-th, from 1; empty when absent), `{cwd}`, `{dir}` (the
 /// stand-in's own folder), `{name}`, `{pid}`, `{env:NAME}` and `{env:NAME|fallback}` (empty or the fallback when unset),
-/// `{flag:PREFIX}` (what follows PREFIX in the last argument that starts with it, as `${a#PREFIX}` does), `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
+/// `{flag:PREFIX}` (what follows PREFIX in the last argument that starts with it, as `${a#PREFIX}` does), `{flag_unquoted:PREFIX}` (the same without one pair of single quotes around it, as cargo's `--config key='value'` has), `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
 fn expand(text: &str, ctx: &Ctx) -> Result<String, String> {
     let mut out = String::new();
     let mut rest = text;
@@ -201,7 +201,18 @@ fn token(t: &str, ctx: &Ctx) -> Result<String, String> {
         "stdin" => stdin.to_string(),
         "stdin_line" => stdin.lines().next().unwrap_or("").to_string(),
         _ => {
-            if let Some(prefix) = t.strip_prefix("flag:") {
+            if let Some(prefix) = t.strip_prefix("flag_unquoted:") {
+                let v = ctx
+                    .argv
+                    .iter()
+                    .rev()
+                    .find_map(|a| a.strip_prefix(prefix))
+                    .unwrap_or_default();
+                v.strip_prefix('\'')
+                    .and_then(|v| v.strip_suffix('\''))
+                    .unwrap_or(v)
+                    .to_string()
+            } else if let Some(prefix) = t.strip_prefix("flag:") {
                 ctx.argv
                     .iter()
                     .rev()

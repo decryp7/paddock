@@ -893,3 +893,24 @@ fn a_bundled_program_finds_its_script_at_its_own_end_and_a_plain_one_alone_is_br
     let o = run(&plain, &[]);
     assert_eq!(o.status.code(), Some(70), "{}", err(&o));
 }
+
+#[test]
+fn the_unquoted_flag_token_drops_one_pair_of_single_quotes_around_the_value() {
+    let s = Scratch::new();
+    let f = s.work().join("dir");
+    let p = StandIn::new(&s.work(), "cargo")
+        .answers(Actions::new().writes_with(
+            &f.to_string_lossy(),
+            "<{flag_unquoted:build.target-dir=}> <{flag_unquoted:other=}> <{flag_unquoted:none=}>\n",
+        ))
+        .install()
+        .unwrap();
+    run(
+        p.program(),
+        &["--config", "build.target-dir='/t dir'", "other=plain"],
+    );
+    assert_eq!(
+        std::fs::read_to_string(&f).unwrap().replace("\r\n", "\n"),
+        "</t dir> <plain> <>\n"
+    );
+}
