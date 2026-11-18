@@ -681,11 +681,9 @@ fn installs_a_second_stand_in_that_answers_for_itself() {
             Actions::new()
                 .makes_dir(&out_dir.to_string_lossy())
                 .installs(
-                    &format!(
-                        "{}/paddock-dev{}",
-                        out_dir.display(),
-                        std::env::consts::EXE_SUFFIX
-                    ),
+                    &out_dir
+                        .join(format!("paddock-dev{}", std::env::consts::EXE_SUFFIX))
+                        .to_string_lossy(),
                     &built,
                 ),
         )
