@@ -23,6 +23,14 @@ fn tracked() -> Vec<String> {
 }
 
 fn read(path: &str) -> String {
+    // What this file reads must mark paddock-dev in the plan, or these tests would not run when it changes (plan::is_contract_input).
+    assert!(
+        paddock_dev::plan::is_contract_input(path)
+            || path.ends_with("/paddock.ci.json")
+            // workflows are narrowed to the jobs a change reaches on purpose (plan_gitea), so they do not all mark paddock-dev
+            || path.starts_with(".gitea/workflows/"),
+        "{path} is read by a contracts test but is not a planner contract input: add it to plan.rs CONTRACT_INPUT"
+    );
     // A Windows checkout may turn line ends into CRLF; the contracts are about the text.
     std::fs::read_to_string(root().join(path)).unwrap().replace("\r\n", "\n")
 }

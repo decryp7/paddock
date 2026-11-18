@@ -591,6 +591,10 @@ fn today_is_read_as_a_utc_day() {
 
 /// The cases both readers answer (scripts/npm-audit-fixtures.json: the script's own test reads the same file, rule 55).
 fn fixtures() -> Value {
+    assert!(
+        crate::plan::is_contract_input("scripts/npm-audit-fixtures.json"),
+        "the planner must mark paddock-dev for the file this test reads"
+    );
     let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/npm-audit-fixtures.json");
     serde_json::from_str(&std::fs::read_to_string(&file).unwrap_or_else(|e| panic!("{} cannot be read: {e}", file.display()))).unwrap()
 }

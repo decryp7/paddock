@@ -114,6 +114,20 @@ static PER_MACHINE_INPUT: LazyLock<Regex> = LazyLock::new(|| {
     re(r"^(apps/[^/]+/app/src-tauri/(tauri(\.windows)?\.conf\.json|windows/)|crates/paddock-setup/nsis/paddock-per-machine\.nsh)")
 });
 
+/// What the paddock-dev tests that check repository contracts read (tests/it/contracts.rs: CODEOWNERS, Renovate, the rules and doc
+/// blocks, the job-isolation script, and the audit fixtures `src/audit/tests.rs` reads). They replaced the JS contracts test that ran
+/// in the tools job, so a change to one marks paddock-dev. `contracts.rs` and the audit test assert every file they read matches.
+static CONTRACT_INPUT: LazyLock<Regex> = LazyLock::new(|| {
+    re(
+        r"^(CODEOWNERS|renovate\.json|renovate/.*|AGENTS\.md|docs/rules\.md|docs/blocks/.*|conformance/ci/job-isolation\.sh|(.*/)?package\.json|(.*/)?\.config/nextest[^/]*\.toml|apps/[^/]+/src-tauri/Cargo\.lock|scripts/npm-audit(\.mjs|-fixtures\.json))$",
+    )
+});
+
+/// Whether paddock-dev's contract tests read `path` ([`CONTRACT_INPUT`]).
+pub fn is_contract_input(path: &str) -> bool {
+    CONTRACT_INPUT.is_match(path)
+}
+
 /// What C100 reads (ADR 0060 section 4): `./dev gates inputs` (`gates/inputs.rs`; the retired scripts/affected.mjs had `C100_INPUTS`). A change marks conformance.
 /// The content rule (a test file that adds or removes an ignore attribute or an environment guard) is [`guards_changed`].
 static C100_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -481,6 +495,12 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
             st.mark(Some(format!("app:{app}")), format!("its workflow {f}"));
             st.kind(Some(&format!("app:{app}")), "all");
             continue;
+        }
+        if CONTRACT_INPUT.is_match(f) {
+            st.mark(
+                Some("paddock-dev".to_string()),
+                format!("its contract tests (tests/it/contracts.rs, the audit fixtures) read {f}"),
+            );
         }
         if C100_INPUTS.iter().any(|r| r.is_match(f)) {
             st.mark(Some("conformance".to_string()), format!("C100 reads {f} (./dev gates inputs)"));
@@ -1114,6 +1134,33 @@ mod tests {
     }
 
     #[test]
+    fn every_file_the_repo_contract_tests_read_marks_paddock_dev() {
+        // tests/it/contracts.rs and the audit tests read these; they run only when paddock-dev is planned (the retired JS test
+        // ran in the tools job, which these files also mark).
+        for f in [
+            "CODEOWNERS",
+            "renovate.json",
+            "renovate/x.json",
+            "AGENTS.md",
+            "docs/rules.md",
+            "docs/blocks/blocks.json",
+            "docs/blocks/style.md",
+            "conformance/ci/job-isolation.sh",
+            "scripts/npm-audit.mjs",
+            "scripts/npm-audit-fixtures.json",
+            "package.json",
+            "apps/shell-demo/src-tauri/Cargo.lock",
+        ] {
+            let p = plan(&[f]);
+            assert_eq!(p["paddockDev"], true, "{f} is read by a paddock-dev test");
+            assert!(is_contract_input(f), "{f}");
+        }
+        // negative control: an ordinary script is not read by them
+        assert_eq!(plan(&["scripts/publish.mjs"])["paddockDev"], false);
+        assert!(!is_contract_input("scripts/publish.mjs"));
+    }
+
+    #[test]
     fn a_shared_crate_change_reaches_its_dependents_and_apps() {
         let p = plan(&["crates/core/src/lib.rs"]);
         assert_eq!(p["crates"], true);
@@ -1274,6 +1321,32 @@ mod tests {
         // The sample repo has no Pitcrew app: the declared input names it, so its explanation does too.
         assert!(capture.to_string().contains("app:pitcrew"), "{capture}");
         assert_eq!(plan(&["Mystery"])["all"], true);
+    }
+
+    #[test]
+    fn the_secret_scan_allow_list_marks_conformance_only_and_a_diagram_png_marks_no_tools() {
+        // Cases of the retired affected.test.mjs: the allow-list is read where the scan runs (the conformance job); a PNG next to a
+        // diagram is not what the SVG drift check compares.
+        let p = plan(&[".gitleaks.toml"]);
+        assert_eq!((p["all"].clone(), p["conformance"].clone()), (json!(false), json!(true)));
+        for k in ["tools", "ui", "crates", "paddockDev", "icons"] {
+            assert_eq!(p[k], false, "{k}");
+        }
+        assert_eq!(plan(&["diagrams/paddock.png"])["tools"], false);
+        assert_eq!(
+            plan(&["diagrams/paddock.drawio"])["tools"],
+            true,
+            "positive control: the drawio source marks tools"
+        );
+    }
+
+    #[test]
+    fn the_js_conformance_runner_and_its_baselines_mark_paddock_dev_but_its_tests_and_readme_do_not() {
+        assert_eq!(plan(&["conformance/bin/paddock-conformance.mjs"])["paddockDev"], true);
+        assert_eq!(plan(&["conformance/baselines/C53.json"])["paddockDev"], true);
+        for f in ["conformance/test/core.test.mjs", "conformance/baselines/README.md"] {
+            assert_eq!(plan(&[f])["paddockDev"], false, "{f}");
+        }
     }
 
     #[test]

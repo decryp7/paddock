@@ -4,7 +4,7 @@
 //!   folder with two commits, tagged `fixture-base` and `fixture-head`, and one commit per folder of `tests/golden/steps` on a
 //!   side branch, tagged `step-<folder>`: the `.gitea` and shared-script edits); the answers are in `tests/golden/expected/`.
 //!   They were first recorded from `scripts/affected.mjs` (retired 2026-11-18, ADR 0022 R4); the planner itself now writes them:
-//!   a changed answer is a reviewed edit made with `PADDOCK_GOLDEN_BLESS=1 cargo nextest run -E 'test(recorded_)'`, never by hand.
+//!   a changed answer is a reviewed edit made with `PADDOCK_GOLDEN_BLESS=1 cargo nextest run -E 'test(golden::)'`, never by hand and never in CI.
 //! - `recorded_command_line_*`: the same for the command line (`--ci`, `--commit-range`, the argument forms) in
 //!   `tests/golden/ci-cases.json`, recorded into `tests/golden/expected/cli/`.
 //! - `the_ci_jobs_table_*`: `plan_gitea::CI_JOBS` against `tests/golden/ci-jobs.json`.
@@ -47,7 +47,36 @@ fn canonical(mut v: Value) -> Value {
 
 /// Whether `PADDOCK_GOLDEN_BLESS=1` asks the recorded tests to rewrite their files from what the planner answers now.
 fn bless() -> bool {
-    std::env::var("PADDOCK_GOLDEN_BLESS").is_ok_and(|v| v == "1")
+    bless_allowed(|k| std::env::var(k).ok())
+}
+
+/// The rule behind [`bless`], over an injectable environment: blessing is on only when asked for, and never in CI (a run that rewrites
+/// its own reference would pass whatever the planner answered).
+fn bless_allowed(env: impl Fn(&str) -> Option<String>) -> bool {
+    let asked = env("PADDOCK_GOLDEN_BLESS").is_some_and(|v| v == "1");
+    let ci = ["CI", "GITHUB_ACTIONS"].iter().any(|k| env(k).is_some_and(|v| v == "true"));
+    assert!(
+        !(asked && ci),
+        "PADDOCK_GOLDEN_BLESS=1 is refused in CI: bless on a workstation, review the diff and commit it"
+    );
+    asked
+}
+
+#[test]
+fn blessing_is_refused_in_ci_and_off_unless_asked_for() {
+    let env =
+        |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+    assert!(bless_allowed(env(&[("PADDOCK_GOLDEN_BLESS", "1")])), "asked for, on a workstation");
+    assert!(!bless_allowed(env(&[])), "not asked for");
+    assert!(!bless_allowed(env(&[("CI", "true")])), "CI alone blesses nothing");
+    let refused = std::panic::catch_unwind(|| bless_allowed(env(&[("PADDOCK_GOLDEN_BLESS", "1"), ("GITHUB_ACTIONS", "true")])));
+    assert!(refused.is_err(), "asked for in CI is refused");
+}
+
+/// The kind of a planner error (its variant), recorded instead of a bare `true` so a different failure is a changed answer.
+fn error_kind(e: &impl std::fmt::Debug) -> String {
+    let d = format!("{e:?}");
+    d.split(|c: char| !c.is_alphanumeric()).next().unwrap_or("").to_string()
 }
 
 /// What a recorded file says on a mismatch: the one command that rewrites it, to review as a diff.
@@ -71,7 +100,7 @@ fn record(path: &Path, value: &Value) {
 }
 
 /// The plan flags a real-tree sample records (the rest of a plan moves with every new project).
-const SAMPLE_KEYS: [&str; 10] = [
+const SAMPLE_KEYS: [&str; 12] = [
     "all",
     "crates",
     "ui",
@@ -82,6 +111,8 @@ const SAMPLE_KEYS: [&str; 10] = [
     "icons",
     "paddockDev",
     "docs",
+    "apps",
+    "kinds",
 ];
 
 /// The change sets of `tests/golden/real-tree-samples.json` on this repository: the flags the planner answers, as recorded from
@@ -248,14 +279,17 @@ fn recorded_plans_match_the_planners_answers_on_the_fixture_repository() {
         };
         let expected: Value =
             serde_json::from_str(&std::fs::read_to_string(golden_dir().join("expected").join(format!("{name}.json"))).unwrap()).unwrap();
-        let got = plan_for(&root, &history, &req).map_err(|e| e.to_string());
+        let got = plan_for(&root, &history, &req);
         if bless() {
-            let recorded = got.clone().unwrap_or_else(|_| json!({"error": true}));
+            let recorded = match &got {
+                Ok(plan) => plan.clone(),
+                Err(e) => json!({"error": true, "kind": error_kind(e)}),
+            };
             record(&golden_dir().join("expected").join(format!("{name}.json")), &recorded);
             continue;
         }
         let ok = match (&got, expected.get("error").is_some()) {
-            (Err(_), true) => true,
+            (Err(e), true) => expected["kind"].as_str().is_none_or(|k| k == error_kind(e)),
             (Ok(plan), false) => canonical(plan.clone()) == canonical(expected.clone()),
             _ => false,
         };
@@ -689,9 +723,40 @@ fn edits_on_a_copy(edits: &[(String, Option<String>)], narrowed: &std::sync::ato
         let started = Instant::now();
         let got = canonical(plan_on_graph(&copy, &history, &req, &graph).unwrap());
         eprintln!("edit of {rel} (job {job:?}): plan {:.1} s", started.elapsed().as_secs_f64());
-        // What a narrowed plan says about the edit: the workflow's own projects, never a plan that fell back to everything for
-        // a file the split could read. The answers for the same edits on the fixture are the recorded `gitea-*` cases.
-        assert!(got["why"].is_object(), "a plan with reasons for an edit of {rel} (job {job:?})");
+        // A job edit reaches exactly the projects CI_JOBS names for it, plus conformance (in every plan); an action or script edit
+        // is narrowed, never everything. (`plan` wires every other job, so its edit is everything by design.)
+        match job {
+            Some(job) => {
+                let projects = paddock_dev::plan_gitea::CI_JOBS.iter().find(|(j, _)| j == job).unwrap().1;
+                if projects == ["everything"] {
+                    assert_eq!(got["all"], true, "an edit of the plan job reaches everything");
+                } else {
+                    assert_eq!(got["all"], false, "an edit of job {job} is narrowed");
+                    let mut want: std::collections::BTreeSet<String> = projects.iter().map(|p| p.to_string()).collect();
+                    want.insert("conformance".into());
+                    let mut have: std::collections::BTreeSet<String> = [
+                        ("crates", "crates"),
+                        ("ui", "ui"),
+                        ("eslint", "eslint"),
+                        ("conformance", "conformance"),
+                        ("c99", "c99"),
+                        ("tools", "tools"),
+                        ("icons", "icons"),
+                        ("ciImage", "ci-image"),
+                        ("paddockDev", "paddock-dev"),
+                    ]
+                    .iter()
+                    .filter(|(k, _)| got[k] == true)
+                    .map(|(_, p)| p.to_string())
+                    .collect();
+                    if got["apps"].as_array().is_some_and(|a| !a.is_empty()) {
+                        have.insert("apps".into());
+                    }
+                    assert_eq!(have, want, "projects reached by an edit of job {job} of {rel}");
+                }
+            }
+            None => assert_eq!(got["all"], false, "an edit of {rel} is narrowed"),
+        }
         narrowed.fetch_add(usize::from(got["all"] == false), std::sync::atomic::Ordering::Relaxed);
         let restored = Command::new("git")
             .arg("-C")

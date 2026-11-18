@@ -25,7 +25,7 @@ docs/            family docs: rules, lessons, ADRs, plans, research; an app's do
 tools/paddock-dev  the Rust developer and CI tool (ADR 0022: its own Cargo workspace and lockfile; run it with `./dev`, which
                  builds or fetches the binary its inputs name)
 scripts/         family scripts: ./dev plan (CI's plan), publish.mjs, new-app.mjs, demo-release.mjs
-.gitea/          ci.yml (plan and affected jobs), nightly.yml, each app's <app>.yml, the shared actions
+.gitea/          ci.yml (the plan job and the per-project jobs), nightly.yml, each app's <app>.yml, the shared actions
 package.json     the one npm workspace and package-lock.json (ui, eslint, icons, the demos, apps/*/app)
 ```
 
