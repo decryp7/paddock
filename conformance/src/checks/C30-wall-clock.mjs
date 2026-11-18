@@ -21,7 +21,7 @@ import { error, warn } from '../finding.mjs';
 import { parseAllowList, readAllowList } from '../util/allow-list.mjs';
 
 /** Whether an unlisted site and the allow list's growth are errors (the user's decision of 2026-11-18, after the list is on main). */
-export const BLOCKING = false;
+export const BLOCKING = true;
 /** The allow list of today's sites. */
 export const ALLOW = 'conformance/c30-allow.json';
 /** The allow list: [{ path, site, reason, count }], or throws why it cannot be read (the shared parser). */
