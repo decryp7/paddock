@@ -118,8 +118,8 @@ test.describe('firewall rule table at the smallest window (900 px)', () => {
     await page.goto('/?latency=0#/firewall');
     const path = page.locator('[data-source="applicationFirewall"] [data-testid="path-text"]').first();
     await expect(path).toBeVisible();
-    // conformance: e2e-ready — reads focus; the loop presses Tab until the path has it, and a toBeFocused follows
     for (let i = 0; i < 60; i++) {
+      // eslint-disable-next-line paddock/e2e-ready-reads -- reads focus; the loop presses Tab until the path has it, and a toBeFocused follows
       if (await path.evaluate((el) => el === document.activeElement)) break;
       await page.keyboard.press('Tab');
     }

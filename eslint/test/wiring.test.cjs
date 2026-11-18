@@ -1,7 +1,7 @@
 'use strict';
 // Wiring (ER-41, the class "a check wired where it never runs, or silently replaces another", 2026-11-12 and 2026-11-16): for every app and
 // the ui, (1) the lint command covers the e2e folder (the lint target's lintFilePatterns in angular.json, or the ui's `eslint` script), (2) a
-// planted spec linted with the app's real eslint config gets the pinned-clock rule, and (3) the app's other rules still fire in that
+// planted spec linted with the app's real eslint config gets the pinned-clock rule and the ready-reads rule as an error, and (3) the app's other rules still fire in that
 // folder (Debrief's raw-row selectors, and eslint:recommended's no-debugger everywhere). The config is loaded in a child process, as `ng lint`
 // does, so the environment of the test cannot change it.
 const assert = require('node:assert/strict');
@@ -13,7 +13,7 @@ const { minimatch } = require('minimatch');
 
 const REPO = resolve(__dirname, '..', '..');
 const PLANTED = 'e2e/zz-planted.spec.ts';
-const SPEC = "import { test } from '@playwright/test';\ndebugger;\nconst raw = page.locator('[role=row].row');\n";
+const SPEC = "import { test } from '@playwright/test';\ndebugger;\nconst raw = page.locator('[role=row].row');\nawait expect(raw).toBeVisible();\nconst box = await raw.boundingBox();\n";
 
 /** The apps with an Angular workspace and an e2e folder, and the ui. */
 const targets = [
@@ -32,12 +32,12 @@ function lintPatterns(dir) {
   return Object.values(workspace.projects).flatMap((p) => p.architect?.lint?.options?.lintFilePatterns ?? []);
 }
 
-/** The rule ids ESLint reports for the planted spec with the app's own config (DEBRIEF_LINT_REPORT=1 turns Debrief's report-only rule on). */
+/** The messages [{ ruleId, severity }] ESLint reports for the planted spec with the app's own config (DEBRIEF_LINT_REPORT=1 turns Debrief's report-only rule on). */
 function lintPlanted(dir) {
   const script = `
     const { ESLint } = require('eslint');
     new ESLint({ cwd: ${JSON.stringify(dir)} }).lintText(${JSON.stringify(SPEC)}, { filePath: ${JSON.stringify(join(dir, PLANTED))} })
-      .then((r) => process.stdout.write(JSON.stringify(r[0].messages.map((m) => m.ruleId))));`;
+      .then((r) => process.stdout.write(JSON.stringify(r[0].messages.map((m) => ({ ruleId: m.ruleId, severity: m.severity })))));`;
   const out = spawnSync(process.execPath, ['-e', script], { cwd: dir, env: { ...process.env, DEBRIEF_LINT_REPORT: '1' }, encoding: 'utf8' });
   assert.equal(out.status, 0, `${dir}: eslint failed: ${out.stderr}`);
   return JSON.parse(out.stdout);
@@ -52,9 +52,14 @@ for (const dir of targets) {
       patterns.some((p) => minimatch(PLANTED, rel(p), { dot: true })),
       `${name}: no lint pattern covers ${PLANTED} (${patterns.join(', ')}): a spec is never linted by \`npm run lint\``,
     );
-    const rules = lintPlanted(dir);
+    const messages = lintPlanted(dir);
+    const rules = messages.map((m) => m.ruleId);
     assert.ok(rules.includes('paddock/e2e-pinned-clock'), `${name}: the pinned-clock rule did not fire: ${rules.join(', ')}`);
     assert.ok(rules.includes('no-debugger'), `${name}: eslint:recommended no longer applies in e2e: ${rules.join(', ')}`);
+    // ER-33: the ready-reads rule must be an error in the real config (a warning or a missing block would let a new unready read through the lint step).
+    const ready = messages.find((m) => m.ruleId === 'paddock/e2e-ready-reads');
+    assert.ok(ready, `${name}: the ready-reads rule did not fire on a read right after a bare visibility wait: ${rules.join(', ')}`);
+    assert.equal(ready.severity, 2, `${name}: paddock/e2e-ready-reads is not an error (severity ${ready.severity})`);
     if (name.endsWith('debrief/app')) assert.ok(rules.includes('no-restricted-syntax'), `${name}: the raw-row selectors were replaced: ${rules.join(', ')}`);
   });
 }

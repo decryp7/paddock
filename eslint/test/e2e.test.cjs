@@ -9,11 +9,13 @@ const { defineConfig } = require('eslint/config');
 const tseslint = require('typescript-eslint');
 const { e2ePinnedClock } = require('../src/index.cjs');
 
+/** The ESLint results of the last `lint` call (messages with their severity). */
+let lintResults = [];
 const dir = mkdtempSync(join(tmpdir(), 'paddock-eslint-e2e-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
 
 /** Lints `files` ({ path: text }) with the e2e block over the TypeScript parser (and `extra` config blocks); returns "path:line rule". */
-async function lint(files, extra = [], ready = 'warn') {
+async function lint(files, extra = [], ready = undefined) {
   for (const [p, text] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, p)), { recursive: true });
     writeFileSync(join(dir, p), text);
@@ -24,6 +26,7 @@ async function lint(files, extra = [], ready = 'warn') {
     overrideConfig: defineConfig({ files: ['**/*.ts'], languageOptions: { parser: tseslint.parser } }, ...extra, ...e2ePinnedClock({ ready })),
   });
   const results = await eslint.lintFiles(Object.keys(files));
+  lintResults = results;
   return results.flatMap((r) => r.messages.map((m) => `${r.filePath.slice(dir.length + 1)}:${m.line} ${m.ruleId ?? 'parse'}`));
 }
 const RULE = 'paddock/e2e-pinned-clock';
@@ -117,7 +120,7 @@ test('e2e-ready-reads: a read right after a bare visibility wait is reported (th
   assert.deepEqual(readLines(found, 'e2e/bad.spec.ts'), [5, 7, 9], found.join(' | '));
 });
 
-test('e2e-ready-reads: a ready helper or any other step between, a waiver, a click and a read in a function are fine', async () => {
+test('e2e-ready-reads: a ready helper or any other step between, a disable directive with a reason, a click and a read in a function are fine', async () => {
   const found = await lint({
     'e2e/ok.spec.ts': [
       "import { expect, test } from './test';",
@@ -126,7 +129,7 @@ test('e2e-ready-reads: a ready helper or any other step between, a waiver, a cli
       '  await expectListFiltered(options);',
       '  const texts = await options.allInnerTexts();',
       '  await expect(options.first()).toBeVisible();',
-      '  // conformance: e2e-ready — the list is static here, read once',
+      '  // eslint-disable-next-line paddock/e2e-ready-reads -- the list is static here, read once',
       '  const t2 = await options.allInnerTexts();',
       '  await expect(options.first()).toBeVisible();',
       '  await options.first().click();',
@@ -141,9 +144,33 @@ test('e2e-ready-reads: a ready helper or any other step between, a waiver, a cli
   assert.deepEqual(readLines(found, 'e2e/ok.spec.ts'), [], found.join(' | '));
 });
 
-test('e2e-ready-reads is off by default (report-only: the lint commands run with --max-warnings 0)', async () => {
-  const found = await lint({ 'e2e/off.spec.ts': "test('a', async () => {\n  await expect(x).toBeVisible();\n  const t = await x.allInnerTexts();\n});\n" }, [], null);
+test('e2e-ready-reads is an error by default (the lint commands run with --max-warnings 0, so every app change is blocked)', async () => {
+  await lint({ 'e2e/err.spec.ts': "test('a', async () => {\n  await expect(x).toBeVisible();\n  const t = await x.allInnerTexts();\n});\n" });
+  const m = lintResults[0].messages.find((x) => x.ruleId === READY);
+  assert.ok(m, 'the read is reported');
+  assert.equal(m.severity, 2, 'severity 2 is an error');
+});
+
+test('e2e-ready-reads: positive control, the rule can be switched off and then reports nothing', async () => {
+  const found = await lint({ 'e2e/off.spec.ts': "test('a', async () => {\n  await expect(x).toBeVisible();\n  const t = await x.allInnerTexts();\n});\n" }, [], 'off');
   assert.deepEqual(readLines(found, 'e2e/off.spec.ts'), []);
+});
+
+test('e2e-ready-reads: a disable directive that no longer covers a site is reported as unused (so a fixed read leaves no stale exception)', async () => {
+  const found = await lint({
+    'e2e/unused.spec.ts': [
+      "test('a', async () => {",
+      '  await expect(x).toBeVisible();',
+      '  await expectNotMoving(x);',
+      '  // eslint-disable-next-line paddock/e2e-ready-reads -- stale: the read below now waits',
+      '  const t = await x.allInnerTexts();',
+      '});',
+      '',
+    ].join('\n'),
+  });
+  assert.deepEqual(readLines(found, 'e2e/unused.spec.ts'), []);
+  const unused = lintResults[0].messages.filter((m) => /Unused eslint-disable directive/.test(m.message));
+  assert.equal(unused.length, 1, JSON.stringify(lintResults[0].messages));
 });
 
 test('e2e-ready-reads: evaluate and evaluateAll are reads only when their result is used', async () => {

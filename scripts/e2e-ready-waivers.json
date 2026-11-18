@@ -1,8 +1,0 @@
-{
-  "apps/debrief/app/e2e/drag-ghost.e2e.ts": 1,
-  "apps/debrief/app/e2e/prod-csp.e2e.ts": 1,
-  "apps/debrief/app/e2e/view-controls-stay.e2e.ts": 1,
-  "apps/dyno/app/e2e/dialogs.spec.ts": 1,
-  "apps/dyno/app/e2e/lists-map.spec.ts": 1,
-  "apps/dyno/app/e2e/screens-consistency.spec.ts": 1
-}

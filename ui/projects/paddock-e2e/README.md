@@ -137,6 +137,6 @@ axe helpers in both engines with `--project=chromium --project=webkit`.
 | `expectNotMoving(locator)` | the same box in two reads in a row | an element still settling |
 
 Apps import the source relatively (`../../../../ui/projects/paddock-e2e/src/ready.ts`) unless their workflow builds the kit (conformance C137).
-The ESLint rule `paddock/e2e-ready-reads` (in the `e2ePinnedClock` block, off by default because the lint commands run with `--max-warnings 0`; read it with `PADDOCK_E2E_READY_LINT=warn npx eslint 'e2e/**/*.ts'`) flags a `boundingBox`, `allInnerTexts`, `allTextContents`, `innerText`,
+The ESLint rule `paddock/e2e-ready-reads` (in the `e2ePinnedClock` block, an error, so every app's and the ui's lint step blocks a new site) flags a `boundingBox`, `allInnerTexts`, `allTextContents`, `innerText`,
 `textContent`, or an `evaluate` or `evaluateAll` whose result is used, in the next statement of the same block after a bare `toBeVisible()` or `waitFor()` (a window of one statement: a read two statements later, or after a `waitForTimeout`, is not seen); a read that is meant to be immediate carries
-`// conformance: e2e-ready — <why>`. CI's "e2e ready-reads (gate)" step (`node scripts/e2e-ready-report.mjs`) fails on a new site against `scripts/e2e-ready-baseline.json` (generated, shrinks only: `--update`; growth against the merge base needs the user's approval, ER-46); it blocks once `scripts/e2e-ready-gate.json` names `blockingSinceRun` (ER-41), and reports until then.
+`// eslint-disable-next-line paddock/e2e-ready-reads -- <why>` (the description is required and an unused directive is reported; conformance C139 counts the directives per file in `conformance/c139-allow.json`, a list that only shrinks, ER-46).

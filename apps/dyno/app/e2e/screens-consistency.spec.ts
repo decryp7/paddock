@@ -116,7 +116,7 @@ for (const { name, hash, facts } of PAGES) {
     await page.goto(`/?latency=0&stable=60000&chrome=macos&menu=native#${hash}`);
     await page.clock.runFor(SHOT_AFTER_MS - 10_000);
     await expect(page.locator('pd-shell-frame, dy-tray').first()).toBeVisible();
-    // conformance: e2e-ready — reads the faked clock (Date.now), not the page
+    // eslint-disable-next-line paddock/e2e-ready-reads -- reads the faked clock (Date.now), not the page
     const now = await page.evaluate(() => Date.now());
     await page.clock.runFor(FROZEN + SHOT_AFTER_MS - now);
     // The page does not draw while the clock is paused (pauseLive): wait for every figure to be drawn first, so the pause freezes a finished page
