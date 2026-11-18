@@ -2712,7 +2712,7 @@ fn lock_holder_child() {
 fn a_lock_held_by_a_killed_process_is_free_again() {
     use paddock_proc::{Claim, InstanceLock};
     use std::io::{BufRead, BufReader};
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     if std::env::var(LOCK_CHILD).is_ok() {
         return;
     }
@@ -2728,7 +2728,7 @@ fn a_lock_held_by_a_killed_process_is_free_again() {
     let record = RecordFile::new(dir.path(), LABEL);
     // The lock file of the record, as the record names it.
     let path = dir.path().join(format!("service-{LABEL}.lock"));
-    let mut child = Command::new(std::env::current_exe().unwrap())
+    let mut child = paddock_proc::command(std::env::current_exe().unwrap())
         .args([
             "--exact",
             "model::lock_holder_child",

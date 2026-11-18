@@ -100,7 +100,10 @@ fn check(out: &std::process::Output, what: &str) {
     );
 }
 
-#[allow(clippy::disallowed_methods)] // the plain starts are the baseline being measured, each awaited here
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the plain starts are the baseline being measured, each awaited here: the measured baseline is a plain std start"
+)]
 fn plain(program: &OsString) -> Command {
     Command::new(program)
 }

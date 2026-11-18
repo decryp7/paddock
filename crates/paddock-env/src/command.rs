@@ -30,6 +30,15 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
     cmd
 }
 
+/// A command with no creation flags: the child shares this process's console (a command-line front end that runs its helper
+/// in the same terminal, so Ctrl+C and the output reach it) or shows windows of its own the usual way (the app starting itself
+/// again after an update). Counted like [`command`]; use [`command`] for a tool whose console window must not appear.
+#[allow(clippy::disallowed_methods)] // the canonical constructor without creation flags
+pub fn attached_command(program: impl AsRef<OsStr>) -> Command {
+    crate::starts::note();
+    Command::new(program)
+}
+
 /// A variable that **restricts** what a child may do, with the values that restrict it (ER-47). A value that loosens it
 /// (`PADDOCK_DEV_DOWNLOAD=1`, `RUSTUP_AUTO_INSTALL=1`, `CARGO_NET_OFFLINE=false`) is not a restriction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

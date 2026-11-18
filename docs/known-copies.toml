@@ -130,27 +130,6 @@ symbols = ["item:command", "item:CREATE_NO_WINDOW"]
 status = "built"
 adr = "0100"
 
-  [[mechanism.copy]]
-  paths = ["crates/paddock-download/src/proxy_os.rs"]
-  symbols = ["text:0x0800_0000"]
-  owner = "paddock"
-  delete_by = "v0.5.0"
-  note = "The proxy lookup sets the Windows flag itself; paddock-download has no paddock-env dependency yet. It becomes paddock_env::command::command when the crate next takes the dependency."
-
-  [[mechanism.copy]]
-  paths = ["apps/spotter/app/src-tauri/src/notifier.rs"]
-  symbols = ["text:0x0800_0000"]
-  owner = "spotter"
-  delete_by = "spotter-v1.1.0"
-  note = "The notifier sets the flag on its own Command; the app crate has no paddock-proc dependency (spotter-render uses paddock_proc::CREATE_NO_WINDOW). The four app constructors (debrief-plugin-api, dyno-platform, pitcrew-service, pitwall-server) call paddock_proc::command since ADR 0100's re-landing and are not copies."
-
-  [[mechanism.copy]]
-  paths = ["apps/pitcrew/app/src-tauri/src/handoff.rs"]
-  symbols = ["text:0x0800_0000"]
-  owner = "pitcrew"
-  delete_by = "pitcrew-v1.1.0"
-  note = "The hand-off sets the flag on its own tokio Command; the app crate has no paddock-proc dependency."
-
 [[mechanism]]
 id = "ipc-child-launch"
 title = "Starting a child with its endpoint and token on stdin; the child's side of the connection"

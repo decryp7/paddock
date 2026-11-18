@@ -4674,6 +4674,7 @@ version = "1.0.0"
 dependencies = [
  "iana-time-zone",
  "jiff",
+ "paddock-env",
  "paddock-secrets",
  "serde",
  "serde_json",

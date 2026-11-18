@@ -70,9 +70,8 @@ pub fn total() -> Option<u64> {
     #[cfg(target_os = "macos")]
     {
         macos_total(&|key| {
-            // A fixed system program that only reads one kernel value and returns at once; this runner has no process helper of its own.
-            #[allow(clippy::disallowed_methods)]
-            let out = std::process::Command::new("/usr/sbin/sysctl").args(["-n", key]).output().ok()?;
+            // A fixed system program that only reads one kernel value and returns at once.
+            let out = paddock_env::command::command("/usr/sbin/sysctl").args(["-n", key]).output().ok()?;
             out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
         })
     }

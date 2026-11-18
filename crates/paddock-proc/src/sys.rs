@@ -823,12 +823,7 @@ mod tests {
     #[test]
     fn children_are_listed_for_one_pid_and_the_buffer_grows() {
         let mut kids: Vec<_> = (0..3)
-            .map(|_| {
-                std::process::Command::new("sleep")
-                    .arg("60")
-                    .spawn()
-                    .unwrap()
-            })
+            .map(|_| crate::command("sleep").arg("60").spawn().unwrap())
             .collect();
         let me = std::process::id();
         for room in [1, 2, 3, 1024] {

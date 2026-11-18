@@ -4,7 +4,6 @@
 
 use paddock_testkit::{StandIn, exe};
 use std::path::Path;
-use std::process::Command;
 
 /// Writes the stand-in binary to `path` through `exe::write_program` (the function under test) and its script, which prints
 /// `said` and exits with `code`, beside it: a program that runs the same on every OS, with no shell script planted.
@@ -29,16 +28,23 @@ fn a_written_program_is_executable_and_runs() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("prog");
     program(&path, Some("hi"), 0);
-    let out = exe::output(&mut Command::new(&path)).unwrap();
+    let out = exe::output(&mut paddock_env::command::command(&path)).unwrap();
     assert!(out.status.success());
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hi");
     // Written again over itself (the file exists, the mode stays right).
     program(&path, None, 3);
     assert_eq!(
-        exe::status(&mut Command::new(&path)).unwrap().code(),
+        exe::status(&mut paddock_env::command::command(&path))
+            .unwrap()
+            .code(),
         Some(3)
     );
-    assert!(exe::spawn(&mut Command::new(&path)).unwrap().wait().is_ok());
+    assert!(
+        exe::spawn(&mut paddock_env::command::command(&path))
+            .unwrap()
+            .wait()
+            .is_ok()
+    );
 }
 
 /// While a handle opened for writing is held, a plain start is refused; `exe::status` waits it out (the handle is let go when
@@ -52,7 +58,7 @@ fn a_start_refused_because_the_file_is_held_open_for_writing_succeeds_after_it_i
     let path = dir.path().join("prog");
     program(&path, None, 0);
     let writer = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
-    let raw = Command::new(&path).status();
+    let raw = paddock_env::command::command(&path).status();
     assert!(
         raw.as_ref().is_err_and(is_text_busy),
         "precondition: {raw:?}"
@@ -65,7 +71,7 @@ fn a_start_refused_because_the_file_is_held_open_for_writing_succeeds_after_it_i
         }
         drop(writer);
     });
-    let status = exe::status(&mut Command::new(&path)).unwrap();
+    let status = exe::status(&mut paddock_env::command::command(&path)).unwrap();
     releaser.join().unwrap();
     assert!(status.success());
 }
@@ -92,7 +98,7 @@ fn the_program_is_written_by_another_process_and_a_running_one_is_replaced() {
     // A running binary at the path.
     std::fs::remove_file(&path).unwrap();
     std::fs::copy("/bin/sleep", &path).unwrap();
-    let mut child = exe::spawn(Command::new(&path).arg("600")).unwrap();
+    let mut child = exe::spawn(paddock_env::command::command(&path).arg("600")).unwrap();
     // The precondition (ER-33): a plain write to the running program is refused.
     let plain = std::fs::OpenOptions::new().write(true).open(&path);
     assert!(
@@ -107,7 +113,9 @@ fn the_program_is_written_by_another_process_and_a_running_one_is_replaced() {
     child.kill().unwrap();
     child.wait().unwrap();
     assert_eq!(
-        exe::status(&mut Command::new(&path)).unwrap().code(),
+        exe::status(&mut paddock_env::command::command(&path))
+            .unwrap()
+            .code(),
         Some(7)
     );
 }

@@ -8,7 +8,7 @@ fn windows_a_scratch_under_a_folder_other_accounts_can_write_is_still_private() 
     let parent = Scratch::new();
     let open = parent.work().join("open");
     std::fs::create_dir(&open).unwrap();
-    let grant = std::process::Command::new("icacls")
+    let grant = paddock_env::command::command("icacls")
         .arg(&open)
         .args(["/grant", "*S-1-5-11:(OI)(CI)M"])
         .output()

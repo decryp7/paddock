@@ -48,7 +48,6 @@ mod real {
     use std::fs::OpenOptions;
     use std::io::Write;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    use std::process::Command;
     use std::sync::mpsc;
 
     fn script(dir: &std::path::Path, body: &str) -> std::path::PathBuf {
@@ -75,7 +74,7 @@ mod real {
         let path = script(dir.path(), "exit 0");
         let writer = OpenOptions::new().write(true).open(&path).unwrap();
         // The precondition (ER-33): without the retry this start really is refused.
-        let raw = Command::new(&path).spawn();
+        let raw = paddock_env::command::command(&path).spawn();
         assert!(
             raw.as_ref().is_err_and(is_text_busy),
             "the held write handle must make the start fail with ETXTBSY, got {raw:?}"
@@ -85,7 +84,7 @@ mod real {
             failed_rx.recv().unwrap();
             drop(writer);
         });
-        let mut cmd = Command::new(&path);
+        let mut cmd = paddock_env::command::command(&path);
         let mut child = retry("start the script", || {
             let r = cmd.spawn();
             if r.as_ref().is_err_and(is_text_busy) {
@@ -127,7 +126,7 @@ mod real {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("prog");
         std::fs::copy("/bin/sleep", &path).unwrap();
-        let mut cmd = Command::new(&path);
+        let mut cmd = paddock_env::command::command(&path);
         cmd.arg("600");
         let mut child = Reap(Some(retry("start the program", || cmd.spawn()).unwrap()));
         let raw = std::fs::write(&path, b"#!/bin/sh\nexit 0\n");

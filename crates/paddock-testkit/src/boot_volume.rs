@@ -15,7 +15,7 @@
 use std::ffi::OsStr;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -101,7 +101,7 @@ pub fn boot_volume_temp_with(
             temp.display()
         )),
     };
-    let mut cmd = Command::new("/bin/bash");
+    let mut cmd = paddock_env::command::command("/bin/bash");
     cmd.arg(script)
         .arg("temp")
         .arg(temp)

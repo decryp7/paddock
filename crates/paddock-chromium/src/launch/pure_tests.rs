@@ -364,7 +364,7 @@ fn the_cap_is_checked_once_more_when_the_browser_connects() {
 #[test]
 fn a_live_owner_whose_start_time_reads_a_little_apart_keeps_its_profile() {
     let base = tempfile::tempdir().unwrap();
-    let mut other = std::process::Command::new("/bin/sleep")
+    let mut other = paddock_proc::command("/bin/sleep")
         .arg("30")
         .spawn()
         .unwrap();

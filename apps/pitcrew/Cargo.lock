@@ -3442,6 +3442,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-service-management",
  "paddock-build",
+ "paddock-env",
  "paddock-secrets",
  "paddock-testkit",
  "pitcrew-core",

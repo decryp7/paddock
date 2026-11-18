@@ -4,7 +4,7 @@ use paddock_slots::{
 };
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 const POLL: Duration = Duration::from_millis(5);
@@ -306,7 +306,7 @@ fn a_killed_holder_frees_its_slot() {
     std::fs::create_dir(&owner).unwrap();
     let root = dir.path().join("ci");
     let mut child = KillOnDrop(
-        Command::new(std::env::current_exe().unwrap())
+        paddock_env::command::command(std::env::current_exe().unwrap())
             .args([
                 "--exact",
                 "holder::killed_holder_child",

@@ -437,10 +437,9 @@ mod imp {
 
     /// `launchctl <args>`, bounded to a few seconds; `None` when it cannot be run or read.
     fn launchctl(args: &[&str]) -> Option<String> {
-        use std::process::{Command, Stdio};
+        use std::process::Stdio;
         // macOS only: no console window to hide, and the wait below is bounded.
-        #[allow(clippy::disallowed_methods)]
-        let mut child = Command::new("/bin/launchctl")
+        let mut child = paddock_env::command::command("/bin/launchctl")
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -472,7 +471,7 @@ mod imp {
     //! program has the timeouts; this side only bounds the wait for it.
     use super::*;
     use crate::service_client::ServiceClient;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     use std::time::{Duration, Instant};
 
     const UNIT: &str = pitcrew_core::service_spec::SYSTEMD_UNIT;
@@ -516,8 +515,7 @@ mod imp {
         let exe = service_exe()?;
         // The one place the app starts a program: it is our own service, bounded by the wait loop below (no console
         // window exists on Linux).
-        #[allow(clippy::disallowed_methods)]
-        let mut child = Command::new(&exe)
+        let mut child = paddock_env::command::command(&exe)
             .arg(verb)
             .stdin(Stdio::null())
             .stdout(Stdio::null())

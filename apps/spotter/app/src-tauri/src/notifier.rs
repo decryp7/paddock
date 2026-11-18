@@ -171,22 +171,18 @@ pub async fn run_command(program: &str, args: &[String]) -> Result<(), String> {
 }
 
 /// [`run_command`] with another time limit.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "this is Spotter's action runner, the one place that starts a program: no shell, no console window on Windows, killed with its handle and bounded by `limit`"
-)]
+/// Spotter's action runner, the one place that starts a program: no shell, no console window on Windows (the one constructor,
+/// which also counts the start for budget tests), killed with its handle and bounded by `limit`.
 pub async fn run_command_for(program: &str, args: &[String], limit: Duration) -> Result<(), String> {
     if !Path::new(program).is_absolute() {
         return Err("The program to run needs its full path.".into());
     }
-    let mut cmd = tokio::process::Command::new(program);
+    let mut cmd = tokio::process::Command::from(paddock_env::command::command(program));
     cmd.args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
-    #[cfg(windows)]
-    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     let mut child = cmd.spawn().map_err(|e| format!("The program could not be started: {e}"))?;
     match tokio::time::timeout(limit, child.wait()).await {
         Ok(Ok(status)) if status.success() => Ok(()),

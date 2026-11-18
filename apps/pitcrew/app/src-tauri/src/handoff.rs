@@ -171,17 +171,12 @@ pub fn hand_off(
 pub fn start(program: &Path, file: &Path) -> Result<(), String> {
     // The program is Debrief's own, found by name on PATH or in an install folder, started detached: the app must not
     // wait for a window that stays open.
-    #[allow(clippy::disallowed_methods)]
-    let mut cmd = std::process::Command::new(program);
+    // The one constructor: no console window on Windows, counted for budget tests.
+    let mut cmd = paddock_env::command::command(program);
     cmd.arg(file)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
     cmd.spawn().map(|_| ()).map_err(|e| format!("Debrief could not be started: {e}"))
 }
 

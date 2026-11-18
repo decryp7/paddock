@@ -281,15 +281,12 @@ fn unique_dir(base: &Path) -> PathBuf {
 
 impl Chromium {
     /// Starts `exe` with a fresh profile and connects to it.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "the browser, a GUI program: std Command, as the driver is copied between apps"
-    )]
     pub fn launch(exe: &Browser, opts: &LaunchOptions) -> Result<Chromium> {
         check_display(opts.mode, cfg!(target_os = "linux"), |k| std::env::var(k).ok())?;
         let dir = unique_dir(&opts.profile_base);
         std::fs::create_dir_all(&dir).map_err(|e| Error::Launch(format!("the profile folder could not be created: {e}")))?;
-        let mut cmd = std::process::Command::new(&exe.path);
+        // The one constructor, as paddock-chromium launches it: counted for budget tests.
+        let mut cmd = paddock_proc::command(&exe.path);
         let stderr = std::fs::File::create(dir.join(STDERR_FILE)).map_or_else(|_| std::process::Stdio::null(), std::process::Stdio::from);
         cmd.args(args(&dir, opts.mode, exe.flavor, &opts.extra_args))
             .stdin(std::process::Stdio::null())

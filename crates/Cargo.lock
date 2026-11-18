@@ -3379,6 +3379,7 @@ version = "0.2.0"
 dependencies = [
  "fs4",
  "httpdate",
+ "paddock-env",
  "paddock-jobs",
  "paddock-limits",
  "paddock-testkit",
@@ -3745,6 +3746,7 @@ dependencies = [
 name = "paddock-plugin-test"
 version = "0.1.0"
 dependencies = [
+ "paddock-env",
  "paddock-ipc",
  "paddock-plugin-api",
  "paddock-plugin-package",
@@ -3896,6 +3898,7 @@ name = "paddock-setup"
 version = "1.2.0"
 dependencies = [
  "base64 0.22.1",
+ "paddock-env",
  "paddock-proc",
  "paddock-service",
  "paddock-testkit",
@@ -3969,6 +3972,7 @@ dependencies = [
 name = "paddock-slots"
 version = "0.1.0"
 dependencies = [
+ "paddock-env",
  "paddock-testkit",
  "paddock-workspace-hack",
  "tempfile",
@@ -4064,6 +4068,7 @@ dependencies = [
  "paddock-commands",
  "paddock-dialogs",
  "paddock-download",
+ "paddock-env",
  "paddock-files",
  "paddock-jobs",
  "paddock-limits",

@@ -35,7 +35,8 @@ fn run_agent(args: &[String]) -> i32 {
             return 1;
         }
     };
-    match std::process::Command::new(&exe).args(args).status() {
+    // In this terminal: no creation flags, so Ctrl+C and the output reach the agent; counted for budget tests.
+    match paddock_env::command::attached_command(&exe).args(args).status() {
         Ok(status) => status.code().unwrap_or(1),
         Err(e) => {
             eprintln!("dyno: could not run {} ({e})", exe.display());

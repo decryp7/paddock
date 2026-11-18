@@ -35,7 +35,7 @@ impl Danger for Real {
 /// Builds the test program `name` with the `cargo` that runs the tests; whether it succeeded.
 pub fn build_with_cargo(name: &str) -> bool {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    std::process::Command::new(cargo)
+    paddock_env::command::command(cargo)
         .args([
             "build",
             "--quiet",

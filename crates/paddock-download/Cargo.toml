@@ -16,6 +16,8 @@ http = ["dep:ureq", "dep:rustls"]
 tauri = ["dep:tauri"]
 
 [dependencies]
+# The one constructor of a program's Command (no console window; counted for budget tests, paddock_env::starts).
+paddock-env = { workspace = true }
 paddock-limits = { workspace = true }
 paddock-jobs = { workspace = true }
 serde = { version = "1", features = ["derive"] }

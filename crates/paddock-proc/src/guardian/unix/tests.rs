@@ -40,7 +40,7 @@ fn run_if_requested_probe_process() {
 #[test]
 fn run_if_requested_marks_a_plain_process_and_serves_in_the_guardian_process() {
     let probe = |guardian: bool| {
-        let mut cmd = Command::new(std::env::current_exe().unwrap());
+        let mut cmd = crate::command(std::env::current_exe().unwrap());
         cmd.args([
             "guardian::unix::tests::run_if_requested_probe_process",
             "--exact",
@@ -71,7 +71,7 @@ fn run_if_requested_marks_a_plain_process_and_serves_in_the_guardian_process() {
 
 #[test]
 fn the_test_entry_run_as_a_plain_test_does_not_mark_the_process_as_a_guardian_host() {
-    let out = Command::new(std::env::current_exe().unwrap())
+    let out = crate::command(std::env::current_exe().unwrap())
         .args([
             "guardian::unix::tests::hook_probe_process",
             "--exact",
@@ -372,13 +372,13 @@ fn forged_owner(act_as_user: bool) {
     )
     .unwrap();
     // A victim: its own group, a keeper in it, and a folder marked for it.
-    let mut victim = Command::new("/bin/sleep")
+    let mut victim = crate::command("/bin/sleep")
         .arg("30")
         .process_group(0)
         .spawn()
         .unwrap();
     let victim_id = ProcessId::of(victim.id()).unwrap();
-    let mut keeper = Command::new(cat().unwrap())
+    let mut keeper = crate::command(cat().unwrap())
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .process_group(i32::try_from(victim.id()).unwrap())
@@ -393,7 +393,7 @@ fn forged_owner(act_as_user: bool) {
     let log = std::fs::canonicalize(d.path())
         .unwrap()
         .join("guardian.log");
-    let mut guardian = Command::new(std::env::current_exe().unwrap());
+    let mut guardian = crate::command(std::env::current_exe().unwrap());
     if act_as_user {
         guardian.env(ACT_AS_USER_ENV, "1");
     }
@@ -532,7 +532,7 @@ fn guard_owner_process() {
     enable_in_test_binary(ENTRY);
     let mut held = Vec::new();
     for folder in folders.split(':') {
-        let mut cmd = Command::new("/bin/sh");
+        let mut cmd = crate::command("/bin/sh");
         cmd.args(["-c", "sleep 60 & echo \"$!\"; wait"])
             .stdout(Stdio::piped());
         let mut s = Supervised::spawn_owning_folder(cmd, None, Path::new(folder)).unwrap();
@@ -588,7 +588,7 @@ fn owner_killed(act_as_user: bool) {
         .map(|f| f.display().to_string())
         .collect::<Vec<_>>()
         .join(":");
-    let mut owner_cmd = Command::new(std::env::current_exe().unwrap());
+    let mut owner_cmd = crate::command(std::env::current_exe().unwrap());
     if act_as_user {
         owner_cmd.env(ACT_AS_USER_ENV, "1");
     }
@@ -685,7 +685,7 @@ fn owner_killed(act_as_user: bool) {
 #[test]
 fn a_root_process_registers_no_child_with_a_guardian() {
     enable_in_test_binary(ENTRY);
-    let mut cmd = Command::new("/bin/sh");
+    let mut cmd = crate::command("/bin/sh");
     cmd.args(["-c", "sleep 60"]);
     let mut s = Supervised::spawn(cmd).unwrap();
     let registered = s.guard.is_some();
@@ -700,7 +700,7 @@ fn an_owner_that_ends_its_child_itself_keeps_the_folder_and_ends_the_keeper() {
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().join("kept");
     std::fs::create_dir_all(&folder).unwrap();
-    let mut cmd = Command::new("/bin/sh");
+    let mut cmd = crate::command("/bin/sh");
     cmd.args(["-c", "sleep 60"]);
     let mut s = Supervised::spawn_owning_folder(cmd, None, &folder).unwrap();
     let child = s.process().unwrap();
@@ -886,7 +886,7 @@ fn refused_guardian(owner_env: Option<String>, stdin: Stdio) -> (Option<i32>, St
     let log = std::fs::canonicalize(d.path())
         .unwrap()
         .join("guardian.log");
-    let mut cmd = Command::new(std::env::current_exe().unwrap());
+    let mut cmd = crate::command(std::env::current_exe().unwrap());
     cmd.args([ENTRY, "--exact"])
         .env(ACT_AS_USER_ENV, "1")
         .env(GUARDIAN_ENV, "1")
@@ -924,7 +924,7 @@ fn a_guardian_whose_input_is_not_a_pipe_refuses_and_says_so() {
 fn a_guardian_that_ended_is_started_again_for_the_next_child() {
     enable_in_test_binary(ENTRY);
     let _acting = ActAsUser::here();
-    let mut first = Command::new("/bin/sh");
+    let mut first = crate::command("/bin/sh");
     first.args(["-c", "sleep 60"]);
     let mut first = Supervised::spawn(first).unwrap();
     let guardian = {
@@ -935,7 +935,7 @@ fn a_guardian_that_ended_is_started_again_for_the_next_child() {
         r.child.wait().unwrap();
         id
     };
-    let mut second = Command::new("/bin/sh");
+    let mut second = crate::command("/bin/sh");
     second.args(["-c", "sleep 60"]);
     let mut second = Supervised::spawn(second).unwrap();
     let again = lock().as_ref().map(|r| r.child.id());

@@ -39,7 +39,7 @@ pub use paddock_env::RESTRICTING;
 
 /// A command for `program` that opens no console window on Windows ([`paddock_env::command::command`], the one place programs
 /// are started from; clippy forbids `Command::new` elsewhere).
-pub use paddock_env::command::command;
+pub use paddock_env::command::{attached_command, command};
 
 /// Clears the child's environment and copies back only the variables in `keep` (use [`KEPT_ENV`]) that this process has, and
 /// every restricting variable it has ([`paddock_env::RESTRICTING`]: a download ban, an offline switch; a child that lost one would

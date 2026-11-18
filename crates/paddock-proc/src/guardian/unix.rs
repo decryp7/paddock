@@ -7,7 +7,7 @@ use std::io::{BufRead, Write};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
@@ -181,7 +181,7 @@ fn start(args: &[OsString], me: ProcessId) -> std::io::Result<Running> {
     let exe = std::env::current_exe()?;
     let (from_owner, to) = std::io::pipe()?;
     let (keeper_input, keeper_hold) = std::io::pipe()?;
-    let mut cmd = Command::new(exe);
+    let mut cmd = crate::command(exe);
     cmd.args(args)
         .env(GUARDIAN_ENV, "1")
         .env(OWNER_ENV, identity_text(me))
@@ -326,7 +326,7 @@ pub(crate) fn register(group: u32, folder: Option<&Path>) -> Option<Registration
     }
     let r = guard.as_mut()?;
     let started = r.keeper_input.try_clone().and_then(|input| {
-        Command::new(cat)
+        crate::command(cat)
             .stdin(input)
             .stdout(Stdio::null())
             .stderr(Stdio::null())

@@ -1,7 +1,9 @@
 //! Tests of [`crate::starts`]: a counter sees the commands its own thread (or a thread or task it is carried into) makes, never
 //! another test's; the assertion helpers pass and fail on the count.
 
-use super::{StartBudget, assert_starts, assert_starts_async, at_most, count_starts};
+use super::{
+    StartBudget, assert_starts, assert_starts_async, at_most, at_most_or_none, count_starts,
+};
 use crate::command::command;
 use std::future::Future;
 use std::pin::pin;
@@ -17,6 +19,15 @@ fn block_on<F: Future>(fut: F) -> F::Output {
             return v;
         }
     }
+}
+
+/// The text of a caught panic (a `String` from a formatted message, a `&str` from a plain one).
+fn panic_text(panic: &Box<dyn std::any::Any + Send>) -> String {
+    panic
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()))
+        .unwrap_or_default()
 }
 
 /// The code under test: one command per item, and one for all.
@@ -116,12 +127,12 @@ fn assert_starts_positive_control_the_per_item_loop_fails_with_the_count() {
     // ER-33: the same assertion that passes on the bulk form fails on the per-item loop.
     let panic = std::panic::catch_unwind(|| assert_starts(1, || one_per_item(&["a", "b", "c"])))
         .unwrap_err();
-    let text = panic.downcast_ref::<String>().cloned().unwrap_or_default();
+    let text = panic_text(&panic);
     assert!(text.contains("expected 1 process start, got 3"), "{text}");
     let panic =
         std::panic::catch_unwind(|| assert_starts(at_most(2), || one_per_item(&["a", "b", "c"])))
             .unwrap_err();
-    let text = panic.downcast_ref::<String>().cloned().unwrap_or_default();
+    let text = panic_text(&panic);
     assert!(
         text.contains("expected at most 2 process starts, got 3"),
         "{text}"
@@ -142,6 +153,98 @@ fn assert_starts_async_counts_the_future() {
         block_on(assert_starts_async(1, async { one_per_item(&["a", "b"]) }))
     })
     .unwrap_err();
-    let text = panic.downcast_ref::<String>().cloned().unwrap_or_default();
+    let text = panic_text(&panic);
     assert!(text.contains("got 2"), "{text}");
+}
+
+#[test]
+fn a_scope_entered_on_its_own_counters_thread_counts_once() {
+    // P1-1: the counter is already live here; entering its scope again must not add it twice.
+    let counter = count_starts();
+    let _in = counter.scope().enter();
+    let _again = counter.scope().enter();
+    one_per_item(&["a", "b"]);
+    assert_eq!(counter.starts(), 2);
+    drop(_again);
+    one_for_all(&["c"]);
+    assert_eq!(
+        counter.starts(),
+        3,
+        "leaving one entry keeps the counter while another holds it"
+    );
+}
+
+#[test]
+fn a_task_polled_on_its_own_counters_thread_counts_once() {
+    // P1-1: a current-thread runtime (`#[tokio::test]`) polls the wrapped task on the thread whose counter is live.
+    let counter = count_starts();
+    block_on(
+        counter
+            .scope()
+            .wrap(async { one_per_item(&["a", "b", "c"]) }),
+    );
+    assert_eq!(counter.starts(), 3);
+    one_for_all(&["d"]);
+    assert_eq!(
+        counter.starts(),
+        4,
+        "the counter still counts after the task's scope ended"
+    );
+}
+
+#[test]
+fn at_most_needs_at_least_one_start_positive_control_on_an_uncarried_thread() {
+    // P1-2: work moved to a thread the scope was not carried into starts nothing this counter sees; a budget must not pass on that.
+    let panic = std::panic::catch_unwind(|| {
+        assert_starts(at_most(3), || {
+            std::thread::spawn(|| one_per_item(&["a", "b"]))
+                .join()
+                .unwrap()
+        })
+    })
+    .unwrap_err();
+    let text = panic_text(&panic);
+    assert!(
+        text.contains("got 0") && text.contains("at_most_or_none"),
+        "{text}"
+    );
+    // The same work, carried, meets the budget.
+    let counter = count_starts();
+    let scope = counter.scope();
+    std::thread::spawn(move || {
+        let _in = scope.enter();
+        one_per_item(&["a", "b"]);
+    })
+    .join()
+    .unwrap();
+    assert_eq!(counter.starts(), 2);
+}
+
+#[test]
+fn at_most_or_none_allows_zero_with_a_reason() {
+    assert_starts(at_most_or_none(2, "a warm cache starts nothing"), || ());
+    assert_starts(at_most_or_none(2, "a cold cache starts one"), || {
+        one_for_all(&["a"])
+    });
+    let panic = std::panic::catch_unwind(|| {
+        assert_starts(at_most_or_none(1, "x y z"), || one_per_item(&["a", "b"]))
+    })
+    .unwrap_err();
+    let text = panic_text(&panic);
+    assert!(text.contains("at most 1"), "{text}");
+}
+
+#[test]
+#[should_panic(expected = "a reason")]
+fn at_most_or_none_refuses_an_empty_reason() {
+    let _ = at_most_or_none(1, " ");
+}
+
+#[test]
+fn a_program_with_windows_of_its_own_is_counted_too() {
+    // `attached_command` (a CLI's helper in its terminal, the app relaunching itself) sets no creation flags and is still one start.
+    assert_starts(2, || {
+        crate::command::attached_command("browser");
+        command("tool");
+    });
 }
