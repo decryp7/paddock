@@ -3,12 +3,11 @@
 // opt-out keeps one backend call per item on purpose, so each is a cost someone accepted: the list makes the total visible and growth a
 // decision. Flagged, in a `.ts` file under `apps/` or `ui/` (specs, e2e and node_modules skipped): an opt-out comment (`//` or `/* */`)
 // whose file has no entry in `conformance/c140-allow.json` (a `path`, the site `per-item`, a `reason` and a `count`, read by the shared
-// allow list), and one whose reason has fewer than three words (the lint refuses it too). The list is held to shrink-only against the
-// merge base with the target branch (`util/baseline.mjs`): an entry added by a branch is an error. A file that cannot be read is not
+// allow list), and one whose reason has fewer than three words (the lint refuses it too). The shared allow list holds it to shrink-only against
+// the merge base with the target branch (`util/allow-list.mjs`, through `util/baseline.mjs`): an entry added by a branch is a finding. A file that cannot be read is not
 // measured; an allow file that cannot be read makes the check broken (one finding, nothing else).
 // Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
-import { error, warn } from '../finding.mjs';
-import { baselineGrowth, unmeasuredFinding } from '../util/baseline.mjs';
+import { warn } from '../finding.mjs';
 import { parseAllowList, readAllowList } from '../util/allow-list.mjs';
 
 export const ALLOW = 'conformance/c140-allow.json';
@@ -60,17 +59,7 @@ export default {
         out.push(warn('C140', 21, f, line, `keeps a backend call per item (\`// per-item:\`) and is not in ${ALLOW}`, FIX));
       }
     }
-    const g = allow.entries.length === 0 ? { added: [] } : baselineGrowth({
-      root: ctx.root,
-      path: ALLOW,
-      current: allow.entries,
-      keyOf: (e) => `${e.path}\0${e.site}`,
-      entriesOf: (j) => j.allow ?? [],
-      ...(ctx.options.git ? { git: ctx.options.git } : {}),
-      ...(ctx.options.baseRef ? { baseRef: ctx.options.baseRef } : {}),
-    });
-    if (g.reason) out.push(unmeasuredFinding(ctx, { id: 'C140', rule: 21, file: ALLOW, what: 'the list', g }));
-    else for (const a of g.added) out.push(error('C140', 21, ALLOW, 1, `the list grew: \`${a.site}\` in ${a.path} is not in the list at the merge base ${g.base.slice(0, 9)}`, 'Remove the entry and add the bulk command instead, or ask the user to approve the growth (ER-46).'));
+    // The shared allow list compares the list with the merge base itself (its growth findings come with `warnings()`).
     return [...out, ...allow.warnings()];
   },
 };

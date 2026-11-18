@@ -21,7 +21,7 @@ test('C140 allow file: a path, the site per-item, a reason and a count', () => {
   assert.throws(() => parseAllow(list([{ path: 'a.ts', reason: 'long enough' }])), /site/);
 });
 
-test('C140 through the runner: listed opt-outs pass, unlisted ones and short reasons are warnings, the list may not grow', async () => {
+test('C140 through the runner: listed opt-outs pass, unlisted ones and short reasons are warnings', async () => {
   const files = {
     [ALLOW]: list([entry('apps/a/app/src/listed.store.ts')]),
     'apps/a/app/src/listed.store.ts': '// per-item: each runner answers on its own pipe\nfor (const r of rs) await backend.ping(r);\n',
@@ -37,8 +37,7 @@ test('C140 through the runner: listed opt-outs pass, unlisted ones and short rea
     ['apps/a/app/src/short.store.ts', 1, 'warn'],
     ['apps/a/app/src/short.store.ts', 1, 'warn'],
   ]);
-  const grown = await findingsOf('C140', makeApp(files), { options: base(list()) });
-  assert.ok(grown.some((f) => f.severity === 'error' && /the list grew/.test(f.message)));
+  // Growth against the merge base is the shared allow list's own finding, tested once with C140's sample in allow-list.test.mjs (ER-22).
 });
 
 test('C140 positive control (ER-33): with the opt-out taken away from the text there is nothing to count', async () => {
