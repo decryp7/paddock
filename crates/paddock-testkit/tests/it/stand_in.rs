@@ -765,6 +765,7 @@ fn a_stand_in_that_ignores_term_survives_it_and_dies_of_kill() {
         .unwrap();
     let mut child = TestCommand::new(p.program()).spawn().unwrap();
     wait_until("it is up", || ready.exists());
+    // conformance: pid-kill — the pid is of a child this test spawned and still holds (not reaped), so it cannot have been handed on
     let term = std::process::Command::new("kill")
         .args(["-TERM", &child.id().to_string()])
         .status()
@@ -822,6 +823,7 @@ fn a_stand_in_that_stops_itself_goes_on_after_sigcont() {
     assert!(!after.exists(), "it did not stop");
     let id = child.id().to_string();
     assert!(
+        // conformance: pid-kill — the pid is of a child this test spawned and still holds (not reaped), so it cannot have been handed on
         std::process::Command::new("kill")
             .args(["-CONT", &id])
             .status()
