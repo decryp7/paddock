@@ -301,16 +301,24 @@ test('chart: the donut total is drawn in the middle of the ring, wide, narrow an
 test('chart: switching the theme draws the charts again with the new colours', async ({ page }) => {
   await open(page, 'dark');
   const canvas = page.locator('section[data-testid="chart"] pd-chart').first().locator('canvas');
-  const drawing = () => canvas.evaluate((c) => (c as HTMLCanvasElement).toDataURL());
-  // The chart draws over a few frames: the picture before the switch is the one two reads in a row agree on.
+  // The picture and the count of its inked pixels (an empty canvas has none: two blank reads agree and are not a drawn chart).
+  const drawing = () =>
+    canvas.evaluate((c) => {
+      const cv = c as HTMLCanvasElement;
+      const px = cv.getContext('2d')?.getImageData(0, 0, cv.width, cv.height).data;
+      let inked = 0;
+      for (let i = 3; px && i < px.length; i += 4) if (px[i]! > 0) inked++;
+      return { url: cv.toDataURL(), inked };
+    });
+  // The chart draws over a few frames: the picture before the switch is the inked one that two reads in a row agree on.
   let before = '';
   await expect
     .poll(async () => {
       const now = await drawing();
-      const same = now === before;
-      before = now;
+      const same = now.inked > 0 && now.url === before;
+      before = now.url;
       return same;
-    }, { message: 'the chart has stopped drawing' })
+    }, { message: 'the chart has drawn (inked pixels) and stopped drawing (two reads agree)' })
     .toBe(true);
   await page.getByRole('radiogroup', { name: 'Theme' }).getByRole('radio', { name: 'light' }).click();
   await expect.poll(async () => page.locator('section[data-testid="chart"] pd-chart').first().locator('canvas').evaluate((c) => (c as HTMLCanvasElement).toDataURL())).not.toBe(before);

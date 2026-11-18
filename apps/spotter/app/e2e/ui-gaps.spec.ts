@@ -38,7 +38,7 @@ test.describe('row menus, keyboard rows, sticky headers and charts', () => {
     await page.goto('/');
     await expect(page.locator('sp-whats-new li.item').first()).toBeVisible();
     // Several rows are drawn, and exactly one of them is a tab stop (retried until the roving tabindex is set).
-    await expect(page.locator('sp-whats-new li.item')).not.toHaveCount(1);
+    await expect.poll(() => page.locator('sp-whats-new li.item').count(), { message: 'several feed rows are drawn' }).toBeGreaterThan(1);
     await expect(page.locator('sp-whats-new li.item[tabindex="0"]')).toHaveCount(1);
   });
 
