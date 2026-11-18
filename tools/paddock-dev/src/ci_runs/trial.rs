@@ -87,32 +87,19 @@ pub fn prepare(
             "`{branch}` is not a branch name this command accepts (letters, digits, . _ - and /)"
         ));
     }
-    let mut fetch: Vec<String> = [
-        "fetch",
-        "--quiet",
-        "--no-tags",
-        "origin",
-        "+refs/heads/main:refs/remotes/origin/main",
-        "+refs/heads/train/*:refs/remotes/origin/train/*",
-    ]
-    .map(String::from)
-    .to_vec();
-    fetch.push(format!("+refs/heads/{branch}:refs/remotes/origin/{branch}"));
-    // A target that is neither main nor a train (an experiment branch) is fetched too: the kept clone only has the refs named here.
-    if let Some(name) = onto.and_then(|t| t.strip_prefix("origin/"))
-        && name != branch
-        && name != "main"
-        && !name.starts_with("train/")
-    {
-        if !valid_branch(name) {
-            return Err(format!(
-                "--onto `{}` is not a branch name this command accepts (letters, digits, . _ - and /)",
-                onto.unwrap_or("")
-            ));
-        }
-        fetch.push(format!("+refs/heads/{name}:refs/remotes/origin/{name}"));
-    }
-    git(g, Child::Authed, &fetch.iter().map(String::as_str).collect::<Vec<_>>())?;
+    git(
+        g,
+        Child::Authed,
+        &[
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            "origin",
+            "+refs/heads/main:refs/remotes/origin/main",
+            "+refs/heads/train/*:refs/remotes/origin/train/*",
+            &format!("+refs/heads/{branch}:refs/remotes/origin/{branch}"),
+        ],
+    )?;
     let target = match onto {
         Some(t) => t.to_string(),
         None => open_train(g)?.unwrap_or_else(|| "origin/main".to_string()),
@@ -382,23 +369,6 @@ mod tests {
         );
         let files = git_in(&w.origin, &["ls-tree", "-r", "--name-only", &head]);
         assert!(files.contains("a.txt") && files.contains("m1.txt"), "{files}");
-    }
-
-    /// `--onto` names any pushed branch (a trial of an experiment on another experiment): it is fetched, not only main and
-    /// `train/*` (the trial clone never had it, so the merge target did not resolve).
-    #[test]
-    fn onto_a_branch_that_is_neither_main_nor_a_train_fetches_it() {
-        let w = world();
-        // The trial clone is kept between runs: it was made before these branches existed, and only named refs are fetched into it.
-        let g = open(&w);
-        commit(&w, "exp/base", "base.txt", "base", "main");
-        commit(&w, "feat/g", "g.txt", "g", "main");
-        let Outcome::Ready { target, head, .. } = prepare(&g, "feat/g", Some("origin/exp/base"), &ok).unwrap() else {
-            panic!("expected a ready trial");
-        };
-        assert_eq!(target, "origin/exp/base");
-        let files = git_in(&w.origin, &["ls-tree", "-r", "--name-only", &head]);
-        assert!(files.contains("base.txt") && files.contains("g.txt"), "{files}");
     }
 
     #[test]

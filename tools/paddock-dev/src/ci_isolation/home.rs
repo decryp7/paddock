@@ -233,17 +233,6 @@ pub fn cmd_path(ctx: &Ctx, args: &[String], io: &mut Sinks<'_>) -> R<()> {
         }
     }
     std::fs::create_dir_all(&target).map_err(|e| Stop::die(format!("cannot create {}: {e}", target.display())))?;
-    // A target folder cargo did not make has no CACHEDIR.TAG, and the test kit then links the toolchain into every command's own
-    // folder (ADR 0107 D1, testcommand-ab.yml run 8246).
-    if kind == "target" {
-        paddock_env::cachedir::ensure(&target).map_err(|e| {
-            Stop::die(format!(
-                "cannot write {} in {}: {e}",
-                paddock_env::cachedir::FILE_NAME,
-                target.display()
-            ))
-        })?;
-    }
     touch(&target);
     record_owner(ctx, &target);
     io.value(format!("{home}/{rel}"));
@@ -344,42 +333,5 @@ mod tests {
         assert_eq!(code, 0, "{err}");
         assert!(!err.contains("moved"), "{err}");
         assert!(ci.join("target-x-0123456789").is_dir() && Path::new(p.trim()).is_dir());
-    }
-
-    /// ADR 0107 D1: a kept target folder made here has cargo's `CACHEDIR.TAG`, as one cargo makes itself has; without it the test kit
-    /// links the toolchain into every command's own folder (testcommand-ab.yml run 8246). A tag already there is never rewritten, and a kind
-    /// that is not a target folder gets none.
-    #[test]
-    fn a_kept_target_folder_made_by_path_target_carries_cachedir_tag() {
-        let d = tempfile::tempdir().unwrap();
-        let tables = d.path().join("tables");
-        std::fs::create_dir(&tables).unwrap();
-        std::fs::write(
-            tables.join("kept-folders.txt"),
-            "target target-{name}-{slot} slot\nsrc src/{name}-{slot} slot\n",
-        )
-        .unwrap();
-        let ci = d.path().join("ci");
-        std::fs::create_dir(&ci).unwrap();
-        let mut c = ctx(&[
-            ("PADDOCK_CI_HOME", ci.to_str().unwrap()),
-            ("PADDOCK_CI_SLOT", "s1"),
-            ("RUNNER_OS", "macOS"),
-        ]);
-        c.tables = tables;
-        let (code, p, err) = go(&c, &["path", "target", "x"]);
-        assert_eq!(code, 0, "{err}");
-        let tag = Path::new(p.trim()).join("CACHEDIR.TAG");
-        let text = std::fs::read_to_string(&tag).unwrap_or_else(|e| panic!("{}: {e}", tag.display()));
-        assert!(text.starts_with("Signature: 8a477f597d28d172789f06886806bc55\n"), "{text}");
-        // An existing tag (cargo's own) is kept as it is.
-        std::fs::write(&tag, "Signature: 8a477f597d28d172789f06886806bc55\n# cargo's own\n").unwrap();
-        let (code, _, err) = go(&c, &["path", "target", "x"]);
-        assert_eq!(code, 0, "{err}");
-        assert!(std::fs::read_to_string(&tag).unwrap().contains("cargo's own"));
-        // Another kind of kept folder is not a target folder.
-        let (code, p, err) = go(&c, &["path", "src", "x"]);
-        assert_eq!(code, 0, "{err}");
-        assert!(!Path::new(p.trim()).join("CACHEDIR.TAG").exists());
     }
 }

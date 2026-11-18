@@ -15,8 +15,6 @@
 //!   ER-47) and [`command::clear_env`], the one function that clears a child's environment.
 //! - [`vars`]: this process's environment as text, skipping (and naming) a variable that is not valid Unicode instead of panicking
 //!   like `std::env::vars`, which Clippy forbids everywhere.
-//! - [`cachedir`]: cargo's `CACHEDIR.TAG` (`is_tag`, `ensure`), which a target folder made by anything but cargo needs for the test
-//!   kit to share its toolchain link folder.
 //! - [`cargo_layout`]: the profile folder above a test program or `OUT_DIR`, in cargo's old and 1.100 build-folder layouts.
 //! - [`winpath`]: Windows paths without the verbatim `\\?\` prefix, in one place (`plain`, `for_tools`, `real*`, `same`).
 //! - [`home_guard`]: the one "is this folder inside the home folder" check (symlinks resolved), shared by `heavy` and `paddock-dev`.
@@ -27,7 +25,6 @@
 
 mod app;
 mod atomic;
-pub mod cachedir;
 pub mod cargo_layout;
 pub mod command;
 pub mod dev_override;

@@ -126,41 +126,22 @@ fn cargo_of_toolchain(path: Option<&OsStr>) -> Option<PathBuf> {
 /// through rustup's proxy").
 const SYSROOT_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// `<target>/paddock-test-toolchain` of the cargo target folder this program runs from, and only when that holds cargo's
-/// `CACHEDIR.TAG` (so a test program copied to `.../deps/x` elsewhere, a home folder say, never writes there; ER-14). A cargo
-/// layout without the tag is said once on stderr (ADR 0107 D2, ER-27). The decision is [`link_root_and_note`]; this only prints.
+/// `<target>/paddock-test-toolchain` of the cargo target folder this program runs from: its profile folder's parent, and only
+/// when that holds cargo's `CACHEDIR.TAG` (so a test program copied to `.../deps/x` elsewhere, a home folder say, never writes
+/// there; ER-14).
 fn link_root() -> Option<PathBuf> {
-    let (root, note) = link_root_and_note(&std::env::current_exe().ok()?);
-    if let Some(note) = note {
-        crate::process::log_once(&note);
-    }
-    root
+    link_root_of(&std::env::current_exe().ok()?)
 }
 
-/// The link root for the program `exe`, and the note to print when it is in a cargo layout whose target folder has no tag. The
-/// target folder is the profile folder's parent, or its parent's parent for `target/<triple>/<profile>` (cargo tags the root).
-fn link_root_and_note(exe: &Path) -> (Option<PathBuf>, Option<String>) {
-    let Some(profile) = paddock_env::cargo_layout::profile_dir_of_exe(exe) else {
-        return (None, None);
-    };
-    let Some(parent) = profile.parent() else {
-        return (None, None);
-    };
-    let tagged = std::iter::once(parent)
-        .chain(parent.parent())
-        .find(|dir| paddock_env::cachedir::is_tag(dir));
-    match tagged {
-        Some(target) => (Some(target.join("paddock-test-toolchain")), None),
-        None => (None, Some(untagged_note(parent))),
-    }
-}
-
-/// The line printed once when a test program's target folder has no tag.
-fn untagged_note(target: &Path) -> String {
-    format!(
-        "TestCommand: {} has no CACHEDIR.TAG, so each command links the toolchain into its own folder (slow on Windows); next step: let cargo create the folder or write the tag (`./dev ci isolation path target` does)",
-        target.display()
-    )
+/// [`link_root`] for the program `exe`.
+fn link_root_of(exe: &Path) -> Option<PathBuf> {
+    let target = paddock_env::cargo_layout::profile_dir_of_exe(exe)?
+        .parent()?
+        .to_path_buf();
+    target
+        .join("CACHEDIR.TAG")
+        .is_file()
+        .then(|| target.join("paddock-test-toolchain"))
 }
 
 /// A new temporary folder in the captured temp folder ([`Ambient::temp_dir`]): `tempfile::tempdir()` reads the live `TMPDIR`,
@@ -188,94 +169,15 @@ mod tests {
         let exe = d.path().join("target/debug/deps/it-0123456789abcdef");
         std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
         std::fs::write(&exe, "").unwrap();
-        let (root, note) = link_root_and_note(&exe);
-        assert_eq!(root, None, "a folder without CACHEDIR.TAG");
-        let note = note.expect("an untagged cargo layout is said");
-        assert!(
-            note.contains(&d.path().join("target").display().to_string()),
-            "{note}"
-        );
-        // An empty or partial file is not a tag.
-        std::fs::write(d.path().join("target/CACHEDIR.TAG"), "Signat").unwrap();
-        assert_eq!(link_root_and_note(&exe).0, None);
-        paddock_env::cachedir::ensure(&d.path().join("target")).unwrap();
-        assert_eq!(
-            link_root_and_note(&exe),
-            (Some(d.path().join("target/paddock-test-toolchain")), None)
-        );
-        assert_eq!(
-            link_root_and_note(&d.path().join("elsewhere/x")),
-            (None, None)
-        );
-    }
-
-    /// `cargo test --target <triple>` runs a program from `target/<triple>/<profile>/deps`; cargo tags the root `target`.
-    #[test]
-    fn a_target_triple_layout_finds_the_tag_one_level_up() {
-        let d = tempdir();
-        let exe = d
-            .path()
-            .join("target/aarch64-apple-darwin/debug/deps/it-0123456789abcdef");
-        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
-        assert_eq!(link_root_and_note(&exe).0, None);
-        paddock_env::cachedir::ensure(&d.path().join("target")).unwrap();
-        assert_eq!(
-            link_root_and_note(&exe),
-            (Some(d.path().join("target/paddock-test-toolchain")), None)
-        );
-    }
-
-    /// ADR 0107 D3: a test program in a cargo target folder gets the shared link root, as it does on CI hosts once
-    /// `./dev ci isolation path target` writes the tag; the untagged folder is the red case (testcommand-ab.yml run 8246). A scratch copy of
-    /// the layout, never the real target folder.
-    #[test]
-    fn a_test_program_in_a_cargo_target_folder_gets_the_shared_link_root() {
-        let d = tempdir();
-        let exe = d.path().join("target-kept/debug/deps/it-0123456789abcdef");
-        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
-        let target = d.path().join("target-kept");
-        // The folder as a CI helper made it before cargo ran, then as `path target` makes it now.
-        assert!(link_root_and_note(&exe).0.is_none());
-        paddock_env::cachedir::ensure(&target).unwrap();
-        let (Some(root), None) = link_root_and_note(&exe) else {
-            panic!("no shared link root in a tagged target folder");
-        };
-        assert_eq!(root, target.join("paddock-test-toolchain"));
-        // Only a stand-in toolchain: the command is made and looked at, never started.
-        let tc = d.path().join("toolchain");
-        std::fs::create_dir(&tc).unwrap();
+        assert_eq!(link_root_of(&exe), None, "a folder without CACHEDIR.TAG");
         std::fs::write(
-            tc.join(format!("rustc{}", std::env::consts::EXE_SUFFIX)),
-            "",
+            d.path().join("target/CACHEDIR.TAG"),
+            "Signature: 8a477f597d28d172789f06886806bc55\n",
         )
         .unwrap();
-        let machine = Ambient {
-            path: Some(tc.into_os_string()),
-            link_root: Some(root.clone()),
-            ..ambient().clone()
-        };
-        let report = crate::TestCommand::on("git", &machine).path_report();
-        let first = report
-            .child
-            .first()
-            .unwrap_or_else(|| panic!("no PATH: {report}"));
-        assert!(
-            first.starts_with(&root),
-            "the command links into its own folder, not under {}: {report}",
-            root.display()
-        );
-    }
-
-    /// ADR 0107 D2: the note names the folder and the next step.
-    #[test]
-    fn the_untagged_note_names_the_folder_and_the_next_step() {
-        let note = untagged_note(Path::new("/x/target-a"));
-        assert!(note.starts_with("TestCommand: "), "{note}");
-        assert!(
-            note.contains("/x/target-a")
-                && note.contains("CACHEDIR.TAG")
-                && note.contains("next step"),
-            "{note}"
+        assert_eq!(
+            link_root_of(&exe),
+            Some(d.path().join("target/paddock-test-toolchain"))
         );
     }
 
