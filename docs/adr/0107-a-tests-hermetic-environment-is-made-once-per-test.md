@@ -84,7 +84,10 @@ with the tag written:
 - without the tag: link folder in the command's private folder, 3.7 ms per build;
 - with the tag: the shared `paddock-test-toolchain`, 1.0 ms per build.
 
-Not yet measured on the Windows runner: the same A/B with the tag present. That run is the check for WP-2 below.
+Measured on the Windows runner with the tag present (ci run 8247, option A at `f09a919a9`, docs/benchmarks.md "...with
+CACHEDIR.TAG present"): the child's `PATH` uses the shared `paddock-test-toolchain`, the builder fell from 55 to 5.9 ms per
+command, and `TestCommand::new` per start is 1.28 times plain (2.55 before). The fault was present in run 8246 and removed in
+run 8247, on the same runner and kept folder.
 
 ## Common practice (ER-37)
 
