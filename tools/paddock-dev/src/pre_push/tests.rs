@@ -245,6 +245,23 @@ fn the_doctest_row_follows_the_change() {
     let got = ids(&plan_gates(&plan(), &change(&["apps/dyno/src/a.rs"]), &facts()));
     assert!(!got.iter().any(|g| g == "doctest crates"), "{got:?}");
     assert!(got.iter().any(|g| g == "doctest apps/dyno"), "{got:?}");
+    // A developer's push (no member gate) skips an app workspace's doctests with a reason, and still runs the crates' own.
+    let dev = Facts {
+        member_gate: false,
+        ..facts()
+    };
+    let planned = plan_gates(&plan(), &change(&["apps/dyno/src/a.rs", "crates/paddock-proc/src/lib.rs"]), &dev);
+    let got = ids(&planned);
+    assert!(
+        got.iter().any(|g| g == "doctest crates") && !got.iter().any(|g| g == "doctest apps/dyno"),
+        "{got:?}"
+    );
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "doctest apps/dyno" && reason.contains("--member-gate"))),
+        "{planned:?}"
+    );
     let planned = plan_gates(&plan(), &change(&["crates/Cargo.toml"]), &facts());
     let g = run_gates(&planned).into_iter().find(|g| g.id == "doctest crates").cloned().unwrap();
     assert_eq!(g.args.join(" "), "test --config build.target-dir='/t' --doc --locked --workspace");

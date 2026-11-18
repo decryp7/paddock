@@ -1914,3 +1914,25 @@ starts `git` many times through its own `PATH`, which `TestCommand` curates. Whi
   probe). The first v2 run's 20 failures were the toolchain lookups that `85c21b7d6` fixes.
 - **Not measured:** the CI Windows runner with this tree (the train's next Windows run); a repeat run for variance (one run per tree).
 
+
+## Doctest row of the push gate (2026-11-18, feat/member-gate-doctests)
+
+Question: what does the `doctest <workspace>` row (`cargo test --doc`; nextest does not run doctests) cost? In `crates` it runs on
+every push for the touched crates only (`-p`); in an app workspace it runs `--workspace`, only in the member gate (`--member-gate`).
+
+- **Machine:** the shared Mac mini (arm64), other agents running: 1-minute load 29 to 35 during the runs (not an idle machine);
+  `CARGO_BUILD_JOBS=2`, `RUSTUP_AUTO_INSTALL=0`, one run per row, build folders in a scratch folder (not the worktree's)
+- **Commands:** `cargo test --doc --locked -p paddock-diag` in `crates` (one crate, one doctest); `cargo test --doc --locked --workspace`
+  in `apps/dyno`. The script and logs were in a scratch folder and are not kept.
+
+  | What | Where | Seconds |
+  |---|---|---:|
+  | typical push: one crate with `-p`, first run (builds that crate's test-profile dependencies) | crates | 51 |
+  | typical push: one crate with `-p`, warm build folder | crates | 3 |
+  | member gate: one app workspace, cold build folder | apps/dyno | 1122 |
+  | member gate: one app workspace, warm build folder | apps/dyno | 13 |
+
+The cold app figure is a new empty build folder under load 30 or more, and is why the app row is member-gate only: the gate's kept
+build folder per workspace (`kept_targets`) makes the warm figure the usual one. Not measured: the app row on the CI runner.
+The crates row already caught the bug it was made for: on the train base, `-p paddock-testkit` fails with E0308 until
+fix/testkit-doctest lands.

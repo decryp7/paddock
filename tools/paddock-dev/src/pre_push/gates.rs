@@ -237,11 +237,17 @@ fn changed_crates(files: &[String]) -> Option<BTreeSet<String>> {
 
 /// The doctests of the crates a change reaches (`cargo test --doc`). nextest does not run doctests, so a broken example passed the
 /// local gates and failed CI (paddock-testkit's `StandIn` doctest, E0308, 2026-11-18); this runs the same command as CI's tests do.
-/// In `crates` only the touched crates (`-p`; every one has a library, and `-p` of a binary-only package is an error), in an app
-/// workspace the whole workspace (cargo skips packages with no library). `RUSTUP_AUTO_INSTALL=0` stops a probe from installing a
+/// In `crates` only the touched crates (`-p`; every one has a library, and `-p` of a binary-only package is an error), on every push; in an
+/// app workspace the whole workspace (cargo skips packages with no library), only in the member gate (`--member-gate`). `RUSTUP_AUTO_INSTALL=0` stops a probe from installing a
 /// toolchain (ER-45). Blocking from the start: CI already runs these tests, so this is an established check moved earlier (as the
 /// member audits are, ER-41), and `cargo test --doc --workspace` in `crates` was green on the real tree (63 test programs ok, 2026-11-18).
-fn doctest(ws: &str, files: &[String], facts: &Facts) -> Gate {
+fn doctest(ws: &str, files: &[String], facts: &Facts) -> Planned {
+    if ws != "crates" && !facts.member_gate {
+        return Planned::Skip {
+            id: format!("doctest {ws}"),
+            reason: "an app workspace's doctests run in the member gate of `./dev merge check --gates` (`--member-gate`), not in a developer's push (a whole-workspace test build); the crates' doctests run on every push".into(),
+        };
+    }
     let mut args: Vec<String> = strs(&["test", "--doc", "--locked"]);
     match (ws, changed_crates(files)) {
         ("crates", Some(names)) if !names.is_empty() => {
@@ -269,7 +275,7 @@ fn doctest(ws: &str, files: &[String], facts: &Facts) -> Gate {
         (None, Some(k)) => g.args = cargo_target::with_target_dir(&g.args, &format!("{}/{}", k.trim_end_matches('/'), slug(ws))),
         (None, None) => {}
     }
-    g
+    Planned::Run(g)
 }
 
 /// The gates `change` reaches under `plan`, in table order. Each is CI's own command (the one source is named in `next` or the
@@ -321,7 +327,7 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             (None, None) => {}
         }
         out.push(Planned::Run(g));
-        out.push(Planned::Run(doctest(&ws, &change.files, facts)));
+        out.push(doctest(&ws, &change.files, facts));
         if all_features || facts.windows_clippy.contains(&ws) {
             let mut args: Vec<&str> = vec![
                 "xwin",
