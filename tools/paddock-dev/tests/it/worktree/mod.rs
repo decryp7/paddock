@@ -12,7 +12,7 @@ mod ops;
 mod oracle;
 mod primary;
 
-use paddock_testkit::TestCommand;
+use paddock_testkit::{Actions, Case, Exec, StandIn, TestCommand};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -130,17 +130,25 @@ impl Fixture {
         self.dev_in(&self.primary, args)
     }
 
-    /// A `git` script first on the PATH (the seam that slows or fails one git call): `body` is shell run before the real git
-    /// with `$REAL` the real binary and the arguments in `$*`; falling off the end runs the real git. Returns the folder, for `path_first`.
-    #[cfg(unix)]
-    // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+    /// The real `git`, for a stand-in that falls through to it.
+    // Starts a helper by program name (a throw-away fixture), never a process by pid (C53).
     #[allow(clippy::disallowed_methods)]
-    pub fn fake_git(&self, name: &str, body: &str) -> PathBuf {
+    pub fn real_git(&self) -> Exec {
         let real = String::from_utf8(Command::new("which").arg("git").output().unwrap().stdout).unwrap();
+        Exec::program(real.trim())
+    }
+
+    /// A `git` stand-in first on the PATH (the seam that slows or fails one git call): a call that no `cases` entry answers does
+    /// `every_call` and then runs the real git; a case answers instead, and runs the real git only when its actions say so
+    /// (`.execs(&fx.real_git())`). Returns the folder, for `path_first`.
+    pub fn fake_git(&self, name: &str, every_call: Actions, cases: Vec<(Case, Actions)>) -> PathBuf {
         let bin = self.root.join(format!("fakebin-{name}"));
         std::fs::create_dir_all(&bin).unwrap();
-        let script = format!("#!/bin/sh\nREAL={}\n{body}\nexec \"$REAL\" \"$@\"\n", real.trim());
-        paddock_testkit::exe::write_program(bin.join("git"), script).unwrap();
+        let mut git = StandIn::new(&bin, "git").answers(every_call.execs(&self.real_git()));
+        for (case, actions) in cases {
+            git = git.when(&case, actions);
+        }
+        git.install().unwrap();
         bin
     }
 
@@ -152,11 +160,17 @@ impl Fixture {
     pub fn fake_slow_add(&self, name: &str) -> (PathBuf, std::sync::mpsc::Receiver<()>) {
         let fifo = self.root.join(format!("reached-{name}.fifo"));
         assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
-        let body = format!(
-            r#"case "$*" in *"worktree add"*) echo reached > '{}'; sleep 3;; esac"#,
-            fifo.display()
+        let path_env = self.fake_git(
+            name,
+            Actions::new(),
+            vec![(
+                Case::new().args_text_contains("worktree add"),
+                Actions::new()
+                    .writes(&fifo, "reached\n")
+                    .sleeps(std::time::Duration::from_secs(3))
+                    .execs(&self.real_git()),
+            )],
         );
-        let path_env = self.fake_git(name, &body);
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             // Opening a fifo for reading blocks until the fake git opens it for writing; the caller bounds the wait.
