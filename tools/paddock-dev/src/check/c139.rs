@@ -1,115 +1,56 @@
-//! C139: an e2e spec that switches off `paddock/e2e-ready-reads` says why, and the exceptions only shrink. The ESLint rule (an error in
-//! every app's and the ui's e2e lint block, so the existing `--max-warnings 0` lint steps block a new unready read) has one escape, ESLint's
-//! own `// eslint-disable-next-line paddock/e2e-ready-reads -- <why>`. ESLint cannot require the description or count the directives; this
-//! check does (ER-21 class "a read on 'it is in the DOM'", ER-46: a list of exceptions only shrinks). `reportUnusedDisableDirectives` (ESLint,
-//! on by default as a warning, which the lint steps block) removes a directive whose read was fixed.
+//! C139: the exceptions to `paddock/e2e-ready-reads` only shrink. The rule is an error in every app's and the ui's e2e lint block (so
+//! the existing `--max-warnings 0` lint steps block a new unready read), and that block sets `noInlineConfig`: no inline comment, in any of
+//! ESLint's spellings, can switch it off (ESLint's own grammar decides; we do not parse it). The one way to except a read is an entry of the
+//! project's `eslint-suppressions.json` (ESLint bulk suppressions: `{ "<spec>": { "<rule>": { "count": n } } }`), and the user approves a new
+//! one (ER-46). ESLint's CLI fails on an entry that no longer occurs (never run with the flag that ignores unused ones; `eslint/test/wiring.test.cjs`
+//! runs it and forbids the flag), so a fixed read leaves no slack for a new one. This check is the other half: each entry, counted `count`
+//! times, is compared with the file at the merge base (`baseline::growth`, the one comparison C53 and C115 use; "not measured" is an error in
+//! CI, ADR 0089), and an entry the merge base lacks, or a raised count, is one unwaivable finding at that file.
 //!
-//! Flagged, one finding per line, in `.ts` files of an `e2e` folder of an app or the ui:
-//! - a `eslint-disable` directive that names no rule (it would switch off everything: say which rule);
-//! - the block form (`/* eslint-disable paddock/e2e-ready-reads */`, no `-next-line` or `-line`): it covers any number of reads;
-//! - a directive for the rule without a description (`-- ` and at least three characters);
-//! - a directive that the allow list `conformance/c139-allow.json` does not name, or that is beyond its entry's `count`.
+//! Read: the `eslint-suppressions.json` of an app (`apps/<app>/app/`) and of the ui. A malformed file is one check-broken finding at it.
+//! A run that finds no e2e spec at all (`apps/<app>/app/e2e/*.ts`, `ui/e2e/*.ts`) did not look at anything: one not-measured error, never a pass (ER-33).
 //!
-//! The list is read by the shared [`super::allow_list`] (path, site `paddock/e2e-ready-reads`, reason, count): it only shrinks against the
-//! merge base (`baseline::growth`, as C53 and C115 use it; "not measured" is an error in CI, ADR 0089), a stale entry is a warning.
-//! **Report-only (warnings) until its first green CI run that includes it (ER-41); it turns blocking then (mode `Gate`, and the list's growth findings are errors under `--strict C139`), with that run id recorded here and in `C139-e2e-ready-directives.mjs`.** Recorded: not yet. The lint rule itself is an error already: it had its report-only phase, and the real tree is at 0.
+//! **Report-only (warnings) until its first green CI run that includes it (ER-41); it turns blocking then (mode `Gate`, `--strict C139`),
+//! with that run id recorded here, in `C139-e2e-ready-directives.mjs` and in docs/gates.toml.** Recorded: not yet (train 15's integrator fills it in).
+//! The lint rule itself is an error already: it had its report-only phase, and the real tree is at 0 sites outside the suppressions files.
 //! Rust host; `conformance/src/checks/C139-e2e-ready-directives.mjs` is the port and `tests/it/check_c139.rs` compares them.
 
-use super::allow_list::{self, Admit, Entry, Spec};
+use super::baseline::{self, Growth};
 use super::finding::Finding;
 use super::jsre::rx;
+use super::outcome::Outcome;
+use super::record::Precondition;
 use super::{Check, CheckOutput, Control, Ctx};
 use regex::Regex;
 use std::sync::LazyLock;
 
-/// The allow list both hosts read.
-pub const ALLOW: &str = "conformance/c139-allow.json";
-/// The rule the directive names, and the `site` of an allow entry.
+/// The rule whose exceptions are counted (others in the file are shrink-only too).
 pub const RULE_ID: &str = "paddock/e2e-ready-reads";
 
-/// The check's own files: they name the pattern, their invented lines are test data.
-pub const IMPLEMENTATION: [&str; 5] = [
-    "conformance/src/checks/C139-e2e-ready-directives.mjs",
-    "conformance/test/c139-e2e-ready-directives.test.mjs",
-    "tools/paddock-dev/src/check/c139.rs",
-    "tools/paddock-dev/tests/it/check_c139.rs",
-    ALLOW,
-];
-
 static E2E_TS: LazyLock<Regex> = LazyLock::new(|| rx(r"^(?:apps/[^/]+/app|ui)/e2e/.+\.ts$"));
+static SUPPRESSIONS: LazyLock<Regex> = LazyLock::new(|| rx(r"^(?:apps/[^/]+/app|ui)/eslint-suppressions\.json$"));
 static NOT_READ: LazyLock<Regex> = LazyLock::new(|| rx(r"(?:^|/)(?:node_modules|[^/]*-snapshots)/"));
-static DIRECTIVE: LazyLock<Regex> = LazyLock::new(|| rx(r"(?://|/\*)\s*eslint-disable(-next-line|-line)?\b(.*)$"));
 
-const FIX_RULES: &str = "Name the rule: `// eslint-disable-next-line paddock/e2e-ready-reads -- <why>`. Better, wait with a ready helper from @decryp7/paddock-e2e (ui/projects/paddock-e2e/src/ready.ts) so the read needs no exception.";
-const FIX_BLOCK: &str =
-    "Use the one-line form, `// eslint-disable-next-line paddock/e2e-ready-reads -- <why>`: a block covers any number of reads.";
-const FIX_WHY: &str = "Say why the read is immediate by design: `// eslint-disable-next-line paddock/e2e-ready-reads -- <why>` (at least three characters after the dashes).";
-const FIX_LIST: &str = "Wait with a ready helper from @decryp7/paddock-e2e (ui/projects/paddock-e2e/src/ready.ts) instead. An exception has to be listed in conformance/c139-allow.json (path, site `paddock/e2e-ready-reads`, reason, count), and the list only shrinks: a new entry needs the user's approval (ER-46).";
+const FIX_GROW: &str = "Wait with a ready helper from @decryp7/paddock-e2e (ui/projects/paddock-e2e/src/ready.ts) instead. An exception is an entry of the project's eslint-suppressions.json, and the file only shrinks: a new entry needs the user's approval (ER-46).";
+const FIX_BROKEN: &str = "Restore the file: ESLint bulk suppressions, `{ \"e2e/a.spec.ts\": { \"paddock/e2e-ready-reads\": { \"count\": 1 } } }` (`npx eslint e2e --suppress-rule paddock/e2e-ready-reads` writes it).";
 
-/// Whether `path` is a spec file this check reads.
-pub fn readable(path: &str) -> bool {
-    E2E_TS.is_match(path) && !NOT_READ.is_match(path) && !IMPLEMENTATION.contains(&path)
-}
-
-/// What a directive line is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Kind {
-    /// Names no rule.
-    Unrestricted,
-    /// The block form for the rule.
-    Block,
-    /// A line form for the rule without a description.
-    NoReason,
-    /// A line form for the rule with a description: counted against the allow list.
-    Counted,
-}
-
-/// `(line, kind)` of every `eslint-disable` directive in `text` that names the rule or no rule at all.
-pub fn sites(path: &str, text: &str) -> Vec<(usize, Kind)> {
-    if !readable(path) {
-        return Vec::new();
-    }
+/// The entries of an `eslint-suppressions.json` text, each as `count` copies of the key `file NUL rule`; `None` when it is not that shape.
+pub fn entries_of(text: &str) -> Option<Vec<String>> {
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
     let mut out = Vec::new();
-    for (i, line) in text.split('\n').enumerate() {
-        // A CRLF file: the carriage return is not part of the line (JavaScript's `.` stops at it, so both hosts drop it first).
-        let line = line.trim_end_matches('\r');
-        let Some(caps) = DIRECTIVE.captures(line) else { continue };
-        let line_form = caps.get(1).is_some();
-        let rest = caps.get(2).map_or("", |m| m.as_str());
-        let (rules, why) = match rest.split_once(" -- ") {
-            Some((r, w)) => (r, w),
-            None => (rest.trim_end().trim_end_matches("*/").trim_end(), ""),
-        };
-        let rules = rules.trim_end().trim_end_matches("*/");
-        let names: Vec<&str> = rules.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
-        let kind = if names.is_empty() {
-            Kind::Unrestricted
-        } else if !names.contains(&RULE_ID) {
-            continue;
-        } else if !line_form {
-            Kind::Block
-        } else if why.trim().encode_utf16().count() >= 3 {
-            Kind::Counted
-        } else {
-            Kind::NoReason
-        };
-        out.push((i + 1, kind));
+    for (file, rules) in v.as_object()? {
+        for (rule, body) in rules.as_object()? {
+            let count = body.get("count")?.as_u64()?;
+            if count == 0 || count > 10_000 {
+                return None;
+            }
+            for _ in 0..count {
+                out.push(format!("{file}\u{0}{rule}"));
+            }
+        }
     }
-    out
+    Some(out)
 }
-
-/// Reads the allow list: its entries, or why it cannot be read (the shared parser, [`super::allow_list`]).
-pub fn parse_allow(text: &str) -> Result<Vec<Entry>, String> {
-    allow_list::parse(text, ALLOW)
-}
-
-static SPEC: Spec = Spec {
-    id: "C139",
-    rule: 49,
-    file: ALLOW,
-    unseen: "an e2e spec",
-    restore: "Restore conformance/c139-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"paddock/e2e-ready-reads\", \"reason\": \"...\", \"count\": 1}]}.",
-};
 
 /// The check.
 pub struct C139;
@@ -124,7 +65,7 @@ impl Check for C139 {
     }
 
     fn title(&self) -> &'static str {
-        "an e2e spec that disables paddock/e2e-ready-reads says why, and the exceptions only shrink"
+        "the exceptions to paddock/e2e-ready-reads (eslint-suppressions.json) only shrink"
     }
 
     fn scope(&self) -> super::CheckScope {
@@ -135,104 +76,120 @@ impl Check for C139 {
         super::Mode::ReportOnly
     }
 
-    fn allow_list(&self) -> Option<&'static allow_list::Spec> {
-        Some(&SPEC)
-    }
-
     fn control(&self) -> Control {
         Control {
             files: vec![
+                ("ui/e2e/a.spec.ts", "const a = 1;\n"),
                 (
-                    ALLOW,
-                    "{\"allow\":[{\"path\":\"ui/e2e/ok.spec.ts\",\"site\":\"paddock/e2e-ready-reads\",\"reason\":\"the read is immediate by design\"}]}",
+                    "ui/eslint-suppressions.json",
+                    "{\"e2e/a.spec.ts\":{\"paddock/e2e-ready-reads\":{\"count\":1}}}",
                 ),
                 (
-                    "ui/e2e/ok.spec.ts",
-                    "// eslint-disable-next-line paddock/e2e-ready-reads -- immediate by design\nconst a = 1;\n",
+                    "apps/dyno/app/eslint-suppressions.json",
+                    "{\"e2e/a.spec.ts\":{\"paddock/e2e-ready-reads\":{\"count\":0}}}",
                 ),
-                (
-                    "ui/e2e/bad.spec.ts",
-                    "const b = 1;\n// eslint-disable-next-line paddock/e2e-ready-reads -- not listed anywhere\nconst c = 2;\n",
-                ),
-                (
-                    "ui/e2e/other.spec.ts",
-                    "// eslint-disable-next-line no-console -- another rule is not this check's\n",
-                ),
-                (
-                    "ui/src/not-e2e.ts",
-                    "// eslint-disable-next-line paddock/e2e-ready-reads -- outside an e2e folder\n",
-                ),
+                ("ui/src/eslint-suppressions.json", "not read: outside the two places"),
             ],
-            expect: vec![("ui/e2e/bad.spec.ts", 2)],
+            expect: vec![("apps/dyno/app/eslint-suppressions.json", 1)],
         }
     }
 
     fn run(&self, ctx: &Ctx) -> CheckOutput {
-        let mut allow = match allow_list::read(ctx, &SPEC, allow_list::entries_only(ALLOW)) {
-            Ok((allow, ())) => allow,
-            Err(broken) => return *broken,
-        };
+        let files = ctx.files();
+        let specs = files.iter().filter(|f| E2E_TS.is_match(f) && !NOT_READ.is_match(f)).count();
+        if specs == 0 {
+            return CheckOutput {
+                findings: vec![
+                    Finding::error(
+                        "C139",
+                        49,
+                        "ui/e2e",
+                        1,
+                        "not measured: the run read no e2e spec (apps/<app>/app/e2e, ui/e2e), so no exception list was looked at"
+                            .to_string(),
+                        "Run the check over the whole repository.",
+                    )
+                    .unwaivable()
+                    .with_outcome(Outcome::NotMeasured),
+                ],
+                // One probe (looking for specs): zero probes would make the runner add a second not-measured finding.
+                probes: 1,
+                completed: true,
+                // The not-measured finding above is the whole answer; an unmet precondition would add a second one.
+                precondition: Precondition {
+                    met: true,
+                    detail: "no e2e spec in the run (reported as not measured)".to_string(),
+                },
+            };
+        }
         let mut findings = Vec::new();
-        for f in ctx.files().iter() {
-            if !readable(f) {
+        let mut probes = specs;
+        for f in files.iter().filter(|f| SUPPRESSIONS.is_match(f)) {
+            probes += 1;
+            let Some(text) = ctx.read(f) else {
+                findings.push(
+                    Finding::error(
+                        "C139",
+                        49,
+                        f,
+                        1,
+                        format!("not measured: {f} could not be read, so its exceptions cannot be seen"),
+                        "Make the file readable (permissions) and run the check again.",
+                    )
+                    .unwaivable()
+                    .with_outcome(Outcome::NotMeasured),
+                );
+                continue;
+            };
+            let Some(current) = entries_of(&text) else {
+                findings.push(
+                    Finding::warn(
+                        "C139",
+                        49,
+                        f,
+                        1,
+                        "the check cannot look: not ESLint bulk suppressions (an object of files, rules and counts of at least 1)"
+                            .to_string(),
+                        FIX_BROKEN,
+                    )
+                    .unwaivable()
+                    .with_outcome(Outcome::CheckBroken),
+                );
+                continue;
+            };
+            if ctx.is_in_memory() || !baseline::is_work_tree(ctx.root()) {
                 continue;
             }
-            let text = match allow.read(ctx, f) {
-                Ok(text) => text,
-                Err(unread) => {
-                    findings.push(*unread);
-                    continue;
-                }
-            };
-            for (line, kind) in sites(f, &text) {
-                let finding = match kind {
-                    Kind::Unrestricted => Finding::warn(
+            let of = |t: &str| entries_of(t);
+            let exact = |k: &String| k.clone();
+            match baseline::growth(ctx.root(), &ctx.base_ref(), f, &current, &of, &exact, None) {
+                Growth::Unmeasured(why) => findings.push(baseline::unmeasured_finding(ctx.in_ci(), "C139", 49, f, "the exception list", &why)),
+                Growth::Added { added: 0, .. } => {}
+                Growth::Added { base, added, .. } => findings.push(
+                    Finding::warn(
                         "C139",
                         49,
                         f,
-                        line,
-                        "an eslint-disable in an e2e spec that names no rule switches off every rule on its line".to_string(),
-                        FIX_RULES,
-                    ),
-                    Kind::Block => Finding::warn(
-                        "C139",
-                        49,
-                        f,
-                        line,
-                        "a block eslint-disable of paddock/e2e-ready-reads covers any number of reads".to_string(),
-                        FIX_BLOCK,
-                    ),
-                    Kind::NoReason => Finding::warn(
-                        "C139",
-                        49,
-                        f,
-                        line,
-                        "a disable of paddock/e2e-ready-reads without a description".to_string(),
-                        FIX_WHY,
-                    ),
-                    Kind::Counted => match allow.admit(f, |site| site == RULE_ID) {
-                        Admit::Allowed => continue,
-                        Admit::Beyond => Finding::warn(
-                            "C139",
-                            49,
-                            f,
-                            line,
-                            "a disable of paddock/e2e-ready-reads beyond the count of its allow entry".to_string(),
-                            FIX_LIST,
+                        1,
+                        format!(
+                            "the exception list grew: {added} entr{} (counting each `count`) not in {f} at the merge base {}; it may only shrink",
+                            if added == 1 { "y is" } else { "ies are" },
+                            &base[..base.len().min(9)]
                         ),
-                        Admit::Unlisted => Finding::warn(
-                            "C139",
-                            49,
-                            f,
-                            line,
-                            "a disable of paddock/e2e-ready-reads that the allow list does not name".to_string(),
-                            FIX_LIST,
-                        ),
-                    },
-                };
-                findings.push(finding);
+                        FIX_GROW,
+                    )
+                    .unwaivable(),
+                ),
             }
         }
-        allow.output(ctx, findings)
+        CheckOutput {
+            findings,
+            probes,
+            completed: true,
+            precondition: Precondition {
+                met: true,
+                detail: format!("{specs} e2e specs and the exception lists are read"),
+            },
+        }
     }
 }
