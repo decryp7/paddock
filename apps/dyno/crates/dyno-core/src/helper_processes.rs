@@ -168,6 +168,42 @@ pub struct Sweep {
     pub taken_at: i64,
 }
 
+/// How long a sweep serves the follow-up pages of a paged read (ADR 0108 DY-2). The agent asks for the next page as soon as
+/// one arrives, over the connection it keeps, so the pages of one read come within milliseconds; a page later than this is
+/// read from a new sweep.
+pub const PAGE_SWEEP_TTL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The sweep the pages of one paged read share (ADR 0108 DY-2): a first page (no cursor) always takes a new sweep, and a
+/// follow-up page within [`PAGE_SWEEP_TTL`] of it reads the same one, so a read of N pages costs one sweep and its pages show
+/// one moment. Kept unscoped (the raw sweep): each page is scoped to its own caller by [`build_page`].
+#[derive(Default)]
+pub struct PageSweeps {
+    last: std::sync::Mutex<Option<(std::time::Duration, std::sync::Arc<Sweep>)>>,
+}
+
+impl PageSweeps {
+    /// The sweep for a page asked at `now` (a monotonic clock): the kept one for a `follow_up` page within the TTL, else a new
+    /// one from `sweep`, kept for the pages that follow. A failed sweep keeps nothing.
+    pub fn for_page(
+        &self,
+        now: std::time::Duration,
+        follow_up: bool,
+        sweep: impl FnOnce() -> Result<Sweep, PlatformError>,
+    ) -> Result<std::sync::Arc<Sweep>, PlatformError> {
+        let last = || self.last.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if follow_up {
+            if let Some((at, kept)) = last().as_ref() {
+                if now.saturating_sub(*at) <= PAGE_SWEEP_TTL {
+                    return Ok(std::sync::Arc::clone(kept));
+                }
+            }
+        }
+        let fresh = std::sync::Arc::new(sweep()?);
+        *last() = Some((now, std::sync::Arc::clone(&fresh)));
+        Ok(fresh)
+    }
+}
+
 /// The helper's reader of the machine's processes.
 pub trait ProcessSweeper: Send + Sync {
     /// Reads every process once.

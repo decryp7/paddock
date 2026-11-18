@@ -14,7 +14,7 @@ use dyno_core::helper_extras::{wake_answer, ExtrasReader};
 use dyno_core::helper_holders::{file_answer, socket_answer, HolderSource};
 use dyno_core::helper_memory::MemoryReader;
 use dyno_core::helper_policy::{Access, OthersPolicy, Visibility};
-use dyno_core::helper_processes::{build_page, ProcessSweeper};
+use dyno_core::helper_processes::{build_page, PageSweeps, ProcessSweeper};
 use dyno_core::helper_requests::ExtrasKind;
 use dyno_core::helper_wire::{codes, error_code, AuditEntry, AuditVerdict, CallerView, HelperInfo, HelperReply, HelperRequest, HelperUser};
 use dyno_core::network_traffic::{traffic_answer, MAX_COUNTERS};
@@ -82,6 +82,10 @@ pub struct Dispatcher {
     tools: Box<dyn ToolInstaller>,
     firewall: Box<dyn FirewallReader>,
     log_tail: Box<dyn Fn(usize) -> Vec<String> + Send + Sync>,
+    /// Time since the dispatcher was made (a monotonic clock; tests give their own).
+    monotonic: Box<dyn Fn() -> std::time::Duration + Send + Sync>,
+    /// The sweep the pages of one Processes read share.
+    page_sweeps: PageSweeps,
 }
 
 /// Who is asking, as the connection established it (never from a request, never from a process id).
@@ -141,7 +145,18 @@ impl Dispatcher {
             tools: parts.tools,
             firewall: parts.firewall,
             log_tail: parts.log_tail,
+            monotonic: {
+                let start = std::time::Instant::now();
+                Box::new(move || start.elapsed())
+            },
+            page_sweeps: PageSweeps::default(),
         }
+    }
+
+    /// The same dispatcher on the monotonic clock `clock` (tests).
+    pub fn with_monotonic(mut self, clock: Box<dyn Fn() -> std::time::Duration + Send + Sync>) -> Dispatcher {
+        self.monotonic = clock;
+        self
     }
 
     /// The caller's account for a scoped answer; a request made inside the helper has none.
@@ -241,7 +256,11 @@ impl Dispatcher {
                         "The process list is scoped to an account; this caller has none.",
                     )
                 })?;
-                let sweep = self.processes.sweep().map_err(|e| remote(&e))?;
+                // One sweep per paged read, not per page (ADR 0108 DY-2): a follow-up page reads the sweep of the first.
+                let sweep = self
+                    .page_sweeps
+                    .for_page((self.monotonic)(), q.after.is_some(), || self.processes.sweep())
+                    .map_err(|e| remote(&e))?;
                 let page = build_page(&sweep, &who, ctx.view.scope, &q);
                 log::info!(items = page.items.len(), more = page.next.is_some(); "Helper: processes answered");
                 Ok(HelperReply::Processes(page))
@@ -1091,6 +1110,92 @@ mod tests {
         fn sweep(&self) -> Result<dyno_core::helper_processes::Sweep, PlatformError> {
             Ok(self.0.clone())
         }
+    }
+
+    /// A sweeper that counts its sweeps (each is a full process-table read and, on macOS and Windows, the account list).
+    struct CountedSweep(dyno_core::helper_processes::Sweep, Arc<std::sync::atomic::AtomicUsize>);
+    impl ProcessSweeper for CountedSweep {
+        fn sweep(&self) -> Result<dyno_core::helper_processes::Sweep, PlatformError> {
+            self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(self.0.clone())
+        }
+    }
+
+    /// DY-2 (ADR 0108, guard D): the follow-up pages of one paged Processes read come from the sweep of its first page, so a
+    /// read of N pages is one sweep, not N (and every page shows the same moment).
+    #[test]
+    fn a_paged_processes_read_is_one_sweep() {
+        use dyno_core::helper_processes::{ProcState, RawOwner, RawProcess, Sweep};
+        use dyno_core::helper_requests::ProcessQuery;
+        use std::sync::atomic::Ordering;
+        let sweep = Sweep {
+            processes: (1..=10)
+                .map(|pid| RawProcess {
+                    pid,
+                    started: Some(1),
+                    parent: None,
+                    name: format!("p{pid}"),
+                    path: None,
+                    owner: RawOwner::Account {
+                        id: HelperUser::Uid(501),
+                        name: Some("ana".into()),
+                    },
+                    state: ProcState::Running,
+                    threads: None,
+                    cpu_time_ms: None,
+                    memory_bytes: None,
+                    disk_read_bytes: None,
+                    disk_written_bytes: None,
+                })
+                .collect(),
+            homes: vec![],
+            taken_at: 9,
+        };
+        let sweeps = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let now = Arc::new(std::sync::Mutex::new(std::time::Duration::from_secs(100)));
+        let mut r = rig(HelperHost::Macos, Ok(vec![]));
+        r.d.processes = Box::new(CountedSweep(sweep, sweeps.clone()));
+        let clock = now.clone();
+        let Rig { d, gone: _, _dir } = r;
+        let d = d.with_monotonic(Box::new(move || *clock.lock().unwrap()));
+        let ctx = Ctx {
+            account: Some(HelperUser::Uid(501)),
+            ..Ctx::anonymous(Some(1))
+        };
+        let read = |d: &Dispatcher| {
+            let mut after = None;
+            let mut pages = 0;
+            loop {
+                let q = ProcessQuery {
+                    after,
+                    limit: 3,
+                    ..Default::default()
+                };
+                let HelperReply::Processes(page) = d.handle_for(&ctx, HelperRequest::Processes(q)).unwrap() else {
+                    panic!("not a page")
+                };
+                pages += 1;
+                match page.next {
+                    Some(n) => after = Some(n),
+                    None => return pages,
+                }
+            }
+        };
+        assert_eq!(read(&d), 4);
+        assert_eq!(sweeps.swap(0, Ordering::SeqCst), 1, "four pages, one sweep");
+        // The next read (a first page again) takes a new sweep: the list refreshes.
+        *now.lock().unwrap() += std::time::Duration::from_secs(1);
+        assert_eq!(read(&d), 4);
+        assert_eq!(sweeps.swap(0, Ordering::SeqCst), 1);
+        // A follow-up page that comes later than PAGE_SWEEP_TTL is not served from an old sweep.
+        *now.lock().unwrap() += dyno_core::helper_processes::PAGE_SWEEP_TTL + std::time::Duration::from_millis(1);
+        let late = ProcessQuery {
+            after: Some(3),
+            limit: 3,
+            ..Default::default()
+        };
+        d.handle_for(&ctx, HelperRequest::Processes(late)).unwrap();
+        assert_eq!(sweeps.swap(0, Ordering::SeqCst), 1);
     }
 
     #[test]

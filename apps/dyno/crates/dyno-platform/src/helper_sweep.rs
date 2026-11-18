@@ -8,7 +8,9 @@ use dyno_core::helper::HelperHost;
 use dyno_core::helper_processes::{classify_owner, default_first_person, ProcState, ProcessSweeper, RawOwner, RawProcess, Sweep};
 use dyno_core::helper_wire::HelperUser;
 use dyno_core::ports::PlatformError;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sysinfo::{ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System, UpdateKind, Users};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -17,6 +19,12 @@ const REG: &str = r"C:\Windows\System32\reg.exe";
 const PROFILE_LIST: &str = r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList";
 /// The most account homes read (a bound on a hostile or huge directory).
 const MAX_HOMES: usize = 4_096;
+/// How long the account list is reused at most (ADR 0108 DY-2). On macOS a change of the account database's folder ends it
+/// sooner; an account made within this time whose files a process runs from is the case it bounds.
+pub const HOMES_TTL: Duration = Duration::from_secs(60);
+/// The local account database of macOS (one plist per account): its modification time changes when an account is added or
+/// removed. The helper runs as root and can read it; when it cannot, [`HOMES_TTL`] alone bounds the cache.
+const DSLOCAL_USERS: &str = "/var/db/dslocal/nodes/Default/users";
 
 /// `name:x:uid:gid:gecos:home:shell` lines to (uid, home); other lines are skipped.
 pub fn parse_passwd(text: &str) -> Vec<(HelperUser, String)> {
@@ -103,17 +111,65 @@ fn state(s: ProcessStatus) -> ProcState {
 pub struct SystemSweeper {
     host: HelperHost,
     runner: Box<dyn ToolRunner>,
+    account_db: PathBuf,
+    homes: Mutex<Option<CachedHomes>>,
+}
+
+/// The account list as last read: when, the account database's modification time then, and the list.
+struct CachedHomes {
+    at: Instant,
+    db_modified: Option<SystemTime>,
+    homes: Vec<(HelperUser, String)>,
 }
 
 impl SystemSweeper {
     /// A sweeper for `host` reading its account list through `runner`.
     pub fn new(host: HelperHost, runner: Box<dyn ToolRunner>) -> SystemSweeper {
-        SystemSweeper { host, runner }
+        SystemSweeper {
+            host,
+            runner,
+            account_db: PathBuf::from(DSLOCAL_USERS),
+            homes: Mutex::new(None),
+        }
+    }
+
+    /// The same, watching `dir` instead of macOS' account database for changes (tests).
+    pub fn with_account_db(mut self, dir: &Path) -> SystemSweeper {
+        self.account_db = dir.to_path_buf();
+        self
     }
 
     /// Every account's home folder. An unreadable list is an error: with an incomplete list other accounts' paths would not be
     /// redacted, so no answer is better than a leaking one.
     pub fn homes(&self) -> Result<Vec<(HelperUser, String)>, PlatformError> {
+        self.homes_at(Instant::now())
+    }
+
+    /// [`SystemSweeper::homes`] at `now`: on macOS and Windows, where the list costs program starts (`dscl` twice, `reg`), the
+    /// last list is reused for [`HOMES_TTL`] while the account database is unchanged (ADR 0108 DY-2); Linux reads
+    /// `/etc/passwd` each time (a file read). A failed read is not kept.
+    fn homes_at(&self, now: Instant) -> Result<Vec<(HelperUser, String)>, PlatformError> {
+        if self.host == HelperHost::Linux {
+            return self.read_homes();
+        }
+        let db_modified = std::fs::metadata(&self.account_db).and_then(|m| m.modified()).ok();
+        let cache = || self.homes.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(c) = cache().as_ref() {
+            if now.saturating_duration_since(c.at) < HOMES_TTL && c.db_modified == db_modified {
+                return Ok(c.homes.clone());
+            }
+        }
+        let homes = self.read_homes()?;
+        log::debug!(accounts = homes.len(); "Helper: the account list was read");
+        *cache() = Some(CachedHomes {
+            at: now,
+            db_modified,
+            homes: homes.clone(),
+        });
+        Ok(homes)
+    }
+
+    fn read_homes(&self) -> Result<Vec<(HelperUser, String)>, PlatformError> {
         match self.host {
             HelperHost::Linux => {
                 let text = std::fs::read_to_string("/etc/passwd")
@@ -268,5 +324,47 @@ mod tests {
         let win = SystemSweeper::new(HelperHost::Windows, Box::new(Fake(vec![])));
         assert!(win.homes().is_err());
         assert!(win.sweep().is_err(), "no sweep without the account list");
+    }
+
+    /// DY-2 (ADR 0108, guard D): the account list is read once, not twice per sweep (every page of the Processes list and both
+    /// sweeps of a Traffic answer took one): `dscl` starts twice on the first read, then not again until the list may have changed.
+    #[test]
+    fn the_account_list_is_read_once_and_again_when_it_may_have_changed() {
+        use crate::runner::Counted;
+        use paddock_proc::starts::{assert_starts, at_most_or_none};
+        let dscl = || Counted(Fake(vec![("NFSHomeDirectory", "ana /Users/ana\n"), ("UniqueID", "ana 501\n")]));
+        let db = paddock_testkit::private_tempdir().unwrap();
+        let mac = SystemSweeper::new(HelperHost::Macos, Box::new(dscl())).with_account_db(db.path());
+        let start = Instant::now();
+        let first = assert_starts(2, || mac.homes_at(start)).unwrap();
+        let again = assert_starts(at_most_or_none(0, "the list is cached"), || {
+            mac.homes_at(start + Duration::from_secs(5))
+        })
+        .unwrap();
+        assert_eq!(again, first);
+        // An account added or removed changes the account database's folder: read again at once.
+        std::fs::create_dir(db.path().join("new-account")).unwrap();
+        let mtime = std::fs::metadata(db.path()).unwrap().modified().unwrap();
+        let bumped = filetime_plus(mtime);
+        set_mtime(db.path(), bumped);
+        assert_starts(2, || mac.homes_at(start + Duration::from_secs(6))).unwrap();
+        assert_starts(at_most_or_none(0, "the list is cached"), || {
+            mac.homes_at(start + Duration::from_secs(7))
+        })
+        .unwrap();
+        // And at the latest after HOMES_TTL.
+        assert_starts(2, || mac.homes_at(start + Duration::from_secs(7) + HOMES_TTL)).unwrap();
+        // A failed read is not cached.
+        let failing = SystemSweeper::new(HelperHost::Macos, Box::new(Counted(Fake(vec![])))).with_account_db(db.path());
+        assert_starts(1, || failing.homes_at(start)).unwrap_err();
+        assert_starts(1, || failing.homes_at(start)).unwrap_err();
+    }
+
+    fn filetime_plus(t: SystemTime) -> SystemTime {
+        t + Duration::from_secs(10)
+    }
+
+    fn set_mtime(p: &std::path::Path, t: SystemTime) {
+        std::fs::File::open(p).unwrap().set_modified(t).unwrap();
     }
 }
