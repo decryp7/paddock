@@ -155,6 +155,12 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+      # The slot goes back last, after everything that uses its folders.
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
+
   release:
     name: release (assets, SHA256SUMS)
     needs: [build-linux, build-host]
