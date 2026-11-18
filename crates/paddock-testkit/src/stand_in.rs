@@ -691,13 +691,30 @@ impl StandIn {
         Value::Obj(m)
     }
 
-    /// Installs the stand-in under its name in the folder and writes its script. A stand-in of the same name already there is
-    /// replaced and its record starts empty.
+    /// The stand-in as bytes, for a test that packs it into an archive or serves it (a "tool" a code under test downloads or unpacks and
+    /// then runs): the program and its script, to be written side by side. Nothing is installed and nothing is recorded (a recording
+    /// stand-in has no folder of its own here: it is refused).
     ///
     /// # Errors
     ///
-    /// When the name is not a bare program name, the folder is missing, or the stand-in binary cannot be found, built or linked.
-    pub fn install(&self) -> io::Result<Installed> {
+    /// When the name is not a bare program name, the stand-in is recording, or the stand-in binary cannot be found, built or read.
+    pub fn files(&self) -> io::Result<Files> {
+        self.check_name()?;
+        if self.record {
+            return Err(invalid(
+                "a recording stand-in cannot be packed: its record has no folder".to_string(),
+            ));
+        }
+        let stub = stub_binary().map_err(io::Error::other)?;
+        Ok(Files {
+            program_name: format!("{}{}", self.name, std::env::consts::EXE_SUFFIX),
+            program: std::fs::read(&stub)?,
+            script_name: format!("{}.stand-in.json", self.name),
+            script: self.script(Path::new("")).to_json().into_bytes(),
+        })
+    }
+
+    fn check_name(&self) -> io::Result<()> {
         let bad_name = self.name.is_empty()
             || self.name.contains(['/', '\\'])
             || self.name.to_ascii_lowercase().ends_with(".exe");
@@ -707,6 +724,17 @@ impl StandIn {
                 self.name
             )));
         }
+        Ok(())
+    }
+
+    /// Installs the stand-in under its name in the folder and writes its script. A stand-in of the same name already there is
+    /// replaced and its record starts empty.
+    ///
+    /// # Errors
+    ///
+    /// When the name is not a bare program name, the folder is missing, or the stand-in binary cannot be found, built or linked.
+    pub fn install(&self) -> io::Result<Installed> {
+        self.check_name()?;
         // A Unix exit status is one byte: 256 would read as 0, and -1 as 255, so a test asking for either never sees what it wrote.
         if let Some(code) = self
             .exit_codes()
@@ -746,6 +774,20 @@ impl StandIn {
             recording: self.record,
         })
     }
+}
+
+/// A stand-in as the two files an archive or a download holds: put both beside each other under `program_name` and `script_name`
+/// and the program runs as installed (see [`StandIn::files`]).
+#[derive(Debug, Clone)]
+pub struct Files {
+    /// The file name of the program (`<name>` plus `.exe` on Windows).
+    pub program_name: String,
+    /// The bytes of the program.
+    pub program: Vec<u8>,
+    /// The file name of its script (`<name>.stand-in.json`), which must sit in the same folder.
+    pub script_name: String,
+    /// The bytes of the script.
+    pub script: Vec<u8>,
 }
 
 /// An installed stand-in.
