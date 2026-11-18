@@ -1122,7 +1122,7 @@ fn a_bundled_program_finds_its_script_at_its_own_end_and_a_plain_one_alone_is_br
         .unwrap();
     let bundled = s.work().join("one").join(&f.program_name);
     std::fs::create_dir_all(bundled.parent().unwrap()).unwrap();
-    paddock_testkit::exe::write_program(&bundled, &f.bundled()).unwrap();
+    paddock_testkit::exe::write_program(&bundled, f.bundled()).unwrap();
     let o = run(&bundled, &[]);
     assert_eq!((o.status.code(), out(&o).as_str()), (Some(4), "alone\n"));
     // Control: the program without its script (nothing beside it, nothing at its end) is a broken stand-in.
