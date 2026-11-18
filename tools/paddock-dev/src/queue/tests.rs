@@ -1119,8 +1119,16 @@ fn a_fast_forward_after_which_main_is_not_the_train_head_is_an_error_not_a_landi
     w.green("ci.yml", &head, 8001);
     // The server accepts the push and then moves main back (a hook, a mirror): what the queue pushed is not what main is.
     let main = w.repos.origin_ref("refs/heads/main");
-    let hook = w.repos.origin.join("hooks/post-receive");
-    paddock_testkit::exe::write_program(&hook, format!("#!/bin/sh\ngit update-ref refs/heads/main {main}\n")).unwrap();
+    paddock_testkit::StandIn::new(&w.repos.origin.join("hooks"), "post-receive")
+        .answers(
+            paddock_testkit::Actions::new().execs(
+                &paddock_testkit::Exec::program("git")
+                    .args(["update-ref", "refs/heads/main", main.as_str()])
+                    .without_call_arguments(),
+            ),
+        )
+        .install()
+        .unwrap();
     let e = w.try_tick_hour(Some(12)).unwrap_err();
     assert!(e.contains("not the train head"), "{e}");
     assert_eq!(w.labels_of(1), vec!["state/in-train"], "nothing is marked landed");
@@ -1297,15 +1305,16 @@ fn hold_and_unhold_set_and_clear_the_label_without_touching_the_others() {
 fn booby_trapped(w: &World, name: &str, sentinel: &Path) -> String {
     git(&w.repos.author, &["checkout", "--quiet", "-B", name, "origin/main"]);
     let dir = &w.repos.author;
-    let script = format!("#!/bin/sh\ntouch '{}'\n", sentinel.display());
-    let put = |path: &str, text: &str, exec: bool| {
+    let put = |path: &str, text: &str| {
         let p = dir.join(path);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        if exec {
-            paddock_testkit::exe::write_program(&p, text).unwrap();
-        } else {
-            std::fs::write(&p, text).unwrap();
-        }
+        std::fs::write(&p, text).unwrap();
+    };
+    // A program that touches the sentinel when something runs it (a stand-in, so it also runs where `sh` is not what starts it).
+    let trap = |folder: &str, name: &str| {
+        let d = dir.join(folder);
+        std::fs::create_dir_all(&d).unwrap();
+        paddock_testkit::StandIn::new(&d, name).writes(sentinel, "").install().unwrap();
     };
     for hook in [
         "pre-commit",
@@ -1316,55 +1325,48 @@ fn booby_trapped(w: &World, name: &str, sentinel: &Path) -> String {
         "pre-push",
         "reference-transaction",
     ] {
-        put(&format!(".githooks/{hook}"), &script, true);
-        put(&format!(".git-hooks/{hook}"), &script, true);
+        trap(".githooks", hook);
+        trap(".git-hooks", hook);
     }
-    put("scripts/gate.sh", &script, true);
-    // Windows cannot start a `#!/bin/sh` script, so cargo's rustc-wrapper there is a batch file that does the same. In ci.yml run
+    trap("scripts", "gate.sh");
+    // Windows cannot start `scripts/gate.sh` as a wrapper, so cargo's rustc-wrapper there is a batch file that does the same. In ci.yml run
     // 8147 the control never fired on Windows: `gate.sh` was the wrapper, which CreateProcess cannot start, and the toolchain-folder
     // trap is off wherever `RUSTUP_TOOLCHAIN` pins the toolchain (CI's setup-rust sets it on every OS).
     put(
         "scripts/gate.cmd",
         &format!("@echo off\r\ntype nul > \"{}\"\r\n", sentinel.display()),
-        false,
     );
-    put("scripts/toolchain/bin/cargo", &script, true);
+    trap("scripts/toolchain/bin", "cargo");
     let wrapper = if cfg!(windows) { "./scripts/gate.cmd" } else { "./scripts/gate.sh" };
     put(
         ".cargo/config.toml",
         &format!("[build]\nrustc-wrapper = \"{wrapper}\"\n[alias]\nmetadata = \"!./scripts/gate.sh\"\n"),
-        false,
     );
-    put("rust-toolchain.toml", "[toolchain]\npath = \"./scripts/toolchain\"\n", false);
-    put(".gitattributes", "* filter=evil\n*.txt diff=evil merge=evil\n", false);
+    put("rust-toolchain.toml", "[toolchain]\npath = \"./scripts/toolchain\"\n");
+    put(".gitattributes", "* filter=evil\n*.txt diff=evil merge=evil\n");
     put(
         "lefthook.yml",
         "pre-commit:\n  commands:\n    gate:\n      run: ./scripts/gate.sh\n",
-        false,
     );
     put(
         "package.json",
         "{\"scripts\": {\"postinstall\": \"./scripts/gate.sh\", \"prepare\": \"./scripts/gate.sh\", \"test\": \"./scripts/gate.sh\"}}\n",
-        false,
     );
     put(
         "conformance/bin/paddock-conformance.mjs",
         "require('fs').writeFileSync(process.env.S || '/nonexistent', 'x');\n",
-        false,
     );
     put(
         "Cargo.toml",
         "[package]\nname = \"trap\"\nversion = \"0.0.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n",
-        false,
     );
-    put("src/lib.rs", "", false);
+    put("src/lib.rs", "");
     put(
         "build.rs",
         &format!(
             "fn main() {{ std::fs::write({:?}, \"x\").unwrap(); }}\n",
             sentinel.to_string_lossy()
         ),
-        false,
     );
     put(
         "crates/x/build.rs",
@@ -1372,7 +1374,6 @@ fn booby_trapped(w: &World, name: &str, sentinel: &Path) -> String {
             "fn main() {{ std::fs::write({:?}, \"x\").unwrap(); }}\n",
             sentinel.to_string_lossy()
         ),
-        false,
     );
     git(&w.repos.author, &["add", "-A"]);
     git(
@@ -1393,8 +1394,7 @@ fn a_train_full_of_things_that_run_executes_nothing_during_a_tick() {
     w.approve(1, &head);
     // Positive control: the files do run when something runs them, so the sentinel can see a violation.
     git(&w.repos.author, &["checkout", "--quiet", "feat/pr1"]);
-    let ran = TestCommand::new("sh")
-        .arg("scripts/gate.sh")
+    let ran = TestCommand::new(w.repos.author.join(format!("scripts/gate.sh{}", std::env::consts::EXE_SUFFIX)))
         .current_dir(&w.repos.author)
         .status()
         .unwrap();
@@ -2003,8 +2003,10 @@ fn the_lockfile_loop_of_the_train_gates_runs_on_the_real_repository_and_visits_n
     // The real loop, on the real repository, with a cargo that only says where it was run.
     let shim = tempfile::tempdir().unwrap();
     let log = shim.path().join("visited");
-    let cargo = shim.path().join("cargo");
-    paddock_testkit::exe::write_program(&cargo, format!("#!/bin/sh\npwd >> '{}'\nexit 0\n", log.display())).unwrap();
+    paddock_testkit::StandIn::new(shim.path(), "cargo")
+        .answers(paddock_testkit::Actions::new().appends_with(&log.display().to_string(), "{cwd}\n"))
+        .install()
+        .unwrap();
     let shims_dir = shim.path().to_path_buf();
     let out = TestCommand::new("sh")
         .args(["-ec", &script])
