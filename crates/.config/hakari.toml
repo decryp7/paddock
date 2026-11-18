@@ -34,4 +34,7 @@ third-party = [
     { name = "cairo-sys-rs" },
     { name = "gdk-pixbuf-sys" },
     { name = "atk-sys" },
+    # gitoxide (paddock-git's in-process reads, ADR 0108 G2): its own feature sets stay its own. Unified, its dependencies changed
+    # the features of jiff, syn, zlib-rs and others for every crate (measured on perf/git-heavy-tests-2, 2026-11-18).
+    { name = "gix" },
 ]
