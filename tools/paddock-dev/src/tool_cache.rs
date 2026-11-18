@@ -185,7 +185,9 @@ mod tests {
         let dir = home.join("bin").join(entry);
         std::fs::create_dir_all(&dir).unwrap();
         let bin = dir.join(exe(name));
-        paddock_testkit::exe::write_program(&bin, "#!/bin/sh\necho held\n").unwrap();
+        // One file with its script at its end: `hold` links it under another name, and it still answers.
+        let program = paddock_testkit::StandIn::new(&dir, name).stdout("held").files().unwrap();
+        paddock_testkit::exe::write_program(&bin, &program.bundled()).unwrap();
         bin
     }
 

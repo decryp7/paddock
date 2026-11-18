@@ -951,11 +951,15 @@ mod tests {
         assert_eq!(cache_mode("Cache location  x\n"), None);
     }
 
-    /// A stand-in sccache: `--version`, start and stop count in files beside it, and the stats say read-only for the first
-    /// `readonly-starts` starts (sccache 0.19.0 keeps a failed startup write check for the server's whole life).
+    /// A stand-in sccache: `--version`, start and stop are recorded, and the stats say read-only for the first `readonly_starts`
+    /// starts (sccache 0.19.0 keeps a failed startup write check for the server's whole life). Each start makes a file
+    /// `starts-<n>` beside it (up to four), so the number of starts is which of them exist.
     #[cfg(unix)]
-    fn fake(readonly_starts: u32, foreign_location: Option<&str>) -> (tempfile::TempDir, HashMap<String, String>, PathBuf) {
-        use std::os::unix::fs::PermissionsExt;
+    fn fake(
+        readonly_starts: u32,
+        foreign_location: Option<&str>,
+    ) -> (tempfile::TempDir, HashMap<String, String>, paddock_testkit::Installed) {
+        use paddock_testkit::{Actions, Case, StandIn};
         let home = tempfile::tempdir().unwrap();
         let e = env(&[
             ("PADDOCK_DEV_HOME", home.path().to_str().unwrap()),
@@ -963,40 +967,59 @@ mod tests {
             ("PATH", "/usr/bin:/bin"),
         ]);
         let bin = install_path(&e).unwrap();
-        std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
-        let script = r#"#!/bin/sh
-d=$(dirname "$0")
-echo "$1" >> "$d/calls"
-case "$1" in
-  --version) echo "sccache 0.19.0";;
-  --start-server)
-    if [ -f "$d/address-in-use" ]; then echo "Address in use (os error 48)" >&2; exit 1; fi
-    n=$(cat "$d/starts" 2>/dev/null || echo 0); echo $((n+1)) > "$d/starts";;
-  --stop-server) ;;
-  --show-adv-stats)
-    n=$(cat "$d/starts" 2>/dev/null || echo 0); ro=$(cat "$d/readonly-starts" 2>/dev/null || echo 0)
-    mode=ReadWrite; [ "$n" -le "$ro" ] && mode=ReadOnly
-    if [ -f "$d/location" ]; then cat "$d/location"; else echo "Cache location                  Local disk: \"$SCCACHE_DIR\""; fi
-    echo "Effective cache mode            $mode";;
-esac
-exit 0
-"#;
-        std::fs::write(&bin, script).unwrap();
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::fs::write(bin.with_file_name("readonly-starts"), readonly_starts.to_string()).unwrap();
-        if let Some(l) = foreign_location {
-            std::fs::write(bin.with_file_name("location"), format!("Cache location                  {l}\n")).unwrap();
+        let dir = bin.parent().unwrap();
+        std::fs::create_dir_all(dir).unwrap();
+        let starts = |n: u32| dir.join(format!("starts-{n}"));
+        let location = match foreign_location {
+            Some(l) => format!("Cache location                  {l}"),
+            None => "Cache location                  Local disk: \"{env:SCCACHE_DIR}\"".to_string(),
+        };
+        let stats = |mode: &str| {
+            Actions::new()
+                .stdout_with(&location)
+                .stdout(&format!("Effective cache mode            {mode}"))
+        };
+        let mut fake = StandIn::new(dir, "sccache")
+            .records_args()
+            .stdout("sccache 0.19.0")
+            .when_args(&["--stop-server"], Actions::new())
+            .when(
+                &Case::new()
+                    .args_start_with(&["--show-adv-stats"])
+                    .file_missing(&starts(readonly_starts + 1)),
+                stats("ReadOnly"),
+            )
+            .when(
+                &Case::new()
+                    .args_start_with(&["--show-adv-stats"])
+                    .file_exists(&starts(readonly_starts + 1)),
+                stats("ReadWrite"),
+            );
+        for n in 1..=4 {
+            let mut case = Case::new().args_start_with(&["--start-server"]).file_missing(&starts(n));
+            if n > 1 {
+                case = case.file_exists(&starts(n - 1));
+            }
+            fake = fake.when(&case, Actions::new().writes(&starts(n), ""));
         }
-        (home, e, bin)
+        // Last, so it is asked first: a server that is already up answers every start with this.
+        fake = fake.when(
+            &Case::new()
+                .args_start_with(&["--start-server"])
+                .file_exists(&dir.join("address-in-use")),
+            Actions::new().stderr("Address in use (os error 48)").exit(1),
+        );
+        let installed = fake.install().unwrap();
+        (home, e, installed)
     }
 
     #[cfg(unix)]
-    fn calls(bin: &Path) -> Vec<String> {
-        std::fs::read_to_string(bin.with_file_name("calls"))
-            .unwrap_or_default()
-            .lines()
-            .filter(|l| l.starts_with("--start") || l.starts_with("--stop"))
-            .map(str::to_string)
+    fn calls(bin: &paddock_testkit::Installed) -> Vec<String> {
+        bin.calls()
+            .unwrap()
+            .into_iter()
+            .filter_map(|a| a.into_iter().next())
+            .filter(|a| a.starts_with("--start") || a.starts_with("--stop"))
             .collect()
     }
 
@@ -1042,8 +1065,8 @@ exit 0
     #[test]
     fn an_already_running_read_only_server_is_never_stopped_and_is_warned_about() {
         let (h, e, bin) = fake(5, None);
-        std::fs::write(bin.with_file_name("address-in-use"), "").unwrap();
-        std::fs::write(bin.with_file_name("starts"), "1").unwrap(); // the other owner's start: stats say read-only
+        std::fs::write(bin.dir().join("address-in-use"), "").unwrap();
+        std::fs::write(bin.dir().join("starts-1"), "").unwrap(); // the other owner's start: stats say read-only
         assert!(
             matches!(prepare(&e, Install::Never), Outcome::Ready(_)),
             "read-only is still used for reads"
@@ -1242,7 +1265,11 @@ exit 0
         std::fs::create_dir_all(&dir).unwrap();
         let stage = home.path().join("stage").join(&name);
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::write(stage.join("sccache"), "#!/bin/sh\necho sccache 0.19.0\n").unwrap();
+        let packed = paddock_testkit::StandIn::new(&stage, "sccache")
+            .stdout("sccache 0.19.0")
+            .files()
+            .unwrap();
+        paddock_testkit::exe::write_program(&stage.join(&packed.program_name), &packed.bundled()).unwrap();
         let archive = dir.join(format!("{name}.tar.gz"));
         let tar = ToolCall::new("tar")
             .args([
