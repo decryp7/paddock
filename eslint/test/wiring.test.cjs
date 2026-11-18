@@ -33,12 +33,14 @@ function lintPatterns(dir) {
 }
 
 /** The rule ids ESLint reports for the planted spec with the app's own config (DEBRIEF_LINT_REPORT=1 turns Debrief's report-only rule on). */
-function lintPlanted(dir) {
+function lintPlanted(dir, file = PLANTED, text = SPEC, env = { DEBRIEF_LINT_REPORT: '1' }) {
   const script = `
     const { ESLint } = require('eslint');
-    new ESLint({ cwd: ${JSON.stringify(dir)} }).lintText(${JSON.stringify(SPEC)}, { filePath: ${JSON.stringify(join(dir, PLANTED))} })
+    new ESLint({ cwd: ${JSON.stringify(dir)} }).lintText(${JSON.stringify(text)}, { filePath: ${JSON.stringify(join(dir, file))} })
       .then((r) => process.stdout.write(JSON.stringify(r[0].messages.map((m) => m.ruleId))));`;
-  const out = spawnSync(process.execPath, ['-e', script], { cwd: dir, env: { ...process.env, DEBRIEF_LINT_REPORT: '1' }, encoding: 'utf8' });
+  const base = { ...process.env };
+  delete base.PADDOCK_BULK_LINT;
+  const out = spawnSync(process.execPath, ['-e', script], { cwd: dir, env: { ...base, ...env }, encoding: 'utf8' });
   assert.equal(out.status, 0, `${dir}: eslint failed: ${out.stderr}`);
   return JSON.parse(out.stdout);
 }
@@ -56,5 +58,23 @@ for (const dir of targets) {
     assert.ok(rules.includes('paddock/e2e-pinned-clock'), `${name}: the pinned-clock rule did not fire: ${rules.join(', ')}`);
     assert.ok(rules.includes('no-debugger'), `${name}: eslint:recommended no longer applies in e2e: ${rules.join(', ')}`);
     if (name.endsWith('debrief/app')) assert.ok(rules.includes('no-restricted-syntax'), `${name}: the raw-row selectors were replaced: ${rules.join(', ')}`);
+  });
+}
+
+// `paddock/no-backend-call-in-loop` (src/bulk.cjs, WP-0 G5): every app and the ui lint their sources with it, off by default (report-only,
+// ER-41) and on with PADDOCK_BULK_LINT=warn. A planted source file with a backend call in a loop is the positive control (ER-33): the
+// rule must fire there when it is switched on, and stay silent when it is not.
+const BULK = 'for (const m of models) await backend.deleteModel(m.id);\nexport {};\n';
+const BULK_RULE = 'paddock/no-backend-call-in-loop';
+for (const dir of targets) {
+  const name = dir.slice(REPO.length + 1);
+  const planted = name === 'ui' ? 'projects/paddock-ui/src/zz-planted-bulk.ts' : 'src/app/zz-planted-bulk.ts';
+  test(`${name}: the lint command covers the sources, and ${BULK_RULE} fires there only when PADDOCK_BULK_LINT is set`, () => {
+    const patterns = lintPatterns(dir).map((p) => p.replace(/^\.\//, ''));
+    assert.ok(patterns.some((p) => minimatch(planted, p, { dot: true })), `${name}: no lint pattern covers ${planted} (${patterns.join(', ')})`);
+    const on = lintPlanted(dir, planted, BULK, { PADDOCK_BULK_LINT: 'warn' });
+    assert.ok(on.includes(BULK_RULE), `${name}: ${BULK_RULE} did not fire with PADDOCK_BULK_LINT=warn: ${on.join(', ')} (add ...bulkCalls() to its eslint config)`);
+    const off = lintPlanted(dir, planted, BULK, {});
+    assert.ok(!off.includes(BULK_RULE), `${name}: ${BULK_RULE} fired without PADDOCK_BULK_LINT; it is report-only until its first green run (ER-41)`);
   });
 }

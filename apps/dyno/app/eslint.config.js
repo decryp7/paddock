@@ -6,7 +6,7 @@ const { defineConfig } = require('eslint/config');
 const tseslint = require('typescript-eslint');
 const angular = require('angular-eslint');
 // The shared Paddock rule that a dialog's start-up load is a pending task (ADR 0026 §6).
-const { plugin: paddock, e2ePinnedClock } = require('../../../eslint/src/index.cjs');
+const { plugin: paddock, bulkCalls, e2ePinnedClock } = require('../../../eslint/src/index.cjs');
 
 module.exports = defineConfig(
   {
@@ -32,4 +32,6 @@ module.exports = defineConfig(
     extends: [angular.configs.templateRecommended, angular.configs.templateAccessibility],
   },
   ...e2ePinnedClock(),
+  // PRINCIPLES, Bulk APIs: no backend call per item (report-only: PADDOCK_BULK_LINT=warn reads it).
+  ...bulkCalls(),
 );

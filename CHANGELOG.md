@@ -4,6 +4,22 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Bulk APIs: counting seams, one per-item result type and a report-only lint (bulk-API redesign WP-0, G3 to G5)
+- New `paddock_env::starts` (also `paddock_proc::starts`): `paddock_env::command::command` notes every command it makes, and
+  `assert_starts(1, || ...)`, `assert_starts(at_most(k), || ...)` and `assert_starts_async` assert how many programs a piece of code
+  starts, after Django's `assertNumQueries`. The count belongs to the thread that made the `StartCounter` (each test's own), plus any
+  thread or task its `StartScope` is carried into (`enter`, `wrap`); parallel tests never share it.
+- New `paddock_commands::ItemResult<T>` (`{ ok: T } | { err: CommandError }` on the wire), `BulkReply<T>` (per-item errors; the outer
+  error is only for the whole call), `AtomicReply<T>` (all or nothing), `per_item` and `check_batch` (the bound of a batch, a `limit`
+  error). `CommandError` and `ErrorCode` now also deserialize, for a Rust peer that relays them. Generated TypeScript twin `ItemResult<T>`
+  in `@decryp7/paddock-ui/ipc`, with `isItemOk`, `parseItemResults` (checks a reply at the edge: one result per item) and
+  `splitItemResults` (one summary instead of a toast per item).
+- New in `@decryp7/paddock-ui/ipc/testing`: `countingBackend`, `provideCountingBackend(token, inner)` (through the app's own backend
+  token, not a patch on `invoke`) and `expectBackendCalls(counter, 1 | { max }, run, method?)`.
+- New ESLint rule `paddock/no-backend-call-in-loop` and block `bulkCalls()` (`@decryp7/paddock-eslint`, in `preset()` and every app's
+  config): a backend, port or `invoke` call per item in a loop, a `.forEach`, or a `.map` joined by `Promise.all`/`forkJoin`.
+  Report-only (ER-41): off until its first green run; `PADDOCK_BULK_LINT=warn` reads it.
+
 ### `paddock_proc::run_bounded_noting`
 - New: `run_bounded_noting(cmd, limits, started)` is `run_bounded` that tells `started` the program's `Option<ProcessId>` right after
   it started (`None`: its start time is unreadable), so a caller that gives up on the run can end the tree itself. `run_bounded` is
