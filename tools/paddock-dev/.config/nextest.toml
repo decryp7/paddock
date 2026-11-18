@@ -10,10 +10,9 @@ test-threads = -1
 slow-timeout = { period = "30s", terminate-after = 4 }
 
 # waiver: the same whole-repository tests as the ci profile's overrides below (measured 2026-11-11: 42-49 s quiet, over 240 s under
-# I/O load); eight periods of 60 s there, the same here. Every check module's `live_` and `this_working_tree_` test is one of them (the
-# class tests/it/member_audits.rs names; measured 2026-11-18 below).
+# I/O load); eight periods of 60 s there, the same here, for the same named tests (the two measured 2026-11-18 below included).
 [[profile.default.overrides]]
-filter = "test(/^ipc_endpoints::the_repository_register_is_complete/) | test(/^check(_[a-z0-9]+)?::(live_|this_working_tree_)/) | test(/^contracts::every_markdown_file_that_code_reads/) | test(/^golden::/)"
+filter = "test(/^ipc_endpoints::the_repository_register_is_complete/) | test(/^check::live_/) | test(/^check_engine::this_working_tree_/) | test(/^check_c122::live_tree_/) | test(/^contracts::every_markdown_file_that_code_reads/) | test(/^golden::/)"
 slow-timeout = { period = "60s", terminate-after = 8 }
 
 [profile.ci]
@@ -36,14 +35,15 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 # progress (ADR 0071, `paddock_testkit::guarded`): it fails with its own message when it finishes no file for 120 s, so a hang is named
 # and a slow disk is not called one. Four periods of 60 s are nextest's bound on the whole run, kept at the old size (not raised): a
 # run over 240 s in total is still stopped here and is a finding about the host (ER-12).
-# The class is every check module's `live_` and `this_working_tree_` test (tests/it/member_audits.rs checks this filter covers each),
-# not only the `check::` module's: the others had the plain 60 s by their names alone. Measured 2026-11-18, full ci-profile runs at a
-# 15-minute load of 50 to 80 on the 14-core Mac (fix/paddock-dev-load-flakes): check_engine::this_working_tree_ 58.8 s, 59.1 s, and
-# 60.0 s stopped then 45.8 s; check_c122::live_tree_ 52.5-55.3 s after its quadratic walk was removed (stopped at 60 s on both tries,
-# 3 runs of 3, before); check::live_tree_ (already here) 46.5-48.4 s in the same runs. Not every test of the class judges its own
-# progress yet (check_engine, check_c120, check_c123 do not); for those the 240 s bound is the stop.
+# Two more tests by name, each measured on its own (2026-11-18, full ci-profile runs at a 15-minute load of 50 to 80 on the 14-core Mac,
+# fix/paddock-dev-load-flakes; check::live_tree_, already here, took 46.5-48.4 s in the same runs):
+# - check_engine::this_working_tree_: 58.8 s, 59.1 s, and stopped at 60.0 s then 45.8 s. It does not judge its own progress yet, so for
+#   it the 240 s bound is the stop.
+# - check_c122::live_tree_: 52.5-55.3 s after its quadratic walk was removed (stopped at 60 s on both tries in 3 of 3 runs before); on
+#   train 15's member gate at a load of about 50 it was stopped at 120 s (before the fix).
+# Another whole-tree test joins this list only when it is measured timing out, by name, with its numbers here.
 [[profile.ci.overrides]]
-filter = "test(/^ipc_endpoints::the_repository_register_is_complete/) | test(/^check(_[a-z0-9]+)?::(live_|this_working_tree_)/)"
+filter = "test(/^ipc_endpoints::the_repository_register_is_complete/) | test(/^check::live_/) | test(/^check_engine::this_working_tree_/) | test(/^check_c122::live_tree_/)"
 slow-timeout = { period = "60s", terminate-after = 4 }
 
 # waiver: the whole-repository reads of the documentation contract; measured 2026-11-11 like the live tests above (waiting on disk, git
