@@ -119,12 +119,19 @@ pub struct Actions {
     steps: Vec<Value>,
     exit: i32,
     echoes: bool,
+    /// A template names a stdin token (which needs stdin read whole, unless a `read_line` step reads the one line).
+    stdin_tokens: bool,
+    reads_line: bool,
 }
 
 impl Actions {
     /// No steps, exit code 0.
     pub fn new() -> Actions {
         Actions::default()
+    }
+
+    fn reads_whole_stdin(&self) -> bool {
+        self.echoes || (self.stdin_tokens && !self.reads_line)
     }
 
     fn step(mut self, kind: &str, v: Value) -> Actions {
@@ -188,14 +195,14 @@ impl Actions {
     /// Prints `template` and a newline on stdout, with the call's values filled in (see the module text for the tokens; a `{stdin}` token makes the stand-in read stdin).
     #[must_use]
     pub fn stdout_with(mut self, template: &str) -> Actions {
-        self.echoes |= template.contains("{stdin");
+        self.stdin_tokens |= template.contains("{stdin");
         self.step("stdout_t", Value::Str(template.to_string()))
     }
 
     /// Prints `template` and a newline on stderr, with the call's values filled in.
     #[must_use]
     pub fn stderr_with(mut self, template: &str) -> Actions {
-        self.echoes |= template.contains("{stdin");
+        self.stdin_tokens |= template.contains("{stdin");
         self.step("stderr_t", Value::Str(template.to_string()))
     }
 
@@ -219,7 +226,7 @@ impl Actions {
     }
 
     fn file_with(mut self, path: &str, content: &str, append: bool, atomic: bool) -> Actions {
-        self.echoes |= content.contains("{stdin");
+        self.stdin_tokens |= content.contains("{stdin");
         let m = vec![
             ("path".to_string(), Value::Str(path.to_string())),
             ("content".to_string(), Value::Str(content.to_string())),
@@ -259,6 +266,26 @@ impl Actions {
     #[must_use]
     pub fn stops_itself(self) -> Actions {
         self.step("stop_self", Value::Null)
+    }
+
+    /// Reads one line of stdin (and no more), which `{stdin_line}` then gives: a program that waits for a `go` on its stdin.
+    #[must_use]
+    pub fn reads_stdin_line(mut self) -> Actions {
+        self.reads_line = true;
+        self.step("read_line", Value::Null)
+    }
+
+    /// Spins on a CPU until it is ended (a busy program for a cancel test; start it as a [`Spawn`] to have several).
+    #[must_use]
+    pub fn burns_cpu(self) -> Actions {
+        self.step("burn", Value::Null)
+    }
+
+    /// Runs `each` again and again until the program is ended, as `while :; do ...; done` does (`each` should print or sleep).
+    /// An `exit_env` or `exec` inside ends the program.
+    #[must_use]
+    pub fn repeats(self, each: &Actions) -> Actions {
+        self.step("repeat", each.to_value())
     }
 
     /// Ignores SIGTERM from here on (Unix only), as `trap '' TERM` does.
@@ -655,7 +682,7 @@ impl StandIn {
 
     /// Whether any answer echoes stdin, which needs it read.
     fn reads_stdin_for_echo(&self) -> bool {
-        self.actions.echoes || self.cases.iter().any(|(_, a)| a.echoes)
+        self.actions.reads_whole_stdin() || self.cases.iter().any(|(_, a)| a.reads_whole_stdin())
     }
 
     /// Every exit code the stand-in can end with.
