@@ -4,6 +4,21 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-git`: one batched reader of git objects, in process with gix (ADR 0108 G2)
+
+- New crate. `Reader::open(root, make_git)` reads blobs, trees and existence in process with gix (0.90, the object database only:
+  no network, index or worktree features) for revisions named by full object ids, and through one long-lived `git cat-file
+  --batch-command` for the rest (a ref name, a short id, a partial clone's omitted blob). `Reader::new(make_git)` is the git-only
+  form. `starts()` counts git processes. Windows runner, 20 trees and 300 blobs: 11.1 s one git start per read, 428 ms one
+  `cat-file`, 9.4 ms gix (docs/benchmarks.md).
+- paddock-dev's merge check reads through it: `blob_ids` (was `ls-tree -r`), `file_at` (`cat-file blob`), `has_commit`
+  (`cat-file -e`) and `changed_paths` (`diff --name-only`, now from the two trees' listings in process).
+- gix is outside the workspace hack (`crates/.config/hakari.toml` traversal-excludes), so it changes no other crate's features. Adding
+  it still moved the Windows-only edges of a few crates (dirs-sys, errno, rustix, tempfile, winapi-util, winreg, rustls) off
+  windows-sys 0.59: in `crates/` onto 0.61, in the apps onto a version their graph already had, each within the crate's declared range.
+  The hack's windows-sys 0.59 entry went with it, so every lockfile that holds the hack changed too; macOS and Linux builds are
+  unchanged. Windows CI of every app is the check.
+
 ### `paddock-proc`: a bounded run with input, and a long-lived child spoken to over its pipes (ADR 0108 G1)
 
 - `run_bounded_with_input(cmd, input, limits)`: `run_bounded` with `input` written to the child's stdin on its own thread, then closed

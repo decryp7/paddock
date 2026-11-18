@@ -232,8 +232,12 @@ fn run(git: &Git, merge: &Merge) -> Result<Vec<Finding>, String> {
         return Err("this clone is shallow, so parents, merge bases and earlier blobs may be missing (run `git fetch --unshallow`)".into());
     }
     for p in &merge.parents {
-        git.text(&["cat-file", "-e", &format!("{p}^{{commit}}")])
-            .map_err(|e| format!("a parent is not in this clone (a shallow clone? run `git fetch --unshallow`): {e}"))?;
+        if !git.has_commit(p)? {
+            return Err(format!(
+                "the parent {} is not in this clone (a shallow clone? run `git fetch --unshallow`)",
+                git::short(p)
+            ));
+        }
     }
     let first = merge.parents.first().ok_or("the merge has no parents")?;
     let tree = merge.tree.as_str();

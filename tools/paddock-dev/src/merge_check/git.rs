@@ -29,7 +29,14 @@ pub struct Git<'a> {
     memo: RefCell<HashMap<MemoKey, Vec<u8>>>,
     /// How many git processes this reader started (tests read it).
     starts: Cell<usize>,
+    /// Blobs and trees through one shared reader (ADR 0108 G2: in process with gix, else one `cat-file` process), made on first use.
+    objects: RefCell<Option<paddock_git::Reader>>,
+    /// Tree listings already walked, by revision.
+    walks: RefCell<HashMap<String, Listing>>,
 }
+
+/// A tree's files by path, each with its mode and object id (shared between the reads of one check).
+type Listing = std::rc::Rc<HashMap<String, (String, String)>>;
 
 /// A remembered read: its arguments, and whether exit status 1 was an answer.
 type MemoKey = (Vec<String>, bool);
@@ -84,12 +91,26 @@ impl<'a> Git<'a> {
             texts: RefCell::new(HashMap::new()),
             memo: RefCell::new(HashMap::new()),
             starts: Cell::new(0),
+            objects: RefCell::new(None),
+            walks: RefCell::new(HashMap::new()),
         }
     }
 
-    /// How many git processes this reader has started.
+    /// How many git processes this reader has started (its object reader's included).
     pub fn starts(&self) -> usize {
-        self.starts.get()
+        self.starts.get() + self.objects.borrow().as_ref().map_or(0, paddock_git::Reader::starts)
+    }
+
+    /// Runs `f` on the object reader, made on first use with this reader's git policy (the same `-c` settings and scrubbed
+    /// environment as every other call).
+    fn with_objects<T>(&self, f: impl FnOnce(&mut paddock_git::Reader) -> T) -> T {
+        let mut slot = self.objects.borrow_mut();
+        let reader = slot.get_or_insert_with(|| {
+            let root = self.root.to_path_buf();
+            let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
+            paddock_git::Reader::open(self.root, move || git_command(&root, &[], &parent))
+        });
+        f(reader)
     }
 
     /// The same reader with another output cap (a read longer than it is an error, never a cut answer).
@@ -135,22 +156,7 @@ impl<'a> Git<'a> {
     /// The git child of one call: stable output, hooks off, and none of the queue's credentials (`parent`: the names of this
     /// process's environment) - the merge check reads a merged tree that holds pull request code.
     pub(crate) fn command_for(&self, args: &[&str], parent: &[String]) -> std::process::Command {
-        let mut cmd = crate::git_env::git();
-        // Stable, parseable output whatever the user's git config says.
-        cmd.arg("-C")
-            .arg(self.root)
-            .args([
-                "-c",
-                "core.quotePath=false",
-                "-c",
-                "core.fsmonitor=false",
-                "-c",
-                "log.showSignature=false",
-            ])
-            .args(["-c", "core.hooksPath=/dev/null"])
-            .args(args);
-        crate::child_env::scrub(&mut cmd, parent);
-        cmd
+        git_command(self.root, args, parent)
     }
 
     fn run(&self, args: &[&str], status_1_is_empty: bool) -> Result<Vec<u8>, String> {
@@ -198,7 +204,32 @@ impl<'a> Git<'a> {
 
     /// The paths that differ between two tree-ish revisions (no rename detection: both names of a rename are listed).
     pub fn changed_paths(&self, from: &str, to: &str) -> Result<Vec<String>, String> {
+        // In process from the two trees' listings (a path whose mode or object differs, or that only one side has), as `git diff
+        // --name-only --no-renames` lists them, in git's byte order; through git when a revision is not readable that way.
+        if let (Some(a), Some(b)) = (self.entries(from), self.entries(to)) {
+            let mut out: Vec<String> = a
+                .iter()
+                .filter(|(p, e)| b.get(*p) != Some(*e))
+                .map(|(p, _)| p.clone())
+                .chain(b.keys().filter(|p| !a.contains_key(*p)).cloned())
+                .collect();
+            out.sort_unstable();
+            return Ok(out);
+        }
         self.paths(&["diff", "--name-only", "-z", "--no-renames", from, to])
+    }
+
+    /// Every file of the tree `rev` names, by path, with its mode and object id (read once per revision); `None` when the reader
+    /// cannot list it.
+    fn entries(&self, rev: &str) -> Option<Listing> {
+        if let Some(hit) = self.walks.borrow().get(rev) {
+            return Some(hit.clone());
+        }
+        let spec = format!("{rev}^{{tree}}");
+        let entries = self.with_objects(|r| r.walk(&spec)).ok()??;
+        let map: Listing = std::rc::Rc::new(entries.into_iter().map(|e| (e.path, (e.mode, e.oid))).collect());
+        self.walks.borrow_mut().insert(rev.to_string(), map.clone());
+        Some(map)
     }
 
     /// Whether `ancestor` is reachable from `of` (`git merge-base --is-ancestor`: exit 0 yes, 1 no, anything else an error).
@@ -227,36 +258,30 @@ impl<'a> Git<'a> {
 
     /// Every file of `rev` with its blob id.
     pub fn blob_ids(&self, rev: &str) -> Result<HashMap<String, String>, String> {
-        let listing = self.text(&["ls-tree", "-r", "-z", rev])?;
-        let mut m = HashMap::new();
-        for entry in listing.split('\0').filter(|e| !e.is_empty()) {
-            // "<mode> <type> <oid>\t<path>"
-            if let Some((meta, path)) = entry.split_once('\t')
-                && let Some(oid) = meta.split(' ').nth(2)
-            {
-                m.insert(path.to_string(), oid.to_string());
+        match self.entries(rev) {
+            Some(m) => Ok(m.iter().map(|(p, (_, oid))| (p.clone(), oid.clone())).collect()),
+            None => {
+                let spec = format!("{rev}^{{tree}}");
+                match self.with_objects(|r| r.walk(&spec)) {
+                    Ok(_) => Err(format!("git ls-tree -r {rev}: no such revision")),
+                    Err(e) => Err(format!("git ls-tree -r {rev}: {e}")),
+                }
             }
         }
-        Ok(m)
+    }
+
+    /// Whether `rev` names a commit this clone has.
+    pub fn has_commit(&self, rev: &str) -> Result<bool, String> {
+        let spec = format!("{rev}^{{commit}}");
+        self.with_objects(|r| r.info(&spec))
+            .map(|i| i.is_some_and(|i| i.kind == paddock_git::Kind::Commit))
+            .map_err(|e| format!("git cat-file -e {spec}: {e}"))
     }
 
     /// The bytes of `path` at `rev` (a commit or tree), `None` when the revision has no such file.
     pub fn file_at(&self, rev: &str, path: &str) -> Result<Option<Vec<u8>>, String> {
-        let spec = format!("{rev}:{path}");
-        match self.bytes(&["cat-file", "blob", &spec]) {
-            Ok(b) => Ok(Some(b)),
-            Err(first) => {
-                // One process in the common case; only a failure asks whether the file is simply not there.
-                let listing = self
-                    .text(&["ls-tree", "-z", rev, "--", path])
-                    .map_err(|e| format!("{first}; {e}"))?;
-                if listing.split('\0').any(|e| e.split_once('\t').is_some_and(|(_, p)| p == path)) {
-                    Err(first)
-                } else {
-                    Ok(None)
-                }
-            }
-        }
+        self.with_objects(|r| r.file_at(rev, path))
+            .map_err(|e| format!("git cat-file blob {rev}:{path}: {e}"))
     }
 
     /// The file as UTF-8 text (read once per revision and path); a file that is not UTF-8 is an error (it cannot be measured).
@@ -272,6 +297,26 @@ impl<'a> Git<'a> {
         self.texts.borrow_mut().insert(key, text.clone());
         Ok(text)
     }
+}
+
+/// The git child of one merge-check call (see [`Git::command_for`]).
+fn git_command(root: &Path, args: &[&str], parent: &[String]) -> std::process::Command {
+    let mut cmd = crate::git_env::git();
+    // Stable, parseable output whatever the user's git config says.
+    cmd.arg("-C")
+        .arg(root)
+        .args([
+            "-c",
+            "core.quotePath=false",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "log.showSignature=false",
+        ])
+        .args(["-c", "core.hooksPath=/dev/null"])
+        .args(args);
+    crate::child_env::scrub(&mut cmd, parent);
+    cmd
 }
 
 /// The first nine characters of a revision name or hash, for messages.
