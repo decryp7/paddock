@@ -32,7 +32,7 @@ Decisions: <what the user or an accepted ADR already decided, and what was ruled
 
 Check ids: <a brief that adds a conformance check says: take the id with `./dev check new-id --reserve <branch>` and commit the reservation file; otherwise write "none">
 Gates: <the exact commands, in order: fmt, clippy on the host and through xwin, the touched tests, `./dev gates check`, commit-lint, and the conformance line if conformance is touched>
-Heavy steps: through engineering-rules' scripts/heavy.sh (next to the main checkout; the slot), with CARGO_BUILD_JOBS=2, NEXTEST_TEST_THREADS=4 and a private CARGO_TARGET_DIR under <dev-targets>/build/, only while the 5-minute load is under 15.
+Heavy steps: through the Rust `heavy` (`heavy run <agent> -- <command>`, or `./dev heavy -- <command>`, which finds or builds it; the slot count follows the machine's load), with CARGO_BUILD_JOBS=2, NEXTEST_TEST_THREADS=4 and a private CARGO_TARGET_DIR under <dev-targets>/build/, only while the 5-minute load is under 15.
 
 ## Rules every brief repeats
 

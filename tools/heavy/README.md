@@ -38,21 +38,44 @@ command runs: a waiter does not break the lock of a SIGKILLed heavy whose comman
 
 `HEAVY_SLOTS` (or `--slots N`) is the most steps that may run together: `auto` (the default) is about half the cores and at most
 5 (ER-24: about 5 builders on a 14-core Mac), a number is that maximum, 1 is one at a time. How many run at a moment is
-`gate::allowed_slots`, read by the head of the queue on every poll: the cores the **15-minute load** leaves free, 2 cores a step
-(`CARGO_BUILD_JOBS=2`), and none beyond the first while the **CPU idle share** is under 30 %. When the load or the idle share is
-unknown (Windows has no load average; the first CPU reading has nothing to compare with) it is 1. A **container run** (a command line
-with `docker`, `podman`, `nerdctl` or `linux-container.sh`) runs alone, and nothing starts beside a live one, because the VM behind it
-takes memory and cores that heavy cannot see. A waiter holds a ticket, never a slot (ER-43). Running steps are never stopped when the
-load rises; the rule only decides who starts next. The wait line says what it saw: `1 running, 1 of at most 5 at once (14 cores,
-15-minute load 15.0, CPU idle 80%)`. `HEAVY_CPUS` replaces the OS's core count (tests, and a machine whose cores the OS misreports).
-The 15-minute load lags: after a spike it keeps the count at 1 for up to a quarter of an hour (measured in docs/benchmarks.md).
+`gate::allowed_slots`, read by the head of the queue on every poll:
 
-## heavy.sh
+- the cores the **15-minute load** leaves free, 2 cores a step (`CARGO_BUILD_JOBS=2`): `(cores - load15) / 2`, rounded down, between 1
+  and the maximum. The count is of all steps running, heavy's own included: their load is already in the average (late), so the rule
+  is the stricter reading of one thing, never a sum;
+- one while the **CPU idle share** is under 30 %, and one while the **1-minute load** is at or over the core count (the fast brake: a
+  burst the 15-minute average has not seen). `make -l N` and `ninja -l N` are the same shape, a count of jobs and a load brake; they
+  use the 1-minute load alone, which reacts at once and flaps; this opens on the 15-minute load and closes on either;
+- one when the load or the idle share is unknown (Windows has no load average; the first CPU reading needs a sampling interval, it
+  is taken when heavy starts and a second one 200 ms later).
 
-The shell `heavy.sh` (engineering-rules) and the shell plock are retired: `scripts/heavy.sh` is a thin wrapper of this binary (same
-arguments; exit codes are the command's own, with 2 for a usage error, a refused build folder or a lock that could not be taken;
-127 with an `::error::` when `heavy` is not installed). Their lock folders were never shared with this layout; `HEAVY_LOCK_DIR` is
-ignored with a warning.
+**What to expect on this Mac:** its 15-minute load has been 16 to 48 on 14 cores for days, so `auto` gives 1 (the old behaviour) at its usual
+loads, and more only when the machine is quiet (docs/benchmarks.md). The count stays at 1 for up to a quarter of an hour after a spike.
+
+A **container run** (a command line with `docker`, `podman`, `nerdctl` or `linux-container.sh`) runs alone, and nothing starts beside a live
+one, because the VM behind it takes memory and cores that heavy cannot see. The limit, plainly: heavy tells only the container runs that go
+through heavy; one started outside it is invisible except through the load and idle share it causes. A container run that has waited
+`HEAVY_PRIORITY_MAX` / 6 (300 s) for the machine to be free of other steps writes a drain marker (`pitcrew-heavy.drain.<pid>-<name>`): every other step
+waits, high-priority ones too, until it has run (the marker counts for `HEAVY_PRIORITY_MAX` at most), so a stream of steps cannot keep it out for good.
+
+A waiter holds a ticket, never a slot (ER-43). After taking a slot a step looks at the folder again: when more steps run than the rule
+allows now (the load rose, a container run arrived, a high-priority run came in beside the head) and it is one of the younger ones (by the time of
+its record, then pid), it gives the slot back and waits again with its ticket, so two takers that see each other never both step back and the count
+does not exceed the rule. Running steps are never stopped when the load rises. The wait line says what the rule saw: `1 running, 1 of at most 5 at
+once (14 cores, 15-minute load 15.0, CPU idle 80%)`. `HEAVY_CPUS` replaces the OS's core count (tests, a machine whose cores the OS misreports).
+
+## The shell heavy.sh
+
+**Today** (until the wrapper below lands in engineering-rules) `scripts/heavy.sh` there is still the shell semaphore, with its own 5 slots in its
+own folder (`HEAVY_LOCK_DIR`), and does not exclude Rust `heavy` holders: both run, up to 5 of each. Only Paddock's own tools are moved to `heavy`.
+The wrapper (a patch prepared with this change: same arguments, the command's exit codes, 2 for usage, a refused build folder or a lock that could
+not be taken, 127 with an `::error::` when `heavy` is not installed) makes engineering-rules' script a thin caller of this binary; **landing it is a
+prerequisite** of calling the shell retired, and it lands only once the binary can be installed for every project (a release from the registry that
+the user installs, or a stable path the wrapper finds). `HEAVY_LOCK_DIR` is ignored with a warning.
+
+Old binaries: a `heavy` built before this change looks at the first slot only (`slots` was 1). With new binaries running beside it, the first slot is
+shared by name and mutual exclusion (the directory), and the new ones count every slot folder including the old one's, so the total never exceeds the
+maximum of the new ones (a test runs one old-kind and five new together).
 
 ## Environment
 

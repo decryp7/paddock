@@ -137,7 +137,7 @@ runs under its own agent name (`pre-push-<pid>-<n>`) in a log folder of its own 
 `<git common dir>/paddock-pre-push/logs/`, the newest 20 kept), the file is created before the poller starts, and only
 `<that name> holds the lock (pid` counts, read from where the last poll stopped (250 ms). Before this, the shared per-gate log held
 the line of earlier runs (48 of 174 logs there already did) and of another worktree pushing the same gate. Only our `heavy` writes that
-line; any other heavy (`heavy.sh`) gives `Unknown` and keeps the credit at the end of the step, so a silent tool never extends the
+line; any other heavy (a `PADDOCK_HEAVY` of someone else's, or engineering-rules' shell `heavy.sh` until its wrapper lands) gives `Unknown` and keeps the credit at the end of the step, so a silent tool never extends the
 budget. No limit changed: the run budget is still 15 min of run time, the queue allowance 30 min. The end-of-step credit stays (it is
 exact, from heavy's own timing line, and it takes the sibling-held part out).
 
@@ -147,21 +147,26 @@ out of the real filter as its control), so a guard from one branch (the self_exe
 another (a new `current_exe()` use) is caught at merge time on the combined tree, as train 15 needed. The two audits take 0.17 s
 ([benchmarks](../benchmarks.md#source-audits-in-the-member-gate-2026-11-18-fixpush-gate-queue-time)).
 
-## Amendment 2026-11-18 (second): the shell heavy is retired, and the slots follow the load
+## Amendment 2026-11-18 (second): the slots follow the load; the shell heavy is retired once the wrapper lands
 
-The user approved retiring the shell `heavy.sh` and plock (2026-11-18). Their only callers outside Paddock's own tools were
-engineering-rules' `scripts/heavy.sh` (its test and its `templates/lefthook.yml` line) and two stale worktrees of that repository;
-no other project under the development folder calls them. Paddock's resolver (`heavy_prefix`) no longer looks for `heavy.sh`; the
-reference shell fixture and `tests/it/mixed.rs` are gone with the conformance exception E6 (a list that shrinks, ER-46). engineering-rules'
-`heavy.sh` becomes a wrapper of the Rust `heavy` (prepared as a patch, landed by the coordinator).
+The user approved retiring the shell `heavy.sh` and plock (2026-11-18). Their callers outside Paddock's own tools: engineering-rules'
+`scripts/heavy.sh` (with its test and the `templates/lefthook.yml` line) and two stale worktrees of that repository; no other project under the
+development folder calls them. **Today** (this change landed, the wrapper not) engineering-rules still runs the shell semaphore with its own 5 slots
+in its own folder, which does not exclude Rust holders, so up to 5 shell and up to 5 Rust steps can run; the wrapper (a patch of `scripts/heavy.sh`
+and its test, prepared and handed to the coordinator) is a landing prerequisite of calling the shell retired, and lands after the Rust `heavy` can be
+installed for other projects (README). Paddock's resolver (`heavy_prefix`) no longer looks for `heavy.sh`; the reference shell fixture, `tests/it/mixed.rs`
+and the conformance exception E6 are gone (a list that shrinks, ER-46); the brief template names `heavy run`.
 
-With one implementation left, the single slot (kept only so the shell could be a lock holder too) goes. `HEAVY_SLOTS` is the most
-steps that may run together (`auto` by default: about half the cores, at most 5, ER-24); how many run now is read by the head of
-the queue on each poll from the 15-minute load (2 cores a step), the CPU idle share (none beyond the first under 30 %) and the
-container rule (a container run is alone, and nothing starts beside one: heavy tells by the command line, `docker`, `podman`,
-`nerdctl` or `linux-container.sh`). Unknown load or idle is 1. A waiter holds a ticket, never a slot (ER-43). Common practice: a
-build farm's executor count is a configured maximum with a load average brake (GNU make `-l`, ninja `-l`, distcc's load limits);
-`make -l` is the same rule with the 1-minute load, which reacts faster but flaps; the 15-minute load was asked for, so after a
-spike the count stays at 1 for up to a quarter of an hour (measured: [benchmarks](../benchmarks.md#load-aware-heavy-slots-2026-11-18-featheavy-load-aware-slots)).
-The push gate still starts one heavy step of its own push at a time (its credit accounting), so a single push does not use the
-extra slots; other agents' steps and CI do. Letting a push start several is the next step and needs its own measurement.
+With the shell going, the single slot (kept only so the shell could be a lock holder too) goes. `HEAVY_SLOTS` is the most steps that may run
+together (`auto` by default: about half the cores, at most 5, ER-24); how many run now is read by the head of the queue on each poll: the cores the
+15-minute load leaves free (2 a step), one under 30 % CPU idle or at a 1-minute load of the core count, one when unknown, and the container rule
+(a container run is alone and nothing starts beside one; heavy tells by the command line, so only runs that go through heavy, and says so). A waiter
+holds a ticket, never a slot (ER-43); a taker looks again after taking and the younger of too many steps back; a container run that waited long
+makes the others wait for it (a drain marker, bounded). Common practice: GNU make and ninja `-l` brake a job count by the load average (the
+1-minute one: quick, flapping); distcc and icecream cap by job slots; here the 15-minute load opens and the 1-minute one only closes. On this
+Mac `auto` is 1 at its usual loads (15-minute load 16 to 48 on 14 cores) and more only when it is quiet
+([benchmarks](../benchmarks.md#load-aware-heavy-slots-2026-11-18-featheavy-load-aware-slots)); a count of free capacity only (running steps
+added to what the load leaves free) was considered and not taken: it admits a burst before the average sees it.
+Old binaries (one slot) beside new ones never push the total past the maximum of the new ones (tested).
+The push gate still starts one heavy step of its own push at a time (its credit accounting), so a single push does not use the extra slots; other
+agents' steps and CI do. Letting a push start several is the next step and needs its own measurement.

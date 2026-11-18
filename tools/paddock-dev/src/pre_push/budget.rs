@@ -135,8 +135,8 @@ impl BudgetClock {
     /// [`BudgetClock::left`] while a heavy step of this push is in flight: its wait so far is not run time either, but it is
     /// credited only when the step ends ([`BudgetClock::record`]), so a row that starts meanwhile would see the budget spent by
     /// waiting for others. The wait is what [`Slot`] says (queued: since it began; taken: until then), at most the step's queue
-    /// limit; no step in flight, or nothing known (no live credit: the end-of-step credit is all there is, as for a `heavy.sh`
-    /// of someone else's): none. Credit and live wait are read under one lock.
+    /// limit; no step in flight, or nothing known (no live credit: the end-of-step credit is all there is, as for a heavy of
+    /// someone else's): none. Credit and live wait are read under one lock.
     pub fn left_live(&self, now: Instant) -> Duration {
         let Ok(i) = self.inner.lock() else { return Duration::ZERO };
         let waited = i.live.as_ref().map_or(Duration::ZERO, |l| {

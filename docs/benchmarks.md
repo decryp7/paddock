@@ -2067,5 +2067,7 @@ Question: with the slot count following the load, how long does a queue of 4 cli
 - **Not measured:** the rule at a really low 15-minute load on this machine (it was not low at any point of this run); the row with
   `HEAVY_CPUS=64` stands in for it and shows the mechanism, not the machine. The deterministic cases (two jobs together at low load,
   serialised at high load, busy CPU, unknown load, container) are tests in `tools/heavy/tests/it/slots.rs`.
+- **Rule after review:** the rule also closes on a 1-minute load at the core count (the fast brake) and primes the CPU reading when heavy starts;
+  neither changes these rows (the 15-minute load decided them).
 - **Cost to note:** the 15-minute load lags, so after a spike the count stays at 1 for up to a quarter of an hour; the 1-minute
   load had fallen to 7 while the 15-minute was still 44 (second `after` row's neighbours).

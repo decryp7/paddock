@@ -29,6 +29,9 @@ pub struct Config {
     /// The same bound for the marker of a CI job on this host (`heavy mark ci-...`, ADR 0102): a job runs for up to its
     /// `timeout-minutes` (the longest host job's is 120), so the bound is 7200 s, not the push gate's 1800 s.
     pub ci_priority_max: Duration,
+    /// A container run that has waited this long for the machine to be free of other steps makes everyone else wait for it
+    /// (a drain marker), so a stream of other steps cannot keep it out for good. Default: a sixth of `priority_max`.
+    pub drain_after: Duration,
     /// The most heavy steps that may run together (the "Auto" default is `gate::auto_max_slots`, at most 5). How many do run
     /// together at a given moment is `gate::allowed_slots`: this is only its upper bound; 1 means one at a time, always.
     pub slots: u32,
@@ -129,6 +132,7 @@ impl Config {
             priority_max: Duration::from_secs_f64(priority_max),
             ci_priority_max: Duration::from_secs_f64(ci_priority_max),
             slots,
+            drain_after: Duration::from_secs_f64((priority_max / 6.0).max(1.0)),
             cpus,
             log_file: first(get, &["HEAVY_LOG_FILE"]).map(PathBuf::from),
             verbose: flag("HEAVY_VERBOSE"),
