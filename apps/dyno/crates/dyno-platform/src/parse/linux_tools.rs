@@ -14,6 +14,29 @@ pub fn dpkg_owner(output: &str) -> Option<String> {
     (!name.is_empty() && !name.contains(' ')).then(|| name.to_string())
 }
 
+/// Every (path, package) of a `dpkg -S <path>...` answer (`pkg: /path` lines; diversion notes skipped).
+pub fn dpkg_owners(output: &str) -> Vec<(String, String)> {
+    output
+        .lines()
+        .filter(|l| !l.starts_with("diversion by"))
+        .filter_map(|l| {
+            let (_, path) = l.split_once(": ")?;
+            Some((path.trim().to_string(), dpkg_owner(l)?))
+        })
+        .collect()
+}
+
+/// Every (path, package) of a `pacman -Qo <path>...` answer (`/path is owned by pkg version` lines).
+pub fn pacman_owners(output: &str) -> Vec<(String, String)> {
+    output
+        .lines()
+        .filter_map(|l| {
+            let (path, _) = l.split_once(" is owned by ")?;
+            Some((path.trim().to_string(), pacman_owner(l)?))
+        })
+        .collect()
+}
+
 /// The package that owns a file, from `rpm -qf <path>` (`bash-5.2.15-3.fc38.x86_64`); the "not owned" message is not
 /// a package.
 pub fn rpm_owner(output: &str) -> Option<String> {

@@ -131,6 +131,19 @@ pub trait ProcessSource: Send {
     fn retry_helper(&mut self) {}
 }
 
+/// Who signed a program file (rule 85, bulk APIs; ADR 0108 DY-5): one call for many files, so a look at several new programs is
+/// one tool run (macOS `codesign`, Linux's package manager), not one each. Shared, not behind the details lock: a caller never
+/// waits on another's process details while a signature is checked.
+pub trait SignatureProbe: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
+    /// The signature of each file of `exes`, in the order given (one answer per file; a file that cannot be checked is
+    /// [`crate::process::SignatureInfo::Unknown`] with the reason).
+    fn signatures(&self, exes: &[&Path]) -> Vec<crate::process::SignatureInfo>;
+}
+
 /// "What is locking this file?"
 pub trait FileLocks: Send {
     /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.

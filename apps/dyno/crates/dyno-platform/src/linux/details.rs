@@ -2,14 +2,16 @@
 //! files, connections, mapped libraries, the owning package and what started it. Everything about another user's
 //! process that the kernel hides becomes an unavailable field with the reason, never an error.
 
-use super::packages::PackageOwners;
+use super::packages::PackageLookup;
 use super::paths::{home_dir, read_text, HostPaths};
 use super::tools::Tools;
 use crate::parse::desktop_entry;
 use crate::parse::linux_net::{parse_table, Proto};
 use crate::parse::linux_proc::{cpus_allowed, maps_files, socket_inode, stat_nice, status_field, user_service};
 use crate::processes::DetailsProbe;
-use dyno_core::process::{Connection, ListOrReason, Priority, ProcessDetails, ProcessRef, MAX_DETAIL_ITEMS};
+use crate::signatures::CachedSignatures;
+use dyno_core::ports::SignatureProbe;
+use dyno_core::process::{Connection, ListOrReason, Priority, ProcessDetails, ProcessRef, SignatureInfo, MAX_DETAIL_ITEMS};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -25,7 +27,7 @@ const EFFICIENCY_NICE: i32 = 10;
 pub struct LinuxDetails {
     paths: HostPaths,
     autostart: Vec<PathBuf>,
-    packages: PackageOwners,
+    signatures: Arc<dyn SignatureProbe>,
 }
 
 impl LinuxDetails {
@@ -34,8 +36,14 @@ impl LinuxDetails {
         LinuxDetails {
             paths,
             autostart: autostart_dirs,
-            packages: PackageOwners::new(tools),
+            signatures: Arc::new(CachedSignatures::new(Box::new(PackageLookup::new(tools)))),
         }
+    }
+
+    /// The same probe answering signatures from `signatures` (the system's one, whose cache the agent's look shares).
+    pub fn with_signatures(mut self, signatures: Arc<dyn SignatureProbe>) -> Self {
+        self.signatures = signatures;
+        self
     }
 
     /// The usual autostart folders of `$HOME` and the system.
@@ -169,7 +177,10 @@ impl DetailsProbe for LinuxDetails {
             }
             None => ListOrReason::Unavailable(NEEDS_OWNER.to_string()),
         };
-        details.signature = self.packages.signature(exe.and_then(Path::to_str));
+        details.signature = match exe {
+            Some(e) => self.signatures.signatures(&[e]).remove(0),
+            None => SignatureInfo::Unknown("The program file is unknown".into()),
+        };
         details.startup_source = self.startup_source(&base, exe);
     }
 }

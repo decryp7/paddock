@@ -75,7 +75,9 @@ impl UnusualCentre {
         }
         let seen = observed(&processes, &shared.network.connection_counts());
         let startup = self.startup_entries(shared);
-        // Signatures of programs the baseline has not seen, outside the baseline's lock (a check can take seconds).
+        // Signatures of programs the baseline has not seen, outside the baseline's lock (a check can take seconds), in one call
+        // of the shared signature port: never through the details port, whose lock a person's process details wait on (rule 85;
+        // ADR 0108 DY-5).
         let learning = lock(&self.state).baseline.learning(t, &settings).active;
         let mut signatures: HashMap<String, Signing> = HashMap::new();
         if !learning {
@@ -89,12 +91,7 @@ impl UnusualCentre {
                     .take(MAX_SIGNATURE_CHECKS)
                     .collect()
             };
-            for (key, p) in fresh {
-                let sig = lock(&shared.ports.details)
-                    .details(p.reference())
-                    .map_or(Signing::Unknown, |d| Signing::from(&d.signature));
-                signatures.insert(key, sig);
-            }
+            signatures = signatures_of(shared.ports.signatures.as_ref(), &fresh);
         }
         let outcome = {
             let mut st = lock(&self.state);
@@ -161,6 +158,23 @@ impl UnusualCentre {
         drop(core);
         Ok(lock(&self.state).baseline.overview(now(), &settings))
     }
+}
+
+/// The signing verdict of each new program, from one call of `probe` for those with a known file; one without a file is
+/// [`Signing::Unknown`].
+fn signatures_of(probe: &dyn dyno_core::ports::SignatureProbe, fresh: &[(String, &ProcessSample)]) -> HashMap<String, Signing> {
+    let with_file: Vec<(&String, &std::path::Path)> = fresh
+        .iter()
+        .filter_map(|(k, p)| p.exe.as_deref().map(|e| (k, std::path::Path::new(e))))
+        .collect();
+    let mut out: HashMap<String, Signing> = fresh.iter().map(|(k, _)| (k.clone(), Signing::Unknown)).collect();
+    if !with_file.is_empty() {
+        let files: Vec<&std::path::Path> = with_file.iter().map(|(_, f)| *f).collect();
+        for ((key, _), info) in with_file.iter().zip(probe.signatures(&files)) {
+            out.insert((*key).clone(), Signing::from(&info));
+        }
+    }
+    out
 }
 
 /// The programs in a process table: one per program, with the most children one process has and the connections of all
@@ -265,5 +279,62 @@ mod tests {
         let os = current_os();
         assert_eq!(os == Os::Macos, cfg!(target_os = "macos"));
         assert_eq!(os == Os::Windows, cfg!(windows));
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+    use dyno_core::ports::{PlatformError, ProcessSource};
+    use dyno_core::process::{ProcessDetails, ProcessRef};
+    use dyno_core::time::Timestamp;
+    use dyno_core::unusual::baseline::Baseline;
+    use dyno_platform::fake::{process, Fake};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// A details port that counts its calls (each one held the details lock for a whole `details()`).
+    struct CountingDetails(Arc<AtomicUsize>);
+    impl ProcessSource for CountingDetails {
+        fn processes(&mut self) -> Vec<ProcessSample> {
+            Vec::new()
+        }
+        fn details(&mut self, _: ProcessRef) -> Result<ProcessDetails, PlatformError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(PlatformError::Unsupported("counted".into()))
+        }
+    }
+
+    /// DY-5 (ADR 0108, guard D): a look that finds N new programs checks their signatures in one call of the signature port,
+    /// and never through the details port (whose lock a person's "process details" waits on).
+    #[test]
+    fn new_programs_are_checked_in_one_signature_call_without_the_details_port() {
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let fake = Fake::new();
+        let details = Arc::new(AtomicUsize::new(0));
+        let (shared, _, _) = Shared::build(
+            crate::paths::Dirs::at(tmp.path().join("data")),
+            fake.platform(),
+            Box::new(CountingDetails(details.clone())),
+            Box::new(|_| Ok(())),
+        )
+        .unwrap();
+        lock(&shared.core).latest.processes = (0..3)
+            .map(|i| {
+                let mut p = process(100 + i, &format!("new{i}"), 1.0);
+                p.exe = Some(format!("/opt/new{i}/new{i}"));
+                p
+            })
+            .collect();
+        // A baseline that finished learning long ago, so new programs are checked.
+        let centre = UnusualCentre {
+            state: Mutex::new(State {
+                baseline: Baseline::restore(Some(Timestamp(0)), vec![], vec![]),
+                startup: Some((Instant::now(), vec![])),
+            }),
+        };
+        centre.look(&shared);
+        assert_eq!(details.load(Ordering::SeqCst), 0, "the look never takes the details port");
+        assert_eq!(fake.signature_counts(), (1, 3), "three new programs, one signature call");
     }
 }

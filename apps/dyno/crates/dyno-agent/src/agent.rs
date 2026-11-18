@@ -382,6 +382,8 @@ pub struct Ports {
     pub locks: Mutex<Box<dyn FileLocks>>,
     /// Process details (slow calls).
     pub details: Mutex<Box<dyn ProcessSource>>,
+    /// Who signed a program file, many per call; shared and never behind the details lock (ADR 0108 DY-5).
+    pub signatures: Arc<dyn dyno_core::ports::SignatureProbe>,
     /// Slow-changing facts.
     pub facts: Mutex<Box<dyn FactsSource>>,
     /// User activity.
@@ -724,6 +726,7 @@ impl Shared {
         let Platform {
             sensors,
             processes,
+            signatures,
             locks,
             startup,
             facts,
@@ -759,6 +762,7 @@ impl Shared {
                     locks
                 }),
                 details: Mutex::new(details),
+                signatures,
                 facts: Mutex::new(facts),
                 activity: Mutex::new(activity),
                 startup: Mutex::new(startup),

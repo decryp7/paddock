@@ -13,6 +13,7 @@
 
 ### Changed
 
+- Dyno starts fewer programs while it watches your computer. The helper reads fans and CPU power with one `powermetrics` run per reading (it took two on an Intel Mac and four on Apple silicon), and a long Processes list is read from one look at the process table instead of one per page, with the account list kept between looks. New programs are checked for a signature together, and each file is checked once until it changes; the check no longer holds up the details of a process you open. Each round of history is saved in one write.
 - Memory modules on Windows and macOS are now read by the agent itself, so their source shows Local instead of the helper.
 - On Linux the helper's card now lists disk health (SMART), which it already read for the wear forecast.
 - Health no longer says "Nothing needs your attention" when it could not read a fact the score looks at (disk health, a pending restart, pending updates). It says "Nothing found in what Dyno could check" and lists what was not checked; facts Dyno never reads on this OS are listed once as coverage. The score is unchanged. This is another protocol version (8), so an older app or agent is replaced at the next start.

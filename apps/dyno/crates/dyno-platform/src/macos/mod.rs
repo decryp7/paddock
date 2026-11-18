@@ -27,6 +27,7 @@ pub fn platform(secrets_dir: &std::path::Path) -> Platform {
     Platform {
         sensors: Box::new(SysinfoSensors::new(Box::new(probe::MacProbe::new()))),
         processes: Box::new(SysinfoProcesses::new(Box::new(details::MacDetails::new()))),
+        signatures: crate::signatures::system(),
         locks: Box::new(locks::LsofLocks),
         startup: Box::new(startup::LaunchAgents::for_current_user()),
         facts: Box::new(facts::MacFacts::new()),

@@ -1,38 +1,30 @@
 //! macOS process details: nice value and background class, open files, sockets and mapped libraries from `libproc` and the kernel socket lists (never `lsof`, Dyno ADR 0026),
 //! and the code signature from `codesign`. Everything runs with a timeout; failures become unavailable fields.
 
-use crate::parse::mac_tools::parse_codesign;
 use crate::processes::DetailsProbe;
 use crate::unix_proc::get_nice;
+use dyno_core::ports::SignatureProbe;
 use dyno_core::process::{ListOrReason, Priority, ProcessDetails, ProcessRef, SignatureInfo};
 use std::path::Path;
-use std::time::Duration;
-
-const TOOL_TIMEOUT: Duration = Duration::from_secs(8);
+use std::sync::Arc;
 
 /// Details through macOS' own tools.
-pub struct MacDetails;
+pub struct MacDetails {
+    signatures: Arc<dyn SignatureProbe>,
+}
 
 impl MacDetails {
-    /// The probe.
+    /// The probe, with the system's signature check (whose cache the agent's look at new programs shares).
     pub fn new() -> Self {
-        MacDetails
+        MacDetails {
+            signatures: crate::signatures::system(),
+        }
     }
 }
 
 impl Default for MacDetails {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-fn signature(exe: &Path) -> SignatureInfo {
-    let mut cmd = crate::process::command("/usr/bin/codesign");
-    cmd.args(["-dv", "--verbose=2"]).arg(exe);
-    match crate::process::run_with_timeout(cmd, TOOL_TIMEOUT) {
-        // codesign writes its report to stderr.
-        Ok(out) => parse_codesign(&String::from_utf8_lossy(&out.stderr), out.status.success()),
-        Err(e) => SignatureInfo::Unknown(e.to_string()),
     }
 }
 
@@ -46,7 +38,7 @@ impl DetailsProbe for MacDetails {
         details.efficiency_mode = super::background::is_background(pid);
         details.affinity = None;
         details.signature = match exe {
-            Some(e) => signature(e),
+            Some(e) => self.signatures.signatures(&[e]).remove(0),
             None => SignatureInfo::Unknown("The program file is not known".into()),
         };
         // Never `lsof`: it asks the kernel about every socket and pipe descriptor of the process, which can mark another
@@ -125,13 +117,14 @@ mod tests {
 
     #[test]
     fn signatures_of_system_and_unsigned_files() {
+        let sig = |p: &Path| MacDetails::new().signatures.signatures(&[p]).remove(0);
         assert!(matches!(
-            signature(Path::new("/bin/ls")),
+            sig(Path::new("/bin/ls")),
             SignatureInfo::Signed(_) | SignatureInfo::Invalid(_)
         ));
         let dir = paddock_testkit::private_tempdir().unwrap();
         let f = dir.path().join("plain");
         std::fs::write(&f, b"not a program").unwrap();
-        assert!(!matches!(signature(&f), SignatureInfo::Signed(_)));
+        assert!(!matches!(sig(&f), SignatureInfo::Signed(_)));
     }
 }
