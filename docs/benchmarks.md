@@ -1416,6 +1416,27 @@ The conformance row already ran on every push (the plan marks conformance on eve
   quieter machine (three rows at a time) it overlaps the Clippy rows. It fits the 15 minute budget.
 - **Not measured:** a run at a load under 10 (three rows at a time), and the conformance tests on Linux or Windows.
 
+### Contracts step added to `conformance tests` (2026-11-19, refactor/retire-js-planner)
+
+Question: what does the `cargo nextest run` line added to the phase (the whole-tree repo contracts and the audit fixture tests, moved
+from the retired JS planner's test) add to the push gate's `conformance-tests` row?
+
+- **Machine and tree:** the shared Mac mini (arm64) under other agents' load; a fresh worktree (`./dev worktree add`) of this branch
+  at 4b94bbf55, `./dev` built, a new empty build folder (`PADDOCK_GATE_TARGET_DIR`, passed as `--config build.target-dir=`, never a
+  `CARGO_*` variable), the local sccache on (6,480 hits; 29 Rust misses, the workspace's own crates)
+- **Run:** `./dev ci run conformance tests` with `PADDOCK_TEST_CONCURRENCY=4`, one run
+
+  | Line | Seconds |
+  |---|---:|
+  | `npm test` | 105.2 |
+  | the `cargo nextest run` line (compile in a new folder, then the contracts and audit-fixture tests) | 31.0 |
+  | the phase | 136.2 |
+
+- **Added time per push:** about 31 s in a fresh worktree with a cold build folder and a warm sccache; the folder is kept between
+  pushes, so a later push compiles only what changed. (`npm test` took 105 s here against 71 s on 2026-11-14: the load differs.)
+- **CI (conformance job, Linux container):** cold 71 s, warm 1 s in the local CI image, recorded in docs/lessons.md (2026-11-19).
+- **Not measured:** a warm second push in the same worktree, an sccache-cold machine, a Windows or amd64 run.
+
 ### With the cap of 4 test processes (2026-11-15, same branch, after review)
 
 The gate now sets `PADDOCK_TEST_CONCURRENCY=4` (ER-24; `node --test` otherwise starts one process per core, about 13 here).

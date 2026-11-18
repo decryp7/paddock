@@ -554,3 +554,19 @@ fn heavy_puts_every_line_through_the_machine_wide_slot_and_refuses_without_one()
         "{log}"
     );
 }
+
+#[test]
+fn a_cargo_nextest_line_gets_the_gates_build_folder_as_configuration_and_other_lines_do_not() {
+    let got = with_build_folder("cargo nextest run --profile ci -E 'test(/^a::/)'", "/t/pd");
+    assert_eq!(
+        got,
+        r#"cargo nextest run --config 'build.target-dir='\''/t/pd'\''' --profile ci -E 'test(/^a::/)'"#
+    );
+    // never as a variable (sccache hashes CARGO_*), and not twice
+    assert_eq!(with_build_folder(&got, "/t/other"), got, "a line that names a folder keeps it");
+    assert_eq!(with_build_folder("npm test", "/t/pd"), "npm test");
+    assert_eq!(
+        with_build_folder("cargo clippy --all-targets", "/t/pd"),
+        "cargo clippy --all-targets"
+    );
+}

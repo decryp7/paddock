@@ -8,7 +8,7 @@
  "tools": true,
  "icons": false,
  "ciImage": false,
- "paddockDev": true,
+ "paddockDev": false,
  "docs": false,
  "apps": [
   "x"
@@ -38,9 +38,6 @@
   "crates": [
    "crates/a/CHANGELOG.md",
    "cargo crates/b reaches crates/a"
-  ],
-  "paddock-dev": [
-   "its contract tests (tests/it/contracts.rs, the audit fixtures) read docs/rules.md"
   ],
   "tools": [
    "docs/rules.md"

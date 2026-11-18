@@ -114,20 +114,6 @@ static PER_MACHINE_INPUT: LazyLock<Regex> = LazyLock::new(|| {
     re(r"^(apps/[^/]+/app/src-tauri/(tauri(\.windows)?\.conf\.json|windows/)|crates/paddock-setup/nsis/paddock-per-machine\.nsh)")
 });
 
-/// What the paddock-dev tests that check repository contracts read (tests/it/contracts.rs: CODEOWNERS, Renovate, the rules and doc
-/// blocks, the job-isolation script, and the audit fixtures `src/audit/tests.rs` reads). They replaced the JS contracts test that ran
-/// in the tools job, so a change to one marks paddock-dev. `contracts.rs` and the audit test assert every file they read matches.
-static CONTRACT_INPUT: LazyLock<Regex> = LazyLock::new(|| {
-    re(
-        r"^(CODEOWNERS|renovate\.json|renovate/.*|AGENTS\.md|docs/rules\.md|docs/blocks/.*|conformance/ci/job-isolation\.sh|(.*/)?package\.json|(.*/)?\.config/nextest[^/]*\.toml|apps/[^/]+/src-tauri/Cargo\.lock|scripts/npm-audit(\.mjs|-fixtures\.json))$",
-    )
-});
-
-/// Whether paddock-dev's contract tests read `path` ([`CONTRACT_INPUT`]).
-pub fn is_contract_input(path: &str) -> bool {
-    CONTRACT_INPUT.is_match(path)
-}
-
 /// What C100 reads (ADR 0060 section 4): `./dev gates inputs` (`gates/inputs.rs`; the retired scripts/affected.mjs had `C100_INPUTS`). A change marks conformance.
 /// The content rule (a test file that adds or removes an ignore attribute or an environment guard) is [`guards_changed`].
 static C100_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -495,12 +481,6 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
             st.mark(Some(format!("app:{app}")), format!("its workflow {f}"));
             st.kind(Some(&format!("app:{app}")), "all");
             continue;
-        }
-        if CONTRACT_INPUT.is_match(f) {
-            st.mark(
-                Some("paddock-dev".to_string()),
-                format!("its contract tests (tests/it/contracts.rs, the audit fixtures) read {f}"),
-            );
         }
         if C100_INPUTS.iter().any(|r| r.is_match(f)) {
             st.mark(Some("conformance".to_string()), format!("C100 reads {f} (./dev gates inputs)"));
@@ -1131,33 +1111,6 @@ mod tests {
         ] {
             assert!(!owners(f).is_some_and(|o| o.iter().any(|p| p == "eslint")), "{f}");
         }
-    }
-
-    #[test]
-    fn every_file_the_repo_contract_tests_read_marks_paddock_dev() {
-        // tests/it/contracts.rs and the audit tests read these; they run only when paddock-dev is planned (the retired JS test
-        // ran in the tools job, which these files also mark).
-        for f in [
-            "CODEOWNERS",
-            "renovate.json",
-            "renovate/x.json",
-            "AGENTS.md",
-            "docs/rules.md",
-            "docs/blocks/blocks.json",
-            "docs/blocks/style.md",
-            "conformance/ci/job-isolation.sh",
-            "scripts/npm-audit.mjs",
-            "scripts/npm-audit-fixtures.json",
-            "package.json",
-            "apps/shell-demo/src-tauri/Cargo.lock",
-        ] {
-            let p = plan(&[f]);
-            assert_eq!(p["paddockDev"], true, "{f} is read by a paddock-dev test");
-            assert!(is_contract_input(f), "{f}");
-        }
-        // negative control: an ordinary script is not read by them
-        assert_eq!(plan(&["scripts/publish.mjs"])["paddockDev"], false);
-        assert!(!is_contract_input("scripts/publish.mjs"));
     }
 
     #[test]
