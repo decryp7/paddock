@@ -57,6 +57,20 @@ pub struct Store {
     conn: Connection,
 }
 
+/// One transaction over a batch of writes ([`Store::batch`]): committed when dropped, so the statements that succeeded are kept
+/// as they were when each committed alone; a failed commit is logged. Inside an open batch it is a no-op (it joins the open one).
+pub struct Batch<'a>(Option<rusqlite::Transaction<'a>>);
+
+impl Drop for Batch<'_> {
+    fn drop(&mut self) {
+        if let Some(tx) = self.0.take() {
+            if let Err(e) = tx.commit() {
+                log::error!("dyno-agent: a batch of history writes could not be committed: {e}");
+            }
+        }
+    }
+}
+
 const SCHEMA_SQL: &str = "
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
@@ -191,12 +205,27 @@ impl Store {
         Ok(Store { conn })
     }
 
+    /// Opens one transaction for the writes that follow until the returned guard is dropped (rule 85; ADR 0108 DY-7): a
+    /// sampler tick, an alarm batch or a prune is one commit, not one per statement. Inside an open batch it joins that one;
+    /// when the transaction cannot be opened, the writes commit one by one as before.
+    pub fn batch(&self) -> Batch<'_> {
+        if !self.conn.is_autocommit() {
+            return Batch(None);
+        }
+        match self.conn.unchecked_transaction() {
+            Ok(tx) => Batch(Some(tx)),
+            Err(e) => {
+                log::warn!("dyno-agent: no transaction for a batch of history writes ({e}); they commit one by one");
+                Batch(None)
+            }
+        }
+    }
+
     /// Stores a point.
     pub fn put_point(&self, tier: Tier, p: &HistoryPoint) -> Result<()> {
-        self.conn.execute(
-            "INSERT OR REPLACE INTO points (tier, at, data) VALUES (?1, ?2, ?3)",
-            params![tier_id(tier), p.at.millis(), json(p)?],
-        )?;
+        self.conn
+            .prepare_cached("INSERT OR REPLACE INTO points (tier, at, data) VALUES (?1, ?2, ?3)")?
+            .execute(params![tier_id(tier), p.at.millis(), json(p)?])?;
         Ok(())
     }
 
@@ -211,10 +240,9 @@ impl Store {
 
     /// Stores a per-core bucket of a tier.
     pub fn put_core_point(&self, tier: Tier, p: &CoreBucket) -> Result<()> {
-        self.conn.execute(
-            "INSERT OR REPLACE INTO core_points (tier, at, data) VALUES (?1, ?2, ?3)",
-            params![tier_id(tier), p.at.millis(), json(&p.cores)?],
-        )?;
+        self.conn
+            .prepare_cached("INSERT OR REPLACE INTO core_points (tier, at, data) VALUES (?1, ?2, ?3)")?
+            .execute(params![tier_id(tier), p.at.millis(), json(&p.cores)?])?;
         Ok(())
     }
 
@@ -233,15 +261,14 @@ impl Store {
     }
 
     /// Stores one minute's top apps.
-    pub fn put_app_minutes(&mut self, rows: &[AppMinute]) -> Result<()> {
-        let tx = self.conn.transaction()?;
-        {
-            let mut st = tx.prepare_cached("INSERT INTO app_minutes (at, app, cpu, memory) VALUES (?1, ?2, ?3, ?4)")?;
-            for r in rows {
-                st.execute(params![r.at.millis(), r.app, f64::from(r.cpu), r.memory as i64])?;
-            }
+    pub fn put_app_minutes(&self, rows: &[AppMinute]) -> Result<()> {
+        let _batch = self.batch();
+        let mut st = self
+            .conn
+            .prepare_cached("INSERT INTO app_minutes (at, app, cpu, memory) VALUES (?1, ?2, ?3, ?4)")?;
+        for r in rows {
+            st.execute(params![r.at.millis(), r.app, f64::from(r.cpu), r.memory as i64])?;
         }
-        tx.commit()?;
         Ok(())
     }
 
@@ -286,10 +313,9 @@ impl Store {
 
     /// Stores a disk's free space.
     pub fn put_disk_free(&self, disk: &str, at: Timestamp, total: u64, free: u64) -> Result<()> {
-        self.conn.execute(
-            "INSERT OR REPLACE INTO disk_free (disk, at, total, free) VALUES (?1, ?2, ?3, ?4)",
-            params![disk, at.millis(), total as i64, free as i64],
-        )?;
+        self.conn
+            .prepare_cached("INSERT OR REPLACE INTO disk_free (disk, at, total, free) VALUES (?1, ?2, ?3, ?4)")?
+            .execute(params![disk, at.millis(), total as i64, free as i64])?;
         Ok(())
     }
 
@@ -533,12 +559,14 @@ impl Store {
     /// Stores a small value.
     pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
         self.conn
-            .execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)", params![key, value])?;
+            .prepare_cached("INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)")?
+            .execute(params![key, value])?;
         Ok(())
     }
 
-    /// Deletes everything older than the retention allows.
+    /// Deletes everything older than the retention allows, in one transaction.
     pub fn prune(&self, r: Retention, now: Timestamp) -> Result<()> {
+        let _batch = self.batch();
         for t in Tier::ALL {
             self.conn.execute(
                 "DELETE FROM points WHERE tier = ?1 AND at < ?2",
@@ -567,10 +595,50 @@ impl Store {
     }
 }
 
+/// The commits of a store, counted by SQLite's commit hook (each autocommit statement is one): the budget tests' reading
+/// (ADR 0108 DY-7, guard D).
+#[cfg(test)]
+pub(crate) struct Commits(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+#[cfg(test)]
+impl Commits {
+    /// Commits since the counter was made or last taken; resets it.
+    pub(crate) fn take(&self) -> usize {
+        self.0.swap(0, std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+impl Store {
+    /// Counts this store's commits from now on.
+    pub(crate) fn count_commits(&mut self) -> Commits {
+        let n = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = std::sync::Arc::clone(&n);
+        self.conn
+            .commit_hook(Some(move || {
+                seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                false
+            }))
+            .expect("the commit hook installs on an open connection");
+        Commits(n)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use dyno_core::activity::ActivityKind;
+
+    #[test]
+    fn the_commit_counter_counts_each_autocommit_statement() {
+        let mut store = Store::memory().unwrap();
+        let commits = store.count_commits();
+        store.set_meta("a", "1").unwrap();
+        store.set_meta("b", "2").unwrap();
+        assert_eq!(commits.take(), 2);
+        assert_eq!(store.meta("a").unwrap().as_deref(), Some("1"));
+        assert_eq!(commits.take(), 0, "a read commits nothing");
+    }
     use dyno_core::time::{HOUR, MINUTE};
 
     #[test]

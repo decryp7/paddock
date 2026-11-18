@@ -55,7 +55,9 @@ impl AlarmCentre {
         self.engine.set_config(config);
     }
 
+    /// Stores a batch of changes in one transaction (rule 85; ADR 0108 DY-7).
     fn persist(store: &Store, changes: &[AlarmChange]) {
+        let _batch = store.batch();
         for c in changes {
             let r = if c.kind == ChangeKind::Pruned {
                 store.delete_alarm(c.alarm.id)
@@ -162,5 +164,22 @@ mod tests {
         assert_eq!(c.engine.muted_rules(), ["alert:lowDisk"]);
         assert_eq!(s.alarms(10).unwrap().len(), 1);
         assert_eq!(s.muted_rules().unwrap(), ["alert:lowDisk"]);
+    }
+
+    /// DY-7 (ADR 0108, guard D): a batch of alarm changes (each an alarm row and a change-log row) is one commit.
+    #[test]
+    fn an_alarm_batch_is_one_commit() {
+        let mut s = Store::memory().unwrap();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), dyno_core::time::FixedZone::shared(0));
+        let changes: Vec<AlarmChange> = ["alert:a", "alert:b", "alert:c"]
+            .into_iter()
+            .flat_map(|r| e.apply(raise(r)))
+            .collect();
+        assert_eq!(changes.len(), 3);
+        let commits = s.count_commits();
+        AlarmCentre::persist(&s, &changes);
+        assert_eq!(commits.take(), 1);
+        assert_eq!(s.alarms(10).unwrap().len(), 3);
+        assert_eq!(s.alarm_events(None, 10).unwrap().len(), 3);
     }
 }

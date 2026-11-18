@@ -68,6 +68,8 @@ dyno-platform = { workspace = true, features = ["test-support"] }
 # The helper rig serves a real dispatcher to the agent (tests/common/helper_rig.rs); no cycle: the helper does not depend on the agent.
 dyno-helper = { path = "../dyno-helper" }
 postcard.workspace = true
+# The commit hook counts a tick's transactions in the budget tests (ADR 0108 DY-7, guard D); test builds only.
+rusqlite = { version = "0.41", features = ["bundled", "hooks"] }
 plist = "1"
 tempfile.workspace = true
 proptest = "1"

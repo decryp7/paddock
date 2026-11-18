@@ -185,8 +185,11 @@ impl Sampler {
         if core.settings.flight_recorder {
             core.recorder.record(sample, &core.latest.groups);
         }
+        // The tick's writes (history, disks, prune, alerts, alarms) are one transaction, not one commit per statement under the
+        // core lock (rule 85; ADR 0108 DY-7).
+        let batch = core.store.batch();
         let groups_for_history: &[AppGroup] = if fresh { &core.latest.groups } else { &[] };
-        if let Err(e) = core.writer.record(&mut core.store, sample, groups_for_history) {
+        if let Err(e) = core.writer.record(&core.store, sample, groups_for_history) {
             log::error!("dyno-agent: history write failed: {e}");
         }
         if t.millis() % 900_000 < 5_000 {
@@ -220,6 +223,7 @@ impl Sampler {
             push_alarm_changes(shared, changes);
         }
         let ticked = core.alarms.tick(&core.store, t);
+        drop(batch);
         push_alarm_changes(shared, ticked);
         let pressure = sample
             .memory
@@ -287,5 +291,55 @@ fn push_live(shared: &Shared, live: &LiveUpdate) {
         if let Some(d) = s.wants() {
             let _ = s.tx.try_send(Message::Live(Box::new(for_detail(live.clone(), d))));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dyno_core::time::HOUR;
+    use dyno_platform::fake::{process, quiet_sample, Fake};
+
+    /// DY-7 (ADR 0108, guard D): one sampler tick under the core lock writes its history, disks, prune, alerts and alarms in
+    /// one transaction, not one autocommit statement each.
+    #[test]
+    fn a_sampler_tick_is_one_commit() {
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let fake = Fake::new();
+        fake.add_process(process(100, "busy", 60.0));
+        let (shared, sensors, processes) = Shared::build(
+            crate::paths::Dirs::at(tmp.path().join("data")),
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+        )
+        .unwrap();
+        let mut sampler = Sampler::new(sensors, processes);
+        // A quarter-hour mark more than an hour after the epoch: the disks are due, the prune is due, every rollup tier runs.
+        let t = Timestamp(4 * 900_000 + HOUR);
+        let mut sample = quiet_sample(t);
+        for i in 0..3 {
+            sample.disks.push(dyno_core::metrics::DiskSample {
+                id: format!("disk{i}"),
+                name: "Disk".into(),
+                mount: format!("/d{i}"),
+                total: 100,
+                free: 40,
+                removable: false,
+            });
+        }
+        let procs = vec![process(100, "busy", 60.0)];
+        let groups = group(&procs);
+        let overhead = Overhead {
+            agent_cpu: 0.0,
+            agent_memory: 0,
+            sampling_interval_ms: 2_000,
+            process_interval_ms: 10_000,
+        };
+        let commits = lock(&shared.core).store.count_commits();
+        sampler.record(&shared, &sample, Some((procs, groups)), overhead, t);
+        assert_eq!(commits.take(), 1, "one tick, one transaction");
+        let core = lock(&shared.core);
+        assert_eq!(core.store.disk_free(Timestamp(0), Timestamp(t.millis() + HOUR)).unwrap().len(), 3);
     }
 }

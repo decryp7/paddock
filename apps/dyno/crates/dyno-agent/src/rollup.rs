@@ -50,7 +50,9 @@ impl Default for HistoryWriter {
 impl HistoryWriter {
     /// Records one tick: the raw point (when a step has passed), app sums, disk space and any closed buckets.
     /// `groups` is empty on ticks that did not refresh the process table.
-    pub fn record(&mut self, store: &mut Store, s: &SystemSample, groups: &[AppGroup]) -> Result<()> {
+    /// One transaction for the whole tick (rule 85; ADR 0108 DY-7).
+    pub fn record(&mut self, store: &Store, s: &SystemSample, groups: &[AppGroup]) -> Result<()> {
+        let _batch = store.batch();
         let at = s.at.floor_to(RAW_STEP_MS);
         if self.last_raw != Some(at) {
             let mut p = point_from(s);
@@ -65,7 +67,7 @@ impl HistoryWriter {
         roll_up(store, s.at)
     }
 
-    fn add_apps(&mut self, store: &mut Store, now: Timestamp, groups: &[AppGroup]) -> Result<()> {
+    fn add_apps(&mut self, store: &Store, now: Timestamp, groups: &[AppGroup]) -> Result<()> {
         let minute = now.floor_to(MINUTE);
         if self.apps.minute != minute {
             self.flush_apps(store)?;
@@ -84,7 +86,7 @@ impl HistoryWriter {
     }
 
     /// Writes the finished minute's top apps (average CPU over the process ticks of the minute, peak memory).
-    fn flush_apps(&mut self, store: &mut Store) -> Result<()> {
+    fn flush_apps(&mut self, store: &Store) -> Result<()> {
         let acc = std::mem::take(&mut self.apps);
         if acc.ticks == 0 {
             return Ok(());
@@ -106,8 +108,9 @@ impl HistoryWriter {
         Ok(())
     }
 
-    /// Stores each disk's free space once per quarter hour (the trend needs days, not seconds).
+    /// Stores each disk's free space once per quarter hour (the trend needs days, not seconds), in one transaction.
     pub fn record_disks(&self, store: &Store, s: &SystemSample) -> Result<()> {
+        let _batch = store.batch();
         let at = s.at.floor_to(15 * MINUTE);
         for d in &s.disks {
             store.put_disk_free(&d.id, at, d.total, d.free)?;
@@ -254,5 +257,49 @@ mod tests {
         w.record_disks(&store, &s).unwrap();
         assert_eq!(store.disk_free(Timestamp(0), Timestamp(HOUR)).unwrap().len(), 1);
         w.prune(&store, Default::default(), Timestamp(MINUTE)).unwrap();
+    }
+
+    /// DY-7 (ADR 0108, guard D): a tick's rows (the raw and per-core points, the closed minute's apps, every rollup tier and
+    /// its progress mark), a quarter hour's disks and an hourly prune are one commit each, however many rows they write.
+    #[test]
+    fn a_tick_its_disks_and_a_prune_are_one_commit_each() {
+        let mut store = Store::memory().unwrap();
+        let mut w = HistoryWriter::default();
+        let mut s = dyno_platform::fake::quiet_sample(Timestamp(0));
+        for i in 0..3 {
+            s.disks.push(dyno_core::metrics::DiskSample {
+                id: format!("disk{i}"),
+                name: "Disk".into(),
+                mount: format!("/d{i}"),
+                total: 100,
+                free: 40,
+                removable: false,
+            });
+        }
+        let apps = [AppGroup {
+            id: "busy".into(),
+            name: "busy".into(),
+            exe: None,
+            pids: vec![1],
+            cpu: Measured::Value(50.0),
+            memory: Measured::Value(100),
+            disk_bps: Measured::Value(0.0),
+            partial: false,
+        }];
+        for i in 0..(HOUR / RAW_STEP_MS) {
+            s.at = Timestamp(i * RAW_STEP_MS);
+            w.record(&mut store, &s, &apps).unwrap();
+        }
+        let commits = store.count_commits();
+        // An hour boundary: a raw point, the last minute's apps, and the minute, quarter-hour and hour rollups with their marks.
+        s.at = Timestamp(HOUR + 1);
+        w.record(&mut store, &s, &apps).unwrap();
+        assert!(!store.points(Tier::Hour, Timestamp(0), Timestamp(2 * HOUR)).unwrap().is_empty());
+        assert_eq!(commits.take(), 1, "one tick, one transaction");
+        w.record_disks(&store, &s).unwrap();
+        assert_eq!(store.disk_free(Timestamp(0), Timestamp(2 * HOUR)).unwrap().len(), 3);
+        assert_eq!(commits.take(), 1, "every disk of a quarter hour in one transaction");
+        w.prune(&store, Default::default(), Timestamp(HOUR + 1)).unwrap();
+        assert_eq!(commits.take(), 1, "the prune's deletes in one transaction");
     }
 }
