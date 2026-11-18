@@ -222,10 +222,9 @@ fn a_blob_a_partial_clone_omitted_is_read_through_git() {
     let (d, first, _) = repo();
     git(d.path(), &["config", "uploadpack.allowFilter", "true"]);
     let clone = paddock_testkit::tempdir();
-    let url = format!(
-        "file://{}",
-        d.path().display().to_string().replace('\\', "/")
-    );
+    let origin = d.path().display().to_string();
+    // conformance: path-text — a file:// URL for git clone (URLs use `/`), not a path compared with another
+    let url = format!("file://{}", origin.replace('\\', "/"));
     let target = clone.path().join("c");
     let out = TestCommand::new("git")
         .args(["clone", "-q", "--no-checkout", "--filter=blob:none", &url])
