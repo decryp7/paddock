@@ -259,10 +259,6 @@ impl Chromium {
     }
 
     /// [`Chromium::launch`] with the sandbox decision made by the caller (tests run the root branch on any OS).
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "the browser, a GUI program: this crate cannot use Debrief's process helper"
-    )]
     fn launch_with(exe: &Browser, opts: &LaunchOptions, sandbox: Sandbox) -> Result<Chromium> {
         let (dir, throwaway) = match &opts.profile {
             Profile::Throwaway(base) => (
@@ -278,7 +274,8 @@ impl Chromium {
                 log::warn!("The browser frame colour could not be written: {e}");
             }
         }
-        let mut cmd = std::process::Command::new(&exe.path);
+        // The one constructor, as paddock-chromium launches it: counted for budget tests.
+        let mut cmd = paddock_proc::command(&exe.path);
         cmd.args(command_line(exe.flavor, &dir, opts, sandbox))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())

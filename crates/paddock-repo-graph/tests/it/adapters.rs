@@ -2,13 +2,12 @@
 #![cfg(all(feature = "git-history", feature = "cargo-metadata"))]
 use paddock_repo_graph::{CargoCli, CargoMetadata, GitHistory, GraphError, History};
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 const T: Duration = Duration::from_secs(60);
 
 fn git(dir: &Path, args: &[&str]) {
-    let st = Command::new("git")
+    let st = paddock_proc::command("git")
         .arg("-C")
         .arg(dir)
         .args([

@@ -37,7 +37,7 @@ fn main() {
         .nth(1)
         .and_then(|s| s.parse().ok())
         .unwrap_or(60);
-    let mut child = std::process::Command::new("sleep")
+    let mut child = paddock_proc::command("sleep")
         .arg("1000")
         .spawn()
         .expect("sleep");

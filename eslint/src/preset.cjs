@@ -2,6 +2,7 @@
 // The flat-config preset: `module.exports = defineConfig(...require('@decryp7/paddock-eslint').preset({ prefix: 'pc' }))`.
 // Needs eslint, @eslint/js, typescript-eslint and angular-eslint (peer dependencies) in the app.
 const plugin = require('./plugin.cjs');
+const { bulkCalls } = require('./bulk.cjs');
 
 /** A peer dependency, resolved from the app being linted first (so a preset linked from a sibling folder works), then from here. */
 function peer(name) {
@@ -22,6 +23,7 @@ const DEFAULT_IGNORES = ['dist/**', '.angular/**', 'coverage/**', 'node_modules/
  * @param {object} [options.rules]           extra rules for `*.ts`
  * @param {string} [options.storeFlagsAllowedIn] regex of files that may hold `loading`/`error` state flags (the withRequestStatus feature itself)
  * @param {boolean} [options.signalForms]    rule 37: forbid new reactive forms (off while existing forms stay)
+ * @param {object} [options.bulk]           options of the `bulkCalls()` block (PRINCIPLES, Bulk APIs; report-only by default)
  */
 function preset(options) {
   if (!options || !options.prefix) throw new Error('paddock-eslint preset: { prefix } is required (the app\'s selector prefix)');
@@ -106,6 +108,8 @@ function preset(options) {
       plugins: { paddock: plugin },
       rules: { 'paddock/dialog-frame-footer': 'error' },
     },
+    // PRINCIPLES, Bulk APIs: no backend call per item (src/bulk.cjs; report-only: PADDOCK_BULK_LINT=warn reads it).
+    ...bulkCalls(options.bulk),
   ];
 }
 

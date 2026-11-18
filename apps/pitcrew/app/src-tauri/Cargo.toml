@@ -20,6 +20,8 @@ crate-type = ["rlib"]
 paddock-build = { path = "../../../../crates/paddock-build", features = ["tauri-build"] }
 
 [dependencies]
+# The one constructor of a program's Command (no console window on Windows; counted for budget tests).
+paddock-env = { path = "../../../../crates/paddock-env" }
 pitcrew-core.workspace = true
 notify-channels = { path = "../../crates/notify-channels" }
 serde.workspace = true

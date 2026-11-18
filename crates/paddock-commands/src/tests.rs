@@ -632,11 +632,15 @@ fn generated_files() -> Vec<(&'static str, String)> {
     let ipc_header = format!(
         "// Generated from the Rust wire types of paddock-commands (ts-rs). Do not edit: {REGENERATE}.\n\n"
     );
-    let ipc_types = [ErrorCode::decl(), CommandError::decl()]
-        .into_iter()
-        .map(|d| format!("export {d}\n"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let ipc_types = [
+        ErrorCode::decl(),
+        CommandError::decl(),
+        crate::ItemResult::<()>::decl(),
+    ]
+    .into_iter()
+    .map(|d| format!("export {d}\n"))
+    .collect::<Vec<_>>()
+    .join("\n");
     let codes = ErrorCode::ALL
         .iter()
         .map(|c| format!("'{}'", c.as_str()))

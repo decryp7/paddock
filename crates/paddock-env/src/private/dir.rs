@@ -440,7 +440,7 @@ mod common_tests {
     fn a_macos_folder_acl_refuses_only_write_entries_for_others() {
         let t = temp();
         let chmod = |entry: &str, p: &Path| {
-            let out = std::process::Command::new("/bin/chmod")
+            let out = crate::command::command("/bin/chmod")
                 .args(["+a", entry, p.to_str().unwrap()])
                 .output()
                 .unwrap();
@@ -510,7 +510,7 @@ mod common_tests {
         ] {
             let p = t.path().join(entry.replace([' ', ','], "-"));
             std::fs::create_dir(&p).unwrap();
-            let out = std::process::Command::new("/bin/chmod")
+            let out = crate::command::command("/bin/chmod")
                 .args(["+a", entry, p.to_str().unwrap()])
                 .output()
                 .unwrap();
@@ -541,7 +541,7 @@ mod common_tests {
     fn a_macos_parent_acl_is_judged_by_the_parent_rule() {
         let t = temp();
         let chmod = |entry: &str, p: &Path| {
-            let out = std::process::Command::new("/bin/chmod")
+            let out = crate::command::command("/bin/chmod")
                 .args(["+a", entry, p.to_str().unwrap()])
                 .output()
                 .unwrap();
@@ -558,7 +558,7 @@ mod common_tests {
             PrivateDir::open(&child, Links::Refuse).unwrap();
             PrivateDir::create_all(&child).unwrap();
             assert_eq!(
-                std::process::Command::new("/bin/chmod")
+                crate::command::command("/bin/chmod")
                     .args(["-N", parent.to_str().unwrap()])
                     .status()
                     .unwrap()
@@ -583,7 +583,7 @@ mod common_tests {
                 );
             }
             assert_eq!(
-                std::process::Command::new("/bin/chmod")
+                crate::command::command("/bin/chmod")
                     .args(["-N", parent.to_str().unwrap()])
                     .status()
                     .unwrap()
@@ -711,7 +711,7 @@ mod tests {
         if std::env::var_os(MARKER).is_some() {
             return body();
         }
-        let out = std::process::Command::new(std::env::current_exe().unwrap())
+        let out = crate::command::command(std::env::current_exe().unwrap())
             .args(["--exact", test, "--test-threads=1", "--nocapture"])
             .env(MARKER, "1")
             .output()
@@ -1182,7 +1182,7 @@ mod tests {
         let t = temp();
         let p = t.path().join("d");
         std::fs::create_dir(&p).unwrap();
-        let status = std::process::Command::new("/bin/chmod")
+        let status = crate::command::command("/bin/chmod")
             .args([
                 "+a",
                 "everyone allow list,add_file,delete_child",
@@ -1199,7 +1199,7 @@ mod tests {
         let made = PrivateDir::create_all(&d).unwrap();
         made.write_atomic("f", b"x").unwrap();
         let f = d.join("f");
-        let status = std::process::Command::new("/bin/chmod")
+        let status = crate::command::command("/bin/chmod")
             .args(["+a", "everyone allow read", f.to_str().unwrap()])
             .status()
             .unwrap();
@@ -1211,7 +1211,7 @@ mod tests {
         // An entry that only denies takes nothing away from owner-only.
         let g = d.join("g");
         made.write_atomic("g", b"x").unwrap();
-        let status = std::process::Command::new("/bin/chmod")
+        let status = crate::command::command("/bin/chmod")
             .args(["+a", "everyone deny delete", g.to_str().unwrap()])
             .status()
             .unwrap();
@@ -1226,7 +1226,6 @@ mod windows_tests {
     use super::*;
     use crate::folder::Refusal;
     use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
-    use std::process::Command;
 
     const EVERYONE: &str = "S-1-1-0";
     const AUTHENTICATED_USERS: &str = "S-1-5-11";
@@ -1249,7 +1248,7 @@ mod windows_tests {
 
     /// Runs `icacls` on a folder or file of the test's own temporary tree.
     fn icacls(path: &Path, args: &[&str]) {
-        let out = Command::new("icacls")
+        let out = crate::command::command("icacls")
             .arg(path)
             .args(args)
             .output()
@@ -1341,7 +1340,7 @@ mod windows_tests {
     }
 
     fn junction(link: &Path, target: &Path) {
-        let out = Command::new("cmd")
+        let out = crate::command::command("cmd")
             .args(["/C", "mklink", "/J"])
             .arg(link)
             .arg(target)

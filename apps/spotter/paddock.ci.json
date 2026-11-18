@@ -27,6 +27,7 @@
     "cd apps/spotter/app",
     "node ../../../scripts/npm-audit.mjs",
     "npm run lint",
+    "npm run lint:report",
     "npx ng build",
     "npx ng test --watch=false --coverage"
   ],

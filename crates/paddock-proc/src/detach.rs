@@ -316,9 +316,9 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    #[allow(clippy::disallowed_methods)] // a test child of this very test binary
     fn the_last_resort_closes_inherited_descriptors() {
-        let out = std::process::Command::new(std::env::current_exe().unwrap())
+        // A test child of this very test binary.
+        let out = crate::command(std::env::current_exe().unwrap())
             .args([
                 "--exact",
                 "detach::tests::last_resort_child",

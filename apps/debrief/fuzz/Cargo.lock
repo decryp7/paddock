@@ -2098,6 +2098,7 @@ version = "0.2.0"
 dependencies = [
  "fs4",
  "httpdate",
+ "paddock-env",
  "paddock-jobs",
  "paddock-limits",
  "paddock-workspace-hack",
@@ -2221,7 +2222,6 @@ dependencies = [
  "uuid",
  "windows",
  "windows-core",
- "windows-sys 0.52.0",
  "windows-sys 0.59.0",
  "windows-sys 0.60.2",
  "windows-sys 0.61.2",

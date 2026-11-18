@@ -101,7 +101,9 @@ mod uid_tests {
     }
 }
 
-pub use command::{CREATE_NO_WINDOW, KEPT_ENV, RESTRICTING, clean_env, command, lower_priority};
+pub use command::{
+    CREATE_NO_WINDOW, KEPT_ENV, RESTRICTING, attached_command, clean_env, command, lower_priority,
+};
 pub use detach::{
     DetachError, close_inherited, keep_handles_from_children, spawn_detached,
     spawn_detached_clearing_handles,
@@ -114,6 +116,8 @@ pub use login::{
     MAX_PATH_LEN, SHELL_TIMEOUT, ask_shell, login_path, merge_path, parse_probe_output,
     probe_script, shell_candidates,
 };
+/// The process-start counter of budget tests: `starts::assert_starts(1, || ...)` (counted in [`command`]; `paddock_env::starts`).
+pub use paddock_env::starts;
 pub use run::{
     DEFAULT_MAX_OUTPUT, Limits, Outcome, Output, RunError, run_bounded, run_bounded_noting,
 };

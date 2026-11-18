@@ -1083,9 +1083,8 @@ pub(crate) fn answer(
     limit: std::time::Duration,
 ) -> Answered {
     use std::io::Read;
-    #[allow(clippy::disallowed_methods)]
     // a read-only question; the child is ended only through the handle held here
-    let child = Command::new(program)
+    let child = paddock_env::command::command(program)
         .args(args)
         .envs(env.iter().copied())
         .stdin(Stdio::null())

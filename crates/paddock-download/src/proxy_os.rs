@@ -48,18 +48,14 @@ pub(crate) fn system_rules() -> ProxyRules {
 #[cfg(any(target_os = "macos", windows))]
 fn run(program: &str, args: &[&str]) -> Option<String> {
     use std::io::Read;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     use std::time::Instant;
-    let mut cmd = Command::new(program);
+    // The one constructor: no console window on Windows, counted for budget tests.
+    let mut cmd = paddock_env::command::command(program);
     cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
     let mut child = cmd.spawn().ok()?;
     let mut out = child.stdout.take()?;
     let reader = std::thread::spawn(move || {

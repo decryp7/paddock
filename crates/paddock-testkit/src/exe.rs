@@ -63,7 +63,7 @@ fn install_program(path: &Path, bytes: &[u8]) -> io::Result<()> {
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::write(&staging, bytes)?;
-    let made = Command::new(INSTALL)
+    let made = paddock_env::command::command(INSTALL)
         .args(["-m", "755"])
         .arg(&staging)
         .arg(path)

@@ -6,7 +6,7 @@ const { defineConfig } = require('eslint/config');
 const tseslint = require('typescript-eslint');
 const angular = require('angular-eslint');
 // Every e2e page runs on the pinned clock: specs reach `test` through e2e/test.ts only (C133).
-const { e2ePinnedClock } = require('../../../eslint/src/index.cjs');
+const { bulkCalls, e2ePinnedClock } = require('../../../eslint/src/index.cjs');
 
 module.exports = defineConfig(
   {
@@ -27,4 +27,6 @@ module.exports = defineConfig(
     extends: [angular.configs.templateRecommended, angular.configs.templateAccessibility],
   },
   ...e2ePinnedClock(),
+  // PRINCIPLES, Bulk APIs: no backend call per item (report-only: PADDOCK_BULK_LINT=warn reads it).
+  ...bulkCalls(),
 );

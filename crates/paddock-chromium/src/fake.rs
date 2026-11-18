@@ -610,7 +610,7 @@ fn hold_if_asked(ws: &tungstenite::WebSocket<std::net::TcpStream>, method: &str)
     while held(method) {
         if END_KEEPING_CONNECTION.load(Ordering::SeqCst) {
             if let Ok(socket) = ws.get_ref().try_clone() {
-                let _ = std::process::Command::new("sleep")
+                let _ = paddock_proc::command("sleep")
                     .arg("30")
                     .stdin(std::os::fd::OwnedFd::from(socket))
                     .stdout(std::process::Stdio::null())

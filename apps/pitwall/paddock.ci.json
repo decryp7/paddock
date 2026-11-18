@@ -31,6 +31,7 @@
     "cd apps/pitwall/app",
     "node ../../../scripts/npm-audit.mjs",
     "npm run lint",
+    "npm run lint:report",
     "npx ng build",
     "npm run check:index",
     "npx ng test --watch=false --coverage",

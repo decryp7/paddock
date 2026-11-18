@@ -13,6 +13,8 @@ name = "dyno-bench"
 path = "src/main.rs"
 
 [dependencies]
+# The one constructor of a program's Command (counted for budget tests).
+paddock-env = { path = "../../../../crates/paddock-env" }
 dyno-core.workspace = true
 # The clock the repetition driver takes (ManualClock in tests).
 paddock-bench = { path = "../../../../crates/paddock-bench" }

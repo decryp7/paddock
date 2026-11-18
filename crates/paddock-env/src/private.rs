@@ -267,10 +267,9 @@ mod named_folder_tests {
 #[cfg(all(test, windows))]
 mod named_folder_windows_tests {
     use super::*;
-    use std::process::Command;
 
     fn everyone_can_write(folder: &Path) {
-        let out = Command::new("icacls")
+        let out = crate::command::command("icacls")
             .arg(folder)
             .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
             .output()

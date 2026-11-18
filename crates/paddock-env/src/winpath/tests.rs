@@ -470,7 +470,7 @@ mod on_windows {
         struct Subst(String);
         impl Drop for Subst {
             fn drop(&mut self) {
-                let _ = std::process::Command::new("subst")
+                let _ = crate::command::command("subst")
                     .args([&self.0, "/d"])
                     .status();
             }
@@ -481,7 +481,7 @@ mod on_windows {
             .map(|l| format!("{l}:"))
             .find(|dr| !Path::new(&format!("{dr}\\")).exists())
             .unwrap();
-        let status = std::process::Command::new("subst")
+        let status = crate::command::command("subst")
             .arg(&free)
             .arg(d.path())
             .status()

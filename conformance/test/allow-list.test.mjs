@@ -89,6 +89,7 @@ const SAMPLE = {
 
   C131: ['x/tests/golden/a.json', '{"uid": 501}\n'],
   C135: ['apps/a/src/x.spec.ts', "installLeakDetector({ mode: 'off' });\n"],
+  C140: ['apps/a/app/src/x.store.ts', '// per-item: each runner answers on its own pipe\n'],
 };
 const users = checks.filter((c) => c.allowList);
 

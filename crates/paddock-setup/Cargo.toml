@@ -48,5 +48,7 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
+# The one constructor of a program's Command (the fake installer example).
+paddock-env = { workspace = true }
 tempfile = "3"
 paddock-testkit = { workspace = true }

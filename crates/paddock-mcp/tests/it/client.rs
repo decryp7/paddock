@@ -263,11 +263,11 @@ fn the_link_reports_its_version_and_a_connection_pings() {
 /// is the app being killed. Never the user's programs (ER-14).
 fn owner_process() -> std::process::Child {
     #[cfg(unix)]
-    let mut c = std::process::Command::new("sleep");
+    let mut c = paddock_proc::command("sleep");
     #[cfg(unix)]
     c.arg("300");
     #[cfg(windows)]
-    let mut c = std::process::Command::new("ping");
+    let mut c = paddock_proc::command("ping");
     #[cfg(windows)]
     c.args(["-n", "300", "127.0.0.1"]);
     c.stdin(std::process::Stdio::null())

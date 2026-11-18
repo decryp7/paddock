@@ -208,6 +208,10 @@ fn spawn(arg: &Value, dir: &Path) -> Result<(), String> {
         .and_then(Value::as_str)
         .ok_or("spawn needs a program")?;
     let beside: PathBuf = dir.join(format!("{program}{}", std::env::consts::EXE_SUFFIX));
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the stand-in is compiled alone by rustc with no dependencies (stand_in.rs builds it), so it cannot reach paddock_env's constructor"
+    )]
     let mut cmd = Command::new(if beside.is_file() {
         beside
     } else {

@@ -9,7 +9,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 /// A script of its own, and a write handle on it that is let go when the first retry has happened (or after the hang guard).
@@ -25,7 +25,7 @@ fn held_script() -> (tempfile::TempDir, PathBuf, std::thread::JoinHandle<()>) {
         .unwrap();
     f.write_all(b"#!/bin/sh\necho started\n").unwrap();
     // The precondition (ER-33): while the handle is held, a plain start really fails with ETXTBSY.
-    let raw = Command::new(&path).stdin(Stdio::null()).spawn();
+    let raw = paddock_proc::command(&path).stdin(Stdio::null()).spawn();
     assert!(
         raw.as_ref().is_err_and(is_text_busy),
         "the held write handle must make a plain start fail with ETXTBSY, got {raw:?}"
@@ -45,7 +45,11 @@ fn held_script() -> (tempfile::TempDir, PathBuf, std::thread::JoinHandle<()>) {
 #[test]
 fn a_bounded_run_of_a_program_held_open_for_writing_starts_after_the_retry() {
     let (_dir, path, releaser) = held_script();
-    let out = run_bounded(Command::new(&path), Limits::new(Duration::from_secs(30))).unwrap();
+    let out = run_bounded(
+        paddock_proc::command(&path),
+        Limits::new(Duration::from_secs(30)),
+    )
+    .unwrap();
     releaser.join().unwrap();
     assert!(out.success(), "{out:?}");
     assert_eq!(out.stdout_text().trim(), "started");
@@ -54,7 +58,7 @@ fn a_bounded_run_of_a_program_held_open_for_writing_starts_after_the_retry() {
 #[test]
 fn a_supervised_child_held_open_for_writing_starts_after_the_retry() {
     let (_dir, path, releaser) = held_script();
-    let mut child = Supervised::spawn(Command::new(&path)).unwrap();
+    let mut child = Supervised::spawn(paddock_proc::command(&path)).unwrap();
     releaser.join().unwrap();
     child.wait();
 }

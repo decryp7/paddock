@@ -32,6 +32,7 @@ app	dyno	ubuntu-latest	apps/dyno/app	TZ=Pacific/Auckland npx ng test --watch=fal
 app	dyno	ubuntu-latest	apps/dyno/app	node ../../../conformance/ci/check-index.mjs dist/dyno-app/browser/index.html
 app	dyno	ubuntu-latest	apps/dyno/app	node ../../../scripts/npm-audit.mjs
 app	dyno	ubuntu-latest	apps/dyno/app	npm run lint
+app	dyno	ubuntu-latest	apps/dyno/app	npm run lint:report
 app	dyno	ubuntu-latest	apps/dyno/app	npx ng build
 app	dyno	ubuntu-latest	apps/dyno/app	npx ng test --watch=false --coverage
 app	dyno	windows-latest	apps/dyno	cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper
@@ -39,6 +40,7 @@ app	pitcrew	ubuntu-latest		node conformance/bin/paddock-conformance.mjs --app pi
 app	pitcrew	ubuntu-latest		npm run build -w ui
 app	pitcrew	ubuntu-latest	apps/pitcrew/app	node ../../../scripts/npm-audit.mjs
 app	pitcrew	ubuntu-latest	apps/pitcrew/app	npm run lint
+app	pitcrew	ubuntu-latest	apps/pitcrew/app	npm run lint:report
 app	pitcrew	ubuntu-latest	apps/pitcrew/app	npx ng build
 app	pitcrew	ubuntu-latest	apps/pitcrew/app	npx ng test --watch=false --coverage
 app	pitwall	ubuntu-latest		git fetch --no-tags --depth=1 origin '+refs/tags/pitwall-v*:refs/tags/pitwall-v*'
@@ -57,6 +59,7 @@ app	pitwall	ubuntu-latest	apps/pitwall/app	node ../../../scripts/npm-audit.mjs
 app	pitwall	ubuntu-latest	apps/pitwall/app	node ../scripts/ci/ui-coverage-guard.mjs --min 80 --dir coverage
 app	pitwall	ubuntu-latest	apps/pitwall/app	npm run check:index
 app	pitwall	ubuntu-latest	apps/pitwall/app	npm run lint
+app	pitwall	ubuntu-latest	apps/pitwall/app	npm run lint:report
 app	pitwall	ubuntu-latest	apps/pitwall/app	npx ng build
 app	pitwall	ubuntu-latest	apps/pitwall/app	npx ng test --watch=false --coverage
 app	shell-demo	ubuntu-latest		node scripts/demo-release.mjs shell-demo icons
@@ -72,6 +75,7 @@ app	spotter	ubuntu-latest	apps/spotter/app	PW_PORT=$((4369 + E2E_INDEX)) npx pla
 app	spotter	ubuntu-latest	apps/spotter/app	PW_PORT=4372 npx playwright test --project=webkit --workers=1
 app	spotter	ubuntu-latest	apps/spotter/app	node ../../../scripts/npm-audit.mjs
 app	spotter	ubuntu-latest	apps/spotter/app	npm run lint
+app	spotter	ubuntu-latest	apps/spotter/app	npm run lint:report
 app	spotter	ubuntu-latest	apps/spotter/app	npx ng build
 app	spotter	ubuntu-latest	apps/spotter/app	npx ng test --watch=false --coverage
 app	workbench-demo	ubuntu-latest		node scripts/demo-release.mjs workbench-demo icons
@@ -945,6 +949,7 @@ job	ui		ui	npm run build
 job	ui		ui	npm run build:e2e
 job	ui		ui	npm run i18n:check
 job	ui		ui	npm run lint
+job	ui		ui	npm run lint:report
 job	ui		ui	npm run shell-demo:build
 job	ui		ui	npm run test:scripts
 job	ui		ui	npm run test:tokens

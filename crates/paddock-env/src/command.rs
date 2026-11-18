@@ -4,8 +4,10 @@
 //! `paddock_proc::command` re-exports [`command`] (the shared crates and tools start programs through it, and clippy forbids
 //! `Command::new` there), and the test kit's `TestCommand` builds on it, so a test's child has the same start flags as the
 //! product's. It lives in this leaf crate because `paddock-proc`'s own tests use the test kit: the kit cannot depend on
-//! `paddock-proc` (that made a publish cycle, ci.yml 7989; ADR 0100). Apps that cannot depend on it keep a registered copy
-//! (`docs/known-copies.toml`, rule 55, entry `no-console-command`); this file is the canonical one.
+//! `paddock-proc` (that made a publish cycle, ci.yml 7989; ADR 0100). Clippy forbids `Command::new` in the shared crates and every
+//! app, so every program is started from here ([`command`], or [`attached_command`] without creation flags), and each start is
+//! counted for budget tests ([`crate::starts`]). The registered copies of this constructor (`docs/known-copies.toml`, rule 55,
+//! entry `no-console-command`) were folded into it; the entry keeps this file as the canonical one.
 
 use std::ffi::{OsStr, OsString};
 use std::process::Command;
@@ -17,6 +19,8 @@ pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// or, under Remote Desktop, show it). The canonical constructor; clippy forbids `Command::new` elsewhere.
 #[allow(clippy::disallowed_methods)] // the canonical constructor
 pub fn command(program: impl AsRef<OsStr>) -> Command {
+    // The counting seam of budget tests (`crate::starts`): one start per command made here.
+    crate::starts::note();
     let cmd = Command::new(program);
     #[cfg(windows)]
     let cmd = {
@@ -26,6 +30,15 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
         cmd
     };
     cmd
+}
+
+/// A command with no creation flags: the child shares this process's console (a command-line front end that runs its helper
+/// in the same terminal, so Ctrl+C and the output reach it) or shows windows of its own the usual way (the app starting itself
+/// again after an update). Counted like [`command`]; use [`command`] for a tool whose console window must not appear.
+#[allow(clippy::disallowed_methods)] // the canonical constructor without creation flags
+pub fn attached_command(program: impl AsRef<OsStr>) -> Command {
+    crate::starts::note();
+    Command::new(program)
 }
 
 /// A variable that **restricts** what a child may do, with the values that restrict it (ER-47). A value that loosens it

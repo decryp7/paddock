@@ -141,7 +141,7 @@ mod tests {
     fn windows_a_private_folder_passes_the_named_folder_check_under_a_parent_other_accounts_can_write()
      {
         let parent = tempfile::tempdir().unwrap();
-        let grant = std::process::Command::new("icacls")
+        let grant = paddock_env::command::command("icacls")
             .arg(parent.path())
             .args(["/grant", "*S-1-5-11:(OI)(CI)M"])
             .output()

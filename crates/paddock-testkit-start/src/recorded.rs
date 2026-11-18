@@ -208,7 +208,7 @@ fn millis(t: SystemTime) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     use std::time::Duration;
 
     /// A child that runs until its stdin closes (`cat` reading nothing), started after the caller's stamp.
@@ -253,7 +253,7 @@ mod tests {
     }
 
     fn ended() -> Exited {
-        let mut c = Command::new(std::env::current_exe().unwrap());
+        let mut c = paddock_proc::command(std::env::current_exe().unwrap());
         c.args(["--exact", "recorded::tests::no_such_test"])
             .stdout(Stdio::null())
             .stderr(Stdio::null());

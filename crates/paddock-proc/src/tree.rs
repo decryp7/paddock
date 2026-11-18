@@ -713,7 +713,7 @@ mod port_tests {
 mod presence_tests {
     use super::*;
     use crate::sys::{self, Exists};
-    use std::process::{Child, Command, Stdio};
+    use std::process::{Child, Stdio};
 
     #[test]
     fn what_sysinfo_could_not_read_is_unknown_and_only_proof_of_absence_is_gone() {
@@ -785,10 +785,10 @@ mod presence_tests {
 
     fn exiting_child() -> Child {
         #[cfg(unix)]
-        let mut c = Command::new("true");
+        let mut c = crate::command("true");
         #[cfg(windows)]
         let mut c = {
-            let mut c = Command::new("cmd");
+            let mut c = crate::command("cmd");
             c.args(["/C", "exit", "0"]);
             c
         };
@@ -851,7 +851,7 @@ mod presence_tests {
     #[cfg(unix)]
     #[test]
     fn a_live_child_hidden_from_sysinfo_is_not_gone() {
-        let mut child = Command::new("sleep").arg("30").spawn().expect("sleep");
+        let mut child = crate::command("sleep").arg("30").spawn().expect("sleep");
         let pid = child.id();
         assert_eq!(presence(pid), Presence::Running);
         assert_ne!(
@@ -895,7 +895,6 @@ mod presence_tests {
 mod tests {
     use super::*;
     use crate::Supervised;
-    use std::process::Command;
 
     #[test]
     fn an_unreadable_process_table_is_not_a_process_that_was_gone() {
@@ -1209,7 +1208,7 @@ mod tests {
     #[test]
     fn a_group_of_zombies_has_no_member_that_runs() {
         use std::os::unix::process::CommandExt;
-        let mut dead = Command::new("/bin/sh");
+        let mut dead = crate::command("/bin/sh");
         dead.args(["-c", "exit 0"]).process_group(0);
         let mut dead = dead.spawn().unwrap();
         let zombie = dead.id();
@@ -1226,7 +1225,7 @@ mod tests {
         assert!(!group_exists(zombie), "a zombie is not a member that runs");
         dead.wait().unwrap();
 
-        let mut live = Command::new("/bin/sh");
+        let mut live = crate::command("/bin/sh");
         live.args(["-c", "exec sleep 60"]).process_group(0);
         let mut live = live.spawn().unwrap();
         assert!(group_exists(live.id()));

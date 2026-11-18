@@ -15,7 +15,6 @@
 //! `PADDOCK_SETUP_E2E_SIGNATURE_OTHER` is the same bytes signed under another product's file name.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// How often an action that changes things (a delete, a clean-up, a whole fake update) is tried again: not a fast poll.
 const RETRY_EVERY: std::time::Duration = std::time::Duration::from_millis(500);
@@ -80,7 +79,7 @@ impl Drop for Site {
         // Windows Defender may still be scanning a program that was just started; remove with a bounded retry.
         let _ =
             paddock_testkit::retry_within(std::time::Duration::from_secs(20), RETRY_EVERY, || {
-                let _ = Command::new("cmd")
+                let _ = paddock_proc::command("cmd")
                     .args(["/c", "rmdir", "/s", "/q"])
                     .arg(&self.0)
                     .output();
@@ -93,7 +92,7 @@ impl Drop for Site {
 }
 
 fn run(program: &Path, args: &[&str]) -> (i32, String) {
-    let out = Command::new(program)
+    let out = paddock_proc::command(program)
         .args(args)
         .output()
         .expect("run paddock-setup");
@@ -112,7 +111,7 @@ fn run_env(program: &Path, args: &[&str], env: &[(&str, &str)]) -> (i32, String)
     let file =
         std::env::temp_dir().join(format!("paddock-setup-out-{}-{n}.txt", std::process::id()));
     let out = std::fs::File::create(&file).expect("output file");
-    let status = Command::new(program)
+    let status = paddock_proc::command(program)
         .args(args)
         .envs(env.iter().copied())
         .stdout(out)
@@ -131,7 +130,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn junction(link: &Path, target: &Path) {
-    let st = Command::new("cmd")
+    let st = paddock_proc::command("cmd")
         .args(["/c", "mklink", "/J"])
         .arg(link)
         .arg(target)
@@ -176,7 +175,7 @@ fn the_binary_carries_the_update_description_in_its_version_resource() {
         "(Get-Item '{}').VersionInfo | ForEach-Object {{ $_.FileDescription; $_.ProductName; $_.FileVersion }}",
         exe("PADDOCK_SETUP_EXE").display()
     );
-    let out = Command::new("powershell")
+    let out = paddock_proc::command("powershell")
         .args(["-NoProfile", "-Command", &ps])
         .output()
         .expect("powershell");
@@ -255,7 +254,7 @@ fn same_folder_ignores_case_a_trailing_backslash_and_short_names_but_not_a_junct
         "(New-Object -ComObject Scripting.FileSystemObject).GetFolder('{}').ShortPath",
         long.display()
     );
-    let short = Command::new("powershell")
+    let short = paddock_proc::command("powershell")
         .args(["-NoProfile", "-Command", &ps])
         .output()
         .unwrap();
@@ -357,7 +356,7 @@ fn check_dir_refuses_a_nested_folder_and_a_junction_in_program_files() {
         &exe("PADDOCK_SETUP_EXE"),
         &["check-dir", "--dir", &link.to_string_lossy()],
     );
-    let _ = Command::new("cmd")
+    let _ = paddock_proc::command("cmd")
         .args(["/c", "rmdir"])
         .arg(&link)
         .status();
@@ -391,7 +390,7 @@ fn a_hostile_updates_folder_is_renamed_aside() {
         0,
         "nothing was written through the junction"
     );
-    let _ = Command::new("cmd")
+    let _ = paddock_proc::command("cmd")
         .args(["/c", "rmdir"])
         .arg(site.0.join("updates.refused-1"))
         .status();
@@ -399,7 +398,7 @@ fn a_hostile_updates_folder_is_renamed_aside() {
 }
 
 fn reg(args: &[&str]) -> bool {
-    Command::new("reg")
+    paddock_proc::command("reg")
         .args(args)
         .output()
         .map(|o| o.status.success())
@@ -741,7 +740,7 @@ fn apply_update_refuses_a_hard_link_a_symlink_a_junction_and_a_file_larger_than_
     // A second hard link: the file can still be changed through the other name.
     let linked = dir.join("linked.exe");
     assert!(
-        Command::new("cmd")
+        paddock_proc::command("cmd")
             .args(["/c", "mklink", "/H"])
             .arg(&linked)
             .arg(&file)
@@ -755,7 +754,7 @@ fn apply_update_refuses_a_hard_link_a_symlink_a_junction_and_a_file_larger_than_
     // A symbolic link to the file is a reparse point.
     let sym = dir.join("sym.exe");
     assert!(
-        Command::new("cmd")
+        paddock_proc::command("cmd")
             .args(["/c", "mklink"])
             .arg(&sym)
             .arg(&file)
@@ -861,7 +860,7 @@ fn acl_identities(path: &Path) -> Vec<String> {
         "(Get-Acl -LiteralPath '{}').Access | ForEach-Object {{ $_.IdentityReference.Value }}",
         path.display()
     );
-    let out = Command::new("powershell")
+    let out = paddock_proc::command("powershell")
         .args(["-NoProfile", "-Command", &ps])
         .output()
         .unwrap();
@@ -962,7 +961,7 @@ fn hold_installing_logs_and_releases_when_its_parent_ends() {
     // `raw_arg`: cmd.exe parses its own command line, so the quotes must reach it as written. No pipe is inherited, so the
     // test does not wait for the holder's handles, only for cmd itself.
     use std::os::windows::process::CommandExt;
-    let status = Command::new("cmd")
+    let status = paddock_proc::command("cmd")
         .raw_arg(format!("/c \"{line}\""))
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -1004,7 +1003,7 @@ fn clean_staging_keeps_what_is_in_use_and_removes_the_rest() {
         .join("System32")
         .join("PING.EXE");
     std::fs::copy(&ping, busy.join("installer.exe")).unwrap();
-    let mut child = Command::new(busy.join("installer.exe"))
+    let mut child = paddock_proc::command(busy.join("installer.exe"))
         .args(["-t", "127.0.0.1"])
         .stdout(std::process::Stdio::null())
         .spawn()
@@ -1059,7 +1058,7 @@ fn check_dir_accepts_an_8_3_short_name_and_prints_the_long_one() {
 #[ignore = "Windows test VM only: PADDOCK_SETUP_VM=1 (ER-14)"]
 fn check_dir_refuses_a_folder_that_users_can_change() {
     let site = Site::new("users-modify");
-    let grant = Command::new("icacls")
+    let grant = paddock_proc::command("icacls")
         .arg(&site.0)
         .args(["/grant", "*S-1-5-32-545:(OI)(CI)M"])
         .output()
@@ -1118,12 +1117,12 @@ fn stop_all_ends_a_listed_program_from_the_folder_and_leaves_a_namesake_alone() 
     std::fs::copy(&ping, &mine).unwrap();
     std::fs::copy(&ping, &theirs).unwrap();
     // `ping -t` runs until it is ended; both children are made and ended by this test only.
-    let mut child_mine = Command::new(&mine)
+    let mut child_mine = paddock_proc::command(&mine)
         .args(["-t", "127.0.0.1"])
         .stdout(std::process::Stdio::null())
         .spawn()
         .expect("start the listed program");
-    let mut child_theirs = Command::new(&theirs)
+    let mut child_theirs = paddock_proc::command(&theirs)
         .args(["-t", "127.0.0.1"])
         .stdout(std::process::Stdio::null())
         .spawn()

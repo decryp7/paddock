@@ -325,3 +325,64 @@ describe('the real lint command goes red', { concurrency: targets.length }, () =
     });
   }
 });
+
+/** The rule ids ESLint reports for `text` planted at `file` in `dir`, with the app's own config and `env` over this process's (PADDOCK_BULK_LINT removed first). */
+function lintPlantedRules(dir, file, text, env) {
+  const script = `
+    const { ESLint } = require('eslint');
+    new ESLint({ cwd: ${JSON.stringify(dir)} }).lintText(${JSON.stringify(text)}, { filePath: ${JSON.stringify(join(dir, file))} })
+      .then((r) => process.stdout.write(JSON.stringify(r[0].messages.map((m) => m.ruleId))));`;
+  const base = { ...process.env };
+  delete base.PADDOCK_BULK_LINT;
+  const out = spawnSync(process.execPath, ['-e', script], { cwd: dir, env: { ...base, ...env }, encoding: 'utf8' });
+  assert.equal(out.status, 0, `${dir}: eslint failed: ${out.stderr}`);
+  return JSON.parse(out.stdout);
+}
+
+// `paddock/no-backend-call-in-loop` (src/bulk.cjs, WP-0 G5): every app and the ui lint their sources with it, off by default (report-only,
+// ER-41) and on with PADDOCK_BULK_LINT=warn. A planted source file with a backend call in a loop is the positive control (ER-33): the
+// rule must fire there when it is switched on, and stay silent when it is not.
+const BULK = 'for (const m of models) await backend.deleteModel(m.id);\nexport {};\n';
+const BULK_RULE = 'paddock/no-backend-call-in-loop';
+for (const dir of targets) {
+  const name = dir.slice(REPO.length + 1);
+  const planted = name === 'ui' ? 'projects/paddock-ui/src/zz-planted-bulk.ts' : 'src/app/zz-planted-bulk.ts';
+  test(`${name}: the lint command covers the sources, and ${BULK_RULE} fires there only when PADDOCK_BULK_LINT is set`, () => {
+    const patterns = lintPatterns(dir).map((p) => p.replace(/^\.\//, ''));
+    assert.ok(patterns.some((p) => minimatch(planted, p, { dot: true })), `${name}: no lint pattern covers ${planted} (${patterns.join(', ')})`);
+    const on = lintPlantedRules(dir, planted, BULK, { PADDOCK_BULK_LINT: 'warn' });
+    assert.ok(on.includes(BULK_RULE), `${name}: ${BULK_RULE} did not fire with PADDOCK_BULK_LINT=warn: ${on.join(', ')} (add ...bulkCalls() to its eslint config)`);
+    const off = lintPlantedRules(dir, planted, BULK, {});
+    assert.ok(!off.includes(BULK_RULE), `${name}: ${BULK_RULE} fired without PADDOCK_BULK_LINT; it is report-only until its first green run (ER-41)`);
+  });
+}
+
+// The report step (ER-41, P1-4 of the WP-0 review): every app and the ui has `npm run lint:report`, which runs bin/lint-report.cjs (it sets
+// PADDOCK_BULK_LINT=warn and writes the job summary), and CI runs it. Read through the accessors that own the data (ER-42): an app's
+// contract through the planner's `readApps` (scripts/affected.mjs), the ui's phase through the gate executor (`./dev ci run ui lint
+// --list`), and Debrief's own workflow through the workflow reader's `parseSteps` (conformance/src/util/workflows.mjs).
+async function ciRunsReport(dir) {
+  const name = dir.slice(REPO.length + 1);
+  if (name === 'ui') {
+    const r = spawnSync(join(REPO, 'dev'), ['ci', 'run', 'ui', 'lint', '--list'], { cwd: REPO, encoding: 'utf8' });
+    assert.equal(r.status, 0, `./dev ci run ui lint --list failed: ${r.stderr}`);
+    return r.stdout.split('\n').some((l) => l.replace(/^\[[^\]]*\]\s*/, '').trim() === 'npm run lint:report');
+  }
+  const app = name.split('/')[1];
+  const { readApps } = await import(join(REPO, 'scripts', 'affected.mjs'));
+  const contract = readApps([`apps/${app}/paddock.ci.json`], REPO).get(app);
+  assert.ok(contract, `${name}: no apps/${app}/paddock.ci.json`);
+  if (Object.values(contract).filter(Array.isArray).flat().includes('npm run lint:report')) return true;
+  if (!contract.workflow) return false;
+  const { parseSteps } = await import(join(REPO, 'conformance', 'src', 'util', 'workflows.mjs'));
+  const workflow = join(REPO, '.gitea', 'workflows', contract.workflow.replace(/^.*\//, ''));
+  return existsSync(workflow) && parseSteps(readFileSync(workflow, 'utf8')).some((st) => (st.run ?? '').trim() === 'npm run lint:report');
+}
+for (const dir of targets) {
+  const name = dir.slice(REPO.length + 1);
+  test(`${name}: lint:report runs bin/lint-report.cjs and CI runs lint:report`, async () => {
+    const script = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).scripts?.['lint:report'] ?? '';
+    assert.match(script, /eslint\/bin\/lint-report\.cjs/, `${name}: lint:report (${script || 'missing'}) does not run eslint/bin/lint-report.cjs`);
+    assert.ok(await ciRunsReport(dir), `${name}: no CI line runs \`npm run lint:report\` (its paddock.ci.json, or its own workflow)`);
+  });
+}

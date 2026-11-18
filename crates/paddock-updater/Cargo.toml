@@ -16,6 +16,8 @@ tauri = ["dep:tauri", "paddock-commands/tauri", "paddock-jobs/tauri", "paddock-d
 install = ["tauri", "dep:tauri-plugin-updater", "dep:windows-sys"]
 
 [dependencies]
+# The one constructor of a program's Command (no console window; counted for budget tests, paddock_env::starts).
+paddock-env = { workspace = true }
 paddock-limits = { workspace = true }
 paddock-commands = { workspace = true }
 # The dialog contracts of this crate (`dialogs!`, ADR 0026 §3).

@@ -22,7 +22,7 @@ pub(super) fn relaunch_after<R: Runtime>(app: &AppHandle<R>, action: crate::Exit
     }
     match ::tauri::process::current_binary(&app.env()) {
         Ok(exe) => {
-            if let Err(e) = std::process::Command::new(exe).spawn() {
+            if let Err(e) = paddock_env::command::attached_command(exe).spawn() {
                 log::error!("Could not start the app again after the update: {e}");
             }
         }

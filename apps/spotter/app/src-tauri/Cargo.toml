@@ -20,6 +20,8 @@ crate-type = ["rlib"]
 tauri-build = { version = "2.7.3", features = [] }
 
 [dependencies]
+# The one constructor of a program's Command (no console window on Windows; counted for budget tests).
+paddock-env = { path = "../../../../crates/paddock-env" }
 spotter-core.workspace = true
 spotter-engine.workspace = true
 spotter-render.workspace = true

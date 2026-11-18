@@ -176,12 +176,23 @@ fn parse_identity(s: &str) -> Option<ProcessId> {
     ))
 }
 
+/// A command for the guardian's own plumbing (this executable as the guardian, its `cat` keeper), built without counting it
+/// (`paddock_env::starts`): whether a guardian starts depends on the OS and the user, not on the code a budget test measures.
+/// Unix only, so there is no console window to hide.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the guardian's plumbing is not the caller's work: built uncounted, so a budget test's count does not depend on the OS or user"
+)]
+fn plumbing(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    Command::new(program)
+}
+
 /// Starts the guardian: this executable with [`GUARDIAN_ENV`] and this process's identity, in a group of its own.
 fn start(args: &[OsString], me: ProcessId) -> std::io::Result<Running> {
     let exe = std::env::current_exe()?;
     let (from_owner, to) = std::io::pipe()?;
     let (keeper_input, keeper_hold) = std::io::pipe()?;
-    let mut cmd = Command::new(exe);
+    let mut cmd = plumbing(exe);
     cmd.args(args)
         .env(GUARDIAN_ENV, "1")
         .env(OWNER_ENV, identity_text(me))
@@ -326,7 +337,7 @@ pub(crate) fn register(group: u32, folder: Option<&Path>) -> Option<Registration
     }
     let r = guard.as_mut()?;
     let started = r.keeper_input.try_clone().and_then(|input| {
-        Command::new(cat)
+        plumbing(cat)
             .stdin(input)
             .stdout(Stdio::null())
             .stderr(Stdio::null())

@@ -160,7 +160,7 @@ fn start_owner(
 ) -> (std::process::Child, ProcessId, PathBuf) {
     use std::io::BufRead;
     let spawned = Stamp::now();
-    let mut owner = std::process::Command::new(std::env::current_exe().unwrap())
+    let mut owner = paddock_proc::command(std::env::current_exe().unwrap())
         .args([
             "launch::tests::browser_owner_process",
             "--exact",
@@ -251,7 +251,7 @@ fn started_in_the_background_end(dir: &Path, exe: &Path, launcher: &str) {
         let profile = dir.join(format!("profile-{n}"));
         std::fs::create_dir_all(&profile).unwrap();
         let spawned = Stamp::now();
-        let out = std::process::Command::new("sh")
+        let out = paddock_proc::command("sh")
             .arg("-c")
             .arg(launcher)
             .arg(exe)
@@ -285,7 +285,7 @@ fn running_the_guardian_entry_as_a_plain_test_does_not_start_a_guardian_of_the_w
     let d = tempfile::tempdir().unwrap();
     let (mut owner, browser, _profile) = start_owner(d.path(), false, true);
     let me = std::env::current_exe().unwrap().display().to_string();
-    let table = std::process::Command::new("ps")
+    let table = paddock_proc::command("ps")
         .args(["-axo", "pid=,ppid=,command="])
         .output()
         .unwrap();

@@ -390,14 +390,13 @@ mod windows_tests {
     //! Run on a Windows runner as an ordinary user (no administrator needed), and on the Windows test VM.
     use super::*;
     use crate::privileged::trust::{Reason, verify_chain};
-    use std::process::Command;
 
     fn text(p: &std::path::Path) -> String {
         p.to_string_lossy().into_owned()
     }
 
     fn icacls(args: &[&str]) {
-        let out = Command::new(crate::privileged::system_tool("icacls").unwrap())
+        let out = paddock_proc::command(crate::privileged::system_tool("icacls").unwrap())
             .args(args)
             .output()
             .unwrap();
@@ -417,7 +416,7 @@ mod windows_tests {
     impl Drop for Unlock {
         fn drop(&mut self) {
             if let Ok(tool) = crate::privileged::system_tool("icacls") {
-                let _ = Command::new(tool)
+                let _ = paddock_proc::command(tool)
                     .arg(&self.0)
                     .args(["/reset", "/T", "/C", "/Q"])
                     .output();
@@ -509,7 +508,7 @@ mod windows_tests {
         std::fs::create_dir(&target).unwrap();
         std::fs::write(target.join("prog.exe"), b"MZ").unwrap();
         let junction = dir.path().join("junction");
-        let out = Command::new("cmd")
+        let out = paddock_proc::command("cmd")
             .args(["/C", "mklink", "/J", &text(&junction), &text(&target)])
             .output()
             .unwrap();
@@ -601,7 +600,7 @@ mod windows_tests {
         std::fs::create_dir(&parent).unwrap();
         std::fs::create_dir(parent.join("Dyno.untrusted-5-0")).unwrap();
         let junction = parent.join("Dyno.untrusted-1-0");
-        let out = Command::new("cmd")
+        let out = paddock_proc::command("cmd")
             .args(["/C", "mklink", "/J", &text(&junction), &text(&outside)])
             .output()
             .unwrap();

@@ -29,7 +29,7 @@ fn main() {
             .parent()
             .map(|p| p.to_path_buf())
             .unwrap_or_default();
-        let _ = std::process::Command::new(&holder)
+        let _ = paddock_env::command::command(&holder)
             .arg("hold-installing")
             .arg("--dir")
             .arg(dir)

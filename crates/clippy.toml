@@ -1,7 +1,11 @@
 # The shared crates' clippy configuration. Only the kill entries and the Keychain entries of the family preset
-# (lint/clippy.toml) apply here: the shared crates are where the process helpers live, so `Command::new` and `temp_dir`
-# stay allowed in them, and paddock-secrets is the one door to the OS credential store, so keyring::Entry stays allowed.
+# (lint/clippy.toml) apply here, plus `Command::new`: the one constructor is paddock_env::command::command (re-exported as
+# paddock_proc::command; `attached_command` for a child that shares this console or relaunches the app), which also counts starts for budget tests
+# (paddock_env::starts). `temp_dir` stays allowed (the shared crates are where the temp helpers live), and paddock-secrets is the one door to the OS credential store, so keyring::Entry stays allowed.
 disallowed-methods = [
+    # Bulk-API redesign G3: every start is made by the one constructor, so a budget test's count (paddock_env::starts) sees it.
+    { path = "std::process::Command::new", reason = "build it with paddock_env::command::command (paddock_proc::command), or attached_command for a child that shares this console: no console window on Windows, and counted for budget tests (paddock_env::starts)" },
+    { path = "tokio::process::Command::new", allow-invalid = true, reason = "build a std Command with paddock_env::command::command and convert it (tokio::process::Command::from): counted for budget tests" },
     { path = "std::env::vars", reason = "panics on a variable that is not valid Unicode: read the environment through paddock_env::vars (skips and names it)" },
     # ER-47 / rule 84 (ADR 0100): clearing a child's environment strips the variables that restrict it (a download ban, an install ban,
     # an offline switch). paddock_env::clear_env (paddock_proc::clean_env) is the one function that clears, and it passes them.

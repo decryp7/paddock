@@ -125,7 +125,10 @@ fn main() {
     }
     let git = if cfg!(windows) { "git.exe" } else { "git" };
     let t = Instant::now();
-    #[allow(clippy::disallowed_methods)] // a timing of one plain spawn, awaited here
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a timing of one plain spawn, awaited here: the measured baseline is a plain std start"
+    )]
     let ok = std::process::Command::new(git)
         .arg("--exec-path")
         .output()
@@ -184,8 +187,10 @@ fn main() {
                 for _ in 0..n {
                     for (g, total) in [(&a, &mut ta), (&b, &mut tb)] {
                         let t = Instant::now();
-                        #[allow(clippy::disallowed_methods)]
-                        // a timing of plain spawns, each awaited here
+                        #[expect(
+                            clippy::disallowed_methods,
+                            reason = "a timing of plain spawns, each awaited here: the measured baseline is a plain std start"
+                        )]
                         let ok = std::process::Command::new(g)
                             .arg("--version")
                             .output()
@@ -228,7 +233,10 @@ fn main() {
             };
             let t = Instant::now();
             for _ in 0..n {
-                #[allow(clippy::disallowed_methods)] // a timing of plain spawns, each awaited here
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "a timing of plain spawns, each awaited here: the measured baseline is a plain std start"
+                )]
                 let ok = std::process::Command::new(&git)
                     .arg("--version")
                     .output()

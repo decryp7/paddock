@@ -10,6 +10,36 @@ Conventional Commits; one semver tag for the whole repo.
   (growth, unwaivable) until the list is on main, when C30 blocks both (`BLOCKING`). Stale entries warn. C30's scope is now the
   Paddock root, as for every check with an allow list. The shared JavaScript reader takes `growth: 'error'` for a check that blocks.
 
+### Bulk APIs: counting seams, one per-item result type and a report-only lint (bulk-API redesign WP-0, G3 to G5)
+- New `paddock_env::starts` (also `paddock_proc::starts`): the constructors `paddock_env::command::command` and the new
+  `attached_command` (no creation flags: a child that shares this console, or the app relaunching itself) note every command they
+  make, and `assert_starts(n, || ...)`, `assert_starts(at_most(k), || ...)` and `assert_starts_async` assert how many programs a piece
+  of code starts, after Django's `assertNumQueries`. `at_most(k)` needs at least one start (zero is what work on an uncarried thread
+  looks like); `at_most_or_none(k, reason)` allows zero. One start is one `Command` made by a constructor (std has no spawn hook), so
+  one `Command` spawned twice counts once. The count belongs to the thread that made the `StartCounter`, plus any thread or task its
+  `StartScope` is carried into (`enter`, `wrap`); a scope entered where its counter already counts adds nothing.
+- Clippy forbids `std::process::Command::new` (and tokio's) in the shared crates too (`crates/clippy.toml`). Every shared-crate site,
+  the browser drivers of Debrief and Spotter, Pitcrew's service and hand-off starts, Spotter's action runner, dyno-cli and dyno-bench
+  now build their commands with the constructor; paddock-download, paddock-plugin-test, paddock-updater, Pitcrew's and Spotter's app
+  crates and dyno-bench take a paddock-env dependency for it. The three registered copies of the constructor
+  (`docs/known-copies.toml`, `no-console-command`) are gone.
+- New `paddock_commands::ItemResult<T>` (`{ ok: T } | { err: CommandError }` on the wire), `BulkReply<T>` (per-item errors; the outer
+  error is only for the whole call), `AtomicReply<T>` (all or nothing), `per_item` and `check_batch` (the bound of a batch, a `limit`
+  error). `CommandError` and `ErrorCode` now also deserialize, for a Rust peer that relays them. Generated TypeScript twin `ItemResult<T>`
+  in `@decryp7/paddock-ui/ipc`, with `isItemOk`, `parseItemResults(reply, count, isValue)` (checks a reply at the edge: one result per
+  item; the value check is required, `acceptAny` says any value is fine) and `splitItemResults` (one summary instead of a toast per item).
+- New in `@decryp7/paddock-ui/ipc/testing`: `countingInvoke(invoke)` and `expectInvokes` (the IPC call under an app's tauri-backend),
+  and `countingBackend`, `provideCountingBackend(token, inner)` (the injected port, through the app's own token; signal reads and
+  Observables are not counted) and `expectBackendCalls`. A budget `{ max }` needs at least one call; `{ max, allowNone: '<why>' }` allows
+  zero.
+- New ESLint rule `paddock/no-backend-call-in-loop` and block `bulkCalls()` (`@decryp7/paddock-eslint`, in `preset()` and every app's
+  config): a backend, port or `invoke` call per item in a loop over a collection, a `.forEach`, or a `.map` joined by
+  `Promise.all`/`forkJoin`; retry and paging loops and loops over a written-out list are left alone. Opt-out
+  `// per-item: <reason>` (three words at least), counted by the new report-only conformance check C140 in a list that only shrinks.
+  Report-only (ER-41): off in `npm run lint`, on in the new `npm run lint:report` of every app and the ui (`eslint/bin/lint-report.cjs`:
+  findings in the log and the job summary, exit 0), which CI runs; 23 findings on the train today.
+- Open: G3 (c), the measured Tauri invoke round trip on the Mac and Windows (a rule 48 row in docs/benchmarks.md), is not done yet.
+
 ### `paddock_proc::run_bounded_noting`
 - New: `run_bounded_noting(cmd, limits, started)` is `run_bounded` that tells `started` the program's `Option<ProcessId>` right after
   it started (`None`: its start time is unreadable), so a caller that gives up on the run can end the tree itself. `run_bounded` is

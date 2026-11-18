@@ -5,7 +5,7 @@
 
 use paddock_service::{Hosting, ServiceExit, ServiceSpec, service_main};
 use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 const CHILD: &str = "PADDOCK_SERVICE_MAIN_CHILD";
 
@@ -93,7 +93,7 @@ fn watch(child: &std::process::Child) -> Watchdog {
 }
 
 fn spawn(mode: &str) -> std::process::Child {
-    Command::new(std::env::current_exe().unwrap())
+    paddock_proc::command(std::env::current_exe().unwrap())
         .args(["--exact", "child_entry", "--nocapture", "--test-threads=1"])
         .env(CHILD, mode)
         .stdout(Stdio::piped())

@@ -104,7 +104,7 @@ impl TrustPort for RealTrust {
 fn mac_acl_allows_write(path: &str) -> bool {
     // `ls -lde` lists the ACL entries under the line of the folder itself; a failure to run it is treated as "has a write
     // entry" so that the rule refuses rather than guesses.
-    match std::process::Command::new("/bin/ls")
+    match paddock_proc::command("/bin/ls")
         .args(["-lde", "--", path])
         .output()
     {
