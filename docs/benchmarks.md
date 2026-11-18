@@ -2073,3 +2073,28 @@ save more, on each OS? And did the user's Defender process exclusions for git ch
   programs were already in excluded folders (`C:\gitea-runner\work\<job>\tmp`, `C:\Users\<user>\.paddock-ci`).
 - **Not measured:** gix against a partial clone (`--filter=blob:none`, as the CI kept clones are): gix does not fetch a missing blob
   from the promisor remote, git does.
+
+## The shared reader moved in: git starts per merge check, gix's build cost, and the windows-sys edges (2026-11-18, perf/git-heavy-tests-2, ADR 0108 G2 and TD-1, TD-3 to TD-6, TD-8, TD-10)
+
+- **Git starts of `./dev merge check`** (counted on the Mac with a logging `git` first on `PATH`, the starts whose parent is
+  paddock-dev): `merge_check::a_clean_merge_is_clean` 67 before the memo (a06109c92), 43 now; `a_hunk_with_most_of_its_lines_kept...`
+  151, 97 now. The rest are `diff -U0`, `log`, `merge-base`, `merge-tree` and `rev-parse` of ref names, which the reader does not
+  answer.
+- **`pr plan-status` (TD-10):** 61 references (20 on main, 10 off it, 30 short ids, one missing) cost at most 2 git starts (the
+  base's `rev-list`; short ids through the reader's git), against up to 3 per reference before (`repo_git_tests`).
+- **`GitHistory::file_at` (TD-1):** 121 reads of 60 files at two revisions start the reader 0 times (gix in process) plus one
+  `rev-parse` per revision (`file_at_for_many_files_starts_no_git_per_file`); before, one `git show` per read.
+- **Cold debug build, paddock-proc alone against paddock-git with gix, `CARGO_BUILD_JOBS=2`, no sccache:** Mac 44 s against 37 s at a
+  load of 32 to 80 (other agents' builds): **not measured** (the order and the load decided it). Windows runner: below.
+- **Windows runner, the whole paddock-dev suite at 8 test threads** (`windows-host-probe.yml`, nothing else on the runner; host probes
+  the same in all three: empty start 29 to 41 ms, git start 33 to 44 ms, a small repository 238 to 323 ms):
+
+  | | 8277: train 14 + memo | 8280: + the gix reader (f4b085304) | 8281: + one test per case (381137e33) |
+  |---|---:|---:|---:|
+  | `merge_check::the_remerge_subject_...` | 63.6 s timeout, then 45.2 s (FLAKY) | 60.0 s timeout, then 44.4 s (FLAKY) | 4 tests, 15.1 to 19.2 s |
+  | `merge_check::generated_files_are_skipped_...` | 45.1 s | 49.3 s | 5 tests, 12.0 to 14.9 s |
+  | `merge_check::a_clean_merge_is_clean` | 6.7 s | 3.9 s | 4.0 s |
+  | merge_check tests: n, median, max | 86, 8.8 s, 45.2 s | 86, 7.3 s, 49.3 s | 92, 8.8 s, 27.3 s |
+
+  The slow tests were fixture-bound (116 of the remerge test's 188 git starts were its own fixture): the reader cut the merge check's
+  part, the split cut each test to one case (docs/lessons.md, "One test per fixture case").
