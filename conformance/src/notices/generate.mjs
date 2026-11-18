@@ -121,8 +121,11 @@ export function npmPackages(appDir) {
       const wrong = typeof pkgJson.version === 'string' && pkgJson.version !== p.version;
       if (!readable || wrong) {
         const what = `${p.name}@${p.version}${wrong ? ` (installed ${pkgJson.version})` : ''}`;
-        if (p.optional && !wrong) warnings.push(`npm ${what}: optional package is not installed on this platform`);
-        else missing.push(what);
+        if (p.optional && !wrong && !readable) {
+          warnings.push(`npm ${what}: optional package is not installed on this platform, so it is left out`);
+          return null;
+        }
+        missing.push(what);
       }
       const license = p.license ?? declaredLicense(pkgJson.license ?? pkgJson.licenses) ?? 'UNKNOWN';
       const files = existsSync(dir) ? readdirSync(dir).filter((f) => LICENCE_FILE.test(f) && !/\.(js|ts|json|css)$/.test(f)).sort() : [];
@@ -131,7 +134,8 @@ export function npmPackages(appDir) {
         .filter((t) => t.text);
       if (!texts.length) warnings.push(`npm ${p.name}@${p.version}: no licence file found (declared ${license})`);
       return { kind: 'npm', name: p.name, version: p.version, license, texts, spdx: spdxIds(license) };
-    });
+    })
+    .filter(Boolean);
   if (missing.length) {
     const shown = missing.slice(0, 5).join(', ');
     const err = new Error(`${missing.length} production npm packages are not installed as the lock says (${shown}${missing.length > 5 ? `, and ${missing.length - 5} more` : ''}): run \`npm ci\` at the repo root, then run this again`);

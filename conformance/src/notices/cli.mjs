@@ -1,7 +1,7 @@
 // `paddock-notices`: regenerates (or with --check, verifies) THIRD_PARTY_NOTICES.md.
 //
 //   paddock-notices --app Pitcrew [--root .] [--manifest app/src-tauri/Cargo.toml ...] [--npm app] [--out app/src-tauri/resources ...]
-//                   [--rust-json cargo-about.json ...] [--about about.toml] [--check] [--verify-npm]
+//                   [--rust-json cargo-about.json ...] [--about about.toml] [--check] [--provision]
 //   paddock-notices --config apps/<app>/paddock.ci.json [--root <repo>] [--check]
 //
 // --config reads the app's `notices` block ({ name, manifests, npm, out, about, rustJson, components }; `components` are markdown files for bundled software that is neither a crate nor an npm package, appended verbatim; paths relative to the app's
@@ -9,8 +9,9 @@
 // folder may be a workspace of the root lock above it (the monorepo). Without an `about.toml` of its own, the app uses the
 // shared one (templates/repo/about.toml), so the accepted licences are one list.
 //
-// --verify-npm only checks that the installed npm packages match the lock (exit 0, or 6): scripts/notices.sh asks before it runs
-// `npm ci`.
+// --provision (what scripts/notices.sh passes) looks after the tools: cargo-about at the pinned version (probed with
+// RUSTUP_AUTO_INSTALL=0) and the root npm install. With --check it installs nothing (ER-45) and exits 6 when either is missing; without
+// it, it runs `cargo install cargo-about` and `npm ci --ignore-scripts` (at --root) and goes on.
 //
 // Rust licences come from `cargo about generate` (run once per --manifest, with a timeout) unless --rust-json files are
 // given. The npm side reads package-lock.json and node_modules of --npm (run `npm ci --omit=dev --ignore-scripts` first).
@@ -25,17 +26,19 @@ import { fileURLToPath } from 'node:url';
 import { lf, nonPermissive, npmPackages, render, rustCrates } from './generate.mjs';
 
 const MANY = new Set(['manifest', 'out', 'rust-json']);
-const FLAGS = new Set(['check', 'verify-npm']);
+const FLAGS = new Set(['check', 'provision']);
 const ONE = new Set(['app', 'root', 'npm', 'about', 'config']);
 /** The shared cargo-about configuration (its `accepted` list equals deny.toml's allow list; a test keeps them equal). */
 const SHARED_ABOUT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'templates', 'repo', 'about.toml');
 /** ADR 0089's "not measured": a precondition is missing, so there is no verdict. */
 const NOT_MEASURED = 6;
+/** The cargo-about release the committed notices are the output of: a new release can find more licence texts (0.9.3 found five more). */
+export const CARGO_ABOUT = '0.9.2';
 const TIMEOUT_MS = 10 * 60 * 1000;
 
 /** Parses the arguments; repeated --manifest/--out/--rust-json collect into arrays. Throws on anything unknown. */
 export function parseArgs(argv) {
-  const o = { manifest: [], out: [], 'rust-json': [], check: false, 'verify-npm': false };
+  const o = { manifest: [], out: [], 'rust-json': [], check: false, provision: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (!a.startsWith('--')) throw new Error(`unexpected argument: ${a}`);
@@ -70,6 +73,26 @@ export function cargoAbout({ manifests, aboutToml, root, exec = execFileSync }) 
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+/** An error that means "no verdict" (exit 6): a precondition is missing, with its cause and the next step in the message. */
+function notMeasured(message) {
+  return Object.assign(new Error(message), { notMeasured: true });
+}
+
+/** Makes sure cargo-about is at the pinned version: with `install` it installs it, otherwise (--check) a missing one is not measured. */
+export function ensureCargoAbout({ install, root, exec = execFileSync }) {
+  const probe = () => {
+    try {
+      return `${exec('cargo', ['about', '--version'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, RUSTUP_AUTO_INSTALL: '0' } })}`.trim().split(/\s+/)[1];
+    } catch {
+      return undefined;
+    }
+  };
+  if (probe() === CARGO_ABOUT) return;
+  const cmd = `cargo install cargo-about --version ${CARGO_ABOUT} --locked --features cli`;
+  if (!install) throw notMeasured(`cargo-about ${CARGO_ABOUT} is not installed and --check installs nothing. Next step: ${cmd}`);
+  exec('cargo', ['install', 'cargo-about', '--version', CARGO_ABOUT, '--locked', '--force', '--features', 'cli'], { cwd: root, stdio: 'inherit' });
 }
 
 /** Entry point; returns the exit status. */
@@ -107,16 +130,16 @@ export function main(argv, { log = console.log, err = console.error, exec } = {}
     try {
       npm = npmPackages(npmDir);
     } catch (e) {
-      if (!e.notInstalled) throw e;
-      err(`paddock-notices: ${e.message}`);
-      err(`paddock-notices: not measured, and ${o.check ? 'nothing compared' : 'nothing written'}`);
-      return NOT_MEASURED;
+      if (!e.notInstalled || !o.provision || o.check) throw e;
+      (exec ?? execFileSync)('npm', ['ci', '--ignore-scripts'], { cwd: root, stdio: 'inherit' });
+      npm = npmPackages(npmDir);
     }
-    if (o['verify-npm']) return 0;
     let docs;
     if (jsonRel.length) docs = jsonRel.map((f) => JSON.parse(readFileSync(resolve(base, f), 'utf8')));
-    else if (manifests.length) docs = cargoAbout({ manifests: manifests.map((m) => resolve(base, m)), aboutToml, root: base, exec });
-    else throw new Error('no Rust manifest: pass --manifest <Cargo.toml> or --rust-json <file>');
+    else if (manifests.length) {
+      if (o.provision) ensureCargoAbout({ install: !o.check, root, exec });
+      docs = cargoAbout({ manifests: manifests.map((m) => resolve(base, m)), aboutToml, root: base, exec });
+    } else throw new Error('no Rust manifest: pass --manifest <Cargo.toml> or --rust-json <file>');
     const rust = rustCrates(docs, base);
     const { markdown, counts } = render(rust.packages, npm.packages, name, componentRel.map((f) => readFileSync(resolve(base, f), 'utf8')));
     for (const w of [...rust.warnings, ...npm.warnings]) err(`warning: ${w}`);
@@ -142,6 +165,10 @@ export function main(argv, { log = console.log, err = console.error, exec } = {}
     }
     return bad.length ? 1 : 0;
   } catch (e) {
+    if (e.notInstalled || e.notMeasured) {
+      err(`::error::paddock-notices: not measured: ${e.message}. Nothing was compared or written.`);
+      return NOT_MEASURED;
+    }
     err(`paddock-notices: ${e.message}`);
     return 2;
   }
