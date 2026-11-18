@@ -2,8 +2,11 @@
 // PRINCIPLES, Bulk APIs (WP-0 G5 of the bulk-API redesign): a caller with N items makes one backend call, not N. This rule flags a
 // call on a backend, a port or the IPC `invoke` that runs once per item:
 //
-// - inside the body, test or update of a `for`, `for...in`, `for...of`, `for await`, `while` or `do...while` loop;
-// - inside a `.forEach` callback (a loop by another name);
+// - inside the body, test or update of a loop over a collection: a `for...of` / `for...in` / `for await` over anything but a list
+//   written out in the code, or a `for` / `while` / `do...while` whose test reads a `.length` or `.size` or drains with `.shift()` /
+//   `.pop()`. A retry or paging loop (`for (;;)`, `while (true)`, `do ... while (page)`, `i < 3`) is one call per attempt or page and
+//   is left alone;
+// - inside a `.forEach` callback (a loop by another name), except on a list written out in the code;
 // - inside a `.map` / `.flatMap` callback whose promises are started together: the map is an argument of `Promise.all`,
 //   `Promise.allSettled`, `Promise.any`, `Promise.race` or rxjs `forkJoin` (directly, spread into an array, or through a `const`
 //   that is passed there). ESLint's `no-await-in-loop` does not see this shape.
@@ -15,11 +18,14 @@
 // helper function or through a store or service whose name is not a backend's (DB-4's `charts`, DB-5's `counter`, PC-3's `status`), rxjs `mergeMap` over items, and a component
 // per row that calls the backend in its own effect (DB-2, SP-4): the runtime budget tests on the counting seams cover those.
 //
-// Opt-out: `// per-item: <reason>` right above the call's statement, the loop or the `Promise.all` statement (an empty reason
-// does not count).
+// Known false positive: a signal read on a port (`port.imageBlock()`, a `computed` the port exposes) looks like a call; mark it
+// `// per-item: <reason>` or read the signal once before the loop.
+//
+// Opt-out: `// per-item: <reason>` right above the call's statement, the loop or the `Promise.all` statement, with a reason of at
+// least three words. Conformance C140 counts every opt-out in conformance/c140-allow.json, a list that only shrinks (ER-46).
 //
 // Report-only (ER-41) until its first green run on the real tree: the `bulkCalls()` block (src/bulk.cjs) reads its severity from
-// PADDOCK_BULK_LINT and is off by default.
+// PADDOCK_BULK_LINT and is off by default; every app's `npm run lint:report` (bin/lint-report.cjs) turns it on in CI.
 const { statementOf } = require('../ast.cjs');
 
 const LOOPS = new Set(['ForStatement', 'ForInStatement', 'ForOfStatement', 'WhileStatement', 'DoWhileStatement']);
@@ -38,8 +44,12 @@ const DEFERRING = new Set([
 const NAME = /^(backend|port|ipc)$|Backend$|Port$/;
 /** A DI token whose instance is a backend or port. */
 const TOKEN = /(Backend|BACKEND|Port|PORT)$/;
-/** The opt-out with a reason. */
-const OPT_OUT = /(^|\s)per-item:\s*\S/;
+/** The opt-out with a reason of at least three words (conformance C140 counts every opt-out in a list that only shrinks). */
+const OPT_OUT = /(^|\s)per-item:\s*\S+(\s+\S+){2,}/;
+/** Members that say a loop's test reads a collection: `while (queue.length)`, `i < items.length`, `queue.size > 0`. */
+const COLLECTION_MEMBERS = new Set(['length', 'size']);
+/** Calls in a `while` test that drain a collection: `while (x = queue.shift())`. */
+const DRAINS = new Set(['shift', 'pop']);
 
 /** The name a member's key spells, or null. */
 function memberName(node) {
@@ -56,6 +66,31 @@ function injectedToken(node) {
   if (arg.type === 'Identifier') return arg.name;
   if (arg.type === 'MemberExpression') return memberName(arg);
   return null;
+}
+
+/** True when `node` (a loop's test) reads a collection's length or size, or drains one. */
+function readsCollection(node) {
+  if (!node || typeof node.type !== 'string') return false;
+  if (node.type === 'MemberExpression' && !node.computed && node.property.type === 'Identifier' && COLLECTION_MEMBERS.has(node.property.name)) return true;
+  if (node.type === 'CallExpression' && node.callee.type === 'MemberExpression' && DRAINS.has(memberName(node.callee))) return true;
+  for (const key of Object.keys(node)) {
+    if (key === 'parent') continue;
+    const v = node[key];
+    if (Array.isArray(v)) {
+      if (v.some((c) => c && typeof c.type === 'string' && readsCollection(c))) return true;
+    } else if (v && typeof v.type === 'string' && readsCollection(v)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a loop runs once per item of a collection: `for...of` / `for...in` over anything but a list written out in the code, a
+ * `for (;;)` or `while` whose test reads a collection's length or size or drains it. A retry or paging loop (`for (;;)`, `while (true)`,
+ * `do ... while (page)`, `i < 3`) is one call per attempt or page and is not this rule's shape.
+ */
+function overCollection(loop) {
+  if (loop.type === 'ForOfStatement' || loop.type === 'ForInStatement') return loop.right.type !== 'ArrayExpression';
+  return readsCollection(loop.test);
 }
 
 /** @type {import('eslint').Rule.RuleModule} */
@@ -147,14 +182,14 @@ module.exports = {
       for (let n = call.parent; n; child = n, n = n.parent) {
         if (LOOPS.has(n.type)) {
           const once = (n.type === 'ForStatement' && child === n.init) || ((n.type === 'ForOfStatement' || n.type === 'ForInStatement') && (child === n.right || child === n.left));
-          if (!once) return { kind: 'loop', at: n };
+          if (!once && overCollection(n)) return { kind: 'loop', at: n };
         }
         if (FUNCTIONS.has(n.type)) {
           const owner = n.parent;
           // A function that is not a call's argument (declared, stored, returned, `new Promise(...)`) ends the climb.
           if (owner?.type !== 'CallExpression' || !owner.arguments.includes(n)) return null;
           const method = owner.callee.type === 'MemberExpression' ? memberName(owner.callee) : owner.callee.type === 'Identifier' ? owner.callee.name : null;
-          if (method === 'forEach' && owner.callee.type === 'MemberExpression') return { kind: 'loop', at: owner };
+          if (method === 'forEach' && owner.callee.type === 'MemberExpression' && owner.callee.object.type !== 'ArrayExpression') return { kind: 'loop', at: owner };
           if (MAPS.has(method) && owner.callee.type === 'MemberExpression') {
             const join = joinOf(owner);
             if (join) return { kind: 'parallel', join: join.name, at: join.node };

@@ -23,6 +23,7 @@
     "i18n:check": "node projects/paddock-ui/bin/paddock-i18n.mjs build --check",
     "release": "node ../scripts/publish.mjs",
     "lint": "eslint projects e2e",
+    "lint:report": "node ../eslint/bin/lint-report.cjs projects",
     "check:dialog-commands": "node ../scripts/dialog-commands.mjs --contracts projects/shell-demo/src/app/generated/dialog-contracts.ts projects/paddock-ui/shell/about/generated/dialog-contracts.ts projects/paddock-ui/shell/channels/generated/dialog-contracts.ts projects/paddock-ui/shell/confirm/generated/dialog-contracts.ts projects/paddock-ui/shell/diagnostics/generated/dialog-contracts.ts projects/paddock-ui/shell/mcp/generated/dialog-contracts.ts projects/paddock-ui/shell/setup/generated/dialog-contracts.ts projects/paddock-ui/shell/storage/generated/dialog-contracts.ts --seen dialog-check/dialog-commands-seen.json --unexercised projects/shell-demo/dialog-commands-unexercised.json --baseline projects/shell-demo/dialog-commands-unexercised.count --visited dialog-check/dialogs-visited.json"
   },
   "dependencies": {

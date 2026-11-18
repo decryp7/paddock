@@ -8,6 +8,7 @@
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "lint": "ng lint",
+    "lint:report": "node ../../../eslint/bin/lint-report.cjs src",
     "tauri": "tauri"
   },
   "private": true,

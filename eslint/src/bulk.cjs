@@ -4,8 +4,10 @@
 // Use: `module.exports = defineConfig(..., ...bulkCalls())` in the app's eslint.config.js; test/wiring.test.cjs checks every app and the ui.
 //
 // Report-only (ER-41): the lint commands run with --max-warnings 0, so a warning would block every touched file. The rule is off
-// until its first green run on the real tree, recorded here; read its findings with `PADDOCK_BULK_LINT=warn npx eslint src`.
-// First green run: not yet.
+// in `npm run lint` and on in `npm run lint:report` (bin/lint-report.cjs sets PADDOCK_BULK_LINT=warn, prints the findings and writes
+// the job summary without failing), which every app's CI runs (Debrief's debrief.yml step, the others' paddock.ci.json, the ui's lint
+// phase). It becomes an error once a CI run of every app reports zero findings, recorded here by run id.
+// First run id: pending.
 const plugin = require('./plugin.cjs');
 
 /** The severity from `PADDOCK_BULK_LINT` (`warn` or `error`), else `off`. */

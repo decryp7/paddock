@@ -9,6 +9,7 @@
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "lint": "ng lint",
+    "lint:report": "node ../../../eslint/bin/lint-report.cjs src",
     "e2e": "playwright test",
     "e2e:install": "playwright install chromium webkit",
     "screenshots": "playwright test -c e2e/screenshots/playwright.config.ts",

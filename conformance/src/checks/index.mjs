@@ -69,6 +69,7 @@ import C135 from './C135-leak-detector-opt-outs.mjs';
 import C136 from './C136-unit-live-feeds.mjs';
 import C137 from './C137-e2e-kit-import.mjs';
 import C138 from './C138-owned-scroll.mjs';
+import C140 from './C140-per-item-opt-outs.mjs';
 
 /** Every check, in id order. A check is { id, title, rule, run(ctx) -> findings[] | Promise<findings[]> }. */
-export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C39, C43, C45, C48, C50, C51, C53, C54, C56, C57, C59, C61, C62, C71, C78, C79, C85, C91, C98, C99, C104, C110, C111, C112, C113, C114, C115, C116, C117, C118, C119, C120, C121, C122, C123, C124, C125, C126, C127, C128, C129, C130, C131, C133, C135, C136, C137, C138];
+export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C39, C43, C45, C48, C50, C51, C53, C54, C56, C57, C59, C61, C62, C71, C78, C79, C85, C91, C98, C99, C104, C110, C111, C112, C113, C114, C115, C116, C117, C118, C119, C120, C121, C122, C123, C124, C125, C126, C127, C128, C129, C130, C131, C133, C135, C136, C137, C138, C140];

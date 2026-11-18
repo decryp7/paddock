@@ -78,3 +78,24 @@ for (const dir of targets) {
     assert.ok(!off.includes(BULK_RULE), `${name}: ${BULK_RULE} fired without PADDOCK_BULK_LINT; it is report-only until its first green run (ER-41)`);
   });
 }
+
+// The report step (ER-41, P1-4 of the WP-0 review): every app and the ui has `npm run lint:report`, which runs bin/lint-report.cjs (it sets
+// PADDOCK_BULK_LINT=warn and writes the job summary), and CI runs it: a line of the app's paddock.ci.json (the ui: its `lint` phase), or
+// for Debrief, whose CI is its own workflow, a `run: npm run lint:report` step in .gitea/workflows/debrief.yml.
+function ciRunsReport(dir) {
+  const name = dir.slice(REPO.length + 1);
+  const contract = name === 'ui' ? join(REPO, 'ui', 'paddock.ci.json') : join(dir, '..', 'paddock.ci.json');
+  const lines = Object.values(JSON.parse(readFileSync(contract, 'utf8'))).filter(Array.isArray).flat();
+  if (lines.includes('npm run lint:report')) return true;
+  const app = name.split('/')[1];
+  const workflow = join(REPO, '.gitea', 'workflows', `${app}.yml`);
+  return existsSync(workflow) && /^\s*run: npm run lint:report\s*$/m.test(readFileSync(workflow, 'utf8'));
+}
+for (const dir of targets) {
+  const name = dir.slice(REPO.length + 1);
+  test(`${name}: lint:report runs bin/lint-report.cjs and CI runs lint:report`, () => {
+    const script = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).scripts?.['lint:report'] ?? '';
+    assert.match(script, /eslint\/bin\/lint-report\.cjs/, `${name}: lint:report (${script || 'missing'}) does not run eslint/bin/lint-report.cjs`);
+    assert.ok(ciRunsReport(dir), `${name}: no CI line runs \`npm run lint:report\` (its paddock.ci.json, or its own workflow)`);
+  });
+}

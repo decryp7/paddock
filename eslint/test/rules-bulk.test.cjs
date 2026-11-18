@@ -34,6 +34,15 @@ ts().run('no-backend-call-in-loop (Bulk APIs)', rule, {
     'for (const x of xs) effect(() => backend.watch(x()));',
     'for (const x of xs) emitter.on(x, () => backend.open(x));',
     'for (const x of xs) new Promise(() => backend.open(x));',
+    // Loops over no collection: a retry or paging loop is one call per attempt or page, not per item (P2-1).
+    'for (let attempt = 1; ; attempt++) { const a = await backend.queryPage(q); if (a.ok) break; }',
+    'for (let i = 0; i < 3; i++) await backend.retry();',
+    'while (true) { const p = await backend.next(); if (!p) break; }',
+    'do { page = await backend.next(page); } while (page);',
+    'while (await backend.more()) step();',
+    // A loop over a list written out in the code is a fixed handful, not N items.
+    'for (const id of [survey, ai]) if (id !== null) void jobs.unwait(id);',
+    '[a, b].forEach((x) => backend.close(x));',
     // Names that only end like a port.
     'for (const x of xs) report.add(x); for (const x of xs) viewport.scroll(x); for (const x of xs) support.ask(x);',
     // The opt-out with a reason, on the call or on the loop.
@@ -45,13 +54,13 @@ ts().run('no-backend-call-in-loop (Bulk APIs)', rule, {
     // for-of with await (PW-1's shape).
     { code: 'for (const m of models) await backend.deleteModel(m.id);', errors: [loop] },
     // Classic for, for-in, while, do-while, for-await.
-    { code: 'for (let i = 0; i < n; i++) { await this.backend.save(items[i]); }', errors: [loop] },
+    { code: 'for (let i = 0; i < items.length; i++) { await this.backend.save(items[i]); }', errors: [loop] },
     { code: 'for (const k in byId) backend.touch(k);', errors: [loop] },
     { code: 'while (queue.length) await backend.send(queue.shift());', errors: [loop] },
-    { code: 'do { page = await backend.next(page); } while (page);', errors: [loop] },
     { code: 'for await (const x of stream) await backend.put(x);', errors: [loop] },
-    // A loop's test and update run every iteration.
-    { code: 'while (await backend.more()) step();', errors: [loop] },
+    // A loop's test and update run every iteration, over the collection it drains.
+    { code: 'while (queue.size > 0) await backend.send(take(queue));', errors: [loop] },
+    { code: 'do { await backend.send(queue.pop()); } while (queue.length);', errors: [loop] },
     // `invoke` itself, bare or on the IPC object.
     { code: "for (const id of ids) await invoke('delete_watch', { id });", errors: [loop] },
     { code: "for (const id of ids) await ipc.invoke('delete_watch', { id });", errors: [loop] },
@@ -81,6 +90,9 @@ ts().run('no-backend-call-in-loop (Bulk APIs)', rule, {
     // An ordinary comment is not the opt-out, nor is the tag without a reason.
     { code: '// slow, fix later\nfor (const m of models) await backend.deleteModel(m.id);', errors: [loop] },
     { code: '// per-item:\nfor (const m of models) await backend.deleteModel(m.id);', errors: [loop] },
+    // A reason needs at least three words (P2-2).
+    { code: '// per-item: legacy\nfor (const m of models) await backend.deleteModel(m.id);', errors: [loop] },
+    { code: '// per-item: legacy code\nfor (const m of models) await backend.deleteModel(m.id);', errors: [loop] },
   ],
 });
 
