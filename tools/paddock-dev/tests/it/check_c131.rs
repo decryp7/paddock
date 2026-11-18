@@ -1,7 +1,7 @@
 //! C131 (a golden file holds no value of the machine that captured it): the Rust host against the conformance host as the oracle, on a fixture tree and on this
 //! working tree.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{LIVE_STALL, has_node, node, node_ticking, repo_root, skip};
+use super::check::{LIVE_STALL, node, node_ticking, repo_root};
 use paddock_dev::check::tree::Tree;
 use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
 use serde_json::{Value, json};
@@ -76,14 +76,18 @@ fn tree_of(files: &[(&str, &str)]) -> tempfile::TempDir {
 }
 
 /// Both hosts over `root`: the shared part of each report, the Rust one first.
-fn both(root: &Path) -> (Value, Value) {
-    let js: Value = serde_json::from_str(&node(
-        JS_RUN,
-        &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", "fixture".into())],
-    ))
-    .unwrap();
+fn both(case: &str, root: &Path) -> (Value, Value) {
+    let js: Value = crate::recorded::js_answer(case, || {
+        shared_part(
+            &serde_json::from_str::<Value>(&node(
+                JS_RUN,
+                &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", "fixture".into())],
+            ))
+            .unwrap(),
+        )
+    });
     let r = run_checks(&options(root, "fixture"), &registry()).unwrap();
-    (shared_part(&r.json()), shared_part(&js))
+    (shared_part(&r.json()), js)
 }
 
 #[test]
@@ -147,7 +151,10 @@ fn c131_control_sees_a_planted_uid() {
 /// else, on both hosts, never a pass.
 #[test]
 fn c131_with_a_broken_allow_file_is_one_check_broken_finding_on_both_hosts() {
-    for allow in [None, Some("nope"), Some("{}"), Some("{\"allow\": [{\"path\": \"a\"}]}")] {
+    for (i, allow) in [None, Some("nope"), Some("{}"), Some("{\"allow\": [{\"path\": \"a\"}]}")]
+        .into_iter()
+        .enumerate()
+    {
         let mut files = vec![("x/tests/golden/a.json", "{\"uid\": 501}\n")];
         if let Some(text) = allow {
             files.push(("conformance/c131-allow.json", text));
@@ -156,46 +163,30 @@ fn c131_with_a_broken_allow_file_is_one_check_broken_finding_on_both_hosts() {
         let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
         let got: Vec<(&str, Option<&str>)> = r.findings.iter().map(|f| (f.file.as_str(), f.outcome.map(|o| o.name()))).collect();
         assert_eq!(got, [("conformance/c131-allow.json", Some("check-broken"))], "{allow:?}");
-        if has_node() {
-            // The JSON parsers word their own error differently (serde_json and V8): the message is compared up to that text.
-            let cut = |mut v: Value| {
-                for f in v["findings"].as_array_mut().unwrap() {
-                    let m = f["message"].as_str().unwrap().to_string();
-                    f["message"] = Value::from(m.split(" is not JSON: ").next().unwrap());
-                }
-                v
-            };
-            let (rust, js) = both(tree.path());
-            assert_eq!(cut(rust), cut(js), "{allow:?}");
-        }
+        // The JSON parsers word their own error differently (serde_json and V8): the message is compared up to that text.
+        let cut = |mut v: Value| {
+            for f in v["findings"].as_array_mut().unwrap() {
+                let m = f["message"].as_str().unwrap().to_string();
+                f["message"] = Value::from(m.split(" is not JSON: ").next().unwrap());
+            }
+            v
+        };
+        let (rust, js) = both(&format!("c131-broken-allow-{i}"), tree.path());
+        assert_eq!(cut(rust), cut(js), "{allow:?}");
     }
 }
 
 #[test]
-fn live_c131_fixture_findings_equal_the_js_host() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn c131_fixture_findings_equal_the_recorded_js_answer() {
     let tree = fixture_tree();
-    let (got, want) = both(tree.path());
+    let (got, want) = both("c131-fixture", tree.path());
     assert_eq!(got["findings"], want["findings"]);
     assert_eq!(got, want);
 }
 
 #[test]
-fn live_c131_tree_findings_equal_the_js_host() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn c131_tree_findings_stay_within_the_recorded_js_answer() {
     let root = repo_root();
-    let js_root = root.clone();
-    let js = paddock_testkit::guarded("the JS C131 over the live tree", LIVE_STALL, move |progress| {
-        let driver = format!(
-            "import fs from 'node:fs';\nimport {{ syncBuiltinESMExports }} from 'node:module';\nconst read = fs.readFileSync;\nfs.readFileSync = (...a) => {{ process.stdout.write('.\\n'); return read(...a); }};\nsyncBuiltinESMExports();\n{JS_RUN}"
-        );
-        let env = [("RT5_ROOT", js_root.display().to_string()), ("RT5_APP", "paddock".into())];
-        serde_json::from_str::<Value>(node_ticking(&driver, &env, &progress).trim()).unwrap()
-    });
     let r = paddock_testkit::guarded("the Rust C131 over the live tree", LIVE_STALL, {
         let root = root.clone();
         move |progress| {
@@ -203,9 +194,20 @@ fn live_c131_tree_findings_equal_the_js_host() {
             run_checks_in(&tree, &options(&root, "paddock"), &registry()).unwrap()
         }
     });
-    let (got, want) = (shared_part(&r.json()), shared_part(&js));
-    assert_eq!(got["findings"], want["findings"]);
-    assert_eq!(got, want);
+    crate::recorded::assert_tree_within(
+        "c131-real-tree",
+        || {
+            let js_root = root.clone();
+            paddock_testkit::guarded("the JS C131 over the live tree", LIVE_STALL, move |progress| {
+                let driver = format!(
+                    "import fs from 'node:fs';\nimport {{ syncBuiltinESMExports }} from 'node:module';\nconst read = fs.readFileSync;\nfs.readFileSync = (...a) => {{ process.stdout.write('.\\n'); return read(...a); }};\nsyncBuiltinESMExports();\n{JS_RUN}"
+                );
+                let env = [("RT5_ROOT", js_root.display().to_string()), ("RT5_APP", "paddock".into())];
+                serde_json::from_str::<Value>(node_ticking(&driver, &env, &progress).trim()).unwrap()
+            })
+        },
+        &r.json(),
+    );
 }
 
 /// The shared parity corpus (a byte order mark, CRLF, astral text, case-folding letters, no-break spaces, long lines).

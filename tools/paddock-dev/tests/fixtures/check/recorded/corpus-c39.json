@@ -1,0 +1,348 @@
+{
+ "plain": {
+  "findings": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/bad.rs",
+    "line": 2,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   },
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/first.rs",
+    "line": 1,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/waived.rs",
+    "line": 3,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`.",
+    "waiver": {
+     "reason": "a child retries on a taken port",
+     "expires": "inline"
+    }
+   }
+  ]
+ },
+ "bom": {
+  "findings": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/bad.rs",
+    "line": 2,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   },
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/first.rs",
+    "line": 1,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/waived.rs",
+    "line": 3,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`.",
+    "waiver": {
+     "reason": "a child retries on a taken port",
+     "expires": "inline"
+    }
+   }
+  ]
+ },
+ "crlf": {
+  "findings": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/bad.rs",
+    "line": 2,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   },
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/first.rs",
+    "line": 1,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/waived.rs",
+    "line": 3,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`.",
+    "waiver": {
+     "reason": "a child retries on a taken port",
+     "expires": "inline"
+    }
+   }
+  ]
+ },
+ "astral-and-emoji": {
+  "findings": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/bad.rs",
+    "line": 3,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   },
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/first.rs",
+    "line": 2,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/waived.rs",
+    "line": 4,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`.",
+    "waiver": {
+     "reason": "a child retries on a taken port",
+     "expires": "inline"
+    }
+   }
+  ]
+ },
+ "case-fold-letters": {
+  "findings": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/bad.rs",
+    "line": 3,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   },
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/first.rs",
+    "line": 2,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/waived.rs",
+    "line": 4,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`.",
+    "waiver": {
+     "reason": "a child retries on a taken port",
+     "expires": "inline"
+    }
+   }
+  ]
+ },
+ "no-break-space": {
+  "findings": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/bad.rs",
+    "line": 2,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   },
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/first.rs",
+    "line": 1,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   },
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/waived.rs",
+    "line": 3,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   }
+  ],
+  "errors": 3,
+  "warnings": 0,
+  "waived": []
+ },
+ "line-separators": {
+  "findings": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/bad.rs",
+    "line": 3,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   },
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/first.rs",
+    "line": 2,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/waived.rs",
+    "line": 4,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`.",
+    "waiver": {
+     "reason": "a child retries on a taken port",
+     "expires": "inline"
+    }
+   }
+  ]
+ },
+ "long-line": {
+  "findings": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/bad.rs",
+    "line": 2,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   },
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/first.rs",
+    "line": 1,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/waived.rs",
+    "line": 3,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`.",
+    "waiver": {
+     "reason": "a child retries on a taken port",
+     "expires": "inline"
+    }
+   }
+  ]
+ },
+ "no-final-newline": {
+  "findings": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/bad.rs",
+    "line": 2,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   },
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/first.rs",
+    "line": 1,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": [
+   {
+    "check": "C39",
+    "severity": "error",
+    "rule": 40,
+    "file": "crates/c/tests/waived.rs",
+    "line": 3,
+    "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+    "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`.",
+    "waiver": {
+     "reason": "a child retries on a taken port",
+     "expires": "inline"
+    }
+   }
+  ]
+ }
+}

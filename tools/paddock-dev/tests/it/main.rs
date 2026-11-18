@@ -41,6 +41,7 @@ mod member_audits;
 mod merge_check;
 mod parity_corpus;
 mod pr;
+mod recorded;
 mod pre_push;
 mod release_isolation;
 mod safe_remove_lint;

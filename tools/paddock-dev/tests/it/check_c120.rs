@@ -19,7 +19,12 @@ const r = await runChecks({ root: process.env.C120_ROOT, app: 'paddock', only: [
 process.stdout.write(JSON.stringify({ findings: r.findings, waived: r.waived, errors: r.errors, warnings: r.warnings }));
 "#;
 
-fn js(root: &Path) -> Value {
+/// The JS host's answer for `case` (recorded: tests/fixtures/check/recorded).
+fn js(case: &str, root: &Path) -> Value {
+    crate::recorded::js_answer(case, || js_live(root))
+}
+
+fn js_live(root: &Path) -> Value {
     let out = paddock_testkit::TestCommand::new("node")
         .args(["--input-type=module", "-e", DRIVER])
         .current_dir(repo())
@@ -68,7 +73,7 @@ fn cases() -> tempfile::TempDir {
 #[test]
 fn every_shape_gives_the_same_findings_in_both_hosts() {
     let d = cases();
-    let (a, b) = (js(d.path()), rust(d.path()));
+    let (a, b) = (js("c120-every-shape", d.path()), rust(d.path()));
     assert_eq!(a, b);
     let at = |file: &str| -> Vec<u64> {
         a["findings"]
@@ -140,7 +145,7 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
 #[test]
 fn this_working_tree_gives_the_same_findings_in_both_hosts() {
     let root = repo();
-    assert_eq!(js(&root)["findings"], rust(&root)["findings"]);
+    crate::recorded::assert_tree_within("c120-real-tree", || js_live(&root), &rust(&root));
     assert_eq!(rust(&root)["warnings"], 0, "every site carries a waiver with a reason, or is fixed");
     assert!(
         rust(&root)["waived"].as_array().unwrap().len() >= 20,

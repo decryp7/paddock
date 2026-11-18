@@ -1,0 +1,26 @@
+[
+ [
+  "C121",
+  "conformance/c121-allow.json"
+ ],
+ [
+  "C124",
+  "conformance/c124-allow.json"
+ ],
+ [
+  "C125",
+  "conformance/c125-allow.json"
+ ],
+ [
+  "C130",
+  "conformance/c130-allow.json"
+ ],
+ [
+  "C131",
+  "conformance/c131-allow.json"
+ ],
+ [
+  "C135",
+  "conformance/c135-allow.json"
+ ]
+]

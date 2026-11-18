@@ -1,0 +1,146 @@
+{
+ "app": "fixture",
+ "checks": [
+  "C129"
+ ],
+ "findings": [
+  {
+   "check": "C129",
+   "severity": "warn",
+   "rule": 55,
+   "file": "bin/env-bash",
+   "line": 1,
+   "message": "new shell file (2 lines): shell is being ported to Rust",
+   "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+  },
+  {
+   "check": "C129",
+   "severity": "warn",
+   "rule": 55,
+   "file": "bin/py",
+   "line": 1,
+   "message": "new shell file (1 lines): shell is being ported to Rust",
+   "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+  },
+  {
+   "check": "C129",
+   "severity": "warn",
+   "rule": 55,
+   "file": "grew.sh",
+   "line": 1,
+   "message": "shell file grew from 2 to 3 lines: the baseline may only shrink",
+   "fix": "Port the change to Rust instead of growing the script. Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+  },
+  {
+   "check": "C129",
+   "severity": "warn",
+   "rule": 55,
+   "file": "new.PY",
+   "line": 1,
+   "message": "new shell file (1 lines): shell is being ported to Rust",
+   "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+  },
+  {
+   "check": "C129",
+   "severity": "warn",
+   "rule": 55,
+   "file": "new.sh",
+   "line": 1,
+   "message": "new shell file (3 lines): shell is being ported to Rust",
+   "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+  },
+  {
+   "check": "C129",
+   "severity": "warn",
+   "rule": 55,
+   "file": "conformance/baselines/C129-shell.json",
+   "line": 1,
+   "message": "shrank.sh is under its baseline count (1 of 9 lines)",
+   "fix": "Lower the entry: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+  },
+  {
+   "check": "C129",
+   "severity": "warn",
+   "rule": 55,
+   "file": "vm/sub/b.ps1",
+   "line": 1,
+   "message": "new shell file (1 lines): shell is being ported to Rust",
+   "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+  },
+  {
+   "check": "C129",
+   "severity": "warn",
+   "rule": 55,
+   "file": "é/ü.bat",
+   "line": 1,
+   "message": "new shell file (2 lines): shell is being ported to Rust",
+   "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+  },
+  {
+   "check": "C129",
+   "severity": "warn",
+   "rule": 55,
+   "file": "conformance/baselines/C129-shell.json",
+   "line": 1,
+   "message": "stale baseline entry (gone.sh): the file is gone or is no longer shell",
+   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+  },
+  {
+   "check": "C129",
+   "severity": "warn",
+   "rule": 55,
+   "file": "conformance/shell-exceptions.json",
+   "line": 1,
+   "message": "stale exception (gone/x.sh, E6) names no file",
+   "fix": "Remove it from conformance/shell-exceptions.json."
+  },
+  {
+   "check": "C129",
+   "severity": "warn",
+   "rule": 55,
+   "file": "conformance/baselines/C129-shell.json",
+   "line": 1,
+   "message": "the baseline's shrink-only rule is not enforced here: no merge base (Command failed: git rev-parse HEAD)",
+   "fix": "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with."
+  },
+  {
+   "check": "C129",
+   "severity": "warn",
+   "rule": 55,
+   "file": "conformance/shell-exceptions.json",
+   "line": 1,
+   "message": "the exception list's shrink-only rule is not enforced here: no merge base (Command failed: git rev-parse HEAD)",
+   "fix": "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with."
+  },
+  {
+   "check": "C129",
+   "severity": "warn",
+   "rule": 55,
+   "file": ".gitea/workflows/x.yml",
+   "line": 4,
+   "message": "names the script `scripts/gone.sh`, which the tree does not have",
+   "fix": "Switch the caller to the command that replaced the script, or restore the script."
+  },
+  {
+   "check": "C129",
+   "severity": "warn",
+   "rule": 55,
+   "file": "apps/d/paddock.ci.json",
+   "line": 1,
+   "message": "names the script `scripts/nope.ps1`, which the tree does not have",
+   "fix": "Switch the caller to the command that replaced the script, or restore the script."
+  },
+  {
+   "check": "C129",
+   "severity": "warn",
+   "rule": 55,
+   "file": ".gitea",
+   "line": 1,
+   "message": "inline shell in .gitea: 7 lines in 6 `run:` blocks (reported, not a finding of a file)",
+   "fix": "Decision D7 of docs/plans/shell-to-rust.md is taken on this number."
+  }
+ ],
+ "waived": [],
+ "errors": 0,
+ "warnings": 15
+}

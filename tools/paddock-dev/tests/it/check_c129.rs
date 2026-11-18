@@ -1,6 +1,6 @@
 //! C129 (no new shell): the Rust host against the conformance host as the oracle, on a fixture tree and on this working tree.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{LIVE_STALL, has_node, node, node_ticking, repo_root, skip};
+use super::check::{LIVE_STALL, node, node_ticking, repo_root};
 use paddock_dev::check::tree::Tree;
 use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
 use serde_json::{Value, json};
@@ -82,14 +82,18 @@ fn tree_of<T: AsRef<str>>(files: &[(&str, T)]) -> tempfile::TempDir {
     d
 }
 
-fn both(root: &Path) -> (Value, Value) {
-    let js: Value = serde_json::from_str(&node(
-        JS_RUN,
-        &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", "fixture".into())],
-    ))
-    .unwrap();
+fn both(case: &str, root: &Path) -> (Value, Value) {
+    let js: Value = crate::recorded::js_answer(case, || {
+        shared_part(
+            &serde_json::from_str::<Value>(&node(
+                JS_RUN,
+                &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", "fixture".into())],
+            ))
+            .unwrap(),
+        )
+    });
     let r = run_checks(&options(root, "fixture"), &registry()).unwrap();
-    (shared_part(&r.json()), shared_part(&js))
+    (shared_part(&r.json()), js)
 }
 
 #[test]
@@ -138,7 +142,7 @@ fn c129_flags_new_and_grown_shell_and_names_stale_entries_as_warnings() {
 fn c129_with_a_broken_list_is_one_check_broken_finding_on_both_hosts() {
     let good_b = "{\"files\":[]}";
     let good_e = "{\"exceptions\":[]}";
-    for (which, text) in [
+    for (i, (which, text)) in [
         (BASELINE, None),
         (BASELINE, Some("nope")),
         (BASELINE, Some("{}")),
@@ -157,7 +161,10 @@ fn c129_with_a_broken_list_is_one_check_broken_finding_on_both_hosts() {
             EXCEPTIONS,
             Some("{\"exceptions\":[{\"path\":\"a\",\"id\":\"E1\",\"reason\":\"short\",\"owner\":\"x\"}]}"),
         ),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let mut files = vec![("a.sh", "x\n".to_string())];
         for (path, good) in [(BASELINE, good_b), (EXCEPTIONS, good_e)] {
             if path != which {
@@ -170,18 +177,16 @@ fn c129_with_a_broken_list_is_one_check_broken_finding_on_both_hosts() {
         let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
         let got: Vec<(&str, Option<&str>)> = r.findings.iter().map(|f| (f.file.as_str(), f.outcome.map(|o| o.name()))).collect();
         assert_eq!(got, [(which, Some("check-broken"))], "{which} {text:?}");
-        if has_node() {
-            // The JSON parsers word their own error differently (serde_json and V8): the message is compared up to that text.
-            let cut = |mut v: Value| {
-                for f in v["findings"].as_array_mut().unwrap() {
-                    let m = f["message"].as_str().unwrap().to_string();
-                    f["message"] = Value::from(m.split(" is not JSON: ").next().unwrap());
-                }
-                v
-            };
-            let (rust, js) = both(tree.path());
-            assert_eq!(cut(rust), cut(js), "{which} {text:?}");
-        }
+        // The JSON parsers word their own error differently (serde_json and V8): the message is compared up to that text.
+        let cut = |mut v: Value| {
+            for f in v["findings"].as_array_mut().unwrap() {
+                let m = f["message"].as_str().unwrap().to_string();
+                f["message"] = Value::from(m.split(" is not JSON: ").next().unwrap());
+            }
+            v
+        };
+        let (rust, js) = both(&format!("c129-broken-list-{i}"), tree.path());
+        assert_eq!(cut(rust), cut(js), "{which} {text:?}");
     }
 }
 
@@ -207,7 +212,7 @@ fn c129_an_unreadable_file_is_not_measured_on_both_hosts() {
         return;
     }
     let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
-    let parity = has_node().then(|| both(tree.path()));
+    let parity = Some(both("c129-unreadable", tree.path()));
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
     let got: Vec<(&str, Option<&str>)> = r
         .findings
@@ -250,30 +255,16 @@ fn c129_a_files_run_judges_only_the_files_it_looked_at() {
 }
 
 #[test]
-fn live_c129_fixture_findings_equal_the_js_host() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn c129_fixture_findings_equal_the_recorded_js_answer() {
     let tree = tree_of(&cases());
-    let (got, want) = both(tree.path());
+    let (got, want) = both("c129-fixture", tree.path());
     assert_eq!(got["findings"], want["findings"]);
     assert_eq!(got, want);
 }
 
 #[test]
-fn live_c129_tree_findings_equal_the_js_host() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn c129_tree_findings_stay_within_the_recorded_js_answer() {
     let root = repo_root();
-    let js_root = root.clone();
-    let js = paddock_testkit::guarded("the JS C129 over the live tree", LIVE_STALL, move |progress| {
-        let driver = format!(
-            "import fs from 'node:fs';\nimport {{ syncBuiltinESMExports }} from 'node:module';\nconst read = fs.readFileSync;\nfs.readFileSync = (...a) => {{ process.stdout.write('.\\n'); return read(...a); }};\nsyncBuiltinESMExports();\n{JS_RUN}"
-        );
-        let env = [("RT5_ROOT", js_root.display().to_string()), ("RT5_APP", "paddock".into())];
-        serde_json::from_str::<Value>(node_ticking(&driver, &env, &progress).trim()).unwrap()
-    });
     let r = paddock_testkit::guarded("the Rust C129 over the live tree", LIVE_STALL, {
         let root = root.clone();
         move |progress| {
@@ -281,9 +272,20 @@ fn live_c129_tree_findings_equal_the_js_host() {
             run_checks_in(&tree, &options(&root, "paddock"), &registry()).unwrap()
         }
     });
-    let (got, want) = (shared_part(&r.json()), shared_part(&js));
-    assert_eq!(got["findings"], want["findings"]);
-    assert_eq!(got, want);
+    crate::recorded::assert_tree_within(
+        "c129-real-tree",
+        || {
+            let js_root = root.clone();
+            paddock_testkit::guarded("the JS C129 over the live tree", LIVE_STALL, move |progress| {
+                let driver = format!(
+                    "import fs from 'node:fs';\nimport {{ syncBuiltinESMExports }} from 'node:module';\nconst read = fs.readFileSync;\nfs.readFileSync = (...a) => {{ process.stdout.write('.\\n'); return read(...a); }};\nsyncBuiltinESMExports();\n{JS_RUN}"
+                );
+                let env = [("RT5_ROOT", js_root.display().to_string()), ("RT5_APP", "paddock".into())];
+                serde_json::from_str::<Value>(node_ticking(&driver, &env, &progress).trim()).unwrap()
+            })
+        },
+        &r.json(),
+    );
 }
 
 // Plain `git` in a scratch repository, started and awaited here; nothing is killed by pid.

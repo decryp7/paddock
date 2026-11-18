@@ -1,0 +1,15 @@
+{
+ "errors": 0,
+ "sites": {
+  "C130": [
+   "conformance/c130-allow.json",
+   "crates/paddock-env/tests/it/text_busy.rs",
+   "crates/paddock-proc/tests/it/text_busy.rs",
+   "tools/paddock-dev/src/check/c129.rs",
+   "tools/paddock-dev/src/local_sccache.rs",
+   "tools/paddock-dev/src/pre_push/tests.rs",
+   "tools/paddock-dev/tests/it/check_c129.rs",
+   "tools/paddock-dev/tests/it/check_ids.rs"
+  ]
+ }
+}

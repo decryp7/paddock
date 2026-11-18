@@ -1,0 +1,18 @@
+{
+ "findings": [
+  {
+   "check": "C124",
+   "severity": "error",
+   "rule": 21,
+   "file": "tools/paddock-dev/src/x/mod.rs",
+   "line": 1,
+   "message": "not measured: tools/paddock-dev/src/x/mod.rs could not be read, so a gate result made by hand in it cannot be seen",
+   "fix": "Make the file readable (permissions) and run the check again.",
+   "unwaivable": true,
+   "outcome": "not-measured"
+  }
+ ],
+ "errors": 1,
+ "warnings": 0,
+ "waived": []
+}

@@ -2,7 +2,7 @@
 //! working tree. The check's own test file: C121 does not read it (its `IMPLEMENTATION`), so the invented lines below need no allow
 //! entry.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{has_node, node, repo_root, skip};
+use super::check::{node, repo_root};
 use paddock_dev::check::{RunOptions, registry, run_checks};
 use serde_json::{Value, json};
 use std::path::Path;
@@ -138,22 +138,22 @@ fn c121_without_its_allow_list_cannot_look() {
 }
 
 #[test]
-fn live_c121_findings_equal_the_js_port_on_a_fixture_tree_and_on_this_tree() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
-    let tree = c121_tree();
-    for (root, app) in [(tree.path().to_path_buf(), "fixture"), (repo_root(), "paddock")] {
+fn c121_findings_equal_the_recorded_js_answers_on_a_fixture_tree_and_on_this_tree() {
+    let live = |root: &Path, app: &str| {
         let js: Value = serde_json::from_str(&node(
             JS_RUN_C121,
             &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", app.into())],
         ))
         .unwrap();
-        let r = run_checks(&c121_options(&root, app), &registry()).unwrap();
-        let (got, want) = (shared_part(&r.json()), shared_part(&js));
-        assert_eq!(got["findings"], want["findings"], "C121 on {app}");
-        assert_eq!(got, want, "C121 on {app}");
-    }
+        shared_part(&js)
+    };
+    let tree = c121_tree();
+    let want = crate::recorded::js_answer("c121-fixture", || live(tree.path(), "fixture"));
+    let r = run_checks(&c121_options(tree.path(), "fixture"), &registry()).unwrap();
+    assert_eq!(shared_part(&r.json()), want, "C121 on the fixture tree");
+    let root = repo_root();
+    let r = run_checks(&c121_options(&root, "paddock"), &registry()).unwrap();
+    crate::recorded::assert_tree_within("c121-real-tree", || live(&root, "paddock"), &r.json());
 }
 
 /// The check's own files are not read: their invented lines need no allow entry; another test file still is.

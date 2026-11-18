@@ -3,7 +3,7 @@
 //! letters, no-break spaces, line separators, a very long line) and the two hosts' findings are compared. The seed is the check's own
 //! control tree (`Check::control`), so a new dual-host check needs one line in its parity test: `assert_no_divergence("C1xx")`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{has_node, node, repo_root, skip};
+use super::check::{node, repo_root};
 use paddock_dev::check::{RunOptions, registry, run_checks};
 use serde_json::{Value, json};
 use std::path::Path;
@@ -177,11 +177,14 @@ pub(crate) fn divergences_with(id: &str, seeds: &[Seed], rust_view: RustView) ->
         .iter()
         .map(|(n, _, _, j)| json!({"name": n, "root": j.path().display().to_string()}))
         .collect();
-    let js: Value = serde_json::from_str(&node(
-        JS_RUN,
-        &[("RT5_JOBS", Value::Array(jobs).to_string()), ("RT5_ONLY", id.to_string())],
-    ))
-    .unwrap();
+    let js: Value = crate::recorded::js_answer(&format!("corpus-{}", id.to_lowercase()), || {
+        let all: Value = serde_json::from_str(&node(
+            JS_RUN,
+            &[("RT5_JOBS", Value::Array(jobs).to_string()), ("RT5_ONLY", id.to_string())],
+        ))
+        .unwrap();
+        Value::Object(all.as_object().unwrap().iter().map(|(k, v)| (k.clone(), shared(v))).collect())
+    });
     let mut out = Vec::new();
     for (name, may_empty, rust_dir, _) in &trees {
         let run = run_checks(&options(rust_dir.path(), id), &registry()).unwrap();
@@ -205,7 +208,7 @@ pub(crate) fn divergences_with(id: &str, seeds: &[Seed], rust_view: RustView) ->
             }
         }
         let rust = shared(&run.json());
-        if let Some(why) = field_difference(&rust, &shared(&js[name])) {
+        if let Some(why) = field_difference(&rust, &js[name]) {
             out.push(format!("{id} variant `{name}`: {why}"));
         }
     }
@@ -217,11 +220,8 @@ pub(crate) fn divergences(id: &str, seeds: &[Seed]) -> Vec<String> {
     divergences_with(id, seeds, str::to_string)
 }
 
-/// Fails with the divergences of check `id` (none is parity); skips without node.
+/// Fails with the divergences of check `id` from the recorded JS answers (none is parity).
 pub(crate) fn assert_no_divergence(id: &str, seeds: &[Seed]) {
-    if !has_node() {
-        return skip("node is not installed");
-    }
     let d = divergences(id, seeds);
     assert!(
         d.is_empty(),
@@ -232,9 +232,6 @@ pub(crate) fn assert_no_divergence(id: &str, seeds: &[Seed]) {
 
 /// A known divergence, with its measured `cause`: it fails when the hosts agree, so the marker is removed with the fix.
 pub(crate) fn assert_known_divergence(id: &str, seeds: &[Seed], cause: &str) {
-    if !has_node() {
-        return skip("node is not installed");
-    }
     let d = divergences(id, seeds);
     assert!(
         !d.is_empty(),
@@ -245,9 +242,6 @@ pub(crate) fn assert_known_divergence(id: &str, seeds: &[Seed], cause: &str) {
 /// The corpus sees a planted difference: giving the Rust host the text without its byte order mark removes C124's `bom` divergence.
 #[test]
 fn the_corpus_sees_a_planted_byte_order_mark_difference() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
     let real = divergences("C124", &[]);
     assert!(
         real.iter().any(|d| d.contains("`bom`")),

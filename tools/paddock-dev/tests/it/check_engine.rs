@@ -54,24 +54,40 @@ fn run_host(js: bool, args: &[&str], scratch: &Path) -> Ran {
     ran
 }
 
-/// Both hosts over the same arguments; asserts they agree byte for byte and returns the answer.
-fn same(args: &[&str]) -> Ran {
-    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let (js, rust) = (run_host(true, args, a.path()), run_host(false, args, b.path()));
-    if let (Ok(a), Ok(b)) = (
-        serde_json::from_str::<Value>(&js.stdout),
-        serde_json::from_str::<Value>(&rust.stdout),
-    ) {
-        for k in ["findings", "waived", "checks"] {
-            assert_eq!(a[k], b[k], "{k} of {args:?}");
-        }
+/// A run as recorded data, with the scratch folder and the tree's root named `<scratch>` and `<root>` (no machine in a recording, ER-46).
+fn ran_json(r: &Ran, scratch: &Path, root: &str) -> Value {
+    let scrub = |t: &str| {
+        let t = t.replace(scratch.to_str().unwrap(), "<scratch>");
+        if root.is_empty() { t } else { t.replace(root, "<root>") }
+    };
+    json!({
+        "code": r.code,
+        "stdout": scrub(&r.stdout),
+        "stderr": scrub(&r.stderr),
+        "out": r.out.as_deref().map(scrub),
+        "summary": r.summary.as_deref().map(scrub),
+    })
+}
+
+/// The Rust host over `args`, held to the answer the JS host recorded for `case` (stdout, `--out`, `--summary`, exit status and
+/// standard error, byte for byte); returns the Rust answer.
+fn same(case: &str, args: &[&str]) -> Ran {
+    let b = tempfile::tempdir().unwrap();
+    let rust = run_host(false, args, b.path());
+    let root = args
+        .iter()
+        .position(|a| *a == "--root")
+        .and_then(|i| args.get(i + 1))
+        .copied()
+        .unwrap_or("");
+    let want = crate::recorded::js_answer(case, || {
+        let a = tempfile::tempdir().unwrap();
+        ran_json(&run_host(true, args, a.path()), a.path(), root)
+    });
+    let got = ran_json(&rust, b.path(), root);
+    for k in ["code", "stdout", "out", "summary", "stderr"] {
+        assert_eq!(got[k], want[k], "{k} of {args:?} ({case})");
     }
-    assert_eq!(js.stdout, rust.stdout, "stdout of {args:?}");
-    assert_eq!(js.out, rust.out, "--out of {args:?}");
-    assert_eq!(js.summary, rust.summary, "--summary of {args:?}");
-    assert_eq!(js.code, rust.code, "exit status of {args:?}");
-    let scrub = |r: &Ran, d: &tempfile::TempDir| r.stderr.replace(d.path().to_str().unwrap(), "<scratch>");
-    assert_eq!(scrub(&js, &a), scrub(&rust, &b), "stderr of {args:?}");
     rust
 }
 
@@ -88,9 +104,21 @@ fn tree(files: &[(&str, &str)]) -> tempfile::TempDir {
 }
 
 #[test]
-fn this_working_tree_gives_the_same_report_files_and_exit_code_in_both_hosts() {
+fn this_working_tree_gives_the_report_files_the_js_host_gave() {
     let root = repo();
-    let r = same(&["--app", "paddock", "--root", root.to_str().unwrap(), "--only", PORTED]);
+    // The tree changes under the tests: its findings are held to the recorded JS answer as a ceiling (`recorded::assert_tree_within`),
+    // the shape of the report and its files exactly.
+    let scratch = tempfile::tempdir().unwrap();
+    let args = ["--app", "paddock", "--root", root.to_str().unwrap(), "--only", PORTED];
+    let r = run_host(false, &args, scratch.path());
+    crate::recorded::assert_tree_within(
+        "engine-real-tree",
+        || {
+            let a = tempfile::tempdir().unwrap();
+            serde_json::from_str(run_host(true, &args, a.path()).out.as_deref().unwrap()).unwrap()
+        },
+        &serde_json::from_str::<Value>(r.out.as_deref().unwrap()).unwrap(),
+    );
     assert!(r.stdout.contains("paddock: 4 checks"), "{}", r.stdout);
     let out: Value = serde_json::from_str(r.out.as_deref().unwrap()).unwrap();
     assert_eq!(out["checks"], json!(["C39", "C53", "C119", "C120"]));
@@ -104,22 +132,33 @@ fn this_working_tree_gives_the_same_report_files_and_exit_code_in_both_hosts() {
 fn json_mode_strict_and_the_exit_statuses_agree() {
     let root = repo();
     let root = root.to_str().unwrap();
-    let json_run = same(&["--app", "paddock", "--root", root, "--only", "C119,C120", "--json"]);
+    let scratch = tempfile::tempdir().unwrap();
+    let json_run = run_host(
+        false,
+        &["--app", "paddock", "--root", root, "--only", "C119,C120", "--json"],
+        scratch.path(),
+    );
     assert!(json_run.stdout.trim_start().starts_with('{'));
     // C120 and C119 are report-only: a warning never fails the run, `--strict` makes the named check's warnings fail.
     // conformance: layout-guess — a shell fixture for the strict-mode test, not a layout this code computes
     let bad = tree(&[("scripts/x.sh", "#!/bin/sh\nd=$(dirname \"$0\")/../deps\ncd \"$d\"\n")]);
-    let loose = same(&["--app", "t", "--root", bad.path().to_str().unwrap(), "--only", "C120"]);
-    let strict = same(&[
-        "--app",
-        "t",
-        "--root",
-        bad.path().to_str().unwrap(),
-        "--only",
-        "C120",
-        "--strict",
-        "C120",
-    ]);
+    let loose = same(
+        "engine-loose",
+        &["--app", "t", "--root", bad.path().to_str().unwrap(), "--only", "C120"],
+    );
+    let strict = same(
+        "engine-strict",
+        &[
+            "--app",
+            "t",
+            "--root",
+            bad.path().to_str().unwrap(),
+            "--only",
+            "C120",
+            "--strict",
+            "C120",
+        ],
+    );
     assert_eq!(loose.code, Some(check::outcome::CLEAN), "{}", loose.stdout);
     assert_eq!(strict.code, Some(check::outcome::FINDINGS), "{}", strict.stdout);
 }
@@ -128,13 +167,16 @@ fn json_mode_strict_and_the_exit_statuses_agree() {
 fn usage_errors_and_a_missing_app_agree() {
     let empty = tempfile::tempdir().unwrap();
     let root = empty.path().to_str().unwrap();
-    for args in [
+    for (n, args) in [
         vec!["--root", root],
         vec!["--app", "t", "--bogus"],
         vec!["--app", "t", "stray"],
         vec!["--app"],
-    ] {
-        let r = same(&args);
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let r = same(&format!("engine-usage-{n}"), &args);
         assert_eq!(r.code, Some(check::outcome::USAGE), "{args:?}: {}", r.stderr);
     }
 }
@@ -182,7 +224,10 @@ fn a_marker_in_a_string_literal_is_no_waiver_in_either_host() {
             "jobs:\n  a:\n    steps:\n      - run: echo \"# conformance: dev-before-toolchain — the image has the only compiler\" && ./dev x\n",
         ),
     ]);
-    let r = same(&["--app", "paddock", "--root", d.path().to_str().unwrap(), "--only", PORTED, "--json"]);
+    let r = same(
+        "engine-string-markers",
+        &["--app", "paddock", "--root", d.path().to_str().unwrap(), "--only", PORTED, "--json"],
+    );
     let v: Value = serde_json::from_str(&r.stdout).unwrap();
     let waived: Vec<String> = v["waived"]
         .as_array()
@@ -236,7 +281,10 @@ fn waiver_tree() -> tempfile::TempDir {
 fn inline_waivers_are_listed_under_waived_identically_by_both_hosts() {
     let d = waiver_tree();
     // C119 judges the Paddock repository only (the JavaScript check returns nothing for another app): the same app name in both.
-    let r = same(&["--app", "paddock", "--root", d.path().to_str().unwrap(), "--only", PORTED, "--json"]);
+    let r = same(
+        "engine-inline-waivers",
+        &["--app", "paddock", "--root", d.path().to_str().unwrap(), "--only", PORTED, "--json"],
+    );
     let v: Value = serde_json::from_str(&r.stdout).unwrap();
     let waived = v["waived"].as_array().unwrap();
     let listed: Vec<(String, String, u64)> = waived

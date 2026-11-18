@@ -1,0 +1,7 @@
+{
+ "code": 2,
+ "stdout": "",
+ "stderr": "paddock-conformance: unknown option: --bogus\n",
+ "out": null,
+ "summary": null
+}

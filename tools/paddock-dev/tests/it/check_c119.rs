@@ -19,7 +19,12 @@ const r = await runChecks({ root: process.env.C119_ROOT, app: 'paddock', only: [
 process.stdout.write(JSON.stringify({ findings: r.findings, errors: r.errors, warnings: r.warnings }));
 "#;
 
-fn js(root: &Path) -> Value {
+/// The JS host's answer for `case` (recorded: tests/fixtures/check/recorded).
+fn js(case: &str, root: &Path) -> Value {
+    crate::recorded::js_answer(case, || js_live(root))
+}
+
+fn js_live(root: &Path) -> Value {
     let out = TestCommand::new("node")
         .args(["--input-type=module", "-e", DRIVER])
         .current_dir(repo())
@@ -72,7 +77,7 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
             "jobs:\n  w:\n    steps:\n      # conformance: dev-before-toolchain — the image has the only compiler\n      - run: ./dev x\n  bare:\n    steps:\n      # conformance: dev-before-toolchain\n      - run: ./dev x\n  c:\n    steps:\n      # ./dev x\n      - run: echo ./dev\n      - run: ./devx\n  d:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n      - run: ./dev ok\n",
         ),
     ]);
-    let (a, b) = (js(d.path()), rust(d.path()));
+    let (a, b) = (js("c119-every-shape", d.path()), rust(d.path()));
     assert_eq!(a, b);
     assert_eq!(a["warnings"], 4, "bad, plainjob, bare and c: {a}");
 }
@@ -80,12 +85,12 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
 #[test]
 fn a_tree_without_workflows_is_check_broken_in_both_never_a_pass() {
     let d = tree(&[("README.md", "x")]);
-    let (a, b) = (js(d.path()), rust(d.path()));
+    let (a, b) = (js("c119-no-workflows", d.path()), rust(d.path()));
     assert!(a["errors"].as_u64().unwrap() >= 1 && b["errors"].as_u64().unwrap() >= 1, "{a} {b}");
 }
 
 #[test]
 fn this_working_tree_gives_the_same_findings_in_both_hosts() {
     let root = repo();
-    assert_eq!(js(&root)["findings"], rust(&root)["findings"]);
+    crate::recorded::assert_tree_within("c119-real-tree", || js_live(&root), &rust(&root));
 }

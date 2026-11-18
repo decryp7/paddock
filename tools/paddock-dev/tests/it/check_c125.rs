@@ -1,7 +1,7 @@
 //! C125 (no hard-coded machine disk paths): the Rust host against the conformance host as the oracle, on a fixture tree and on this
 //! working tree.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{LIVE_STALL, has_node, node, node_ticking, repo_root, skip};
+use super::check::{LIVE_STALL, node, node_ticking, repo_root};
 use paddock_dev::check::tree::Tree;
 use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
 use serde_json::{Value, json};
@@ -77,14 +77,18 @@ fn fixture_tree() -> tempfile::TempDir {
 }
 
 /// Both hosts over `root`: the shared part of each report, the Rust one first.
-fn both(root: &Path) -> (Value, Value) {
-    let js: Value = serde_json::from_str(&node(
-        JS_RUN,
-        &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", "fixture".into())],
-    ))
-    .unwrap();
+fn both(case: &str, root: &Path) -> (Value, Value) {
+    let js: Value = crate::recorded::js_answer(case, || {
+        shared_part(
+            &serde_json::from_str::<Value>(&node(
+                JS_RUN,
+                &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", "fixture".into())],
+            ))
+            .unwrap(),
+        )
+    });
     let r = run_checks(&options(root, "fixture"), &registry()).unwrap();
-    (shared_part(&r.json()), shared_part(&js))
+    (shared_part(&r.json()), js)
 }
 
 #[test]
@@ -142,12 +146,15 @@ fn c125_flags_unlisted_disk_paths_and_names_stale_entries_as_warnings() {
 /// nothing else, on both hosts, never a pass.
 #[test]
 fn c125_with_a_broken_allow_file_is_one_check_broken_finding_on_both_hosts() {
-    for allow in [
+    for (i, allow) in [
         None,
         Some("nope"),
         Some("{\"allow\": []}"),
         Some("{\"history\": [], \"allow\": [{\"path\": \"a\"}]}"),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let mut files = vec![("scripts/a.sh", "x=/Volumes/d7sst7\n")];
         if let Some(text) = allow {
             files.push(("conformance/c125-allow.json", text));
@@ -156,18 +163,16 @@ fn c125_with_a_broken_allow_file_is_one_check_broken_finding_on_both_hosts() {
         let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
         let got: Vec<(&str, Option<&str>)> = r.findings.iter().map(|f| (f.file.as_str(), f.outcome.map(|o| o.name()))).collect();
         assert_eq!(got, [("conformance/c125-allow.json", Some("check-broken"))], "{allow:?}");
-        if has_node() {
-            // The JSON parsers word their own error differently (serde_json and V8): the message is compared up to that text.
-            let cut = |mut v: Value| {
-                for f in v["findings"].as_array_mut().unwrap() {
-                    let m = f["message"].as_str().unwrap().to_string();
-                    f["message"] = Value::from(m.split(" is not JSON: ").next().unwrap());
-                }
-                v
-            };
-            let (rust, js) = both(tree.path());
-            assert_eq!(cut(rust), cut(js), "{allow:?}");
-        }
+        // The JSON parsers word their own error differently (serde_json and V8): the message is compared up to that text.
+        let cut = |mut v: Value| {
+            for f in v["findings"].as_array_mut().unwrap() {
+                let m = f["message"].as_str().unwrap().to_string();
+                f["message"] = Value::from(m.split(" is not JSON: ").next().unwrap());
+            }
+            v
+        };
+        let (rust, js) = both(&format!("c125-broken-allow-{i}"), tree.path());
+        assert_eq!(cut(rust), cut(js), "{allow:?}");
     }
 }
 
@@ -189,7 +194,7 @@ fn c125_an_unreadable_file_is_not_measured_on_both_hosts() {
         return;
     }
     let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
-    let parity = has_node().then(|| both(tree.path()));
+    let parity = Some(both("c125-unreadable", tree.path()));
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
     let got: Vec<(&str, Option<&str>)> = r.findings.iter().map(|f| (f.file.as_str(), f.outcome.map(|o| o.name()))).collect();
     assert_eq!(got, [("scripts/a.sh", Some("not-measured")), ("scripts/b.sh", None)]);
@@ -199,30 +204,16 @@ fn c125_an_unreadable_file_is_not_measured_on_both_hosts() {
 }
 
 #[test]
-fn live_c125_fixture_findings_equal_the_js_host() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn c125_fixture_findings_equal_the_recorded_js_answer() {
     let tree = fixture_tree();
-    let (got, want) = both(tree.path());
+    let (got, want) = both("c125-fixture", tree.path());
     assert_eq!(got["findings"], want["findings"]);
     assert_eq!(got, want);
 }
 
 #[test]
-fn live_c125_tree_findings_equal_the_js_host() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn c125_tree_findings_stay_within_the_recorded_js_answer() {
     let root = repo_root();
-    let js_root = root.clone();
-    let js = paddock_testkit::guarded("the JS C125 over the live tree", LIVE_STALL, move |progress| {
-        let driver = format!(
-            "import fs from 'node:fs';\nimport {{ syncBuiltinESMExports }} from 'node:module';\nconst read = fs.readFileSync;\nfs.readFileSync = (...a) => {{ process.stdout.write('.\\n'); return read(...a); }};\nsyncBuiltinESMExports();\n{JS_RUN}"
-        );
-        let env = [("RT5_ROOT", js_root.display().to_string()), ("RT5_APP", "paddock".into())];
-        serde_json::from_str::<Value>(node_ticking(&driver, &env, &progress).trim()).unwrap()
-    });
     let r = paddock_testkit::guarded("the Rust C125 over the live tree", LIVE_STALL, {
         let root = root.clone();
         move |progress| {
@@ -230,9 +221,20 @@ fn live_c125_tree_findings_equal_the_js_host() {
             run_checks_in(&tree, &options(&root, "paddock"), &registry()).unwrap()
         }
     });
-    let (got, want) = (shared_part(&r.json()), shared_part(&js));
-    assert_eq!(got["findings"], want["findings"]);
-    assert_eq!(got, want);
+    crate::recorded::assert_tree_within(
+        "c125-real-tree",
+        || {
+            let js_root = root.clone();
+            paddock_testkit::guarded("the JS C125 over the live tree", LIVE_STALL, move |progress| {
+                let driver = format!(
+                    "import fs from 'node:fs';\nimport {{ syncBuiltinESMExports }} from 'node:module';\nconst read = fs.readFileSync;\nfs.readFileSync = (...a) => {{ process.stdout.write('.\\n'); return read(...a); }};\nsyncBuiltinESMExports();\n{JS_RUN}"
+                );
+                let env = [("RT5_ROOT", js_root.display().to_string()), ("RT5_APP", "paddock".into())];
+                serde_json::from_str::<Value>(node_ticking(&driver, &env, &progress).trim()).unwrap()
+            })
+        },
+        &r.json(),
+    );
 }
 
 /// A file the check reads and then passes over (a NUL byte) is not read: an entry for it says so, and it is no probe.
@@ -256,10 +258,8 @@ fn c125_an_entry_for_a_file_it_passes_over_names_a_file_it_does_not_read() {
             "allow entry (scripts/blob.sh: /Volumes/Data) names a file this check does not read"
         )]
     );
-    if has_node() {
-        let (rust, js) = both(tree.path());
-        assert_eq!(rust, js);
-    }
+    let (rust, js) = both("c125-passed-over", tree.path());
+    assert_eq!(rust, js);
 }
 
 /// A run over other files (`--files`, the push gate) says nothing about a history entry whose files it did not look at.

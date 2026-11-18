@@ -1,0 +1,18 @@
+{
+ "findings": [
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "conformance/c130-allow.json",
+   "line": 1,
+   "message": "the check cannot look: conformance/c130-allow.json cannot be read",
+   "fix": "Restore conformance/c130-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"#!/bin/sh\", \"reason\": \"...\", \"count\": 1}]}.",
+   "unwaivable": true,
+   "outcome": "check-broken"
+  }
+ ],
+ "errors": 0,
+ "warnings": 1,
+ "waived": []
+}

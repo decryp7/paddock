@@ -2,7 +2,7 @@
 //! tree and on this working tree. The check's own test file: C130 does not read it (its `IMPLEMENTATION`), so the invented lines below
 //! need no allow entry.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{has_node, node, repo_root, skip};
+use super::check::{node, repo_root};
 use paddock_dev::check::{RunOptions, registry, run_checks};
 use serde_json::{Value, json};
 use std::path::Path;
@@ -126,22 +126,22 @@ fn c130_without_its_allow_list_cannot_look() {
 }
 
 #[test]
-fn live_c130_findings_equal_the_js_port_on_a_fixture_tree_and_on_this_tree() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
-    let tree = c130_tree();
-    for (root, app) in [(tree.path().to_path_buf(), "fixture"), (repo_root(), "paddock")] {
+fn c130_findings_equal_the_recorded_js_answers_on_a_fixture_tree_and_on_this_tree() {
+    let live = |root: &Path, app: &str| {
         let js: Value = serde_json::from_str(&node(
             JS_RUN_C130,
             &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", app.into())],
         ))
         .unwrap();
-        let r = run_checks(&c130_options(&root, app), &registry()).unwrap();
-        let (got, want) = (shared_part(&r.json()), shared_part(&js));
-        assert_eq!(got["findings"], want["findings"], "C130 on {app}");
-        assert_eq!(got, want, "C130 on {app}");
-    }
+        shared_part(&js)
+    };
+    let tree = c130_tree();
+    let want = crate::recorded::js_answer("c130-fixture", || live(tree.path(), "fixture"));
+    let r = run_checks(&c130_options(tree.path(), "fixture"), &registry()).unwrap();
+    assert_eq!(shared_part(&r.json()), want, "C130 on the fixture tree");
+    let root = repo_root();
+    let r = run_checks(&c130_options(&root, "paddock"), &registry()).unwrap();
+    crate::recorded::assert_tree_within("c130-real-tree", || live(&root, "paddock"), &r.json());
 }
 
 /// The check's own files are not read: their invented lines need no allow entry; another test file still is.
@@ -254,23 +254,23 @@ fn growth_is_not_measured_on_a_fixture_folder_and_a_missing_base_is_said() {
 }
 
 #[test]
-fn growth_findings_equal_the_js_host_in_a_git_repository() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn growth_findings_equal_the_recorded_js_answers_in_a_git_repository() {
     let extra = ",{\"path\":\"tools/t/tests/it/ok.rs\",\"site\":\"#!/bin/bash\",\"reason\":\"baseline: planted before StandIn\"}";
     for (name, repo) in [
         ("raised", growth_repo(&allow_of(2, ""), &allow_of(3, ""))),
         ("added", growth_repo(&allow_of(3, ""), &allow_of(3, extra))),
         ("same", growth_repo(&allow_of(3, ""), &allow_of(3, ""))),
     ] {
-        let js: Value = serde_json::from_str(&node(
-            JS_RUN_C130,
-            &[("RT5_ROOT", repo.path().display().to_string()), ("RT5_APP", "fixture".into())],
-        ))
-        .unwrap();
+        let want = crate::recorded::js_answer(&format!("c130-growth-{name}"), || {
+            let js: Value = serde_json::from_str(&node(
+                JS_RUN_C130,
+                &[("RT5_ROOT", repo.path().display().to_string()), ("RT5_APP", "fixture".into())],
+            ))
+            .unwrap();
+            shared_part(&js)
+        });
         let r = run_checks(&c130_options(repo.path(), "fixture"), &registry()).unwrap();
-        let (got, want) = (shared_part(&r.json()), shared_part(&js));
+        let got = crate::recorded::scrub(shared_part(&r.json()));
         assert_eq!(got["findings"], want["findings"], "{name}");
         assert_eq!(got, want, "{name}");
     }
@@ -327,9 +327,9 @@ fn the_trains_own_entries_are_not_growth_of_a_member_measured_against_the_train(
     let msgs = grew_against(own.path(), "origin/train");
     assert_eq!(msgs.len(), 1, "the member's own raise counts");
     assert!(msgs[0].starts_with("the allow list grew: 1 entry is"), "{msgs:?}");
-    // The JavaScript host agrees on the same repositories with the same ref.
-    if has_node() {
-        for (name, repo) in [("clean", &repo), ("own", &own)] {
+    // The recorded answers of the JavaScript host on the same repositories with the same ref.
+    for (name, repo) in [("clean", &repo), ("own", &own)] {
+        let want = crate::recorded::js_answer(&format!("c130-train-{name}"), || {
             let js: Value = serde_json::from_str(&node(
                 JS_RUN_C130,
                 &[
@@ -339,11 +339,16 @@ fn the_trains_own_entries_are_not_growth_of_a_member_measured_against_the_train(
                 ],
             ))
             .unwrap();
-            let mut o = c130_options(repo.path(), "fixture");
-            o.base_ref = Some("origin/train".into());
-            let r = run_checks(&o, &registry()).unwrap();
-            assert_eq!(shared_part(&r.json())["findings"], shared_part(&js)["findings"], "{name}");
-        }
+            shared_part(&js)
+        });
+        let mut o = c130_options(repo.path(), "fixture");
+        o.base_ref = Some("origin/train".into());
+        let r = run_checks(&o, &registry()).unwrap();
+        assert_eq!(
+            crate::recorded::scrub(shared_part(&r.json()))["findings"],
+            want["findings"],
+            "{name}"
+        );
     }
 }
 

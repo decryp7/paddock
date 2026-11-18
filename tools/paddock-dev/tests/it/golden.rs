@@ -46,7 +46,7 @@ fn canonical(mut v: Value) -> Value {
 }
 
 /// Whether `PADDOCK_GOLDEN_BLESS=1` asks the recorded tests to rewrite their files from what the planner answers now.
-fn bless() -> bool {
+pub(crate) fn bless() -> bool {
     bless_allowed(|k| std::env::var(k).ok())
 }
 
@@ -83,7 +83,7 @@ fn error_kind(e: &impl std::fmt::Debug) -> String {
 const REGENERATE: &str = "to accept the planner's new answer, review it, then run `PADDOCK_GOLDEN_BLESS=1 cargo nextest run -E 'test(golden::)'` and commit the changed files under tools/paddock-dev/tests/golden";
 
 /// Writes `value` as the recorded files are written (one space per level, a final newline).
-fn record(path: &Path, value: &Value) {
+pub(crate) fn record(path: &Path, value: &Value) {
     // serde_json indents by two spaces; the recorded files use one (structural indentation only: a string never breaks a line).
     let mut out: String = serde_json::to_string_pretty(value)
         .unwrap()
