@@ -941,3 +941,22 @@ fn an_exact_name_may_end_in_exe_on_any_host_and_answers_for_itself() {
             && files.script_name.ends_with(".stand-in.json")
     );
 }
+
+#[test]
+fn the_environ_token_lists_every_variable_the_call_was_given() {
+    let s = Scratch::new();
+    let log = s.work().join("env");
+    let p = StandIn::new(&s.work(), "tool")
+        .answers(Actions::new().appends_with(&log.to_string_lossy(), "{environ}\n"))
+        .install()
+        .unwrap();
+    TestCommand::new(p.program())
+        .env("PADDOCK_STAND_IN_CANARY", "a b")
+        .status()
+        .unwrap();
+    let seen = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        seen.lines().any(|l| l == "PADDOCK_STAND_IN_CANARY=a b"),
+        "{seen}"
+    );
+}

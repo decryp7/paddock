@@ -163,7 +163,7 @@ struct Ctx {
 }
 
 /// Fills a template: `{args}` (the arguments, joined by spaces), `{arg:N}` (the N-th, from 1; empty when absent), `{cwd}`, `{dir}` (the
-/// stand-in's own folder), `{name}`, `{pid}`, `{env:NAME}` and `{env:NAME|fallback}` (empty or the fallback when unset),
+/// stand-in's own folder), `{name}`, `{pid}`, `{environ}` (every variable as a `NAME=value` line, as `env` prints them), `{env:NAME}` and `{env:NAME|fallback}` (empty or the fallback when unset),
 /// `{flag:PREFIX}` (what follows PREFIX in the last argument that starts with it, as `${a#PREFIX}` does), `{run:program|arg|arg}` (what that program prints in the working folder, without its last newline; empty when it fails; no `|` or `}` inside an argument), `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
 fn expand(text: &str, ctx: &Ctx) -> Result<String, String> {
     let mut out = String::new();
@@ -199,6 +199,10 @@ fn token(t: &str, ctx: &Ctx) -> Result<String, String> {
             .map(|d| d.display().to_string())
             .unwrap_or_default(),
         "dir" => ctx.dir.display().to_string(),
+        "environ" => std::env::vars_os()
+            .map(|(k, v)| format!("{}={}", k.to_string_lossy(), v.to_string_lossy()))
+            .collect::<Vec<_>>()
+            .join("\n"),
         "name" => ctx.name.clone(),
         "pid" => std::process::id().to_string(),
         "stdin" => stdin.to_string(),
