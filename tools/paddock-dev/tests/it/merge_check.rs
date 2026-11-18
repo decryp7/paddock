@@ -3,7 +3,7 @@
 //! `tests/fixtures/merge-check/087570da4` holds the real contents of those files at the merge base (e16df7328), the first
 //! parent (80f1021a8) and the second (d3ec06cac), and the real merge message. The others are invented histories.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use paddock_testkit::TestCommand;
+use paddock_testkit::{Actions, Case, StandIn, TestCommand};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -1124,20 +1124,29 @@ fn a_dropped_hunk_finding_shows_where_it_was_and_what_it_said() {
 mod hakari {
     use super::*;
 
-    const FAKE_CARGO: &str = r#"#!/bin/sh
-# argv: hakari generate --diff, run in <tree>/crates. Like cargo-hakari 0.9.39, it prints the diff on STANDARD ERROR.
-[ "$1 $2 $3" = "hakari generate --diff" ] || { echo "unexpected: $*" >&2; exit 2; }
-if grep -q base64 x/Cargo.toml && ! grep -q base64 paddock-workspace-hack/Cargo.toml; then
-  printf 'info: \n--- original\n+++ modified\n+base64 = { version = "0.23" }\n' >&2
-  exit 1
-fi
-exit 0
-"#;
-
+    /// Plays `cargo hakari generate --diff`, run in `<tree>/crates`. Like cargo-hakari 0.9.39, it prints the diff on STANDARD ERROR.
     fn fake_cargo(dir: &Path) -> PathBuf {
-        let p = dir.join("cargo");
-        paddock_testkit::exe::write_program(&p, FAKE_CARGO).unwrap();
-        p
+        let hakari = ["hakari", "generate", "--diff"];
+        let stale = Case::new()
+            .args_start_with(&hakari)
+            .file_contains(Path::new("x/Cargo.toml"), "base64")
+            .file_lacks(Path::new("paddock-workspace-hack/Cargo.toml"), "base64");
+        StandIn::new(dir, "cargo")
+            .answers(Actions::new().stderr_with("unexpected: {args}").exit(2))
+            .when(&Case::new().args_start_with(&hakari), Actions::new())
+            .when(
+                &stale,
+                Actions::new()
+                    .stderr("info: ")
+                    .stderr("--- original")
+                    .stderr("+++ modified")
+                    .stderr("+base64 = { version = \"0.23\" }")
+                    .exit(1),
+            )
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf()
     }
 
     /// A merge of two clean branches: one adds a member that needs base64, the other touches an unrelated file; `fixed` is
@@ -1311,21 +1320,29 @@ exit 0
 mod member_gate {
     use super::*;
 
-    const FAKE_GATES: &str = r#"#!/bin/sh
-# argv: check --pre-push --member-gate --base <base> --root <root>; run in <root>. Logs its argv and the checkout's HEAD.
-echo "$* HEAD=$(git rev-parse HEAD)" >> "$GATES_LOG"
-# What the real push gate prints with --json: an outcome whose evidence names this checkout's commit and tree (ADR 0089 WP-T5).
-sha=$(git rev-parse HEAD); tree=$(git rev-parse 'HEAD^{tree}')
-ev="{\"check\":\"pre-push\",\"subject\":{\"kind\":\"commit\",\"sha\":\"$sha\",\"tree\":\"$tree\"},\"tool\":\"fake\",\"at\":1}"
-if [ -f a.txt ] && [ -f b.txt ]; then
-  echo "clippy FAILED: a.txt and b.txt together"
-  printf '{"outcome":{"status":"findings","findings":[{"message":"clippy","failing":true}],"evidence":%s}}\n' "$ev"
-  exit "${GATES_EXIT:-5}"
-fi
-echo "fmt ok; clippy ok"
-printf '{"outcome":{"status":"clean","evidence":%s}}\n' "$ev"
-exit 0
-"#;
+    /// Plays `check --pre-push --member-gate --base <base> --root <root>`, run in `<root>`. Logs its argv and the checkout's HEAD.
+    /// What the real push gate prints with --json: an outcome whose evidence names this checkout's commit and tree (ADR 0089 WP-T5).
+    fn fake_gates(dir: &Path) {
+        let ev = r#"{{"check":"pre-push","subject":{{"kind":"commit","sha":"{run:git|rev-parse|HEAD}","tree":"{run:git|rev-parse|HEAD:}"}},"tool":"fake","at":1}}"#;
+        let log = Actions::new().appends_with("{env:GATES_LOG}", "{args} HEAD={run:git|rev-parse|HEAD}\n");
+        let together = Case::new().file_exists(Path::new("a.txt")).file_exists(Path::new("b.txt"));
+        StandIn::new(dir, "gates")
+            .answers(
+                log.clone()
+                    .stdout("fmt ok; clippy ok")
+                    .stdout_with(&format!(r#"{{{{"outcome":{{{{"status":"clean","evidence":{ev}}}}}}}}}"#)),
+            )
+            .when(
+                &together,
+                log.stdout("clippy FAILED: a.txt and b.txt together")
+                    .stdout_with(&format!(
+                        r#"{{{{"outcome":{{{{"status":"findings","findings":[{{{{"message":"clippy","failing":true}}}}],"evidence":{ev}}}}}}}}}"#
+                    ))
+                    .exits_with_env("GATES_EXIT", 5),
+            )
+            .install()
+            .unwrap();
+    }
 
     struct Train {
         repo: Repo,
@@ -1371,8 +1388,7 @@ exit 0
             repo.git(&["merge", "-q", "--no-ff", "-m", &format!("Merge {member}"), member]);
         }
         let gates = tempfile::tempdir().unwrap();
-        let p = gates.path().join("gates");
-        paddock_testkit::exe::write_program(&p, FAKE_GATES).unwrap();
+        fake_gates(gates.path());
         Train { repo, gates }
     }
 
@@ -1395,13 +1411,9 @@ exit 0
     #[test]
     fn a_gate_that_exits_0_without_an_outcome_for_this_merge_is_not_a_pass() {
         let t = train(false);
-        let script = |body: &str| {
-            let p = t.gates.path().join("gates");
-            paddock_testkit::exe::write_program(&p, format!("#!/bin/sh\n{body}\nexit 0\n")).unwrap();
-        };
-        let stale = r#"printf '{"outcome":{"status":"clean","evidence":{"check":"pre-push","subject":{"kind":"commit","sha":"0000000000000000000000000000000000000001","tree":"0000000000000000000000000000000000000002"},"tool":"x","at":1}}}\n'"#;
-        for body in ["echo fine", "echo '{\"outcome\":{\"status\":\"clean\"}}'", stale] {
-            script(body);
+        let stale = r#"{"outcome":{"status":"clean","evidence":{"check":"pre-push","subject":{"kind":"commit","sha":"0000000000000000000000000000000000000001","tree":"0000000000000000000000000000000000000002"},"tool":"x","at":1}}}"#;
+        for body in ["fine", r#"{"outcome":{"status":"clean"}}"#, stale] {
+            StandIn::new(t.gates.path(), "gates").stdout(body).install().unwrap();
             let (code, out) = t.run(&["--gates", "--json", "HEAD"], "0");
             assert_eq!(code, 0, "report-only keeps the exit: {out}");
             assert!(out.contains("NOT MEASURED") || out.contains("not measured"), "{body}: {out}");
