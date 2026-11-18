@@ -518,15 +518,36 @@ fn install(arg: &Value, ctx: &Ctx) -> Result<(), String> {
     let name = file.strip_suffix(".exe").unwrap_or(file);
     let me = std::env::current_exe().map_err(|e| format!("cannot find its own path: {e}"))?;
     let _ = std::fs::remove_file(&target);
+    let filled = fill(script, ctx)?;
+    if arg.get("bundled").and_then(Value::as_bool) == Some(true) {
+        // One self-contained file: the stub (without a script of its own at its end), the script, the marker and the length.
+        let mut bytes = std::fs::read(&me).map_err(|e| format!("cannot read itself: {e}"))?;
+        let script_bytes = filled.to_json().into_bytes();
+        bytes.extend_from_slice(&script_bytes);
+        bytes.extend_from_slice(BUNDLE_MAGIC);
+        bytes.extend_from_slice(&(script_bytes.len() as u64).to_le_bytes());
+        std::fs::write(&target, bytes).map_err(|e| format!("cannot install {path}: {e}"))?;
+        return make_executable(&target).map_err(|e| format!("cannot make {path} executable: {e}"));
+    }
     if std::fs::hard_link(&me, &target).is_err() {
         std::fs::copy(&me, &target).map_err(|e| format!("cannot install {path}: {e}"))?;
     }
-    let filled = fill(script, ctx)?;
     std::fs::write(
         target.with_file_name(format!("{name}.stand-in.json")),
         filled.to_json(),
     )
     .map_err(|e| format!("cannot write the script of {path}: {e}"))
+}
+
+#[cfg(unix)]
+fn make_executable(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+}
+
+#[cfg(not(unix))]
+fn make_executable(_path: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 fn fill(v: &Value, ctx: &Ctx) -> Result<Value, String> {

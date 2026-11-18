@@ -914,3 +914,33 @@ fn the_unquoted_flag_token_drops_one_pair_of_single_quotes_around_the_value() {
         "</t dir> <plain> <>\n"
     );
 }
+
+#[test]
+fn a_bundled_install_runs_under_any_name_it_is_copied_to() {
+    let s = Scratch::new();
+    let built = StandIn::new(&s.work(), "made").answers(
+        Actions::new()
+            .stdout_with("built {{args}}")
+            .stdout("none")
+            .exit(5),
+    );
+    let path = s
+        .work()
+        .join(format!("made{}", std::env::consts::EXE_SUFFIX));
+    let maker = StandIn::new(&s.work(), "maker")
+        .answers(Actions::new().installs_bundled(&path.to_string_lossy(), &built))
+        .install()
+        .unwrap();
+    assert!(run(maker.program(), &[]).status.success());
+    // No script beside it, and a copy under another name: it still answers.
+    assert!(!s.work().join("made.stand-in.json").exists());
+    let other = s
+        .work()
+        .join(format!("other{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(&path, &other).unwrap();
+    let o = run(&other, &["a", "b"]);
+    assert_eq!(
+        (o.status.code(), out(&o).as_str()),
+        (Some(5), "built a b\nnone\n")
+    );
+}

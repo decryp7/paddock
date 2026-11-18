@@ -290,6 +290,18 @@ impl Actions {
         self.step("install", Value::Obj(m))
     }
 
+    /// As [`Actions::installs`], but the installed program is one self-contained file (its script at its end, see [`Files::bundled`]):
+    /// a copy, link or move of it under another name still finds its script, as code that "holds" a built tool under its own name does.
+    #[must_use]
+    pub fn installs_bundled(self, path_template: &str, program: &StandIn) -> Actions {
+        let m = vec![
+            ("path".to_string(), Value::Str(path_template.to_string())),
+            ("script".to_string(), program.script(Path::new(""))),
+            ("bundled".to_string(), Value::Bool(true)),
+        ];
+        self.step("install", Value::Obj(m))
+    }
+
     /// Ends with the exit code that the environment variable holds, or `default` when it is unset or empty.
     #[must_use]
     pub fn exits_with_env(self, name: &str, default: i32) -> Actions {
