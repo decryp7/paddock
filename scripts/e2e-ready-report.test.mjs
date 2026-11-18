@@ -24,7 +24,8 @@ test('summaryTable shows a project eslint failed in as not measured, never as ze
 });
 
 test('the script measures a project whose plugin is registered only inside the e2e block (a --rule override cannot find it: "could not find plugin paddock")', () => {
-  const out = execFileSync('node', ['scripts/e2e-ready-report.mjs', 'scripts/fixtures/e2e-ready'], { encoding: 'utf8', cwd: new URL('..', import.meta.url) });
+  // The committed baseline and gate are not this test's subject (the gate is blocking): it runs with its own, report-only.
+  const { out } = gate({}, null);
   assert.match(out, /scripts\/fixtures\/e2e-ready\/e2e\/bad\.ts:6/, out);
   assert.match(out, /\| scripts\/fixtures\/e2e-ready \| 1 \|/);
   assert.match(out, /projects not measured\*\* \| \*\*0\*\*/);
