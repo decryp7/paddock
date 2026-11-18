@@ -4,44 +4,51 @@
   {
    "path": "apps/dyno/crates/dyno-helper-service/src/tests.rs",
    "site": "conformance: stand-in",
-   "reason": "the shipped maintainer scripts are the product under test: their shebang is asserted",
-   "count": 1
+   "reason": "approved by the user 2026-11-19: the shipped maintainer scripts are the product under test: their shebang is asserted",
+   "count": 1,
+   "approved": "user"
   },
   {
    "path": "crates/paddock-service/src/privileged/trust_real/unix.rs",
    "site": "conformance: stand-in",
-   "reason": "the shebang is the data: a script, not an ELF file, must be refused",
-   "count": 1
+   "reason": "approved by the user 2026-11-19: the shebang is the data: a script, not an ELF file, must be refused",
+   "count": 1,
+   "approved": "user"
   },
   {
    "path": "tools/paddock-dev/src/check/c129.rs",
    "site": "conformance: stand-in",
-   "reason": "data for the shebang detector of C129",
-   "count": 1
+   "reason": "approved by the user 2026-11-19: data for the shebang detector of C129",
+   "count": 1,
+   "approved": "user"
   },
   {
    "path": "tools/paddock-dev/src/hook/install.rs",
    "site": "conformance: stand-in",
-   "reason": "asserts that the tracked shim text starts with its shebang",
-   "count": 1
+   "reason": "approved by the user 2026-11-19: asserts that the tracked shim text starts with its shebang",
+   "count": 1,
+   "approved": "user"
   },
   {
    "path": "tools/paddock-dev/tests/it/check_c129.rs",
    "site": "conformance: stand-in",
-   "reason": "shell-file data for the C129 check, never run",
-   "count": 5
+   "reason": "approved by the user 2026-11-19: shell-file data for the C129 check, never run",
+   "count": 5,
+   "approved": "user"
   },
   {
    "path": "tools/paddock-dev/tests/it/worktree/oracle.rs",
    "site": "conformance: stand-in",
-   "reason": "asserts the shell oracle script's own second line",
-   "count": 1
+   "reason": "approved by the user 2026-11-19: asserts the shell oracle script's own second line",
+   "count": 1,
+   "approved": "user"
   },
   {
    "path": "tools/paddock-dev/tests/it/check_engine.rs",
    "site": "conformance: stand-in",
-   "reason": "the shell file is the data of the C120 layout check, never run",
-   "count": 1
+   "reason": "approved by the user 2026-11-19: the shell file is the data of the C120 layout check, never run",
+   "count": 1,
+   "approved": "user"
   }
  ]
 }
