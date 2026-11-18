@@ -1914,3 +1914,65 @@ starts `git` many times through its own `PATH`, which `TestCommand` curates. Whi
   probe). The first v2 run's 20 failures were the toolchain lookups that `85c21b7d6` fixes.
 - **Not measured:** the CI Windows runner with this tree (the train's next Windows run); a repeat run for variance (one run per tree).
 
+
+## TestCommand on the Windows CI runner: what one start costs (2026-11-18, exp/testcommand-runner-ab, ADR 0107)
+
+Question: why ci.yml run 8245 (job 41212) ran merge_check 19 times slower on windows-latest once its fixture started git through
+`TestCommand`, when the test VM never showed it (the two entries above).
+
+- **Machine:** the Windows CI runner itself (windows-latest), ci run 8246, job 41213 (`testcommand-ab.yml` on
+  `trial/exp/testcommand-runner-ab` = `2ccf8dc00`, train 14 `5484f36eb` plus `a80479dd7`), set up as the crate job (job isolation,
+  kept clone, the kept build folder `target-paddock-crate-s1`), the program copied into the profile's `deps` folder; no other run
+  on the runner. Mac rows: the Mac mini, 1-minute load 21 to 34.
+- **Command:** `measure_test_command --ab 20`: the merge_check fixture's four git starts (`init`, `add`, `commit`, `rev-parse`) in
+  a new repository per sequence, 20 rounds, each round every variant once in an order rotated per round; `--first` ten times.
+- **Numbers (ms per sequence of four starts, runner):** plain 190.7 median / 212.1 p90; plain resolved 185.9 / 199.7; plain with
+  `CREATE_NO_WINDOW` 240.6 / 284.1; plain with TestCommand's cleared environment 180.3 / 201.4; that without the ceiling 185.6 /
+  208.8, with the machine's PATH 188.8 / 204.0, with the machine's folders 181.8 / 207.4; plain with the ceiling alone 191.3 /
+  220.1; `TestCommand::new` per start 485.3 / 571.8; `new_in` one home 443.1 / 470.2; `TestCommand` without the flag 431.3 /
+  452.3; `TestCommand` with the inherited environment 482.6 / 524.5; four builds and drops, nothing started, 219.7 / 234.1. First
+  `TestCommand::new` of a process: 169 to 217 ms (10 processes).
+- **Finding:** the child's PATH began with a link folder in the command's own private folder (`...\paddock-test-cmd-*\toolchain\...`),
+  and no "cannot make the toolchain link folder" line: `ambient::link_root()` was `None`, so the kept target folder (made by
+  `./dev ci isolation path target` before cargo ran) has no `CACHEDIR.TAG`, and every command links the toolchain itself.
+- **Mac, both ways (10 rounds):** from a copied `debug/deps` folder without `CACHEDIR.TAG`: private link folder, four builds 14.8
+  ms; with the tag: the shared `paddock-test-toolchain`, 3.9 ms. Mac, 20 rounds, tagged target: plain 80.6, cleared environment
+  109.3, `TestCommand::new` 103.2, `TestCommand` with the inherited environment 71.7, four builds 5.6 (noisy at load 21).
+- **Not measured:** the runner with the tag present (ADR 0107 WP-2's rerun), and the runner under the real 8-test load (the
+  link-limit copy fallback).
+
+## TestCommand on the Windows CI runner with CACHEDIR.TAG present (2026-11-18, fix/ci-target-cachedir-tag, ADR 0107 WP-2)
+
+Question: does option A of ADR 0107 (`./dev ci isolation path target` writes cargo's `CACHEDIR.TAG`) remove the builder's
+per-command cost measured in run 8246 (the block above)?
+
+- **Machine and command:** as in run 8246: `testcommand-ab.yml`, ci run 8247, job 41214, on `trial/exp/testcommand-runner-ab` =
+  `c114b9adc` (`exp/testcommand-runner-ab` `a80479dd7` merged onto `origin/fix/ci-target-cachedir-tag` = `f09a919a9`); `./dev` built
+  from the merged tree in the job ("paddock-dev 07c485db7... is not published ...; building it", "built ... in 59 s (not
+  downloaded)"); no other run on the runner; `measure_test_command --ab 20` and `--first` ten times.
+- **The fault is gone:** the child's PATH now starts with the shared
+  `C:\Users\***\.paddock-ci\target-paddock-crate-s1\paddock-test-toolchain\0741e9b7bbf772ab` (run 8246: a folder inside each
+  command's own private folder).
+- **Numbers (ms per sequence of four git starts; run 8247 against run 8246):**
+
+  | Variant | 8247 median / p90 | 8247 / plain | 8246 median / p90 | 8246 / plain |
+  |---|---:|---:|---:|---:|
+  | plain | 243.4 / 270.5 | 1.00 | 190.7 / 212.1 | 1.00 |
+  | plain, resolved path | 215.5 / 255.0 | 0.89 | 185.9 / 199.7 | 0.98 |
+  | plain + `CREATE_NO_WINDOW` | 274.5 / 340.4 | 1.13 | 240.6 / 284.1 | 1.26 |
+  | plain + cleared environment | 231.1 / 271.6 | 0.95 | 180.3 / 201.4 | 0.95 |
+  | cleared, no ceiling / machine PATH / machine folders | 245.8 / 244.4 / 240.1 | 0.99 to 1.01 | 185.6 / 188.8 / 181.8 | 0.95 to 0.99 |
+  | plain + ceiling alone | 217.5 / 264.9 | 0.89 | 191.3 / 220.1 | 1.00 |
+  | `TestCommand::new` per start | 312.0 / 402.4 | **1.28** | 485.3 / 571.8 | 2.55 |
+  | `new_in`, one home per sequence | 309.5 / 341.8 | 1.27 | 443.1 / 470.2 | 2.32 |
+  | TestCommand, flag off | 270.7 / 297.1 | 1.11 | 431.3 / 452.3 | 2.26 |
+  | TestCommand, inherited environment | 357.6 / 377.5 | 1.47 | 482.6 / 524.5 | 2.53 |
+  | four builds and drops, nothing started | **23.7** / 25.3 | 0.10 | 219.7 / 234.1 | 1.15 |
+
+  First `TestCommand::new` of a process: 150 to 167 ms (run 8246: 169 to 217 ms); drop 1.2 to 1.5 ms (5 to 10 ms).
+- **Result against ADR 0107's bar:** `TestCommand::new` per start 1.28 times plain (bar: within 1.5): met. Four builds 23.7 ms
+  (bar: under 20 ms; the bar was an estimate, not a measurement): missed by 3.7 ms; the builder fell from 55 to 5.9 ms per
+  command (9.3 times less), the rest being the per-command private folder, its `.gitconfig` and its removal. The runner was
+  slower overall in this run (plain 243 against 191 ms). One run of 20 rounds after the fix, one before (ER-28: fault present in
+  8246, removed in 8247, both on the same runner and kept folder).
+- **Not measured:** the paddock-dev suite under the real 8-test load with the fix (the train's next Windows run).
