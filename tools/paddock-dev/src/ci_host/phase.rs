@@ -3,9 +3,10 @@
 //! did not finish. The caller decides what a timeout means: a hard step ends in one `::error::` line, a soft one (a step that must
 //! never fail its job, `BOUNDED_SOFT=1` in the shell) warns and falls back.
 //!
-//! A phase that overruns is left behind: its thread is not killable, so a phase that holds a program (git) gives that program the
-//! same limit through [`ToolCall`](crate::ci_tool::ToolCall), which ends the program's whole tree at the limit. A file-system call
-//! that hangs is abandoned and the process ends with the step.
+//! A phase that overruns is left behind: its thread is not killable. A program (git) it holds is told to the phase's [`Held`] and is
+//! ended with the phase when it is abandoned; the program's own limit through [`ToolCall`](crate::ci_tool::ToolCall) is the phase's
+//! limit, except under a clock mark (tests only), where it is the general one and the phase's bound, counted from the mark, ends it
+//! (ADR 0103, second amendment). A file-system call that hangs is abandoned and the process ends with the step.
 
 use super::Step;
 use paddock_proc::ProcessId;
@@ -194,6 +195,13 @@ pub struct ClockMark<'a> {
     pub wait: Duration,
 }
 
+/// The general limit of a hung-phase test (the one that bounds every other phase, and the hanging one until its mark): 20 s because the
+/// slowest whole hung-phase test took 17.4 s (300 runs of the six, 6 burners, 1-minute load 18 to 68, 2026-11-15;
+/// `fix/kept-clone-phase-state`'s 50-run stress, ADR 0103), and no phase of a test outlasts the test; a git that misses its mark then
+/// ends at 20 s, not at nextest's 60 s. The one value of every hung-phase test (ER-22): the unit tests, `stable_workspace`'s and the
+/// parity tests' `kept_hang_env`.
+pub const HUNG_TEST_GENERAL_LIMIT: Duration = Duration::from_secs(20);
+
 /// How often a phase with a clock mark looks for it: the shell's first naps (0.05 s).
 const MARK_LOOK: Duration = Duration::from_millis(50);
 
@@ -370,5 +378,93 @@ mod tests {
         assert!(matches!(r, Err(Phase::Timeout)), "the phase ends at its wait");
         assert!(before_mark, "it ended before its mark");
         assert!(!file.exists(), "no mark was written");
+    }
+
+    /// The functions of a test module's text that bound work with a phase (`.phase(`, `bounded`, `bounded_hung`, `bounded_marked`,
+    /// `run_with`) and neither use a clock mark (`ClockMark`, `hang_flow(`, `hang_env(`) nor carry the exemption line
+    /// `// conformance: no-clock-mark - <reason>`: such a test times its limit from the phase's start, so setup work before its hang
+    /// (a stand-in git that is slow to start under load) can meet the limit. The class seen four times (ADR 0103, second amendment).
+    fn unmarked_phase_tests(text: &str) -> Vec<String> {
+        let trigger = regex::Regex::new(concat!(r"\.pha", r"se\(|\bbound", r"ed(_hung|_marked)?\(|\brun_", r"with\(")).unwrap();
+        let marked = regex::Regex::new(concat!(
+            r"Clock",
+            r"Mark|hang_",
+            r"flow\(|hang_",
+            r"env\(|conformance: no-clock",
+            r"-mark - \S"
+        ))
+        .unwrap();
+        let Some((_, tests)) = text.split_once("mod tests {") else {
+            return Vec::new();
+        };
+        let head = regex::Regex::new(r"(?m)^    (?:async )?fn ([a-z0-9_]+)").unwrap();
+        let starts: Vec<(usize, String)> = head
+            .captures_iter(tests)
+            .map(|c| (c.get(0).unwrap().start(), c[1].to_string()))
+            .collect();
+        let mut bad = Vec::new();
+        for (i, (at, name)) in starts.iter().enumerate() {
+            let end = starts.get(i + 1).map_or(tests.len(), |n| n.0);
+            let body = &tests[*at..end];
+            if trigger.is_match(body) && !marked.is_match(body) {
+                bad.push(name.clone());
+            }
+        }
+        bad
+    }
+
+    #[test]
+    fn the_audit_of_unmarked_phase_tests_sees_one_and_accepts_a_mark_or_a_reason() {
+        // The positive control (ER-33): the audit finds a test that times a phase from its start, and passes the same test once it
+        // uses a mark or carries its reason.
+        let plain = "mod tests {\n    fn slow_git() {\n        flow.phase(step, id, \"x\", f);\n    }\n}\n";
+        assert_eq!(unmarked_phase_tests(plain), ["slow_git"]);
+        let marked = plain.replace("flow.phase", "let flow = hang_flow(&bin, &mark);\n        flow.phase");
+        assert!(unmarked_phase_tests(&marked).is_empty());
+        let exempt = plain.replace(
+            "flow.phase",
+            "// conformance: no-clock-mark - fake operations, no program\n        flow.phase",
+        );
+        assert!(unmarked_phase_tests(&exempt).is_empty());
+        let bare = plain.replace("flow.phase", "// conformance: no-clock-mark -\n        flow.phase");
+        assert_eq!(unmarked_phase_tests(&bare), ["slow_git"], "an exemption names its reason");
+    }
+
+    /// Every test of the phase machinery (the files that use `ci_host::phase`) that bounds work with a phase uses a clock mark or says
+    /// why it need not (the class "work before the hang point of a hung-phase test meets its limit under load", ADR 0103).
+    #[test]
+    fn no_source_file_times_a_phase_test_from_its_start_without_a_clock_mark_or_a_reason() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ci_host");
+        let mut seen = Vec::new();
+        let mut bad = Vec::new();
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|x| x != "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            if !text.contains("phase::{")
+                && !text.contains("use super::phase")
+                && !text.contains("mod phase_tests")
+                && !path.ends_with("phase.rs")
+            {
+                continue;
+            }
+            seen.push(path.file_name().unwrap().to_string_lossy().into_owned());
+            for name in unmarked_phase_tests(&text) {
+                bad.push(format!("{}::{name}", path.file_name().unwrap().to_string_lossy()));
+            }
+        }
+        assert!(
+            ["kept_clone.rs", "stable_workspace.rs", "phase.rs"]
+                .iter()
+                .all(|f| seen.iter().any(|s| s == f)),
+            "the scan read {seen:?}: wrong folder?"
+        );
+        assert!(
+            bad.is_empty(),
+            "these tests bound work with a phase from its start: use `bounded_marked` with a ClockMark (`hang_flow` in kept_clone.rs) so a \
+             slow-starting stand-in cannot meet the limit, or add `// conformance: no-clock-mark - <reason>` inside the test: {bad:?}"
+        );
     }
 }

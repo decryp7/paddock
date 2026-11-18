@@ -290,6 +290,7 @@ pub fn run_with(
 
     // An unusable move must never fail the job: it only costs the cache hits of the workspace crates (a hang does: it ends the
     // step with the error above).
+    let mark_wait = mark.as_ref().map(|m| m.wait);
     let moved = {
         let (ops, ws, stable, root) = (ops.clone(), ws.clone(), stable.clone(), root.clone());
         bounded(&mut step, &format!("move the checkout to {stable_text}"), limit, move |_| {
@@ -313,8 +314,8 @@ pub fn run_with(
                 bounded_marked(&mut step, &label, limit, None, mark, move |held| {
                     clone_checkout(ops.as_ref(), &ws, &stable, &root, &held)
                 })
-                .0
             };
+            let (cloned, before_mark) = cloned;
             match cloned {
                 Ok(()) => {
                     let head = ops
@@ -329,7 +330,11 @@ pub fn run_with(
                     ));
                     use_folder(&mut step, &stable);
                 }
-                Err(Phase::Timeout) => return timeout_error(&mut step, &label, limit, &ws_text, &why),
+                // The line names the phase's limit, or the mark's wait when the phase ended before its clock mark (as `Flow::phase`).
+                Err(Phase::Timeout) => {
+                    let shown = if before_mark { mark_wait.unwrap_or(limit) } else { limit };
+                    return timeout_error(&mut step, &label, shown, &ws_text, &why);
+                }
                 Err(Phase::Failed(clone_why)) => {
                     let why = if why.is_empty() { "no message".to_string() } else { why };
                     step.warn(format!(
@@ -534,6 +539,7 @@ mod tests {
     }
 
     fn go(sc: &Scene, win: bool, fake: Arc<Fake>, limit: u64) -> (i32, String) {
+        // conformance: no-clock-mark - the operations are fakes: no program starts, so nothing is slow to start under load
         let mut out = Vec::new();
         let code = run_with(
             &sc.env,
@@ -765,7 +771,7 @@ mod tests {
         let mut out = Vec::new();
         let mark = ClockMark {
             file: &mark_file,
-            wait: Duration::from_secs(20),
+            wait: crate::ci_host::phase::HUNG_TEST_GENERAL_LIMIT,
         };
         let code = run_with(
             &sc.env,
@@ -789,6 +795,7 @@ mod tests {
 
     #[test]
     fn a_clone_that_fetched_another_commit_than_the_checkouts_is_an_error_never_a_silent_wrong_tree() {
+        // conformance: no-clock-mark - the operations are fakes: no program starts, so nothing is slow to start under load
         struct Skewed(Fake);
         impl Ops for Skewed {
             fn is_symlink(&self, p: &Path) -> bool {

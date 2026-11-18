@@ -97,9 +97,9 @@ fn norm(text: &str, fx: &Fx) -> String {
     // A hung git ends at its limit (the Rust git's own, outside a clock mark) or, with a clock mark, when the abandoned phase ends it
     // (`signal 9`: the git's limit is then the general one, so a slow start cannot meet the phase's limit).
     let timed_out_last =
-        regex::Regex::new(r"Last output: kept-clone: git [a-z-]+ failed \((?:timed out after \d+ s|signal \d+)\)\.").unwrap();
-    let timed_out_why = regex::Regex::new(r"\(kept-clone: git [a-z-]+ failed \((?:timed out after \d+ s|signal \d+)\)\)").unwrap();
-    let timed_out_line = regex::Regex::new(r"^kept-clone: git [a-z-]+ failed \((?:timed out after \d+ s|signal \d+)\)$").unwrap();
+        regex::Regex::new(r"Last output: kept-clone: git [a-z-]+ failed \((?:timed out after \d+ s|signal 9)\)\.").unwrap();
+    let timed_out_why = regex::Regex::new(r"\(kept-clone: git [a-z-]+ failed \((?:timed out after \d+ s|signal 9)\)\)").unwrap();
+    let timed_out_line = regex::Regex::new(r"^kept-clone: git [a-z-]+ failed \((?:timed out after \d+ s|signal 9)\)$").unwrap();
     // The Rust phase says how many programs of an abandoned phase it ended and how long that took (ER-27); the shell's `bounded` ends
     // the function's tree and says nothing.
     let ended_line = regex::Regex::new(r": ended \d+ program\(s\) of the abandoned phase in \d+ ms$").unwrap();
@@ -1441,15 +1441,15 @@ const KEPT_PHASES: [(&str, &str, &str); 7] = [
 ];
 
 /// The environment of a hung-phase test: the hanging phase's own limit (1 s), the clock mark its git writes, and a bounded general
-/// limit, which bounds every other phase and the hanging one until its mark. 20 s because the slowest whole hung-phase test took
-/// 17.4 s (300 runs of the six, 6 burners, 1-minute load 18 to 68, 2026-11-15; `fix/kept-clone-phase-state`'s 50-run stress) and
-/// no phase of a test outlasts the test; a git that misses its mark then ends at 20 s with "did not finish within 20 s", not at
-/// nextest's 60 s.
+/// limit, which bounds every other phase and the hanging one until its mark (`HUNG_TEST_GENERAL_LIMIT`, with its measurement).
 fn kept_hang_env(id: &'static str) -> Vec<(&'static str, String)> {
     vec![
         (id, "1".into()),
         ("PADDOCK_KEPT_CLONE_CLOCK_MARK", "<ROOT>/hang-mark".into()),
-        ("PADDOCK_KEPT_CLONE_TIMEOUT", "20".into()),
+        (
+            "PADDOCK_KEPT_CLONE_TIMEOUT",
+            paddock_dev::ci_host::phase::HUNG_TEST_GENERAL_LIMIT.as_secs().to_string(),
+        ),
     ]
 }
 
