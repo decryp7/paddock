@@ -1,7 +1,7 @@
 use crate::{
     audit, brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, disk, gates,
-    generators, golden_cmd, heavy_cmd, hook, input_hash, ipc_endpoints, load, local_sccache, locks, merge_check, places, plan, plan_cmd,
-    pr, pre_push, queue, release_isolation, slots, wait, worktree,
+    generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, load, local_sccache, locks, merge_check, places,
+    plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -36,6 +36,8 @@ enum Command {
     Wait(wait::WaitArgs),
     /// Run a command through the machine-wide heavy slot (ER-24), found the way `check --pre-push` finds it; git hooks use it.
     Heavy(heavy_cmd::HeavyArgs),
+    /// Install the `heavy` binary of a release into `<dev-targets>/heavy/bin`: downloads the asset for this OS, checks its SHA256SUMS entry, renames it into place, records the version.
+    HeavyInstall(heavy_install::InstallArgs),
     /// Golden files: `confirm <test filter>` runs the tests on this machine and in the CI image as root; passes only if both pass.
     Golden {
         #[command(subcommand)]
@@ -718,6 +720,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         } => ci_runs::trial_prune(&a),
         Command::Wait(a) => wait::command(&a),
         Command::Heavy(a) => heavy_cmd::command(&a),
+        Command::HeavyInstall(a) => heavy_install::command(&a),
         Command::Golden { command } => golden_cmd::command(command),
         Command::Load(a) => load::command(&a),
         Command::Places(a) => places::command(&a),

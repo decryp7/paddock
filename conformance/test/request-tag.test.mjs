@@ -11,6 +11,23 @@ const SHA = 'a'.repeat(40);
 const files = (o) => (p) => o[p] ?? null;
 const conf = (v) => JSON.stringify({ version: v });
 
+// heavy-vX.Y.Z publishes the tool (heavy-release.yml): its version source is tools/heavy/Cargo.toml, not an app folder.
+test('a heavy-v tag is checked against the version of tools/heavy/Cargo.toml', () => {
+  const cargo = 'tools/heavy/Cargo.toml';
+  const toml = (v) => `[package]\nname = "paddock-heavy"\nversion = "${v}"\n`;
+  assert.equal(checkVersion('heavy', 'heavy-v0.2.0', files({ [cargo]: toml('0.2.0') })), '0.2.0');
+  assert.throws(() => checkVersion('heavy', 'heavy-v0.2.0', files({ [cargo]: toml('0.1.0') })), /says 0\.2\.0, tools\/heavy\/Cargo\.toml says 0\.1\.0/);
+  assert.throws(() => checkVersion('heavy', 'heavy-v0.2.0', files({})), /tools\/heavy\/Cargo\.toml is missing/);
+  assert.equal(gateWorkflow('heavy', files({})), 'ci.yml');
+  // The publish workflow runs on that tag and on no other.
+  const wf = readFileSync(join(PADDOCK, '.gitea/workflows/heavy-release.yml'), 'utf8');
+  assert.match(wf, /tags: \["heavy-v\*"\]/);
+  assert.match(wf, /cargo publish --locked --registry decryp7/);
+  assert.match(wf, /SHA256SUMS/);
+  assert.match(wf, /conformance\/release\/publish\.mjs/);
+  for (const t of ['aarch64-apple-darwin', 'x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu', 'x86_64-pc-windows-msvc']) assert.ok(wf.includes(t), t);
+});
+
 test('tag names: <app>-vX.Y.Z and vX.Y.Z, nothing else', () => {
   assert.deepEqual(parseTag('pitcrew-v1.2.3'), { app: 'pitcrew', version: '1.2.3' });
   assert.deepEqual(parseTag('shell-demo-v0.1.0-rc.1'), { app: 'shell-demo', version: '0.1.0-rc.1' });

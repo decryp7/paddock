@@ -347,3 +347,54 @@ fn the_first_cpu_reading_is_primed_and_later_ones_are_percentages() {
     let idle = got.expect("a reading after the sampling interval");
     assert!((0.0..=100.0).contains(&idle), "{idle}");
 }
+
+#[test]
+fn a_container_run_asks_for_the_drain_even_while_a_high_priority_marker_already_makes_it_wait() {
+    let (rig, mut cfg) = rig_with(5);
+    cfg.drain_after = std::time::Duration::from_secs(300);
+    let (a, c) = (rig.agent_with(121, cfg.clone()), rig.agent_with(122, cfg));
+    let mut ha = Acquirer::new(&a.h, req("A")).unwrap();
+    let mut hc = Acquirer::new(&c.h, req_cmd("C", "docker run --rm x")).unwrap();
+    assert_eq!(ha.poll(), Poll::Held);
+    // A high-priority run announced itself long ago and is still live (a stream of them): the container run yields to it ...
+    rig.procs.run(123, rig.now().saturating_sub(100));
+    std::fs::write(rig.root().join("pitcrew-heavy.high.123-H"), format!("123\nstart\n{}\n", rig.now())).unwrap();
+    assert_eq!(hc.poll(), Poll::Waiting);
+    assert_eq!(rig.count("pitcrew-heavy.drain."), 0, "not yet");
+    // ... but after drain_after it must still ask the machine to drain, not wait behind the high marker until priority_max.
+    rig.clock.advance(std::time::Duration::from_secs(301));
+    assert_eq!(hc.poll(), Poll::Waiting);
+    assert_eq!(rig.count("pitcrew-heavy.drain."), 1, "{}", c.said());
+}
+
+#[test]
+fn a_container_run_held_by_a_single_slot_binary_keeps_the_load_aware_ones_from_starting_beside_it() {
+    // The binary before this change (slots = 1) holds the first slot with a container run; the new ones read its owner record.
+    let rig = Rig::new();
+    let old_cfg = rig.cfg();
+    let mut new_cfg = rig.cfg();
+    new_cfg.slots = 5;
+    let old = rig.agent_with(131, old_cfg);
+    let mut ho = Acquirer::new(&old.h, req_cmd("old", "docker run --rm x")).unwrap();
+    assert_eq!(ho.poll(), Poll::Held);
+    let ags: Vec<_> = (132..135).map(|p| rig.agent_with(p, new_cfg.clone())).collect();
+    let mut hs: Vec<_> = ags.iter().map(|a| Acquirer::new(&a.h, req("n")).unwrap()).collect();
+    for h in hs.iter_mut() {
+        assert_eq!(h.poll(), Poll::Waiting, "nothing starts beside the old binary's container run");
+    }
+    ho.release();
+    assert_eq!(hs[0].poll(), Poll::Held);
+    assert_eq!(hs[1].poll(), Poll::Held, "and the load-aware ones run together once it is gone");
+    // The gap, stated by the test: a binary of the single-slot kind looks at the first slot only, so it neither sees `.slotN`
+    // holders nor drain markers. It takes the first slot when that is free, even beside new holders in other slots.
+    hs[0].release();
+    drop(hs.pop()); // the third one gives up its place in the queue
+    let old2 = rig.agent_with(136, rig.cfg());
+    let mut ho2 = Acquirer::new(&old2.h, req("old2")).unwrap();
+    assert_eq!(
+        ho2.poll(),
+        Poll::Held,
+        "the old binary starts beside the new holder of another slot (the documented gap)"
+    );
+    assert_eq!(rig.count("pitcrew-heavy-v2.lock"), 2);
+}

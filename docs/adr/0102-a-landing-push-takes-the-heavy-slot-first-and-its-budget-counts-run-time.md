@@ -161,12 +161,17 @@ With the shell going, the single slot (kept only so the shell could be a lock ho
 together (`auto` by default: about half the cores, at most 5, ER-24); how many run now is read by the head of the queue on each poll: the cores the
 15-minute load leaves free (2 a step), one under 30 % CPU idle or at a 1-minute load of the core count, one when unknown, and the container rule
 (a container run is alone and nothing starts beside one; heavy tells by the command line, so only runs that go through heavy, and says so). A waiter
-holds a ticket, never a slot (ER-43); a taker looks again after taking and the younger of too many steps back; a container run that waited long
+holds a ticket, never a slot (ER-43); a taker looks again after taking and the younger of too many steps back (the oldest always keeps its slot; takers read the load at slightly different moments, so the count can pass the rule for one poll and settles at the next look); a container run that waited long
 makes the others wait for it (a drain marker, bounded). Common practice: GNU make and ninja `-l` brake a job count by the load average (the
 1-minute one: quick, flapping); distcc and icecream cap by job slots; here the 15-minute load opens and the 1-minute one only closes. On this
 Mac `auto` is 1 at its usual loads (15-minute load 16 to 48 on 14 cores) and more only when it is quiet
 ([benchmarks](../benchmarks.md#load-aware-heavy-slots-2026-11-18-featheavy-load-aware-slots)); a count of free capacity only (running steps
 added to what the load leaves free) was considered and not taken: it admits a burst before the average sees it.
-Old binaries (one slot) beside new ones never push the total past the maximum of the new ones (tested).
+Old binaries (one slot) beside new ones: the first slot is shared and a container run held by an old binary keeps the new ones out (tested); the gap is that an old binary ignores `.slotN` holders and drain markers, so it can start beside new holders until every machine has the new binary.
 The push gate still starts one heavy step of its own push at a time (its credit accounting), so a single push does not use the extra slots; other
 agents' steps and CI do. Letting a push start several is the next step and needs its own measurement.
+
+Distribution (same date): `heavy` is released from a `heavy-vX.Y.Z` tag by `.gitea/workflows/heavy-release.yml` (binaries for macOS arm64, Linux
+x86_64 and arm64 and Windows x86_64 plus `SHA256SUMS` on the Gitea release, the crate to the `decryp7` registry when its dependencies are there), and
+`./dev heavy-install` downloads the asset for the machine, verifies the checksum, installs atomically into `<dev-targets>/heavy/bin/heavy` and records
+the version (tools/heavy/README.md); the engineering-rules wrapper only looks there and says the install command when it is missing.

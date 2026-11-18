@@ -872,6 +872,24 @@ impl<'a> Acquirer<'a> {
             if self.held.is_some() {
                 return Poll::Held;
             }
+            // A container run that has waited long for the machine to be free of other steps asks for it to drain; every other
+            // step then waits (a stream of high-priority runs cannot keep the container run out for good).
+            let container_req = is_container_command(&self.req.cmdline);
+            let waited_now = h.now().saturating_sub(self.t0);
+            if container_req && self.drain.is_none() && waited_now >= h.cfg.drain_after.as_secs() && !h.held_dirs().is_empty() {
+                let m = h.cfg.root.join(format!("{DRAIN_PREFIX}{}-{}", h.pid, record::sanitize_name(&name)));
+                let tmp = h.tmp_name("drain.");
+                if fs::write(&tmp, record::format_marker(h.pid, &h.start_text(), h.now())).is_ok() && fs::rename(&tmp, &m).is_ok() {
+                    h.log.info(
+                        "heavy.wait",
+                        "a container run asks for the machine to drain",
+                        &[("WaitedSeconds", json!(waited_now))],
+                    );
+                    self.drain = Some(m);
+                } else {
+                    let _ = fs::remove_file(&tmp);
+                }
+            }
             // A container run that asked for the machine to drain goes before the high-priority runs it made wait.
             if !self.req.high && self.drain.is_none() {
                 let waited = h.now().saturating_sub(self.t0);
@@ -932,24 +950,6 @@ impl<'a> Acquirer<'a> {
                         ],
                     );
                     return Poll::Waiting;
-                }
-            }
-            // A container run that has waited long for the machine to be free of other steps asks for it to drain; every other
-            // step then waits (a stream of high-priority runs cannot keep the container run out for good).
-            let container_req = is_container_command(&self.req.cmdline);
-            let waited_now = h.now().saturating_sub(self.t0);
-            if container_req && self.drain.is_none() && waited_now >= h.cfg.drain_after.as_secs() && !h.held_dirs().is_empty() {
-                let m = h.cfg.root.join(format!("{DRAIN_PREFIX}{}-{}", h.pid, record::sanitize_name(&name)));
-                let tmp = h.tmp_name("drain.");
-                if fs::write(&tmp, record::format_marker(h.pid, &h.start_text(), h.now())).is_ok() && fs::rename(&tmp, &m).is_ok() {
-                    h.log.info(
-                        "heavy.wait",
-                        "a container run asks for the machine to drain",
-                        &[("WaitedSeconds", json!(waited_now))],
-                    );
-                    self.drain = Some(m);
-                } else {
-                    let _ = fs::remove_file(&tmp);
                 }
             }
             if !container_req && let Some(m) = h.live_drain_marker(&name) {

@@ -60,8 +60,9 @@ waits, high-priority ones too, until it has run (the marker counts for `HEAVY_PR
 
 A waiter holds a ticket, never a slot (ER-43). After taking a slot a step looks at the folder again: when more steps run than the rule
 allows now (the load rose, a container run arrived, a high-priority run came in beside the head) and it is one of the younger ones (by the time of
-its record, then pid), it gives the slot back and waits again with its ticket, so two takers that see each other never both step back and the count
-does not exceed the rule. Running steps are never stopped when the load rises. The wait line says what the rule saw: `1 running, 1 of at most 5 at
+its record, then pid), it gives the slot back and waits again with its ticket, so the oldest holder always keeps its slot. Takers read the load at
+slightly different moments, so they can disagree by one poll: the count can pass the rule for one poll interval and settles at the next look; a step
+back costs the younger one that interval. Running steps are never stopped when the load rises. The wait line says what the rule saw: `1 running, 1 of at most 5 at
 once (14 cores, 15-minute load 15.0, CPU idle 80%)`. `HEAVY_CPUS` replaces the OS's core count (tests, a machine whose cores the OS misreports).
 
 ## The shell heavy.sh
@@ -73,9 +74,10 @@ not be taken, 127 with an `::error::` when `heavy` is not installed) makes engin
 prerequisite** of calling the shell retired, and it lands only once the binary can be installed for every project (a release from the registry that
 the user installs, or a stable path the wrapper finds). `HEAVY_LOCK_DIR` is ignored with a warning.
 
-Old binaries: a `heavy` built before this change looks at the first slot only (`slots` was 1). With new binaries running beside it, the first slot is
-shared by name and mutual exclusion (the directory), and the new ones count every slot folder including the old one's, so the total never exceeds the
-maximum of the new ones (a test runs one old-kind and five new together).
+Old binaries: a `heavy` built before this change looks at the first slot only (`slots` was 1). The first slot is shared by mutual exclusion (the
+directory), and the new ones count every slot folder including the old one's and read its owner record (a container run held by an old binary keeps the
+new ones out; tested). **The gap:** an old binary does not see `.slotN` holders or drain markers, so while one runs it can start beside new holders
+in the other slots, and a container run waiting for a drain is not waited for by it. Move every machine to the new binary together (the install below).
 
 ## Environment
 
@@ -137,11 +139,28 @@ the observed OS start time (`Evidence`), every break, put-back and stale removal
 - A pid we may not signal (EPERM) or whose start time is unreadable is alive. Pid 0 and out-of-range pids are never probed.
 - Waits are logged every 60 s with the holder; the queue is FIFO.
 
-## Rollout
+## Install and release
 
-Done (2026-11-18): the shells are retired and Paddock's callers use `heavy`. Install from the registry once the tag workflow has
-published `paddock-heavy`: `cargo install paddock-heavy --registry decryp7 --locked --root <dev-targets>/heavy` (the binary lands in
-`.../heavy/bin/heavy`); check with `heavy --version` and `heavy status`. engineering-rules' `scripts/heavy.sh` is the wrapper above.
+**Install (once per machine, no manual download):** in a Paddock checkout run
+
+```
+./dev heavy-install
+```
+
+It reads the version of this checkout's `tools/heavy/Cargo.toml` (or `--version X.Y.Z`), downloads the asset for this OS and CPU and the
+release's `SHA256SUMS` from the repository's Gitea release `heavy-vX.Y.Z` (`PADDOCK_HEAVY_RELEASES` replaces the base URL; the token is
+`PADDOCK_DEV_TOKEN`, else `GITHUB_TOKEN`, sent through a private curl config and never printed), refuses a checksum that does not match
+(`::error::heavy-install: the downloaded ... SHA256SUMS says ...`, nothing installed), renames the binary atomically into
+`<dev-targets>/heavy/bin/heavy` and records the version in `<dev-targets>/heavy/VERSION`. Run again, it downloads nothing while the same
+version is there and unchanged. It never touches `~/.cargo` or `~/.rustup`. Then `heavy --version` and `heavy status` check it, and
+engineering-rules' `scripts/heavy.sh` wrapper finds it (`HEAVY_BIN`, then PATH, then `$PADDOCK_DEV_TARGETS/heavy/bin/heavy`; when it is missing
+the wrapper prints this one command and exits 127: it never downloads by itself).
+
+**Release (CI):** the tag `heavy-vX.Y.Z` (requested through the tag workflow, after this reaches main) starts `.gitea/workflows/heavy-release.yml`: it
+builds macOS arm64, Linux x86_64 and arm64 and Windows x86_64, attaches `heavy-<version>-<target>[.exe]` and `SHA256SUMS` to the Gitea release
+(`conformance/release/publish.mjs`) and, when `paddock-proc` and `paddock-env` are in the `decryp7` registry at the versions this crate asks for,
+publishes the crate `paddock-heavy` there as well (the registry has `paddock-proc` 0.1.0 only today: a `v*` tag publishes 0.2 first; the crate step
+is optional, the release is what machines install from).
 
 CI leg needed (not added here: `.gitea/` and `scripts/affected.mjs` belong to the integrating agent): a `tools/heavy` job in
 `ci.yml` on Linux, macOS and Windows runners with `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,

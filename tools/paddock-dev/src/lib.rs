@@ -66,6 +66,7 @@ pub mod generators;
 pub mod git_env;
 pub mod golden_cmd;
 pub mod heavy_cmd;
+pub mod heavy_install;
 pub mod hook;
 pub mod input_hash;
 pub mod ipc_endpoints;
