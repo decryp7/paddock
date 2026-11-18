@@ -1336,3 +1336,14 @@ fn a_single_file_program_written_to_a_path_runs_and_replaces_one_that_is_there()
         .unwrap();
     assert_eq!(out(&run(&path, &[])), "two\n");
 }
+
+#[test]
+fn a_literal_with_braces_reaches_the_output_unchanged_through_a_template_method() {
+    let s = Scratch::new();
+    let text = r#"{"path":"C:\{x}\y"}"#;
+    let p = StandIn::new(&s.work(), "tool")
+        .answers(Actions::new().stdout_with(&paddock_testkit::template_literal(text)))
+        .install()
+        .unwrap();
+    assert_eq!(out(&run(p.program(), &[])), format!("{text}\n"));
+}

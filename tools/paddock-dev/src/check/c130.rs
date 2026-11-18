@@ -46,6 +46,7 @@ static SHEBANG: LazyLock<Regex> = LazyLock::new(|| rx(r"#!/(?:usr/)?bin/(?:env[ 
 static WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*stand-in\s*([—–-]+)"));
 static TEST_PATH: LazyLock<Regex> = LazyLock::new(|| rx(r"(?:^|/)tests?/|(?:^|/)tests\.rs$|_tests?\.rs$"));
 static NOT_READ: LazyLock<Regex> = LazyLock::new(|| rx(r"(?:^|/)(?:target|vendor|fixtures|node_modules)/"));
+static WRITES_PROGRAM: LazyLock<Regex> = LazyLock::new(|| rx(r"\bwrite_program\("));
 static CFG_TEST: LazyLock<Regex> = LazyLock::new(|| rx(r"^[ \t]*#\[cfg\((?:test|(?:all|any)\([^\]]*\btest\b[^\]]*)\)\]"));
 
 const WAIVER_FIX: &str = "Waivers are counted, so none is free: list it in conformance/c130-allow.json (path, site `conformance: stand-in`, a reason and the file's count), which the user approves, or convert the fixture to `StandIn`.";
@@ -66,7 +67,7 @@ pub fn sites(path: &str, text: &str) -> Vec<(usize, String, bool)> {
         return Vec::new();
     }
     let lines: Vec<&str> = text.split('\n').collect();
-    let from = if TEST_PATH.is_match(path) {
+    let from = if TEST_PATH.is_match(path) || WRITES_PROGRAM.is_match(text) {
         0
     } else {
         match lines.iter().position(|l| CFG_TEST.is_match(l)) {

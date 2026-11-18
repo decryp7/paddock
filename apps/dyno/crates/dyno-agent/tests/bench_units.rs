@@ -89,12 +89,9 @@ fn a_unit_run_waits_for_go_runs_at_nice_0_without_a_memory_limit_and_leaves_noth
     let dir = paddock_testkit::private_tempdir().unwrap();
     // The runner reads `go` (stdin through --pipe), then reports its own nice value and memory.high through its result line.
     let runner = paddock_testkit::StandIn::new(dir.path(), "runner")
-        .answers(
-            Actions::new()
-                .reads_stdin_line()
-                .stdout(r#"{"t":"heartbeat"}"#)
-                .stdout_with(r#"{{"t":"result","status":{{"state":"unavailable","reason":"ni={nice} mh={cgroup:memory.high|none}"}}}}"#),
-        )
+        .answers(Actions::new().reads_stdin_line().stdout(r#"{"t":"heartbeat"}"#).stdout_with(
+            r#"{{"t":"result","status":{{"state":"unavailable","reason":"go={stdin_line} ni={nice} mh={cgroup:memory.high|none}"}}}}"#,
+        ))
         .install()
         .unwrap()
         .program()
@@ -106,8 +103,8 @@ fn a_unit_run_waits_for_go_runs_at_nice_0_without_a_memory_limit_and_leaves_noth
         panic!("{status:?}")
     };
     assert!(
-        reason.starts_with("ni=0 "),
-        "the unit runs at nice 0 even when the agent is lowered: {reason}"
+        reason.starts_with("go=go ni=0 "),
+        "the runner got `go` on its stdin, and the unit runs at nice 0 even when the agent is lowered: {reason}"
     );
     assert!(reason.ends_with("mh=max") || reason.ends_with("mh=none"), "no MemoryHigh: {reason}");
     assert!(!records.exists(), "the record is forgotten when the run ends");

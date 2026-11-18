@@ -19,6 +19,13 @@ test('C130 sites: shebang text in a test file, or after the first cfg(test) line
   }
 });
 
+test('C130 sites: a file that calls write_program( is read whole, test-support files included', () => {
+  const body = 'fn install(p: &Path) {\n    write_program(p, "#!/bin/sh\\nexit 0\\n").unwrap();\n}\n';
+  assert.deepEqual(lines(sites('crates/x/src/fake.rs', body)), [2]);
+  // Without the call, production shell text in a source file is still not a fixture.
+  assert.deepEqual(sites('crates/x/src/fake.rs', 'const SHIM: &str = "#!/bin/sh\\n";\n'), []);
+});
+
 test('C130 sites: sh, bash and zsh, plain and through env; other text is not a shebang', () => {
   for (const sb of ['#!/bin/sh', '#!/bin/bash', '#!/usr/bin/env bash', '#!/usr/bin/env sh', '#!/bin/zsh', '#!/usr/bin/env  bash']) {
     assert.equal(sites('x/tests/a.rs', `let s = "${sb}\\n";\n`).length, 1, sb);

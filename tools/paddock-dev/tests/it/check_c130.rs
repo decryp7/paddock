@@ -35,6 +35,8 @@ fn c130_tree() -> tempfile::TempDir {
             "tools/t/src/e_test.rs",
             "let a = \"#!/bin/sh\\n\"; // conformance: stand-in \u{2014} ab\r\nlet b = \"#!/bin/sh\\n\"; // conformance: stand-in \u{2014} \u{1F600}a\r\nlet c = \"#!/bin/sh\\n\"; // conformance: stand-in \u{2014} \u{1F600}\r\n".to_string(),
         ),
+        // A test-support file outside tests/ and with no cfg(test): it writes programs, so its shebang is a fixture.
+        ("tools/t/src/fake.rs", format!("fn install(p: &Path) {{\n    paddock_testkit::exe::write_program(p, \"#!/bin/sh\\nexit 0\\n\").unwrap();\n}}\n")),
         ("tools/t/tests/fixtures/f.rs", SH.to_string()),
         ("tools/t/tests/it/script.sh", "#!/bin/sh\necho hi\n".to_string()),
         ("a/tests/crlf.rs", "let a = \"#!/bin/sh\\n\";\r\nlet b = 1;\r\n".to_string()),
@@ -85,6 +87,7 @@ fn c130_flags_the_shapes_it_names_and_only_as_warnings() {
             ("tools/t/src/e_test.rs".to_string(), 1),
             ("tools/t/src/e_test.rs".to_string(), 2),
             ("tools/t/src/e_test.rs".to_string(), 3),
+            ("tools/t/src/fake.rs".to_string(), 2),
             ("tools/t/src/tests.rs".to_string(), 1),
             ("tools/t/src/tests.rs".to_string(), 2),
             ("tools/t/tests/it/bad.rs".to_string(), 2),
@@ -95,7 +98,7 @@ fn c130_flags_the_shapes_it_names_and_only_as_warnings() {
     );
     assert!(r.findings.iter().any(|f| f.message.contains("beyond the count of its allow entry")));
     assert_eq!(r.errors(), 0, "report-only until its first green run (ER-41)");
-    assert_eq!(r.warnings(), 14);
+    assert_eq!(r.warnings(), 15);
     assert!(
         r.findings.iter().any(|f| f.file == "tools/t/src/d_test.rs"
             && f.line == 5

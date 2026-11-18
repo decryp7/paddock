@@ -14,15 +14,17 @@
 //! # Ok(()) }
 //! ```
 //!
-//! What a stand-in can do, in this order: print stdout and stderr lines, write or append files, sleep (at most two minutes),
-//! start a named grandchild (for tree-kill tests, optionally writing its pid to a file), echo what it read on stdin, then exit
-//! with a code. [`StandIn::when_args`] answers a call whose first arguments match differently (the first match wins), so one
+//! What a stand-in can do: the steps of an [`Actions`] run top to bottom in the order they were added, then it exits with the code
+//! (default 0). The steps: print stdout and stderr lines, write or append files, sleep (at most two minutes: a longer sleep is refused
+//! at install), start a named grandchild (for tree-kill tests, optionally writing its pid to a file), echo what it read on stdin.
+//! A path or text that has to reach the stand-in untouched goes through [`template_literal`] (or a non-template method such as
+//! [`Actions::writes`]), since the `_with` methods read `{` and `}` as template syntax. [`StandIn::when_args`] answers a call whose first arguments match differently (the first match wins), so one
 //! program answers `--version` and `build` its own way. Calls are recorded when [`StandIn::records_args`] is set: arguments
 //! (with spaces, quotes and non-ASCII as they were given; a non-UTF-8 argument is lossy), the environment variables asked for
 //! with [`StandIn::records_env`] and, with [`StandIn::reads_stdin`], what was written to stdin (at most 1 MiB).
 //!
 //! More, for the fixtures that were shell scripts: output filled from the call ([`Actions::stdout_with`] and the other `_with`
-//! methods name `{args}`, `{arg:N}`, `{flag:PREFIX}`, `{flag_unquoted:PREFIX}`, `{cwd}`, `{dir}`, `{name}`, `{pid}`, `{environ}`, `{flag:PREFIX|SUFFIX}`, `{lines:PATH|MAX}`, `{run:program|arg|arg}`, `{env:NAME}` / `{env:NAME|fallback}`, `{nice}`, `{cgroup:FILE|fallback}`, `{stdin}` and
+//! methods name `{args}`, `{args_lines}`, `{arg:N}`, `{flag:PREFIX}`, `{flag_unquoted:PREFIX}`, `{cwd}`, `{dir}`, `{name}`, `{pid}`, `{environ}`, `{flag:PREFIX|SUFFIX}`, `{lines:PATH|MAX}`, `{run:program|arg|arg}`, `{env:NAME}` / `{env:NAME|fallback}`, `{nice}`, `{cgroup:FILE|fallback}`, `{stdin}` and
 //! `{stdin_line}`; `{{` and `}}` are braces), [`Actions::writes_atomically`], [`Actions::waits_for_file`], named pipes
 //! ([`Actions::makes_fifo`], [`Actions::reads_file`]), [`Actions::ignores_term`] (Unix), [`Actions::installs`] (a second stand-in
 //! written at run time, as a fake `cargo` that "builds" a tool does), [`Actions::exits_with_env`] and [`Actions::execs`] (run another
@@ -124,6 +126,11 @@ pub struct Actions {
     reads_line: bool,
     /// The first thing a test asked for that a stand-in cannot do (a sleep over the cap); `install` and `files` refuse with it.
     refused: Option<String>,
+}
+
+/// Escapes `text` for a `_with` method, so that braces in it (a path, JSON) are printed as they are and not read as tokens.
+pub fn template_literal(text: &str) -> String {
+    text.replace('{', "{{").replace('}', "}}")
 }
 
 /// The longest a `sleep` step, a `wait_for_file`, a `burn` and a `repeat` run (the stand-in binary has the same cap).

@@ -5,7 +5,7 @@
 // grep and tr, WP-7 put windows-twin waivers on three unix-only test files. Share first (rule 42): one stand-in binary, written once.
 // Flagged, one finding per line, in Rust test code only (a file of a `tests/` folder, `tests.rs`, `*_test.rs`, or a file from its first
 // `#[cfg(test)]` / `#[cfg(all(test, ..))]` / `#[cfg(any(.., test))]` line on, which also covers a test-only item in the middle of a
-// file): a line that holds `#!/bin/sh`, `#!/bin/bash`, `#!/usr/bin/env bash` and the like. Comment lines (`//`) are not read.
+// file; and any file that calls `write_program(`, test-support files included, whole): a line that holds `#!/bin/sh`, `#!/bin/bash`, `#!/usr/bin/env bash` and the like. Comment lines (`//`) are not read.
 // Not flagged, said out loud: a script built without a shebang (`sh -c`), a shebang another way (a byte string split over lines), and
 // shell files themselves (C129 flags those; this reads the Rust text C129 names as its known gap, so the two never report the same
 // line). A fixture that has to be a script (a hook or a wrapper script under test) carries `// conformance: stand-in — <why>` on its
@@ -33,6 +33,7 @@ const SHEBANG = /#!\/(?:usr\/)?bin\/(?:env[ \t]+)?(?:ba|z)?sh\b/;
 const WAIVER = /conformance:\s*stand-in\s*[—–-]+\s*\S.{2,}/;
 const TEST_PATH = /(?:^|\/)tests?\/|(?:^|\/)tests\.rs$|_tests?\.rs$/;
 const NOT_READ = /(?:^|\/)(?:target|vendor|fixtures|node_modules)\//;
+const WRITES_PROGRAM = /\bwrite_program\(/;
 const CFG_TEST = /^[ \t]*#\[cfg\((?:test|(?:all|any)\([^\]]*\btest\b[^\]]*)\)\]/;
 const FIX =
   "Install the testkit's stand-in instead: `paddock_testkit::StandIn::new(dir, \"name\").stdout(..).exit(..).records_args().install()?` (it runs on Windows and records its calls). A fixture that has to be a script carries `// conformance: stand-in — <why>`; an existing site is listed in conformance/c130-allow.json until it is converted.";
@@ -49,7 +50,9 @@ export const WAIVED_SITE = 'conformance: stand-in';
 export function sites(path, text) {
   if (!readable(path)) return [];
   const lines = text.split('\n');
-  const whole = TEST_PATH.test(path);
+  // A file that calls `write_program(` is a fixture writer wherever it lives (a test-support file such as a `fake.rs` compiled
+  // for tests is not under `tests/` and has no `#[cfg(test)]`): every shebang in it counts.
+  const whole = TEST_PATH.test(path) || WRITES_PROGRAM.test(text);
   let from = whole ? 0 : lines.findIndex((l) => CFG_TEST.test(l));
   if (from < 0) return [];
   const out = [];

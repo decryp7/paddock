@@ -2,12 +2,14 @@
 //! its probe, and turning that probe off lets the same leak through (the mutation check: the test depends on the probe).
 
 use super::fixture::{Fixture, Leak};
+#[path = "../../tests/it/fake_npm.rs"]
+mod fake_npm;
 use super::ledger::Kind;
 use super::verify::{Env, VerifyOptions, verify};
 
 fn job() -> (tempfile::TempDir, Fixture) {
     let dir = tempfile::tempdir().unwrap();
-    let f = Fixture::build(dir.path());
+    let f = fake_npm::build(dir.path());
     (dir, f)
 }
 
