@@ -944,6 +944,21 @@ fn step_name() -> String {
 /// Deletes all but the newest `keep` run folders under `root` (each push run has its own log folder): a folder at a time, by exact
 /// path, through the one guarded remover. Best effort: a folder that cannot be removed stays.
 pub fn prune_run_logs(root: &Path, keep: usize) {
+    // A folder whose owner (the pid that made it) still runs is a push in progress: never pruned, whatever its age.
+    let owner_runs = |dir: &Path| -> bool {
+        let file = dir.join("owner");
+        let Ok(text) = std::fs::read_to_string(&file) else { return false };
+        let Some(pid) = text.lines().next().and_then(|l| l.trim().parse::<u32>().ok()) else {
+            return false;
+        };
+        let written_ms = std::fs::metadata(&file)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+        // Gone only when the process table says so; unreadable counts as running (never pruned on a failed read).
+        paddock_proc::ProcessId::recorded_presence(pid, written_ms) != paddock_proc::Presence::Gone
+    };
     let Ok(read) = std::fs::read_dir(root) else { return };
     let mut dirs: Vec<(std::time::SystemTime, PathBuf)> = read
         .flatten()
@@ -953,7 +968,17 @@ pub fn prune_run_logs(root: &Path, keep: usize) {
     dirs.sort();
     let drop = dirs.len().saturating_sub(keep);
     for (_, d) in dirs.into_iter().take(drop) {
+        if owner_runs(&d) {
+            continue;
+        }
         let _ = crate::safe_remove::remove_under(root, &d, None);
+    }
+}
+
+/// Marks `dir` (this run's log folder) as a push in progress: its owner file holds this process's pid. Best effort.
+pub fn claim_run_logs(dir: &Path) {
+    if std::fs::create_dir_all(dir).is_ok() {
+        let _ = std::fs::write(dir.join("owner"), format!("{}\n", std::process::id()));
     }
 }
 
@@ -1622,6 +1647,40 @@ exit $rc
                 assert_eq!(step.join().unwrap(), Kind::Passed);
             });
             assert_eq!(ex.slot(), Slot::Unknown, "the step is over");
+        }
+
+        /// A long push's log folder is never pruned under it: a folder whose owner (the pid that made it, with the time of the record)
+        /// still runs stays, whatever its age; one whose owner is gone, or that has no owner file, is pruned beyond the newest `keep`.
+        #[test]
+        fn a_run_folder_of_a_running_push_is_not_pruned_and_one_of_a_gone_push_is() {
+            let d = tempfile::tempdir().unwrap();
+            let root = d.path();
+            let make = |name: &str, age: u64, owner: Option<u32>| {
+                let dir = root.join(name);
+                std::fs::create_dir(&dir).unwrap();
+                if let Some(pid) = owner {
+                    std::fs::write(dir.join("owner"), format!("{pid}\n")).unwrap();
+                }
+                let at = std::time::SystemTime::now() - Duration::from_secs(age);
+                std::fs::File::open(&dir).unwrap().set_modified(at).unwrap();
+            };
+            make("running-old", 5000, Some(std::process::id()));
+            make("gone-old", 4000, Some(4_000_000_000));
+            make("unowned-old", 3000, None);
+            make("new-1", 20, None);
+            make("new-2", 10, None);
+            prune_run_logs(root, 2);
+            let mut left: Vec<String> = std::fs::read_dir(root)
+                .unwrap()
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect();
+            left.sort();
+            assert_eq!(
+                left,
+                ["new-1", "new-2", "running-old"],
+                "the running push's folder stays, the others beyond the newest two go"
+            );
         }
 
         #[test]

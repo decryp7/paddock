@@ -443,7 +443,9 @@ fn command_in(
             // One log folder per push run: another run's logs (or an earlier one's) are never this run's (ADR 0102 amendment 2026-11-18).
             let all = state.join("logs");
             exec::prune_run_logs(&all, KEEP_RUN_LOGS);
-            all.join(exec::run_token())
+            let mine = all.join(exec::run_token());
+            exec::claim_run_logs(&mine);
+            mine
         },
         stop: Arc::clone(&stop),
         built_heavy: Default::default(),
