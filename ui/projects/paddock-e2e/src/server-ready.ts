@@ -6,6 +6,8 @@
 // Server processes never outlive the run (ER-14): each is started as its own process group, every group is killed when the
 // run ends, is interrupted (SIGINT, SIGTERM, SIGHUP; Playwright runs no teardown after an interrupted setup) or exits.
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { lookup } from 'node:dns/promises';
+import { get as httpGet } from 'node:http';
 import { isAbsolute, resolve } from 'node:path';
 
 /** One server a run needs. */
@@ -50,16 +52,47 @@ const PROBE_MS = 3000;
 /** Playwright's own readiness rule for a URL: 2xx, 3xx or 400-403 means something serves it. */
 const answers = (status: number) => status >= 200 && status < 404;
 
+/** One GET with `node:http`, as Playwright's own `webServer` check does (not `fetch`): its status, or why there is none. */
+function get(target: URL, address: string | undefined): Promise<{ status?: number; error?: string }> {
+  return new Promise((resolve) => {
+    const req = httpGet(
+      { protocol: target.protocol, hostname: address ?? target.hostname, port: target.port, path: target.pathname + target.search, headers: { Accept: '*/*', Host: target.host }, timeout: PROBE_MS },
+      (res) => {
+        res.resume();
+        resolve({ status: res.statusCode ?? 0 });
+      },
+    );
+    req.on('timeout', () => {
+      req.destroy();
+      resolve({ error: `no answer within ${PROBE_MS / 1000} s` });
+    });
+    req.on('error', (e: NodeJS.ErrnoException) => resolve({ error: e.code === 'ECONNREFUSED' ? 'connection refused' : (e.code ?? e.message) }));
+  });
+}
+
+/**
+ * Whether something serves `url`. The name is tried at every address it resolves to (run 8256: `ng serve` printed its URL, and every
+ * probe of the name was refused, so a server bound to one loopback address must not depend on which one the name lists first), and a
+ * 404 at `/` is retried at `/index.html`, as Playwright does. `what` says what each address answered, for the error line.
+ */
 async function probe(url: string): Promise<{ ok: boolean; what: string }> {
+  const target = new URL(url);
+  let addresses: string[] = [];
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(PROBE_MS), redirect: 'manual' });
-    await res.body?.cancel();
-    return { ok: answers(res.status), what: `HTTP ${res.status}` };
-  } catch (e) {
-    const cause = (e as { cause?: { code?: string } }).cause?.code;
-    const name = (e as Error).name;
-    return { ok: false, what: cause === 'ECONNREFUSED' ? 'connection refused' : name === 'TimeoutError' ? `no answer within ${PROBE_MS / 1000} s` : (cause ?? (e as Error).message) };
+    addresses = (await lookup(target.hostname, { all: true })).map((a) => a.address);
+  } catch {
+    /* the name itself is tried below */
   }
+  const tries: Array<string | undefined> = addresses.length ? addresses : [undefined];
+  const seen: string[] = [];
+  for (const address of tries) {
+    let r = await get(target, address);
+    if (r.status === 404 && target.pathname === '/') r = await get(new URL('/index.html', target), address);
+    const label = address ?? target.hostname;
+    if (r.status !== undefined && answers(r.status)) return { ok: true, what: `HTTP ${r.status} at ${label}` };
+    seen.push(r.status !== undefined ? `${label} HTTP ${r.status}` : `${label} ${r.error}`);
+  }
+  return { ok: false, what: seen.join(', ') };
 }
 
 // Every server this process started and has not ended. The children are held, never looked up by a name read earlier (rule 53).

@@ -38,7 +38,10 @@ const identify = (pid: number): Proc => {
   assert.ok(started, `process ${pid} is running`);
   return { pid, started };
 };
-const alive = (p: Proc) => startOf(p.pid) === p.started;
+// A killed process whose parent does not reap it (an orphan under a container's PID 1 without an init, as in CI run 8256) stays a
+// zombie: it still has a start time but runs nothing, so it counts as ended.
+const zombie = (pid: number): boolean => spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim().startsWith('Z');
+const alive = (p: Proc) => startOf(p.pid) === p.started && !zombie(p.pid);
 async function allGone(procs: readonly Proc[], what: string): Promise<void> {
   await until(() => !procs.some(alive), `${what}: the processes to end`, 5000).catch(() => undefined);
   assert.deepEqual(procs.filter(alive), [], `${what}: processes still running`);
@@ -70,7 +73,7 @@ test('positive control: a command that exits at once fails fast with one ::error
       assert.ok(m.includes(`http://localhost:${port}`), m);
       assert.match(m, /exit status 3/);
       assert.match(m, /stderr tail: EADDRINUSE: address already in use/);
-      assert.match(m, /last probe GET http:\/\/localhost:\d+: connection refused/);
+      assert.match(m, /last probe GET http:\/\/localhost:\d+: (127\.0\.0\.1|::1) connection refused/);
       assert.match(m, /Next step: .*port already in use/);
       return true;
     },
@@ -85,7 +88,7 @@ test('positive control: a server that never answers fails at its timeout, naming
   const started = Date.now();
 
   const pending = startServers([{ command: treeServer(file), url: `http://localhost:${port}`, timeoutMs: 1500, reuseExisting: false }], quiet);
-  const failure = assert.rejects(pending, /^Error: ::error::e2e server http:\/\/localhost:\d+ did not answer within 1\.5 s \(probed GET http:\/\/localhost:\d+ \d+ times; last: connection refused/);
+  const failure = assert.rejects(pending, /^Error: ::error::e2e server http:\/\/localhost:\d+ did not answer within 1\.5 s \(probed GET http:\/\/localhost:\d+ \d+ times; last: (127\.0\.0\.1|::1) connection refused/);
   const tree = await treeOf(file);
   await failure;
   assert.ok(Date.now() - started < 10_000);
@@ -289,4 +292,44 @@ test('a SIGTERM to the parent kills the orphan of a leader that already exited (
   assert.equal(await ended, 'SIGTERM');
   await allGone([orphan!], 'after SIGTERM to the parent');
   rmSync(dir, { recursive: true, force: true });
+});
+
+// CI run 8256: `ng serve` printed "Local: http://localhost:4300/" and every probe of `http://localhost:4300` was refused, because the
+// name resolved first to an address the server was not bound to. The probe tries every address of the name, as Playwright's own check does.
+test('a server bound to 127.0.0.1 only is ready through the name localhost, whatever address the name resolves to first', async () => {
+  const s = createServer((q, r) => r.end('ok')).listen(0, '127.0.0.1');
+  await new Promise((r) => s.once('listening', r));
+  const { port } = s.address() as { port: number };
+  try {
+    const lines: string[] = [];
+    const running = await startServers([{ command: node(`setInterval(() => {}, 1000)`), url: `http://localhost:${port}`, timeoutMs: 5000, reuseExisting: true }], { log: (l) => lines.push(l) });
+    assert.ok(lines.some((l) => /already answers/.test(l)), lines.join('\n'));
+    await running.stop();
+  } finally {
+    s.close();
+  }
+});
+
+test('a server bound to ::1 only is ready through the name localhost', async (t) => {
+  const s = createServer((q, r) => r.end('ok'));
+  const bound = await new Promise<boolean>((r) => {
+    s.once('error', () => r(false));
+    s.listen(0, '::1', () => r(true));
+  });
+  if (!bound) return t.skip('no IPv6 loopback on this machine');
+  const { port } = s.address() as { port: number };
+  try {
+    const running = await startServers([{ command: node(`setInterval(() => {}, 1000)`), url: `http://localhost:${port}`, timeoutMs: 5000, reuseExisting: true }], quiet);
+    await running.stop();
+  } finally {
+    s.close();
+  }
+});
+
+test('positive control: when no address of the name answers, the message lists each address tried', async () => {
+  const port = await freePort();
+  await assert.rejects(
+    startServers([{ command: node(`process.exit(2)`), url: `http://localhost:${port}`, timeoutMs: 5000, reuseExisting: false }], quiet),
+    /last probe GET http:\/\/localhost:\d+: (127\.0\.0\.1|::1) connection refused/,
+  );
 });
