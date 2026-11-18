@@ -12,6 +12,7 @@
 //! dev ci prune-folder <folder> <max-gb>          cap one folder (incremental caches first, then the folder)
 //! dev ci prune-agent-builds --app <id> [--remove] [--keep <suffix>...]   list or remove agents' build folders
 //! dev ci host-cleanup --id <app> [--process-pattern <p>]... [--temp-prefix <p>] [--build-outputs]
+//! dev ci host-probe [--dir <folder>] [--starts <n>] [--repos <n>] [--files <n>] [--label <text>]
 //! ```
 //!
 //! The contract is the shell's, case for case (`tests/it/host_steps.rs` runs both on the same inputs, `conformance/test/*` keep the
@@ -29,6 +30,7 @@ pub mod boot_volume;
 pub mod build_folder;
 pub mod cleanup;
 pub mod guardian_as_user;
+pub mod host_probe;
 pub mod host_tools;
 pub mod kept_clone;
 pub mod links;
@@ -78,6 +80,9 @@ pub enum HostStep {
     /// Leaves nothing of this job behind: its stray processes, its temp folders, optionally its build outputs (the port of
     /// tools/host-cleanup.sh). Always exits 0 once the arguments are valid.
     HostCleanup(cleanup::Args),
+    /// How fast this host starts programs (an empty one, `git --version`), makes small repositories and writes small files, in a
+    /// folder of the caller's choice: a slow test run told apart from a slow host, before and after a host change. Always exits 0.
+    HostProbe(host_probe::Args),
 }
 
 /// Runs a host step for the real process.
@@ -97,6 +102,7 @@ pub fn run(step: &HostStep, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         HostStep::PruneFolder(a) => prune::run_folder(&env, a, out, err),
         HostStep::PruneAgentBuilds(a) => prune::run_agent(&env, a, out, err),
         HostStep::HostCleanup(a) => cleanup::run(&env, windows, a, out, err),
+        HostStep::HostProbe(a) => host_probe::run_step(&env, a, out),
     }
 }
 
