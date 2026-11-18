@@ -1918,7 +1918,7 @@ starts `git` many times through its own `PATH`, which `TestCommand` curates. Whi
 ## Doctest row of the push gate (2026-11-18, feat/member-gate-doctests)
 
 Question: what does the `doctest <workspace>` row (`cargo test --doc`; nextest does not run doctests) cost? In `crates` it runs on
-every push for the touched crates only (`-p`); in an app workspace it runs `--workspace`, only in the member gate (`--member-gate`).
+every push for the touched crates and the crates in `crates/` that depend on them (`-p`, from `cargo metadata`); in an app workspace it runs `--workspace`, only in the member gate (`--member-gate`).
 
 - **Machine:** the shared Mac mini (arm64), other agents running: 1-minute load 29 to 35 during the runs (not an idle machine);
   `CARGO_BUILD_JOBS=2`, `RUSTUP_AUTO_INSTALL=0`, one run per row, build folders in a scratch folder (not the worktree's)
@@ -1936,3 +1936,23 @@ The cold app figure is a new empty build folder under load 30 or more, and is wh
 build folder per workspace (`kept_targets`) makes the warm figure the usual one. Not measured: the app row on the CI runner.
 The crates row already caught the bug it was made for: on the train base, `-p paddock-testkit` fails with E0308 until
 fix/testkit-doctest lands.
+
+### Reverse dependencies and `--all-features` (2026-11-18, review of 1be287647)
+
+The row now passes `--all-features` in `crates` (CI's own doc-test step does) and adds the dependents of the touched crates, so a public API
+change that breaks a dependent's doctest is caught. Measured in `crates` of the fix branch on 1be287647, same machine and settings as
+above (load 13 to 28), one build folder, `cargo test --doc --all-features --locked --no-fail-fast`, 57 members:
+
+| Selection | Test programs | Seconds |
+|---|---:|---:|
+| `--workspace`, cold build folder | 63 | 289 |
+| `--workspace`, warm, twice in a row | 63 | 33, 30 (and 31, 30 on later repeats) |
+| one leaf crate (`-p paddock-diag`), warm | 1 | 1 to 2 |
+| four dependents of `paddock-log` (`-p`), warm | 4 | 3 |
+| `paddock-proc` and its 31 dependents (the largest realistic set below the root crates), warm | 32 | 12 |
+| the same, first run after a different selection (feature sets differ, cargo rebuilds) | 32 | 61 |
+
+A `-p` selection rebuilds once when the previous run used another selection (features unify per selection), then runs in seconds; a warm
+`--workspace` takes about 30 s every time. The dependents row therefore costs at most about as much as `--workspace` and usually far less,
+so it is kept (the root crates `paddock-env`, `paddock-limits` and the workspace hack reach nearly all 57 and cost what `--workspace` does).
+Not measured: the CI runner; load was 13 to 28, so absolute values are noisy.

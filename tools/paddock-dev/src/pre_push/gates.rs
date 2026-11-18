@@ -126,6 +126,8 @@ pub struct Facts {
     /// The Tauri crates each candidate workspace leaves out of the Linux Clippy ([`super::linux_inputs::left_out`]), or why cargo
     /// could not say. Filled for [`linux_candidates`] only.
     pub left_out: std::collections::BTreeMap<String, Result<super::linux_inputs::WsCrates, String>>,
+    /// The members of the `crates` workspace (name, folder, dependencies), or why cargo could not say; None when not read.
+    pub crates_members: Option<Result<Vec<super::members::Member>, String>>,
     /// The run is the member gate of `./dev merge check --gates` (`--member-gate`): the repository-wide audits run too.
     pub member_gate: bool,
     /// A kept build folder per workspace (`<it>/<workspace>`), used when the caller sets no `CARGO_TARGET_DIR`: the throw-away
@@ -222,40 +224,39 @@ pub(super) fn windows_skip_reason(ws: &str) -> String {
     }
 }
 
-/// The crate folders of the `crates` workspace that hold a changed file (`crates/<crate>/...`; a crate's folder is its package name),
-/// or None when a changed file there belongs to no crate (the workspace manifest, its lockfile): every crate is reached then.
-fn changed_crates(files: &[String]) -> Option<BTreeSet<String>> {
-    let mut crates = BTreeSet::new();
-    for f in files.iter().filter_map(|f| f.strip_prefix("crates/")) {
-        match f.split_once('/') {
-            Some((name, _)) => crates.insert(name.to_string()),
-            None => return None,
-        };
-    }
-    Some(crates)
-}
-
 /// The doctests of the crates a change reaches (`cargo test --doc`). nextest does not run doctests, so a broken example passed the
-/// local gates and failed CI (paddock-testkit's `StandIn` doctest, E0308, 2026-11-18); this runs the same command as CI's tests do.
-/// In `crates` only the touched crates (`-p`; every one has a library, and `-p` of a binary-only package is an error), on every push; in an
-/// app workspace the whole workspace (cargo skips packages with no library), only in the member gate (`--member-gate`). `RUSTUP_AUTO_INSTALL=0` stops a probe from installing a
-/// toolchain (ER-45). Blocking from the start: CI already runs these tests, so this is an established check moved earlier (as the
-/// member audits are, ER-41), and `cargo test --doc --workspace` in `crates` was green on the real tree (63 test programs ok, 2026-11-18).
+/// local gates and failed CI (paddock-testkit's `StandIn` doctest, E0308, 2026-11-18). The flags are CI's own: `crates` with
+/// `--all-features` (ci.yml, "Doc tests (workspace, every feature)"), an app workspace as the app-gates action runs it (no feature flag).
+/// In `crates` only the touched crates and their dependents inside `crates` (`-p`, names and dependencies from `cargo metadata`, see
+/// [`super::members::reached`]; a changed file in no member, or a metadata failure, widens to `--workspace`), on every push; in an app
+/// workspace the whole workspace (cargo skips packages with no library), only in the member gate (`--member-gate`).
+/// `RUSTUP_AUTO_INSTALL=0` stops a probe from installing a toolchain (ER-45). Blocking from the start: CI already runs these tests, so
+/// this is an established check moved earlier (as the member audits are, ER-41). On 1be287647 (2026-11-18) `cargo test --doc --all-features
+/// --workspace --no-fail-fast` in `crates` ran 63 test programs and 62 passed; the failure is paddock-testkit's `StandIn` doctest (E0308),
+/// which fix/testkit-doctest (47ef26a47) fixes and that base lacks. Costs: docs/benchmarks.md, "Doctest row of the push gate".
 fn doctest(ws: &str, files: &[String], facts: &Facts) -> Planned {
     if ws != "crates" && !facts.member_gate {
         return Planned::Skip {
             id: format!("doctest {ws}"),
-            reason: "an app workspace's doctests run in the member gate of `./dev merge check --gates` (`--member-gate`), not in a developer's push (a whole-workspace test build); the crates' doctests run on every push".into(),
+            reason: "an app workspace's doctests run in the member gate of `./dev merge check --gates` (`--member-gate`), not in a developer's push (a whole-workspace test build); the doctests of the touched crates (and their dependents) run on every push".into(),
         };
     }
-    let mut args: Vec<String> = strs(&["test", "--doc", "--locked"]);
-    match (ws, changed_crates(files)) {
-        ("crates", Some(names)) if !names.is_empty() => {
+    let mut args: Vec<String> = strs(&["test", "--doc"]);
+    if ws == "crates" {
+        args.push("--all-features".into());
+    }
+    args.push("--locked".into());
+    let reached = match (ws, &facts.crates_members) {
+        ("crates", Some(Ok(members))) => super::members::reached(members, ws, files).filter(|r| !r.is_empty()),
+        _ => None,
+    };
+    match reached {
+        Some(names) => {
             for n in names {
                 args.extend(["-p".to_string(), n]);
             }
         }
-        _ => args.push("--workspace".into()),
+        None => args.push("--workspace".into()),
     }
     let mut g = Gate {
         heavy: true,
@@ -808,7 +809,7 @@ pub const NOT_RUN: &[(&str, &str)] = &[
         "CI covers them (ER-9 overlap); only workspaces with a changed file of their own are linted here",
     ),
     (
-        "tests (nextest, vitest, Playwright) other than the member audits and the doctests of touched crates",
+        "tests (nextest, vitest, Playwright) other than the member audits and the doctests of touched crates and their dependents",
         "slower local checks run beside CI after dispatch (ER-9); the repository-wide audits of tools/paddock-dev run in the push gate (`member-audits`), and `doctest <workspace>` runs `cargo test --doc`",
     ),
 ];
