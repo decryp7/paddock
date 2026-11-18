@@ -629,11 +629,23 @@ struct Fake {
     /// Gates that never got a slot: `how` is heavy's queue-limit text.
     no_slot: Vec<String>,
     ran: Mutex<Vec<String>>,
+    /// The stand-in for this program that the rows `./dev` runs itself start (None: the real answer, a test program is refused).
+    dev_program: Option<String>,
     /// The limits every gate was started with.
     limits: Mutex<Vec<(String, Limits)>>,
 }
 
 impl Exec for Fake {
+    fn dev_program(&self) -> Result<String, String> {
+        self.dev_program.clone().map_or_else(
+            || {
+                crate::tool_cache::self_exe()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .map_err(|e| e.to_string())
+            },
+            Ok,
+        )
+    }
     fn has_tool(&self, p: &str) -> bool {
         !self.no_tools.iter().any(|t| t == p)
     }
@@ -1831,9 +1843,9 @@ mod known_commit {
         known::write_record(&r, &state(&r), &two, "origin/main", &[], 5, &pass_for(&r, &two)).unwrap();
         let l = fake(None, Err("x"));
         let delete = format!("(delete) {} refs/heads/old {}\n", "0".repeat(40), two);
-        // The gates run on a fake: on the real executor the gates-register row starts the test binary itself (exec.rs,
-        // `harness_as_gate`), a nested test run that took this test past nextest's 60 s under load (2026-11-18).
-        let gates = super::Fake::default();
+        // The gates of the run are measured afresh, never read from the record: gates-register reaches the executor, started as
+        // the stand-in dev program (a test process is never started as paddock-dev, 48fa2449a).
+        let gates = standin_dev();
         let got = command_in(
             &PrePushArgs {
                 root: Some(r.clone()),
@@ -1846,17 +1858,36 @@ mod known_commit {
             Some(&gates),
         );
         assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
-        // Measured, not skipped: the gates of the run went to the executor (the positive control of the verdict above).
-        assert!(gates.ran.lock().unwrap().contains(&"gates-register".to_string()), "{got:?}");
+        assert_measured_afresh(&got, &gates);
         let a = PrePushArgs {
             root: Some(r.clone()),
             base: Some("origin/main".into()),
             ..args()
         };
-        let gates = super::Fake::default();
+        let gates = standin_dev();
         let got = command_in(&a, &r, &push_line(&two), &l, crate::local_sccache::Lazy::off(), Some(&gates));
         assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
-        assert!(gates.ran.lock().unwrap().contains(&"gates-register".to_string()), "{got:?}");
+        assert_measured_afresh(&got, &gates);
+    }
+
+    /// The executor of the gates with a stand-in for this program: in a test process the real one is the test harness, which the
+    /// rows `./dev` runs itself must never start (`tool_cache::self_exe`).
+    fn standin_dev() -> super::Fake {
+        super::Fake {
+            dev_program: Some("/x/dev".into()),
+            ..Default::default()
+        }
+    }
+
+    /// The gates of this run were measured afresh, none read from the record: commit-lint passed in process and gates-register
+    /// went to the executor (started as the stand-in) and passed.
+    fn assert_measured_afresh<E: std::fmt::Debug>(got: &Result<paddock_cli::Report, E>, gates: &super::Fake) {
+        let rep = got.as_ref().unwrap_or_else(|e| panic!("no report: {e:?}"));
+        let rows = rep.data["gates"].as_array().expect("the report lists the gates of the run");
+        let verdict = |id: &str| rows.iter().find(|g| g["id"] == id).map(|g| g["verdict"].clone());
+        assert_eq!(verdict("commit-lint"), Some(serde_json::json!("passed")), "{rep:?}");
+        assert_eq!(verdict("gates-register"), Some(serde_json::json!("passed")), "{rep:?}");
+        assert!(gates.ran.lock().unwrap().contains(&"gates-register".to_string()), "{rep:?}");
     }
 
     /// A record measured from a nearer base (a local train, a branch's old commit) checked less than a push from an older base

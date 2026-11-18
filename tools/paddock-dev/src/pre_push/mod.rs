@@ -457,7 +457,7 @@ fn command_in(
         CliError::failure(format!("The planner could not plan this change: {e}."))
             .with_hint("Run `./dev plan --files <a,b>` to see the same error.")
     })?;
-    let mut facts = read_facts(&work, &plan, &env);
+    let mut facts = read_facts(&work, &plan, &env, given.unwrap_or(&real));
     // A dry run lists and runs nothing, so it needs no install; a real run in a throw-away tree on Windows has no node_modules.
     facts.conformance_env = if args.dry_run {
         None
@@ -1344,7 +1344,7 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
 }
 
 /// What the repository says that the plan does not: the conformance contract's check list, the apps that lint Windows, the CI image.
-fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts {
+fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn exec::Exec) -> Facts {
     let ci = crate::ci_run::contract::conformance_args_at(root);
     let mut windows = std::collections::BTreeSet::new();
     for ws in gates::workspaces(plan) {
@@ -1379,9 +1379,7 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts
         member_gate: false,
         kept_targets: None,
         pitwall_tests: tests,
-        dev_exe: crate::tool_cache::self_exe()
-            .map(|p| p.to_string_lossy().to_string())
-            .map_err(|e| e.to_string()),
+        dev_exe: ex.dev_program(),
         target_dir: env.get("CARGO_TARGET_DIR").cloned(),
     }
 }
