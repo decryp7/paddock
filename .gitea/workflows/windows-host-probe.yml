@@ -28,10 +28,6 @@ on:
         description: "nextest --test-threads for the merge_check set (1: each test's own time; 8: CI's load)."
         required: false
         default: "1"
-      buildtime:
-        description: "Time a cold build of paddock-git (with gix) against one of paddock-proc alone (its other dependencies), in fresh folders without sccache: true or false. Needs a tree with crates/paddock-git (a trial onto perf/git-heavy-tests-2)."
-        required: false
-        default: "false"
 
 env:
   PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
@@ -121,21 +117,6 @@ jobs:
               | tee -a "$RUNNER_TEMP/spike.txt" || { echo "::error::the spike failed. Next step: run it locally"; exit 1; }
           done
           { echo '### git read spike'; grep -E '^(repo:|\|)' "$RUNNER_TEMP/spike.txt"; } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Cold build time of gix
-        if: ${{ inputs.buildtime == 'true' }}
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
-        env:
-          RUSTC_WRAPPER: ""
-        run: |
-          t=$(cygpath -w "$RUNNER_TEMP")
-          for pkg in paddock-proc paddock-git paddock-proc paddock-git; do
-            dir="$t\\bt-$pkg-$RANDOM"
-            start=$SECONDS
-            cargo build --locked -q -p "$pkg" --config "build.target-dir='$dir'" --config 'build.rustc-wrapper=""' || { echo "::error::the cold build of $pkg failed"; exit 1; }
-            echo "cold debug build of $pkg: $((SECONDS - start)) s" | tee -a "$GITHUB_STEP_SUMMARY"
-            rm -rf "$dir"
-          done
 
       - name: merge_check, one thread
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
