@@ -871,3 +871,24 @@ fn files_are_the_program_and_its_script_to_pack_or_serve_and_they_run_where_they
         .unwrap_err();
     assert!(e.to_string().contains("cannot be packed"), "{e}");
 }
+
+#[test]
+fn a_bundled_program_finds_its_script_at_its_own_end_and_a_plain_one_alone_is_broken() {
+    let s = Scratch::new();
+    let f = StandIn::new(&s.work(), "tool")
+        .stdout("alone")
+        .exit(4)
+        .files()
+        .unwrap();
+    let bundled = s.work().join("one").join(&f.program_name);
+    std::fs::create_dir_all(bundled.parent().unwrap()).unwrap();
+    paddock_testkit::exe::write_program(&bundled, &f.bundled()).unwrap();
+    let o = run(&bundled, &[]);
+    assert_eq!((o.status.code(), out(&o).as_str()), (Some(4), "alone\n"));
+    // Control: the program without its script (nothing beside it, nothing at its end) is a broken stand-in.
+    let plain = s.work().join("two").join(&f.program_name);
+    std::fs::create_dir_all(plain.parent().unwrap()).unwrap();
+    paddock_testkit::exe::write_program(&plain, &f.program).unwrap();
+    let o = run(&plain, &[]);
+    assert_eq!(o.status.code(), Some(70), "{}", err(&o));
+}

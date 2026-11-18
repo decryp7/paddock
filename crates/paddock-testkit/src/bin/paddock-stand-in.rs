@@ -26,6 +26,8 @@ const JSON_SOURCE: &str = include_str!("../stand_in_json.rs");
 const MAX_SLEEP_MS: i64 = 120_000;
 /// The most of stdin that is read and recorded.
 const MAX_STDIN: u64 = 1 << 20;
+/// Marks a script carried at the end of the program (`Files::bundled`).
+const BUNDLE_MAGIC: &[u8] = b"\0PADDOCK-STAND-IN-SCRIPT\0";
 /// What the stand-in exits with when its own script is wrong (sysexits EX_SOFTWARE), distinct from the codes a script asks for.
 const BROKEN: i32 = 70;
 
@@ -60,8 +62,12 @@ fn run() -> Result<i32, String> {
         _ => file,
     };
     let script_path = dir.join(format!("{name}.stand-in.json"));
-    let text = std::fs::read_to_string(&script_path)
-        .map_err(|e| format!("cannot read its script {}: {e}", script_path.display()))?;
+    let text = match std::fs::read_to_string(&script_path) {
+        Ok(t) => t,
+        // No script beside it: a program packed with `Files::bundled` carries its script at its end.
+        Err(e) => bundled_script(&exe)
+            .ok_or_else(|| format!("cannot read its script {}: {e}", script_path.display()))?,
+    };
     let script = json::parse(&text).map_err(|e| format!("{}: {e}", script_path.display()))?;
 
     let argv: Vec<String> = std::env::args_os()
@@ -261,6 +267,28 @@ fn record_call(
         .map_err(|e| format!("cannot open its record {}: {e}", path.display()))?;
     f.write_all(format!("{}\n", line.to_json()).as_bytes())
         .map_err(|e| format!("cannot write its record {}: {e}", path.display()))
+}
+
+/// The script a stand-in carries at its own end: the script, `BUNDLE_MAGIC`, then the script's length as eight bytes (little endian).
+fn bundled_script(exe: &Path) -> Option<String> {
+    use std::io::{Seek, SeekFrom};
+    let mut f = std::fs::File::open(exe).ok()?;
+    let size = f.seek(SeekFrom::End(0)).ok()?;
+    let tail_len = (BUNDLE_MAGIC.len() + 8) as u64;
+    f.seek(SeekFrom::Start(size.checked_sub(tail_len)?)).ok()?;
+    let mut tail = vec![0u8; tail_len as usize];
+    f.read_exact(&mut tail).ok()?;
+    if &tail[..BUNDLE_MAGIC.len()] != BUNDLE_MAGIC {
+        return None;
+    }
+    let len = u64::from_le_bytes(tail[BUNDLE_MAGIC.len()..].try_into().ok()?);
+    f.seek(SeekFrom::Start(
+        size.checked_sub(tail_len)?.checked_sub(len)?,
+    ))
+    .ok()?;
+    let mut script = vec![0u8; usize::try_from(len).ok()?];
+    f.read_exact(&mut script).ok()?;
+    String::from_utf8(script).ok()
 }
 
 fn act(actions: &Value, ctx: &Ctx) -> Result<i32, String> {

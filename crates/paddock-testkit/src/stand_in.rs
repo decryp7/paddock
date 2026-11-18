@@ -801,6 +801,21 @@ pub struct Files {
     pub script: Vec<u8>,
 }
 
+impl Files {
+    /// The program with its script at its end, as one file: where the code under test puts a downloaded or unpacked program alone
+    /// (nothing beside it), this one still finds its script. Written under `program_name`.
+    pub fn bundled(&self) -> Vec<u8> {
+        let mut bytes = self.program.clone();
+        bytes.extend_from_slice(&self.script);
+        bytes.extend_from_slice(BUNDLE_MAGIC);
+        bytes.extend_from_slice(&(self.script.len() as u64).to_le_bytes());
+        bytes
+    }
+}
+
+/// Marks a script carried at the end of a program (the same bytes as in the stand-in binary).
+const BUNDLE_MAGIC: &[u8] = b"\0PADDOCK-STAND-IN-SCRIPT\0";
+
 /// An installed stand-in.
 #[derive(Debug, Clone)]
 pub struct Installed {
