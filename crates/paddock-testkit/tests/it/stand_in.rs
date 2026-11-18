@@ -823,3 +823,29 @@ fn a_stand_in_that_stops_itself_goes_on_after_sigcont() {
     assert!(child.wait().unwrap().success());
     assert!(after.exists());
 }
+
+#[test]
+fn files_are_the_program_and_its_script_to_pack_or_serve_and_they_run_where_they_are_put() {
+    let s = Scratch::new();
+    let f = StandIn::new(&s.work(), "Packed Tool")
+        .stdout("from the archive")
+        .exit(2)
+        .files()
+        .unwrap();
+    assert_eq!(f.script_name, "Packed Tool.stand-in.json");
+    let elsewhere = s.work().join("unpacked");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let program = elsewhere.join(&f.program_name);
+    paddock_testkit::exe::write_program(&program, &f.program).unwrap();
+    std::fs::write(elsewhere.join(&f.script_name), &f.script).unwrap();
+    let o = run(&program, &[]);
+    assert_eq!(
+        (o.status.code(), out(&o).as_str()),
+        (Some(2), "from the archive\n")
+    );
+    let e = StandIn::new(&s.work(), "r")
+        .records_args()
+        .files()
+        .unwrap_err();
+    assert!(e.to_string().contains("cannot be packed"), "{e}");
+}
