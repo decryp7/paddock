@@ -15,6 +15,30 @@ Conventional Commits; one semver tag for the whole repo.
   it started (`None`: its start time is unreadable), so a caller that gives up on the run can end the tree itself. `run_bounded` is
   unchanged. Used by paddock-dev's bounded phases (`Held`), which end the programs of an abandoned phase before the step goes on.
 
+### `paddock-git`: one batched reader of git objects, in process with gix (ADR 0108 G2)
+
+- New crate. `Reader::open(root, make_git)` reads blobs, trees and existence in process with gix (0.90, the object database only:
+  no network, index or worktree features) for revisions named by full object ids, and through one long-lived `git cat-file
+  --batch-command` for the rest (a ref name, a short id, a partial clone's omitted blob). `Reader::new(make_git)` is the git-only
+  form. `starts()` counts git processes. Windows runner, 20 trees and 300 blobs: 11.1 s one git start per read, 428 ms one
+  `cat-file`, 9.4 ms gix (docs/benchmarks.md).
+- paddock-dev's merge check reads through it: `blob_ids` (was `ls-tree -r`), `file_at` (`cat-file blob`), `has_commit`
+  (`cat-file -e`) and `changed_paths` (`diff --name-only`, now from the two trees' listings in process).
+- gix is outside the workspace hack (`crates/.config/hakari.toml` traversal-excludes), so it changes no other crate's features. Adding
+  it still moved the Windows-only edges of a few crates (dirs-sys, errno, rustix, tempfile, winapi-util, winreg, rustls) off
+  windows-sys 0.59: in `crates/` onto 0.61, in the apps onto a version their graph already had, each within the crate's declared range.
+  The hack's windows-sys 0.59 entry went with it, so every lockfile that holds the hack changed too; macOS and Linux builds are
+  unchanged. Windows CI of every app is the check.
+
+### `paddock-proc`: a bounded run with input, and a long-lived child spoken to over its pipes (ADR 0108 G1)
+
+- `run_bounded_with_input(cmd, input, limits)`: `run_bounded` with `input` written to the child's stdin on its own thread, then closed
+  (at most `MAX_INPUT`, 64 MiB): a request list for a batch program (`git cat-file --batch`, `diff-tree --stdin`, `hash-object
+  --stdin`) in one start. paddock-dev's input hash moves its private stdin runner onto it.
+- `Session` (`start`, `send`, `read_line`, `read_exact`, `stderr_tail`, `finish`) with `SessionLimits` and `SessionError`: a child whose
+  stdin stays open, every read bounded by its own deadline and an answer cap, its tree ended by identity on `finish`, on a timeout or
+  when dropped. For a request whose next question depends on the last answer (walking trees through one `cat-file --batch`).
+
 ### `paddock-env`: `cachedir`, cargo's `CACHEDIR.TAG` for a target folder cargo did not make (ADR 0107)
 
 - `cachedir::{FILE_NAME, SIGNATURE, CONTENT, is_tag, ensure}`: `./dev ci isolation path target` writes the tag into a kept build folder, and the test kit shares its toolchain link folder only in a folder that has it (also one level up, for `target/<triple>/<profile>`). `is_tag` checks the signature line; `ensure` repairs a missing, empty or partial tag by writing a temporary file and renaming it, and never rewrites a good one. Without the tag every `TestCommand` linked the toolchain into its own folder (testcommand-ab.yml run 8246, Windows); the kit now prints one `TestCommand:` line when it falls back.

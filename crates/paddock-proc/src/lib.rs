@@ -66,6 +66,7 @@ pub mod own;
 mod run;
 mod runstate;
 pub mod self_test;
+mod session;
 mod stall;
 mod start;
 mod supervised;
@@ -115,9 +116,11 @@ pub use login::{
     probe_script, shell_candidates,
 };
 pub use run::{
-    DEFAULT_MAX_OUTPUT, Limits, Outcome, Output, RunError, run_bounded, run_bounded_noting,
+    DEFAULT_MAX_OUTPUT, Limits, MAX_INPUT, Outcome, Output, RunError, run_bounded,
+    run_bounded_noting, run_bounded_with_input,
 };
 pub use runstate::{RunState, run_state};
+pub use session::{FINISH_GRACE, Session, SessionError, SessionLimits};
 pub use stall::{StallAction, StallCause, StallReport};
 pub use start::{
     Cpu, ExitInfo, Liveness, Pace, Patience, Reading, StartJudge, StartProbe, StartState,
