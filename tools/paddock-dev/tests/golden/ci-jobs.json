@@ -1,0 +1,65 @@
+{
+ "plan": [
+  "everything"
+ ],
+ "ui": [
+  "ui"
+ ],
+ "e2e": [
+  "ui"
+ ],
+ "e2e-webkit": [
+  "ui"
+ ],
+ "conformance": [
+  "conformance"
+ ],
+ "c99": [
+  "c99"
+ ],
+ "ipc-endpoints": [
+  "conformance"
+ ],
+ "gitleaks": [
+  "conformance"
+ ],
+ "tools": [
+  "tools"
+ ],
+ "tools-macos": [
+  "tools"
+ ],
+ "wiki": [
+  "tools"
+ ],
+ "heavy": [
+  "tools"
+ ],
+ "icons": [
+  "icons"
+ ],
+ "eslint-preset": [
+  "eslint"
+ ],
+ "crates": [
+  "crates"
+ ],
+ "crate": [
+  "crates"
+ ],
+ "commits": [
+  "tools"
+ ],
+ "audit": [
+  "paddock-dev"
+ ],
+ "train-gates": [
+  "tools"
+ ],
+ "app": [
+  "apps"
+ ],
+ "paddock-dev": [
+  "paddock-dev"
+ ]
+}

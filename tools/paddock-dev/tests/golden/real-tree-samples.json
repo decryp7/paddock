@@ -1,0 +1,795 @@
+[
+ {
+  "files": [
+   "crates/paddock-cli/src/lib.rs"
+  ],
+  "plan": {
+   "all": false,
+   "crates": true,
+   "ui": true,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": true,
+   "icons": false,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "crates/paddock-proc/src/run.rs",
+   "crates/paddock-slots/src/lib.rs"
+  ],
+  "plan": {
+   "all": false,
+   "crates": true,
+   "ui": true,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": true,
+   "icons": false,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "crates/Cargo.toml"
+  ],
+  "plan": {
+   "all": false,
+   "crates": true,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": true,
+   "icons": false,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "ui/projects/paddock-ui/src/public-api.ts"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": true,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "ui/projects/paddock-ui/shell/generated/public-api.ts"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": true,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "ui/projects/paddock-ui/shell/generated/dialogs.ts"
+  ],
+  "plan": {
+   "all": false,
+   "crates": true,
+   "ui": true,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "ui/package.json"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": true,
+   "eslint": true,
+   "conformance": true,
+   "c99": false,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "eslint/src/index.cjs"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": true,
+   "eslint": true,
+   "conformance": true,
+   "c99": false,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "apps/dyno/app/src-tauri/src/main.rs"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": true,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "apps/debrief/app/src/app/app.component.ts"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   ".gitea/workflows/ci.yml"
+  ],
+  "plan": {
+   "all": true,
+   "crates": true,
+   "ui": true,
+   "eslint": true,
+   "conformance": true,
+   "c99": true,
+   "tools": true,
+   "icons": true,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   ".gitea/workflows/debrief.yml"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "diagrams/paddock.xml",
+   "README.md"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": true
+  }
+ },
+ {
+  "files": [
+   "docs/rules.md",
+   "CODEOWNERS",
+   "scripts/publish.mjs"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": true,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": true,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "icons/tools/install.mjs"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": false,
+   "icons": true,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "conformance/src/index.mjs"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "package-lock.json"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "tools/paddock-dev/src/lib.rs",
+   "tools/test/x.test.mjs"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": true,
+   "icons": false,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "totally-unknown-root-file"
+  ],
+  "plan": {
+   "all": true,
+   "crates": true,
+   "ui": true,
+   "eslint": true,
+   "conformance": true,
+   "c99": true,
+   "tools": true,
+   "icons": true,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "scripts/affected.mjs",
+   "scripts/affected.test.mjs"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": true,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": true,
+   "icons": false,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   ".cargo/config.toml"
+  ],
+  "plan": {
+   "all": false,
+   "crates": true,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "lint/clippy.toml"
+  ],
+  "plan": {
+   "all": false,
+   "crates": true,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": false,
+   "icons": false,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "rust-toolchain.toml",
+   "tsconfig/base.json"
+  ],
+  "plan": {
+   "all": true,
+   "crates": true,
+   "ui": true,
+   "eslint": true,
+   "conformance": true,
+   "c99": true,
+   "tools": true,
+   "icons": true,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "conformance/ci/build-folder.sh"
+  ],
+  "plan": {
+   "all": true,
+   "crates": true,
+   "ui": true,
+   "eslint": true,
+   "conformance": true,
+   "c99": true,
+   "tools": true,
+   "icons": true,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "conformance/src/util/is-main.mjs"
+  ],
+  "plan": {
+   "all": true,
+   "crates": true,
+   "ui": true,
+   "eslint": true,
+   "conformance": true,
+   "c99": true,
+   "tools": true,
+   "icons": true,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   ".gitea/actions/app-gates/action.yml",
+   ".gitea/workflows/nightly.yml"
+  ],
+  "plan": {
+   "all": true,
+   "crates": true,
+   "ui": true,
+   "eslint": true,
+   "conformance": true,
+   "c99": true,
+   "tools": true,
+   "icons": true,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   ".gitignore",
+   "crates/paddock-cli/CHANGELOG.md"
+  ],
+  "plan": {
+   "all": false,
+   "crates": true,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": true,
+   "icons": false,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "docs/gates.toml"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": true
+  }
+ },
+ {
+  "files": [
+   "apps/dyno/paddock.ci.json",
+   "AGENTS.md"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": true,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": true
+  }
+ },
+ {
+  "files": [
+   "lefthook.yml",
+   "apps/dyno/scripts/check-wording.mjs"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "apps/debrief/Cargo.lock"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "apps/pitwall/crates/pitwall-server/Cargo.toml"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "apps/pitwall/crates/pitwall-server/src/lib.rs"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": true,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "crates/paddock-secrets/Cargo.toml"
+  ],
+  "plan": {
+   "all": false,
+   "crates": true,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "apps/dyno/app/src-tauri/capabilities/default.json"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "apps/pitwall/paddock.ci.json"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": true,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "conformance/src/checks/C99-no-keychain.mjs"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "conformance/src/checks/C53-pid-kills.mjs"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "conformance/baselines/C53.json"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": false,
+   "icons": false,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "conformance/src/util/fs.mjs"
+  ],
+  "plan": {
+   "all": true,
+   "crates": true,
+   "ui": true,
+   "eslint": true,
+   "conformance": true,
+   "c99": true,
+   "tools": true,
+   "icons": true,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "diagrams/paddock.xml"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": true
+  }
+ },
+ {
+  "files": [
+   "apps/dyno/app/src-tauri/Cargo.toml"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": true,
+   "tools": false,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   ".claude/hooks/worktree-guard.py"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": true,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   ".claude/settings.json"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": true,
+   "icons": false,
+   "paddockDev": false,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "tools/paddock-dev/src/places.rs"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": true,
+   "icons": false,
+   "paddockDev": true,
+   "docs": false
+  }
+ },
+ {
+  "files": [
+   "docs/known-copies.toml"
+  ],
+  "plan": {
+   "all": false,
+   "crates": false,
+   "ui": false,
+   "eslint": false,
+   "conformance": true,
+   "c99": false,
+   "tools": true,
+   "icons": false,
+   "paddockDev": false,
+   "docs": true
+  }
+ }
+]

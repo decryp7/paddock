@@ -29,12 +29,12 @@
   ]
  },
  "packages": {
+  "apps/x/app/src-tauri": [
+   "x"
+  ],
   "crates": [
    "fx-a",
    "fx-b"
-  ],
-  "apps/x/app/src-tauri": [
-   "x"
   ]
  },
  "why": {
