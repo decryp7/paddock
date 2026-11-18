@@ -23,4 +23,6 @@ Check that the author ran the repository-wide gates, and run them yourself when 
 
 Wait with `./dev wait`; never `pgrep -f` on a string your own command contains.
 
+For code, a loop that calls a command, port, process, query or HTTP endpoint once per item is a finding (rule 85, ER-20, PRINCIPLES "Bulk APIs"; ADR 0108) unless the code says why (`// per-item: <reason>`); a new bulk command needs its budget test (N items cost at most K starts, statements or invokes).
+
 Is this more than comparable apps do? Name them and offer the common-practice option (ER-37).
