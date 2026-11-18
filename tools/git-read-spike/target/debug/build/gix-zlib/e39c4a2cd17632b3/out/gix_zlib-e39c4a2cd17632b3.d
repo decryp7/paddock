@@ -1,0 +1,10 @@
+/Volumes/vault-dev/dev-targets/wt/winslow-probe/tools/git-read-spike/target/debug/build/gix-zlib/e39c4a2cd17632b3/out/gix_zlib-e39c4a2cd17632b3.d: /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/lib.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/stream/mod.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/stream/deflate.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/stream/inflate.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/inflate.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/decompress.rs
+
+/Volumes/vault-dev/dev-targets/wt/winslow-probe/tools/git-read-spike/target/debug/build/gix-zlib/e39c4a2cd17632b3/out/libgix_zlib-e39c4a2cd17632b3.rmeta: /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/lib.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/stream/mod.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/stream/deflate.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/stream/inflate.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/inflate.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/decompress.rs
+
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/lib.rs:
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/stream/mod.rs:
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/stream/deflate.rs:
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/stream/inflate.rs:
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/inflate.rs:
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-zlib-0.4.0/src/decompress.rs:

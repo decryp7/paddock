@@ -1,0 +1,1 @@
+{"$message_type":"unused_extern","lint_level":"force-warn","unused_extern_names":["gix_command","gix_path","gix_quote","gix_trace","gix_url"]}

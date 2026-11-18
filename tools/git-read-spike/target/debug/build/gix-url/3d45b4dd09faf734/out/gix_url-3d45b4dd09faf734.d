@@ -1,0 +1,10 @@
+/Volumes/vault-dev/dev-targets/wt/winslow-probe/tools/git-read-spike/target/debug/build/gix-url/3d45b4dd09faf734/out/gix_url-3d45b4dd09faf734.d: /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/lib.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/expand_path.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/scheme.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/impls.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/parse.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/simple_url.rs
+
+/Volumes/vault-dev/dev-targets/wt/winslow-probe/tools/git-read-spike/target/debug/build/gix-url/3d45b4dd09faf734/out/libgix_url-3d45b4dd09faf734.rmeta: /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/lib.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/expand_path.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/scheme.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/impls.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/parse.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/simple_url.rs
+
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/lib.rs:
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/expand_path.rs:
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/scheme.rs:
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/impls.rs:
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/parse.rs:
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-url-0.40.1/src/simple_url.rs:

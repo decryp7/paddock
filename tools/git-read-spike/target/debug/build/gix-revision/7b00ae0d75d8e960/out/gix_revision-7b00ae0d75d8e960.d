@@ -1,0 +1,9 @@
+/Volumes/vault-dev/dev-targets/wt/winslow-probe/tools/git-read-spike/target/debug/build/gix-revision/7b00ae0d75d8e960/out/gix_revision-7b00ae0d75d8e960.d: /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-revision-0.52.0/src/lib.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-revision-0.52.0/src/spec/mod.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-revision-0.52.0/src/spec/parse/mod.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-revision-0.52.0/src/spec/parse/delegate.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-revision-0.52.0/src/spec/parse/function.rs
+
+/Volumes/vault-dev/dev-targets/wt/winslow-probe/tools/git-read-spike/target/debug/build/gix-revision/7b00ae0d75d8e960/out/libgix_revision-7b00ae0d75d8e960.rmeta: /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-revision-0.52.0/src/lib.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-revision-0.52.0/src/spec/mod.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-revision-0.52.0/src/spec/parse/mod.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-revision-0.52.0/src/spec/parse/delegate.rs /Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-revision-0.52.0/src/spec/parse/function.rs
+
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-revision-0.52.0/src/lib.rs:
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-revision-0.52.0/src/spec/mod.rs:
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-revision-0.52.0/src/spec/parse/mod.rs:
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-revision-0.52.0/src/spec/parse/delegate.rs:
+/Users/decryp7/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gix-revision-0.52.0/src/spec/parse/function.rs:

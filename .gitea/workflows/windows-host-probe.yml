@@ -95,15 +95,21 @@ jobs:
             ./dev ci host-probe --dir "$PADDOCK_WORKSPACE" --label "$LABEL-workspace-$i" --starts 200 --repos 50 --files 500
           done
 
+      # The crate job's kept build folder: paddock-git's example builds there (crates/paddock-git on perf/git-heavy-tests-2; run this
+      # workflow as a trial onto that branch).
+      - uses: ./.gitea/actions/build-folder
+        if: ${{ inputs.spike == 'true' }}
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
+          name: paddock-crate
+
       - name: git read spike
         if: ${{ inputs.spike == 'true' }}
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/git-read-spike
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: |
-          cargo build --release --locked --config "build.target-dir='$RUNNER_TEMP/spike-target'" || {
-            echo "::error::the spike did not build. Next step: build it locally with cargo xwin"; exit 1; }
           for files in 2000 12000; do
-            "$RUNNER_TEMP/spike-target/release/git-read-spike.exe" --files "$files" --commits 20 --blobs 300 --reps 3 --dir "$TEMP" \
-              | tee -a "$RUNNER_TEMP/spike.txt"
+            cargo run --release --locked -q -p paddock-git --example read_spike -- --files "$files" --commits 20 --blobs 300 --reps 3 --dir "$TEMP" \
+              | tee -a "$RUNNER_TEMP/spike.txt" || { echo "::error::the spike failed. Next step: run it locally"; exit 1; }
           done
           { echo '### git read spike'; grep -E '^(repo:|\|)' "$RUNNER_TEMP/spike.txt"; } >> "$GITHUB_STEP_SUMMARY"
 
