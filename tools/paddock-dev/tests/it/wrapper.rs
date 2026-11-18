@@ -4,7 +4,7 @@
 //! them and the toolchain checks fail on that warning, so a test's result would depend on the build folder the agent running it exports.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::input_hash::{Real, compute, is_hashed_var};
-use paddock_testkit::TestCommand;
+use paddock_testkit::{Actions, Case, StandIn, TestCommand};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -129,14 +129,20 @@ impl Fixture {
     }
 }
 
-/// A "compiler" that prints a chosen `-vV`.
+/// A "compiler" that prints a chosen `-vV`: one self-contained file, so a test may copy it.
 #[cfg(unix)]
 pub(crate) fn fake_rustc(dir: &Path, name: &str, release: &str, commit: &str, host: &str) -> String {
     let p = dir.join(name);
-    let body = format!(
-        "#!/bin/sh\nprintf 'rustc {release}\\nbinary: rustc\\ncommit-hash: {commit}\\ncommit-date: d\\nhost: {host}\\nrelease: {release}\\nLLVM version: 1\\n'\n"
-    );
-    paddock_testkit::exe::write_program(&p, body).unwrap();
+    StandIn::new(dir, name)
+        .stdout(&format!("rustc {release}"))
+        .stdout("binary: rustc")
+        .stdout(&format!("commit-hash: {commit}"))
+        .stdout("commit-date: d")
+        .stdout(&format!("host: {host}"))
+        .stdout(&format!("release: {release}"))
+        .stdout("LLVM version: 1")
+        .write_single_file(&p)
+        .unwrap();
     p.display().to_string()
 }
 
@@ -358,57 +364,107 @@ fn a_config_that_only_names_the_build_folder_does_not_change_the_hash() {
     }
 }
 
+/// A stand-in program at `path` (its folder is made); install it when its answers are set.
 #[cfg(unix)]
-const CARGO_FOLDER_PRELUDE: &str = r#"[ -z "${CARGO_TARGET_DIR:-}" ] || { echo "CARGO_TARGET_DIR reached cargo: pass --config build.target-dir" >&2; exit 97; }
-for a in "$@"; do case "$a" in build.target-dir=*) CARGO_TARGET_DIR=${a#build.target-dir=}; CARGO_TARGET_DIR=${CARGO_TARGET_DIR#\'}; CARGO_TARGET_DIR=${CARGO_TARGET_DIR%\'};; esac; done
-"#;
-
-/// A tiny stand-in for the tool binary: answers `--version`, otherwise prints a marker.
-#[cfg(unix)]
-pub(crate) fn write_script(path: &Path, body: &str) {
-    write_script_with(path, body, true);
+pub(crate) fn stand_in_at(path: &Path) -> StandIn {
+    let dir = path.parent().unwrap();
+    std::fs::create_dir_all(dir).unwrap();
+    StandIn::new(dir, path.file_name().unwrap().to_str().unwrap())
 }
 
-/// [`write_script`] without the cargo build-folder rule, for `conformance/ci/dev-tool-publish.sh`: that CI script builds one
-/// throw-away tool with `CARGO_TARGET_DIR` and no compile cache, and CI is not part of the local sccache change.
+/// Writes `tool` as one self-contained file at `path` (its folder is made), the way a built or downloaded tool is a single file.
 #[cfg(unix)]
-pub(crate) fn write_script_plain(path: &Path, body: &str) {
-    write_script_with(path, body, false);
-}
-
-#[cfg(unix)]
-fn write_script_with(path: &Path, body: &str, cargo_rule: bool) {
+pub(crate) fn write_tool(path: &Path, tool: &StandIn) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    // A stand-in cargo takes its build folder from `--config build.target-dir='...'` and fails when `CARGO_TARGET_DIR` reaches it:
-    // sccache hashes every `CARGO_*` variable, so the variable defeats the compile cache across worktrees (lessons.md).
-    let prelude = if cargo_rule && path.file_name().is_some_and(|n| n == "cargo") {
-        CARGO_FOLDER_PRELUDE
-    } else {
-        ""
-    };
-    paddock_testkit::exe::write_program(path, format!("#!/bin/sh\n{prelude}{body}\n")).unwrap();
+    tool.write_single_file(path).unwrap();
 }
 
-/// A stand-in `cargo` that "builds" a script answering `--version`, `self hash` (the hash it was built for, as the real tool shows)
-/// and a marker, then takes `slow` seconds to return, as a busy build would.
+/// A tool that does nothing and succeeds (a cached or old entry the wrapper only lists, prunes or probes).
 #[cfg(unix)]
-pub(crate) fn shim_cargo(slow: u32) -> String {
-    format!(
-        r#"mkdir -p "$CARGO_TARGET_DIR/release"; printf '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 0; exit 0; fi\nif [ "$1" = self ]; then echo "embedded %s"; exit 0; fi\necho built-by-shim\n' "$PADDOCK_DEV_HASH" > "$CARGO_TARGET_DIR/release/paddock-dev"; chmod +x "$CARGO_TARGET_DIR/release/paddock-dev"; sleep {slow}"#
-    )
+pub(crate) fn idle_tool() -> StandIn {
+    StandIn::new(Path::new(""), "idle")
+}
+
+/// A stand-in `cargo` in `shims`, answering as `build` says. With `folder_rule` it takes its build folder from
+/// `--config build.target-dir='...'` and fails when `CARGO_TARGET_DIR` reaches it: sccache hashes every `CARGO_*` variable, so the
+/// variable defeats the compile cache across worktrees (lessons.md). `conformance/ci/dev-tool-publish.sh` builds one folder per
+/// tool, so its test turns the rule off.
+#[cfg(unix)]
+pub(crate) fn install_cargo(shims: &Path, folder_rule: bool, build: impl FnOnce(StandIn) -> StandIn) {
+    std::fs::create_dir_all(shims).unwrap();
+    let mut cargo = build(StandIn::new(shims, "cargo"));
+    if folder_rule {
+        cargo = cargo.when(
+            &Case::new().env_is_set("CARGO_TARGET_DIR"),
+            Actions::new()
+                .stderr("CARGO_TARGET_DIR reached cargo: pass --config build.target-dir")
+                .exit(97),
+        );
+    }
+    cargo.install().unwrap();
+}
+
+/// The build folder a stand-in `cargo` was given: `--config build.target-dir='...'`, without the quotes.
+#[cfg(unix)]
+const BUILD_FOLDER: &str = "{flag:build.target-dir='|'}";
+
+/// The tool a stand-in `cargo` "builds": answers `--version`, `self` (the hash it was built for, as the real tool shows) and
+/// otherwise prints `says` (a template the tool fills when it runs: write `{{env:NAME}}` for a variable).
+#[cfg(unix)]
+pub(crate) fn built_tool(says: &str, hash: &str) -> StandIn {
+    StandIn::new(Path::new(""), "paddock-dev")
+        .answers(Actions::new().stdout_with(says))
+        .when_args(&["--version"], Actions::new().stdout("0"))
+        .when_args(&["self"], Actions::new().stdout(&format!("embedded {hash}")))
+}
+
+/// A call of `cargo build` that is given its build folder with `--config build.target-dir='...'` (a probe such as `cargo --version`
+/// builds nothing).
+#[cfg(unix)]
+pub(crate) fn build_call() -> Case {
+    Case::new().args_text_contains("build.target-dir=")
+}
+
+/// `cargo` answers a call that is given a build folder with `builds`, and any other call as it was set to.
+#[cfg(unix)]
+pub(crate) fn building(cargo: StandIn, builds: Actions) -> StandIn {
+    cargo.when(&build_call(), builds)
+}
+
+/// The build folder of a stand-in `cargo` that has no folder rule (`conformance/ci/dev-tool-publish.sh` passes `CARGO_TARGET_DIR`).
+#[cfg(unix)]
+pub(crate) const BUILD_FOLDER_ENV: &str = "{env:CARGO_TARGET_DIR}";
+
+/// The steps of a stand-in `cargo` that "builds" `tool` into the build folder `folder` (a template) after running `pre`.
+#[cfg(unix)]
+pub(crate) fn cargo_builds(folder: &str, pre: Actions, tool: &StandIn) -> Actions {
+    pre.makes_dir(&format!("{folder}/release"))
+        .installs(&format!("{folder}/release/paddock-dev"), tool)
+}
+
+/// A stand-in `cargo` that "builds" a tool answering `--version`, `self hash` (the hash it was built for, as the real tool shows)
+/// and a marker.
+#[cfg(unix)]
+pub(crate) fn shim_cargo() -> Actions {
+    cargo_builds(BUILD_FOLDER, Actions::new(), &built_tool("built-by-shim", "{env:PADDOCK_DEV_HASH}"))
 }
 
 /// Runs the whole wrapper (not just `--wrapper-hash`) with a scratch cache and a stand-in `cargo` that "builds" a script.
 #[cfg(unix)]
 fn run_wrapper(f: &Fixture, home: &Path, extra_env: &[(&str, String)]) -> (i32, String, String) {
-    run_wrapper_with_cargo(f, home, extra_env, &shim_cargo(0))
+    run_wrapper_with_cargo(f, home, extra_env, |c| building(c, shim_cargo()))
 }
 
 /// [`run_wrapper`] with a `cargo` of the test's own.
 #[cfg(unix)]
-fn run_wrapper_with_cargo(f: &Fixture, home: &Path, extra_env: &[(&str, String)], cargo: &str) -> (i32, String, String) {
+fn run_wrapper_with_cargo(
+    f: &Fixture,
+    home: &Path,
+    extra_env: &[(&str, String)],
+    cargo: impl FnOnce(StandIn) -> StandIn,
+) -> (i32, String, String) {
     let shims = f.cargo_home.path().join("shims");
-    write_script(&shims.join("cargo"), cargo);
+    install_cargo(&shims, true, cargo);
     let shims_dir = shims.to_path_buf();
     let mut cmd = TestCommand::new("sh");
     cmd.arg(f.root().join("dev"))
@@ -446,8 +502,8 @@ fn a_cached_binary_that_does_not_run_is_replaced_and_a_good_one_is_used_as_it_is
     let home = scratch.path().join("home");
     let cached = home.join("bin").join(&hash).join("paddock-dev-test-host");
     // A damaged cache entry: an empty file that is executable.
-    write_script(&cached, "");
-    std::fs::write(&cached, "").unwrap();
+    std::fs::create_dir_all(cached.parent().unwrap()).unwrap();
+    paddock_testkit::exe::write_program(&cached, "").unwrap();
     let (code, out, err) = run_wrapper(&f, &home, &env);
     assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
     assert!(err.contains("does not run; rebuilding"), "{err}");
@@ -470,13 +526,12 @@ fn where_cygpath_exists_the_build_folder_reaches_cargo_in_its_windows_form() {
     let scratch = tempfile::tempdir().unwrap();
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     let calls = scratch.path().join("cygpath-calls");
-    write_script(
-        &f.cargo_home.path().join("shims").join("cygpath"),
-        &format!(
-            "echo \"$*\" >> '{}'\n[ \"$1\" = -m ] && shift\nprintf '%s\\n' \"$1\"",
-            calls.display()
-        ),
-    );
+    let log = || Actions::new().appends_with(&calls.display().to_string(), "{args}\n");
+    stand_in_at(&f.cargo_home.path().join("shims").join("cygpath"))
+        .answers(log().stdout_with("{arg:1}"))
+        .when_args(&["-m"], log().stdout_with("{arg:2}"))
+        .install()
+        .unwrap();
     let home = scratch.path().join("home");
     let (code, out, err) = run_wrapper(&f, &home, &[("RUSTC", rustc)]);
     assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
@@ -491,7 +546,12 @@ fn where_cygpath_exists_the_build_folder_reaches_cargo_in_its_windows_form() {
 /// A cached tool that answers `--version` and otherwise says it ran (what an old cached binary would do).
 #[cfg(unix)]
 fn cached_tool(path: &Path) {
-    write_script(path, r#"if [ "$1" = "--version" ]; then echo 0; else echo "cached ran $*"; fi"#);
+    write_tool(
+        path,
+        &StandIn::new(Path::new(""), "cached")
+            .answers(Actions::new().stdout_with("cached ran {args}"))
+            .when_args(&["--version"], Actions::new().stdout("0")),
+    );
 }
 
 /// A git hook runs its commands with `GIT_DIR` set (and a worktree's hooks may set `GIT_WORK_TREE`): the wrapper finds the repository
@@ -554,35 +614,73 @@ fn without_a_compiler_no_cached_binary_is_run_and_the_error_names_the_next_step(
     }
 }
 
+/// How the fake rustup answers a call after logging it (its folder and arguments).
+#[cfg(unix)]
+#[derive(Clone, Copy)]
+enum Rustup {
+    /// `toolchain install` makes the toolchain appear; any other call fails.
+    Installs,
+    /// `toolchain install` makes the toolchain appear; any other call succeeds.
+    InstallsOk,
+    /// As `InstallsOk`, and `--version` prints a version line.
+    Reports,
+    /// `toolchain install` never returns (until it is ended); any other call succeeds.
+    Hangs,
+    /// Every call fails.
+    Fails,
+}
+
+/// What `rustc -vV` prints for the pinned toolchain.
+#[cfg(unix)]
+fn rustc_version_lines(a: Actions) -> Actions {
+    a.stdout("rustc 1.90.0")
+        .stdout("binary: rustc")
+        .stdout("commit-hash: aaaa")
+        .stdout("commit-date: d")
+        .stdout("host: test-host")
+        .stdout("release: 1.90.0")
+        .stdout("LLVM version: 1")
+}
+
 /// A Windows-shaped runner: rustup is there, its `rustc` shim cannot run until the pinned toolchain is installed, no RUSTC is set.
 /// Returns the folder of the shims and the log of the fake rustup.
 #[cfg(unix)]
-fn rustup_without_toolchain(f: &Fixture, rustup_body: &str) -> (PathBuf, PathBuf) {
+fn rustup_without_toolchain(f: &Fixture, how: Rustup) -> (PathBuf, PathBuf) {
     std::fs::write(
         f.root().join("rust-toolchain.toml"),
         "[toolchain]\nchannel = \"1.90.0\"\nprofile = \"minimal\"\ncomponents = [\"clippy\"]\n",
     )
     .unwrap();
     let shims = f.cargo_home.path().join("shims");
+    std::fs::create_dir_all(&shims).unwrap();
     let marker = f.cargo_home.path().join("installed");
     let log = f.cargo_home.path().join("rustup.log");
-    write_script(
-        &shims.join("rustc"),
-        &format!(
-            "[ -e '{}' ] || {{ echo \"error: toolchain '1.90.0' is not installed\" >&2; exit 1; }}\nprintf 'rustc 1.90.0\\nbinary: rustc\\ncommit-hash: aaaa\\ncommit-date: d\\nhost: test-host\\nrelease: 1.90.0\\nLLVM version: 1\\n'",
-            marker.display()
-        ),
-    );
-    write_script(
-        &shims.join("rustup"),
-        &format!(
-            "echo \"$PWD: $*\" >> '{}'\n{}",
-            log.display(),
-            rustup_body.replace("MARKER", &marker.display().to_string())
-        ),
-    );
+    StandIn::new(&shims, "rustc")
+        .answers(rustc_version_lines(Actions::new()))
+        .when(
+            &Case::new().file_missing(&marker),
+            Actions::new().stderr("error: toolchain '1.90.0' is not installed").exit(1),
+        )
+        .install()
+        .unwrap();
+    let logged = || Actions::new().appends_with(&log.display().to_string(), "{cwd}: {args}\n");
+    let install = Case::new().args_start_with(&["toolchain", "install"]);
+    let rustup = StandIn::new(&shims, "rustup");
+    let rustup = match how {
+        Rustup::Installs => rustup.answers(logged().exit(1)).when(&install, logged().writes(&marker, "")),
+        Rustup::InstallsOk => rustup.answers(logged()).when(&install, logged().writes(&marker, "")),
+        Rustup::Reports => rustup
+            .answers(logged())
+            .when(&install, logged().writes(&marker, ""))
+            .when_args(&["--version"], logged().stdout("rustup 9.9.9 (test)")),
+        Rustup::Hangs => rustup
+            .answers(logged())
+            .when(&install, logged().sleeps(std::time::Duration::from_secs(30))),
+        Rustup::Fails => rustup.answers(logged().exit(1)),
+    };
+    rustup.install().unwrap();
     // The install is checked by running cargo and the components the file asks for (clippy here); a test may replace this one.
-    write_script(&shims.join("cargo"), "echo cargo 1.90.0");
+    install_cargo(&shims, true, |c| c.stdout("cargo 1.90.0"));
     (shims, log)
 }
 
@@ -591,7 +689,7 @@ fn rustup_without_toolchain(f: &Fixture, rustup_body: &str) -> (PathBuf, PathBuf
 fn a_runner_with_rustup_but_without_the_pinned_toolchain_installs_it_before_building() {
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
-    let (_, log) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
+    let (_, log) = rustup_without_toolchain(&f, Rustup::Installs);
     let (code, out, err) = run_wrapper(
         &f,
         &scratch.path().join("home"),
@@ -613,10 +711,7 @@ fn a_runner_with_rustup_but_without_the_pinned_toolchain_installs_it_before_buil
 #[cfg(unix)]
 #[test]
 fn a_failed_or_stuck_toolchain_install_is_an_error_with_the_next_step_and_runs_no_cached_tool() {
-    for (body, timeout, want) in [
-        ("exit 1", "30", "exit 1"),
-        ("[ \"$1 $2\" = 'toolchain install' ] && exec sleep 30; exit 0", "1", "exit 124"),
-    ] {
+    for (body, timeout, want) in [(Rustup::Fails, "30", "exit 1"), (Rustup::Hangs, "1", "exit 124")] {
         let f = Fixture::new();
         let scratch = tempfile::tempdir().unwrap();
         let home = scratch.path().join("home");
@@ -636,7 +731,7 @@ fn a_failed_or_stuck_toolchain_install_is_an_error_with_the_next_step_and_runs_n
 #[test]
 fn ensure_toolchain_succeeds_when_the_compiler_runs_after_the_install() {
     let f = Fixture::new();
-    let (shims, _) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
+    let (shims, _) = rustup_without_toolchain(&f, Rustup::Installs);
     let shims_dir = shims.to_path_buf();
     let run = || {
         TestCommand::new("sh")
@@ -670,20 +765,27 @@ fn ensure_toolchain_succeeds_when_the_compiler_runs_after_the_install() {
 /// running jobs (run 8063: "can't find crate for `std`"). Returns the shims and rustup's log.
 #[cfg(unix)]
 fn rustup_installing_broken(f: &Fixture, what: &str) -> (PathBuf, PathBuf) {
-    let (shims, log) = rustup_without_toolchain(f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'; exit 0");
+    let (shims, log) = rustup_without_toolchain(f, Rustup::InstallsOk);
     let marker = f.cargo_home.path().join("installed");
     match what {
-        "clippy" => write_script(
-            &shims.join("cargo"),
-            "if [ \"$1 $2\" = 'clippy --version' ]; then echo \"error: the 'cargo-clippy' binary is not applicable to the toolchain\" >&2; exit 1; fi\necho cargo 1.90.0",
-        ),
-        "std" => write_script(
-            &shims.join("rustc"),
-            &format!(
-                "[ -e '{}' ] || {{ echo \"error: toolchain '1.90.0' is not installed\" >&2; exit 1; }}\ncase \"$*\" in *.rs*) echo \"error[E0463]: can't find crate for 'std'\" >&2; exit 1 ;; esac\nprintf 'rustc 1.90.0\\nbinary: rustc\\ncommit-hash: aaaa\\ncommit-date: d\\nhost: test-host\\nrelease: 1.90.0\\nLLVM version: 1\\n'",
-                marker.display()
-            ),
-        ),
+        "clippy" => install_cargo(&shims, true, |c| {
+            c.stdout("cargo 1.90.0").when_args(
+                &["clippy", "--version"],
+                Actions::new()
+                    .stderr("error: the 'cargo-clippy' binary is not applicable to the toolchain")
+                    .exit(1),
+            )
+        }),
+        "std" => StandIn::new(&shims, "rustc")
+            .answers(rustc_version_lines(Actions::new()))
+            .when_arg_contains(".rs", Actions::new().stderr("error[E0463]: can't find crate for 'std'").exit(1))
+            .when(
+                &Case::new().file_missing(&marker),
+                Actions::new().stderr("error: toolchain '1.90.0' is not installed").exit(1),
+            )
+            .install()
+            .map(|_| ())
+            .unwrap(),
         other => panic!("unknown breakage {other}"),
     }
     (shims, log)
@@ -767,10 +869,7 @@ fn ensure_toolchain_refuses_a_broken_install_without_uninstalling_it() {
 #[test]
 fn a_working_toolchain_passes_the_check_after_its_install() {
     let f = Fixture::new();
-    let (shims, log) = rustup_without_toolchain(
-        &f,
-        "[ \"$1\" = --version ] && echo 'rustup 9.9.9 (test)'; [ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'; exit 0",
-    );
+    let (shims, log) = rustup_without_toolchain(&f, Rustup::Reports);
     let out = install_toolchain(&f, &shims, &["1.90.0", "clippy", "x86_64-pc-windows-msvc"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(0), "{err}");
@@ -804,7 +903,7 @@ fn a_compiler_without_a_release_line_and_a_build_target_are_refused_aloud() {
     let scratch = tempfile::tempdir().unwrap();
     let home = scratch.path().join("home");
     let odd = scratch.path().join("odd-rustc");
-    write_script(&odd, "echo 'not rustc'");
+    write_tool(&odd, &StandIn::new(Path::new(""), "odd").stdout("not rustc"));
     let (code, _, err) = run_wrapper(&f, &home, &[("RUSTC", odd.display().to_string())]);
     assert_eq!(code, 2);
     assert!(err.contains("printed no release line"), "{err}");
@@ -825,7 +924,7 @@ fn only_the_five_newest_cached_tools_are_kept() {
     let scratch = tempfile::tempdir().unwrap();
     let home = scratch.path().join("home");
     for i in 0..7 {
-        write_script(&home.join(format!("bin/old-{i}/paddock-dev-test-host")), "exit 0");
+        write_tool(&home.join(format!("bin/old-{i}/paddock-dev-test-host")), &idle_tool());
         // Older directories get older times so the order is certain.
         let t = std::time::SystemTime::now() - std::time::Duration::from_secs(3 * 86_400 - i * 100);
         std::fs::File::open(home.join(format!("bin/old-{i}")))
@@ -847,7 +946,7 @@ fn a_source_only_cache_keeps_the_five_newest_tools_and_leaves_bin_alone() {
     let scratch = tempfile::tempdir().unwrap();
     let home = scratch.path().join("home");
     for i in 0..7 {
-        write_script(&home.join(format!("bin-source/old-{i}/paddock-dev-test-host")), "exit 0");
+        write_tool(&home.join(format!("bin-source/old-{i}/paddock-dev-test-host")), &idle_tool());
         // Older directories get older times so the order is certain; all are past the one-day window a tool is kept for.
         let t = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 86_400 + 1000 - i * 100);
         std::fs::File::open(home.join(format!("bin-source/old-{i}")))
@@ -909,7 +1008,7 @@ fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_hom
     std::fs::create_dir_all(&mount).unwrap();
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     let (hash, _) = f.both(&[("RUSTC", rustc.clone())]);
-    write_script(&f.cargo_home.path().join("shims/cargo"), &shim_cargo(0));
+    install_cargo(&f.cargo_home.path().join("shims"), true, |c| building(c, shim_cargo()));
     let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
     let run = |extra: &[(&str, &Path)]| {
         let mut cmd = TestCommand::new("sh");
@@ -947,11 +1046,11 @@ fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_hom
 /// A stand-in `cargo` that writes its binary, announces itself with a file of its own in `$BARRIER`, and returns only once the test
 /// has created `$BARRIER/go`: the test decides when the builds overlap, no sleep does.
 #[cfg(unix)]
-fn barrier_cargo() -> String {
-    format!(
-        r#"{}; echo "$CARGO_TARGET_DIR" >> "$BARRIER.dirs"; touch "$BARRIER/built-$PADDOCK_DEV_HASH-$$"; n=0; while [ ! -e "$BARRIER/go" ] && [ $n -lt 300 ]; do sleep 0.1; n=$((n+1)); done"#,
-        shim_cargo(0)
-    )
+fn barrier_cargo() -> Actions {
+    shim_cargo()
+        .appends_with("{env:BARRIER}.dirs", &format!("{BUILD_FOLDER}\n"))
+        .writes_with("{env:BARRIER}/built-{env:PADDOCK_DEV_HASH}-{pid}", "")
+        .waits_for_file("{env:BARRIER}/go")
 }
 
 /// Starts one wrapper per compiler against one kept mount; returns once `expected` builds are inside `cargo`, then lets them all go.
@@ -963,7 +1062,7 @@ fn run_overlapping(rustcs: &[&str], expected: usize, shared_target: bool) -> (te
     let barrier = scratch.path().join("barrier");
     std::fs::create_dir_all(&mount).unwrap();
     std::fs::create_dir_all(&barrier).unwrap();
-    write_script(&f.cargo_home.path().join("shims/cargo"), &barrier_cargo());
+    install_cargo(&f.cargo_home.path().join("shims"), true, |c| building(c, barrier_cargo()));
     let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
     let children: Vec<_> = rustcs
         .iter()
@@ -1076,14 +1175,14 @@ fn a_cache_hit_counts_as_use_and_an_orphaned_legacy_build_folder_goes() {
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     let (hash, _) = f.both(&[("RUSTC", rustc.clone())]);
     // The tool of this hash, published long ago and used just now: a hit must refresh it.
-    write_script(
+    write_tool(
         &home.join("bin").join(&hash).join("paddock-dev-test-host"),
-        "if [ \"$1\" = \"--version\" ]; then echo 0; fi",
+        &StandIn::new(Path::new(""), "tool").when_args(&["--version"], Actions::new().stdout("0")),
     );
     set(&home.join("bin").join(&hash), hours(72));
     // Five newer tools push it past the keep count; build folders: one orphaned and old, one orphaned and fresh, one with a tool.
     for i in 0..5 {
-        write_script(&home.join(format!("bin/newer-{i}/paddock-dev-test-host")), "exit 0");
+        write_tool(&home.join(format!("bin/newer-{i}/paddock-dev-test-host")), &idle_tool());
         set(&home.join(format!("bin/newer-{i}")), hours(48));
     }
     let kept_target = format!("target-{hash}");
@@ -1129,7 +1228,7 @@ fn a_failed_build_names_the_hash_and_the_next_step_in_an_annotation() {
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
-    write_script(&f.cargo_home.path().join("shims/cargo"), "echo boom >&2; exit 101");
+    install_cargo(&f.cargo_home.path().join("shims"), true, |c| c.stderr("boom").exit(101));
     let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
     let out = TestCommand::new("sh")
         .arg(f.root().join("dev"))
@@ -1154,7 +1253,7 @@ fn a_ci_run_without_a_kept_mount_says_so() {
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
-    write_script(&f.cargo_home.path().join("shims/cargo"), &shim_cargo(0));
+    install_cargo(&f.cargo_home.path().join("shims"), true, |c| building(c, shim_cargo()));
     let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
     let out = TestCommand::new("sh")
         .arg(f.root().join("dev"))
@@ -1180,7 +1279,7 @@ fn a_cached_tool_touched_in_the_last_minutes_is_never_pruned() {
     let scratch = tempfile::tempdir().unwrap();
     let home = scratch.path().join("home");
     for i in 0..7 {
-        write_script(&home.join(format!("bin/recent-{i}/paddock-dev-test-host")), "exit 0");
+        write_tool(&home.join(format!("bin/recent-{i}/paddock-dev-test-host")), &idle_tool());
     }
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     let (code, _, err) = run_wrapper(&f, &home, &[("RUSTC", rustc)]);
@@ -1202,7 +1301,7 @@ fn print_binary_names_the_cached_tool_without_running_it() {
     let (hash, _) = f.both(&[("RUSTC", rustc.clone())]);
     let (code, out, err) = {
         let mut cmd = TestCommand::new("sh");
-        write_script(&f.cargo_home.path().join("shims/cargo"), &shim_cargo(0));
+        install_cargo(&f.cargo_home.path().join("shims"), true, |c| building(c, shim_cargo()));
         let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
         cmd.arg(f.root().join("dev"))
             .arg("--print-binary")
@@ -1235,7 +1334,7 @@ fn a_tool_used_two_hours_ago_is_kept_beyond_the_five_newest() {
     let home = scratch.path().join("home");
     let old = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 3600);
     for i in 0..7 {
-        write_script(&home.join(format!("bin/used-{i}/paddock-dev-test-host")), "exit 0");
+        write_tool(&home.join(format!("bin/used-{i}/paddock-dev-test-host")), &idle_tool());
         std::fs::File::open(home.join(format!("bin/used-{i}")))
             .unwrap()
             .set_modified(old)
@@ -1312,12 +1411,21 @@ fn builds_of_two_compilers_on_one_explicit_build_folder_get_a_folder_each() {
 fn updating_rustc(dir: &Path, cap: u32) -> String {
     let state = dir.join("state");
     std::fs::create_dir_all(&state).unwrap();
-    let body = format!(
-        "n=$(wc -l < '{runs}' 2>/dev/null || echo 0); n=$((n+0)); [ $n -gt {cap} ] && n={cap}; printf 'rustc 1.9%s.0\\nbinary: rustc\\ncommit-hash: c%s\\ncommit-date: d\\nhost: test-host\\nrelease: 1.9%s.0\\nLLVM version: 1\\n' $n $n $n",
-        runs = state.join("cargo-runs").display()
-    );
+    let n = format!("{{lines:{}|{cap}}}", state.join("cargo-runs").display());
     let p = dir.join("rustc-updating");
-    write_script(&p, &body);
+    StandIn::new(dir, "rustc-updating")
+        .answers(
+            Actions::new()
+                .stdout_with(&format!("rustc 1.9{n}.0"))
+                .stdout("binary: rustc")
+                .stdout_with(&format!("commit-hash: c{n}"))
+                .stdout("commit-date: d")
+                .stdout("host: test-host")
+                .stdout_with(&format!("release: 1.9{n}.0"))
+                .stdout("LLVM version: 1"),
+        )
+        .write_single_file(&p)
+        .unwrap();
     p.display().to_string()
 }
 
@@ -1327,8 +1435,9 @@ fn run_with_updating_compiler(cap: u32) -> (i32, String, String, tempfile::TempD
     let scratch = tempfile::tempdir().unwrap();
     let rustc = updating_rustc(scratch.path(), cap);
     let state = scratch.path().join("state");
-    let cargo = format!("echo run >> '{}'; {}", state.join("cargo-runs").display(), shim_cargo(0));
-    let (code, out, err) = run_wrapper_with_cargo(&f, &scratch.path().join("home"), &[("RUSTC", rustc)], &cargo);
+    let pre = Actions::new().appends(&state.join("cargo-runs"), "run\n");
+    let cargo = cargo_builds(BUILD_FOLDER, pre, &built_tool("built-by-shim", "{env:PADDOCK_DEV_HASH}"));
+    let (code, out, err) = run_wrapper_with_cargo(&f, &scratch.path().join("home"), &[("RUSTC", rustc)], |c| building(c, cargo));
     (code, out, err, scratch)
 }
 
@@ -1382,13 +1491,10 @@ fn an_uncommitted_input_builds_in_a_folder_of_its_own_compiler() {
     assert!(target.join("rustc-cccc3333dddd/release/paddock-dev").exists());
 }
 
-/// A `cargo` that builds a tool printing `what` (which may read the environment), after running `pre`.
+/// The steps of a `cargo` that builds a tool printing `what` (a template the tool fills when it runs), after running `pre`.
 #[cfg(unix)]
-fn cargo_building(pre: &str, what: &str) -> String {
-    format!(
-        r#"{pre}
-mkdir -p "$CARGO_TARGET_DIR/release"; printf '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 0; exit 0; fi\nif [ "$1" = self ]; then echo "embedded %s"; exit 0; fi\n{what}\n' "$PADDOCK_DEV_HASH" > "$CARGO_TARGET_DIR/release/paddock-dev"; chmod +x "$CARGO_TARGET_DIR/release/paddock-dev""#
-    )
+fn cargo_building(pre: Actions, what: &str) -> Actions {
+    cargo_builds(BUILD_FOLDER, pre, &built_tool(what, "{env:PADDOCK_DEV_HASH}"))
 }
 
 #[cfg(unix)]
@@ -1399,10 +1505,10 @@ fn the_restart_marker_is_not_passed_on_to_the_tool_so_a_nested_dev_can_restart()
     let rustc = updating_rustc(scratch.path(), 1);
     let state = scratch.path().join("state");
     let cargo = cargo_building(
-        &format!("echo run >> '{}'", state.join("cargo-runs").display()),
-        "echo restarted=${PADDOCK_DEV_RESTARTED:-unset}",
+        Actions::new().appends(&state.join("cargo-runs"), "run\n"),
+        "restarted={{env:PADDOCK_DEV_RESTARTED|unset}}",
     );
-    let (code, out, err) = run_wrapper_with_cargo(&f, &scratch.path().join("home"), &[("RUSTC", rustc)], &cargo);
+    let (code, out, err) = run_wrapper_with_cargo(&f, &scratch.path().join("home"), &[("RUSTC", rustc)], |c| building(c, cargo));
     assert_eq!(code, 0, "{err}");
     assert!(err.contains("starting over once"), "the run did restart: {err}");
     assert_eq!(out.trim(), "restarted=unset");
@@ -1415,17 +1521,19 @@ fn a_changed_input_builds_warm_in_the_folder_of_the_same_compiler() {
     let scratch = tempfile::tempdir().unwrap();
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa1111bbbb2222", "test-host");
     let home = scratch.path().join("home");
-    let first = cargo_building("touch \"$CARGO_TARGET_DIR/warm-marker\"", "echo first");
-    let (code, _, err) = run_wrapper_with_cargo(&f, &home, &[("RUSTC", rustc.clone())], &first);
+    let first = cargo_building(Actions::new().writes_with(&format!("{BUILD_FOLDER}/warm-marker"), ""), "first");
+    let (code, _, err) = run_wrapper_with_cargo(&f, &home, &[("RUSTC", rustc.clone())], |c| building(c, first));
     assert_eq!(code, 0, "{err}");
     // A new commit under an input path: a new hash, the same compiler, so the same folder with what the first build left in it.
     std::fs::write(f.root().join("tools/paddock-dev/src/main.rs"), "fn main() { /* changed */ }\n").unwrap();
     git(f.root(), &["commit", "-q", "-am", "chore: change an input"]);
-    let second = cargo_building(
-        "[ -e \"$CARGO_TARGET_DIR/warm-marker\" ] || { echo cold >&2; exit 101; }",
-        "echo second",
-    );
-    let (code, out, err) = run_wrapper_with_cargo(&f, &home, &[("RUSTC", rustc)], &second);
+    let second = cargo_building(Actions::new(), "second");
+    let (code, out, err) = run_wrapper_with_cargo(&f, &home, &[("RUSTC", rustc)], |c| {
+        building(c, second).when(
+            &Case::new().file_missing_with(&format!("{BUILD_FOLDER}/warm-marker")),
+            Actions::new().stderr("cold").exit(101),
+        )
+    });
     assert_eq!(code, 0, "{err}");
     assert_eq!(out.trim(), "second");
 }
@@ -1438,13 +1546,17 @@ fn a_binary_replaced_by_another_build_before_the_copy_is_built_again() {
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     let tries = scratch.path().join("tries");
     // The first run of cargo leaves a tool for another hash (a build of another input in the same folder got there first).
-    let cargo = format!(
-        r#"echo t >> '{t}'; if [ "$(wc -l < '{t}')" -eq 1 ]; then export PADDOCK_DEV_HASH=somebody-elses; fi
-{b}"#,
-        t = tries.display(),
-        b = shim_cargo(0)
-    );
-    let (code, out, err) = run_wrapper_with_cargo(&f, &scratch.path().join("home"), &[("RUSTC", rustc)], &cargo);
+    // Another input's build in the same folder got there first: the first run's tool names a hash that is not this one's.
+    let build = |hash: &str| {
+        cargo_builds(
+            BUILD_FOLDER,
+            Actions::new().appends(&tries, "t\n"),
+            &built_tool("built-by-shim", hash),
+        )
+    };
+    let (code, out, err) = run_wrapper_with_cargo(&f, &scratch.path().join("home"), &[("RUSTC", rustc)], |c| {
+        building(c, build("{env:PADDOCK_DEV_HASH}")).when(&build_call().file_missing(&tries), build("somebody-elses"))
+    });
     assert_eq!(code, 0, "{err}");
     assert_eq!(out.trim(), "built-by-shim");
     assert!(err.contains("try 2"), "{err}");
@@ -1500,7 +1612,7 @@ fn install_lock(f: &Fixture, owner_pid: u32, stamp: &str) -> PathBuf {
 fn a_timed_out_install_is_uninstalled_so_no_half_toolchain_is_left() {
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
-    let (_, log) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && exec sleep 30; exit 0");
+    let (_, log) = rustup_without_toolchain(&f, Rustup::Hangs);
     let (code, _, err) = run_wrapper(
         &f,
         &scratch.path().join("home"),
@@ -1520,7 +1632,7 @@ fn a_timed_out_install_is_uninstalled_so_no_half_toolchain_is_left() {
 fn an_install_waits_for_a_live_holder_of_the_lock_and_never_runs_beside_it() {
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
-    let (_, log) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
+    let (_, log) = rustup_without_toolchain(&f, Rustup::Installs);
     // This test process is a live owner (pid and start time match), however old the lock is.
     let me = std::process::id();
     let lock = install_lock(&f, me, &stamp_of(me));
@@ -1554,7 +1666,7 @@ fn a_lock_of_a_gone_owner_or_of_a_reused_pid_is_taken_over_whatever_its_age() {
     ] {
         let f = Fixture::new();
         let scratch = tempfile::tempdir().unwrap();
-        let (_, log) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
+        let (_, log) = rustup_without_toolchain(&f, Rustup::Installs);
         install_lock(&f, pid, &stamp);
         let (code, _, err) = run_wrapper(&f, &scratch.path().join("home"), &[("PADDOCK_DEV_DOWNLOAD", "0".to_string())]);
         assert_eq!(code, 0, "pid {pid}: {err}");
@@ -1568,7 +1680,7 @@ fn a_lock_of_a_gone_owner_or_of_a_reused_pid_is_taken_over_whatever_its_age() {
 fn after_a_failed_install_earlier_in_the_job_no_second_install_is_tried() {
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
-    let (_, log) = rustup_without_toolchain(&f, "exit 1");
+    let (_, log) = rustup_without_toolchain(&f, Rustup::Fails);
     let (code, _, err) = run_wrapper(&f, &scratch.path().join("home"), &[("PADDOCK_TOOLCHAIN_FAILED", "1".to_string())]);
     assert_eq!(code, 2, "{err}");
     assert!(err.contains("an earlier step of this job failed to"), "{err}");
@@ -1579,7 +1691,7 @@ fn after_a_failed_install_earlier_in_the_job_no_second_install_is_tried() {
 #[cfg(unix)]
 fn old_entries(home: &Path, names: &[String], file: &str) {
     for (i, n) in names.iter().enumerate() {
-        write_script(&home.join("bin").join(n).join(file), "exit 0");
+        write_tool(&home.join("bin").join(n).join(file), &idle_tool());
         let t = std::time::SystemTime::now() - std::time::Duration::from_secs(3 * 86_400 - i as u64 * 100);
         std::fs::File::open(home.join("bin").join(n)).unwrap().set_modified(t).unwrap();
     }
@@ -1652,8 +1764,13 @@ fn a_cached_tool_that_fails_its_probe_is_replaced_never_removed_first() {
     let cached = home.join("bin").join(&hash).join("paddock-dev-test-host");
     // A probe that fails (on a loaded machine a slow `--version` is enough) and a build that fails: another run pinned to this
     // path (`--print-binary`) must still find it.
-    write_script(&cached, r#"if [ "$1" = "--version" ]; then exit 1; fi; echo pinned"#);
-    let (code, _, err) = run_wrapper_with_cargo(&f, &home, &env, "exit 1");
+    write_tool(
+        &cached,
+        &StandIn::new(Path::new(""), "tool")
+            .stdout("pinned")
+            .when_args(&["--version"], Actions::new().exit(1)),
+    );
+    let (code, _, err) = run_wrapper_with_cargo(&f, &home, &env, |c| c.exit(1));
     assert_ne!(code, 0, "{err}");
     assert!(
         cached.is_file(),
