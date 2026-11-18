@@ -133,6 +133,18 @@ describe('MockBackend', () => {
     await expect(mock.saveSettings({ ...s, server: { ...s.server, port: 80 } })).rejects.toMatchObject({ code: 'badRequest' });
   });
 
+  it('deletes many models in one call, one result each (a loaded or unknown one fails alone)', async () => {
+    const mock = new MockBackend({ now: clock });
+    const results = await mock.deleteModels(['qwen3.5-9b-q4_k_m', 'qwen3.5-2b-q8_0', 'nope']);
+    expect(results).toEqual([
+      { err: { code: 'busy', message: 'Unload the model before deleting it.', retryable: false } },
+      { ok: null },
+      { err: { code: 'notFound', message: 'No model nope.', retryable: false } },
+    ]);
+    expect((await mock.localModels()).length).toBe(7);
+    expect(await mock.deleteModels([])).toEqual([]);
+  });
+
   it('manages the model library', async () => {
     const mock = new MockBackend({ now: clock });
     await expect(mock.deleteModel('qwen3.5-9b-q4_k_m')).rejects.toMatchObject({ code: 'conflict' });

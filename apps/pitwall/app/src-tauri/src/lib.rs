@@ -95,6 +95,7 @@ paddock_commands::command_table! {
     Query [WINDOW] => commands::downloads,
     Mutation [WINDOW | TRAY] => commands::cancel_download,
     Mutation [WINDOW] => commands::delete_model,
+    Mutation [WINDOW] => commands::delete_models,
     Mutation [WINDOW] => commands::unload_model,
     Mutation [WINDOW] => commands::pin_model,
     Mutation [WINDOW] => commands::set_model_idle,

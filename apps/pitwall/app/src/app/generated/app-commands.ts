@@ -34,6 +34,7 @@ export const APP_COMMANDS = {
   delete_all_chats: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   delete_app: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   delete_model: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
+  delete_models: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   delete_preset: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   deny_pairing: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   disk_usage: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },

@@ -102,6 +102,21 @@ impl Caches {
         cache::decode_vector(&self.store(Kind::Embedding).get(Kind::Embedding, key, now)?)
     }
 
+    /// The stored embeddings of `keys`, one entry per key in order: one store call for all of them (ADR 0108, PW-2).
+    pub fn vectors(&self, keys: &[Key], now: Millis) -> Vec<Option<Vec<f32>>> {
+        self.store(Kind::Embedding)
+            .get_many(Kind::Embedding, keys, now)
+            .into_iter()
+            .map(|v| v.and_then(|b| cache::decode_vector(&b)))
+            .collect()
+    }
+
+    /// Stores many embeddings with one `meta`: one store call, one write for the whole batch (ADR 0108, PW-2).
+    pub fn store_vectors(&self, items: &[(Key, Vec<f32>)], meta: &Meta, now: Millis) {
+        let items = items.iter().map(|(k, v)| (*k, cache::encode_vector(v), meta.clone())).collect();
+        self.store(Kind::Embedding).put_many(Kind::Embedding, items, now);
+    }
+
     /// Stores an embedding.
     pub fn store_vector(&self, key: Key, v: &[f32], meta: Meta, now: Millis) {
         self.store(Kind::Embedding)

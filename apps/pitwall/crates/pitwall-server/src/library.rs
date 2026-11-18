@@ -147,12 +147,38 @@ pub fn size_of(f: &LocalFile) -> ModelSize {
     ModelSize::from_header(&f.info, proj)
 }
 
+/// Deletes the model `id` found in `all` (all parts, its sidecar and its folder when empty).
+fn delete_in(all: &[LocalFile], id: &ModelId) -> std::io::Result<()> {
+    let f = all
+        .iter()
+        .find(|f| &f.id == id)
+        .ok_or_else(|| std::io::Error::other("no such model"))?;
+    let dir = f.path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let name = f.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let base = pitwall_core::ids::strip_split_suffix(name.trim_end_matches(".gguf")).to_string();
+    for e in std::fs::read_dir(&dir)?.filter_map(Result::ok) {
+        let n = e.file_name().to_string_lossy().into_owned();
+        let stem = n.trim_end_matches(".gguf");
+        if n.ends_with(".gguf")
+            && (stem == name.trim_end_matches(".gguf")
+                || (pitwall_core::ids::split_part(stem).is_some() && pitwall_core::ids::strip_split_suffix(stem) == base))
+        {
+            std::fs::remove_file(e.path())?;
+        }
+    }
+    let _ = std::fs::remove_file(sidecar_path(&f.path));
+    let _ = std::fs::remove_dir(&dir);
+    Ok(())
+}
+
 /// The library over a models folder.
 #[derive(Clone)]
 pub struct Library {
     dirs: Dirs,
     egress: Egress,
     downloads: Arc<Mutex<Downloads>>,
+    /// How many full scans of the models folder this library has made (the budget tests' seam: a bulk call scans once).
+    scans: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 struct Slot {
@@ -173,12 +199,19 @@ impl Library {
             dirs,
             egress,
             downloads: Arc::new(Mutex::new(Downloads::default())),
+            scans: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 
-    /// Models on disk.
+    /// Models on disk. Every call opens and parses every model header: bulk work calls it once.
     pub fn local(&self) -> Vec<LocalFile> {
+        self.scans.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         scan(&self.dirs.models())
+    }
+
+    /// How many scans of the models folder this library has made so far.
+    pub fn scans(&self) -> usize {
+        self.scans.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The downloaded models that came from a Hugging Face repository, with what was recorded when they were
@@ -212,27 +245,17 @@ impl Library {
 
     /// Delete a model (all parts and its folder when empty).
     pub fn delete(&self, id: &ModelId) -> std::io::Result<()> {
-        let all = self.local();
-        let f = all
-            .iter()
-            .find(|f| &f.id == id)
-            .ok_or_else(|| std::io::Error::other("no such model"))?;
-        let dir = f.path.parent().map(Path::to_path_buf).unwrap_or_default();
-        let name = f.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let base = pitwall_core::ids::strip_split_suffix(name.trim_end_matches(".gguf")).to_string();
-        for e in std::fs::read_dir(&dir)?.filter_map(Result::ok) {
-            let n = e.file_name().to_string_lossy().into_owned();
-            let stem = n.trim_end_matches(".gguf");
-            if n.ends_with(".gguf")
-                && (stem == name.trim_end_matches(".gguf")
-                    || (pitwall_core::ids::split_part(stem).is_some() && pitwall_core::ids::strip_split_suffix(stem) == base))
-            {
-                std::fs::remove_file(e.path())?;
-            }
+        delete_in(&self.local(), id)
+    }
+
+    /// Delete many models, scanning the folder once. One result per id, in request order: a model that is gone or cannot be
+    /// removed fails alone. A model deleted earlier in the same call counts as gone for a repeated id.
+    pub fn delete_many(&self, ids: &[ModelId]) -> Vec<std::io::Result<()>> {
+        if ids.is_empty() {
+            return vec![];
         }
-        let _ = std::fs::remove_file(sidecar_path(&f.path));
-        let _ = std::fs::remove_dir(&dir);
-        Ok(())
+        let all = self.local();
+        ids.iter().map(|id| delete_in(&all, id)).collect()
     }
 
     /// Hugging Face search (GGUF models).
@@ -616,6 +639,55 @@ mod tests {
         assert_eq!(vis.image_max_pixels, Some(pitwall_core::gguf::MAX_IMAGE_TOKENS * 32 * 32));
         let plain = found.iter().find(|f| f.id.to_string().starts_with("plain")).unwrap();
         assert_eq!(plain.image_max_pixels, None);
+    }
+
+    /// PW-1 (ADR 0108): deleting N models scans the folder once, not N times, and each id gets its own result.
+    #[test]
+    fn deleting_many_models_scans_the_folder_once() {
+        let d = tempfile::tempdir().unwrap();
+        let lib = Library::new(Dirs::at(d.path()), Egress::unreachable());
+        let models = lib.dirs.models();
+        let mut ids = vec![];
+        for n in 0..5 {
+            let dir = models.join(format!("o/m{n}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(format!("m{n}-q4_k_m.gguf")), gguf_with("llama", &[])).unwrap();
+            ids.push(ModelId::from_file_name(&format!("m{n}-q4_k_m.gguf")).unwrap());
+        }
+        let keep = ids.pop().unwrap();
+        let mut ask = ids.clone();
+        ask.push(ModelId::from_file_name("ghost-q4_k_m.gguf").unwrap());
+        let before = lib.scans();
+        let results = lib.delete_many(&ask);
+        assert_eq!(lib.scans() - before, 1, "one scan for {} ids", ask.len());
+        assert_eq!(
+            results.iter().map(|r| r.is_ok()).collect::<Vec<_>>(),
+            [true, true, true, true, false]
+        );
+        let left: Vec<_> = lib.local().into_iter().map(|f| f.id).collect();
+        assert_eq!(left, [keep]);
+    }
+
+    #[test]
+    fn deleting_no_models_scans_nothing() {
+        let d = tempfile::tempdir().unwrap();
+        let lib = Library::new(Dirs::at(d.path()), Egress::unreachable());
+        assert!(lib.delete_many(&[]).is_empty());
+        assert_eq!(lib.scans(), 0);
+    }
+
+    #[test]
+    fn deleting_one_model_still_works_and_scans_once() {
+        let d = tempfile::tempdir().unwrap();
+        let lib = Library::new(Dirs::at(d.path()), Egress::unreachable());
+        let dir = lib.dirs.models().join("o/a");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a-q4_k_m.gguf"), gguf_with("llama", &[])).unwrap();
+        let id = ModelId::from_file_name("a-q4_k_m.gguf").unwrap();
+        lib.delete(&id).unwrap();
+        assert_eq!(lib.scans(), 1);
+        assert!(!dir.exists());
+        assert!(lib.delete(&id).is_err());
     }
 
     #[test]

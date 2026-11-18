@@ -37,7 +37,7 @@ pub const MAX_CHAT_TOOL_BYTES: usize = 256 * 1024;
 pub fn timeout_for(method: &str) -> Duration {
     Duration::from_secs(match method {
         "stop_serving" => 30,
-        "delete_model" | "install_build" | "remove_build" | "select_build" | "rollback_build" => 120,
+        "delete_model" | "delete_models" | "install_build" | "remove_build" | "select_build" | "rollback_build" => 120,
         "search_models" | "repo_files" | "download_model" | "release_memory" | "unload_model" => 60,
         _ => 15,
     })
@@ -66,6 +66,15 @@ impl Validate for String {
             return Err(bad(field, "must not contain control characters"));
         }
         Ok(())
+    }
+}
+
+impl Validate for Vec<String> {
+    fn validate(&self, field: &str) -> Result<(), CommandError> {
+        if self.len() > pitwall_core::mgmt::MAX_BULK_IDS {
+            return Err(bad(field, "too many items in one call"));
+        }
+        self.iter().try_for_each(|s| s.validate(field))
     }
 }
 
@@ -259,6 +268,9 @@ rpc!(
 rpc!(
     /// Deletes a model from disk.
     delete_model => "delete_model", id: String = "id");
+rpc!(
+    /// Deletes many models from disk with one scan; one `ItemResult` per id, in order (ADR 0108, PW-1).
+    delete_models => "delete_models", ids: Vec<String> = "ids");
 rpc!(
     /// Unloads a model.
     unload_model => "unload_model", id: String = "id");
@@ -482,6 +494,17 @@ mod tests {
         assert!(Some("x".to_string()).validate("p").is_ok());
         assert!(Option::<String>::None.validate("p").is_ok());
         assert!(Some("a\nb".to_string()).validate("p").is_err());
+    }
+
+    /// A list of ids (a bulk call) is bounded and each id is checked like a single one (ADR 0108).
+    #[test]
+    fn a_list_of_ids_is_bounded_and_each_id_checked() {
+        assert!(vec!["a".to_string(), "b".to_string()].validate("ids").is_ok());
+        assert!(Vec::<String>::new().validate("ids").is_ok());
+        let many = vec!["a".to_string(); pitwall_core::mgmt::MAX_BULK_IDS + 1];
+        assert_eq!(many.validate("ids").unwrap_err().code, ErrorCode::BadRequest);
+        let e = vec!["ok".to_string(), "a\u{0}b".to_string()].validate("ids").unwrap_err();
+        assert!(e.message.starts_with("ids:"), "{}", e.message);
     }
 
     #[test]

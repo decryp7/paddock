@@ -96,6 +96,46 @@ pub fn undo_cancelled_load(st: &AppState, id: &ModelId, loaded_here: bool) {
     }
 }
 
+/// `delete_models` (ADR 0108, PW-1): unloads and deletes many models with one scan of the library and answers one
+/// `ItemResult` per id, in request order. A bad id or a model that is gone fails alone.
+async fn delete_models(st: &AppState, a: &Value) -> R<Value> {
+    use paddock_commands::{CommandError as ItemError, ItemResult};
+    let raw: Vec<String> = arg(a, "ids")?;
+    paddock_commands::check_batch(raw.len(), mgmt::MAX_BULK_IDS, "ids").map_err(|e| err(mgmt::ErrorCode::BadRequest, e.message))?;
+    let mut out: Vec<Option<ItemResult<()>>> = vec![None; raw.len()];
+    let mut ids = vec![];
+    let mut slots = vec![];
+    for (i, s) in raw.iter().enumerate() {
+        match ModelId::parse(s) {
+            Ok(id) => {
+                st.serving.unload(&id, pitwall_core::memory::ReleaseReason::Manual);
+                st.serving.retry(&id);
+                ids.push(id);
+                slots.push(i);
+            }
+            Err(e) => out[i] = Some(ItemResult::Err(ItemError::invalid(e.to_string()).field("ids"))),
+        }
+    }
+    let library = st.library.clone();
+    let owned = ids.clone();
+    let done = tokio::task::spawn_blocking(move || library.delete_many(&owned))
+        .await
+        .map_err(|e| err(mgmt::ErrorCode::Internal, e.to_string()))?;
+    for ((i, id), r) in slots.into_iter().zip(&ids).zip(done) {
+        out[i] = Some(match r {
+            Ok(()) => {
+                st.invalidate_model(id);
+                ItemResult::Ok(())
+            }
+            Err(e) => ItemResult::Err(ItemError::not_found(e.to_string()).field("ids")),
+        });
+    }
+    ok(out
+        .into_iter()
+        .map(|r| r.unwrap_or(ItemResult::Err(ItemError::internal("no result"))))
+        .collect::<Vec<_>>())
+}
+
 fn model(a: &Value, name: &str) -> R<ModelId> {
     let s: String = arg(a, name)?;
     ModelId::parse(&s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e.to_string()))
@@ -275,6 +315,7 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
             st.invalidate_model(&id);
             ok(())
         }
+        "delete_models" => delete_models(st, a).await,
         "load_model" => {
             let id = model(a, "id")?;
             st.serving.retry(&id);

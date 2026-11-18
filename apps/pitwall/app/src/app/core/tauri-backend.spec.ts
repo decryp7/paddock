@@ -1,5 +1,6 @@
 import type { AppPermissions, JobEvent, LiveUpdate, PlaygroundEvent, PlaygroundRequest, PresetDraft, Settings } from './api.types';
 import type { PitwallBackend } from './backend';
+import { countingInvoke, expectInvokes } from '@decryp7/paddock-ui/ipc/testing';
 import { JOB_METHODS } from './backend';
 import { LIVE_EVENT, POPOVER_EVENT, TauriBackend, toBase64, type TauriBridge } from './tauri-backend';
 
@@ -158,6 +159,26 @@ const JOBS: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<str
 ];
 
 describe('TauriBackend', () => {
+  /** PW-1 (ADR 0108): N ids are one invoke, not N, and the reply is checked: one result per id. */
+  describe('deleteModels', () => {
+    const IDS = ['a-q4_k_m', 'b-q4_k_m', 'c-q4_k_m', 'd-q4_k_m'];
+    const gone = { code: 'notFound', message: 'no such model', retryable: false };
+
+    it('sends every id in one delete_models invoke and returns one result per id, in order', async () => {
+      const { bridge } = fakeBridge(() => IDS.map((_, i) => (i === 2 ? { err: gone } : { ok: null })));
+      const counter = countingInvoke(bridge.invoke);
+      const backend = new TauriBackend({ ...bridge, invoke: counter.invoke });
+      const results = await expectInvokes(counter, 1, () => backend.deleteModels(IDS));
+      expect(counter.calls).toEqual([{ command: 'delete_models', args: { ids: IDS } }]);
+      expect(results).toEqual([{ ok: null }, { ok: null }, { err: gone }, { ok: null }]);
+    });
+
+    it('refuses a reply that does not have one result per id (the backend broke its contract)', async () => {
+      const { bridge } = fakeBridge(() => [{ ok: null }]);
+      await expect(new TauriBackend(bridge).deleteModels(IDS)).rejects.toMatchObject({ code: 'internal' });
+    });
+  });
+
   it.each(TABLE)('%s invokes its command with the documented arguments', async (_name, call, cmd, args) => {
     const { bridge, calls } = fakeBridge();
     await call(new TauriBackend(bridge));
@@ -173,7 +194,7 @@ describe('TauriBackend', () => {
 
   it('covers every request/response method of the backend interface', () => {
     const methods = Object.getOwnPropertyNames(TauriBackend.prototype).filter((m) => m !== 'constructor' && m !== 'run' && m !== 'job');
-    const pinned = new Set([...TABLE.map((r) => r[0]), ...JOBS.map((r) => r[0]), 'subscribe', 'onPopover', 'onQuitAsk', 'onConnectedApps', 'chat', 'jobEvents']);
+    const pinned = new Set([...TABLE.map((r) => r[0]), ...JOBS.map((r) => r[0]), 'deleteModels', 'subscribe', 'onPopover', 'onQuitAsk', 'onConnectedApps', 'chat', 'jobEvents']);
     expect(methods.filter((m) => !pinned.has(m))).toEqual([]);
   });
 

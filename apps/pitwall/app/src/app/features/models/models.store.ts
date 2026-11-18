@@ -1,4 +1,5 @@
 import { computed, inject } from '@angular/core';
+import { splitItemResults } from '@decryp7/paddock-ui/ipc';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import type { CommandError, DiskUsage, EnginePinState, HfModel, HfRepo, InstalledBuild, LocalModel, PacksInfo, PinChange, QuantVariant, Recommendation, SlotsChange } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
@@ -248,13 +249,21 @@ export const ModelsStore = signalStore(
       async cleanUnused(): Promise<void> {
         const models = store.unusedModels();
         if (!models.length) return;
-        const freed = store.unusedBytes();
+        const ids = models.map((m) => m.id);
+        // One call for all of them (one scan of the library on the server); each model answers for itself.
         await act(
           'cleanup',
           async () => {
-            for (const m of models) await backend.deleteModel(m.id);
+            const { ok, failed } = splitItemResults(ids, await backend.deleteModels(ids));
+            const freed = ok.reduce((sum, { item }) => sum + (models.find((m) => m.id === item)?.sizeBytes ?? 0), 0);
+            if (failed.length) {
+              const first = failed[0]!;
+              const error: CommandError = { code: 'conflict', message: `Deleted ${ok.length} of ${ids.length} models (freed ${bytes(freed)}). ${first.item}: ${first.error.message}` };
+              throw error;
+            }
+            return freed;
           },
-          `Freed ${bytes(freed)}.`,
+          (freed) => `Freed ${bytes(freed)}.`,
         );
         // Reload either way: a failure part-way still deleted the models before it.
         await load();

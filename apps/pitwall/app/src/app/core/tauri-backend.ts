@@ -1,5 +1,6 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { parseItemResults, type ItemResult } from '@decryp7/paddock-ui/ipc';
 import type {
   ChatModels,
   ChatAttached,
@@ -215,6 +216,10 @@ export class TauriBackend implements PitwallBackend {
   }
   deleteModel(id: string): Promise<void> {
     return this.run('delete_model', { id });
+  }
+  async deleteModels(ids: readonly string[]): Promise<ItemResult<null>[]> {
+    const reply = await this.run<unknown>('delete_models', { ids: [...ids] });
+    return parseItemResults(reply, ids.length, (v): v is null => v === null);
   }
   loadModel(id: string): Promise<void> {
     return this.job('start_load_model', { id });

@@ -20,6 +20,10 @@ pub use crate::usage::{AppUsageSeries, Counters as UsageCounters, UsageRange, Us
 use crate::time::Millis;
 use serde::{Deserialize, Serialize};
 
+/// Most ids one bulk management call takes (`delete_models`); the app and the server both refuse more (PRINCIPLES: bulk calls
+/// stay bounded).
+pub const MAX_BULK_IDS: usize = 4096;
+
 /// A typed error for the UI (`CommandError`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(rename_all = "camelCase")]
