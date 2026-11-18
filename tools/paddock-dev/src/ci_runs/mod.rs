@@ -4,7 +4,7 @@
 //! - `ci flakes --app <app> [--days 30]`: the tests nextest and Playwright marked flaky, vitest's failed specs, and tests that
 //!   failed and then passed on a rerun of the same commit ([`flakes`], ADR 0082 D6; the log readers are [`logfind`]). A run whose
 //!   logs cannot be read is "not measured", never "no flakes" (ER-33).
-//! - `ci timings`: the port of `scripts/ci-timings.mjs` ([`timings`]).
+//! - `ci timings`: formerly `scripts/ci-timings.mjs` (retired 2026-11-18) ([`timings`]).
 //! - `ci verdict --workflow <file> --sha <sha>`: is there a full green run of the workflow on the commit ([`verdict`]; exit 0, 5
 //!   red or partial only, 6 not measured). The one reader of the runs for a pass/fail answer; the tag workflow asks it.
 //! - `ci schedule-skip`: whether a scheduled run ends early because a train is in CI ([`schedule_skip`]; the job token in

@@ -2,7 +2,7 @@
 // (`bundle.windows.nsis.installMode`, read from tauri.windows.conf.json over tauri.conf.json) must use the shared include:
 // its installer hooks include paddock-per-machine.nsh and call the include's macros from the hooks the ADR names; its updater
 // runs `passive` (`quiet` cannot elevate); the generated stop list, the include copy and the exclusions file are there (their
-// content is checked by paddock-service's `per_machine` test, which runs with this check: scripts/affected.mjs
+// content is checked by paddock-service's `per_machine` test, which runs with this check: ./dev plan
 // PER_MACHINE_INPUT); and the app's release workflow stages paddock-setup.exe before the bundle (scripts/stage-paddock-setup.mjs),
 // without which the include's `File` has nothing to embed.
 // Not checked yet, because they land with their own work packages: the app declares InstallScope::PerMachine (S6), the

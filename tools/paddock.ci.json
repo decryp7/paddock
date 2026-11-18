@@ -9,9 +9,6 @@
   "vm-smoke": [
     "node --test scripts/vm-smoke/*.test.mjs"
   ],
-  "affected": [
-    "node --test scripts/affected.test.mjs"
-  ],
   "hooks": [
     "bash .claude/hooks/run-tests.sh"
   ],

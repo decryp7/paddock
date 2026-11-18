@@ -112,7 +112,7 @@ enum Command {
         command: queue::QueueCommand,
     },
     /// The CI planner: which projects a change reaches, the CI matrix and the commit lint's range (the port of
-    /// scripts/affected.mjs; the arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --commit-range, --commit-flags, --explain).
+    /// the retired scripts/affected.mjs; the arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --commit-range, --commit-flags, --explain).
     /// It prints no JSON object: `--json` is refused.
     Plan(PlanArgs),
     /// Merge checks.
@@ -360,7 +360,7 @@ enum CiCommand {
     /// Record finished runs as test fixtures (run, jobs, failed-job logs), with people, e-mail addresses, avatars and runner names
     /// replaced by invented values on capture. Conformance C110 fails a fixture that holds a real one.
     RecordFixture(ci_runs::RecordArgs),
-    /// Real CI timings of the family from the Gitea API (the port of scripts/ci-timings.mjs, same Markdown).
+    /// Real CI timings of the family from the Gitea API (the script scripts/ci-timings.mjs it replaced is retired; the recorded golden is the reference).
     Timings(ci_runs::TimingsArgs),
     /// Is there a full green run of a workflow on a commit? The one reader of the runs for that verdict (the tag workflow asks
     /// it). A run counts if it is a push to main or its plan job logged `plan mode: full=true`; the newest full run decides.
@@ -479,7 +479,7 @@ struct GatesRootArgs {
 
 #[derive(Subcommand)]
 enum GraphCommand {
-    /// The projects a change reaches (the core of scripts/affected.mjs).
+    /// The projects a change reaches (the core of the retired scripts/affected.mjs).
     Affected(AffectedArgs),
 }
 
@@ -488,7 +488,7 @@ struct PlanArgs {
     /// The repository root (default: the folder containing .git, found from the current folder).
     #[arg(long)]
     root: Option<PathBuf>,
-    /// The planner's own arguments, as scripts/affected.mjs took them.
+    /// The planner's own arguments, as the retired scripts/affected.mjs took them.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
 }

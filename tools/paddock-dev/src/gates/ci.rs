@@ -378,8 +378,8 @@ fn parse_action(text: &str) -> Result<Action, String> {
 // ---------------------------------------------------------------------------------------------------------------------
 // The app matrix (§2.2): one leg per app contract and per entry of its `os` list.
 
-/// The keys of one leg of ci.yml's app matrix, as `scripts/affected.mjs` `matrix()` builds them. A test compares this list
-/// with that function's text, so a change to the matrix-building step fails here until the binding is updated.
+/// The keys of one leg of ci.yml's app matrix, as `plan_ci::matrix` builds them. A test compares this list
+/// with a leg that function builds, so a change to the leg object fails here until the binding is updated.
 pub const LEG_KEYS: &[&str] = &[
     "app",
     "os",
@@ -1580,31 +1580,23 @@ jobs:
     }
 
     #[test]
-    fn the_leg_keys_follow_affected_mjs() {
-        // The model binds the matrix by name; a change to scripts/affected.mjs matrix() fails here until LEG_KEYS follows.
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/affected.mjs");
-        let text = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("the leg-key test needs scripts/affected.mjs ({}): {e}", path.display()));
-        let from = text
-            .find("const legs = oses.filter")
-            .expect("matrix() changed shape: update gates::ci");
-        let to = text[from..].find("// paddock.ci.json `e2e`").expect("matrix() changed shape") + from;
-        let body = &text[from..to];
-        let obj = &body[body.find("return {").expect("leg object") + 8..];
-        let obj = &obj[..obj.find("      };").expect("leg object end")];
-        let mut keys: Vec<String> = obj
-            .lines()
-            .filter_map(|l| {
-                // `key: value,` or the shorthand `key,`
-                let t = l.trim().trim_end_matches(',');
-                let k = t.split(':').next()?;
-                (!k.is_empty() && !k.starts_with("//") && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')).then(|| k.to_string())
-            })
-            .collect();
+    fn the_leg_keys_are_the_keys_the_planner_builds() {
+        // The model binds the matrix by name; a change to the leg object of plan_ci::matrix fails here until LEG_KEYS follows.
+        use paddock_repo_graph::Graph;
+        let graph = crate::plan::RepoGraph {
+            cargo: Graph::new(),
+            npm: Graph::new(),
+            apps: ["x".to_string()].into(),
+            configs: [("x".to_string(), serde_json::json!({"cargo": ".", "dir": "apps/x"}))].into(),
+        };
+        let plan = serde_json::json!({"all": false, "apps": ["x"], "kinds": {"x": ["rust"]}, "packages": {}});
+        let legs = crate::plan_ci::matrix(&plan, &graph, crate::plan_ci::MatrixOpts::default()).unwrap();
+        assert!(!legs.is_empty(), "a positive control: the planner built a leg");
+        let mut keys: Vec<String> = legs[0].as_object().unwrap().keys().cloned().collect();
         keys.sort();
         let mut want: Vec<String> = LEG_KEYS.iter().map(|k| k.to_string()).collect();
         want.sort();
-        assert_eq!(keys, want, "scripts/affected.mjs matrix() legs and gates::ci::LEG_KEYS differ");
+        assert_eq!(keys, want, "plan_ci::matrix legs and gates::ci::LEG_KEYS differ");
     }
 
     #[test]

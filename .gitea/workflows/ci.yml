@@ -1,4 +1,4 @@
-# The monorepo's CI (ADR 0014 §6): a plan job decides which projects a change reaches (scripts/affected.mjs: the Cargo and
+# The monorepo's CI (ADR 0014 §6): a plan job decides which projects a change reaches (./dev plan: the Cargo and
 # npm graphs plus the frontendDist and config-path edges), then only those run: the shared UI package and its entry points,
 # the reference apps, the Rust crates, the conformance, tools and ESLint packages, and one matrix leg per affected app
 # (apps/<app>/paddock.ci.json, through .gitea/actions/app-gates). The base of the diff: the last green push run of main for a
@@ -113,9 +113,6 @@ jobs:
             grep -Eq '^[[:space:]]*run: \./dev gates check( --warn)?$' "$f" || { echo "::error file=$f::C100 is not wired: no line runs ./dev gates check. Fix: restore the line (ADR 0060 section 4)."; exit 1; }
           done
 
-      - name: The plan's tests
-        run: node --test scripts/affected.test.mjs
-
       - name: Affected projects
         id: plan
         env:
@@ -127,9 +124,6 @@ jobs:
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
           # The rerun reads the earlier run's jobs and logs through the API (tools/paddock-dev/src/plan_since.rs).
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
-          # Fallback for one release (ADR 0022 R4): the repository variable PLAN_PLANNER=node plans with scripts/affected.mjs again
-          # (a rerun of failures, PLAN_SINCE_RUN, always uses ./dev plan). Unset: ./dev plan. Remove with the script.
-          PLAN_PLANNER: ${{ vars.PLAN_PLANNER }}
           # The crate and paddock-dev legs when the plan names none of its own (every run but a rerun of their failures).
           PLAN_OS_LEGS: '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]'
           # The scope of this run (tests everything its plan can reach, not a diff from a base or a rerun of failures): a push to
@@ -138,12 +132,7 @@ jobs:
           PLAN_MODE_FULL: ${{ github.event_name == 'push' || inputs.app != '' || (github.event_name == 'workflow_dispatch' && github.event.inputs.base == '' && github.event.inputs.since_run == '') }}
         run: |
           echo "plan mode: full=$PLAN_MODE_FULL"
-          if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_PLANNER" = node ]; then
-            echo "::warning::PLAN_PLANNER=node: planning with scripts/affected.mjs, the fallback that goes with the script (ADR 0022 R4). Unset the repository variable to plan with ./dev plan."
-            node scripts/affected.mjs --ci
-          else
-            ./dev plan --ci
-          fi
+          ./dev plan --ci
           grep -q '^crate_legs=' "$GITHUB_OUTPUT" || echo "crate_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           # After the plan decided: complete only for a full run that is not a rerun of failures (plan_since::COMPLETE_LINE).
@@ -440,7 +429,7 @@ jobs:
 
   # Conformance C99 (ADR 0057 §3, rule 72): no shipped process uses the macOS Keychain. Its own job, planned on its inputs
   # (every Cargo.toml and Cargo.lock under apps/ and crates/, the scanned sources, capabilities, paddock.ci.json, the check's
-  # code; scripts/affected.mjs C99_INPUT), because it needs cargo and the registry (`cargo fetch`, `cargo tree` for both Apple
+  # code; tools/paddock-dev/src/plan.rs C99_INPUT), because it needs cargo and the registry (`cargo fetch`, `cargo tree` for both Apple
   # triples) and the conformance job above does not. Every release path runs the same action, scoped to its app.
   c99:
     name: C99 (no Keychain in a macOS build)
@@ -495,12 +484,6 @@ jobs:
         name: VM start check
         run: ./dev ci run tools vm-smoke
 
-      # The plan's rules and the repo contracts it checks (doc inputs, app CI files, CODEOWNERS, Renovate, one npm lock).
-      - env:
-          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-        name: Affected rules and repo contracts
-        run: ./dev ci run tools affected
-
       # The agent hooks' tests (.claude/hooks/*.test.sh, with the rule-55 parity test of places.rs against lib/paddockpaths.py).
       # Report-only (ER-41): registered as `step:tools/hooks` in docs/gates.toml (review_by, first green run id); `./dev gates check`
       # fails when the date passes or when this step blocks. A change under .claude/hooks/, places.rs or docs/known-copies.toml marks this job.
@@ -512,7 +495,7 @@ jobs:
 
       # ER-40: a committed SVG is generated from its .drawio and never hand-edited. The check re-exports every diagram with the pinned
       # draw.io (ci-image/Dockerfile: DRAWIO_VERSION) and fails on a difference that is not the host's fonts (scripts/svg-drift.mjs).
-      # A diagram or SVG change marks this job through the declared inputs in scripts/affected.mjs (DOC_INPUTS).
+      # A diagram or SVG change marks this job through the declared inputs of the planner (tools/paddock-dev/src/plan.rs, DOC_INPUTS).
       - name: draw.io for the SVG drift check
         run: |
           # The image from v3 on has it (system packages belong to the image, not to a job). Until then: the same pinned package, checked
@@ -1068,7 +1051,7 @@ jobs:
           mode: release
 
   # Conventional Commits and no AI attribution (rules 4, 8) for every commit of a change, whichever project it touches.
-  # Only the commits a change adds are linted (scripts/affected.mjs commitLintRange): a push `before..sha`, a manual run from the
+  # Only the commits a change adds are linted (./dev plan commit_lint_range): a push `before..sha`, a manual run from the
   # plan's base. On a push to main that is `--first-parent`: only the commits main
   # itself gets (the landing merge, a direct commit), not the ones a merge brought in. A branch's commits are linted by the
   # integrator before landing (`commit-lint --range origin/main..<branch>`, docs/rules.md rule 50(g)); C23 in the conformance

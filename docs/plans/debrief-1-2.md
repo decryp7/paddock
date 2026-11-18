@@ -88,7 +88,7 @@ Conventions for every package:
 - One agent, own worktree of `paddock` (sparse: `crates ui scripts docs eslint conformance apps/debrief`), own
   `CARGO_TARGET_DIR`, own e2e port, `CARGO_BUILD_JOBS=2`, heavy jobs through the machine's slots (rule 41).
 - Branch `debrief-1-2/<id>` from the integration branch `integrate/debrief-1-2` (made by 0.1 from the combined state of
-  section 0); the coordinator merges each package when its gates pass. Tests: what `scripts/affected.mjs` selects plus
+  section 0); the coordinator merges each package when its gates pass. Tests: what `./dev plan` selects (the script was retired 2026-11-18) plus
   the touched specs, Playwright in Chromium only (rule 3). Lint and type-check the touched files. `CHANGELOG.md`
   (Unreleased) for shared changes, `apps/debrief/CHANGELOG.md` for Debrief's.
 - Shared integration points (`apps/debrief/app/src/app/app.config.ts`, `app/src-tauri/src/lib.rs` command table,

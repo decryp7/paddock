@@ -1,4 +1,4 @@
-//! The repository contracts `scripts/affected.test.mjs` also held, moved so the script can be retired (ADR 0022 R4): the
+//! The repository contracts the retired `scripts/affected.test.mjs` also held, moved so the script can be retired (ADR 0022 R4): the
 //! apps' CI contracts (`paddock.ci.json`) and the host-cleanup process patterns they hand to `job-isolation.sh`, the markdown
 //! that code reads (declared doc inputs), CODEOWNERS, Renovate and the one npm workspace.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -356,16 +356,18 @@ fn job_isolation_refuses_a_process_pattern_that_names_no_folder_of_the_job() {
     assert!(!out.status.success(), "no job temp folder: nothing to anchor on");
 }
 
-#[test]
-fn every_markdown_file_that_code_reads_is_a_declared_doc_input() {
+/// The markdown files that code under `root` reads (a quoted repo path or an `include_str!`), and the ones no DOC_INPUTS entry
+/// declares. Whole-tree: `git grep` over the tracked code files, so it runs in the conformance job, not by a planner mark.
+fn markdown_that_code_reads(root: &Path) -> (BTreeSet<String>, Vec<String>) {
     // include_str!("rel.md") is resolved from its file; quoted repo paths ('docs/x.md', "apps/a/README.md") are taken as is.
     let pattern = r#"include_str!\("[^"]+\.md"\)|['"](docs|apps|crates|ui)/[A-Za-z0-9_./-]+\.md['"]"#;
     let out = paddock_proc::command("git")
-        .current_dir(root())
+        .current_dir(root)
         .args(["grep", "-E", pattern, "--", "*.rs", "*.mjs", "*.ts", "*.cjs"])
         .output()
         .unwrap();
-    let tracked: BTreeSet<String> = tracked().into_iter().collect();
+    let ls = paddock_proc::command("git").current_dir(root).args(["ls-files"]).output().unwrap();
+    let tracked: BTreeSet<String> = String::from_utf8_lossy(&ls.stdout).lines().map(String::from).collect();
     let re = Regex::new(pattern).unwrap();
     let include = Regex::new(r#"include_str!\("([^"]+)"\)"#).unwrap();
     let comment = Regex::new(r"^\s*(//|\*|#)").unwrap();
@@ -377,7 +379,7 @@ fn every_markdown_file_that_code_reads_is_a_declared_doc_input() {
         }
         if matches!(
             file,
-            "scripts/affected.test.mjs" | "tools/paddock-dev/tests/it/contracts.rs" | "tools/paddock-dev/tests/it/tree.rs"
+            "tools/paddock-dev/tests/it/contracts.rs" | "tools/paddock-dev/tests/it/tree.rs"
         ) {
             continue; // these files name docs as test data
         }
@@ -394,11 +396,17 @@ fn every_markdown_file_that_code_reads_is_a_declared_doc_input() {
             }
         }
     }
+    let undeclared = read.iter().filter(|f| !is_declared_doc_input(f)).cloned().collect();
+    (read, undeclared)
+}
+
+#[test]
+fn every_markdown_file_that_code_reads_is_a_declared_doc_input() {
+    let (read, undeclared) = markdown_that_code_reads(&root());
     assert!(
         read.contains("apps/shell-demo/CHANGELOG.md"),
         "the grep finds the shell demo What's New"
     );
-    let undeclared: Vec<&String> = read.iter().filter(|f| !is_declared_doc_input(f)).collect();
     assert!(
         undeclared.is_empty(),
         "markdown that code reads but no DOC_INPUTS entry declares: {undeclared:?}"
@@ -406,6 +414,114 @@ fn every_markdown_file_that_code_reads_is_a_declared_doc_input() {
     for f in ["docs/rules.md", "docs/blocks/first-launch.md", "docs/blocks/readme-skeleton.md"] {
         assert!(is_declared_doc_input(f), "{f}");
     }
+}
+
+/// The check goes red for a script that reads a markdown file no DOC_INPUTS entry declares (the reviewed case: scripts/new-app.mjs).
+#[test]
+fn a_script_reading_an_undeclared_markdown_file_is_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        let out = paddock_proc::command("git").current_dir(dir.path()).args(args).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    };
+    git(&["init", "-q"]);
+    std::fs::create_dir_all(dir.path().join("scripts")).unwrap();
+    std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+    std::fs::write(dir.path().join("docs/zz-undeclared-input.md"), "x\n").unwrap();
+    std::fs::write(dir.path().join("docs/rules.md"), "x\n").unwrap();
+    std::fs::write(
+        dir.path().join("scripts/new-app.mjs"),
+        "const a = readFileSync('docs/zz-undeclared-input.md');\nconst b = readFileSync('docs/rules.md');\n",
+    )
+    .unwrap();
+    git(&["add", "-A"]);
+    let (read, undeclared) = markdown_that_code_reads(dir.path());
+    assert_eq!(read.len(), 2, "{read:?}");
+    assert_eq!(
+        undeclared,
+        vec!["docs/zz-undeclared-input.md".to_string()],
+        "the declared file passes, the other is found"
+    );
+}
+
+/// Every test of this file runs in the conformance job's step (ER-41: that job is planned for every change, so the whole-tree
+/// contracts do not depend on which project a change marks). The step's filter is read from the conformance contract.
+#[test]
+fn every_contracts_test_runs_in_the_conformance_step() {
+    let contract = json("conformance/paddock.ci.json");
+    let step = contract["tests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .find(|l| l.contains("nextest") && l.contains("contracts::"))
+        .expect("conformance/paddock.ci.json `tests` has a nextest step for contracts::");
+    let filter = step
+        .split("-E ")
+        .nth(1)
+        .expect("the step passes a filter with -E")
+        .trim()
+        .trim_matches('\'');
+    // The clauses of `test(/a/) | test(/b/)`: each is one regex.
+    let clauses: Vec<Regex> = filter
+        .split(" | ")
+        .map(|c| {
+            Regex::new(
+                c.strip_prefix("test(/")
+                    .and_then(|f| f.strip_suffix("/)"))
+                    .expect("the filter is `test(/regex/)` clauses joined by ` | `"),
+            )
+            .unwrap()
+        })
+        .collect();
+    let selected = |name: &str| clauses.iter().any(|r| r.is_match(name));
+    // This file's tests, listed from this binary.
+    let exe = std::env::current_exe().unwrap();
+    let out = paddock_proc::command(exe).args(["--list", "--format", "terse"]).output().unwrap();
+    let all: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.strip_suffix(": test").map(String::from))
+        .collect();
+    let mine: Vec<&String> = all.iter().filter(|n| n.starts_with("contracts::")).collect();
+    assert!(
+        mine.len() >= 8,
+        "a positive control: this file's tests were listed ({})",
+        mine.len()
+    );
+    let missed: Vec<&&String> = mine.iter().filter(|n| !selected(n)).collect();
+    assert!(missed.is_empty(), "contracts tests the conformance step does not run: {missed:?}");
+    assert!(
+        !all.iter().filter(|n| !n.starts_with("contracts::")).any(|n| selected(n)),
+        "the filter selects no other test of this binary"
+    );
+    // The audit tests that read the shared fixtures or the family's allow list (whole-tree files of scripts/ and the repository):
+    // found in the source of the library's own audit tests (they are not in this binary), and selected exactly.
+    let source = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/audit/tests.rs")).unwrap();
+    let mut reading = BTreeSet::new();
+    let mut others = BTreeSet::new();
+    for chunk in source.split("#[test]\n").skip(1) {
+        let Some(name) = chunk.strip_prefix("fn ").and_then(|c| c.split('(').next()) else {
+            continue;
+        };
+        let name = format!("audit::tests::{name}");
+        let body = chunk.split("\n}\n").next().unwrap_or(chunk);
+        if body.contains("cases(") || body.contains("fixtures(") || body.contains(r#".join("../..")"#) {
+            reading.insert(name);
+        } else {
+            others.insert(name);
+        }
+    }
+    assert!(
+        reading.len() >= 3,
+        "a positive control: the fixture-reading audit tests were found: {reading:?}"
+    );
+    let unselected: Vec<&String> = reading.iter().filter(|n| !selected(n)).collect();
+    assert!(
+        unselected.is_empty(),
+        "audit tests that read whole-tree fixtures but are not in the conformance step: {unselected:?}"
+    );
+    let extra: Vec<&String> = others.iter().filter(|n| selected(n)).collect();
+    assert!(extra.is_empty(), "the step selects audit tests that read no fixture: {extra:?}");
 }
 
 fn normalize(path: &str) -> String {

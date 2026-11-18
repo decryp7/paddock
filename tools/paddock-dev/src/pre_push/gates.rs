@@ -710,12 +710,24 @@ const CONFORMANCE_TEST_CONCURRENCY: &str = "4";
 
 fn conformance_tests(facts: &Facts) -> Planned {
     let id = "conformance-tests";
+    // The phase also compiles paddock-dev's contracts tests: the executor puts this build folder on that line as cargo configuration
+    // (never a CARGO_* variable) and the gate runs through heavy (ER-24), compiling through the local sccache.
+    let mut env: Vec<(String, String)> = vec![("PADDOCK_TEST_CONCURRENCY".into(), CONFORMANCE_TEST_CONCURRENCY.into())];
+    match (&facts.target_dir, &facts.kept_targets) {
+        (Some(d), _) => env.push((crate::ci_run::GATE_TARGET_DIR.into(), d.trim_end_matches('/').to_string())),
+        (None, Some(k)) => env.push((
+            crate::ci_run::GATE_TARGET_DIR.into(),
+            format!("{}/tools-paddock-dev", k.trim_end_matches('/')),
+        )),
+        (None, None) => {}
+    }
     conformance_not_ready(id, facts).unwrap_or_else(|| {
         dev_run(
             facts,
             Gate {
                 args: strs(&["ci", "run", "conformance", "tests"]),
-                env: vec![("PADDOCK_TEST_CONCURRENCY".into(), CONFORMANCE_TEST_CONCURRENCY.into())],
+                heavy: true,
+                env,
                 ..gate(
                     id.into(),
                     "",

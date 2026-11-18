@@ -17,9 +17,9 @@
 //!   ([`generators`], ER-40); `merge check` runs the ones a merge makes due;
 //! - `graph affected`: the affected closure of a change set, the first consumer of `paddock-repo-graph` ([`plan`], with the
 //!   `.gitea` narrowing in [`plan_gitea`] and the git reader in [`plan_repo`]);
-//! - `plan`: the CI planner, the whole command line of `scripts/affected.mjs` (`<base> [<head>]`, `--files`, `--all`, `--ci
+//! - `plan`: the CI planner, the whole command line of the retired `scripts/affected.mjs` (`<base> [<head>]`, `--files`, `--all`, `--ci
 //!   [--app]`, `--commit-range`, `--explain`): the matrix, the base of a run and the commit lint's range in [`plan_ci`], the
-//!   command in [`plan_cmd`]. Oracle-tested against the script until it is retired (ADR 0022 R4). `plan --since-run <run>`
+//!   command in [`plan_cmd`]. Tested against recorded answers (the script was retired 2026-11-18, ADR 0022 R4). `plan --since-run <run>`
 //!   reruns only what failed in a finished run ([`plan_since`]).
 //! - `ci setup-rust`: the compile cache and the Tauri Linux libraries of a CI job, the port of the setup-rust action's shell steps
 //!   ([`ci_setup_rust`]), over [`ci_tool`], the wrapper contract for third-party programs a CI step runs (docs/plans/ci-in-rust.md);

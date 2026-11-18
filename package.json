@@ -12,10 +12,6 @@
     "apps/workbench-demo",
     "apps/*/app"
   ],
-  "scripts": {
-    "affected": "node scripts/affected.mjs",
-    "test:affected": "node --test scripts/affected.test.mjs"
-  },
   "engines": {
     "node": ">=24"
   }

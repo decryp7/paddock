@@ -1,4 +1,4 @@
-//! `dev graph affected`: which projects a change reaches. The oracle-tested port of the core of `scripts/affected.mjs`
+//! `dev graph affected`: which projects a change reaches. The port of the core of the retired `scripts/affected.mjs`
 //! (`affected()`, `owners()`, `appOfWorkflow()` and the rule tables); the graph itself comes from `paddock-repo-graph`.
 //! The CI matrix, the nextest narrowing and `--ci` are in `plan_ci` and `plan_cmd`.
 //!
@@ -34,7 +34,7 @@ fn re(pattern: &str) -> Regex {
     Regex::new(pattern).expect("a valid pattern")
 }
 
-/// Inputs that every project's build or tests read: a change re-runs everything. Mirrors `GLOBAL` in `scripts/affected.mjs`
+/// Inputs that every project's build or tests read: a change re-runs everything. Formerly `GLOBAL` in the retired `scripts/affected.mjs`
 /// (its comment table says what each former global reaches). `.gitea/` and `conformance/(ci|release|src/util)/` are narrowed per
 /// job from the file text at two revisions (`plan_gitea`); without a reader for those revisions they plan everything.
 static GLOBAL: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -50,11 +50,11 @@ static GLOBAL: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     .into()
 });
 
-/// An app's `src-tauri/Cargo.toml` and `capabilities/`, which conformance C48 reads. Mirrors `APP_CAPABILITY_INPUT` in `scripts/affected.mjs`.
+/// An app's `src-tauri/Cargo.toml` and `capabilities/`, which conformance C48 reads. Formerly `APP_CAPABILITY_INPUT` in the retired `scripts/affected.mjs`.
 static APP_CAPABILITY_INPUT: LazyLock<Regex> = LazyLock::new(|| re(r"^apps/[^/]+/(app/)?src-tauri/(Cargo\.toml|capabilities/)"));
 
 /// What conformance C99 (no macOS Keychain in a shipped build, ADR 0057 §3.4) reads; they run the dedicated `c99` job. Mirrors
-/// `C99_INPUT` in `scripts/affected.mjs`: every Cargo.toml and Cargo.lock under apps/ and crates/, the sources the check scans,
+/// `C99_INPUT` of the retired `scripts/affected.mjs`: every Cargo.toml and Cargo.lock under apps/ and crates/, the sources the check scans,
 /// the Tauri capability files, the paddock.ci.json files, the cargo registry configuration, the waivers and the check's code.
 static C99_INPUT: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
@@ -100,24 +100,21 @@ fn truthy(v: &Value) -> bool {
 /// Inputs of the Rust builds only (cargo registry and linker config, the shared clippy and workspace lint presets).
 static RUST_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| [r"^\.cargo/", r"^lint/"].map(re).into());
 
-/// The planner and its tests: besides the scripts' owners, this tool's golden test runs them as its oracle.
-static PLANNER_FILES: LazyLock<Regex> = LazyLock::new(|| re(r"^scripts/affected(\.test)?\.mjs$"));
-
 /// What the hooks' parity test (`.claude/hooks/paddockpaths-parity.test.sh`) runs against: `places.rs` and the copies register. A change
-/// marks the tools job. Mirrors `HOOKS_PARITY_INPUT` in `scripts/affected.mjs`.
+/// marks the tools job. Formerly `HOOKS_PARITY_INPUT` in the retired `scripts/affected.mjs`.
 static HOOKS_PARITY_INPUT: LazyLock<Regex> = LazyLock::new(|| re(r"^(tools/paddock-dev/src/places\.rs|docs/known-copies\.toml)$"));
 
 /// The JS conformance runner and what it reads: this tool's parity tests run it over fixtures and the live tree (C39, C53).
-/// Mirrors `PARITY_INPUT` in `scripts/affected.mjs`.
+/// Formerly `PARITY_INPUT` in the retired `scripts/affected.mjs`.
 static PARITY_INPUT: LazyLock<Regex> = LazyLock::new(|| re(r"^conformance/(src|bin|baselines)/.+\.(mjs|json)$"));
 
-/// What conformance C91 and paddock-service's `per_machine` sync test read of a per-machine app (scripts/affected.mjs
+/// What conformance C91 and paddock-service's `per_machine` sync test read of a per-machine app (the retired scripts/affected.mjs
 /// `PER_MACHINE_INPUT`).
 static PER_MACHINE_INPUT: LazyLock<Regex> = LazyLock::new(|| {
     re(r"^(apps/[^/]+/app/src-tauri/(tauri(\.windows)?\.conf\.json|windows/)|crates/paddock-setup/nsis/paddock-per-machine\.nsh)")
 });
 
-/// What C100 reads (ADR 0060 section 4): scripts/affected.mjs `C100_INPUTS` and `./dev gates inputs`. A change marks conformance.
+/// What C100 reads (ADR 0060 section 4): `./dev gates inputs` (`gates/inputs.rs`; the retired scripts/affected.mjs had `C100_INPUTS`). A change marks conformance.
 /// The content rule (a test file that adds or removes an ignore attribute or an environment guard) is [`guards_changed`].
 static C100_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
@@ -143,7 +140,7 @@ static RUST_FN: LazyLock<Regex> = LazyLock::new(|| re(r"(?-u:\b)fn\s+((?-u:\w)+)
 static TS_TEST: LazyLock<Regex> = LazyLock::new(|| re(r#"(?-u:\b)(?:test|it)(?:\.(?-u:\w)+)?\(\s*['"`]([^'"`]+)"#));
 
 /// The ignore attributes and environment guards of a test file, each paired with the Rust function or TypeScript test title it
-/// belongs to (`guardSet` in scripts/affected.mjs): moving an ignore from one test to another changes the set though the count
+/// belongs to (`guardSet` of the retired scripts/affected.mjs): moving an ignore from one test to another changes the set though the count
 /// stays.
 pub fn guard_set(text: &str) -> BTreeSet<String> {
     let lines: Vec<&str> = text.split('\n').collect();
@@ -225,7 +222,7 @@ pub fn is_declared_doc_input(path: &str) -> bool {
 
 /// The Rust sources that can emit a health cause code: ui's cause-codes.spec.ts reads every `.rs` file under `crates/` and `apps/`
 /// against the chip's table, skipping folders named target, node_modules, tests and benches and files named tests.rs. A change to one
-/// marks ui too (the owner keeps its own halves). Same as `isCauseCodeSource` in scripts/affected.mjs.
+/// marks ui too (the owner keeps its own halves). Formerly `isCauseCodeSource` of the retired scripts/affected.mjs.
 fn is_cause_code_source(f: &str) -> bool {
     let parts: Vec<&str> = f.split('/').collect();
     let (Some(last), Some(first)) = (parts.last(), parts.first()) else {
@@ -294,7 +291,7 @@ static OWNERS: LazyLock<Vec<(Regex, &'static [&'static str])>> = LazyLock::new(|
 
 /// The files that set what the e2e lint block does in one project: its ESLint config (any `eslint*.js`, `.cjs` or `.mjs` file: a second config named by `-c` or `eslintConfig` is one too), its bulk suppressions, the lint target of
 /// `angular.json`, the `package.json` of an app or the ui (its lint script) and the contract (`paddock.ci.json`) that names the lint commands CI runs. A change to one also runs the eslint package's tests, whose wiring test
-/// resolves the rule's severity in every real config (ER-41); `scripts/affected.mjs` (`LINT_WIRING`) is the oracle.
+/// resolves the rule's severity in every real config (ER-41); the retired `scripts/affected.mjs` had it as `LINT_WIRING`.
 static LINT_WIRING: LazyLock<Regex> = LazyLock::new(|| {
     re(
         r"^(?:apps/[^/]+/app|ui)/(?:eslint[^/]*\.[cm]?js|eslint-suppressions\.json|angular\.json|package\.json)$|^(?:apps/[^/]+|ui)/paddock\.ci\.json$",
@@ -383,7 +380,7 @@ pub struct Options<'a> {
 }
 
 /// The apps whose Windows installer adopts the shared include: hooks that include `paddock-per-machine.nsh`, or a
-/// `perMachine` install mode in their Tauri configuration (scripts/affected.mjs `adoptsPerMachine`).
+/// `perMachine` install mode in their Tauri configuration (`adoptsPerMachine` of the retired scripts/affected.mjs).
 pub fn per_machine_apps(root: &Path) -> Vec<String> {
     let Ok(apps) = std::fs::read_dir(root.join("apps")) else {
         return Vec::new();
@@ -403,7 +400,7 @@ pub fn per_machine_apps(root: &Path) -> Vec<String> {
     out
 }
 
-/// The apps whose contract `checks` run `paddock-conformance` (scripts/affected.mjs `app.checks`).
+/// The apps whose contract `checks` run `paddock-conformance` (`app.checks` of the retired scripts/affected.mjs).
 pub fn conformance_apps(root: &Path) -> Vec<String> {
     let Ok(apps) = std::fs::read_dir(root.join("apps")) else {
         return Vec::new();
@@ -452,7 +449,7 @@ impl State {
     }
 }
 
-/// The plan for a list of changed files, in the JSON shape of `scripts/affected.mjs`.
+/// The plan for a list of changed files, in the JSON shape the retired `scripts/affected.mjs` printed.
 pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<Value, GraphError> {
     let mut st = State::default();
     let every: Vec<String> = PROJECTS
@@ -500,7 +497,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
                 );
             }
         }
-        // The apps whose own checks run paddock-conformance rerun those checks when conformance changes (scripts/affected.mjs).
+        // The apps whose own checks run paddock-conformance rerun those checks when conformance changes (as the retired scripts/affected.mjs did).
         if CONFORMANCE_CODE.is_match(f) {
             for a in &opts.conformance_apps {
                 st.mark(Some(format!("app:{a}")), format!("its checks run paddock-conformance ({f})"));
@@ -558,12 +555,6 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
             st.mark(
                 Some("tools".to_string()),
                 format!("the hooks' parity test (.claude/hooks/paddockpaths-parity.test.sh) reads {f}"),
-            );
-        }
-        if PLANNER_FILES.is_match(f) {
-            st.mark(
-                Some("paddock-dev".to_string()),
-                format!("its golden test compares {f} (tools/paddock-dev/tests/it/golden.rs)"),
             );
         }
         if RUST_INPUTS.iter().any(|r| r.is_match(f)) {
@@ -747,7 +738,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         st.kind(p.as_deref(), if d.ends_with("src-tauri") { "all" } else { "ui" });
     }
 
-    // The conformance job is in every plan, whatever changed (user decision 2026-11-12); mirrors `affected` in scripts/affected.mjs.
+    // The conformance job is in every plan, whatever changed (user decision 2026-11-12); as `affected` of the retired scripts/affected.mjs did.
     st.mark(Some("conformance".to_string()), "conformance always runs".to_string());
     let has = |p: &str| st.why.contains_key(p);
     let mut packages: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1067,6 +1058,61 @@ mod tests {
         assert_eq!(app_of_workflow("README.md", &apps), None);
     }
 
+    /// A file name that a glob of `./dev gates inputs` matches (the retired JavaScript tests used the same sample).
+    fn glob_sample(g: &str) -> String {
+        g.replace("**/", "").replace("/**", "/x").replace('*', "x")
+    }
+
+    #[test]
+    fn every_planner_rule_for_c100_is_one_of_the_globs_of_gates_inputs() {
+        let globs: Vec<&str> = crate::gates::inputs::GLOBS
+            .iter()
+            .copied()
+            .filter(|g| !g.starts_with(".gitea/"))
+            .collect();
+        assert!(globs.len() > 15, "a positive control: the glob list is not empty ({})", globs.len());
+        for r in C100_INPUTS.iter() {
+            assert!(
+                globs.iter().any(|g| r.is_match(&glob_sample(g))),
+                "{r} has no glob in gates/inputs.rs"
+            );
+        }
+        for ordinary in ["crates/paddock-jobs/src/lib.rs", "docs/plans/x.md"] {
+            assert!(!C100_INPUTS.iter().any(|r| r.is_match(ordinary)), "{ordinary} is not a C100 input");
+        }
+    }
+
+    #[test]
+    fn lint_wiring_files_are_owned_by_eslint_and_other_files_are_not() {
+        for f in [
+            "apps/dyno/app/eslint.config.js",
+            "apps/debrief/app/eslint.config.js",
+            "apps/pitcrew/app/eslint-suppressions.json",
+            "apps/pitwall/app/angular.json",
+            "ui/eslint.config.cjs",
+            "ui/eslint-suppressions.json",
+            "ui/angular.json",
+            "ui/package.json",
+            "apps/dyno/app/package.json",
+            "apps/spotter/paddock.ci.json",
+            "apps/pitwall/app/eslint.lax.cjs",
+            "apps/dyno/app/eslint.base.mjs",
+            "ui/eslint.other.js",
+            "ui/paddock.ci.json",
+        ] {
+            assert!(owners(f).is_some_and(|o| o.iter().any(|p| p == "eslint")), "{f}: {:?}", owners(f));
+        }
+        for f in [
+            "apps/dyno/app/e2e/a.spec.ts",
+            "apps/dyno/app/src/package.json",
+            "apps/dyno/package.json",
+            "ui/e2e/a.spec.ts",
+            "ui/projects/paddock-ui/src/a.ts",
+        ] {
+            assert!(!owners(f).is_some_and(|o| o.iter().any(|p| p == "eslint")), "{f}");
+        }
+    }
+
     #[test]
     fn a_shared_crate_change_reaches_its_dependents_and_apps() {
         let p = plan(&["crates/core/src/lib.rs"]);
@@ -1109,7 +1155,7 @@ mod tests {
         ] {
             assert_eq!(plan(&[f])["c99"], json!(true), "{f}");
         }
-        // Markdown paths are built, not quoted: affected.test.mjs fails on a quoted repo markdown path that no DOC_INPUTS entry declares.
+        // Markdown paths are built, not quoted: a contracts test fails on a quoted repo markdown path that no DOC_INPUTS entry declares.
         let docs = [
             format!("docs/{}.md", "benchmarks"),
             format!("apps/dyno/{}", "README.md"),
@@ -1122,13 +1168,13 @@ mod tests {
     }
 
     #[test]
-    fn the_planner_marks_scripts_tools_and_paddock_dev_but_no_app_and_rust_inputs_only_the_rust_builds() {
-        for f in ["scripts/affected.mjs", "scripts/affected.test.mjs"] {
+    fn the_planner_marks_scripts_tools_and_ui_but_no_app_and_rust_inputs_only_the_rust_builds() {
+        for f in ["scripts/publish.mjs", "scripts/new-app.test.mjs"] {
             let p = plan(&[f]);
             assert_eq!((p["all"].clone(), p["apps"].clone()), (json!(false), json!([])), "{f}");
             assert_eq!(
                 (p["tools"].clone(), p["ui"].clone(), p["paddockDev"].clone()),
-                (json!(true), json!(true), json!(true)),
+                (json!(true), json!(true), json!(false)),
                 "{f}"
             );
         }
@@ -1228,6 +1274,32 @@ mod tests {
         // The sample repo has no Pitcrew app: the declared input names it, so its explanation does too.
         assert!(capture.to_string().contains("app:pitcrew"), "{capture}");
         assert_eq!(plan(&["Mystery"])["all"], true);
+    }
+
+    #[test]
+    fn the_secret_scan_allow_list_marks_conformance_only_and_a_diagram_png_marks_no_tools() {
+        // Cases of the retired affected.test.mjs: the allow-list is read where the scan runs (the conformance job); a PNG next to a
+        // diagram is not what the SVG drift check compares.
+        let p = plan(&[".gitleaks.toml"]);
+        assert_eq!((p["all"].clone(), p["conformance"].clone()), (json!(false), json!(true)));
+        for k in ["tools", "ui", "crates", "paddockDev", "icons"] {
+            assert_eq!(p[k], false, "{k}");
+        }
+        assert_eq!(plan(&["diagrams/paddock.png"])["tools"], false);
+        assert_eq!(
+            plan(&["diagrams/paddock.drawio"])["tools"],
+            true,
+            "positive control: the drawio source marks tools"
+        );
+    }
+
+    #[test]
+    fn the_js_conformance_runner_and_its_baselines_mark_paddock_dev_but_its_tests_and_readme_do_not() {
+        assert_eq!(plan(&["conformance/bin/paddock-conformance.mjs"])["paddockDev"], true);
+        assert_eq!(plan(&["conformance/baselines/C53.json"])["paddockDev"], true);
+        for f in ["conformance/test/core.test.mjs", "conformance/baselines/README.md"] {
+            assert_eq!(plan(&[f])["paddockDev"], false, "{f}");
+        }
     }
 
     #[test]
@@ -1473,7 +1545,7 @@ mod tests {
         assert_eq!(command(&req).err().map(|e| e.exit), Some(paddock_cli::Exit::Usage));
     }
 
-    // ---- .gitea changes are narrowed to the jobs they reach (the cases of scripts/affected.test.mjs, on synthetic trees) ----
+    // ---- .gitea changes are narrowed to the jobs they reach (the cases of the retired scripts/affected.test.mjs, on synthetic trees) ----
 
     use crate::plan_gitea::{Fixed, changed_jobs, script_importers};
 

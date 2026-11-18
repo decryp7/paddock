@@ -255,7 +255,7 @@ pub struct Gating {
     satisfied: Option<BTreeSet<String>>,
 }
 
-/// The plan job outputs the planner models (scripts/affected-marks.mjs). An output outside this list (an app workflow's `run`) is
+/// The plan job outputs the planner models (`gates::edge::outputs_of`). An output outside this list (an app workflow's `run`) is
 /// not verified.
 const KNOWN_OUTPUTS: &[&str] = &[
     "crates",
@@ -947,7 +947,7 @@ mod tests {
         for (path, gated) in [
             ("apps/dyno/scripts/check-capabilities.mjs", true),
             ("apps/dyno/scripts/check-wording.test.mjs", true),
-            ("scripts/affected.test.mjs", true),
+            ("scripts/x.test.mjs", true),
             ("apps/dyno/scripts/check-bundle.sh", true),
             ("apps/dyno/scripts/check-other.mjs", false),
             ("apps/pitcrew/scripts/check-capabilities.mjs", false),

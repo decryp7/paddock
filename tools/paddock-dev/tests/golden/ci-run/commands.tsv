@@ -124,6 +124,7 @@ job	conformance			bash "conformance/ci/kit.sh" build-jobs
 job	conformance			bash "conformance/ci/kit.sh" host sccache-stats
 job	conformance			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	conformance			cargo --version
+job	conformance			cargo nextest run --manifest-path tools/paddock-dev/Cargo.toml --profile ci --no-tests=fail -E 'test(/^contracts::/) | test(/^audit::tests::(every_shared_|the_rust_reader_and_the_script_agree|the_families_real_list)/)'
 job	conformance			case "$RUNNER_OS-$(uname -m)" in
 job	conformance			case "$TOTAL" in ''
 job	conformance			case "local" in auto
@@ -794,7 +795,6 @@ job	tools			missing=1
 job	tools			mkdir -p "$DEST"
 job	tools			mkdir -p "$DIR"
 job	tools			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
-job	tools			node --test scripts/affected.test.mjs
 job	tools			node --test scripts/new-app.test.mjs scripts/npm-audit.test.mjs scripts/coverage-gate.test.mjs scripts/demo/*.test.mjs scripts/shell-demo/*.test.mjs
 job	tools			node --test scripts/vm-smoke/*.test.mjs
 job	tools			node --test tools/test/*.test.mjs

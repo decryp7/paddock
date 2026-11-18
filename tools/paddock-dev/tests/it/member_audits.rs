@@ -60,7 +60,7 @@ fn names() -> Vec<String> {
 }
 
 #[test]
-fn every_clause_of_the_profile_selects_at_least_one_test_and_the_exclusion_excludes_one() {
+fn every_clause_of_the_profile_selects_at_least_one_test() {
     let whole = filter();
     // The clauses of this binary's audits; the source audits of the tool's own modules are checked by the gate's tests (pre_push).
     let (f, _) = split_audit_filter(&whole).unwrap_or_else(|| panic!("the filter starts with its `binary(it)` group: {whole}"));
@@ -102,9 +102,6 @@ fn every_clause_of_the_profile_selects_at_least_one_test_and_the_exclusion_exclu
             "`{audit}` is not selected by the {AUDIT_PROFILE} profile"
         );
     }
-    assert!(!selected(
-        "golden::live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history"
-    ));
     // A rename cannot silently drop a live or working-tree audit: every check module's `live_` and `this_working_tree_` test is selected.
     let audit_name = Regex::new(r"^check(_[a-z0-9]+)?::(live_|this_working_tree_)").unwrap();
     let check_audits: Vec<&String> = all.iter().filter(|n| audit_name.is_match(n)).collect();

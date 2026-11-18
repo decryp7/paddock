@@ -51,7 +51,7 @@ jobs:
       - uses: ./.gitea/actions/runner-wait
         with:
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
-      # affected.mjs for Spotter, and the skip of a main push whose commit carries a spotter-v* tag (the tag run is the gate).
+      # ./dev plan for Spotter, and the skip of a main push whose commit carries a spotter-v* tag (the tag run is the gate).
       # The nightly builds installers even when main's CI nightly was green.
       - id: plan
         uses: ./.gitea/actions/plan

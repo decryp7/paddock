@@ -1,4 +1,4 @@
-//! paddock-dev's integration tests, one binary (C37): the command line, the planner against `scripts/affected.mjs`, the
+//! paddock-dev's integration tests, one binary (C37): the command line, the planner against its recorded answers, the
 //! `inputs.txt` list, the slot commands with the real binary, the CI kit's job-isolation.sh over it and the `./dev` wrapper.
 mod build_env;
 mod build_jobs;
@@ -27,6 +27,7 @@ mod contracts;
 mod dev_bin;
 mod dev_tool_publish;
 mod dev_tool_workflow;
+mod gates_planner;
 mod generators;
 mod golden;
 mod heavy_install;

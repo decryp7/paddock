@@ -169,7 +169,7 @@ builds macOS arm64, Linux x86_64 and arm64 and Windows x86_64, attaches `heavy-<
 publishes the crate `paddock-heavy` there as well (the registry has `paddock-proc` 0.1.0 only today: a `v*` tag publishes 0.2 first; the crate step
 is optional, the release is what machines install from).
 
-CI leg needed (not added here: `.gitea/` and `scripts/affected.mjs` belong to the integrating agent): a `tools/heavy` job in
+CI leg needed (not added here: `.gitea/` and `./dev plan` belong to the integrating agent): a `tools/heavy` job in
 `ci.yml` on Linux, macOS and Windows runners with `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
 `cargo nextest run --profile ci` and `cargo deny check` in `tools/heavy`; `paddock.ci.json`/the planner entry for the
 `tools/heavy` workspace (inputs: `tools/heavy`, `crates/paddock-proc`); and `tools/heavy` in the publish plan of

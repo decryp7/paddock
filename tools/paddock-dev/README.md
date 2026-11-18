@@ -32,7 +32,7 @@ One tool makes, claims and removes agent worktrees, so every one is locked with 
 cleanup removes a locked one. Run it from any checkout of the repository (or pass `--repo <folder>`); `--json` as everywhere.
 
 - `worktree add <name> --base <ref> [-b <branch>] [--detach] [--profile gates | --sparse a,b] --owner <role>:<task> [--root <folder>]`
-  makes `<root>/<name>`: a full checkout (`--profile gates`, the default, because conformance, `affected.mjs`, `gates check` and `plan`
+  makes `<root>/<name>`: a full checkout (`--profile gates`, the default, because conformance, `./dev plan`, `gates check` and `plan`
   read most folders); `--sparse` only with `--detach` (a review copy that reads a few folders). The branch is `<name>` unless `-b`;
   an existing local branch, or one only a remote has, is attached to (its ahead and behind counts against `--base` and its remote
   are printed; a branch already merged into the base, or behind its remote, is refused with the fix). Always locked with the note
@@ -139,7 +139,7 @@ after the command (`pr label` takes every later word as a change).
 
 ## Not ported yet (R0b gaps, listed on purpose)
 
-`dev plan` is the port of `scripts/affected.mjs` (`--ci`, `--app`, the matrix legs and the commit range; its recorded cases are in
+`dev plan` is the one planner (it replaced `scripts/affected.mjs`, retired 2026-11-18: `--ci`, `--app`, the matrix legs and the commit range; its recorded answers are in
 `tests/golden/`); `graph affected` is its graph step. Still open from R0b: the `dev-build` job (one build per run for a hash nobody
 published, shared as a run artifact) and `setup-rust`'s image fast path, both deferred (ADR 0022, status below). Done: `dev-tool.yml`
 publishes the binary per input hash and runner kind from `main`, and the `dev` wrapper downloads it in CI (locally with
@@ -148,8 +148,8 @@ or doubt; a run with `PADDOCK_DEV_DOWNLOAD=0` (release and tag jobs) never uses 
 
 ## The planner in CI
 
-`ci.yml`'s plan job runs `./dev plan --ci` for every run (the app workflows already ran `./dev plan --ci --app <app>`); the golden
-tests compare it with `scripts/affected.mjs` on every sample, recorded case, the repository's history and the live narrowing edits,
-including C100's content rule (a test file that adds, moves or removes an ignore attribute or an environment guard marks conformance).
-Fallback for one release (ADR 0022 R4): set the repository variable `PLAN_PLANNER` to `node` and the plan job plans with the script
-again (it prints a `::warning::`); unset it to return. The script, its golden generator and this switch are removed together.
+`ci.yml`'s plan job runs `./dev plan --ci` for every run (the app workflows run `./dev plan --ci --app <app>`), and C100 (`./dev gates
+check`) asks the same planner in process. The recorded answers in `tests/golden/` (`expected/`, `ci-jobs.json`, `real-tree-samples.json`)
+are its reference: they were first made by `scripts/affected.mjs`, and a changed answer is a reviewed rewrite with
+`PADDOCK_GOLDEN_BLESS=1 cargo nextest run -E 'test(golden::)'`. The planner covers C100's content rule (a test file that adds, moves
+or removes an ignore attribute or an environment guard marks conformance). The ADR 0022 R4 fallback (`PLAN_PLANNER=node`) is gone with the script.

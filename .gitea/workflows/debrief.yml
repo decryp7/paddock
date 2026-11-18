@@ -1,5 +1,5 @@
 # Debrief's CI and release in the Paddock monorepo (ADR 0014, imported from decryp7/debrief's build.yml): every job runs in
-# apps/debrief. The plan job runs only when the change reaches Debrief (scripts/affected.mjs: Debrief's own files, a shared
+# apps/debrief. The plan job runs only when the change reaches Debrief (./dev plan: Debrief's own files, a shared
 # input, or a global one); Debrief is not a leg of ci.yml because its gates span three OS, real-app smoke tests and the
 # installers.
 #
@@ -62,7 +62,7 @@ defaults:
 
 jobs:
   # Decides whether this run is needed at all:
-  # the change does not reach Debrief (scripts/affected.mjs, the same plan as ci.yml);
+  # the change does not reach Debrief (./dev plan, the same plan as ci.yml);
   # a push to main whose commit carries a debrief-v* tag is covered by the tag run;
   # a nightly run is skipped while main is unchanged since the last green one.
   # And whether it is a full run (`full`): installers, real-app smoke and WebKit only for main, tags, nightly and

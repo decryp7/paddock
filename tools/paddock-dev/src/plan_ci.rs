@@ -1,5 +1,5 @@
 //! The CI half of the planner: the matrix legs of the affected apps, the base of a run, the `--ci` outputs and summary, the
-//! commit lint's range and the command line. The port of the rest of `scripts/affected.mjs` (`matrix`, `onlyApp`, `wantsWebkit`,
+//! commit lint's range and the command line. The port of the rest of the retired `scripts/affected.mjs` (`matrix`, `onlyApp`, `wantsWebkit`,
 //! `chooseBase`, `ciOutputs`, `summary`, `commitLintRange`, `parseArgs` and `ci`); the rules that decide which projects a change
 //! reaches are in [`crate::plan`].
 
@@ -787,6 +787,27 @@ mod tests {
         let bad = graph_with(vec![("x", json!({"cargo": ".", "os": ["macos-latest"]}))], Graph::new());
         let err = matrix(&plan(&["x"], json!({"x": ["rust"]}), json!({})), &bad, MatrixOpts::default()).unwrap_err();
         assert!(err.contains("must include ubuntu-latest"), "{err}");
+    }
+
+    #[test]
+    fn the_notices_check_runs_on_exactly_one_linux_leg_of_an_app_that_has_the_block() {
+        // Cases of the retired affected.test.mjs: the block, the leg that runs Rust or UI on Linux, never a host leg, an e2e shard or the WebKit leg.
+        let with = json!({"cargo": ".", "os": [LINUX, "windows-latest"], "ui": ["npm test"], "e2e": ["pw"], "e2eShards": 2,
+            "e2eWebkit": ["pw --project=webkit"], "notices": {"name": "X", "manifests": []}});
+        let mut without = with.clone();
+        without.as_object_mut().unwrap().remove("notices");
+        let p = plan(&["x"], json!({"x": ["rust", "ui"]}), json!({}));
+        let opts = MatrixOpts {
+            narrow: false,
+            webkit: true,
+        };
+        let legs = matrix(&p, &graph_with(vec![("x", with)], Graph::new()), opts).unwrap();
+        assert!(legs.len() > 3, "the main leg, a host leg, the shards and WebKit: {}", legs.len());
+        let checked: Vec<&Value> = legs.iter().filter(|l| l["notices"] == "true").collect();
+        assert_eq!(checked.len(), 1, "exactly one leg checks the notices");
+        assert!(checked[0]["os"] == LINUX && checked[0]["e2e_leg"] == "", "the Linux main leg");
+        let none = matrix(&p, &graph_with(vec![("x", without)], Graph::new()), opts).unwrap();
+        assert!(none.iter().all(|l| l["notices"] == "false"), "no block, no check");
     }
 
     #[test]

@@ -21,11 +21,11 @@
    ]
   },
   "packages": {
-   "crates": [
-    "fx-b"
-   ],
    "apps/x/app/src-tauri": [
     "x"
+   ],
+   "crates": [
+    "fx-b"
    ]
   },
   "why": {

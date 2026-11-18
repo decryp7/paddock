@@ -489,7 +489,10 @@ fn conformance_and_its_tests_run_on_every_push_whatever_changed() {
         assert_eq!(tests.rank, 0, "a cheap gate: it starts before any Clippy");
         assert_eq!(
             tests.env,
-            [("PADDOCK_TEST_CONCURRENCY".to_string(), "4".to_string())],
+            [
+                ("PADDOCK_TEST_CONCURRENCY".to_string(), "4".to_string()),
+                ("PADDOCK_GATE_TARGET_DIR".to_string(), "/t".to_string())
+            ],
             "a share of the machine beside the Clippy rows (ER-24), not one test process per core"
         );
     }
@@ -3497,4 +3500,24 @@ fn a_given_file_list_has_no_base_and_a_measured_change_has_one() {
     assert_eq!(measured.base.as_deref(), Some(c1.as_str()));
     let (pushed, _, _) = super::discover(&r.root, &c1, &[], std::slice::from_ref(&c2)).unwrap();
     assert_eq!(pushed.base.as_deref(), Some(c1.as_str()));
+}
+
+/// The contracts line of the conformance `tests` phase compiles paddock-dev's tests, so the row hands the executor the build folder
+/// (as configuration, through `PADDOCK_GATE_TARGET_DIR`, never a CARGO_* variable) and runs through heavy (ER-24).
+#[test]
+fn the_conformance_tests_row_passes_the_build_folder_to_the_executor_and_runs_heavy() {
+    let unrelated = json!({"conformance": false, "apps": [], "packages": {}});
+    let planned = plan_gates(&unrelated, &change(&["docs/x.md"]), &facts());
+    let g = run_gates(&planned)
+        .into_iter()
+        .find(|g| g.id == "conformance-tests")
+        .cloned()
+        .unwrap_or_else(|| panic!("{planned:?}"));
+    assert!(
+        g.env.contains(&("PADDOCK_GATE_TARGET_DIR".to_string(), "/t".to_string())),
+        "{:?}",
+        g.env
+    );
+    assert!(g.env.iter().all(|(k, _)| !k.starts_with("CARGO_")), "{:?}", g.env);
+    assert!(g.heavy);
 }

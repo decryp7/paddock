@@ -1,4 +1,4 @@
-//! The planner's rules on this repository's real graph, and the plan read from git: the cases of `scripts/affected.test.mjs`
+//! The planner's rules on this repository's real graph, and the plan read from git: the cases of the retired `scripts/affected.test.mjs`
 //! (the ones about the plan itself) moved here so they outlive the script (ADR 0022 R4). The synthetic `.gitea` trees and the
 //! pure parts (base choice, matrix legs, lock diff, command line) are unit tests of `plan`, `plan_gitea` and `plan_ci`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -136,7 +136,7 @@ fn a_ui_change_marks_the_tauri_shells_that_embed_a_ui_build_both_halves() {
     let r = run(&["ui/projects/paddock-ui/shell/src/public-api.ts"]);
     assert_eq!(r["ui"], true);
     // Debrief maps @decryp7/paddock-ui and @decryp7/paddock-e2e to ui/dist in its tsconfig (package 0.4 of the 1.2 plan), as
-    // Spotter and Dyno do, so its UI half is marked too (scripts/affected.test.mjs says the same).
+    // Spotter and Dyno do, so its UI half is marked too (the retired affected.test.mjs said the same).
     assert_eq!(
         names(&r["apps"]),
         ["debrief", "dyno", "pitcrew", "pitwall", "shell-demo", "spotter", "workbench-demo"]
@@ -209,7 +209,7 @@ fn a_per_machine_apps_installer_files_run_c91_and_the_shared_crates_sync_test() 
 fn uis_eslint_config_reaches_the_preset_and_docs_mark_only_the_link_check() {
     let r = run(&["eslint/src/preset.cjs"]);
     assert!(r["eslint"] == true && r["ui"] == true);
-    // Built, not quoted: scripts/affected.test.mjs fails on a quoted repo markdown path no DOC_INPUTS entry declares.
+    // Built, not quoted: a contracts test fails on a quoted repo markdown path no DOC_INPUTS entry declares.
     let adr = format!("docs/adr/{}", "0014-monorepo-under-paddock.md");
     let d = run(&[adr.as_str(), "crates/paddock-jobs/README.md", "README.md", "diagrams/paddock.xml"]);
     assert_eq!(
@@ -327,8 +327,8 @@ fn icons_conformance_scripts_ci_image_and_the_developer_tool_mark_what_they_feed
 }
 
 #[test]
-fn the_planner_files_mark_tools_ui_and_paddock_dev_never_an_app_and_the_rust_inputs_only_the_rust_builds() {
-    for f in ["scripts/affected.test.mjs", "scripts/affected.mjs"] {
+fn scripts_mark_tools_and_ui_never_an_app_and_the_rust_inputs_only_the_rust_builds() {
+    for f in ["scripts/publish.mjs", "scripts/new-app.test.mjs"] {
         let r = run(&[f]);
         assert_eq!(
             (
@@ -339,7 +339,7 @@ fn the_planner_files_mark_tools_ui_and_paddock_dev_never_an_app_and_the_rust_inp
                 r["ui"].clone(),
                 r["paddockDev"].clone()
             ),
-            (json!(false), json!([]), json!(false), json!(true), json!(true), json!(true)),
+            (json!(false), json!([]), json!(false), json!(true), json!(true), json!(false)),
             "{f}"
         );
     }
@@ -852,7 +852,7 @@ fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
     for (key, text) in &wf.jobs {
         assert!(
             paddock_dev::plan_gitea::CI_JOBS.iter().any(|(j, _)| j == key),
-            "ci.yml job {key} is not in plan_gitea::CI_JOBS (and CI_JOBS of scripts/affected.mjs)"
+            "ci.yml job {key} is not in plan_gitea::CI_JOBS (and tests/golden/ci-jobs.json)"
         );
         if key == "plan" {
             continue;
@@ -1039,4 +1039,50 @@ fn every_scheduled_workflow_skips_while_a_train_is_in_ci_and_never_marks_a_skipp
     assert!(plan.contains("ci schedule-skip"));
     let action = std::fs::read_to_string(root().join(".gitea/actions/schedule-skip/action.yml")).unwrap();
     assert!(action.contains("ci schedule-skip") && action.contains("fail open"));
+}
+
+#[test]
+fn every_c100_input_glob_marks_conformance_on_the_real_tree_and_an_ordinary_file_does_not() {
+    let globs: Vec<&str> = paddock_dev::gates::inputs::GLOBS
+        .iter()
+        .copied()
+        .filter(|g| !g.starts_with(".gitea/"))
+        .collect();
+    assert!(globs.len() > 15, "a positive control: the glob list is not empty");
+    for g in globs {
+        let f = g.replace("**/", "").replace("/**", "/x").replace('*', "x");
+        assert!(because(&run(&[&f])), "{g} ({f}) marks conformance");
+    }
+    assert!(!because(&run(&["crates/paddock-jobs/src/lib.rs"])));
+    assert!(!because(&run(&["docs/plans/x.md"])));
+}
+
+#[test]
+fn an_apps_notices_block_names_its_product_and_manifests_and_runs_on_the_linux_legs_only() {
+    for (name, config) in &graph().configs {
+        if let Some(n) = config.get("notices").filter(|n| !n.is_null()) {
+            assert!(
+                n["name"].is_string() && n["manifests"].is_array(),
+                "{name}: notices needs a name and its Cargo manifests"
+            );
+        }
+    }
+    assert!(
+        graph().config("pitwall")["notices"].is_object(),
+        "Pitwall has a notices block (1.1)"
+    );
+    let pw = leg_rows(
+        &run(&["apps/pitwall/crates/pitwall-core/src/lib.rs"]),
+        MatrixOpts::default(),
+        "pitwall",
+    );
+    assert!(pw.len() > 1, "Pitwall has host legs too");
+    for l in &pw {
+        assert_eq!(l["notices"], if l["os"] == LINUX { "true" } else { "false" }, "{}", l["os"]);
+    }
+    let action = std::fs::read_to_string(root().join(".gitea/actions/app-gates/action.yml")).unwrap();
+    assert!(
+        action.contains("scripts/notices.sh\" \"$APP\" --check"),
+        "app-gates runs the shared check"
+    );
 }

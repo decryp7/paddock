@@ -1074,6 +1074,14 @@ CARGO_BUILD_JOBS and the toolchain install (with its image fast path), because `
 compiler; and an action that release jobs use keeps its shell steps for release, rule 54 and tag runs until the release-path
 lane (G.7's guard), with both paths compared by a test meanwhile. Nothing else in this ADR changes.
 
+## Amendment (2026-11-18): the JavaScript planner is retired
+
+The user waived R4's "keep the JS planner for one release" on 2026-11-18, as the first step of retiring duplicated script and Rust
+pairs (docs/research/2026-11-18-tool-twin-pairs.md, P1). `scripts/affected.mjs`, `scripts/affected-marks.mjs`, their tests and
+the `PLAN_PLANNER=node` fallback are deleted. `./dev plan` is the one planner, and C100 (`./dev gates check`) asks it in process.
+Its reference is the recorded answers in `tools/paddock-dev/tests/golden` (first made by `affected.mjs`, since rewritten by the
+planner with `PADDOCK_GOLDEN_BLESS=1`); a changed answer is a reviewed edit.
+
 ## Sources
 
 - Features research note: [2026-10-dev-tooling-features.md](../research/2026-10-dev-tooling-features.md)
