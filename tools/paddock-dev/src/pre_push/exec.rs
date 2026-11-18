@@ -310,9 +310,10 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
         // No slot means the command never ran: not measured, never a pass or a failure (ADR 0102 on ADR 0089's rows).
         Ok(done) if done.no_slot() => Row::not_measured(
             format!(
-                "{} never got a heavy slot (queue allowance spent: queued {:.1} s of the {} min allowed, {}; load {}): the machine was busy with other steps, so nothing was measured",
+                "{} never got a heavy slot (queue allowance spent: queued {:.1} s{} of the {} min allowed, {}; load {}): the machine was busy with other steps, so nothing was measured",
                 gate.rerun(),
                 done.timing.map_or(0.0, |t| t.queued),
+                queue_holder(done.log.as_deref()).map_or(String::new(), |h| format!(" behind {h}")),
                 limits.queue.as_secs() / 60,
                 done.how,
                 load_text(exec.load())
@@ -668,6 +669,14 @@ pub fn heavy_command_for(
 pub fn on_path(env: &HashMap<String, String>, program: &str) -> bool {
     let path = env.get("PATH").cloned().unwrap_or_default();
     std::env::split_paths(&path).any(|d| exists(&d, program))
+}
+
+/// Who held the heavy slot while a step queued, from the step's log (`the lock is held by <who> (pid N) for ...`); `None` when the
+/// log is unreadable or never named one.
+fn queue_holder(log: Option<&str>) -> Option<String> {
+    let text = std::fs::read_to_string(log?).ok()?;
+    let held = text.lines().rev().find_map(|l| l.split("the lock is held by ").nth(1))?;
+    Some(held.split(" for ").next().unwrap_or(held).trim().to_string())
 }
 
 /// Whether the output of a gate run through `heavy` shows that it never got the slot: it printed who holds the lock
@@ -1063,6 +1072,60 @@ mod tests {
         fn slot(&self) -> Slot {
             self.slot
         }
+    }
+
+    /// An executor whose heavy step got no slot: `heavy` exited 79 and its log says who held the slot.
+    struct NoSlot {
+        log: PathBuf,
+    }
+
+    impl Exec for NoSlot {
+        fn has_tool(&self, _: &str) -> bool {
+            true
+        }
+        fn docker_up(&self) -> bool {
+            true
+        }
+        fn run(&self, _: &Gate, _: Limits) -> Result<Done, String> {
+            Ok(Done {
+                success: false,
+                how: "queue limit: no slot taken in time".into(),
+                tail: String::new(),
+                log: Some(self.log.display().to_string()),
+                timing: Some(Timing { queued: 1800.0, ran: 0.0 }),
+            })
+        }
+    }
+
+    #[test]
+    fn a_step_that_got_no_slot_says_who_it_queued_behind() {
+        let d = tempfile::tempdir().unwrap();
+        let log = d.path().join("g.log");
+        std::fs::write(&log, "pre-push waiting: the lock is held by agent-7 (pid 41) for 31 min\n").unwrap();
+        let Planned::Run(g) = gate_row("clippy a", true) else {
+            unreachable!()
+        };
+        let limits = Limits {
+            run: Duration::from_secs(900),
+            queue: Duration::from_secs(1800),
+        };
+        let row = decide_with(&g, &NoSlot { log }, limits, &test_subject(), &mut |_| {});
+        assert!(row.reason().contains("queued 1800.0 s behind agent-7 (pid 41)"), "{}", row.reason());
+        // Without a holder in the log the reason still says the queue time, and does not invent one.
+        let row = decide_with(
+            &g,
+            &NoSlot {
+                log: d.path().join("none.log"),
+            },
+            limits,
+            &test_subject(),
+            &mut |_| {},
+        );
+        assert!(
+            row.reason().contains("queued 1800.0 s") && !row.reason().contains("behind"),
+            "{}",
+            row.reason()
+        );
     }
 
     fn gate_row(id: &str, heavy: bool) -> Planned {
