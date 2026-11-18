@@ -3,6 +3,9 @@ import { test } from 'node:test';
 import { graceAsserts, mask, threadSleeps, tsWallClockAsserts, wallClockAsserts } from '../src/checks/C30-wall-clock.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
+/** A fixture tree with C30's allow list (empty unless given): the check reads it before anything else. */
+const c30App = (files, allow = []) => makeApp({ 'conformance/c30-allow.json': JSON.stringify({ allow }), ...files });
+
 const wrap = (body) => `use std::time::*;\n#[test]\nfn it() {\n${body}\n}\n`;
 
 test('C30 bad: elapsed, Instant arithmetic and tainted variables compared with a Duration', () => {
@@ -32,14 +35,14 @@ test('C30 hang guards: waived from 10 s, too tight below, a comment line above c
 
 test('C30 through the runner: a warning per assertion, none for a clean or guarded file', async () => {
   const bad = wrap('    let t = Instant::now();\n    assert!(t.elapsed() < Duration::from_millis(700));');
-  const f = await findingsOf('C30', makeApp({ 'crates/a/tests/bad.rs': bad, 'crates/a/tests/good.rs': wrap('    assert!(true);') }));
+  const f = await findingsOf('C30', c30App({ 'crates/a/tests/bad.rs': bad, 'crates/a/tests/good.rs': wrap('    assert!(true);') }));
   assert.equal(f.length, 1);
   assert.equal(f[0].severity, 'warn');
   assert.equal(f[0].file, 'crates/a/tests/bad.rs');
   const guarded = wrap('    let t = Instant::now();\n    // conformance: hang-guard\n    assert!(t.elapsed() < Duration::from_secs(30));');
-  assert.deepEqual(await findingsOf('C30', makeApp({ 'crates/a/tests/g.rs': guarded })), []);
+  assert.deepEqual(await findingsOf('C30', c30App({ 'crates/a/tests/g.rs': guarded })), []);
   const tight = wrap('    let t = Instant::now();\n    // conformance: hang-guard\n    assert!(t.elapsed() < Duration::from_secs(3));');
-  const g = await findingsOf('C30', makeApp({ 'crates/a/tests/t.rs': tight }));
+  const g = await findingsOf('C30', c30App({ 'crates/a/tests/t.rs': tight }));
   assert.match(g[0].message, /too tight/);
 });
 
@@ -52,29 +55,29 @@ test('mask keeps newlines and blanks comments and strings', () => {
 const sleepy = (body) => `use std::{sync::*, thread, time::Duration};\n#[test]\nfn it() {\n${body}\n}\n`;
 
 test('C30 through the runner: an assertion over a product grace period is an error (ER-21); a hang guard or grace-free waiver is not', async () => {
-  const f = await findingsOf('C30', makeApp({ 'crates/a/tests/close.rs': wrap('    assert!(b.close(), "ends by itself");') }));
+  const f = await findingsOf('C30', c30App({ 'crates/a/tests/close.rs': wrap('    assert!(b.close(), "ends by itself");') }));
   assert.equal(f.length, 1);
   assert.equal(f[0].severity, 'error');
   assert.match(f[0].message, /within its grace/);
-  const g = await findingsOf('C30', makeApp({ 'crates/a/tests/g.rs': wrap('    assert!(b.close_gracefully(Duration::from_secs(5)));') }));
+  const g = await findingsOf('C30', c30App({ 'crates/a/tests/g.rs': wrap('    assert!(b.close_gracefully(Duration::from_secs(5)));') }));
   assert.equal(g[0].severity, 'error');
   const guarded = wrap('    // conformance: hang-guard — only stops a browser that never exits\n    assert!(b.close_gracefully(Duration::from_secs(40)));');
-  assert.deepEqual(await findingsOf('C30', makeApp({ 'crates/a/tests/h.rs': guarded })), []);
+  assert.deepEqual(await findingsOf('C30', c30App({ 'crates/a/tests/h.rs': guarded })), []);
   const ended = wrap('    // conformance: grace-free — it ended already\n    assert!(b.close(), "a second close");');
-  assert.deepEqual(await findingsOf('C30', makeApp({ 'crates/a/tests/e.rs': ended })), []);
+  assert.deepEqual(await findingsOf('C30', c30App({ 'crates/a/tests/e.rs': ended })), []);
 });
 
 test('C30 hang guards at or above the CI test budget (60 s) are flagged: CI kills the test before the guard reports', async () => {
   const long = wrap('    // conformance: hang-guard — only stops a browser that never exits\n    assert!(b.close_gracefully(Duration::from_secs(120)));');
-  const f = await findingsOf('C30', makeApp({ 'crates/a/tests/l.rs': long }));
+  const f = await findingsOf('C30', c30App({ 'crates/a/tests/l.rs': long }));
   assert.equal(f.length, 1);
   assert.equal(f[0].severity, 'warn');
   assert.match(f[0].message, /60 s/);
   const clock = wrap('    let t = Instant::now();\n    // conformance: hang-guard — a broken fake must fail the test\n    assert!(t.elapsed() < Duration::from_secs(60));');
-  assert.match((await findingsOf('C30', makeApp({ 'crates/a/tests/c.rs': clock })))[0]?.message ?? '', /60 s/);
+  assert.match((await findingsOf('C30', c30App({ 'crates/a/tests/c.rs': clock })))[0]?.message ?? '', /60 s/);
   const ok = wrap('    // conformance: hang-guard — only stops a browser that never exits\n    assert!(b.close_gracefully(Duration::from_secs(40)));');
-  assert.deepEqual(await findingsOf('C30', makeApp({ 'crates/a/tests/ok.rs': ok })), []);
-  const err = await findingsOf('C30', makeApp({ 'crates/a/tests/e.rs': wrap('    assert!(b.close());') }));
+  assert.deepEqual(await findingsOf('C30', c30App({ 'crates/a/tests/ok.rs': ok })), []);
+  const err = await findingsOf('C30', c30App({ 'crates/a/tests/e.rs': wrap('    assert!(b.close());') }));
   assert.match(err[0].fix, /from_secs\(40\)/);
 });
 
@@ -110,15 +113,15 @@ test('C30 TypeScript: Date.now() / performance.now() differences asserted are fl
 test('C30 through the runner: sleeps in Rust and wall-clock expects in specs are warnings, other files are left alone', async () => {
   const rs = sleepy('    let h = thread::spawn(|| work());\n    thread::sleep(Duration::from_millis(50));\n    h.join().unwrap();');
   const ts = "it('x', () => {\n  const t0 = Date.now();\n  expect(Date.now() - t0).toBeLessThan(700);\n});\n";
-  const f = await findingsOf('C30', makeApp({ 'crates/a/tests/s.rs': rs, 'app/src/a.spec.ts': ts, 'app/e2e/b.ts': ts, 'app/src/app.ts': ts }));
+  const f = await findingsOf('C30', c30App({ 'crates/a/tests/s.rs': rs, 'app/src/a.spec.ts': ts, 'app/e2e/b.ts': ts, 'app/src/app.ts': ts }));
   assert.deepEqual(f.map((x) => x.file).sort(), ['app/e2e/b.ts', 'app/src/a.spec.ts', 'crates/a/tests/s.rs']);
   assert.ok(f.every((x) => x.severity === 'warn'));
 });
 
 test('C30 through the runner: a sleep waiver needs a reason', async () => {
   const body = (c) => sleepy(`    let h = thread::spawn(|| work());\n    ${c}\n    thread::sleep(Duration::from_millis(50));\n    h.join().unwrap();`);
-  assert.deepEqual(await findingsOf('C30', makeApp({ 'crates/a/tests/a.rs': body('// conformance: hang-guard — the kernel gives no event for a mtime tick') })), []);
-  const f = await findingsOf('C30', makeApp({ 'crates/a/tests/a.rs': body('// conformance: hang-guard') }));
+  assert.deepEqual(await findingsOf('C30', c30App({ 'crates/a/tests/a.rs': body('// conformance: hang-guard — the kernel gives no event for a mtime tick') })), []);
+  const f = await findingsOf('C30', c30App({ 'crates/a/tests/a.rs': body('// conformance: hang-guard') }));
   assert.match(f[0].message, /gives no reason/);
 });
 
@@ -147,15 +150,96 @@ test('C30 grace: close(id), negated asserts and other close_* names are not the 
 test('C30 grace: a guarded close_gracefully of under 10 s is too tight', async () => {
   const tight = wrap('    // conformance: hang-guard\n    assert!(b.close_gracefully(Duration::from_millis(200)));');
   assert.equal(graceAsserts(tight)[0].limitMs, 200);
-  const f = await findingsOf('C30', makeApp({ 'crates/a/tests/t.rs': tight }));
+  const f = await findingsOf('C30', c30App({ 'crates/a/tests/t.rs': tight }));
   assert.equal(f.length, 1);
   assert.match(f[0].message, /too tight/);
   const ok = wrap('    // conformance: hang-guard\n    assert!(b.close_gracefully(Duration::from_secs(40)));');
-  assert.deepEqual(await findingsOf('C30', makeApp({ 'crates/a/tests/t.rs': ok })), []);
+  assert.deepEqual(await findingsOf('C30', c30App({ 'crates/a/tests/t.rs': ok })), []);
 });
 
 test('C30 grace through the runner: a warning for an unguarded assert over close()', async () => {
-  const f = await findingsOf('C30', makeApp({ 'crates/a/tests/b.rs': wrap('    assert!(b.close());'), 'crates/a/tests/ok.rs': wrap('    b.close();') }));
+  const f = await findingsOf('C30', c30App({ 'crates/a/tests/b.rs': wrap('    assert!(b.close());'), 'crates/a/tests/ok.rs': wrap('    b.close();') }));
   assert.equal(f.length, 1);
   assert.equal(f[0].file, 'crates/a/tests/b.rs');
+});
+
+// ---- the allow list of today's sites (conformance/c30-allow.json): listed sites pass, new ones are reported, the list only shrinks ----
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { ALLOW, BLOCKING } from '../src/checks/C30-wall-clock.mjs';
+
+const SITE = 'assert!(t.elapsed() < Duration::from_millis(700));';
+const twoSites = wrap(`    let t = Instant::now();\n    ${SITE}\n    work();\n    ${SITE}`);
+const listed = (count = 1) => ({ path: 'crates/a/tests/bad.rs', site: SITE, reason: 'listed in a test fixture', count });
+
+test('C30 allow list: a listed site passes, a site beyond its count and an unlisted one are reported at their own line', async () => {
+  assert.deepEqual(await findingsOf('C30', c30App({ 'crates/a/tests/bad.rs': twoSites }, [listed(2)])), []);
+  const beyond = await findingsOf('C30', c30App({ 'crates/a/tests/bad.rs': twoSites }, [listed(1)]));
+  assert.deepEqual(beyond.map((f) => [f.file, f.line, f.severity]), [['crates/a/tests/bad.rs', 7, BLOCKING ? 'error' : 'warn']]);
+  const unlisted = await findingsOf('C30', c30App({ 'crates/a/tests/bad.rs': twoSites, 'crates/a/tests/new.rs': twoSites }, [listed(2)]));
+  assert.deepEqual(unlisted.map((f) => [f.file, f.line]), [['crates/a/tests/new.rs', 5], ['crates/a/tests/new.rs', 7]]);
+  assert.match(unlisted[0].message, /asserts on the wall clock/);
+});
+
+test('C30 allow list: an entry whose site is gone is stale (a warning: remove it); the grace-period error is never listed', async () => {
+  const f = await findingsOf('C30', c30App({ 'crates/a/tests/bad.rs': wrap('    assert!(true);') }, [listed(1)]));
+  assert.deepEqual(f.map((x) => [x.file, x.severity]), [[ALLOW, 'warn']]);
+  assert.match(f[0].message, /stale allow entry \(crates\/a\/tests\/bad\.rs: .*\) matches no site/);
+  const close = 'assert!(b.close());';
+  const g = await findingsOf('C30', c30App({ 'crates/a/tests/c.rs': wrap(`    ${close}`) }, [{ path: 'crates/a/tests/c.rs', site: close, reason: 'listed in a test fixture' }]));
+  assert.deepEqual(g.map((x) => [x.file, x.severity]).sort(), [[ALLOW, 'warn'], ['crates/a/tests/c.rs', 'error']], 'the error stays and its entry is stale');
+});
+
+test('C30 allow list: a broken or missing list is one check-broken finding, nothing else', async () => {
+  for (const files of [{}, { [ALLOW]: 'nope' }, { [ALLOW]: '{}' }]) {
+    const f = await findingsOf('C30', makeApp({ 'crates/a/tests/bad.rs': twoSites, ...files }));
+    assert.deepEqual(f.map((x) => [x.file, x.outcome, x.unwaivable]), [[ALLOW, 'check-broken', true]]);
+  }
+});
+
+const sh = (root, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: root, stdio: 'ignore' });
+/** A repository whose `main` has `baseFiles` and the list `base`, and whose `topic` commit has `nowFiles` and the list `now`. */
+function repo(baseFiles, base, nowFiles, now) {
+  const root = c30App(baseFiles, base);
+  sh(root, 'init', '-q', '-b', 'main');
+  sh(root, 'add', '.');
+  sh(root, 'commit', '-q', '-m', 'base');
+  sh(root, 'checkout', '-q', '-b', 'topic');
+  for (const [p, text] of Object.entries(nowFiles)) writeFileSync(join(root, p), text);
+  writeFileSync(join(root, ALLOW), JSON.stringify({ allow: now }));
+  sh(root, 'add', '.');
+  sh(root, 'commit', '-q', '-a', '--allow-empty', '-m', 'topic');
+  return root;
+}
+const run = (root) => findingsOf('C30', root, { options: { baseRef: 'main' } });
+
+test('C30 allow list growth: a new finding put on the list is growth against the merge base, one unwaivable finding at the list', async () => {
+  const added = { path: 'crates/a/tests/new.rs', site: SITE, reason: 'listed in a test fixture', count: 2 };
+  const root = repo({ 'crates/a/tests/bad.rs': twoSites }, [listed(2)], { 'crates/a/tests/new.rs': twoSites }, [listed(2), added]);
+  const f = await run(root);
+  assert.deepEqual(f.map((x) => [x.file, x.line, x.severity, x.unwaivable]), [[ALLOW, 1, BLOCKING ? 'error' : 'warn', true]]);
+  assert.match(f[0].message, /the allow list grew: 2 entries are \(counting each `count`\) not in conformance\/c30-allow\.json at the merge base/);
+  // Without the entry the new sites are reported as findings of their own, and the list did not grow.
+  const unlisted = await run(repo({ 'crates/a/tests/bad.rs': twoSites }, [listed(2)], { 'crates/a/tests/new.rs': twoSites }, [listed(2)]));
+  assert.deepEqual(unlisted.map((x) => [x.file, x.line]), [['crates/a/tests/new.rs', 5], ['crates/a/tests/new.rs', 7]]);
+});
+
+test('C30 allow list growth: fixing a site and removing its entry shrinks the list, with no finding; a raised count is growth', async () => {
+  const fixed = wrap(`    let t = Instant::now();\n    ${SITE}\n    work();`);
+  assert.deepEqual(await run(repo({ 'crates/a/tests/bad.rs': twoSites }, [listed(2)], { 'crates/a/tests/bad.rs': fixed }, [listed(1)])), []);
+  const gone = await run(repo({ 'crates/a/tests/bad.rs': twoSites }, [listed(2)], { 'crates/a/tests/bad.rs': wrap('    assert!(true);') }, []));
+  assert.deepEqual(gone, [], 'the whole entry removed');
+  const raised = await run(repo({ 'crates/a/tests/bad.rs': fixed }, [listed(1)], { 'crates/a/tests/bad.rs': twoSites }, [listed(2)]));
+  assert.match(raised.map((x) => x.message).join('\n'), /the allow list grew: 1 entry is/);
+});
+
+test('C30 allow list: the repository\'s own list is well formed, names files C30 reads and has no entry twice', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { parseAllow, readsFile } = await import('../src/checks/C30-wall-clock.mjs');
+  const entries = parseAllow(readFileSync(new URL('../c30-allow.json', import.meta.url), 'utf8'));
+  assert.ok(entries.length > 0);
+  assert.deepEqual(entries.filter((e) => !readsFile(e.path)).map((e) => e.path), []);
+  const keys = entries.map((e) => `${e.path}\0${e.site}`);
+  assert.equal(new Set(keys).size, keys.length, 'one entry per path and site; a repeated site is one entry with a count');
 });

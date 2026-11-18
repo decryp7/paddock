@@ -1,0 +1,895 @@
+{
+  "allow": [
+    {
+      "path": "apps/debrief/app/src-tauri/src/browser/approvals.rs",
+      "site": "assert!(start.elapsed() >= Duration::from_millis(30));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
+      "site": "assert!(start.elapsed() < Duration::from_secs(10), \"bounded\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(10), \"no wait for the user's check\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
+      "site": "assert!(started.elapsed() < LOAD_TIMEOUT / 3, \"without waiting for the load timeout\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/jobs/service.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(5), \"the caller did not wait for it\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/lifecycle.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/lifecycle.rs",
+      "site": "assert!(started <= now + START_TOLERANCE_SECS && now - started < 24 * 3600);",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/lifecycle.rs",
+      "site": "assert!(started.elapsed() < std::time::Duration::from_secs(2));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/lifecycle.rs",
+      "site": "assert!(started.elapsed() < std::time::Duration::from_secs(60));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/lifecycle.rs",
+      "site": "let controls = crate::jobs::Controls::cancel(|| std::thread::sleep(std::time::Duration::from_secs(30",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/lifecycle.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_millis(300));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/lifecycle.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_secs(30));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/live.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(1), \"the tray did not wait\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/opener.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(2), \"must not wait for the helper\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/profiling.rs",
+      "site": "std::thread::sleep(Duration::from_millis(300));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/window_capture/tests.rs",
+      "site": "assert!(started.elapsed() < CAPTURE_TIMEOUT, \"no waiting for the timeout\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src-tauri/src/windows.rs",
+      "site": "assert!(started.elapsed() < std::time::Duration::from_secs(1), \"the registry lock was free\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/app/src/app/diagnostics/diagnostics.spec.ts",
+      "site": "expect(performance.now() - started).toBeLessThan(50);",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/chromium-driver/src/launch.rs",
+      "site": "assert!(start.elapsed() < Duration::from_secs(5), \"bounded\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/chromium-driver/src/launch.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(5), \"no wait for the load timeout\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/chromium-driver/src/launch.rs",
+      "site": "assert!(started.elapsed() < START_PAGE_WAIT + Duration::from_secs(3), \"bounded\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-agent/src/agent/tests.rs",
+      "site": "std::thread::sleep(Duration::from_millis(100));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-agent/src/clock.rs",
+      "site": "assert!(start.elapsed() < Duration::from_secs(1));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-agent/src/clock.rs",
+      "site": "assert!(start.elapsed() >= Duration::from_millis(30));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-ai/src/browser/research.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-ai/src/browser/research.rs",
+      "site": "assert!(waited >= pause * 5, \"{waited:?}\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-ai/src/engine/pitwall/http.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(2));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-ai/src/engine/pitwall/http.rs",
+      "site": "std::thread::sleep(Duration::from_millis(100));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-ai/src/engine/pitwall/tests.rs",
+      "site": "assert!(t.elapsed() < Duration::from_millis(500), \"{:?}\", t.elapsed());",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-ai/src/engine/pitwall/tests.rs",
+      "site": "std::thread::sleep(Duration::from_millis(100));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-ai/tests/it/segmented_download.rs",
+      "site": "assert!(t.elapsed() < Duration::from_secs(5));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-ai/tests/it/segmented_download.rs",
+      "site": "std::thread::sleep(Duration::from_millis(3));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-cli/tests/it/cli.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_millis(30));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-collect/src/runner.rs",
+      "site": "assert!(elapsed < Duration::from_secs(10), \"answered after {elapsed:?}\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/src/events/tests.rs",
+      "site": "assert!(start.elapsed() < Duration::from_secs(1), \"publish blocked: {:?}\", start.elapsed());",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/src/guard/tests.rs",
+      "site": "std::thread::sleep(Duration::from_millis(10));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/src/guard/tests.rs",
+      "site": "std::thread::sleep(Duration::from_millis(300));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/src/ingest/pipeline.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(2), \"{:?}\", started.elapsed());",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/src/ingest/pipeline.rs",
+      "site": "std::thread::sleep(Duration::from_millis(1));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/src/names/alias_job.rs",
+      "site": "assert!(started.elapsed() >= Duration::from_millis(20));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/src/plugin/services.rs",
+      "site": "std::thread::sleep(Duration::from_millis(10));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/src/plugin/tools/tests.rs",
+      "site": "assert!(started.elapsed() < Duration::from_millis(390), \"abandoned, not awaited\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/src/plugin/tools/tests.rs",
+      "site": "std::thread::sleep(Duration::from_millis(10));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/src/plugin/watchdog.rs",
+      "site": "std::thread::sleep(Duration::from_millis(5));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/src/plugin/watchdog.rs",
+      "site": "std::thread::sleep(Duration::from_millis(50));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/src/spans/infer/tests.rs",
+      "site": "assert!(secs < 120.0, \"{secs} s\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/tests/it/analysis.rs",
+      "site": "assert!(started.elapsed().as_secs() < 5, \"{:?}\", started.elapsed());",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/tests/it/archives_projects.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_millis(20));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/tests/it/findings_cap.rs",
+      "site": "assert!(took.as_secs() < 5, \"ranking took {took:?}\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/tests/it/import_discovery.rs",
+      "site": "assert!(t.elapsed() < Duration::from_secs(2));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/tests/it/import_discovery.rs",
+      "site": "std::thread::sleep(Duration::from_millis(1));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/tests/it/package_export_cancel.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_micros(100));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/tests/it/patterns_exceptions.rs",
+      "site": "assert!(elapsed.as_secs() < 10, \"took {elapsed:?}\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/tests/it/plugin_graph.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/tests/it/plugin_graph.rs",
+      "site": "assert!(e.contains(\"abandoned\") && started.elapsed() < Duration::from_millis(350), \"{e}\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/tests/it/plugin_graph.rs",
+      "site": "std::thread::sleep(Duration::from_millis(400));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/tests/it/store.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_millis(5));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/tests/it/tail.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/tests/it/tail.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(1), \"stopping returned at once\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-core/tests/it/tail.rs",
+      "site": "std::thread::sleep(Duration::from_millis(400));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
+      "site": "assert!(started.elapsed() < CANCEL_GRACE);",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
+      "site": "assert!(started.elapsed() >= CANCEL_GRACE);",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
+      "site": "std::thread::sleep(Duration::from_millis(1));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
+      "site": "std::thread::sleep(Duration::from_millis(200));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
+      "site": "std::thread::sleep(Duration::from_secs(4));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-ipc/tests/it/launch.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(5));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-monitor/src/dotnet_win_tests.rs",
+      "site": "std::thread::sleep(Duration::from_millis(100));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-monitor/src/dotnet_win_tests.rs",
+      "site": "std::thread::sleep(Duration::from_millis(1500));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-monitor/src/source.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_millis(10));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-monitor/src/tests.rs",
+      "site": "assert!(t.elapsed() < Duration::from_secs(5));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-api/src/output.rs",
+      "site": "std::thread::sleep(Duration::from_millis(600));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-dotnet/src/plugin/elevated.rs",
+      "site": "std::thread::sleep(Duration::from_millis(20));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-dotnet/src/plugin/tool.rs",
+      "site": "std::thread::sleep(Duration::from_millis(20));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry",
+      "count": 2
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-dotnet/src/recording.rs",
+      "site": "assert!(r.elapsed() < Duration::from_secs(60));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
+      "site": "std::thread::sleep(Duration::from_millis(100));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-dumps/src/capture.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_millis(500));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-dumps/src/capture.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_secs(30));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-host/tests/it/remote.rs",
+      "site": "assert!(early >= Duration::from_millis(400), \"progress arrived {early:?} before the answer\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-host/tests/it/remote.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(30), \"{:?}\", started.elapsed());",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-native/src/captures.rs",
+      "site": "std::thread::sleep(Duration::from_millis(5));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry",
+      "count": 3
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-native/tests/it/real_process.rs",
+      "site": "assert!(t.elapsed() < Duration::from_secs(5));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-tools/src/monitor_tool.rs",
+      "site": "std::thread::sleep(Duration::from_millis(30));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-windows/src/command.rs",
+      "site": "assert!(elapsed < Duration::from_secs(10), \"answered after {elapsed:?}\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower/tests.rs",
+      "site": "assert!(t.elapsed() < Duration::from_secs(1), \"{:?}\", t.elapsed());",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower/tests.rs",
+      "site": "std::thread::sleep(Duration::from_millis(100));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower/tests.rs",
+      "site": "std::thread::sleep(Duration::from_millis(50));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry",
+      "count": 2
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugin-windows/tests/it/eventlog_live.rs",
+      "site": "std::thread::sleep(Duration::from_millis(300));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugins/tests/it/native_profiling.rs",
+      "site": "std::thread::sleep(Duration::from_millis(200));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-plugins/tests/it/native_profiling.rs",
+      "site": "std::thread::sleep(Duration::from_millis(500));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-duck/src/analysis.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_millis(300));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-duck/tests/bench_reads.rs",
+      "site": "std::thread::sleep(Duration::from_millis(20));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-duck/tests/it/import_phases.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_micros(50));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-duck/tests/it/large_folder.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-duck/tests/it/long_ops.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(60), \"indexing did not finish: {s:?}\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-duck/tests/it/qlang.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_millis(5));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-duck/tests/it/redacted_copy.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_micros(200));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-duck/tests/it/store_pane.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(20));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-duck/tests/it/store_pane.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(20), \"{:?}\", started.elapsed());",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-duck/tests/it/store_pane.rs",
+      "site": "std::thread::sleep(Duration::from_millis(300));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry",
+      "count": 2
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-duck/tests/it/store_pane.rs",
+      "site": "std::thread::sleep(Duration::from_millis(400));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-worker/tests/it/parity.rs",
+      "site": "std::thread::sleep(Duration::from_millis(5));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+      "site": "Err(e) if e.is_retryable() && Instant::now() < deadline => std::thread::sleep(Duration::from_millis(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry",
+      "count": 2
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(20));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+      "site": "std::thread::sleep(Duration::from_millis(30));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+      "site": "std::thread::sleep(Duration::from_millis(300));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-symbols/src/servers.rs",
+      "site": "std::thread::sleep(Duration::from_millis(20));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-symbols/tests/it/dbghelp.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_millis(50));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/debrief/crates/debrief-video/tests/it/fake_ffmpeg.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(20));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/app/src-tauri/src/login.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/app/src-tauri/tests/shell.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/counters.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(2));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/counters.rs",
+      "site": "std::thread::sleep(Duration::from_millis(10));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/counters.rs",
+      "site": "std::thread::sleep(Duration::from_millis(20));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/disk/centre.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/disk/centre.rs",
+      "site": "assert!(began.elapsed() < std::time::Duration::from_secs(60), \"the second listing never ran\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/extras/finder.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(5), \"Cancel waited for the stuck call\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/extras/finder.rs",
+      "site": "std::thread::sleep(Duration::from_millis(10));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/tests/bench_units.rs",
+      "site": "assert!(took < Duration::from_secs(2), \"Cancel returned after {took:?}\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/tests/jobs.rs",
+      "site": "assert!(cancelled_at.elapsed() < Duration::from_secs(5), \"Cancel did not wait for the tool\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/tests/jobs.rs",
+      "site": "std::thread::sleep(Duration::from_millis(5));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/tests/power.rs",
+      "site": "assert!(began.elapsed() < HANG_GUARD, \"the agent never noted its start\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/tests/power.rs",
+      "site": "assert!(began.elapsed() < HANG_GUARD, \"the countdown was never pushed to the app\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/tests/power.rs",
+      "site": "assert!(began.elapsed() < HANG_GUARD, \"the process table never filled\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/tests/term.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/tests/wol.rs",
+      "site": "assert!(t.elapsed() < Duration::from_secs(20), \"the fake clock waited the 120 s\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-helper/src/server.rs",
+      "site": "std::thread::sleep(Duration::from_millis(30));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-helper/src/setup.rs",
+      "site": "assert!(waited.elapsed().as_secs() < 20, \"the logging thread never wrote its file\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-platform/src/macos/procinfo.rs",
+      "site": "assert!(started > 1_000_000_000 && started <= now);",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-platform/src/network.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_millis(20));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-platform/src/process.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-platform/src/process.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(10));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-platform/src/process.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(15));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-platform/src/process.rs",
+      "site": "std::thread::sleep(Duration::from_millis(200));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-platform/tests/windows_wake_timer_vm.rs",
+      "site": "assert!(began.elapsed() < Duration::from_secs(120), \"the timer never fired\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-plugin-host/tests/processes.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry",
+      "count": 2
+    },
+    {
+      "path": "apps/pitcrew/crates/notify-channels/src/tests.rs",
+      "site": "std::thread::sleep(Duration::from_millis(1500));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/pitcrew/crates/pitcrew-service/src/login_env.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(15));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/pitcrew/crates/pitcrew-service/src/probe.rs",
+      "site": "std::thread::sleep(std::time::Duration::from_millis(100));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/pitcrew/crates/pitcrew-service/src/process.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(15));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/pitwall/app/src-tauri/src/chat_host/tests.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/pitwall/app/src-tauri/src/commands.rs",
+      "site": "std::thread::sleep(Duration::from_millis(5));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/spotter/app/src/app/features/dashboard/dashboard-page.spec.ts",
+      "site": "expect(until - before).toBeGreaterThan(0);",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/spotter/app/src/app/features/dashboard/dashboard-page.spec.ts",
+      "site": "expect(until - before).toBeLessThanOrEqual(24 * 3_600_000 + 5_000);",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/spotter/crates/spotter-engine/tests/engine_robustness.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(2), \"the timeout was honoured\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/spotter/crates/spotter-engine/tests/fetch_http.rs",
+      "site": "assert!(started.elapsed() >= Duration::from_millis(280), \"{:?}\", started.elapsed());",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/spotter/crates/spotter-engine/tests/long_operations.rs",
+      "site": "assert!(began.elapsed() < Duration::from_secs(10));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/spotter/crates/spotter-engine/tests/long_operations.rs",
+      "site": "assert!(began.elapsed() < Duration::from_secs(10), \"{:?}\", began.elapsed());",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/spotter/crates/spotter-engine/tests/mail_delivery.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(10), \"the total limit ended it\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/spotter/crates/spotter-engine/tests/mail_delivery.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(5));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/spotter/crates/spotter-render/src/launch.rs",
+      "site": "assert!(t.elapsed() < Duration::from_secs(30), \"waited {:?}\", t.elapsed());",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/spotter/crates/spotter-render/tests/install_progress.rs",
+      "site": "assert!(began.elapsed() < Duration::from_secs(5));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/spotter/crates/spotter-render/tests/real_browser.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/spotter/crates/spotter-render/tests/real_browser.rs",
+      "site": "assert!(elapsed >= Duration::from_millis(5500), \"ended before the 6 s budget: {elapsed:?}\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/spotter/crates/spotter-sources/src/folder.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "apps/spotter/crates/spotter-sources/src/folder.rs",
+      "site": "std::thread::sleep(Duration::from_millis(60));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "crates/paddock-assistant/tests/it/pitwall.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry",
+      "count": 2
+    },
+    {
+      "path": "crates/paddock-assistant/tests/it/turns.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "crates/paddock-download/tests/it/http.rs",
+      "site": "std::thread::sleep(Duration::from_millis(500));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "crates/paddock-files/src/open.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "crates/paddock-ipc/src/testing/endings/log.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "crates/paddock-power/src/event_thread.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry",
+      "count": 3
+    },
+    {
+      "path": "crates/paddock-proc/src/identity.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "crates/paddock-service/tests/it/model.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "crates/paddock-testkit-start/src/recorded.rs",
+      "site": "assert!(t.elapsed() < HANG_GUARD / 2, \"{:?}\", t.elapsed());",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "crates/paddock-testkit/src/process.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry",
+      "count": 2
+    },
+    {
+      "path": "tools/heavy/tests/it/priority.rs",
+      "site": "assert!(t.elapsed() < Duration::from_secs(20));",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "tools/heavy/tests/it/real.rs",
+      "site": "assert!(t0.elapsed().as_secs() < 8);",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "tools/heavy/tests/it/real.rs",
+      "site": "assert!(t0.elapsed().as_secs() <= 4);",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "tools/heavy/tests/it/real.rs",
+      "site": "assert!(took.as_secs() < 8, \"heavy waited {took:?} for a background process's stderr\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "tools/paddock-dev/src/ci_run/tests.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(20), \"bounded\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "tools/paddock-dev/src/input_hash.rs",
+      "site": "assert!(started.elapsed() < Duration::from_secs(5), \"took {:?}\", started.elapsed());",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "tools/paddock-dev/src/load.rs",
+      "site": "assert!(started.elapsed().as_secs() < 20);",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "tools/paddock-dev/src/local_sccache.rs",
+      "site": "assert!(t.elapsed() < Duration::from_secs(5), \"{:?}\", t.elapsed());",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "tools/paddock-dev/src/pre_push/heavy_tool.rs",
+      "site": "assert!(",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "tools/paddock-dev/tests/it/worktree/ops.rs",
+      "site": "assert!(took < Duration::from_millis(1000), \"a claim waited {took:?} behind an add\");",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    },
+    {
+      "path": "ui/projects/paddock-e2e/selftest/settle.shot.ts",
+      "site": "expect(Date.now() - t, 'settling waited for transitions that restart').toBeLessThan(800);",
+      "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
+    }
+  ]
+}

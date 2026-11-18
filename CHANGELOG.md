@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Conformance C30: today's wall-clock sites are an allow list that may only shrink
+- `conformance/c30-allow.json` lists the 189 sites C30 found on 2026-11-18 (176 entries, the flagged line's text as `site`, read by the
+  shared allow-list reader). A listed site passes; an unlisted one is still a warning, and so is an entry the merge base's list lacks
+  (growth, unwaivable) until the list is on main, when C30 blocks both (`BLOCKING`). Stale entries warn. C30's scope is now the
+  Paddock root, as for every check with an allow list. The shared JavaScript reader takes `growth: 'error'` for a check that blocks.
+
 ### `paddock_proc::run_bounded_noting`
 - New: `run_bounded_noting(cmd, limits, started)` is `run_bounded` that tells `started` the program's `Option<ProcessId>` right after
   it started (`None`: its start time is unreadable), so a caller that gives up on the run can end the tree itself. `run_bounded` is
