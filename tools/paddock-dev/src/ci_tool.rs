@@ -17,7 +17,7 @@
 //! timeout; and the duration). The caller decides what a failure means and prints exactly one `::error::` line for it with
 //! [`error_line`]: the cause, then `Next step:`.
 
-use paddock_proc::{KEPT_ENV, Limits, Outcome, RunError, Sink, command, run_bounded, run_waited_cancellable};
+use paddock_proc::{KEPT_ENV, Limits, Outcome, RunError, Sink, command, run_bounded_noting, run_waited_cancellable};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Write;
@@ -85,6 +85,7 @@ pub struct ToolCall {
     cwd: Option<PathBuf>,
     unset: Vec<String>,
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    held: Option<std::sync::Arc<crate::ci_host::phase::Held>>,
 }
 
 /// How a run ended.
@@ -121,6 +122,7 @@ impl ToolCall {
             cwd: None,
             unset,
             cancel: None,
+            held: None,
         }
     }
 
@@ -191,6 +193,12 @@ impl ToolCall {
     /// [`Output::Stream`] and [`Output::File`] runs.
     pub fn cancel_on(mut self, flag: std::sync::Arc<std::sync::atomic::AtomicBool>) -> ToolCall {
         self.cancel = Some(flag);
+        self
+    }
+
+    /// Tells `held` who this program is when it starts, so its caller can end it (captured runs only).
+    pub fn held_by(mut self, held: std::sync::Arc<crate::ci_host::phase::Held>) -> ToolCall {
+        self.held = Some(held);
         self
     }
 
@@ -274,7 +282,12 @@ impl ToolCall {
     }
 
     fn run_captured(&self, cmd: std::process::Command) -> Result<Ran, String> {
-        let out = run_bounded(cmd, Limits::new(self.timeout)).map_err(|e| self.not_started(e))?;
+        let note = |id: Option<paddock_proc::ProcessId>| {
+            if let Some(h) = &self.held {
+                h.note(id);
+            }
+        };
+        let out = run_bounded_noting(cmd, Limits::new(self.timeout), &note).map_err(|e| self.not_started(e))?;
         let (success, how) = match out.outcome {
             Outcome::Exited(s) => (s.success(), describe_status(s)),
             Outcome::TimedOut => (false, self.timed_out()),
@@ -290,6 +303,10 @@ impl ToolCall {
 
     /// Streamed or file output, through `paddock_proc::run_waited` (bounded, the whole tree ended at the timeout).
     fn run_to(&self, cmd: std::process::Command, sink: Sink, file: Option<&PathBuf>) -> Result<Ran, String> {
+        debug_assert!(
+            self.held.is_none(),
+            "held_by is for captured runs: a streamed or file run is ended through cancel_on"
+        );
         let idle = std::sync::atomic::AtomicBool::new(false);
         let flag: &std::sync::atomic::AtomicBool = self.cancel.as_deref().unwrap_or(&idle);
         let (outcome, cancelled) = run_waited_cancellable(cmd, self.timeout, sink, flag).map_err(|e| self.not_started(e))?;

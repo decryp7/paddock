@@ -208,7 +208,19 @@ fn take(c: &Arc<Mutex<Captured>>) -> Captured {
 /// Runs `cmd` to completion with stdin closed and stdout and stderr captured under `limits`. A non-zero exit is not an
 /// error: look at [`Output::outcome`]. A timeout or the output cap ends the program's whole tree (the child leads its
 /// own process group on Unix) and is reported in the outcome, with what it wrote until then.
-pub fn run_bounded(mut cmd: Command, limits: Limits) -> Result<Output, RunError> {
+pub fn run_bounded(cmd: Command, limits: Limits) -> Result<Output, RunError> {
+    run_bounded_noting(cmd, limits, &|_| {})
+}
+
+/// [`run_bounded`] that tells `on_start` the program's identity right after it started, before the run waits for anything: a caller
+/// that may have to give up on the run (an abandoned phase of a step) can then end the tree itself, by identity, instead of
+/// leaving it to the run's own timeout. The identity is `None` when the start time cannot be read (the run logs that): such a
+/// program has no identity to end it by.
+pub fn run_bounded_noting(
+    mut cmd: Command,
+    limits: Limits,
+    on_start: &dyn Fn(Option<ProcessId>),
+) -> Result<Output, RunError> {
     let name = program_name(&cmd);
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -231,6 +243,7 @@ pub fn run_bounded(mut cmd: Command, limits: Limits) -> Result<Output, RunError>
             child.id()
         );
     }
+    on_start(root);
     let (tx, rx) = mpsc::channel();
     let mut pipes = 0;
     let out = child.stdout.take().map(|s| {
@@ -460,6 +473,29 @@ mod tests {
 
     fn limits() -> Limits {
         Limits::new(Duration::from_secs(120))
+    }
+
+    #[test]
+    fn a_run_tells_its_caller_who_it_started_while_the_program_runs() {
+        // The caller may give up on the run and end the tree itself: it is told the identity of the program once, at its start, while
+        // the program still runs (a callback after the program ended could not end anything).
+        let told = Mutex::new(Vec::new());
+        let o = run_bounded_noting(
+            child(Mode::Sleep),
+            Limits::new(Duration::from_millis(300)),
+            &|id| {
+                told.lock()
+                    .unwrap()
+                    .push(id.map(|id| (id, id.confirmed_running())));
+            },
+        )
+        .unwrap();
+        assert_eq!(o.outcome, Outcome::TimedOut);
+        let told = told.into_inner().unwrap();
+        assert_eq!(told.len(), 1, "told once: {told:?}");
+        let (id, running) = told[0].expect("the start time of a child of this test is readable");
+        assert!(running, "the program ran when the caller was told: {id:?}");
+        assert!(id.has_ended(), "the timed-out program is gone: {id:?}");
     }
 
     #[test]

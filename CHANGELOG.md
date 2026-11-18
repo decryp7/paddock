@@ -4,6 +4,11 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock_proc::run_bounded_noting`
+- New: `run_bounded_noting(cmd, limits, started)` is `run_bounded` that tells `started` the program's `Option<ProcessId>` right after
+  it started (`None`: its start time is unreadable), so a caller that gives up on the run can end the tree itself. `run_bounded` is
+  unchanged. Used by paddock-dev's bounded phases (`Held`), which end the programs of an abandoned phase before the step goes on.
+
 ### jiff is the family's one date and time library (outside Debrief's own crates)
 - RUSTSEC-2026-0543 marks chrono unmaintained, which fails `cargo deny` wherever a workspace crate names it. The shared crates and
   apps leave chrono and the `time` crate for `jiff`. Breaking shared API: `paddock_diag` (`Collected::collect`, `Context::now`,

@@ -2789,3 +2789,35 @@ and got the step added; the generator registry declares the install in `requires
 Class: a generator or check that treats a missing input as an empty input; compare the input with what declares it (here the
 lock) and stop when they differ.
 **Recurring: input-precondition-not-verified** (ER-33 cases on Dyno 1.1.0, the 2026-11-17 Debrief dock spec, `every()` over nothing in ER-12).
+
+## An abandoned kept-clone phase let its git outlive the step (2026-11-18)
+`host_steps::kept_clone_the_create_phase_is_bounded_by_its_own_limit` failed once in 5.9 s and passed on its retry (5.5 s) in a full
+nextest run at load 10 to 25: the reaper found a process "below a child" still running after the Rust step ended. Causes listed, with
+what ruled each out: (1) the product ends only the git's group and not the tree: refuted by `paddock_proc::kill_tree` (SIGKILL of
+the group, then each process by identity) and its test of a grandchild; (2) the reaper reads the table before the kill is reaped:
+refuted for the git, whose own wait is reaped by the run before it returns, and the reaper skips zombies; (3) the phase is abandoned
+at its bound while the git's kill is still in flight, and the step ends with the git running: confirmed (below).
+The git ends itself at the phase's limit (1 s from its start); the phase is abandoned at limit + 1 s from the clock mark (the hanging
+git's first line), so ending the git's tree must take less than a second. **Where the time goes** (temporary probes, not committed;
+`host_steps::` at 16 threads, 6 iterations, load 17 to 26, 59 hung gits): the timer fired on time (at most 11 ms late); `kill_tree`
+took up to 1.79 s (it reads the whole process table, with a start-time look per process, before it signals anything); the run
+returned after at most 1.72 s of a 1 s limit. At that load the phase was abandoned while its git still ran in 40 of 59 hung gits (the
+step said so: "ended 1 program(s) of the abandoned phase"), and the parity tests failed on the extra line, so the failure is common at
+load 26 and rare at load 10. The earlier single-test loops at load 28 never reached it (one test at a time reads a table that is not
+under 16 threads of its own).
+Regression tests: `a_phase_abandoned_at_its_bound_leaves_no_program_of_its_own_running` (kept clone) and
+`a_hung_git_of_an_abandoned_phase_is_ended_with_the_programs_below_it` (stable workspace), both red without the fix (the program below
+the git was still running when the phase returned). **Fix:** `Held` (in `ci_host/phase.rs`) is owned by `bounded`, `bounded_hung` and
+`bounded_marked`, handed to the phase's closure, and ended on `Phase::Timeout`: a captured `ToolCall` is `held_by` it (fed by
+`paddock_proc::run_bounded_noting`, which tells the caller the program's identity at its start, `None` when its start time is
+unreadable: counted and reported, never ended by guess), and `Held::end_all` ends every program still running by identity, once per
+running program (the first version read the table twice per program: 6.7 s for three programs at that load), and waits until they
+are gone. A program that starts after that is ended at its start. The step logs how many it ended and how long it took. The phase's
+limits are unchanged. **`ENDED_WITHIN` (10 s, ER-12):** the deadline of the wait after the signals, not an expected time: measured
+`end_all` at most 1.9 s (59 calls, one program each, load 17 to 26), all of it the table read; a process that outlasts 10 s is stuck
+in the kernel and is reported by name, not waited for. The stand-in's `pid_file` now ends in a newline (`read_pid_file` waits for a
+complete line and never completed on it: both new tests hung 40 s before that fix; test in `paddock-testkit`'s stand_in).
+**Class: work a step abandons keeps running past the step** (earlier: the abandoned checkout phase that set the next phase's flag,
+2026-11-15, above; found both times by ADR 0103's reaper and the parity tests under load). Open, not done here: `kill_tree` reads the
+whole process table before it signals; signalling the group first and reading the table for escapees would cut the 1.8 s but changes
+what a tree kill can find (a child whose parent was killed is no longer below it), so it needs its own design.

@@ -8,9 +8,122 @@
 //! that hangs is abandoned and the process ends with the step.
 
 use super::Step;
+use paddock_proc::ProcessId;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::{Duration, Instant};
+
+/// The programs a phase runs, which its caller may have to give up on: a captured [`ToolCall`](crate::ci_tool::ToolCall)
+/// (`held_by`) tells the set who it started, and [`Held::end_all`] ends them all by identity and closes the set, so a program that
+/// starts after that is ended at its start. A phase's thread cannot be killed, so a phase that hit its bound is abandoned; the
+/// bounded functions below end the set of an abandoned phase before they return, because the thread's own timeout may be late
+/// (ending a tree takes time on a loaded machine) and a step that ends with a program still running leaves it behind.
+#[derive(Debug, Default)]
+pub struct Held {
+    state: Mutex<HeldState>,
+}
+
+#[derive(Debug, Default)]
+struct HeldState {
+    closed: bool,
+    running: Vec<ProcessId>,
+    /// Programs whose start time could not be read: they have no identity, so nothing can end them safely (rule 53).
+    unidentified: usize,
+}
+
+/// What [`Held::end_all`] did.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct EndedAll {
+    /// How many programs (with the ones below them) it ended.
+    pub ended: usize,
+    /// How long that took.
+    pub took: Duration,
+    /// Still running when the wait ran out: the OS refused to end them.
+    pub left: Vec<ProcessId>,
+    /// Programs it could not identify and so did not end.
+    pub unidentified: usize,
+}
+
+/// How long [`Held::end_all`] waits for the OS to finish ending what it signalled. SIGKILL is delivered at once and the process goes a
+/// moment later; the wait is on the process table with this deadline. Measured 2026-11-18 (lessons.md, "An abandoned kept-clone phase
+/// let its git outlive the step"): the whole wait took at most a few milliseconds in every run, at load 17 to 28; 10 s is a bound for a
+/// machine in trouble (a process stuck in the kernel), not an expected time, and a process that outlasts it is reported, not waited for.
+const ENDED_WITHIN: Duration = Duration::from_secs(10);
+
+impl Held {
+    /// A program started: `id` is its identity, `None` when its start time could not be read.
+    pub(crate) fn note(&self, id: Option<ProcessId>) {
+        let ended_at_once = {
+            let mut s = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            match id {
+                Some(id) if !s.closed => s.running.push(id),
+                Some(_) => {}
+                None => s.unidentified += 1,
+            }
+            s.closed
+        };
+        if let (true, Some(id)) = (ended_at_once, id) {
+            let _ = paddock_proc::kill_tree(id);
+        }
+    }
+
+    /// Ends every program noted so far and every one noted later; returns once they are gone (at most [`ENDED_WITHIN`]).
+    pub fn end_all(&self) -> EndedAll {
+        let began = Instant::now();
+        let (running, unidentified) = {
+            let mut s = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            s.closed = true;
+            (std::mem::take(&mut s.running), s.unidentified)
+        };
+        // Only a program still running is looked at: reading the process table to end a tree costs about a second on a loaded machine
+        // (measured, lessons.md), and most programs of a phase have ended by the time it is abandoned. `kill_tree` reads the tree and
+        // answers every process it ended, so the table is read once per running program.
+        let mut ended_or_ending = Vec::new();
+        for id in running.iter().filter(|id| !id.has_ended()) {
+            ended_or_ending.extend(paddock_proc::kill_tree(*id).into_iter().map(|(id, _)| id));
+        }
+        let deadline = Instant::now() + ENDED_WITHIN;
+        let mut pause = Duration::from_millis(1);
+        let left = loop {
+            let left: Vec<_> = ended_or_ending.iter().copied().filter(|id| !id.has_ended()).collect();
+            if left.is_empty() || Instant::now() >= deadline {
+                break left;
+            }
+            std::thread::sleep(pause);
+            pause = (pause * 2).min(Duration::from_millis(20));
+        };
+        EndedAll {
+            ended: ended_or_ending.len() - left.len(),
+            took: began.elapsed(),
+            left,
+            unidentified,
+        }
+    }
+}
+
+/// Ends what an abandoned phase's programs left running, and says so in the step's log (ER-27: how many, and how long it took).
+fn end_abandoned(step: &mut Step<'_>, label: &str, held: &Held) {
+    let done = held.end_all();
+    if done.ended > 0 {
+        step.say(format!(
+            "{}: {label}: ended {} program(s) of the abandoned phase in {} ms",
+            step.name,
+            done.ended,
+            done.took.as_millis()
+        ));
+    }
+    for id in &done.left {
+        step.warn(format!(
+            "{label}: {id} was still running {ENDED_WITHIN:?} after the abandoned phase's programs were ended"
+        ));
+    }
+    if done.unidentified > 0 {
+        step.warn(format!(
+            "{label}: {} program(s) of the abandoned phase have no readable start time and were not ended",
+            done.unidentified
+        ));
+    }
+}
 
 /// Why a bounded phase ended without a value.
 pub enum Phase {
@@ -25,7 +138,7 @@ pub fn bounded<T: Send + 'static>(
     step: &mut Step<'_>,
     label: &str,
     limit: Duration,
-    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+    f: impl FnOnce(Arc<Held>) -> Result<T, String> + Send + 'static,
 ) -> Result<T, Phase> {
     bounded_hung(step, label, limit, None, f)
 }
@@ -38,16 +151,18 @@ pub fn bounded_hung<T: Send + 'static>(
     label: &str,
     limit: Duration,
     hung: Option<&AtomicBool>,
-    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+    f: impl FnOnce(Arc<Held>) -> Result<T, String> + Send + 'static,
 ) -> Result<T, Phase> {
     let start = Instant::now();
     step.say(format!("{}: {label} ...", step.name));
     let (tx, rx) = mpsc::channel();
+    let held = Arc::new(Held::default());
+    let mine = held.clone();
     std::thread::spawn(move || {
-        let _ = tx.send(f());
+        let _ = tx.send(f(mine));
     });
     let secs = |s: Instant| s.elapsed().as_secs();
-    match rx.recv_timeout(limit) {
+    let r = match rx.recv_timeout(limit) {
         // A program of the phase ended at its limit and the phase went on (the port of a shell function that ignores one step's
         // status): the phase still ran for its limit, and the shell's `bounded` ends the whole phase there, so it hung.
         Ok(Ok(_)) if hung.is_some_and(|h| h.load(Ordering::SeqCst)) => Err(Phase::Timeout),
@@ -63,7 +178,11 @@ pub fn bounded_hung<T: Send + 'static>(
             Err(Phase::Failed(e))
         }
         Err(_) => Err(Phase::Timeout),
+    };
+    if matches!(r, Err(Phase::Timeout)) {
+        end_abandoned(step, label, &held);
     }
+    r
 }
 
 /// A clock mark (ADR 0103, "Hang-point signal"; for tests): the phase's limit counts from the moment `file` appears, and until then the
@@ -87,7 +206,7 @@ pub fn bounded_marked<T: Send + 'static>(
     limit: Duration,
     hung: Option<&AtomicBool>,
     mark: Option<ClockMark<'_>>,
-    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+    f: impl FnOnce(Arc<Held>) -> Result<T, String> + Send + 'static,
 ) -> (Result<T, Phase>, bool) {
     let Some(mark) = mark else {
         return (bounded_hung(step, label, limit, hung, f), false);
@@ -96,8 +215,10 @@ pub fn bounded_marked<T: Send + 'static>(
     let start = Instant::now();
     step.say(format!("{}: {label} ...", step.name));
     let (tx, rx) = mpsc::channel();
+    let held = Arc::new(Held::default());
+    let mine = held.clone();
     std::thread::spawn(move || {
-        let _ = tx.send(f());
+        let _ = tx.send(f(mine));
     });
     // Before the mark: look for it between waits for the result, up to `wait`; from the mark on, `limit`.
     let (mut from, mut bound, mut seen) = (start, mark.wait, false);
@@ -131,6 +252,9 @@ pub fn bounded_marked<T: Send + 'static>(
         }
         None => Err(Phase::Timeout),
     };
+    if matches!(r, Err(Phase::Timeout)) {
+        end_abandoned(step, label, &held);
+    }
     (r, !seen)
 }
 
@@ -143,7 +267,7 @@ mod tests {
     fn marked(
         file: &std::path::Path,
         wait: Duration,
-        f: impl FnOnce() -> Result<(), String> + Send + 'static,
+        f: impl FnOnce(Arc<Held>) -> Result<(), String> + Send + 'static,
     ) -> (Result<(), Phase>, bool, String) {
         let env = HashMap::new();
         let mut out = Vec::new();
@@ -167,7 +291,7 @@ mod tests {
         let file = dir.path().join("mark");
         std::fs::write(&file, "stale").unwrap();
         let f2 = file.clone();
-        let (r, before_mark, _) = marked(&file, Duration::from_secs(60), move || {
+        let (r, before_mark, _) = marked(&file, Duration::from_secs(60), move |_| {
             // The phase's slow work before its hang: a program that runs longer than the limit (as a slow `git config` would), waited
             // for as a phase waits for its programs.
             let _ = paddock_proc::command("/bin/sleep").arg("1.5").status();
@@ -185,11 +309,48 @@ mod tests {
         );
     }
 
+    /// A sleeper stand-in (30 s) started the way a phase's program is: the caller waits for it in a thread, and `held` is told who it is.
+    fn sleeper(dir: &std::path::Path, held: &Held) -> std::thread::JoinHandle<std::process::ExitStatus> {
+        let program = paddock_testkit::StandIn::new(dir, "sleeper")
+            .sleeps(Duration::from_secs(30))
+            .install()
+            .unwrap();
+        let mut cmd = paddock_proc::command(program.program());
+        let mut child = cmd.spawn().unwrap();
+        held.note(ProcessId::of(child.id()));
+        std::thread::spawn(move || child.wait().unwrap())
+    }
+
+    #[test]
+    fn a_held_set_ends_the_programs_it_was_told_of_and_ends_a_later_one_at_its_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let held = Held::default();
+        let first = sleeper(dir.path(), &held);
+        let done = held.end_all();
+        assert_eq!(
+            (done.ended >= 1, done.left.is_empty(), done.unidentified),
+            (true, true, 0),
+            "{done:?}"
+        );
+        assert!(!first.join().unwrap().success(), "the first program was ended");
+        // The set is closed: a program that starts after it is ended at its start (it would sleep 30 s otherwise).
+        let late = sleeper(dir.path(), &held);
+        assert!(!late.join().unwrap().success(), "the later program was ended at its start");
+    }
+
+    #[test]
+    fn a_program_without_a_readable_start_time_is_counted_and_never_ended_by_a_guess() {
+        let held = Held::default();
+        held.note(None);
+        let done = held.end_all();
+        assert_eq!((done.ended, done.unidentified), (0, 1));
+    }
+
     #[test]
     fn a_marked_phase_that_finishes_before_its_mark_is_done() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("mark");
-        let (r, before_mark, out) = marked(&file, Duration::from_secs(60), || Ok(()));
+        let (r, before_mark, out) = marked(&file, Duration::from_secs(60), |_| Ok(()));
         assert!(r.is_ok());
         assert!(before_mark, "it ended before any mark");
         assert!(out.contains("t: p: done in "), "{out}");
@@ -201,7 +362,7 @@ mod tests {
         // the caller is told it ended before its mark, so its line names that bound instead of the phase's limit.
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("mark");
-        let (r, before_mark, _) = marked(&file, Duration::from_secs(2), || {
+        let (r, before_mark, _) = marked(&file, Duration::from_secs(2), |_| {
             loop {
                 std::thread::park(); // the hang, with no mark: nothing unparks it
             }
