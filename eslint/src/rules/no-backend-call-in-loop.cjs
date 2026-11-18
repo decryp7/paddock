@@ -18,6 +18,9 @@
 // helper function or through a store or service whose name is not a backend's (DB-4's `charts`, DB-5's `counter`, PC-3's `status`), rxjs `mergeMap` over items, and a component
 // per row that calls the backend in its own effect (DB-2, SP-4): the runtime budget tests on the counting seams cover those.
 //
+// Also not seen: a loop whose bound was read into a name first (`const n = items.length; for (let i = 0; i < n; i++)`), since the
+// test then reads no `.length` or `.size`; write the bound in the test, or rely on the budget tests.
+//
 // Known false positive: a signal read on a port (`port.imageBlock()`, a `computed` the port exposes) looks like a call; mark it
 // `// per-item: <reason>` or read the signal once before the loop.
 //

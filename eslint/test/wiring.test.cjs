@@ -358,22 +358,31 @@ for (const dir of targets) {
 }
 
 // The report step (ER-41, P1-4 of the WP-0 review): every app and the ui has `npm run lint:report`, which runs bin/lint-report.cjs (it sets
-// PADDOCK_BULK_LINT=warn and writes the job summary), and CI runs it: a line of the app's paddock.ci.json (the ui: its `lint` phase), or
-// for Debrief, whose CI is its own workflow, a `run: npm run lint:report` step in .gitea/workflows/debrief.yml.
-function ciRunsReport(dir) {
+// PADDOCK_BULK_LINT=warn and writes the job summary), and CI runs it. Read through the accessors that own the data (ER-42): an app's
+// contract through the planner's `readApps` (scripts/affected.mjs), the ui's phase through the gate executor (`./dev ci run ui lint
+// --list`), and Debrief's own workflow through the workflow reader's `parseSteps` (conformance/src/util/workflows.mjs).
+async function ciRunsReport(dir) {
   const name = dir.slice(REPO.length + 1);
-  const contract = name === 'ui' ? join(REPO, 'ui', 'paddock.ci.json') : join(dir, '..', 'paddock.ci.json');
-  const lines = Object.values(JSON.parse(readFileSync(contract, 'utf8'))).filter(Array.isArray).flat();
-  if (lines.includes('npm run lint:report')) return true;
+  if (name === 'ui') {
+    const r = spawnSync(join(REPO, 'dev'), ['ci', 'run', 'ui', 'lint', '--list'], { cwd: REPO, encoding: 'utf8' });
+    assert.equal(r.status, 0, `./dev ci run ui lint --list failed: ${r.stderr}`);
+    return r.stdout.split('\n').some((l) => l.replace(/^\[[^\]]*\]\s*/, '').trim() === 'npm run lint:report');
+  }
   const app = name.split('/')[1];
-  const workflow = join(REPO, '.gitea', 'workflows', `${app}.yml`);
-  return existsSync(workflow) && /^\s*run: npm run lint:report\s*$/m.test(readFileSync(workflow, 'utf8'));
+  const { readApps } = await import(join(REPO, 'scripts', 'affected.mjs'));
+  const contract = readApps([`apps/${app}/paddock.ci.json`], REPO).get(app);
+  assert.ok(contract, `${name}: no apps/${app}/paddock.ci.json`);
+  if (Object.values(contract).filter(Array.isArray).flat().includes('npm run lint:report')) return true;
+  if (!contract.workflow) return false;
+  const { parseSteps } = await import(join(REPO, 'conformance', 'src', 'util', 'workflows.mjs'));
+  const workflow = join(REPO, '.gitea', 'workflows', contract.workflow.replace(/^.*\//, ''));
+  return existsSync(workflow) && parseSteps(readFileSync(workflow, 'utf8')).some((st) => (st.run ?? '').trim() === 'npm run lint:report');
 }
 for (const dir of targets) {
   const name = dir.slice(REPO.length + 1);
-  test(`${name}: lint:report runs bin/lint-report.cjs and CI runs lint:report`, () => {
+  test(`${name}: lint:report runs bin/lint-report.cjs and CI runs lint:report`, async () => {
     const script = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).scripts?.['lint:report'] ?? '';
     assert.match(script, /eslint\/bin\/lint-report\.cjs/, `${name}: lint:report (${script || 'missing'}) does not run eslint/bin/lint-report.cjs`);
-    assert.ok(ciRunsReport(dir), `${name}: no CI line runs \`npm run lint:report\` (its paddock.ci.json, or its own workflow)`);
+    assert.ok(await ciRunsReport(dir), `${name}: no CI line runs \`npm run lint:report\` (its paddock.ci.json, or its own workflow)`);
   });
 }

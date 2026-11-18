@@ -11,9 +11,13 @@ const { test } = require('node:test');
 const SCRIPT = resolve(__dirname, '..', 'bin', 'lint-report.cjs');
 const PKG = resolve(__dirname, '..');
 
+/** The folder this test owns for its throwaway apps, inside the repository's node_modules (ignored); made on first use, so a fresh `npm ci` works. */
+const BASE = resolve(__dirname, '..', '..', 'node_modules', '.cache', 'paddock-eslint-lint-report');
+
 /** A throwaway app: an eslint config with the bulk block and `src/a.ts`; returns the run's status, output and summary. */
 function run(source, extraEnv = {}) {
-  const dir = mkdtempSync(join(resolve(__dirname, '..', '..', 'node_modules', '.cache'), 'lint-report-'));
+  mkdirSync(BASE, { recursive: true });
+  const dir = mkdtempSync(join(BASE, 'app-'));
   try {
     mkdirSync(join(dir, 'src'));
     writeFileSync(join(dir, 'src', 'a.ts'), source);
