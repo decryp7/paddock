@@ -13,6 +13,10 @@ on:
         required: false
         default: ""
 
+env:
+  # The fallback switch of conformance/ci/kit.sh, as in ci.yml.
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
+
 jobs:
   ab:
     name: testcommand A/B (windows-latest)
@@ -22,6 +26,8 @@ jobs:
       run:
         shell: bash
     env:
+      # The tag rule (a tag run builds ./dev from source); this workflow never runs on a tag.
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       CARGO_TERM_COLOR: never
     steps:
