@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 import { appBuildGuard, reuseServer } from '../../../ui/projects/paddock-e2e/src/build-guard.ts';
+import { paddockServers } from '../../../ui/projects/paddock-e2e/src/servers.ts';
 import { e2ePortOrCiDefault } from '../../../ui/projects/paddock-e2e/src/env.ts';
 
 // Fails fast, before any server starts, when what the app consumes of ui (ui/dist, the css) is stale (build-guard.ts).
@@ -35,10 +36,12 @@ export default defineConfig({
       ? [{ name: 'screenshots', testMatch: /screenshots\.spec\.ts/, use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 } }]
       : []),
   ],
-  webServer: {
-    command: `npx ng serve --port ${PORT}`,
-    url: `http://localhost:${PORT}`,
-    reuseExistingServer: reuseServer(),
-    timeout: 180_000,
-  },
+  ...paddockServers([
+    {
+      command: `npx ng serve --port ${PORT}`,
+      url: `http://localhost:${PORT}`,
+      reuseExisting: reuseServer(),
+      timeoutMs: 180_000,
+    },
+  ]),
 });
