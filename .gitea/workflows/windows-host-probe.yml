@@ -1,0 +1,148 @@
+# The before/after measurement of a host change on the Windows runner (a Defender exclusion): `./dev ci host-probe` three times in
+# the job's temp folder ($TEMP) and three times in the kept workspace ($PADDOCK_WORKSPACE), alternating, then paddock-dev's merge_check
+# integration tests on one thread (each test's time without the others' load). Dispatch only, on a branch ref:
+#   ./dev ci dispatch windows-host-probe.yml --ref exp/windows-host-probe --input label=before --max 60m
+# It waits behind a train's CI (the train-ci lock). Not part of any release path; delete with the branch.
+name: windows-host-probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "before or after (the probe lines carry it)."
+        required: false
+        default: "probe"
+      rounds:
+        description: "Probe rounds per folder."
+        required: false
+        default: "3"
+      spike:
+        description: "Also run tools/git-read-spike (per-call git, one cat-file --batch, gix), on the job's temp folder: true or false."
+        required: false
+        default: "false"
+      tests:
+        description: "Run the serial merge_check set: true or false."
+        required: false
+        default: "true"
+      filter:
+        description: "The nextest filter of the test step (default: merge_check's integration tests; all() for the whole suite as CI runs it)."
+        required: false
+        default: "binary_id(paddock-dev::it) & test(/^merge_check::/)"
+      threads:
+        description: "nextest --test-threads for the merge_check set (1: each test's own time; 8: CI's load)."
+        required: false
+        default: "1"
+
+env:
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
+
+jobs:
+  probe:
+    name: windows host probe (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .cargo
+            .gitea
+            conformance
+            scripts
+            tools
+            crates
+          filter: blob:none
+
+      - name: Git bash on PATH (Windows)
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+
+      - uses: ./.gitea/actions/build-jobs
+
+      - uses: ./.gitea/actions/job-isolation
+
+      - uses: ./.gitea/actions/kept-clone
+        with:
+          name: paddock-checkout-${{ runner.os }}
+          profile: lean
+
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+          name: paddock-paddock-dev
+
+      - uses: ./.gitea/actions/setup-rust
+
+      - uses: ./.gitea/actions/host-tools
+
+      - name: Build the tests
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: |
+          cargo nextest run --profile ci --locked --no-run || {
+            echo "::error::the paddock-dev tests did not build. Next step: read the build output above"; exit 1; }
+
+      - name: Host probes
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        env:
+          LABEL: ${{ inputs.label || 'probe' }}
+          ROUNDS: ${{ inputs.rounds || '3' }}
+        run: |
+          # Git bash shows the job's temp folder as /tmp; a Windows program needs its Windows path (the folder the tests' TEMP names).
+          tmp=$(cygpath -w "$TEMP")
+          echo "TEMP=$tmp PADDOCK_WORKSPACE=$PADDOCK_WORKSPACE git=$(cygpath -w "$(command -v git)")"
+          for i in $(seq 1 "$ROUNDS"); do
+            ./dev ci host-probe --dir "$tmp" --label "$LABEL-temp-$i" --starts 200 --repos 50 --files 500
+            ./dev ci host-probe --dir "$PADDOCK_WORKSPACE" --label "$LABEL-workspace-$i" --starts 200 --repos 50 --files 500
+          done
+
+      - uses: ./.gitea/actions/build-folder
+        if: ${{ inputs.spike == 'true' }}
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/git-read-spike
+          name: git-read-spike
+
+      - name: git read spike
+        if: ${{ inputs.spike == 'true' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/git-read-spike
+        run: |
+          tmp=$(cygpath -w "$TEMP")
+          for files in 2000 12000; do
+            cargo run --release --locked -q -- --files "$files" --commits 20 --blobs 300 --reps 3 --dir "$tmp" \
+              | tee -a "$RUNNER_TEMP/spike.txt" || { echo "::error::the spike failed. Next step: run it locally"; exit 1; }
+          done
+          { echo '### git read spike'; grep -E '^(repo:|\|)' "$RUNNER_TEMP/spike.txt"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: merge_check, one thread
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        if: ${{ inputs.tests != 'false' }}
+        env:
+          FILTER: ${{ inputs.filter || 'binary_id(paddock-dev::it) & test(/^merge_check::/)' }}
+        run: |
+          start=$SECONDS
+          cargo nextest run --profile ci --locked --no-fail-fast --test-threads "${{ inputs.threads || '1' }}" \
+            -E "$FILTER" 2>&1 | tee "$RUNNER_TEMP/tests.txt" || true
+          total=$(grep -E 'PASS \[' "$RUNNER_TEMP/tests.txt" | sed -E 's/.*\[ *([0-9.]+)s\].*/\1/' | awk '{s+=$1; n++} END {printf "%d tests, %.1f s", n, s}')
+          echo "merge_check, ${{ inputs.threads || '1' }} thread(s): $total (wall $((SECONDS - start)) s)" | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -E 'PASS \[|FAIL|TIMEOUT|SLOW|FLKY|TMT' "$RUNNER_TEMP/tests.txt" | grep -E 'a_clean_merge_is_clean|the_remerge_subject_is_read_in_any_case' | tee -a "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Host probes (after the tests)
+        if: always()
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        env:
+          LABEL: ${{ inputs.label || 'probe' }}
+        run: ./dev ci host-probe --dir "$(cygpath -w "$TEMP")" --label "$LABEL-temp-end" --starts 200 --repos 50 --files 500
+
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
