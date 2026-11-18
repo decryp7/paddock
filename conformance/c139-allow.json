@@ -1,0 +1,41 @@
+{
+ "_comment": "The e2e specs that switch off paddock/e2e-ready-reads (C139), one entry per file. Fix the read with a ready helper (ui/projects/paddock-e2e/src/ready.ts) and delete the directive and its entry; ESLint reports a directive that no longer covers a site. The list only shrinks against the merge base.",
+ "allow": [
+  {
+   "path": "apps/debrief/app/e2e/drag-ghost.e2e.ts",
+   "site": "paddock/e2e-ready-reads",
+   "reason": "asserts that nothing popped out: the opens list is read right after the drag ended",
+   "count": 1
+  },
+  {
+   "path": "apps/debrief/app/e2e/prod-csp.e2e.ts",
+   "site": "paddock/e2e-ready-reads",
+   "reason": "reads the CSP violations collected over the whole flow; Save was its last step",
+   "count": 1
+  },
+  {
+   "path": "apps/debrief/app/e2e/view-controls-stay.e2e.ts",
+   "site": "paddock/e2e-ready-reads",
+   "reason": "the test is that the button did not move while the profile arrived: an immediate read",
+   "count": 1
+  },
+  {
+   "path": "apps/dyno/app/e2e/dialogs.spec.ts",
+   "site": "paddock/e2e-ready-reads",
+   "reason": "data-dialog-ready is the dialog's own signal that fittedHeight was set",
+   "count": 1
+  },
+  {
+   "path": "apps/dyno/app/e2e/lists-map.spec.ts",
+   "site": "paddock/e2e-ready-reads",
+   "reason": "reads focus; the loop presses Tab until the path has it, and a toBeFocused follows",
+   "count": 1
+  },
+  {
+   "path": "apps/dyno/app/e2e/screens-consistency.spec.ts",
+   "site": "paddock/e2e-ready-reads",
+   "reason": "reads the faked clock (Date.now), not the page",
+   "count": 1
+  }
+ ]
+}

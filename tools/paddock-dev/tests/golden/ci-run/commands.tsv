@@ -176,7 +176,7 @@ job	conformance			missing=1
 job	conformance			mkdir -p "$DEST"
 job	conformance			mkdir -p "$DIR"
 job	conformance			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
-job	conformance			node conformance/bin/paddock-conformance.mjs --app paddock --root . --only $ONLY --strict C36
+job	conformance			node conformance/bin/paddock-conformance.mjs --app paddock --root . --only $ONLY --strict C36,C139
 job	conformance			npm ci --ignore-scripts -w conformance
 job	conformance			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	conformance			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
@@ -919,7 +919,6 @@ job	ui			missing=1
 job	ui			mkdir -p "$DEST"
 job	ui			mkdir -p "$DIR"
 job	ui			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
-job	ui			node scripts/e2e-ready-report.mjs
 job	ui			npm ci
 job	ui			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	ui			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"

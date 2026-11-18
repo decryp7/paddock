@@ -114,6 +114,7 @@ The check index (generated from each module's id, title, scope, mode and needs):
 | C136 | A unit test that starts a live mock feed runs it on a clock the test moves | root | report-only | all |
 | C137 | An app e2e spec imports the kit by package name only when its CI job builds it | root | report-only | all |
 | C138 | Scrollers our code positions make no scroll moves of their own | both | report-only | all |
+| C139 | an e2e spec that disables paddock/e2e-ready-reads says why, and the exceptions only shrink | root | gate | all |
 <!-- checks:end -->
 
 Notes per check (written by hand; the index above is the complete list):
