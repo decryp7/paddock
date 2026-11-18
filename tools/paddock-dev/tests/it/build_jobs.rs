@@ -9,7 +9,7 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use paddock_testkit::TestCommand;
+use paddock_testkit::{Actions, Case, StandIn, TestCommand};
 use std::path::{Path, PathBuf};
 
 fn repo() -> PathBuf {
@@ -39,14 +39,19 @@ impl Scratch {
         self.dir.path().join(name)
     }
 
-    /// A program on the front of PATH that appends the name of its call and what it saw of the job's token to `calls`.
-    fn shim(&self, name: &str, body: &str) {
-        let p = self.path("bin").join(name);
-        let text = format!(
-            "#!/bin/sh\necho \"{name} $* token=${{PADDOCK_DEV_TOKEN:-}}\" >> '{}'\n{body}\n",
-            self.path("calls").display()
-        );
-        paddock_testkit::exe::write_program(&p, text).unwrap();
+    /// A stand-in on the front of PATH whose every call appends its name, arguments and what it saw of the job's token to `calls`;
+    /// `answer` adds what it prints and its exit code to that first step.
+    fn shim(&self, name: &str, answer: impl FnOnce(Actions) -> Actions) {
+        self.standin(name).answers(answer(self.logged())).install().unwrap();
+    }
+
+    fn standin(&self, name: &str) -> StandIn {
+        StandIn::new(&self.path("bin"), name)
+    }
+
+    /// The first step of every answer: the call's line in `calls`.
+    fn logged(&self) -> Actions {
+        Actions::new().appends_with(&self.path("calls").display().to_string(), "{name} {args} token={env:PADDOCK_DEV_TOKEN}\n")
     }
 
     fn base_env(&self, vars: &[(&str, &str)], with_env_file: bool) -> Vec<(String, String)> {
@@ -290,19 +295,24 @@ fn without_a_github_env_the_assignments_are_printed() {
 #[test]
 fn the_probes_are_tried_in_the_shells_order() {
     let s = Scratch::new();
-    s.shim("nproc", "exit 1");
-    s.shim("sysctl", "case \"$2\" in hw.ncpu) echo 10 ;; hw.memsize) echo 34359738368 ;; esac");
-    s.shim("getconf", "echo 6");
+    s.shim("nproc", |a| a.exit(1));
+    s.standin("sysctl")
+        .when(&Case::new().has_arg("hw.ncpu"), s.logged().stdout("10"))
+        .when(&Case::new().has_arg("hw.memsize"), s.logged().stdout("34359738368"))
+        .answers(s.logged())
+        .install()
+        .unwrap();
+    s.shim("getconf", |a| a.stdout("6"));
     let vars = [("RUNNER_OS", "macOS")];
     let r = same(&s, None, &vars, true);
     assert!(r.stderr.contains("this host: 10 cores"), "{}", r.stderr);
     // nproc answering wins over everything.
-    s.shim("nproc", "echo 12");
+    s.shim("nproc", |a| a.stdout("12"));
     let r = same(&s, None, &vars, true);
     assert!(r.stderr.contains("this host: 12 cores"), "{}", r.stderr);
     // sysctl failing, the variable then getconf.
-    s.shim("nproc", "exit 1");
-    s.shim("sysctl", "exit 1");
+    s.shim("nproc", |a| a.exit(1));
+    s.shim("sysctl", |a| a.exit(1));
     let r = same(&s, None, &[("RUNNER_OS", "macOS"), ("NUMBER_OF_PROCESSORS", "7")], true);
     assert!(r.stderr.contains("this host: 7 cores"), "{}", r.stderr);
     let r = same(&s, None, &vars, true);
@@ -323,8 +333,8 @@ fn the_comparison_sees_a_difference() {
 #[test]
 fn a_token_of_the_job_never_reaches_a_probe() {
     let s = Scratch::new();
-    s.shim("nproc", "echo 4");
-    s.shim("sysctl", "echo 8192");
+    s.shim("nproc", |a| a.stdout("4"));
+    s.shim("sysctl", |a| a.stdout("8192"));
     let vars = [("RUNNER_OS", "macOS")];
     s.reset();
     let rs = s.rust(None, &vars, true);
