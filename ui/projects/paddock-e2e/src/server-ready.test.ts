@@ -264,3 +264,29 @@ test('after a signal removed the handlers, the next start installs them again', 
   assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), [2, 1, 2], 'own + ours, own only after the signal, own + ours again');
   rmSync(dir, { recursive: true, force: true });
 });
+
+test('a SIGTERM to the parent kills the orphan of a leader that already exited (POSIX keeps the group until the run ends)', { skip: process.platform === 'win32' && 'POSIX process groups' }, async () => {
+  const dir = scratch();
+  const file = join(dir, 'pids');
+  const port = await freePort();
+  const parent = join(dir, 'parent.ts');
+  const leaderExits =
+    `const g=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});` +
+    `require('fs').writeFileSync(${JSON.stringify(file)},process.pid+' '+g.pid);` +
+    `require('http').createServer((q,r)=>r.end('ok')).listen(${port}, () => setTimeout(() => process.exit(0), 300))`;
+  writeFileSync(
+    parent,
+    `import { startServers } from ${JSON.stringify(join(here, 'server-ready.ts'))};\n` +
+      `await startServers([{ command: ${JSON.stringify(node(leaderExits))}, url: 'http://localhost:${port}', timeoutMs: 20000, reuseExisting: false }], { log: () => undefined });\n` +
+      `setInterval(() => undefined, 1000);\n`,
+  );
+  const child = spawn(process.execPath, ['--disable-warning=MODULE_TYPELESS_PACKAGE_JSON', parent], { stdio: 'ignore' });
+  const ended = new Promise<string | null>((r) => child.once('exit', (_c, sig) => r(sig)));
+  const [leader, orphan] = await treeOf(file);
+  await allGone([leader!], 'the leader exits');
+  assert.ok(alive(orphan!), 'the orphan outlives its leader');
+  child.kill('SIGTERM');
+  assert.equal(await ended, 'SIGTERM');
+  await allGone([orphan!], 'after SIGTERM to the parent');
+  rmSync(dir, { recursive: true, force: true });
+});

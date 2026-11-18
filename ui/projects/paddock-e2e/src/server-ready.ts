@@ -165,7 +165,9 @@ async function startOne(spec: ServerSpec, log: (line: string) => void, baseDir: 
   let stopping = false;
   let ready = false;
   const ended = new Promise<void>((done) => child.once('close', () => done()));
-  child.once('exit', () => live.delete(child)); // an ended child's pid may be reused: never signalled again from the exit handlers
+  // Windows only: an ended child's pid may be reused and has no group to keep it, so it is never signalled again. On POSIX the group is
+  // kept until the run ends: members that outlive the leader are still killed by a later SIGTERM or exit.
+  if (process.platform === 'win32') child.once('exit', () => live.delete(child));
   child.on('error', (e) => (exit = `could not start: ${e.message}`));
   child.on('exit', (code, signal) => {
     exit = signal ? `ended by ${signal}` : `exit status ${code}`;
