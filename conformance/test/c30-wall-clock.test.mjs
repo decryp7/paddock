@@ -5,6 +5,8 @@ import { findingsOf, makeApp } from './helpers.mjs';
 
 /** A fixture tree with C30's allow list (empty unless given): the check reads it before anything else. */
 const c30App = (files, allow = []) => makeApp({ 'conformance/c30-allow.json': JSON.stringify({ allow }), ...files });
+/** The severity of an unlisted site: a warning until C30 blocks (`BLOCKING`), then an error. */
+const UNLISTED = BLOCKING ? 'error' : 'warn';
 
 const wrap = (body) => `use std::time::*;\n#[test]\nfn it() {\n${body}\n}\n`;
 
@@ -37,7 +39,7 @@ test('C30 through the runner: a warning per assertion, none for a clean or guard
   const bad = wrap('    let t = Instant::now();\n    assert!(t.elapsed() < Duration::from_millis(700));');
   const f = await findingsOf('C30', c30App({ 'crates/a/tests/bad.rs': bad, 'crates/a/tests/good.rs': wrap('    assert!(true);') }));
   assert.equal(f.length, 1);
-  assert.equal(f[0].severity, 'warn');
+  assert.equal(f[0].severity, UNLISTED);
   assert.equal(f[0].file, 'crates/a/tests/bad.rs');
   const guarded = wrap('    let t = Instant::now();\n    // conformance: hang-guard\n    assert!(t.elapsed() < Duration::from_secs(30));');
   assert.deepEqual(await findingsOf('C30', c30App({ 'crates/a/tests/g.rs': guarded })), []);
@@ -71,7 +73,7 @@ test('C30 hang guards at or above the CI test budget (60 s) are flagged: CI kill
   const long = wrap('    // conformance: hang-guard — only stops a browser that never exits\n    assert!(b.close_gracefully(Duration::from_secs(120)));');
   const f = await findingsOf('C30', c30App({ 'crates/a/tests/l.rs': long }));
   assert.equal(f.length, 1);
-  assert.equal(f[0].severity, 'warn');
+  assert.equal(f[0].severity, UNLISTED);
   assert.match(f[0].message, /60 s/);
   const clock = wrap('    let t = Instant::now();\n    // conformance: hang-guard — a broken fake must fail the test\n    assert!(t.elapsed() < Duration::from_secs(60));');
   assert.match((await findingsOf('C30', c30App({ 'crates/a/tests/c.rs': clock })))[0]?.message ?? '', /60 s/);
@@ -115,7 +117,7 @@ test('C30 through the runner: sleeps in Rust and wall-clock expects in specs are
   const ts = "it('x', () => {\n  const t0 = Date.now();\n  expect(Date.now() - t0).toBeLessThan(700);\n});\n";
   const f = await findingsOf('C30', c30App({ 'crates/a/tests/s.rs': rs, 'app/src/a.spec.ts': ts, 'app/e2e/b.ts': ts, 'app/src/app.ts': ts }));
   assert.deepEqual(f.map((x) => x.file).sort(), ['app/e2e/b.ts', 'app/src/a.spec.ts', 'crates/a/tests/s.rs']);
-  assert.ok(f.every((x) => x.severity === 'warn'));
+  assert.ok(f.every((x) => x.severity === UNLISTED));
 });
 
 test('C30 through the runner: a sleep waiver needs a reason', async () => {
