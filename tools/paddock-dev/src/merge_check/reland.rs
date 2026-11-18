@@ -29,11 +29,20 @@ struct Reland {
     files: HashSet<String>,
 }
 
-/// Whether a subject says the commit re-applies work (any case): `revert: reapply ...`, git's `Reapply "..."`, or the default
+/// Whether a subject says the commit re-applies work (any case): `revert: reapply ...` (scope and `!` allowed), git's `Reapply "..."`, or the default
 /// subject of `git revert` of a revert, `Revert "Revert ..."` (what `merge sync-member` tells the author to run).
 pub fn is_reland_subject(subject: &str) -> bool {
     let s = subject.trim().to_ascii_lowercase();
-    s.starts_with("revert: reapply") || s.starts_with("reapply \"") || s.starts_with("revert \"revert ")
+    if s.starts_with("reapply \"") || s.starts_with("revert \"revert ") {
+        return true;
+    }
+    // `revert: reapply ...`, with an optional `(scope)` and `!` (what conformance/src/commit-lint.mjs accepts).
+    let Some(mut rest) = s.strip_prefix("revert") else { return false };
+    if let Some(scoped) = rest.strip_prefix('(') {
+        let Some((_, after)) = scoped.split_once(')') else { return false };
+        rest = after;
+    }
+    rest.strip_prefix('!').unwrap_or(rest).starts_with(": reapply")
 }
 
 /// The commit names `(cherry picked from commit <hex>)` lines give.
@@ -197,6 +206,28 @@ mod tests {
             "reapply: x",
         ] {
             assert!(!is_reland_subject(no), "{no}");
+        }
+    }
+
+    /// The table `conformance/commit-lint.mjs` reads too (docs/known-copies.toml, mechanism `reland-rule`).
+    const CASES: &str = include_str!("../../../../conformance/reland-cases.json");
+
+    #[test]
+    fn the_shared_case_table_gives_the_same_answers_as_the_javascript_rule() {
+        let table: serde_json::Value = serde_json::from_str(CASES).unwrap();
+        let subjects = table["subjects"].as_array().unwrap();
+        let trailers = table["trailers"].as_array().unwrap();
+        // The table is not empty and has both outcomes: a table read as nothing would pass every loop below.
+        assert!(subjects.len() > 10 && trailers.len() > 5);
+        assert!(subjects.iter().any(|c| c["reland"] == true) && subjects.iter().any(|c| c["reland"] == false));
+        for c in subjects {
+            let subject = c["subject"].as_str().unwrap();
+            assert_eq!(is_reland_subject(subject), c["reland"].as_bool().unwrap(), "{subject}");
+        }
+        for c in trailers {
+            let message = c["message"].as_str().unwrap();
+            let want: Vec<&str> = c["targets"].as_array().unwrap().iter().map(|t| t.as_str().unwrap()).collect();
+            assert_eq!(trailer_targets(message), want, "{message}");
         }
     }
 

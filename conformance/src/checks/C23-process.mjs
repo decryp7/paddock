@@ -5,7 +5,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { error, warn } from '../finding.mjs';
-import { lint, messagesInRange } from '../commit-lint.mjs';
+import { descendsFromRule, lint, messagesInRange, relandProblem } from '../commit-lint.mjs';
 import { paddockRoot } from '../sync/paddock-root.mjs';
 import { planBlocks } from '../sync/plan.mjs';
 
@@ -49,9 +49,18 @@ function commitFindings(ctx) {
   } catch (e) {
     return [error('C23', 8, '.git', 1, `cannot read the commit history (${range}): ${e.message}`, 'Fetch enough history (fetch-depth) or set commitRange in paddock.conformance.json.')];
   }
-  for (const { id, message } of items) {
-    for (const p of lint(message, { landed: true })) out.push(error('C23', 8, `commit ${id}`, 1, p, 'Reword the commit (git commit --amend / rebase) before it is pushed.'));
+  let unmeasured = false;
+  for (const { id, sha, message } of items) {
+    // A re-land is judged when it descends from the commit that introduces the rule; the ones before it stay as they are.
+    let reland = false;
+    if (relandProblem(message)) {
+      const d = descendsFromRule(sha, ctx.root, ctx.options.git, ctx.options.relandRule);
+      reland = d === true;
+      unmeasured ||= d === null;
+    }
+    for (const p of lint(message, { landed: true, reland })) out.push(error('C23', 8, `commit ${id}`, 1, p, 'Reword the commit (git commit --amend / rebase) before it is pushed.'));
   }
+  if (unmeasured) out.push(warn('C23', 8, '.git', 1, 're-lands were not judged (not measured): the commit that introduces the re-land rule is not in this clone', 'Fetch the full history (fetch-depth: 0).'));
   return out;
 }
 
