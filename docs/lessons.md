@@ -2845,3 +2845,15 @@ The inventory for ADR 0108 read four defects from code. None is reproduced yet; 
   that never exits ends at the limit with an error naming the command.
 Class (the first two): per-item calls (ADR 0108) bring their own races when they run in parallel against one shared file; the bulk form (one
 pass, one write) removes the race with the calls.
+
+## Fix item: job-isolation's orphan-days test failed once in the push gate (2026-11-18)
+`disk: kept folders no job used for PADDOCK_CI_ORPHAN_DAYS ... go when their slot is idle; used ones stay`
+(conformance/test/job-isolation.test.mjs:357, "an old-layout folder nobody took over: gone") failed once in the pre-push row
+`conformance-tests` of `docs/adr-bulk-apis` (machine load 22 to 27, the row at concurrency 4 beside the other rows), and passed in
+two runs right after on the same tree (`npm test` in conformance, then `./dev ci run conformance tests` at concurrency 4). The
+change being pushed was docs only and does not reach `job-isolation.sh` or its test, so the push went ahead (ER-12: a FLAKY test
+outside the change's plan is recorded, not blocking). Causes to rule out, with the observation that rules each out: (1) `release`
+returns before the orphan sweep of unslotted folders has finished (rule out: the sweep runs inside `release`'s own process and
+`release` waits on it); (2) the unslotted folder is swept only under a lock another concurrent test file can hold (rule out: the
+lock path is under the test's own `host()` root); (3) the 20-day time stamp is renewed by something before the sweep (rule out: the
+folder's mtime just before `release`). Next: reproduce under load with a failing run first (ER-28), then fix the cause.
