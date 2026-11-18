@@ -2932,3 +2932,21 @@ tools/paddock-dev/Cargo.toml --profile ci --no-tests=fail -E 'test(/^contracts::
 paddock-ci, `tools/linux-container.sh --ci-image`, 4 CPUs, 2 jobs, a new empty build volume, host load 27): cold 71 s, warm 1 s (the 12
 tests run in 1.2 s). Under the limits set for the choice (30 s warm, 3 min cold), so the step stays a nextest step. Not measured: a
 real amd64 CI runner; read the step's timing from the next train run and revisit if the cold time passes 3 min.
+## A slow-to-start stand-in git met the phase limit: the mark now bounds every call of a hung-phase test (2026-11-19)
+`ci_host::kept_clone::tests::a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase` failed once at a 1-minute load of
+about 31 (integrator-train16, m2-nextest.log): the stand-in git recorded no call, because the git's own 1 s limit, counted from its
+spawn, ended it before it ran. Fourth sighting of "work before the hang point of a hung-phase test meets its limit under load"
+(fe1bd861d, e0fdd0286, 2026-11-15 above). Causes listed: (1) the test's own setup calls: none, the first call is the hang; (2) the
+phase bound (limit + 1 s from phase start, as no mark was set in that unit test): ruled out as the first cause, the git is ended
+by its own limit first; (3) the git's limit counts from spawn and the stand-in's start-up under load exceeds it: confirmed by a
+deterministic stand-in that sleeps 1.5 s (past the 1 s limit) before it writes its mark: red on the old code ("did not finish within
+20 s", the git "timed out after 1 s", no mark), green on the new. The 2026-11-15 fix had moved the phase's limit to the mark but
+left a git command's own limit on its spawn and said so (ADR 0103); with `Held::end_all` it could be closed. **Fix (the class):**
+with a clock mark a git in a phase has the general limit and the phase's bound, counted from the mark, ends it; the unit test, the new
+test and `stable_workspace`'s hung-git test (which had the same shape, its `run_with` now takes an optional `ClockMark`; red before:
+no pid file after 40 s) use the one mechanism, `phase::bounded_marked`; the parity normaliser treats `signal 9` like `timed out`.
+**Measured:** natural rate on the old code 0 of 200 runs (28 processes x 1 thread, 40 CPU burners, load 33), so the injected delay is
+the proof, as the failure is rare; the heavy run was stopped at the coordinator's request (ER-24). Capped runs after the fix: see
+below. **Rule:** a timed hung-phase test counts every limit it asserts from the stand-in's mark, setup calls included, and proves it
+with a stand-in that is slow before its hang. **Class: work before the hang point of a hung-phase test meeting its limit under load
+(fourth sighting; ADR 0103, second amendment).**

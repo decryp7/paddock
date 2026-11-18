@@ -94,9 +94,12 @@ fn norm(text: &str, fx: &Fx) -> String {
     let secs_cell = regex::Regex::new(r"\| \d+ s \|").unwrap();
     let sizes = regex::Regex::new(r"(is|still) \d+( \(cap|;)").unwrap();
     let bash_killed = regex::Regex::new(r": line \d+: +\d+ Killed ").unwrap();
-    let timed_out_last = regex::Regex::new(r"Last output: kept-clone: git [a-z-]+ failed \(timed out after \d+ s\)\.").unwrap();
-    let timed_out_why = regex::Regex::new(r"\(kept-clone: git [a-z-]+ failed \(timed out after \d+ s\)\)").unwrap();
-    let timed_out_line = regex::Regex::new(r"^kept-clone: git [a-z-]+ failed \(timed out after \d+ s\)$").unwrap();
+    // A hung git ends at its limit (the Rust git's own, outside a clock mark) or, with a clock mark, when the abandoned phase ends it
+    // (`signal 9`: the git's limit is then the general one, so a slow start cannot meet the phase's limit).
+    let timed_out_last =
+        regex::Regex::new(r"Last output: kept-clone: git [a-z-]+ failed \((?:timed out after \d+ s|signal \d+)\)\.").unwrap();
+    let timed_out_why = regex::Regex::new(r"\(kept-clone: git [a-z-]+ failed \((?:timed out after \d+ s|signal \d+)\)\)").unwrap();
+    let timed_out_line = regex::Regex::new(r"^kept-clone: git [a-z-]+ failed \((?:timed out after \d+ s|signal \d+)\)$").unwrap();
     // The Rust phase says how many programs of an abandoned phase it ended and how long that took (ER-27); the shell's `bounded` ends
     // the function's tree and says nothing.
     let ended_line = regex::Regex::new(r": ended \d+ program\(s\) of the abandoned phase in \d+ ms$").unwrap();

@@ -20,7 +20,7 @@
 //! phase, and each phase logs its duration (ER-27). Any other problem only costs cache hits and never fails the job.
 
 use super::links::{Links, OsLinks};
-use super::phase::{Held, Phase, bounded};
+use super::phase::{ClockMark, Held, Phase, bounded, bounded_marked};
 use super::{Step, folder_name, isolation_full, tail_flat};
 use crate::ci_isolation::home;
 use crate::ci_tool::ToolCall;
@@ -164,11 +164,21 @@ pub fn run(env: &HashMap<String, String>, windows: bool, args: &Args, out: &mut 
         windows,
         git_limit: limit,
     });
-    run_with(env, windows, args, ops, limit, out)
+    run_with(env, windows, args, ops, limit, None, out)
 }
 
-/// The command over explicit operations (tests).
-pub fn run_with(env: &HashMap<String, String>, windows: bool, args: &Args, ops: Arc<dyn Ops>, limit: Duration, out: &mut dyn Write) -> i32 {
+/// The command over explicit operations (tests). `mark` (tests only, ADR 0103 "Hang-point signal"): the clone phase's limit counts from
+/// the moment the test's hanging stand-in writes that file, not from the phase's start, so a stand-in that is slow to start under load
+/// cannot meet a short limit before it reaches its hang.
+pub fn run_with(
+    env: &HashMap<String, String>,
+    windows: bool,
+    args: &Args,
+    ops: Arc<dyn Ops>,
+    limit: Duration,
+    mark: Option<ClockMark<'_>>,
+    out: &mut dyn Write,
+) -> i32 {
     let mut step = Step {
         env,
         out,
@@ -300,9 +310,10 @@ pub fn run_with(env: &HashMap<String, String>, windows: bool, args: &Args, ops: 
             let label = format!("keep a clone of the checkout at {stable_text}");
             let cloned = {
                 let (ops, ws, stable, root) = (ops.clone(), ws.clone(), stable.clone(), root.clone());
-                bounded(&mut step, &label, limit, move |held| {
+                bounded_marked(&mut step, &label, limit, None, mark, move |held| {
                     clone_checkout(ops.as_ref(), &ws, &stable, &root, &held)
                 })
+                .0
             };
             match cloned {
                 Ok(()) => {
@@ -532,6 +543,7 @@ mod tests {
             },
             fake,
             Duration::from_secs(limit),
+            None,
             &mut out,
         );
         (code, String::from_utf8(out).unwrap())
@@ -719,6 +731,7 @@ mod tests {
         std::fs::create_dir_all(&bin).unwrap();
         std::fs::create_dir_all(&work).unwrap();
         let pid_file = sc.dir.path().join("below.pid");
+        let mark_file = sc.dir.path().join("hang-mark");
         paddock_testkit::StandIn::new(&bin, "sleeper")
             .sleeps(Duration::from_secs(30))
             .install()
@@ -727,8 +740,12 @@ mod tests {
             .stdout("abc123")
             .when_arg_contains(
                 "fetch",
+                // Slow to start (1.5 s, past the 1 s limit: a loaded machine), then the helper, then the mark and the hang: the limit
+                // counts from the mark (ADR 0103, "Hang-point signal"), so the setup is not in it.
                 paddock_testkit::Actions::new()
+                    .sleeps(Duration::from_millis(1500))
                     .spawns(&paddock_testkit::Spawn::new("sleeper").pid_file(&pid_file))
+                    .writes(&mark_file, "hang")
                     .sleeps(Duration::from_secs(30)),
             )
             .install()
@@ -746,7 +763,19 @@ mod tests {
             git_limit: Duration::from_secs(60),
         }));
         let mut out = Vec::new();
-        let code = run_with(&sc.env, false, &Args { name: "n".into() }, ops, Duration::from_secs(1), &mut out);
+        let mark = ClockMark {
+            file: &mark_file,
+            wait: Duration::from_secs(20),
+        };
+        let code = run_with(
+            &sc.env,
+            false,
+            &Args { name: "n".into() },
+            ops,
+            Duration::from_secs(1),
+            Some(mark),
+            &mut out,
+        );
         let out = String::from_utf8(out).unwrap();
         assert_ne!(code, 0, "the hung clone phase ends the step: {out}");
         assert!(out.contains("did not finish within 1 s"), "{out}");
@@ -801,7 +830,15 @@ mod tests {
             rename_fails: true,
             ..Fake::default()
         }));
-        let code = run_with(&sc.env, true, &Args { name: "n".into() }, ops, Duration::from_secs(5), &mut out);
+        let code = run_with(
+            &sc.env,
+            true,
+            &Args { name: "n".into() },
+            ops,
+            Duration::from_secs(5),
+            None,
+            &mut out,
+        );
         let out = String::from_utf8(out).unwrap();
         assert_eq!(code, 0);
         assert!(out.contains("nor clone it there (the clone fetched def456, not abc123)"), "{out}");

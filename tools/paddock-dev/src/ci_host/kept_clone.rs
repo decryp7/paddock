@@ -803,8 +803,12 @@ impl Flow {
         let mark_file = self.kc.env.get(CLOCK_MARK).filter(|v| !v.is_empty()).map(PathBuf::from);
         let mark = mark_file.as_deref().map(|file| ClockMark { file, wait: self.limit });
         let bound = limit + Duration::from_secs(1);
+        // With a mark, a git command's own limit is the general one too (as the shell's commands have): a stand-in that is slow to
+        // start would otherwise meet the phase's limit before it reaches its hang, and the phase's bound, counted from the mark, ends
+        // the hanging git through the phase's `Held`.
+        let git_limit = if mark_file.is_some() { self.limit } else { limit };
         let (r, before_mark) = bounded_marked(step, label, bound, Some(&out.timed_out), mark, move |held| {
-            IN_PHASE.with(|p| p.set(Some(limit)));
+            IN_PHASE.with(|p| p.set(Some(git_limit)));
             PHASE_HELD.with(|h| *h.borrow_mut() = Some(held));
             PHASE_OUT.with(|p| *p.borrow_mut() = Some(mine));
             f(&kc)
@@ -1142,25 +1146,86 @@ mod tests {
         }
     }
 
+    /// The environment of a hung-phase test: the fetch phase has a 1 s limit, which counts from the mark the stand-in git writes as it
+    /// enters its hang (ADR 0103, "Hang-point signal"), and the general limit (20 s, as `kept_hang_env` in `host_steps.rs`) bounds
+    /// everything before it, so no setup call (a git that is slow to start) can meet the 1 s. `Flow::limit` is that general limit.
+    #[cfg(unix)]
+    fn hang_env(mark: &Path) -> Vec<(&'static str, String)> {
+        vec![
+            (PhaseId::Fetch.var(), "1".into()),
+            (CLOCK_MARK, mark.display().to_string()),
+            ("PADDOCK_KEPT_CLONE_TIMEOUT", "20".into()),
+        ]
+    }
+
+    #[cfg(unix)]
+    fn hang_flow(bin: &Path, mark: &Path) -> Flow {
+        let env = hang_env(mark);
+        let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let mut flow = flow_of(kc_with_git(bin, &env));
+        flow.limit = Duration::from_secs(20);
+        flow
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hung_phase_counts_its_limit_from_the_hang_mark_not_from_its_first_git_call() {
+        // The class of the kept-clone flake (fourth sighting, 2026-11-19; load 31): a stand-in git that is slow before it enters its hang
+        // (a loaded machine starting it) met the phase's 1 s limit in that setup, recorded no call and the test failed on the setup.
+        // Here the stand-in takes 1.5 s, past the limit, before it writes its mark and hangs: the limit must count from the mark.
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let mark = dir.path().join("hang-mark");
+        let git = paddock_testkit::StandIn::new(&bin, "git")
+            .records_args()
+            .sleeps(Duration::from_millis(1500))
+            .writes(&mark, "hang")
+            .sleeps(Duration::from_secs(30))
+            .install()
+            .unwrap();
+        let flow = hang_flow(&bin, &mark);
+        let mut out = Vec::new();
+        let mut step = Step {
+            env: &flow.kc.env.clone(),
+            out: &mut out,
+            windows: false,
+            name: NAME,
+        };
+        let r = flow.phase(&mut step, PhaseId::Fetch, "fetch", |kc| kc.git(true, &["fetch"]));
+        let text = String::from_utf8_lossy(&out).into_owned();
+        assert!(matches!(r, Err(Hung)), "the hang is reported as a hung phase: {text}");
+        assert!(
+            text.contains("'fetch' did not finish within 1 s"),
+            "the limit counted from the mark is the phase's own, 1 s, not the setup's: {text}"
+        );
+        assert!(
+            mark.exists() && git.calls().unwrap().len() == 1,
+            "the git reached its hang (mark written, one call recorded) before the phase ended"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase() {
         use std::sync::mpsc;
-        // The fetch phase (own limit 1 s, bound 2 s) runs one git, which ends at its limit (a git that logs its call and sleeps), and is
-        // then held until it is abandoned. While the next phase runs, the held phase goes on: its second git must not start (the next
+        // The fetch phase (own limit 1 s from the hang mark, bound 2 s) runs one git, which hangs and is ended when the phase is
+        // abandoned (a git that logs its call and sleeps), and the phase is then held until it is abandoned. While the next phase runs, the held phase goes on: its second git must not start (the next
         // phase may be removing or making the same folder), the next phase must not be reported as hung, and its error output must not
         // carry the abandoned phase's lines.
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
-        // A git that logs its call and sleeps (the stand-in records every call's arguments and stays for 30 s).
+        // A git that logs its call, writes the hang mark and sleeps (the stand-in records every call's arguments and stays for 30 s);
+        // the phase's 1 s counts from the mark, so the stand-in's start-up under load is not in it.
+        let mark = dir.path().join("hang-mark");
         let git = paddock_testkit::StandIn::new(&bin, "git")
             .records_args()
+            .writes(&mark, "hang")
             .sleeps(Duration::from_secs(30))
             .install()
             .unwrap();
-        let kc = kc_with_git(&bin, &[(PhaseId::Fetch.var(), "1")]);
-        let flow = flow_of(kc);
+        let flow = hang_flow(&bin, &mark);
         let mut out = Vec::new();
         let mut step = Step {
             env: &flow.kc.env.clone(),
@@ -1171,7 +1236,7 @@ mod tests {
         let (go_tx, go_rx) = mpsc::channel::<()>();
         let (done_tx, done_rx) = mpsc::channel::<()>();
         let first = flow.phase(&mut step, PhaseId::Fetch, "fetch", move |kc| {
-            let _ = kc.git(true, &["fetch", "first"]); // ends at its 1 s limit
+            let _ = kc.git(true, &["fetch", "first"]); // ended when the phase is abandoned
             go_rx.recv().ok(); // held past the phase's bound (limit + 1 s)
             let r = kc.git(true, &["fetch", "late"]);
             done_tx.send(()).ok();
@@ -1180,7 +1245,7 @@ mod tests {
         assert!(matches!(first, Err(Hung)), "the held phase is abandoned at its bound");
         let second = flow.phase(&mut step, PhaseId::Checkout, "check out", move |_| {
             go_tx.send(()).ok();
-            done_rx.recv().ok(); // the abandoned phase's git has ended at its limit and written what it writes
+            done_rx.recv().ok(); // the abandoned phase's git has ended and written what it writes
             Ok(())
         });
         let text = String::from_utf8_lossy(&out).into_owned();
