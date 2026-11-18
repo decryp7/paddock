@@ -155,7 +155,7 @@ struct Ctx {
 
 /// Fills a template: `{args}` (the arguments, joined by spaces), `{arg:N}` (the N-th, from 1; empty when absent), `{cwd}`, `{dir}` (the
 /// stand-in's own folder), `{name}`, `{pid}`, `{env:NAME}` and `{env:NAME|fallback}` (empty or the fallback when unset),
-/// `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
+/// `{flag:PREFIX}` (what follows PREFIX in the last argument that starts with it, as `${a#PREFIX}` does), `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
 fn expand(text: &str, ctx: &Ctx) -> Result<String, String> {
     let mut out = String::new();
     let mut rest = text;
@@ -195,7 +195,14 @@ fn token(t: &str, ctx: &Ctx) -> Result<String, String> {
         "stdin" => stdin.to_string(),
         "stdin_line" => stdin.lines().next().unwrap_or("").to_string(),
         _ => {
-            if let Some(n) = t.strip_prefix("arg:") {
+            if let Some(prefix) = t.strip_prefix("flag:") {
+                ctx.argv
+                    .iter()
+                    .rev()
+                    .find_map(|a| a.strip_prefix(prefix))
+                    .unwrap_or_default()
+                    .to_string()
+            } else if let Some(n) = t.strip_prefix("arg:") {
                 let n: usize = n
                     .parse()
                     .map_err(|_| format!("`{{{t}}}`: the argument number is not a number"))?;
@@ -291,6 +298,7 @@ fn act(actions: &Value, ctx: &Ctx) -> Result<i32, String> {
                     .map_err(|e| format!("cannot copy {from} to {to}: {e}"))?;
             }
             "ignore_term" => ignore_term()?,
+            "stop_self" => stop_self()?,
             "sleep_ms" => {
                 let ms = arg
                     .as_i64()
@@ -432,6 +440,25 @@ fn ignore_term() -> Result<(), String> {
 #[cfg(not(unix))]
 fn ignore_term() -> Result<(), String> {
     Err("ignore_term exists only on Unix".into())
+}
+
+/// Stops this process as `kill -STOP $$` does (Unix); it goes on only when something sends SIGCONT (or kills it).
+#[cfg(unix)]
+fn stop_self() -> Result<(), String> {
+    unsafe extern "C" {
+        fn raise(signum: i32) -> i32;
+    }
+    // SIGSTOP is 17 on macOS and 19 on Linux.
+    let sigstop = if cfg!(target_os = "macos") { 17 } else { 19 };
+    let _ = std::io::stdout().flush();
+    // SAFETY: `raise` only sends the signal to this process.
+    unsafe { raise(sigstop) };
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn stop_self() -> Result<(), String> {
+    Err("stop_self exists only on Unix".into())
 }
 
 /// Installs another stand-in: a copy of this program under `path` (a template) and the nested script beside it, whose own strings are

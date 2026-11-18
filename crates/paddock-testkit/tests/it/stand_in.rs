@@ -790,3 +790,84 @@ fn copies_a_binary_file_to_the_place_the_call_names() {
             .success()
     );
 }
+
+fn the_flag_token_is_what_follows_a_prefix_in_the_last_argument_that_has_it() {
+    let s = Scratch::new();
+    let f = s.work().join("port");
+    let p = StandIn::new(&s.work(), "browser")
+        .answers(Actions::new().writes_with(
+            &f.to_string_lossy(),
+            "dir=<{flag:--user-data-dir=}> none=<{flag:--nope=}>\n",
+        ))
+        .install()
+        .unwrap();
+    run(
+        p.program(),
+        &[
+            "--headless",
+            "--user-data-dir=/first",
+            "--user-data-dir=/second dir",
+        ],
+    );
+    assert_eq!(
+        std::fs::read_to_string(&f).unwrap().replace("\r\n", "\n"),
+        "dir=</second dir> none=<>\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stand_in_that_stops_itself_goes_on_after_sigcont() {
+    let s = Scratch::new();
+    let before = s.work().join("before");
+    let after = s.work().join("after");
+    let p = StandIn::new(&s.work(), "stopper")
+        .answers(
+            Actions::new()
+                .writes(&before, "x")
+                .stops_itself()
+                .writes(&after, "y"),
+        )
+        .install()
+        .unwrap();
+    let mut child = TestCommand::new(p.program()).spawn().unwrap();
+    wait_until("it wrote before stopping", || before.exists());
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!after.exists(), "it did not stop");
+    let id = child.id().to_string();
+    assert!(
+        std::process::Command::new("kill")
+            .args(["-CONT", &id])
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(child.wait().unwrap().success());
+    assert!(after.exists());
+}
+
+#[test]
+fn files_are_the_program_and_its_script_to_pack_or_serve_and_they_run_where_they_are_put() {
+    let s = Scratch::new();
+    let f = StandIn::new(&s.work(), "Packed Tool")
+        .stdout("from the archive")
+        .exit(2)
+        .files()
+        .unwrap();
+    assert_eq!(f.script_name, "Packed Tool.stand-in.json");
+    let elsewhere = s.work().join("unpacked");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let program = elsewhere.join(&f.program_name);
+    paddock_testkit::exe::write_program(&program, &f.program).unwrap();
+    std::fs::write(elsewhere.join(&f.script_name), &f.script).unwrap();
+    let o = run(&program, &[]);
+    assert_eq!(
+        (o.status.code(), out(&o).as_str()),
+        (Some(2), "from the archive\n")
+    );
+    let e = StandIn::new(&s.work(), "r")
+        .records_args()
+        .files()
+        .unwrap_err();
+    assert!(e.to_string().contains("cannot be packed"), "{e}");
+}
