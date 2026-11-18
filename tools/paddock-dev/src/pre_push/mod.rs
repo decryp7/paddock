@@ -451,6 +451,7 @@ fn command_in(
         stop: Arc::clone(&stop),
         built_heavy: Default::default(),
         live_slot: Default::default(),
+        folders: None,
         priority: pushes.iter().any(|p| budget::is_landing_ref(&p.remote_ref)),
         wrapper,
     };

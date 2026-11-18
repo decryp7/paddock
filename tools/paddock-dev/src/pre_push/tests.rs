@@ -3391,6 +3391,7 @@ mod deny_row {
             stop: Arc::new(AtomicBool::new(false)),
             built_heavy: Default::default(),
             live_slot: Default::default(),
+            folders: None,
             priority: false,
             wrapper: crate::local_sccache::Lazy::off(),
         }
