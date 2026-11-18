@@ -767,3 +767,26 @@ fn a_stand_in_that_ignores_term_survives_it_and_dies_of_kill() {
     child.kill().unwrap();
     assert_eq!(child.wait().unwrap().signal(), Some(9));
 }
+
+#[test]
+fn copies_a_binary_file_to_the_place_the_call_names() {
+    let s = Scratch::new();
+    let src = s.work().join("archive.bin");
+    let bytes: Vec<u8> = vec![0, 159, 146, 150, 255, 10, 0];
+    std::fs::write(&src, &bytes).unwrap();
+    let p = StandIn::new(&s.work(), "curl")
+        .answers(Actions::new().copies_file(&src.to_string_lossy(), "{arg:2}"))
+        .install()
+        .unwrap();
+    let dest = s.work().join("copy.bin");
+    let o = run(p.program(), &["-o", &dest.to_string_lossy()]);
+    assert!(o.status.success(), "{}", err(&o));
+    assert_eq!(std::fs::read(&dest).unwrap(), bytes);
+    // A source that is missing is a broken stand-in, not a silent success.
+    std::fs::remove_file(&src).unwrap();
+    assert!(
+        !run(p.program(), &["-o", &dest.to_string_lossy()])
+            .status
+            .success()
+    );
+}

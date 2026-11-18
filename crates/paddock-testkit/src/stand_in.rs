@@ -255,6 +255,17 @@ impl Actions {
         self.step("mkdir", Value::Str(path_template.to_string()))
     }
 
+    /// Copies the file `from_template` to `to_template` (replacing it; binary content as it is), both with the call's values
+    /// filled in: a fake `curl -o` that "downloads" an archive built by the test.
+    #[must_use]
+    pub fn copies_file(self, from_template: &str, to_template: &str) -> Actions {
+        let m = vec![
+            ("from".to_string(), Value::Str(from_template.to_string())),
+            ("to".to_string(), Value::Str(to_template.to_string())),
+        ];
+        self.step("copy", Value::Obj(m))
+    }
+
     /// Ignores SIGTERM from here on (Unix only), as `trap '' TERM` does.
     #[must_use]
     pub fn ignores_term(self) -> Actions {

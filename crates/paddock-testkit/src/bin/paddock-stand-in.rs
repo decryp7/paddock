@@ -279,6 +279,17 @@ fn act(actions: &Value, ctx: &Ctx) -> Result<i32, String> {
                 let path = expand(arg.as_str().ok_or("mkdir needs a path")?, ctx)?;
                 std::fs::create_dir_all(&path).map_err(|e| format!("cannot make {path}: {e}"))?;
             }
+            "copy" => {
+                let get = |k: &str| {
+                    arg.get(k)
+                        .and_then(Value::as_str)
+                        .ok_or(format!("copy needs `{k}`"))
+                };
+                let from = expand(get("from")?, ctx)?;
+                let to = expand(get("to")?, ctx)?;
+                std::fs::copy(&from, &to)
+                    .map_err(|e| format!("cannot copy {from} to {to}: {e}"))?;
+            }
             "ignore_term" => ignore_term()?,
             "sleep_ms" => {
                 let ms = arg
