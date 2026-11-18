@@ -9,7 +9,7 @@ use super::baseline::{self, Growth, reconcile};
 use super::finding::Finding;
 use super::inline_waiver::{CommentView, InlineWaiver, Kind};
 use super::jsre::{LineIndex, is_js_space, rx};
-use super::mask::mask_units;
+use super::mask::mask_rust;
 use regex::Regex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -69,8 +69,8 @@ pub fn pid_liveness(text: &str, file: &str) -> Vec<Liveness> {
     if IMPLEMENTATION.contains(&file) {
         return Vec::new();
     }
-    let mask_u = mask_units(&text.encode_utf16().collect::<Vec<u16>>());
-    let masked = String::from_utf16_lossy(&mask_u);
+    // `mask_units` of the text, without the round trip through UTF-16 and back (`text` is valid UTF-8).
+    let masked = mask_rust(text);
     let view = CommentView::of(text, Kind::Rust);
     let lines: Vec<&str> = text.split('\n').collect();
     let mut hits: Vec<Hit> = Vec::new();

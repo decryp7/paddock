@@ -14,7 +14,7 @@
 //! Positions are UTF-16 offsets, as in the JavaScript.
 
 use super::finding::{Finding, Severity};
-use super::jsre::{UnitIndex, has_reason, rx};
+use super::jsre::{Positions, UnitIndex, has_reason, rx};
 use super::mask::mask_rust;
 use super::record::Precondition;
 use super::{Check, CheckOutput, Control, Ctx};
@@ -180,9 +180,9 @@ pub fn path_text_sites(text: &str, file: &str) -> Vec<Site> {
         }
     }
     // Counted only when a fold is there (rare): most files have none.
-    let in_text = std::cell::OnceCell::new();
+    let in_text = Positions::new(text);
     for c in FOLD.find_iter(text) {
-        let start = in_text.get_or_init(|| UnitIndex::new(text)).at(c.start());
+        let start = in_text.unit(c.start());
         if start < from || slice(&m, start, start + 9) != ".replace(" {
             continue;
         }

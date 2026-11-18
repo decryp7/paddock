@@ -55,10 +55,10 @@ fn kind_of(lang: &str) -> Kind {
     }
 }
 
-/// The oracle's answer for every case: comments, and the mask of a Rust case. Split over a few threads: over every tracked `.rs`
-/// file this is most of the test's CPU time in a debug build (about 10 s alone, 2026-11-18), and the test runs beside the whole suite.
+/// The oracle's answer for every case: comments, and the mask of a Rust case. Split over two threads: over every tracked `.rs` file
+/// this is most of the test's CPU time in a debug build (about 10 s alone, 2026-11-18), and nextest already runs a test per core.
 fn oracle(cases: &[(String, String)]) -> Vec<(Value, Value)> {
-    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 4);
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 2);
     let chunk = cases.len().div_ceil(threads).max(1);
     std::thread::scope(|s| {
         let parts: Vec<_> = cases

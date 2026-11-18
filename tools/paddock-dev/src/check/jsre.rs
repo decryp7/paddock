@@ -126,9 +126,39 @@ impl LineIndex {
     }
 }
 
+/// The JavaScript index and the line of byte offsets of one text: its [`UnitIndex`] and [`LineIndex`], each built on first use, so a
+/// text with no hit costs nothing.
+pub struct Positions<'a> {
+    text: &'a str,
+    units: std::cell::OnceCell<UnitIndex>,
+    lines: std::cell::OnceCell<LineIndex>,
+}
+
+impl<'a> Positions<'a> {
+    /// Nothing is counted yet.
+    pub fn new(text: &'a str) -> Positions<'a> {
+        Positions {
+            text,
+            units: std::cell::OnceCell::new(),
+            lines: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// [`UnitIndex::at`].
+    pub fn unit(&self, byte: usize) -> usize {
+        self.units.get_or_init(|| UnitIndex::new(self.text)).at(byte)
+    }
+
+    /// [`LineIndex::line`].
+    pub fn line(&self, byte: usize) -> usize {
+        self.lines.get_or_init(|| LineIndex::new(self.text)).line(byte)
+    }
+}
+
 /// The JavaScript index (UTF-16 offset) of every byte offset of one text, counted in one pass. `units(&text[..m.start()])` for
 /// each match walked the prefix again every time: C122 spent 17 of its 20 s on that over this tree in a debug build, and its live
-/// test passed nextest's 60 s under load (2026-11-18).
+/// test passed nextest's 60 s under load (2026-11-18). It holds one `usize` per byte: 8 times the text's size on a 64-bit host (a
+/// 100 kB source takes 800 kB while it is checked).
 pub struct UnitIndex(Vec<usize>);
 
 impl UnitIndex {
@@ -177,6 +207,16 @@ mod tests {
             }
             assert_eq!(ix.at(s.len() + 5), units(s), "past the end is the end");
         }
+    }
+
+    #[test]
+    fn positions_count_nothing_until_asked_and_then_answer_as_the_indexes_do() {
+        let s = "a\n😀b\nc";
+        WALKED.with(|w| w.set(0));
+        let p = Positions::new(s);
+        assert_eq!(WALKED.with(|w| w.get()), 0, "nothing is counted before a lookup");
+        assert_eq!((p.unit(6), p.line(6)), (units(&s[..6]), line_at(s, 6)));
+        assert_eq!((p.unit(s.len()), p.line(s.len())), (units(s), line_at(s, s.len())));
     }
 
     #[test]
