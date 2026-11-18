@@ -1161,11 +1161,13 @@ mod tests {
 
     struct Sensors;
     impl CounterReader for Sensors {
-        fn read(&self, id: dyno_core::helper_requests::CounterId) -> Result<CounterValue, PlatformError> {
-            match id {
-                dyno_core::helper_requests::CounterId::Fans => Err(PlatformError::Unsupported("No fans.".into())),
-                _ => Ok(CounterValue::Thermal(vec![])),
-            }
+        fn read_many(&self, ids: &[dyno_core::helper_requests::CounterId]) -> Vec<Result<CounterValue, PlatformError>> {
+            ids.iter()
+                .map(|id| match id {
+                    dyno_core::helper_requests::CounterId::Fans => Err(PlatformError::Unsupported("No fans.".into())),
+                    _ => Ok(CounterValue::Thermal(vec![])),
+                })
+                .collect()
         }
     }
 

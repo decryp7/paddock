@@ -142,9 +142,40 @@ impl ToolRunner for SystemRunner {
     }
 }
 
+/// Budget tests' runner (ADR 0108 guard D): a scripted runner that makes, for each run, the `Command` [`SystemRunner`] would
+/// make, so `paddock_proc::starts::assert_starts` counts the programs a reader would start, without starting any.
+#[cfg(test)]
+pub(crate) struct Counted<R>(pub R);
+
+#[cfg(test)]
+impl<R: ToolRunner> ToolRunner for Counted<R> {
+    fn run_tool(&self, t: &Tool, timeout: Duration) -> Result<ToolOutput, PlatformError> {
+        let _counted = command(&t.program);
+        self.0.run_tool(t, timeout)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_counted_runner_counts_one_start_per_run_and_a_bare_fake_none() {
+        let fake = OnlyTool(ToolOutput {
+            ok: true,
+            stdout: String::new(),
+            error: String::new(),
+        });
+        paddock_proc::starts::assert_starts(paddock_proc::starts::at_most_or_none(0, "a scripted fake starts nothing"), || {
+            fake.run("/x/tool", &[], TOOL_TIMEOUT)
+        })
+        .unwrap();
+        let counted = Counted(fake);
+        paddock_proc::starts::assert_starts(2, || {
+            counted.run("/x/tool", &[], TOOL_TIMEOUT).unwrap();
+            counted.run("/x/tool", &[], TOOL_TIMEOUT).unwrap();
+        });
+    }
 
     struct OnlyTool(ToolOutput);
     impl ToolRunner for OnlyTool {
