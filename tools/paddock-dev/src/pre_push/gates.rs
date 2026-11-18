@@ -46,6 +46,8 @@ pub struct Gate {
     pub next: String,
     /// The Cargo workspace folders it lints (the Linux Clippy), for the steps that name them; empty for the other gates.
     pub workspaces: Vec<String>,
+    /// One line the push prints when the gate checks less than its full command (the deny row without advisories); `None` otherwise.
+    pub notice: Option<String>,
 }
 
 impl Gate {
@@ -142,6 +144,8 @@ pub struct Change {
     pub files: Vec<String>,
     /// The commit ranges to lint (`<merge base>..<pushed commit>`, one per pushed ref); none when there is no commit of its own.
     pub ranges: Vec<String>,
+    /// The commit the files were measured from. `None`: unknown, and the checks that judge only what the push adds run in full.
+    pub base: Option<String>,
 }
 
 /// The rows that do not depend on a workspace, as the pass record stores them (`known::write_record`): a record made by a tool with
@@ -177,6 +181,7 @@ fn gate(id: String, cwd: &str, program: &str, args: &[&str], rank: u8, next: Str
         rank,
         next,
         workspaces: Vec::new(),
+        notice: None,
     }
 }
 
@@ -355,10 +360,13 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             "pitwall-deny".into(),
             "apps/pitwall",
             "cargo",
-            &["deny", "--workspace", "check"],
+            &[],
             1,
             "`cargo deny --workspace check` in apps/pitwall names the advisory or licence; fix or record it in deny.toml".into(),
         );
+        let scope = super::deny::scope(change, "apps/pitwall");
+        d.args = scope.args();
+        d.notice = scope.notice("apps/pitwall");
         d.need = Need::Tool("cargo-deny".into());
         out.push(Planned::Run(d));
     } else {

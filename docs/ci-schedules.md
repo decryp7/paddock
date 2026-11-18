@@ -71,3 +71,10 @@ repository variable `PADDOCK_AUDIT_ENFORCE` is `1` (Gitea: repository settings, 
 (nightly `audit`: not yet; ci `audit`: not yet), then add nightly's `audit` to `mark`. The plain audit steps (`cargo deny check` in the
 crates, tauri and paddock-dev jobs, `npm audit` in debrief.yml) stay blocking until then, so nothing gets weaker; after it they move to
 `./dev audit compare` (one job per question, no copied logic).
+
+**The push hook (`./dev check --pre-push`).** Its `pitwall-deny` row runs `cargo deny` for licences, bans and sources on every push, and the
+`advisories` check only when the push changes a `Cargo.lock`, a `Cargo.toml` or the `deny.toml` the workspace depends on (its own, or a
+shared crate's manifest under `crates/`), measured from the same base as the rest of the push (`pre_push/deny.rs`, one value that
+decides the arguments and the printed line). A push that skips them prints `advisories skipped` and names the nightly audit that covers
+them. A push whose base is not known runs them (not measured never passes, ADR 0089). Reason: an outside advisory (lettre 0.11.23,
+2026-11-18) turned every push of every branch red, also those that touch no dependency.

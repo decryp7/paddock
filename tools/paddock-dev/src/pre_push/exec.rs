@@ -1068,6 +1068,7 @@ exit $rc
                 rank: 2,
                 next: "fix it".into(),
                 workspaces: Vec::new(),
+                notice: None,
             }
         }
 
