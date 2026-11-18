@@ -681,11 +681,9 @@ fn installs_a_second_stand_in_that_answers_for_itself() {
             Actions::new()
                 .makes_dir(&out_dir.to_string_lossy())
                 .installs(
-                    &format!(
-                        "{}/paddock-dev{}",
-                        out_dir.display(),
-                        std::env::consts::EXE_SUFFIX
-                    ),
+                    &out_dir
+                        .join(format!("paddock-dev{}", std::env::consts::EXE_SUFFIX))
+                        .to_string_lossy(),
                     &built,
                 ),
         )
@@ -703,6 +701,16 @@ fn installs_a_second_stand_in_that_answers_for_itself() {
         out(&run(&made, &[])),
         "embedded abc\n",
         "the token was filled when it was installed"
+    );
+    // One self-contained file: copied alone, to another name, it still answers (a wrapper that caches a built tool does this).
+    let copy = s.work().join("copy");
+    std::fs::create_dir_all(&copy).unwrap();
+    let copied = copy.join("elsewhere");
+    std::fs::copy(&made, &copied).unwrap();
+    assert_eq!(out(&run(&copied, &["--version"])), "0\n");
+    assert!(
+        !out_dir.join("paddock-dev.stand-in.json").exists(),
+        "no script is left beside it"
     );
 }
 
@@ -848,4 +856,233 @@ fn files_are_the_program_and_its_script_to_pack_or_serve_and_they_run_where_they
         .files()
         .unwrap_err();
     assert!(e.to_string().contains("cannot be packed"), "{e}");
+}
+
+#[test]
+fn a_case_on_the_joined_arguments_and_on_file_contents_answers_only_when_they_hold() {
+    let s = Scratch::new();
+    let work = s.work();
+    std::fs::write(work.join("a.toml"), "x = base64\n").unwrap();
+    std::fs::write(work.join("b.toml"), "y = serde\n").unwrap();
+    let p = StandIn::new(&work, "tool")
+        .when(
+            &Case::new()
+                .args_text_contains(" -C x rev-parse HEAD ")
+                .file_contains(&work.join("a.toml"), "base64")
+                .file_lacks(&work.join("b.toml"), "base64"),
+            Actions::new().exit(3),
+        )
+        .install()
+        .unwrap();
+    let call = |a: &[&str]| run(p.program(), a).status.code();
+    assert_eq!(call(&["-C", "x", "rev-parse", "HEAD"]), Some(3));
+    // Each condition alone can fail it: the joined text is a whole-word match, the files are read at the call.
+    assert_eq!(call(&["-C", "x", "rev-parse", "HEAD2"]), Some(0));
+    assert_eq!(call(&["-C", "xy", "rev-parse", "HEAD"]), Some(0));
+    std::fs::write(work.join("b.toml"), "y = base64\n").unwrap();
+    assert_eq!(
+        call(&["-C", "x", "rev-parse", "HEAD"]),
+        Some(0),
+        "file_lacks"
+    );
+    std::fs::write(work.join("b.toml"), "y = serde\n").unwrap();
+    std::fs::write(work.join("a.toml"), "x = serde\n").unwrap();
+    assert_eq!(
+        call(&["-C", "x", "rev-parse", "HEAD"]),
+        Some(0),
+        "file_contains"
+    );
+    // A missing file holds nothing: file_lacks is true.
+    std::fs::write(work.join("a.toml"), "x = base64\n").unwrap();
+    std::fs::remove_file(work.join("b.toml")).unwrap();
+    assert_eq!(call(&["-C", "x", "rev-parse", "HEAD"]), Some(3));
+}
+
+#[test]
+fn the_run_token_is_what_a_program_prints_in_the_working_folder() {
+    let s = Scratch::new();
+    let work = s.work();
+    let p = StandIn::new(&work, "gates")
+        .answers(Actions::new().stdout_with(
+            "inside=<{run:git|rev-parse|--is-inside-work-tree}> bad=<{run:git|no-such-subcommand}>",
+        ))
+        .install()
+        .unwrap();
+    let repo = work.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    assert!(
+        TestCommand::new("git")
+            .args(["init", "-q"])
+            .current_dir(&repo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let o = TestCommand::new(p.program())
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert_eq!(out(&o), "inside=<true> bad=<>\n");
+}
+
+#[test]
+fn an_exact_name_may_end_in_exe_on_any_host_and_answers_for_itself() {
+    let s = Scratch::new();
+    let work = s.work();
+    assert!(
+        StandIn::new(&work, "sccache.exe").install().is_err(),
+        "a plain name still refuses `.exe`"
+    );
+    let p = StandIn::new(&work, "sccache.exe")
+        .exact_name()
+        .stdout("sccache 0.19.0")
+        .install()
+        .unwrap();
+    assert!(p.program().ends_with("sccache.exe"));
+    assert_eq!(out(&run(p.program(), &[])), "sccache 0.19.0\n");
+    let files = StandIn::new(&work, "sccache.exe")
+        .exact_name()
+        .files()
+        .unwrap();
+    assert!(
+        files.program_name.ends_with("sccache.exe")
+            && files.script_name.ends_with(".stand-in.json")
+    );
+}
+
+#[test]
+fn the_environ_token_lists_every_variable_the_call_was_given() {
+    let s = Scratch::new();
+    let log = s.work().join("env");
+    let p = StandIn::new(&s.work(), "tool")
+        .answers(Actions::new().appends_with(&log.to_string_lossy(), "{environ}\n"))
+        .install()
+        .unwrap();
+    TestCommand::new(p.program())
+        .env("PADDOCK_STAND_IN_CANARY", "a b")
+        .status()
+        .unwrap();
+    let seen = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        seen.lines().any(|l| l == "PADDOCK_STAND_IN_CANARY=a b"),
+        "{seen}"
+    );
+}
+
+#[test]
+fn runs_starts_a_program_and_goes_on_with_the_next_step() {
+    let s = Scratch::new();
+    let work = s.work();
+    let helper = StandIn::new(&work, "helper")
+        .answers(Actions::new().stdout_with("helper {args}").exit(9))
+        .install()
+        .unwrap();
+    let p = StandIn::new(&work, "tool")
+        .answers(
+            Actions::new()
+                .runs(
+                    &Exec::program(&helper.program().to_string_lossy())
+                        .args(["first"])
+                        .without_call_arguments(),
+                )
+                .stdout("after")
+                .exit(4),
+        )
+        .install()
+        .unwrap();
+    let o = run(p.program(), &["x"]);
+    assert_eq!(
+        o.status.code(),
+        Some(4),
+        "the helper's exit code 9 is not the stand-in's"
+    );
+    // The helper's output goes to the stand-in's own stdout, before the next step's line.
+    assert_eq!(out(&o), "helper first\nafter\n");
+}
+
+#[test]
+fn an_env_condition_a_templated_file_condition_lines_and_a_flag_suffix_read_the_call() {
+    let s = Scratch::new();
+    let work = s.work();
+    let count = work.join("runs");
+    let p = StandIn::new(&work, "cargo")
+        .answers(
+            Actions::new()
+                .appends_with(&count.to_string_lossy(), "run\n")
+                .stdout_with("target={flag:build.target-dir='|'} runs={lines:%COUNT%|2} none={lines:%COUNT%.missing}"
+                    .replace("%COUNT%", &count.to_string_lossy())
+                    .as_str()),
+        )
+        .when(
+            &Case::new().env_is_set("STAND_IN_FORBIDDEN"),
+            Actions::new().stderr("forbidden").exit(97),
+        )
+        .when(
+            &Case::new().file_missing_with("{flag:build.target-dir='|'}/marker"),
+            Actions::new().stdout("cold").exit(3),
+        )
+        .install()
+        .unwrap();
+    let marker_dir = work.join("t");
+    std::fs::create_dir_all(&marker_dir).unwrap();
+    let arg = format!("build.target-dir='{}'", marker_dir.display());
+    let call = |env: Option<(&str, &str)>| {
+        let mut c = TestCommand::new(p.program());
+        c.args(["--config", &arg]);
+        if let Some((k, v)) = env {
+            c.env(k, v);
+        }
+        c.output().unwrap()
+    };
+    let cold = call(None);
+    assert_eq!(
+        (cold.status.code(), out(&cold)),
+        (Some(3), "cold\n".to_string()),
+        "no marker yet"
+    );
+    std::fs::write(marker_dir.join("marker"), "").unwrap();
+    for runs in 1..=3 {
+        let o = call(None);
+        let want = format!(
+            "target={} runs={} none=0\n",
+            marker_dir.display(),
+            runs.min(2)
+        );
+        assert_eq!(
+            out(&o),
+            want,
+            "the suffix quote is dropped and the count is capped"
+        );
+    }
+    let o = call(Some(("STAND_IN_FORBIDDEN", "1")));
+    assert_eq!(
+        (o.status.code(), err(&o)),
+        (Some(97), "forbidden\n".to_string())
+    );
+    let o = call(Some(("STAND_IN_FORBIDDEN", "")));
+    assert_eq!(o.status.code(), Some(0), "an empty variable is not set");
+}
+
+#[test]
+fn a_single_file_stand_in_answers_from_its_own_bytes_when_copied_alone() {
+    let s = Scratch::new();
+    let work = s.work();
+    let tool = StandIn::new(&work, "ignored")
+        .answers(Actions::new().stdout_with("name={name} args={args}"))
+        .exit(5);
+    let first = work.join("one");
+    tool.write_single_file(&first).unwrap();
+    let elsewhere = work.join("sub");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let second = elsewhere.join("renamed-tool");
+    std::fs::copy(&first, &second).unwrap();
+    let o = run(&second, &["a", "b"]);
+    assert_eq!(
+        (o.status.code(), out(&o)),
+        (Some(5), "name=renamed-tool args=a b\n".to_string())
+    );
+    assert_eq!(
+        std::fs::read(&first).unwrap(),
+        tool.single_file_bytes().unwrap()
+    );
 }

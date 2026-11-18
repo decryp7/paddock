@@ -9,7 +9,7 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use paddock_testkit::TestCommand;
+use paddock_testkit::{Actions, Exec, StandIn, TestCommand};
 use std::path::{Path, PathBuf};
 
 fn repo() -> PathBuf {
@@ -54,8 +54,8 @@ struct Result {
 }
 
 impl Runner {
-    /// `shim`: shell lines run by the fake sccache before it exits 0 (`None`: no sccache on PATH).
-    fn new(shim: Option<&str>) -> Runner {
+    /// `shim`: how the fake sccache answers (`None`: no sccache on PATH).
+    fn new(shim: Option<Fail>) -> Runner {
         let dir = tempfile::tempdir().unwrap();
         let root = paddock_env::winpath::real(dir.path()).unwrap();
         let bin = root.join("bin");
@@ -68,10 +68,12 @@ impl Runner {
             write_shim(&bin.join("sccache"), &calls, shim);
         }
         // apt-get and sudo always have shims first on PATH, so no test can reach the machine's own.
-        for (name, body) in [("sudo", "exec \"$@\""), ("apt-get", "exit 0")] {
-            let p = bin.join(name);
-            paddock_testkit::exe::write_program(&p, format!("#!/bin/sh\necho \"{name} $*\" >> '{}'\n{body}\n", calls.display())).unwrap();
-        }
+        let log = |name: &str| Actions::new().appends_with(&calls.display().to_string(), &format!("{name} {{args}}\n"));
+        StandIn::new(&bin, "sudo")
+            .answers(log("sudo").execs(&Exec::call_arguments()))
+            .install()
+            .unwrap();
+        StandIn::new(&bin, "apt-get").answers(log("apt-get")).install().unwrap();
         Runner {
             root,
             bin,
@@ -188,13 +190,31 @@ impl Runner {
     }
 }
 
-fn write_shim(path: &Path, calls: &Path, shim: &str) {
-    let body = format!(
-        "#!/bin/sh\necho \"tok=${{PADDOCK_DEV_TOKEN:-}}\" >> '{tokens}'\necho \"$* port=$SCCACHE_SERVER_PORT io=$SCCACHE_IGNORE_SERVER_IO_ERROR dir=${{SCCACHE_DIR:-}} size=${{SCCACHE_CACHE_SIZE:-}} redis=${{SCCACHE_REDIS_ENDPOINT:-}} db=${{SCCACHE_REDIS_DB:-}}\" >> '{}'\n[ \"$1\" = --version ] && echo sccache 0.19.0\n{shim}\nexit 0\n",
-        calls.display(),
-        tokens = calls.with_file_name("tokens").display()
-    );
-    paddock_testkit::exe::write_program(path, body).unwrap();
+/// How the fake sccache fails: never, or when its first argument is this.
+#[derive(Clone, Copy)]
+enum Fail {
+    Never,
+    On(&'static str),
+}
+
+/// A fake sccache at `path` that logs the job's token and its call, prints its version, and fails as `fail` says.
+fn write_shim(path: &Path, calls: &Path, fail: Fail) {
+    let base = || {
+        Actions::new()
+            .appends_with(&calls.with_file_name("tokens").display().to_string(), "tok={env:PADDOCK_DEV_TOKEN}\n")
+            .appends_with(
+                &calls.display().to_string(),
+                "{args} port={env:SCCACHE_SERVER_PORT} io={env:SCCACHE_IGNORE_SERVER_IO_ERROR} dir={env:SCCACHE_DIR} size={env:SCCACHE_CACHE_SIZE} redis={env:SCCACHE_REDIS_ENDPOINT} db={env:SCCACHE_REDIS_DB}\n",
+            )
+    };
+    let mut shim = StandIn::new(path.parent().unwrap(), path.file_name().unwrap().to_str().unwrap())
+        .exact_name()
+        .answers(base())
+        .when_args(&["--version"], base().stdout("sccache 0.19.0"));
+    if let Fail::On(first) = fail {
+        shim = shim.when_args(&[first], base().exit(1));
+    }
+    shim.install().unwrap();
 }
 
 struct Input {
@@ -227,7 +247,7 @@ fn same(runner: &Runner, input: &Input, extra: &[(&str, &str)], with_install: bo
 
 #[test]
 fn a_host_slot_gets_its_own_folder_port_and_share_of_the_budget() {
-    let r = Runner::new(Some("true"));
+    let r = Runner::new(Some(Fail::Never));
     let (_, rs) = same(&r, &LOCAL, &[], true);
     assert!(rs.env.contains("RUSTC_WRAPPER=sccache\nCARGO_INCREMENTAL=0\n"), "{}", rs.env);
     assert!(
@@ -267,7 +287,7 @@ fn a_host_slot_gets_its_own_folder_port_and_share_of_the_budget() {
 
 #[test]
 fn a_container_uses_the_mount_or_a_folder_that_dies_with_it() {
-    let r = Runner::new(Some("true"));
+    let r = Runner::new(Some(Fail::Never));
     let mount = r.root.join("mount");
     std::fs::create_dir_all(&mount).unwrap();
     let mount = mount.display().to_string();
@@ -285,7 +305,7 @@ fn a_container_uses_the_mount_or_a_folder_that_dies_with_it() {
 
 #[test]
 fn redis_is_used_when_asked_for_or_when_auto_has_an_endpoint() {
-    let r = Runner::new(Some("true"));
+    let r = Runner::new(Some(Fail::Never));
     let auto = Input {
         backend: "auto",
         endpoint: "redis://h:6379",
@@ -313,8 +333,8 @@ fn redis_is_used_when_asked_for_or_when_auto_has_an_endpoint() {
 
 #[test]
 fn a_server_that_does_not_start_or_answer_leaves_the_wrapper_unset_and_the_step_green() {
-    for shim in ["[ \"$1\" = --start-server ] && exit 1", "[ \"$1\" = --show-stats ] && exit 1"] {
-        let r = Runner::new(Some(shim));
+    for shim in ["--start-server", "--show-stats"] {
+        let r = Runner::new(Some(Fail::On(shim)));
         let (_, rs) = same(&r, &LOCAL, &[], true);
         assert_eq!((rs.code, rs.env.as_str()), (0, ""), "{shim}");
         assert!(rs.out.contains("::warning::the sccache server did not start"), "{}", rs.out);
@@ -323,7 +343,7 @@ fn a_server_that_does_not_start_or_answer_leaves_the_wrapper_unset_and_the_step_
 
 #[test]
 fn wrong_inputs_fail_the_step_with_the_shells_message() {
-    let r = Runner::new(Some("true"));
+    let r = Runner::new(Some(Fail::Never));
     let (_, rs) = same(
         &r,
         &Input {
@@ -428,7 +448,7 @@ fn a_pinned_copy_in_the_tool_cache_is_put_on_path_and_used() {
     let r = Runner::new(None);
     let pinned = r.root.join("tools/sccache/0.19.0");
     std::fs::create_dir_all(&pinned).unwrap();
-    write_shim(&pinned.join("sccache"), &r.calls, "true");
+    write_shim(&pinned.join("sccache"), &r.calls, Fail::Never);
     let (os, has_pin) = host_runner();
     let host = [("RUNNER_OS", os)];
     let sh = r.shell(&LOCAL, &host, true);
@@ -476,7 +496,7 @@ fn a_download_with_the_wrong_checksum_fails_the_step() {
 
 #[test]
 fn the_tauri_libraries_are_installed_through_sudo_as_the_shell_did() {
-    let r = Runner::new(Some("true"));
+    let r = Runner::new(Some(Fail::Never));
     let tauri = Input { tauri: true, ..LOCAL };
     let (_, rs) = same(&r, &tauri, &[("RUNNER_OS", "Linux")], true);
     assert!(rs.calls.contains("sudo apt-get update\napt-get update\n"), "{}", rs.calls);
@@ -493,7 +513,7 @@ fn the_tauri_libraries_are_installed_through_sudo_as_the_shell_did() {
 
 #[test]
 fn a_token_of_the_job_never_reaches_sccache() {
-    let r = Runner::new(Some("true"));
+    let r = Runner::new(Some(Fail::Never));
     let (sh, rs) = same(&r, &LOCAL, &[], true);
     assert!(
         sh.tokens.contains("tok=tok-secret"),
@@ -507,7 +527,7 @@ fn a_token_of_the_job_never_reaches_sccache() {
 #[test]
 fn on_a_windows_host_the_slot_and_the_exe_names_are_used() {
     let r = Runner::new(None);
-    write_shim(&r.bin.join("sccache.exe"), &r.calls, "true");
+    write_shim(&r.bin.join("sccache.exe"), &r.calls, Fail::Never);
     let win = [("RUNNER_OS", "Windows"), ("PADDOCK_CI_ASSUME_WINDOWS", "1")];
     let rs = r.rust(&LOCAL, &win);
     assert_eq!(rs.code, 0, "{}", rs.out);
@@ -545,7 +565,7 @@ fn on_a_windows_host_a_pinned_copy_in_the_tool_cache_is_used() {
     let r = Runner::new(None);
     let pinned = r.root.join("tools/sccache/0.19.0");
     std::fs::create_dir_all(&pinned).unwrap();
-    write_shim(&pinned.join("sccache.exe"), &r.calls, "true");
+    write_shim(&pinned.join("sccache.exe"), &r.calls, Fail::Never);
     let rs = r.rust(&LOCAL, &[("RUNNER_OS", "Windows"), ("PADDOCK_CI_ASSUME_WINDOWS", "1")]);
     assert_eq!(rs.code, 0, "{}", rs.out);
     assert!(
@@ -567,7 +587,7 @@ fn in_a_container_a_pinned_copy_in_the_tool_cache_is_put_on_path() {
     let r = Runner::new(None);
     let pinned = r.root.join("tools/sccache/0.19.0");
     std::fs::create_dir_all(&pinned).unwrap();
-    write_shim(&pinned.join("sccache"), &r.calls, "true");
+    write_shim(&pinned.join("sccache"), &r.calls, Fail::Never);
     let mount = r.root.join("mount");
     std::fs::create_dir_all(&mount).unwrap();
     let linux = [("RUNNER_OS", "Linux"), ("PADDOCK_SCCACHE_MOUNT", mount.to_str().unwrap())];

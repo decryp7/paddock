@@ -1,22 +1,29 @@
 //! `dev check --pre-push` as a real process on this repository's tree, with fake `cargo` and no `cargo-xwin` on PATH (ER-14: no
 //! real lint runs): the same gates as CI for a change to `crates/`, the exit codes, and one line per failure with its next step.
-// windows-twin: none: the fake tools are shell scripts; the planner and gate table are unit-tested on every OS in src/pre_push
+// windows-twin: none: the tests start `./dev`'s unix paths and PATH with `:`; the planner and gate table are unit-tested on every OS in src/pre_push
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use paddock_testkit::{Actions, Case, Exec, StandIn};
 use std::path::Path;
 
 const CHANGE: &str = "crates/paddock-proc/src/lib.rs";
 
 /// A folder with a `cargo` that lets `metadata` through to the real one (the planner reads the graph with it) and answers every
-/// other call from `script`; the PATH of the run is that folder plus the system's, which has no cargo-xwin and no docker.
-fn fake_bin(dir: &Path, script: &str) -> String {
-    // conformance: test-env — only the path of the real cargo is written into the stand-in's script; no process starts here
+/// other call as `answer` says; the PATH of the run is that folder plus the system's, which has no cargo-xwin and no docker.
+fn fake_bin(dir: &Path, answer: Actions) -> String {
+    // conformance: test-env — only the path of the real cargo is given to the stand-in; no process starts here
     let real = std::env::var("CARGO").unwrap();
     let real_dir = Path::new(&real).parent().unwrap().display().to_string();
-    let cargo = format!("#!/bin/sh\ncase \"$1\" in metadata) PATH=\"{real_dir}:$PATH\" exec \"{real}\" \"$@\";; esac\n{script}\n");
-    let path = dir.join("cargo");
-    paddock_testkit::exe::write_program(&path, cargo).unwrap();
+    StandIn::new(dir, "cargo")
+        .answers(answer)
+        .when(
+            &Case::new().args_start_with(&["metadata"]),
+            Actions::new()
+                .execs(&Exec::program(&real).env("PATH", &format!("{}:{{env:PATH}}", real_dir.replace('{', "{{").replace('}', "}}")))),
+        )
+        .install()
+        .unwrap();
     format!("{}:/usr/bin:/bin", dir.display())
 }
 
@@ -58,7 +65,7 @@ fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>, test_off: bool) -> 
 #[test]
 fn the_dry_run_lists_the_gates_ci_runs_for_a_crates_change_and_why_others_are_left_out() {
     let d = tempfile::tempdir().unwrap();
-    let path = fake_bin(d.path(), "exit 0");
+    let path = fake_bin(d.path(), Actions::new());
     let (code, out, err) = dev(&path, &["--dry-run"]);
     assert_eq!(code, 0, "{err}{out}");
     for want in [
@@ -84,7 +91,7 @@ fn the_dry_run_lists_the_gates_ci_runs_for_a_crates_change_and_why_others_are_le
 #[test]
 fn the_gates_check_is_planned_for_a_crates_change_and_for_an_app_contract_change() {
     let d = tempfile::tempdir().unwrap();
-    let path = fake_bin(d.path(), "exit 0");
+    let path = fake_bin(d.path(), Actions::new());
     for files in [CHANGE, "apps/dyno/paddock.ci.json"] {
         let (code, out, err) = dev(&path, &["--dry-run", "--files", files]);
         assert_eq!(code, 0, "{err}{out}");
@@ -95,7 +102,7 @@ fn the_gates_check_is_planned_for_a_crates_change_and_for_an_app_contract_change
 #[test]
 fn a_failing_fmt_is_exit_5_with_one_error_line_and_the_rerun_command() {
     let d = tempfile::tempdir().unwrap();
-    let path = fake_bin(d.path(), "echo 'Diff in lib.rs' >&2; exit 1");
+    let path = fake_bin(d.path(), Actions::new().stderr("Diff in lib.rs").exit(1));
     let (code, out, err) = dev(&path, &["--only", "fmt"]);
     assert_eq!(code, 5, "{err}{out}");
     let line = out
@@ -112,7 +119,7 @@ fn a_failing_fmt_is_exit_5_with_one_error_line_and_the_rerun_command() {
 #[test]
 fn without_xwin_the_windows_lint_is_not_measured_exit_6_never_a_pass() {
     let d = tempfile::tempdir().unwrap();
-    let path = fake_bin(d.path(), "exit 0");
+    let path = fake_bin(d.path(), Actions::new());
     let (code, out, err) = dev(&path, &["--only", "clippy-windows"]);
     assert_eq!(code, 6, "{err}{out}");
     assert!(
@@ -125,7 +132,7 @@ fn without_xwin_the_windows_lint_is_not_measured_exit_6_never_a_pass() {
 #[test]
 fn everything_that_runs_green_is_exit_0() {
     let d = tempfile::tempdir().unwrap();
-    let path = fake_bin(d.path(), "exit 0");
+    let path = fake_bin(d.path(), Actions::new());
     let (code, out, err) = dev(&path, &["--only", "fmt,clippy"]);
     assert_eq!(code, 0, "{err}{out}");
     assert!(
@@ -137,7 +144,7 @@ fn everything_that_runs_green_is_exit_0() {
 #[test]
 fn when_heavy_cannot_be_built_the_compiles_are_not_measured_exit_6_never_a_pass() {
     let d = tempfile::tempdir().unwrap();
-    let path = fake_bin(d.path(), "exit 0");
+    let path = fake_bin(d.path(), Actions::new());
     let (code, out, err) = dev_heavy(&path, &["--only", "clippy"], None, false);
     assert_eq!(code, 6, "{err}{out}");
     assert!(
@@ -150,7 +157,7 @@ fn when_heavy_cannot_be_built_the_compiles_are_not_measured_exit_6_never_a_pass(
 #[test]
 fn heavy_off_without_the_test_variable_is_an_override_and_not_measured() {
     let d = tempfile::tempdir().unwrap();
-    let path = fake_bin(d.path(), "exit 0");
+    let path = fake_bin(d.path(), Actions::new());
     let (code, out, err) = dev_heavy(&path, &["--only", "clippy"], Some("off"), false);
     assert_eq!(code, 6, "{err}{out}");
     assert!(out.starts_with("OVERRIDE SET") || out.contains("\nOVERRIDE SET"), "{out}");
@@ -187,13 +194,16 @@ fn a_run_never_sees_the_machines_environment_or_takes_a_real_slot() {
     std::fs::create_dir_all(rules.join("scripts")).unwrap();
     let marker = d.path().join("real-heavy-ran");
     let script = rules.join("scripts/heavy.sh");
-    paddock_testkit::exe::write_program(&script, format!("#!/bin/sh\ntouch {}\nexec \"$@\"\n", marker.display())).unwrap();
+    paddock_testkit::StandIn::new(script.parent().unwrap(), "heavy.sh")
+        .answers(Actions::new().writes(&marker, "").execs(&Exec::call_arguments()))
+        .install()
+        .unwrap();
     let slots = d.path().join("slots");
     env.set("ENGINEERING_RULES", &rules);
     env.set("HEAVY_LOCK_DIR", &slots);
     env.set("PADDOCK_ENV_CANARY", "1");
     let envlog = d.path().join("envlog");
-    let path = fake_bin(d.path(), &format!("env >> {}; exit 0", envlog.display()));
+    let path = fake_bin(d.path(), Actions::new().appends_with(&envlog.display().to_string(), "{environ}\n"));
     let (code, out, err) = dev_heavy(&path, &["--only", "fmt,clippy"], None, false);
     // Not vacuous: fmt ran (the fake cargo logged its environment) and clippy, which needs a slot tool, is NOT MEASURED because the
     // machine's heavy.sh was not found (exit 6), instead of running through it.

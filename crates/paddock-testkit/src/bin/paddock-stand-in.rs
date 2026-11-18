@@ -60,8 +60,11 @@ fn run() -> Result<i32, String> {
         _ => file,
     };
     let script_path = dir.join(format!("{name}.stand-in.json"));
-    let text = std::fs::read_to_string(&script_path)
-        .map_err(|e| format!("cannot read its script {}: {e}", script_path.display()))?;
+    let text = match std::fs::read_to_string(&script_path) {
+        Ok(text) => text,
+        Err(e) => embedded_script(&exe)
+            .ok_or_else(|| format!("cannot read its script {}: {e}", script_path.display()))?,
+    };
     let script = json::parse(&text).map_err(|e| format!("{}: {e}", script_path.display()))?;
 
     let argv: Vec<String> = std::env::args_os()
@@ -107,6 +110,26 @@ fn run() -> Result<i32, String> {
     act(actions, &ctx)
 }
 
+/// The script appended to this program's own file (`StandIn::write_single_file`): the script's text, its length (8 bytes, little
+/// endian) and the marker `PDSTNDIN` close the file. A program that was copied alone still finds it.
+fn embedded_script(exe: &Path) -> Option<String> {
+    use std::io::{Seek, SeekFrom};
+    let mut f = std::fs::File::open(exe).ok()?;
+    let size = f.seek(SeekFrom::End(0)).ok()?;
+    let mut tail = [0u8; 16];
+    f.seek(SeekFrom::Start(size.checked_sub(16)?)).ok()?;
+    f.read_exact(&mut tail).ok()?;
+    if &tail[8..] != b"PDSTNDIN" {
+        return None;
+    }
+    let len = u64::from_le_bytes(tail[..8].try_into().ok()?);
+    f.seek(SeekFrom::Start((size - 16).checked_sub(len)?))
+        .ok()?;
+    let mut text = vec![0u8; usize::try_from(len).ok()?];
+    f.read_exact(&mut text).ok()?;
+    String::from_utf8(text).ok()
+}
+
 fn texts(v: Option<&Value>) -> Vec<&str> {
     v.and_then(Value::as_arr)
         .unwrap_or(&[])
@@ -121,7 +144,7 @@ fn prefix_hit(prefix: Option<&Value>, argv: &[String]) -> bool {
 }
 
 /// One condition of an `all` case: `args` (a prefix), `arg` (some argument is this), `no_arg_of` (no argument is any of these),
-/// `file` / `no_file` (a path exists / does not), `cwd_ends` (the working folder ends with this text).
+/// `file` / `no_file` (a path exists / does not), `file_has` / `file_lacks` (a file holds a text / does not, or is missing), `args_text` (the arguments joined by single spaces, with a space on each side, hold a text: `case " $* " in *text*)`), `env_set` (the variable is set and not empty), `file_t` / `no_file_t` (as `file` / `no_file`, the path a template filled from the call), `cwd_ends` (the working folder ends with this text).
 fn condition(c: &Value, ctx: &Ctx) -> bool {
     let Some((kind, arg)) = c.as_obj().and_then(|m| m.first()) else {
         return false;
@@ -137,6 +160,21 @@ fn condition(c: &Value, ctx: &Ctx) -> bool {
         }
         "file" => arg.as_str().is_some_and(|p| Path::new(p).exists()),
         "no_file" => arg.as_str().is_some_and(|p| !Path::new(p).exists()),
+        "args_text" => arg
+            .as_str()
+            .is_some_and(|t| format!(" {} ", ctx.argv.join(" ")).contains(t)),
+        "file_has" | "file_lacks" => {
+            let both = texts(Some(arg));
+            let has = both.len() == 2
+                && std::fs::read_to_string(both[0]).is_ok_and(|body| body.contains(both[1]));
+            has == (kind == "file_has")
+        }
+        "env_set" => arg
+            .as_str()
+            .is_some_and(|n| std::env::var_os(n).is_some_and(|v| !v.is_empty())),
+        "file_t" | "no_file_t" => arg.as_str().is_some_and(|p| {
+            expand(p, ctx).is_ok_and(|p| Path::new(&p).exists() == (kind == "file_t"))
+        }),
         "cwd_ends" => arg.as_str().is_some_and(|t| {
             std::env::current_dir()
                 .is_ok_and(|d| d.to_string_lossy().replace('\\', "/").ends_with(t))
@@ -154,8 +192,8 @@ struct Ctx {
 }
 
 /// Fills a template: `{args}` (the arguments, joined by spaces), `{arg:N}` (the N-th, from 1; empty when absent), `{cwd}`, `{dir}` (the
-/// stand-in's own folder), `{name}`, `{pid}`, `{env:NAME}` and `{env:NAME|fallback}` (empty or the fallback when unset),
-/// `{flag:PREFIX}` (what follows PREFIX in the last argument that starts with it, as `${a#PREFIX}` does), `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
+/// stand-in's own folder), `{name}`, `{pid}`, `{environ}` (every variable as a `NAME=value` line, as `env` prints them), `{env:NAME}` and `{env:NAME|fallback}` (empty or the fallback when unset),
+/// `{flag:PREFIX}` or `{flag:PREFIX|SUFFIX}` (what follows PREFIX in the last argument that starts with it, as `${a#PREFIX}` does, without a trailing SUFFIX when it has one), `{lines:PATH}` or `{lines:PATH|MAX}` (how many lines the file has, 0 when it is missing, at most MAX: `wc -l`), `{run:program|arg|arg}` (what that program prints in the working folder, without its last newline; empty when it fails; no `|` or `}` inside an argument), `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
 fn expand(text: &str, ctx: &Ctx) -> Result<String, String> {
     let mut out = String::new();
     let mut rest = text;
@@ -190,18 +228,43 @@ fn token(t: &str, ctx: &Ctx) -> Result<String, String> {
             .map(|d| d.display().to_string())
             .unwrap_or_default(),
         "dir" => ctx.dir.display().to_string(),
+        "environ" => std::env::vars_os()
+            .map(|(k, v)| format!("{}={}", k.to_string_lossy(), v.to_string_lossy()))
+            .collect::<Vec<_>>()
+            .join("\n"),
         "name" => ctx.name.clone(),
         "pid" => std::process::id().to_string(),
         "stdin" => stdin.to_string(),
         "stdin_line" => stdin.lines().next().unwrap_or("").to_string(),
         _ => {
-            if let Some(prefix) = t.strip_prefix("flag:") {
+            if let Some(cmd) = t.strip_prefix("run:") {
+                let mut parts = cmd.split('|');
+                let program = parts.next().unwrap_or_default();
+                std::process::Command::new(program)
+                    .args(parts)
+                    .output()
+                    .ok()
+                    .filter(|o| o.status.success())
+                    .map(|o| {
+                        String::from_utf8_lossy(&o.stdout)
+                            .trim_end_matches(['\r', '\n'])
+                            .to_string()
+                    })
+                    .unwrap_or_default()
+            } else if let Some(spec) = t.strip_prefix("flag:") {
+                let (prefix, suffix) = spec.split_once('|').unwrap_or((spec, ""));
                 ctx.argv
                     .iter()
                     .rev()
                     .find_map(|a| a.strip_prefix(prefix))
+                    .map(|v| v.strip_suffix(suffix).unwrap_or(v))
                     .unwrap_or_default()
                     .to_string()
+            } else if let Some(spec) = t.strip_prefix("lines:") {
+                let (path, cap) = spec.split_once('|').unwrap_or((spec, ""));
+                let n =
+                    std::fs::read(path).map_or(0, |b| b.iter().filter(|c| **c == b'\n').count());
+                cap.parse::<usize>().map_or(n, |cap| n.min(cap)).to_string()
             } else if let Some(n) = t.strip_prefix("arg:") {
                 let n: usize = n
                     .parse()
@@ -315,6 +378,12 @@ fn act(actions: &Value, ctx: &Ctx) -> Result<i32, String> {
                 return i32::try_from(code).map_err(|_| format!("exit code {code} does not fit"));
             }
             "exec" => return exec(arg, ctx),
+            "run" => {
+                let (mut cmd, program) = command_of(arg, ctx)?;
+                let _ = std::io::stdout().flush();
+                cmd.status()
+                    .map_err(|e| format!("cannot start {program}: {e}"))?;
+            }
             other => return Err(format!("unknown step `{other}`")),
         }
     }
@@ -465,18 +534,36 @@ fn install(arg: &Value, ctx: &Ctx) -> Result<(), String> {
         .file_name()
         .and_then(|s| s.to_str())
         .ok_or("install: the path has no file name")?;
-    let name = file.strip_suffix(".exe").unwrap_or(file);
+    let _ = file;
     let me = std::env::current_exe().map_err(|e| format!("cannot find its own path: {e}"))?;
-    let _ = std::fs::remove_file(&target);
-    if std::fs::hard_link(&me, &target).is_err() {
-        std::fs::copy(&me, &target).map_err(|e| format!("cannot install {path}: {e}"))?;
+    // One self-contained file (the program, its script, the marker): the code under test may copy or move it alone.
+    let mut bytes = std::fs::read(&me).map_err(|e| format!("cannot read {}: {e}", me.display()))?;
+    if let Some(len) = embedded_len(&bytes) {
+        bytes.truncate(bytes.len() - 16 - len);
     }
-    let filled = fill(script, ctx)?;
-    std::fs::write(
-        target.with_file_name(format!("{name}.stand-in.json")),
-        filled.to_json(),
-    )
-    .map_err(|e| format!("cannot write the script of {path}: {e}"))
+    let script = fill(script, ctx)?.to_json().into_bytes();
+    bytes.extend_from_slice(&script);
+    bytes.extend_from_slice(&(script.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(b"PDSTNDIN");
+    let _ = std::fs::remove_file(&target);
+    std::fs::write(&target, bytes).map_err(|e| format!("cannot install {path}: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("cannot make {path} executable: {e}"))?;
+    }
+    Ok(())
+}
+
+/// The length of the script appended to `bytes` (a program file), when it has one.
+fn embedded_len(bytes: &[u8]) -> Option<usize> {
+    let tail = bytes.get(bytes.len().checked_sub(16)?..)?;
+    if &tail[8..] != b"PDSTNDIN" {
+        return None;
+    }
+    let len = usize::try_from(u64::from_le_bytes(tail[..8].try_into().ok()?)).ok()?;
+    (len <= bytes.len() - 16).then_some(len)
 }
 
 fn fill(v: &Value, ctx: &Ctx) -> Result<Value, String> {
@@ -492,10 +579,8 @@ fn fill(v: &Value, ctx: &Ctx) -> Result<Value, String> {
     })
 }
 
-/// Runs another program with this call's arguments (all of them, or those after the first `--`), in this process's place on Unix, and
-/// ends with its status. `program` is that program; without it the first of those arguments is. `args` come before them, `env` (name,
-/// template pairs) are set for it.
-fn exec(arg: &Value, ctx: &Ctx) -> Result<i32, String> {
+/// The program an `exec` or `run` step starts, ready to start, and its name for messages.
+fn command_of(arg: &Value, ctx: &Ctx) -> Result<(Command, String), String> {
     let from: &[String] = match arg.get("from").and_then(Value::as_str) {
         Some("none") => &[],
         Some("after") => {
@@ -531,6 +616,14 @@ fn exec(arg: &Value, ctx: &Ctx) -> Result<i32, String> {
     for (k, t) in &vars {
         cmd.env(k, expand(t, ctx)?);
     }
+    Ok((cmd, program))
+}
+
+/// Runs another program with this call's arguments (all of them, or those after the first `--`), in this process's place on Unix, and
+/// ends with its status. `program` is that program; without it the first of those arguments is. `args` come before them, `env` (name,
+/// template pairs) are set for it.
+fn exec(arg: &Value, ctx: &Ctx) -> Result<i32, String> {
+    let (mut cmd, program) = command_of(arg, ctx)?;
     let _ = std::io::stdout().flush();
     #[cfg(unix)]
     {

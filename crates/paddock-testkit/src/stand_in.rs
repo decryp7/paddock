@@ -22,11 +22,11 @@
 //! with [`StandIn::records_env`] and, with [`StandIn::reads_stdin`], what was written to stdin (at most 1 MiB).
 //!
 //! More, for the fixtures that were shell scripts: output filled from the call ([`Actions::stdout_with`] and the other `_with`
-//! methods name `{args}`, `{arg:N}`, `{flag:PREFIX}`, `{cwd}`, `{dir}`, `{name}`, `{pid}`, `{env:NAME}` / `{env:NAME|fallback}`, `{stdin}` and
+//! methods name `{args}`, `{arg:N}`, `{flag:PREFIX}`, `{cwd}`, `{dir}`, `{name}`, `{pid}`, `{environ}`, `{flag:PREFIX|SUFFIX}`, `{lines:PATH|MAX}`, `{run:program|arg|arg}`, `{env:NAME}` / `{env:NAME|fallback}`, `{stdin}` and
 //! `{stdin_line}`; `{{` and `}}` are braces), [`Actions::writes_atomically`], [`Actions::waits_for_file`], named pipes
 //! ([`Actions::makes_fifo`], [`Actions::reads_file`]), [`Actions::ignores_term`] (Unix), [`Actions::installs`] (a second stand-in
 //! written at run time, as a fake `cargo` that "builds" a tool does), [`Actions::exits_with_env`] and [`Actions::execs`] (run another
-//! program with the call's arguments, as a wrapper script does). [`StandIn::when`] answers a call by several conditions at once
+//! program with the call's arguments, as a wrapper script does) and [`Actions::runs`] (the same, then go on). [`StandIn::when`] answers a call by several conditions at once
 //! ([`Case`]: arguments, a file that exists, the working folder), and [`StandIn::answers`] replaces the default answer.
 //!
 //! Realistic defaults are opt-in: [`StandIn::npm_like`] and [`StandIn::git_like`] answer the common calls with the shape the real
@@ -295,6 +295,13 @@ impl Actions {
         self.step("exec", exec.to_value())
     }
 
+    /// Runs another program (see [`Exec`]) and waits for it, then goes on with the next step (its exit code is ignored, as in a script
+    /// without `set -e`).
+    #[must_use]
+    pub fn runs(self, exec: &Exec) -> Actions {
+        self.step("run", exec.to_value())
+    }
+
     /// The exit code (default 0).
     #[must_use]
     pub fn exit(mut self, code: i32) -> Actions {
@@ -446,6 +453,54 @@ impl Case {
         self.with("no_file", Value::Str(text(path)))
     }
 
+    /// The arguments, joined by single spaces with a space on each side, hold `text` (the shell's `case " $* " in *text*)`).
+    #[must_use]
+    pub fn args_text_contains(self, text: &str) -> Case {
+        self.with("args_text", Value::Str(text.to_string()))
+    }
+
+    /// The file exists and holds `text` (a relative path is read from the call's working folder).
+    #[must_use]
+    pub fn file_contains(self, path: &Path, text: &str) -> Case {
+        self.with(
+            "file_has",
+            Value::Arr(vec![
+                Value::Str(self::text(path)),
+                Value::Str(text.to_string()),
+            ]),
+        )
+    }
+
+    /// The file does not hold `text`, or does not exist.
+    #[must_use]
+    pub fn file_lacks(self, path: &Path, text: &str) -> Case {
+        self.with(
+            "file_lacks",
+            Value::Arr(vec![
+                Value::Str(self::text(path)),
+                Value::Str(text.to_string()),
+            ]),
+        )
+    }
+
+    /// The variable is set and not empty when the call is made.
+    #[must_use]
+    pub fn env_is_set(self, name: &str) -> Case {
+        self.with("env_set", Value::Str(name.to_string()))
+    }
+
+    /// As [`Case::file_exists`], with the path a template filled from the call (`{flag:...}`, `{env:...}`, `{cwd}`).
+    #[must_use]
+    pub fn file_exists_with(self, path_template: &str) -> Case {
+        self.with("file_t", Value::Str(path_template.to_string()))
+    }
+
+    /// As [`Case::file_missing`], with the path a template filled from the call.
+    #[must_use]
+    pub fn file_missing_with(self, path_template: &str) -> Case {
+        self.with("no_file_t", Value::Str(path_template.to_string()))
+    }
+
     /// The working folder ends with this text (compared with `/` as the separator).
     #[must_use]
     pub fn cwd_ends_with(self, tail: &str) -> Case {
@@ -475,6 +530,7 @@ pub struct StandIn {
     record: bool,
     record_env: Vec<String>,
     read_stdin: bool,
+    exact_name: bool,
 }
 
 impl StandIn {
@@ -488,7 +544,38 @@ impl StandIn {
             record: false,
             record_env: Vec::new(),
             read_stdin: false,
+            exact_name: false,
         }
+    }
+
+    /// The program file is named exactly `name`, which may end in `.exe`, with no platform suffix added: for a test of code that looks a
+    /// program up by its Windows name (`sccache.exe`) on a Unix host.
+    #[must_use]
+    pub fn exact_name(mut self) -> StandIn {
+        self.exact_name = true;
+        self
+    }
+
+    /// The program's file name, and the name its script and record are kept under (the stand-in drops a `.exe` on Windows).
+    fn file_and_stem(&self) -> (String, String) {
+        if !self.exact_name {
+            return (
+                format!("{}{}", self.name, std::env::consts::EXE_SUFFIX),
+                self.name.clone(),
+            );
+        }
+        let stem = match self
+            .name
+            .len()
+            .checked_sub(4)
+            .and_then(|at| self.name.get(at..))
+        {
+            Some(ext) if cfg!(windows) && ext.eq_ignore_ascii_case(".exe") => {
+                self.name[..self.name.len() - 4].to_string()
+            }
+            _ => self.name.clone(),
+        };
+        (self.name.clone(), stem)
     }
 
     /// Prints `line` on stdout for any call no [`StandIn::when_args`] case answers.
@@ -707,17 +794,50 @@ impl StandIn {
         }
         let stub = stub_binary().map_err(io::Error::other)?;
         Ok(Files {
-            program_name: format!("{}{}", self.name, std::env::consts::EXE_SUFFIX),
+            program_name: self.file_and_stem().0,
             program: std::fs::read(&stub)?,
-            script_name: format!("{}.stand-in.json", self.name),
+            script_name: format!("{}.stand-in.json", self.file_and_stem().1),
             script: self.script(Path::new("")).to_json().into_bytes(),
         })
+    }
+
+    /// The program as one self-contained file: the stand-in binary with its script appended, which a test serves or copies on its own
+    /// (a "tool" a download test hands out, or a program the code under test moves). A recording stand-in is refused, as in
+    /// [`StandIn::files`].
+    ///
+    /// # Errors
+    ///
+    /// As [`StandIn::files`].
+    pub fn single_file_bytes(&self) -> io::Result<Vec<u8>> {
+        let files = self.files()?;
+        let mut bytes = files.program;
+        let script = files.script;
+        bytes.extend_from_slice(&script);
+        bytes.extend_from_slice(&(script.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(b"PDSTNDIN");
+        Ok(bytes)
+    }
+
+    /// Writes [`StandIn::single_file_bytes`] to `path` and makes it executable (a Unix mode of 755).
+    ///
+    /// # Errors
+    ///
+    /// As [`StandIn::files`], or when the file cannot be written.
+    pub fn write_single_file(&self, path: &Path) -> io::Result<()> {
+        let _ = std::fs::remove_file(path);
+        std::fs::write(path, self.single_file_bytes()?)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
+        }
+        Ok(())
     }
 
     fn check_name(&self) -> io::Result<()> {
         let bad_name = self.name.is_empty()
             || self.name.contains(['/', '\\'])
-            || self.name.to_ascii_lowercase().ends_with(".exe");
+            || (!self.exact_name && self.name.to_ascii_lowercase().ends_with(".exe"));
         if bad_name {
             return Err(invalid(format!(
                 "`{}` is not a bare program name (no folder, no `.exe`)",
@@ -745,10 +865,9 @@ impl StandIn {
             )));
         }
         let stub = stub_binary().map_err(io::Error::other)?;
-        let program = self
-            .dir
-            .join(format!("{}{}", self.name, std::env::consts::EXE_SUFFIX));
-        let record = self.dir.join(format!("{}.stand-in.calls", self.name));
+        let (file, stem) = self.file_and_stem();
+        let program = self.dir.join(file);
+        let record = self.dir.join(format!("{stem}.stand-in.calls"));
         let _ = std::fs::remove_file(&program);
         let _ = std::fs::remove_file(&record);
         if std::fs::hard_link(&stub, &program).is_err() {
@@ -764,7 +883,7 @@ impl StandIn {
             })?;
         }
         std::fs::write(
-            self.dir.join(format!("{}.stand-in.json", self.name)),
+            self.dir.join(format!("{stem}.stand-in.json")),
             self.script(&record).to_json(),
         )?;
         Ok(Installed {
