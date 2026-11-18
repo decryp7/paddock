@@ -28,6 +28,7 @@ pub mod gates;
 pub mod heavy_tool;
 pub mod known;
 pub mod linux_inputs;
+pub mod members;
 pub mod outcome;
 pub mod warm;
 
@@ -470,6 +471,7 @@ fn command_in(
             (ws, l)
         })
         .collect();
+    facts.crates_members = Some(members::read_members(&work, "crates"));
     facts.member_gate = args.member_gate;
     facts.kept_targets = kept_targets;
     let mut planned = gates::plan_gates(&plan, &change, &facts);
@@ -1373,6 +1375,7 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts
         windows_clippy: windows,
         ci_version: Some(version),
         left_out: Default::default(),
+        crates_members: None,
         member_gate: false,
         kept_targets: None,
         pitwall_tests: tests,
