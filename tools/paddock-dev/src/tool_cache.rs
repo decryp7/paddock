@@ -321,6 +321,10 @@ mod tests {
                 "test_sleeper.rs",
                 "a test helper that starts its own test harness on purpose, with `--exact` and one test name",
             ),
+            (
+                "pre_push/exec.rs",
+                "`harness_as_gate` compares a gate's program with the test binary to refuse it, it starts nothing",
+            ),
             ("check/c120.rs", "C120's own samples and messages, text only"),
         ];
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
