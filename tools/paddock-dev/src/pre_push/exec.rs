@@ -777,7 +777,8 @@ impl RealExec {
         }
         // A cargo gate that names its build folder as configuration never also gets it as a variable (the variable would win over
         // the configuration and sccache hashes it), and compiles through the local sccache when there is one.
-        if crate::cargo_target::is_cargo(&gate.program) && crate::cargo_target::names_target_dir(&gate.args) {
+        let hands_folder = gate.env.iter().any(|(k, _)| k == crate::ci_run::GATE_TARGET_DIR);
+        if hands_folder || (crate::cargo_target::is_cargo(&gate.program) && crate::cargo_target::names_target_dir(&gate.args)) {
             call = call.without("CARGO_TARGET_DIR").without("CARGO_BUILD_TARGET_DIR");
             if gate.heavy
                 && let Some(w) = self.wrapper.get()
@@ -1280,6 +1281,34 @@ exit $rc
             s.heavy = true;
             let sh = ex.call(&s, limits, &log, None).child_env(&ex.env);
             assert!(sh.iter().all(|(k, _)| k != "RUSTC_WRAPPER"), "{sh:?}");
+        }
+
+        /// The executor (`ci run`) starts cargo for a gate that is not cargo itself: when the gate hands it a build folder it compiles
+        /// through the local sccache like a cargo gate does, and never gets the folder as a variable.
+        #[test]
+        fn a_gate_that_hands_the_executor_a_build_folder_compiles_through_the_wrapper() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = repo_with_fake_cargo(d.path(), true);
+            ex.wrapper = crate::local_sccache::Lazy::ready(crate::local_sccache::Ready {
+                bin: "/x/sccache".into(),
+                vars: vec![("RUSTC_WRAPPER".into(), "/x/sccache".into())],
+            });
+            let limits = Limits {
+                run: Duration::from_secs(60),
+                queue: Duration::from_secs(60),
+            };
+            let log = d.path().join("g.log");
+            let mut g = gate("conformance-tests", "true");
+            g.heavy = true;
+            g.env.push(("PADDOCK_GATE_TARGET_DIR".into(), "/t/x".into()));
+            let with = ex.call(&g, limits, &log, None).child_env(&ex.env);
+            assert!(with.contains(&("RUSTC_WRAPPER".into(), "/x/sccache".into())), "{with:?}");
+            g.env.clear();
+            let without = ex.call(&g, limits, &log, None).child_env(&ex.env);
+            assert!(
+                without.iter().all(|(k, _)| k != "RUSTC_WRAPPER"),
+                "a gate with no folder is never wrapped: {without:?}"
+            );
         }
 
         #[test]

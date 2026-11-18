@@ -248,7 +248,12 @@ fn execute(
             return 130;
         }
         let dir = root.join(cwd);
-        let (code, how) = run_line(text, &dir, env, heavy, args.max_secs, stop, out);
+        // The push gate hands over its build folder for the line that compiles (the contracts step of the conformance job).
+        let run_text = match env.get(GATE_TARGET_DIR) {
+            Some(folder) => with_build_folder(text, folder),
+            None => text.clone(),
+        };
+        let (code, how) = run_line(&run_text, &dir, env, heavy, args.max_secs, stop, out);
         ran += 1;
         if code != 0 {
             failed += 1;
@@ -275,6 +280,24 @@ fn execute(
         started.elapsed().as_secs_f64()
     );
     if failed == 0 { 0 } else { 1 }
+}
+
+/// The variable through which the push gate hands the executor the build folder of the `cargo nextest run` line of a phase. Not a
+/// `CARGO_*` name: sccache hashes those into its cache key, so the folder goes in as `--config build.target-dir=...` instead.
+pub const GATE_TARGET_DIR: &str = "PADDOCK_GATE_TARGET_DIR";
+
+/// `line` with the build folder as cargo configuration after `cargo nextest run`, when it is such a line that names no folder
+/// itself (the one accessor of the configuration is [`crate::cargo_target::config_value`]).
+pub fn with_build_folder(line: &str, folder: &str) -> String {
+    const PREFIX: &str = "cargo nextest run";
+    let Some(rest) = line.strip_prefix(PREFIX) else {
+        return line.to_string();
+    };
+    if line.contains("build.target-dir") || line.contains("--target-dir") {
+        return line.to_string();
+    }
+    let value = crate::cargo_target::config_value(folder).replace('\'', "'\\''");
+    format!("{PREFIX} --config '{value}'{rest}")
 }
 
 /// The command that runs one line: `bash -euo pipefail -c <text>` behind the heavy prefix, in `dir`, with the job's environment.

@@ -461,15 +461,21 @@ fn every_contracts_test_runs_in_the_conformance_step() {
         .nth(1)
         .expect("the step passes a filter with -E")
         .trim()
-        .trim_matches('\'')
-        .to_string();
-    let re = Regex::new(
-        filter
-            .strip_prefix("test(/")
-            .and_then(|f| f.strip_suffix("/)"))
-            .expect("the filter is one test(/regex/)"),
-    )
-    .unwrap();
+        .trim_matches('\'');
+    // The clauses of `test(/a/) | test(/b/)`: each is one regex.
+    let clauses: Vec<Regex> = filter
+        .split(" | ")
+        .map(|c| {
+            Regex::new(
+                c.strip_prefix("test(/")
+                    .and_then(|f| f.strip_suffix("/)"))
+                    .expect("the filter is `test(/regex/)` clauses joined by ` | `"),
+            )
+            .unwrap()
+        })
+        .collect();
+    let selected = |name: &str| clauses.iter().any(|r| r.is_match(name));
+    // This file's tests, listed from this binary.
     let exe = std::env::current_exe().unwrap();
     let out = paddock_proc::command(exe).args(["--list", "--format", "terse"]).output().unwrap();
     let all: Vec<String> = String::from_utf8_lossy(&out.stdout)
@@ -482,12 +488,40 @@ fn every_contracts_test_runs_in_the_conformance_step() {
         "a positive control: this file's tests were listed ({})",
         mine.len()
     );
-    let missed: Vec<&&String> = mine.iter().filter(|n| !re.is_match(n)).collect();
+    let missed: Vec<&&String> = mine.iter().filter(|n| !selected(n)).collect();
     assert!(missed.is_empty(), "contracts tests the conformance step does not run: {missed:?}");
     assert!(
-        !all.iter().filter(|n| !n.starts_with("contracts::")).any(|n| re.is_match(n)),
-        "the filter selects only contracts tests"
+        !all.iter().filter(|n| !n.starts_with("contracts::")).any(|n| selected(n)),
+        "the filter selects no other test of this binary"
     );
+    // The audit tests that read the shared fixtures or the family's allow list (whole-tree files of scripts/ and the repository):
+    // found in the source of the library's own audit tests (they are not in this binary), and selected exactly.
+    let source = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/audit/tests.rs")).unwrap();
+    let mut reading = BTreeSet::new();
+    let mut others = BTreeSet::new();
+    for chunk in source.split("#[test]\n").skip(1) {
+        let Some(name) = chunk.strip_prefix("fn ").and_then(|c| c.split('(').next()) else {
+            continue;
+        };
+        let name = format!("audit::tests::{name}");
+        let body = chunk.split("\n}\n").next().unwrap_or(chunk);
+        if body.contains("cases(") || body.contains("fixtures(") || body.contains(r#".join("../..")"#) {
+            reading.insert(name);
+        } else {
+            others.insert(name);
+        }
+    }
+    assert!(
+        reading.len() >= 3,
+        "a positive control: the fixture-reading audit tests were found: {reading:?}"
+    );
+    let unselected: Vec<&String> = reading.iter().filter(|n| !selected(n)).collect();
+    assert!(
+        unselected.is_empty(),
+        "audit tests that read whole-tree fixtures but are not in the conformance step: {unselected:?}"
+    );
+    let extra: Vec<&String> = others.iter().filter(|n| selected(n)).collect();
+    assert!(extra.is_empty(), "the step selects audit tests that read no fixture: {extra:?}");
 }
 
 fn normalize(path: &str) -> String {
