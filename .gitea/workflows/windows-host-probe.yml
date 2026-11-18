@@ -89,9 +89,11 @@ jobs:
           LABEL: ${{ inputs.label || 'probe' }}
           ROUNDS: ${{ inputs.rounds || '3' }}
         run: |
-          echo "TEMP=$TEMP PADDOCK_WORKSPACE=$PADDOCK_WORKSPACE git=$(command -v git)"
+          # Git bash shows the job's temp folder as /tmp; a Windows program needs its Windows path (the folder the tests' TEMP names).
+          tmp=$(cygpath -w "$TEMP")
+          echo "TEMP=$tmp PADDOCK_WORKSPACE=$PADDOCK_WORKSPACE git=$(cygpath -w "$(command -v git)")"
           for i in $(seq 1 "$ROUNDS"); do
-            ./dev ci host-probe --dir "$TEMP" --label "$LABEL-temp-$i" --starts 200 --repos 50 --files 500
+            ./dev ci host-probe --dir "$tmp" --label "$LABEL-temp-$i" --starts 200 --repos 50 --files 500
             ./dev ci host-probe --dir "$PADDOCK_WORKSPACE" --label "$LABEL-workspace-$i" --starts 200 --repos 50 --files 500
           done
 
@@ -128,7 +130,7 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
         env:
           LABEL: ${{ inputs.label || 'probe' }}
-        run: ./dev ci host-probe --dir "$TEMP" --label "$LABEL-temp-end" --starts 200 --repos 50 --files 500
+        run: ./dev ci host-probe --dir "$(cygpath -w "$TEMP")" --label "$LABEL-temp-end" --starts 200 --repos 50 --files 500
 
       - uses: ./.gitea/actions/job-isolation
         if: always()
