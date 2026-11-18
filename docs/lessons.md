@@ -2789,3 +2789,22 @@ and got the step added; the generator registry declares the install in `requires
 Class: a generator or check that treats a missing input as an empty input; compare the input with what declares it (here the
 lock) and stop when they differ.
 **Recurring: input-precondition-not-verified** (ER-33 cases on Dyno 1.1.0, the 2026-11-17 Debrief dock spec, `every()` over nothing in ER-12).
+
+## An abandoned kept-clone phase let its git outlive the step (2026-11-18)
+`host_steps::kept_clone_the_create_phase_is_bounded_by_its_own_limit` failed once in 5.9 s and passed on its retry (5.5 s) in a full
+nextest run at load 10 to 25: the reaper found a process "below a child" still running after the Rust step ended. Causes listed, with
+what ruled each out: (1) the product ends only the git's group and not the tree: refuted by `paddock_proc::kill_tree` (SIGKILL of
+the group, then each process by identity) and its test of a grandchild; (2) the reaper reads the table before the kill is reaped:
+refuted for the git, whose own wait is reaped by the run before it returns, and the reaper skips zombies; (3) the phase is abandoned
+at its bound while the git's kill is still in flight, and the step ends with the git running: confirmed by measurement. The git
+ends itself at the phase's limit (1 s from its start), the phase is abandoned at limit + 1 s from the clock mark (the hanging git's
+first line), so ending the tree must take less than a second. Probe (temporary, not committed) on 66 timed-out gits at load 17 to 28
+(all `host_steps::` tests, 16 threads): a timed-out git returned after 1.0 to 1.87 s, so the kill took up to 0.87 s of that second;
+under heavier load it takes more, the phase is abandoned, and nothing ended its git (the abandoned thread was left to finish and the
+step ended first). The 40-run and 8-run single-test loops at load 28 did not fail (the tail is thin), so the failing test is the
+deterministic one below, not a loop: `a_phase_abandoned_at_its_bound_leaves_no_program_of_its_own_running` (red before the fix: the
+git was still running when `phase` returned). **Fix:** a captured `ToolCall` can be `held_by` a `Held` set (through
+`paddock_proc::run_bounded_noting`, which tells the caller the identity of the program at its start); an abandoned phase ends every
+program of its set by identity and waits until they are gone (`Held::end_all`), and a program that starts after that is ended at
+its start. The limits are unchanged. **Class: work a step abandons keeps running past the step** (earlier: the abandoned checkout
+phase that set the next phase's flag, 2026-11-15, above; ADR 0103's reaper is the check that found it).

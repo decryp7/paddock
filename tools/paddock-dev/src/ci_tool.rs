@@ -17,7 +17,7 @@
 //! timeout; and the duration). The caller decides what a failure means and prints exactly one `::error::` line for it with
 //! [`error_line`]: the cause, then `Next step:`.
 
-use paddock_proc::{KEPT_ENV, Limits, Outcome, RunError, Sink, command, run_bounded, run_waited_cancellable};
+use paddock_proc::{KEPT_ENV, Limits, Outcome, RunError, Sink, command, run_bounded_noting, run_waited_cancellable};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Write;
@@ -85,6 +85,66 @@ pub struct ToolCall {
     cwd: Option<PathBuf>,
     unset: Vec<String>,
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    held: Option<std::sync::Arc<Held>>,
+}
+
+/// The programs a caller may have to give up on: a captured run tells the set who it started, and [`Held::end_all`] ends them all
+/// by identity and closes the set, so a run that starts after that is ended at its start. A caller that abandons the thread that
+/// runs a program (a phase of a step that hit its bound) ends the programs with this before it goes on: the thread's own timeout
+/// may be late (ending a tree takes time on a loaded machine), and a step that ends with a program still running leaves it behind.
+#[derive(Debug, Default)]
+pub struct Held {
+    state: std::sync::Mutex<HeldState>,
+}
+
+#[derive(Debug, Default)]
+struct HeldState {
+    closed: bool,
+    running: Vec<paddock_proc::ProcessId>,
+}
+
+/// How long [`Held::end_all`] waits for the OS to finish ending what it signalled (SIGKILL is delivered at once and the process
+/// goes a moment later). The wait is on the state, with this deadline, and a process that outlasts it is logged.
+const ENDED_WITHIN: Duration = Duration::from_secs(10);
+
+impl Held {
+    fn note(&self, id: paddock_proc::ProcessId) {
+        let ended_at_once = {
+            let mut s = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !s.closed {
+                s.running.push(id);
+            }
+            s.closed
+        };
+        if ended_at_once {
+            let _ = paddock_proc::kill_tree(id);
+        }
+    }
+
+    /// Ends every program noted so far and every one noted later; returns once they are gone (at most [`ENDED_WITHIN`]) with the
+    /// ones that are still running by then (none, unless the OS refuses to end one).
+    pub fn end_all(&self) -> Vec<paddock_proc::ProcessId> {
+        let running = {
+            let mut s = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            s.closed = true;
+            std::mem::take(&mut s.running)
+        };
+        let mut below = Vec::new();
+        for id in &running {
+            below.extend(paddock_proc::descendants_of(*id));
+            let _ = paddock_proc::kill_tree(*id);
+        }
+        let deadline = Instant::now() + ENDED_WITHIN;
+        let mut pause = Duration::from_millis(1);
+        loop {
+            let left: Vec<_> = running.iter().chain(below.iter()).copied().filter(|id| !id.has_ended()).collect();
+            if left.is_empty() || Instant::now() >= deadline {
+                return left;
+            }
+            std::thread::sleep(pause);
+            pause = (pause * 2).min(Duration::from_millis(20));
+        }
+    }
 }
 
 /// How a run ended.
@@ -121,6 +181,7 @@ impl ToolCall {
             cwd: None,
             unset,
             cancel: None,
+            held: None,
         }
     }
 
@@ -191,6 +252,12 @@ impl ToolCall {
     /// [`Output::Stream`] and [`Output::File`] runs.
     pub fn cancel_on(mut self, flag: std::sync::Arc<std::sync::atomic::AtomicBool>) -> ToolCall {
         self.cancel = Some(flag);
+        self
+    }
+
+    /// Tells `held` who this program is when it starts, so its caller can end it (captured runs only).
+    pub fn held_by(mut self, held: std::sync::Arc<Held>) -> ToolCall {
+        self.held = Some(held);
         self
     }
 
@@ -274,7 +341,12 @@ impl ToolCall {
     }
 
     fn run_captured(&self, cmd: std::process::Command) -> Result<Ran, String> {
-        let out = run_bounded(cmd, Limits::new(self.timeout)).map_err(|e| self.not_started(e))?;
+        let note = |id| {
+            if let Some(h) = &self.held {
+                h.note(id);
+            }
+        };
+        let out = run_bounded_noting(cmd, Limits::new(self.timeout), &note).map_err(|e| self.not_started(e))?;
         let (success, how) = match out.outcome {
             Outcome::Exited(s) => (s.success(), describe_status(s)),
             Outcome::TimedOut => (false, self.timed_out()),
