@@ -197,7 +197,7 @@ fn live_c125_fixture_findings_equal_the_recorded_js_answer() {
 }
 
 #[test]
-fn live_c125_tree_findings_stay_within_the_recorded_js_answer() {
+fn live_c125_tree_run_is_sound() {
     let root = repo_root();
     let r = paddock_testkit::guarded("the Rust C125 over the live tree", LIVE_STALL, {
         let root = root.clone();
@@ -206,7 +206,7 @@ fn live_c125_tree_findings_stay_within_the_recorded_js_answer() {
             run_checks_in(&tree, &options(&root, "paddock"), &registry()).unwrap()
         }
     });
-    crate::recorded::assert_tree_within("c125-real-tree", &r.json());
+    crate::recorded::assert_live_tree_sound("c125", &r.json());
 }
 
 /// A file the check reads and then passes over (a NUL byte) is not read: an entry for it says so, and it is no probe.

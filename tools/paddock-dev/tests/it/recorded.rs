@@ -27,7 +27,7 @@ pub(crate) fn expect(case: &str, ours: &Value) -> Value {
     read(case, &p)
 }
 
-fn write(p: &std::path::Path, v: &Value) {
+pub(crate) fn write(p: &std::path::Path, v: &Value) {
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     crate::golden::record(p, v);
     // C125 reads every file of the tree for a stale disk name, and a recording quotes the fixtures that plant one: the file spells
@@ -73,45 +73,97 @@ pub(crate) fn scrub(v: Value) -> Value {
     }
 }
 
-/// The part of a report of the whole tree that is stable under unrelated edits: the number of errors and, per check, the files that
-/// have a finding (no line numbers, so a moved line is no change). The tree changes under the tests, so a whole-tree answer is a
-/// ceiling (ER-46: lists only shrink), not an exact copy.
-pub(crate) fn tree_summary(report: &Value) -> Value {
-    let mut sites: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> = Default::default();
-    for f in report["findings"].as_array().unwrap() {
-        sites
-            .entry(f["check"].as_str().unwrap().to_string())
-            .or_default()
-            .insert(f["file"].as_str().unwrap_or("").to_string());
-    }
-    serde_json::json!({ "errors": report["errors"], "sites": sites })
-}
-
-/// What `got` (a [`tree_summary`]) has that `want` does not: errors that differ and files with a finding the recording did not have.
-fn tree_excess(want: &Value, got: &Value) -> Vec<String> {
+/// What a run over the live tree must hold whatever else the tree holds (P1-1 of the review of pair P3): the checks ran, looked at
+/// something, passed their positive control and found no error. Which warnings the tree has is not asserted: an unrelated change may add
+/// a report-only site, and a test that fails for it fails whoever next runs paddock-dev. The comparison with the JS host's answers is
+/// made on a frozen copy of files ([`frozen`]), never on the live tree.
+pub(crate) fn live_tree_problems(report: &Value) -> Vec<String> {
     let mut out = Vec::new();
-    if got["errors"] != want["errors"] {
-        out.push(format!("errors: {} against {}", got["errors"], want["errors"]));
+    if report["errors"] != 0 {
+        out.push(format!("{} errors", report["errors"]));
     }
-    for (check, files) in got["sites"].as_object().unwrap() {
-        for f in files.as_array().unwrap() {
-            if !want["sites"][check].as_array().is_some_and(|w| w.contains(f)) {
-                out.push(format!("{check} {}", f.as_str().unwrap()));
-            }
+    let runs = report["runs"].as_array().map_or(&[][..], Vec::as_slice);
+    if runs.is_empty() {
+        out.push("the report has no run record: nothing was measured".to_string());
+    }
+    for r in runs {
+        let id = r["check"].as_str().unwrap_or("?");
+        if r["ran"] != true || r["completed"] != true {
+            out.push(format!("{id} did not run to the end"));
+        }
+        if r["control"] != true {
+            out.push(format!("{id}: its positive control did not see what it is built to see"));
+        }
+        if r["probes"].as_u64().unwrap_or(0) == 0 {
+            out.push(format!("{id} looked at nothing"));
+        }
+        if r["precondition"]["met"] != true {
+            out.push(format!("{id}: its precondition failed"));
         }
     }
     out
 }
 
-/// Holds `ours`, a report of this working tree, to the answer the JS host gave on the whole tree (`case`): the same errors and no
-/// file with a finding that the JS host did not have. A bless rewrites the answer from `ours`, which can only shrink it in review.
-pub(crate) fn assert_tree_within(case: &str, ours: &Value) {
-    let want = expect(case, &tree_summary(ours));
-    let excess = tree_excess(&want, &tree_summary(ours));
-    assert!(
-        excess.is_empty(),
-        "{case}: the JS host reported none of these on this tree (a new site is a fix or a reviewed bless): {excess:?}"
-    );
+/// [`live_tree_problems`] as an assertion naming `what`.
+pub(crate) fn assert_live_tree_sound(what: &str, report: &Value) {
+    let p = live_tree_problems(report);
+    assert!(p.is_empty(), "{what}: the run over this tree is not sound: {p:?}");
+}
+
+/// The tests' own frozen tree: `tests/fixtures/check/real-tree.json`, the files of this repository that carry findings of the 12 checks
+/// (and the lists and baselines they read) as they were on 2026-11-19, with the answer the JavaScript host gave on them
+/// (`recorded/frozen-real-tree.json`, made from commit 984fa453b with `tests/fixtures/check/harvest/freeze.mjs`). It never changes with
+/// the repository, so comparing with it cannot fail for a later change.
+pub(crate) fn frozen() -> (tempfile::TempDir, Value) {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/check/real-tree.json");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(dir).unwrap()).unwrap();
+    let tree = tempfile::tempdir().unwrap();
+    for f in v["files"].as_array().unwrap() {
+        let to = tree.path().join(f[0].as_str().unwrap());
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::write(to, f[1].as_str().unwrap()).unwrap();
+    }
+    (tree, v)
+}
+
+/// The wording the hosts own differently, made equal on both sides: the command that regenerates a list (the JS tool is retired), the
+/// JSON parsers' own error text (serde_json and V8), the git error behind "no merge base" (a bare temporary folder), and a check that
+/// could not look at all, which the JS host calls "check broken: no <file> was found to read" and the Rust host "not measured": both
+/// are an unwaivable error that never passes (ER-33).
+pub(crate) fn normal(report: &Value) -> Value {
+    let mut v = report.clone();
+    for list in ["findings", "waived"] {
+        for f in v[list].as_array_mut().unwrap() {
+            let mut m = f["message"].as_str().unwrap().to_string();
+            m = m.replace("node conformance/bin/paddock-shell-baseline.mjs", "./dev check shell-baseline");
+            if let Some(i) = m.find(" is not JSON: ") {
+                m.truncate(i + " is not JSON: ".len());
+            }
+            if let Some(i) = m.find("no merge base (") {
+                m.truncate(i + "no merge base (".len());
+            }
+            let fix = f["fix"]
+                .as_str()
+                .unwrap_or_default()
+                .replace("node conformance/bin/paddock-shell-baseline.mjs", "./dev check shell-baseline");
+            let fix = fix.split(" is not JSON: ").next().unwrap_or_default().to_string();
+            let refused = f["unwaivable"] == true
+                && f["severity"] == "error"
+                && f["file"]
+                    .as_str()
+                    .is_some_and(|p| p.is_empty() || !p.contains('.') || p.ends_with("workflows"));
+            if refused && (m.contains("was found to read") || m.contains("its precondition failed")) {
+                m = "a check that could not look refuses to pass".to_string();
+                f["file"] = serde_json::json!("");
+                f["fix"] = serde_json::json!("");
+                f["outcome"] = serde_json::json!("");
+            } else {
+                f["fix"] = serde_json::json!(fix);
+            }
+            f["message"] = serde_json::json!(m);
+        }
+    }
+    v
 }
 
 #[test]
@@ -123,26 +175,27 @@ fn a_commit_in_a_message_is_scrubbed_and_nothing_else() {
     );
 }
 
-/// The positive control of [`assert_tree_within`]: a site the JS host did not report, an error it did not have and a check it did not
-/// run each fail it, and a site that went away does not.
+/// P1-1's positive control, both ways. A report with a new site the recorded answer never had (a planted shell script is a C129
+/// warning) is sound, so a later unrelated change cannot fail the live tests; a report whose control failed, that looked at nothing,
+/// that did not complete or that has an error is not.
 #[test]
-fn a_tree_report_with_a_new_site_or_an_error_the_js_host_did_not_have_fails_the_ceiling() {
-    let finding = |check: &str, file: &str| serde_json::json!({"check": check, "file": file, "line": 1});
-    let report = |errors: u64, f: Vec<Value>| tree_summary(&serde_json::json!({"errors": errors, "findings": f}));
-    let want = report(0, vec![finding("C1", "a.rs"), finding("C1", "b.rs")]);
+fn a_new_site_in_the_live_tree_is_sound_and_a_broken_control_is_not() {
+    let run = |check: &str, control: bool, probes: u64, completed: bool, met: bool| serde_json::json!({"check": check, "ran": true, "completed": completed, "control": control, "probes": probes, "precondition": {"met": met}});
+    let report =
+        |errors: u64, findings: Vec<Value>, runs: Vec<Value>| serde_json::json!({"errors": errors, "findings": findings, "runs": runs});
+    let planted = serde_json::json!({"check": "C129", "file": "apps/debrief/scripts/new.sh", "severity": "warn"});
     assert!(
-        tree_excess(&want, &report(0, vec![finding("C1", "a.rs")])).is_empty(),
-        "a site that went away is fine"
+        live_tree_problems(&report(0, vec![planted], vec![run("C129", true, 40, true, true)])).is_empty(),
+        "a new warning does not fail"
     );
-    assert_eq!(
-        tree_excess(&want, &report(0, vec![finding("C1", "c.rs")])),
-        ["C1 c.rs"],
-        "a new file"
-    );
-    assert_eq!(
-        tree_excess(&want, &report(0, vec![finding("C2", "a.rs")])),
-        ["C2 a.rs"],
-        "a new check on a known file"
-    );
-    assert_eq!(tree_excess(&want, &report(1, vec![])).len(), 1, "an error");
+    for (what, bad) in [
+        ("a failed control", report(0, vec![], vec![run("C129", false, 40, true, true)])),
+        ("nothing looked at", report(0, vec![], vec![run("C129", true, 0, true, true)])),
+        ("not completed", report(0, vec![], vec![run("C129", true, 40, false, true)])),
+        ("a failed precondition", report(0, vec![], vec![run("C129", true, 40, true, false)])),
+        ("an error", report(1, vec![], vec![run("C129", true, 40, true, true)])),
+        ("no run record", report(0, vec![], vec![])),
+    ] {
+        assert!(!live_tree_problems(&bad).is_empty(), "{what} fails");
+    }
 }

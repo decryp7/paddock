@@ -113,7 +113,15 @@ pub fn conformance_args(contract: &Value) -> Result<Vec<String>, String> {
     if only.is_empty() {
         return Err("conformance/paddock.ci.json: `conformance.only` is empty (no check would run: ER-33)".into());
     }
-    let strict = ids("strict")?;
+    let rust: Vec<String> = if c.contains_key("rust") { ids("rust")? } else { Vec::new() };
+    let mut strict = ids("strict")?;
+    if let Some(lost) = strict.iter().find(|s| !only.contains(s) && !rust.contains(s)) {
+        return Err(format!(
+            "conformance/paddock.ci.json: `conformance.strict` names {lost}, which is in neither `conformance.only` nor `conformance.rust` (it would run nowhere strictly)"
+        ));
+    }
+    // A strict id that only the Rust host runs goes to the Rust host (`conformance_rust_args`), not to the JavaScript one.
+    strict.retain(|s| only.contains(s));
     let mut args = vec![
         "conformance/bin/paddock-conformance.mjs".to_string(),
         "--app".into(),
@@ -163,14 +171,28 @@ pub fn conformance_rust_args(contract: &Value) -> Result<Vec<String>, String> {
         ));
     }
     let text = |k: &str| c.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
-    Ok(vec![
-        "--app".into(),
+    let strict: Vec<String> = c
+        .get("strict")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|s| ids.iter().any(|i| i == s))
+        .map(str::to_string)
+        .collect();
+    let mut args = vec![
+        "--app".to_string(),
         text("app"),
         "--root".into(),
         text("root"),
         "--only".into(),
         ids.join(","),
-    ])
+    ];
+    if !strict.is_empty() {
+        args.push("--strict".into());
+        args.push(strict.join(","));
+    }
+    Ok(args)
 }
 
 /// [`conformance_rust_args`] read from the repository at `root`.
@@ -200,10 +222,10 @@ mod tests {
 
     #[test]
     fn the_conformance_arguments_are_built_from_the_fields() {
-        let c = json!({"conformance": {"app": "paddock", "root": ".", "only": ["C06", "C14"], "strict": ["C36"]}});
+        let c = json!({"conformance": {"app": "paddock", "root": ".", "only": ["C06", "C14", "C36"], "strict": ["C36"]}});
         assert_eq!(
             conformance_args(&c).unwrap().join(" "),
-            "conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14 --strict C36"
+            "conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C36 --strict C36"
         );
         let no_strict = json!({"conformance": {"app": "p", "root": ".", "only": ["C06"], "strict": []}});
         assert!(!conformance_args(&no_strict).unwrap().contains(&"--strict".to_string()));
@@ -228,6 +250,22 @@ mod tests {
         assert!(conformance_rust_args(&missing).is_err());
         let comma = json!({"conformance": {"app": "p", "root": ".", "only": ["C06"], "strict": [], "rust": ["C39,C53"]}});
         assert!(conformance_rust_args(&comma).unwrap_err().contains("invalid check id"));
+    }
+
+    #[test]
+    fn a_strict_id_goes_to_the_host_that_runs_it_and_one_in_neither_list_is_an_error() {
+        let c = json!({"conformance": {"app": "p", "root": ".", "only": ["C06", "C36"], "strict": ["C36", "C39"], "rust": ["C39", "C53"]}});
+        assert_eq!(
+            conformance_args(&c).unwrap().join(" "),
+            "conformance/bin/paddock-conformance.mjs --app p --root . --only C06,C36 --strict C36"
+        );
+        assert_eq!(
+            conformance_rust_args(&c).unwrap().join(" "),
+            "--app p --root . --only C39,C53 --strict C39"
+        );
+        let lost = json!({"conformance": {"app": "p", "root": ".", "only": ["C06"], "strict": ["C99"], "rust": ["C39"]}});
+        assert!(conformance_args(&lost).unwrap_err().contains("C99, which is in neither"));
+        assert!(conformance_rust_args(&lost).unwrap_err().contains("C99, which is in neither"));
     }
 
     #[test]

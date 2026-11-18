@@ -1,9 +1,0 @@
-{
- "errors": 0,
- "sites": {
-  "C121": [
-   "conformance/test/c129-no-new-shell.test.mjs",
-   "conformance/test/c137-e2e-kit-import.test.mjs"
-  ]
- }
-}

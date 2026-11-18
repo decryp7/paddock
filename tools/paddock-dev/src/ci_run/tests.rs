@@ -168,7 +168,7 @@ fn list_prints_the_lines_with_their_folders_and_runs_nothing() {
 #[test]
 fn the_conformance_field_becomes_the_argument_variable_of_every_line() {
     let c = serde_json::json!({
-        "conformance": {"app": "paddock", "root": ".", "only": ["C06", "C14"], "strict": ["C36"], "rust": ["C39"]},
+        "conformance": {"app": "paddock", "root": ".", "only": ["C06", "C14", "C36"], "strict": ["C36"], "rust": ["C39"]},
         "paddock": ["echo \"$PADDOCK_CONFORMANCE_ARGS\" > args", "echo \"$PADDOCK_CONFORMANCE_RUST_ARGS\" > rust-args"]
     })
     .to_string();
@@ -177,7 +177,7 @@ fn the_conformance_field_becomes_the_argument_variable_of_every_line() {
     assert_eq!(code, 0, "{log}");
     assert_eq!(
         std::fs::read_to_string(r.root().join("args")).unwrap().trim(),
-        "--app paddock --root . --only C06,C14 --strict C36"
+        "--app paddock --root . --only C06,C14,C36 --strict C36"
     );
     assert_eq!(
         std::fs::read_to_string(r.root().join("rust-args")).unwrap().trim(),

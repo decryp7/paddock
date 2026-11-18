@@ -170,7 +170,7 @@ fn live_c131_fixture_findings_equal_the_recorded_js_answer() {
 }
 
 #[test]
-fn live_c131_tree_findings_stay_within_the_recorded_js_answer() {
+fn live_c131_tree_run_is_sound() {
     let root = repo_root();
     let r = paddock_testkit::guarded("the Rust C131 over the live tree", LIVE_STALL, {
         let root = root.clone();
@@ -179,7 +179,7 @@ fn live_c131_tree_findings_stay_within_the_recorded_js_answer() {
             run_checks_in(&tree, &options(&root, "paddock"), &registry()).unwrap()
         }
     });
-    crate::recorded::assert_tree_within("c131-real-tree", &r.json());
+    crate::recorded::assert_live_tree_sound("c131", &r.json());
 }
 
 /// The shared parity corpus (a byte order mark, CRLF, astral text, case-folding letters, no-break spaces, long lines).

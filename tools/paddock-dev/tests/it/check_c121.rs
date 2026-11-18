@@ -137,7 +137,7 @@ fn live_c121_findings_equal_the_recorded_js_answers_on_a_fixture_tree_and_on_thi
     assert_eq!(got, crate::recorded::expect("c121-fixture", &got), "C121 on the fixture tree");
     let root = repo_root();
     let r = run_checks(&c121_options(&root, "paddock"), &registry()).unwrap();
-    crate::recorded::assert_tree_within("c121-real-tree", &r.json());
+    crate::recorded::assert_live_tree_sound("c121", &r.json());
 }
 
 /// The check's own files are not read: their invented lines need no allow entry; another test file still is.

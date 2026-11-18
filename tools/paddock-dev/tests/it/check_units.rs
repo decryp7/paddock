@@ -4,6 +4,7 @@
 //! test files with their exported functions and `runChecks` wrapped; a case that needs a git history or an unreadable file is not here
 //! (the Rust tests of those, `check_c129.rs`, `check_c130.rs` and `check.rs`, build them).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+use crate::recorded::normal;
 use paddock_dev::check::{RunOptions, registry, run_checks};
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -15,52 +16,13 @@ fn units(id: &str) -> Vec<Value> {
     serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))).unwrap()
 }
 
-/// The wording the hosts own differently, made equal on both sides: the command that regenerates a list (the JS tool is retired), the
-/// JSON parsers' own error text (serde_json and V8), the git error behind "no merge base" (a bare temporary folder), and a check that
-/// could not look at all, which the JS host calls "check broken: no <file> was found to read" and the Rust host "not measured": both
-/// are an unwaivable error that never passes (ER-33).
-fn normal(report: &Value) -> Value {
-    let mut v = report.clone();
-    for list in ["findings", "waived"] {
-        for f in v[list].as_array_mut().unwrap() {
-            let mut m = f["message"].as_str().unwrap().to_string();
-            m = m.replace("node conformance/bin/paddock-shell-baseline.mjs", "./dev check shell-baseline");
-            if let Some(i) = m.find(" is not JSON: ") {
-                m.truncate(i + " is not JSON: ".len());
-            }
-            if let Some(i) = m.find("no merge base (") {
-                m.truncate(i + "no merge base (".len());
-            }
-            let fix = f["fix"]
-                .as_str()
-                .unwrap_or_default()
-                .replace("node conformance/bin/paddock-shell-baseline.mjs", "./dev check shell-baseline");
-            let fix = fix.split(" is not JSON: ").next().unwrap_or_default().to_string();
-            let refused = f["unwaivable"] == true
-                && f["severity"] == "error"
-                && f["file"]
-                    .as_str()
-                    .is_some_and(|p| p.is_empty() || !p.contains('.') || p.ends_with("workflows"));
-            if refused && (m.contains("was found to read") || m.contains("its precondition failed")) {
-                m = "a check that could not look refuses to pass".to_string();
-                f["file"] = json!("");
-                f["fix"] = json!("");
-                f["outcome"] = json!("");
-            } else {
-                f["fix"] = json!(fix);
-            }
-            f["message"] = json!(m);
-        }
-    }
-    v
-}
-
 /// The cases of `id` the Rust host answers differently, each with what differs (the first difference of the findings).
 fn differences(id: &str) -> Vec<String> {
     let mut out = Vec::new();
-    let cases = units(id);
+    let mut cases = units(id);
+    let bless = crate::golden::bless();
     assert!(!cases.is_empty(), "{id}: no recorded case (a loop over nothing passes, ER-12)");
-    for case in &cases {
+    for case in &mut cases {
         let dir = tempfile::tempdir().unwrap();
         for f in case["files"].as_array().unwrap() {
             let (path, text) = (f[0].as_str().unwrap(), f[1].as_str().unwrap());
@@ -90,7 +52,13 @@ fn differences(id: &str) -> Vec<String> {
             base_ref: Some("origin/main".into()),
             ci: Some(false),
         };
-        let got = normal(&run_checks(&opts, &registry()).unwrap().json());
+        let raw = run_checks(&opts, &registry()).unwrap().json();
+        if bless {
+            // A reviewed bless (refused in CI by `golden::bless`): the recorded answer becomes what the Rust host answers now.
+            case["result"] =
+                json!({"findings": raw["findings"], "waived": raw["waived"], "errors": raw["errors"], "warnings": raw["warnings"]});
+        }
+        let got = normal(&raw);
         let want = normal(&case["result"]);
         for k in ["findings", "waived", "errors", "warnings"] {
             if got[k] != want[k] {
@@ -98,6 +66,12 @@ fn differences(id: &str) -> Vec<String> {
                 break;
             }
         }
+    }
+    if bless {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/check/units")
+            .join(format!("{}.json", id.to_lowercase()));
+        crate::recorded::write(&path, &Value::Array(cases));
     }
     out
 }
@@ -150,4 +124,31 @@ fn a_changed_recorded_answer_is_a_difference() {
     };
     let got = run_checks(&opts, &registry()).unwrap().json();
     assert_ne!(got["warnings"], case["result"]["warnings"]);
+}
+
+/// The real-tree comparison, on a frozen copy (P1-1): the files of this repository that carry findings of the 12 checks, as they were
+/// when the JS host was retired, answer as the JS host answered. The live tree is only held to be sound (`recorded::live_tree_problems`).
+#[test]
+fn the_frozen_real_tree_answers_as_the_js_host_did() {
+    let (tree, frozen) = crate::recorded::frozen();
+    assert!(frozen["files"].as_array().unwrap().len() > 100, "the frozen tree has its files");
+    let ids: Vec<String> = [
+        "C39", "C53", "C119", "C120", "C121", "C122", "C123", "C124", "C125", "C129", "C130", "C131",
+    ]
+    .map(String::from)
+    .to_vec();
+    let opts = RunOptions {
+        root: tree.path().to_path_buf(),
+        config: paddock_dev::check::config::Config::bare("paddock"),
+        scope: None,
+        only: Some(ids),
+        files: None,
+        today: "2026-11-19".into(),
+        base_ref: Some("origin/main".into()),
+        ci: Some(false),
+    };
+    let raw = run_checks(&opts, &registry()).unwrap().json();
+    let shared = json!({"app": raw["app"], "checks": raw["checks"], "findings": raw["findings"], "waived": raw["waived"], "errors": raw["errors"], "warnings": raw["warnings"]});
+    let want = crate::recorded::expect("frozen-real-tree", &shared);
+    assert_eq!(normal(&shared), normal(&want));
 }

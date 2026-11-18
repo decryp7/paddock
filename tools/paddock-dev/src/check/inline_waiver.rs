@@ -175,6 +175,8 @@ mod tests {
         assert_eq!(recognise("conformance: t -- a", "t"), InlineWaiver::Reason("- a".into()));
         assert_eq!(recognise("conformance: t — ab", "t"), InlineWaiver::NoReason);
         assert_eq!(recognise("conformance: t", "t"), InlineWaiver::NoReason);
+        // The next line's text is no reason (a case of the retired JS parity test, review of pair P3).
+        assert_eq!(recognise("# conformance: t\n- run: ./dev x", "t"), InlineWaiver::NoReason);
         assert_eq!(recognise("nothing", "t"), InlineWaiver::No);
         assert_eq!(recognise("conformance: other — because", "t"), InlineWaiver::No);
     }

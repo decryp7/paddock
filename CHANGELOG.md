@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-conformance`: C39, C53, C119-C125 and C129-C131 left the package (pair P3, ADR 0022 amendment 2026-11-19)
+- Breaking: these 12 checks have no JavaScript module any more, so `paddock-conformance --only C39` (and the others) is an `unknown
+  check` error that points to `./dev conformance --only <ids>`. The Rust host runs them (`conformance.rust` of
+  `conformance/paddock.ci.json`; the second line of its `paddock` phase). `paddock-shell-baseline.mjs` is `./dev check shell-baseline`.
+  The package's `checks` list and the README index hold only the JavaScript checks.
+
 ### Conformance C30: today's wall-clock sites are an allow list that may only shrink
 - `conformance/c30-allow.json` lists the 189 sites C30 found on 2026-11-18 (176 entries, the flagged line's text as `site`, read by the
   shared allow-list reader). A listed site passes; an unlisted one is still a warning, and so is an entry the merge base's list lacks

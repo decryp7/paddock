@@ -16,7 +16,7 @@ export async function runChecks({ root, app, only = null, options = {}, registry
   const ctx = createContext({ root, config, options });
   const selected = only ? registry.filter((c) => only.includes(c.id)) : registry;
   const unknown = (only ?? []).filter((id) => !registry.some((c) => c.id === id));
-  if (unknown.length) throw new Error(`unknown check: ${unknown.join(', ')}`);
+  if (unknown.length) throw new Error(`unknown check: ${unknown.join(', ')}${unknown.some((id) => /^C\d+$/.test(id)) ? ' (a check with no module here may run on the Rust host: `./dev conformance --only <id>`, listed by `./dev conformance list` and as conformance.rust in conformance/paddock.ci.json)' : ''}`);
 
   let findings = [];
   const inlineWaived = [];

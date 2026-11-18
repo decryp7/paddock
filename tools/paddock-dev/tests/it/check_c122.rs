@@ -86,7 +86,7 @@ fn live_fixture_findings_equal_the_recorded_js_answer() {
 }
 
 #[test]
-fn live_tree_findings_stay_within_the_recorded_js_answer_and_no_rule_a_or_b_site_is_left() {
+fn live_tree_run_is_sound_and_no_rule_a_or_b_site_is_left() {
     let root = repo_root();
     let r = paddock_testkit::guarded("the Rust C122 over the live tree", LIVE_STALL, {
         let root = root.clone();
@@ -95,7 +95,7 @@ fn live_tree_findings_stay_within_the_recorded_js_answer_and_no_rule_a_or_b_site
             run_checks_in(&tree, &options(&root, "paddock"), &registry()).unwrap()
         }
     });
-    crate::recorded::assert_tree_within("c122-real-tree", &r.json());
+    crate::recorded::assert_live_tree_sound("c122", &r.json());
     // The ADR's WP-3b: all sites were moved onto paddock_testkit::path, so the check starts with an empty baseline. Rule C
     // warnings are a heuristic and stay.
     let left: Vec<String> = r

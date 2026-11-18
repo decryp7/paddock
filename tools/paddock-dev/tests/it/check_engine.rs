@@ -95,17 +95,25 @@ fn tree(files: &[(&str, &str)]) -> tempfile::TempDir {
 }
 
 #[test]
-fn this_working_tree_gives_the_report_files_within_what_the_js_host_gave() {
+fn this_working_tree_gives_a_sound_report() {
     let root = repo();
-    // The tree changes under the tests: its findings are held to the recorded JS answer as a ceiling (`recorded::assert_tree_within`),
-    // the shape of the report and its files exactly.
+    // The tree changes under the tests: only what holds whatever it holds is asserted (`recorded::assert_live_tree_sound`); the report
+    // files and exit code are compared with the JS host's on fixture trees above.
     let scratch = tempfile::tempdir().unwrap();
     let args = ["--app", "paddock", "--root", root.to_str().unwrap(), "--only", PORTED];
     let r = run_host(&args, scratch.path());
-    crate::recorded::assert_tree_within(
-        "engine-real-tree",
-        &serde_json::from_str::<Value>(r.out.as_deref().unwrap()).unwrap(),
-    );
+    // The CLI's report has the JS host's shape (no run records): soundness is asked of the same checks run in process.
+    let opts = RunOptions {
+        root: root.clone(),
+        config: check::config::Config::bare("paddock"),
+        scope: None,
+        only: Some(PORTED.split(',').map(String::from).collect()),
+        files: None,
+        today: check::today_utc(),
+        base_ref: None,
+        ci: Some(false),
+    };
+    crate::recorded::assert_live_tree_sound("engine", &run_checks(&opts, &check::registry()).unwrap().json());
     assert!(r.stdout.contains("paddock: 4 checks"), "{}", r.stdout);
     let out: Value = serde_json::from_str(r.out.as_deref().unwrap()).unwrap();
     assert_eq!(out["checks"], json!(["C39", "C53", "C119", "C120"]));

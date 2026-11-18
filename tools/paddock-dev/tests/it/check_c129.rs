@@ -256,7 +256,7 @@ fn live_c129_fixture_findings_equal_the_recorded_js_answer() {
 }
 
 #[test]
-fn live_c129_tree_findings_stay_within_the_recorded_js_answer() {
+fn live_c129_tree_run_is_sound() {
     let root = repo_root();
     let r = paddock_testkit::guarded("the Rust C129 over the live tree", LIVE_STALL, {
         let root = root.clone();
@@ -265,7 +265,7 @@ fn live_c129_tree_findings_stay_within_the_recorded_js_answer() {
             run_checks_in(&tree, &options(&root, "paddock"), &registry()).unwrap()
         }
     });
-    crate::recorded::assert_tree_within("c129-real-tree", &r.json());
+    crate::recorded::assert_live_tree_sound("c129", &r.json());
 }
 
 // Plain `git` in a scratch repository, started and awaited here; nothing is killed by pid.

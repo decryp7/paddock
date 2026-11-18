@@ -1,8 +1,0 @@
-{
- "errors": 0,
- "sites": {
-  "C123": [
-   "tools/paddock-dev/src/pre_push/tests.rs"
-  ]
- }
-}

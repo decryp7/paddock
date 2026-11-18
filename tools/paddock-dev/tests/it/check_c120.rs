@@ -10,7 +10,7 @@ fn repo() -> PathBuf {
     paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
 }
 
-fn rust(root: &Path) -> Value {
+fn full(root: &Path) -> Value {
     let opts = RunOptions {
         root: root.to_path_buf(),
         config: paddock_dev::check::config::Config::bare("paddock"),
@@ -21,7 +21,11 @@ fn rust(root: &Path) -> Value {
         base_ref: None,
         ci: Some(false),
     };
-    let r = run_checks(&opts, &registry()).unwrap().json();
+    run_checks(&opts, &registry()).unwrap().json()
+}
+
+fn rust(root: &Path) -> Value {
+    let r = full(root);
     json!({"findings": r["findings"], "waived": r["waived"], "errors": r["errors"], "warnings": r["warnings"]})
 }
 
@@ -119,9 +123,9 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
 }
 
 #[test]
-fn this_working_tree_gives_findings_within_the_recorded_js_answer() {
+fn this_working_tree_run_is_sound() {
     let root = repo();
-    crate::recorded::assert_tree_within("c120-real-tree", &rust(&root));
+    crate::recorded::assert_live_tree_sound("c120", &full(&root));
     assert_eq!(rust(&root)["warnings"], 0, "every site carries a waiver with a reason, or is fixed");
     assert!(
         rust(&root)["waived"].as_array().unwrap().len() >= 20,
