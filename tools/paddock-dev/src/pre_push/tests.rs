@@ -496,11 +496,23 @@ struct Fake {
     /// Gates that never got a slot: `how` is heavy's queue-limit text.
     no_slot: Vec<String>,
     ran: Mutex<Vec<String>>,
+    /// The stand-in for this program that the rows `./dev` runs itself start (None: the real answer, a test program is refused).
+    dev_program: Option<String>,
     /// The limits every gate was started with.
     limits: Mutex<Vec<(String, Limits)>>,
 }
 
 impl Exec for Fake {
+    fn dev_program(&self) -> Result<String, String> {
+        self.dev_program.clone().map_or_else(
+            || {
+                crate::tool_cache::self_exe()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .map_err(|e| e.to_string())
+            },
+            Ok,
+        )
+    }
     fn has_tool(&self, p: &str) -> bool {
         !self.no_tools.iter().any(|t| t == p)
     }
@@ -1698,10 +1710,9 @@ mod known_commit {
         known::write_record(&r, &state(&r), &two, "origin/main", &[], 5, &pass_for(&r, &two)).unwrap();
         let l = fake(None, Err("x"));
         let delete = format!("(delete) {} refs/heads/old {}\n", "0".repeat(40), two);
-        // The gates of the run are measured afresh, never read from the record. In a test process the rows `./dev` runs itself
-        // (gates-register) are not measured, with the reason (`tool_cache::self_exe` refuses a test program, 48fa2449a); the
-        // commit-lint row runs in process. A reused record would be the verdict `known_commit` with no gate rows.
-        let gates = super::Fake::default();
+        // The gates of the run are measured afresh, never read from the record: gates-register reaches the executor, started as
+        // the stand-in dev program (a test process is never started as paddock-dev, 48fa2449a).
+        let gates = standin_dev();
         let got = command_in(
             &PrePushArgs {
                 root: Some(r.clone()),
@@ -1714,27 +1725,36 @@ mod known_commit {
             Some(&gates),
         );
         assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
-        assert_measured_afresh(&got);
+        assert_measured_afresh(&got, &gates);
         let a = PrePushArgs {
             root: Some(r.clone()),
             base: Some("origin/main".into()),
             ..args()
         };
-        let gates = super::Fake::default();
+        let gates = standin_dev();
         let got = command_in(&a, &r, &push_line(&two), &l, crate::local_sccache::Lazy::off(), Some(&gates));
         assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
-        assert_measured_afresh(&got);
+        assert_measured_afresh(&got, &gates);
     }
 
-    /// Positive control of the evidence test: the report lists the gates of this run, the commit-lint row passed and the
-    /// gates-register row is not measured because this test process cannot be started again as paddock-dev.
-    fn assert_measured_afresh<E: std::fmt::Debug>(got: &Result<paddock_cli::Report, E>) {
+    /// The executor of the gates with a stand-in for this program: in a test process the real one is the test harness, which the
+    /// rows `./dev` runs itself must never start (`tool_cache::self_exe`).
+    fn standin_dev() -> super::Fake {
+        super::Fake {
+            dev_program: Some("/x/dev".into()),
+            ..Default::default()
+        }
+    }
+
+    /// The gates of this run were measured afresh, none read from the record: commit-lint passed in process and gates-register
+    /// went to the executor (started as the stand-in) and passed.
+    fn assert_measured_afresh<E: std::fmt::Debug>(got: &Result<paddock_cli::Report, E>, gates: &super::Fake) {
         let rep = got.as_ref().unwrap_or_else(|e| panic!("no report: {e:?}"));
-        let gates = rep.data["gates"].as_array().expect("the report lists the gates of the run");
-        let verdict = |id: &str| gates.iter().find(|g| g["id"] == id).map(|g| g["verdict"].clone());
+        let rows = rep.data["gates"].as_array().expect("the report lists the gates of the run");
+        let verdict = |id: &str| rows.iter().find(|g| g["id"] == id).map(|g| g["verdict"].clone());
         assert_eq!(verdict("commit-lint"), Some(serde_json::json!("passed")), "{rep:?}");
-        assert_eq!(verdict("gates-register"), Some(serde_json::json!("not measured")), "{rep:?}");
-        assert!(rep.text.contains("is a test program"), "{}", rep.text);
+        assert_eq!(verdict("gates-register"), Some(serde_json::json!("passed")), "{rep:?}");
+        assert!(gates.ran.lock().unwrap().contains(&"gates-register".to_string()), "{rep:?}");
     }
 
     /// A record measured from a nearer base (a local train, a branch's old commit) checked less than a push from an older base
