@@ -1086,3 +1086,98 @@ fn a_single_file_stand_in_answers_from_its_own_bytes_when_copied_alone() {
         tool.single_file_bytes().unwrap()
     );
 }
+
+#[test]
+fn copies_a_binary_file_to_the_place_the_call_names() {
+    let s = Scratch::new();
+    let src = s.work().join("archive.bin");
+    let bytes: Vec<u8> = vec![0, 159, 146, 150, 255, 10, 0];
+    std::fs::write(&src, &bytes).unwrap();
+    let p = StandIn::new(&s.work(), "curl")
+        .answers(Actions::new().copies_file(&src.to_string_lossy(), "{arg:2}"))
+        .install()
+        .unwrap();
+    let dest = s.work().join("copy.bin");
+    let o = run(p.program(), &["-o", &dest.to_string_lossy()]);
+    assert!(o.status.success(), "{}", err(&o));
+    assert_eq!(std::fs::read(&dest).unwrap(), bytes);
+    // A source that is missing is a broken stand-in, not a silent success.
+    std::fs::remove_file(&src).unwrap();
+    assert!(
+        !run(p.program(), &["-o", &dest.to_string_lossy()])
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn a_bundled_program_finds_its_script_at_its_own_end_and_a_plain_one_alone_is_broken() {
+    let s = Scratch::new();
+    let f = StandIn::new(&s.work(), "tool")
+        .stdout("alone")
+        .exit(4)
+        .files()
+        .unwrap();
+    let bundled = s.work().join("one").join(&f.program_name);
+    std::fs::create_dir_all(bundled.parent().unwrap()).unwrap();
+    paddock_testkit::exe::write_program(&bundled, &f.bundled()).unwrap();
+    let o = run(&bundled, &[]);
+    assert_eq!((o.status.code(), out(&o).as_str()), (Some(4), "alone\n"));
+    // Control: the program without its script (nothing beside it, nothing at its end) is a broken stand-in.
+    let plain = s.work().join("two").join(&f.program_name);
+    std::fs::create_dir_all(plain.parent().unwrap()).unwrap();
+    paddock_testkit::exe::write_program(&plain, &f.program).unwrap();
+    let o = run(&plain, &[]);
+    assert_eq!(o.status.code(), Some(70), "{}", err(&o));
+}
+
+#[test]
+fn the_unquoted_flag_token_drops_one_pair_of_single_quotes_around_the_value() {
+    let s = Scratch::new();
+    let f = s.work().join("dir");
+    let p = StandIn::new(&s.work(), "cargo")
+        .answers(Actions::new().writes_with(
+            &f.to_string_lossy(),
+            "<{flag_unquoted:build.target-dir=}> <{flag_unquoted:other=}> <{flag_unquoted:none=}>\n",
+        ))
+        .install()
+        .unwrap();
+    run(
+        p.program(),
+        &["--config", "build.target-dir='/t dir'", "other=plain"],
+    );
+    assert_eq!(
+        std::fs::read_to_string(&f).unwrap().replace("\r\n", "\n"),
+        "</t dir> <plain> <>\n"
+    );
+}
+
+#[test]
+fn a_bundled_install_runs_under_any_name_it_is_copied_to() {
+    let s = Scratch::new();
+    let built = StandIn::new(&s.work(), "made").answers(
+        Actions::new()
+            .stdout_with("built {{args}}")
+            .stdout("none")
+            .exit(5),
+    );
+    let path = s
+        .work()
+        .join(format!("made{}", std::env::consts::EXE_SUFFIX));
+    let maker = StandIn::new(&s.work(), "maker")
+        .answers(Actions::new().installs(&path.to_string_lossy(), &built))
+        .install()
+        .unwrap();
+    assert!(run(maker.program(), &[]).status.success());
+    // No script beside it, and a copy under another name: it still answers.
+    assert!(!s.work().join("made.stand-in.json").exists());
+    let other = s
+        .work()
+        .join(format!("other{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(&path, &other).unwrap();
+    let o = run(&other, &["a", "b"]);
+    assert_eq!(
+        (o.status.code(), out(&o).as_str()),
+        (Some(5), "built a b\nnone\n")
+    );
+}

@@ -636,6 +636,7 @@ mod tests {
     #[test]
     fn line_counts_and_shebangs() {
         assert_eq!(["", "a", "a\n", "a\nb", "a\n\n"].map(line_count), [0, 1, 1, 2, 2]);
+        // conformance: stand-in — the shebang text is the data of this detector test; no program is planted
         assert!(shebang("#!/bin/sh\n") && shebang("#!/usr/bin/env python3\n") && shebang("#!/usr/bin/env -S bash -e\n"));
         assert!(!shebang("#!/usr/bin/env node\n") && !shebang("# !/bin/sh\n") && !shebang("#!/bin/shx\n"));
     }

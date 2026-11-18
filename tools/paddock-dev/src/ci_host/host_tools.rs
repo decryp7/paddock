@@ -297,6 +297,7 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use paddock_testkit::{Actions, StandIn};
 
     /// The Windows member gate's aarch64 cargo-nextest (scripts/vm-win/member-gate-tools.lock) is the release of this pin.
     #[test]
@@ -316,11 +317,6 @@ mod tests {
             "cargo-nextest-{0}/cargo-nextest-{0}-aarch64-pc-windows-msvc.zip",
             PIN.version
         )));
-    }
-
-    fn script(path: &Path, body: &str) {
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        paddock_testkit::exe::write_program(path, format!("#!/bin/sh\n{body}\n")).unwrap();
     }
 
     struct Scene {
@@ -359,11 +355,16 @@ mod tests {
     #[test]
     fn a_kept_pinned_program_is_used_without_a_download_and_put_on_the_path() {
         let sc = scene("macOS");
-        script(
-            &kept_dir(&sc).join("cargo-nextest"),
-            &format!("echo 'cargo-nextest {} (abc)'", PIN.version),
-        );
-        script(&sc.d.path().join("bin/curl"), "echo curl was called >&2; exit 7");
+        std::fs::create_dir_all(kept_dir(&sc)).unwrap();
+        StandIn::new(&kept_dir(&sc), "cargo-nextest")
+            .stdout(&format!("cargo-nextest {} (abc)", PIN.version))
+            .install()
+            .unwrap();
+        StandIn::new(&sc.d.path().join("bin"), "curl")
+            .stderr("curl was called")
+            .exit(7)
+            .install()
+            .unwrap();
         let (code, out) = go(&sc, &PIN);
         assert_eq!(code, 0, "{out}");
         assert!(out.contains(&format!("cargo-nextest {} kept in", PIN.version)), "{out}");
@@ -377,7 +378,11 @@ mod tests {
     #[test]
     fn a_kept_program_of_another_version_fails_the_check_naming_both() {
         let sc = scene("macOS");
-        script(&kept_dir(&sc).join("cargo-nextest"), "echo 'cargo-nextest 0.9.1 (abc)'");
+        std::fs::create_dir_all(kept_dir(&sc)).unwrap();
+        StandIn::new(&kept_dir(&sc), "cargo-nextest")
+            .stdout("cargo-nextest 0.9.1 (abc)")
+            .install()
+            .unwrap();
         let (code, out) = go(&sc, &PIN);
         assert_eq!(code, 1);
         assert!(
@@ -393,10 +398,10 @@ mod tests {
     #[test]
     fn linux_checks_the_image_copy_only_and_a_missing_one_is_an_error() {
         let sc = scene("Linux");
-        script(
-            &sc.d.path().join("bin/cargo-nextest"),
-            &format!("echo 'cargo-nextest {} (x)'", PIN.version),
-        );
+        StandIn::new(&sc.d.path().join("bin"), "cargo-nextest")
+            .stdout(&format!("cargo-nextest {} (x)", PIN.version))
+            .install()
+            .unwrap();
         let (code, out) = go(&sc, &PIN);
         assert_eq!((code, out.as_str()), (0, format!("cargo-nextest {}\n", PIN.version).as_str()));
         assert!(!sc.d.path().join("github-path").exists());
@@ -409,7 +414,13 @@ mod tests {
     /// A pin whose archive is built here: a tar.gz with a shim program, and its real SHA-256.
     fn fixture_pin(sc: &Scene, version: &'static str, lie: bool) -> Pin {
         let pack = sc.d.path().join("pack");
-        script(&pack.join("cargo-nextest"), &format!("echo 'cargo-nextest {version} (fixture)'"));
+        std::fs::create_dir_all(&pack).unwrap();
+        // The archive holds the program alone, so the stand-in carries its script at its end.
+        let packed = StandIn::new(&pack, "cargo-nextest")
+            .stdout(&format!("cargo-nextest {version} (fixture)"))
+            .files()
+            .unwrap();
+        paddock_testkit::exe::write_program(pack.join(&packed.program_name), packed.bundled()).unwrap();
         let tgz = sc.d.path().join("fixture.tar.gz");
         let ok = paddock_proc::command("tar")
             .args([
@@ -428,14 +439,14 @@ mod tests {
             hex(&Sha256::digest(std::fs::read(&tgz).unwrap())).leak()
         };
         // curl: copies the fixture to the -o path and records the URL.
-        script(
-            &sc.d.path().join("bin/curl"),
-            &format!(
-                "out=''; url=''; while [ $# -gt 0 ]; do case \"$1\" in -o) out=\"$2\"; shift;; -*) ;; *) url=\"$1\";; esac; shift; done; echo \"$url\" > '{}'; cp '{}' \"$out\"",
-                sc.d.path().join("url").display(),
-                tgz.display()
-            ),
-        );
+        StandIn::new(&sc.d.path().join("bin"), "curl")
+            .answers(
+                Actions::new()
+                    .writes_with(&sc.d.path().join("url").display().to_string(), "{arg:6}\n")
+                    .copies_file(&tgz.display().to_string(), "{arg:5}"),
+            )
+            .install()
+            .unwrap();
         Pin {
             version,
             macos: Asset {
@@ -474,7 +485,11 @@ mod tests {
             "the work folder is removed"
         );
         // The second run finds it kept and does not call curl again.
-        script(&sc.d.path().join("bin/curl"), "echo curl was called >&2; exit 7");
+        StandIn::new(&sc.d.path().join("bin"), "curl")
+            .stderr("curl was called")
+            .exit(7)
+            .install()
+            .unwrap();
         let (code, out) = go(&sc, &pin);
         assert_eq!(code, 0, "{out}");
         assert!(out.contains("kept in"), "{out}");
@@ -496,7 +511,11 @@ mod tests {
     #[test]
     fn a_failed_download_is_one_error_line_with_its_next_step() {
         let sc = scene("macOS");
-        script(&sc.d.path().join("bin/curl"), "echo 'curl: (6) could not resolve host' >&2; exit 6");
+        StandIn::new(&sc.d.path().join("bin"), "curl")
+            .stderr("curl: (6) could not resolve host")
+            .exit(6)
+            .install()
+            .unwrap();
         let (code, out) = go(&sc, &PIN);
         assert_eq!(code, 1);
         let errors: Vec<&str> = out.lines().filter(|l| l.starts_with("::error::")).collect();

@@ -193,7 +193,7 @@ struct Ctx {
 
 /// Fills a template: `{args}` (the arguments, joined by spaces), `{arg:N}` (the N-th, from 1; empty when absent), `{cwd}`, `{dir}` (the
 /// stand-in's own folder), `{name}`, `{pid}`, `{environ}` (every variable as a `NAME=value` line, as `env` prints them), `{env:NAME}` and `{env:NAME|fallback}` (empty or the fallback when unset),
-/// `{flag:PREFIX}` or `{flag:PREFIX|SUFFIX}` (what follows PREFIX in the last argument that starts with it, as `${a#PREFIX}` does, without a trailing SUFFIX when it has one), `{lines:PATH}` or `{lines:PATH|MAX}` (how many lines the file has, 0 when it is missing, at most MAX: `wc -l`), `{run:program|arg|arg}` (what that program prints in the working folder, without its last newline; empty when it fails; no `|` or `}` inside an argument), `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
+/// `{flag_unquoted:PREFIX}` (the same without one pair of single quotes around it, as cargo's `--config key='value'` has), `{flag:PREFIX}` or `{flag:PREFIX|SUFFIX}` (what follows PREFIX in the last argument that starts with it, as `${a#PREFIX}` does, without a trailing SUFFIX when it has one), `{lines:PATH}` or `{lines:PATH|MAX}` (how many lines the file has, 0 when it is missing, at most MAX: `wc -l`), `{run:program|arg|arg}` (what that program prints in the working folder, without its last newline; empty when it fails; no `|` or `}` inside an argument), `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
 fn expand(text: &str, ctx: &Ctx) -> Result<String, String> {
     let mut out = String::new();
     let mut rest = text;
@@ -237,7 +237,18 @@ fn token(t: &str, ctx: &Ctx) -> Result<String, String> {
         "stdin" => stdin.to_string(),
         "stdin_line" => stdin.lines().next().unwrap_or("").to_string(),
         _ => {
-            if let Some(cmd) = t.strip_prefix("run:") {
+            if let Some(prefix) = t.strip_prefix("flag_unquoted:") {
+                let v = ctx
+                    .argv
+                    .iter()
+                    .rev()
+                    .find_map(|a| a.strip_prefix(prefix))
+                    .unwrap_or_default();
+                v.strip_prefix('\'')
+                    .and_then(|v| v.strip_suffix('\''))
+                    .unwrap_or(v)
+                    .to_string()
+            } else if let Some(cmd) = t.strip_prefix("run:") {
                 let mut parts = cmd.split('|');
                 let program = parts.next().unwrap_or_default();
                 std::process::Command::new(program)
@@ -348,6 +359,17 @@ fn act(actions: &Value, ctx: &Ctx) -> Result<i32, String> {
             "mkdir" => {
                 let path = expand(arg.as_str().ok_or("mkdir needs a path")?, ctx)?;
                 std::fs::create_dir_all(&path).map_err(|e| format!("cannot make {path}: {e}"))?;
+            }
+            "copy" => {
+                let get = |k: &str| {
+                    arg.get(k)
+                        .and_then(Value::as_str)
+                        .ok_or(format!("copy needs `{k}`"))
+                };
+                let from = expand(get("from")?, ctx)?;
+                let to = expand(get("to")?, ctx)?;
+                std::fs::copy(&from, &to)
+                    .map_err(|e| format!("cannot copy {from} to {to}: {e}"))?;
             }
             "ignore_term" => ignore_term()?,
             "stop_self" => stop_self()?,

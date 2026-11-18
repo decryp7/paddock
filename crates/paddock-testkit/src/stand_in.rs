@@ -22,7 +22,7 @@
 //! with [`StandIn::records_env`] and, with [`StandIn::reads_stdin`], what was written to stdin (at most 1 MiB).
 //!
 //! More, for the fixtures that were shell scripts: output filled from the call ([`Actions::stdout_with`] and the other `_with`
-//! methods name `{args}`, `{arg:N}`, `{flag:PREFIX}`, `{cwd}`, `{dir}`, `{name}`, `{pid}`, `{environ}`, `{flag:PREFIX|SUFFIX}`, `{lines:PATH|MAX}`, `{run:program|arg|arg}`, `{env:NAME}` / `{env:NAME|fallback}`, `{stdin}` and
+//! methods name `{args}`, `{arg:N}`, `{flag:PREFIX}`, `{flag_unquoted:PREFIX}`, `{cwd}`, `{dir}`, `{name}`, `{pid}`, `{environ}`, `{flag:PREFIX|SUFFIX}`, `{lines:PATH|MAX}`, `{run:program|arg|arg}`, `{env:NAME}` / `{env:NAME|fallback}`, `{stdin}` and
 //! `{stdin_line}`; `{{` and `}}` are braces), [`Actions::writes_atomically`], [`Actions::waits_for_file`], named pipes
 //! ([`Actions::makes_fifo`], [`Actions::reads_file`]), [`Actions::ignores_term`] (Unix), [`Actions::installs`] (a second stand-in
 //! written at run time, as a fake `cargo` that "builds" a tool does), [`Actions::exits_with_env`] and [`Actions::execs`] (run another
@@ -253,6 +253,17 @@ impl Actions {
     #[must_use]
     pub fn makes_dir(self, path_template: &str) -> Actions {
         self.step("mkdir", Value::Str(path_template.to_string()))
+    }
+
+    /// Copies the file `from_template` to `to_template` (replacing it; binary content as it is), both with the call's values
+    /// filled in: a fake `curl -o` that "downloads" an archive built by the test.
+    #[must_use]
+    pub fn copies_file(self, from_template: &str, to_template: &str) -> Actions {
+        let m = vec![
+            ("from".to_string(), Value::Str(from_template.to_string())),
+            ("to".to_string(), Value::Str(to_template.to_string())),
+        ];
+        self.step("copy", Value::Obj(m))
     }
 
     /// Stops itself (SIGSTOP, Unix only), as `kill -STOP $$` does; it goes on after SIGCONT.
@@ -809,13 +820,7 @@ impl StandIn {
     ///
     /// As [`StandIn::files`].
     pub fn single_file_bytes(&self) -> io::Result<Vec<u8>> {
-        let files = self.files()?;
-        let mut bytes = files.program;
-        let script = files.script;
-        bytes.extend_from_slice(&script);
-        bytes.extend_from_slice(&(script.len() as u64).to_le_bytes());
-        bytes.extend_from_slice(b"PDSTNDIN");
-        Ok(bytes)
+        Ok(self.files()?.bundled())
     }
 
     /// Writes [`StandIn::single_file_bytes`] to `path` and makes it executable (a Unix mode of 755).
@@ -907,6 +912,18 @@ pub struct Files {
     pub script_name: String,
     /// The bytes of the script.
     pub script: Vec<u8>,
+}
+
+impl Files {
+    /// The program with its script at its end, as one file: where the code under test puts a downloaded or unpacked program alone
+    /// (nothing beside it), this one still finds its script. Written under `program_name`.
+    pub fn bundled(&self) -> Vec<u8> {
+        let mut bytes = self.program.clone();
+        bytes.extend_from_slice(&self.script);
+        bytes.extend_from_slice(&(self.script.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(b"PDSTNDIN");
+        bytes
+    }
 }
 
 /// An installed stand-in.
