@@ -75,17 +75,17 @@ def _config_positionals(args):
     return out
 
 
-def paddock_config_write(args):
-    """True when `git config <args>` writes a `paddock.*` key or the `paddock` section (the shared common config that names the
-    machine's dev folders, docs/dev-setup.md); reads are False."""
+def config_write(args, key_pred):
+    """True when `git config <args>` writes a key `key_pred` accepts (a lower-cased name; `--edit` counts for every predicate);
+    lookups (`--get`, `get`, `--list`, one bare key) are False."""
     if not args:
         return False
     keys = _config_positionals(args)
     sub = None
     if keys and keys[0] in ("get", "list", "set", "unset", "rename-section", "remove-section", "edit"):
         sub, keys = keys[0], keys[1:]
-    names_paddock = any(k.lower() == "paddock" or k.lower().startswith("paddock.") for k in keys[:1])
-    if not names_paddock and not (sub == "edit" or "--edit" in args or "-e" in args):
+    names_key = any(key_pred(k.lower()) for k in keys[:1])
+    if not names_key and not (sub == "edit" or "--edit" in args or "-e" in args):
         return False
     if sub in ("get", "list"):
         return False
@@ -97,6 +97,17 @@ def paddock_config_write(args):
         return False
     # `git config <key> <value>` writes; `git config <key>` reads. The type options (--type, --bool, ...) only canonicalise.
     return len(keys) >= 2
+
+
+def paddock_config_write(args):
+    """True when `git config <args>` writes a `paddock.*` key or the `paddock` section (the shared common config that names the
+    machine's dev folders, docs/dev-setup.md)."""
+    return config_write(args, lambda k: k == "paddock" or k.startswith("paddock."))
+
+
+def hooks_path_write(args):
+    """True when `git config <args>` writes or unsets `core.hooksPath`, which switches every hook off like `--no-verify`."""
+    return config_write(args, lambda k: k == HOOKS_PATH)
 
 
 def closes_with_exit(cmds, cmd):
@@ -121,28 +132,29 @@ def closes_with_exit(cmds, cmd):
 
 
 HOOKS_PATH = "core.hookspath"
-_CONFIG_READ = ("--get", "--get-all", "--get-regexp", "--list", "-l", "--unset", "--unset-all")
+# The commands whose hooks run (or whose result is a commit): a config override on one of them can point git at other hooks.
+OVERRIDE_SUBS = ("commit", "push", "merge", "cherry-pick", "rebase", "am", "revert")
+# git options and environment variables that change which config (and so which hooks, identity or repository) a command reads.
+CONFIG_OPTIONS = ("-c", "--config-env", "--exec-path", "--git-dir")
+CONFIG_ENV = {"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS",
+              "HOME", "XDG_CONFIG_HOME", "GIT_DIR", "GIT_EXEC_PATH"}
+CONFIG_ENV_PREFIXES = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
 
 
-def hooks_path_bypass(c, sub, args):
-    """What names a `core.hooksPath` override on this git command (`git -c core.hooksPath=/dev/null ...`, `--config-env`,
-    `git config core.hooksPath ...`, or an environment carrying it), or None. It switches every hook off like `--no-verify`."""
+def config_override(c):
+    """What overrides git's configuration for this command (any `-c`, `--config-env`, `--exec-path`, `--git-dir`, or an
+    environment variable of CONFIG_ENV), or None. An outcome rule, not a list of spellings: every override of the config of a
+    commit, push, merge, cherry-pick, rebase, am or revert can switch the hooks off."""
     a = c.argv
     k = 1
     while k < len(a) and a[k].startswith("-") and a[k] != "--":
-        if a[k] in ("-c", "--config-env") and k + 1 < len(a) and a[k + 1].lower().split("=", 1)[0] == HOOKS_PATH:
-            return "git %s %s" % (a[k], a[k + 1])
-        if a[k].lower().startswith(("--config-env=" + HOOKS_PATH, "-c" + HOOKS_PATH)):
-            return "git " + a[k]
+        if a[k] == "-c" or a[k].split("=", 1)[0] in CONFIG_OPTIONS:
+            return "git %s" % " ".join(a[k:k + 2] if a[k] in shellscan._GIT_OPT_ARG else a[k:k + 1])
         k += 2 if a[k] in shellscan._GIT_OPT_ARG else 1
-    if sub == "config" and any(x.lower() == HOOKS_PATH for x in args) and not any(x in _CONFIG_READ for x in args):
-        return "git config core.hooksPath"
     for e in c.env:
-        name, _, val = e.partition("=")
-        if name == "GIT_CONFIG_PARAMETERS" and HOOKS_PATH in val.lower():
-            return "GIT_CONFIG_PARAMETERS carrying core.hooksPath"
-        if name.startswith("GIT_CONFIG_KEY_") and val.lower() == HOOKS_PATH:
-            return "%s=core.hooksPath" % name
+        name = e.partition("=")[0]
+        if name in CONFIG_ENV or name.startswith(CONFIG_ENV_PREFIXES):
+            return "the environment variable %s" % name
     return None
 
 
@@ -181,15 +193,21 @@ def decide(data):
             continue
         eff, sub, args = g
         if is_agent:
-            hp = hooks_path_bypass(c, sub, args)
-            if hp:
-                return ("Blocked: git hooks are bypassed (%s). core.hooksPath points git at other hooks, which skips lefthook "
-                        "like --no-verify. Hooks must pass: cherry-pick the hook fix or stop and report (no bypass)." % hp)
-        if is_agent and sub in ("commit", "push", "merge", "cherry-pick", "rebase", "am"):
+            ov = config_override(c) if sub in OVERRIDE_SUBS else None
+            if ov:
+                return ("Blocked (ER-39, hooks are never bypassed): `git %s` with a config override (%s). Any override of git's "
+                        "configuration can point git at other hooks (core.hooksPath, include.path, another HOME or "
+                        "GIT_CONFIG_GLOBAL) and skips lefthook like --no-verify. Next step: run it without the override; if a "
+                        "hook fails, fix the hook (or cherry-pick its fix) or stop and report." % (sub, ov))
+        if is_agent and sub in OVERRIDE_SUBS:
             bypass = [e for e in c.env if e.split("=", 1)[0] in ("LEFTHOOK_EXCLUDE",) or e in ("LEFTHOOK=0", "LEFTHOOK=false")]
             if bypass or (sub in ("commit", "push") and "--no-verify" in args) or (sub == "commit" and short_n(args)):
                 return ("Blocked: git hooks are bypassed (%s). Hooks must pass: cherry-pick the hook fix or stop and report "
                         "(no bypass)." % (bypass[0] if bypass else "--no-verify"))
+        if is_agent and sub == "config" and hooks_path_write(args) and not paddock_config_write(args):
+            return ("Blocked (ER-39, hooks are never bypassed): `git config` writes or unsets core.hooksPath, which points git at "
+                    "other hooks and skips lefthook like --no-verify. Next step: leave it; if a hook fails, fix the hook or stop "
+                    "and report. Reading it (`git config --get core.hooksPath`) is fine.")
         if is_agent and sub == "config" and paddock_config_write(args):
             return ("Blocked: `git config` writes a `paddock.*` key by a subagent. It lives in the common config every worktree "
                     "shares and moves the dev, VM, lock and disk folders for everyone (docs/dev-setup.md, \"Where things "

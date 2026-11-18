@@ -1452,3 +1452,22 @@ status = "built"
   owner = "paddock"
   delete_by = "v0.5.0"
   note = "`./dev audit` reads the same scripts/npm-audit-allow.json in Rust (parse_allow, Exception::live) so the nightly and the train audit honour the approved exceptions; the app jobs' plain audit is the script. scripts/npm-audit-fixtures.json holds the cases (reports and allow lists, valid and invalid, the 90-day cap, not-measured reports); scripts/npm-audit.test.mjs and tools/paddock-dev/src/audit/tests.rs (every_shared_report_fixture_is_read_as_the_script_reads_it, every_shared_allow_fixture_is_read_as_the_script_reads_it) both read that one file, so the two readers cannot drift. Goes when the app jobs' audit moves onto `./dev audit` and the script is retired."
+
+# =====================================================================================================================
+# The re-land rule (what a re-land subject is, which body line names its revert)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "reland-rule"
+title = "What a re-land subject is and which `This reverts commit <sha>` line names what it reverts"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/merge_check/reland.rs", "tools/paddock-dev/src/merge_check/reverted_base.rs"]
+symbols = ["item:is_reland_subject", "item:trailer_targets"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["conformance/src/commit-lint.mjs"]
+  symbols = ["item:isRelandSubject", "item:revertsTargets"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The commit-msg hook, `commit-lint --range` and C23 run in Node before any binary is built. One case table, conformance/reland-cases.json, is read by both test suites (the Rust test the_shared_case_table_gives_the_same_answers_as_the_javascript_rule and the c23-commit-lint test 're-land rule'), so a case one side fails is a drift. Goes when commit-lint moves into `./dev` (docs/plans/ci-in-rust.md, WP-9)."

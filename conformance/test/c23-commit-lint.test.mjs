@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { commitLintMain, lint } from '../src/commit-lint.mjs';
+import { commitLintMain, isRelandSubject, lint, revertsTargets } from '../src/commit-lint.mjs';
 import { runChecks } from '../src/runner.mjs';
 import { findingsOf, makeApp, messages } from './helpers.mjs';
 
@@ -12,7 +12,7 @@ test('lint good: Conventional Commits, scope, breaking mark, merge commits', () 
 });
 
 test('lint good: git\'s own Revert and Reapply subjects (a revert of a revert) pass the header rule', () => {
-  for (const m of ['Revert "feat: add x"', 'Revert "Revert "fix: y""\n\nThis reverts commit abc.', 'Reapply "feat: add x"\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567.', 'Reapply "Revert "fix: y""\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567.']) assert.deepEqual(lint(m), [], m);
+  for (const m of ['Revert "feat: add x"', 'Revert "Revert "fix: y""\n\nThis reverts commit abc1234.', 'Reapply "feat: add x"\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567.', 'Reapply "Revert "fix: y""\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567.']) assert.deepEqual(lint(m), [], m);
 });
 
 function commitLintMainResult(subject) {
@@ -23,19 +23,20 @@ function commitLintMainResult(subject) {
 
 test('lint: a re-land names what it reverts (git revert form), else it fails with the fix', () => {
   const line = 'This reverts commit 0123456789abcdef0123456789abcdef01234567.';
-  for (const m of ['revert: reapply feat x\n\n' + line, 'Reapply "feat: x"\n\nwhy\n\n' + line + '\n']) assert.deepEqual(lint(m), [], m);
-  for (const m of ['revert: reapply feat x', 'Reapply "feat: x"', 'revert: reapply x\n\nThis reverts commit abc123.', 'Reapply "x"\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567']) {
+  for (const m of ['revert: reapply feat x\n\n' + line, 'Reapply "feat: x"\n\nwhy\n\n' + line + '\n', 'Reapply "x"\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567']) assert.deepEqual(lint(m), [], m);
+  for (const m of ['revert: reapply feat x', 'Reapply "feat: x"', 'revert: reapply x\n\nThis reverts commit abc123.']) {
     assert.match(lint(m).join(), /git revert <sha>/, m);
   }
-  // Landed history (CI's range, C23's window) is never judged for it: five train-14 re-lands predate the rule.
+  // Landed history is judged only where the caller says the commit descends from the rule's commit (reland: true); the advice text follows `landed`.
   assert.deepEqual(lint('Reapply "feat: x"', { landed: true }), []);
-  assert.deepEqual(lint('revert: reapply feat x', { landed: true }), []);
-  assert.match(commitLintMainResult('revert: reapply x'), /git revert <sha>/);
+  assert.match(lint('Reapply "feat: x"', { landed: true, reland: true }).join(), /git revert <sha>/);
+  assert.match(lint('revert: reapply x\n\nThis reverts commit abc123.', { landed: true, reland: true }).join(), /git revert <sha>/, 'a 6-hex name is not one');
+  assert.deepEqual(lint('revert: reapply x\n\nThis reverts commit abc1234', { landed: true, reland: true }), [], 'a 7-hex name is');
   assert.deepEqual(lint('revert: drop the cache'), []); // a plain revert is not a re-land
 });
 
 test('lint bad (positive control): a malformed Reapply or Revert still fails, and a git subject still cannot carry attribution', () => {
-  for (const m of ['Reapply', 'Reapplied "feat: x"', 'reapply "feat: x"', 'Reapply"feat: x"', 'Revert']) assert.match(lint(m)[0], /does not start with|empty/, m);
+  for (const m of ['Reapply', 'Reapplied "feat: x"', 'reapply "feat: x"', 'Reapply"feat: x"', 'Revert']) assert.match(lint(m).join(), /does not start with|empty/, m);
   assert.match(lint('Reapply "feat: x"\n\nCo-Authored-By: A <a@b.c>').join(), /Co-Authored-By/);
 });
 
@@ -103,7 +104,11 @@ test('C23 bad: a history with a Co-Authored-By commit and a free-form subject', 
 test('C23 good: git\'s Reapply and Revert subjects in a history are accepted; a malformed one is still an error', async () => {
   assert.deepEqual(await findingsOf('C23', repo(['feat: one', 'Revert "feat: one"', 'Reapply "feat: one"\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567.'])), []);
   // C23 scans a window of landed history, which holds re-lands from before the rule: it does not judge them (the commit-msg hook and the range check judge new commits).
-  assert.deepEqual(await findingsOf('C23', repo(['feat: one', 'Reapply "feat: one"', 'revert: reapply feat: one'])), []);
+  const old = repo(['feat: one', 'feat: the rule lands', 'Reapply "feat: one"', 'revert: reapply feat: one']);
+  const ruleOfOld = execFileSync('git', ['rev-parse', 'HEAD~2'], { cwd: old, encoding: 'utf8' }).trim();
+  assert.deepEqual(await findingsOf('C23', repo(['feat: one', 'Reapply "feat: one"', 'revert: reapply feat: one']), { options: { relandRule: '1'.repeat(40), strictUnmeasured: false } }).then((f) => f.map((x) => x.severity)), ['warn'], 'the rule commit missing from the clone: said, not passed silently');
+  assert.deepEqual(await findingsOf('C23', repo(['feat: one', 'Reapply "feat: one"']), { options: { relandRule: '1'.repeat(40), strictUnmeasured: true } }).then((f) => f.map((x) => x.severity)), ['error'], 'in CI (a shallow clone would hide the rule) it fails');
+  assert.deepEqual(await findingsOf('C23', old, { options: { relandRule: ruleOfOld } }).then((f) => f.map((x) => x.severity)), ['error', 'error'], 'descending from the rule commit: judged');
   assert.match(messages(await findingsOf('C23', repo(['feat: one', 'Reapplied "feat: one"']))), /does not start with/);
 });
 
@@ -224,4 +229,70 @@ test('a commit that already exists is told to be reworded, not that nothing was 
 test('a wrong-shape subject gets a next step too: the form to use', () => {
   assert.match(lint('Added a thing').join('\n'), /Start the subject with "<type>: "/);
   assert.match(lint('Added a thing', { landed: true }).join('\n'), /Reword the commit before it lands/);
+});
+
+// One table for the re-land rule, read by the Rust side too (tools/paddock-dev/src/merge_check, docs/known-copies.toml: reland-rule).
+const CASES = JSON.parse(readFileSync(new URL('../reland-cases.json', import.meta.url), 'utf8'));
+
+test('re-land rule: the shared case table (subjects and "This reverts commit" lines)', () => {
+  assert.ok(CASES.subjects.length > 10 && CASES.trailers.length > 5, 'the table is not empty');
+  assert.ok(CASES.subjects.some((c) => c.reland) && CASES.subjects.some((c) => !c.reland), 'the table has both outcomes (positive control)');
+  for (const { subject, reland } of CASES.subjects) assert.equal(isRelandSubject(subject), reland, subject);
+  for (const { message, targets } of CASES.trailers) assert.deepEqual(revertsTargets(message), targets, message);
+});
+
+test('commit-lint --subject: a correct re-land subject passes, the missing body line is a note', () => {
+  const out = [];
+  const code = commitLintMain(['--subject', 'revert: reapply x'], process.cwd(), (m) => out.push(m));
+  assert.equal(code, 0);
+  assert.match(out.join('\n'), /^note: .*This reverts commit <sha>/);
+  const bad = [];
+  assert.equal(commitLintMain(['--subject', 'Reapplied x'], process.cwd(), (m) => bad.push(m)), 1, 'a malformed subject still fails (positive control)');
+});
+
+// A history with re-lands before and after the commit that introduces the rule: the range judges only the later ones.
+function relandHistory() {
+  const dir = repo(['feat: one', 'revert: reapply old one', 'feat: the rule lands']);
+  const rule = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+  const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.test', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, stdio: 'pipe' });
+  const add = (m, n) => {
+    writeFileSync(join(dir, 'a.txt'), n);
+    git('add', '.');
+    git('commit', '-q', '-m', m);
+  };
+  add('revert(ci): reapply new one', 'a');
+  add('Reapply "feat: fine"\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567.', 'b');
+  return { dir, rule };
+}
+
+test('commit-lint --range and C23 judge a re-land that descends from the rule commit, and only that', async () => {
+  const { dir, rule } = relandHistory();
+  const out = [];
+  assert.equal(commitLintMain(['--range', 'HEAD~4..HEAD'], dir, (m) => out.push(m), new Date(), { relandRule: rule }), 1);
+  assert.equal(out.filter((l) => /git revert <sha>/.test(l)).length, 1, out.join('\n'));
+  assert.match(out.join('\n'), /Reword the commit|re-land/);
+  assert.doesNotMatch(out.join('\n'), /old one/);
+  const f = await runChecks({ root: dir, app: 'demo', only: ['C23'], options: { relandRule: rule } });
+  assert.equal(f.errors, 1, JSON.stringify(f.findings));
+  // Without the later re-land, the history is clean: the one before the rule is not judged.
+  const clean = repo(['feat: one', 'revert: reapply old one', 'feat: the rule lands']);
+  const cleanRule = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: clean, encoding: 'utf8' }).trim();
+  assert.equal(commitLintMain(['--range', 'HEAD~2..HEAD'], clean, () => {}, new Date(), { relandRule: cleanRule }), 0);
+  // The rule's commit missing from the clone is "not measured", said aloud, and does not pass silently.
+  const lost = [];
+  assert.equal(commitLintMain(['--range', 'HEAD~4..HEAD'], dir, (m) => lost.push(m), new Date(), { relandRule: '1'.repeat(40), strictUnmeasured: false }), 0);
+  assert.match(lost.join('\n'), /not measured/);
+  const ci = [];
+  assert.equal(commitLintMain(['--range', 'HEAD~4..HEAD'], dir, (m) => ci.push(m), new Date(), { relandRule: '1'.repeat(40), strictUnmeasured: true }), 1, 'in CI it fails');
+  assert.match(ci.join('\n'), /not measured.*fetch-depth: 0/s);
+});
+
+test('CI: every job that runs commit-lint --range or C23 checks out full history (a shallow clone would make the re-land rule not measured)', () => {
+  const wf = readFileSync(new URL('../../.gitea/workflows/ci.yml', import.meta.url), 'utf8');
+  const job = (name) => wf.split(/^  (?=[a-z0-9-]+:\n)/m).find((j) => j.startsWith(`${name}:`)) ?? '';
+  for (const name of ['conformance', 'commits', 'train-gates']) {
+    const j = job(name);
+    assert.ok(j.length > 100, `${name} job found`);
+    assert.match(j, /actions\/checkout@v4[\s\S]*?fetch-depth: 0/, `${name} checks out with fetch-depth: 0`);
+  }
 });
