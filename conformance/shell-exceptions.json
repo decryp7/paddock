@@ -13,7 +13,6 @@
   {"path": "apps/dyno/app/src-tauri/linux/postinst", "id": "E7", "reason": "Debian maintainer script: dpkg runs it (Debian Policy section 6), a few lines", "owner": "shell-to-rust plan section 2"},
   {"path": "apps/dyno/app/src-tauri/linux/postrm", "id": "E7", "reason": "Debian maintainer script: dpkg runs it (Debian Policy section 6), a few lines", "owner": "shell-to-rust plan section 2"},
   {"path": "apps/dyno/app/src-tauri/linux/prerm", "id": "E7", "reason": "Debian maintainer script: dpkg runs it (Debian Policy section 6), a few lines", "owner": "shell-to-rust plan section 2"},
-  {"path": "tools/heavy/tests/fixtures/plock.sh", "id": "E6", "reason": "reference shell lock for mixed shell and Rust runs on one lock folder; deleted when no machine runs the shell plock", "owner": "shell-to-rust plan section 2"},
   {"path": "tools/paddock-dev/src/hook/fixtures/no-force-push.sh", "id": "E6", "reason": "oracle copy of the old hook for hook/oracle_tests.rs; deleted in WP-5 when the corpus holds its cases", "owner": "shell-to-rust plan section 2"},
   {"path": "tools/paddock-dev/src/hook/fixtures/no-pgrep-wait.sh", "id": "E6", "reason": "oracle copy of the old hook for hook/oracle_tests.rs; deleted in WP-5 when the corpus holds its cases", "owner": "shell-to-rust plan section 2"},
   {"path": "tools/paddock-dev/tests/golden/fixture/conformance/ci/build-folder.sh", "id": "E6", "reason": "planner golden input, not a tool", "owner": "shell-to-rust plan section 2"},

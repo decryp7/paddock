@@ -49,7 +49,7 @@ pub struct RunArgs {
     /// The most seconds one line may run before its process tree is ended.
     #[arg(long, default_value_t = DEFAULT_MAX_SECS)]
     pub max_secs: u64,
-    /// Put every line through the machine-wide heavy slot (ER-24): `PADDOCK_HEAVY`, else `heavy.sh` or `heavy` on PATH.
+    /// Put every line through the machine-wide heavy slot (ER-24): `PADDOCK_HEAVY`, else `heavy` on PATH.
     #[arg(long)]
     pub heavy: bool,
     /// The repository root (default: the folder with a `.git` above the current one).
@@ -197,7 +197,7 @@ pub fn run_with(args: &RunArgs, env: &HashMap<String, String>, stop: &Arc<Atomic
     if args.heavy && heavy.is_empty() {
         return fail(
             out,
-            "--heavy asked for the machine-wide slot, but neither PADDOCK_HEAVY nor `heavy.sh` or `heavy` is available".into(),
+            "--heavy asked for the machine-wide slot, but neither PADDOCK_HEAVY nor `heavy` is available".into(),
             "install tools/heavy (`cargo install --path tools/heavy --locked`), or run without --heavy",
         );
     }

@@ -26,23 +26,33 @@ low byte is 0 becomes 1.
 
 ## Compatible with the shell plock (rollout)
 
-The lock folder, record formats and names are the shell plock's, byte for byte where a shell reader looks: the lock is the
-directory `pitcrew-heavy-v2.lock` published atomically with its 6-line `owner` record (pid, start text, agent, epoch seconds,
-cwd, masked command; old 3-line records are read), tickets `pitcrew-heavy.ticket.<016 microseconds>-<pid>` (4 lines), high
-markers `pitcrew-heavy.high.<pid>-<name>` (3 lines), the old-style `pitcrew-heavy.lock` is honoured, and breaks/removals
-and waits/takes go to `pitcrew-lock-breaks.log` / `pitcrew-lock-activity.log`. Shell and Rust holders and waiters
-interoperate (tests/it/mixed.rs runs both on one folder). Slots above 1 use extra lock dirs
-the shell never looks at: leave it at 1 until the shell is retired. The owner record has an optional 7th line
-`child <pid> <os start microseconds>`, written once the command runs: the shell reads six lines and ignores it, and a Rust waiter
-does not break the lock of a SIGKILLed heavy whose command still runs (heavy.sh's "a slot is taken while either lives").
+The lock folder, record formats and names are the retired shell plock's layout, kept so an old record or marker is still read: the
+lock is the directory `pitcrew-heavy-v2.lock` published atomically with its 6-line `owner` record (pid, start text, agent, epoch
+seconds, cwd, masked command; old 3-line records are read), tickets `pitcrew-heavy.ticket.<016 microseconds>-<pid>` (4 lines), high
+markers `pitcrew-heavy.high.<pid>-<name>` (3 lines), the old-style `pitcrew-heavy.lock` is honoured, and breaks/removals and
+waits/takes go to `pitcrew-lock-breaks.log` / `pitcrew-lock-activity.log`. More slots use extra lock dirs
+`pitcrew-heavy-v2.lock.slotN`. The owner record has an optional 7th line `child <pid> <os start microseconds>`, written once the
+command runs: a waiter does not break the lock of a SIGKILLed heavy whose command still runs.
 
-### heavy.sh callers move at the same time
+## Slots follow the load
 
-heavy.sh keeps its slots in `HEAVY_LOCK_DIR/<n>` (pid and cpid files); heavy does **not** honour that layout. A heavy.sh
-caller and a heavy caller on the same machine do not exclude each other, so every caller of `scripts/heavy.sh` moves to heavy
-in the same change (the rollout below makes `heavy.sh` exec the binary). To keep an inherited heavy.sh environment from silently
-changing behaviour: `HEAVY_LOCK_DIR` is ignored with a warning, and `HEAVY_SLOTS` is ignored with a warning unless `HEAVY_DIR`
-is set too (or `--slots` is given).
+`HEAVY_SLOTS` (or `--slots N`) is the most steps that may run together: `auto` (the default) is about half the cores and at most
+5 (ER-24: about 5 builders on a 14-core Mac), a number is that maximum, 1 is one at a time. How many run at a moment is
+`gate::allowed_slots`, read by the head of the queue on every poll: the cores the **15-minute load** leaves free, 2 cores a step
+(`CARGO_BUILD_JOBS=2`), and none beyond the first while the **CPU idle share** is under 30 %. When the load or the idle share is
+unknown (Windows has no load average; the first CPU reading has nothing to compare with) it is 1. A **container run** (a command line
+with `docker`, `podman`, `nerdctl` or `linux-container.sh`) runs alone, and nothing starts beside a live one, because the VM behind it
+takes memory and cores that heavy cannot see. A waiter holds a ticket, never a slot (ER-43). Running steps are never stopped when the
+load rises; the rule only decides who starts next. The wait line says what it saw: `1 running, 1 of at most 5 at once (14 cores,
+15-minute load 15.0, CPU idle 80%)`. `HEAVY_CPUS` replaces the OS's core count (tests, and a machine whose cores the OS misreports).
+The 15-minute load lags: after a spike it keeps the count at 1 for up to a quarter of an hour (measured in docs/benchmarks.md).
+
+## heavy.sh
+
+The shell `heavy.sh` (engineering-rules) and the shell plock are retired: `scripts/heavy.sh` is a thin wrapper of this binary (same
+arguments; exit codes are the command's own, with 2 for a usage error, a refused build folder or a lock that could not be taken;
+127 with an `::error::` when `heavy` is not installed). Their lock folders were never shared with this layout; `HEAVY_LOCK_DIR` is
+ignored with a warning.
 
 ## Environment
 
@@ -56,7 +66,8 @@ is set too (or `--slots` is given).
 | ownerless lock/ticket broken after | `HEAVY_UNREADABLE_LIMIT`, `PLOCK_UNREADABLE_LIMIT` | 120 s |
 | load gate threshold / poll | `HEAVY_GATE_LOAD` (`--gate-load`), `HEAVY_GATE_POLL` | 30 / 20 s |
 | priority bound (`--high` yields to nobody; others stop yielding after this) | `HEAVY_PRIORITY_MAX` | 1800 s |
-| slots | `--slots`, or `HEAVY_SLOTS` together with `HEAVY_DIR` | 1 |
+| most steps at once | `--slots N`, `HEAVY_SLOTS` (`auto` or 1..64) | auto: half the cores, at most 5 |
+| cores counted against the load | `HEAVY_CPUS` | the OS's count |
 | wait for the command's stderr pipe after it exited (ms) | `HEAVY_DRAIN_MS` | 500 |
 | correlation id | `DEVKIT_RUN_ID` is reused as the run id and passed to the command | made per run |
 | log | `HEAVY_LOG_FILE` (`--log-file`), `HEAVY_VERBOSE=1` (`--verbose`) | `<folder>/heavy-logs/heavy.<day>.log` |
@@ -69,7 +80,7 @@ is set too (or `--slots` is given).
 |---|---|---|---|
 | FIFO queue, `--high` first | yes | no (polling) | yes |
 | load gate | 30, fixed | none | threshold and poll settable; skipped with a note on Windows (no load average there) |
-| N slots | no | `HEAVY_SLOTS` | `HEAVY_SLOTS` / `--slots` |
+| N slots | no | `HEAVY_SLOTS` | `HEAVY_SLOTS` / `--slots`, following the 15-minute load and CPU idle |
 | home guard (ER-14) | no | yes | yes (`CARGO_TARGET_DIR`, `CARGO_BUILD_TARGET_DIR`, `--target-dir`, `--config build.target-dir`, `build.target-dir` in `.cargo/config.toml` up the tree and in `$CARGO_HOME`) |
 | slot kept while the command runs although the owner died | yes (`cpid`) | yes | yes (line 7 of the owner record) |
 | ends the command's group on INT/TERM | no | yes | yes, by process identity (`paddock_proc::kill_tree`, rule 53); 130/143 |
@@ -105,19 +116,9 @@ the observed OS start time (`Evidence`), every break, put-back and stale removal
 
 ## Rollout
 
-1. **Install** from the registry once the tag workflow has published `paddock-heavy`:
-   `cargo install paddock-heavy --registry decryp7 --locked --root <dev-targets>/heavy` (the binary lands in
-   `.../heavy/bin/heavy`). Check with `heavy --version` and `heavy status`.
-2. **Switch the agents' `plock`** (`<dev-targets>/scratch/pitcrew-lock/plock`; [`<dev-targets>`](../../docs/dev-setup.md#where-things-live)) to a thin wrapper:
-   `exec <dev-targets>/heavy/bin/heavy "$@"` with `HEAVY_DIR=/private/tmp/claude-501` exported (the same folder, so
-   running shell and Rust holders interoperate). Keep the old script as `plock.sh.bak`. Slots stay at 1. Builds with a target
-   folder under `~` are now refused (exit 78).
-3. **engineering-rules:** make `scripts/heavy.sh` exec the binary when present
-   (`exec heavy run "${HEAVY_AGENT:-$USER}" -- "$@"`), keeping the old body as the fallback, and update the ER-24 text: heavy
-   steps go through `heavy`, the load gate is 30 by default, `HEAVY_SLOTS` needs `HEAVY_DIR`. Every heavy.sh caller moves in the
-   same change (see above).
-4. **Retire the shells** after a few days of mixed use with no entries in `heavy-logs/` or `pitcrew-lock-breaks.log` that need
-   explaining: delete `plock`, `plock.test.sh`, the `heavy.sh` fallback body, and then raise `HEAVY_SLOTS` if wanted.
+Done (2026-11-18): the shells are retired and Paddock's callers use `heavy`. Install from the registry once the tag workflow has
+published `paddock-heavy`: `cargo install paddock-heavy --registry decryp7 --locked --root <dev-targets>/heavy` (the binary lands in
+`.../heavy/bin/heavy`); check with `heavy --version` and `heavy status`. engineering-rules' `scripts/heavy.sh` is the wrapper above.
 
 CI leg needed (not added here: `.gitea/` and `scripts/affected.mjs` belong to the integrating agent): a `tools/heavy` job in
 `ci.yml` on Linux, macOS and Windows runners with `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
@@ -129,8 +130,7 @@ CI leg needed (not added here: `.gitea/` and `scripts/affected.mjs` belong to th
 
 `cargo nextest run` (every test is bounded: the fake clock never sleeps, real processes run under a 40 s deadline and are
 killed on drop). `tests/it/ported.rs` ports the shell plock.test.sh checks onto a fake clock and fake process table;
-`real.rs` runs the binary with real processes; `mixed.rs` (macOS) runs the reference shell script
-`tests/fixtures/plock.sh` and the binary on one folder; `props.rs` is proptest. Gates: `cargo fmt --check`,
+`real.rs` runs the binary with real processes; `slots.rs` is the load-aware slot rule; `props.rs` is proptest. Gates: `cargo fmt --check`,
 `cargo clippy --all-targets -- -D warnings`, `cargo deny check`, and `cargo xwin check --target x86_64-pc-windows-msvc`.
 
 ## Priority lane (ADR 0102)

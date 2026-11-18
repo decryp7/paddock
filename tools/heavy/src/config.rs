@@ -29,8 +29,11 @@ pub struct Config {
     /// The same bound for the marker of a CI job on this host (`heavy mark ci-...`, ADR 0102): a job runs for up to its
     /// `timeout-minutes` (the longest host job's is 120), so the bound is 7200 s, not the push gate's 1800 s.
     pub ci_priority_max: Duration,
-    /// Number of slots (1 = the plock-compatible single lock).
+    /// The most heavy steps that may run together (the "Auto" default is `gate::auto_max_slots`, at most 5). How many do run
+    /// together at a given moment is `gate::allowed_slots`: this is only its upper bound; 1 means one at a time, always.
     pub slots: u32,
+    /// The number of CPU cores the slot rule counts against the load (`HEAVY_CPUS`, else what the OS says).
+    pub cpus: u32,
     /// The troubleshooting log file (None: the default under `root`).
     pub log_file: Option<PathBuf>,
     /// Echo every log event to stderr.
@@ -90,23 +93,28 @@ impl Config {
         let unreadable = secs(get, &["HEAVY_UNREADABLE_LIMIT", "PLOCK_UNREADABLE_LIMIT"], 120.0, 0.0, &mut w);
         let gate_load = secs(get, &["HEAVY_GATE_LOAD", "PLOCK_GATE_LOAD"], 30.0, 0.0, &mut w);
         let gate_poll = secs(get, &["HEAVY_GATE_POLL", "PLOCK_GATE_POLL"], 20.0, 0.01, &mut w);
-        // heavy.sh's HEAVY_SLOTS is often exported globally; the shell plock knows only one lock, so slots count only when
-        // the folder is chosen explicitly with HEAVY_DIR (or --slots is given). Otherwise the variable is ignored, with a warning.
         let priority_max = secs(get, &["HEAVY_PRIORITY_MAX"], 1800.0, 1.0, &mut w);
         let ci_priority_max = secs(get, &["HEAVY_CI_MAX"], 7200.0, 1.0, &mut w);
-        let slots_var = first(get, &["HEAVY_SLOTS"]);
-        if slots_var.is_some() && first(get, &["HEAVY_DIR"]).is_none() {
-            w.push(
-                "HEAVY_SLOTS is ignored without HEAVY_DIR (the shell plock shares one lock; use --slots or set HEAVY_DIR to opt in)".into(),
-            );
-        }
-        let slots = match slots_var.filter(|_| first(get, &["HEAVY_DIR"]).is_some()) {
-            None => 1,
+        let cpus = match first(get, &["HEAVY_CPUS"]) {
+            None => std::thread::available_parallelism().map_or(1, |n| u32::try_from(n.get()).unwrap_or(u32::MAX)),
+            Some(v) => match v.trim().parse::<u32>() {
+                Ok(n) if n >= 1 => n,
+                _ => {
+                    w.push(format!("HEAVY_CPUS={v:?} is not a number >= 1; using the OS's count"));
+                    std::thread::available_parallelism().map_or(1, |n| u32::try_from(n.get()).unwrap_or(u32::MAX))
+                }
+            },
+        };
+        // HEAVY_SLOTS is the most steps that may run together: `auto` (the default) or 1..64. How many run at a moment follows the
+        // load (gate::allowed_slots); the shell plock that kept one lock is retired, so no other variable has to opt in.
+        let slots = match first(get, &["HEAVY_SLOTS"]) {
+            None => crate::gate::auto_max_slots(cpus),
+            Some(v) if v.trim().eq_ignore_ascii_case("auto") => crate::gate::auto_max_slots(cpus),
             Some(v) => match v.trim().parse::<u32>() {
                 Ok(n) if (1..=64).contains(&n) => n,
                 _ => {
-                    w.push(format!("HEAVY_SLOTS={v:?} is not 1..64; using 1"));
-                    1
+                    w.push(format!("HEAVY_SLOTS={v:?} is not `auto` or 1..64; using auto"));
+                    crate::gate::auto_max_slots(cpus)
                 }
             },
         };
@@ -121,6 +129,7 @@ impl Config {
             priority_max: Duration::from_secs_f64(priority_max),
             ci_priority_max: Duration::from_secs_f64(ci_priority_max),
             slots,
+            cpus,
             log_file: first(get, &["HEAVY_LOG_FILE"]).map(PathBuf::from),
             verbose: flag("HEAVY_VERBOSE"),
             stderr_tail: get("HEAVY_STDERR_TAIL").is_none_or(|v| v != "0"),
@@ -167,23 +176,22 @@ mod tests {
     }
 
     #[test]
-    fn heavy_sh_variables_do_not_silently_diverge() {
-        let (c, w) = cfg(&[("PLOCK_DIR", "/a"), ("HEAVY_LOCK_DIR", "/slots"), ("HEAVY_SLOTS", "5")]);
-        assert_eq!((c.root, c.slots), (PathBuf::from("/a"), 1));
-        assert!(
-            w.iter().any(|m| m.contains("HEAVY_LOCK_DIR")) && w.iter().any(|m| m.contains("HEAVY_SLOTS is ignored")),
-            "{w:?}"
-        );
-        let (c, w) = cfg(&[("HEAVY_DIR", "/a"), ("HEAVY_SLOTS", "5")]);
-        assert_eq!(c.slots, 5);
-        assert!(w.is_empty(), "{w:?}");
+    fn heavy_sh_slot_folder_is_ignored_with_a_warning() {
+        let (c, w) = cfg(&[("PLOCK_DIR", "/a"), ("HEAVY_LOCK_DIR", "/slots")]);
+        assert_eq!(c.root, PathBuf::from("/a"));
+        assert!(w.iter().any(|m| m.contains("HEAVY_LOCK_DIR")), "{w:?}");
     }
 
     #[test]
     fn bad_values_fall_back_with_a_warning() {
-        let (c, w) = cfg(&[("HEAVY_POLL", "abc"), ("HEAVY_SLOTS", "0"), ("HEAVY_GATE_LOAD", "-1")]);
-        assert_eq!((c.poll, c.slots, c.gate_load), (Duration::from_secs(5), 1, 30.0));
-        assert_eq!(w.len(), 3);
+        let (c, w) = cfg(&[
+            ("HEAVY_POLL", "abc"),
+            ("HEAVY_SLOTS", "0"),
+            ("HEAVY_GATE_LOAD", "-1"),
+            ("HEAVY_CPUS", "4"),
+        ]);
+        assert_eq!((c.poll, c.slots, c.gate_load), (Duration::from_secs(5), 2, 30.0));
+        assert_eq!(w.len(), 3, "{w:?}");
     }
 
     #[test]
@@ -200,9 +208,9 @@ mod tests {
 
     #[test]
     fn defaults() {
-        let (c, _) = Config::from_env(&|_| None, true);
+        let (c, _) = Config::from_env(&|k| (k == "HEAVY_CPUS").then(|| "14".to_string()), true);
         assert_eq!(c.root, PathBuf::from(LEGACY_ROOT));
-        assert_eq!((c.gate_load, c.slots, c.wait_log), (30.0, 1, Duration::from_secs(60)));
+        assert_eq!((c.gate_load, c.slots, c.wait_log), (30.0, 5, Duration::from_secs(60)));
         assert!(c.log_path("2026-10-31").ends_with("heavy-logs/heavy.2026-10-31.log"));
     }
 }

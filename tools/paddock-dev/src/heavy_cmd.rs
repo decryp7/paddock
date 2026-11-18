@@ -1,5 +1,5 @@
 //! `dev heavy -- <command...>`: run a command through the machine-wide heavy slot (ER-24), found by the one resolver the push gate and
-//! `./dev gen check` use ([`crate::pre_push::exec::heavy_command_for`]: `PADDOCK_HEAVY`, `heavy.sh` or `heavy` on PATH, else the
+//! `./dev gen check` use ([`crate::pre_push::exec::heavy_command_for`]: `PADDOCK_HEAVY` or `heavy` on PATH, else the
 //! `heavy` built from tools/heavy). When none can be found it is an error with the next step: never an unthrottled run.
 
 use crate::pre_push::exec::{BUDGET, heavy_command_for, on_path};
@@ -28,7 +28,7 @@ pub fn plan(
     built: &OnceLock<Result<Held, String>>,
 ) -> Result<Vec<String>, String> {
     let prefix = heavy_command_for(root, env, has, built, BUDGET).map_err(|why| {
-        format!("dev heavy: no machine-wide heavy slot, so `{}` was not started: {why}. Next: put `heavy` or `heavy.sh` on PATH, set PADDOCK_HEAVY, or fix the build of tools/heavy", command[0])
+        format!("dev heavy: no machine-wide heavy slot, so `{}` was not started: {why}. Next: put `heavy` on PATH, set PADDOCK_HEAVY, or fix the build of tools/heavy", command[0])
     })?;
     Ok(prefix.into_iter().chain(command.iter().cloned()).collect())
 }
@@ -101,8 +101,8 @@ mod tests {
             plan(&cmd(), &env, &|_| false, Path::new("/nonexistent"), &built).unwrap(),
             ["/x/heavy.sh", "cargo", "clippy"]
         );
-        let line = plan(&cmd(), &HashMap::new(), &|p| p == "heavy.sh", Path::new("/nonexistent"), &built).unwrap();
-        assert_eq!(line, ["heavy.sh", "cargo", "clippy"]);
+        let line = plan(&cmd(), &HashMap::new(), &|p| p == "heavy", Path::new("/nonexistent"), &built).unwrap();
+        assert_eq!(line, ["heavy", "run", "pre-push", "--", "cargo", "clippy"]);
     }
 
     #[test]

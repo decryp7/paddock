@@ -133,3 +133,22 @@ The member gate also runs the source audits of the tool's own modules. The `memb
 (`test(/::no_source_file_/)`, outside the `binary(it)` group), so a guard from one branch (the self_exe audit) meeting code from
 another (a new `current_exe()` use) is caught at merge time on the combined tree, as train 15 needed. The two audits take 0.17 s
 ([benchmarks](../benchmarks.md#source-audits-in-the-member-gate-2026-11-18-fixpush-gate-queue-time)).
+
+## Amendment 2026-11-18 (second): the shell heavy is retired, and the slots follow the load
+
+The user approved retiring the shell `heavy.sh` and plock (2026-11-18). Their only callers outside Paddock's own tools were
+engineering-rules' `scripts/heavy.sh` (its test and its `templates/lefthook.yml` line) and two stale worktrees of that repository;
+no other project under the development folder calls them. Paddock's resolver (`heavy_prefix`) no longer looks for `heavy.sh`; the
+reference shell fixture and `tests/it/mixed.rs` are gone with the conformance exception E6 (a list that shrinks, ER-46). engineering-rules'
+`heavy.sh` becomes a wrapper of the Rust `heavy` (prepared as a patch, landed by the coordinator).
+
+With one implementation left, the single slot (kept only so the shell could be a lock holder too) goes. `HEAVY_SLOTS` is the most
+steps that may run together (`auto` by default: about half the cores, at most 5, ER-24); how many run now is read by the head of
+the queue on each poll from the 15-minute load (2 cores a step), the CPU idle share (none beyond the first under 30 %) and the
+container rule (a container run is alone, and nothing starts beside one: heavy tells by the command line, `docker`, `podman`,
+`nerdctl` or `linux-container.sh`). Unknown load or idle is 1. A waiter holds a ticket, never a slot (ER-43). Common practice: a
+build farm's executor count is a configured maximum with a load average brake (GNU make `-l`, ninja `-l`, distcc's load limits);
+`make -l` is the same rule with the 1-minute load, which reacts faster but flaps; the 15-minute load was asked for, so after a
+spike the count stays at 1 for up to a quarter of an hour (measured: [benchmarks](../benchmarks.md#load-aware-heavy-slots-2026-11-18-featheavy-load-aware-slots)).
+The push gate still starts one heavy step of its own push at a time (its credit accounting), so a single push does not use the
+extra slots; other agents' steps and CI do. Letting a push start several is the next step and needs its own measurement.

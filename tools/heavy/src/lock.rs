@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! <root>/pitcrew-heavy-v2.lock/owner        the lock: a directory that appears atomically WITH its owner record
-//! <root>/pitcrew-heavy-v2.lock.slotN        slots 2.. (only when HEAVY_SLOTS > 1; shell plock ignores them)
+//! <root>/pitcrew-heavy-v2.lock.slotN        slots 2.. (taken only while the load allows more than one step at a time)
 //! <root>/pitcrew-heavy.lock                 the old-style lock (honoured while it exists)
 //! <root>/pitcrew-heavy.ticket.<us>-<pid>    FIFO queue tickets
 //! <root>/pitcrew-heavy.high.<pid>-<name>    --high markers
@@ -14,7 +14,7 @@
 
 use crate::clock::Clock;
 use crate::config::Config;
-use crate::gate::{LoadSource, load_text};
+use crate::gate::{LoadSource, Pressure, allowed_slots, is_container_command, load_text};
 use crate::log::{Level, Logger};
 use crate::probe::file_id;
 use crate::procs::{Presence, Procs, evidence, pid_alive};
@@ -563,6 +563,40 @@ impl Heavy {
         }
     }
 
+    /// The live holders' slot folders: those that exist (a stale one is broken by the poll loop, not here).
+    fn held_dirs(&self) -> Vec<PathBuf> {
+        (0..self.cfg.slots).map(|i| self.slot_dir(i)).filter(|d| d.is_dir()).collect()
+    }
+
+    /// Whether a live holder is running a container (`gate::is_container_command` on its owner record).
+    fn container_running(&self, dirs: &[PathBuf]) -> bool {
+        dirs.iter().any(|d| match self.read_owner(d) {
+            OwnerRead::Ok(o) => is_container_command(&o.cmd),
+            _ => false,
+        })
+    }
+
+    /// How many steps may run together now for `req`, and what the rule saw (for the wait line and the log). A step that is a
+    /// container run counts as holding the machine alone; so does any live container holder.
+    pub fn allowed(&self, req: &Request, dirs: &[PathBuf]) -> (u32, String) {
+        let l = self.load.load();
+        let p = Pressure {
+            load15: l.map(|l| l[2]),
+            idle: self.load.idle_percent(),
+        };
+        let container = is_container_command(&req.cmdline) || self.container_running(dirs);
+        let n = allowed_slots(self.cfg.slots, self.cfg.cpus, &p, container);
+        let seen = format!(
+            "{n} of at most {} at once ({} cores, 15-minute load {}, CPU idle {}{})",
+            self.cfg.slots,
+            self.cfg.cpus,
+            p.load15.map_or("unknown".into(), |x| format!("{x:.1}")),
+            p.idle.map_or("unknown".into(), |x| format!("{x:.0}%")),
+            if container { ", a container run alone" } else { "" }
+        );
+        (n, seen)
+    }
+
     /// The load gate for one check: Ok(None) open, Ok(Some(text)) closed.
     pub fn gate_closed(&self) -> Option<String> {
         let l = self.load.load()?;
@@ -846,13 +880,28 @@ impl<'a> Acquirer<'a> {
                 }
             }
             let mut busy: Option<PathBuf> = None;
+            // A stale holder is broken first, so the count below is of live ones.
+            let dirs = h.held_dirs();
+            for d in &dirs {
+                if h.break_if_stale(d, &name) {
+                    continue 'again;
+                }
+            }
+            let (allowed, seen) = if h.cfg.slots > 1 {
+                h.allowed(&self.req, &dirs)
+            } else {
+                (1, String::new())
+            };
+            // A waiter holds a ticket, never a slot (ER-43): the slot of a step that waits for the load stays free for whoever
+            // the rule lets in.
+            let limited = dirs.len() >= allowed as usize;
             for i in 0..h.cfg.slots {
                 let dir = h.slot_dir(i);
                 if dir.exists() {
-                    if h.break_if_stale(&dir, &name) {
-                        continue 'again;
-                    }
                     busy.get_or_insert(dir);
+                    continue;
+                }
+                if limited {
                     continue;
                 }
                 let t = h.clock.now_micros();
@@ -915,8 +964,12 @@ impl<'a> Acquirer<'a> {
                 }
             }
             if let Some(dir) = busy {
-                let (msg, props) = h.holder_note(&dir);
-                let reason = format!("{}:{}", msg.split(" for ").next().unwrap_or(""), file_name(&dir));
+                let (mut msg, props) = h.holder_note(&dir);
+                let mut reason = format!("{}:{}", msg.split(" for ").next().unwrap_or(""), file_name(&dir));
+                if h.cfg.slots > 1 && dirs.len() > 1 || (limited && h.cfg.slots > 1) {
+                    msg = format!("{msg}; {} running, {seen}", dirs.len());
+                    reason = format!("{reason}:limit{allowed}");
+                }
                 self.wait_for(&reason, &msg, &props);
             }
             return Poll::Waiting;
