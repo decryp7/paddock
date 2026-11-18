@@ -23,7 +23,7 @@ pub struct AutoMerge {
 pub struct Git<'a> {
     root: &'a Path,
     max_output: usize,
-    /// Texts already read, by revision and path: the detectors read the same file at the same revision more than once.
+    /// Texts already read, by full object id and path: the detectors read the same file at the same revision more than once.
     texts: RefCell<HashMap<(String, String), Option<String>>>,
     /// Answers of the reads [`cacheable`] allows, by arguments: they depend only on immutable objects.
     memo: RefCell<HashMap<MemoKey, Vec<u8>>>,
@@ -31,12 +31,12 @@ pub struct Git<'a> {
     starts: Cell<usize>,
     /// Blobs and trees through one shared reader (ADR 0108 G2: in process with gix, else one `cat-file` process), made on first use.
     objects: RefCell<Option<paddock_git::Reader>>,
-    /// Tree listings already walked, by revision.
+    /// Tree listings already walked, by full object id.
     walks: RefCell<HashMap<String, Listing>>,
 }
 
 /// A tree's files by path, each with its mode and object id (shared between the reads of one check).
-type Listing = std::rc::Rc<HashMap<String, (String, String)>>;
+type Listing = std::rc::Rc<HashMap<String, (paddock_git::Mode, String)>>;
 
 /// A remembered read: its arguments, and whether exit status 1 was an answer.
 type MemoKey = (Vec<String>, bool);
@@ -44,9 +44,29 @@ type MemoKey = (Vec<String>, bool);
 /// The read commands whose answer depends only on the objects their full ids name, when every revision they name is one.
 const IMMUTABLE_READS: &[&str] = &["ls-tree", "diff", "merge-base", "merge-tree", "log", "cat-file"];
 
+/// The options that make a read select refs (where branches, tags or the reflog point now), whatever ids it also names.
+const REF_SELECTING: &[&str] = &[
+    "--all",
+    "--branches",
+    "--tags",
+    "--remotes",
+    "--glob",
+    "--exclude",
+    "--reflog",
+    "--stdin",
+    "--alternate-refs",
+    "--bisect",
+];
+
+/// A full object id (lower-case hex, SHA-1 or SHA-256 length): it names one immutable object.
+fn is_full_id(s: &str) -> bool {
+    matches!(s.len(), 40 | 64) && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+}
+
 /// Whether `git <args>` may be answered from memory within one check: a command of [`IMMUTABLE_READS`] whose revisions are all
-/// full object ids (`<id>`, `^<id>`, `<id>..<id>`, `<id>^{commit}`, `<id>:<path>`), or `rev-parse --is-shallow-repository`. A ref,
-/// `HEAD` or a short id can move or become ambiguous, so a read that names one runs git again.
+/// full object ids (`<id>`, `^<id>`, `<id>..<id>`, `<id>^{commit}`, `<id>:<path>`) and that selects no refs ([`REF_SELECTING`]),
+/// or `rev-parse --is-shallow-repository` (a property of the clone, not of a ref). A ref, `HEAD` or a short id can move or become
+/// ambiguous, so a read that names one runs git again.
 pub(crate) fn cacheable(args: &[&str]) -> bool {
     if args == ["rev-parse", "--is-shallow-repository"] {
         return true;
@@ -57,7 +77,7 @@ pub(crate) fn cacheable(args: &[&str]) -> bool {
     if !IMMUTABLE_READS.contains(cmd) {
         return false;
     }
-    let is_id = |s: &str| matches!(s.len(), 40 | 64) && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase());
+    let is_id = is_full_id;
     let is_rev = |r: &str| {
         let r = r.strip_prefix('^').unwrap_or(r);
         let r = r.split_once(':').map_or(r, |(rev, _path)| rev);
@@ -66,6 +86,10 @@ pub(crate) fn cacheable(args: &[&str]) -> bool {
     };
     let mut saw_rev = false;
     for a in rest.iter().take_while(|a| **a != "--") {
+        let option = a.split_once('=').map_or(*a, |(name, _)| name);
+        if REF_SELECTING.contains(&option) {
+            return false;
+        }
         if a.starts_with('-') || a.bytes().all(|b| b.is_ascii_digit()) || (*cmd == "cat-file" && matches!(*a, "blob" | "tree" | "commit")) {
             continue;
         }
@@ -197,9 +221,21 @@ impl<'a> Git<'a> {
         self.bytes(args).map(|b| String::from_utf8_lossy(&b).into_owned())
     }
 
-    /// The NUL-separated paths `args` print.
+    /// The NUL-separated paths `args` print. A path that is not UTF-8 is an error: decoded lossily, two such paths would become one.
     pub fn paths(&self, args: &[&str]) -> Result<Vec<String>, String> {
-        Ok(self.text(args)?.split('\0').filter(|p| !p.is_empty()).map(str::to_string).collect())
+        self.bytes(args)?
+            .split(|b| *b == 0)
+            .filter(|p| !p.is_empty())
+            .map(|p| {
+                String::from_utf8(p.to_vec()).map_err(|_| {
+                    format!(
+                        "git {} printed the path {:?}, which is not UTF-8",
+                        args.join(" "),
+                        String::from_utf8_lossy(p)
+                    )
+                })
+            })
+            .collect()
     }
 
     /// The paths that differ between two tree-ish revisions (no rename detection: both names of a rename are listed).
@@ -219,8 +255,8 @@ impl<'a> Git<'a> {
         self.paths(&["diff", "--name-only", "-z", "--no-renames", from, to])
     }
 
-    /// Every file of the tree `rev` names, by path, with its mode and object id (read once per revision); `None` when the reader
-    /// cannot list it.
+    /// Every file of the tree `rev` names, by path, with its canonical mode and object id; `None` when the reader cannot list it
+    /// (a name that is not UTF-8 among them). Remembered for a full object id only: a ref can move between two reads.
     fn entries(&self, rev: &str) -> Option<Listing> {
         if let Some(hit) = self.walks.borrow().get(rev) {
             return Some(hit.clone());
@@ -228,7 +264,9 @@ impl<'a> Git<'a> {
         let spec = format!("{rev}^{{tree}}");
         let entries = self.with_objects(|r| r.walk(&spec)).ok()??;
         let map: Listing = std::rc::Rc::new(entries.into_iter().map(|e| (e.path, (e.mode, e.oid))).collect());
-        self.walks.borrow_mut().insert(rev.to_string(), map.clone());
+        if is_full_id(rev) {
+            self.walks.borrow_mut().insert(rev.to_string(), map.clone());
+        }
         Some(map)
     }
 
@@ -284,7 +322,8 @@ impl<'a> Git<'a> {
             .map_err(|e| format!("git cat-file blob {rev}:{path}: {e}"))
     }
 
-    /// The file as UTF-8 text (read once per revision and path); a file that is not UTF-8 is an error (it cannot be measured).
+    /// The file as UTF-8 text (read once per path for a full object id; a ref can move, so a ref name reads again); a file that is
+    /// not UTF-8 is an error (it cannot be measured).
     pub fn text_at(&self, rev: &str, path: &str) -> Result<Option<String>, String> {
         let key = (rev.to_string(), path.to_string());
         if let Some(hit) = self.texts.borrow().get(&key) {
@@ -294,7 +333,9 @@ impl<'a> Git<'a> {
             None => None,
             Some(b) => Some(String::from_utf8(b).map_err(|_| format!("{path} at {} is not UTF-8", short(rev)))?),
         };
-        self.texts.borrow_mut().insert(key, text.clone());
+        if is_full_id(rev) {
+            self.texts.borrow_mut().insert(key, text.clone());
+        }
         Ok(text)
     }
 }
@@ -381,6 +422,245 @@ mod tests {
         assert!(!cacheable(&["diff", "--name-only", "main", &sha]));
         assert!(!cacheable(&["rev-parse", "--verify", "HEAD"]));
         assert!(!cacheable(&["show", "-s", &sha]), "a command off the list");
+    }
+
+    /// A read that selects refs (`--all`, `--branches`, `--glob=...`) answers from where the refs point now, so it is never
+    /// remembered, even when it also names a full id.
+    #[test]
+    fn a_read_that_selects_refs_is_never_remembered() {
+        let sha = "a".repeat(40);
+        for opt in [
+            "--all",
+            "--branches",
+            "--tags",
+            "--remotes",
+            "--glob=refs/heads/*",
+            "--exclude=x",
+            "--reflog",
+            "--stdin",
+        ] {
+            assert!(!cacheable(&["log", "--format=%H", opt, &sha]), "{opt}");
+        }
+        assert!(
+            cacheable(&["log", "--format=%H", "--first-parent", &sha]),
+            "an option that selects no refs keeps it cacheable"
+        );
+    }
+
+    /// A ref can move between two reads of one check: a file or a listing read by a ref name is read again; one read by a full
+    /// id is remembered.
+    #[test]
+    fn a_file_or_listing_read_by_a_ref_name_is_read_again_after_the_ref_moves() {
+        let t = Trees::new();
+        let sha = t.commit(&t.tree(&[("100644", "a.txt", &t.blob("1\n"))]), "");
+        t.git(&["update-ref", "refs/heads/main", &sha]);
+        let g = Git::new(t.dir.path());
+        assert_eq!(g.text_at("main", "a.txt").unwrap().as_deref(), Some("1\n"));
+        assert!(g.changed_paths(&sha, "main").unwrap().is_empty());
+        let second = t.commit(&t.tree(&[("100644", "a.txt", &t.blob("2\n"))]), &sha);
+        t.git(&["update-ref", "refs/heads/main", &second]);
+        assert_eq!(g.text_at("main", "a.txt").unwrap().as_deref(), Some("2\n"), "main moved");
+        assert_eq!(g.changed_paths(&sha, "main").unwrap(), ["a.txt"], "main moved");
+        assert_eq!(g.text_at(&sha, "a.txt").unwrap().as_deref(), Some("1\n"));
+    }
+
+    /// A repository whose trees are made with the index plumbing, never the file system: a symlink, a submodule and two names
+    /// that differ only in case are the same on every OS.
+    struct Trees {
+        dir: tempfile::TempDir,
+    }
+
+    impl Trees {
+        fn new() -> Trees {
+            let t = Trees {
+                dir: tempfile::tempdir().unwrap(),
+            };
+            t.git(&["init", "-q", "-b", "main"]);
+            t.git(&["config", "core.symlinks", "false"]);
+            t
+        }
+
+        fn run(&self, dir: &Path, args: &[&str], input: &[u8]) -> Vec<u8> {
+            use std::io::Write;
+            let mut c = crate::git_env::git();
+            c.arg("-C").arg(dir).args(args);
+            c.stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+            let mut child = c.spawn().unwrap();
+            let mut stdin = child.stdin.take().unwrap();
+            stdin.write_all(input).unwrap();
+            drop(stdin);
+            let out = child.wait_with_output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            out.stdout
+        }
+
+        fn git(&self, args: &[&str]) -> String {
+            String::from_utf8(self.run(self.dir.path(), args, b"")).unwrap().trim().to_string()
+        }
+
+        fn blob(&self, text: &str) -> String {
+            String::from_utf8(self.run(self.dir.path(), &["hash-object", "-w", "--stdin"], text.as_bytes()))
+                .unwrap()
+                .trim()
+                .to_string()
+        }
+
+        /// A tree of `(mode, path, object id)` entries, folders made from the paths.
+        fn tree(&self, entries: &[(&str, &str, &str)]) -> String {
+            self.git(&["read-tree", "--empty"]);
+            for (mode, path, oid) in entries {
+                self.git(&["update-index", "--add", "--cacheinfo", &format!("{mode},{oid},{path}")]);
+            }
+            self.git(&["write-tree"])
+        }
+
+        /// A tree written byte for byte (`hash-object --literally`), for what the index would correct: a mode spelled `100664`,
+        /// a name that is not UTF-8.
+        fn raw_tree(&self, entries: &[(&[u8], &[u8], &str)]) -> String {
+            let mut data = Vec::new();
+            for (mode, name, oid) in entries {
+                data.extend_from_slice(mode);
+                data.push(b' ');
+                data.extend_from_slice(name);
+                data.push(0);
+                data.extend((0..oid.len()).step_by(2).map(|i| u8::from_str_radix(&oid[i..i + 2], 16).unwrap()));
+            }
+            String::from_utf8(self.run(
+                self.dir.path(),
+                &["hash-object", "-t", "tree", "-w", "--literally", "--stdin"],
+                &data,
+            ))
+            .unwrap()
+            .trim()
+            .to_string()
+        }
+
+        fn commit(&self, tree: &str, parent: &str) -> String {
+            let mut args = vec!["-c", "user.name=t", "-c", "user.email=t@t.invalid", "commit-tree", tree, "-m", "c"];
+            if !parent.is_empty() {
+                args.extend(["-p", parent]);
+            }
+            self.git(&args)
+        }
+
+        /// `git diff --name-only --no-renames -z a b` in `dir`.
+        fn git_diff(&self, dir: &Path, a: &str, b: &str) -> Vec<String> {
+            let out = self.run(dir, &["diff", "--name-only", "--no-renames", "-z", a, b], b"");
+            String::from_utf8(out)
+                .unwrap()
+                .split('\0')
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .collect()
+        }
+    }
+
+    /// `changed_paths(a, b)` lists what `git diff --name-only --no-renames -z a b` lists, in its order, read in process (no git
+    /// start: the case tests the in-process diff, not the fallback).
+    fn same_as_git_diff(t: &Trees, a: &str, b: &str) {
+        let g = Git::new(t.dir.path());
+        let ours = g.changed_paths(a, b).unwrap();
+        assert_eq!(g.starts(), 0, "read in process");
+        let theirs = t.git_diff(t.dir.path(), a, b);
+        assert_eq!(ours, theirs, "changed_paths against git diff");
+        assert!(!theirs.is_empty() || a == b || ours.is_empty());
+    }
+
+    #[test]
+    fn changed_paths_is_git_diff_for_a_mode_change() {
+        let t = Trees::new();
+        let b = t.blob("x\n");
+        same_as_git_diff(
+            &t,
+            &t.tree(&[("100644", "f", &b), ("100644", "g", &b)]),
+            &t.tree(&[("100755", "f", &b), ("100644", "g", &b)]),
+        );
+    }
+
+    #[test]
+    fn changed_paths_is_git_diff_for_a_mode_spelled_another_way() {
+        let t = Trees::new();
+        let b = t.blob("x\n");
+        let a = t.raw_tree(&[(b"100644", b"f", &b)]);
+        let odd = t.raw_tree(&[(b"100664", b"f", &b)]);
+        assert_ne!(a, odd, "two different trees");
+        same_as_git_diff(&t, &a, &odd);
+    }
+
+    #[test]
+    fn changed_paths_is_git_diff_for_a_symlink() {
+        let t = Trees::new();
+        let (x, y) = (t.blob("x"), t.blob("y"));
+        let link = t.tree(&[("120000", "l", &x)]);
+        same_as_git_diff(&t, &link, &t.tree(&[("120000", "l", &y)]));
+        same_as_git_diff(&t, &link, &t.tree(&[("100644", "l", &x)]));
+    }
+
+    #[test]
+    fn changed_paths_is_git_diff_for_a_submodule() {
+        let t = Trees::new();
+        let (c1, c2) = ("1".repeat(40), "2".repeat(40));
+        let file = t.blob("x\n");
+        let none = t.tree(&[("100644", "f", &file)]);
+        let one = t.tree(&[("100644", "f", &file), ("160000", "sub", &c1)]);
+        same_as_git_diff(&t, &none, &one);
+        same_as_git_diff(&t, &one, &t.tree(&[("100644", "f", &file), ("160000", "sub", &c2)]));
+    }
+
+    #[test]
+    fn changed_paths_is_git_diff_for_a_file_that_becomes_a_folder_and_back() {
+        let t = Trees::new();
+        let b = t.blob("x\n");
+        let around = [
+            ("100644", "a-b", b.as_str()),
+            ("100644", "a.txt", b.as_str()),
+            ("100644", "a0", b.as_str()),
+        ];
+        let mut file = around.to_vec();
+        file.push(("100644", "a", &b));
+        let mut folder = around.to_vec();
+        folder.push(("100644", "a/x", &b));
+        let (file, folder) = (t.tree(&file), t.tree(&folder));
+        same_as_git_diff(&t, &file, &folder);
+        same_as_git_diff(&t, &folder, &file);
+    }
+
+    #[test]
+    fn changed_paths_is_git_diff_for_a_case_only_rename() {
+        let t = Trees::new();
+        let b = t.blob("x\n");
+        same_as_git_diff(&t, &t.tree(&[("100644", "Readme.md", &b)]), &t.tree(&[("100644", "README.md", &b)]));
+    }
+
+    #[test]
+    fn changed_paths_is_git_diff_in_a_linked_worktree() {
+        let t = Trees::new();
+        let first = t.commit(&t.tree(&[("100644", "a", &t.blob("1\n"))]), "");
+        let second = t.commit(
+            &t.tree(&[("100644", "a", &t.blob("2\n")), ("100644", "d/b", &t.blob("b\n"))]),
+            &first,
+        );
+        let linked = tempfile::tempdir().unwrap();
+        let wt = linked.path().join("wt");
+        t.git(&["worktree", "add", "-q", "--detach", &wt.to_string_lossy(), &first]);
+        let g = Git::new(&wt);
+        let ours = g.changed_paths(&first, &second).unwrap();
+        assert_eq!(g.starts(), 0, "read in process in a linked worktree too");
+        assert_eq!(ours, t.git_diff(&wt, &first, &second));
+        assert_eq!(ours, ["a", "d/b"]);
+    }
+
+    /// Two names that are not UTF-8 would both decode to U+FFFD: the in-process diff and git's both refuse them, never merge them.
+    #[test]
+    fn changed_paths_refuses_names_that_are_not_utf8() {
+        let t = Trees::new();
+        let b = t.blob("x\n");
+        let a = t.raw_tree(&[(b"100644", b"\xfe", &b)]);
+        let both = t.raw_tree(&[(b"100644", b"\xfe", &b), (b"100644", b"\xff", &b)]);
+        let err = Git::new(t.dir.path()).changed_paths(&a, &both).unwrap_err();
+        assert!(err.contains("UTF-8"), "{err}");
     }
 
     #[test]
