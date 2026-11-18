@@ -16,6 +16,7 @@ node_modules
 /tools/paddock-dev/target/
 /crates/.cargo/ci.toml
 /tools/paddock-dev/.cargo/ci.toml
+/tools/git-read-spike/.cargo/ci.toml
 .DS_Store
 
 # Icon set build deps
