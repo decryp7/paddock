@@ -2038,3 +2038,38 @@ timeout on both tries), and is it the host or the code?
   stopped on a test name the filter left out; all their tests passed.)
 - **Not measured:** a Defender exclusion for the runner's work folder (host configuration, the user's decision); git starts are 38 to
   48 ms there against 5.6 ms on the Mac (`git --version`), and a small repository 220 to 345 ms against 45 ms.
+
+## Batched git reads: per-call git against one cat-file process against gix, and the Defender exclusions (2026-11-18, perf/git-heavy-tests-2, ADR 0108 G1 and G2)
+
+Question: how much does one long-lived `git cat-file` process save over one git start per read, and does reading in process with gix
+save more, on each OS? And did the user's Defender process exclusions for git change the Windows runner's numbers?
+
+- **Machines:** the Windows CI runner (windows-latest, `windows-host-probe.yml` on `exp/windows-host-probe`, never merged, nothing else
+  on the runner); the Mac mini (load 8.5 to 10.7, an indication); the local Linux CI-image container (arm64, an indication, ER-9).
+- **Spike:** `tools/git-read-spike` on that branch (release build): a synthetic repository made by one `git fast-import` stream (2,000
+  or 12,000 files in 40 folders, 20 commits), then the same reads three ways, each 3 times in rotated order with the results compared:
+  every commit's tree listed recursively (`git ls-tree -r` per commit) plus 300 blobs (`git cat-file blob` per blob); the same through
+  one `git cat-file --batch` process with trees parsed in process (paddock-git's `Reader` does the same over `--batch-command`); the
+  same with gix 0.90 in process.
+
+| ms, median of 3 | Windows runner (8267) | Mac | Linux container |
+|---|---:|---:|---:|
+| 2,000 files: per call | 11,145 | 2,418 (1,806 min) | 159 |
+| 2,000 files: one cat-file | 428 | 508 (83 min) | 34 |
+| 2,000 files: gix | 9.4 | 14.2 | 8.0 |
+| 12,000 files: per call | 11,950 | 1,776 | 233 |
+| 12,000 files: one cat-file | 685 | 231 | 145 |
+| 12,000 files: gix | 39.4 | 28.8 | 29.8 |
+
+- **Host probe (`./dev ci host-probe`, medians, ms):** on the Windows runner an empty program (`cmd /d /c exit 0`) takes 28 to 45 ms to
+  start, `git --version` 32 to 42 ms, a one-commit repository (4 git starts) 229 to 325 ms, a 4 KiB file 1.0 to 1.6 ms. On the Mac:
+  1.7, 5.2, 37.0 and 0.2 ms. So on Windows the cost is the OS's process start itself, not git: git adds 3 to 8 ms to an empty start.
+- **Defender process exclusions for git (applied by the user on 2026-11-18, before run 8265; the "before" figures are runs 8251 to
+  8257 of the same day's morning and run 8263, whose timing relative to the change is not known):** git start 32 to 41 ms after
+  (8265) against 37 to 48 ms (8251 to 8257) and 33 to 42 ms (8263); a repository 238 to 306 ms against 220 to 346 and 239 to 325 ms;
+  empty start 28 to 39 ms against 30 to 45 ms (8263). merge_check serial, 84 tests on the same tree: 289.5 s (8265) against 353.5 s
+  (8263); 340.2 s on the fix tree (8255, morning). **No change in any host-probe phase beyond the run-to-run spread**; the one serial
+  merge_check run was 18% faster, which one run per side cannot separate from the spread. The fixtures' repositories and the test
+  programs were already in excluded folders (`C:\gitea-runner\work\<job>\tmp`, `C:\Users\<user>\.paddock-ci`).
+- **Not measured:** gix against a partial clone (`--filter=blob:none`, as the CI kept clones are): gix does not fetch a missing blob
+  from the promisor remote, git does.
