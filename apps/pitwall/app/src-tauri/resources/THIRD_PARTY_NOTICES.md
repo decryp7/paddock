@@ -54,11 +54,11 @@ Licence expressions (packages):
 - alloc-no-stdlib 3.0.0 — BSD-3-Clause [BSD-3-Clause-3]
 - alloc-stdlib 0.3.0 — BSD-3-Clause [BSD-3-Clause-4]
 - alsa 0.11.0 — Apache-2.0 OR MIT [MIT-33]
-- alsa-sys 0.4.0 — MIT [MIT-71]
-- android_system_properties 0.1.6 — MIT OR Apache-2.0 [MIT-171]
+- alsa-sys 0.4.0 — MIT [MIT-72]
+- android_system_properties 0.1.6 — MIT OR Apache-2.0 [MIT-172]
 - anyhow 1.0.104 — MIT OR Apache-2.0 [MIT-49]
-- apple-native-keyring-store 1.0.2 — MIT OR Apache-2.0 [MIT-176]
-- async-broadcast 0.7.2 — MIT OR Apache-2.0 [MIT-78]
+- apple-native-keyring-store 1.0.2 — MIT OR Apache-2.0 [MIT-177]
+- async-broadcast 0.7.2 — MIT OR Apache-2.0 [MIT-79]
 - async-channel 2.5.0 — Apache-2.0 OR MIT [MIT-49]
 - async-executor 1.14.1 — Apache-2.0 OR MIT [MIT-49]
 - async-io 2.6.0 — Apache-2.0 OR MIT [MIT-49]
@@ -74,25 +74,25 @@ Licence expressions (packages):
 - auto-launch 0.6.0 — MIT [MIT-232]
 - axum 0.8.9 — MIT [MIT-218]
 - axum-core 0.5.6 — MIT [MIT-1]
-- base64 0.21.7 — MIT OR Apache-2.0 [MIT-107]
-- base64 0.22.1 — MIT OR Apache-2.0 [MIT-107]
+- base64 0.21.7 — MIT OR Apache-2.0 [MIT-108]
+- base64 0.22.1 — MIT OR Apache-2.0 [MIT-108]
 - base64 0.23.1 — MIT OR Apache-2.0 [MIT-48]
-- bit-set 0.8.0 — Apache-2.0 OR MIT [MIT-83]
-- bit-vec 0.8.0 — Apache-2.0 OR MIT [MIT-83]
+- bit-set 0.8.0 — Apache-2.0 OR MIT [MIT-84]
+- bit-vec 0.8.0 — Apache-2.0 OR MIT [MIT-84]
 - bitflags 1.3.2 — MIT OR Apache-2.0 [MIT-16]
 - bitflags 2.13.2 — MIT OR Apache-2.0 [MIT-16]
-- block-buffer 0.10.4 — MIT OR Apache-2.0 [MIT-97]
-- block-buffer 0.12.1 — MIT OR Apache-2.0 [MIT-117]
-- block-padding 0.4.2 — MIT OR Apache-2.0 [MIT-117]
+- block-buffer 0.10.4 — MIT OR Apache-2.0 [MIT-98]
+- block-buffer 0.12.1 — MIT OR Apache-2.0 [MIT-118]
+- block-padding 0.4.2 — MIT OR Apache-2.0 [MIT-118]
 - block2 0.6.2 — MIT [MIT-5]
 - blocking 1.7.0 — Apache-2.0 OR MIT [MIT-49]
 - brotli 9.0.0 — BSD-3-Clause AND MIT [BSD-3-Clause-3, MIT-38]
 - brotli-decompressor 6.0.1 — BSD-3-Clause OR MIT [MIT-5]
-- bumpalo 3.20.3 — MIT OR Apache-2.0 [MIT-90]
+- bumpalo 3.20.3 — MIT OR Apache-2.0 [MIT-91]
 - bytemuck 1.25.2 — Zlib OR Apache-2.0 OR MIT [MIT-208]
 - byteorder 1.5.0 — Unlicense OR MIT [MIT-18]
 - byteorder-lite 0.1.0 — Unlicense OR MIT [MIT-18]
-- bytes 1.12.1 — MIT [MIT-86]
+- bytes 1.12.1 — MIT [MIT-87]
 - cairo-rs 0.18.5 — MIT [MIT-31]
 - cairo-sys-rs 0.18.2 — MIT [MIT-31]
 - camino 1.2.6 — MIT OR Apache-2.0 [MIT-49]
@@ -100,37 +100,37 @@ Licence expressions (packages):
 - cargo_metadata 0.19.2 — MIT [MIT-49]
 - cbc 0.2.1 — MIT OR Apache-2.0 [MIT-225]
 - cesu8 1.1.0 — Apache-2.0 OR MIT [MIT-5]
-- cfb 0.14.0 — MIT [MIT-64]
-- cfg-if 1.0.5 — MIT OR Apache-2.0 [MIT-132]
+- cfb 0.14.0 — MIT [MIT-65]
+- cfg-if 1.0.5 — MIT OR Apache-2.0 [MIT-133]
 - chacha20 0.10.2 — MIT OR Apache-2.0 [MIT-9]
 - cipher 0.5.2 — MIT OR Apache-2.0 [MIT-36]
-- cmov 0.5.4 — Apache-2.0 OR MIT [MIT-160]
-- cobs 0.3.0 — MIT OR Apache-2.0 [MIT-177]
-- color_quant 1.1.0 — MIT [MIT-161]
-- combine 4.6.9 — MIT [MIT-165]
+- cmov 0.5.4 — Apache-2.0 OR MIT [MIT-161]
+- cobs 0.3.0 — MIT OR Apache-2.0 [MIT-178]
+- color_quant 1.1.0 — MIT [MIT-162]
+- combine 4.6.9 — MIT [MIT-166]
 - concurrent-queue 2.5.0 — Apache-2.0 OR MIT [MIT-49]
 - const-oid 0.10.2 — Apache-2.0 OR MIT [MIT-219]
-- cookie 0.18.2 — MIT OR Apache-2.0 [MIT-77]
-- core-foundation 0.10.1 — MIT OR Apache-2.0 [MIT-63]
-- core-foundation 0.9.4 — MIT OR Apache-2.0 [MIT-63]
-- core-foundation-sys 0.8.7 — MIT OR Apache-2.0 [MIT-63]
-- core-graphics 0.25.0 — MIT OR Apache-2.0 [MIT-63]
-- core-graphics-types 0.2.0 — MIT OR Apache-2.0 [MIT-63]
+- cookie 0.18.2 — MIT OR Apache-2.0 [MIT-78]
+- core-foundation 0.10.1 — MIT OR Apache-2.0 [MIT-64]
+- core-foundation 0.9.4 — MIT OR Apache-2.0 [MIT-64]
+- core-foundation-sys 0.8.7 — MIT OR Apache-2.0 [MIT-64]
+- core-graphics 0.25.0 — MIT OR Apache-2.0 [MIT-64]
+- core-graphics-types 0.2.0 — MIT OR Apache-2.0 [MIT-64]
 - coreaudio-rs 0.14.2 — MIT OR Apache-2.0 [MIT-234]
 - cpal 0.18.2 — Apache-2.0 [Apache-2.0-1]
 - cpubits 0.1.1 — MIT OR Apache-2.0 [MIT-54]
-- cpufeatures 0.2.17 — MIT OR Apache-2.0 [MIT-102]
+- cpufeatures 0.2.17 — MIT OR Apache-2.0 [MIT-103]
 - cpufeatures 0.3.1 — MIT OR Apache-2.0 [MIT-219]
-- crc32fast 1.5.3 — MIT OR Apache-2.0 [MIT-152]
-- croner 4.0.2 — MIT [MIT-185]
-- crossbeam-channel 0.5.17 — MIT OR Apache-2.0 [MIT-93]
-- crossbeam-utils 0.8.23 — MIT OR Apache-2.0 [MIT-93]
-- crypto-common 0.1.7 — MIT OR Apache-2.0 [MIT-104]
+- crc32fast 1.5.3 — MIT OR Apache-2.0 [MIT-153]
+- croner 4.0.2 — MIT [MIT-186]
+- crossbeam-channel 0.5.17 — MIT OR Apache-2.0 [MIT-94]
+- crossbeam-utils 0.8.23 — MIT OR Apache-2.0 [MIT-94]
+- crypto-common 0.1.7 — MIT OR Apache-2.0 [MIT-105]
 - crypto-common 0.2.2 — MIT OR Apache-2.0 [MIT-206]
 - cssparser 0.37.0 — MPL-2.0 [MPL-2.0-1]
 - cssparser-macros 0.7.1 — MPL-2.0 [MPL-2.0-1]
-- ctor 1.0.13 — Apache-2.0 OR MIT [MIT-180]
-- ctutils 0.4.5 — Apache-2.0 OR MIT [MIT-72]
+- ctor 1.0.13 — Apache-2.0 OR MIT [MIT-181]
+- ctutils 0.4.5 — Apache-2.0 OR MIT [MIT-73]
 - darling 0.20.11 — MIT [MIT-196]
 - darling 0.24.1 — MIT [MIT-196]
 - darling_core 0.20.11 — MIT [MIT-196]
@@ -143,9 +143,9 @@ Licence expressions (packages):
 - derive_builder 0.20.2 — MIT OR Apache-2.0 [MIT-44]
 - derive_builder_core 0.20.2 — MIT OR Apache-2.0 [MIT-44]
 - derive_builder_macro 0.20.2 — MIT OR Apache-2.0 [MIT-44]
-- derive_more 2.1.1 — MIT [MIT-81]
-- derive_more-impl 2.1.1 — MIT [MIT-81]
-- digest 0.10.7 — MIT OR Apache-2.0 [MIT-155]
+- derive_more 2.1.1 — MIT [MIT-82]
+- derive_more-impl 2.1.1 — MIT [MIT-82]
+- digest 0.10.7 — MIT OR Apache-2.0 [MIT-156]
 - digest 0.11.3 — MIT OR Apache-2.0 [MIT-191]
 - dirs 6.0.0 — MIT OR Apache-2.0 [MIT-224]
 - dirs 7.0.0 — MIT OR Apache-2.0 [MIT-224]
@@ -154,46 +154,46 @@ Licence expressions (packages):
 - displaydoc 0.2.7 — MIT OR Apache-2.0 [MIT-49]
 - dlopen2 0.8.2 — MIT [MIT-5]
 - dlopen2_derive 0.4.3 — MIT [MIT-5]
-- dom_query 0.28.0 — MIT [MIT-145]
+- dom_query 0.28.0 — MIT [MIT-146]
 - dpi 0.1.2 — Apache-2.0 AND MIT [Apache-2.0-4, MIT-5]
 - dtoa 1.0.11 — MIT OR Apache-2.0 [MIT-49]
 - dtoa-short 0.3.5 — MPL-2.0 [MPL-2.0-1]
 - dunce 1.0.5 — CC0-1.0 OR MIT-0 OR Apache-2.0 [MIT-0-1]
 - dyn-clone 1.0.20 — MIT OR Apache-2.0 [MIT-49]
-- email-encoding 0.4.2 — MIT OR Apache-2.0 [MIT-187]
-- email_address 0.2.9 — MIT [MIT-154]
-- embed_plist 1.2.2 — MIT OR Apache-2.0 [MIT-162]
+- email-encoding 0.4.3 — MIT OR Apache-2.0 [MIT-62]
+- email_address 0.2.9 — MIT [MIT-155]
+- embed_plist 1.2.2 — MIT OR Apache-2.0 [MIT-163]
 - endi 1.1.1 — MIT [MIT-49]
 - enumflags2 0.7.12 — MIT OR Apache-2.0 [MIT-205]
 - enumflags2_derive 0.7.12 — MIT OR Apache-2.0 [MIT-11]
-- equivalent 1.0.3 — Apache-2.0 OR MIT [MIT-70]
+- equivalent 1.0.3 — Apache-2.0 OR MIT [MIT-71]
 - erased-serde 0.4.10 — MIT OR Apache-2.0 [MIT-49]
-- errno 0.3.14 — MIT OR Apache-2.0 [MIT-127]
+- errno 0.3.14 — MIT OR Apache-2.0 [MIT-128]
 - event-listener 5.4.2 — Apache-2.0 OR MIT [MIT-49]
 - event-listener-strategy 0.5.4 — Apache-2.0 OR MIT [MIT-49]
 - fallible-iterator 0.3.0 — MIT OR Apache-2.0 [MIT-47]
 - fallible-streaming-iterator 0.1.9 — MIT OR Apache-2.0 [MIT-209]
 - fastrand 2.5.0 — Apache-2.0 OR MIT [MIT-49]
-- fdeflate 0.3.7 — MIT OR Apache-2.0 [MIT-119]
+- fdeflate 0.3.7 — MIT OR Apache-2.0 [MIT-120]
 - field-offset 0.3.6 — MIT OR Apache-2.0 [MIT-227]
-- filetime 0.2.29 — MIT OR Apache-2.0 [MIT-132]
+- filetime 0.2.29 — MIT OR Apache-2.0 [MIT-133]
 - flate2 1.1.10 — MIT OR Apache-2.0 [MIT-27]
-- fnv 1.0.7 — Apache-2.0  OR  MIT [MIT-186]
+- fnv 1.0.7 — Apache-2.0  OR  MIT [MIT-187]
 - foldhash 0.2.0 — Zlib [Zlib-2]
 - foreign-types 0.5.0 — MIT OR Apache-2.0 [MIT-192]
 - foreign-types-macros 0.2.4 — MIT OR Apache-2.0 [MIT-192]
 - foreign-types-shared 0.3.1 — MIT OR Apache-2.0 [MIT-192]
 - form_urlencoded 1.2.2 — MIT OR Apache-2.0 [MIT-53]
 - fs4 0.13.1 — MIT OR Apache-2.0 [MIT-2]
-- futures-channel 0.3.34 — MIT OR Apache-2.0 [MIT-173]
-- futures-core 0.3.34 — MIT OR Apache-2.0 [MIT-173]
-- futures-executor 0.3.34 — MIT OR Apache-2.0 [MIT-173]
-- futures-io 0.3.34 — MIT OR Apache-2.0 [MIT-173]
+- futures-channel 0.3.34 — MIT OR Apache-2.0 [MIT-174]
+- futures-core 0.3.34 — MIT OR Apache-2.0 [MIT-174]
+- futures-executor 0.3.34 — MIT OR Apache-2.0 [MIT-174]
+- futures-io 0.3.34 — MIT OR Apache-2.0 [MIT-174]
 - futures-lite 2.6.1 — Apache-2.0 OR MIT [MIT-30, MIT-49]
-- futures-macro 0.3.34 — MIT OR Apache-2.0 [MIT-173]
-- futures-sink 0.3.34 — MIT OR Apache-2.0 [MIT-173]
-- futures-task 0.3.34 — MIT OR Apache-2.0 [MIT-173]
-- futures-util 0.3.34 — MIT OR Apache-2.0 [MIT-173]
+- futures-macro 0.3.34 — MIT OR Apache-2.0 [MIT-174]
+- futures-sink 0.3.34 — MIT OR Apache-2.0 [MIT-174]
+- futures-task 0.3.34 — MIT OR Apache-2.0 [MIT-174]
+- futures-util 0.3.34 — MIT OR Apache-2.0 [MIT-174]
 - gdk 0.18.2 — MIT [MIT-31]
 - gdk-pixbuf 0.18.5 — MIT [MIT-31]
 - gdk-pixbuf-sys 0.18.0 — MIT [MIT-31]
@@ -201,10 +201,10 @@ Licence expressions (packages):
 - gdkwayland-sys 0.18.2 — MIT [MIT-31]
 - gdkx11 0.18.2 — MIT [MIT-31]
 - gdkx11-sys 0.18.2 — MIT [MIT-31]
-- generic-array 0.14.7 — MIT [MIT-169]
-- getrandom 0.2.17 — MIT OR Apache-2.0 [MIT-76]
-- getrandom 0.3.4 — MIT OR Apache-2.0 [MIT-114]
-- getrandom 0.4.3 — MIT OR Apache-2.0 [MIT-150]
+- generic-array 0.14.7 — MIT [MIT-170]
+- getrandom 0.2.17 — MIT OR Apache-2.0 [MIT-77]
+- getrandom 0.3.4 — MIT OR Apache-2.0 [MIT-115]
+- getrandom 0.4.3 — MIT OR Apache-2.0 [MIT-151]
 - gif 0.14.2 — MIT OR Apache-2.0 [MIT-26]
 - gio 0.18.4 — MIT [MIT-31]
 - gio-sys 0.18.1 — MIT [MIT-31]
@@ -216,26 +216,26 @@ Licence expressions (packages):
 - gtk 0.18.2 — MIT [MIT-31]
 - gtk-sys 0.18.2 — MIT [MIT-31]
 - gtk3-macros 0.18.2 — MIT [MIT-31]
-- hashbrown 0.16.1 — MIT OR Apache-2.0 [MIT-170]
-- hashbrown 0.17.1 — MIT OR Apache-2.0 [MIT-170]
+- hashbrown 0.16.1 — MIT OR Apache-2.0 [MIT-171]
+- hashbrown 0.17.1 — MIT OR Apache-2.0 [MIT-171]
 - hashlink 0.12.2 — MIT OR Apache-2.0 [MIT-215]
 - heck 0.4.1 — MIT OR Apache-2.0 [MIT-2]
 - heck 0.5.0 — MIT OR Apache-2.0 [MIT-2]
 - hermit-abi 0.5.3 — MIT OR Apache-2.0 [MIT-49]
-- hex 0.4.3 — MIT OR Apache-2.0 [MIT-156]
+- hex 0.4.3 — MIT OR Apache-2.0 [MIT-157]
 - hkdf 0.13.0 — MIT OR Apache-2.0 [MIT-39]
-- hmac 0.13.0 — MIT OR Apache-2.0 [MIT-155]
+- hmac 0.13.0 — MIT OR Apache-2.0 [MIT-156]
 - html5ever 0.39.0 — MIT OR Apache-2.0 [MIT-55]
 - http 1.5.0 — MIT OR Apache-2.0 [MIT-226]
-- http-body 1.1.0 — MIT [MIT-91]
-- http-body-util 0.1.5 — MIT [MIT-91]
-- httparse 1.10.1 — MIT OR Apache-2.0 [MIT-133]
-- httpdate 1.0.3 — MIT OR Apache-2.0 [MIT-143]
-- hybrid-array 0.4.15 — MIT OR Apache-2.0 [MIT-160]
+- http-body 1.1.0 — MIT [MIT-92]
+- http-body-util 0.1.5 — MIT [MIT-92]
+- httparse 1.10.1 — MIT OR Apache-2.0 [MIT-134]
+- httpdate 1.0.3 — MIT OR Apache-2.0 [MIT-144]
+- hybrid-array 0.4.15 — MIT OR Apache-2.0 [MIT-161]
 - hyper 1.12.0 — MIT [MIT-4]
-- hyper-rustls 0.27.10 — Apache-2.0 OR ISC OR MIT [MIT-164]
+- hyper-rustls 0.27.10 — Apache-2.0 OR ISC OR MIT [MIT-165]
 - hyper-util 0.1.21 — MIT [MIT-213]
-- ico 0.6.0 — MIT [MIT-151]
+- ico 0.6.0 — MIT [MIT-152]
 - icu_collections 2.4.0 — Unicode-3.0 [Unicode-3.0-2]
 - icu_locale_core 2.4.0 — Unicode-3.0 [Unicode-3.0-2]
 - icu_normalizer 2.4.0 — Unicode-3.0 [Unicode-3.0-2]
@@ -244,68 +244,68 @@ Licence expressions (packages):
 - icu_properties_data 2.4.0 — Unicode-3.0 [Unicode-3.0-2]
 - icu_provider 2.4.0 — Unicode-3.0 [Unicode-3.0-2]
 - ident_case 1.0.1 — MIT OR Apache-2.0 [MIT-21]
-- idna 1.1.0 — MIT OR Apache-2.0 [MIT-121]
+- idna 1.1.0 — MIT OR Apache-2.0 [MIT-122]
 - idna_adapter 1.2.2 — Apache-2.0 OR MIT [MIT-7]
-- image 0.25.10 — MIT OR Apache-2.0 [MIT-119]
-- image-webp 0.2.4 — MIT OR Apache-2.0 [MIT-119]
-- indexmap 2.14.2 — Apache-2.0 OR MIT [MIT-85]
-- infer 0.22.0 — MIT [MIT-120]
+- image 0.25.10 — MIT OR Apache-2.0 [MIT-120]
+- image-webp 0.2.4 — MIT OR Apache-2.0 [MIT-120]
+- indexmap 2.14.2 — Apache-2.0 OR MIT [MIT-86]
+- infer 0.22.0 — MIT [MIT-121]
 - inout 0.2.6 — MIT OR Apache-2.0 [MIT-15]
 - ipnet 2.12.2 — MIT OR Apache-2.0 [MIT-193]
 - itoa 1.0.18 — MIT OR Apache-2.0 [MIT-49]
-- javascriptcore-rs 1.1.2 — MIT [MIT-139]
-- javascriptcore-rs-sys 1.1.1 — MIT [MIT-74]
+- javascriptcore-rs 1.1.2 — MIT [MIT-140]
+- javascriptcore-rs-sys 1.1.1 — MIT [MIT-75]
 - jiff 0.2.38 — Unlicense OR MIT [MIT-18]
 - jiff-core 0.1.1 — Unlicense OR MIT [MIT-18]
 - jiff-tzdb 0.1.9 — Unlicense OR MIT [MIT-18]
-- jni 0.21.1 — MIT OR Apache-2.0 [MIT-109]
+- jni 0.21.1 — MIT OR Apache-2.0 [MIT-110]
 - jni 0.22.4 — MIT OR Apache-2.0 [MIT-5]
 - jni-macros 0.22.4 — MIT OR Apache-2.0 [MIT-5]
-- jni-sys 0.3.1 — MIT OR Apache-2.0 [MIT-62]
-- jni-sys 0.4.1 — MIT OR Apache-2.0 [MIT-62]
+- jni-sys 0.3.1 — MIT OR Apache-2.0 [MIT-63]
+- jni-sys 0.4.1 — MIT OR Apache-2.0 [MIT-63]
 - jni-sys-macros 0.4.1 — MIT OR Apache-2.0 [MIT-5]
-- js-sys 0.3.106 — MIT OR Apache-2.0 [MIT-132]
+- js-sys 0.3.106 — MIT OR Apache-2.0 [MIT-133]
 - json-patch 4.2.0 — MIT OR Apache-2.0 [MIT-22]
 - jsonptr 0.7.1 — MIT OR Apache-2.0 [MIT-3]
 - keyboard-types 0.8.3 — MIT OR Apache-2.0 [MIT-50]
-- keyring 4.2.0 — MIT OR Apache-2.0 [MIT-176]
-- keyring-core 1.0.1 — MIT OR Apache-2.0 [MIT-176]
+- keyring 4.2.0 — MIT OR Apache-2.0 [MIT-177]
+- keyring-core 1.0.1 — MIT OR Apache-2.0 [MIT-177]
 - lazy_static 1.5.1 — MIT OR Apache-2.0 [MIT-49]
-- lettre 0.11.23 — MIT [MIT-153]
+- lettre 0.11.24 — MIT [MIT-154]
 - libappindicator 0.9.0 — Apache-2.0 OR MIT [MIT-199]
 - libappindicator-sys 0.9.0 — Apache-2.0 OR MIT [MIT-5]
 - libc 0.2.191 — MIT OR Apache-2.0 [MIT-194]
-- libdbus-sys 0.2.7 — Apache-2.0 OR MIT [MIT-87, MIT-204]
+- libdbus-sys 0.2.7 — Apache-2.0 OR MIT [MIT-88, MIT-204]
 - libloading 0.7.4 — ISC [ISC-22]
-- libredox 0.1.25 — MIT [MIT-123]
-- libsqlite3-sys 0.39.1 — MIT [MIT-99]
+- libredox 0.1.25 — MIT [MIT-124]
+- libsqlite3-sys 0.39.1 — MIT [MIT-100]
 - linux-raw-sys 0.12.1 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT [MIT-49]
 - litemap 0.8.3 — Unicode-3.0 [Unicode-3.0-2]
-- lock_api 0.4.14 — MIT OR Apache-2.0 [MIT-141]
+- lock_api 0.4.14 — MIT OR Apache-2.0 [MIT-142]
 - log 0.4.34 — MIT OR Apache-2.0 [MIT-16]
-- mach2 0.6.0 — BSD-2-Clause OR MIT OR Apache-2.0 [MIT-147]
+- mach2 0.6.0 — BSD-2-Clause OR MIT OR Apache-2.0 [MIT-148]
 - markup5ever 0.39.0 — MIT OR Apache-2.0 [MIT-55]
-- matchit 0.8.4 — MIT AND BSD-3-Clause [BSD-3-Clause-2, MIT-129]
+- matchit 0.8.4 — MIT AND BSD-3-Clause [BSD-3-Clause-2, MIT-130]
 - memchr 2.8.3 — Unlicense OR MIT [MIT-18]
 - memoffset 0.9.1 — MIT [MIT-51]
-- mime 0.3.17 — MIT OR Apache-2.0 [MIT-163]
+- mime 0.3.17 — MIT OR Apache-2.0 [MIT-164]
 - minisign-verify 0.3.0 — MIT [MIT-5]
-- miniz_oxide 0.8.9 — MIT OR Zlib OR Apache-2.0 [MIT-115, MIT-168]
-- miniz_oxide 0.9.1 — MIT OR Zlib OR Apache-2.0 [MIT-115, MIT-168]
+- miniz_oxide 0.8.9 — MIT OR Zlib OR Apache-2.0 [MIT-116, MIT-169]
+- miniz_oxide 0.9.1 — MIT OR Zlib OR Apache-2.0 [MIT-116, MIT-169]
 - mio 1.2.4 — MIT [MIT-190]
 - moxcms 0.8.1 — BSD-3-Clause OR Apache-2.0 [Apache-2.0-6]
-- muda 0.20.0 — Apache-2.0 OR MIT [MIT-134]
+- muda 0.20.0 — Apache-2.0 OR MIT [MIT-135]
 - ndk 0.9.0 — MIT OR Apache-2.0 [MIT-5]
 - ndk-context 0.1.1 — MIT OR Apache-2.0 [MIT-5]
 - ndk-sys 0.6.0+11769913 — MIT OR Apache-2.0 [MIT-5]
-- new_debug_unreachable 1.0.6 — MIT [MIT-69]
-- nix 0.31.3 — MIT [MIT-179]
+- new_debug_unreachable 1.0.6 — MIT [MIT-70]
+- nix 0.31.3 — MIT [MIT-180]
 - nom 8.0.0 — MIT [MIT-217]
 - ntapi 0.4.3 — Apache-2.0 OR MIT [MIT-14]
 - num 0.4.3 — MIT OR Apache-2.0 [MIT-16]
 - num-bigint 0.4.8 — MIT OR Apache-2.0 [MIT-16]
 - num-complex 0.4.6 — MIT OR Apache-2.0 [MIT-16]
-- num-conv 0.2.2 — MIT OR Apache-2.0 [MIT-84]
+- num-conv 0.2.2 — MIT OR Apache-2.0 [MIT-85]
 - num-derive 0.4.2 — MIT OR Apache-2.0 [MIT-16]
 - num-integer 0.1.47 — MIT OR Apache-2.0 [MIT-16]
 - num-iter 0.1.46 — MIT OR Apache-2.0 [MIT-16]
@@ -338,32 +338,32 @@ Licence expressions (packages):
 - objc2-user-notifications 0.3.2 — Zlib OR Apache-2.0 OR MIT [MIT-5]
 - objc2-web-kit 0.3.2 — Zlib OR Apache-2.0 OR MIT [MIT-5]
 - once_cell 1.21.4 — MIT OR Apache-2.0 [MIT-49]
-- openssl-probe 0.2.1 — MIT OR Apache-2.0 [MIT-132]
+- openssl-probe 0.2.1 — MIT OR Apache-2.0 [MIT-133]
 - option-ext 0.2.0 — MPL-2.0 [MPL-2.0-2]
 - ordered-stream 0.2.0 — MIT OR Apache-2.0 [MIT-49]
-- os_info 3.15.0 — MIT [MIT-125]
-- osakit 0.3.1 — MIT OR Apache-2.0 [MIT-110]
+- os_info 3.15.0 — MIT [MIT-126]
+- osakit 0.3.1 — MIT OR Apache-2.0 [MIT-111]
 - pango 0.18.3 — MIT [MIT-31]
 - pango-sys 0.18.0 — MIT [MIT-31]
 - parking 2.2.1 — Apache-2.0 OR MIT [MIT-49]
-- parking_lot 0.12.5 — MIT OR Apache-2.0 [MIT-141]
-- parking_lot_core 0.9.12 — MIT OR Apache-2.0 [MIT-141]
-- percent-encoding 2.3.2 — MIT OR Apache-2.0 [MIT-121]
+- parking_lot 0.12.5 — MIT OR Apache-2.0 [MIT-142]
+- parking_lot_core 0.9.12 — MIT OR Apache-2.0 [MIT-142]
+- percent-encoding 2.3.2 — MIT OR Apache-2.0 [MIT-122]
 - phf 0.13.1 — MIT [MIT-220]
 - phf_generator 0.13.1 — MIT [MIT-220]
 - phf_macros 0.13.1 — MIT [MIT-220]
 - phf_shared 0.13.1 — MIT [MIT-220]
 - pin-project-lite 0.2.17 — Apache-2.0 OR MIT [MIT-49]
 - piper 0.2.5 — MIT OR Apache-2.0 [MIT-49]
-- plist 1.10.3 — MIT [MIT-94]
-- png 0.18.1 — MIT OR Apache-2.0 [MIT-130]
+- plist 1.10.3 — MIT [MIT-95]
+- png 0.18.1 — MIT OR Apache-2.0 [MIT-131]
 - polling 3.11.0 — Apache-2.0 OR MIT [MIT-49]
 - portable-atomic 1.15.0 — Apache-2.0 OR MIT [MIT-49]
 - portable-atomic-util 0.2.8 — Apache-2.0 OR MIT [MIT-49]
 - postcard 1.1.3 — MIT OR Apache-2.0 [MIT-46]
 - potential_utf 0.1.6 — Unicode-3.0 [Unicode-3.0-2]
-- powerfmt 0.2.1 — MIT OR Apache-2.0 [MIT-111]
-- precomputed-hash 0.1.1 — MIT [MIT-105]
+- powerfmt 0.2.1 — MIT OR Apache-2.0 [MIT-112]
+- precomputed-hash 0.1.1 — MIT [MIT-106]
 - proc-macro-crate 1.3.1 — MIT OR Apache-2.0 [MIT-49]
 - proc-macro-crate 2.0.2 — MIT OR Apache-2.0 [MIT-49]
 - proc-macro-crate 3.5.0 — MIT OR Apache-2.0 [MIT-49]
@@ -378,32 +378,32 @@ Licence expressions (packages):
 - r-efi 5.3.0 — MIT OR Apache-2.0 OR LGPL-2.1-or-later [MIT-5]
 - r-efi 6.0.0 — MIT OR Apache-2.0 OR LGPL-2.1-or-later [MIT-5]
 - rand 0.10.3 — MIT OR Apache-2.0 [MIT-195]
-- rand_core 0.10.1 — MIT OR Apache-2.0 [MIT-112]
-- raw-window-handle 0.6.2 — MIT OR Apache-2.0 OR Zlib [MIT-166]
+- rand_core 0.10.1 — MIT OR Apache-2.0 [MIT-113]
+- raw-window-handle 0.6.2 — MIT OR Apache-2.0 OR Zlib [MIT-167]
 - redox_syscall 0.5.18 — MIT [MIT-235]
 - redox_users 0.5.3 — MIT [MIT-19]
 - regex 1.13.1 — MIT OR Apache-2.0 [MIT-16]
 - regex-automata 0.4.18 — MIT OR Apache-2.0 [MIT-16]
 - regex-syntax 0.8.11 — MIT OR Apache-2.0 [MIT-16]
-- reqwest 0.12.28 — MIT OR Apache-2.0 [MIT-89]
-- reqwest 0.13.5 — MIT OR Apache-2.0 [MIT-182]
+- reqwest 0.12.28 — MIT OR Apache-2.0 [MIT-90]
+- reqwest 0.13.5 — MIT OR Apache-2.0 [MIT-183]
 - ring 0.17.14 — Apache-2.0 AND ISC [Apache-2.0-2, Apache-2.0-8, ISC-14, ISC-3, ISC-5, ISC-4, ISC-24, ISC-12, ISC-16, ISC-9, ISC-13, ISC-6, ISC-7, ISC-20, ISC-10, ISC-15, ISC-26, ISC-1]
 - rsqlite-vfs 0.1.1 — MIT [MIT-5]
-- rusqlite 0.41.1 — MIT [MIT-99]
+- rusqlite 0.41.1 — MIT [MIT-100]
 - rustc-hash 2.1.3 — Apache-2.0 OR MIT [MIT-49]
 - rustix 1.1.6 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT [MIT-49]
-- rustls 0.23.46 — Apache-2.0 OR ISC OR MIT [MIT-164]
-- rustls-native-certs 0.8.5 — Apache-2.0 OR ISC OR MIT [MIT-164]
+- rustls 0.23.46 — Apache-2.0 OR ISC OR MIT [MIT-165]
+- rustls-native-certs 0.8.5 — Apache-2.0 OR ISC OR MIT [MIT-165]
 - rustls-pki-types 1.15.1 — MIT OR Apache-2.0 [MIT-188]
-- rustls-platform-verifier 0.7.1 — MIT OR Apache-2.0 [MIT-100]
+- rustls-platform-verifier 0.7.1 — MIT OR Apache-2.0 [MIT-101]
 - rustls-platform-verifier-android 0.2.0 — MIT OR Apache-2.0 [MIT-5]
 - rustls-webpki 0.103.16 — ISC [ISC-8]
 - rustversion 1.0.23 — MIT OR Apache-2.0 [MIT-49]
 - ryu 1.0.23 — Apache-2.0 OR BSL-1.0 [Apache-2.0-10]
-- same-file 1.0.6 — Unlicense OR MIT [MIT-113]
+- same-file 1.0.6 — Unlicense OR MIT [MIT-114]
 - schannel 0.1.30 — MIT [MIT-29]
 - schemars 0.8.22 — MIT [MIT-28]
-- schemars_derive 0.8.22 — MIT [MIT-106, MIT-28]
+- schemars_derive 0.8.22 — MIT [MIT-107, MIT-28]
 - scopeguard 1.2.0 — MIT OR Apache-2.0 [MIT-23]
 - secret-service 5.2.0 — MIT OR Apache-2.0 [MIT-200]
 - security-framework 3.7.0 — MIT OR Apache-2.0 [MIT-57]
@@ -419,36 +419,36 @@ Licence expressions (packages):
 - serde_json 1.0.154 — MIT OR Apache-2.0 [MIT-49]
 - serde_path_to_error 0.1.20 — MIT OR Apache-2.0 [MIT-49]
 - serde_repr 0.1.21 — MIT OR Apache-2.0 [MIT-49]
-- serde_spanned 1.1.2 — MIT OR Apache-2.0 [MIT-73]
-- serde_urlencoded 0.7.1 — MIT OR Apache-2.0 [MIT-175]
+- serde_spanned 1.1.2 — MIT OR Apache-2.0 [MIT-74]
+- serde_urlencoded 0.7.1 — MIT OR Apache-2.0 [MIT-176]
 - serde_with 3.24.0 — MIT OR Apache-2.0 [MIT-234]
 - serde_with_macros 3.24.0 — MIT OR Apache-2.0 [MIT-234]
-- serialize-to-javascript 0.1.2 — MIT OR Apache-2.0 [MIT-118]
-- serialize-to-javascript-impl 0.1.2 — MIT OR Apache-2.0 [MIT-118]
+- serialize-to-javascript 0.1.2 — MIT OR Apache-2.0 [MIT-119]
+- serialize-to-javascript-impl 0.1.2 — MIT OR Apache-2.0 [MIT-119]
 - servo_arc 0.4.3 — MIT OR Apache-2.0 [MIT-49]
-- sha2 0.10.9 — MIT OR Apache-2.0 [MIT-67]
-- sha2 0.11.1 — MIT OR Apache-2.0 [MIT-88]
+- sha2 0.10.9 — MIT OR Apache-2.0 [MIT-68]
+- sha2 0.11.1 — MIT OR Apache-2.0 [MIT-89]
 - sharded-slab 0.1.7 — MIT [MIT-32]
-- signal-hook-registry 1.4.8 — MIT OR Apache-2.0 [MIT-167]
-- simd-adler32 0.3.10 — MIT [MIT-101]
+- signal-hook-registry 1.4.8 — MIT OR Apache-2.0 [MIT-168]
+- simd-adler32 0.3.10 — MIT [MIT-102]
 - simd_cesu8 1.2.0 — Apache-2.0 OR MIT [MIT-49]
 - simdutf8 0.1.5 — MIT OR Apache-2.0 [MIT-21]
 - siphasher 1.0.4 — MIT OR Apache-2.0 [MIT-31]
 - slab 0.4.12 — MIT [MIT-13]
-- smallvec 1.16.3 — MIT OR Apache-2.0 [MIT-126]
+- smallvec 1.16.3 — MIT OR Apache-2.0 [MIT-127]
 - smappservice-rs 0.1.3 — MIT [MIT-203]
-- socket2 0.6.5 — MIT OR Apache-2.0 [MIT-132]
+- socket2 0.6.5 — MIT OR Apache-2.0 [MIT-133]
 - softbuffer 0.4.8 — MIT OR Apache-2.0 [MIT-231]
-- soup3 0.5.0 — MIT [MIT-74]
-- soup3-sys 0.5.0 — MIT [MIT-74]
-- sqlite-wasm-rs 0.5.5 — MIT [MIT-80]
-- stable_deref_trait 1.2.1 — MIT OR Apache-2.0 [MIT-96]
-- string_cache 0.9.0 — MIT OR Apache-2.0 [MIT-63]
-- strsim 0.11.1 — MIT [MIT-146]
+- soup3 0.5.0 — MIT [MIT-75]
+- soup3-sys 0.5.0 — MIT [MIT-75]
+- sqlite-wasm-rs 0.5.5 — MIT [MIT-81]
+- stable_deref_trait 1.2.1 — MIT OR Apache-2.0 [MIT-97]
+- string_cache 0.9.0 — MIT OR Apache-2.0 [MIT-64]
+- strsim 0.11.1 — MIT [MIT-147]
 - strum 0.27.2 — MIT [MIT-34]
 - strum_macros 0.27.2 — MIT [MIT-34]
 - subtle 2.6.1 — BSD-3-Clause [BSD-3-Clause-1]
-- swift-rs 1.0.9 — MIT OR Apache-2.0 [MIT-116]
+- swift-rs 1.0.9 — MIT OR Apache-2.0 [MIT-117]
 - syn 1.0.109 — MIT OR Apache-2.0 [MIT-49]
 - syn 2.0.119 — MIT OR Apache-2.0 [MIT-49]
 - syn 3.0.9 — MIT OR Apache-2.0 [MIT-49]
@@ -460,80 +460,80 @@ Licence expressions (packages):
 - tao 0.37.1 — Apache-2.0 [Apache-2.0-4]
 - tao-macros 0.1.4 — MIT OR Apache-2.0 [MIT-35]
 - tar 0.4.46 — MIT OR Apache-2.0 [MIT-212]
-- tauri 2.12.5 — Apache-2.0 OR MIT [MIT-138]
-- tauri-codegen 2.7.4 — Apache-2.0 OR MIT [MIT-138]
-- tauri-macros 2.7.4 — Apache-2.0 OR MIT [MIT-138]
+- tauri 2.12.5 — Apache-2.0 OR MIT [MIT-139]
+- tauri-codegen 2.7.4 — Apache-2.0 OR MIT [MIT-139]
+- tauri-macros 2.7.4 — Apache-2.0 OR MIT [MIT-139]
 - tauri-plugin-autostart 2.7.0 — Apache-2.0 OR MIT [MIT-5]
 - tauri-plugin-single-instance 2.5.4 — Apache-2.0 OR MIT [MIT-5]
 - tauri-plugin-updater 2.14.0 — Apache-2.0 OR MIT [MIT-5]
-- tauri-runtime 2.12.2 — Apache-2.0 OR MIT [MIT-138]
-- tauri-runtime-wry 2.12.3 — Apache-2.0 OR MIT [MIT-138]
-- tauri-utils 2.10.2 — Apache-2.0 OR MIT [MIT-138]
-- tempfile 3.27.0 — MIT OR Apache-2.0 [MIT-122]
+- tauri-runtime 2.12.2 — Apache-2.0 OR MIT [MIT-139]
+- tauri-runtime-wry 2.12.3 — Apache-2.0 OR MIT [MIT-139]
+- tauri-utils 2.10.2 — Apache-2.0 OR MIT [MIT-139]
+- tempfile 3.27.0 — MIT OR Apache-2.0 [MIT-123]
 - tendril 0.5.1 — MIT OR Apache-2.0 [MIT-207]
 - termcolor 1.4.1 — Unlicense OR MIT [MIT-18]
 - thiserror 1.0.69 — MIT OR Apache-2.0 [MIT-49]
 - thiserror 2.0.21 — MIT OR Apache-2.0 [MIT-49]
 - thiserror-impl 1.0.69 — MIT OR Apache-2.0 [MIT-49]
 - thiserror-impl 2.0.21 — MIT OR Apache-2.0 [MIT-49]
-- thread_local 1.1.10 — MIT OR Apache-2.0 [MIT-141]
-- time 0.3.55 — MIT OR Apache-2.0 [MIT-128]
-- time-core 0.1.9 — MIT OR Apache-2.0 [MIT-128]
-- time-macros 0.2.32 — MIT OR Apache-2.0 [MIT-128]
+- thread_local 1.1.10 — MIT OR Apache-2.0 [MIT-142]
+- time 0.3.55 — MIT OR Apache-2.0 [MIT-129]
+- time-core 0.1.9 — MIT OR Apache-2.0 [MIT-129]
+- time-macros 0.2.32 — MIT OR Apache-2.0 [MIT-129]
 - tinystr 0.8.5 — Unicode-3.0 [Unicode-3.0-2]
-- tokio 1.54.1 — MIT [MIT-66]
-- tokio-macros 2.7.2 — MIT [MIT-183]
+- tokio 1.54.1 — MIT [MIT-67]
+- tokio-macros 2.7.2 — MIT [MIT-184]
 - tokio-rustls 0.26.6 — MIT OR Apache-2.0 [MIT-24]
-- tokio-util 0.7.20 — MIT [MIT-66]
-- toml 0.9.12+spec-1.1.0 — MIT OR Apache-2.0 [MIT-73]
-- toml 1.1.8+spec-1.1.0 — MIT OR Apache-2.0 [MIT-73]
-- toml_datetime 0.6.3 — MIT OR Apache-2.0 [MIT-132]
-- toml_datetime 0.7.5+spec-1.1.0 — MIT OR Apache-2.0 [MIT-73]
-- toml_datetime 1.1.2+spec-1.1.0 — MIT OR Apache-2.0 [MIT-73]
-- toml_edit 0.19.15 — MIT OR Apache-2.0 [MIT-73]
-- toml_edit 0.20.2 — MIT OR Apache-2.0 [MIT-73]
-- toml_edit 0.25.17+spec-1.1.0 — MIT OR Apache-2.0 [MIT-73]
-- toml_parser 1.1.5+spec-1.1.0 — MIT OR Apache-2.0 [MIT-73]
-- toml_writer 1.1.3+spec-1.1.0 — MIT OR Apache-2.0 [MIT-73]
+- tokio-util 0.7.20 — MIT [MIT-67]
+- toml 0.9.12+spec-1.1.0 — MIT OR Apache-2.0 [MIT-74]
+- toml 1.1.8+spec-1.1.0 — MIT OR Apache-2.0 [MIT-74]
+- toml_datetime 0.6.3 — MIT OR Apache-2.0 [MIT-133]
+- toml_datetime 0.7.5+spec-1.1.0 — MIT OR Apache-2.0 [MIT-74]
+- toml_datetime 1.1.2+spec-1.1.0 — MIT OR Apache-2.0 [MIT-74]
+- toml_edit 0.19.15 — MIT OR Apache-2.0 [MIT-74]
+- toml_edit 0.20.2 — MIT OR Apache-2.0 [MIT-74]
+- toml_edit 0.25.17+spec-1.1.0 — MIT OR Apache-2.0 [MIT-74]
+- toml_parser 1.1.5+spec-1.1.0 — MIT OR Apache-2.0 [MIT-74]
+- toml_writer 1.1.3+spec-1.1.0 — MIT OR Apache-2.0 [MIT-74]
 - tower 0.5.3 — MIT [MIT-202]
 - tower-http 0.6.11 — MIT [MIT-221]
 - tower-layer 0.3.3 — MIT [MIT-202]
 - tower-service 0.3.3 — MIT [MIT-202]
-- tracing 0.1.44 — MIT [MIT-184]
-- tracing-attributes 0.1.31 — MIT [MIT-184]
-- tracing-core 0.1.36 — MIT [MIT-184, MIT-108]
-- tracing-log 0.2.0 — MIT [MIT-184]
-- tracing-subscriber 0.3.23 — MIT [MIT-184]
-- tray-icon 0.25.1 — MIT OR Apache-2.0 [MIT-134]
+- tracing 0.1.44 — MIT [MIT-185]
+- tracing-attributes 0.1.31 — MIT [MIT-185]
+- tracing-core 0.1.36 — MIT [MIT-185, MIT-109]
+- tracing-log 0.2.0 — MIT [MIT-185]
+- tracing-subscriber 0.3.23 — MIT [MIT-185]
+- tray-icon 0.25.1 — MIT OR Apache-2.0 [MIT-135]
 - try-lock 0.2.5 — MIT [MIT-59]
 - ts-rs 11.1.0 — MIT [MIT-5]
 - ts-rs-macros 11.1.0 — MIT [MIT-5]
 - typed-path 0.12.4 — MIT OR Apache-2.0 [MIT-49]
 - typeid 1.0.3 — MIT OR Apache-2.0 [MIT-49]
-- typenum 1.20.1 — MIT OR Apache-2.0 [MIT-137]
-- uds_windows 1.2.1 — MIT [MIT-142]
+- typenum 1.20.1 — MIT OR Apache-2.0 [MIT-138]
+- uds_windows 1.2.1 — MIT [MIT-143]
 - unicode-ident 1.0.27 — (MIT OR Apache-2.0) AND Unicode-3.0 [MIT-49, Unicode-3.0-1]
 - unicode-segmentation 1.13.3 — MIT OR Apache-2.0 [MIT-2]
 - untrusted 0.9.0 — ISC [ISC-18]
 - ureq 3.5.0 — MIT OR Apache-2.0 [MIT-37]
-- ureq-proto 0.6.5 — MIT OR Apache-2.0 [MIT-181]
-- url 2.5.8 — MIT OR Apache-2.0 [MIT-121]
+- ureq-proto 0.6.5 — MIT OR Apache-2.0 [MIT-182]
+- url 2.5.8 — MIT OR Apache-2.0 [MIT-122]
 - urlpattern 0.6.0 — MIT [MIT-223]
 - utf8-zero 0.8.1 — MIT OR Apache-2.0 [MIT-49]
-- utf8_iter 1.0.4 — Apache-2.0 OR MIT [MIT-124]
+- utf8_iter 1.0.4 — Apache-2.0 OR MIT [MIT-125]
 - uuid 1.28.0 — Apache-2.0 OR MIT [MIT-10]
 - walkdir 2.5.0 — Unlicense OR MIT [MIT-18]
 - want 0.3.2 — MIT [MIT-230]
 - wasi 0.11.1+wasi-snapshot-preview1 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT [MIT-49]
 - wasip2 1.0.4+wasi-0.2.12 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT [MIT-49]
-- wasm-bindgen 0.2.129 — MIT OR Apache-2.0 [MIT-132]
-- wasm-bindgen-futures 0.4.79 — MIT OR Apache-2.0 [MIT-132]
-- wasm-bindgen-macro 0.2.129 — MIT OR Apache-2.0 [MIT-132]
-- wasm-bindgen-macro-support 0.2.129 — MIT OR Apache-2.0 [MIT-132]
-- wasm-bindgen-shared 0.2.129 — MIT OR Apache-2.0 [MIT-132]
+- wasm-bindgen 0.2.129 — MIT OR Apache-2.0 [MIT-133]
+- wasm-bindgen-futures 0.4.79 — MIT OR Apache-2.0 [MIT-133]
+- wasm-bindgen-macro 0.2.129 — MIT OR Apache-2.0 [MIT-133]
+- wasm-bindgen-macro-support 0.2.129 — MIT OR Apache-2.0 [MIT-133]
+- wasm-bindgen-shared 0.2.129 — MIT OR Apache-2.0 [MIT-133]
 - wasm-streams 0.4.2 — MIT OR Apache-2.0 [MIT-49]
 - wasm-streams 0.5.0 — MIT OR Apache-2.0 [MIT-49]
-- web-sys 0.3.106 — MIT OR Apache-2.0 [MIT-132]
+- web-sys 0.3.106 — MIT OR Apache-2.0 [MIT-133]
 - web-time 1.1.0 — MIT OR Apache-2.0 [MIT-52]
 - web_atoms 0.2.6 — MIT OR Apache-2.0 [MIT-55]
 - webkit2gtk 2.0.2 — MIT [MIT-40]
@@ -543,13 +543,13 @@ Licence expressions (packages):
 - webview2-com 0.39.1 — MIT [MIT-5]
 - webview2-com-macros 0.8.1 — MIT [MIT-5]
 - webview2-com-sys 0.39.1 — MIT [MIT-5]
-- weezl 0.1.12 — MIT OR Apache-2.0 [MIT-98]
+- weezl 0.1.12 — MIT OR Apache-2.0 [MIT-99]
 - widestring 1.2.1 — MIT OR Apache-2.0 [MIT-21]
 - winapi 0.3.9 — MIT OR Apache-2.0 [MIT-43]
 - winapi-i686-pc-windows-gnu 0.4.0 — MIT OR Apache-2.0 [MIT-5]
-- winapi-util 0.1.11 — Unlicense OR MIT [MIT-113]
+- winapi-util 0.1.11 — Unlicense OR MIT [MIT-114]
 - winapi-x86_64-pc-windows-gnu 0.4.0 — MIT OR Apache-2.0 [MIT-5]
-- window-vibrancy 0.8.1 — Apache-2.0 OR MIT [MIT-174]
+- window-vibrancy 0.8.1 — Apache-2.0 OR MIT [MIT-175]
 - windows 0.62.2 — MIT OR Apache-2.0 [MIT-5]
 - windows-collections 0.3.2 — MIT OR Apache-2.0 [MIT-5]
 - windows-core 0.62.2 — MIT OR Apache-2.0 [MIT-5]
@@ -557,7 +557,7 @@ Licence expressions (packages):
 - windows-implement 0.60.2 — MIT OR Apache-2.0 [MIT-5]
 - windows-interface 0.59.3 — MIT OR Apache-2.0 [MIT-5]
 - windows-link 0.2.1 — MIT OR Apache-2.0 [MIT-5]
-- windows-native-keyring-store 1.1.0 — MIT OR Apache-2.0 [MIT-176]
+- windows-native-keyring-store 1.1.0 — MIT OR Apache-2.0 [MIT-177]
 - windows-numerics 0.3.1 — MIT OR Apache-2.0 [MIT-5]
 - windows-registry 0.6.1 — MIT OR Apache-2.0 [MIT-5]
 - windows-result 0.4.1 — MIT OR Apache-2.0 [MIT-5]
@@ -596,72 +596,72 @@ Licence expressions (packages):
 - windows_x86_64_msvc 0.42.2 — MIT OR Apache-2.0 [MIT-5]
 - windows_x86_64_msvc 0.52.6 — MIT OR Apache-2.0 [MIT-5]
 - windows_x86_64_msvc 0.53.1 — MIT OR Apache-2.0 [MIT-5]
-- winnow 0.5.40 — MIT [MIT-136]
-- winnow 0.7.15 — MIT [MIT-136]
-- winnow 1.0.4 — MIT [MIT-136]
+- winnow 0.5.40 — MIT [MIT-137]
+- winnow 0.7.15 — MIT [MIT-137]
+- winnow 1.0.4 — MIT [MIT-137]
 - winreg 0.56.0 — MIT [MIT-201]
 - wit-bindgen 0.57.1 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT [MIT-49]
 - writeable 0.6.4 — Unicode-3.0 [Unicode-3.0-2]
-- wry 0.57.0 — Apache-2.0 OR MIT [MIT-135]
+- wry 0.57.0 — Apache-2.0 OR MIT [MIT-136]
 - x11 2.21.0 — MIT [MIT-49]
 - x11-dl 2.21.0 — MIT [MIT-49]
-- xattr 1.6.1 — MIT OR Apache-2.0 [MIT-122]
+- xattr 1.6.1 — MIT OR Apache-2.0 [MIT-123]
 - yoke 0.8.4 — Unicode-3.0 [Unicode-3.0-2]
 - yoke-derive 0.8.4 — Unicode-3.0 [Unicode-3.0-2]
-- zbus 5.19.0 — MIT [MIT-158]
-- zbus-secret-service-keyring-store 1.0.1 — MIT OR Apache-2.0 [MIT-176]
-- zbus_macros 5.19.0 — MIT [MIT-158]
-- zbus_names 4.3.5 — MIT [MIT-158]
+- zbus 5.19.0 — MIT [MIT-159]
+- zbus-secret-service-keyring-store 1.0.1 — MIT OR Apache-2.0 [MIT-177]
+- zbus_macros 5.19.0 — MIT [MIT-159]
+- zbus_names 4.3.5 — MIT [MIT-159]
 - zcheapstr 1.1.0 — MIT [MIT-56]
 - zerofrom 0.1.8 — Unicode-3.0 [Unicode-3.0-2]
 - zerofrom-derive 0.1.8 — Unicode-3.0 [Unicode-3.0-2]
-- zeroize 1.9.1 — Apache-2.0 OR MIT [MIT-131]
+- zeroize 1.9.1 — Apache-2.0 OR MIT [MIT-132]
 - zerotrie 0.2.5 — Unicode-3.0 [Unicode-3.0-2]
 - zerovec 0.11.9 — Unicode-3.0 [Unicode-3.0-2]
 - zerovec-derive 0.11.7 — Unicode-3.0 [Unicode-3.0-2]
-- zip 9.0.5 — MIT [MIT-108]
+- zip 9.0.5 — MIT [MIT-109]
 - zlib-rs 0.6.8 — Zlib [Zlib-1]
 - zmij 1.0.23 — MIT [MIT-49]
 - zopfli 0.8.4 — Apache-2.0 [Apache-2.0-9]
-- zune-core 0.5.3 — MIT OR Apache-2.0 OR Zlib [MIT-82]
-- zune-jpeg 0.5.15 — MIT OR Apache-2.0 OR Zlib [MIT-82]
-- zvariant 5.15.1 — MIT [MIT-158]
-- zvariant_derive 5.15.1 — MIT [MIT-158]
+- zune-core 0.5.3 — MIT OR Apache-2.0 OR Zlib [MIT-83]
+- zune-jpeg 0.5.15 — MIT OR Apache-2.0 OR Zlib [MIT-83]
+- zvariant 5.15.1 — MIT [MIT-159]
+- zvariant_derive 5.15.1 — MIT [MIT-159]
 - zvariant_utils 4.2.0 — MIT [MIT-49]
 
 ## npm packages (77)
 
 - @angular/cdk 22.2.4 — MIT [MIT-198]
-- @angular/common 22.2.3 — MIT [MIT-75]
-- @angular/compiler 22.2.3 — MIT [MIT-75]
-- @angular/core 22.2.3 — MIT [MIT-75]
-- @angular/forms 22.2.3 — MIT [MIT-75]
-- @angular/localize 22.2.3 — MIT [MIT-75]
+- @angular/common 22.2.3 — MIT [MIT-76]
+- @angular/compiler 22.2.3 — MIT [MIT-76]
+- @angular/core 22.2.3 — MIT [MIT-76]
+- @angular/forms 22.2.3 — MIT [MIT-76]
+- @angular/localize 22.2.3 — MIT [MIT-76]
 - @angular/material 22.2.4 — MIT [MIT-198]
-- @angular/platform-browser 22.2.3 — MIT [MIT-75]
-- @angular/router 22.2.3 — MIT [MIT-75]
-- @babel/code-frame 8.0.6 — MIT [MIT-144]
-- @babel/compat-data 8.0.5 — MIT [MIT-144]
-- @babel/core 8.0.1 — MIT [MIT-144]
-- @babel/generator 8.0.6 — MIT [MIT-144]
-- @babel/helper-compilation-targets 8.0.7 — MIT [MIT-144]
-- @babel/helper-globals 8.0.6 — MIT [MIT-144]
-- @babel/helper-string-parser 8.0.6 — MIT [MIT-144]
-- @babel/helper-validator-identifier 8.0.6 — MIT [MIT-144]
-- @babel/helper-validator-option 8.0.0 — MIT [MIT-144]
-- @babel/helpers 8.0.7 — MIT [MIT-68]
-- @babel/parser 8.0.7 — MIT [MIT-92]
-- @babel/template 8.0.0 — MIT [MIT-144]
-- @babel/traverse 8.0.7 — MIT [MIT-144]
-- @babel/types 8.0.6 — MIT [MIT-144]
+- @angular/platform-browser 22.2.3 — MIT [MIT-76]
+- @angular/router 22.2.3 — MIT [MIT-76]
+- @babel/code-frame 8.0.6 — MIT [MIT-145]
+- @babel/compat-data 8.0.5 — MIT [MIT-145]
+- @babel/core 8.0.1 — MIT [MIT-145]
+- @babel/generator 8.0.6 — MIT [MIT-145]
+- @babel/helper-compilation-targets 8.0.7 — MIT [MIT-145]
+- @babel/helper-globals 8.0.6 — MIT [MIT-145]
+- @babel/helper-string-parser 8.0.6 — MIT [MIT-145]
+- @babel/helper-validator-identifier 8.0.6 — MIT [MIT-145]
+- @babel/helper-validator-option 8.0.0 — MIT [MIT-145]
+- @babel/helpers 8.0.7 — MIT [MIT-69]
+- @babel/parser 8.0.7 — MIT [MIT-93]
+- @babel/template 8.0.0 — MIT [MIT-145]
+- @babel/traverse 8.0.7 — MIT [MIT-145]
+- @babel/types 8.0.6 — MIT [MIT-145]
 - @fontsource/inter 5.3.0 — OFL-1.1 [OFL-1.1-1]
-- @jridgewell/gen-mapping 0.4.0-beta.0 — MIT [MIT-149]
-- @jridgewell/resolve-uri 3.1.2 — MIT [MIT-178]
-- @jridgewell/sourcemap-codec 1.6.0 — MIT [MIT-149]
-- @jridgewell/trace-mapping 0.3.31 — MIT [MIT-149]
-- @ngrx/signals 22.0.1 — MIT [MIT-159]
-- @standard-schema/spec 1.1.0 — MIT [MIT-103]
-- @tauri-apps/api 2.12.4 — Apache-2.0 OR MIT [Apache-2.0-3, MIT-138, Apache-2.0-5]
+- @jridgewell/gen-mapping 0.4.0-beta.0 — MIT [MIT-150]
+- @jridgewell/resolve-uri 3.1.2 — MIT [MIT-179]
+- @jridgewell/sourcemap-codec 1.6.0 — MIT [MIT-150]
+- @jridgewell/trace-mapping 0.3.31 — MIT [MIT-150]
+- @ngrx/signals 22.0.1 — MIT [MIT-160]
+- @standard-schema/spec 1.1.0 — MIT [MIT-104]
+- @tauri-apps/api 2.12.4 — Apache-2.0 OR MIT [Apache-2.0-3, MIT-139, Apache-2.0-5]
 - @types/gensync 1.0.5 — MIT [MIT-236]
 - @types/jsesc 2.5.1 — MIT [MIT-236]
 - ansi-regex 6.4.0 — MIT [MIT-17]
@@ -674,34 +674,34 @@ Licence expressions (packages):
 - echarts 6.1.0 — Apache-2.0 [Apache-2.0-7, NOTICE-1]
 - electron-to-chromium 1.5.463 — ISC [ISC-17]
 - emoji-regex 10.6.0 — MIT [MIT-214]
-- empathic 2.1.0 — MIT [MIT-65]
+- empathic 2.1.0 — MIT [MIT-66]
 - entities 8.1.0 — BSD-2-Clause [BSD-2-Clause-1]
-- escalade 3.2.0 — MIT [MIT-65]
+- escalade 3.2.0 — MIT [MIT-66]
 - fdir 6.5.0 — MIT [MIT-20]
-- flru 1.0.2 — MIT [MIT-65]
+- flru 1.0.2 — MIT [MIT-66]
 - gensync 1.0.0-beta.2 — MIT [MIT-58]
 - get-caller-file 2.0.5 — ISC [ISC-23]
 - get-east-asian-width 1.7.0 — MIT [MIT-17]
 - import-meta-resolve 4.2.0 — MIT [MIT-60]
-- js-tokens 10.0.0 — MIT [MIT-157]
+- js-tokens 10.0.0 — MIT [MIT-158]
 - jsesc 3.1.0 — MIT [MIT-214]
-- json5 2.2.3 — MIT [MIT-95]
-- node-releases 2.0.60 — MIT [MIT-172]
+- json5 2.2.3 — MIT [MIT-96]
+- node-releases 2.0.60 — MIT [MIT-173]
 - obug 2.2.1 — MIT [MIT-210]
 - obug 3.0.0 — MIT [MIT-210]
 - parse5 8.0.1 — MIT [MIT-42]
 - picocolors 1.1.1 — ISC [ISC-25]
-- picomatch 4.0.7 — MIT [MIT-148]
+- picomatch 4.0.7 — MIT [MIT-149]
 - rxjs 7.8.2 — Apache-2.0 [Apache-2.0-11]
 - semver 7.8.5 — ISC [ISC-2]
 - string-width 7.2.0 — MIT [MIT-17]
 - string-width 8.3.0 — MIT [MIT-17]
 - strip-ansi 7.2.0 — MIT [MIT-17]
-- tinyglobby 0.2.17 — MIT [MIT-79]
+- tinyglobby 0.2.17 — MIT [MIT-80]
 - tslib 2.3.0 — 0BSD [0BSD-1]
 - tslib 2.8.1 — 0BSD [0BSD-1]
 - update-browserslist-db 1.3.4 — MIT [MIT-8]
-- verkit 0.5.0 — MIT [MIT-140]
+- verkit 0.5.0 — MIT [MIT-141]
 - wrap-ansi 9.0.2 — MIT [MIT-17]
 - y18n 5.0.8 — ISC [ISC-21]
 - yargs 18.1.0 — MIT [MIT-228]
@@ -5834,6 +5834,33 @@ Used by (1):
 
 ### MIT-62
 
+Used by (1):
+  email-encoding 0.4.3
+
+    MIT License
+
+    Copyright (c) 2021-2026 Paolo Barbolini <paolo@paolobarbolini.it>
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+### MIT-63
+
 Used by (2):
   jni-sys 0.3.1, jni-sys 0.4.1
 
@@ -5857,7 +5884,7 @@ Used by (2):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-63
+### MIT-64
 
 Used by (6):
   core-foundation 0.10.1, core-foundation 0.9.4, core-foundation-sys 0.8.7, core-graphics 0.25.0,
@@ -5889,7 +5916,7 @@ Used by (6):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-64
+### MIT-65
 
 Used by (1):
   cfb 0.14.0
@@ -5916,7 +5943,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-65
+### MIT-66
 
 Used by (3):
   empathic 2.1.0, escalade 3.2.0, flru 1.0.2
@@ -5931,7 +5958,7 @@ Used by (3):
 
     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-### MIT-66
+### MIT-67
 
 Used by (2):
   tokio 1.54.1, tokio-util 0.7.20
@@ -5958,7 +5985,7 @@ Used by (2):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-67
+### MIT-68
 
 Used by (1):
   sha2 0.10.9
@@ -5991,7 +6018,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-68
+### MIT-69
 
 Used by (1):
   @babel/helpers 8.0.7
@@ -6020,7 +6047,7 @@ Used by (1):
     OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
     WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-### MIT-69
+### MIT-70
 
 Used by (1):
   new_debug_unreachable 1.0.6
@@ -6051,7 +6078,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-70
+### MIT-71
 
 Used by (1):
   equivalent 1.0.3
@@ -6082,7 +6109,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-71
+### MIT-72
 
 Used by (1):
   alsa-sys 0.4.0
@@ -6109,7 +6136,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-72
+### MIT-73
 
 Used by (1):
   ctutils 0.4.5
@@ -6140,7 +6167,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-73
+### MIT-74
 
 Used by (10):
   serde_spanned 1.1.2, toml 0.9.12+spec-1.1.0, toml 1.1.8+spec-1.1.0,
@@ -6168,7 +6195,7 @@ Used by (10):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-74
+### MIT-75
 
 Used by (3):
   javascriptcore-rs-sys 1.1.1, soup3 0.5.0, soup3-sys 0.5.0
@@ -6195,7 +6222,7 @@ Used by (3):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-75
+### MIT-76
 
 Used by (7):
   @angular/common 22.2.3, @angular/compiler 22.2.3, @angular/core 22.2.3, @angular/forms 22.2.3,
@@ -6223,7 +6250,7 @@ Used by (7):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-### MIT-76
+### MIT-77
 
 Used by (1):
   getrandom 0.2.17
@@ -6255,7 +6282,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-77
+### MIT-78
 
 Used by (1):
   cookie 0.18.2
@@ -6287,7 +6314,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-78
+### MIT-79
 
 Used by (1):
   async-broadcast 0.7.2
@@ -6314,7 +6341,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-79
+### MIT-80
 
 Used by (1):
   tinyglobby 0.2.17
@@ -6341,7 +6368,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-80
+### MIT-81
 
 Used by (1):
   sqlite-wasm-rs 0.5.5
@@ -6368,7 +6395,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-81
+### MIT-82
 
 Used by (2):
   derive_more 2.1.1, derive_more-impl 2.1.1
@@ -6395,7 +6422,7 @@ Used by (2):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-82
+### MIT-83
 
 Used by (2):
   zune-core 0.5.3, zune-jpeg 0.5.15
@@ -6422,7 +6449,7 @@ Used by (2):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-83
+### MIT-84
 
 Used by (2):
   bit-set 0.8.0, bit-vec 0.8.0
@@ -6453,7 +6480,7 @@ Used by (2):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-84
+### MIT-85
 
 Used by (1):
   num-conv 0.2.2
@@ -6478,7 +6505,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-85
+### MIT-86
 
 Used by (1):
   indexmap 2.14.2
@@ -6509,7 +6536,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-86
+### MIT-87
 
 Used by (1):
   bytes 1.12.1
@@ -6540,7 +6567,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-87
+### MIT-88
 
 Used by (1):
   libdbus-sys 0.2.7
@@ -6582,7 +6609,7 @@ Used by (1):
     DBUS_END_DECLS
     #endif /* DBUS_SERVER_LAUNCHD_H */
 
-### MIT-88
+### MIT-89
 
 Used by (1):
   sha2 0.11.1
@@ -6616,7 +6643,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-89
+### MIT-90
 
 Used by (1):
   reqwest 0.12.28
@@ -6641,7 +6668,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-### MIT-90
+### MIT-91
 
 Used by (1):
   bumpalo 3.20.3
@@ -6672,7 +6699,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-91
+### MIT-92
 
 Used by (2):
   http-body 1.1.0, http-body-util 0.1.5
@@ -6703,7 +6730,7 @@ Used by (2):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-92
+### MIT-93
 
 Used by (1):
   @babel/parser 8.0.7
@@ -6728,7 +6755,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-### MIT-93
+### MIT-94
 
 Used by (2):
   crossbeam-channel 0.5.17, crossbeam-utils 0.8.23
@@ -6761,7 +6788,7 @@ Used by (2):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-94
+### MIT-95
 
 Used by (1):
   plist 1.10.3
@@ -6786,7 +6813,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-95
+### MIT-96
 
 Used by (1):
   json5 2.2.3
@@ -6815,7 +6842,7 @@ Used by (1):
 
     [others]: https://github.com/json5/json5/contributors
 
-### MIT-96
+### MIT-97
 
 Used by (1):
   stable_deref_trait 1.2.1
@@ -6846,7 +6873,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-97
+### MIT-98
 
 Used by (1):
   block-buffer 0.10.4
@@ -6877,7 +6904,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-98
+### MIT-99
 
 Used by (1):
   weezl 0.1.12
@@ -6904,7 +6931,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-99
+### MIT-100
 
 Used by (2):
   libsqlite3-sys 0.39.1, rusqlite 0.41.1
@@ -6929,7 +6956,7 @@ Used by (2):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-### MIT-100
+### MIT-101
 
 Used by (1):
   rustls-platform-verifier 0.7.1
@@ -6956,7 +6983,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-101
+### MIT-102
 
 Used by (1):
   simd-adler32 0.3.10
@@ -6983,7 +7010,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-102
+### MIT-103
 
 Used by (1):
   cpufeatures 0.2.17
@@ -7014,7 +7041,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-103
+### MIT-104
 
 Used by (1):
   @standard-schema/spec 1.1.0
@@ -7041,7 +7068,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-104
+### MIT-105
 
 Used by (1):
   crypto-common 0.1.7
@@ -7072,7 +7099,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-105
+### MIT-106
 
 Used by (1):
   precomputed-hash 0.1.1
@@ -7099,7 +7126,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-106
+### MIT-107
 
 Used by (1):
   schemars_derive 0.8.22
@@ -7158,7 +7185,7 @@ Used by (1):
         }
     }
 
-### MIT-107
+### MIT-108
 
 Used by (2):
   base64 0.21.7, base64 0.22.1
@@ -7185,7 +7212,7 @@ Used by (2):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-### MIT-108
+### MIT-109
 
 Used by (2):
   tracing-core 0.1.36, zip 9.0.5
@@ -7212,7 +7239,7 @@ Used by (2):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-109
+### MIT-110
 
 Used by (1):
   jni 0.21.1
@@ -7239,7 +7266,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-110
+### MIT-111
 
 Used by (1):
   osakit 0.3.1
@@ -7270,7 +7297,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-111
+### MIT-112
 
 Used by (1):
   powerfmt 0.2.1
@@ -7295,7 +7322,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-112
+### MIT-113
 
 Used by (1):
   rand_core 0.10.1
@@ -7326,7 +7353,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-113
+### MIT-114
 
 Used by (2):
   same-file 1.0.6, winapi-util 0.1.11
@@ -7353,7 +7380,7 @@ Used by (2):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-### MIT-114
+### MIT-115
 
 Used by (1):
   getrandom 0.3.4
@@ -7385,7 +7412,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-115
+### MIT-116
 
 Used by (2):
   miniz_oxide 0.8.9, miniz_oxide 0.9.1
@@ -7416,7 +7443,7 @@ Used by (2):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-116
+### MIT-117
 
 Used by (1):
   swift-rs 1.0.9
@@ -7441,7 +7468,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-117
+### MIT-118
 
 Used by (2):
   block-buffer 0.12.1, block-padding 0.4.2
@@ -7472,7 +7499,7 @@ Used by (2):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-118
+### MIT-119
 
 Used by (2):
   serialize-to-javascript 0.1.2, serialize-to-javascript-impl 0.1.2
@@ -7499,7 +7526,7 @@ Used by (2):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-119
+### MIT-120
 
 Used by (3):
   fdeflate 0.3.7, image 0.25.10, image-webp 0.2.4
@@ -7530,7 +7557,7 @@ Used by (3):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-120
+### MIT-121
 
 Used by (1):
   infer 0.22.0
@@ -7557,7 +7584,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-121
+### MIT-122
 
 Used by (3):
   idna 1.1.0, percent-encoding 2.3.2, url 2.5.8
@@ -7588,7 +7615,7 @@ Used by (3):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-122
+### MIT-123
 
 Used by (2):
   tempfile 3.27.0, xattr 1.6.1
@@ -7619,7 +7646,7 @@ Used by (2):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-123
+### MIT-124
 
 Used by (1):
   libredox 0.1.25
@@ -7646,7 +7673,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-124
+### MIT-125
 
 Used by (1):
   utf8_iter 1.0.4
@@ -7677,7 +7704,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-125
+### MIT-126
 
 Used by (1):
   os_info 3.15.0
@@ -7704,7 +7731,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-126
+### MIT-127
 
 Used by (1):
   smallvec 1.16.3
@@ -7735,7 +7762,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-127
+### MIT-128
 
 Used by (1):
   errno 0.3.14
@@ -7766,7 +7793,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-128
+### MIT-129
 
 Used by (3):
   time 0.3.55, time-core 0.1.9, time-macros 0.2.32
@@ -7791,7 +7818,7 @@ Used by (3):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-129
+### MIT-130
 
 Used by (1):
   matchit 0.8.4
@@ -7818,7 +7845,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-130
+### MIT-131
 
 Used by (1):
   png 0.18.1
@@ -7849,7 +7876,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-131
+### MIT-132
 
 Used by (1):
   zeroize 1.9.1
@@ -7880,7 +7907,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-132
+### MIT-133
 
 Used by (12):
   cfg-if 1.0.5, filetime 0.2.29, js-sys 0.3.106, openssl-probe 0.2.1, socket2 0.6.5,
@@ -7914,7 +7941,7 @@ Used by (12):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-133
+### MIT-134
 
 Used by (1):
   httparse 1.10.1
@@ -7939,7 +7966,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-### MIT-134
+### MIT-135
 
 Used by (2):
   muda 0.20.0, tray-icon 0.25.1
@@ -7966,7 +7993,7 @@ Used by (2):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-135
+### MIT-136
 
 Used by (1):
   wry 0.57.0
@@ -7993,7 +8020,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-136
+### MIT-137
 
 Used by (3):
   winnow 0.5.40, winnow 0.7.15, winnow 1.0.4
@@ -8017,7 +8044,7 @@ Used by (3):
     OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
     WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-### MIT-137
+### MIT-138
 
 Used by (1):
   typenum 1.20.1
@@ -8044,7 +8071,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-138
+### MIT-139
 
 Used by (7):
   @tauri-apps/api 2.12.4, tauri 2.12.5, tauri-codegen 2.7.4, tauri-macros 2.7.4,
@@ -8072,7 +8099,7 @@ Used by (7):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-139
+### MIT-140
 
 Used by (1):
   javascriptcore-rs 1.1.2
@@ -8100,7 +8127,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-140
+### MIT-141
 
 Used by (1):
   verkit 0.5.0
@@ -8127,7 +8154,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-141
+### MIT-142
 
 Used by (4):
   lock_api 0.4.14, parking_lot 0.12.5, parking_lot_core 0.9.12, thread_local 1.1.10
@@ -8158,7 +8185,7 @@ Used by (4):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-142
+### MIT-143
 
 Used by (1):
   uds_windows 1.2.1
@@ -8185,7 +8212,7 @@ Used by (1):
         OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
         SOFTWARE
 
-### MIT-143
+### MIT-144
 
 Used by (1):
   httpdate 1.0.3
@@ -8210,7 +8237,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-### MIT-144
+### MIT-145
 
 Used by (12):
   @babel/code-frame 8.0.6, @babel/compat-data 8.0.5, @babel/core 8.0.1, @babel/generator 8.0.6,
@@ -8242,7 +8269,7 @@ Used by (12):
     OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
     WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-### MIT-145
+### MIT-146
 
 Used by (1):
   dom_query 0.28.0
@@ -8275,7 +8302,7 @@ Used by (1):
     derived from the "nipper" project (https://github.com/importcjj/nipper),
     developed by Chen Jiaju, licensed under the MIT License and the Apache License 2.0 (dual licensed).
 
-### MIT-146
+### MIT-147
 
 Used by (1):
   strsim 0.11.1
@@ -8304,7 +8331,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-147
+### MIT-148
 
 Used by (1):
   mach2 0.6.0
@@ -8335,7 +8362,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-148
+### MIT-149
 
 Used by (1):
   picomatch 4.0.7
@@ -8362,7 +8389,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-### MIT-149
+### MIT-150
 
 Used by (3):
   @jridgewell/gen-mapping 0.4.0-beta.0, @jridgewell/sourcemap-codec 1.6.0,
@@ -8388,7 +8415,7 @@ Used by (3):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-150
+### MIT-151
 
 Used by (1):
   getrandom 0.4.3
@@ -8420,7 +8447,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-151
+### MIT-152
 
 Used by (1):
   ico 0.6.0
@@ -8447,7 +8474,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-152
+### MIT-153
 
 Used by (1):
   crc32fast 1.5.3
@@ -8474,10 +8501,10 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-153
+### MIT-154
 
 Used by (1):
-  lettre 0.11.23
+  lettre 0.11.24
 
     Copyright (c) 2014-2024 Alexis Mousset <contact@amousset.me>
     Copyright (c) 2019-2025 Paolo Barbolini <paolo@paolo565.org>
@@ -8507,7 +8534,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-154
+### MIT-155
 
 Used by (1):
   email_address 0.2.9
@@ -8534,7 +8561,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-155
+### MIT-156
 
 Used by (2):
   digest 0.10.7, hmac 0.13.0
@@ -8565,7 +8592,7 @@ Used by (2):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-156
+### MIT-157
 
 Used by (1):
   hex 0.4.3
@@ -8591,7 +8618,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-157
+### MIT-158
 
 Used by (1):
   js-tokens 10.0.0
@@ -8618,7 +8645,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-### MIT-158
+### MIT-159
 
 Used by (5):
   zbus 5.19.0, zbus_macros 5.19.0, zbus_names 4.3.5, zvariant 5.15.1, zvariant_derive 5.15.1
@@ -8649,7 +8676,7 @@ Used by (5):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-159
+### MIT-160
 
 Used by (1):
   @ngrx/signals 22.0.1
@@ -8680,7 +8707,7 @@ Used by (1):
     https://github.com/cartant/rxjs-etc by Nicholas Jamieson, MIT licensed. See the
     file header for details.
 
-### MIT-160
+### MIT-161
 
 Used by (2):
   cmov 0.5.4, hybrid-array 0.4.15
@@ -8711,7 +8738,7 @@ Used by (2):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-161
+### MIT-162
 
 Used by (1):
   color_quant 1.1.0
@@ -8738,7 +8765,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-162
+### MIT-163
 
 Used by (1):
   embed_plist 1.2.2
@@ -8765,7 +8792,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-163
+### MIT-164
 
 Used by (1):
   mime 0.3.17
@@ -8790,7 +8817,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-### MIT-164
+### MIT-165
 
 Used by (3):
   hyper-rustls 0.27.10, rustls 0.23.46, rustls-native-certs 0.8.5
@@ -8821,7 +8848,7 @@ Used by (3):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-165
+### MIT-166
 
 Used by (1):
   combine 4.6.9
@@ -8848,7 +8875,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-### MIT-166
+### MIT-167
 
 Used by (1):
   raw-window-handle 0.6.2
@@ -8875,7 +8902,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-167
+### MIT-168
 
 Used by (1):
   signal-hook-registry 1.4.8
@@ -8906,7 +8933,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-168
+### MIT-169
 
 Used by (2):
   miniz_oxide 0.8.9, miniz_oxide 0.9.1
@@ -8936,7 +8963,7 @@ Used by (2):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-169
+### MIT-170
 
 Used by (1):
   generic-array 0.14.7
@@ -8963,7 +8990,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-170
+### MIT-171
 
 Used by (2):
   hashbrown 0.16.1, hashbrown 0.17.1
@@ -8994,7 +9021,7 @@ Used by (2):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-171
+### MIT-172
 
 Used by (1):
   android_system_properties 0.1.6
@@ -9020,7 +9047,7 @@ Used by (1):
     IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
     CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-### MIT-172
+### MIT-173
 
 Used by (1):
   node-releases 2.0.60
@@ -9047,7 +9074,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-### MIT-173
+### MIT-174
 
 Used by (8):
   futures-channel 0.3.34, futures-core 0.3.34, futures-executor 0.3.34, futures-io 0.3.34,
@@ -9080,7 +9107,7 @@ Used by (8):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-174
+### MIT-175
 
 Used by (1):
   window-vibrancy 0.8.1
@@ -9107,7 +9134,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-175
+### MIT-176
 
 Used by (1):
   serde_urlencoded 0.7.1
@@ -9138,7 +9165,7 @@ Used by (1):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-176
+### MIT-177
 
 Used by (5):
   apple-native-keyring-store 1.0.2, keyring 4.2.0, keyring-core 1.0.1,
@@ -9170,7 +9197,7 @@ Used by (5):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-177
+### MIT-178
 
 Used by (1):
   cobs 0.3.0
@@ -9195,7 +9222,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-178
+### MIT-179
 
 Used by (1):
   @jridgewell/resolve-uri 3.1.2
@@ -9220,7 +9247,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-179
+### MIT-180
 
 Used by (1):
   nix 0.31.3
@@ -9247,7 +9274,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-### MIT-180
+### MIT-181
 
 Used by (1):
   ctor 1.0.13
@@ -9258,7 +9285,7 @@ Used by (1):
 
     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-### MIT-181
+### MIT-182
 
 Used by (1):
   ureq-proto 0.6.5
@@ -9271,7 +9298,7 @@ Used by (1):
 
     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-### MIT-182
+### MIT-183
 
 Used by (1):
   reqwest 0.13.5
@@ -9296,7 +9323,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-### MIT-183
+### MIT-184
 
 Used by (1):
   tokio-macros 2.7.2
@@ -9324,7 +9351,7 @@ Used by (1):
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-### MIT-184
+### MIT-185
 
 Used by (5):
   tracing 0.1.44, tracing-attributes 0.1.31, tracing-core 0.1.36, tracing-log 0.2.0,
@@ -9356,7 +9383,7 @@ Used by (5):
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-### MIT-185
+### MIT-186
 
 Used by (1):
   croner 4.0.2
@@ -9382,7 +9409,7 @@ Used by (1):
     IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
     CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-### MIT-186
+### MIT-187
 
 Used by (1):
   fnv 1.0.7
@@ -9412,33 +9439,6 @@ Used by (1):
     OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
     IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
-
-### MIT-187
-
-Used by (1):
-  email-encoding 0.4.2
-
-    MIT License
-
-    Copyright (c) 2021-2024 Paolo Barbolini <paolo@paolo565.org>
-
-    Permission is hereby granted, free of charge, to any person obtaining a copy
-    of this software and associated documentation files (the "Software"), to deal
-    in the Software without restriction, including without limitation the rights
-    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-    copies of the Software, and to permit persons to whom the Software is
-    furnished to do so, subject to the following conditions:
-
-    The above copyright notice and this permission notice shall be included in all
-    copies or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-    SOFTWARE.
 
 ### MIT-188
 
