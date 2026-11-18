@@ -96,7 +96,11 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
         "pitwall-scripts",
         "pitwall-deny",
     ] {
-        assert!(got.iter().any(|g| g == want), "{want} is missing from {got:?}");
+        assert!(
+            got.iter()
+                .any(|g| g == want || (want == "pitwall-deny" && g.starts_with("pitwall-deny"))),
+            "{want} is missing from {got:?}"
+        );
     }
     assert!(!got.iter().any(|g| g.contains("fuzz")), "a fuzz workspace has its own job: {got:?}");
     let by = |id: &str| run_gates(&planned).into_iter().find(|g| g.id == id).cloned().unwrap();
@@ -831,7 +835,7 @@ fn the_cargo_folder_alone_reaches_linux_clippy_but_documentation_does_not() {
 #[test]
 fn pitwalls_deny_needs_cargo_deny_and_an_empty_script_list_is_a_broken_check() {
     let planned = crates_gates();
-    let deny = run_gates(&planned).into_iter().find(|g| g.id == "pitwall-deny").unwrap();
+    let deny = run_gates(&planned).into_iter().find(|g| g.id.starts_with("pitwall-deny")).unwrap();
     assert_eq!(deny.need, Need::Tool("cargo-deny".into()));
     let rows = run_all(
         &planned,
@@ -841,7 +845,7 @@ fn pitwalls_deny_needs_cargo_deny_and_an_empty_script_list_is_a_broken_check() {
         },
         2,
     );
-    assert!(matches!(nm(&verdicts(&rows)["pitwall-deny"]), Some((reason, _)) if reason.contains("cargo-deny")));
+    assert!(matches!(nm(&verdicts(&rows)["pitwall-deny (licences, bans, sources)"]), Some((reason, _)) if reason.contains("cargo-deny")));
     let mut f = facts();
     f.pitwall_tests.clear();
     let planned = plan_gates(&plan(), &change(&["apps/pitwall/a.rs"]), &f);
@@ -3129,14 +3133,18 @@ mod deny_row {
         let mut c = change(files);
         c.base = base.map(String::from);
         let planned = plan_gates(&plan(), &c, &facts());
-        let g = run_gates(&planned).into_iter().find(|g| g.id == "pitwall-deny").unwrap().clone();
+        let g = run_gates(&planned)
+            .into_iter()
+            .find(|g| g.id.starts_with("pitwall-deny"))
+            .unwrap()
+            .clone();
         (decide(&g, &ex, Duration::from_secs(60), &test_subject()), planned)
     }
 
     fn notice(planned: &[Planned]) -> Option<String> {
         run_gates(planned)
             .into_iter()
-            .find(|g| g.id == "pitwall-deny")
+            .find(|g| g.id.starts_with("pitwall-deny"))
             .unwrap()
             .notice
             .clone()
@@ -3172,6 +3180,8 @@ mod deny_row {
             "apps/pitwall/crates/x/Cargo.toml",
             "apps/pitwall/deny.toml",
             "crates/paddock-proc/Cargo.toml",
+            ".cargo/config.toml",
+            "apps/pitwall/app/.cargo/config.toml",
         ] {
             let d = tempfile::tempdir().unwrap();
             let (row, planned) = push(d.path(), &[file], Some("origin/main"));
@@ -3192,4 +3202,33 @@ mod deny_row {
         assert_eq!(row.kind(), Kind::Failed, "not measured never passes: {row:?}");
         assert!(notice(&planned).is_none());
     }
+
+    #[test]
+    fn the_next_step_names_the_command_that_ran() {
+        let d = tempfile::tempdir().unwrap();
+        for (file, want) in [
+            ("apps/pitwall/src/a.rs", "cargo deny --workspace check licenses bans sources"),
+            ("apps/pitwall/Cargo.lock", "cargo deny --workspace check`"),
+        ] {
+            let (_, planned) = push(d.path(), &[file], Some("origin/main"));
+            let g = run_gates(&planned).into_iter().find(|g| g.id.starts_with("pitwall-deny")).unwrap();
+            assert!(g.next.contains(want), "{}", g.next);
+        }
+    }
+}
+
+/// A file list the caller gave is not measured from the base, so what judges only "what the push adds" (the deny advisories) must
+/// run in full; a measured push and a person's run with no list keep the base.
+#[test]
+fn a_given_file_list_has_no_base_and_a_measured_change_has_one() {
+    let r = Repo::new();
+    let c1 = r.commit("a");
+    r.remote("main", &c1);
+    let c2 = r.commit("b");
+    let (given, _, _) = super::discover(&r.root, &c1, &["apps/pitwall/src/a.rs".to_string()], &[]).unwrap();
+    assert_eq!(given.base, None);
+    let (measured, _, _) = super::discover(&r.root, &c1, &[], &[]).unwrap();
+    assert_eq!(measured.base.as_deref(), Some(c1.as_str()));
+    let (pushed, _, _) = super::discover(&r.root, &c1, &[], std::slice::from_ref(&c2)).unwrap();
+    assert_eq!(pushed.base.as_deref(), Some(c1.as_str()));
 }

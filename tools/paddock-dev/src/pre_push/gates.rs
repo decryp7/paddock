@@ -356,15 +356,13 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
         } else {
             Planned::Run(g)
         });
-        let mut d = gate(
-            "pitwall-deny".into(),
-            "apps/pitwall",
-            "cargo",
-            &[],
-            1,
-            "`cargo deny --workspace check` in apps/pitwall names the advisory or licence; fix or record it in deny.toml".into(),
-        );
+        let mut d = gate("pitwall-deny".into(), "apps/pitwall", "cargo", &[], 1, String::new());
         let scope = super::deny::scope(change, "apps/pitwall");
+        d.id = scope.label(&d.id);
+        d.next = format!(
+            "`cargo {}` in apps/pitwall names the finding; fix it or record it in deny.toml",
+            scope.args().join(" ")
+        );
         d.args = scope.args();
         d.notice = scope.notice("apps/pitwall");
         d.need = Need::Tool("cargo-deny".into());

@@ -34,6 +34,15 @@ impl Scope {
         a
     }
 
+    /// The row label: the full command's row is plain, a row that leaves the advisories out says what it did check, so it does not
+    /// read as a full pass.
+    pub fn label(&self, id: &str) -> String {
+        match self {
+            Scope::All { .. } => id.to_string(),
+            Scope::WithoutAdvisories { .. } => format!("{id} (licences, bans, sources)"),
+        }
+    }
+
     /// The one line a push prints when the advisories are left out; `None` when they run.
     pub fn notice(&self, workspace: &str) -> Option<String> {
         match self {
@@ -46,12 +55,15 @@ impl Scope {
 }
 
 /// Whether `file` changes what `workspace` (a folder such as `apps/pitwall`) depends on: its own lockfile, any manifest below it, its
-/// `deny.toml`, or a manifest of the shared crates it reaches by path.
+/// `deny.toml`, a manifest of the shared crates it reaches by path, or a `.cargo/config.toml`.
 fn changes_dependencies(file: &str, workspace: &str) -> bool {
     let name = file.rsplit('/').next().unwrap_or(file);
     let inside = file.starts_with(&format!("{workspace}/"));
     let shared = file.starts_with("crates/") && name == "Cargo.toml";
-    (inside && matches!(name, "Cargo.lock" | "Cargo.toml" | "deny.toml")) || shared
+    // Cargo's own configuration (a `[patch]`, a source replacement) changes the resolved graph: the root one and any below the workspace.
+    let cargo_config = matches!(file, ".cargo/config.toml" | ".cargo/config")
+        || (inside && (file.contains("/.cargo/config.toml") || file.contains("/.cargo/config")));
+    (inside && matches!(name, "Cargo.lock" | "Cargo.toml" | "deny.toml")) || shared || cargo_config
 }
 
 /// The scope of the deny row of `workspace` for this push. A change with no known base runs the advisories.
@@ -93,6 +105,8 @@ mod tests {
             "apps/pitwall/app/src-tauri/Cargo.lock",
             "apps/pitwall/Cargo.toml",
             "crates/a/Cargo.toml",
+            ".cargo/config.toml",
+            "apps/pitwall/app/.cargo/config.toml",
         ] {
             let all = scope(&change(&[f], Some("b")), ws);
             assert_eq!(all.args().join(" "), "deny --workspace check", "{f}");

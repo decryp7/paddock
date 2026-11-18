@@ -1284,6 +1284,8 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
         ])
     };
     let mut notes = Vec::new();
+    // A list of files the caller gave (`--files`) is not measured from the base: checks that judge only what the push adds run in full.
+    let mut base_known = true;
     let mut changed: Vec<String> = Vec::new();
     let mut ranges = Vec::new();
     let mut extra = Vec::new();
@@ -1320,6 +1322,7 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
             }
         } else {
             changed.extend(files.iter().cloned());
+            base_known = false;
         }
         if count(&mb, "HEAD") > 0 {
             ranges.push(format!("{mb}..HEAD"));
@@ -1331,7 +1334,7 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
         Change {
             files: changed,
             ranges,
-            base: Some(base.to_string()),
+            base: base_known.then(|| base.to_string()),
         },
         notes,
         extra,
