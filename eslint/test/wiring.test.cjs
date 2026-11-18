@@ -238,11 +238,17 @@ for (const dir of targets) {
 // Three reviews each found a new way to turn paddock/e2e-ready-reads off without any check noticing: an app's own config override (round 1), a non-default
 // suppressions file (round 2), a different ESLint config named by `eslintConfig` or `-c` (round 3). Forbidding one more spelling each time never ends, so this
 // control does not read how the command is configured at all: for each project it takes the lint command CI runs (the contract's `npm run lint`, which is the package.json
-// script), runs exactly that command in the project folder against a planted spec with an unready read, and requires a failure with the rule's message; then
-// against a planted suppression that no longer occurs, and requires a failure. Whatever config, flag, builder option, `configurations` entry or composite
-// action the command picks up is covered because the command itself is shown to go red. The cheap checks above stay where they are cheap.
-const { describe } = require('node:test');
-const { rmSync: rm, writeFileSync: write, readFileSync: read } = require('node:fs');
+// script), runs exactly that command against a planted spec with an unready read, and requires a failure with the rule's message; then against a planted suppression that no
+// longer occurs, and requires a failure. Whatever config, flag, builder option, `configurations` entry or composite action the command picks up is covered because the
+// command itself is shown to go red. The cheap checks above stay where they are cheap.
+//
+// ER-45: it never writes into the real repository. Every planted file goes into a scratch copy of the project outside it (scripts/test-helpers/scratch-project.cjs, removed
+// in `finally` and by a signal and exit handler), so a kill mid-run leaves `git status` clean and two concurrent runs cannot corrupt each other's "original"; a guard
+// below compares `git status --porcelain` before and after.
+const { describe, before, after } = require('node:test');
+const { writeFileSync: write } = require('node:fs');
+const { execFileSync } = require('node:child_process');
+const { scratchProject } = require('../../scripts/test-helpers/scratch-project.cjs');
 
 const PLANTED_READ = 'e2e/zz-planted-ready-read.spec.ts';
 const PLANTED_CLEAN = 'e2e/zz-planted-clean.spec.ts';
@@ -257,76 +263,65 @@ const READ_SPEC = [
 ].join('\n');
 const CLEAN_SPEC = 'export const plantedClean = 1;\n';
 
-/** The lint command CI runs for the project: the `npm run lint` of its contract or workflow, as the package.json script it names. Throws when CI runs something else. */
+/** The lint command CI runs for the project: the `npm run lint` of its contract or workflow. Throws when CI runs something else. */
 function realLintCommand(dir) {
   const name = dir.slice(REPO.length + 1);
   const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
   const ci = ciCommands(dir);
   assert.ok(ci.some((c) => /^npm run lint$/.test(c.trim())), `${name}: CI does not run \`npm run lint\` (${ci.filter((c) => /lint/.test(c)).join(' | ')})`);
   assert.ok(pkg.scripts?.lint, `${name}: no lint script`);
-  return { cmd: 'npm', args: ['run', 'lint'], script: pkg.scripts.lint };
+  return { cmd: 'npm', args: ['run', 'lint'] };
 }
 
-/** Runs the command in `dir` and resolves { status, out }. Never rejects. */
-function runCommand(dir, { cmd, args }) {
-  return new Promise((resolveRun) => {
-    const child = require('node:child_process').spawn(cmd, args, { cwd: dir, env: { ...process.env, CI: '1', FORCE_COLOR: '0' } });
-    let out = '';
-    child.stdout.on('data', (d) => (out += d));
-    child.stderr.on('data', (d) => (out += d));
-    child.on('close', (status) => resolveRun({ status, out }));
-    child.on('error', (e) => resolveRun({ status: -1, out: String(e) }));
-  });
-}
-
-/**
- * The planted-spec control and the planted-suppression control for one project. Every file it writes is removed or restored in `finally`, also when the command
- * hangs or throws; a planted file is never left in the tree.
- */
+/** The planted-spec control and the planted-suppression control for one project, in a scratch copy of it. */
 async function plantedControls(dir) {
   const command = realLintCommand(dir);
-  const read = join(dir, PLANTED_READ);
-  const clean = join(dir, PLANTED_CLEAN);
-  const supp = join(dir, 'eslint-suppressions.json');
-  const original = existsSync(supp) ? read_(supp) : null;
+  const scratch = scratchProject(REPO, dir.slice(REPO.length + 1));
   const timings = {};
   const results = {};
   try {
     // 1. an unready read, with the project's own suppressions in place (they never name this file).
-    write(read, READ_SPEC);
+    write(join(scratch.dir, PLANTED_READ), READ_SPEC);
     let t = Date.now();
-    results.unready = await runCommand(dir, command);
+    results.unready = await scratch.run(command.cmd, command.args);
     timings.unready = Date.now() - t;
-    rm(read, { force: true });
+    rmSync(join(scratch.dir, PLANTED_READ), { force: true });
     // 2. a suppression that no longer occurs: the file exists and has no unready read.
-    write(clean, CLEAN_SPEC);
-    const entries = original ? JSON.parse(original) : {};
+    write(join(scratch.dir, PLANTED_CLEAN), CLEAN_SPEC);
+    const supp = join(scratch.dir, 'eslint-suppressions.json');
+    const entries = existsSync(supp) ? JSON.parse(readFileSync(supp, 'utf8')) : {};
     entries[PLANTED_CLEAN] = { 'paddock/e2e-ready-reads': { count: 1 } };
     write(supp, `${JSON.stringify(entries, null, 2)}\n`);
     t = Date.now();
-    results.unused = await runCommand(dir, command);
+    results.unused = await scratch.run(command.cmd, command.args);
     timings.unused = Date.now() - t;
   } finally {
-    rm(read, { force: true });
-    rm(clean, { force: true });
-    if (original === null) rm(supp, { force: true });
-    else write(supp, original);
+    scratch.cleanup();
   }
-  return { command, results, timings };
+  return { results, timings, scratch };
 }
-const read_ = (p) => readFileSync(p, 'utf8');
+
+const gitStatus = () => execFileSync('git', ['status', '--porcelain'], { cwd: REPO, encoding: 'utf8' });
 
 describe('the real lint command goes red', { concurrency: targets.length }, () => {
+  let statusBefore;
+  before(() => {
+    statusBefore = gitStatus();
+  });
+  after(() => {
+    assert.equal(gitStatus(), statusBefore, 'the control changed the real repository (git status differs before and after)');
+  });
   for (const dir of targets) {
     const name = dir.slice(REPO.length + 1);
-    test(`${name}: \`npm run lint\` fails on a planted unready read and on a planted unused suppression (and leaves nothing behind)`, async () => {
-      const { results, timings } = await plantedControls(dir);
+    test(`${name}: \`npm run lint\` fails on a planted unready read and on a planted unused suppression (in a scratch copy)`, async () => {
+      const { results, timings, scratch } = await plantedControls(dir);
       console.log(`# lint-control timing ${name}: unready ${(timings.unready / 1000).toFixed(1)} s, unused-suppression ${(timings.unused / 1000).toFixed(1)} s`);
       assert.notEqual(results.unready.status, 0, `${name}: the real lint command passed with a planted unready read:\n${results.unready.out.slice(-800)}`);
       assert.match(results.unready.out, /paddock\/e2e-ready-reads/, `${name}: the lint failed, but not on the ready-reads rule:\n${results.unready.out.slice(-800)}`);
       assert.notEqual(results.unused.status, 0, `${name}: the real lint command passed with a planted suppression that no longer occurs:\n${results.unused.out.slice(-800)}`);
       assert.match(results.unused.out, /suppressions left that do not occur/, `${name}: the lint failed, but not on the unused suppression:\n${results.unused.out.slice(-800)}`);
-      for (const f of [PLANTED_READ, PLANTED_CLEAN]) assert.equal(existsSync(join(dir, f)), false, `${name}: ${f} was left in the tree`);
+      assert.equal(existsSync(scratch.root), false, `${name}: the scratch copy was left behind`);
+      for (const f of [PLANTED_READ, PLANTED_CLEAN]) assert.equal(existsSync(join(dir, f)), false, `${name}: ${f} reached the real tree`);
     });
   }
 });
