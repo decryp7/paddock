@@ -1429,7 +1429,7 @@ from the retired JS planner's test) add to the push gate's `conformance-tests` r
   | Line | Seconds |
   |---|---:|
   | `npm test` | 105.2 |
-  | `cargo nextest run ... -E 'test(/^contracts::/) | test(/^audit::tests::.../)'` (compile in a new folder, then the tests) | 31.0 |
+  | the `cargo nextest run` line (compile in a new folder, then the contracts and audit-fixture tests) | 31.0 |
   | the phase | 136.2 |
 
 - **Added time per push:** about 31 s in a fresh worktree with a cold build folder and a warm sccache; the folder is kept between
