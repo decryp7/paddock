@@ -2767,3 +2767,16 @@ passed in runs 8218 and 8225 on the same tree and 20 of 20 locally (Chromium, 4 
 recorded here and not blocking, by the coordinator's decision. Next: reproduce in the Linux CI container with a failing run first,
 then wait for the layout to settle (two reads agree, ER-12) before the comparison. **Class: an e2e read before the layout settled
 (the ready-read class; train 13's workbench palette, Dyno alarms, gallery menu, grid header, Pitwall tray and Manage-layouts rename).**
+
+## Fix item: `./dev ci dispatch --trial --onto` and `--json` (2026-11-18, Windows slowdown trials 8251 to 8257)
+- **`--onto` with a branch pushed after the trial clone was made** ("trial: git rev-parse failed: fatal: Needed a single revision").
+  Already fixed on train 14 in ae662f1e9 (`trial::prepare` fetches an `origin/<branch>` target; test
+  `onto_a_branch_that_is_neither_main_nor_a_train_fetches_it`); the failure came from a `./dev` built from main's tree, which lacks
+  it. Still open: `--onto <sha>` of a commit no fetched ref holds fails with the same bare git message. Next: name the ref to fetch, or
+  say "fetch a branch that holds it" in the error.
+- **`dispatch --json` returns no run id** (`{"ok":true,"dispatched":true,"waitedMs":535}`): Gitea's dispatch endpoint answers with no
+  body, so a script cannot tell its run from another agent's. A script that took the newest run took another agent's ci.yml trial
+  (8256) as its own. Next: read the run list just before and after the dispatch (`client.rs` `runs_page`), return the new run whose
+  `path` is `<workflow>@refs/heads/<ref>` and whose head is the dispatched commit, as `runId`; the dispatch tests' `Script` fake
+  answers both lists. More than an hour with the fake's ordering, so not done in that series.
+**Class: a tool's answer that a caller has to guess around (ER-27).**
