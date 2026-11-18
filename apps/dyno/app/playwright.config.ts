@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 import { appBuildGuard, reuseServer } from '../../../ui/projects/paddock-e2e/src/build-guard.ts';
+import { paddockServers } from '../../../ui/projects/paddock-e2e/src/servers.ts';
 import { e2ePortOrCiDefault } from '../../../ui/projects/paddock-e2e/src/env.ts';
 
 // Fails fast, before any server starts, when what the app consumes of ui (ui/dist, the css) is stale (build-guard.ts).
@@ -56,10 +57,12 @@ export default defineConfig({
       : []),
   ],
   updateSnapshots: 'none',
-  webServer: {
-    command: `npx ng serve --port ${PORT} --poll 1500`,
-    url: `http://localhost:${PORT}`,
-    reuseExistingServer: reuseServer(),
-    timeout: 180_000,
-  },
+  ...paddockServers([
+    {
+      command: `npx ng serve --port ${PORT} --poll 1500`,
+      url: `http://localhost:${PORT}`,
+      reuseExisting: reuseServer(),
+      timeoutMs: 180_000,
+    },
+  ]),
 });

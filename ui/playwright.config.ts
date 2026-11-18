@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { assertChromeForTesting, e2ePort, isOn, reuseServer, SCREENSHOT_SPECS, uiConfigGuard } from './projects/paddock-e2e/src/index.ts';
+import { assertChromeForTesting, e2ePort, isOn, paddockServers, reuseServer, SCREENSHOT_SPECS, uiConfigGuard } from './projects/paddock-e2e/src/index.ts';
 
 /**
  * Browser checks of the reference apps (`npx playwright test`): the gallery (`ng serve gallery`) and the shell demo
@@ -12,7 +12,7 @@ import { assertChromeForTesting, e2ePort, isOn, reuseServer, SCREENSHOT_SPECS, u
  * --project=gallery-webkit --project=shell-demo-webkit --project=workbench-demo-webkit`. These projects exist only when the
  * variable is set, so a plain run (and a branch run, rule 3) stays Chromium; the full gate before a build sets it.
  */
-// A reused server does not rebuild the css (the webServers below do): then it must be fresh (build-guard.ts).
+// A reused server does not rebuild the css (the servers below do): then it must be fresh (build-guard.ts).
 uiConfigGuard(__dirname);
 
 const PORT = e2ePort('PW_PORT', 4300);
@@ -57,25 +57,20 @@ export default assertChromeForTesting(
           ]
         : []),
     ],
-    webServer: [
-      {
-        command: `npm run build:css && npx ng serve gallery --port ${PORT}`,
-        url: `http://localhost:${PORT}`,
-        reuseExistingServer: reuseServer(),
-        timeout: 180_000,
-      },
-      {
-        command: `npm run build:css && npx ng serve shell-demo --port ${SHELL_DEMO_PORT}`,
-        url: `http://localhost:${SHELL_DEMO_PORT}`,
-        reuseExistingServer: reuseServer(),
-        timeout: 180_000,
-      },
-      {
-        command: `npm run build:css && npx ng serve workbench-demo --port ${WORKBENCH_DEMO_PORT}`,
-        url: `http://localhost:${WORKBENCH_DEMO_PORT}`,
-        reuseExistingServer: reuseServer(),
-        timeout: 180_000,
-      },
-    ],
+    ...paddockServers(
+      (
+        [
+          ['gallery', PORT],
+          ['shell-demo', SHELL_DEMO_PORT],
+          ['workbench-demo', WORKBENCH_DEMO_PORT],
+        ] as const
+      ).map(([app, port]) => ({
+        command: `npm run build:css && npx ng serve ${app} --port ${port}`,
+        url: `http://localhost:${port}`,
+        reuseExisting: reuseServer(),
+        // The former Playwright webServer timeout, carried over unchanged (no new limit).
+        timeoutMs: 180_000,
+      })),
+    ),
   }),
 );

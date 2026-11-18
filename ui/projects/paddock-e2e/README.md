@@ -22,10 +22,12 @@ export default paddockConfig({
 
 `paddockConfig` is the whole shared part: projects `chromium` and `webkit` (a branch runs `--project=chromium`, rule 3), a
 `screenshots` project only when `SCREENSHOTS=1`, `retries: 0`, a trace kept on failure, one worker, the browser guard, the
-port from the environment, and the web server. `CHROMIUM_TEST_PATH` names a pinned Chrome for Testing. Sharding: run
+port from the environment, and the web server. The server is started by a global setup (`paddockServers`, `server-ready.ts`), not
+Playwright's `webServer`: one that never answers fails the run once at start-up with one `::error::` line (URL, probe, exit status,
+stderr tail, next step), and its output is in the log. A config without `paddockConfig` spreads `...paddockServers([{ command, url, timeoutMs, reuseExisting }])`. `CHROMIUM_TEST_PATH` names a pinned Chrome for Testing. Sharding: run
 `PADDOCK_E2E_SHARD=1-of-4 PADDOCK_E2E_BLOB=1 npx playwright test --shard=1/4` in each job (blob report in `blob-report/`), then
 `npx playwright merge-reports --reporter list,html blob-report` in the merge job. Anything else goes in `extend`
-(`use`, extra `projects`, `webServer`, ...); `reporters` adds the retried reporter after `list`.
+(`use`, extra `projects`, ...); `reporters` adds the retried reporter after `list`.
 
 ## A fixed page clock for every spec: `pinnedClockTest`
 
