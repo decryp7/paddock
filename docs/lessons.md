@@ -2926,3 +2926,9 @@ gone since the planner retirement (2026-11-18). On the Mac the 20 golden tests n
 decide it. **To do:** read the `golden::` test durations from the next train CI run (the Windows and Mac legs), and if every one is inside the
 60 s default, delete the override and the `golden::` entry of the default profile's override. Until then the old budget stays, with its old
 cause noted in the file.
+
+Measured 2026-11-19 (the conformance step's cost of compiling paddock-dev's tests): the step `cargo nextest run --manifest-path
+tools/paddock-dev/Cargo.toml --profile ci --no-tests=fail -E 'test(/^contracts::/)'` in the local CI image (arm64 build of
+paddock-ci, `tools/linux-container.sh --ci-image`, 4 CPUs, 2 jobs, a new empty build volume, host load 27): cold 71 s, warm 1 s (the 12
+tests run in 1.2 s). Under the limits set for the choice (30 s warm, 3 min cold), so the step stays a nextest step. Not measured: a
+real amd64 CI runner; read the step's timing from the next train run and revisit if the cold time passes 3 min.
