@@ -17,7 +17,15 @@ const freePort = async (): Promise<number> =>
     });
   });
 const quiet = { log: () => undefined };
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Polls `condition` every 25 ms until it holds; fails naming `what` after `ms`. */
+async function until(condition: () => boolean, what: string, ms = 10_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!condition()) {
+    assert.ok(Date.now() < deadline, `timed out waiting for ${what}`);
+    // conformance: hang-guard — a 10 s bound (the deadline above) on a condition that other processes make true
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
 
 /** A process's identity: pid plus start time (rule 53), so a reused pid is not mistaken for the original. */
 interface Proc {
@@ -32,8 +40,7 @@ const identify = (pid: number): Proc => {
 };
 const alive = (p: Proc) => startOf(p.pid) === p.started;
 async function allGone(procs: readonly Proc[], what: string): Promise<void> {
-  const deadline = Date.now() + 5000;
-  while (procs.some(alive) && Date.now() < deadline) await sleep(50);
+  await until(() => !procs.some(alive), `${what}: the processes to end`, 5000).catch(() => undefined);
   assert.deepEqual(procs.filter(alive), [], `${what}: processes still running`);
 }
 
@@ -44,8 +51,7 @@ const treeServer = (file: string) =>
       `require('fs').writeFileSync(${JSON.stringify(file)},process.pid+' '+g.pid);setInterval(()=>{},1000)`,
   );
 async function treeOf(file: string): Promise<Proc[]> {
-  const deadline = Date.now() + 10_000;
-  while (!existsSync(file) && Date.now() < deadline) await sleep(25);
+  await until(() => existsSync(file), `${file}`);
   const [a, b] = readFileSync(file, 'utf8').split(' ').map(Number) as [number, number];
   return [identify(a), identify(b)];
 }
@@ -124,8 +130,7 @@ test('stderr stays in the log after the server is ready, and a server that ends 
   const lines: string[] = [];
   const code = `require('http').createServer((q,r)=>r.end('ok')).listen(${port}, () => setTimeout(() => { console.error('late warning'); setTimeout(() => process.exit(7), 100) }, 300))`;
   const running = await startServers([{ command: node(code), url: `http://localhost:${port}`, timeoutMs: 20_000, reuseExisting: false }], { log: (l) => lines.push(l) });
-  const deadline = Date.now() + 5000;
-  while (!lines.some((l) => l.startsWith('::error::')) && Date.now() < deadline) await sleep(25);
+  await until(() => lines.some((l) => l.startsWith('::error::')), 'the ::error:: line', 5000);
   await running.stop();
   assert.ok(lines.some((l) => l.includes('[e2e server err] late warning')), lines.join('\n'));
   const errors = lines.filter((l) => l.startsWith('::error::'));
