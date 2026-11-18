@@ -24,7 +24,7 @@ test('the profile editor keeps Propose… in place while its profile loads, and 
   await releaseMockHolds(page);
   await expect(name).toHaveText('OrderService (Serilog) — demo');
   await expect(editor.getByText('Valid', { exact: true })).toBeVisible();
-  // eslint-disable-next-line paddock/e2e-ready-reads -- the check is that the button did not move while the profile arrived: an immediate read is the test
+  // Immediate read by design, recorded in eslint-suppressions.json (conformance C139): the check is that the button did not move while the profile arrived: an immediate read is the test
   expect(await propose.boundingBox()).toEqual(before);
   await page.mouse.up();
 

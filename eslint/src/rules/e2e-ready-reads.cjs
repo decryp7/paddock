@@ -10,8 +10,10 @@
 // (itself a C71 finding), or one inside a callback is not seen; that keeps false positives low and is the limit of the rule.
 // `evaluate` and `evaluateAll` are reads only when their result is used (an assignment, an argument, a return, a chain): a bare `await x.evaluate(...)`
 // statement acts or waits.
-// A read that is meant to be immediate carries `// eslint-disable-next-line paddock/e2e-ready-reads -- <why>` (ESLint's own directive; unused ones are reported).
-// Conformance C139 requires the description and counts the directives per file in conformance/c139-allow.json, a list that only shrinks (ER-46).
+// A read that is meant to be immediate is an entry of the project's eslint-suppressions.json (ESLint bulk suppressions); the e2e block sets `noInlineConfig`, so no comment
+// can switch the rule off. The six entries of 2026-11-18 (Debrief 3, Dyno 3) were approved by the user; a new one needs the user's approval (ER-46). Conformance C139
+// compares each file with the merge base (shrink-only); the ESLint CLI fails on an entry that no longer occurs.
+// Status: blocking (an error in every lint step). The first green CI run that includes it: pending (train 15's integrator records the run id here).
 const READS = new Set(['boundingBox', 'allInnerTexts', 'allTextContents', 'innerText', 'textContent']);
 const RESULT_READS = new Set(['evaluate', 'evaluateAll']);
 
@@ -67,7 +69,7 @@ const rule = {
     docs: { description: 'A read right after a bare visibility wait measures a page that may not be ready (use a ready helper).' },
     schema: [],
     messages: {
-      read: '`{{read}}` reads the page right after a bare visibility wait: the element exists, its content or position may not be final. Wait with a ready helper from @decryp7/paddock-e2e (expectListFiltered, expectOverlayAlignedWith, expectWired, expectStreamDone, expectDockPlanned, expectNotMoving), or add `// eslint-disable-next-line paddock/e2e-ready-reads -- <why>` where the read is meant to be immediate.',
+      read: '`{{read}}` reads the page right after a bare visibility wait: the element exists, its content or position may not be final. Wait with a ready helper from @decryp7/paddock-e2e (expectListFiltered, expectOverlayAlignedWith, expectWired, expectStreamDone, expectDockPlanned, expectNotMoving), or, where the read is immediate by design, record it in the project\'s eslint-suppressions.json (an exception only shrinks and needs the user\'s approval, ER-46).',
     },
   },
   create(context) {

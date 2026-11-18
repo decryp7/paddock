@@ -32,7 +32,7 @@ test.describe('Dyno dialogs', () => {
     await page.goto(dialogWindowUrl('pd.updates', {}, { title: 'Updates' }));
     // The window was sized for "asking" before any status arrived (the held status is a pending task, so it is not settled yet); now the status comes.
     await page.locator('html[data-dialog-ready]').waitFor();
-    // eslint-disable-next-line paddock/e2e-ready-reads -- data-dialog-ready is the dialog's own signal that fittedHeight was set for the asking state
+    // Immediate read by design, recorded in eslint-suppressions.json (conformance C139): data-dialog-ready is the dialog's own signal that fittedHeight was set for the asking state
     const before = Number(await page.evaluate(() => document.documentElement.dataset['fittedHeight']));
     await page.evaluate(() => (globalThis as { __pdReleaseUpdatesStatus?: () => void }).__pdReleaseUpdatesStatus?.());
     await expect(page.getByTestId('updates-current')).toBeVisible();

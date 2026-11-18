@@ -31,7 +31,7 @@ test('production build loads under the Tauri CSP without violations', async ({ p
   await page.getByRole('button', { name: 'Profile editor' }).click();
   await expect(page.getByRole('button', { name: 'Save & apply' })).toBeVisible();
 
-  // eslint-disable-next-line paddock/e2e-ready-reads -- reads the violations collected over the whole flow; the Save button was its last step
+  // Immediate read by design, recorded in eslint-suppressions.json (conformance C139): reads the violations collected over the whole flow; the Save button was its last step
   const violations = await page.evaluate(() => (window as unknown as { __cspViolations: string[] }).__cspViolations);
   expect([...problems, ...violations.map((v) => `violation: ${v}`)]).toEqual([]);
 });

@@ -144,7 +144,9 @@
               "scripts/**/*.ts",
               "playwright.config.ts"
             ],
-            "maxWarnings": 0
+            "maxWarnings": 0,
+            "applySuppressions": true,
+            "suppressionsLocation": "eslint-suppressions.json"
           }
         },
         "extract-i18n": {

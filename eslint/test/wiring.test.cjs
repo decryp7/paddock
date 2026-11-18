@@ -13,7 +13,7 @@ const { minimatch } = require('minimatch');
 
 const REPO = resolve(__dirname, '..', '..');
 const PLANTED = 'e2e/zz-planted.spec.ts';
-const SPEC = "import { test } from '@playwright/test';\ndebugger;\nconst raw = page.locator('[role=row].row');\nawait expect(raw).toBeVisible();\nconst box = await raw.boundingBox();\n";
+const SPEC = "/* eslint paddock/e2e-ready-reads: \"off\" */\n/* eslint-disable paddock/e2e-ready-reads */\nimport { test } from '@playwright/test';\ndebugger;\nconst raw = page.locator('[role=row].row');\nawait expect(raw).toBeVisible();\nconst box = await raw.boundingBox();\n";
 
 /** The apps with an Angular workspace and an e2e folder, and the ui. */
 const targets = [
@@ -61,5 +61,77 @@ for (const dir of targets) {
     assert.ok(ready, `${name}: the ready-reads rule did not fire on a read right after a bare visibility wait: ${rules.join(', ')}`);
     assert.equal(ready.severity, 2, `${name}: paddock/e2e-ready-reads is not an error (severity ${ready.severity})`);
     if (name.endsWith('debrief/app')) assert.ok(rules.includes('no-restricted-syntax'), `${name}: the raw-row selectors were replaced: ${rules.join(', ')}`);
+  });
+}
+
+// ---- exceptions: ESLint bulk suppressions (eslint-suppressions.json), the only way to except a read from paddock/e2e-ready-reads ----
+const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = require('node:fs');
+const { tmpdir } = require('node:os');
+
+/** Runs the ESLint CLI (as the ui's lint script does) in `dir` over its e2e folder; returns { status, out }. */
+function cli(dir) {
+  const bin = join(REPO, 'node_modules', '.bin', 'eslint');
+  const r = spawnSync(bin, ['e2e', '--max-warnings', '0'], { cwd: dir, encoding: 'utf8' });
+  return { status: r.status, out: `${r.stdout}${r.stderr}` };
+}
+
+for (const dir of targets.filter((d) => existsSync(join(d, 'eslint-suppressions.json')))) {
+  const name = dir.slice(REPO.length + 1);
+  test(`${name}: its eslint-suppressions.json is applied by the lint target and has no unused entry`, () => {
+    const file = join(dir, 'eslint-suppressions.json');
+    // The Angular builder applies suppressions only when asked; the ui's CLI finds the file in its folder by itself.
+    if (existsSync(join(dir, 'angular.json')) && !name.endsWith('ui')) {
+      const workspace = JSON.parse(readFileSync(join(dir, 'angular.json'), 'utf8'));
+      const lintOptions = Object.values(workspace.projects).map((p) => p.architect?.lint?.options).filter(Boolean);
+      assert.ok(lintOptions.length > 0, `${name}: no lint target`);
+      for (const o of lintOptions) {
+        assert.equal(o.applySuppressions, true, `${name}: the lint target does not apply suppressions: its exceptions would not count`);
+        assert.equal(resolve(dir, o.suppressionsLocation ?? 'eslint-suppressions.json'), file, `${name}: the lint target reads another suppressions file`);
+      }
+    }
+    // The CLI fails on a suppression that no longer occurs (the API the Angular builder uses does not), so this is where a fixed read must leave its entry.
+    const r = cli(dir);
+    assert.equal(r.status, 0, `${name}: eslint over e2e fails with its suppressions (an unused entry, or a new site): ${r.out.slice(0, 600)}`);
+  });
+}
+
+test('positive control: a suppression that no longer occurs fails the ESLint CLI, and a used one passes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'paddock-supp-'));
+  try {
+    mkdirSync(join(dir, 'e2e'));
+    writeFileSync(join(dir, 'package.json'), '{"type":"commonjs"}');
+    writeFileSync(join(dir, 'eslint.config.cjs'), "module.exports = [{ files: ['e2e/**/*.js'], rules: { 'no-debugger': 'error' } }];\n");
+    writeFileSync(join(dir, 'e2e', 'a.js'), 'debugger;\n');
+    writeFileSync(join(dir, 'eslint-suppressions.json'), JSON.stringify({ 'e2e/a.js': { 'no-debugger': { count: 1 } } }));
+    assert.equal(cli(dir).status, 0, 'a used suppression passes');
+    writeFileSync(join(dir, 'e2e', 'a.js'), 'const ok = 1;\n');
+    const r = cli(dir);
+    assert.notEqual(r.status, 0, `an unused suppression must fail: ${r.out}`);
+    assert.match(r.out, /suppressions left that do not occur/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('nothing passes --pass-on-unpruned-suppressions (it would let a fixed read leave slack for a new one)', () => {
+  const r = spawnSync('git', ['grep', '-ln', 'pass-on-unpruned-suppressions', '--', '**/package.json', 'package.json', '**/angular.json', '.gitea', 'lefthook*', 'scripts', 'tools/paddock-dev/src', 'conformance/ci'], { cwd: REPO, encoding: 'utf8' });
+  assert.equal(r.stdout.trim(), '', `the flag is used in: ${r.stdout}`);
+});
+
+// A warning must block: the ui's lint script, and every app's lint target, fail on one (a directive ESLint ignores under noInlineConfig, an unused
+// suppression the API reports, are warnings).
+for (const dir of targets) {
+  const name = dir.slice(REPO.length + 1);
+  test(`${name}: the lint command fails on a warning (--max-warnings 0 or maxWarnings 0)`, () => {
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+    const script = pkg.scripts?.lint ?? '';
+    if (/^eslint\s/.test(script)) {
+      assert.match(script, /--max-warnings[ =]0\b/, `${name}: \`${script}\` lets a warning pass`);
+      return;
+    }
+    const workspace = JSON.parse(readFileSync(join(dir, 'angular.json'), 'utf8'));
+    const lint = Object.values(workspace.projects).map((p) => p.architect?.lint?.options).filter(Boolean);
+    assert.ok(lint.length > 0, `${name}: no lint target`);
+    for (const o of lint) assert.equal(o.maxWarnings, 0, `${name}: a lint target lets a warning pass (maxWarnings ${o.maxWarnings})`);
   });
 }

@@ -91,7 +91,7 @@ test.describe('dragging a tab out of the window with the shell ghost', () => {
     expect((await ghost(page)).visible).toBe(false);
     await page.mouse.up();
     await expect(tab(page, 'Metrics')).toBeVisible();
-    // eslint-disable-next-line paddock/e2e-ready-reads -- asserts that nothing popped out: the list of opens is read right after the drag ended
+    // Immediate read by design, recorded in eslint-suppressions.json (conformance C139): asserts that nothing popped out: the list of opens is read right after the drag ended
     expect(await page.evaluate(() => (window as unknown as { __opens: string[] }).__opens.length)).toBe(0);
   });
 });
