@@ -15,7 +15,9 @@ test('the preset: chromium and webkit, the port from the variable, no retries, t
   assert.equal(c.forbidOnly, false);
   assert.equal(c.workers, 1);
   assert.equal(c.use?.trace, 'retain-on-failure');
-  assert.deepEqual(c.webServer, { command: 'serve --port 4391', url: 'http://localhost:4391', reuseExistingServer: false, timeout: 180_000 });
+  assert.deepEqual(c.metadata, { paddockServers: [{ command: 'serve --port 4391', url: 'http://localhost:4391', timeoutMs: 180_000, reuseExisting: false }] });
+  assert.match(String(c.globalSetup), /global-setup\.ts$/);
+  assert.equal(c.webServer, undefined, "Playwright's own webServer is replaced: it fails without a cause");
   assert.deepEqual(c.reporter, [['list']]);
 });
 
@@ -28,7 +30,7 @@ test('the port: a local default, a named variable, an error for a bad value and 
 });
 
 test('a running server is reused only on request with PW_REUSE_SERVER, never on CI', () => {
-  const reuse = (env: Record<string, string>) => (paddockConfig({ ...base, serve: () => 'serve', env: { PW_PORT: '4400', ...env } }).webServer as { reuseExistingServer: boolean }).reuseExistingServer;
+  const reuse = (env: Record<string, string>) => (paddockConfig({ ...base, serve: () => 'serve', env: { PW_PORT: '4400', ...env } }).metadata as { paddockServers: { reuseExisting: boolean }[] }).paddockServers[0]!.reuseExisting;
   assert.equal(reuse({}), false);
   assert.equal(reuse({ PW_REUSE_SERVER: '1' }), true);
   assert.equal(reuse({ PW_REUSE_SERVER: '1', CI: 'true' }), false);
@@ -37,12 +39,13 @@ test('a running server is reused only on request with PW_REUSE_SERVER, never on 
 test('on CI: test.only is refused and a server already on the port is not reused', () => {
   const c = paddockConfig({ ...base, serve: () => 'serve', env: { CI: 'true', PW_PORT: '4400' } });
   assert.equal(c.forbidOnly, true);
-  assert.equal((c.webServer as { reuseExistingServer: boolean }).reuseExistingServer, false);
+  assert.equal((c.metadata as { paddockServers: { reuseExisting: boolean }[] }).paddockServers[0]!.reuseExisting, false);
 });
 
 test('no web server unless the app names a command, and webkit can be left out', () => {
   const c = paddockConfig({ ...base, webkit: false, env: {} });
-  assert.equal(c.webServer, undefined);
+  assert.equal(c.globalSetup, undefined);
+  assert.equal(c.metadata, undefined);
   assert.deepEqual(names(c), ['chromium']);
 });
 

@@ -1,7 +1,10 @@
 import { defineConfig, devices, type PlaywrightTestConfig, type ReporterDescription } from '@playwright/test';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { assertChromeForTesting, pinnedChrome } from './browser.ts';
 import { assertFreshBuilds, reuseServer, type BuildGuard } from './build-guard.ts';
 import { e2ePort, isOn } from './env.ts';
+import type { ServerSpec } from './server-ready.ts';
 
 export { isOn };
 
@@ -55,6 +58,28 @@ export interface PaddockConfigOptions {
   readonly extend?: PlaywrightTestConfig;
 }
 
+/**
+ * This file's folder in both module formats: Playwright loads configs as CommonJS (`__dirname`, and `import.meta` is a syntax error
+ * there), `node --test` as ESM (no `__dirname`; the frame of this call names the file by URL).
+ */
+function thisDir(): string {
+  if (typeof __dirname === 'string') return __dirname;
+  const url = /(file:\/\/[^\s)]+?):\d+:\d+/.exec(new Error().stack ?? '')?.[1];
+  if (!url) throw new Error('paddock-e2e: cannot locate its own folder for the global setup');
+  return dirname(fileURLToPath(url));
+}
+
+/**
+ * The servers a run needs, as config fields (`...paddockServers([{ command, url, timeoutMs, reuseExisting }])`). Replaces
+ * Playwright's `webServer`: a server that never answers (or ends first) fails the run once at start-up with one `::error::`
+ * line naming the URL, the probe, the exit status and the stderr tail, and its output reaches the job log (ER-27, server-ready.ts).
+ * Why not `maxFailures`: it would fire after the 2 min limit of its first N tests, and N has no measured basis (ER-12); a
+ * readiness check says the cause once, before any test runs.
+ */
+export function paddockServers(servers: readonly ServerSpec[]): Pick<PlaywrightTestConfig, 'globalSetup' | 'metadata'> {
+  return { globalSetup: join(thisDir(), 'global-setup.ts'), metadata: { paddockServers: servers } };
+}
+
 /** The default pattern of screenshot-only specs: `screenshots.spec.ts` and `*.shot.ts`. */
 export const SCREENSHOT_SPECS = /(?:screenshots\.spec|\.shot)\.ts$/;
 
@@ -98,7 +123,7 @@ export function paddockConfig(options: PaddockConfigOptions): PlaywrightTestConf
         : []),
     ],
     ...(options.serve
-      ? { webServer: { command: options.serve(port), url: `http://localhost:${port}`, reuseExistingServer: reuseServer(env), timeout: options.serveTimeoutMs ?? 180_000 } }
+      ? paddockServers([{ command: options.serve(port), url: `http://localhost:${port}`, timeoutMs: options.serveTimeoutMs ?? 180_000, reuseExisting: reuseServer(env) }])
       : {}),
     ...options.extend,
   });
