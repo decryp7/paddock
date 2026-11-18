@@ -44,17 +44,6 @@ fn runs(bin: &Path, env: &HashMap<String, String>) -> bool {
 
 /// The path of a runnable `heavy` for the tree at `root`: cached, else built. `Err` is the whole explanation.
 pub fn ensure(root: &Path, env: &HashMap<String, String>, left: Duration) -> Result<PathBuf, String> {
-    ensure_with(root, env, left, &crate::worktree::procs::process_folders)
-}
-
-/// [`ensure`] with the process scan the removal of the build folder needs given (`lsof` on macOS, which takes tens of seconds on a loaded
-/// machine): a test passes its own, so no test runs the real one (ER-14).
-pub fn ensure_with(
-    root: &Path,
-    env: &HashMap<String, String>,
-    left: Duration,
-    folders: &dyn Fn() -> crate::safe_remove::ProcessFolders,
-) -> Result<PathBuf, String> {
     let home = home(env)?;
     let lookup = |k: &str| env.get(k).cloned();
     let vars: Vec<(String, String)> = env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
@@ -107,7 +96,7 @@ pub fn ensure_with(
     );
     let published = result.and_then(|built| publish(&built, &cached));
     // Never left behind, and never silent: what the removal did is printed (ER-27).
-    match crate::safe_remove::remove_with(&target, std::slice::from_ref(&base), folders()) {
+    match crate::safe_remove::remove(&target, std::slice::from_ref(&base)) {
         Ok(r) => eprintln!("pre-push: removed the heavy build folder {}", r.path.display()),
         Err(why) => eprintln!(
             "::warning::pre-push: the heavy build folder {} was not removed: {why}. Next: delete it by hand",

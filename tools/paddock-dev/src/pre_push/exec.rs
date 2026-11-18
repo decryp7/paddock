@@ -702,18 +702,6 @@ pub fn heavy_command_for(
     built: &std::sync::OnceLock<Result<crate::tool_cache::Held, String>>,
     left: Duration,
 ) -> Result<Vec<String>, String> {
-    heavy_command_with(root, env, has_tool, built, left, &crate::worktree::procs::process_folders)
-}
-
-/// [`heavy_command_for`] with the process scan of the build's cleanup given (a test's, never the real `lsof`).
-pub fn heavy_command_with(
-    root: &Path,
-    env: &HashMap<String, String>,
-    has_tool: &dyn Fn(&str) -> bool,
-    built: &std::sync::OnceLock<Result<crate::tool_cache::Held, String>>,
-    left: Duration,
-    folders: &dyn Fn() -> crate::safe_remove::ProcessFolders,
-) -> Result<Vec<String>, String> {
     if env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") {
         // Only a test may run without the slot: anything else is an override that makes the gate not measured.
         return if env.contains_key(TEST_HEAVY_OFF) {
@@ -726,8 +714,7 @@ pub fn heavy_command_with(
     if !found.is_empty() {
         return Ok(found);
     }
-    match built.get_or_init(|| super::heavy_tool::ensure_with(root, env, left, folders).and_then(|bin| super::heavy_tool::hold(&bin, env)))
-    {
+    match built.get_or_init(|| super::heavy_tool::ensure(root, env, left).and_then(|bin| super::heavy_tool::hold(&bin, env))) {
         Ok(held) => Ok(vec![
             held.path().display().to_string(),
             "run".into(),
@@ -777,9 +764,6 @@ pub struct RealExec {
     pub built_heavy: std::sync::OnceLock<Result<crate::tool_cache::Held, String>>,
     /// How far the heavy step in flight has got ([`Exec::slot`]): written while a step runs through our `heavy`.
     pub live_slot: Mutex<Slot>,
-    /// The process scan the cleanup of heavy's build folder uses (`None`: the real one). Only a test sets it: the real `lsof` takes tens of
-    /// seconds on a loaded Mac and a test must not run it (ER-14, ER-12).
-    pub folders: Option<fn() -> crate::safe_remove::ProcessFolders>,
     /// The push is a landing (`train/*`, `main`, a release tag): its heavy steps take the priority lane (`heavy --high`, ADR 0102).
     pub priority: bool,
     /// The local sccache wrapper for the gates that compile (`None`: off, or CI; [`crate::local_sccache`]).
@@ -834,10 +818,7 @@ impl RealExec {
     /// `left` is the run time the push has left on its credited clock ([`BudgetClock`]): the build of heavy is cut off there, so
     /// time queued for the slot never counts against it.
     fn heavy_command(&self, left: Duration) -> Result<Vec<String>, String> {
-        match self.folders {
-            Some(f) => heavy_command_with(&self.root, &self.env, &|p| self.has_tool(p), &self.built_heavy, left, &f),
-            None => heavy_command_for(&self.root, &self.env, &|p| self.has_tool(p), &self.built_heavy, left),
-        }
+        heavy_command_for(&self.root, &self.env, &|p| self.has_tool(p), &self.built_heavy, left)
     }
 
     fn set_slot(&self, to: Slot) {
@@ -1393,7 +1374,6 @@ exit $rc
                 stop: Arc::new(AtomicBool::new(false)),
                 built_heavy: Default::default(),
                 live_slot: Default::default(),
-                folders: None,
                 priority: false,
                 wrapper: crate::local_sccache::Lazy::off(),
             }
@@ -1578,8 +1558,6 @@ exit $rc
                 stop: Arc::new(AtomicBool::new(false)),
                 built_heavy: Default::default(),
                 live_slot: Default::default(),
-                // No test runs the real `lsof` (the build's cleanup scans the process list): an empty answer, at once.
-                folders: Some(|| Ok(Vec::new())),
                 priority: false,
                 wrapper: crate::local_sccache::Lazy::off(),
             }
@@ -1656,7 +1634,7 @@ exit $rc
                 assert!(what(), "the step never got there");
             };
             assert_eq!(ex.slot(), Slot::Unknown, "no step in flight");
-            // heavy's build (and the cleanup's process scan) happen once, here, before anything is observed: the state below is driven
+            // heavy's build (and the cleanup's process scan, empty in a test: worktree::procs) happens once, here, before anything is observed: the state below is driven
             // by the step's own log lines, not by how long a build or a scan took on a loaded machine (ER-12, ER-28).
             ex.heavy_command(Duration::from_secs(60)).expect("the fake heavy is built and held");
             std::thread::scope(|sc| {
@@ -1706,27 +1684,6 @@ exit $rc
                 left,
                 ["new-1", "new-2", "running-old"],
                 "the running push's folder stays, the others beyond the newest two go"
-            );
-        }
-
-        /// The cleanup of heavy's build folder scans the process list; a test's scan is the one used, and it is asked exactly once.
-        #[test]
-        fn the_process_scan_of_the_builds_cleanup_is_the_one_given() {
-            use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
-            static ASKED: AtomicUsize = AtomicUsize::new(0);
-            let d = tempfile::tempdir().unwrap();
-            let mut ex = repo_with_fake_cargo(d.path(), true);
-            ex.folders = Some(|| {
-                ASKED.fetch_add(1, SeqCst);
-                Ok(Vec::new())
-            });
-            ex.heavy_command(Duration::from_secs(60)).unwrap();
-            assert_eq!(ASKED.load(SeqCst), 1);
-            // The tree's own build folder was removed through that scan, so it is gone.
-            assert!(
-                !std::fs::read_dir(d.path().join("tgt"))
-                    .map(|r| r.flatten().any(|e| e.file_name().to_string_lossy().starts_with("heavy-")))
-                    .unwrap_or(false)
             );
         }
 
@@ -1837,7 +1794,6 @@ exit $rc
             let ex2 = RealExec {
                 built_heavy: Default::default(),
                 live_slot: Default::default(),
-                folders: None,
                 priority: false,
                 wrapper: crate::local_sccache::Lazy::off(),
                 env: ex.env.clone(),
