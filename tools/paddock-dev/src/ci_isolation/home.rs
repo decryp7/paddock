@@ -234,7 +234,7 @@ pub fn cmd_path(ctx: &Ctx, args: &[String], io: &mut Sinks<'_>) -> R<()> {
     }
     std::fs::create_dir_all(&target).map_err(|e| Stop::die(format!("cannot create {}: {e}", target.display())))?;
     // A target folder cargo did not make has no CACHEDIR.TAG, and the test kit then links the toolchain into every command's own
-    // folder (ADR 0107 D1, ci.yml run 8246).
+    // folder (ADR 0107 D1, testcommand-ab.yml run 8246).
     if kind == "target" {
         paddock_env::cachedir::ensure(&target).map_err(|e| {
             Stop::die(format!(
@@ -347,7 +347,7 @@ mod tests {
     }
 
     /// ADR 0107 D1: a kept target folder made here has cargo's `CACHEDIR.TAG`, as one cargo makes itself has; without it the test kit
-    /// links the toolchain into every command's own folder (ci.yml run 8246). A tag already there is never rewritten, and a kind
+    /// links the toolchain into every command's own folder (testcommand-ab.yml run 8246). A tag already there is never rewritten, and a kind
     /// that is not a target folder gets none.
     #[test]
     fn a_kept_target_folder_made_by_path_target_carries_cachedir_tag() {
