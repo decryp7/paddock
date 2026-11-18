@@ -1,8 +1,8 @@
-//! The files whose content changes C100's answer (ADR 0060 §4). `plan.rs` reads this list directly; `affected.mjs` has a
-//! golden test against `./dev gates inputs` while it lives, so the list has one source.
+//! The files whose content changes C100's answer (ADR 0060 §4). `plan.rs` reads this list directly; a test of `plan.rs` holds its
+//! rules to this list, so the list has one source.
 
 /// Globs, from the repository root. Rust and TypeScript test files whose diff adds or removes an ignore attribute or an
-/// environment guard are a content rule of the planner (a golden case in `affected.mjs` and `plan.rs`), not a glob here.
+/// environment guard are a content rule of the planner (a case of `plan.rs`), not a glob here.
 pub const GLOBS: &[&str] = &[
     ".gitea/**",
     "docs/gates.toml",

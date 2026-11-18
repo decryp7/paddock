@@ -1,7 +1,7 @@
 //! C100 asks `./dev plan`'s own planner, in this process, and never a script (ADR 0022 R4; the user retired `affected.mjs`
 //! on 2026-11-18). The JS planner used to answer here; a repository whose `scripts/affected-marks.mjs` answers differently shows
 //! which one decides.
-#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::gates::edge;
 use paddock_dev::gates::gating::Planner;
 

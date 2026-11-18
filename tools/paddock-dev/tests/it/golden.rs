@@ -85,7 +85,7 @@ const SAMPLE_KEYS: [&str; 10] = [
 ];
 
 /// The change sets of `tests/golden/real-tree-samples.json` on this repository: the flags the planner answers, as recorded from
-/// `scripts/affected.mjs` on 2026-11-18 (a change of the tree that moves one is a reviewed bless, not a silent edit).
+/// the retired `scripts/affected.mjs` on 2026-11-18 (a change of the tree that moves one is a reviewed bless, not a silent edit).
 #[test]
 fn recorded_real_tree_samples_match_the_planners_flags() {
     let root = repo_root();
@@ -250,7 +250,7 @@ fn recorded_plans_match_the_planners_answers_on_the_fixture_repository() {
             serde_json::from_str(&std::fs::read_to_string(golden_dir().join("expected").join(format!("{name}.json"))).unwrap()).unwrap();
         let got = plan_for(&root, &history, &req).map_err(|e| e.to_string());
         if bless() {
-            let recorded = got.as_ref().map(Clone::clone).unwrap_or_else(|_| json!({"error": true}));
+            let recorded = got.clone().unwrap_or_else(|_| json!({"error": true}));
             record(&golden_dir().join("expected").join(format!("{name}.json")), &recorded);
             continue;
         }

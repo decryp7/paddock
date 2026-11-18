@@ -1,4 +1,4 @@
-//! The repository contracts `scripts/affected.test.mjs` also held, moved so the script can be retired (ADR 0022 R4): the
+//! The repository contracts the retired `scripts/affected.test.mjs` also held, moved so the script can be retired (ADR 0022 R4): the
 //! apps' CI contracts (`paddock.ci.json`) and the host-cleanup process patterns they hand to `job-isolation.sh`, the markdown
 //! that code reads (declared doc inputs), CODEOWNERS, Renovate and the one npm workspace.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -377,7 +377,7 @@ fn every_markdown_file_that_code_reads_is_a_declared_doc_input() {
         }
         if matches!(
             file,
-            "scripts/affected.test.mjs" | "tools/paddock-dev/tests/it/contracts.rs" | "tools/paddock-dev/tests/it/tree.rs"
+            "tools/paddock-dev/tests/it/contracts.rs" | "tools/paddock-dev/tests/it/tree.rs"
         ) {
             continue; // these files name docs as test data
         }

@@ -47,7 +47,7 @@ test('C126 reads test code only and skips the kits', () => {
   assert.deepEqual(sites(`fn p() {}\n#[cfg(test)]\nmod tests {\n${loop}}\n`, 'crates/a/src/lib.rs'), ['A6']);
   assert.deepEqual(sites(loop, 'crates/paddock-testkit-start/src/reap.rs'), []);
   assert.deepEqual(sites("for (;;) {\n  spawnSync('x');\n}\n", 'scripts/test-kit.mjs'), []);
-  assert.deepEqual(sites("for (;;) {\n  spawnSync('x');\n}\n", 'scripts/affected.mjs'), [], 'a script, not a test');
+  assert.deepEqual(sites("for (;;) {\n  spawnSync('x');\n}\n", 'scripts/publish.mjs'), [], 'a script, not a test');
 });
 
 test('C126 is report-only: its findings are warnings naming the rule, the ADR and the fix', () => {

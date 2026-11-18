@@ -1,5 +1,5 @@
 # The safety net of affected CI (ADR 0014 §6): every night, and on a manual run, ci.yml runs everything on main (every
-# project, every app leg, Chromium and WebKit), whatever the change. A wrong filter in scripts/affected.mjs can therefore
+# project, every app leg, Chromium and WebKit), whatever the change. A wrong filter in ./dev plan can therefore
 # hide a failure for at most one night, or two when a train in CI skipped one (a skip never leaves main unmeasured for more
 # than 36 h and never happens twice in a row: ./dev ci schedule-skip), and release workflows always run their app's full gates.
 #

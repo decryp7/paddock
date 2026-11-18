@@ -39,7 +39,7 @@ changes here, every app's copy is updated in the same change.
    container of the user's, and Docker was down for about 15 minutes.
     Fixtures recorded from live APIs or CI are scrubbed of names, emails, avatars and hostnames at capture; a check fails on real-looking values (ER-14; 2026-11-12). Paddock's planned check C110 does this.
 8. **Every lesson goes into [lessons.md](lessons.md)**, every rule here; no `Co-Authored-By` or AI attribution anywhere.
-    Hooks and gates are never bypassed: no `--no-verify`, `-n`, `LEFTHOOK=0` or `LEFTHOOK_EXCLUDE`; fix the failure or stop and report (ER-39; the worktree-guard refusal is planned; 2026-11-12). Generated files (SVGs, lockfiles, synced copies) are regenerated from their source, never hand-edited, and CI checks they match (ER-40). Checks run on every change that could bring in their class, not only when their own files change; conformance runs on every change: CI plans its job for every change (`conformance always runs` in `scripts/affected.mjs` and `./dev plan`), and the push gate runs the conformance row and the conformance tests on every push (ER-41; user, 2026-11-14).
+    Hooks and gates are never bypassed: no `--no-verify`, `-n`, `LEFTHOOK=0` or `LEFTHOOK_EXCLUDE`; fix the failure or stop and report (ER-39; the worktree-guard refusal is planned; 2026-11-12). Generated files (SVGs, lockfiles, synced copies) are regenerated from their source, never hand-edited, and CI checks they match (ER-40). Checks run on every change that could bring in their class, not only when their own files change; conformance runs on every change: CI plans its job for every change (`conformance always runs` in `./dev plan`), and the push gate runs the conformance row and the conformance tests on every push (ER-41; user, 2026-11-14).
 9. **Releases only from a tag in CI**, never from a local machine; a local build for the user to try is fine but is never
    published. Never tag a `[skip ci]` commit.
     A tag or landing counts only a complete CI run on that exact commit, not a skipped run, a failed-only rerun or an in-place retry; `./dev ci verdict` is the one reader (planned; ER-15; 2026-11-12).
@@ -363,7 +363,7 @@ changes here, every app's copy is updated in the same change.
     packages.
     (a) The batch dispatches `<app>-release.yml` with gates on and the installers (bundle) built; passing tests alone is
     not enough.
-    (a2) A train dispatches an app's release gate only when the plan (`./dev plan` or `scripts/affected.mjs`, over the train's
+    (a2) A train dispatches an app's release gate only when the plan (`./dev plan`, over the train's
     diff against main) marks that app's release workflow or release path (user, 2026-11-16). Otherwise it skips the gate and
     records the plan output in the landing report. The counting full `ci.yml` run always runs. This is also how rule 50's train
     sequence reads. *Why:* each unaffected release gate cost up to 34 minutes of the single Mac runner per train (train 12:
@@ -497,7 +497,7 @@ Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as writt
 - **Rule 2:** every agent works in its own git worktree of `paddock` (a full checkout: `./dev worktree add --profile gates`,
   the default; sparse only for a `--detach` review copy), with its own `CARGO_TARGET_DIR` per app and its own e2e port; the
   main checkout stays on `main` for the coordinator.
-- **Rule 3:** the affected tests are what `scripts/affected.mjs` selects, plus the touched specs; otherwise unchanged
+- **Rule 3:** the affected tests are what `./dev plan` selects, plus the touched specs; otherwise unchanged
   (Playwright in Chromium only in a branch; the full suite, Chromium and WebKit, once on the combined result before a
   local build or release, plus CI).
 - **Rule 8:** rules live once, in this file and the root `AGENTS.md`; no per-app copies. Every lesson still goes into

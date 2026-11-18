@@ -794,7 +794,6 @@ job	tools			missing=1
 job	tools			mkdir -p "$DEST"
 job	tools			mkdir -p "$DIR"
 job	tools			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
-job	tools			node --test scripts/affected.test.mjs
 job	tools			node --test scripts/new-app.test.mjs scripts/npm-audit.test.mjs scripts/coverage-gate.test.mjs scripts/demo/*.test.mjs scripts/shell-demo/*.test.mjs
 job	tools			node --test scripts/vm-smoke/*.test.mjs
 job	tools			node --test tools/test/*.test.mjs

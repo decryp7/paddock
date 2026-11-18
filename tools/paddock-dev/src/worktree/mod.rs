@@ -90,12 +90,12 @@ pub struct AddArgs {
     /// A review copy at the base: no branch.
     #[arg(long)]
     detach: bool,
-    /// What to check out: `gates` (the default) is a full checkout, everything conformance, `affected.mjs`, `gates check`
+    /// What to check out: `gates` (the default) is a full checkout, everything conformance, `gates check`
     /// and `dev plan` read. Measurements: docs/benchmarks.md, "Full against sparse worktree checkout".
     #[arg(long, value_enum, default_value = "gates", conflicts_with = "sparse")]
     profile: Profile,
     /// Sparse cone folders (comma separated). Only with --detach, for a review copy that reads a few folders. A review copy
-    /// that runs the gates (conformance, `affected.mjs`, `gates check`, `dev plan`) needs no --sparse: leave it out.
+    /// that runs the gates (conformance, `gates check`, `dev plan`) needs no --sparse: leave it out.
     #[arg(long, value_delimiter = ',')]
     sparse: Vec<String>,
     /// The folder all agent worktrees go under (default: git config paddock.worktreeRoot, then PADDOCK_WORKTREE_ROOT).

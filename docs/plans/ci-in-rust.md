@@ -27,7 +27,7 @@
 
 | Piece | State | Evidence |
 |---|---|---|
-| `./dev plan` (R4, the planner) | on `origin/main`; CI's plan job uses it; `PLAN_PLANNER=node` still falls back to `scripts/affected.mjs` "for one release". No release tag contains it yet (`git tag --contains` of the last `plan.rs` commit on main is empty), so the fallback's release has not happened | `.gitea/workflows/ci.yml:112-120`, `tools/paddock-dev/src/plan*.rs` |
+| `./dev plan` (R4, the planner) | on `origin/main`; CI's plan job uses it; the `PLAN_PLANNER=node` fallback and `scripts/affected.mjs` were removed on 2026-11-18 (the user waived R4's "one release"; ADR 0022 amendment). Before that no release tag contained it (`git tag --contains` of the last `plan.rs` commit on main is empty), so the fallback's release has not happened | `.gitea/workflows/ci.yml:112-120`, `tools/paddock-dev/src/plan*.rs` |
 | `./dev ci isolation` (RT-1) | built on `origin/main` (`tools/paddock-dev/src/ci_isolation`), **not switched**: every job still runs `conformance/ci/job-isolation.sh`, which calls `./dev ci slot` for the locks | `.gitea/actions/job-isolation/action.yml:13`, 12 direct `job-isolation.sh path/port` calls in workflows and actions |
 | `./dev ci release-isolation` (RT-2) | built on `origin/main`, not called by any workflow yet (`grep -rl release-isolation .gitea` is empty) | `tools/paddock-dev/src/release_isolation` |
 | `./dev ci flakes`, `./dev ci timings` (RT-8) | on `origin/main`; `scripts/ci-timings.mjs` (337 lines) still in the tree, no CI user | `tools/paddock-dev/src/ci_runs` |

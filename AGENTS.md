@@ -24,7 +24,7 @@ conformance/ eslint/ tsconfig/ lint/ icons/ templates/    shared checks, presets
 docs/            family docs: rules, lessons, ADRs, plans, research; an app's docs stay in apps/<app>/docs
 tools/paddock-dev  the Rust developer and CI tool (ADR 0022: its own Cargo workspace and lockfile; run it with `./dev`, which
                  builds or fetches the binary its inputs name)
-scripts/         family scripts: affected.mjs (CI's plan), publish.mjs, new-app.mjs, demo-release.mjs
+scripts/         family scripts: ./dev plan (CI's plan), publish.mjs, new-app.mjs, demo-release.mjs
 .gitea/          ci.yml (plan and affected jobs), nightly.yml, each app's <app>.yml, the shared actions
 package.json     the one npm workspace and package-lock.json (ui, eslint, icons, the demos, apps/*/app)
 ```
@@ -32,7 +32,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 ## Working in the monorepo
 
 - **Worktrees (rule 2).** Every agent works in its own worktree of `paddock`; make it with
-  `./dev worktree add`: a full checkout (`--profile gates`, the default), because conformance, `scripts/affected.mjs` and
+  `./dev worktree add`: a full checkout (`--profile gates`, the default), because conformance, `./dev plan` and
   `./dev gates check` and `./dev plan` read most folders, and a sparse cone makes them stop with an `::error::` line naming the
   missing folders (measurements: [benchmarks](docs/benchmarks.md#2026-11-12-full-against-sparse-worktree-checkout-fixworktree-gates-profile));
   `--sparse` is only for a `--detach` review copy, and `-b <branch>` attaches to a branch that already exists.
@@ -60,13 +60,13 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - **npm.** One workspace and one `package-lock.json` at the root: `npm ci` there, never in a package folder; add a
   dependency with `npm install <pkg> -w <workspace>`. Apps use `@decryp7/paddock-ui` from `ui/dist` (built with
   `npm run build -w ui`). Name styles and assets in `angular.json` by package path, never `node_modules/...`.
-- **Affected tests (rule 3).** `node scripts/affected.mjs origin/main --explain` lists the projects a change reaches (the
+- **Affected tests (rule 3).** `./dev plan origin/main --explain` lists the projects a change reaches (the
   Cargo and npm graphs, Tauri `frontendDist`, `tsconfig`/`angular.json`/ESLint config paths, declared doc inputs). Run
   those, plus the touched specs. CI runs the same plan; nightly.yml runs everything.
   Only `rust-toolchain`, the root `package.json`, `.npmrc`, `.nvmrc`, `.gitattributes` and `tsconfig/` still mark
-  everything; the table above `GLOBAL` in `scripts/affected.mjs` says what every other former global reaches:
-  `scripts/affected*.mjs` mark tools, ui and paddock-dev (the `plan` and `tools` jobs run their tests; the golden test of
-  `dev` uses the script as oracle), `.cargo/` and `lint/` the Rust builds (`lint/` also conformance), a `ci.yml` change only
+  everything; the table above `GLOBAL` in `tools/paddock-dev/src/plan.rs` says what every other former global reaches:
+  `tools/paddock-dev/src/plan*.rs` mark paddock-dev (the planner's tests are its own; the recorded answers in
+  `tools/paddock-dev/tests/golden` are its reference), `.cargo/` and `lint/` the Rust builds (`lint/` also conformance), a `ci.yml` change only
   the jobs whose text changed (everything if the file cannot be split into jobs, uses YAML anchors, its header changed or
   the `plan` job changed), a shared action or a script of `conformance/ci` or `conformance/release` only the jobs and
   workflows that use it, following scripts that import or name it (imports built at run time are not seen), reusable
@@ -83,12 +83,12 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   publish-and-consume step. A breaking change to a shared crate or package updates every app in the same change.
 - **Workflows are named after their app** (ADR 0014's last amendment): an app with gates on several OS (Debrief, Dyno,
   Pitcrew, Pitwall, Spotter) has `.gitea/workflows/<app>.yml`, its whole CI and its release from an `<app>-v*` tag, whose
-  plan job asks `node scripts/affected.mjs --ci --app <app>`; extra jobs are `<app>-<what>.yml` (Debrief's fuzz, bench,
+  plan job asks `./dev plan --ci --app <app>`; extra jobs are `<app>-<what>.yml` (Debrief's fuzz, bench,
   corpus, mutants). An app whose gates fit one Linux job (the demos) is a leg of ci.yml and releases through
   `<app>-release.yml`. Any of these files marks only its app in the plan.
 - **A new conformance check** gets its id from `./dev check new-id --reserve <branch>` (the next free id across all branches and `conformance/reserved/`; it takes the id on origin at once by pushing a ref `refs/paddock/check-ids/C<n>`, which a second agent cannot create, so two agents never get one id; commit the reservation file as the record), never a hand-picked number.
 - **A new app** gets `apps/<app>/paddock.ci.json` (`workflow` for its own workflow, or its leg: Cargo workspace,
-  prepare, checks, UI commands), a CODEOWNERS line and its workflow. `scripts/affected.test.mjs` checks all three.
+  prepare, checks, UI commands), a CODEOWNERS line and its workflow. `tools/paddock-dev/tests/it/contracts.rs` checks all three.
 
 ## Shared code: `crates/` and `ui/`
 
@@ -121,7 +121,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 
   ```sh
   npm ci
-  node scripts/affected.mjs origin/main
+  ./dev plan origin/main
   (cd ui && npm run test:tokens && npm run lint && npm test && npm run build && npx playwright test --project=gallery)
   (cd crates && cargo fmt --all --check && cargo clippy --workspace --all-targets --all-features -- -D warnings)
   ```
@@ -139,7 +139,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   single-user setup). ADRs: family ones in `docs/adr/`, an app's in `apps/<app>/docs/adr/` (numbered per app).
 
 <!-- The sections below are docs/blocks (the engineering rules common to every app), copied verbatim;
-     scripts/affected.test.mjs fails when they drift. Change them in docs/blocks first. -->
+     `tools/paddock-dev/tests/it/contracts.rs` fails when they drift. Change them in docs/blocks first. -->
 
 ## Design principles
 

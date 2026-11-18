@@ -10,7 +10,7 @@ const lw = (sites) => sites.map(({ line, what }) => ({ line, what }));
 test('C121 kinds: registries and test files are read, fixtures and other files are not', () => {
   assert.equal(kindOf('docs/generators.toml'), 'registry');
   assert.equal(kindOf('docs/sub/x.toml'), null);
-  for (const t of ['tools/x/tests/it/a.rs', 'conformance/test/a.test.mjs', 'scripts/affected.test.mjs', 'src/queue/tests.rs', 'a/b_test.rs', '.claude/hooks/x.test.sh']) {
+  for (const t of ['tools/x/tests/it/a.rs', 'conformance/test/a.test.mjs', 'scripts/x.test.mjs', 'src/queue/tests.rs', 'a/b_test.rs', '.claude/hooks/x.test.sh']) {
     assert.equal(kindOf(t), 'test', t);
   }
   for (const n of ['src/lib.rs', 'tools/x/tests/fixtures/a.rs', 'tests/a.toml', 'node_modules/x/tests/a.js']) assert.equal(kindOf(n), null, n);

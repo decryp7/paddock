@@ -1,5 +1,5 @@
 //! Which projects a changed `.gitea/` file or shared CI script reaches: the port of `giteaTargets`, `giteaUsers`,
-//! `scriptImporters`, `workflowJobs` and `changedJobs` of `scripts/affected.mjs`.
+//! `scriptImporters`, `workflowJobs` and `changedJobs` of the retired `scripts/affected.mjs`.
 //!
 //! A line-based reading of the workflow files, no YAML library, exactly as the script does it: whatever the split cannot
 //! prove (anchors, odd indentation, an unknown job, a file that is not a workflow) answers `None`, and the caller plans

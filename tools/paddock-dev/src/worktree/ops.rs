@@ -285,7 +285,7 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
     if req.branch.is_some() && !req.sparse.is_empty() {
         return Err(CliError::usage("--sparse is for review copies (--detach); a branch worktree is a full checkout.")
             .with_hint(
-                "The gates (conformance, affected.mjs, `gates check`) read most of the repository; a full checkout costs a little more disk and time (docs/benchmarks.md, \"Full against sparse worktree checkout\"). Drop --sparse, or add --detach for a review copy.",
+                "The gates (conformance, `dev plan`, `gates check`) read most of the repository; a full checkout costs a little more disk and time (docs/benchmarks.md, \"Full against sparse worktree checkout\"). Drop --sparse, or add --detach for a review copy.",
             ));
     }
     let git = repo.git();

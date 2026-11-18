@@ -1,4 +1,4 @@
-// A sparse checkout that lacks folders the gates read makes conformance, scripts/affected.mjs and `dev gates check` fail with a bare
+// A sparse checkout that lacks folders the gates read makes conformance, ./dev plan and `dev gates check` fail with a bare
 // ENOENT, and agents then add folders one by one. This says it once, with the folders and the fix (ER-27). It compares the
 // tracked folders (the top level, and the children of apps/) with the disk, so it needs no list of what the gates read.
 import { execFileSync } from 'node:child_process';

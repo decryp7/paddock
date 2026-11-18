@@ -323,14 +323,14 @@ pub fn evaluate(input: &Input) -> Outcome {
     if inputs.iter().any(|f| input.planner.marks(f).is_none()) {
         finding(
             &mut out,
-            Some("scripts/affected-marks.mjs"),
+            Some("tools/paddock-dev/src/plan.rs"),
             None,
             "planner",
             format!(
                 "not measured: the planner could not say which plan outputs a check's files turn on, so 'runs when planned' is unchecked{}",
                 input.planner.failure().map(|why| format!(" (cause: {why})")).unwrap_or_default()
             ),
-            "Run `echo '[\"scripts/affected.mjs\"]' | node scripts/affected-marks.mjs` and fix what it reports.",
+            "Run `./dev plan --files <the check's file> --explain` and fix what it reports.",
         );
     }
     let ids: BTreeSet<String> = all.iter().map(|c| c.id.clone()).collect();
@@ -832,7 +832,7 @@ mod tests {
             None
         }
         fn failure(&self) -> Option<String> {
-            Some("scripts/affected-marks.mjs: it did not finish within 60 seconds".into())
+            Some("the planner did not finish within 60 seconds".into())
         }
     }
 
@@ -941,7 +941,7 @@ mod tests {
             .find(|x| x.contains("planner could not say"))
             .unwrap_or_else(|| panic!("{m:?}"));
         assert!(
-            f.contains("it did not finish within 60 seconds"),
+            f.contains("the planner did not finish within 60 seconds"),
             "the cause is in the finding: {f}"
         );
     }

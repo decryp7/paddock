@@ -119,7 +119,7 @@ the observed OS start time (`Evidence`), every break, put-back and stale removal
 4. **Retire the shells** after a few days of mixed use with no entries in `heavy-logs/` or `pitcrew-lock-breaks.log` that need
    explaining: delete `plock`, `plock.test.sh`, the `heavy.sh` fallback body, and then raise `HEAVY_SLOTS` if wanted.
 
-CI leg needed (not added here: `.gitea/` and `scripts/affected.mjs` belong to the integrating agent): a `tools/heavy` job in
+CI leg needed (not added here: `.gitea/` and `./dev plan` belong to the integrating agent): a `tools/heavy` job in
 `ci.yml` on Linux, macOS and Windows runners with `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
 `cargo nextest run --profile ci` and `cargo deny check` in `tools/heavy`; `paddock.ci.json`/the planner entry for the
 `tools/heavy` workspace (inputs: `tools/heavy`, `crates/paddock-proc`); and `tools/heavy` in the publish plan of

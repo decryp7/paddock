@@ -329,24 +329,6 @@
  },
  {
   "files": [
-   "scripts/affected.mjs",
-   "scripts/affected.test.mjs"
-  ],
-  "plan": {
-   "all": false,
-   "crates": false,
-   "ui": true,
-   "eslint": false,
-   "conformance": true,
-   "c99": false,
-   "tools": true,
-   "icons": false,
-   "paddockDev": true,
-   "docs": false
-  }
- },
- {
-  "files": [
    ".cargo/config.toml"
   ],
   "plan": {

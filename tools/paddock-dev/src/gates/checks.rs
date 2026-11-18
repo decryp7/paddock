@@ -307,7 +307,7 @@ mod tests {
     fn scripts_and_npm_scripts() {
         let t = MemTree::new(&[
             ("scripts/check-x.mjs", ""),
-            ("scripts/affected.test.mjs", ""),
+            ("scripts/a.test.mjs", ""),
             ("apps/dyno/scripts/check-bundle.sh", ""),
             ("apps/dyno/scripts/other.sh", ""),
             ("conformance/test/c13.test.mjs", ""),
@@ -321,7 +321,7 @@ mod tests {
             vec![
                 "apps/dyno/scripts/check-bundle.sh",
                 "conformance/test/c13.test.mjs",
-                "scripts/affected.test.mjs",
+                "scripts/a.test.mjs",
                 "scripts/check-x.mjs"
             ]
         );

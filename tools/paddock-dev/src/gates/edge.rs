@@ -84,7 +84,7 @@ impl Tree for GitTree {
 }
 
 /// `Some(::error:: line)` when `root` is a sparse checkout that lacks folders the gates read (local runs only: CI checks out sparse
-/// on purpose). One implementation, `conformance/src/util/full-checkout.mjs`, which also serves conformance and `affected.mjs`.
+/// on purpose). One implementation, `conformance/src/util/full-checkout.mjs`, which also serves conformance and `dev plan`.
 pub fn sparse_problem(root: &Path) -> Option<String> {
     let script = "conformance/src/util/full-checkout.mjs";
     if !root.join(script).is_file() {

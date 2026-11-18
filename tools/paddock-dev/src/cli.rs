@@ -110,7 +110,7 @@ enum Command {
         command: queue::QueueCommand,
     },
     /// The CI planner: which projects a change reaches, the CI matrix and the commit lint's range (the port of
-    /// scripts/affected.mjs; the arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --commit-range, --commit-flags, --explain).
+    /// the retired scripts/affected.mjs; the arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --commit-range, --commit-flags, --explain).
     /// It prints no JSON object: `--json` is refused.
     Plan(PlanArgs),
     /// Merge checks.
@@ -474,7 +474,7 @@ struct GatesRootArgs {
 
 #[derive(Subcommand)]
 enum GraphCommand {
-    /// The projects a change reaches (the core of scripts/affected.mjs).
+    /// The projects a change reaches (the core of the retired scripts/affected.mjs).
     Affected(AffectedArgs),
 }
 
@@ -483,7 +483,7 @@ struct PlanArgs {
     /// The repository root (default: the folder containing .git, found from the current folder).
     #[arg(long)]
     root: Option<PathBuf>,
-    /// The planner's own arguments, as scripts/affected.mjs took them.
+    /// The planner's own arguments, as the retired scripts/affected.mjs took them.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
 }

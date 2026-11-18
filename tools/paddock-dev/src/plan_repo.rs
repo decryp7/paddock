@@ -1,5 +1,5 @@
 //! The `.gitea` and `conformance` files the planner narrows workflow changes with, read from git and the working tree
-//! (the I/O half of `planFor` in `scripts/affected.mjs`).
+//! (the I/O half of `planFor` in the retired `scripts/affected.mjs`).
 
 use crate::plan_gitea::GiteaSource;
 use paddock_proc::{Limits, run_bounded};
