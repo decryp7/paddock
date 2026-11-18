@@ -1976,3 +1976,65 @@ per-command cost measured in run 8246 (the block above)?
   slower overall in this run (plain 243 against 191 ms). One run of 20 rounds after the fix, one before (ER-28: fault present in
   8246, removed in 8247, both on the same runner and kept folder).
 - **Not measured:** the paddock-dev suite under the real 8-test load with the fix (the train's next Windows run).
+
+## Train 14's Windows slowdown: host or code, and the merge check's repeated git reads (2026-11-18, fix/windows-testcommand-slow, perf/git-heavy-tests)
+
+Question: why did paddock-dev's git-heavy tests run 5 to 10 times slower on windows-latest in train 14's runs 8245 and 8248 than in
+main's run 8241 (`pre_push::tests::known_commit::a_delete_only_push_and_an_explicit_base_never_use_evidence` 5.3 s, then 56 s, then a
+timeout on both tries), and is it the host or the code?
+
+- **Machine:** the Windows CI runner itself (windows-latest), one job per trial of `windows-slow-ab.yml` (branch
+  `exp/windows-slow-ab`, never merged) set up as ci.yml's paddock-dev job (job isolation, kept clone, the paddock-dev job's kept build
+  folder), nothing else on the runner (`./dev ci dispatch` waited for it). In the same job: host probes (Dyno's `dyno-bench cpu` and
+  `dyno-bench disk --disk-mib 256` in the job's work folder, 200 `git --version`, 50 new repositories with `init`, `add`, `commit`)
+  right before and right after paddock-dev's tests. Debug test build, as CI's. Mac: the Mac mini, 1-minute load 4 to 11. Linux: the
+  local CI-image container (`tools/linux-container.sh --ci-image`, arm64), an indication only (ER-9).
+- **Trees:** main `f5f08f71e`, train 14 `842ef2d1a`, the fix `48fa2449a` (on the train), the fix plus the memo `54759b464`.
+- **Cause, seen directly:** the train's new push-gate row `gates-register` (6120c49cf, C100 on every push) starts `Facts::dev_exe`,
+  which was `current_exe()`. In a unit test that is the test harness, which reads `gates check` as two test-name filters and runs every
+  test named `gates` or `check` again, at full parallelism, inside the test. On the Mac two such children (`<test binary> gates check`)
+  run during the test; it took 0.40 s on main and 14.2 to 17.5 s on the train.
+
+| Windows runner, 8 test threads, `pre_push` and `merge_check` | main (8251) | train (8252) | fix (8253) |
+|---|---:|---:|---:|
+| `known_commit::a_delete_only_push...` | 3.1 s | **48.2 s** | 3.8 s |
+| `merge_check::a_clean_merge_is_clean` | 4.1 s | 7.1 s | 7.2 s |
+| `merge_check::a_hunk_with_most_of_its_lines_kept...` | 10.7 s | 25.2 s | 17.4 s |
+| merge_check tests both trees have (45), total | 165.8 s | 361.6 s | 310.8 s |
+| tests run / wall | 169 / 38 s | 239 / 115 s | 240 / 94 s |
+| host before / after: 200 `git --version` (ms each) | 42.2 / 47.1 | 37.3 / 47.6 | 38.4 / 38.8 |
+| host: 50 x init+add+commit (ms each) | 345.5 / 220.6 | 289.5 / 227.0 | 285.8 / 300.2 |
+| host: dyno-bench cpu single / multi | 343-368 / 6429-6467 | 490-491 / 6700-6744 | 373-494 / 6495-6698 |
+| host: dyno-bench disk 1 MiB read / write MB/s | 781-849 / 353-1075 | 730-772 / 999-1022 | 688-785 / 1066-1102 |
+
+| Windows runner, merge_check (it) only, 1 test thread | main (8254) | fix (8255) | fix + memo (8257) |
+|---|---:|---:|---:|
+| `merge_check::a_clean_merge_is_clean` | 3.8 s | 4.1 s | 4.7 s |
+| `merge_check::a_hunk_with_most_of_its_lines_kept...` | 8.0 s | 13.7 s | 10.5 s |
+| the 45 tests both trees have, total | 137.9 s | 178.5 s (1.32 times, median per test) | 176.8 s (1.31 times) |
+| all merge_check tests of the tree | 45: 137.9 s | 84: 340.2 s | 84: 340.7 s |
+| host: 200 `git --version` (ms each) | 43.2 / 47.6 | 40.5 / 45.3 | 47.7 / 47.4 |
+| host: 50 x init+add+commit (ms each) | 291.5 / 295.2 | 316.2 / 295.1 | 265.3 / 284.8 |
+
+- **Host or code:** code. The host probes are the same on every tree within the run-to-run spread (git start 37 to 48 ms, a small
+  repository 220 to 345 ms, CPU and disk the same or better on the slow tree), while the train's test is 15 times main's in the
+  same minutes and back to main's with the fix. The earlier slow runs did not meet the VM's nightly Proxmox backup either (it started
+  about 16:52 UTC on 2026-11-10): paddock-dev on Windows ran 22:47-23:02 UTC (8152), 02:37-02:52 (8161), 01:47-01:55 (8241, green),
+  03:17-03:52 (8245), 06:21-06:29 (8248); the trials ran 10:01-11:15 UTC. In run 8245 the paddock-dev unit tests outside `pre_push`
+  that took over 0.5 s on main kept a median of 1.1 times main's, while the integration tests that start many children took 3 times.
+- **The rest of the gap (serial, fix against main, 1.32 times):** each test of the train's tree does more: its fixture starts git
+  through `TestCommand` (ADR 0100; `CREATE_NO_WINDOW` and the builder, about 17 ms of a 60 ms start, ADR 0107's run 8247), and
+  `./dev merge check` starts git more often (the train's stale-base, reverted-base and re-land detectors: 80 against 64 git starts for
+  `a_clean_merge_is_clean`, 211 against 179 for `a_hunk_with_most...`, counted on the Mac with a logging `git` first on `PATH`). Of a
+  merge check's 33 starts for a two-commit merge, 7 were the same read of the same object ids asked again by another detector.
+- **The memo (perf/git-heavy-tests, a06109c92):** the merge check's git reader answers a read whose revisions are all full object ids
+  (ls-tree, diff, merge-base, merge-tree, log, cat-file) or `rev-parse --is-shallow-repository` from memory after its first run.
+  Mac, merge_check and pre_push tests at 8 threads, runs 2 and 3 of 3 (run 1 of each was a cold cache): merge_check total 89.6 and
+  90.5 s before, 80.5 and 81.3 s after (median per test 0.71 to 0.63 s). Linux container, merge_check, 2 runs each: total 18.9 and
+  18.0 s before, 17.6 and 38.3 s after (the second under another agent's build; an indication only). Windows, serial, one run
+  each: 340.2 s before (8255), 340.7 s after (8257), with the host's git start at 40.5 to 45.3 ms in the first and 47.4 to 47.7 ms
+  in the second: **no gain measurable on the Windows runner** with one run per tree; the memo stays because it is correct and
+  cheap, not for a measured Windows gain. (Trials 8254, 8255 and 8257 report failure only because the trial's summary step
+  stopped on a test name the filter left out; all their tests passed.)
+- **Not measured:** a Defender exclusion for the runner's work folder (host configuration, the user's decision); git starts are 38 to
+  48 ms there against 5.6 ms on the Mac (`git --version`), and a small repository 220 to 345 ms against 45 ms.
