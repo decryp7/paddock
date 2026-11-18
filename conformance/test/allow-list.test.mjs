@@ -81,6 +81,7 @@ test('allow list: a whole float count is its integer, as the Rust host reads it'
  * kept to one line so that no check flags this file itself.
  */
 const SAMPLE = {
+  C30: ['crates/a/tests/t.rs', '#[test]\nfn t() {\n    let s = std::time::Instant::now();\n    assert!(s.elapsed() < std::time::Duration::from_secs(1));\n}\n'],
   C135: ['apps/a/src/x.spec.ts', "installLeakDetector({ mode: 'off' });\n"],
 };
 const users = checks.filter((c) => c.allowList);
@@ -98,9 +99,9 @@ test('allow list: the reader reads and parses the file once, and a file it could
   assert.deepEqual(l.warnings().map((f) => f.message), ['stale allow entry (a/b.rs: needle) matches no site', 'stale allow entry (a/gone.rs: needle) matches no site']);
 });
 
-test('allow list: every check that reads one has a sample here, and C135 reads one (C121, C124, C125, C130 and C131 are Rust-only since pair P3)', () => {
+test('allow list: every check that reads one has a sample here, and C30 and C135 read one (C121, C124, C125, C130 and C131 are Rust-only since pair P3)', () => {
   assert.deepEqual(users.map((c) => c.id).filter((id) => !SAMPLE[id]), []);
-  assert.deepEqual(users.map((c) => c.id), ['C135']);
+  assert.deepEqual(users.map((c) => c.id), ['C30', 'C135']);
 });
 
 test('allow list: a broken allow file is one unwaivable check-broken finding and nothing else, for every check that reads one', async () => {

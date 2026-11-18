@@ -6,7 +6,7 @@
 //! selection into a failure there.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use paddock_dev::pre_push::gates::AUDIT_PROFILE;
+use paddock_dev::pre_push::gates::{AUDIT_PROFILE, split_audit_filter};
 use regex::Regex;
 use std::path::Path;
 
@@ -61,8 +61,9 @@ fn names() -> Vec<String> {
 
 #[test]
 fn every_clause_of_the_profile_selects_at_least_one_test() {
-    let f = filter();
-    assert!(f.contains("binary(it)"), "the audits live in the `it` binary: {f}");
+    let whole = filter();
+    // The clauses of this binary's audits; the source audits of the tool's own modules are checked by the gate's tests (pre_push).
+    let (f, _) = split_audit_filter(&whole).unwrap_or_else(|| panic!("the filter starts with its `binary(it)` group: {whole}"));
     let all = names();
     assert!(all.len() > 100, "the list of this binary's tests looks empty: {}", all.len());
     let found = clauses(&f);

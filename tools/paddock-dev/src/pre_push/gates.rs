@@ -745,6 +745,30 @@ fn conformance_tests(facts: &Facts) -> Planned {
 /// one place that lists them (ER-42), so a new audit is one line there and the gate and its tests read the same list.
 pub const AUDIT_PROFILE: &str = "member-audits";
 
+/// The two parts of the audit profile's `default-filter`: the leading `(binary(it) & ( ... ))` group (the audits of `tests/it`) and the
+/// rest (clauses that select tests of the tool's own modules by name: the source audits `no_source_file_*`). Pure text in, text out;
+/// `None` when the filter does not start with such a group (the guards of both parts read the filter through this one function, ER-42).
+pub fn split_audit_filter(filter: &str) -> Option<(String, String)> {
+    let f = filter.trim();
+    if !f.starts_with("(binary(it)") {
+        return None;
+    }
+    let mut depth = 0usize;
+    for (i, c) in f.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((f[..=i].to_string(), f[i + 1..].trim().to_string()));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// The audits of `tools/paddock-dev/tests/it`: tests that read the whole tree (the allow-list parity, the cargo-target lint, the
 /// parity corpus, the plan against the tree, the golden checks). A member's own touched-file tests never see a clash between two
 /// members' changes in them; on the merged tree they do (train 13: local-sccache's audits against golden-checked-when-made's code, the

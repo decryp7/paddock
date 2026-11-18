@@ -134,6 +134,8 @@ pub fn base_env(c: &mut TestCommand, w: &World) {
         .env("PLOCK_POLL", "0.2")
         .env("PLOCK_WAIT_LOG", "1")
         .env("PLOCK_UNREADABLE_LIMIT", "3")
+        // One at a time: the tests of the queue need it whatever the load of the machine they run on (slots.rs covers the rest).
+        .env("HEAVY_SLOTS", "1")
         .env("HOME", w.path("home"))
         .env("CARGO_HOME", w.path("home/.cargo"))
         .stdin(Stdio::null());

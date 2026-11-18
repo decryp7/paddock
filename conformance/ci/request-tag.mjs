@@ -22,6 +22,9 @@ export const TAG_RE = /^(?:([a-z0-9]+(?:-[a-z0-9]+)*)-)?v(\d+\.\d+\.\d+(?:-[0-9A
 export const SHA_RE = /^[0-9a-f]{40}$/;
 const SKIP_CI = /\[(?:skip ci|ci skip|no ci|skip actions|actions skip)\]/i;
 
+/** Tools published from their own tag (`heavy-vX.Y.Z`, heavy-release.yml): the tag's name and the file that says their version. */
+export const TOOL_VERSION_SOURCES = { heavy: 'tools/heavy/Cargo.toml' };
+
 /** `{ app, version }` of a tag (`app` is null for a `v*` tag of the shared packages), or throws. */
 export function parseTag(tag) {
   const m = TAG_RE.exec(tag);
@@ -36,6 +39,15 @@ export function checkNotSkipCi(message, sha) {
 
 /** Throws unless the app's single version source says the tag's version. `read(path)` returns the file's text or null. */
 export function checkVersion(app, tag, read) {
+  const tool = app && TOOL_VERSION_SOURCES[app];
+  if (tool) {
+    const text = read(tool);
+    if (text == null) throw new Error(`${tool} is missing at this commit, so the version of ${tag} cannot be read`);
+    const have = /^\[package\][^[]*?^version\s*=\s*"([^"]+)"/m.exec(text)?.[1];
+    const want = parseTag(tag).version;
+    if (have !== want) throw new Error(`the tag ${tag} says ${want}, ${tool} says ${have ?? 'nothing'}: bump the version first, then request the tag`);
+    return want;
+  }
   const conf = app && `apps/${app}/app/src-tauri/tauri.conf.json`;
   const cargo = app && `apps/${app}/src-tauri/Cargo.toml`;
   if (!app) {

@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! <root>/pitcrew-heavy-v2.lock/owner        the lock: a directory that appears atomically WITH its owner record
-//! <root>/pitcrew-heavy-v2.lock.slotN        slots 2.. (only when HEAVY_SLOTS > 1; shell plock ignores them)
+//! <root>/pitcrew-heavy-v2.lock.slotN        slots 2.. (taken only while the load allows more than one step at a time)
 //! <root>/pitcrew-heavy.lock                 the old-style lock (honoured while it exists)
 //! <root>/pitcrew-heavy.ticket.<us>-<pid>    FIFO queue tickets
 //! <root>/pitcrew-heavy.high.<pid>-<name>    --high markers
@@ -14,7 +14,7 @@
 
 use crate::clock::Clock;
 use crate::config::Config;
-use crate::gate::{LoadSource, load_text};
+use crate::gate::{LoadSource, Pressure, allowed_slots, is_container_command, load_text};
 use crate::log::{Level, Logger};
 use crate::probe::file_id;
 use crate::procs::{Presence, Procs, evidence, pid_alive};
@@ -41,6 +41,8 @@ pub const ACTIVITY_LOG: &str = "pitcrew-lock-activity.log";
 pub const TICKET_PREFIX: &str = "pitcrew-heavy.ticket.";
 /// High marker file name prefix.
 pub const HIGH_PREFIX: &str = "pitcrew-heavy.high.";
+/// Drain marker file name prefix: a container run that has waited long for the machine to be free of other steps.
+pub const DRAIN_PREFIX: &str = "pitcrew-heavy.drain.";
 
 /// Failures to inject (tests only; there is no environment switch in the program).
 #[derive(Default)]
@@ -53,6 +55,8 @@ pub struct Faults {
     pub ticket_fail: AtomicBool,
     /// Runs once inside a break, after the decision and before the rename (race tests).
     pub before_aside: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// Runs once right after a slot was taken, before the count is checked again (race tests: another taker arrives in between).
+    pub after_take: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     /// Runs once inside a release, after the owner check and before the rename aside (race tests).
     pub before_release: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
@@ -563,6 +567,87 @@ impl Heavy {
         }
     }
 
+    /// The first live drain marker of another run that still counts (younger than `priority_max`), by its name suffix; the markers of
+    /// dead processes are removed. A container run that waited `drain_after` has one: while it lives no other step starts, so the
+    /// machine drains and the container run goes first (the bound keeps a stuck one from holding everybody for good).
+    pub fn live_drain_marker(&self, who: &str) -> Option<String> {
+        let mut found = None;
+        for f in self.dir_entries(DRAIN_PREFIX) {
+            let b = file_name(&f);
+            let suffix = &b[DRAIN_PREFIX.len()..];
+            let Ok(bytes) = read_bounded(&f) else { continue };
+            let ep = record::parse_marker_epoch(&bytes).or_else(|| mtime(&f));
+            let pid = record::marker_pid(suffix);
+            if pid.is_some_and(|p| pid_alive(&*self.procs, p, ep)) {
+                if pid != Some(self.pid) && self.now().saturating_sub(ep.unwrap_or(0)) < self.cfg.priority_max.as_secs() && found.is_none()
+                {
+                    found = Some(suffix.to_string());
+                }
+                continue;
+            }
+            self.blog(&format!("{who} removed the stale drain marker {b}"));
+            let _ = fs::remove_file(&f);
+        }
+        found
+    }
+
+    /// Whether a taker that holds slot `me` now sees more holders than the rule allows (the load rose, or a container run took a
+    /// slot, between its look and its take) and is one of the younger ones: the holders are ordered by the time of their record
+    /// (then pid) and only the first `allowed` keep their slot, so two takers that see each other never both step back.
+    fn over_allowed(&self, req: &Request, me: u32, my_epoch: u64) -> bool {
+        let dirs = self.held_dirs();
+        let (allowed, _) = self.allowed(req, &dirs);
+        if dirs.len() <= allowed as usize {
+            return false;
+        }
+        let mine = (my_epoch, self.pid);
+        let mut keys: Vec<(u64, u32)> = dirs
+            .iter()
+            .map(|d| match self.read_owner(d) {
+                OwnerRead::Ok(o) => (o.epoch.unwrap_or(u64::MAX), o.pid),
+                _ => (u64::MAX, u32::MAX),
+            })
+            .collect();
+        let _ = me;
+        keys.sort();
+        keys.iter().position(|k| *k == mine).is_none_or(|p| p >= allowed as usize)
+    }
+
+    /// The live holders' slot folders: those that exist (a stale one is broken by the poll loop, not here).
+    fn held_dirs(&self) -> Vec<PathBuf> {
+        (0..self.cfg.slots).map(|i| self.slot_dir(i)).filter(|d| d.is_dir()).collect()
+    }
+
+    /// Whether a live holder is running a container (`gate::is_container_command` on its owner record).
+    fn container_running(&self, dirs: &[PathBuf]) -> bool {
+        dirs.iter().any(|d| match self.read_owner(d) {
+            OwnerRead::Ok(o) => is_container_command(&o.cmd),
+            _ => false,
+        })
+    }
+
+    /// How many steps may run together now for `req`, and what the rule saw (for the wait line and the log). A step that is a
+    /// container run counts as holding the machine alone; so does any live container holder.
+    pub fn allowed(&self, req: &Request, dirs: &[PathBuf]) -> (u32, String) {
+        let l = self.load.load();
+        let p = Pressure {
+            load1: l.map(|l| l[0]),
+            load15: l.map(|l| l[2]),
+            idle: self.load.idle_percent(),
+        };
+        let container = is_container_command(&req.cmdline) || self.container_running(dirs);
+        let n = allowed_slots(self.cfg.slots, self.cfg.cpus, &p, container);
+        let seen = format!(
+            "{n} of at most {} at once ({} cores, 15-minute load {}, CPU idle {}{})",
+            self.cfg.slots,
+            self.cfg.cpus,
+            p.load15.map_or("unknown".into(), |x| format!("{x:.1}")),
+            p.idle.map_or("unknown".into(), |x| format!("{x:.0}%")),
+            if container { ", a container run alone" } else { "" }
+        );
+        (n, seen)
+    }
+
     /// The load gate for one check: Ok(None) open, Ok(Some(text)) closed.
     pub fn gate_closed(&self) -> Option<String> {
         let l = self.load.load()?;
@@ -682,6 +767,8 @@ pub struct Acquirer<'a> {
     last_reason: String,
     waited_micros: u64,
     bound_said: bool,
+    /// The drain marker of this run, once it asked for the machine to drain.
+    drain: Option<PathBuf>,
 }
 
 impl<'a> Acquirer<'a> {
@@ -703,6 +790,7 @@ impl<'a> Acquirer<'a> {
             last_reason: String::new(),
             waited_micros: 0,
             bound_said: false,
+            drain: None,
         };
         if a.req.high {
             let m = h
@@ -784,7 +872,26 @@ impl<'a> Acquirer<'a> {
             if self.held.is_some() {
                 return Poll::Held;
             }
-            if !self.req.high {
+            // A container run that has waited long for the machine to be free of other steps asks for it to drain; every other
+            // step then waits (a stream of high-priority runs cannot keep the container run out for good).
+            let container_req = is_container_command(&self.req.cmdline);
+            let waited_now = h.now().saturating_sub(self.t0);
+            if container_req && self.drain.is_none() && waited_now >= h.cfg.drain_after.as_secs() && !h.held_dirs().is_empty() {
+                let m = h.cfg.root.join(format!("{DRAIN_PREFIX}{}-{}", h.pid, record::sanitize_name(&name)));
+                let tmp = h.tmp_name("drain.");
+                if fs::write(&tmp, record::format_marker(h.pid, &h.start_text(), h.now())).is_ok() && fs::rename(&tmp, &m).is_ok() {
+                    h.log.info(
+                        "heavy.wait",
+                        "a container run asks for the machine to drain",
+                        &[("WaitedSeconds", json!(waited_now))],
+                    );
+                    self.drain = Some(m);
+                } else {
+                    let _ = fs::remove_file(&tmp);
+                }
+            }
+            // A container run that asked for the machine to drain goes before the high-priority runs it made wait.
+            if !self.req.high && self.drain.is_none() {
                 let waited = h.now().saturating_sub(self.t0);
                 let (counts, ignored) = h.counting_high_marker(&name, waited);
                 if !ignored.is_empty() && !self.bound_said {
@@ -845,20 +952,62 @@ impl<'a> Acquirer<'a> {
                     return Poll::Waiting;
                 }
             }
+            if !container_req && let Some(m) = h.live_drain_marker(&name) {
+                self.wait_for(
+                    "drain",
+                    &format!("a container run waits for the machine to drain ({m}); nothing starts before it"),
+                    &[("Reason", json!("drain")), ("Marker", json!(m))],
+                );
+                return Poll::Waiting;
+            }
             let mut busy: Option<PathBuf> = None;
+            // A stale holder is broken first, so the count below is of live ones.
+            let dirs = h.held_dirs();
+            for d in &dirs {
+                if h.break_if_stale(d, &name) {
+                    continue 'again;
+                }
+            }
+            let (allowed, seen) = if h.cfg.slots > 1 {
+                h.allowed(&self.req, &dirs)
+            } else {
+                (1, String::new())
+            };
+            // A waiter holds a ticket, never a slot (ER-43): the slot of a step that waits for the load stays free for whoever
+            // the rule lets in.
+            let limited = dirs.len() >= allowed as usize;
             for i in 0..h.cfg.slots {
                 let dir = h.slot_dir(i);
                 if dir.exists() {
-                    if h.break_if_stale(&dir, &name) {
-                        continue 'again;
-                    }
                     busy.get_or_insert(dir);
+                    continue;
+                }
+                if limited {
                     continue;
                 }
                 let t = h.clock.now_micros();
                 match h.try_take(&dir, &self.req, &mut self.epoch) {
                     Take::Taken => {
                         self.held = Some(i);
+                        if let Some(hook) = h.faults.after_take.lock().ok().and_then(|mut x| x.take()) {
+                            hook();
+                        }
+                        // Two takers can both have seen room (the load rose, a container run arrived, a high run came in beside the
+                        // head): look again now that the slot is ours, and step back if the younger of too many. The ticket stays.
+                        if h.cfg.slots > 1 && h.over_allowed(&self.req, i, self.epoch) {
+                            self.release_slot();
+                            h.log.info(
+                                "heavy.wait",
+                                "took a slot and stepped back: more steps run than the rule allows now",
+                                &[("Slot", json!(i + 1))],
+                            );
+                            self.wait_for(
+                                "stepped-back",
+                                "stepped back from a slot: more steps run than the load (or a container run) allows now",
+                                &[("Reason", json!("stepped-back"))],
+                            );
+                            return Poll::Waiting;
+                        }
                         self.waited_micros = h.clock.now_micros().saturating_sub(self.t0_micros);
                         h.log.info(
                             "heavy.phase",
@@ -883,6 +1032,9 @@ impl<'a> Acquirer<'a> {
                             let _ = fs::remove_file(m);
                         }
                         let _ = fs::remove_file(&self.ticket);
+                        if let Some(d) = self.drain.take() {
+                            let _ = fs::remove_file(d);
+                        }
                         return Poll::Held;
                     }
                     Take::Busy => {
@@ -915,8 +1067,12 @@ impl<'a> Acquirer<'a> {
                 }
             }
             if let Some(dir) = busy {
-                let (msg, props) = h.holder_note(&dir);
-                let reason = format!("{}:{}", msg.split(" for ").next().unwrap_or(""), file_name(&dir));
+                let (mut msg, props) = h.holder_note(&dir);
+                let mut reason = format!("{}:{}", msg.split(" for ").next().unwrap_or(""), file_name(&dir));
+                if h.cfg.slots > 1 && dirs.len() > 1 || (limited && h.cfg.slots > 1) {
+                    msg = format!("{msg}; {} running, {seen}", dirs.len());
+                    reason = format!("{reason}:limit{allowed}");
+                }
                 self.wait_for(&reason, &msg, &props);
             }
             return Poll::Waiting;
@@ -962,12 +1118,20 @@ impl<'a> Acquirer<'a> {
 
     /// Gives everything back: the marker, the ticket, and the lock if the owner record is still ours.
     pub fn release(&mut self) {
-        let h = self.h;
         if let Some(m) = self.marker.take() {
             let _ = fs::remove_file(m);
         }
         let _ = fs::remove_file(&self.ticket);
         let _ = fs::remove_file(PathBuf::from(format!("{}.tmp", self.ticket.display())));
+        if let Some(d) = self.drain.take() {
+            let _ = fs::remove_file(d);
+        }
+        self.release_slot();
+    }
+
+    /// Gives the slot back and nothing else: the ticket and the marker stay, for a taker that steps back and waits again.
+    fn release_slot(&mut self) {
+        let h = self.h;
         if let Some(i) = self.held.take() {
             let dir = h.slot_dir(i);
             match h.read_owner(&dir) {

@@ -475,9 +475,9 @@ mod tests {
         assert!(ensure_shrink_only(FILE, "abc\n").is_ok());
     }
 
-    #[allow(clippy::disallowed_methods, reason = "a test spawns git; it ends it itself")]
     fn git(root: &std::path::Path, args: &[&str]) {
-        let out = std::process::Command::new("git")
+        // The one way this tool starts git (git_env.rs: a hook's GIT_DIR must not reach a `git -C <folder>`).
+        let out = crate::git_env::git()
             .args([
                 "-c",
                 "user.name=t",

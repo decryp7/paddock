@@ -116,3 +116,62 @@ work. The run of train 10 that counted queue time against the budget (837 s for 
    activity log, 145 pre-push steps, queue p50 21 s, p90 386 s, p99 993 s, max 1,187 s
    ([benchmarks](../benchmarks.md#2026-11-15-pre-push-heavy-queue-times-fixpre-push-base-and-budget)). Each run now appends its
    whole queue and run time to `queue-times.log` beside the gate logs; the per-push value is revisited with that log.
+
+## Amendment 2026-11-18: a step's queue time stops counting the moment it starts, not when it ends
+
+Rows of pushes on 2026-11-18 were "not measured" while a heavy step of the same push had only been queued. Evidence: heavy's log
+`/private/tmp/claude-501/heavy-logs/heavy.2026-11-18.log`, session `6608a45127eb7-83bf` (apps/pitwall clippy, started 10:14:00 UTC):
+`queue_wait` 182,546 ms, then `command ended`, `Exit: ended after the run limit of 1 s` (`--run-max 1`): the push's budget was
+spent before the step began and the wait behind another push's `pre-push` holder was not what the step's limit was computed from.
+(Session `6608a43eca501-217e`, 192,793 ms of queue, ran 6.5 s and passed; the other "ended after the run limit" rows of that day,
+for example 196 s in `6608a35ee11e4-1761b`, were the budget really spent by 367 s and 278 s of earlier clippy runs, 0 s queued.)
+The credit of point 3 came when the step ended (`BudgetClock::record`), so a row that started while a heavy step was still waiting
+for the slot (a light row on another worker, or the next row after a long wait) read a clock that counted the whole wait as run time.
+
+The wait is now credited while it happens. `Exec::slot()` says whether the heavy step in flight is waiting or got the slot
+(`budget::Slot::Queued { since }`, `Taken { since, at }`), where `since` is when the step was handed to `heavy` (the build of `heavy`
+before it is not waiting for others). `Turns` gives it to the clock (`BudgetClock::begin_step`, `observe`), which keeps it inside
+its one lock with the credit and clears it in `record` and `end_step`, so a wait is never counted twice; `left_live` adds the wait,
+at most the step's own `--queue-max`, to the budget a row starts with. The real executor reads it from heavy's own log: each step
+runs under its own agent name (`pre-push-<pid>-<n>`) in a log folder of its own (one folder per push run under
+`<git common dir>/paddock-pre-push/logs/`, the newest 20 kept), the file is created before the poller starts, and only
+`<that name> holds the lock (pid` counts, read from where the last poll stopped (250 ms). Before this, the shared per-gate log held
+the line of earlier runs (48 of 174 logs there already did) and of another worktree pushing the same gate. Only our `heavy` writes that
+line; any other heavy (a `PADDOCK_HEAVY` of someone else's, or engineering-rules' shell `heavy.sh` until its wrapper lands) gives `Unknown` and keeps the credit at the end of the step, so a silent tool never extends the
+budget. No limit changed: the run budget is still 15 min of run time, the queue allowance 30 min. The end-of-step credit stays (it is
+exact, from heavy's own timing line, and it takes the sibling-held part out).
+
+The member gate also runs the source audits of the tool's own modules. The `member-audits` profile gets one more clause, by name
+(`test(/::no_source_file_/)`, outside the `binary(it)` group; a test reads the tool's `src` for their names, no process, and takes the clause
+out of the real filter as its control), so a guard from one branch (the self_exe audit) meeting code from
+another (a new `current_exe()` use) is caught at merge time on the combined tree, as train 15 needed. The two audits take 0.17 s
+([benchmarks](../benchmarks.md#source-audits-in-the-member-gate-2026-11-18-fixpush-gate-queue-time)).
+
+## Amendment 2026-11-18 (second): the slots follow the load; the shell heavy is retired once the wrapper lands
+
+The user approved retiring the shell `heavy.sh` and plock (2026-11-18). Their callers outside Paddock's own tools: engineering-rules'
+`scripts/heavy.sh` (with its test and the `templates/lefthook.yml` line) and two stale worktrees of that repository; no other project under the
+development folder calls them. **Today** (this change landed, the wrapper not) engineering-rules still runs the shell semaphore with its own 5 slots
+in its own folder, which does not exclude Rust holders, so up to 5 shell and up to 5 Rust steps can run; the wrapper (a patch of `scripts/heavy.sh`
+and its test, prepared and handed to the coordinator) is a landing prerequisite of calling the shell retired, and lands after the Rust `heavy` can be
+installed for other projects (README). Paddock's resolver (`heavy_prefix`) no longer looks for `heavy.sh`; the reference shell fixture, `tests/it/mixed.rs`
+and the conformance exception E6 are gone (a list that shrinks, ER-46); the brief template names `heavy run`.
+
+With the shell going, the single slot (kept only so the shell could be a lock holder too) goes. `HEAVY_SLOTS` is the most steps that may run
+together (`auto` by default: about half the cores, at most 5, ER-24); how many run now is read by the head of the queue on each poll: the cores the
+15-minute load leaves free (2 a step), one under 30 % CPU idle or at a 1-minute load of the core count, one when unknown, and the container rule
+(a container run is alone and nothing starts beside one; heavy tells by the command line, so only runs that go through heavy, and says so). A waiter
+holds a ticket, never a slot (ER-43); a taker looks again after taking and the younger of too many steps back (the oldest always keeps its slot; takers read the load at slightly different moments, so the count can pass the rule for one poll and settles at the next look); a container run that waited long
+makes the others wait for it (a drain marker, bounded). Common practice: GNU make and ninja `-l` brake a job count by the load average (the
+1-minute one: quick, flapping); distcc and icecream cap by job slots; here the 15-minute load opens and the 1-minute one only closes. On this
+Mac `auto` is 1 at its usual loads (15-minute load 16 to 48 on 14 cores) and more only when it is quiet
+([benchmarks](../benchmarks.md#load-aware-heavy-slots-2026-11-18-featheavy-load-aware-slots)); a count of free capacity only (running steps
+added to what the load leaves free) was considered and not taken: it admits a burst before the average sees it.
+Old binaries (one slot) beside new ones: the first slot is shared and a container run held by an old binary keeps the new ones out (tested); the gap is that an old binary ignores `.slotN` holders and drain markers, so it can start beside new holders until every machine has the new binary.
+The push gate still starts one heavy step of its own push at a time (its credit accounting), so a single push does not use the extra slots; other
+agents' steps and CI do. Letting a push start several is the next step and needs its own measurement.
+
+Distribution (same date): `heavy` is released from a `heavy-vX.Y.Z` tag by `.gitea/workflows/heavy-release.yml` (binaries for macOS arm64, Linux
+x86_64 and arm64 and Windows x86_64 plus `SHA256SUMS` on the Gitea release, the crate to the `decryp7` registry when its dependencies are there), and
+`./dev heavy-install` downloads the asset for the machine, verifies the checksum, installs atomically into `<dev-targets>/heavy/bin/heavy` and records
+the version (tools/heavy/README.md); the engineering-rules wrapper only looks there and says the install command when it is missing.

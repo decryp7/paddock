@@ -1,7 +1,7 @@
 use crate::{
-    audit, brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, disk, gates,
-    generators, golden_cmd, heavy_cmd, hook, input_hash, ipc_endpoints, load, local_sccache, locks, merge_check, places, plan, plan_cmd,
-    pr, pre_push, queue, release_isolation, slots, wait, worktree,
+    audit, brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_setup_rust,
+    disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, load, local_sccache, locks,
+    merge_check, places, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -36,6 +36,8 @@ enum Command {
     Wait(wait::WaitArgs),
     /// Run a command through the machine-wide heavy slot (ER-24), found the way `check --pre-push` finds it; git hooks use it.
     Heavy(heavy_cmd::HeavyArgs),
+    /// Install the `heavy` binary of a release into `<dev-targets>/heavy/bin`: downloads the asset for this OS, checks its SHA256SUMS entry, renames it into place, records the version.
+    HeavyInstall(heavy_install::InstallArgs),
     /// Golden files: `confirm <test filter>` runs the tests on this machine and in the CI image as root; passes only if both pass.
     Golden {
         #[command(subcommand)]
@@ -340,6 +342,9 @@ enum CiCommand {
     /// the setup-rust action's shell steps. The action keeps CARGO_BUILD_JOBS and the toolchain install in YAML (./dev needs
     /// rustc first). Messages and `::warning::` lines on standard output, one `::error::` line on failure.
     SetupRust(ci_setup_rust::SetupRustArgs),
+    /// The compiler a release job builds with is the exact version `rust-toolchain.toml` pins (`rustc --version` against its `channel`, read
+    /// with the TOML parser): one `::error::` line naming both versions when they differ or the channel floats.
+    RustPin(ci_rust_pin::RustPinArgs),
     /// CARGO_BUILD_JOBS and NEXTEST_TEST_THREADS for the job: the runner's share of the host (the port of
     /// conformance/ci/build-jobs.sh). Assignments to $GITHUB_ENV (or standard output without it), the reason on standard error.
     BuildJobs(ci_build_jobs::BuildJobsArgs),
@@ -728,6 +733,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CiCommand::ScheduleSkip(a),
         } => ci_runs::schedule_skip(&a),
         Command::Ci {
+            command: CiCommand::RustPin(a),
+        } => ci_rust_pin::command(&a),
+        Command::Ci {
             command: CiCommand::Verdict(a),
         } => ci_runs::verdict(&a),
         Command::Ci {
@@ -741,6 +749,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         } => ci_runs::trial_prune(&a),
         Command::Wait(a) => wait::command(&a),
         Command::Heavy(a) => heavy_cmd::command(&a),
+        Command::HeavyInstall(a) => heavy_install::command(&a),
         Command::Golden { command } => golden_cmd::command(command),
         Command::Load(a) => load::command(&a),
         Command::Places(a) => places::command(&a),

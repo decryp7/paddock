@@ -22,6 +22,9 @@
 //! announced at the top of every run it is set in, shown in the table and logged next to the gate logs.
 
 pub mod budget;
+
+/// How many earlier runs' log folders are kept beside the current one.
+const KEEP_RUN_LOGS: usize = 20;
 pub mod deny;
 pub mod exec;
 pub mod gates;
@@ -437,9 +440,17 @@ fn command_in(
     let real = RealExec {
         root: work.clone(),
         env: env.clone(),
-        logs: state.join("logs"),
+        logs: {
+            // One log folder per push run: another run's logs (or an earlier one's) are never this run's (ADR 0102 amendment 2026-11-18).
+            let all = state.join("logs");
+            exec::prune_run_logs(&all, KEEP_RUN_LOGS);
+            let mine = all.join(exec::run_token());
+            exec::claim_run_logs(&mine);
+            mine
+        },
         stop: Arc::clone(&stop),
         built_heavy: Default::default(),
+        live_slot: Default::default(),
         priority: pushes.iter().any(|p| budget::is_landing_ref(&p.remote_ref)),
         wrapper,
     };
@@ -503,7 +514,7 @@ fn command_in(
             "OVERRIDE SET: PADDOCK_HEAVY=off is not allowed outside the tests; every compile (clippy, xwin, Linux) is not measured\n"
                 .into();
     } else if exec::heavy_prefix(&env, &|p| ex.has_tool(p)).is_empty() {
-        notes.push("no heavy.sh or heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
+        notes.push("no heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
         "{overridden}pre-push: base {} ({}), {} commit(s) beyond it; {} changed file(s); {} gate(s) at a time (1-minute load {}); budget {} min of run time (time queued for the heavy slot behind other agents is reported apart and bounded on its own: {} min for the whole push; {}); logs in {}\n{}",

@@ -9,10 +9,31 @@
 // (it asserts that a product grace period was long enough for this machine; waive `close_gracefully` with the hang-guard comment
 // and a grace of at least 10 s, or either with `// conformance: grace-free — <why>` when the thing ended already), and, in TypeScript specs, `Date.now()` /
 // `performance.now()` differences asserted with `expect` (unless the spec uses fake timers: `useFakeTimers`, `setSystemTime`,
-// `page.clock`). Warning level: existing code is listed, never blocks a build; except an assertion over a grace period, an
-// error since it failed CI again as a warning (ER-21).
+// `page.clock`). An assertion over a grace period is an error (it failed CI again as a warning, ER-21).
+// Today's sites are the allow list `conformance/c30-allow.json` (path, site = the flagged line's text, matched whole, reason, count), read by the
+// shared allow list (util/allow-list.mjs; no Rust twin, so the JavaScript host only): a listed site passes, an unlisted one is a
+// finding, an entry that matches nothing is stale (a warning: remove it), and an entry the list at the merge base lacks is growth
+// (an unwaivable finding that needs the user's approval). The list may only shrink (ER-46).
+// Blocking after this list lands on main; the run id is recorded then. Until then (`BLOCKING` false) an unlisted site and the list's
+// growth are warnings (ER-41; a list must land while its check still warns, since a list made on a branch is all growth).
 import { maskRust } from '../util/mask-rust.mjs';
 import { error, warn } from '../finding.mjs';
+import { parseAllowList, readAllowList } from '../util/allow-list.mjs';
+
+/** Whether an unlisted site and the allow list's growth are errors (the user's decision of 2026-11-18, after the list is on main). */
+export const BLOCKING = false;
+/** The allow list of today's sites. */
+export const ALLOW = 'conformance/c30-allow.json';
+/** The allow list: [{ path, site, reason, count }], or throws why it cannot be read (the shared parser). */
+export const parseAllow = (text) => parseAllowList(text, ALLOW);
+const SPEC = {
+  id: 'C30',
+  rule: 40,
+  file: ALLOW,
+  unseen: 'a wall-clock assertion',
+  growth: BLOCKING ? 'error' : 'warn',
+  restore: 'Restore conformance/c30-allow.json: {"allow": [{"path": "...", "site": "the text of the flagged line", "reason": "...", "count": 1}]}.',
+};
 
 const HANG_GUARD = /conformance:\s*hang-guard/;
 /** The waiver of a sleep must say why: `// conformance: hang-guard — <reason>` (a dash, an en dash or a hyphen, then words). */
@@ -179,47 +200,74 @@ export function tsWallClockAsserts(source) {
   return out;
 }
 
+/**
+ * The findings of one file `f` with text `text`: [{ finding, site, listable }]. `site` is the flagged line's text (what an allow entry
+ * names); `listable` is false for the grace-period errors, which no list covers.
+ */
+export function findingsIn(f, text) {
+  const out = [];
+  const add = (finding, site, listable = true) => out.push({ finding, site, listable });
+  const fix = 'Use a FakeClock (paddock-testkit re-exports paddock_jobs::time::FakeClock) or count items; a hang guard of at least 10 s may carry `// conformance: hang-guard`.';
+  const report = BLOCKING ? error : warn;
+  if (f.endsWith('.rs')) {
+    if (!/#\[(?:\w+::)*test/.test(text)) return out;
+    for (const a of wallClockAsserts(text)) {
+      if (a.guard === null) add(report('C30', 40, f, a.line, `asserts on the wall clock: ${a.text}`, fix), a.text);
+      else if (a.guard < MIN_GUARD_MS) add(report('C30', 40, f, a.line, `a hang guard of ${a.guard} ms is too tight to be one: ${a.text}`, 'Raise the limit to at least 10 s, or replace it with a FakeClock.'), a.text);
+      else if (a.guard >= CI_TEST_BUDGET_MS) add(report('C30', 40, f, a.line, OVER_BUDGET(a.guard, a.text), OVER_BUDGET_FIX), a.text);
+    }
+    for (const a of graceAsserts(text)) {
+      if (a.waiver === 'grace-free') continue;
+      if (a.waiver === 'hang-guard') {
+        if (a.limitMs !== null && a.limitMs < MIN_GUARD_MS) add(report('C30', 40, f, a.line, `a hang guard of ${a.limitMs} ms is too tight to be one: ${a.text}`, 'Raise the grace to at least 10 s (the exit is waited for on the condition, so a long guard costs nothing), or assert the mechanism instead.'), a.text);
+        else if (a.limitMs !== null && a.limitMs >= CI_TEST_BUDGET_MS) add(report('C30', 40, f, a.line, OVER_BUDGET(a.limitMs, a.text), OVER_BUDGET_FIX), a.text);
+        continue;
+      }
+      // An error, not a warning (ER-21): this kind failed CI again while it was only a warning (fix/flaky-browser-close). No list covers it.
+      add(error('C30', 40, f, a.line, `asserts that a call outlasted by load finished within its grace: ${a.text}`, 'Wait for the exit on the condition with a hang guard (`close_gracefully(Duration::from_secs(40))` with `// conformance: hang-guard`: over three times the slowest exit measured under load, 11.7 s, and under CI\'s 60 s test kill), assert the mechanism, not the budget, or, when the thing has ended already, say so with `// conformance: grace-free — <why>` (lesson "Chromium tests compared a loaded machine with a product timeout").'), a.text, false);
+    }
+    for (const t of threadSleeps(text)) {
+      if (t.waived === 'no-reason') add(report('C30', 40, f, t.line, `the sleep's waiver gives no reason: ${t.text}`, 'Write `// conformance: hang-guard — <why this sleep is needed>`.'), t.text);
+      else if (!t.waived) add(report('C30', 40, f, t.line, `sleeps in a test that uses threads: ${t.text}`, 'Wait for the event (a channel, a gate, `FakeClock::wait_for_waiters`) instead of a sleep; a deliberate sleep carries `// conformance: hang-guard — <why>`.'), t.text);
+    }
+  } else if (SPEC_FILE.test(f)) {
+    if (!NOW.test(text)) return out;
+    for (const a of tsWallClockAsserts(text)) {
+      if (a.guard === null) add(report('C30', 40, f, a.line, `asserts on the wall clock: ${a.text}`, 'Use fake timers (vi.useFakeTimers, page.clock) or assert on events; a hang guard of at least 10 s may carry `// conformance: hang-guard`.'), a.text);
+      else if (a.guard < MIN_GUARD_MS) add(report('C30', 40, f, a.line, `a hang guard of ${a.guard} ms is too tight to be one: ${a.text}`, 'Raise the limit to at least 10 s, or use fake timers.'), a.text);
+    }
+  }
+  return out;
+}
+
+/** The TypeScript and JavaScript test files C30 reads. */
+const SPEC_FILE = /\.(?:spec|test|e2e|shot)\.[mc]?[jt]sx?$|(?:^|\/)(?:e2e|tests?)\/[^/]*\.[mc]?[jt]sx?$/;
+/** Whether C30 reads file `f` at all. */
+export const readsFile = (f) => f.endsWith('.rs') || SPEC_FILE.test(f);
+
 export default {
   id: 'C30',
-  scope: 'both',
+  scope: 'root',
   mode: 'gate',
+  allowList: SPEC,
   title: 'Rust tests do not assert on the wall clock',
   rule: 40,
   run(ctx) {
+    const { list: allow, broken } = readAllowList(ctx, this.allowList);
+    if (broken) return broken;
     const out = [];
-    const fix = 'Use a FakeClock (paddock-testkit re-exports paddock_jobs::time::FakeClock) or count items; a hang guard of at least 10 s may carry `// conformance: hang-guard`.';
     for (const f of ctx.files()) {
-      if (f.endsWith('.rs')) {
-        const text = ctx.read(f);
-        if (!text || !/#\[(?:\w+::)*test/.test(text)) continue;
-        for (const a of wallClockAsserts(text)) {
-          if (a.guard === null) out.push(warn('C30', 40, f, a.line, `asserts on the wall clock: ${a.text}`, fix));
-          else if (a.guard < MIN_GUARD_MS) out.push(warn('C30', 40, f, a.line, `a hang guard of ${a.guard} ms is too tight to be one: ${a.text}`, 'Raise the limit to at least 10 s, or replace it with a FakeClock.'));
-          else if (a.guard >= CI_TEST_BUDGET_MS) out.push(warn('C30', 40, f, a.line, OVER_BUDGET(a.guard, a.text), OVER_BUDGET_FIX));
-        }
-        for (const a of graceAsserts(text)) {
-          if (a.waiver === 'grace-free') continue;
-          if (a.waiver === 'hang-guard') {
-            if (a.limitMs !== null && a.limitMs < MIN_GUARD_MS) out.push(warn('C30', 40, f, a.line, `a hang guard of ${a.limitMs} ms is too tight to be one: ${a.text}`, 'Raise the grace to at least 10 s (the exit is waited for on the condition, so a long guard costs nothing), or assert the mechanism instead.'));
-            else if (a.limitMs !== null && a.limitMs >= CI_TEST_BUDGET_MS) out.push(warn('C30', 40, f, a.line, OVER_BUDGET(a.limitMs, a.text), OVER_BUDGET_FIX));
-            continue;
-          }
-          // An error, not a warning (ER-21): this kind failed CI again while it was only a warning (fix/flaky-browser-close).
-          out.push(error('C30', 40, f, a.line, `asserts that a call outlasted by load finished within its grace: ${a.text}`, 'Wait for the exit on the condition with a hang guard (`close_gracefully(Duration::from_secs(40))` with `// conformance: hang-guard`: over three times the slowest exit measured under load, 11.7 s, and under CI\'s 60 s test kill), assert the mechanism, not the budget, or, when the thing has ended already, say so with `// conformance: grace-free — <why>` (lesson "Chromium tests compared a loaded machine with a product timeout").'));
-        }
-        for (const s of threadSleeps(text)) {
-          if (s.waived === 'no-reason') out.push(warn('C30', 40, f, s.line, `the sleep's waiver gives no reason: ${s.text}`, 'Write `// conformance: hang-guard — <why this sleep is needed>`.'));
-          else if (!s.waived) out.push(warn('C30', 40, f, s.line, `sleeps in a test that uses threads: ${s.text}`, 'Wait for the event (a channel, a gate, `FakeClock::wait_for_waiters`) instead of a sleep; a deliberate sleep carries `// conformance: hang-guard — <why>`.'));
-        }
-      } else if (/\.(?:spec|test|e2e|shot)\.[mc]?[jt]sx?$|(?:^|\/)(?:e2e|tests?)\/[^/]*\.[mc]?[jt]sx?$/.test(f)) {
-        const text = ctx.read(f);
-        if (!text || !NOW.test(text)) continue;
-        for (const a of tsWallClockAsserts(text)) {
-          if (a.guard === null) out.push(warn('C30', 40, f, a.line, `asserts on the wall clock: ${a.text}`, 'Use fake timers (vi.useFakeTimers, page.clock) or assert on events; a hang guard of at least 10 s may carry `// conformance: hang-guard`.'));
-          else if (a.guard < MIN_GUARD_MS) out.push(warn('C30', 40, f, a.line, `a hang guard of ${a.guard} ms is too tight to be one: ${a.text}`, 'Raise the limit to at least 10 s, or use fake timers.'));
-        }
+      if (!readsFile(f)) continue;
+      const { text, finding } = allow.read(f);
+      if (finding) {
+        out.push(finding);
+        continue;
+      }
+      for (const { finding: x, site, listable } of findingsIn(f, text)) {
+        if (listable && allow.admit(f, (s) => s === site) === 'allowed') continue;
+        out.push(x);
       }
     }
-    return out;
+    return [...out, ...allow.warnings()];
   },
 };

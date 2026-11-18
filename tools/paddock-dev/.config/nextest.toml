@@ -83,11 +83,16 @@ path = "junit.xml"
 # shows here and not first in the train-wide run (ER-8).
 # Measured 2026-11-17 (docs/benchmarks.md): the whole `it` binary minus the replay takes 130 s warm on the merged tree (over the 2 minutes
 # the user was told to expect, with a 120 s stop on one test under load), so the list stays positive.
+# The source audits are selected by one rule, a test name (the last clause, outside the `binary(it)` group): every test of the tool's own
+# modules named `no_source_file_*` reads the tool's `src` and fails on a source file that breaks a rule of the tool (the program
+# names itself only through `self_exe`, git starts only through the builder). A member's own run never shows a guard from one branch
+# meeting code from another; the combined tree does (train 15: the self_exe guard against the load-flakes member's tests). A new audit of
+# the same kind takes the prefix and is in; no list here to forget (ER-42). tests/it/member_audits.rs and the gate's tests check the clause.
 # Left out on purpose: the fixture goldens (build_jobs_golden, host_steps_golden) read no tracked tree. (The first-parent history replay
 # against affected.mjs, which was left out too, was removed with the script, 2026-11-18.)
 [profile.member-audits]
 default-filter = '''
-binary(it) & (
+(binary(it) & (
     (test(/^(dev_bin|cargo_target_lint|parity_corpus|tree|golden|check_allow_list|safe_remove_lint)::/))
     | test(/^check::live_/)
     | test(/^check_c1[0-9]{2}::(live_|this_working_tree_)/)
@@ -96,7 +101,8 @@ binary(it) & (
     | test(/^ipc_endpoints::the_repository_register_is_complete/)
     | test(/^contracts::every_markdown_file_that_code_reads/)
     | test(/^generators::the_registry_of_the_repository/)
-)
+))
+| test(/::no_source_file_/)
 '''
 # Every failure of the run is listed, as in the ci profile.
 fail-fast = false

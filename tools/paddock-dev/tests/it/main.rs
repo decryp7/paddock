@@ -31,6 +31,7 @@ mod dev_tool_workflow;
 mod gates_planner;
 mod generators;
 mod golden;
+mod heavy_install;
 mod host_steps;
 mod host_steps_golden;
 mod hostile;

@@ -14,7 +14,9 @@
 // nothing; in a checkout where git cannot give a merge base it warns that the rule is not enforced (in CI a not-measured error, ADR 0089), never silence.
 // The base is the target ref (`targetRef` in baseline.mjs, the one reader of PADDOCK_BASE_REF). The growth finding is a warning only because the checks
 // that use this reader (C121, C124, C125, C130) are report-only themselves (ER-41); the blocking baselines (C53, C71, C104, C115) use the same ref and stay errors.
-// Used by C121, C124, C125 and C130, each declaring the spec it reads with as `allowList` (Rust: `Check::allow_list`). Rust host: tools/paddock-dev/src/check/allow_list.rs (same
+// A check that blocks sets `growth: 'error'` in its spec (C30, after its list is on main; JavaScript only, since C30 has no Rust twin: a twinned check
+// that sets it must set it on both hosts).
+// Used by C30, C121, C124, C125 and C130, each declaring the spec it reads with as `allowList` (Rust: `Check::allow_list`). Rust host: tools/paddock-dev/src/check/allow_list.rs (same
 // entries, same findings; tools/paddock-dev/tests/it/check_allow_list.rs compares the error paths of every user on both hosts).
 import { error, unwaivable, warn } from '../finding.mjs';
 import { baselineGrowth, isWorkTree, targetRef, unmeasuredFinding } from './baseline.mjs';
@@ -115,7 +117,9 @@ export class AllowList {
     if (g.reason) return [unmeasuredFinding(this.ctx, { id, rule, file: this.file, what: "the allow list", g })];
     if (g.added.length === 0) return [];
     const n = g.added.length;
-    return [{ ...warn(id, rule, this.file, 1, `the allow list grew: ${n} entr${n === 1 ? 'y is' : 'ies are'} (counting each \`count\`) not in ${this.file} at the merge base ${g.base.slice(0, 9)}; it may only shrink`, "Remove the added entries or lower the raised counts and fix the sites. Growing the list needs the user's approval."), unwaivable: true }];
+    // A spec's `growth: 'error'` (C30 once it blocks; JavaScript only, it has no Rust twin) makes the growth an error; the default is a warning.
+    const severity = this.spec.growth === 'error' ? error : warn;
+    return [{ ...severity(id, rule, this.file, 1, `the allow list grew: ${n} entr${n === 1 ? 'y is' : 'ies are'} (counting each \`count\`) not in ${this.file} at the merge base ${g.base.slice(0, 9)}; it may only shrink`, "Remove the added entries or lower the raised counts and fix the sites. Growing the list needs the user's approval."), unwaivable: true }];
   }
 
   /**
