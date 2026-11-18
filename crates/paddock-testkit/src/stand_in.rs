@@ -26,7 +26,7 @@
 //! `{stdin_line}`; `{{` and `}}` are braces), [`Actions::writes_atomically`], [`Actions::waits_for_file`], named pipes
 //! ([`Actions::makes_fifo`], [`Actions::reads_file`]), [`Actions::ignores_term`] (Unix), [`Actions::installs`] (a second stand-in
 //! written at run time, as a fake `cargo` that "builds" a tool does), [`Actions::exits_with_env`] and [`Actions::execs`] (run another
-//! program with the call's arguments, as a wrapper script does). [`StandIn::when`] answers a call by several conditions at once
+//! program with the call's arguments, as a wrapper script does) and [`Actions::runs`] (the same, then go on). [`StandIn::when`] answers a call by several conditions at once
 //! ([`Case`]: arguments, a file that exists, the working folder), and [`StandIn::answers`] replaces the default answer.
 //!
 //! Realistic defaults are opt-in: [`StandIn::npm_like`] and [`StandIn::git_like`] answer the common calls with the shape the real
@@ -293,6 +293,13 @@ impl Actions {
     #[must_use]
     pub fn execs(self, exec: &Exec) -> Actions {
         self.step("exec", exec.to_value())
+    }
+
+    /// Runs another program (see [`Exec`]) and waits for it, then goes on with the next step (its exit code is ignored, as in a script
+    /// without `set -e`).
+    #[must_use]
+    pub fn runs(self, exec: &Exec) -> Actions {
+        self.step("run", exec.to_value())
     }
 
     /// The exit code (default 0).

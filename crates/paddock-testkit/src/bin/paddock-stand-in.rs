@@ -342,6 +342,12 @@ fn act(actions: &Value, ctx: &Ctx) -> Result<i32, String> {
                 return i32::try_from(code).map_err(|_| format!("exit code {code} does not fit"));
             }
             "exec" => return exec(arg, ctx),
+            "run" => {
+                let (mut cmd, program) = command_of(arg, ctx)?;
+                let _ = std::io::stdout().flush();
+                cmd.status()
+                    .map_err(|e| format!("cannot start {program}: {e}"))?;
+            }
             other => return Err(format!("unknown step `{other}`")),
         }
     }
@@ -522,7 +528,8 @@ fn fill(v: &Value, ctx: &Ctx) -> Result<Value, String> {
 /// Runs another program with this call's arguments (all of them, or those after the first `--`), in this process's place on Unix, and
 /// ends with its status. `program` is that program; without it the first of those arguments is. `args` come before them, `env` (name,
 /// template pairs) are set for it.
-fn exec(arg: &Value, ctx: &Ctx) -> Result<i32, String> {
+/// The program an `exec` or `run` step starts, ready to start, and its name for messages.
+fn command_of(arg: &Value, ctx: &Ctx) -> Result<(Command, String), String> {
     let from: &[String] = match arg.get("from").and_then(Value::as_str) {
         Some("none") => &[],
         Some("after") => {
@@ -558,6 +565,11 @@ fn exec(arg: &Value, ctx: &Ctx) -> Result<i32, String> {
     for (k, t) in &vars {
         cmd.env(k, expand(t, ctx)?);
     }
+    Ok((cmd, program))
+}
+
+fn exec(arg: &Value, ctx: &Ctx) -> Result<i32, String> {
+    let (mut cmd, program) = command_of(arg, ctx)?;
     let _ = std::io::stdout().flush();
     #[cfg(unix)]
     {

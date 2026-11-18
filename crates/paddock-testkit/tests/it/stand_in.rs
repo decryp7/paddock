@@ -960,3 +960,34 @@ fn the_environ_token_lists_every_variable_the_call_was_given() {
         "{seen}"
     );
 }
+
+#[test]
+fn runs_starts_a_program_and_goes_on_with_the_next_step() {
+    let s = Scratch::new();
+    let work = s.work();
+    let helper = StandIn::new(&work, "helper")
+        .answers(Actions::new().stdout_with("helper {args}").exit(9))
+        .install()
+        .unwrap();
+    let p = StandIn::new(&work, "tool")
+        .answers(
+            Actions::new()
+                .runs(
+                    &Exec::program(&helper.program().to_string_lossy())
+                        .args(["first"])
+                        .without_call_arguments(),
+                )
+                .stdout("after")
+                .exit(4),
+        )
+        .install()
+        .unwrap();
+    let o = run(p.program(), &["x"]);
+    assert_eq!(
+        o.status.code(),
+        Some(4),
+        "the helper's exit code 9 is not the stand-in's"
+    );
+    // The helper's output goes to the stand-in's own stdout, before the next step's line.
+    assert_eq!(out(&o), "helper first\nafter\n");
+}
