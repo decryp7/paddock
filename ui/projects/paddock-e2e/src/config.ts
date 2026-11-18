@@ -1,12 +1,11 @@
 import { defineConfig, devices, type PlaywrightTestConfig, type ReporterDescription } from '@playwright/test';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { assertChromeForTesting, pinnedChrome } from './browser.ts';
 import { assertFreshBuilds, reuseServer, type BuildGuard } from './build-guard.ts';
 import { e2ePort, isOn } from './env.ts';
-import type { ServerSpec } from './server-ready.ts';
+import { paddockServers } from './servers.ts';
 
 export { isOn };
+export { paddockServers };
 
 /**
  * The Playwright config every Paddock app starts from (plan X39): `export default paddockConfig({ app: 'dyno', portEnv:
@@ -58,28 +57,6 @@ export interface PaddockConfigOptions {
   readonly extend?: PlaywrightTestConfig;
 }
 
-/**
- * This file's folder in both module formats: Playwright loads configs as CommonJS (`__dirname`, and `import.meta` is a syntax error
- * there), `node --test` as ESM (no `__dirname`; the frame of this call names the file by URL).
- */
-function thisDir(): string {
-  if (typeof __dirname === 'string') return __dirname;
-  const url = /(file:\/\/[^\s)]+?):\d+:\d+/.exec(new Error().stack ?? '')?.[1];
-  if (!url) throw new Error('paddock-e2e: cannot locate its own folder for the global setup');
-  return dirname(fileURLToPath(url));
-}
-
-/**
- * The servers a run needs, as config fields (`...paddockServers([{ command, url, timeoutMs, reuseExisting }])`). Replaces
- * Playwright's `webServer`: a server that never answers (or ends first) fails the run once at start-up with one `::error::`
- * line naming the URL, the probe, the exit status and the stderr tail, and its output reaches the job log (ER-27, server-ready.ts).
- * Why not `maxFailures`: it would fire after the 2 min limit of its first N tests, and N has no measured basis (ER-12); a
- * readiness check says the cause once, before any test runs.
- */
-export function paddockServers(servers: readonly ServerSpec[]): Pick<PlaywrightTestConfig, 'globalSetup' | 'metadata'> {
-  return { globalSetup: join(thisDir(), 'global-setup.ts'), metadata: { paddockServers: servers } };
-}
-
 /** The default pattern of screenshot-only specs: `screenshots.spec.ts` and `*.shot.ts`. */
 export const SCREENSHOT_SPECS = /(?:screenshots\.spec|\.shot)\.ts$/;
 
@@ -122,10 +99,24 @@ export function paddockConfig(options: PaddockConfigOptions): PlaywrightTestConf
         ? [{ name: 'screenshots', testMatch: shots, use: { ...chromium, viewport: DOC_SCREEN_VIEWPORT, deviceScaleFactor: 2 } }]
         : []),
     ],
-    ...(options.serve
-      ? paddockServers([{ command: options.serve(port), url: `http://localhost:${port}`, timeoutMs: options.serveTimeoutMs ?? 180_000, reuseExisting: reuseServer(env) }])
-      : {}),
     ...options.extend,
+    ...mergedServers(
+      options.serve
+        ? paddockServers([{ command: options.serve(port), url: `http://localhost:${port}`, timeoutMs: options.serveTimeoutMs ?? 180_000, reuseExisting: reuseServer(env) }])
+        : {},
+      options.extend,
+    ),
   });
   return assertChromeForTesting(config, env);
+}
+
+/**
+ * The preset's global setup and server list together with `extend`'s own: neither side loses its global setup (Playwright takes an
+ * array), and a second server list under `metadata.paddockServers` is an error, since one would silently replace the other.
+ */
+function mergedServers(servers: Pick<PlaywrightTestConfig, 'globalSetup' | 'metadata'>, extend: PlaywrightTestConfig | undefined): Pick<PlaywrightTestConfig, 'globalSetup' | 'metadata'> {
+  if (servers.globalSetup === undefined) return {};
+  if (extend?.metadata && 'paddockServers' in extend.metadata) throw new Error("paddock-e2e: `extend.metadata.paddockServers` would replace the server list of `serve`; name the servers in one place");
+  const theirs = extend?.globalSetup === undefined ? [] : Array.isArray(extend.globalSetup) ? extend.globalSetup : [extend.globalSetup];
+  return { globalSetup: [servers.globalSetup as string, ...theirs], metadata: { ...extend?.metadata, ...servers.metadata } };
 }

@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 import { appBuildGuard } from '../../../../../ui/projects/paddock-e2e/src/build-guard.ts';
+import { paddockServers } from '../../../../../ui/projects/paddock-e2e/src/servers.ts';
 import { e2ePortOrCiDefault } from '../../../../../ui/projects/paddock-e2e/src/env.ts';
 
 // Fails fast, before any server starts, when what the app consumes of ui (ui/dist, the css) is stale (build-guard.ts).
@@ -16,12 +17,14 @@ export default defineConfig({
   reporter: [['list']],
   use: { baseURL: `http://localhost:${PORT}`, viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 } }],
-  webServer: {
-    // The production build served statically with the Tauri CSP (as the e2e config does); see ../../playwright.config.ts.
-    command: `npx ng build && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON ../../../ui/projects/paddock-e2e/src/serve-prod.ts . ${PORT}`,
-    cwd: '../..',
-    url: `http://localhost:${PORT}`,
-    reuseExistingServer: false,
-    timeout: 300_000,
-  },
+  ...paddockServers([
+    {
+      // The production build served statically with the Tauri CSP (as the e2e config does); see ../../playwright.config.ts.
+      command: `npx ng build && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON ../../../ui/projects/paddock-e2e/src/serve-prod.ts . ${PORT}`,
+      cwd: '../..',
+      url: `http://localhost:${PORT}`,
+      reuseExisting: false,
+      timeoutMs: 300_000,
+    },
+  ]),
 });

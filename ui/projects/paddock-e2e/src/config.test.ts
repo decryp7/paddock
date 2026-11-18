@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { CHROME_ENV, CHROMIUM_TEST_ENV } from './browser.ts';
 import { paddockConfig, SCREENSHOT_SPECS } from './config.ts';
@@ -16,7 +18,8 @@ test('the preset: chromium and webkit, the port from the variable, no retries, t
   assert.equal(c.workers, 1);
   assert.equal(c.use?.trace, 'retain-on-failure');
   assert.deepEqual(c.metadata, { paddockServers: [{ command: 'serve --port 4391', url: 'http://localhost:4391', timeoutMs: 180_000, reuseExisting: false }] });
-  assert.match(String(c.globalSetup), /global-setup\.ts$/);
+  assert.deepEqual(c.globalSetup, [join(import.meta.dirname, 'global-setup.ts')]);
+  for (const f of c.globalSetup as string[]) assert.ok(existsSync(f), `${f} exists`);
   assert.equal(c.webServer, undefined, "Playwright's own webServer is replaced: it fails without a cause");
   assert.deepEqual(c.reporter, [['list']]);
 });
@@ -100,4 +103,13 @@ test('buildGuard: none by default; ui and ui-dist need uiRoot and fail fast on a
   assert.throws(() => paddockConfig({ ...base, buildGuard: 'ui', env: {} }), /needs uiRoot/);
   assert.throws(() => paddockConfig({ ...base, buildGuard: 'ui', uiRoot: '/nonexistent/ui', env: {} }), /rebuild ui: npm run build -w ui/);
   assert.doesNotThrow(() => paddockConfig({ ...base, buildGuard: 'ui', uiRoot: '/nonexistent/ui', env: { PW_SKIP_BUILD_GUARD: '1' } }));
+});
+
+test('extend keeps the preset global setup and server list: global setups are merged, other metadata kept, a second server list refused', () => {
+  const c = paddockConfig({ ...base, serve: () => 'serve', env: { PW_PORT: '4400' }, extend: { globalSetup: './mine.ts', metadata: { note: 1 } } });
+  assert.deepEqual(c.globalSetup, [join(import.meta.dirname, 'global-setup.ts'), './mine.ts']);
+  assert.equal((c.metadata as { note: number }).note, 1);
+  assert.equal((c.metadata as { paddockServers: unknown[] }).paddockServers.length, 1);
+  assert.throws(() => paddockConfig({ ...base, serve: () => 'serve', env: { PW_PORT: '4400' }, extend: { metadata: { paddockServers: [] } } }), /would replace the server list/);
+  assert.equal(paddockConfig({ ...base, env: {}, extend: { globalSetup: './mine.ts' } }).globalSetup, './mine.ts');
 });
