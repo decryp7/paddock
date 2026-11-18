@@ -435,7 +435,7 @@ export function crateDirsNaming(f, cargo) {
  * target of angular.json (`applySuppressions`, `maxWarnings`) and the ui's package.json (its lint script). A change to one of them also runs the eslint package's tests,
  * whose wiring test resolves the rule's severity in every real config (ER-41: a check runs on every change that could bring in its class, here the rule switched off).
  */
-const LINT_WIRING = /^(?:apps\/[^/]+\/app|ui)\/(?:eslint\.config\.[cm]?js|eslint-suppressions\.json|angular\.json)$|^ui\/package\.json$/;
+const LINT_WIRING = /^(?:apps\/[^/]+\/app|ui)\/(?:eslint\.config\.[cm]?js|eslint-suppressions\.json|angular\.json|package\.json)$|^(?:apps\/[^/]+|ui)\/paddock\.ci\.json$/;
 
 /** The projects that own a path before dependencies, or null for an unknown root file. */
 export function owners(path) {

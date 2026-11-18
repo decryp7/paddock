@@ -48,7 +48,7 @@
     "npm run build -w ui",
     "cd apps/dyno/app",
     "node ../../../scripts/npm-audit.mjs",
-    "npx ng lint",
+    "npm run lint",
     "npx ng build",
     "node ../../../conformance/ci/check-index.mjs dist/dyno-app/browser/index.html",
     "npx ng test --watch=false --coverage",

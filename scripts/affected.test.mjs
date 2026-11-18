@@ -1328,6 +1328,9 @@ describe('lint wiring files mark the eslint project', () => {
     'ui/eslint-suppressions.json',
     'ui/angular.json',
     'ui/package.json',
+    'apps/dyno/app/package.json',
+    'apps/spotter/paddock.ci.json',
+    'ui/paddock.ci.json',
   ];
   for (const f of WIRING) {
     test(`${f}`, () => {
@@ -1336,7 +1339,7 @@ describe('lint wiring files mark the eslint project', () => {
       assert.equal(plan.eslint, true, `${f} does not run the eslint tests`);
     });
   }
-  for (const f of ['apps/dyno/app/e2e/a.spec.ts', 'apps/dyno/app/package.json', 'ui/e2e/a.spec.ts', 'ui/projects/paddock-ui/src/a.ts']) {
+  for (const f of ['apps/dyno/app/e2e/a.spec.ts', 'apps/dyno/app/src/package.json', 'apps/dyno/package.json', 'ui/e2e/a.spec.ts', 'ui/projects/paddock-ui/src/a.ts']) {
     test(`${f} does not`, () => assert.ok(!owners(f).includes('eslint'), f));
   }
 });
