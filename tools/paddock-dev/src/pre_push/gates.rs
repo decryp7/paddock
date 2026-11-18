@@ -212,6 +212,16 @@ pub fn own_workspaces(plan: &Value, files: &[String]) -> std::collections::BTree
         .collect()
 }
 
+/// Why a workspace gets no Windows lint here. An app opts in with `windowsClippy` in its `paddock.ci.json`; a workspace with no
+/// such contract (`tools/paddock-dev`) is linted by CI's own job on every OS leg, so on Windows natively.
+pub(super) fn windows_skip_reason(ws: &str) -> String {
+    if ws.starts_with("apps/") {
+        "CI lints this workspace on the host OSes only (no windowsClippy in its paddock.ci.json)".into()
+    } else {
+        format!("{ws} has no paddock.ci.json contract: CI's own job runs cargo clippy on its Windows leg natively, so no xwin lint here")
+    }
+}
+
 /// The gates `change` reaches under `plan`, in table order. Each is CI's own command (the one source is named in `next` or the
 /// doc of the check that reads it).
 pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
@@ -295,7 +305,7 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
         } else {
             out.push(Planned::Skip {
                 id: format!("clippy-windows {ws}"),
-                reason: "CI lints this workspace on the host OSes only (no windowsClippy in its paddock.ci.json)".into(),
+                reason: windows_skip_reason(&ws),
             });
         }
     }

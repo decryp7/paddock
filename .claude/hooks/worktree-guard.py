@@ -120,6 +120,32 @@ def closes_with_exit(cmds, cmd):
     return False
 
 
+HOOKS_PATH = "core.hookspath"
+_CONFIG_READ = ("--get", "--get-all", "--get-regexp", "--list", "-l", "--unset", "--unset-all")
+
+
+def hooks_path_bypass(c, sub, args):
+    """What names a `core.hooksPath` override on this git command (`git -c core.hooksPath=/dev/null ...`, `--config-env`,
+    `git config core.hooksPath ...`, or an environment carrying it), or None. It switches every hook off like `--no-verify`."""
+    a = c.argv
+    k = 1
+    while k < len(a) and a[k].startswith("-") and a[k] != "--":
+        if a[k] in ("-c", "--config-env") and k + 1 < len(a) and a[k + 1].lower().split("=", 1)[0] == HOOKS_PATH:
+            return "git %s %s" % (a[k], a[k + 1])
+        if a[k].lower().startswith(("--config-env=" + HOOKS_PATH, "-c" + HOOKS_PATH)):
+            return "git " + a[k]
+        k += 2 if a[k] in shellscan._GIT_OPT_ARG else 1
+    if sub == "config" and any(x.lower() == HOOKS_PATH for x in args) and not any(x in _CONFIG_READ for x in args):
+        return "git config core.hooksPath"
+    for e in c.env:
+        name, _, val = e.partition("=")
+        if name == "GIT_CONFIG_PARAMETERS" and HOOKS_PATH in val.lower():
+            return "GIT_CONFIG_PARAMETERS carrying core.hooksPath"
+        if name.startswith("GIT_CONFIG_KEY_") and val.lower() == HOOKS_PATH:
+            return "%s=core.hooksPath" % name
+    return None
+
+
 def decide(data):
     if data.get("tool_name") != "Bash":
         return None
@@ -154,6 +180,11 @@ def decide(data):
         if not g:
             continue
         eff, sub, args = g
+        if is_agent:
+            hp = hooks_path_bypass(c, sub, args)
+            if hp:
+                return ("Blocked: git hooks are bypassed (%s). core.hooksPath points git at other hooks, which skips lefthook "
+                        "like --no-verify. Hooks must pass: cherry-pick the hook fix or stop and report (no bypass)." % hp)
         if is_agent and sub in ("commit", "push", "merge", "cherry-pick", "rebase", "am"):
             bypass = [e for e in c.env if e.split("=", 1)[0] in ("LEFTHOOK_EXCLUDE",) or e in ("LEFTHOOK=0", "LEFTHOOK=false")]
             if bypass or (sub in ("commit", "push") and "--no-verify" in args) or (sub == "commit" and short_n(args)):

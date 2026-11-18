@@ -2,7 +2,7 @@
 
 use super::budget::Timing;
 use super::exec::{Done, Exec, Kind, Limits, QUEUE_MAX, Row, RunOpts, decide, run_all_timed, run_all_with, test_subject};
-use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates};
+use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates, windows_skip_reason};
 use super::{accept_not_measured, parse_refs, render, render_timed};
 use paddock_cli::Exit;
 use serde_json::json;
@@ -263,6 +263,15 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
         !got.contains(&"clippy-windows apps/debrief".to_string()),
         "debrief has no windowsClippy: {got:?}"
     );
+}
+
+/// A workspace without a `paddock.ci.json` (tools/paddock-dev) says why it has no Windows lint: CI's own job lints it natively on
+/// its Windows leg. The app wording stays for apps, which can opt in with `windowsClippy`.
+#[test]
+fn the_windows_skip_reason_names_the_real_cause_per_workspace() {
+    assert!(windows_skip_reason("tools/paddock-dev").contains("Windows leg natively"));
+    assert!(!windows_skip_reason("tools/paddock-dev").contains("windowsClippy"));
+    assert!(windows_skip_reason("apps/debrief").contains("windowsClippy"));
 }
 
 /// ER-41 (user, 2026-11-14): a branch's touched-file tests passed and the full conformance run failed (lib-usage.test.mjs on
