@@ -116,7 +116,7 @@
   {"path":"scripts/demo/check-agent-version.sh","lines":23},
   {"path":"scripts/demo/verify-macos.sh","lines":83},
   {"path":"scripts/disk-record.sh","lines":10},
-  {"path":"scripts/notices.sh","lines":22},
+  {"path":"scripts/notices.sh","lines":12},
   {"path":"scripts/perf/link-time/cc-timed.sh","lines":26},
   {"path":"scripts/perf/link-time/classify.py","lines":72},
   {"path":"scripts/perf/link-time/disfn.sh","lines":9},

@@ -119,6 +119,7 @@ export const CI_JOBS = {
   crates: ['crates'],
   crate: ['crates'],
   commits: ['tools'], // pull requests only; the tools job checks the rest of the file's contract
+  audit: ['paddock-dev'], // `./dev audit compare` on every run (advisories this change adds, docs/ci-schedules.md)
   'train-gates': ['tools'], // a train's dispatch run (the merge queue's local gates, docs/plans/merge-queue.md)
   app: ['apps'],
   'paddock-dev': ['paddock-dev'],

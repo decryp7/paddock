@@ -43,7 +43,7 @@ export function declaredLicense(v) {
 export function lockProduction(lock) {
   return Object.entries(lock.packages ?? {})
     .filter(([path, p]) => path.includes('node_modules/') && !p.dev && !p.devOptional)
-    .map(([path, p]) => ({ path, name: path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length), version: p.version, license: declaredLicense(p.license ?? p.licenses) }));
+    .map(([path, p]) => ({ path, name: path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length), version: p.version, license: declaredLicense(p.license ?? p.licenses), optional: !!p.optional }));
 }
 
 /**
@@ -78,7 +78,7 @@ export function workspaceProduction(lock, ws) {
     seen.add(at);
     for (const n of deps(pk[at])) todo.push(resolveFrom(at, n));
   }
-  return [...seen].sort().map((path) => ({ path, name: path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length), version: pk[path].version, license: pk[path].license ?? null }));
+  return [...seen].sort().map((path) => ({ path, name: path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length), version: pk[path].version, license: pk[path].license ?? null, optional: !!pk[path].optional }));
 }
 
 /** The folder with the package-lock.json that covers `dir`: `dir` itself, or the npm workspace root above it; null if none. */
@@ -89,7 +89,13 @@ function lockRoot(dir) {
   }
 }
 
-/** The production npm packages of an app folder (itself an npm root, or a workspace of the lock above it) with their licence texts: { packages, warnings }. Needs `npm ci --omit=dev` (or a full `npm ci`) first for the texts. */
+/**
+ * The production npm packages of an app folder (itself an npm root, or a workspace of the lock above it) with their licence texts:
+ * { packages, warnings }. Needs `npm ci --omit=dev` (or a full `npm ci`) first. Fail-closed: a package the lock lists that is not
+ * installed (no folder, or another version than the lock's) throws an error with `notInstalled` set, because an absent package would
+ * otherwise render as `[no text]` and drop the texts only it uses. Only an optional package (one npm skips on another OS or CPU) may
+ * be absent, with a warning. An installed package with no licence file is a warning.
+ */
 export function npmPackages(appDir) {
   const root = lockRoot(appDir);
   if (!root) throw new Error(`${join(appDir, 'package-lock.json')} not found: run the notices from the app's folder or pass --npm <dir>`);
@@ -97,16 +103,29 @@ export function npmPackages(appDir) {
   const ws = relative(root, appDir).split(sep).join('/');
   const list = ws ? workspaceProduction(lock, ws) : lockProduction(lock);
   const warnings = [];
+  const missing = [];
   const seen = new Set();
   const packages = list
     .filter((p) => !seen.has(`${p.name}@${p.version}`) && seen.add(`${p.name}@${p.version}`))
     .map((p) => {
       const dir = join(root, p.path);
       let pkgJson = {};
+      let readable = existsSync(join(dir, 'package.json'));
       try {
-        pkgJson = existsSync(join(dir, 'package.json')) ? JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) : {};
+        pkgJson = readable ? JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) : {};
       } catch {
+        readable = false;
         warnings.push(`npm ${p.name}@${p.version}: package.json is not valid JSON`);
+      }
+      // An installed package.json that names another version is another package; one without a version cannot be compared.
+      const wrong = typeof pkgJson.version === 'string' && pkgJson.version !== p.version;
+      if (!readable || wrong) {
+        const what = `${p.name}@${p.version}${wrong ? ` (installed ${pkgJson.version})` : ''}`;
+        if (p.optional && !wrong && !readable) {
+          warnings.push(`npm ${what}: optional package is not installed on this platform, so it is left out`);
+          return null;
+        }
+        missing.push(what);
       }
       const license = p.license ?? declaredLicense(pkgJson.license ?? pkgJson.licenses) ?? 'UNKNOWN';
       const files = existsSync(dir) ? readdirSync(dir).filter((f) => LICENCE_FILE.test(f) && !/\.(js|ts|json|css)$/.test(f)).sort() : [];
@@ -115,7 +134,14 @@ export function npmPackages(appDir) {
         .filter((t) => t.text);
       if (!texts.length) warnings.push(`npm ${p.name}@${p.version}: no licence file found (declared ${license})`);
       return { kind: 'npm', name: p.name, version: p.version, license, texts, spdx: spdxIds(license) };
-    });
+    })
+    .filter(Boolean);
+  if (missing.length) {
+    const shown = missing.slice(0, 5).join(', ');
+    const err = new Error(`${missing.length} production npm packages are not installed as the lock says (${shown}${missing.length > 5 ? `, and ${missing.length - 5} more` : ''}): run \`npm ci\` at the repo root, then run this again`);
+    err.notInstalled = true;
+    throw err;
+  }
   return { packages, warnings };
 }
 

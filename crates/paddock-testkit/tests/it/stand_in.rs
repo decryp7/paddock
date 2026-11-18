@@ -179,11 +179,13 @@ fn starts_a_named_grandchild_beside_it_and_writes_its_pid() {
         .install()
         .unwrap();
     assert_eq!(out(&run(parent.program(), &[])), "parent done\n");
-    let pid: u32 = std::fs::read_to_string(&pid_file)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
+    let text = std::fs::read_to_string(&pid_file).unwrap();
+    // A complete record is a pid and a newline, what `paddock_testkit_start::recorded::read_pid_file` waits for.
+    assert!(
+        text.ends_with('\n'),
+        "the pid record is not a complete line: {text:?}"
+    );
+    let pid: u32 = text.trim().parse().unwrap();
     assert!(pid > 0);
     wait_until("the grandchild wrote its marker", || marker.exists());
 }

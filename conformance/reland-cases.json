@@ -1,0 +1,42 @@
+{
+  "note": "One table for the re-land rule. conformance/src/commit-lint.mjs (isRelandSubject, revertsTargets) and tools/paddock-dev/src/merge_check (is_reland_subject, trailer_targets) both read it in their tests; a case that one side fails is a drift between them (docs/known-copies.toml, mechanism reland-rule, rule 55).",
+  "subjects": [
+    { "subject": "revert: reapply feat x", "reland": true },
+    { "subject": "revert: reapplying x", "reland": true },
+    { "subject": "revert: Reapply x", "reland": true },
+    { "subject": "  revert: Reapply x", "reland": true },
+    { "subject": "REVERT: REAPPLY x", "reland": true },
+    { "subject": "revert(ci): reapply x", "reland": true },
+    { "subject": "revert(ci,debrief)!: reapply x", "reland": true },
+    { "subject": "revert!: reapply x", "reland": true },
+    { "subject": "Reapply \"feat: x\"", "reland": true },
+    { "subject": "REAPPLY \"x\"", "reland": true },
+    { "subject": "Reapply \"Revert \"fix: y\"\"", "reland": true },
+    { "subject": "Revert \"Revert \"x\"\"", "reland": true },
+    { "subject": "Revert \"Revert \"feat: x\"\"", "reland": true },
+    { "subject": "Revert \"feat: x\"", "reland": false },
+    { "subject": "revert: drop the cache", "reland": false },
+    { "subject": "revert(ci): drop x", "reland": false },
+    { "subject": "revert(ci: reapply x", "reland": false },
+    { "subject": "feat: reapply x", "reland": false },
+    { "subject": "fix: reapplying", "reland": false },
+    { "subject": "reapply: x", "reland": false },
+    { "subject": "Reapply", "reland": false },
+    { "subject": "Reapplied \"feat: x\"", "reland": false },
+    { "subject": "Reapply\"feat: x\"", "reland": false }
+  ],
+  "trailers": [
+    { "message": "x\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567.", "targets": ["0123456789abcdef0123456789abcdef01234567"] },
+    { "message": "x\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567", "targets": ["0123456789abcdef0123456789abcdef01234567"] },
+    { "message": "x\n\nThis reverts commit abc1234.", "targets": ["abc1234"] },
+    { "message": "x\n\nThis reverts commit ABC1234F", "targets": ["ABC1234F"] },
+    { "message": "x\n\n  This reverts commit abc1234, reversing it\n", "targets": ["abc1234"] },
+    { "message": "x\n\nThis reverts commit 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "targets": ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"] },
+    { "message": "x\n\nThis reverts commit 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0", "targets": [] },
+    { "message": "x\n\nThis reverts commit abc123", "targets": [] },
+    { "message": "x\n\nThis reverts commit abc12", "targets": [] },
+    { "message": "x\n\nthis reverts commit abc1234", "targets": [] },
+    { "message": "x\n\nSee: This reverts commit abc1234", "targets": [] },
+    { "message": "x\n\nbecause", "targets": [] }
+  ]
+}

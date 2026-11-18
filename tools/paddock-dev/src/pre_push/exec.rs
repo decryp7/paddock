@@ -809,6 +809,17 @@ impl RealExec {
     }
 }
 
+/// In a unit test the dev binary ([`crate::tool_cache::self_exe`]) is the test harness itself: started as a gate, `<harness> gates
+/// check` is a nested run of every unit test whose name holds `gates` or `check` (about 335), 10 s alone and over 30 s under load,
+/// with the fixture repository as its folder (2026-11-18, `a_delete_only_push_and_an_explicit_base_never_use_evidence` stopped at
+/// nextest's 60 s twice in a row). Refused with its cause, so a test that reaches the real executor fails fast and named.
+#[cfg(test)]
+fn harness_as_gate(program: &str) -> Option<String> {
+    let me = std::env::current_exe().ok()?;
+    (Path::new(program) == me)
+        .then(|| format!("a unit test would start its own test binary ({program}) as a gate: give command_in a fake executor (exec::Exec)"))
+}
+
 /// A token no other run has: process id and clock.
 fn run_token() -> String {
     let nanos = std::time::SystemTime::now()
@@ -860,6 +871,10 @@ impl Exec for RealExec {
     }
 
     fn run(&self, gate: &Gate, limits: Limits) -> Result<Done, String> {
+        #[cfg(test)]
+        if let Some(why) = harness_as_gate(&gate.program) {
+            return Err(why);
+        }
         let _ = std::fs::create_dir_all(&self.logs);
         let log = self.logs.join(format!("{}.log", log_name(&gate.id)));
         // Best-effort: the .id file only helps a reader; a failed write never stops the gate.
@@ -1053,7 +1068,32 @@ exit $rc
                 rank: 2,
                 next: "fix it".into(),
                 workspaces: Vec::new(),
+                notice: None,
             }
+        }
+
+        /// The positive control of `harness_as_gate` (ER-33): the test binary itself is refused as a gate, by the guard and by the
+        /// real executor, with the cause named; any other program is not.
+        #[test]
+        fn the_real_executor_refuses_to_start_the_test_binary_as_a_gate() {
+            let me = std::env::current_exe().unwrap().to_string_lossy().to_string();
+            let why = harness_as_gate(&me).expect("the test binary is refused");
+            assert!(why.contains("its own test binary") && why.contains(&me), "{why}");
+            assert_eq!(harness_as_gate("/bin/true"), None);
+            let d = tempfile::tempdir().unwrap();
+            let ex = real(d.path(), &d.path().join("lock"));
+            let g = Gate {
+                program: me,
+                args: vec!["gates".into(), "check".into()],
+                heavy: false,
+                ..gate("gates-register", "")
+            };
+            let limits = Limits {
+                run: Duration::from_secs(5),
+                queue: Duration::from_secs(5),
+            };
+            let err = ex.run(&g, limits).expect_err("the test binary never starts as a gate");
+            assert!(err.contains("its own test binary"), "{err}");
         }
 
         /// The gates-register row's finding (C100's `::error` line, as `./dev gates check` prints it for a check no CI line runs) comes

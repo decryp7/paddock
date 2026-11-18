@@ -1,0 +1,454 @@
+{
+ "_comment": "Shared by scripts/npm-audit.test.mjs and tools/paddock-dev/src/audit/tests.rs: both readers of the npm audit (the script and `dev audit`) must answer every case the same way (rule 55). `reports`: `ids` (found, at level high) or `notMeasured` (a substring of the reason). `allow`: `ids` (accepted) or `error` (a substring of the refusal).",
+ "reports": [
+  {
+   "name": "a high advisory is a finding",
+   "report": {
+    "auditReportVersion": 2,
+    "vulnerabilities": {
+     "picomatch": {
+      "name": "picomatch",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+       {
+        "source": 1,
+        "name": "picomatch",
+        "dependency": "picomatch",
+        "title": "picomatch vulnerable to ReDoS",
+        "url": "https://github.com/advisories/GHSA-fc5q-39xc-vjpf",
+        "severity": "high",
+        "range": "<=4.0.7"
+       }
+      ],
+      "effects": [
+       "fdir"
+      ]
+     },
+     "fdir": {
+      "name": "fdir",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+       "picomatch"
+      ],
+      "effects": []
+     }
+    },
+    "metadata": {
+     "dependencies": {
+      "total": 120
+     }
+    }
+   },
+   "ids": [
+    "GHSA-fc5q-39xc-vjpf"
+   ]
+  },
+  {
+   "name": "positive control: the same report without the advisory finds nothing",
+   "report": {
+    "auditReportVersion": 2,
+    "vulnerabilities": {},
+    "metadata": {
+     "dependencies": {
+      "total": 120
+     }
+    }
+   },
+   "ids": []
+  },
+  {
+   "name": "a moderate advisory is below the level",
+   "report": {
+    "auditReportVersion": 2,
+    "vulnerabilities": {
+     "picomatch": {
+      "name": "picomatch",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+       {
+        "source": 1,
+        "name": "picomatch",
+        "dependency": "picomatch",
+        "title": "picomatch vulnerable to ReDoS",
+        "url": "https://github.com/advisories/GHSA-fc5q-39xc-vjpf",
+        "severity": "moderate",
+        "range": "<=4.0.7"
+       }
+      ],
+      "effects": [
+       "fdir"
+      ]
+     },
+     "fdir": {
+      "name": "fdir",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": [
+       "picomatch"
+      ],
+      "effects": []
+     }
+    },
+    "metadata": {
+     "dependencies": {
+      "total": 120
+     }
+    }
+   },
+   "ids": []
+  },
+  {
+   "name": "a critical advisory is a finding",
+   "report": {
+    "auditReportVersion": 2,
+    "vulnerabilities": {
+     "picomatch": {
+      "name": "picomatch",
+      "severity": "critical",
+      "isDirect": false,
+      "via": [
+       {
+        "source": 1,
+        "name": "picomatch",
+        "dependency": "picomatch",
+        "title": "picomatch vulnerable to ReDoS",
+        "url": "https://github.com/advisories/GHSA-fc5q-39xc-vjpf",
+        "severity": "critical",
+        "range": "<=4.0.7"
+       }
+      ],
+      "effects": [
+       "fdir"
+      ]
+     },
+     "fdir": {
+      "name": "fdir",
+      "severity": "critical",
+      "isDirect": true,
+      "via": [
+       "picomatch"
+      ],
+      "effects": []
+     }
+    },
+    "metadata": {
+     "dependencies": {
+      "total": 120
+     }
+    }
+   },
+   "ids": [
+    "GHSA-fc5q-39xc-vjpf"
+   ]
+  },
+  {
+   "name": "no vulnerabilities key is not measured",
+   "report": {
+    "auditReportVersion": 2,
+    "metadata": {}
+   },
+   "notMeasured": "vulnerabilities"
+  },
+  {
+   "name": "vulnerabilities that is not an object is not measured",
+   "report": {
+    "auditReportVersion": 2,
+    "vulnerabilities": [],
+    "metadata": {}
+   },
+   "notMeasured": "vulnerabilities"
+  },
+  {
+   "name": "vulnerabilities null is not measured",
+   "report": {
+    "auditReportVersion": 2,
+    "vulnerabilities": null,
+    "metadata": {}
+   },
+   "notMeasured": "vulnerabilities"
+  },
+  {
+   "name": "an error object is not measured",
+   "report": {
+    "error": {
+     "code": "ENOTFOUND",
+     "summary": "request to https://registry.npmjs.org failed"
+    }
+   },
+   "notMeasured": "registry.npmjs.org"
+  },
+  {
+   "name": "zero dependencies is not measured",
+   "report": {
+    "auditReportVersion": 2,
+    "vulnerabilities": {},
+    "metadata": {
+     "dependencies": {
+      "total": 0
+     }
+    }
+   },
+   "notMeasured": "no dependencies"
+  },
+  {
+   "name": "an unknown severity is not measured",
+   "report": {
+    "auditReportVersion": 2,
+    "vulnerabilities": {
+     "picomatch": {
+      "name": "picomatch",
+      "severity": "catastrophic",
+      "isDirect": false,
+      "via": [
+       {
+        "source": 1,
+        "name": "picomatch",
+        "dependency": "picomatch",
+        "title": "picomatch vulnerable to ReDoS",
+        "url": "https://github.com/advisories/GHSA-fc5q-39xc-vjpf",
+        "severity": "catastrophic",
+        "range": "<=4.0.7"
+       }
+      ],
+      "effects": [
+       "fdir"
+      ]
+     },
+     "fdir": {
+      "name": "fdir",
+      "severity": "catastrophic",
+      "isDirect": true,
+      "via": [
+       "picomatch"
+      ],
+      "effects": []
+     }
+    },
+    "metadata": {
+     "dependencies": {
+      "total": 120
+     }
+    }
+   },
+   "notMeasured": "severity"
+  },
+  {
+   "name": "a report that is not an object is not measured",
+   "raw": "[1]",
+   "notMeasured": "vulnerabilities"
+  },
+  {
+   "name": "text that is not JSON is not measured",
+   "raw": "npm error network",
+   "notMeasured": "no JSON"
+  }
+ ],
+ "allow": [
+  {
+   "name": "a valid list",
+   "doc": {
+    "allow": [
+     {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "build tool only",
+      "approvedBy": "user",
+      "approved": "2026-11-18",
+      "reviewBy": "2026-12-18"
+     },
+     {
+      "id": "GHSA-aaaa-bbbb-cccc",
+      "reason": "build tool only",
+      "approvedBy": "user",
+      "approved": "2026-11-18",
+      "reviewBy": "2026-11-19"
+     }
+    ]
+   },
+   "ids": [
+    "GHSA-fc5q-39xc-vjpf",
+    "GHSA-aaaa-bbbb-cccc"
+   ]
+  },
+  {
+   "name": "an empty list is valid",
+   "doc": {
+    "allow": []
+   },
+   "ids": []
+  },
+  {
+   "name": "exactly 90 days is valid",
+   "doc": {
+    "allow": [
+     {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "build tool only",
+      "approvedBy": "user",
+      "approved": "2026-11-18",
+      "reviewBy": "2027-02-16"
+     }
+    ]
+   },
+   "ids": [
+    "GHSA-fc5q-39xc-vjpf"
+   ]
+  },
+  {
+   "name": "91 days is refused",
+   "doc": {
+    "allow": [
+     {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "build tool only",
+      "approvedBy": "user",
+      "approved": "2026-11-18",
+      "reviewBy": "2027-02-17"
+     }
+    ]
+   },
+   "error": "more than 90 days"
+  },
+  {
+   "name": "a year is refused",
+   "doc": {
+    "allow": [
+     {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "build tool only",
+      "approvedBy": "user",
+      "approved": "2026-11-18",
+      "reviewBy": "2027-11-18"
+     }
+    ]
+   },
+   "error": "more than 90 days"
+  },
+  {
+   "name": "no reason",
+   "doc": {
+    "allow": [
+     {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "",
+      "approvedBy": "user",
+      "approved": "2026-11-18",
+      "reviewBy": "2026-12-18"
+     }
+    ]
+   },
+   "error": "no reason"
+  },
+  {
+   "name": "no approver",
+   "doc": {
+    "allow": [
+     {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "build tool only",
+      "approvedBy": "",
+      "approved": "2026-11-18",
+      "reviewBy": "2026-12-18"
+     }
+    ]
+   },
+   "error": "no approvedBy"
+  },
+  {
+   "name": "not a GHSA id",
+   "doc": {
+    "allow": [
+     {
+      "id": "CVE-2026-1",
+      "reason": "build tool only",
+      "approvedBy": "user",
+      "approved": "2026-11-18",
+      "reviewBy": "2026-12-18"
+     }
+    ]
+   },
+   "error": "not a GHSA id"
+  },
+  {
+   "name": "listed twice",
+   "doc": {
+    "allow": [
+     {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "build tool only",
+      "approvedBy": "user",
+      "approved": "2026-11-18",
+      "reviewBy": "2026-12-18"
+     },
+     {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "build tool only",
+      "approvedBy": "user",
+      "approved": "2026-11-18",
+      "reviewBy": "2026-12-18"
+     }
+    ]
+   },
+   "error": "listed twice"
+  },
+  {
+   "name": "review day not after approval",
+   "doc": {
+    "allow": [
+     {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "build tool only",
+      "approvedBy": "user",
+      "approved": "2026-11-18",
+      "reviewBy": "2026-11-18"
+     }
+    ]
+   },
+   "error": "review day"
+  },
+  {
+   "name": "a day that is not a day",
+   "doc": {
+    "allow": [
+     {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "build tool only",
+      "approvedBy": "user",
+      "approved": "2026-11-18",
+      "reviewBy": "2026-13-40"
+     }
+    ]
+   },
+   "error": "YYYY-MM-DD"
+  },
+  {
+   "name": "a day without dashes",
+   "doc": {
+    "allow": [
+     {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "build tool only",
+      "approvedBy": "user",
+      "approved": "2026-11-18",
+      "reviewBy": "20261219"
+     }
+    ]
+   },
+   "error": "YYYY-MM-DD"
+  },
+  {
+   "name": "allow is not an array",
+   "doc": {
+    "allow": {}
+   },
+   "error": "allow"
+  },
+  {
+   "name": "not JSON",
+   "raw": "not json",
+   "error": "JSON"
+  }
+ ]
+}

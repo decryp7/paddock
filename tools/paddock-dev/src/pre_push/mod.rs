@@ -22,6 +22,7 @@
 //! announced at the top of every run it is set in, shown in the table and logged next to the gate logs.
 
 pub mod budget;
+pub mod deny;
 pub mod exec;
 pub mod gates;
 pub mod heavy_tool;
@@ -285,7 +286,7 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     // Prepared on first use by a cargo gate, never here and never in `command_in`: a push that runs no cargo gate, and the tests of
     // the push gate, must not start a server on the machine they run on (ER-45).
     let wrapper = crate::local_sccache::Lazy::on_demand(paddock_env::vars().collect());
-    command_in(args, &root, &stdin, &RealLookups { root: root.clone() }, wrapper)
+    command_in(args, &root, &stdin, &RealLookups { root: root.clone() }, wrapper, None)
 }
 
 /// The lookups of one run, `git ls-remote` read once per remote: the base choice and the known-commit lookup ask the same question.
@@ -312,13 +313,15 @@ impl known::Lookups for OnceLookups<'_> {
     }
 }
 
-/// [`command`] with the repository, git's pre-push lines and the outside lookups given.
+/// [`command`] with the repository, git's pre-push lines and the outside lookups given, and the executor of the gates (`None`: the
+/// real machine).
 fn command_in(
     args: &PrePushArgs,
     root: &Path,
     stdin: &str,
     look: &dyn known::Lookups,
     wrapper: crate::local_sccache::Lazy,
+    given: Option<&dyn exec::Exec>,
 ) -> Result<Report, CliError> {
     if args.refs_from_stdin
         && only_reservation_refs(stdin, &|sha| {
@@ -479,17 +482,25 @@ fn command_in(
             args.only.iter().any(|w| id.split(' ').next() == Some(w.as_str()))
         });
     }
+    notes.extend(
+        planned
+            .iter()
+            .filter_map(|p| if let gates::Planned::Run(g) = p { g.notice.clone() } else { None }),
+    );
     if args.dry_run {
         return Ok(dry_run(&planned));
     }
-    let load = exec::Exec::load(&real);
+    // The gates run on the real machine, or on the executor a test gives: in a unit test the dev binary the gates start is the
+    // test harness itself (exec.rs, `harness_as_gate`).
+    let ex: &dyn exec::Exec = given.unwrap_or(&real);
+    let load = ex.load();
     let n = workers(load, std::thread::available_parallelism().map_or(1, |n| n.get()));
     let mut overridden = String::new();
     if env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") && !env.contains_key(exec::TEST_HEAVY_OFF) {
         overridden =
             "OVERRIDE SET: PADDOCK_HEAVY=off is not allowed outside the tests; every compile (clippy, xwin, Linux) is not measured\n"
                 .into();
-    } else if exec::heavy_prefix(&env, &|p| exec::Exec::has_tool(&real, p)).is_empty() {
+    } else if exec::heavy_prefix(&env, &|p| ex.has_tool(p)).is_empty() {
         notes.push("no heavy.sh or heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
@@ -515,7 +526,7 @@ fn command_in(
     let subject = outcome::subject_of(&root, checked.as_deref());
     let (mut rows, timings) = run_all_timed(
         &planned,
-        &real,
+        ex,
         &RunOpts {
             workers: n,
             budget: BUDGET,
@@ -1316,7 +1327,15 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
     }
     changed.sort();
     changed.dedup();
-    Ok((Change { files: changed, ranges }, notes, extra))
+    Ok((
+        Change {
+            files: changed,
+            ranges,
+            base: Some(base.to_string()),
+        },
+        notes,
+        extra,
+    ))
 }
 
 /// What the repository says that the plan does not: the conformance contract's check list, the apps that lint Windows, the CI image.

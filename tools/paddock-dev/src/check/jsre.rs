@@ -94,19 +94,140 @@ pub fn trim(s: &str) -> &str {
     s.trim_matches(is_js_space)
 }
 
-/// The number of UTF-16 code units in `s` (JavaScript's `.length`).
+#[cfg(test)]
+thread_local! {
+    /// How many bytes [`units`] and [`UnitIndex::new`] walked on this thread: a test asserts a check counts each file once, not
+    /// once per match, by this count and not by its time (ER-12).
+    pub(crate) static WALKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The number of UTF-16 code units in `s` (JavaScript's `.length`). Once per match over a growing prefix it is quadratic in the
+/// text: a check that turns many byte offsets of one text into JavaScript indexes builds a [`UnitIndex`] instead.
 pub fn units(s: &str) -> usize {
+    #[cfg(test)]
+    WALKED.with(|w| w.set(w.get() + s.len()));
     s.encode_utf16().count()
 }
 
-/// The 1-based line of byte offset `at` in `text`: the newlines before it plus one.
+/// The 1-based line of any byte offset of one text, from its newlines found once (binary search per lookup).
+pub struct LineIndex(Vec<usize>);
+
+impl LineIndex {
+    /// Finds the newlines of `s` once.
+    pub fn new(s: &str) -> LineIndex {
+        #[cfg(test)]
+        WALKED.with(|w| w.set(w.get() + s.len()));
+        LineIndex(s.bytes().enumerate().filter(|&(_, b)| b == b'\n').map(|(i, _)| i).collect())
+    }
+
+    /// [`line_at`]`(s, byte)`.
+    pub fn line(&self, byte: usize) -> usize {
+        self.0.partition_point(|&n| n < byte) + 1
+    }
+}
+
+/// The JavaScript index and the line of byte offsets of one text: its [`UnitIndex`] and [`LineIndex`], each built on first use, so a
+/// text with no hit costs nothing.
+pub struct Positions<'a> {
+    text: &'a str,
+    units: std::cell::OnceCell<UnitIndex>,
+    lines: std::cell::OnceCell<LineIndex>,
+}
+
+impl<'a> Positions<'a> {
+    /// Nothing is counted yet.
+    pub fn new(text: &'a str) -> Positions<'a> {
+        Positions {
+            text,
+            units: std::cell::OnceCell::new(),
+            lines: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// [`UnitIndex::at`].
+    pub fn unit(&self, byte: usize) -> usize {
+        self.units.get_or_init(|| UnitIndex::new(self.text)).at(byte)
+    }
+
+    /// [`LineIndex::line`].
+    pub fn line(&self, byte: usize) -> usize {
+        self.lines.get_or_init(|| LineIndex::new(self.text)).line(byte)
+    }
+}
+
+/// The JavaScript index (UTF-16 offset) of every byte offset of one text, counted in one pass. `units(&text[..m.start()])` for
+/// each match walked the prefix again every time: C122 spent 17 of its 20 s on that over this tree in a debug build, and its live
+/// test passed nextest's 60 s under load (2026-11-18). It holds one `usize` per byte: 8 times the text's size on a 64-bit host (a
+/// 100 kB source takes 800 kB while it is checked).
+pub struct UnitIndex(Vec<usize>);
+
+impl UnitIndex {
+    /// Counts `s` once.
+    pub fn new(s: &str) -> UnitIndex {
+        #[cfg(test)]
+        WALKED.with(|w| w.set(w.get() + s.len()));
+        let mut at = Vec::with_capacity(s.len() + 1);
+        let mut u = 0;
+        // Byte by byte (a plain loop stays cheap in a debug build too): a character's first byte gets the units before it, then
+        // counts the character, one unit or two (a four-byte character is a surrogate pair). A continuation byte is no boundary.
+        for &b in s.as_bytes() {
+            at.push(u);
+            if b & 0xC0 != 0x80 {
+                u += if b >= 0xF0 { 2 } else { 1 };
+            }
+        }
+        at.push(u);
+        UnitIndex(at)
+    }
+
+    /// `units(&s[..byte])` for a byte offset on a character boundary; one past the end counts as the end.
+    pub fn at(&self, byte: usize) -> usize {
+        self.0[byte.min(self.0.len() - 1)]
+    }
+}
+
+/// The 1-based line of byte offset `at` in `text`: the newlines before it plus one. Once per match it is quadratic like [`units`]:
+/// many offsets of one text go through a [`LineIndex`].
 pub fn line_at(text: &str, at: usize) -> usize {
+    #[cfg(test)]
+    WALKED.with(|w| w.set(w.get() + at.min(text.len())));
     text.as_bytes()[..at.min(text.len())].iter().filter(|b| **b == b'\n').count() + 1
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_unit_index_equals_units_at_every_character_boundary() {
+        for s in ["", "abc", "é😀\nx", "a\u{feff}😀😀b\r\n", "\u{10ffff}z"] {
+            let ix = UnitIndex::new(s);
+            for (i, _) in s.char_indices().chain([(s.len(), ' ')]) {
+                assert_eq!(ix.at(i), units(&s[..i]), "{s:?} at {i}");
+            }
+            assert_eq!(ix.at(s.len() + 5), units(s), "past the end is the end");
+        }
+    }
+
+    #[test]
+    fn positions_count_nothing_until_asked_and_then_answer_as_the_indexes_do() {
+        let s = "a\n😀b\nc";
+        WALKED.with(|w| w.set(0));
+        let p = Positions::new(s);
+        assert_eq!(WALKED.with(|w| w.get()), 0, "nothing is counted before a lookup");
+        assert_eq!((p.unit(6), p.line(6)), (units(&s[..6]), line_at(s, 6)));
+        assert_eq!((p.unit(s.len()), p.line(s.len())), (units(s), line_at(s, s.len())));
+    }
+
+    #[test]
+    fn the_line_index_equals_line_at_at_every_byte() {
+        for s in ["", "a", "\n", "a\nb\n\nc", "é\n😀\r\nx\n"] {
+            let ix = LineIndex::new(s);
+            for i in 0..=s.len() + 2 {
+                assert_eq!(ix.line(i), line_at(s, i), "{s:?} at {i}");
+            }
+        }
+    }
 
     #[test]
     fn s_and_w_are_javascripts() {

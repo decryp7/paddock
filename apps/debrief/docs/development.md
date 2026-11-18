@@ -236,7 +236,7 @@ the CI job's packages, and the x86 CI image only to confirm.
   (no console window on Windows; `clippy.toml` disallows `Command::new`), and every Tauri command that
   builds a window is `async` (a window built from a synchronous command stays white on Windows;
   `app/src-tauri/tests/it/window_commands.rs`).
-- **Commit messages** are checked against Conventional Commits (`node scripts/commit-lint.mjs`).
+- **Commit messages** are checked against Conventional Commits by Paddock's shared lint (`conformance/src/commit-lint.mjs`: subject at most 100 characters, no co-author or AI attribution, a re-land names what it reverts). CI lints ranges through the root `commits` job and C23.
 - **Real-app smoke tests** drive the built Tauri app with WebdriverIO and `tauri-driver`
   (`cd app && npm run e2e:tauri:build && npm run e2e:tauri`; Windows and Linux). Checks that need a
   real desktop are in [docs/testing-manual.md](testing-manual.md).
@@ -438,7 +438,6 @@ scope). Dependencies are updated by Renovate, which also pins CI actions to comm
 ├── samples/                       generated sample logs, profiler captures (profiling/) and an example profile
 ├── scripts/
 │   ├── notices/                   third-party notices generator (cargo-about + npm)
-│   ├── release/                   updater manifest (latest.json) generator
-│   └── commit-lint.mjs            Conventional Commits check
+│   └── release/                   updater manifest (latest.json) generator
 └── .gitea/workflows/              CI (build with release, fuzz, bench, mutants)
 ```

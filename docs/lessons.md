@@ -2766,3 +2766,65 @@ container run, a review finding): each call now ends through one completion slot
 completion, no lost wake-up, an end when the sender is dropped). It also closed a hole the patch above left: a close that
 panicked after taking the calls out left a caller already waiting on the clock waiting for its whole timeout (red at
 4cb546db5).
+
+## Fix item: gallery data.spec:193 read the table's left edge while the columns still moved (2026-11-18, CI run 8215)
+`table: loading and empty say no count, and the columns do not move when rows arrive` (ui/e2e/data.spec.ts:193) failed once on
+Linux in ci.yml run 8215 (job 40623, reference apps shard 1/2): `box-loading` was at x 363 against 353 for the loaded table. It
+passed in runs 8218 and 8225 on the same tree and 20 of 20 locally (Chromium, 4 workers). FLAKY in code train 13 reaches (pd-table);
+recorded here and not blocking, by the coordinator's decision. Next: reproduce in the Linux CI container with a failing run first,
+then wait for the layout to settle (two reads agree, ER-12) before the comparison. **Class: an e2e read before the layout settled
+(the ready-read class; train 13's workbench palette, Dyno alarms, gallery menu, grid header, Pitwall tray and Manage-layouts rename).**
+
+## The notices generator took a missing npm install for an empty one (2026-11-18, ER-33)
+
+`bash scripts/notices.sh dyno --check` in a worktree set up with `npm ci --ignore-scripts -w conformance` said "out of date", and
+a write run would have written a wrong file. `scripts/notices.sh` ran `npm ci` only when the root `node_modules` folder was missing,
+and that recipe leaves one (only `yaml` and the conformance link). `npmPackages` then found no folder for any of Dyno's 76
+production packages, warned `no licence file found` 76 times, rendered each as `[no text]` and dropped the 46 texts only npm
+packages use: 288 distinct texts became 242 and every `[MIT-n]` label moved. Measured (Mac, cargo-about 0.9.2, train 15): with a
+full root `npm ci` the output is byte-identical to the committed file and `--check` exits 0 for Dyno and Pitwall, so the OS was never
+the cause; 1222 licence files of the user's cargo registry against a fresh one (0 differ), CRLF, the cargo-about version and the
+targets were ruled out. It had cost false "stale" findings; no committed file ever carried the shape.
+**Fix, one mechanism.** `npmPackages` throws when a production package the lock lists has no installed folder, an unparseable
+package.json or another installed version (only a package npm marks optional may be absent: a warning, and it is left out of the
+render; an installed package with no licence file stays a warning). `paddock-notices` exits 6 (not measured, which `./dev gen check`
+reads as "could not look") and writes nothing. `--provision` (what `scripts/notices.sh` passes, now a 12-line wrapper) looks after
+the tools in the CLI: with `--check` it installs nothing (no `npm ci`, no cargo-about install; the version probe runs with
+`RUSTUP_AUTO_INSTALL=0`, ER-45) and exits 6 with the cause and the next step; a write run installs cargo-about and runs
+`npm ci --ignore-scripts`. A caller of `--check` must therefore install the npm packages first (debrief.yml's licences job did not
+and got the step added; the generator registry declares the install in `requires`).
+Class: a generator or check that treats a missing input as an empty input; compare the input with what declares it (here the
+lock) and stop when they differ.
+**Recurring: input-precondition-not-verified** (ER-33 cases on Dyno 1.1.0, the 2026-11-17 Debrief dock spec, `every()` over nothing in ER-12).
+
+## An abandoned kept-clone phase let its git outlive the step (2026-11-18)
+`host_steps::kept_clone_the_create_phase_is_bounded_by_its_own_limit` failed once in 5.9 s and passed on its retry (5.5 s) in a full
+nextest run at load 10 to 25: the reaper found a process "below a child" still running after the Rust step ended. Causes listed, with
+what ruled each out: (1) the product ends only the git's group and not the tree: refuted by `paddock_proc::kill_tree` (SIGKILL of
+the group, then each process by identity) and its test of a grandchild; (2) the reaper reads the table before the kill is reaped:
+refuted for the git, whose own wait is reaped by the run before it returns, and the reaper skips zombies; (3) the phase is abandoned
+at its bound while the git's kill is still in flight, and the step ends with the git running: confirmed (below).
+The git ends itself at the phase's limit (1 s from its start); the phase is abandoned at limit + 1 s from the clock mark (the hanging
+git's first line), so ending the git's tree must take less than a second. **Where the time goes** (temporary probes, not committed;
+`host_steps::` at 16 threads, 6 iterations, load 17 to 26, 59 hung gits): the timer fired on time (at most 11 ms late); `kill_tree`
+took up to 1.79 s (it reads the whole process table, with a start-time look per process, before it signals anything); the run
+returned after at most 1.72 s of a 1 s limit. At that load the phase was abandoned while its git still ran in 40 of 59 hung gits (the
+step said so: "ended 1 program(s) of the abandoned phase"), and the parity tests failed on the extra line, so the failure is common at
+load 26 and rare at load 10. The earlier single-test loops at load 28 never reached it (one test at a time reads a table that is not
+under 16 threads of its own).
+Regression tests: `a_phase_abandoned_at_its_bound_leaves_no_program_of_its_own_running` (kept clone) and
+`a_hung_git_of_an_abandoned_phase_is_ended_with_the_programs_below_it` (stable workspace), both red without the fix (the program below
+the git was still running when the phase returned). **Fix:** `Held` (in `ci_host/phase.rs`) is owned by `bounded`, `bounded_hung` and
+`bounded_marked`, handed to the phase's closure, and ended on `Phase::Timeout`: a captured `ToolCall` is `held_by` it (fed by
+`paddock_proc::run_bounded_noting`, which tells the caller the program's identity at its start, `None` when its start time is
+unreadable: counted and reported, never ended by guess), and `Held::end_all` ends every program still running by identity, once per
+running program (the first version read the table twice per program: 6.7 s for three programs at that load), and waits until they
+are gone. A program that starts after that is ended at its start. The step logs how many it ended and how long it took. The phase's
+limits are unchanged. **`ENDED_WITHIN` (10 s, ER-12):** the deadline of the wait after the signals, not an expected time: measured
+`end_all` at most 1.9 s (59 calls, one program each, load 17 to 26), all of it the table read; a process that outlasts 10 s is stuck
+in the kernel and is reported by name, not waited for. The stand-in's `pid_file` now ends in a newline (`read_pid_file` waits for a
+complete line and never completed on it: both new tests hung 40 s before that fix; test in `paddock-testkit`'s stand_in).
+**Class: work a step abandons keeps running past the step** (earlier: the abandoned checkout phase that set the next phase's flag,
+2026-11-15, above; found both times by ADR 0103's reaper and the parity tests under load). Open, not done here: `kill_tree` reads the
+whole process table before it signals; signalling the group first and reading the table for escapees would cut the 1.8 s but changes
+what a tree kill can find (a child whose parent was killed is no longer below it), so it needs its own design.

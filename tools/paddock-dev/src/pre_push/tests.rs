@@ -2,7 +2,7 @@
 
 use super::budget::Timing;
 use super::exec::{Done, Exec, Kind, Limits, QUEUE_MAX, Row, RunOpts, decide, run_all_timed, run_all_with, test_subject};
-use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates};
+use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates, windows_skip_reason};
 use super::{accept_not_measured, parse_refs, render, render_timed};
 use paddock_cli::Exit;
 use serde_json::json;
@@ -59,6 +59,7 @@ fn change(files: &[&str]) -> Change {
     Change {
         files: files.iter().map(|f| f.to_string()).collect(),
         ranges: vec!["abc..HEAD".into()],
+        base: Some("origin/main".into()),
     }
 }
 
@@ -223,6 +224,7 @@ fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
             "apps/dyno/crates/dyno-core/src/a.rs".into(),
         ],
         ranges: vec!["abc..HEAD".into()],
+        ..Change::default()
     };
     let planned = plan_gates(&plan(), &c, &facts());
     let mut fixed: Vec<String> = ids(&planned)
@@ -241,6 +243,7 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
     let c = Change {
         files: vec!["docs/x.md".into()],
         ranges: vec![],
+        ..Change::default()
     };
     let planned = plan_gates(&docs, &c, &facts());
     // Conformance and its tests run on every push, whatever the plan says (ER-41); everything else a docs change does not reach.
@@ -263,6 +266,36 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
         !got.contains(&"clippy-windows apps/debrief".to_string()),
         "debrief has no windowsClippy: {got:?}"
     );
+}
+
+/// A workspace without a `paddock.ci.json` (tools/paddock-dev) says why it has no Windows lint: CI's own job lints it natively on
+/// its Windows leg. The app wording stays for apps, which can opt in with `windowsClippy`.
+#[test]
+fn the_windows_skip_reason_names_the_real_cause_per_workspace() {
+    assert!(windows_skip_reason("tools/paddock-dev").contains("Windows leg natively"));
+    assert!(!windows_skip_reason("tools/paddock-dev").contains("windowsClippy"));
+    assert!(windows_skip_reason("apps/debrief").contains("windowsClippy"));
+}
+
+/// The reason as `plan_gates` prints it: the `Planned::Skip` of the Windows lint, not only the helper's string.
+#[test]
+fn plan_gates_skips_the_windows_lint_of_paddock_dev_with_its_own_reason() {
+    let mut p = plan();
+    p["packages"]["tools/paddock-dev"] = json!(["paddock-dev"]);
+    let mut f = facts();
+    f.left_out.insert("tools/paddock-dev".to_string(), Ok(crates_of(&[], 1)));
+    let windows_skip = |planned: &[Planned], ws: &str| {
+        planned.iter().find_map(|g| match g {
+            Planned::Skip { id, reason } if *id == format!("clippy-windows {ws}") => Some(reason.clone()),
+            _ => None,
+        })
+    };
+    let planned = plan_gates(&p, &change(&["tools/paddock-dev/src/a.rs", "apps/debrief/src/a.rs"]), &f);
+    let tool = windows_skip(&planned, "tools/paddock-dev").unwrap_or_else(|| panic!("no Windows skip for paddock-dev: {planned:?}"));
+    assert!(tool.contains("Windows leg natively") && !tool.contains("windowsClippy"), "{tool}");
+    // Positive control: an app without `windowsClippy` still gets the app wording, so the assertion above can tell the two apart.
+    let app = windows_skip(&planned, "apps/debrief").unwrap_or_else(|| panic!("no Windows skip for debrief: {planned:?}"));
+    assert!(app.contains("windowsClippy") && !app.contains("Windows leg natively"), "{app}");
 }
 
 /// ER-41 (user, 2026-11-14): a branch's touched-file tests passed and the full conformance run failed (lib-usage.test.mjs on
@@ -879,6 +912,7 @@ fn several_pushed_ranges_are_linted_each() {
     let c = Change {
         files: vec!["crates/a.rs".into()],
         ranges: vec!["m1..a".into(), "m2..b".into()],
+        ..Change::default()
     };
     let got = ids(&plan_gates(&plan(), &c, &facts()));
     assert!(
@@ -1532,6 +1566,7 @@ mod known_commit {
             &push_line(&two),
             &fake(None, Err("x")),
             crate::local_sccache::Lazy::off(),
+            Some(&super::Fake::default()),
         )
         .unwrap();
         assert_eq!(rep.exit, Exit::Ok);
@@ -1566,6 +1601,7 @@ mod known_commit {
             &push_line(&two),
             &fake(None, Err("x")),
             crate::local_sccache::Lazy::off(),
+            Some(&super::Fake::default()),
         )
         .unwrap();
         let tree = git_text(&r, &["rev-parse", &format!("{two}^{{tree}}")]).unwrap().trim().to_string();
@@ -1627,6 +1663,9 @@ mod known_commit {
         known::write_record(&r, &state(&r), &two, "origin/main", &[], 5, &pass_for(&r, &two)).unwrap();
         let l = fake(None, Err("x"));
         let delete = format!("(delete) {} refs/heads/old {}\n", "0".repeat(40), two);
+        // The gates run on a fake: on the real executor the gates-register row starts the test binary itself (exec.rs,
+        // `harness_as_gate`), a nested test run that took this test past nextest's 60 s under load (2026-11-18).
+        let gates = super::Fake::default();
         let got = command_in(
             &PrePushArgs {
                 root: Some(r.clone()),
@@ -1636,15 +1675,20 @@ mod known_commit {
             &delete,
             &l,
             crate::local_sccache::Lazy::off(),
+            Some(&gates),
         );
         assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
+        // Measured, not skipped: the gates of the run went to the executor (the positive control of the verdict above).
+        assert!(gates.ran.lock().unwrap().contains(&"gates-register".to_string()), "{got:?}");
         let a = PrePushArgs {
             root: Some(r.clone()),
             base: Some("origin/main".into()),
             ..args()
         };
-        let got = command_in(&a, &r, &push_line(&two), &l, crate::local_sccache::Lazy::off());
+        let gates = super::Fake::default();
+        let got = command_in(&a, &r, &push_line(&two), &l, crate::local_sccache::Lazy::off(), Some(&gates));
         assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
+        assert!(gates.ran.lock().unwrap().contains(&"gates-register".to_string()), "{got:?}");
     }
 
     /// A record measured from a nearer base (a local train, a branch's old commit) checked less than a push from an older base
@@ -1960,7 +2004,14 @@ mod base_choice {
             accept_not_measured: vec![],
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
-        let got = command_in(&args, &r, &line, &live(&r), crate::local_sccache::Lazy::off());
+        let got = command_in(
+            &args,
+            &r,
+            &line,
+            &live(&r),
+            crate::local_sccache::Lazy::off(),
+            Some(&super::Fake::default()),
+        );
         assert!(got.as_ref().map_or(true, |rep| !rep.text.contains("nothing to check")), "{got:?}");
     }
 }
@@ -2385,6 +2436,7 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
         rank,
         next: "fix it".into(),
         workspaces: Vec::new(),
+        notice: None,
     })
 }
 
@@ -3028,4 +3080,116 @@ fn a_workspace_with_only_tauri_crates_is_skipped_and_named_not_linted() {
     // `--warm-linux` skips it too.
     let rows = super::warm::runs(&["apps/demo/src-tauri".to_string()], "7", &|_| Ok(crates_of(&["demo-app"], 0))).unwrap();
     assert!(rows[0].1.is_none());
+}
+
+/// A `cargo` and `cargo-deny` stand-in (ER-14: the real tool never runs, nothing reaches the network): `cargo deny ...` records its
+/// arguments and fails like the real one when the checks it was asked for have a finding. `adv` and `lic` are files in its folder
+/// that switch an advisory and a licence finding on; a run with no category named checks all four.
+#[cfg(unix)]
+mod deny_row {
+    use super::*;
+    use crate::pre_push::exec::RealExec;
+    use std::collections::HashMap;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    fn stand_in(d: &Path) -> RealExec {
+        let bin = d.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(d.join("apps/pitwall")).unwrap();
+        let script = format!(
+            "#!/bin/sh\necho \"$@\" >> {calls}\n[ \"$1\" = deny ] || exit 0\nall=1\nfor a in \"$@\"; do case $a in advisories|licenses|bans|sources) all=0;; esac; done\nhas() {{ [ $all = 1 ] && return 0; case \" $* \" in *\" $W \"*) return 0;; esac; return 1; }}\nW=advisories; if [ -f {adv} ] && has \"$@\"; then echo 'error[vulnerability]: RUSTSEC-2026-9999 lettre' >&2; exit 1; fi\nW=licenses; if [ -f {lic} ] && has \"$@\"; then echo 'error[rejected]: licence GPL-3.0 is not allowed' >&2; exit 1; fi\nexit 0\n",
+            calls = d.join("calls").display(),
+            adv = d.join("adv").display(),
+            lic = d.join("lic").display()
+        );
+        for name in ["cargo", "cargo-deny"] {
+            paddock_testkit::exe::write_program(bin.join(name), script.clone()).unwrap();
+        }
+        RealExec {
+            root: d.to_path_buf(),
+            env: HashMap::from([
+                (
+                    "PATH".to_string(),
+                    format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default()),
+                ),
+                ("HOME".to_string(), d.display().to_string()),
+            ]),
+            logs: d.join("logs"),
+            stop: Arc::new(AtomicBool::new(false)),
+            built_heavy: Default::default(),
+            priority: false,
+            wrapper: crate::local_sccache::Lazy::off(),
+        }
+    }
+
+    /// The deny row of a push that changes `files` (base known unless `base` is None), run on the stand-in.
+    fn push(d: &Path, files: &[&str], base: Option<&str>) -> (Row, Vec<Planned>) {
+        let ex = stand_in(d);
+        let mut c = change(files);
+        c.base = base.map(String::from);
+        let planned = plan_gates(&plan(), &c, &facts());
+        let g = run_gates(&planned).into_iter().find(|g| g.id == "pitwall-deny").unwrap().clone();
+        (decide(&g, &ex, Duration::from_secs(60), &test_subject()), planned)
+    }
+
+    fn notice(planned: &[Planned]) -> Option<String> {
+        run_gates(planned)
+            .into_iter()
+            .find(|g| g.id == "pitwall-deny")
+            .unwrap()
+            .notice
+            .clone()
+    }
+
+    #[test]
+    fn a_push_without_a_lockfile_change_skips_advisories_says_so_and_still_fails_on_a_licence() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("adv"), "").unwrap();
+        // The published advisory does not turn a push red that touches no dependency.
+        let (row, planned) = push(d.path(), &["apps/pitwall/src/a.rs"], Some("origin/main"));
+        assert_eq!(row.kind(), Kind::Passed, "{row:?}");
+        let n = notice(&planned).expect("a skip prints its line");
+        assert!(
+            n.contains("advisories skipped") && n.contains("nightly") && n.contains("apps/pitwall"),
+            "{n}"
+        );
+        let calls = std::fs::read_to_string(d.path().join("calls")).unwrap();
+        assert!(
+            calls.contains("deny --workspace check licenses bans sources") && !calls.contains("advisories"),
+            "{calls}"
+        );
+        // Positive control: the same push with a licence violation is red.
+        std::fs::write(d.path().join("lic"), "").unwrap();
+        let (row, _) = push(d.path(), &["apps/pitwall/src/a.rs"], Some("origin/main"));
+        assert_eq!(row.kind(), Kind::Failed, "licences still run: {row:?}");
+    }
+
+    #[test]
+    fn a_push_that_changes_a_lockfile_or_manifest_runs_advisories_and_fails_on_one() {
+        for file in [
+            "apps/pitwall/app/src-tauri/Cargo.lock",
+            "apps/pitwall/crates/x/Cargo.toml",
+            "apps/pitwall/deny.toml",
+            "crates/paddock-proc/Cargo.toml",
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            let (row, planned) = push(d.path(), &[file], Some("origin/main"));
+            assert_eq!(row.kind(), Kind::Passed, "no advisory published: {file}: {row:?}");
+            assert!(notice(&planned).is_none(), "{file}");
+            std::fs::write(d.path().join("adv"), "").unwrap();
+            let (row, _) = push(d.path(), &[file], Some("origin/main"));
+            assert_eq!(row.kind(), Kind::Failed, "{file}: {row:?}");
+            assert!(std::fs::read_to_string(d.path().join("calls")).unwrap().lines().last().unwrap() == "deny --workspace check");
+        }
+    }
+
+    #[test]
+    fn an_unknown_base_runs_advisories() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("adv"), "").unwrap();
+        let (row, planned) = push(d.path(), &["apps/pitwall/src/a.rs"], None);
+        assert_eq!(row.kind(), Kind::Failed, "not measured never passes: {row:?}");
+        assert!(notice(&planned).is_none());
+    }
 }

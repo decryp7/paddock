@@ -47,7 +47,7 @@
   "ui": [
     "npm run build -w ui",
     "cd apps/dyno/app",
-    "npm audit --omit=dev --audit-level=high",
+    "node ../../../scripts/npm-audit.mjs",
     "npx ng lint",
     "npx ng build",
     "node ../../../conformance/ci/check-index.mjs dist/dyno-app/browser/index.html",
