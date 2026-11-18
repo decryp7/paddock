@@ -10,8 +10,10 @@
 //  - a directive for the rule without a description (`-- ` and at least three characters);
 //  - a directive that the allow list `conformance/c139-allow.json` does not name, or one beyond its entry's `count`.
 // The list is read by the shared reader (util/allow-list.mjs): it only shrinks against the merge base, a stale entry is a warning.
+// Report-only (warnings) until its first green CI run that includes it (ER-41); it turns blocking then (mode gate, and `--strict C139`), with that run id recorded here and in c139.rs.
+// Recorded: not yet. The lint rule itself is an error already: it had its report-only phase, and the real tree is at 0.
 // JavaScript port of tools/paddock-dev/src/check/c139.rs (same findings, line for line; tests/it/check_c139.rs compares them).
-import { error } from '../finding.mjs';
+import { warn } from '../finding.mjs';
 import { parseAllowList, readAllowList } from '../util/allow-list.mjs';
 
 export const ALLOW = 'conformance/c139-allow.json';
@@ -67,7 +69,7 @@ const SPEC = { id: 'C139', rule: 49, file: ALLOW, unseen: 'an e2e spec', restore
 export default {
   id: 'C139',
   scope: 'root',
-  mode: 'gate',
+  mode: 'report-only',
   allowList: SPEC,
   title: 'an e2e spec that disables paddock/e2e-ready-reads says why, and the exceptions only shrink',
   rule: 49,
@@ -83,13 +85,13 @@ export default {
         continue;
       }
       for (const { line, kind } of sites(f, text)) {
-        if (kind === 'unrestricted') out.push(error('C139', 49, f, line, 'an eslint-disable in an e2e spec that names no rule switches off every rule on its line', FIX_RULES));
-        else if (kind === 'block') out.push(error('C139', 49, f, line, 'a block eslint-disable of paddock/e2e-ready-reads covers any number of reads', FIX_BLOCK));
-        else if (kind === 'no-reason') out.push(error('C139', 49, f, line, 'a disable of paddock/e2e-ready-reads without a description', FIX_WHY));
+        if (kind === 'unrestricted') out.push(warn('C139', 49, f, line, 'an eslint-disable in an e2e spec that names no rule switches off every rule on its line', FIX_RULES));
+        else if (kind === 'block') out.push(warn('C139', 49, f, line, 'a block eslint-disable of paddock/e2e-ready-reads covers any number of reads', FIX_BLOCK));
+        else if (kind === 'no-reason') out.push(warn('C139', 49, f, line, 'a disable of paddock/e2e-ready-reads without a description', FIX_WHY));
         else {
           const said = allow.admit(f, (site) => site === RULE_ID);
           if (said === 'allowed') continue;
-          out.push(error('C139', 49, f, line, said === 'beyond' ? 'a disable of paddock/e2e-ready-reads beyond the count of its allow entry' : 'a disable of paddock/e2e-ready-reads that the allow list does not name', FIX_LIST));
+          out.push(warn('C139', 49, f, line, said === 'beyond' ? 'a disable of paddock/e2e-ready-reads beyond the count of its allow entry' : 'a disable of paddock/e2e-ready-reads that the allow list does not name', FIX_LIST));
         }
       }
     }

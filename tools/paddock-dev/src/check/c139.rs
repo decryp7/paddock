@@ -12,6 +12,7 @@
 //!
 //! The list is read by the shared [`super::allow_list`] (path, site `paddock/e2e-ready-reads`, reason, count): it only shrinks against the
 //! merge base (`baseline::growth`, as C53 and C115 use it; "not measured" is an error in CI, ADR 0089), a stale entry is a warning.
+//! **Report-only (warnings) until its first green CI run that includes it (ER-41); it turns blocking then (mode `Gate`, and the list's growth findings are errors under `--strict C139`), with that run id recorded here and in `C139-e2e-ready-directives.mjs`.** Recorded: not yet. The lint rule itself is an error already: it had its report-only phase, and the real tree is at 0.
 //! Rust host; `conformance/src/checks/C139-e2e-ready-directives.mjs` is the port and `tests/it/check_c139.rs` compares them.
 
 use super::allow_list::{self, Admit, Entry, Spec};
@@ -40,7 +41,8 @@ static NOT_READ: LazyLock<Regex> = LazyLock::new(|| rx(r"(?:^|/)(?:node_modules|
 static DIRECTIVE: LazyLock<Regex> = LazyLock::new(|| rx(r"(?://|/\*)\s*eslint-disable(-next-line|-line)?\b(.*)$"));
 
 const FIX_RULES: &str = "Name the rule: `// eslint-disable-next-line paddock/e2e-ready-reads -- <why>`. Better, wait with a ready helper from @decryp7/paddock-e2e (ui/projects/paddock-e2e/src/ready.ts) so the read needs no exception.";
-const FIX_BLOCK: &str = "Use the one-line form, `// eslint-disable-next-line paddock/e2e-ready-reads -- <why>`: a block covers any number of reads.";
+const FIX_BLOCK: &str =
+    "Use the one-line form, `// eslint-disable-next-line paddock/e2e-ready-reads -- <why>`: a block covers any number of reads.";
 const FIX_WHY: &str = "Say why the read is immediate by design: `// eslint-disable-next-line paddock/e2e-ready-reads -- <why>` (at least three characters after the dashes).";
 const FIX_LIST: &str = "Wait with a ready helper from @decryp7/paddock-e2e (ui/projects/paddock-e2e/src/ready.ts) instead. An exception has to be listed in conformance/c139-allow.json (path, site `paddock/e2e-ready-reads`, reason, count), and the list only shrinks: a new entry needs the user's approval (ER-46).";
 
@@ -129,6 +131,10 @@ impl Check for C139 {
         super::CheckScope::Root
     }
 
+    fn mode(&self) -> super::Mode {
+        super::Mode::ReportOnly
+    }
+
     fn allow_list(&self) -> Option<&'static allow_list::Spec> {
         Some(&SPEC)
     }
@@ -140,10 +146,22 @@ impl Check for C139 {
                     ALLOW,
                     "{\"allow\":[{\"path\":\"ui/e2e/ok.spec.ts\",\"site\":\"paddock/e2e-ready-reads\",\"reason\":\"the read is immediate by design\"}]}",
                 ),
-                ("ui/e2e/ok.spec.ts", "// eslint-disable-next-line paddock/e2e-ready-reads -- immediate by design\nconst a = 1;\n"),
-                ("ui/e2e/bad.spec.ts", "const b = 1;\n// eslint-disable-next-line paddock/e2e-ready-reads -- not listed anywhere\nconst c = 2;\n"),
-                ("ui/e2e/other.spec.ts", "// eslint-disable-next-line no-console -- another rule is not this check's\n"),
-                ("ui/src/not-e2e.ts", "// eslint-disable-next-line paddock/e2e-ready-reads -- outside an e2e folder\n"),
+                (
+                    "ui/e2e/ok.spec.ts",
+                    "// eslint-disable-next-line paddock/e2e-ready-reads -- immediate by design\nconst a = 1;\n",
+                ),
+                (
+                    "ui/e2e/bad.spec.ts",
+                    "const b = 1;\n// eslint-disable-next-line paddock/e2e-ready-reads -- not listed anywhere\nconst c = 2;\n",
+                ),
+                (
+                    "ui/e2e/other.spec.ts",
+                    "// eslint-disable-next-line no-console -- another rule is not this check's\n",
+                ),
+                (
+                    "ui/src/not-e2e.ts",
+                    "// eslint-disable-next-line paddock/e2e-ready-reads -- outside an e2e folder\n",
+                ),
             ],
             expect: vec![("ui/e2e/bad.spec.ts", 2)],
         }
@@ -168,13 +186,48 @@ impl Check for C139 {
             };
             for (line, kind) in sites(f, &text) {
                 let finding = match kind {
-                    Kind::Unrestricted => Finding::error("C139", 49, f, line, "an eslint-disable in an e2e spec that names no rule switches off every rule on its line".to_string(), FIX_RULES),
-                    Kind::Block => Finding::error("C139", 49, f, line, "a block eslint-disable of paddock/e2e-ready-reads covers any number of reads".to_string(), FIX_BLOCK),
-                    Kind::NoReason => Finding::error("C139", 49, f, line, "a disable of paddock/e2e-ready-reads without a description".to_string(), FIX_WHY),
+                    Kind::Unrestricted => Finding::warn(
+                        "C139",
+                        49,
+                        f,
+                        line,
+                        "an eslint-disable in an e2e spec that names no rule switches off every rule on its line".to_string(),
+                        FIX_RULES,
+                    ),
+                    Kind::Block => Finding::warn(
+                        "C139",
+                        49,
+                        f,
+                        line,
+                        "a block eslint-disable of paddock/e2e-ready-reads covers any number of reads".to_string(),
+                        FIX_BLOCK,
+                    ),
+                    Kind::NoReason => Finding::warn(
+                        "C139",
+                        49,
+                        f,
+                        line,
+                        "a disable of paddock/e2e-ready-reads without a description".to_string(),
+                        FIX_WHY,
+                    ),
                     Kind::Counted => match allow.admit(f, |site| site == RULE_ID) {
                         Admit::Allowed => continue,
-                        Admit::Beyond => Finding::error("C139", 49, f, line, "a disable of paddock/e2e-ready-reads beyond the count of its allow entry".to_string(), FIX_LIST),
-                        Admit::Unlisted => Finding::error("C139", 49, f, line, "a disable of paddock/e2e-ready-reads that the allow list does not name".to_string(), FIX_LIST),
+                        Admit::Beyond => Finding::warn(
+                            "C139",
+                            49,
+                            f,
+                            line,
+                            "a disable of paddock/e2e-ready-reads beyond the count of its allow entry".to_string(),
+                            FIX_LIST,
+                        ),
+                        Admit::Unlisted => Finding::warn(
+                            "C139",
+                            49,
+                            f,
+                            line,
+                            "a disable of paddock/e2e-ready-reads that the allow list does not name".to_string(),
+                            FIX_LIST,
+                        ),
                     },
                 };
                 findings.push(finding);

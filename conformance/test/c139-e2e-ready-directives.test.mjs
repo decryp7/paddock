@@ -31,7 +31,7 @@ test('C139 allow list: a path, the rule as the site, a reason and a count', () =
   assert.throws(() => parseAllow('{}'), /no `allow` array/);
 });
 
-test('C139 through the runner: the listed directive passes; an unlisted one, a second beyond the count, a block, a bare and a reasonless one are errors; a stale entry is a warning', async () => {
+test('C139 through the runner: the listed directive passes; an unlisted one, a second beyond the count, a block, a bare and a reasonless one are warnings; a stale entry is a warning', async () => {
   const root = makeApp({
     'conformance/c139-allow.json': ALLOW,
     'ui/e2e/ok.spec.ts': `${D}a();\n${D}b();\n`,
@@ -43,11 +43,11 @@ test('C139 through the runner: the listed directive passes; an unlisted one, a s
   });
   const found = await findingsOf('C139', root);
   assert.deepEqual(found.map((f) => [f.file, f.line, f.severity]), [
-    ['ui/e2e/bare.spec.ts', 1, 'error'],
-    ['ui/e2e/block.spec.ts', 1, 'error'],
-    ['ui/e2e/new.spec.ts', 1, 'error'],
-    ['ui/e2e/ok.spec.ts', 3, 'error'],
-    ['ui/e2e/why.spec.ts', 1, 'error'],
+    ['ui/e2e/bare.spec.ts', 1, 'warn'],
+    ['ui/e2e/block.spec.ts', 1, 'warn'],
+    ['ui/e2e/new.spec.ts', 1, 'warn'],
+    ['ui/e2e/ok.spec.ts', 3, 'warn'],
+    ['ui/e2e/why.spec.ts', 1, 'warn'],
   ]);
   assert.match(found.find((f) => f.file === 'ui/e2e/ok.spec.ts').message, /beyond the count/);
   const stale = await findingsOf('C139', makeApp({ 'conformance/c139-allow.json': ALLOW, 'ui/e2e/ok.spec.ts': 'a();\n' }));

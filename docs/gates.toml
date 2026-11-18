@@ -1268,3 +1268,11 @@ owner = "ER-21 class: a unit test asserts a value while a live mock feed keeps c
 since = 2026-11-16
 review_by = 2026-12-16
 approved = "coordinator"
+
+[[report_only]]
+id = "C139"
+reason = "ER-41: report-only until its first green CI run that includes it, recorded by run id here and in C139-e2e-ready-directives.mjs and c139.rs. It requires a description on every `eslint-disable-next-line paddock/e2e-ready-reads` in an e2e spec, refuses the block and bare forms, and counts the directives in conformance/c139-allow.json, a list that only shrinks against the merge base (ER-46). The lint rule itself is an error (it had its report-only phase; the real tree is at 0)."
+owner = "ER-21 class: a read on 'it is in the DOM' (feat/e2e-ready-gating)"
+since = 2026-11-18
+review_by = 2026-12-18
+approved = "coordinator"

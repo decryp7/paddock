@@ -62,7 +62,7 @@ fn c139_options(root: &Path, app: &str) -> RunOptions {
 }
 
 #[test]
-fn c139_flags_the_shapes_it_names_as_errors() {
+fn c139_flags_the_shapes_it_names_only_as_warnings() {
     let tree = c139_tree();
     let r = run_checks(&c139_options(tree.path(), "fixture"), &registry()).unwrap();
     let got: Vec<(String, usize)> = r.findings.iter().map(|f| (f.file.clone(), f.line)).collect();
@@ -85,8 +85,8 @@ fn c139_flags_the_shapes_it_names_as_errors() {
         ]
     );
     assert!(r.findings.iter().any(|f| f.message.contains("beyond the count of its allow entry")));
-    assert_eq!(r.errors(), 11, "a directive outside the list is an error, not a report");
-    assert_eq!(r.warnings(), 1);
+    assert_eq!(r.errors(), 0, "report-only until its first green CI run (ER-41)");
+    assert_eq!(r.warnings(), 12);
 }
 
 #[test]
