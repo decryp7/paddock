@@ -5,7 +5,7 @@ use paddock_assistant::*;
 use serde_json::json;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use support::*;
 
 fn counter() -> Arc<AtomicUsize> {
@@ -580,24 +580,17 @@ fn the_token_budget_and_the_time_budget_end_the_turn_with_a_message() {
 }
 
 #[test]
-fn stop_takes_effect_within_100_ms_and_keeps_what_was_said() {
+fn stop_ends_the_generation_and_keeps_what_was_said() {
     let r = rig(vec![Step::Block]);
     let ack = r.send(ask("long one")).unwrap();
     until(&r.rx, |e| matches!(e, AssistantEvent::Delta { .. }));
-    let asked = Instant::now();
     assert!(r.assistant.stop(&ack.conversation_id));
     let events = until_end(&r.rx);
-    // The generation stops within 100 ms; the end event follows once the conversation is saved (an fsync).
-    let stopped = r
-        .provider
-        .unblocked
-        .lock()
-        .unwrap()
-        .expect("the generation saw the stop");
+    // The blocked generation ended because of the stop (it waits on nothing else); the end event follows once the conversation
+    // is saved (an fsync). No wall-clock limit (rule 40, C30): it measured the wake-up of a loaded machine, not the stop.
     assert!(
-        stopped.duration_since(asked) < Duration::from_millis(100),
-        "stop took {:?}",
-        stopped.duration_since(asked)
+        r.provider.unblocked.lock().unwrap().is_some(),
+        "the generation saw the stop"
     );
     assert_eq!(
         done(&events),

@@ -2821,3 +2821,25 @@ complete line and never completed on it: both new tests hung 40 s before that fi
 2026-11-15, above; found both times by ADR 0103's reaper and the parity tests under load). Open, not done here: `kill_tree` reads the
 whole process table before it signals; signalling the group first and reading the table for escapees would cut the 1.8 s but changes
 what a tree kill can find (a child whose parent was killed is no longer below it), so it needs its own design.
+
+## paddock-assistant: "Stop ends a slow Pitwall within 2 s" timed the turn's save, not Stop (CI run 8241, Windows, 2026-11-18)
+**Symptom.** `pitwall::stop_ends_a_slow_pitwall_within_a_read_slice_in_every_phase` failed once on main's Windows crate job
+(run 8241, job 41141; 2.8 s against its 2 s limit) and passed on its retry (FLAKY). It measured from Stop to the turn's end event.
+**Causes listed (ER-28), with what each measurement showed** (probe on the real Windows runner, branch
+`wip/assistant-stop-windows-probe`, run 8264: 40 turns x 3 conditions x 2 tries = 240, split at the moment the provider's chat
+returned): (1) the cancel acting late (read slice, socket timeout, close): refuted, Stop to the generation's end was at most 65 ms
+in every condition (idle, every core busy, four fsync writers); (2) the save before the end event (`ConversationStore::append`,
+an atomic write with fsync): load-sensitive, median 16 ms idle and 75 ms with the fsync writers, at most 349 ms; in the failing run
+a test that runs a real cargo build, pack and sign (`cargo-paddock-plugin::it flow`) ended next to it; (3) a connect retry (Windows
+reports a refused loopback connect after about 2 s): refuted, nothing connects after Stop on this path (code read:
+`PitwallProvider::chat`, `loopback::send_via`). The 2.8 s was not reproduced in isolation (0 of 240); a held save reproduces the
+failure deterministically (the old assertion with the save taking 2.1 s: red, Stop itself 41 ms).
+**Root cause.** The test asserted a wall-clock limit (rule 40, C30 flagged it) over an interval that included the disk.
+**Fix (test).** The world's store and provider are wrapped (`HeldSaves`, `Watched`): the test holds the save, stops, waits for
+the generation to end (the testkit's hang guard only), checks that no end event came before the save, then lets the save go. No wall-clock
+assertion; the read slice's promptness stays with `paddock_pitwall`'s own `cancel_acts_while_the_server_is_silent`. The sibling
+`stop_takes_effect_within_100_ms_and_keeps_what_was_said` (turns.rs, the same class, the other C30 finding in the crate) now asserts
+that the blocked generation saw the stop, without its 100 ms limit. Positive control: with the provider's cancel not passed on,
+the new test fails at its hang guard ("the generation never ended after Stop"). Stress: 300 of 300 (macOS, load 30).
+**Why the logs did not show it.** The test printed only the total; the split needed the probe. **Class: a test asserts a wall-clock
+limit** (rule 40; earlier: Debrief 1.1.1's three cancel tests, 2026-10-25, above).
