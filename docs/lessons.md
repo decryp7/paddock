@@ -2821,3 +2821,27 @@ complete line and never completed on it: both new tests hung 40 s before that fi
 2026-11-15, above; found both times by ADR 0103's reaper and the parity tests under load). Open, not done here: `kill_tree` reads the
 whole process table before it signals; signalling the group first and reading the table for escapees would cut the 1.8 s but changes
 what a tree kill can find (a child whose parent was killed is no longer below it), so it needs its own design.
+
+## Fix items from the bulk-API inventory: four possible bugs read from code (2026-11-18, ADR 0108)
+The inventory for ADR 0108 read four defects from code. None is reproduced yet; each fix starts with a failing test (ER-11).
+- **Pitcrew `job-outcomes.json` loses outcomes when runners refresh together.** `runner_activity`
+  (`apps/pitcrew/app/src-tauri/src/commands.rs`, an async command on the blocking pool) calls `gitea::outcomes`
+  (`apps/pitcrew/app/src-tauri/src/gitea.rs`), which loads the shared cache file, adds its runner's lookups and saves the whole
+  file. The dashboard asks for every runner at once (`dashboard.store.ts`, `Promise.all`), so the last save wins and the other
+  runners' new outcomes are looked up again on the next refresh. Fix with ADR 0108 WP-9 (one outcomes pass for all runners in
+  one command), or a lock around load-modify-save. Test: two concurrent `outcomes` calls with disjoint new jobs keep both.
+- **Spotter avatar writes share one temporary name.** `write_atomic` (`apps/spotter/crates/spotter-engine/src/avatar.rs`)
+  writes `path.with_extension("tmp")`, so `<key>.img` and `<key>.json` both use `<key>.tmp`. Two `watch_avatar` calls (async
+  commands) storing the same key at once can rename one's bytes into the other's file. Fix: a unique temporary name per write
+  (the full file name plus `.tmp` and a random or process-unique suffix). Test: two concurrent stores of one key leave a
+  readable image and meta.
+- **Dyno's two smartctl readers are not registered.** The local `SmartctlWear::read`
+  (`apps/dyno/crates/dyno-platform/src/hardware.rs`) and the helper's `smart_reader.rs` each run `smartctl` scan plus one run
+  per drive; `docs/known-copies.toml` lists neither (rule 55). Fix with ADR 0108 WP-2 (DY-4: one shared reader, bounded
+  parallel), or register the pair first with a delete-by tag.
+- **`RepoGit::run` in paddock-dev starts git with no timeout.** `tools/paddock-dev/src/pr/mod.rs` runs
+  `git_env::git()...output()`, so a hung git hangs `./dev pr` for ever. Fix: run it through the bounded runner
+  (`paddock_proc::run_bounded`) with a limit, as the other git readers do; with ADR 0108 WP-11 (TD-10). Test: a stand-in git
+  that never exits ends at the limit with an error naming the command.
+Class (the first two): per-item calls (ADR 0108) bring their own races when they run in parallel against one shared file; the bulk form (one
+pass, one write) removes the race with the calls.
