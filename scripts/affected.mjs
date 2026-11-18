@@ -429,10 +429,18 @@ export function crateDirsNaming(f, cargo) {
   return [...new Set(hits.map((h) => nodeOf(h, cargo.keys())).filter((d) => d && cargo.get(d).workspace === 'crates'))];
 }
 
+/**
+ * The files that set what the e2e lint block does in one project: its ESLint config, its bulk suppressions (the exceptions to paddock/e2e-ready-reads), the lint
+ * target of angular.json (`applySuppressions`, `maxWarnings`) and the ui's package.json (its lint script). A change to one of them also runs the eslint package's tests,
+ * whose wiring test resolves the rule's severity in every real config (ER-41: a check runs on every change that could bring in its class, here the rule switched off).
+ */
+const LINT_WIRING = /^(?:apps\/[^/]+\/app|ui)\/(?:eslint\.config\.[cm]?js|eslint-suppressions\.json|angular\.json)$|^ui\/package\.json$/;
+
 /** The projects that own a path before dependencies, or null for an unknown root file. */
 export function owners(path) {
   const m = /^apps\/([^/]+)\//.exec(path);
-  if (m) return [`app:${m[1]}`];
+  if (m) return LINT_WIRING.test(path) ? [`app:${m[1]}`, 'eslint'] : [`app:${m[1]}`];
+  if (LINT_WIRING.test(path)) return ['ui', 'eslint'];
   for (const [re, p] of OWNERS) if (re.test(path)) return p;
   return null;
 }

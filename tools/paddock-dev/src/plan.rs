@@ -292,12 +292,25 @@ static OWNERS: LazyLock<Vec<(Regex, &'static [&'static str])>> = LazyLock::new(|
     ]
 });
 
+/// The files that set what the e2e lint block does in one project: its ESLint config, its bulk suppressions, the lint target of
+/// `angular.json` and the ui's `package.json` (its lint script). A change to one also runs the eslint package's tests, whose wiring test
+/// resolves the rule's severity in every real config (ER-41); `scripts/affected.mjs` (`LINT_WIRING`) is the oracle.
+static LINT_WIRING: LazyLock<Regex> =
+    LazyLock::new(|| re(r"^(?:apps/[^/]+/app|ui)/(?:eslint\.config\.[cm]?js|eslint-suppressions\.json|angular\.json)$|^ui/package\.json$"));
+
 /// The projects that own a path before dependencies, or `None` for an unknown root file.
 pub fn owners(path: &str) -> Option<Vec<String>> {
     if let Some(rest) = path.strip_prefix("apps/")
         && let Some((app, _)) = rest.split_once('/')
     {
-        return Some(vec![format!("app:{app}")]);
+        let mut out = vec![format!("app:{app}")];
+        if LINT_WIRING.is_match(path) {
+            out.push("eslint".to_string());
+        }
+        return Some(out);
+    }
+    if LINT_WIRING.is_match(path) {
+        return Some(vec!["ui".to_string(), "eslint".to_string()]);
     }
     OWNERS
         .iter()
