@@ -24,6 +24,10 @@ on:
         description: "Run the serial merge_check set: true or false."
         required: false
         default: "true"
+      threads:
+        description: "nextest --test-threads for the merge_check set (1: each test's own time; 8: CI's load)."
+        required: false
+        default: "1"
       buildtime:
         description: "Time a cold build of paddock-git (with gix) against one of paddock-proc alone (its other dependencies), in fresh folders without sccache: true or false. Needs a tree with crates/paddock-git (a trial onto perf/git-heavy-tests-2)."
         required: false
@@ -138,10 +142,11 @@ jobs:
         if: ${{ inputs.tests != 'false' }}
         run: |
           start=$SECONDS
-          cargo nextest run --profile ci --locked --no-fail-fast --test-threads 1 \
+          cargo nextest run --profile ci --locked --no-fail-fast --test-threads "${{ inputs.threads || '1' }}" \
             -E 'binary_id(paddock-dev::it) & test(/^merge_check::/)' 2>&1 | tee "$RUNNER_TEMP/tests.txt" || true
           total=$(grep -E 'PASS \[' "$RUNNER_TEMP/tests.txt" | sed -E 's/.*\[ *([0-9.]+)s\].*/\1/' | awk '{s+=$1; n++} END {printf "%d tests, %.1f s", n, s}')
-          echo "merge_check serial: $total (wall $((SECONDS - start)) s)" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "merge_check, ${{ inputs.threads || '1' }} thread(s): $total (wall $((SECONDS - start)) s)" | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -E 'PASS \[|FAIL|TIMEOUT|SLOW|FLKY|TMT' "$RUNNER_TEMP/tests.txt" | grep -E 'a_clean_merge_is_clean|the_remerge_subject_is_read_in_any_case' | tee -a "$GITHUB_STEP_SUMMARY" || true
 
       - name: Host probes (after the tests)
         if: always()
