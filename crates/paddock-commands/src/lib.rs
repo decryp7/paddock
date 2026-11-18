@@ -11,6 +11,7 @@
 //!   The Tauri adapter `tauri::Guard` (feature `tauri`) runs it on every call, rejects with a [`Refusal`] and logs it.
 //! - [`CommandError`] is the one error a command rejects with (plan X28): a short general [`ErrorCode`] list, `retryable`,
 //!   a hint, and the app's own distinctions in `kind`.
+//! - [`ItemResult`] is the one per-item result of a bulk command ([`BulkReply`], [`AtomicReply`], [`check_batch`]).
 //! - [`ts::names_module`] renders the table as TypeScript (command names as a union type); [`testing`] has the checks an
 //!   app runs in its tests: every command async, generated files current.
 //!
@@ -56,6 +57,7 @@
 
 pub mod error;
 pub mod guard;
+pub mod item;
 pub mod labels;
 pub mod plugin_hook;
 pub mod table;
@@ -64,6 +66,7 @@ pub mod ts;
 
 pub use error::{CommandError, ErrorCode};
 pub use guard::{DialogGrant, Refusal, RefusalCode, check};
+pub use item::{AtomicReply, BulkReply, ItemResult, check_batch, per_item};
 pub use labels::{Label, WindowClass, class_of};
 pub use table::{
     CommandInfo, DEFAULT_LIMIT, DialogCallable, DialogCallableKind, KIB, Kind, MAX_LIMIT, MIB,

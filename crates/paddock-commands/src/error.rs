@@ -1,5 +1,5 @@
 //! The one error every command rejects with (plan X28): [`CommandError`] `{ code, message, retryable, hint?, field?,
-//! cause?, kind? }`, camelCase on the wire and mirrored as `CommandError` in `@decryp7/paddock-ui/ipc` (generated from
+//! cause?, kind? }`, camelCase on the wire (read back too, for a Rust peer such as a service or helper that relays it) and mirrored as `CommandError` in `@decryp7/paddock-ui/ipc` (generated from
 //! this file by `ts-rs`, checked by [`crate::testing::sync_generated`]). The UI shows `message` (and `hint`, the next
 //! step) and reacts to `code` and `retryable`, never to the text.
 //!
@@ -8,12 +8,12 @@
 //! Domain errors keep their own types inside the libraries and convert here, once, at the command edge.
 
 use crate::guard::{Refusal, RefusalCode};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// What kind of failure an error is (camelCase on the wire).
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ErrorCode {
     /// The command failed; the message says why.
@@ -96,7 +96,7 @@ impl ErrorCode {
 
 /// The error a command rejects with.
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandError {
     /// What kind of failure.

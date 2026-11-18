@@ -32,5 +32,7 @@ cause?: string,
  */
 kind?: string, };
 
+export type ItemResult<T> = { "ok": T } | { "err": CommandError };
+
 /** Every error code, for validating what arrives over the wire. */
 export const ERROR_CODES: readonly ErrorCode[] = ['failed', 'invalid', 'notFound', 'notGranted', 'busy', 'cancelled', 'io', 'limit', 'unsupported', 'unavailable', 'denied', 'missing', 'timeout', 'internal'];
