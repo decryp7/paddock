@@ -12,7 +12,7 @@
 // renames of the type are not followed. The runtime refusal (`InstallError::InstallerUndeclared`) is the net under these.
 import { error } from '../finding.mjs';
 import { withoutTestItems } from '../util/rust-test-items.mjs';
-import { maskRust } from './C39-freed-port.mjs';
+import { maskRust } from '../util/mask-rust.mjs';
 
 const SRC_TAURI = /(^|\/)src-tauri\/.*\.rs$/;
 const TEST_FILE = /(^|\/)(?:tests?|benches)(?:\.rs$|\/)/;

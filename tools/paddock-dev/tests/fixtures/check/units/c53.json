@@ -1,0 +1,1408 @@
+[
+ {
+  "name": "pidKills-0",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "fn a(h: HANDLE) {\n    unsafe { TerminateProcess(h, 1) };\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+     "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-1",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "fn a(h: HANDLE) {\n    unsafe { TerminateJobObject(h, 1) };\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "ends a job with `TerminateJobObject`: the pid may belong to another process by now",
+     "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-2",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "fn a() {\n    Command::new(\"taskkill\").args([\"/T\", \"/F\"]);\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "runs `taskkill`, which ends processes by pid: the pid may belong to another process by now",
+     "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-3",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "fn exe() -> PathBuf {\n    root.join(\"taskkill.exe\")\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "runs `taskkill`, which ends processes by pid: the pid may belong to another process by now",
+     "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-4",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "fn a() {\n    std::process::Command::new(\"kill\").arg(\"-9\");\n    paddock_proc::command(\"pkill\");\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "runs `kill`, which ends processes by pid: the pid may belong to another process by now",
+     "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    },
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 3,
+     "message": "runs `pkill`, which ends processes by pid: the pid may belong to another process by now",
+     "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 2,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-5",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "fn a() {\n    ps.arg(\"Stop-Process -Id 42 -Force\");\n    Command::new(\"/bin/kill\");\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "runs `Stop-Process`, which ends processes by pid: the pid may belong to another process by now",
+     "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    },
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 3,
+     "message": "runs `/bin/kill`, which ends processes by pid: the pid may belong to another process by now",
+     "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 2,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-6",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "#[expect(clippy::disallowed_methods, reason = \"ADR 0033 WP-5: killpg after reap\")]\nfn a() {}\n// ADR 0033 WP-6: parent pids\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "an open ADR 0033 follow-up (WP-5): a known bare-pid kill or parent-pid walk",
+     "fix": "Fix the site through paddock_proc (ADR 0033), or give it a dated waiver in paddock.waivers.toml."
+    },
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 3,
+     "message": "an open ADR 0033 follow-up (WP-6): a known bare-pid kill or parent-pid walk",
+     "fix": "Fix the site through paddock_proc (ADR 0033), or give it a dated waiver in paddock.waivers.toml."
+    }
+   ],
+   "waived": [],
+   "errors": 2,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-7",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "#![allow(clippy::unwrap_used, clippy::disallowed_methods)]\nfn a() {}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "allows `clippy::disallowed_methods` for a whole crate or module, which hides bare-pid kills from Clippy",
+     "fix": "Fix the site through paddock_proc (ADR 0033), or give it a dated waiver in paddock.waivers.toml."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-8",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "#![cfg_attr(test, allow(clippy::disallowed_methods))]\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 1,
+     "message": "allows `clippy::disallowed_methods` for a whole crate or module, which hides bare-pid kills from Clippy",
+     "fix": "Fix the site through paddock_proc (ADR 0033), or give it a dated waiver in paddock.waivers.toml."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-9",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "#[allow(clippy::disallowed_methods)]\nfn a() {}\n// #![allow(clippy::disallowed_methods)]\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-10",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// conformance: pid-kill — no\n// ADR 0033 WP-6: x\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "an open ADR 0033 follow-up (WP-6): a known bare-pid kill or parent-pid walk",
+     "fix": "Fix the site through paddock_proc (ADR 0033), or give it a dated waiver in paddock.waivers.toml."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-11",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "fn a(c: &mut Child) {\n    let _ = c.kill();\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-12",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "fn a() {\n    let alive = sys.process(Pid::from_u32(pid)).is_some();\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "looks a raw pid up in sysinfo: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-13",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "// libc::kill(p, 9) and Command::new(\"taskkill\")\nfn a() {\n    let s = \"TerminateProcess(h, 1) taskkill\";\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-14",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "fn a() {\n    paddock_proc::kill_tree(id);\n    paddock_proc::end(id);\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-15",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "fn a(p: i32) {\n    unsafe { libc::kill(p, 9) };\n    if let Some(p) = sys.process(Pid::from_u32(pid)) { p.kill(); }\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 3,
+     "message": "looks a raw pid up in sysinfo: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-16",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "fn a(h: HANDLE) {\n    // conformance: pid-kill — a handle we own\n    unsafe { TerminateProcess(h, 1) };\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 3,
+     "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+     "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`.",
+     "waiver": {
+      "reason": "a handle we own",
+      "expires": "inline"
+     }
+    }
+   ],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidKills-17",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/x/src/a.rs",
+    "fn a(h: HANDLE) {\n    unsafe { TerminateProcess(h, 1) }; // conformance: pid-kill\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/a.rs",
+     "line": 2,
+     "message": "the pid-kill waiver gives no reason",
+     "fix": "Write `// conformance: pid-kill — <why this pid cannot have been handed on>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "run-18",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/b.rs",
+    "fn a(h: HANDLE) {\n    // conformance: pid-kill\n    unsafe { TerminateProcess(h, 1) };\n}\n"
+   ],
+   [
+    "crates/a/src/bad.rs",
+    "fn a() {\n    Command::new(\"taskkill\");\n}\n"
+   ],
+   [
+    "crates/a/src/w.rs",
+    "fn a(h: HANDLE) {\n    // conformance: pid-kill — a handle we own\n    unsafe { TerminateProcess(h, 1) };\n}\n"
+   ],
+   [
+    "crates/paddock-proc/src/sys.rs",
+    "fn a() {\n    Command::new(\"taskkill\");\n}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/b.rs",
+     "line": 3,
+     "message": "the pid-kill waiver gives no reason",
+     "fix": "Write `// conformance: pid-kill — <why this pid cannot have been handed on>`."
+    },
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/bad.rs",
+     "line": 2,
+     "message": "runs `taskkill`, which ends processes by pid: the pid may belong to another process by now",
+     "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    }
+   ],
+   "waived": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/w.rs",
+     "line": 3,
+     "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+     "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`.",
+     "waiver": {
+      "reason": "a handle we own",
+      "expires": "inline"
+     }
+    }
+   ],
+   "errors": 2,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "run-19",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "apps/x/vendor/dep/src/win.rs",
+    "fn a() {\n    Command::new(\"taskkill\");\n}\n"
+   ],
+   [
+    "crates/a/src/bad.rs",
+    "fn a() {\n    Command::new(\"taskkill\");\n}\n"
+   ],
+   [
+    "crates/x/src/vendor/a.rs",
+    "fn a() {\n    Command::new(\"taskkill\");\n}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/bad.rs",
+     "line": 2,
+     "message": "runs `taskkill`, which ends processes by pid: the pid may belong to another process by now",
+     "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    },
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/x/src/vendor/a.rs",
+     "line": 2,
+     "message": "runs `taskkill`, which ends processes by pid: the pid may belong to another process by now",
+     "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 2,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-20",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "fn a(pid: u32) -> bool {\n    paddock_proc::is_alive(pid)\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/x.rs",
+     "line": 2,
+     "message": "asks `paddock_proc::is_alive` about a raw pid: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-21",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "fn a(pid: u32) -> bool {\n    paddock_proc::may_be_alive(pid)\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/x.rs",
+     "line": 2,
+     "message": "asks `paddock_proc::may_be_alive` about a raw pid: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-22",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "fn a(pid: u32) {\n    let p = paddock_proc::presence(pid);\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/x.rs",
+     "line": 2,
+     "message": "asks `paddock_proc::presence` about a raw pid: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-23",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "use paddock_proc::is_alive;\nfn a(pid: u32) -> bool {\n    is_alive(pid)\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/x.rs",
+     "line": 3,
+     "message": "asks `is_alive` about a raw pid: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-24",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/paddock-proc/src/testchild.rs",
+    "fn a(pid: u32) -> bool {\n    crate::is_alive(pid)\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/paddock-proc/src/testchild.rs",
+     "line": 2,
+     "message": "asks `is_alive` about a raw pid: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-25",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/paddock-proc/src/tree.rs",
+    "fn a(pid: u32) -> bool {\n    is_alive(pid)\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/paddock-proc/src/tree.rs",
+     "line": 2,
+     "message": "asks `is_alive` about a raw pid: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-26",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "fn a(pid: i32) -> bool {\n    unsafe { libc::kill(pid, 0) == 0 }\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/x.rs",
+     "line": 2,
+     "message": "checks a raw pid with `kill(pid, 0)`: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-27",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "fn a(pid: u32) {\n    let h = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/x.rs",
+     "line": 2,
+     "message": "opens a process by its raw pid with `OpenProcess`: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-28",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "fn a(pid: u32) -> bool {\n    sys.process(sysinfo::Pid::from_u32(pid)).is_some()\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/x.rs",
+     "line": 2,
+     "message": "looks a raw pid up in sysinfo: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-29",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "fn a(id: ProcessId) -> bool {\n    id.is_alive()\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-30",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "fn a(id: ProcessId) {\n    let p = id.presence();\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-31",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "pub fn is_alive(pid: u32) -> bool {\n    true\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-32",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "fn a(app: &App) {\n    let seen = presence(app);\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-33",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "// paddock_proc::is_alive(pid) and kill(pid, 0)\nfn a() { let s = \"OpenProcess(x, 0, pid)\"; }\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-34",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "fn a(c: &mut Child) {\n    let _ = c.kill();\n    unsafe { libc::kill(p, 9) };\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-35",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/paddock-proc/src/sys.rs",
+    "fn a(pid: i32) -> bool {\n    unsafe { libc::kill(pid, 0) == 0 }\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-36",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "fn a(pid: i32) {\n    unsafe { libc::kill(pid, libc::SIGTERM) };\n    kill(pid, Signal::SIGKILL);\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-37",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "fn a(pid: Pid) {\n    let _ = nix::sys::signal::kill(pid, None);\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/x.rs",
+     "line": 2,
+     "message": "checks a raw pid with `kill(pid, 0)`: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-38",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "fn a() {\n    let me = Pid::from_u32(std::process::id());\n    let me = sysinfo::Pid::from_u32(process::id());\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-39",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "use paddock_proc::is_alive as up;\nfn a(pid: u32) -> bool {\n    up(pid)\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/x.rs",
+     "line": 3,
+     "message": "asks `up` about a raw pid: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-40",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "use paddock_proc::{presence as look, ProcessId};\nfn a(pid: u32) {\n    look(pid);\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/x.rs",
+     "line": 3,
+     "message": "asks `look` about a raw pid: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-41",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "use paddock_proc::*;\nfn a(pid: u32) -> bool {\n    may_be_alive(pid)\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/x.rs",
+     "line": 3,
+     "message": "asks `may_be_alive` about a raw pid: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-42",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "fn a(pid: u32) -> bool {\n    // conformance: pid-liveness — the pid came from our own child handle\n    paddock_proc::is_alive(pid)\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/x.rs",
+     "line": 3,
+     "message": "asks `paddock_proc::is_alive` about a raw pid: the pid may belong to another process by now",
+     "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`.",
+     "waiver": {
+      "reason": "the pid came from our own child handle",
+      "expires": "inline"
+     }
+    }
+   ],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "pidLiveness-43",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/a/src/x.rs",
+    "fn a(pid: u32) -> bool {\n    paddock_proc::is_alive(pid) // conformance: pid-liveness\n}\n"
+   ],
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "crates/a/src/x.rs",
+     "line": 2,
+     "message": "the pid-liveness waiver gives no reason",
+     "fix": "Write `// conformance: pid-liveness — <why this pid cannot have been handed on>`."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "run-44",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "conformance/baselines/C53.json",
+    "{ not json"
+   ],
+   [
+    "crates/a/src/k.rs",
+    "fn a(pid: u32) -> bool {\n    paddock_proc::is_alive(pid)\n}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "conformance/baselines/C53.json",
+     "line": 1,
+     "message": "conformance/baselines/C53.json is not JSON with a `sites` list: the liveness baseline cannot be read",
+     "fix": "Restore the file from git (`git checkout origin/main -- conformance/baselines/C53.json`); never rewrite it by hand to add entries."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "run-45",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "conformance/baselines/C53.json",
+    "{\"sites\": 3}"
+   ],
+   [
+    "crates/a/src/k.rs",
+    "fn a(pid: u32) -> bool {\n    paddock_proc::is_alive(pid)\n}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "conformance/baselines/C53.json",
+     "line": 1,
+     "message": "conformance/baselines/C53.json is not JSON with a `sites` list: the liveness baseline cannot be read",
+     "fix": "Restore the file from git (`git checkout origin/main -- conformance/baselines/C53.json`); never rewrite it by hand to add entries."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "run-46",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "conformance/baselines/C53.json",
+    "[]"
+   ],
+   [
+    "crates/a/src/k.rs",
+    "fn a(pid: u32) -> bool {\n    paddock_proc::is_alive(pid)\n}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C53",
+     "severity": "error",
+     "rule": 53,
+     "file": "conformance/baselines/C53.json",
+     "line": 1,
+     "message": "conformance/baselines/C53.json is not JSON with a `sites` list: the liveness baseline cannot be read",
+     "fix": "Restore the file from git (`git checkout origin/main -- conformance/baselines/C53.json`); never rewrite it by hand to add entries."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ }
+]

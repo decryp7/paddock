@@ -177,6 +177,20 @@ enum CheckCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// C129's baseline of shell and Python files (`conformance/baselines/C129-shell.json`): no flag lists the files and writes nothing,
+    /// `--shrink` lowers counts and removes stale entries (never adds or raises), `--init` writes it from every file (the user's
+    /// approval: the baseline may only shrink).
+    ShellBaseline {
+        /// Lower and remove entries.
+        #[arg(long, conflicts_with = "init")]
+        shrink: bool,
+        /// Write the baseline from every file.
+        #[arg(long)]
+        init: bool,
+        /// The repository root (default: the folder containing .git, found from the current folder).
+        #[arg(long)]
+        root: Option<PathBuf>,
+    },
     /// ER-9's fast gates for what this push changes (fmt, host and Windows Clippy, Linux Clippy in the CI image, conformance,
     /// commit-lint, lockfiles `--locked`), the commands CI runs, in parallel and bounded by load. A gate that could not run
     /// is "not measured" (exit 6), never a pass; a failure is one line with its next step (exit 5). The pre-push hook runs it.
@@ -308,6 +322,10 @@ struct ConformanceArgsArgs {
     /// The repository root (default: the folder containing .git, found from the current folder).
     #[arg(long)]
     root: Option<PathBuf>,
+    /// Whose line: `js` (default, the arguments of `node conformance/bin/paddock-conformance.mjs`) or `rust` (the arguments of
+    /// `./dev conformance`, the checks ported in pair P3).
+    #[arg(long, default_value = "js", value_parser = ["js", "rust"])]
+    host: String,
 }
 
 #[derive(Subcommand)]
@@ -690,7 +708,12 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CiCommand::ConformanceArgs(a),
         } => gates::command::repo_root(a.root.as_deref()).and_then(|root| {
             // The one reader is the contract, `conformance/paddock.ci.json` (ADR 0038 section 1), which replaced the line in ci.yml.
-            let args = crate::ci_run::contract::conformance_args_at(&root).map_err(|why| {
+            let read = if a.host == "rust" {
+                crate::ci_run::contract::conformance_rust_args_at(&root)
+            } else {
+                crate::ci_run::contract::conformance_args_at(&root)
+            };
+            let args = read.map_err(|why| {
                 paddock_cli::CliError::new(
                     paddock_cli::Exit::NotMeasured,
                     format!(
@@ -773,6 +796,18 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             root,
             app,
             out,
+        }),
+        Command::Check {
+            command: CheckCommand::ShellBaseline { shrink, init, root },
+        } => gates::command::repo_root(root.as_deref()).and_then(|root| {
+            let mode = if init {
+                check::shell_baseline::Mode::Init
+            } else if shrink {
+                check::shell_baseline::Mode::Shrink
+            } else {
+                check::shell_baseline::Mode::List
+            };
+            check::shell_baseline::command(&root, mode)
         }),
         Command::Check {
             command: CheckCommand::PrePush(a),

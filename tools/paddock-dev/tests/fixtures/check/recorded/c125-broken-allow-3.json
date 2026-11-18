@@ -1,0 +1,22 @@
+{
+ "app": "fixture",
+ "checks": [
+  "C125"
+ ],
+ "findings": [
+  {
+   "check": "C125",
+   "severity": "warn",
+   "rule": 40,
+   "file": "conformance/c125-allow.json",
+   "line": 1,
+   "message": "the check cannot look: conformance/c125-allow.json: every entry needs a path, a site (a piece of the flagged line) and a reason of at least 8 characters",
+   "fix": "Restore conformance/c125-allow.json: {\"history\": [{\"path\": \"...\", \"reason\": \"...\"}], \"allow\": [{\"path\": \"...\", \"site\": \"...\", \"reason\": \"...\", \"count\": 1}]}.",
+   "unwaivable": true,
+   "outcome": "check-broken"
+  }
+ ],
+ "waived": [],
+ "errors": 0,
+ "warnings": 1
+}

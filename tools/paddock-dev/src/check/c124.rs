@@ -23,8 +23,7 @@
 //! (a warning) and a site beyond an entry's `count` is reported at its own line. **Report-only (warnings)
 //! until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet.
 //!
-//! The JavaScript check `conformance/src/checks/C124-gate-outcomes.mjs` is the original; the `c124` tests of `tests/it/check.rs`
-//! compare the two finding for finding.
+//! The JavaScript check (`conformance/src/checks/C124-*.mjs`) was the original; it was retired with pair P3 (ADR 0022 amendment 2026-11-19) and the Rust host is the only one. The answers it gave are recorded in `tests/fixtures/check/recorded` and `units` and ``tests/it/check.rs`` holds the check to them.
 
 use super::allow_list::{self, Admit, Entry, Spec};
 use super::finding::Finding;
@@ -183,7 +182,6 @@ pub fn flagged_rust(path: &str, text: &str) -> Vec<Site> {
 /// Every hand-made pass in the JavaScript text of `path`.
 pub fn flagged_js(path: &str, text: &str) -> Vec<Site> {
     if path == "conformance/src/outcome.mjs"
-        || path == "conformance/src/checks/C124-gate-outcomes.mjs"
         || TEST_PATH.is_match(path)
         || JS_TEST.is_match(path)
     {

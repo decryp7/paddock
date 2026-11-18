@@ -112,12 +112,47 @@ pub fn error_line(message: &str) -> Option<String> {
 
 /// `paddock-conformance` output (`list --json`, `commands --json`) through node. A failure that printed an `::error::` line returns
 /// just that line; the node hint is added only when node could not be started or printed nothing useful.
+///
+/// `list` is the JavaScript host's list plus the checks only the Rust host has (pair P3, ADR 0022 amendment 2026-11-19: `./dev
+/// conformance list` holds them, their source is `tools/paddock-dev/src/check/c<n>.rs`): C100 counts them as checks like any other.
 pub fn conformance_json(root: &Path, sub: &str) -> Result<String, String> {
     if !root.join("conformance/bin/paddock-conformance.mjs").is_file() {
         return Err(MISSING_CONFORMANCE.to_string());
     }
-    Real.run("node", &["conformance/bin/paddock-conformance.mjs", sub, "--json"], root, None)
-        .map_err(|e| error_line(&e.message).unwrap_or_else(|| format!("{} (node must be on PATH)", e.message)))
+    let js = Real
+        .run("node", &["conformance/bin/paddock-conformance.mjs", sub, "--json"], root, None)
+        .map_err(|e| error_line(&e.message).unwrap_or_else(|| format!("{} (node must be on PATH)", e.message)))?;
+    if sub != "list" {
+        return Ok(js);
+    }
+    Ok(with_rust_checks(
+        &js,
+        &crate::check::conformance::list_checks(&crate::check::registry()),
+    ))
+}
+
+/// `js` (the JavaScript host's `list --json`) with the entries of `rust` whose id it lacks, in id order. Text that is not a JSON
+/// array is returned as it is: the reader names that problem.
+fn with_rust_checks(js: &str, rust: &serde_json::Value) -> String {
+    let Ok(serde_json::Value::Array(mut all)) = serde_json::from_str::<serde_json::Value>(js) else {
+        return js.to_string();
+    };
+    let have: std::collections::BTreeSet<String> = all.iter().filter_map(|c| c["id"].as_str().map(str::to_string)).collect();
+    all.extend(
+        rust.as_array()
+            .into_iter()
+            .flatten()
+            .filter(|c| c["id"].as_str().is_some_and(|id| !have.contains(id)))
+            .cloned(),
+    );
+    let number = |c: &serde_json::Value| {
+        c["id"]
+            .as_str()
+            .and_then(|i| i.trim_start_matches('C').parse::<u32>().ok())
+            .unwrap_or(u32::MAX)
+    };
+    all.sort_by_key(number);
+    serde_json::Value::Array(all).to_string()
 }
 
 /// The register at a revision, if the revision and the file exist.
@@ -313,6 +348,21 @@ pub fn base_register(root: &Path, base: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_rust_hosts_checks_join_the_list_and_the_javascript_one_wins_a_shared_id() {
+        let js = r#"[{"id":"C06","file":"a.mjs"},{"id":"C139","file":"b.mjs"}]"#;
+        let rust = serde_json::json!([{"id": "C39", "file": "c39.rs"}, {"id": "C139", "file": "c139.rs"}]);
+        let merged: serde_json::Value = serde_json::from_str(&super::with_rust_checks(js, &rust)).unwrap();
+        let ids: Vec<(&str, &str)> = merged
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| (c["id"].as_str().unwrap(), c["file"].as_str().unwrap()))
+            .collect();
+        assert_eq!(ids, [("C06", "a.mjs"), ("C39", "c39.rs"), ("C139", "b.mjs")]);
+        assert_eq!(super::with_rust_checks("not json", &rust), "not json");
+    }
+
     use super::*;
 
     fn git(root: &Path, args: &[&str]) {

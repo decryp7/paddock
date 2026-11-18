@@ -1,0 +1,18 @@
+{
+ "findings": [
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "conformance/c131-allow.json",
+   "line": 1,
+   "message": "the check cannot look: conformance/c131-allow.json cannot be read",
+   "fix": "Restore conformance/c131-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"...\", \"reason\": \"...\", \"count\": 1}]}.",
+   "unwaivable": true,
+   "outcome": "check-broken"
+  }
+ ],
+ "errors": 0,
+ "warnings": 1,
+ "waived": []
+}

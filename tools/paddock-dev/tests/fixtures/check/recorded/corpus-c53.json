@@ -1,0 +1,227 @@
+{
+ "plain": {
+  "findings": [
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/bad.rs",
+    "line": 2,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   },
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/first.rs",
+    "line": 1,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": []
+ },
+ "bom": {
+  "findings": [
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/bad.rs",
+    "line": 2,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   },
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/first.rs",
+    "line": 1,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": []
+ },
+ "crlf": {
+  "findings": [
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/bad.rs",
+    "line": 2,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   },
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/first.rs",
+    "line": 1,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": []
+ },
+ "astral-and-emoji": {
+  "findings": [
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/bad.rs",
+    "line": 3,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   },
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/first.rs",
+    "line": 2,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": []
+ },
+ "case-fold-letters": {
+  "findings": [
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/bad.rs",
+    "line": 3,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   },
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/first.rs",
+    "line": 2,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": []
+ },
+ "no-break-space": {
+  "findings": [
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/bad.rs",
+    "line": 2,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   },
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/first.rs",
+    "line": 1,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": []
+ },
+ "line-separators": {
+  "findings": [
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/bad.rs",
+    "line": 3,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   },
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/first.rs",
+    "line": 2,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": []
+ },
+ "long-line": {
+  "findings": [
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/bad.rs",
+    "line": 2,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   },
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/first.rs",
+    "line": 1,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": []
+ },
+ "no-final-newline": {
+  "findings": [
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/bad.rs",
+    "line": 2,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   },
+   {
+    "check": "C53",
+    "severity": "error",
+    "rule": 53,
+    "file": "crates/c/src/first.rs",
+    "line": 1,
+    "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+    "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+   }
+  ],
+  "errors": 2,
+  "warnings": 0,
+  "waived": []
+ }
+}

@@ -1,0 +1,761 @@
+[
+ {
+  "name": "run-0",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "a.sh",
+    "echo hi\n"
+   ],
+   [
+    "b.bash",
+    "echo hi\n"
+   ],
+   [
+    "bin/pwsh-tool",
+    "#!/usr/bin/pwsh\nWrite-Host 1\n"
+   ],
+   [
+    "bin/tool",
+    "#!/usr/bin/env -S python3 -I\nprint(1)\n"
+   ],
+   [
+    "c.zsh",
+    "echo hi\n"
+   ],
+   [
+    "conformance/baselines/C129-shell.json",
+    "{\"files\":[]}"
+   ],
+   [
+    "conformance/shell-exceptions.json",
+    "{\"exceptions\":[]}"
+   ],
+   [
+    "d.ps1",
+    "echo hi\n"
+   ],
+   [
+    "dir/I.SH",
+    "echo hi\n"
+   ],
+   [
+    "e.psm1",
+    "echo hi\n"
+   ],
+   [
+    "f.py",
+    "echo hi\n"
+   ],
+   [
+    "g.cmd",
+    "echo hi\n"
+   ],
+   [
+    "h.bat",
+    "echo hi\n"
+   ],
+   [
+    "run",
+    "#!/usr/bin/env bash\necho hi\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "a.sh",
+     "line": 1,
+     "message": "new shell file (1 lines): shell is being ported to Rust",
+     "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "b.bash",
+     "line": 1,
+     "message": "new shell file (1 lines): shell is being ported to Rust",
+     "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "bin/pwsh-tool",
+     "line": 1,
+     "message": "new shell file (2 lines): shell is being ported to Rust",
+     "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "bin/tool",
+     "line": 1,
+     "message": "new shell file (2 lines): shell is being ported to Rust",
+     "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "c.zsh",
+     "line": 1,
+     "message": "new shell file (1 lines): shell is being ported to Rust",
+     "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "d.ps1",
+     "line": 1,
+     "message": "new shell file (1 lines): shell is being ported to Rust",
+     "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "dir/I.SH",
+     "line": 1,
+     "message": "new shell file (1 lines): shell is being ported to Rust",
+     "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "e.psm1",
+     "line": 1,
+     "message": "new shell file (1 lines): shell is being ported to Rust",
+     "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "f.py",
+     "line": 1,
+     "message": "new shell file (1 lines): shell is being ported to Rust",
+     "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "g.cmd",
+     "line": 1,
+     "message": "new shell file (1 lines): shell is being ported to Rust",
+     "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "h.bat",
+     "line": 1,
+     "message": "new shell file (1 lines): shell is being ported to Rust",
+     "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "run",
+     "line": 1,
+     "message": "new shell file (2 lines): shell is being ported to Rust",
+     "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 12
+  }
+ },
+ {
+  "name": "run-1",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "Dockerfile",
+    "FROM x\n"
+   ],
+   [
+    "LICENSE",
+    "MIT\n"
+   ],
+   [
+    "a.mjs",
+    "#!/usr/bin/env node\n"
+   ],
+   [
+    "bin/node-tool",
+    "#!/usr/bin/env node\n"
+   ],
+   [
+    "blob",
+    "#!/bin/sh\u0000\n"
+   ],
+   [
+    "conformance/baselines/C129-shell.json",
+    "{\"files\":[]}"
+   ],
+   [
+    "conformance/shell-exceptions.json",
+    "{\"exceptions\":[]}"
+   ],
+   [
+    "x/y.txt",
+    "#!/bin/sh\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "run-2",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "a.sh",
+    "x\nx\nx\nx\nx\n"
+   ],
+   [
+    "b.sh",
+    "x\nx\nx\nx\nx\nx\nx\n"
+   ],
+   [
+    "c.sh",
+    "x\nx\n"
+   ],
+   [
+    "conformance/baselines/C129-shell.json",
+    "{\"files\":[{\"path\":\"a.sh\",\"lines\":5},{\"path\":\"b.sh\",\"lines\":6},{\"path\":\"c.sh\",\"lines\":9}]}"
+   ],
+   [
+    "conformance/shell-exceptions.json",
+    "{\"exceptions\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "b.sh",
+     "line": 1,
+     "message": "shell file grew from 6 to 7 lines: the baseline may only shrink",
+     "fix": "Port the change to Rust instead of growing the script. Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "conformance/baselines/C129-shell.json",
+     "line": 1,
+     "message": "c.sh is under its baseline count (2 of 9 lines)",
+     "fix": "Lower the entry: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "conformance/baselines/C129-shell.json",
+     "line": 1,
+     "message": "the baseline's shrink-only rule is not enforced here: no merge base (Command failed: git rev-parse HEAD)",
+     "fix": "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 3
+  }
+ },
+ {
+  "name": "run-3",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "conformance/baselines/C129-shell.json",
+    "{\"files\":[]}"
+   ],
+   [
+    "conformance/shell-exceptions.json",
+    "{\"exceptions\":[{\"path\":\"dev\",\"id\":\"E1\",\"reason\":\"it must start first\",\"owner\":\"plan\"},{\"path\":\"fixtures/x/a.sh\",\"id\":\"E6\",\"reason\":\"it must start first\",\"owner\":\"plan\"},{\"path\":\"scripts/vm-win/one.ps1\",\"id\":\"E5\",\"reason\":\"it must start first\",\"owner\":\"plan\"},{\"path\":\"gone/x.sh\",\"id\":\"E5\",\"reason\":\"it must start first\",\"owner\":\"plan\"}]}"
+   ],
+   [
+    "dev",
+    "#!/bin/sh\n"
+   ],
+   [
+    "fixtures/x/a.sh",
+    "x\n"
+   ],
+   [
+    "scripts/vm-win/one.ps1",
+    "x\n"
+   ],
+   [
+    "scripts/vm-win/sub/two.ps1",
+    "x\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "scripts/vm-win/sub/two.ps1",
+     "line": 1,
+     "message": "new shell file (1 lines): shell is being ported to Rust",
+     "fix": "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2)."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "conformance/shell-exceptions.json",
+     "line": 1,
+     "message": "stale exception (gone/x.sh, E5) names no file",
+     "fix": "Remove it from conformance/shell-exceptions.json."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "conformance/shell-exceptions.json",
+     "line": 1,
+     "message": "the exception list's shrink-only rule is not enforced here: no merge base (Command failed: git rev-parse HEAD)",
+     "fix": "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 3
+  }
+ },
+ {
+  "name": "run-4",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "a.sh",
+    "x\n"
+   ],
+   [
+    "conformance/baselines/C129-shell.json",
+    "{\"files\":[{\"path\":\"a.sh\",\"lines\":1},{\"path\":\"gone.sh\",\"lines\":3}]}"
+   ],
+   [
+    "conformance/shell-exceptions.json",
+    "{\"exceptions\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "conformance/baselines/C129-shell.json",
+     "line": 1,
+     "message": "stale baseline entry (gone.sh): the file is gone or is no longer shell",
+     "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "conformance/baselines/C129-shell.json",
+     "line": 1,
+     "message": "the baseline's shrink-only rule is not enforced here: no merge base (Command failed: git rev-parse HEAD)",
+     "fix": "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 2
+  }
+ },
+ {
+  "name": "run-5",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "a.sh",
+    "x\n"
+   ],
+   [
+    "conformance/shell-exceptions.json",
+    "{\"exceptions\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "conformance/baselines/C129-shell.json",
+     "line": 1,
+     "message": "the check cannot look: conformance/baselines/C129-shell.json cannot be read",
+     "fix": "Regenerate it: `node conformance/bin/paddock-shell-baseline.mjs --init` (the first run only), or restore it from git.",
+     "unwaivable": true,
+     "outcome": "check-broken"
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "run-6",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "a.sh",
+    "x\n"
+   ],
+   [
+    "conformance/baselines/C129-shell.json",
+    "nope"
+   ],
+   [
+    "conformance/shell-exceptions.json",
+    "{\"exceptions\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "conformance/baselines/C129-shell.json",
+     "line": 1,
+     "message": "the check cannot look: conformance/baselines/C129-shell.json is not JSON: Unexpected token 'o', \"nope\" is not valid JSON",
+     "fix": "Regenerate it: `node conformance/bin/paddock-shell-baseline.mjs --init` (the first run only), or restore it from git.",
+     "unwaivable": true,
+     "outcome": "check-broken"
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "run-7",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "a.sh",
+    "x\n"
+   ],
+   [
+    "conformance/baselines/C129-shell.json",
+    "{\"files\": [{\"path\": \"a.sh\"}]}"
+   ],
+   [
+    "conformance/shell-exceptions.json",
+    "{\"exceptions\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "conformance/baselines/C129-shell.json",
+     "line": 1,
+     "message": "the check cannot look: conformance/baselines/C129-shell.json: every entry needs a path and a whole number of lines",
+     "fix": "Regenerate it: `node conformance/bin/paddock-shell-baseline.mjs --init` (the first run only), or restore it from git.",
+     "unwaivable": true,
+     "outcome": "check-broken"
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "run-8",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "a.sh",
+    "x\n"
+   ],
+   [
+    "conformance/baselines/C129-shell.json",
+    "{}"
+   ],
+   [
+    "conformance/shell-exceptions.json",
+    "{\"exceptions\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "conformance/baselines/C129-shell.json",
+     "line": 1,
+     "message": "the check cannot look: conformance/baselines/C129-shell.json has no `files` array",
+     "fix": "Regenerate it: `node conformance/bin/paddock-shell-baseline.mjs --init` (the first run only), or restore it from git.",
+     "unwaivable": true,
+     "outcome": "check-broken"
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "run-9",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "a.sh",
+    "x\n"
+   ],
+   [
+    "conformance/baselines/C129-shell.json",
+    "{\"files\":[]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "conformance/shell-exceptions.json",
+     "line": 1,
+     "message": "the check cannot look: conformance/shell-exceptions.json cannot be read",
+     "fix": "Restore conformance/shell-exceptions.json: {\"exceptions\": [{\"path\": \"...\", \"id\": \"E1\", \"reason\": \"...\", \"owner\": \"...\"}]}.",
+     "unwaivable": true,
+     "outcome": "check-broken"
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "run-10",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "a.sh",
+    "x\n"
+   ],
+   [
+    "conformance/baselines/C129-shell.json",
+    "{\"files\":[]}"
+   ],
+   [
+    "conformance/shell-exceptions.json",
+    "nope"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "conformance/shell-exceptions.json",
+     "line": 1,
+     "message": "the check cannot look: conformance/shell-exceptions.json is not JSON: Unexpected token 'o', \"nope\" is not valid JSON",
+     "fix": "Restore conformance/shell-exceptions.json: {\"exceptions\": [{\"path\": \"...\", \"id\": \"E1\", \"reason\": \"...\", \"owner\": \"...\"}]}.",
+     "unwaivable": true,
+     "outcome": "check-broken"
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "run-11",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "a.sh",
+    "x\n"
+   ],
+   [
+    "conformance/baselines/C129-shell.json",
+    "{\"files\":[]}"
+   ],
+   [
+    "conformance/shell-exceptions.json",
+    "{\"exceptions\": [{\"path\": \"a\", \"id\": \"E9\", \"reason\": \"long enough\", \"owner\": \"x\"}]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "conformance/shell-exceptions.json",
+     "line": 1,
+     "message": "the check cannot look: conformance/shell-exceptions.json: every exception needs a path, an id from E1 to E7, a reason of at least 8 characters and an owner",
+     "fix": "Restore conformance/shell-exceptions.json: {\"exceptions\": [{\"path\": \"...\", \"id\": \"E1\", \"reason\": \"...\", \"owner\": \"...\"}]}.",
+     "unwaivable": true,
+     "outcome": "check-broken"
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "run-12",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    "a.sh",
+    "x\n"
+   ],
+   [
+    "conformance/baselines/C129-shell.json",
+    "{\"files\":[]}"
+   ],
+   [
+    "conformance/shell-exceptions.json",
+    "{\"exceptions\": [{\"path\": \"a\", \"id\": \"E1\", \"reason\": \"short\", \"owner\": \"x\"}]}"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "conformance/shell-exceptions.json",
+     "line": 1,
+     "message": "the check cannot look: conformance/shell-exceptions.json: every exception needs a path, an id from E1 to E7, a reason of at least 8 characters and an owner",
+     "fix": "Restore conformance/shell-exceptions.json: {\"exceptions\": [{\"path\": \"...\", \"id\": \"E1\", \"reason\": \"...\", \"owner\": \"...\"}]}.",
+     "unwaivable": true,
+     "outcome": "check-broken"
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "run-13",
+  "app": "demo",
+  "now": null,
+  "files": [
+   [
+    ".gitea/workflows/x.yml",
+    "jobs:\n  a:\n    steps:\n      - run: scripts/gone.sh\n      - run: bash ./scripts/here.sh\n      - run: scripts/in-app.sh\n      - run: scripts/$NAME.sh\n      - run: ls scripts/*.sh\n      # scripts/commented.sh\n      - run: echo conformance/ci/gone.sh.bak\n"
+   ],
+   [
+    "apps/dyno/paddock.ci.json",
+    "{\"prepare\": [\"scripts/in-app.sh\", \"scripts/nope.ps1\"]}"
+   ],
+   [
+    "apps/dyno/scripts/in-app.sh",
+    "x\n"
+   ],
+   [
+    "conformance/baselines/C129-shell.json",
+    "{\"files\":[{\"path\":\"scripts/here.sh\",\"lines\":1},{\"path\":\"apps/dyno/scripts/in-app.sh\",\"lines\":1}]}"
+   ],
+   [
+    "conformance/shell-exceptions.json",
+    "{\"exceptions\":[]}"
+   ],
+   [
+    "lefthook.yml",
+    "pre-push:\n  run: ./scripts/here.sh\n"
+   ],
+   [
+    "scripts/here.sh",
+    "x\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "conformance/baselines/C129-shell.json",
+     "line": 1,
+     "message": "the baseline's shrink-only rule is not enforced here: no merge base (Command failed: git rev-parse HEAD)",
+     "fix": "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": ".gitea/workflows/x.yml",
+     "line": 4,
+     "message": "names the script `scripts/gone.sh`, which the tree does not have",
+     "fix": "Switch the caller to the command that replaced the script, or restore the script."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": "apps/dyno/paddock.ci.json",
+     "line": 1,
+     "message": "names the script `scripts/nope.ps1`, which the tree does not have",
+     "fix": "Switch the caller to the command that replaced the script, or restore the script."
+    },
+    {
+     "check": "C129",
+     "severity": "warn",
+     "rule": 55,
+     "file": ".gitea",
+     "line": 1,
+     "message": "inline shell in .gitea: 6 lines in 6 `run:` blocks (reported, not a finding of a file)",
+     "fix": "Decision D7 of docs/plans/shell-to-rust.md is taken on this number."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 4
+  }
+ }
+]

@@ -1444,3 +1444,37 @@ status = "built"
   owner = "paddock"
   delete_by = "v0.5.0"
   note = "The commit-msg hook, `commit-lint --range` and C23 run in Node before any binary is built. One case table, conformance/reland-cases.json, is read by both test suites (the Rust test the_shared_case_table_gives_the_same_answers_as_the_javascript_rule and the c23-commit-lint test 're-land rule'), so a case one side fails is a drift. Goes when commit-lint moves into `./dev` (docs/plans/ci-in-rust.md, WP-9)."
+
+# =====================================================================================================================
+# The conformance check host (ADR 0022 amendment 2026-11-19, pair P3 of docs/research/2026-11-18-tool-twin-pairs.md)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "conformance-check-host"
+title = "Running a repository check over a tree: the file tree and masks, waivers, baselines, allow lists and the shared lexers"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/check/**"]
+status = "built"
+adr = "0022"
+
+  [[mechanism.copy]]
+  paths = [
+    "conformance/src/util/allow-list.mjs",
+    "conformance/src/util/baseline.mjs",
+    "conformance/src/util/mask-rust.mjs",
+    "conformance/src/util/workflows.mjs",
+    "conformance/src/util/windows-bash.mjs",
+    "conformance/src/util/md-tables.mjs",
+    "conformance/src/util/version.mjs",
+    "conformance/src/util/scope.mjs",
+    "conformance/src/util/full-checkout.mjs",
+  ]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The helpers of the JavaScript host, which still runs the checks that have no Rust port (`node conformance/bin/paddock-conformance.mjs`). The 12 checks C39, C53, C119-C125 and C129-C131 have no JavaScript module any more: `./dev conformance` runs them (conformance.rust of conformance/paddock.ci.json) and tools/paddock-dev/tests/it holds them to the answers the JavaScript host recorded (tests/fixtures/check). tests/it/check_util.rs, check.rs (the mask) and check_allow_list.rs run both helper sets on the same inputs; the inline waiver and the shell and YAML lexers have no JavaScript copy left. Goes with the engine and the other checks (docs/plans/ci-in-rust.md, WP-10)."
+
+  [[mechanism.copy]]
+  paths = ["conformance/src/checks/C139-e2e-ready-directives.mjs"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "C139 is the one check with a module in both hosts (tools/paddock-dev/src/check/c139.rs); tests/it/check_c139.rs runs both on the same trees and on this one. It is the next to retire as the 12 were (record its answers, delete the module)."

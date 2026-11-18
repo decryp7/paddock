@@ -1,0 +1,227 @@
+{
+ "plain": {
+  "findings": [
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "docs/x.toml",
+    "line": 2,
+    "message": "reads a workflow file's text with `sed`: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   },
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "tools/t/tests/it/a.rs",
+    "line": 2,
+    "message": "reads a workflow file's text with a regular expression: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "bom": {
+  "findings": [
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "docs/x.toml",
+    "line": 2,
+    "message": "reads a workflow file's text with `sed`: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   },
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "tools/t/tests/it/a.rs",
+    "line": 2,
+    "message": "reads a workflow file's text with a regular expression: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "crlf": {
+  "findings": [
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "docs/x.toml",
+    "line": 2,
+    "message": "reads a workflow file's text with `sed`: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   },
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "tools/t/tests/it/a.rs",
+    "line": 2,
+    "message": "reads a workflow file's text with a regular expression: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "astral-and-emoji": {
+  "findings": [
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "docs/x.toml",
+    "line": 3,
+    "message": "reads a workflow file's text with `sed`: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   },
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "tools/t/tests/it/a.rs",
+    "line": 3,
+    "message": "reads a workflow file's text with a regular expression: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "case-fold-letters": {
+  "findings": [
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "docs/x.toml",
+    "line": 3,
+    "message": "reads a workflow file's text with `sed`: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   },
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "tools/t/tests/it/a.rs",
+    "line": 3,
+    "message": "reads a workflow file's text with a regular expression: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "no-break-space": {
+  "findings": [
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "docs/x.toml",
+    "line": 2,
+    "message": "reads a workflow file's text with `sed`: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   },
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "tools/t/tests/it/a.rs",
+    "line": 2,
+    "message": "reads a workflow file's text with a regular expression: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "line-separators": {
+  "findings": [
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "docs/x.toml",
+    "line": 3,
+    "message": "reads a workflow file's text with `sed`: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   },
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "tools/t/tests/it/a.rs",
+    "line": 3,
+    "message": "reads a workflow file's text with a regular expression: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "long-line": {
+  "findings": [
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "docs/x.toml",
+    "line": 2,
+    "message": "reads a workflow file's text with `sed`: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   },
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "tools/t/tests/it/a.rs",
+    "line": 2,
+    "message": "reads a workflow file's text with a regular expression: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "no-final-newline": {
+  "findings": [
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "docs/x.toml",
+    "line": 2,
+    "message": "reads a workflow file's text with `sed`: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   },
+   {
+    "check": "C121",
+    "severity": "warn",
+    "rule": 79,
+    "file": "tools/t/tests/it/a.rs",
+    "line": 2,
+    "message": "reads a workflow file's text with a regular expression: the data it needs has one accessor",
+    "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ }
+}

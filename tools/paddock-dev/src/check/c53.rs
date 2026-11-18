@@ -12,7 +12,7 @@
 //!
 //! A justified site carries `// conformance: pid-kill — <reason>` on the line or the line above.
 //!
-//! The port of `conformance/src/checks/C53-pid-kills.mjs`, finding for finding (the oracle test compares them). Positions are
+//! The JavaScript check (`C53-pid-kills.mjs`) was retired with pair P3 (ADR 0022 amendment 2026-11-19); `tests/it/check.rs` holds this one to the answers it recorded. Positions are
 //! UTF-16 offsets, as in the JavaScript, so a hit orders the same way next to non-ASCII text.
 
 use super::finding::Finding;

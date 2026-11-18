@@ -1,0 +1,27 @@
+{
+ "findings": [
+  {
+   "check": "C121",
+   "severity": "error",
+   "rule": 79,
+   "file": "docs/x.toml",
+   "line": 1,
+   "message": "not measured: docs/x.toml could not be read, so a read of a workflow's text in it cannot be seen",
+   "fix": "Make the file readable (permissions) and run the check again.",
+   "unwaivable": true,
+   "outcome": "not-measured"
+  },
+  {
+   "check": "C121",
+   "severity": "warn",
+   "rule": 79,
+   "file": "tools/t/tests/it/a.rs",
+   "line": 2,
+   "message": "reads a workflow file's text with a regular expression: the data it needs has one accessor",
+   "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
+  }
+ ],
+ "errors": 1,
+ "warnings": 1,
+ "waived": []
+}

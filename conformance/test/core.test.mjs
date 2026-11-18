@@ -90,7 +90,7 @@ test('runner: a check that throws is an error finding, unknown ids are refused, 
   const boom = { id: 'C00', title: 't', rule: 1, run() { throw new Error('kaput'); } };
   const r = await runChecks({ root: makeApp({ 'a': 'x' }), app: 'demo', registry: [boom] });
   assert.match(r.findings[0].message, /the check crashed: kaput/);
-  await assert.rejects(runChecks({ root: makeApp({ a: 'x' }), app: 'demo', only: ['C77'] }), /unknown check/);
+  await assert.rejects(runChecks({ root: makeApp({ a: 'x' }), app: 'demo', only: ['C77'] }), /unknown check: C77 .*\.\/dev conformance --only/);
   await assert.rejects(runChecks({ root: makeApp({ a: 'x' }) }), /app name is needed/);
 });
 

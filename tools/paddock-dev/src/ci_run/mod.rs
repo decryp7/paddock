@@ -15,7 +15,7 @@
 //! a Windows crash code), a failure is one `::error::` line with the line, the folder and the next step, no line runs unbounded
 //! (`--max-secs`, a line's whole process tree is ended at the limit through `paddock_proc`), a phase that does not exist is an error,
 //! and a Ctrl+C or SIGTERM ends the running line's tree. The conformance project's `conformance` field becomes
-//! `PADDOCK_CONFORMANCE_ARGS` for every line (the one copy of the check list). `E2E_INDEX` is derived from `E2E_SHARD` (`i/N`
+//! `PADDOCK_CONFORMANCE_ARGS` (the JavaScript host's list) and `PADDOCK_CONFORMANCE_RUST_ARGS` (the Rust host's) for every line (the one copy of the check list). `E2E_INDEX` is derived from `E2E_SHARD` (`i/N`
 //! gives `i`; empty without a shard), as the end-to-end step did, and the download credential of `./dev` (`PADDOCK_DEV_TOKEN`) is not passed on. `export` in one line does not carry to the next (each line is its own shell, as before). `--heavy` puts each line through the machine-wide slot (ER-24), as the pre-push gate does.
 
 pub mod contract;
@@ -171,6 +171,12 @@ pub fn run_with(args: &RunArgs, env: &HashMap<String, String>, stop: &Arc<Atomic
                 child_env.insert("PADDOCK_CONFORMANCE_ARGS".into(), a[1..].join(" "));
             }
             Err(e) => return fail(out, e, "fix the `conformance` object in conformance/paddock.ci.json"),
+        }
+        match contract::conformance_rust_args(&contract) {
+            Ok(a) => {
+                child_env.insert("PADDOCK_CONFORMANCE_RUST_ARGS".into(), a.join(" "));
+            }
+            Err(e) => return fail(out, e, "fix the `conformance.rust` list in conformance/paddock.ci.json"),
         }
     }
     // The end-to-end step's index: `i` of a shard `i/N`, empty for a leg without one (the WebKit leg), so `bash -u` never meets it unset.

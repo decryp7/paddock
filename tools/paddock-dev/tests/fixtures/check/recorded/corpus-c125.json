@@ -1,0 +1,227 @@
+{
+ "plain": {
+  "findings": [
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "hooks/guard.py",
+    "line": 1,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd8sst7/paddock`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   },
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "scripts/first.sh",
+    "line": 1,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd7sst7`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "bom": {
+  "findings": [
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "hooks/guard.py",
+    "line": 1,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd8sst7/paddock`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   },
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "scripts/first.sh",
+    "line": 1,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd7sst7`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "crlf": {
+  "findings": [
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "hooks/guard.py",
+    "line": 1,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd8sst7/paddock`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   },
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "scripts/first.sh",
+    "line": 1,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd7sst7`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "astral-and-emoji": {
+  "findings": [
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "hooks/guard.py",
+    "line": 2,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd8sst7/paddock`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   },
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "scripts/first.sh",
+    "line": 2,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd7sst7`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "case-fold-letters": {
+  "findings": [
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "hooks/guard.py",
+    "line": 2,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd8sst7/paddock`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   },
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "scripts/first.sh",
+    "line": 2,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd7sst7`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "no-break-space": {
+  "findings": [
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "hooks/guard.py",
+    "line": 1,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd8sst7/paddock`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   },
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "scripts/first.sh",
+    "line": 1,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd7sst7`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "line-separators": {
+  "findings": [
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "hooks/guard.py",
+    "line": 2,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd8sst7/paddock`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   },
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "scripts/first.sh",
+    "line": 2,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd7sst7`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "long-line": {
+  "findings": [
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "hooks/guard.py",
+    "line": 1,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd8sst7/paddock`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   },
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "scripts/first.sh",
+    "line": 1,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd7sst7`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "no-final-newline": {
+  "findings": [
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "hooks/guard.py",
+    "line": 1,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd8sst7/paddock`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   },
+   {
+    "check": "C125",
+    "severity": "warn",
+    "rule": 40,
+    "file": "scripts/first.sh",
+    "line": 1,
+    "message": "hard-codes the machine disk path `\u002fVolumes\u002fd7sst7`: it goes stale when the disk is renamed or replaced",
+    "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ }
+}

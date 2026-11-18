@@ -7,7 +7,7 @@
 //! exception (an exact path in `conformance/shell-exceptions.json` with its plan id E1 to E7, a reason and an owner) or is in the
 //! baseline `conformance/baselines/C129-shell.json`: today's files with their line counts, one per line, sorted by path. A file with more lines
 //! than its entry has grown (a finding); fewer is fine. The baseline may only shrink: an entry whose file is gone is stale (a warning), and
-//! an entry the merge base's baseline lacks, or one with more lines than there, is a finding; a file under its count is a warning to lower the entry. The exceptions list may only shrink too: an exception the merge base's list lacks is a finding (it needs the user's approval). Known gaps: shell inside strings (`execSync`, `Command::new("sh")`, heredocs in workflows) and kinds not listed (`.fish`, `.ksh`, `.command`). Differences from plan §6: JSON lists in conformance/, the JavaScript host is the CI host with this twin, shebangs only on extensionless files, and the caller check reads `.gitea` YAML, `paddock.ci.json` and `lefthook.yml` only. `node conformance/bin/paddock-shell-baseline.mjs
+//! an entry the merge base's baseline lacks, or one with more lines than there, is a finding; a file under its count is a warning to lower the entry. The exceptions list may only shrink too: an exception the merge base's list lacks is a finding (it needs the user's approval). Known gaps: shell inside strings (`execSync`, `Command::new("sh")`, heredocs in workflows) and kinds not listed (`.fish`, `.ksh`, `.command`). Differences from plan §6: JSON lists in conformance/, this host is the CI host (the JavaScript module is retired, pair P3), shebangs only on extensionless files, and the caller check reads `.gitea` YAML, `paddock.ci.json` and `lefthook.yml` only. `./dev check shell-baseline
 //! --shrink` regenerates it (removes stale entries and lowers counts, never adds or raises; `--init` writes it from scratch).
 //!
 //! Also reported, never failing the run: a `.sh` or `.ps1` path that `.gitea` workflows and actions, `paddock.ci.json` files and
@@ -16,8 +16,7 @@
 //! list makes the check broken (one finding). **Report-only (warnings) until its first green run on the real tree is recorded here
 //! (ER-41).** Recorded: not yet.
 //!
-//! The JavaScript check `conformance/src/checks/C129-no-new-shell.mjs` is the original; `tests/it/check_c129.rs` compares the two finding
-//! for finding.
+//! The JavaScript check (`conformance/src/checks/C129-*.mjs`) was the original; it was retired with pair P3 (ADR 0022 amendment 2026-11-19) and the Rust host is the only one. The answers it gave are recorded in `tests/fixtures/check/recorded` and `units` and ``tests/it/check_c129.rs`` holds the check to them.
 
 use super::baseline::{self, Growth, growth};
 use super::finding::Finding;
@@ -33,7 +32,7 @@ use std::sync::LazyLock;
 pub const BASELINE: &str = "conformance/baselines/C129-shell.json";
 /// The exceptions both hosts read.
 pub const EXCEPTIONS: &str = "conformance/shell-exceptions.json";
-const REGENERATE: &str = "node conformance/bin/paddock-shell-baseline.mjs --shrink";
+const REGENERATE: &str = "./dev check shell-baseline --shrink";
 const EXCEPTION_IDS: [&str; 7] = ["E1", "E2", "E3", "E4", "E5", "E6", "E7"];
 const FIX_NEW: &str = "Port it to Rust (`./dev`, an xtask or a check), or name it in conformance/shell-exceptions.json with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2).";
 
@@ -370,7 +369,7 @@ impl Check for C129 {
     #[allow(clippy::too_many_lines)]
     fn run(&self, ctx: &Ctx) -> CheckOutput {
         let restore_baseline =
-            "Regenerate it: `node conformance/bin/paddock-shell-baseline.mjs --init` (the first run only), or restore it from git.";
+            "Regenerate it: `./dev check shell-baseline --init` (the first run only), or restore it from git.";
         let restore_exceptions = format!(
             "Restore {EXCEPTIONS}: {{\"exceptions\": [{{\"path\": \"...\", \"id\": \"E1\", \"reason\": \"...\", \"owner\": \"...\"}}]}}."
         );

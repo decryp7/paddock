@@ -1,5 +1,5 @@
 //! The util helpers of the Rust host against `conformance/src/util/*.mjs`, the oracle: every workflow and action file of this tree,
-//! every Markdown file under `docs/`, and generated inputs for the baseline reconcile, the inline-waiver comment, the scope and the
+//! every Markdown file under `docs/`, and generated inputs for the baseline reconcile, the scope and the
 //! version sources. Node is required: a missing oracle fails the test (ER-33).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -213,89 +213,26 @@ process.stdout.write(JSON.stringify(docs.map(([f, t]) => [f, m.tableFindings(t)]
     );
 }
 
+/// The inline waiver comment (its JavaScript twin was retired with the last JS check that used it, pair P3): a tag, a dash and a reason.
 #[test]
-fn the_inline_waiver_comment_is_read_as_the_javascript_does() {
-    let tags = ["freed-port", "pid-kill", "dev-before-toolchain"];
-    let pieces = [
-        "// ",
-        "# ",
-        "conformance:",
-        " ",
-        "\t",
-        "freed-port",
-        "pid-kill",
-        "dev-before-toolchain",
-        "—",
-        "–",
-        "-",
-        "--",
-        " —",
-        "\n",
-        "because",
-        "ab",
-        "a b",
-        "x",
-        "é",
-        "😀",
-        "\r",
-        "  ",
-        "list",
-        "- run: ./dev x",
-        "freed-port-x",
-    ];
-    // A small linear congruential generator: the same inputs on every run.
-    let mut state: u64 = 0x2545_F491_4F6C_DD1D;
-    let mut next = |n: usize| {
-        state = state
-            .wrapping_mul(6_364_136_223_846_793_221)
-            .wrapping_add(1_442_695_040_888_963_407);
-        ((state >> 33) as usize) % n
+fn the_inline_waiver_comment_needs_its_tag_and_a_reason() {
+    let reason = |c: &str, t: &str| match recognise(c, t) {
+        InlineWaiver::Reason(r) => Some(r),
+        _ => None,
     };
-    let mut cases: Vec<String> = Vec::new();
-    for _ in 0..4000 {
-        let len = 2 + next(9);
-        cases.push((0..len).map(|_| pieces[next(pieces.len())]).collect::<String>());
-    }
-    cases.extend([
-        "// conformance: freed-port — handed to a child".into(),
-        "conformance: pid-kill\nconformance: pid-kill — long reason".into(),
-    ]);
-    let js = node(
-        r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const m = await import(pathToFileURL(join(process.cwd(), 'conformance/src/util/inline-waiver.mjs')).href);
-const { cases, tags } = JSON.parse(process.env.UTIL_INPUT);
-process.stdout.write(JSON.stringify(cases.map((c) => tags.map((t) => m.inlineWaiver(c, t)))));
-"#,
-        &json!({ "cases": cases, "tags": tags }),
+    assert_eq!(
+        reason("// conformance: freed-port \u{2014} handed to a child", "freed-port").as_deref(),
+        Some("handed to a child")
     );
-    let rust: Vec<Value> = cases
-        .iter()
-        .map(|c| {
-            Value::Array(
-                tags.iter()
-                    .map(|t| match recognise(c, t) {
-                        InlineWaiver::No => json!({"state": "none"}),
-                        InlineWaiver::NoReason => json!({"state": "no-reason"}),
-                        InlineWaiver::Reason(r) => json!({"state": "reason", "reason": r}),
-                    })
-                    .collect(),
-            )
-        })
-        .collect();
-    let rust = Value::Array(rust);
-    for (i, (a, b)) in rust.as_array().unwrap().iter().zip(js.as_array().unwrap()).enumerate() {
-        assert_eq!(a, b, "case {i}: {:?}", cases[i]);
-    }
-    let reasons = rust
-        .as_array()
-        .unwrap()
-        .iter()
-        .flat_map(|a| a.as_array().unwrap())
-        .filter(|v| v["state"] == "reason")
-        .count();
-    assert!(reasons > 20, "the generated inputs reach the reason path: {reasons}");
+    assert!(
+        matches!(recognise("// conformance: pid-kill", "pid-kill"), InlineWaiver::NoReason),
+        "a tag with no reason"
+    );
+    assert!(
+        matches!(recognise("// conformance: pid-kill \u{2014} why", "freed-port"), InlineWaiver::No),
+        "another tag"
+    );
+    assert!(matches!(recognise("// nothing here", "pid-kill"), InlineWaiver::No));
 }
 
 #[test]

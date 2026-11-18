@@ -1,0 +1,150 @@
+{
+ "findings": [
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/a/src/lib.rs",
+   "line": 7,
+   "message": "a test starts `\"cargo\"` without paddock_testkit::TestCommand (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  },
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/a/tests/it/bad.rs",
+   "line": 2,
+   "message": "a test starts `\"node\"` without paddock_testkit::TestCommand (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  },
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/a/tests/it/bad.rs",
+   "line": 3,
+   "message": "a test starts `env!(\"CARGO\")` without paddock_testkit::TestCommand (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  },
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/a/tests/it/bad.rs",
+   "line": 6,
+   "message": "a test starts `std::env::var(\"CARGO\")` without paddock_testkit::TestCommand (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  },
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/a/tests/it/bad.rs",
+   "line": 7,
+   "message": "a test starts `env!(\"CARGO_BIN_EXE_paddock-dev\")` without paddock_testkit::TestCommand (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  },
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/a/tests/it/bound.rs",
+   "line": 3,
+   "message": "a test starts `env!(\"CARGO_BIN_EXE_other\")` without paddock_testkit::TestCommand (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  },
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/a/tests/it/bound.rs",
+   "line": 4,
+   "message": "a test starts `BIN` without paddock_testkit::TestCommand (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  },
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/a/tests/it/bound.rs",
+   "line": 5,
+   "message": "a test starts `env::var(\"PATH\")` without paddock_testkit::TestCommand (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  },
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/a/tests/it/waived.rs",
+   "line": 7,
+   "message": "a test starts `\"cargo\"` without paddock_testkit::TestCommand (the waiver comment has no reason) (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  },
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/b/src/lib.rs",
+   "line": 8,
+   "message": "a test starts `\"node\"` without paddock_testkit::TestCommand (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  },
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/b/tests/it/gaps.rs",
+   "line": 2,
+   "message": "a test starts `child_program` without paddock_testkit::TestCommand (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  },
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/b/tests/it/gaps.rs",
+   "line": 3,
+   "message": "a test starts `\"rustc\"` without paddock_testkit::TestCommand (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  },
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/b/tests/it/gaps.rs",
+   "line": 4,
+   "message": "a test starts `\"npx.cmd\"` without paddock_testkit::TestCommand (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  },
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/b/tests/it/gaps.rs",
+   "line": 5,
+   "message": "a test starts `env!(\"RUSTC\")` without paddock_testkit::TestCommand (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  },
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/b/tests/it/gaps.rs",
+   "line": 6,
+   "message": "a test starts `root.join(\"dev\")` without paddock_testkit::TestCommand (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  },
+  {
+   "check": "C123",
+   "severity": "warn",
+   "rule": 3,
+   "file": "crates/b/tests/it/gaps.rs",
+   "line": 8,
+   "message": "a test starts `env!(\"CARGO_BIN_EXE_paddock-dev\")` without paddock_testkit::TestCommand (ER-14: the child inherits the machine's environment)",
+   "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
+  }
+ ],
+ "errors": 0,
+ "warnings": 16
+}
