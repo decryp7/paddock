@@ -143,12 +143,38 @@ pub fn release_self() {
     }
 }
 
-/// This program, to start again as a child: its own hold when it has one ([`hold_self`]), else its own path.
+/// This program, to start again as a child: its own hold when it has one ([`hold_self`]), else its own path ([`self_exe_of`]).
+/// The one way paddock-dev names itself as a child's program.
+///
+/// # Errors
+///
+/// When the path is unknown, or this process is a test program (see [`self_exe_of`]).
 pub fn self_exe() -> std::io::Result<PathBuf> {
     match SELF_HOLD.get() {
         Some(Some(h)) => Ok(h.path().to_path_buf()),
-        _ => std::env::current_exe(),
+        _ => self_exe_of(&std::env::current_exe()?),
     }
+}
+
+/// `exe` as the program to start again, unless it is a test program: one in cargo's test layout (`<profile>/deps/`,
+/// `<profile>/build/<package>/<hash>/out/`, [`paddock_env::cargo_layout`]). A unit or integration test runs this crate's code inside
+/// the test harness, and a harness started with `gates check` takes the words as test-name filters and runs every matching test
+/// again inside the test that started it: train 14's push-gate row `gates-register` did that (a 0.4 s test took 14 to 17 s on the
+/// Mac and timed out at 60 s on the Windows runner, runs 8245 and 8248, while its nested runs slowed every test beside it). A
+/// test names the real binary instead (`CARGO_BIN_EXE_paddock-dev`, or a stand-in).
+///
+/// # Errors
+///
+/// When `exe` is a test program.
+pub fn self_exe_of(exe: &Path) -> std::io::Result<PathBuf> {
+    if paddock_env::cargo_layout::profile_dir_of_exe(exe).is_some() {
+        return Err(std::io::Error::other(format!(
+            "{} is a test program (cargo's test layout), not paddock-dev: started again it would run its tests; next step: a test \
+             names the real binary (CARGO_BIN_EXE_paddock-dev) or a stand-in",
+            exe.display()
+        )));
+    }
+    Ok(exe.to_path_buf())
 }
 
 #[cfg(test)]
@@ -262,10 +288,109 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_program_outside_the_cache_holds_nothing_and_names_its_own_path() {
-        // The test binary runs from cargo's target folder, never from a cache: no hold, `self_exe` is the program itself.
+        // The test binary runs from cargo's target folder, never from a cache: no hold.
         let home = tempfile::tempdir().unwrap();
         assert_eq!(hold_self(&env_for(home.path())), None);
-        assert_eq!(self_exe().unwrap(), std::env::current_exe().unwrap());
         assert!(!home.path().join("held").exists());
+    }
+
+    /// A paddock-dev outside the cache (`target/debug/paddock-dev`, a hook's copy, a cache entry) is started by its own path.
+    #[test]
+    fn a_paddock_dev_binary_is_started_again_by_its_own_path() {
+        for exe in [
+            "/w/target/debug/paddock-dev",
+            "/w/.git/paddock-hooks/paddock-dev",
+            "/h/.paddock-dev/bin/x/paddock-dev-host",
+        ] {
+            assert_eq!(self_exe_of(Path::new(exe)).unwrap(), PathBuf::from(exe), "{exe}");
+        }
+    }
+
+    /// Every source file names this program through [`self_exe`], so no other place can start a test program as paddock-dev (the
+    /// class of train 14's nested test runs). The files below read `current_exe()` for another reason, each named.
+    #[test]
+    fn no_source_file_reads_its_own_path_except_through_self_exe() {
+        const OTHER_USES: &[(&str, &str)] = &[
+            (
+                "tool_cache.rs",
+                "self_exe itself, and hold_self, which links the binary it runs from",
+            ),
+            ("cli.rs", "`--print-binary` prints the path, it starts nothing"),
+            ("hook/install.rs", "copies the binary into the hook folder, it starts nothing"),
+            (
+                "test_sleeper.rs",
+                "a test helper that starts its own test harness on purpose, with `--exact` and one test name",
+            ),
+            ("check/c120.rs", "C120's own samples and messages, text only"),
+        ];
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let found = files_reading_own_path(&src);
+        assert!(found.len() >= OTHER_USES.len(), "the scan found {found:?}: wrong folder?");
+        let mut allowed: Vec<PathBuf> = OTHER_USES.iter().map(|(f, _)| PathBuf::from(f)).collect();
+        allowed.sort();
+        assert_eq!(
+            found, allowed,
+            "name this program with crate::tool_cache::self_exe() (a test program is never started as paddock-dev); a new other use \
+             is added to OTHER_USES with its reason, and one that is gone is removed"
+        );
+    }
+
+    /// The `.rs` files under `src` that read their own path (`current_exe()`), as paths relative to `src`, sorted.
+    fn files_reading_own_path(src: &Path) -> Vec<PathBuf> {
+        fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    rust_files(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        rust_files(src, &mut files);
+        let needle = ["current", "_exe()"].concat();
+        let mut found: Vec<PathBuf> = files
+            .iter()
+            .filter(|f| std::fs::read_to_string(f).unwrap().contains(&needle))
+            .map(|f| f.strip_prefix(src).unwrap().to_path_buf())
+            .collect();
+        found.sort();
+        found
+    }
+
+    /// Positive control of the scan: a sample tree with one use in a nested file and one file without.
+    #[test]
+    fn the_scan_finds_a_file_that_reads_its_own_path() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("a")).unwrap();
+        std::fs::write(
+            d.path().join("a/b.rs"),
+            ["let me = std::env::current", "_exe().unwrap();\n"].concat(),
+        )
+        .unwrap();
+        std::fs::write(d.path().join("c.rs"), "fn main() {}\n").unwrap();
+        std::fs::write(d.path().join("d.txt"), ["current", "_exe()"].concat()).unwrap();
+        assert_eq!(files_reading_own_path(d.path()), [Path::new("a").join("b.rs")]);
+    }
+
+    /// A test program is never "this program" to start again: started with `gates check` (the push gate's C100 row), the test
+    /// harness takes the words as test-name filters and runs every matching test again, at full parallelism, inside the test that
+    /// started it (train 14, 2026-11-18: `known_commit::a_delete_only_push...` 0.4 s on main, 14 to 17 s on the Mac and 56 s to a
+    /// timeout on the Windows runner, runs 8245 and 8248, slowing every test beside it).
+    #[test]
+    fn a_test_program_is_never_started_again_as_this_program() {
+        let e = self_exe().expect_err("this unit-test process is the test harness, not paddock-dev");
+        assert!(e.to_string().contains("test program"), "{e}");
+        // Both of cargo's test layouts.
+        for exe in [
+            // conformance: layout-guess — a sample of cargo's old test layout for the guard's own test, not a computed layout
+            "/w/target/debug/deps/paddock_dev-0123456789abcdef",
+            "/w/target/debug/build/paddock-dev/0123456789abcdef/out/paddock_dev-0123456789abcdef",
+            "/w/target/debug/build/paddock-dev-0123/out/it-0123",
+        ] {
+            let e = self_exe_of(Path::new(exe)).expect_err(exe);
+            assert!(e.to_string().contains(exe) && e.to_string().contains("next step"), "{e}");
+        }
     }
 }

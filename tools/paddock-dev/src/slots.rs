@@ -248,7 +248,8 @@ pub fn holder_command(exe: &Path, args: &[String], root: &Path) -> std::process:
 
 /// `dev ci slot acquire`.
 pub fn acquire(a: &AcquireArgs) -> Result<Report, CliError> {
-    let exe = std::env::current_exe().unwrap_or_default();
+    // This program as the holder: never a test program (crate::tool_cache::self_exe), which would run its tests again.
+    let exe = crate::tool_cache::self_exe().unwrap_or_default();
     acquire_with(a, &exe)
 }
 

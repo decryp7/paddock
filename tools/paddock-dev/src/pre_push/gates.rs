@@ -109,7 +109,7 @@ pub enum Planned {
 }
 
 /// What the plan alone cannot say; read from the repository once by the caller.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Facts {
     /// The conformance command's arguments after `node`, read from conformance/paddock.ci.json, or why that failed.
     pub conformance: Option<Result<Vec<String>, String>>,
@@ -121,8 +121,9 @@ pub struct Facts {
     pub ci_version: Option<Result<String, String>>,
     /// Pitwall's script tests (`scripts/ci/*.test.mjs`, relative to `apps/pitwall`): no shell expands a glob here.
     pub pitwall_tests: Vec<String>,
-    /// This program, for the checks `./dev` runs itself.
-    pub dev_exe: String,
+    /// This program, for the checks `./dev` runs itself ([`crate::tool_cache::self_exe`]), or why it cannot be started again (a test
+    /// program is never started as paddock-dev: its harness would run its tests again).
+    pub dev_exe: Result<String, String>,
     /// The Tauri crates each candidate workspace leaves out of the Linux Clippy ([`super::linux_inputs::left_out`]), or why cargo
     /// could not say. Filled for [`linux_candidates`] only.
     pub left_out: std::collections::BTreeMap<String, Result<super::linux_inputs::WsCrates, String>>,
@@ -164,6 +165,22 @@ pub const PER_WORKSPACE_PREFIXES: &[&str] = &["fmt ", "lockfile ", "clippy ", "c
 
 /// Workspaces whose lints are not a push gate: they have a CI job of their own that is not part of a branch run.
 const OWN_JOB: &[&str] = &["/fuzz", "/templates/"];
+
+/// `g` run by this program ([`Facts::dev_exe`]), or not measured when it cannot be started again: never a guessed `./dev`, never
+/// a test program (whose harness would take the arguments as test filters and run its tests again).
+fn dev_run(facts: &Facts, g: Gate) -> Planned {
+    match &facts.dev_exe {
+        Ok(program) => Planned::Run(Gate {
+            program: program.clone(),
+            ..g
+        }),
+        Err(why) => Planned::NotMeasured {
+            id: g.id,
+            reason: format!("this program cannot be started again: {why}"),
+            next: "run the push gate through ./dev (the paddock-dev binary); this is not a finding in your change".into(),
+        },
+    }
+}
 
 fn gate(id: String, cwd: &str, program: &str, args: &[&str], rank: u8, next: String) -> Gate {
     Gate {
@@ -358,17 +375,20 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
         });
     }
     if change.files.iter().any(|f| f.ends_with(".rs") || f == "docs/ipc-endpoints.toml") {
-        out.push(Planned::Run(Gate {
-            args: strs(&["check", "ipc-endpoints"]),
-            ..gate(
-                "ipc-endpoints".into(),
-                "",
-                &facts.dev_exe,
-                &[],
-                0,
-                "add the listen site to docs/ipc-endpoints.toml with an ending test or a reason (C102)".into(),
-            )
-        }));
+        out.push(dev_run(
+            facts,
+            Gate {
+                args: strs(&["check", "ipc-endpoints"]),
+                ..gate(
+                    "ipc-endpoints".into(),
+                    "",
+                    "",
+                    &[],
+                    0,
+                    "add the listen site to docs/ipc-endpoints.toml with an ending test or a reason (C102)".into(),
+                )
+            },
+        ));
     } else {
         out.push(Planned::Skip {
             id: "ipc-endpoints".into(),
@@ -380,17 +400,20 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
     // 5 to 8 s, in parallel with the conformance tests (docs/benchmarks.md, "C100 in the push gate"). It blocks from its first run:
     // C100 is long established (0 findings on the real tree at 97176067c, `./dev gates check`, 2026-11-17) and the user asked for the
     // refusal (2026-11-17).
-    out.push(Planned::Run(Gate {
-        args: strs(&["gates", "check"]),
-        ..gate(
-            "gates-register".into(),
-            "",
-            &facts.dev_exe,
-            &[],
-            0,
-            "fix the C100 finding printed above: its ::error line names the check and the fix (ADR 0060)".into(),
-        )
-    }));
+    out.push(dev_run(
+        facts,
+        Gate {
+            args: strs(&["gates", "check"]),
+            ..gate(
+                "gates-register".into(),
+                "",
+                "",
+                &[],
+                0,
+                "fix the C100 finding printed above: its ::error line names the check and the fix (ADR 0060)".into(),
+            )
+        },
+    ));
     // Dyno's wire fixtures (the UI contract) are regenerated from the Rust types when dyno-core's sources changed; a stale one
     // fails the push with the files named (apps/dyno/scripts/regen-wire-fixtures.sh runs cargo test).
     if change
@@ -588,8 +611,7 @@ fn conformance(facts: &Facts) -> Planned {
     match &facts.conformance {
         // The contract was read and is well-formed; the gate runs it through the executor, as CI does (`./dev ci run conformance paddock`),
         // so a flag or field added to the contract reaches the push gate with no change here.
-        Some(Ok(_)) => Planned::Run(Gate {
-            program: facts.dev_exe.clone(),
+        Some(Ok(_)) => dev_run(facts, Gate {
             args: strs(&["ci", "run", "conformance", "paddock"]),
             ..gate(id, "", "", &[], 0, "fix the finding it printed; the list of checks is the `conformance` field of conformance/paddock.ci.json (CI's \"Paddock itself\" step runs the same)".into())
         }),
@@ -615,19 +637,21 @@ const CONFORMANCE_TEST_CONCURRENCY: &str = "4";
 fn conformance_tests(facts: &Facts) -> Planned {
     let id = "conformance-tests";
     conformance_not_ready(id, facts).unwrap_or_else(|| {
-        Planned::Run(Gate {
-            program: facts.dev_exe.clone(),
-            args: strs(&["ci", "run", "conformance", "tests"]),
-            env: vec![("PADDOCK_TEST_CONCURRENCY".into(), CONFORMANCE_TEST_CONCURRENCY.into())],
-            ..gate(
-                id.into(),
-                "",
-                "",
-                &[],
-                0,
-                "fix the test it names (`cd conformance && npm test`; CI's conformance job runs the same)".into(),
-            )
-        })
+        dev_run(
+            facts,
+            Gate {
+                args: strs(&["ci", "run", "conformance", "tests"]),
+                env: vec![("PADDOCK_TEST_CONCURRENCY".into(), CONFORMANCE_TEST_CONCURRENCY.into())],
+                ..gate(
+                    id.into(),
+                    "",
+                    "",
+                    &[],
+                    0,
+                    "fix the test it names (`cd conformance && npm test`; CI's conformance job runs the same)".into(),
+                )
+            },
+        )
     })
 }
 
