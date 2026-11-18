@@ -265,6 +265,8 @@ pub fn judge_all(runner: &dyn Runner, root: &Path, targets: &[Target], npm: &Npm
             Some(b) => Verdict::compare(&source, &head, &mut || {
                 let tree = prepared.get_or_insert_with(|| b.prepare());
                 match tree {
+                    // A lockfile the change adds is not on the merge base: main has none of its findings, so each one is new.
+                    Ok(tree) if !tree.join(&t.file).exists() => Measure::Found(Vec::new()),
                     Ok(tree) => audit_target(runner, tree, t, npm),
                     Err(why) => Measure::NotMeasured(why.clone()),
                 }
@@ -283,10 +285,11 @@ pub fn judge_all(runner: &dyn Runner, root: &Path, targets: &[Target], npm: &Npm
 fn report(verdict: &Verdict, mode: Mode, enforce: bool, targets: usize) -> Report {
     let mut text: String = lines(verdict, mode, enforce).iter().map(|l| format!("{l}\n")).collect();
     text.push_str(&format!(
-        "audit: {targets} lockfile(s), {} new, {} already on main, {} allowed by an exception, {} not measured; {}\n",
+        "audit: {targets} lockfile(s), {} new, {} already on main, {} allowed by an exception, {} exception(s) expired, {} not measured; {}\n",
         verdict.new.len(),
         verdict.existing.len(),
         verdict.allowed.len(),
+        verdict.expired.len(),
         verdict.not_measured.len(),
         if enforce {
             "enforced"
@@ -303,12 +306,14 @@ fn report(verdict: &Verdict, mode: Mode, enforce: bool, targets: usize) -> Repor
         "enforced": enforce,
         "new": f(&verdict.new),
         "existing": f(&verdict.existing),
+        "allowed": verdict.allowed.iter().map(|(f, e)| json!({"source": f.source, "id": f.id, "package": f.package, "path": f.path, "reviewBy": e.review_by})).collect::<Vec<_>>(),
+        "expired": verdict.expired.iter().map(|e| json!({"id": e.id, "reviewBy": e.review_by})).collect::<Vec<_>>(),
         "not_measured": verdict.not_measured.iter().map(|(s, w)| json!({"source": s, "why": w})).collect::<Vec<_>>(),
     });
     let r = Report::new(data, text);
     if !enforce || verdict.clean() {
         r
-    } else if verdict.new.is_empty() {
+    } else if verdict.new.is_empty() && verdict.expired.is_empty() {
         r.with_exit(Exit::NotMeasured)
     } else {
         r.with_exit(Exit::Findings)
@@ -422,18 +427,49 @@ pub fn command(c: AuditCommand) -> Result<Report, CliError> {
     }
 }
 
+/// What stops a run before any audit: in report-only mode (ER-41) a `::warning::` and exit 0, in enforce mode the error. A gate that
+/// cannot start never turns a report-only job red, and never passes an enforced one.
+fn cannot_start(e: CliError, enforce: bool) -> Result<Report, CliError> {
+    if enforce {
+        return Err(e);
+    }
+    let next = if e.hint.is_empty() {
+        String::new()
+    } else {
+        format!(" Next step: {}", e.hint)
+    };
+    let text = format!(
+        "::warning::report-only, would fail: audit did not run: {}.{next}\naudit: NOT MEASURED; report-only (PADDOCK_AUDIT_ENFORCE is not 1)\n",
+        e.message.trim_end_matches('.')
+    );
+    Ok(Report::new(
+        json!({"enforced": false, "not_run": e.message, "new": [], "existing": [], "allowed": [], "expired": [], "not_measured": []}),
+        text,
+    ))
+}
+
 /// Both commands, with the runner and the merge base given.
 pub fn run(runner: &dyn Runner, root: &Path, npm: &Npm, today: &str, enforce: bool, base: Option<&dyn Base>) -> Result<Report, CliError> {
-    let targets = plan(&tracked(root)?);
+    let targets = match tracked(root) {
+        Ok(t) => plan(&t),
+        Err(e) => return cannot_start(e, enforce),
+    };
     if targets.is_empty() {
-        return Err(
+        return cannot_start(
             CliError::failure(format!("No lockfile with an audit found under {}.", root.display()))
                 .with_hint("Run it in the repository root, or pass --root."),
+            enforce,
         );
     }
-    let allow = allow::load(root).map_err(|e| {
-        CliError::failure(e).with_hint("Fix scripts/npm-audit-allow.json (id, reason, approvedBy, approved, reviewBy): it is the family's one list of npm audit exceptions.")
-    })?;
+    let allow = match allow::load(root) {
+        Ok(a) => a,
+        Err(e) => {
+            return cannot_start(
+                CliError::failure(e).with_hint("Fix scripts/npm-audit-allow.json (id, reason, approvedBy, approved, reviewBy): it is the family's one list of npm audit exceptions."),
+                enforce,
+            );
+        }
+    };
     let mut verdict = judge_all(runner, root, &targets, npm, base);
     verdict.apply_exceptions(&allow, today);
     Ok(report(

@@ -42,8 +42,9 @@ pub enum Measure {
 /// npm's severities, lowest first.
 pub const NPM_LEVELS: [&str; 5] = ["info", "low", "moderate", "high", "critical"];
 
-fn rank(level: &str) -> usize {
-    NPM_LEVELS.iter().position(|l| *l == level).unwrap_or(0)
+/// The rank of an npm severity, or `None` for one npm does not define (the report then cannot be judged: not measured).
+fn rank(level: &str) -> Option<usize> {
+    NPM_LEVELS.iter().position(|l| *l == level)
 }
 
 fn last_lines(text: &str) -> String {
@@ -202,8 +203,13 @@ pub fn parse_npm(source: &str, text: &str, level: &str) -> Measure {
     let Some(vulns) = v.get("vulnerabilities").and_then(Value::as_object) else {
         return Measure::NotMeasured("npm audit's answer has no `vulnerabilities` object".into());
     };
+    if v.pointer("/metadata/dependencies/total").and_then(Value::as_u64) == Some(0) {
+        return Measure::NotMeasured("npm audit saw no dependencies (metadata.dependencies.total is 0)".into());
+    }
     let by_name: BTreeMap<&str, &Value> = vulns.iter().map(|(k, v)| (k.as_str(), v)).collect();
-    let min = rank(level);
+    let Some(min) = rank(level) else {
+        return Measure::NotMeasured(format!("{level} is not an npm severity level"));
+    };
     let mut found: Vec<Finding> = Vec::new();
     for entry in vulns.values() {
         for via in entry
@@ -213,8 +219,15 @@ pub fn parse_npm(source: &str, text: &str, level: &str) -> Measure {
             .flatten()
             .filter(|x| x.is_object())
         {
-            let sev = via.get("severity").and_then(Value::as_str).unwrap_or("info");
-            if rank(sev) < min {
+            let sev = via.get("severity");
+            let Some(rank) = sev.and_then(Value::as_str).and_then(rank) else {
+                let name = via.get("name").and_then(Value::as_str).unwrap_or("an advisory");
+                return Measure::NotMeasured(format!(
+                    "npm audit named an unknown severity ({}) for {name}",
+                    sev.map_or("none".to_string(), Value::to_string)
+                ));
+            };
+            if rank < min {
                 continue;
             }
             let package = via.get("name").and_then(Value::as_str).unwrap_or_default().to_string();

@@ -6,6 +6,9 @@
 use serde_json::Value;
 use std::path::Path;
 
+/// The longest an exception may run: its review day is at most this many days after its approval day (as `MAX_DAYS` in npm-audit.mjs).
+pub const MAX_DAYS: i64 = 90;
+
 /// Where the list lives, relative to the repository root.
 pub const ALLOW_FILE: &str = "scripts/npm-audit-allow.json";
 
@@ -39,6 +42,21 @@ fn is_day(s: &str) -> bool {
             .all(|(i, c)| if i == 4 || i == 7 { *c == b'-' } else { c.is_ascii_digit() })
 }
 
+/// The number of days since 1970-01-01 of a `YYYY-MM-DD` that is a real calendar day (civil-from-days inverse), else `None`.
+pub fn day_number(s: &str) -> Option<i64> {
+    if !is_day(s) {
+        return None;
+    }
+    let (y, m, d): (i64, i64, i64) = (s[0..4].parse().ok()?, s[5..7].parse().ok()?, s[8..10].parse().ok()?);
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    (day_of(days) == s).then_some(days)
+}
+
 fn is_ghsa(s: &str) -> bool {
     let parts: Vec<&str> = s.split('-').collect();
     parts.len() == 4
@@ -49,7 +67,7 @@ fn is_ghsa(s: &str) -> bool {
 }
 
 /// The list, parsed and checked as `parseAllow` in scripts/npm-audit.mjs does: every entry has an id, a reason, an approver, an approval
-/// day and a later review day, and no id is listed twice.
+/// day and a later review day at most 90 days on, and no id is listed twice.
 pub fn parse_allow(text: &str) -> Result<Vec<Exception>, String> {
     let doc: Value = serde_json::from_str(text).map_err(|e| format!("the allow list is not JSON: {e}"))?;
     let entries = doc
@@ -75,11 +93,17 @@ pub fn parse_allow(text: &str) -> Result<Vec<Exception>, String> {
         if !is_ghsa(&x.id) {
             return Err(format!("entry {n}: {} is not a GHSA id", x.id));
         }
-        if !is_day(&x.approved) || !is_day(&x.review_by) {
+        let (Some(from), Some(to)) = (day_number(&x.approved), day_number(&x.review_by)) else {
             return Err(format!("entry {n} ({}): days are YYYY-MM-DD", x.id));
-        }
-        if x.review_by <= x.approved {
+        };
+        if to <= from {
             return Err(format!("entry {n} ({}): the review day is not after the approval day", x.id));
+        }
+        if to - from > MAX_DAYS {
+            return Err(format!(
+                "entry {n} ({}): the review day is more than {MAX_DAYS} days after the approval day",
+                x.id
+            ));
         }
         if out.iter().any(|o| o.id == x.id) {
             return Err(format!("entry {n}: {} is listed twice", x.id));

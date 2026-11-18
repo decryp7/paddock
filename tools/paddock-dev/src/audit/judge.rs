@@ -98,9 +98,10 @@ impl Verdict {
         self.existing = sort(std::mem::take(&mut self.existing), &mut self.allowed, &mut self.expired);
     }
 
-    /// Whether the run passes when it is enforced: nothing new, and everything measured.
+    /// Whether the run passes when it is enforced: nothing new, everything measured, and no exception expired. An expired exception
+    /// counts whether the finding it covered is new or one main has too: nobody renewed or removed it, so the gate does not pass.
     pub fn clean(&self) -> bool {
-        self.new.is_empty() && self.not_measured.is_empty()
+        self.new.is_empty() && self.not_measured.is_empty() && self.expired.is_empty()
     }
 }
 
@@ -151,20 +152,17 @@ pub fn lines(v: &Verdict, mode: Mode, enforce: bool) -> Vec<String> {
             Mode::Nightly => "is on main",
             Mode::Compare => "is new in this change (main does not have it)",
         };
-        let expired = v
-            .expired
-            .iter()
-            .find(|e| e.id == f.id && f.source.starts_with("npm "))
-            .map_or(String::new(), |e| {
-                format!(
-                    " Its exception in scripts/npm-audit-allow.json expired on {}; renew it with the user's approval (ER-46) or fix the dependency.",
-                    e.review_by
-                )
-            });
         out.push(format!(
-            "::{level}::{tag}{}; it {what}.{expired} Next step: {}.",
+            "::{level}::{tag}{}; it {what}. Next step: {}.",
             describe(f),
             exception_step(f)
+        ));
+    }
+    // One line per expired exception, whether its finding is new or main has it too: nobody renewed or removed it (ER-46).
+    for e in &v.expired {
+        out.push(format!(
+            "::{level}::{tag}the exception for {} in scripts/npm-audit-allow.json expired on {}. Next step: renew it with the user's approval (ER-46), or remove it and fix the dependency.",
+            e.id, e.review_by
         ));
     }
     for (f, e) in &v.allowed {

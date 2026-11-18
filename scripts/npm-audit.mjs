@@ -19,20 +19,38 @@ import { isMain } from '../conformance/src/util/is-main.mjs';
 
 export const ALLOW_FILE = join(dirname(fileURLToPath(import.meta.url)), 'npm-audit-allow.json');
 const LEVELS = ['high', 'critical'];
+/** The severities npm defines; an advisory of any other severity cannot be ranked, so the report is not measured. */
+export const SEVERITIES = ['info', 'low', 'moderate', 'high', 'critical'];
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** The longest an exception may run: its review day is at most this many days after its approval day. */
+export const MAX_DAYS = 90;
+
+/** The number of days since 1970-01-01 of a `YYYY-MM-DD` that is a real day, else NaN. */
+function dayNumber(s) {
+  if (!DAY.test(s)) return NaN;
+  const t = Date.parse(`${s}T00:00:00Z`);
+  return Number.isNaN(t) || new Date(t).toISOString().slice(0, 10) !== s ? NaN : t / 86_400_000;
+}
 
 /** The allow list, parsed and checked: every entry has an id, a reason, an approver, an approval day and a later review day. */
 export function parseAllow(text) {
-  const doc = JSON.parse(text);
-  if (!Array.isArray(doc.allow)) throw new Error('the allow list has no "allow" array');
+  let doc;
+  try {
+    doc = JSON.parse(text);
+  } catch (e) {
+    throw new Error(`the allow list is not JSON: ${e.message}`);
+  }
+  if (!Array.isArray(doc?.allow)) throw new Error('the allow list has no "allow" array');
   const seen = new Set();
   return doc.allow.map((e, i) => {
     for (const k of ['id', 'reason', 'approvedBy', 'approved', 'reviewBy']) {
       if (typeof e[k] !== 'string' || e[k].trim() === '') throw new Error(`entry ${i + 1} has no ${k}`);
     }
     if (!/^GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$/.test(e.id)) throw new Error(`entry ${i + 1}: ${e.id} is not a GHSA id`);
-    if (!DAY.test(e.approved) || !DAY.test(e.reviewBy)) throw new Error(`entry ${i + 1} (${e.id}): days are YYYY-MM-DD`);
-    if (e.reviewBy <= e.approved) throw new Error(`entry ${i + 1} (${e.id}): the review day is not after the approval day`);
+    const [from, to] = [dayNumber(e.approved), dayNumber(e.reviewBy)];
+    if (Number.isNaN(from) || Number.isNaN(to)) throw new Error(`entry ${i + 1} (${e.id}): days are YYYY-MM-DD`);
+    if (to <= from) throw new Error(`entry ${i + 1} (${e.id}): the review day is not after the approval day`);
+    if (to - from > MAX_DAYS) throw new Error(`entry ${i + 1} (${e.id}): the review day is more than ${MAX_DAYS} days after the approval day`);
     if (seen.has(e.id)) throw new Error(`entry ${i + 1}: ${e.id} is listed twice`);
     seen.add(e.id);
     return e;
@@ -42,7 +60,7 @@ export function parseAllow(text) {
 /** The high and critical advisories of an `npm audit --json` report: `{ id, name, severity, title, url }`, one per advisory. */
 export function advisories(report) {
   const out = new Map();
-  for (const v of Object.values(report.vulnerabilities ?? {})) {
+  for (const v of Object.values(report.vulnerabilities)) {
     for (const via of v.via ?? []) {
       if (typeof via !== 'object' || !LEVELS.includes(via.severity)) continue;
       const id = /GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}/.exec(via.url ?? '')?.[0] ?? `npm-${via.source}`;
@@ -50,6 +68,33 @@ export function advisories(report) {
     }
   }
   return [...out.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/**
+ * What `npm audit --json` said, from its text: `{ report }` when it looked (the parsed report, its `vulnerabilities` an object), else
+ * `{ notMeasured: why }`. Not JSON, an `error` object, no `vulnerabilities` object, no dependencies at all and an advisory of an unknown
+ * severity are all "did not look", never a pass (ER-33). The Rust reader `parse_npm` answers the same way.
+ */
+export function measure(text) {
+  let report;
+  try {
+    report = JSON.parse(text);
+  } catch {
+    const tail = String(text ?? '').split('\n').map((l) => l.trim()).filter(Boolean).slice(-2).join(' | ');
+    return { notMeasured: `npm audit printed no JSON (${tail})` };
+  }
+  if (report?.error) return { notMeasured: `npm audit answered with ${report.error.summary ?? report.error.code ?? 'an error'}` };
+  const v = report?.vulnerabilities;
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return { notMeasured: "npm audit's answer has no `vulnerabilities` object" };
+  if (report.metadata?.dependencies?.total === 0) return { notMeasured: 'npm audit saw no dependencies (metadata.dependencies.total is 0)' };
+  for (const entry of Object.values(v)) {
+    for (const via of Array.isArray(entry?.via) ? entry.via : []) {
+      if (via !== null && typeof via === 'object' && !SEVERITIES.includes(via.severity)) {
+        return { notMeasured: `npm audit named an unknown severity (${JSON.stringify(via.severity)}) for ${via.name ?? 'an advisory'}` };
+      }
+    }
+  }
+  return { report };
 }
 
 /** The verdict: findings not allowed, entries that expired, entries that matched nothing. */
@@ -84,22 +129,28 @@ function main(argv) {
     console.error(`::error::npm-audit: ${ALLOW_FILE} is broken: ${e.message}. Next step: fix the entry (id, reason, approvedBy, approved, reviewBy).`);
     return 2;
   }
-  let parsed;
+  let text;
   if (report) {
-    parsed = JSON.parse(readFileSync(report, 'utf8'));
+    try {
+      text = report === '-' ? readFileSync(0, 'utf8') : readFileSync(report, 'utf8');
+    } catch (e) {
+      console.error(`::error::npm-audit: the report ${report} cannot be read: ${e.message}. Not measured; next step: pass a saved \`npm audit --json\` report.`);
+      return 6;
+    }
   } else {
     const r = spawnSync('npm', ['audit', '--omit=dev', '--json'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-    try {
-      parsed = JSON.parse(r.stdout);
-    } catch {
-      console.error(`::error::npm-audit: \`npm audit --omit=dev --json\` printed no report (exit ${r.status}): ${(r.stderr ?? '').trim().split('\n').slice(-3).join(' | ')}. Not measured; next step: run it by hand in ${process.cwd()}.`);
+    if (r.error || typeof r.stdout !== 'string') {
+      console.error(`::error::npm-audit: npm could not run: ${r.error?.message ?? 'no output'}. Not measured; next step: install npm or fix PATH, then run \`npm audit --omit=dev\` in ${process.cwd()}.`);
       return 6;
     }
-    if (parsed.error) {
-      console.error(`::error::npm-audit: npm audit failed: ${parsed.error.summary ?? JSON.stringify(parsed.error)}. Not measured; next step: run \`npm audit --omit=dev\` in ${process.cwd()}.`);
-      return 6;
-    }
+    text = r.stdout;
   }
+  const m = measure(text);
+  if (m.notMeasured) {
+    console.error(`::error::npm-audit: NOT MEASURED: ${m.notMeasured}. A missing measurement never counts as a pass. Next step: run \`npm audit --omit=dev\` in ${process.cwd()} where npm and the network work, or pass a saved report.`);
+    return 6;
+  }
+  const parsed = m.report;
   const v = judge(parsed, allow, today);
   for (const a of v.allowed) {
     const e = allow.find((x) => x.id === a.id);

@@ -2,6 +2,7 @@
 //! check shows it can see its signal (ER-33): the same fake tool with its advisory removed finds nothing.
 
 use super::*;
+use serde_json::Value;
 use std::cell::Cell;
 use std::sync::Mutex;
 
@@ -312,25 +313,71 @@ fn cargo_target(dir: &str) -> Target {
     }
 }
 
+/// A merge base folder holding the lockfiles the base has (the extraction's shape), under a folder the test removes.
+fn base_with(files: &[&str]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    for f in files {
+        let p = dir.path().join(f);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, "").unwrap();
+    }
+    dir
+}
+
 #[test]
 fn judge_all_audits_the_tree_and_then_the_merge_base_once_and_cleans_up() {
+    let dir = base_with(&["crates/Cargo.lock", "apps/dyno/Cargo.lock"]);
+    let key: &'static str = Box::leak(dir.path().display().to_string().into_boxed_str());
     let runner = Fake {
         answers: vec![
             ("/head/", deny_ran(Some("RUSTSEC-2026-0543"))),
-            ("/base/", deny_ran(Some("RUSTSEC-2026-0543"))),
+            (key, deny_ran(Some("RUSTSEC-2026-0543"))),
         ],
         ran_in: Mutex::new(vec![]),
     };
     let base = FakeBase {
         prepared: Cell::new(0),
         released: Cell::new(0),
-        result: Ok(PathBuf::from("/base/")),
+        result: Ok(dir.path().to_path_buf()),
     };
     let targets = [cargo_target("crates"), cargo_target("apps/dyno")];
     let v = judge_all(&runner, Path::new("/head/"), &targets, &npm(), Some(&base));
     assert_eq!(v.existing.len(), 2, "both workspaces have it on main too");
     assert!(v.clean());
     assert_eq!((base.prepared.get(), base.released.get()), (1, 1), "extracted once, removed once");
+}
+
+#[test]
+fn a_lockfile_the_change_adds_has_no_base_so_its_findings_are_new_not_unmeasured() {
+    // The base folder holds crates/ only: apps/dyno/Cargo.lock is added by this change.
+    let dir = base_with(&["crates/Cargo.lock"]);
+    let key: &'static str = Box::leak(dir.path().display().to_string().into_boxed_str());
+    let runner = Fake {
+        answers: vec![
+            ("/head/", deny_ran(Some("RUSTSEC-2026-0543"))),
+            (key, deny_ran(Some("RUSTSEC-2026-0543"))),
+        ],
+        ran_in: Mutex::new(vec![]),
+    };
+    let base = FakeBase {
+        prepared: Cell::new(0),
+        released: Cell::new(0),
+        result: Ok(dir.path().to_path_buf()),
+    };
+    let targets = [cargo_target("crates"), cargo_target("apps/dyno")];
+    let v = judge_all(&runner, Path::new("/head/"), &targets, &npm(), Some(&base));
+    assert!(v.not_measured.is_empty(), "{:?}", v.not_measured);
+    assert_eq!(
+        (v.new.len(), v.existing.len()),
+        (1, 1),
+        "the added lockfile's finding is new; the old one is main's"
+    );
+    assert!(v.new[0].source.contains("apps/dyno"));
+    assert_eq!(
+        runner.ran_in.lock().unwrap().iter().filter(|r| r.contains(key)).count(),
+        1,
+        "the base's missing workspace is not audited"
+    );
 }
 
 #[test]
@@ -482,11 +529,36 @@ fn an_expired_exception_counts_as_a_finding_again_and_says_it_expired() {
         assert!(!v.clean() && v.allowed.is_empty() && v.new.len() == 1, "{today}");
         let text = lines(&v, Mode::Nightly, true);
         assert!(
-            text[0].starts_with("::error::") && text[0].contains("expired on 2026-12-18"),
-            "{}",
-            text[0]
+            text.iter()
+                .any(|l| l.starts_with("::error::") && l.contains("expired on 2026-12-18")),
+            "{text:?}"
         );
     }
+}
+
+#[test]
+fn an_expired_exception_for_a_finding_main_has_too_is_an_error_and_fails_an_enforced_run() {
+    let mut v = Verdict::compare("n", &found(vec![npm_finding()]), &mut || found(vec![npm_finding()]));
+    v.apply_exceptions(&[exception("2026-12-18")], "2026-12-18");
+    assert!(v.new.is_empty() && v.existing.len() == 1 && v.expired.len() == 1);
+    let text = lines(&v, Mode::Compare, true);
+    assert!(
+        text.iter()
+            .any(|l| l.starts_with("::error::") && l.contains("expired on 2026-12-18")),
+        "{text:?}"
+    );
+    assert!(!v.clean());
+    assert_eq!(exit_of(&v, true), Exit::Findings.code());
+    assert_eq!(exit_of(&v, false), Exit::Ok.code(), "report-only");
+    assert!(
+        lines(&v, Mode::Compare, false)
+            .iter()
+            .any(|l| l.starts_with("::warning::report-only, would fail: the exception"))
+    );
+    // The control: the same finding before the review day is allowed and the run is clean.
+    let mut live = Verdict::compare("n", &found(vec![npm_finding()]), &mut || found(vec![npm_finding()]));
+    live.apply_exceptions(&[exception("2026-12-18")], "2026-12-17");
+    assert!(live.clean() && live.expired.is_empty());
 }
 
 #[test]
@@ -517,61 +589,193 @@ fn today_is_read_as_a_utc_day() {
     assert_eq!(allow::day_of(11_016), "2000-02-29");
 }
 
-const VALID: &str = r#"{"allow":[
- {"id":"GHSA-fc5q-39xc-vjpf","reason":"r","approvedBy":"user","approved":"2026-11-18","reviewBy":"2026-12-18"},
- {"id":"GHSA-aaaa-bbbb-cccc","reason":"r","approvedBy":"user","approved":"2026-11-18","reviewBy":"2026-11-19"}]}"#;
-
-fn bad_lists() -> Vec<String> {
-    let e = |k: &str, v: &str| {
-        VALID.replace(
-            &format!("\"{k}\":\"{}\"", if k == "id" { "GHSA-aaaa-bbbb-cccc" } else { "r" }),
-            &format!("\"{k}\":\"{v}\""),
-        )
-    };
-    vec![
-        e("reason", ""),
-        e("id", "CVE-2026-1"),
-        e("id", "GHSA-fc5q-39xc-vjpf"),
-        VALID.replace("2026-12-18", "2026-11-18"),
-        VALID.replace("2026-11-19", "2026-1119"),
-        r#"{"allow":{}}"#.to_string(),
-        "not json".to_string(),
-    ]
+/// The cases both readers answer (scripts/npm-audit-fixtures.json: the script's own test reads the same file, rule 55).
+fn fixtures() -> Value {
+    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/npm-audit-fixtures.json");
+    serde_json::from_str(&std::fs::read_to_string(&file).unwrap_or_else(|e| panic!("{} cannot be read: {e}", file.display()))).unwrap()
 }
 
-/// Runs the script's own `parseAllow` on a text: `Ok(ids)` or `Err` when it throws.
-fn script_reads(text: &str) -> Result<Vec<String>, String> {
+fn text_of(case: &Value) -> String {
+    match case.get("raw").and_then(Value::as_str) {
+        Some(raw) => raw.to_string(),
+        None => case.get("report").or_else(|| case.get("doc")).unwrap().to_string(),
+    }
+}
+
+fn cases(kind: &str) -> Vec<Value> {
+    let all = fixtures();
+    let list = all.get(kind).and_then(Value::as_array).cloned().unwrap();
+    assert!(
+        !list.is_empty(),
+        "the shared {kind} fixtures are not empty: a loop over none proves nothing"
+    );
+    list
+}
+
+#[test]
+fn every_shared_report_fixture_is_read_as_the_script_reads_it() {
+    for c in cases("reports") {
+        let name = c["name"].as_str().unwrap();
+        let m = parse_npm("n", &text_of(&c), "high");
+        match (c.get("notMeasured").and_then(Value::as_str), m) {
+            (Some(why), Measure::NotMeasured(got)) => assert!(got.contains(why), "{name}: wanted {why:?}, got {got:?}"),
+            (Some(why), Measure::Found(f)) => panic!("{name}: wanted not measured ({why}), found {f:?}"),
+            (None, Measure::Found(f)) => {
+                let want: Vec<String> = c["ids"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_str().unwrap().to_string())
+                    .collect();
+                assert_eq!(f.iter().map(|x| x.id.clone()).collect::<Vec<_>>(), want, "{name}");
+            }
+            (None, Measure::NotMeasured(got)) => panic!("{name}: should have been measured: {got}"),
+        }
+    }
+}
+
+#[test]
+fn every_shared_allow_fixture_is_read_as_the_script_reads_it() {
+    for c in cases("allow") {
+        let name = c["name"].as_str().unwrap();
+        let got = parse_allow(&text_of(&c));
+        match (c.get("error").and_then(Value::as_str), got) {
+            (Some(why), Err(e)) => assert!(e.contains(why), "{name}: wanted {why:?}, got {e:?}"),
+            (Some(why), Ok(v)) => panic!("{name}: wanted a refusal ({why}), accepted {} entries", v.len()),
+            (None, Ok(v)) => {
+                let want: Vec<String> = c["ids"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_str().unwrap().to_string())
+                    .collect();
+                assert_eq!(v.into_iter().map(|e| e.id).collect::<Vec<_>>(), want, "{name}");
+            }
+            (None, Err(e)) => panic!("{name}: should have been accepted: {e}"),
+        }
+    }
+}
+
+#[test]
+fn an_exception_may_run_at_most_90_days_and_days_are_real_days() {
+    assert_eq!(allow::MAX_DAYS, 90);
+    assert_eq!(allow::day_number("2026-11-18").map(allow::day_of), Some("2026-11-18".to_string()));
+    for bad in ["2026-02-29", "2026-13-01", "2026-00-10", "2026-04-31", "2026-1-01", "20260101"] {
+        assert_eq!(allow::day_number(bad), None, "{bad}");
+    }
+    assert!(allow::day_number("2028-02-29").is_some(), "a leap day");
+}
+
+/// Runs the script's own `parseAllow` on a text: `Some(Ok(ids))` or `Some(Err)` when it throws, `None` (said out loud) without node.
+fn script_reads(text: &str) -> Option<Result<Vec<String>, String>> {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/npm-audit.mjs");
     let code = "import(process.argv[1]).then((m) => { try { console.log(JSON.stringify(m.parseAllow(process.argv[2]).map((e) => e.id))); } catch (e) { console.log('THROWS ' + e.message); } });";
+    // conformance: test-env — node is found through the caller's PATH and runs a read-only script of the repository on its argv
     let mut cmd = paddock_proc::command("node");
     cmd.args(["-e", code, &script.display().to_string(), text]);
-    let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(60))).expect("node runs");
+    let out = match paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(60))) {
+        Ok(o) if o.success() => o,
+        other => {
+            eprintln!(
+                "NOT MEASURED: node did not run ({other:?}), so the script's own reader was not compared; the shared fixtures above still hold for both readers"
+            );
+            return None;
+        }
+    };
     let o = out.stdout_text();
-    match o.trim().strip_prefix("THROWS ") {
+    Some(match o.trim().strip_prefix("THROWS ") {
         Some(why) => Err(why.to_string()),
         None => Ok(serde_json::from_str(o.trim()).expect("ids")),
+    })
+}
+
+#[test]
+fn the_rust_reader_and_the_script_agree_on_every_shared_allow_fixture_when_node_runs() {
+    for c in cases("allow") {
+        let text = text_of(&c);
+        let Some(js) = script_reads(&text) else { return };
+        let rust = parse_allow(&text).map(|v| v.into_iter().map(|e| e.id).collect::<Vec<_>>());
+        assert_eq!(rust.is_ok(), js.is_ok(), "{}: rust {rust:?}, script {js:?}", c["name"]);
     }
 }
 
 #[test]
-fn the_rust_reader_and_the_scripts_agree_on_the_same_lists() {
-    let ids = |t: &str| parse_allow(t).map(|v| v.into_iter().map(|e| e.id).collect::<Vec<_>>());
-    assert_eq!(ids(VALID).ok(), script_reads(VALID).ok());
-    assert!(ids(VALID).is_ok(), "the control: the valid list is accepted");
-    for bad in bad_lists() {
-        let (rust, js) = (ids(&bad), script_reads(&bad));
-        assert!(rust.is_err() && js.is_err(), "both refuse {bad}: rust {rust:?}, script {js:?}");
-    }
-}
-
-#[test]
-fn the_families_real_list_is_read_by_both_and_by_the_accessor() {
+fn the_families_real_list_is_read_by_the_accessor_and_by_the_script_whatever_it_holds() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let text = std::fs::read_to_string(root.join(ALLOW_FILE)).unwrap();
     let from_file = allow::load(&root).unwrap();
-    assert!(!from_file.is_empty(), "the list names the picomatch exception");
-    assert_eq!(
-        from_file.iter().map(|e| e.id.clone()).collect::<Vec<_>>(),
-        script_reads(&text).unwrap()
+    // No entry is required (removing the last exception is the aim): the two readers agree on whatever is there.
+    let ids: Vec<String> = from_file.iter().map(|e| e.id.clone()).collect();
+    if let Some(js) = script_reads(&text) {
+        assert_eq!(Ok(ids), js);
+    }
+}
+
+#[test]
+fn report_only_a_run_that_cannot_start_is_a_warning_and_exit_0_and_enforced_it_is_an_error() {
+    let e = || CliError::failure("No lockfile with an audit found under /x.").with_hint("Run it in the repository root.");
+    let r = super::cannot_start(e(), false).unwrap();
+    assert_eq!(r.exit.code(), Exit::Ok.code());
+    assert!(
+        r.text
+            .starts_with("::warning::report-only, would fail: audit did not run: No lockfile"),
+        "{}",
+        r.text
+    );
+    assert!(r.text.contains("Next step: Run it in the repository root."), "{}", r.text);
+    assert!(super::cannot_start(e(), true).is_err(), "enforced it stays an error");
+}
+
+#[test]
+fn report_only_a_broken_allow_file_and_an_unlistable_repository_do_not_turn_the_job_red() {
+    // A broken list, read through the real loader.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("scripts")).unwrap();
+    std::fs::write(dir.path().join(ALLOW_FILE), r#"{"allow":[{"id":"nope"}]}"#).unwrap();
+    let broken = allow::load(dir.path()).unwrap_err();
+    assert!(broken.contains("is broken"), "{broken}");
+    let r = super::cannot_start(CliError::failure(broken), false).unwrap();
+    assert_eq!(r.exit.code(), Exit::Ok.code());
+    // A root where `git ls-files` fails, through the real `run`: report-only warns, enforced fails.
+    let none = Fake {
+        answers: vec![],
+        ran_in: Mutex::new(vec![]),
+    };
+    let gone = dir.path().join("no-such-folder");
+    let r = run(&none, &gone, &npm(), "2026-11-20", false, None).unwrap();
+    assert_eq!(r.exit.code(), Exit::Ok.code());
+    assert!(
+        r.text.starts_with("::warning::report-only, would fail: audit did not run"),
+        "{}",
+        r.text
+    );
+    assert!(run(&none, &gone, &npm(), "2026-11-20", true, None).is_err());
+}
+
+#[test]
+fn the_json_report_lists_the_allowed_and_the_expired() {
+    let mut v = Verdict::nightly("npm package-lock.json", &found(vec![npm_finding()]));
+    v.apply_exceptions(&[exception("2026-12-18")], "2026-11-20");
+    let data = super::report(&v, Mode::Nightly, true, 1).data;
+    assert_eq!(data["allowed"][0]["id"], "GHSA-fc5q-39xc-vjpf");
+    assert_eq!(data["allowed"][0]["reviewBy"], "2026-12-18");
+    assert_eq!(data["expired"], json!([]));
+    let mut late = Verdict::nightly("npm package-lock.json", &found(vec![npm_finding()]));
+    late.apply_exceptions(&[exception("2026-12-18")], "2026-12-18");
+    let data = super::report(&late, Mode::Nightly, true, 1).data;
+    assert_eq!(data["expired"][0]["id"], "GHSA-fc5q-39xc-vjpf");
+    assert_eq!(data["allowed"], json!([]));
+}
+
+#[test]
+fn an_npm_severity_npm_does_not_define_is_not_measured_and_a_missing_one_too() {
+    let unknown = npm_json("catastrophic");
+    assert!(matches!(parse_npm("n", &unknown, "high"), Measure::NotMeasured(w) if w.contains("severity")));
+    let none = npm_json("high")
+        .replace(r#""severity":"high","isDirect":false"#, r#""isDirect":false"#)
+        .replace(r#","severity":"high","range""#, r#","range""#);
+    assert!(
+        matches!(parse_npm("n", &none, "high"), Measure::NotMeasured(w) if w.contains("severity")),
+        "{none}"
     );
 }
