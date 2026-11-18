@@ -32,9 +32,6 @@ pub enum Mode {
     IgnoreTerm,
     /// Print `ready`, sleep; exits cleanly on SIGTERM (the default action).
     Polite,
-    /// A request-and-answer server: for each line read on stdin print `CHILD:len <n>`, then the line's `n` bytes and a newline;
-    /// the line `quiet` gets no answer, `exit` ends it, and the end of stdin ends it.
-    Answer,
     /// Stop the programs named in `PADDOCK_STOP_IMAGES` in the folder `PADDOCK_STOP_DIR` with `installed::stop_all_here`,
     /// print the exit code, then `alive` and sleep (Windows): the stopper must survive its own folder being cleared.
     #[cfg(windows)]
@@ -59,7 +56,6 @@ impl Mode {
             Mode::Exit3 => "exit3",
             Mode::IgnoreTerm => "ignore_term",
             Mode::Polite => "polite",
-            Mode::Answer => "answer",
             #[cfg(windows)]
             Mode::StopSelf => "stop_self",
             Mode::Freed => "freed",
@@ -171,20 +167,6 @@ fn helper_main() {
         "polite" => {
             say("ready");
             sleep_out();
-        }
-        "answer" => {
-            use std::io::BufRead;
-            for line in std::io::stdin().lock().lines() {
-                let Ok(line) = line else { break };
-                match line.as_str() {
-                    "quiet" => continue,
-                    "exit" => break,
-                    _ => {}
-                }
-                let mut out = std::io::stdout().lock();
-                let _ = write!(out, "{PREFIX}len {}\n{line}\n", line.len());
-                let _ = out.flush();
-            }
         }
         _ => {}
     }
