@@ -2767,3 +2767,25 @@ passed in runs 8218 and 8225 on the same tree and 20 of 20 locally (Chromium, 4 
 recorded here and not blocking, by the coordinator's decision. Next: reproduce in the Linux CI container with a failing run first,
 then wait for the layout to settle (two reads agree, ER-12) before the comparison. **Class: an e2e read before the layout settled
 (the ready-read class; train 13's workbench palette, Dyno alarms, gallery menu, grid header, Pitwall tray and Manage-layouts rename).**
+
+## The notices generator took a missing npm install for an empty one (2026-11-18, ER-33)
+
+`bash scripts/notices.sh dyno --check` in a worktree set up with `npm ci --ignore-scripts -w conformance` said "out of date", and
+a write run would have written a wrong file. `scripts/notices.sh` ran `npm ci` only when the root `node_modules` folder was missing,
+and that recipe leaves one (only `yaml` and the conformance link). `npmPackages` then found no folder for any of Dyno's 76
+production packages, warned `no licence file found` 76 times, rendered each as `[no text]` and dropped the 46 texts only npm
+packages use: 288 distinct texts became 242 and every `[MIT-n]` label moved. Measured (Mac, cargo-about 0.9.2, train 15): with a
+full root `npm ci` the output is byte-identical to the committed file and `--check` exits 0 for Dyno and Pitwall, so the OS was never
+the cause; 1222 licence files of the user's cargo registry against a fresh one (0 differ), CRLF, the cargo-about version and the
+targets were ruled out. It had cost false "stale" findings; no committed file ever carried the shape.
+**Fix, one mechanism.** `npmPackages` throws when a production package the lock lists has no installed folder, an unparseable
+package.json or another installed version (only a package npm marks optional may be absent: a warning, and it is left out of the
+render; an installed package with no licence file stays a warning). `paddock-notices` exits 6 (not measured, which `./dev gen check`
+reads as "could not look") and writes nothing. `--provision` (what `scripts/notices.sh` passes, now a 12-line wrapper) looks after
+the tools in the CLI: with `--check` it installs nothing (no `npm ci`, no cargo-about install; the version probe runs with
+`RUSTUP_AUTO_INSTALL=0`, ER-45) and exits 6 with the cause and the next step; a write run installs cargo-about and runs
+`npm ci --ignore-scripts`. A caller of `--check` must therefore install the npm packages first (debrief.yml's licences job did not
+and got the step added; the generator registry declares the install in `requires`).
+Class: a generator or check that treats a missing input as an empty input; compare the input with what declares it (here the
+lock) and stop when they differ.
+**Recurring: input-precondition-not-verified** (ER-33 cases on Dyno 1.1.0, the 2026-11-17 Debrief dock spec, `every()` over nothing in ER-12).
