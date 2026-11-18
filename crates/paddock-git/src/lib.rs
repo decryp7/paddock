@@ -74,24 +74,72 @@ pub struct Object {
 /// One entry of a tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
-    /// The mode as git writes it (`100644`, `100755`, `120000`, `40000`, `160000`).
-    pub mode: String,
-    /// The name (one path component, or, from [`Reader::walk`], the path from the walked tree with `/`), as bytes may not be
-    /// UTF-8: lossy.
+    /// The mode.
+    pub mode: Mode,
+    /// The name (one path component, or, from [`Reader::walk`], the path from the walked tree with `/`). A tree with a name that
+    /// is not UTF-8 is an error ([`GitError::NotUtf8`]), never decoded lossily (two such names would become one path).
     pub path: String,
     /// The object id (hex).
     pub oid: String,
 }
 
+/// A tree entry's mode, canonicalised as git reads it (`canon_mode` in git's `tree-walk.c`, `decode_tree_entry`): one of the five
+/// kinds, so two trees that only spell a mode differently (`040000` against `40000`, an old `100664` file) compare equal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Mode(u32);
+
+impl Mode {
+    /// A folder.
+    pub const TREE: Mode = Mode(0o040000);
+    /// A file.
+    pub const FILE: Mode = Mode(0o100644);
+    /// An executable file.
+    pub const EXECUTABLE: Mode = Mode(0o100755);
+    /// A symbolic link.
+    pub const SYMLINK: Mode = Mode(0o120000);
+    /// A submodule (a commit in a tree).
+    pub const SUBMODULE: Mode = Mode(0o160000);
+
+    /// The canonical mode of the octal digits a tree holds, `None` when they are not octal (at most 7 digits).
+    pub fn parse(digits: &[u8]) -> Option<Mode> {
+        if digits.is_empty()
+            || digits.len() > 7
+            || !digits.iter().all(|d| (b'0'..=b'7').contains(d))
+        {
+            return None;
+        }
+        let raw = digits.iter().fold(0u32, |n, d| n * 8 + u32::from(d - b'0'));
+        Some(match raw & 0o170000 {
+            0o100000 if raw & 0o100 != 0 => Mode::EXECUTABLE,
+            0o100000 => Mode::FILE,
+            0o120000 => Mode::SYMLINK,
+            0o040000 => Mode::TREE,
+            _ => Mode::SUBMODULE,
+        })
+    }
+
+    /// The mode as a number (`0o100644`).
+    pub fn bits(self) -> u32 {
+        self.0
+    }
+}
+
+impl std::fmt::Display for Mode {
+    /// As `git ls-tree` writes it, without the folder's leading zero (`40000`, `100644`).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:o}", self.0)
+    }
+}
+
 impl Entry {
     /// A subtree.
     pub fn is_tree(&self) -> bool {
-        self.mode == "40000"
+        self.mode == Mode::TREE
     }
 
     /// A submodule (a commit in a tree).
     pub fn is_submodule(&self) -> bool {
-        self.mode == "160000"
+        self.mode == Mode::SUBMODULE
     }
 }
 
@@ -111,6 +159,17 @@ pub enum GitError {
     },
     /// The request holds a newline, which the batch protocol cannot carry.
     BadRequest(String),
+    /// A tree holds a name that is not UTF-8 (its bytes).
+    NotUtf8(Vec<u8>),
+    /// The object is over the reader's size cap ([`MAX_OBJECT`], or [`Reader::with_max_object`]); it was not read.
+    TooLarge {
+        /// The request.
+        spec: String,
+        /// The object's size in bytes, from its header.
+        size: usize,
+        /// The cap.
+        max: usize,
+    },
 }
 
 impl std::fmt::Display for GitError {
@@ -119,6 +178,14 @@ impl std::fmt::Display for GitError {
             GitError::Process(e) => write!(f, "git cat-file: {e}"),
             GitError::Protocol(s) => write!(f, "git cat-file answered something unreadable: {s}"),
             GitError::WrongKind { spec, kind } => write!(f, "{spec} is a {kind:?}, not a file"),
+            GitError::NotUtf8(name) => write!(
+                f,
+                "a tree holds the name {:?}, which is not UTF-8 (read it through git)",
+                String::from_utf8_lossy(name)
+            ),
+            GitError::TooLarge { spec, size, max } => {
+                write!(f, "{spec} is {size} bytes, over the reader's cap of {max}")
+            }
             GitError::BadRequest(s) => write!(
                 f,
                 "{s:?} holds a newline, which git cat-file cannot be asked"
@@ -149,6 +216,7 @@ pub struct Reader {
     session: Option<Session>,
     starts: usize,
     limits: SessionLimits,
+    max_object: usize,
 }
 
 impl std::fmt::Debug for Reader {
@@ -168,7 +236,8 @@ impl Reader {
             make: Box::new(make),
             session: None,
             starts: 0,
-            limits: SessionLimits::new(READ_TIMEOUT).max_answer(MAX_OBJECT),
+            limits: SessionLimits::new(READ_TIMEOUT).max_answer(MAX_OBJECT + 1),
+            max_object: MAX_OBJECT,
         }
     }
 
@@ -191,6 +260,13 @@ impl Reader {
     /// The same reader with another limit per answer (tests).
     pub fn with_read_timeout(mut self, timeout: Duration) -> Reader {
         self.limits.read_timeout = timeout;
+        self
+    }
+
+    /// The same reader with another size cap per object (tests; [`MAX_OBJECT`] by default).
+    pub fn with_max_object(mut self, max: usize) -> Reader {
+        self.max_object = max;
+        self.limits = self.limits.max_answer(max.saturating_add(1));
         self
     }
 
@@ -236,9 +312,15 @@ impl Reader {
     ///
     /// When git fails or answers something unreadable.
     pub fn info(&mut self, spec: &str) -> Result<Option<Info>, GitError> {
-        match self.gix.as_ref().map(|g| g.lookup(spec)) {
+        match self
+            .gix
+            .as_ref()
+            .map(|g| g.lookup(spec, false, self.max_object))
+        {
             Some(Said::Found(o)) => Ok(Some(o.info)),
+            Some(Said::Header(i)) => Ok(Some(i)),
             Some(Said::Absent) => Ok(None),
+            Some(Said::TooLarge(size)) => Err(self.too_large(spec, size)),
             Some(Said::AskGit) | None => self.ask("info", spec),
         }
     }
@@ -252,14 +334,24 @@ impl Reader {
         if spec.contains('\n') {
             return Err(GitError::BadRequest(spec.to_string()));
         }
-        match self.gix.as_ref().map(|g| g.lookup(spec)) {
+        match self
+            .gix
+            .as_ref()
+            .map(|g| g.lookup(spec, true, self.max_object))
+        {
             Some(Said::Found(o)) => return Ok(Some(o)),
             Some(Said::Absent) => return Ok(None),
-            Some(Said::AskGit) | None => {}
+            Some(Said::TooLarge(size)) => return Err(self.too_large(spec, size)),
+            Some(Said::Header(_) | Said::AskGit) | None => {}
         }
         let Some(info) = self.ask("contents", spec)? else {
             return Ok(None);
         };
+        if info.size > self.max_object {
+            // Its content is on the pipe unread: this process is done.
+            self.session = None;
+            return Err(self.too_large(spec, info.size));
+        }
         let r = (|| {
             let s = self.session()?;
             let mut data = s.read_exact(info.size + 1)?;
@@ -276,6 +368,14 @@ impl Reader {
                 self.session = None;
                 Err(e)
             }
+        }
+    }
+
+    fn too_large(&self, spec: &str, size: usize) -> GitError {
+        GitError::TooLarge {
+            spec: spec.to_string(),
+            size,
+            max: self.max_object,
         }
     }
 
@@ -365,11 +465,18 @@ struct Gix {
 enum Said {
     /// The object, read in process.
     Found(Object),
+    /// Its header only (an `info` request: the object is not loaded).
+    Header(Info),
     /// The revision's tree has no such path: absent, as `cat-file` would say.
     Absent,
+    /// The object's header says it is over the cap (its size); it was not loaded.
+    TooLarge(usize),
     /// gix cannot answer (a ref name, a short id, an object it does not have: a partial clone's omitted blob): ask git.
     AskGit,
 }
+
+/// How many tags and commits a peel follows before it gives the request to git.
+const MAX_PEELS: usize = 16;
 
 impl Gix {
     fn open(root: &std::path::Path) -> Option<Gix> {
@@ -387,26 +494,67 @@ impl Gix {
         .flatten()
     }
 
-    fn object(o: gix::Object<'_>) -> Option<Object> {
-        let kind = match o.kind {
+    fn kind(k: gix::object::Kind) -> Kind {
+        match k {
             gix::object::Kind::Blob => Kind::Blob,
             gix::object::Kind::Tree => Kind::Tree,
             gix::object::Kind::Commit => Kind::Commit,
             gix::object::Kind::Tag => Kind::Tag,
-        };
-        let o = o.detach();
-        Some(Object {
-            info: Info {
-                oid: o.id.to_hex().to_string(),
-                kind,
-                size: o.data.len(),
-            },
-            data: o.data,
-        })
+        }
     }
 
-    /// `<oid>`, `<oid>^{tree}`, `<oid>^{commit}` and `<oid>:<path>`; anything else is git's to answer.
-    fn lookup(&self, spec: &str) -> Said {
+    /// The object `id` names: its header first, and its content only when `data` and the header says it is at most `max` bytes.
+    fn fetch(&self, id: gix::ObjectId, data: bool, max: usize) -> Said {
+        let Ok(Some(h)) = self.repo.try_find_header(id) else {
+            return Said::AskGit;
+        };
+        let info = Info {
+            oid: id.to_hex().to_string(),
+            kind: Gix::kind(h.kind()),
+            size: usize::try_from(h.size()).unwrap_or(usize::MAX),
+        };
+        if !data {
+            return Said::Header(info);
+        }
+        if info.size > max {
+            return Said::TooLarge(info.size);
+        }
+        match self.repo.try_find_object(id) {
+            Ok(Some(o)) => Said::Found(Object {
+                info,
+                data: o.detach().data,
+            }),
+            _ => Said::AskGit,
+        }
+    }
+
+    /// `id` peeled to `want` (through tags, and a commit to its tree), each object read under the cap; `Err` with the answer to
+    /// give when it cannot be (an object over the cap, or git's to answer).
+    fn peel(&self, mut id: gix::ObjectId, want: Kind, max: usize) -> Result<gix::ObjectId, Said> {
+        for _ in 0..MAX_PEELS {
+            let o = match self.fetch(id, true, max) {
+                Said::Found(o) => o,
+                Said::TooLarge(n) => return Err(Said::TooLarge(n)),
+                _ => return Err(Said::AskGit),
+            };
+            let next = match (o.info.kind, want) {
+                (k, w) if k == w => return Ok(id),
+                (Kind::Tag, _) => {
+                    gix::objs::TagRef::from_bytes(&o.data, id.kind()).map(|t| t.target())
+                }
+                (Kind::Commit, Kind::Tree) => {
+                    gix::objs::CommitRef::from_bytes(&o.data, id.kind()).map(|c| c.tree())
+                }
+                _ => return Err(Said::AskGit),
+            };
+            id = next.map_err(|_| Said::AskGit)?;
+        }
+        Err(Said::AskGit)
+    }
+
+    /// `<oid>`, `<oid>^{tree}`, `<oid>^{commit}` and `<oid>:<path>`; anything else is git's to answer. Every object on the way is
+    /// read under the cap `max`, checked against its header before it is loaded.
+    fn lookup(&self, spec: &str, data: bool, max: usize) -> Said {
         let (rev, path) = match spec.split_once(':') {
             Some((r, p)) => (r, Some(p)),
             None => (spec, None),
@@ -418,41 +566,42 @@ impl Gix {
         let Some(id) = Gix::id(hex) else {
             return Said::AskGit;
         };
-        let Ok(Some(obj)) = self.repo.try_find_object(id) else {
-            return Said::AskGit;
+        let found = match (peel, path) {
+            (None, None) => Ok(id),
+            (Some("tree"), None) => self.peel(id, Kind::Tree, max),
+            (Some("commit"), None) => self.peel(id, Kind::Commit, max),
+            (None, Some(path)) => self
+                .peel(id, Kind::Tree, max)
+                .and_then(|tree| self.entry(tree, path, max)),
+            _ => Err(Said::AskGit),
         };
-        let obj = match peel {
-            None => obj,
-            Some("tree") => match obj.peel_to_kind(gix::object::Kind::Tree) {
-                Ok(t) => t,
-                Err(_) => return Said::AskGit,
-            },
-            Some("commit") => match obj.peel_to_kind(gix::object::Kind::Commit) {
-                Ok(c) => c,
-                Err(_) => return Said::AskGit,
-            },
-            Some(_) => return Said::AskGit,
-        };
-        let Some(path) = path else {
-            return Gix::object(obj).map_or(Said::AskGit, Said::Found);
-        };
-        if path.is_empty() {
-            return match obj.peel_to_kind(gix::object::Kind::Tree) {
-                Ok(t) => Gix::object(t).map_or(Said::AskGit, Said::Found),
-                Err(_) => Said::AskGit,
+        match found {
+            Ok(id) => self.fetch(id, data, max),
+            Err(said) => said,
+        }
+    }
+
+    /// The object at `path` (components joined by `/`; empty is the tree itself) under `tree`. `Err(Said::Absent)` when a component
+    /// is not there or a file stands where a folder is named, `Err(Said::TooLarge)` for a tree on the way over the cap, and
+    /// `Err(Said::AskGit)` when gix cannot read one (git answers then).
+    fn entry(&self, tree: gix::ObjectId, path: &str, max: usize) -> Result<gix::ObjectId, Said> {
+        let mut id = tree;
+        for name in path.split('/').filter(|c| !c.is_empty()) {
+            let o = match self.fetch(id, true, max) {
+                Said::Found(o) => o,
+                Said::TooLarge(n) => return Err(Said::TooLarge(n)),
+                _ => return Err(Said::AskGit),
             };
+            if o.info.kind != Kind::Tree {
+                return Err(Said::Absent);
+            }
+            let entries = parse_tree(&o.data, id.as_slice().len()).map_err(|_| Said::AskGit)?;
+            let Some(e) = entries.into_iter().find(|e| e.path == name) else {
+                return Err(Said::Absent);
+            };
+            id = gix::ObjectId::from_hex(e.oid.as_bytes()).map_err(|_| Said::AskGit)?;
         }
-        let Ok(tree) = obj.peel_to_tree() else {
-            return Said::AskGit;
-        };
-        match tree.lookup_entry_by_path(path) {
-            Ok(None) => Said::Absent,
-            Ok(Some(entry)) => match entry.object() {
-                Ok(o) => Gix::object(o).map_or(Said::AskGit, Said::Found),
-                Err(_) => Said::AskGit,
-            },
-            Err(_) => Said::AskGit,
-        }
+        Ok(id)
     }
 }
 
@@ -498,9 +647,12 @@ fn parse_tree(data: &[u8], id_len: usize) -> Result<Vec<Entry>, GitError> {
             + sp;
         let end = nul + 1 + id_len;
         let id = data.get(nul + 1..end).ok_or_else(|| bad(nul))?;
+        let name = &data[sp + 1..nul];
         out.push(Entry {
-            mode: String::from_utf8_lossy(&data[i..sp]).into_owned(),
-            path: String::from_utf8_lossy(&data[sp + 1..nul]).into_owned(),
+            mode: Mode::parse(&data[i..sp]).ok_or_else(|| bad(i))?,
+            path: std::str::from_utf8(name)
+                .map_err(|_| GitError::NotUtf8(name.to_vec()))?
+                .to_string(),
             oid: id.iter().map(|b| format!("{b:02x}")).collect(),
         });
         i = end;
@@ -548,11 +700,52 @@ mod tests {
         let e = parse_tree(&t, 20).unwrap();
         assert_eq!(e.len(), 2);
         assert_eq!(
-            (e[0].mode.as_str(), e[0].path.as_str(), e[0].oid.as_str()),
+            (
+                e[0].mode.to_string().as_str(),
+                e[0].path.as_str(),
+                e[0].oid.as_str()
+            ),
             ("100644", "a.txt", "11".repeat(20).as_str())
         );
         assert!(e[1].is_tree() && !e[0].is_tree());
         assert!(parse_tree(&t[..t.len() - 3], 20).is_err());
         assert!(parse_tree(b"100644 no-nul", 20).is_err());
+    }
+
+    /// git reads a tree's mode as an octal number and canonicalises it (`canon_mode`): `040000` (a tool's zero-padded form) is a
+    /// tree as `40000` is, and an old `100664` file is `100644`, so two trees that differ only in how a mode is spelled are equal.
+    #[test]
+    fn a_mode_is_read_as_a_number_and_canonicalised() {
+        let mut t = b"040000 d\0".to_vec();
+        t.extend([0x22; 20]);
+        t.extend(b"100664 f\0");
+        t.extend([0x11; 20]);
+        t.extend(b"100775 x\0");
+        t.extend([0x33; 20]);
+        let e = parse_tree(&t, 20).unwrap();
+        assert!(e[0].is_tree(), "040000 is a tree");
+        assert_eq!(e[0].mode, Mode::TREE);
+        assert_eq!(e[1].mode, Mode::FILE, "100664 is git's 100644");
+        assert_eq!(e[2].mode, Mode::EXECUTABLE, "100775 is git's 100755");
+        assert_eq!(e[0].mode.to_string(), "40000", "written as git writes it");
+        let mut bad = b"10x644 f\0".to_vec();
+        bad.extend([0x11; 20]);
+        assert!(
+            parse_tree(&bad, 20).is_err(),
+            "a mode that is not octal is malformed"
+        );
+    }
+
+    /// Two names that are not UTF-8 would both decode to U+FFFD and become one path: such a tree is an error, never merged.
+    #[test]
+    fn a_name_that_is_not_utf8_is_an_error_not_a_lossy_path() {
+        let mut t = b"100644 \xfe\0".to_vec();
+        t.extend([0x11; 20]);
+        t.extend(b"100644 \xff\0");
+        t.extend([0x22; 20]);
+        match parse_tree(&t, 20) {
+            Err(GitError::NotUtf8(name)) => assert_eq!(name, vec![0xfe]),
+            other => panic!("{other:?}"),
+        }
     }
 }
