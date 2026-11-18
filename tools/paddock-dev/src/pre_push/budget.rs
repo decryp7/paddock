@@ -19,11 +19,43 @@ pub struct Timing {
     pub ran: f64,
 }
 
+/// How far the heavy step in flight has got, as the executor sees it live.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Slot {
+    /// Nothing is known (the executor does not look).
+    #[default]
+    Unknown,
+    /// Waiting for the machine-wide slot since `since` (when the step was handed to `heavy`: the build of `heavy` before it is
+    /// not waiting for others): every second since is waiting for others.
+    Queued {
+        /// When the wait began.
+        since: Instant,
+    },
+    /// The slot was taken at `at` after waiting since `since`; the command has been running since `at`.
+    Taken {
+        /// When the wait began.
+        since: Instant,
+        /// When the slot was taken.
+        at: Instant,
+    },
+}
+
+/// The heavy step of the push in flight, as the clock knows it: which one (the instant it was launched), the most its wait may
+/// count (its own `--queue-max`) and how far it has got.
+struct Live {
+    token: Instant,
+    max: Duration,
+    slot: Slot,
+}
+
 #[derive(Default)]
 struct Inner {
     credit: Duration,
     /// Spans in which a gate of this push held the slot.
     held: Vec<(Instant, Instant)>,
+    /// The heavy step in flight, if any: its live wait counts in [`BudgetClock::left_live`] until [`BudgetClock::record`] or
+    /// [`BudgetClock::end_step`] clears it, under the same lock as the credit, so a wait is never counted twice.
+    live: Option<Live>,
 }
 
 /// The budget of one push gate: `total` of run time from `start`, plus the time its steps queued for others.
@@ -71,6 +103,53 @@ impl BudgetClock {
         (self.start + self.total + credit).saturating_duration_since(now)
     }
 
+    /// A heavy step of this push is launched at `token` and may wait `max` at most (its own queue limit).
+    pub fn begin_step(&self, token: Instant, max: Duration) {
+        if let Ok(mut i) = self.inner.lock() {
+            i.live = Some(Live {
+                token,
+                max,
+                slot: Slot::Unknown,
+            });
+        }
+    }
+
+    /// What the executor says about the step launched at `token`; ignored when that step has already ended (a late answer about a
+    /// step whose credit is on the clock must not count again).
+    pub fn observe(&self, token: Instant, slot: Slot) {
+        if let Ok(mut i) = self.inner.lock()
+            && let Some(l) = i.live.as_mut()
+            && l.token == token
+        {
+            l.slot = slot;
+        }
+    }
+
+    /// The step in flight is over without a timing to record (nothing was measured): its live wait stops counting.
+    pub fn end_step(&self) {
+        if let Ok(mut i) = self.inner.lock() {
+            i.live = None;
+        }
+    }
+
+    /// [`BudgetClock::left`] while a heavy step of this push is in flight: its wait so far is not run time either, but it is
+    /// credited only when the step ends ([`BudgetClock::record`]), so a row that starts meanwhile would see the budget spent by
+    /// waiting for others. The wait is what [`Slot`] says (queued: since it began; taken: until then), at most the step's queue
+    /// limit; no step in flight, or nothing known (no live credit: the end-of-step credit is all there is, as for a `heavy.sh`
+    /// of someone else's): none. Credit and live wait are read under one lock.
+    pub fn left_live(&self, now: Instant) -> Duration {
+        let Ok(i) = self.inner.lock() else { return Duration::ZERO };
+        let waited = i.live.as_ref().map_or(Duration::ZERO, |l| {
+            let w = match l.slot {
+                Slot::Unknown => Duration::ZERO,
+                Slot::Queued { since } => now.saturating_duration_since(since),
+                Slot::Taken { since, at } => at.min(now).saturating_duration_since(since),
+            };
+            w.min(l.max)
+        });
+        (self.start + self.total + i.credit + waited).saturating_duration_since(now)
+    }
+
     /// The total credit so far.
     pub fn credit(&self) -> Duration {
         self.inner.lock().map_or(Duration::ZERO, |i| i.credit)
@@ -87,6 +166,7 @@ impl BudgetClock {
         i.credit += queued.saturating_sub(own);
         // Even a step that did not queue held the slot from `started`: a sibling that queued behind it is not waiting for others.
         i.held.push((held_at, ended));
+        i.live = None;
     }
 }
 
@@ -149,6 +229,18 @@ pub fn with_heavy_flags(prefix: &[String], priority: bool, queue_max: Duration, 
     out
 }
 
+/// `prefix` (our `heavy run <agent> --`) with `name` as the agent: a step's own name, so its lines in a log are told from any other
+/// step's (`<name> holds the lock (pid`). Anything else (not our `heavy`) is returned unchanged.
+pub fn with_agent_name(prefix: &[String], name: &str) -> Vec<String> {
+    let ours = prefix.len() >= 3 && prefix[1] == "run" && prefix.last().is_some_and(|l| l == "--");
+    let mut out = prefix.to_vec();
+    if ours {
+        let at = out.len() - 2;
+        out[at] = name.to_string();
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,6 +268,46 @@ mod tests {
         c.record(at(b, 0), at(b, 1500), Duration::from_secs(1200));
         assert_eq!(c.credit(), Duration::from_secs(1200));
         assert_eq!(c.left(at(b, 1500)), Duration::from_secs(600));
+    }
+
+    #[test]
+    fn a_step_still_queued_is_not_run_time_and_one_that_got_the_slot_counts_only_from_then() {
+        let b = Instant::now();
+        let c = BudgetClock::new(b, MIN15);
+        let max = Duration::from_secs(1800);
+        c.begin_step(b, max);
+        // queued the whole 20 minutes: all run time is left
+        c.observe(b, Slot::Queued { since: b });
+        assert_eq!(c.left_live(at(b, 1200)), MIN15);
+        // the slot taken at 300 s: at 700 s, 400 s have run
+        c.observe(b, Slot::Taken { since: b, at: at(b, 300) });
+        assert_eq!(c.left_live(at(b, 700)), Duration::from_secs(500));
+        // the build of heavy before the wait began (queued since 100 s) is not waiting for others
+        c.observe(b, Slot::Queued { since: at(b, 100) });
+        assert_eq!(c.left_live(at(b, 700)), Duration::from_secs(800));
+        // the wait counts at most the step's own queue limit
+        c.begin_step(b, Duration::from_secs(60));
+        c.observe(b, Slot::Queued { since: b });
+        assert_eq!(c.left_live(at(b, 700)), Duration::from_secs(260));
+        // nothing known, or no step in flight: the wall clock
+        c.observe(b, Slot::Unknown);
+        assert_eq!(c.left_live(at(b, 700)), Duration::from_secs(200));
+        c.end_step();
+        c.observe(b, Slot::Queued { since: b });
+        assert_eq!(c.left_live(at(b, 700)), Duration::from_secs(200), "no step in flight");
+    }
+
+    #[test]
+    fn a_late_answer_about_a_step_whose_credit_is_recorded_is_not_counted_twice() {
+        let b = Instant::now();
+        let c = BudgetClock::new(b, MIN15);
+        c.begin_step(b, Duration::from_secs(1800));
+        c.observe(b, Slot::Taken { since: b, at: at(b, 300) });
+        // the step ends: its 300 s are credit now ...
+        c.record(b, at(b, 400), Duration::from_secs(300));
+        // ... and a stale answer of the executor about it does not add them again
+        c.observe(b, Slot::Taken { since: b, at: at(b, 300) });
+        assert_eq!(c.left_live(at(b, 400)), Duration::from_secs(800));
     }
 
     #[test]
@@ -239,6 +371,19 @@ mod tests {
         ] {
             assert!(!is_landing_ref(no), "{no}");
         }
+    }
+
+    #[test]
+    fn a_step_gets_its_own_agent_name_in_our_heavy_only() {
+        let ours: Vec<String> = ["heavy", "run", "--high", "--queue-max", "1", "pre-push", "--"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            with_agent_name(&ours, "pre-push-7-1").join(" "),
+            "heavy run --high --queue-max 1 pre-push-7-1 --"
+        );
+        let other = vec!["heavy.sh".to_string()];
+        assert_eq!(with_agent_name(&other, "x"), other);
     }
 
     #[test]
