@@ -304,7 +304,7 @@
    "c99": false,
    "tools": false,
    "icons": false,
-   "paddockDev": true,
+   "paddockDev": false,
    "docs": false,
    "apps": [
     "debrief",
@@ -570,7 +570,7 @@
    "c99": false,
    "tools": true,
    "icons": false,
-   "paddockDev": true,
+   "paddockDev": false,
    "docs": false,
    "apps": [],
    "kinds": {}
@@ -1239,7 +1239,7 @@
    "c99": true,
    "tools": false,
    "icons": false,
-   "paddockDev": true,
+   "paddockDev": false,
    "docs": true,
    "apps": [
     "dyno"

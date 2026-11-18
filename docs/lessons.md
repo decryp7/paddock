@@ -2918,3 +2918,11 @@ four workers on four CPUs). macOS, both engines: green before and after (not the
 headless software renderer) is not measured; the per-tick work (what re-renders) is a product question for Debrief's live tail.
 **Class: a test runs a moving source it does not need while it reads** (earlier: the events-grid fix item, 2026-11-17, and the
 live-tail toast clicks, 2026-11-12, above).
+
+## Fix item: drop the `golden::` nextest waiver once the real legs are measured (2026-11-19)
+
+The `golden::` waiver in `tools/paddock-dev/.config/nextest.toml` (4 x 60 s) was made for the node runs of `scripts/affected.mjs`, which are
+gone since the planner retirement (2026-11-18). On the Mac the 20 golden tests now take 11 s in all, but ER-9 and ER-12 do not let one Mac
+decide it. **To do:** read the `golden::` test durations from the next train CI run (the Windows and Mac legs), and if every one is inside the
+60 s default, delete the override and the `golden::` entry of the default profile's override. Until then the old budget stays, with its old
+cause noted in the file.

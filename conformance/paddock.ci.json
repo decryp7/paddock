@@ -83,7 +83,9 @@
   },
   "tests": [
     "cd conformance",
-    "npm test"
+    "npm test",
+    "cd ..",
+    "cargo nextest run --manifest-path tools/paddock-dev/Cargo.toml --profile ci --no-tests=fail -E 'test(/^contracts::/)'"
   ],
   "paddock": [
     "node conformance/bin/paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS"
