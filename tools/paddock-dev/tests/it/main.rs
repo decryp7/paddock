@@ -27,6 +27,7 @@ mod contracts;
 mod dev_bin;
 mod dev_tool_publish;
 mod dev_tool_workflow;
+mod gates_planner;
 mod generators;
 mod golden;
 mod host_steps;

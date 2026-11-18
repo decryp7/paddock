@@ -206,41 +206,73 @@ pub fn is_shallow(root: &Path) -> bool {
 /// What the planner said per file, or why it could not.
 type Answers = Result<std::collections::BTreeMap<String, std::collections::BTreeSet<String>>, String>;
 
-/// The planner's answers, from `scripts/affected-marks.mjs` (one node run for every file asked about).
-pub struct NodePlanner {
+/// The names of ci.yml's plan job outputs a plan turns on (what C100 compares with a check's planned lines): `crates`, `ui`,
+/// `eslint`, `conformance`, `tools`, `icons`, `paddock_dev`, `c99` and `any_app`.
+pub fn outputs_of(plan: &serde_json::Value) -> std::collections::BTreeSet<String> {
+    let on = |k: &str| plan[k].as_bool().unwrap_or(false);
+    let mut out: std::collections::BTreeSet<String> = ["crates", "ui", "eslint", "conformance", "tools", "icons"]
+        .into_iter()
+        .filter(|k| on(k))
+        .map(String::from)
+        .collect();
+    for (key, name) in [("paddockDev", "paddock_dev"), ("c99", "c99")] {
+        if on(key) {
+            out.insert(name.into());
+        }
+    }
+    if plan["apps"].as_array().is_some_and(|a| !a.is_empty()) {
+        out.insert("any_app".into());
+    }
+    out
+}
+
+/// The planner's answers from `./dev plan` itself, in this process: the graphs are read once (`cargo metadata` of every
+/// workspace), then one plan per file, with no workflow narrowing and no file content (a change of the file alone).
+pub struct RustPlanner {
     root: PathBuf,
     answers: std::cell::RefCell<Option<Answers>>,
 }
 
-impl NodePlanner {
-    /// A planner that asks the repository's own `scripts/affected-marks.mjs`.
-    pub fn new(root: &Path) -> NodePlanner {
-        NodePlanner {
+impl RustPlanner {
+    /// A planner over the repository at `root`.
+    pub fn new(root: &Path) -> RustPlanner {
+        RustPlanner {
             root: root.to_path_buf(),
             answers: std::cell::RefCell::new(None),
         }
     }
 }
 
-impl super::gating::Planner for NodePlanner {
+impl super::gating::Planner for RustPlanner {
     fn prefetch(&self, files: &[String]) {
-        let input = serde_json::Value::from(files.to_vec()).to_string();
+        use crate::plan::{Options, affected, conformance_apps, per_machine_apps, read_graph};
         let started = std::time::Instant::now();
-        let run = Real
-            .run("node", &["scripts/affected-marks.mjs"], &self.root, Some(input.as_bytes()))
+        let history = paddock_repo_graph::GitHistory::new(&self.root, std::time::Duration::from_secs(120));
+        let run = read_graph(&self.root, &history)
             .map_err(|e| {
                 format!(
-                    "`node scripts/affected-marks.mjs` for {} files failed after {} ms: {} (node must be on PATH)",
+                    "the planner could not read the graphs for {} files after {} ms: {e}",
                     files.len(),
-                    started.elapsed().as_millis(),
-                    e.message
+                    started.elapsed().as_millis()
                 )
             })
-            .and_then(|out| {
-                serde_json::from_str::<std::collections::BTreeMap<String, Vec<String>>>(&out)
-                    .map_err(|e| format!("scripts/affected-marks.mjs printed no JSON: {e}"))
-            })
-            .map(|m| m.into_iter().map(|(k, v)| (k, v.into_iter().collect())).collect());
+            .and_then(|graph| {
+                let naming = |f: &str| crate::plan_repo::files_naming_generated(&self.root, f);
+                let opts = Options {
+                    crates_naming: Some(&naming),
+                    per_machine_apps: per_machine_apps(&self.root),
+                    conformance_apps: conformance_apps(&self.root),
+                    ..Options::default()
+                };
+                files
+                    .iter()
+                    .map(|f| {
+                        affected(std::slice::from_ref(f), &graph, &opts)
+                            .map(|plan| (f.clone(), outputs_of(&plan)))
+                            .map_err(|e| format!("the planner could not plan {f}: {e}"))
+                    })
+                    .collect()
+            });
         *self.answers.borrow_mut() = Some(run);
     }
 
@@ -254,6 +286,11 @@ impl super::gating::Planner for NodePlanner {
             Err(_) => None,
         }
     }
+}
+
+/// The planner `dev gates check` and `dev gates list` ask (one constructor for both, so a test can see which planner it is).
+pub fn planner(root: &Path) -> RustPlanner {
+    RustPlanner::new(root)
 }
 
 /// The register at the merge base of `base` and HEAD, so that a branch is compared with the commit it started from and a growing
@@ -461,5 +498,13 @@ mod tests {
         assert!(h[1].message.contains("first move") && h[1].message.contains("Gates-date: x 2026-01-01"));
         // a branch that creates the register has no history to judge
         assert!(register_history(root, "nope").is_err() || register_history(root, "nope").unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_outputs_of_a_plan_are_the_plan_job_names() {
+        let plan = serde_json::json!({"crates": true, "ui": false, "tools": true, "paddockDev": true, "c99": false, "ciImage": true, "apps": ["x"]});
+        let got: Vec<String> = outputs_of(&plan).into_iter().collect();
+        assert_eq!(got, ["any_app", "crates", "paddock_dev", "tools"]);
+        assert!(outputs_of(&serde_json::json!({"apps": []})).is_empty());
     }
 }

@@ -86,7 +86,7 @@ pub fn check(a: &CheckArgs) -> Result<Report, CliError> {
     }
     let tree = edge::GitTree::open(&root).map_err(CliError::failure)?;
     let sources = edge::load_sources(&root).map_err(CliError::failure)?;
-    let planner = edge::NodePlanner::new(&root);
+    let planner = edge::planner(&root);
     let history = edge::register_history(&root, &a.base);
     let input = evaluate::Input {
         tree: &tree,
@@ -135,7 +135,7 @@ pub fn list(root: Option<&Path>, base: &str) -> Result<Report, CliError> {
     let root = repo_root(root)?;
     let tree = edge::GitTree::open(&root).map_err(CliError::failure)?;
     let sources = edge::load_sources(&root).map_err(CliError::failure)?;
-    let planner = edge::NodePlanner::new(&root);
+    let planner = edge::planner(&root);
     let input = evaluate::Input {
         tree: &tree,
         sources: &sources,
