@@ -25,6 +25,7 @@
 
 mod app;
 mod atomic;
+pub mod cachedir;
 pub mod cargo_layout;
 pub mod command;
 pub mod dev_override;
