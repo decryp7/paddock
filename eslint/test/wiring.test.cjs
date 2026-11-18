@@ -148,6 +148,10 @@ function lintCommandProblems({ name, pkg, workspace, ci, app }) {
   for (const [pn, p] of Object.entries(workspace?.projects ?? {})) {
     const loc = p.architect?.lint?.options?.suppressionsLocation;
     if (loc !== undefined && loc !== DEFAULT_SUPPRESSIONS) problems.push(`${name}: lint target ${pn} reads ${loc}, not ${DEFAULT_SUPPRESSIONS}`);
+    // `configurations.*` of the lint target can override any option for a named run, and `eslintConfig` names another config: neither is used, so neither is read
+    // (the real-command control below proves the command that CI runs, whatever it picks up, and says so in its header).
+    if (p.architect?.lint?.configurations !== undefined) problems.push(`${name}: lint target ${pn} has \`configurations\`, which can override its options`);
+    if (p.architect?.lint?.options?.eslintConfig !== undefined) problems.push(`${name}: lint target ${pn} names another ESLint config (eslintConfig)`);
   }
   if (app) {
     // The Angular builder (the ESLint API) is silent about a suppression that no longer occurs; only the CLI fails on it.
@@ -202,6 +206,9 @@ test('positive controls: each way around the suppressions is a problem', () => {
   const ws = (loc) => ({ projects: { x: { architect: { lint: { options: { applySuppressions: true, suppressionsLocation: loc } } } } } });
   assert.match(bad({ workspace: ws('lint-exceptions.json') })[0], /reads lint-exceptions\.json/);
   assert.deepEqual(bad({ workspace: ws('eslint-suppressions.json') }), [], 'the default name is fine');
+  const wsWith = (extra) => ({ projects: { x: { architect: { lint: { options: { applySuppressions: true }, ...extra } } } } });
+  assert.match(bad({ workspace: wsWith({ configurations: { ci: { suppressionsLocation: 'x.json' } } }) })[0], /has `configurations`/);
+  assert.match(bad({ workspace: { projects: { x: { architect: { lint: { options: { eslintConfig: 'eslint.lax.cjs' } } } } } } })[0], /another ESLint config/);
   assert.match(bad({ pkg: { scripts: { lint: 'ng lint --suppressions-location x.json && eslint e2e --max-warnings 0' } } })[0], /non-default suppressions file/);
   assert.match(bad({ app: false, pkg: { scripts: { lint: 'eslint projects e2e --max-warnings 0 --suppressions-location x.json' } } })[0], /non-default suppressions file/);
   assert.match(bad({ ci: ['npm run lint', 'npx eslint e2e --pass-on-unpruned-suppressions'] })[0], /unpruned|slack/);
@@ -226,3 +233,100 @@ for (const dir of targets) {
     for (const o of lint) assert.equal(o.maxWarnings, 0, `${name}: a lint target lets a warning pass (maxWarnings ${o.maxWarnings})`);
   });
 }
+
+// ---- the real command goes red (ER-33, the class of rounds 1 to 3) ----
+// Three reviews each found a new way to turn paddock/e2e-ready-reads off without any check noticing: an app's own config override (round 1), a non-default
+// suppressions file (round 2), a different ESLint config named by `eslintConfig` or `-c` (round 3). Forbidding one more spelling each time never ends, so this
+// control does not read how the command is configured at all: for each project it takes the lint command CI runs (the contract's `npm run lint`, which is the package.json
+// script), runs exactly that command in the project folder against a planted spec with an unready read, and requires a failure with the rule's message; then
+// against a planted suppression that no longer occurs, and requires a failure. Whatever config, flag, builder option, `configurations` entry or composite
+// action the command picks up is covered because the command itself is shown to go red. The cheap checks above stay where they are cheap.
+const { describe } = require('node:test');
+const { rmSync: rm, writeFileSync: write, readFileSync: read } = require('node:fs');
+
+const PLANTED_READ = 'e2e/zz-planted-ready-read.spec.ts';
+const PLANTED_CLEAN = 'e2e/zz-planted-clean.spec.ts';
+const READ_SPEC = [
+  'declare const expect: (v: unknown) => { toBeVisible(): Promise<void> };',
+  'declare const planted: { allInnerTexts(): Promise<string[]> };',
+  'export async function plantedRead(): Promise<void> {',
+  '  await expect(planted).toBeVisible();',
+  '  await planted.allInnerTexts();',
+  '}',
+  '',
+].join('\n');
+const CLEAN_SPEC = 'export const plantedClean = 1;\n';
+
+/** The lint command CI runs for the project: the `npm run lint` of its contract or workflow, as the package.json script it names. Throws when CI runs something else. */
+function realLintCommand(dir) {
+  const name = dir.slice(REPO.length + 1);
+  const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+  const ci = ciCommands(dir);
+  assert.ok(ci.some((c) => /^npm run lint$/.test(c.trim())), `${name}: CI does not run \`npm run lint\` (${ci.filter((c) => /lint/.test(c)).join(' | ')})`);
+  assert.ok(pkg.scripts?.lint, `${name}: no lint script`);
+  return { cmd: 'npm', args: ['run', 'lint'], script: pkg.scripts.lint };
+}
+
+/** Runs the command in `dir` and resolves { status, out }. Never rejects. */
+function runCommand(dir, { cmd, args }) {
+  return new Promise((resolveRun) => {
+    const child = require('node:child_process').spawn(cmd, args, { cwd: dir, env: { ...process.env, CI: '1', FORCE_COLOR: '0' } });
+    let out = '';
+    child.stdout.on('data', (d) => (out += d));
+    child.stderr.on('data', (d) => (out += d));
+    child.on('close', (status) => resolveRun({ status, out }));
+    child.on('error', (e) => resolveRun({ status: -1, out: String(e) }));
+  });
+}
+
+/**
+ * The planted-spec control and the planted-suppression control for one project. Every file it writes is removed or restored in `finally`, also when the command
+ * hangs or throws; a planted file is never left in the tree.
+ */
+async function plantedControls(dir) {
+  const command = realLintCommand(dir);
+  const read = join(dir, PLANTED_READ);
+  const clean = join(dir, PLANTED_CLEAN);
+  const supp = join(dir, 'eslint-suppressions.json');
+  const original = existsSync(supp) ? read_(supp) : null;
+  const timings = {};
+  const results = {};
+  try {
+    // 1. an unready read, with the project's own suppressions in place (they never name this file).
+    write(read, READ_SPEC);
+    let t = Date.now();
+    results.unready = await runCommand(dir, command);
+    timings.unready = Date.now() - t;
+    rm(read, { force: true });
+    // 2. a suppression that no longer occurs: the file exists and has no unready read.
+    write(clean, CLEAN_SPEC);
+    const entries = original ? JSON.parse(original) : {};
+    entries[PLANTED_CLEAN] = { 'paddock/e2e-ready-reads': { count: 1 } };
+    write(supp, `${JSON.stringify(entries, null, 2)}\n`);
+    t = Date.now();
+    results.unused = await runCommand(dir, command);
+    timings.unused = Date.now() - t;
+  } finally {
+    rm(read, { force: true });
+    rm(clean, { force: true });
+    if (original === null) rm(supp, { force: true });
+    else write(supp, original);
+  }
+  return { command, results, timings };
+}
+const read_ = (p) => readFileSync(p, 'utf8');
+
+describe('the real lint command goes red', { concurrency: targets.length }, () => {
+  for (const dir of targets) {
+    const name = dir.slice(REPO.length + 1);
+    test(`${name}: \`npm run lint\` fails on a planted unready read and on a planted unused suppression (and leaves nothing behind)`, async () => {
+      const { results, timings } = await plantedControls(dir);
+      console.log(`# lint-control timing ${name}: unready ${(timings.unready / 1000).toFixed(1)} s, unused-suppression ${(timings.unused / 1000).toFixed(1)} s`);
+      assert.notEqual(results.unready.status, 0, `${name}: the real lint command passed with a planted unready read:\n${results.unready.out.slice(-800)}`);
+      assert.match(results.unready.out, /paddock\/e2e-ready-reads/, `${name}: the lint failed, but not on the ready-reads rule:\n${results.unready.out.slice(-800)}`);
+      assert.notEqual(results.unused.status, 0, `${name}: the real lint command passed with a planted suppression that no longer occurs:\n${results.unused.out.slice(-800)}`);
+      assert.match(results.unused.out, /suppressions left that do not occur/, `${name}: the lint failed, but not on the unused suppression:\n${results.unused.out.slice(-800)}`);
+      for (const f of [PLANTED_READ, PLANTED_CLEAN]) assert.equal(existsSync(join(dir, f)), false, `${name}: ${f} was left in the tree`);
+    });
+  }
+});

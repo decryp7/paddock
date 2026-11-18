@@ -431,11 +431,11 @@ export function crateDirsNaming(f, cargo) {
 }
 
 /**
- * The files that set what the e2e lint block does in one project: its ESLint config, its bulk suppressions (the exceptions to paddock/e2e-ready-reads), the lint
+ * The files that set what the e2e lint block does in one project: its ESLint config (any `eslint*.js`, `.cjs` or `.mjs` file: a second config named by `-c` or `eslintConfig` is one too), its bulk suppressions (the exceptions to paddock/e2e-ready-reads), the lint
  * target of angular.json (`applySuppressions`, `maxWarnings`) and the ui's package.json (its lint script). A change to one of them also runs the eslint package's tests,
  * whose wiring test resolves the rule's severity in every real config (ER-41: a check runs on every change that could bring in its class, here the rule switched off).
  */
-const LINT_WIRING = /^(?:apps\/[^/]+\/app|ui)\/(?:eslint\.config\.[cm]?js|eslint-suppressions\.json|angular\.json|package\.json)$|^(?:apps\/[^/]+|ui)\/paddock\.ci\.json$/;
+const LINT_WIRING = /^(?:apps\/[^/]+\/app|ui)\/(?:eslint[^/]*\.[cm]?js|eslint-suppressions\.json|angular\.json|package\.json)$|^(?:apps\/[^/]+|ui)\/paddock\.ci\.json$/;
 
 /** The projects that own a path before dependencies, or null for an unknown root file. */
 export function owners(path) {

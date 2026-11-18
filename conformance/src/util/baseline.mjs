@@ -2,6 +2,8 @@
 // entries a branch adds against its merge base with the target branch are an error; entries that are now fixed are only a warning
 // ("remove it"), so two branches that each fix some of the same entries can land in either order. C71's three baselines and the
 // baselines of the CI-env and shared-enum tests all use this.
+// A check's list has to land on the target branch while the check is still report-only: a list that does not exist at the merge base is an empty base, so every entry
+// of a list created on a branch is growth (ER-46) and the branch gets one finding per file until the list is on the target branch.
 import { execFileSync } from 'node:child_process';
 import { error, unwaivable, warn } from '../finding.mjs';
 

@@ -1330,6 +1330,9 @@ describe('lint wiring files mark the eslint project', () => {
     'ui/package.json',
     'apps/dyno/app/package.json',
     'apps/spotter/paddock.ci.json',
+    'apps/pitwall/app/eslint.lax.cjs',
+    'apps/dyno/app/eslint.base.mjs',
+    'ui/eslint.other.js',
     'ui/paddock.ci.json',
   ];
   for (const f of WIRING) {

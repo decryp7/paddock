@@ -3,6 +3,9 @@
 //! ever shrinks: an entry the code no longer produces is stale and is removed; an entry never appears by itself. `--write`
 //! style tools use [`Baseline::shrunk`] (it cannot add) and [`ensure_shrink_only`] (it refuses a file that has grown).
 //!
+//! A check's list has to land on the target branch while the check is still report-only: a list that does not exist at the merge base is an empty
+//! base, so every entry of a list created on a branch is growth (ER-46) and the branch gets one finding per file until the list is on the target branch.
+//!
 //! Blank lines and `#` comment lines are kept as they are and are not entries.
 
 use super::finding::Finding;

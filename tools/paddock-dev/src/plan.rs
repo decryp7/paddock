@@ -292,12 +292,12 @@ static OWNERS: LazyLock<Vec<(Regex, &'static [&'static str])>> = LazyLock::new(|
     ]
 });
 
-/// The files that set what the e2e lint block does in one project: its ESLint config, its bulk suppressions, the lint target of
+/// The files that set what the e2e lint block does in one project: its ESLint config (any `eslint*.js`, `.cjs` or `.mjs` file: a second config named by `-c` or `eslintConfig` is one too), its bulk suppressions, the lint target of
 /// `angular.json`, the `package.json` of an app or the ui (its lint script) and the contract (`paddock.ci.json`) that names the lint commands CI runs. A change to one also runs the eslint package's tests, whose wiring test
 /// resolves the rule's severity in every real config (ER-41); `scripts/affected.mjs` (`LINT_WIRING`) is the oracle.
 static LINT_WIRING: LazyLock<Regex> = LazyLock::new(|| {
     re(
-        r"^(?:apps/[^/]+/app|ui)/(?:eslint\.config\.[cm]?js|eslint-suppressions\.json|angular\.json|package\.json)$|^(?:apps/[^/]+|ui)/paddock\.ci\.json$",
+        r"^(?:apps/[^/]+/app|ui)/(?:eslint[^/]*\.[cm]?js|eslint-suppressions\.json|angular\.json|package\.json)$|^(?:apps/[^/]+|ui)/paddock\.ci\.json$",
     )
 });
 
