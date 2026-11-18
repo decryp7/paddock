@@ -406,3 +406,364 @@ fn echoing_stdin_in_a_case_reads_stdin_without_asking_for_it_twice() {
     }
     assert_eq!(out(&child.wait_with_output().unwrap()), "piped text");
 }
+
+// What the shell-script fixtures needed (C130 conversion): output filled from the call, conditions, wrappers, pipes, installs.
+
+use paddock_testkit::{Case, Exec};
+
+#[test]
+fn templates_fill_in_the_arguments_the_folder_the_environment_and_stdin() {
+    let s = Scratch::new();
+    let log = s.work().join("calls");
+    let p = StandIn::new(&s.work(), "tool")
+        .answers(
+            Actions::new()
+                .appends_with(
+                    &log.to_string_lossy(),
+                    "{name} {args}|{arg:2}|{arg:9}|{env:STAND_IN_T}|{env:STAND_IN_UNSET|unset}|{{literal}}\n",
+                )
+                .stdout_with("cwd={cwd} line=<{stdin_line}>"),
+        )
+        .install()
+        .unwrap();
+    let mut child = TestCommand::new(p.program())
+        .args(["a b", "c"])
+        .env("STAND_IN_T", "tv")
+        .current_dir(s.work())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"first\nsecond\n")
+            .unwrap();
+    }
+    let o = child.wait_with_output().unwrap();
+    assert!(out(&o).contains("line=<first>"), "{}", out(&o));
+    assert!(out(&o).starts_with("cwd="), "{}", out(&o));
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap().replace("\r\n", "\n"),
+        "tool a b c|c||tv|unset|{literal}\n"
+    );
+}
+
+#[test]
+fn an_unknown_template_token_breaks_the_stand_in_instead_of_printing_it() {
+    let s = Scratch::new();
+    let p = StandIn::new(&s.work(), "tool")
+        .answers(Actions::new().stdout_with("{nope}"))
+        .install()
+        .unwrap();
+    let o = run(p.program(), &[]);
+    assert_eq!(o.status.code(), Some(70));
+    assert!(err(&o).contains("unknown template token"), "{}", err(&o));
+}
+
+#[test]
+fn a_case_with_several_conditions_needs_all_of_them() {
+    let s = Scratch::new();
+    let flag = s.work().join("flag");
+    let case = Case::new()
+        .args_start_with(&["deny"])
+        .file_exists(&flag)
+        .has_none_of(&["licenses", "bans"]);
+    let p = StandIn::new(&s.work(), "cargo")
+        .exit(0)
+        .when(&case, Actions::new().stderr("error: denied").exit(1))
+        .when(
+            &Case::new().has_arg("only-me").file_missing(&flag),
+            Actions::new().stdout("no flag").exit(2),
+        )
+        .install()
+        .unwrap();
+    assert_eq!(
+        run(p.program(), &["deny"]).status.code(),
+        Some(0),
+        "the file is not there"
+    );
+    assert_eq!(run(p.program(), &["only-me"]).status.code(), Some(2));
+    std::fs::write(&flag, "").unwrap();
+    assert_eq!(
+        run(p.program(), &["only-me"]).status.code(),
+        Some(0),
+        "the flag exists now"
+    );
+    let o = run(p.program(), &["deny", "advisories"]);
+    assert_eq!(
+        (o.status.code(), err(&o).as_str()),
+        (Some(1), "error: denied\n")
+    );
+    assert_eq!(
+        run(p.program(), &["deny", "licenses"]).status.code(),
+        Some(0),
+        "an excluded argument"
+    );
+    assert_eq!(
+        run(p.program(), &["check"]).status.code(),
+        Some(0),
+        "the prefix differs"
+    );
+}
+
+#[test]
+fn a_case_on_the_working_folder_reads_the_folder_the_call_ran_in() {
+    let s = Scratch::new();
+    let app = s.work().join("apps").join("dyno");
+    std::fs::create_dir_all(&app).unwrap();
+    let p = StandIn::new(&s.work(), "cargo")
+        .when(
+            &Case::new().cwd_ends_with("/apps/dyno"),
+            Actions::new().exit(1),
+        )
+        .install()
+        .unwrap();
+    assert_eq!(
+        TestCommand::new(p.program())
+            .current_dir(&app)
+            .status()
+            .unwrap()
+            .code(),
+        Some(1)
+    );
+    assert_eq!(
+        TestCommand::new(p.program())
+            .current_dir(s.work())
+            .status()
+            .unwrap()
+            .code(),
+        Some(0)
+    );
+}
+
+#[test]
+fn exec_runs_another_program_with_the_call_arguments_and_its_exit_code() {
+    let s = Scratch::new();
+    let inner = StandIn::new(&s.work(), "inner")
+        .records_args()
+        .stdout("inner ran")
+        .exit(4)
+        .install()
+        .unwrap();
+    let wrapper = StandIn::new(&s.work(), "wrapper")
+        .answers(
+            Actions::new()
+                .appends_with(&s.work().join("log").to_string_lossy(), "{args}\n")
+                .execs(
+                    &Exec::program(&inner.program().to_string_lossy())
+                        .args(["first"])
+                        .env("WRAPPED", "{name}"),
+                ),
+        )
+        .install()
+        .unwrap();
+    let o = run(wrapper.program(), &["x", "y z"]);
+    assert_eq!(o.status.code(), Some(4));
+    assert_eq!(out(&o), "inner ran\n");
+    assert_eq!(inner.calls().unwrap(), [["first", "x", "y z"]]);
+}
+
+#[test]
+fn exec_of_the_call_arguments_and_exec_after_a_separator() {
+    let s = Scratch::new();
+    let inner = StandIn::new(&s.work(), "inner")
+        .records_args()
+        .install()
+        .unwrap();
+    let all = StandIn::new(&s.work(), "all")
+        .answers(Actions::new().execs(&Exec::call_arguments()))
+        .install()
+        .unwrap();
+    run(
+        all.program(),
+        &[&inner.program().to_string_lossy(), "p", "q"],
+    );
+    let after = StandIn::new(&s.work(), "after")
+        .answers(Actions::new().execs(&Exec::call_arguments().after("--")))
+        .install()
+        .unwrap();
+    run(
+        after.program(),
+        &["dropped", "--", &inner.program().to_string_lossy(), "r"],
+    );
+    assert_eq!(inner.calls().unwrap(), [vec!["p", "q"], vec!["r"]]);
+    let none = run(after.program(), &["no separator"]);
+    assert_eq!(none.status.code(), Some(70));
+    assert!(err(&none).contains("no `--`"), "{}", err(&none));
+}
+
+#[test]
+fn a_stand_in_that_waits_for_a_file_runs_on_only_once_it_exists() {
+    let s = Scratch::new();
+    let go = s.work().join("go");
+    let p = StandIn::new(&s.work(), "gated")
+        .answers(
+            Actions::new()
+                .waits_for_file(&go.to_string_lossy())
+                .stdout("went"),
+        )
+        .install()
+        .unwrap();
+    let mut child = TestCommand::new(p.program())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "it ran on without the file"
+    );
+    std::fs::write(&go, "").unwrap();
+    assert_eq!(out(&child.wait_with_output().unwrap()), "went\n");
+}
+
+#[test]
+fn the_exit_code_can_come_from_the_environment() {
+    let s = Scratch::new();
+    let p = StandIn::new(&s.work(), "npm")
+        .answers(Actions::new().exits_with_env("FAKE_NPM_EXIT", 0))
+        .install()
+        .unwrap();
+    assert_eq!(run(p.program(), &[]).status.code(), Some(0));
+    assert_eq!(
+        TestCommand::new(p.program())
+            .env("FAKE_NPM_EXIT", "3")
+            .status()
+            .unwrap()
+            .code(),
+        Some(3)
+    );
+    let bad = TestCommand::new(p.program())
+        .env("FAKE_NPM_EXIT", "x")
+        .output()
+        .unwrap();
+    assert_eq!(bad.status.code(), Some(70));
+}
+
+#[test]
+fn writes_atomically_and_makes_folders() {
+    let s = Scratch::new();
+    let f = s.work().join("deep").join("er").join("pid");
+    let p = StandIn::new(&s.work(), "tool")
+        .answers(
+            Actions::new()
+                .makes_dir(&s.work().join("deep").join("er").to_string_lossy())
+                .writes_atomically(&f.to_string_lossy(), "{pid}\n"),
+        )
+        .install()
+        .unwrap();
+    run(p.program(), &[]);
+    let pid = std::fs::read_to_string(&f).unwrap();
+    assert!(pid.trim().parse::<u32>().is_ok(), "{pid:?}");
+    assert!(
+        !f.with_file_name("pid.part").exists(),
+        "no half-written file is left"
+    );
+}
+
+#[test]
+fn installs_a_second_stand_in_that_answers_for_itself() {
+    let s = Scratch::new();
+    let out_dir = s.work().join("release");
+    let built = StandIn::new(&s.work(), "built")
+        .answers(Actions::new().stdout_with("embedded {env:STAND_IN_HASH}"))
+        .when_args(&["--version"], Actions::new().stdout("0"))
+        .when_args(
+            &["args"],
+            Actions::new().stdout_with("got {{args}} from {env:STAND_IN_HASH}"),
+        );
+    let builder = StandIn::new(&s.work(), "cargo")
+        .answers(
+            Actions::new()
+                .makes_dir(&out_dir.to_string_lossy())
+                .installs(
+                    &format!(
+                        "{}/paddock-dev{}",
+                        out_dir.display(),
+                        std::env::consts::EXE_SUFFIX
+                    ),
+                    &built,
+                ),
+        )
+        .install()
+        .unwrap();
+    let o = TestCommand::new(builder.program())
+        .env("STAND_IN_HASH", "abc")
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", err(&o));
+    let made = out_dir.join(format!("paddock-dev{}", std::env::consts::EXE_SUFFIX));
+    assert_eq!(out(&run(&made, &["--version"])), "0\n");
+    assert_eq!(out(&run(&made, &["args", "k"])), "got args k from abc\n");
+    assert_eq!(
+        out(&run(&made, &[])),
+        "embedded abc\n",
+        "the token was filled when it was installed"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_named_pipe_hands_one_stand_in_to_another_and_the_reader_blocks_until_it_is_written() {
+    let s = Scratch::new();
+    let fifo = s.work().join("go");
+    let maker = StandIn::new(&s.work(), "maker")
+        .answers(
+            Actions::new()
+                .makes_fifo(&fifo.to_string_lossy())
+                .reads_file(&fifo.to_string_lossy())
+                .stdout("released")
+                .exit(3),
+        )
+        .install()
+        .unwrap();
+    let mut child = TestCommand::new(maker.program())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_until("the named pipe exists", || fifo.exists());
+    std::thread::sleep(Duration::from_millis(150));
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "the reader did not block"
+    );
+    let writer = StandIn::new(&s.work(), "writer")
+        .answers(Actions::new().writes(&fifo, "go\n"))
+        .install()
+        .unwrap();
+    assert!(run(writer.program(), &[]).status.success());
+    let o = child.wait_with_output().unwrap();
+    assert_eq!((o.status.code(), out(&o).as_str()), (Some(3), "released\n"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stand_in_that_ignores_term_survives_it_and_dies_of_kill() {
+    use std::os::unix::process::ExitStatusExt;
+    let s = Scratch::new();
+    let ready = s.work().join("ready");
+    let p = StandIn::new(&s.work(), "stubborn")
+        .answers(
+            Actions::new()
+                .ignores_term()
+                .writes(&ready, "up")
+                .sleeps(Duration::from_secs(60)),
+        )
+        .install()
+        .unwrap();
+    let mut child = TestCommand::new(p.program()).spawn().unwrap();
+    wait_until("it is up", || ready.exists());
+    let term = std::process::Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(term.success());
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(child.try_wait().unwrap().is_none(), "SIGTERM ended it");
+    child.kill().unwrap();
+    assert_eq!(child.wait().unwrap().signal(), Some(9));
+}

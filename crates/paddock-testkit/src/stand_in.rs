@@ -21,6 +21,14 @@
 //! (with spaces, quotes and non-ASCII as they were given; a non-UTF-8 argument is lossy), the environment variables asked for
 //! with [`StandIn::records_env`] and, with [`StandIn::reads_stdin`], what was written to stdin (at most 1 MiB).
 //!
+//! More, for the fixtures that were shell scripts: output filled from the call ([`Actions::stdout_with`] and the other `_with`
+//! methods name `{args}`, `{arg:N}`, `{cwd}`, `{dir}`, `{name}`, `{pid}`, `{env:NAME}` / `{env:NAME|fallback}`, `{stdin}` and
+//! `{stdin_line}`; `{{` and `}}` are braces), [`Actions::writes_atomically`], [`Actions::waits_for_file`], named pipes
+//! ([`Actions::makes_fifo`], [`Actions::reads_file`]), [`Actions::ignores_term`] (Unix), [`Actions::installs`] (a second stand-in
+//! written at run time, as a fake `cargo` that "builds" a tool does), [`Actions::exits_with_env`] and [`Actions::execs`] (run another
+//! program with the call's arguments, as a wrapper script does). [`StandIn::when`] answers a call by several conditions at once
+//! ([`Case`]: arguments, a file that exists, the working folder), and [`StandIn::answers`] replaces the default answer.
+//!
 //! Realistic defaults are opt-in: [`StandIn::npm_like`] and [`StandIn::git_like`] answer the common calls with the shape the real
 //! program prints; override any call with [`StandIn::when_args`] (rules added later are matched first).
 //!
@@ -177,6 +185,110 @@ impl Actions {
         self.step("echo_stdin", Value::Null)
     }
 
+    /// Prints `template` and a newline on stdout, with the call's values filled in (see the module text for the tokens; a `{stdin}` token makes the stand-in read stdin).
+    #[must_use]
+    pub fn stdout_with(mut self, template: &str) -> Actions {
+        self.echoes |= template.contains("{stdin");
+        self.step("stdout_t", Value::Str(template.to_string()))
+    }
+
+    /// Prints `template` and a newline on stderr, with the call's values filled in.
+    #[must_use]
+    pub fn stderr_with(mut self, template: &str) -> Actions {
+        self.echoes |= template.contains("{stdin");
+        self.step("stderr_t", Value::Str(template.to_string()))
+    }
+
+    /// Appends `content_template` to the file `path_template`, both with the call's values filled in (a call log: `{args}`, `{cwd}`).
+    #[must_use]
+    pub fn appends_with(self, path_template: &str, content_template: &str) -> Actions {
+        self.file_with(path_template, content_template, true, false)
+    }
+
+    /// Writes `content_template` to the file `path_template` (replacing it), both with the call's values filled in.
+    #[must_use]
+    pub fn writes_with(self, path_template: &str, content_template: &str) -> Actions {
+        self.file_with(path_template, content_template, false, false)
+    }
+
+    /// Writes `content_template` to `path_template` so that a reader polling for the file never sees half of it (written beside
+    /// it, then renamed onto it); both are filled with the call's values (`{pid}` is the stand-in's own pid).
+    #[must_use]
+    pub fn writes_atomically(self, path_template: &str, content_template: &str) -> Actions {
+        self.file_with(path_template, content_template, false, true)
+    }
+
+    fn file_with(mut self, path: &str, content: &str, append: bool, atomic: bool) -> Actions {
+        self.echoes |= content.contains("{stdin");
+        let m = vec![
+            ("path".to_string(), Value::Str(path.to_string())),
+            ("content".to_string(), Value::Str(content.to_string())),
+            ("append".to_string(), Value::Bool(append)),
+            ("atomic".to_string(), Value::Bool(atomic)),
+            ("template".to_string(), Value::Bool(true)),
+        ];
+        self.step("write", Value::Obj(m))
+    }
+
+    /// Waits until the file exists (polling every 10 ms, at most two minutes, then the stand-in is broken: exit 70).
+    #[must_use]
+    pub fn waits_for_file(self, path_template: &str) -> Actions {
+        self.step("wait_file", Value::Str(path_template.to_string()))
+    }
+
+    /// Reads the file to its end; for a named pipe that blocks until a writer has opened and closed it.
+    #[must_use]
+    pub fn reads_file(self, path_template: &str) -> Actions {
+        self.step("read_file", Value::Str(path_template.to_string()))
+    }
+
+    /// Makes a named pipe (Unix only; on Windows the stand-in is broken: exit 70). Opening it for writing, as [`Actions::writes`]
+    /// does, blocks until a reader opens it.
+    #[must_use]
+    pub fn makes_fifo(self, path_template: &str) -> Actions {
+        self.step("mkfifo", Value::Str(path_template.to_string()))
+    }
+
+    /// Makes a folder and its parents.
+    #[must_use]
+    pub fn makes_dir(self, path_template: &str) -> Actions {
+        self.step("mkdir", Value::Str(path_template.to_string()))
+    }
+
+    /// Ignores SIGTERM from here on (Unix only), as `trap '' TERM` does.
+    #[must_use]
+    pub fn ignores_term(self) -> Actions {
+        self.step("ignore_term", Value::Null)
+    }
+
+    /// Installs `program` at run time at `path_template` (a copy of the stand-in and its script; the folder must exist), as a fake
+    /// `cargo` does when it "builds" a tool. The strings of `program` are filled with the call's values now; write `{{args}}` for a
+    /// token the installed program should fill when it runs. `program`'s own folder and recording are not used.
+    #[must_use]
+    pub fn installs(self, path_template: &str, program: &StandIn) -> Actions {
+        let m = vec![
+            ("path".to_string(), Value::Str(path_template.to_string())),
+            ("script".to_string(), program.script(Path::new(""))),
+        ];
+        self.step("install", Value::Obj(m))
+    }
+
+    /// Ends with the exit code that the environment variable holds, or `default` when it is unset or empty.
+    #[must_use]
+    pub fn exits_with_env(self, name: &str, default: i32) -> Actions {
+        let m = vec![
+            ("name".to_string(), Value::Str(name.to_string())),
+            ("default".to_string(), Value::Num(i64::from(default))),
+        ];
+        self.step("exit_env", Value::Obj(m))
+    }
+
+    /// Runs another program (see [`Exec`]) in this stand-in's place and ends with its exit code; steps after it do not run.
+    #[must_use]
+    pub fn execs(self, exec: &Exec) -> Actions {
+        self.step("exec", exec.to_value())
+    }
+
     /// The exit code (default 0).
     #[must_use]
     pub fn exit(mut self, code: i32) -> Actions {
@@ -192,6 +304,149 @@ impl Actions {
     }
 }
 
+/// Another program that a stand-in runs with the call's arguments (`exec "$@"` in a wrapper script).
+#[derive(Debug, Clone, Default)]
+pub struct Exec {
+    program: Option<String>,
+    args: Vec<String>,
+    from: &'static str,
+    separator: Option<String>,
+    env: Vec<(String, String)>,
+}
+
+impl Exec {
+    /// Runs the first argument of the call, with the rest (`exec "$@"`).
+    pub fn call_arguments() -> Exec {
+        Exec {
+            from: "all",
+            ..Exec::default()
+        }
+    }
+
+    /// Runs `program` (a template) with the call's arguments after it (`exec prog "$@"`).
+    pub fn program(program: &str) -> Exec {
+        Exec {
+            program: Some(program.to_string()),
+            from: "all",
+            ..Exec::default()
+        }
+    }
+
+    /// Passes only the call's arguments after the first `separator` (the earlier ones are dropped).
+    #[must_use]
+    pub fn after(mut self, separator: &str) -> Exec {
+        self.from = "after";
+        self.separator = Some(separator.to_string());
+        self
+    }
+
+    /// Passes none of the call's arguments.
+    #[must_use]
+    pub fn without_call_arguments(mut self) -> Exec {
+        self.from = "none";
+        self
+    }
+
+    /// Arguments (templates) that come before the call's.
+    #[must_use]
+    pub fn args<I: IntoIterator<Item = S>, S: AsRef<str>>(mut self, args: I) -> Exec {
+        self.args = args.into_iter().map(|a| a.as_ref().to_string()).collect();
+        self
+    }
+
+    /// Sets an environment variable (a template) for the program.
+    #[must_use]
+    pub fn env(mut self, name: &str, template: &str) -> Exec {
+        self.env.push((name.to_string(), template.to_string()));
+        self
+    }
+
+    fn to_value(&self) -> Value {
+        let mut m = vec![
+            ("from".to_string(), Value::Str(self.from.to_string())),
+            ("args".to_string(), strs(&self.args)),
+            (
+                "env".to_string(),
+                Value::Obj(
+                    self.env
+                        .iter()
+                        .map(|(k, v)| (k.clone(), Value::Str(v.clone())))
+                        .collect(),
+                ),
+            ),
+        ];
+        if let Some(p) = &self.program {
+            m.push(("program".to_string(), Value::Str(p.clone())));
+        }
+        if let Some(s) = &self.separator {
+            m.push(("separator".to_string(), Value::Str(s.clone())));
+        }
+        Value::Obj(m)
+    }
+}
+
+/// A call that satisfies every condition added to it (see [`StandIn::when`]).
+#[derive(Debug, Clone, Default)]
+pub struct Case {
+    conditions: Vec<Value>,
+}
+
+impl Case {
+    /// A case with no condition yet (it matches every call until one is added).
+    pub fn new() -> Case {
+        Case::default()
+    }
+
+    fn with(mut self, kind: &str, v: Value) -> Case {
+        self.conditions
+            .push(Value::Obj(vec![(kind.to_string(), v)]));
+        self
+    }
+
+    /// The first arguments are these.
+    #[must_use]
+    pub fn args_start_with(self, prefix: &[&str]) -> Case {
+        let v = Value::Arr(
+            prefix
+                .iter()
+                .map(|a| Value::Str((*a).to_string()))
+                .collect(),
+        );
+        self.with("args", v)
+    }
+
+    /// Some argument is exactly this.
+    #[must_use]
+    pub fn has_arg(self, arg: &str) -> Case {
+        self.with("arg", Value::Str(arg.to_string()))
+    }
+
+    /// No argument is any of these.
+    #[must_use]
+    pub fn has_none_of(self, args: &[&str]) -> Case {
+        let v = Value::Arr(args.iter().map(|a| Value::Str((*a).to_string())).collect());
+        self.with("no_arg_of", v)
+    }
+
+    /// The path exists when the call is made.
+    #[must_use]
+    pub fn file_exists(self, path: &Path) -> Case {
+        self.with("file", Value::Str(text(path)))
+    }
+
+    /// The path does not exist when the call is made.
+    #[must_use]
+    pub fn file_missing(self, path: &Path) -> Case {
+        self.with("no_file", Value::Str(text(path)))
+    }
+
+    /// The working folder ends with this text (compared with `/` as the separator).
+    #[must_use]
+    pub fn cwd_ends_with(self, tail: &str) -> Case {
+        self.with("cwd_ends", Value::Str(tail.to_string()))
+    }
+}
+
 /// Which calls a case answers.
 #[derive(Debug, Clone)]
 enum Match {
@@ -199,6 +454,8 @@ enum Match {
     Prefix(Vec<String>),
     /// Any argument holds this text.
     Contains(String),
+    /// Every condition holds.
+    All(Vec<Value>),
 }
 
 /// A stand-in program to install.
@@ -307,6 +564,21 @@ impl StandIn {
         self
     }
 
+    /// Replaces the default answer (the one no case answers) with `actions`, which may use every step of [`Actions`].
+    #[must_use]
+    pub fn answers(mut self, actions: Actions) -> StandIn {
+        self.actions = actions;
+        self
+    }
+
+    /// Answers a call that satisfies every condition of `case` with `actions`, as [`StandIn::when_args`] (later cases win).
+    #[must_use]
+    pub fn when(mut self, case: &Case, actions: Actions) -> StandIn {
+        self.cases
+            .insert(0, (Match::All(case.conditions.clone()), actions));
+        self
+    }
+
     /// Records every call's arguments (read them back with [`Installed::calls`]).
     #[must_use]
     pub fn records_args(mut self) -> StandIn {
@@ -393,6 +665,7 @@ impl StandIn {
                 let key = match m {
                     Match::Prefix(p) => ("args".to_string(), strs(p)),
                     Match::Contains(t) => ("contains".to_string(), Value::Str(t.clone())),
+                    Match::All(c) => ("all".to_string(), Value::Arr(c.clone())),
                 };
                 Value::Obj(vec![key, ("actions".to_string(), a.to_value())])
             })
