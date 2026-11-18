@@ -29,6 +29,16 @@ const MAX_STDIN: u64 = 1 << 20;
 /// What the stand-in exits with when its own script is wrong (sysexits EX_SOFTWARE), distinct from the codes a script asks for.
 const BROKEN: i32 = 70;
 
+/// The cap of a `burn` and a `repeat`: two minutes, or less when `PADDOCK_STAND_IN_CAP_MS` says so (the stand-in's own test).
+fn cap() -> Duration {
+    let ms = std::env::var("PADDOCK_STAND_IN_CAP_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok());
+    Duration::from_millis(ms.map_or(MAX_SLEEP_MS.unsigned_abs(), |m| {
+        m.min(MAX_SLEEP_MS.unsigned_abs())
+    }))
+}
+
 fn main() {
     if std::env::var_os("PADDOCK_STAND_IN_PRINT_HASH").is_some() {
         println!("{}", json::source_hash(STUB_SOURCE, JSON_SOURCE));
@@ -429,14 +439,23 @@ fn run_steps(actions: &Value, ctx: &Ctx) -> Result<Option<i32>, String> {
                     .map_err(|e| format!("cannot start {program}: {e}"))?;
             }
             "read_line" => read_stdin_line(ctx)?,
-            "burn" => loop {
-                std::hint::black_box(0u64);
-            },
-            "repeat" => loop {
-                if let Some(code) = run_steps(arg, ctx)? {
-                    return Ok(Some(code));
+            // Both end at the cap of a sleep (a stand-in that outlives its test is broken, not a leak).
+            "burn" => {
+                let until = std::time::Instant::now() + cap();
+                while std::time::Instant::now() < until {
+                    std::hint::black_box(0u64);
                 }
-            },
+                return Err("burn ran to its cap of two minutes".into());
+            }
+            "repeat" => {
+                let until = std::time::Instant::now() + cap();
+                while std::time::Instant::now() < until {
+                    if let Some(code) = run_steps(arg, ctx)? {
+                        return Ok(Some(code));
+                    }
+                }
+                return Err("repeat ran to its cap of two minutes".into());
+            }
             other => return Err(format!("unknown step `{other}`")),
         }
     }

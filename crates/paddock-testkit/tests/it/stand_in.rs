@@ -1265,3 +1265,74 @@ fn the_nice_token_is_a_number_and_the_cgroup_token_falls_back_when_the_file_is_n
         .unwrap_or_else(|| panic!("{text}"));
     assert!(ni.parse::<i32>().is_ok(), "{text}");
 }
+
+#[test]
+fn a_sleep_over_the_cap_is_refused_at_install_wherever_it_hides() {
+    use paddock_testkit::MAX_SLEEP;
+    let s = Scratch::new();
+    let long = MAX_SLEEP + Duration::from_secs(1);
+    assert!(
+        StandIn::new(&s.work(), "ok")
+            .sleeps(MAX_SLEEP)
+            .install()
+            .is_ok(),
+        "the cap itself is allowed"
+    );
+    let default = StandIn::new(&s.work(), "a")
+        .sleeps(long)
+        .install()
+        .unwrap_err();
+    assert!(default.to_string().contains("over the cap"), "{default}");
+    let in_case = StandIn::new(&s.work(), "b")
+        .when_args(&["x"], Actions::new().sleeps(long))
+        .install();
+    assert!(in_case.is_err(), "a case counts");
+    let repeated = StandIn::new(&s.work(), "c")
+        .answers(Actions::new().repeats(&Actions::new().sleeps(long)))
+        .install();
+    assert!(repeated.is_err(), "a repeat counts");
+    let nested = StandIn::new(&s.work(), "d")
+        .answers(Actions::new().installs("x", &StandIn::new(&s.work(), "inner").sleeps(long)))
+        .files();
+    assert!(nested.is_err(), "an installed program counts");
+}
+
+#[test]
+fn burn_and_repeat_end_at_the_cap_and_say_so() {
+    let s = Scratch::new();
+    let burn = StandIn::new(&s.work(), "burn")
+        .answers(Actions::new().burns_cpu())
+        .install()
+        .unwrap();
+    let repeat = StandIn::new(&s.work(), "rep")
+        .answers(Actions::new().repeats(&Actions::new().sleeps(Duration::from_millis(20))))
+        .install()
+        .unwrap();
+    for p in [&burn, &repeat] {
+        // The cap is two minutes; the variable lowers it so the control can run.
+        let o = TestCommand::new(p.program())
+            .env("PADDOCK_STAND_IN_CAP_MS", "300")
+            .output()
+            .unwrap();
+        assert_eq!(o.status.code(), Some(70), "{}", err(&o));
+        assert!(err(&o).contains("cap of two minutes"), "{}", err(&o));
+    }
+}
+
+#[test]
+fn a_single_file_program_written_to_a_path_runs_and_replaces_one_that_is_there() {
+    let s = Scratch::new();
+    let path = s
+        .work()
+        .join(format!("tool{}", std::env::consts::EXE_SUFFIX));
+    StandIn::new(&s.work(), "tool")
+        .stdout("one")
+        .write_single_file(&path)
+        .unwrap();
+    assert_eq!(out(&run(&path, &[])), "one\n");
+    StandIn::new(&s.work(), "tool")
+        .stdout("two")
+        .write_single_file(&path)
+        .unwrap();
+    assert_eq!(out(&run(&path, &[])), "two\n");
+}

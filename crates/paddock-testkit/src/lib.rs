@@ -74,7 +74,7 @@ pub use runner::{Call, FakeRunner, Reply};
 pub use scratch::{
     CanonicalTempDir, Leftovers, Scratch, ScratchError, canonical_tempdir, try_canonical_tempdir,
 };
-pub use stand_in::{Actions, Case, Exec, Files, Installed, Invocation, Spawn, StandIn};
+pub use stand_in::{Actions, Case, Exec, Files, Installed, Invocation, MAX_SLEEP, Spawn, StandIn};
 pub use wait::{
     HANG_GUARD, Look, Progress, StallGuard, guarded, poll_for, poll_until_within, recv,
     recv_within, retry_within, wait_for, wait_for_within, wait_progressing, wait_until,
