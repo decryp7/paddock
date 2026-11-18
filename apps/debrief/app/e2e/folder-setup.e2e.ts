@@ -11,6 +11,7 @@ test.describe('Folder set-up', () => {
     await openApp(page);
     const lanes = page.locator('debrief-timeline-panel .lane-label .key');
     await expect(lanes.first()).toBeVisible();
+    await expect.poll(async () => (await lanes.allInnerTexts()).some((l) => /\d{3,4}$/.test(l)), { message: 'a lane label carries its process id' }).toBe(true);
     const before = await lanes.allInnerTexts();
     expect(before.some((l) => /\d{3,4}$/.test(l))).toBe(true); // lanes include process ids
 

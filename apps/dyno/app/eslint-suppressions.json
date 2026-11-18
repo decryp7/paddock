@@ -1,0 +1,17 @@
+{
+  "e2e/dialogs.spec.ts": {
+    "paddock/e2e-ready-reads": {
+      "count": 1
+    }
+  },
+  "e2e/lists-map.spec.ts": {
+    "paddock/e2e-ready-reads": {
+      "count": 1
+    }
+  },
+  "e2e/screens-consistency.spec.ts": {
+    "paddock/e2e-ready-reads": {
+      "count": 1
+    }
+  }
+}

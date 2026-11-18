@@ -1,0 +1,17 @@
+{
+  "e2e/drag-ghost.e2e.ts": {
+    "paddock/e2e-ready-reads": {
+      "count": 1
+    }
+  },
+  "e2e/prod-csp.e2e.ts": {
+    "paddock/e2e-ready-reads": {
+      "count": 1
+    }
+  },
+  "e2e/view-controls-stay.e2e.ts": {
+    "paddock/e2e-ready-reads": {
+      "count": 1
+    }
+  }
+}

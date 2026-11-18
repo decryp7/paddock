@@ -1,5 +1,6 @@
 import { expect, test } from './test';
 import { openApp, openSettings, settingsDialog } from './app';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // ADR 0023 WP-9a against the mock: the Chat tab's picker and apps line, Settings > Connected apps, and the key dialog.
 test.describe('connected apps and the chat model', () => {
@@ -126,6 +127,7 @@ test.describe('connected apps and the chat model', () => {
       await expect(table.getByRole('row')).toHaveCount(7);
       await expect(table.getByRole('cell', { name: 'Always allowed', exact: true })).toHaveCount(1);
       await expect(table.getByRole('button', { name: 'Ask again before System summary' })).toBeVisible();
+      await expectNotMoving(dyno, 'the Dyno card');
       const boxes = await dyno.evaluate((card) => {
         const c = card.getBoundingClientRect();
         return [...card.querySelectorAll('tr')].map((tr) => {
@@ -160,6 +162,7 @@ test.describe('connected apps and the chat model', () => {
       await settings.getByText(name, { exact: true }).first().click();
       const head = settings.locator('pw-settings-head');
       await expect(head.getByRole('heading', { name })).toBeVisible();
+      await expectNotMoving(head, `${name}: the settings head`);
       const [title, help] = await Promise.all([head.getByRole('heading').boundingBox(), head.getByTestId('settings-head-help').boundingBox()]);
       expect(help!.y, `${name}: the help line is under the title`).toBeGreaterThanOrEqual(title!.y + title!.height - 1);
       expect(Math.abs(help!.x - title!.x), `${name}: aligned on the left`).toBeLessThanOrEqual(1);

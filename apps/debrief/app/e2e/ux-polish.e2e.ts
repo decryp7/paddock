@@ -3,6 +3,7 @@ import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu, openMenuPath } from './menu-support';
 import { openAppWith, openView } from './tools-support';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // The UX polish pass (audit items F5, F7, H2, J1, K1, K2, K5, I4).
 
@@ -38,6 +39,7 @@ test.describe('timeline legend (F7) and explorer (H2)', () => {
     await openApp(page);
     const row = page.locator('debrief-timeline-panel .legend-row');
     await expect(row).toBeVisible();
+    await expectNotMoving(row, 'the legend row');
     const heights = await row.evaluate((el) => ({ row: el.getBoundingClientRect().height, line: el.querySelector('.lg')!.getBoundingClientRect().height }));
     // One line of 24 px hit areas, whatever the panel width: the full legend opens as a popover over the lanes.
     expect(heights.row).toBeLessThan(heights.line * 1.8);

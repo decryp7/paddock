@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { WorkbenchApp, Locator, Page } from '@decryp7/paddock-e2e';
+import { WorkbenchApp, Locator, Page, expectNotMoving } from '@decryp7/paddock-e2e';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -88,6 +88,7 @@ test.describe('contact sheet: workbench', () => {
       await expect(wb.palette.dialog).toHaveCount(0);
       const readme = wb.explorer.node('wd.files', 'README.md');
       await expect(readme).toBeVisible();
+      await expectNotMoving(readme, 'the README node');
       const box = (await readme.boundingBox())!;
       await page.mouse.click(box.x + 60, box.y + box.height / 2, { button: 'right' });
       await expect.poll(async () => {

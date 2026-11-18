@@ -64,7 +64,8 @@ test('C71 baseline: a known site passes by its text wherever it moves, a copy or
   assert.equal(againstBaseline([], [a]).stale.length, 1);
 });
 
-const firstIntroduction = { git: (args) => {
+/** A merge base that has no baseline: an empty base (every baselined site would be growth, ER-46). */
+const noBaselineAtBase = { git: (args) => {
   if (args[0] === 'rev-parse') return 'def456\n';
   if (args[0] === 'merge-base') return 'abc123\n';
   throw Object.assign(new Error('fatal: path does not exist in abc123'), { stderr: 'fatal: path does not exist in abc123' });
@@ -76,16 +77,17 @@ test('C71 through the runner: opt-in, new sites are errors, the baseline passes 
   const off = makeApp({ 'e2e/a.spec.ts': bad });
   assert.deepEqual(await findingsOf('C71', off), [], 'off unless the repo opts in');
   const root = makeApp(files);
-  const f = await findingsOf('C71', root, { options: firstIntroduction });
+  const f = await findingsOf('C71', root, { options: noBaselineAtBase });
   assert.deepEqual(f.map((x) => [x.severity, x.file, x.line]), [['error', 'e2e/a.spec.ts', 1]]);
   assert.match(f[0].fix, /hang-guard/);
   const known = { sites: [{ file: 'e2e/a.spec.ts', line: 1, hash: lineHash(bad) }] };
   const ok = makeApp({ ...files, 'conformance/baselines/C71.json': JSON.stringify(known) });
-  assert.deepEqual(await findingsOf('C71', ok, { options: firstIntroduction }), []);
+  const sameAtBase = { git: (args) => (args[0] === 'show' ? JSON.stringify(known) : noBaselineAtBase.git(args)) };
+  assert.deepEqual(await findingsOf('C71', ok, { options: sameAtBase }), []);
   const dated = makeApp({ ...files, 'conformance/baselines/C71.json': JSON.stringify({ ...known, expires: '2000-01-01' }) });
-  assert.deepEqual(await findingsOf('C71', dated, { options: firstIntroduction }), [], 'the baseline has no expiry (ADR 0041 WP-6 is open-ended)');
+  assert.deepEqual(await findingsOf('C71', dated, { options: sameAtBase }), [], 'the baseline has no expiry (ADR 0041 WP-6 is open-ended)');
   const gone = makeApp({ 'paddock.conformance.json': files['paddock.conformance.json'], 'conformance/baselines/C71.json': JSON.stringify(known) });
-  assert.deepEqual((await findingsOf('C71', gone, { options: firstIntroduction })).map((x) => x.severity), ['warn']);
+  assert.deepEqual((await findingsOf('C71', gone, { options: sameAtBase })).map((x) => x.severity), ['warn']);
 });
 
 test('C71 hang-guard waives only with a bound of at least 10 s; real-wait waives nothing', () => {
@@ -160,7 +162,8 @@ test('C71 baseline is shrink-only against the merge base: an added entry is an e
   assert.deepEqual(noGit.map((x) => x.severity), ['warn'], 'no merge base: not measured, said so');
   assert.match(noGit[0].message, /not (enforced|measured)/);
   const fresh = await run(both, null);
-  assert.deepEqual(fresh, [], 'no baseline at the merge base: the first introduction');
+  assert.deepEqual(fresh.map((x) => x.severity), ['error'], 'no baseline at the merge base: an empty base, so its entries are growth');
+  assert.equal(fresh[0].file, 'conformance/baselines/C71.json');
 });
 
 test('C71 baseline: the site check is exact; only an entry whose file is gone lets a same-hash site move; the tool rewrites the file', () => {
@@ -209,8 +212,8 @@ test('C71 shrinkBaseline keeps the matching entries with their current lines and
 test('C71 leaves vendored third-party code to its own upstream (a vendor/ folder)', async () => {
   const sleepy = '#[cfg(test)]\nmod t {\n    #[test]\n    fn a() {\n        std::thread::sleep(std::time::Duration::from_secs(1));\n    }\n}\n';
   const files = { 'paddock.conformance.json': JSON.stringify({ app: 'demo', timingLint: true }), 'apps/x/vendor/dep/src/system.rs': sleepy };
-  assert.deepEqual(await findingsOf('C71', makeApp(files), { options: firstIntroduction }), []);
-  const own = await findingsOf('C71', makeApp({ ...files, 'crates/x/src/vendor/a.rs': sleepy }), { options: firstIntroduction });
+  assert.deepEqual(await findingsOf('C71', makeApp(files), { options: noBaselineAtBase }), []);
+  const own = await findingsOf('C71', makeApp({ ...files, 'crates/x/src/vendor/a.rs': sleepy }), { options: noBaselineAtBase });
   assert.deepEqual(own.map((x) => x.file), ['crates/x/src/vendor/a.rs'], 'a first-party folder named vendor is still checked');
 });
 
@@ -224,9 +227,9 @@ test('C71 flags a Playwright config whose retries can exceed 0 without failOnFla
   assert.equal(retriesWithoutFlakyFailure('export default defineConfig({\n  // retries: 2,\n});\n'), 0, 'a comment is not a setting');
   assert.equal(retriesWithoutFlakyFailure('export default defineConfig({});\n'), 0);
   const files = (cfg) => ({ 'paddock.conformance.json': JSON.stringify({ app: 'demo', timingLint: true }), 'apps/x/app/playwright.config.ts': cfg });
-  const f = await findingsOf('C71', makeApp(files(bad)), { options: firstIntroduction });
+  const f = await findingsOf('C71', makeApp(files(bad)), { options: noBaselineAtBase });
   assert.deepEqual(f.map((x) => [x.severity, x.file, x.line]), [['error', 'apps/x/app/playwright.config.ts', 2]]);
-  assert.deepEqual(await findingsOf('C71', makeApp(files('export default defineConfig({ retries: 1, failOnFlakyTests: true });\n')), { options: firstIntroduction }), []);
+  assert.deepEqual(await findingsOf('C71', makeApp(files('export default defineConfig({ retries: 1, failOnFlakyTests: true });\n')), { options: noBaselineAtBase }), []);
 });
 
 // ADR 0071 section 4, R2 and R3 in their smallest form: a fixed Duration under 40 s given to a wait or to a start/connect/ready setting

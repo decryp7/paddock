@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { Page } from '@decryp7/paddock-e2e';
+import { Page, expectNotMoving } from '@decryp7/paddock-e2e';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -44,6 +44,8 @@ test.describe('contact sheet: data parts', () => {
       await small.locator('[role=row][data-index]').nth(1).getByRole('button', { name: 'More actions' }).click();
       const menu = page.getByRole('menu');
       await menu.waitFor();
+      await expectNotMoving(menu, 'the menu');
+      await expectNotMoving(small, 'the table');
       const box = (await small.boundingBox())!;
       const menuBox = (await menu.boundingBox())!;
       const bottom = Math.max(box.y + box.height, menuBox.y + menuBox.height) + 8;

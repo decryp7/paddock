@@ -8,7 +8,7 @@
     "check:index": "node ../../../conformance/ci/check-index.mjs dist/app/browser/index.html",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "lint": "ng lint",
+    "lint": "ng lint && eslint e2e --max-warnings 0",
     "lint:report": "node ../../../eslint/bin/lint-report.cjs src",
     "e2e": "playwright test",
     "e2e:install": "playwright install chromium webkit",

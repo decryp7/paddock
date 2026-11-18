@@ -77,6 +77,7 @@ test('Compare time ranges starts from the data and leaves the grid its rows', as
   await runCommand(page, 'Compare time ranges');
   const compare = page.locator('debrief-compare-view');
   await expect(compare.locator('.card .nums').first()).toBeVisible({ timeout: 10_000 });
+  await expect(compare.locator('.card .nums')).toHaveText([/events/, /events/]);
   const events = await compare.locator('.card .nums').allInnerTexts();
   expect(events).toHaveLength(2);
   for (const text of events) expect(text).not.toMatch(/^0 events|^1 events/);

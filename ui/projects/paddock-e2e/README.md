@@ -135,10 +135,9 @@ axe helpers in both engines with `--project=chromium --project=webkit`.
 | `expectOverlayAlignedWith(panel, anchor, tolerance = 1)` | the overlay has the anchor's left edge and width (a select's list) | a select list visible at x 0 before the overlay positions it |
 | `expectWired(control, attribute = 'aria-expanded', value = 'false')` | an attribute only the update pass sets | a click on a control the framework has not wired ("onContainerClick of undefined") |
 | `expectStreamDone(stream)` | `aria-busy` is "false" (call it after the stream has started: a turn is drawn) | a card that moves while the answer still streams |
-| `expectDockPlanned(page)` | `data-dock-planned` (Debrief's DockService.planned) | a layout read before the dock planned for the window |
+| `expectDockPlanned(page, { timeout? })` | `data-dock-planned` (Debrief's DockService.planned) | a layout read before the dock planned for the window (`timeout`: a caller whose load phase has its own budget) |
 | `expectNotMoving(locator)` | the same box in two reads in a row | an element still settling |
 
 Apps import the source relatively (`../../../../ui/projects/paddock-e2e/src/ready.ts`) unless their workflow builds the kit (conformance C137).
-The ESLint rule `paddock/e2e-ready-reads` (in the `e2ePinnedClock` block, off by default because the lint commands run with `--max-warnings 0`; read it with `PADDOCK_E2E_READY_LINT=warn npx eslint 'e2e/**/*.ts'`) flags a `boundingBox`, `allInnerTexts`, `allTextContents`, `innerText`,
-`textContent`, or an `evaluate` or `evaluateAll` whose result is used, in the next statement of the same block after a bare `toBeVisible()` or `waitFor()` (a window of one statement: a read two statements later, or after a `waitForTimeout`, is not seen); a read that is meant to be immediate carries
-`// conformance: e2e-ready — <why>`. Report-only until its first green run on the real tree.
+The ESLint rule `paddock/e2e-ready-reads` (in the `e2ePinnedClock` block, an error, so every app's and the ui's lint step blocks a new site) flags a `boundingBox`, `allInnerTexts`, `allTextContents`, `innerText`,
+`textContent`, or an `evaluate` or `evaluateAll` whose result is used, in the next statement of the same block after a bare `toBeVisible()` or `waitFor()` (a window of one statement: a read two statements later, or after a `waitForTimeout`, is not seen); a read that is meant to be immediate is an entry of the project's `eslint-suppressions.json` (ESLint bulk suppressions; the e2e block sets `noInlineConfig`, so no comment can switch the rule off; a new entry needs the user's approval, and conformance C139 checks the file only shrinks, ER-46).

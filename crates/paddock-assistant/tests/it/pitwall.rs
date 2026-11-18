@@ -12,8 +12,8 @@ use paddock_pitwall::{
 };
 use paddock_secrets::MemorySecrets;
 use serde_json::json;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use support::*;
 
 const KEY: &str = "pw_testkey";
@@ -30,7 +30,109 @@ struct World {
     assistant: Arc<Assistant>,
     rx: std::sync::mpsc::Receiver<Envelope>,
     sink: Arc<ChannelSink>,
+    /// When the Pitwall provider's chat returned (the generation ended), apart from saving the turn.
+    watched: Arc<Watched>,
+    /// The store's saves, which a test can hold.
+    saves: Arc<HeldSaves>,
     _dir: tempfile::TempDir,
+}
+
+/// The Pitwall provider, telling when its chat returned: the generation ended. The turn's end event comes later, once the
+/// conversation is saved (an fsync whose time depends on the disk, not on Stop: CI run 8241, Windows).
+struct Watched {
+    inner: PitwallProvider,
+    returned: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+}
+
+impl LlmProvider for Watched {
+    fn id(&self) -> &str {
+        self.inner.id()
+    }
+    fn display_name(&self) -> String {
+        self.inner.display_name()
+    }
+    fn context_length(&self) -> usize {
+        self.inner.context_length()
+    }
+    fn chat(
+        &self,
+        req: &ChatRequest,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<ChatResponse, ProviderError> {
+        let result = self.inner.chat(req, on_delta);
+        if let Some(tx) = lock(&self.returned).as_ref() {
+            let _ = tx.send(());
+        }
+        result
+    }
+}
+
+impl Watched {
+    /// From now on, each return of chat is sent here.
+    fn returns(&self) -> std::sync::mpsc::Receiver<()> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        *lock(&self.returned) = Some(tx);
+        rx
+    }
+}
+
+/// The file store, with saves of a turn (`append`) that wait while a test holds them. Open by default.
+struct HeldSaves {
+    inner: Arc<ConversationStore>,
+    held: (Mutex<bool>, std::sync::Condvar),
+}
+
+impl HeldSaves {
+    fn hold(&self) {
+        *lock(&self.held.0) = true;
+    }
+    fn open(&self) {
+        *lock(&self.held.0) = false;
+        self.held.1.notify_all();
+    }
+}
+
+impl Conversations for HeldSaves {
+    fn summaries(&self) -> Vec<ConversationSummary> {
+        Conversations::summaries(&*self.inner)
+    }
+    fn get(&self, id: &str) -> Option<Conversation> {
+        Conversations::get(&*self.inner, id)
+    }
+    fn create(&self, first: StoredMessage) -> (String, String, Result<(), SaveError>) {
+        Conversations::create(&*self.inner, first)
+    }
+    fn create_saved(
+        &self,
+        first: StoredMessage,
+        save: bool,
+    ) -> (String, String, Result<(), SaveError>) {
+        Conversations::create_saved(&*self.inner, first, save)
+    }
+    fn append(&self, id: &str, messages: Vec<StoredMessage>) -> Option<Result<(), SaveError>> {
+        let mut held = lock(&self.held.0);
+        while *held {
+            held = self.held.1.wait(held).unwrap_or_else(|p| p.into_inner());
+        }
+        drop(held);
+        Conversations::append(&*self.inner, id, messages)
+    }
+    fn delete(&self, id: &str) -> Result<bool, SaveError> {
+        Conversations::delete(&*self.inner, id)
+    }
+    fn history(&self, id: &str, history_chars: usize) -> Vec<ChatMessage> {
+        Conversations::history(&*self.inner, id, history_chars)
+    }
+    fn take_problem(&self) -> Option<String> {
+        Conversations::take_problem(&*self.inner)
+    }
+    fn admits(&self, conversation_id: Option<&str>, save: bool) -> Result<(), SaveError> {
+        Conversations::admits(&*self.inner, conversation_id, save)
+    }
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 fn world(state: FakeState, store_key: bool, api: u32, tools: Vec<Arc<dyn AssistantTool>>) -> World {
@@ -58,10 +160,18 @@ fn world(state: FakeState, store_key: bool, api: u32, tools: Vec<Arc<dyn Assista
         dir.path().join("assistant.json"),
         Arc::new(clock.clone()),
     ));
-    let assistant = Assistant::new(
-        Arc::new(PitwallProvider::new(link.clone())),
+    let watched = Arc::new(Watched {
+        inner: PitwallProvider::new(link.clone()),
+        returned: Mutex::new(None),
+    });
+    let saves = Arc::new(HeldSaves {
+        inner: store,
+        held: (Mutex::new(false), std::sync::Condvar::new()),
+    });
+    let assistant = Assistant::with_conversations(
+        watched.clone(),
         Tools::new(tools).unwrap(),
-        store,
+        saves.clone(),
         Arc::new(clock),
         AssistantConfig::new("Demo", "You help."),
     );
@@ -72,6 +182,8 @@ fn world(state: FakeState, store_key: bool, api: u32, tools: Vec<Arc<dyn Assista
         assistant,
         rx,
         sink,
+        watched,
+        saves,
         _dir: dir,
     }
 }
@@ -330,8 +442,37 @@ fn an_engine_error_in_the_stream_is_a_plain_error_and_overload_is_unavailable() 
     ));
 }
 
+/// Stops the turn of `id` while the fake Pitwall stays silent and the turn's save is held, and checks that the generation
+/// ends anyway: Stop acts on its own, without an answer from Pitwall and before the conversation is saved. Then lets the save
+/// go and returns the turn's events up to its end.
+///
+/// No wall-clock limit is asserted (rule 40, C30): how fast a cancel acts is the loopback client's read slice, tested by
+/// `paddock_pitwall`'s `cancel_acts_while_the_server_is_silent`. This test once asserted "under 2 s" from Stop to the turn's end
+/// event, which also timed the save (an fsync): 2.8 s on the loaded Windows runner (CI run 8241), while Stop itself took at most
+/// 65 ms there in 240 probe runs under CPU and disk load (docs/lessons.md, 2026-11-18). The wait is the testkit's hang guard only.
+fn stop_with_the_save_held(w: &World, id: &str) -> Vec<AssistantEvent> {
+    w.saves.hold();
+    let returned = w.watched.returns();
+    assert!(w.assistant.stop(id));
+    returned
+        .recv_timeout(paddock_testkit::wait::HANG_GUARD)
+        .expect("the generation never ended after Stop (Pitwall silent, the save held)");
+    // The turn has not ended yet: its end event waits for the held save.
+    let mut events: Vec<AssistantEvent> = w.rx.try_iter().map(|e| e.event).collect();
+    assert!(
+        !events.iter().any(|e| matches!(
+            e,
+            AssistantEvent::Done { .. } | AssistantEvent::Error { .. }
+        )),
+        "the turn ended before its save: {events:?}"
+    );
+    w.saves.open();
+    events.extend(until_end(&w.rx));
+    events
+}
+
 #[test]
-fn stop_ends_a_slow_pitwall_within_a_read_slice_in_every_phase() {
+fn stop_ends_a_silent_pitwall_before_the_turn_is_saved_in_every_phase() {
     // Silent before the first byte.
     let w = world(
         FakeState {
@@ -348,14 +489,7 @@ fn stop_ends_a_slow_pitwall_within_a_read_slice_in_every_phase() {
     while w.fake.requests_to("/v1/chat/completions").is_empty() {
         std::thread::yield_now();
     }
-    let asked = Instant::now();
-    w.assistant.stop(&ack.conversation_id);
-    let events = until_end(&w.rx);
-    assert!(
-        asked.elapsed() < Duration::from_secs(2),
-        "{:?}",
-        asked.elapsed()
-    );
+    let events = stop_with_the_save_held(&w, &ack.conversation_id);
     assert_eq!(done(&events).1, EndReason::Cancelled);
     w.fake.release();
 
@@ -371,14 +505,7 @@ fn stop_ends_a_slow_pitwall_within_a_read_slice_in_every_phase() {
     );
     let ack = w.assistant.send(ask("slow"), w.sink.clone()).unwrap();
     until(&w.rx, |e| matches!(e, AssistantEvent::Delta { .. }));
-    let asked = Instant::now();
-    w.assistant.stop(&ack.conversation_id);
-    let events = until_end(&w.rx);
-    assert!(
-        asked.elapsed() < Duration::from_secs(2),
-        "{:?}",
-        asked.elapsed()
-    );
+    let events = stop_with_the_save_held(&w, &ack.conversation_id);
     assert_eq!(
         done(&events),
         ("Part one".into(), EndReason::Cancelled, None)

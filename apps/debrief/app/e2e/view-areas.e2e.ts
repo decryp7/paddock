@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // Views open in their home areas: analysis views share ONE group below the events grid, documents sit beside the
 // timeline, and the timeline and the events are never covered.
@@ -49,6 +50,7 @@ test.describe('view home areas', () => {
     test('a document (Metrics) opens beside the timeline, not over it or the events', async ({ page }) => {
     await page.getByRole('button', { name: 'Metrics', exact: true }).click();
     await expect(tab(page, 'Metrics')).toBeVisible();
+    for (const g of ['Metrics', 'Timeline', 'Events']) await expectNotMoving(groupOf(page, g), `the ${g} group`);
     const metrics = (await groupOf(page, 'Metrics').boundingBox())!;
     const timeline = (await groupOf(page, 'Timeline').boundingBox())!;
     const events = (await groupOf(page, 'Events').boundingBox())!;
@@ -64,6 +66,7 @@ test.describe('view home areas', () => {
     await expect(tab(page, 'Metrics')).toBeVisible();
     const timeline = groupOf(page, 'Timeline');
     await expect(timeline.getByRole('tab', { name: 'Metrics', exact: true })).toBeVisible();
+    for (const g of ['Timeline', 'Events', 'Metrics']) await expectNotMoving(groupOf(page, g), `the ${g} group`);
     expect((await timeline.boundingBox())!.width).toBeGreaterThanOrEqual(560);
     const events = (await groupOf(page, 'Events').boundingBox())!;
     const metrics = (await groupOf(page, 'Metrics').boundingBox())!;

@@ -1,6 +1,7 @@
 import { expect, test } from './test';
 import { readFileSync } from 'node:fs';
 import { DIALOG_TEST_INPUTS } from '../src/app/dialog-windows/dialog-test-inputs';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // A dialog window is its own small Angular bootstrap (ADR 0050). The browser build can open its route by URL, so this
 // boots every dialog of the contract file (generated from the registry, ADR 0054: not a hand-kept list) with only the
@@ -113,6 +114,7 @@ for (const [id, c] of Object.entries(CONTRACTS).filter(([, c]) => c.kind === 'vi
     await expect(shell.locator('[data-testid=dialog-loading]')).toHaveCount(0, { timeout: 15_000 });
     const close = shell.locator('[data-dialog-close]').or(shell.locator('button').filter({ hasText: CLOSE })).first();
     await expect(close).toBeVisible();
+    await expectNotMoving(close, 'the close button');
     const box = (await close.boundingBox())!;
     expect(box.y + box.height).toBeLessThanOrEqual(560);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
@@ -129,6 +131,8 @@ for (const size of [{ width: 1021, height: 727 }, { width: 760, height: 560 }]) 
     await expect(shell.locator('[data-testid=dialog-loading]')).toHaveCount(0, { timeout: 15_000 });
     const footer = shell.locator('.footer');
     await expect(footer).toBeVisible();
+    await expectNotMoving(footer, 'the footer');
+    await expectNotMoving(shell.locator('debrief-settings-screen'), 'the settings screen');
     const fb = (await footer.boundingBox())!;
     const host = (await shell.locator('debrief-settings-screen').boundingBox())!;
     // The footer ends within the shell's padding of the window bottom; the content spans the window height.
@@ -156,6 +160,7 @@ test('the ai-narrative window with a long answer is at least 480 px tall, scroll
   expect(m.overflowX).toBeLessThanOrEqual(0);
   const close = shell.getByRole('button', { name: 'Close' });
   await expect(close).toBeVisible();
+  await expectNotMoving(close, 'the close button');
   const box = (await close.boundingBox())!;
   expect(box.y + box.height).toBeLessThanOrEqual(560);
   const win = (await shell.boundingBox())!;

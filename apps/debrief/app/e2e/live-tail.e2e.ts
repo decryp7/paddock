@@ -17,6 +17,24 @@ async function liveOn(page: Page): Promise<void> {
   await expect(liveButton(page)).toHaveAttribute('aria-pressed', 'true');
 }
 
+/*
+ * Live ticks are expensive in CI's headless WebKit (Linux): each tick of the mock live tail (every 250 ms) costs the page about a
+ * second of main-thread work (3 to 18 frames in 3 s with ticks, 184 with live tail on and no ticks), so every click, read and axe
+ * scan queues behind the ticks. The status and rolling-files tests took 32 to 37 s of their 60 s on an idle runner (Chromium: 5 to
+ * 6 s) and timed out on a loaded one (debrief.yml run 8243; docs/lessons.md, 2026-11-18). Tests that check something other than
+ * following new lines therefore run with no tick while they run (QUIET_LIVE) or turn live tail off once they have the lines they
+ * need (liveOff). Holding the page clock is no answer: axe and the live toggle wait on page timers.
+ */
+
+/** Live tail on with its first tick two minutes away, past any test's 60 s: the files, their status and set_live, no new lines. */
+const QUIET_LIVE = '?mockLive=1&mockLiveRate=1&mockLiveMs=120000&mockLiveRotateMs=0&mockLiveAlertMs=0';
+
+/** Turns live tail off once a test has the lines it needs (see above). */
+async function liveOff(page: Page): Promise<void> {
+  await liveButton(page).click();
+  await expect(liveButton(page)).toHaveAttribute('aria-pressed', 'false');
+}
+
 /** The `setLive` calls the mock backend received (published by `?mockLive=1`). */
 function liveCalls(page: Page) {
   return page.evaluate(() => (globalThis as unknown as { __debriefMockLiveCalls?: { enabled: boolean; options: Record<string, unknown> | null }[] }).__debriefMockLiveCalls ?? []);
@@ -205,7 +223,8 @@ test.describe('live tail: alerts', () => {
 
 test.describe('live tail: status, sources and opening', () => {
   test('the tail status panel shows each file and links to Settings ▸ Live tail, whose controls call set_live', async ({ page }, testInfo) => {
-    await openAppWith(page, LIVE);
+    // Live tail stays on (the options go to set_live only then), with no live tick while the test runs (QUIET_LIVE).
+    await openAppWith(page, QUIET_LIVE);
     await openView(page, 'Tail status');
     const panel = page.locator('debrief-tail-status-view');
     await expect(panel.getByTestId('tail-file').first()).toBeVisible();
@@ -241,14 +260,16 @@ test.describe('live tail: status, sources and opening', () => {
     await expect(detect).toHaveValue('600000');
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
-    await expect(panel.getByTestId('tail-file').filter({ hasText: 'Polling' }).first()).toBeVisible({ timeout: 10_000 });
+    await expect(panel.getByTestId('tail-file').filter({ hasText: 'Polling' }).first()).toBeVisible();
   });
 
   test('rolling files of one log collapse into a group that expands, with a rotated badge', async ({ page }, testInfo) => {
-    await openOnClock(page, '?mockLive=1&mockLiveRate=20&mockLiveRotateMs=1000&mockLiveAlertMs=0');
+    // A tick every 500 ms: the 2.5 s below run 5 ticks, not 10 (each tick is costly in WebKit, see above).
+    await openOnClock(page, '?mockLive=1&mockLiveRate=20&mockLiveMs=500&mockLiveRotateMs=1000&mockLiveAlertMs=0');
     await liveOn(page);
-    // Two rotations are due within 2 s of live ticks.
+    // Two rotations are due within 2 s of live ticks; then nothing needs new lines (liveOff, see above).
     await page.clock.runFor(2_500);
+    await liveOff(page);
     const group = page.getByTestId('source-group').first();
     await expect(group).toBeVisible();
     await expect(group).toHaveAttribute('aria-expanded', 'false');

@@ -7,7 +7,7 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "lint": "ng lint",
+    "lint": "ng lint && eslint e2e --max-warnings 0",
     "lint:report": "node ../../../eslint/bin/lint-report.cjs src",
     "tauri": "tauri",
     "e2e": "playwright test",

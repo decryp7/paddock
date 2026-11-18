@@ -3,6 +3,7 @@ import { axeInThemes } from '@decryp7/paddock-e2e';
 import type { Locator, Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 /**
  * The dashboard on the shared widget grid (family ADR 0044, WP-C2) against the mock backend, which answers the engine's gestures from the
@@ -165,12 +166,16 @@ test.describe('dashboard grid', () => {
     await open(page);
     await page.getByRole('button', { name: 'Edit layout' }).click();
     await expect(page.getByText('Editing layout')).toBeVisible();
-    const filled = await page.evaluate(() =>
-      [...document.querySelectorAll<HTMLElement>('main .mat-mdc-unelevated-button')]
-        .filter((b) => getComputedStyle(b).backgroundColor !== 'rgba(0, 0, 0, 0)')
-        .map((b) => (b.textContent ?? '').trim()),
-    );
-    expect(filled).toEqual(['Done']);
+    // The buttons' fills settle with the edit mode: poll for the one filled button, never read once.
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>('main .mat-mdc-unelevated-button')]
+            .filter((b) => getComputedStyle(b).backgroundColor !== 'rgba(0, 0, 0, 0)')
+            .map((b) => (b.textContent ?? '').trim()),
+        ),
+      )
+      .toEqual(['Done']);
     // Outside edit mode the Why slow widget's own button is the filled one again.
     await page.getByRole('button', { name: 'Done' }).click();
     await expect(page.getByText('Editing layout')).toHaveCount(0);
@@ -222,6 +227,8 @@ test.describe('dashboard grid', () => {
     await open(page);
     await page.getByRole('button', { name: 'Edit layout' }).click();
     await expect(page.getByText('Editing layout')).toBeVisible();
+    await expectNotMoving(page.locator('[data-pd-cell]').first(), 'the first widget cell');
+    await expectNotMoving(page.locator('[data-pd-cell]').last(), 'the last widget cell');
     const overlaps = await page.evaluate(() => {
       const bad: string[] = [];
       for (const cell of document.querySelectorAll<HTMLElement>('[data-pd-cell]')) {

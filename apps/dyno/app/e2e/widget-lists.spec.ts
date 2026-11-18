@@ -1,6 +1,7 @@
 import { expect, test } from './test';
 import { stablePressPoint } from '@decryp7/paddock-e2e';
 import type { Locator, Page } from '@playwright/test';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 /**
  * Widgets that can scroll list everything and scroll inside themselves (Dyno 1.1.0): the dashboard's Recent events (a virtual viewport)
@@ -249,6 +250,7 @@ test.describe('widget lists in the tray popover', () => {
     await wheelToEnd(page, list);
     await expect(list.getByText('Invented alarm 200')).toBeVisible();
     // The popover did not grow while the list scrolled.
+    await expectNotMoving(page.locator('pd-tray-popover'), 'the popover');
     expect(await page.locator('pd-tray-popover').evaluate((e) => e.getBoundingClientRect().height)).toBe(height);
     await expect(page.getByText('Showing the 200 most severe of 205.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open alarms' })).toBeVisible();

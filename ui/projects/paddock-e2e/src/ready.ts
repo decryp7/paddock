@@ -5,7 +5,7 @@ import { settledLayout } from './settled-layout.ts';
  * "Ready" per kind of thing a spec reads or presses. `toBeVisible()` says an element is drawn; it does not say its content, its position or
  * its wiring is final (the sweep of 2026-11-17, docs/lessons.md: a palette still showing the unfiltered list, an overlay not yet positioned, a
  * section whose update pass had not run, an answer still streaming above a card). Wait with the helper of the kind, then read or press. The
- * lint rule `paddock/e2e-ready-reads` (warn) flags a read right after a bare visibility wait.
+ * lint rule `paddock/e2e-ready-reads` (an error) flags a read right after a bare visibility wait.
  */
 
 /** The larger of the offset of `box` from `anchor`'s left edge and the difference of their widths, in px (pure; `null` when either is not drawn). */
@@ -52,9 +52,12 @@ export async function expectStreamDone(stream: Locator): Promise<void> {
   await expect(stream, 'the stream has finished (aria-busy is "false")').toHaveAttribute('aria-busy', 'false');
 }
 
-/** Waits until the dock has planned its arrangement for the window's current size (`data-dock-planned`, Debrief's DockService.planned). */
-export async function expectDockPlanned(page: Page): Promise<void> {
-  await expect(page.locator('[data-dock-planned]'), 'the dock has planned for the current window size').toBeAttached();
+/**
+ * Waits until the dock has planned its arrangement for the window's current size (`data-dock-planned`, Debrief's DockService.planned).
+ * `timeout` (default: the expect timeout) is for a caller whose wait is part of a longer phase with its own budget, such as an app's first load.
+ */
+export async function expectDockPlanned(page: Page, options: { timeout?: number } = {}): Promise<void> {
+  await expect(page.locator('[data-dock-planned]'), 'the dock has planned for the current window size').toBeAttached(options);
 }
 
 /** Waits until an element's box (left, top, width, height) is the same in two reads in a row: it is drawn and not moving (`settledLayout`). */

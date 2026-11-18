@@ -1,5 +1,6 @@
 import { expect, test } from './test';
 import type { Locator, Page } from '@playwright/test';
+import { expectNotMoving } from '@decryp7/paddock-e2e';
 
 // ER-21: the shared Material surfaces keep the family's control geometry and type under a hostile host theme.
 //
@@ -114,6 +115,7 @@ test.describe('shared settings and panels keep the family density under a host t
     await page.addStyleTag({ content: HOSTILE });
     const group = page.getByTestId('notices-filter-bar').locator('mat-button-toggle-group');
     await expect(group).toBeVisible();
+    await expectNotMoving(group, 'the filter group');
     expect((await group.boundingBox())!.height).toBeLessThanOrEqual((await px(page, 'height', 'var(--pd-control-height)')) + 4);
   });
 });

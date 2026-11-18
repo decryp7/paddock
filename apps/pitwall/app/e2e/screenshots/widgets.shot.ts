@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { dialogWindowUrl, waitForStableFrame } from '../../../../../ui/projects/paddock-e2e/src/index.ts';
+import { expectNotMoving } from '../../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 /**
  * The tray popup's widgets and their chooser, light and dark at 2x, for the independent review (rule 22) and the docs: the
@@ -85,6 +86,7 @@ for (const theme of ['light', 'dark'] as const) {
       const preview = page.locator('pd-tray-popover[aria-label="Preview of the popup"]');
       await expect(preview.locator('section.pd-w').first()).toBeVisible();
       // The preview is beside the list, not under it (the chooser's wide layout).
+      await expectNotMoving(preview, 'the preview');
       const [list, side] = await Promise.all([page.getByText('Add a widget').boundingBox(), preview.boundingBox()]);
       expect(side!.x, 'the preview is to the right of the lists').toBeGreaterThan(list!.x + 300);
       await page.evaluate(async () => document.fonts.ready);

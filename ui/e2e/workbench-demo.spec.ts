@@ -161,6 +161,7 @@ test.describe('dock (plan W2a, W2b)', () => {
       await wb.activity.item('wd.act.problems').click();
       await wb.activity.item('pd.wb.assistant.activity').click();
       await expect(tab(page, 'wd.problems')).toBeVisible();
+      await expectNotMoving(tab(page, 'wd.problems'), 'the Problems tab');
       const short = await page.locator('[data-min-width]').evaluateAll((groups) =>
         groups
           .map((g) => ({ g, r: g.getBoundingClientRect(), w: Number(g.getAttribute('data-min-width')), h: Number(g.getAttribute('data-min-height')) }))
@@ -240,6 +241,7 @@ test.describe('review 1 (X50)', () => {
     await page.mouse.click(box.x + 60, box.y + box.height / 2, { button: 'right' });
     const items = wb.explorer.menu.getByRole('menuitem');
     await expect(items.first()).toBeVisible();
+    await expectNotMoving(wb.explorer.menu, 'the menu');
     const byMouse = await items.evaluateAll((els) => els.map((e) => `${e.textContent?.trim()}|${e.querySelector('.pd-popmenu__icon pd-icon') ? 'icon' : 'none'}`));
     await page.keyboard.press('Escape');
     await row.click();
@@ -273,6 +275,7 @@ test.describe('review 1 (X50)', () => {
     };
     await expect.poll(ratio).toBeGreaterThanOrEqual(0.6);
     await expect(table.locator('.where').first()).toBeVisible();
+    await expectNotMoving(table.locator('[role=row].pd-row').last(), 'the last row');
     // Review 2 P1-A: folded rows grow; no cell overflows, the second line clears the row's bottom border by 4 px.
     const overflow = await table.locator('[role=row].pd-row').evaluateAll((rows) =>
       rows.flatMap((r) => {
@@ -296,6 +299,7 @@ test.describe('review 1 (X50)', () => {
     const wb = new WorkbenchApp(page);
     await wb.frame.open();
     await expect(page.getByTestId('pd-dock')).toBeVisible();
+    await expectNotMoving(page.getByTestId('pd-dock'), 'the dock');
     const before = await page.getByTestId('pd-dock').evaluate((d) => d.getBoundingClientRect().width);
     await wb.activity.item('wd.act.explorer').click();
     await expect(wb.frame.sidebar).toHaveClass(/pd-side-overlay/);

@@ -2,6 +2,8 @@
 // entries a branch adds against its merge base with the target branch are an error; entries that are now fixed are only a warning
 // ("remove it"), so two branches that each fix some of the same entries can land in either order. C71's three baselines and the
 // baselines of the CI-env and shared-enum tests all use this.
+// A check's list has to land on the target branch while the check is still report-only: a list that does not exist at the merge base is an empty base, so every entry
+// of a list created on a branch is growth (ER-46) and the branch gets one finding per file until the list is on the target branch.
 import { execFileSync } from 'node:child_process';
 import { error, unwaivable, warn } from '../finding.mjs';
 
@@ -81,8 +83,8 @@ export function isWorkTree(root, git = defaultGit(root)) {
 
 /**
  * The entries of `current` that the baseline at the merge base does not have (a multiset difference by `keyOf`), or `{ reason }` when
- * it cannot be measured (no git, no merge base, an unreadable file). A baseline absent at the merge base is the first introduction:
- * nothing was added. With `looseKeyOf` an entry whose loose key (say the hash) is in the base but whose full key is not is `moved`, not
+ * it cannot be measured (no git, no merge base, an unreadable file). A baseline absent at the merge base is an empty base (every entry is growth, ER-46).
+ * With `looseKeyOf` an entry whose loose key (say the hash) is in the base but whose full key is not is `moved`, not
  * added (`moved: [{ item, from }]`). `entriesOf(json)` reads the list out of the parsed file; `git` and `baseRef` are injectable for tests.
  */
 export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = defaultGit(root), baseRef = targetRef(), looseKeyOf }) {
@@ -98,7 +100,12 @@ export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = de
   try {
     text = git(['show', `${base}:${path}`]);
   } catch (e) {
-    if (/does not exist|exists on disk, but not in|not in/.test(String(e.stderr ?? e.message))) return { base, added: [], moved: [] };
+    // A list absent at the merge base is an empty base: every current entry is growth (ER-46). Treating it as the "first introduction" let a new list with any
+    // number of entries in silently (a new apps/<app>/app/eslint-suppressions.json with count 5, the second time this class was found).
+    if (/does not exist|exists on disk, but not in|not in/.test(String(e.stderr ?? e.message))) {
+      const { fresh, moved } = reconcile(current, [], keyOf, looseKeyOf);
+      return { base, added: fresh, moved };
+    }
     return { kind: 'unreadable', reason: `the baseline at ${base.slice(0, 9)} cannot be read` };
   }
   let entries;

@@ -42,6 +42,7 @@ for (const size of SIZES) {
         await list.scrollIntoViewIfNeeded();
         const row = list.locator('li.pd-wc-item').first();
         await expect(row).toBeVisible();
+        await expect(row.locator('.pd-wc-txt b')).toHaveText(/\S/);
         const title = (await row.locator('.pd-wc-txt b').innerText()).trim();
         await row.locator('.pd-wc-grip').scrollIntoViewIfNeeded();
         const { x, y } = await stablePressPoint(page, row.locator('.pd-wc-grip'), '.pd-wc-grip');

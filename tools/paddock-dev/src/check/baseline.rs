@@ -3,6 +3,9 @@
 //! ever shrinks: an entry the code no longer produces is stale and is removed; an entry never appears by itself. `--write`
 //! style tools use [`Baseline::shrunk`] (it cannot add) and [`ensure_shrink_only`] (it refuses a file that has grown).
 //!
+//! A check's list has to land on the target branch while the check is still report-only: a list that does not exist at the merge base is an empty
+//! base, so every entry of a list created on a branch is growth (ER-46) and the branch gets one finding per file until the list is on the target branch.
+//!
 //! Blank lines and `#` comment lines are kept as they are and are not entries.
 
 use super::finding::Finding;
@@ -273,7 +276,7 @@ impl Unmeasured {
 
 /// The entries of `current` that the baseline file `path` at the merge base with `base_ref` does not have, or the reason that
 /// cannot be measured (`baselineGrowth`). On the target branch itself the commit is compared with its first parent. A baseline
-/// absent at the merge base is the first introduction: nothing was added. `entries_of` reads the entries out of the file's text.
+/// absent at the merge base is an empty base: every current entry is growth (ER-46). `entries_of` reads the entries out of the file's text.
 pub fn growth<T: Clone>(
     root: &Path,
     base_ref: &str,
@@ -299,31 +302,30 @@ pub fn growth<T: Clone>(
         }
     };
     let short = || base.chars().take(9).collect::<String>();
-    let text = match git(root, &["show", &format!("{base}:{path}")]) {
-        Ok(t) => t,
+    // A list absent at the merge base is an empty base: every current entry is growth (ER-46). Treating it as the "first introduction" let a new list
+    // with any number of entries in silently (a new apps/<app>/app/eslint-suppressions.json with count 5, the second time this class was found).
+    let old: Vec<T> = match git(root, &["show", &format!("{base}:{path}")]) {
+        Ok(text) => {
+            let Some(old) = entries_of(&text) else {
+                return Growth::Unmeasured(Unmeasured::BaselineUnparsed(format!(
+                    "the baseline at {} cannot be parsed",
+                    short()
+                )));
+            };
+            old
+        }
         Err((_, stderr)) => {
             let missing = ["does not exist", "exists on disk, but not in", "not in"]
                 .iter()
                 .any(|p| stderr.contains(p));
-            return if missing {
-                Growth::Added {
-                    base,
-                    added: 0,
-                    moved: Vec::new(),
-                }
-            } else {
-                Growth::Unmeasured(Unmeasured::BaselineUnreadable(format!(
+            if !missing {
+                return Growth::Unmeasured(Unmeasured::BaselineUnreadable(format!(
                     "the baseline at {} cannot be read",
                     short()
-                )))
-            };
+                )));
+            }
+            Vec::new()
         }
-    };
-    let Some(old) = entries_of(&text) else {
-        return Growth::Unmeasured(Unmeasured::BaselineUnparsed(format!(
-            "the baseline at {} cannot be parsed",
-            short()
-        )));
     };
     let r = reconcile(current, &old, exact, loose, &|_, _| true);
     Growth::Added {
@@ -471,5 +473,59 @@ mod tests {
     fn a_grown_file_is_refused_with_the_added_entries() {
         assert_eq!(ensure_shrink_only(FILE, "abc\nplanted\n"), Err(vec!["planted".to_string()]));
         assert!(ensure_shrink_only(FILE, "abc\n").is_ok());
+    }
+
+    #[allow(clippy::disallowed_methods, reason = "a test spawns git; it ends it itself")]
+    fn git(root: &std::path::Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    /// ER-46: a list that is absent at the merge base is an empty base, so every entry of it is growth (a new list with any number of entries
+    /// went in silently when this was "the first introduction"). Present at the base: the usual comparison.
+    #[test]
+    fn a_list_absent_at_the_merge_base_is_an_empty_base_and_every_entry_is_growth() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("keep"), "x").unwrap();
+        git(d.path(), &["init", "-q", "-b", "main"]);
+        git(d.path(), &["add", "."]);
+        git(d.path(), &["commit", "-q", "-m", "base: no list"]);
+        git(d.path(), &["checkout", "-q", "-b", "topic"]);
+        std::fs::write(d.path().join("l.txt"), "a\nb\nb\n").unwrap();
+        git(d.path(), &["add", "."]);
+        git(d.path(), &["commit", "-q", "-m", "the list appears"]);
+        let of = |t: &str| Some(t.lines().map(str::to_string).collect::<Vec<_>>());
+        let exact = |k: &String| k.clone();
+        let current = keys(&["a", "b", "b"]);
+        assert!(matches!(
+            growth(d.path(), "main", "l.txt", &current, &of, &exact, None),
+            Growth::Added { added: 3, .. }
+        ));
+        assert!(
+            matches!(
+                growth(d.path(), "main", "l.txt", &[], &of, &exact, None),
+                Growth::Added { added: 0, .. }
+            ),
+            "a new empty list adds nothing"
+        );
+        // On the base itself the commit is compared with its first parent, where the list is absent too.
+        git(d.path(), &["checkout", "-q", "main"]);
+        git(d.path(), &["merge", "-q", "--ff-only", "topic"]);
+        assert!(matches!(
+            growth(d.path(), "main", "l.txt", &current, &of, &exact, None),
+            Growth::Added { added: 3, .. }
+        ));
     }
 }
