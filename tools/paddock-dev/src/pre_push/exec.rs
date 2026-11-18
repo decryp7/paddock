@@ -1071,6 +1071,30 @@ exit $rc
             }
         }
 
+        /// The positive control of `harness_as_gate` (ER-33): the test binary itself is refused as a gate, by the guard and by the
+        /// real executor, with the cause named; any other program is not.
+        #[test]
+        fn the_real_executor_refuses_to_start_the_test_binary_as_a_gate() {
+            let me = std::env::current_exe().unwrap().to_string_lossy().to_string();
+            let why = harness_as_gate(&me).expect("the test binary is refused");
+            assert!(why.contains("its own test binary") && why.contains(&me), "{why}");
+            assert_eq!(harness_as_gate("/bin/true"), None);
+            let d = tempfile::tempdir().unwrap();
+            let ex = real(d.path(), &d.path().join("lock"));
+            let g = Gate {
+                program: me,
+                args: vec!["gates".into(), "check".into()],
+                heavy: false,
+                ..gate("gates-register", "")
+            };
+            let limits = Limits {
+                run: Duration::from_secs(5),
+                queue: Duration::from_secs(5),
+            };
+            let err = ex.run(&g, limits).expect_err("the test binary never starts as a gate");
+            assert!(err.contains("its own test binary"), "{err}");
+        }
+
         /// The gates-register row's finding (C100's `::error` line, as `./dev gates check` prints it for a check no CI line runs) comes
         /// before a 14-line table; it must be in the failed row's output, not cut off by the table (review of feat/pre-push-unwired-check).
         #[test]
