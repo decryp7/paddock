@@ -22,6 +22,9 @@
 //! announced at the top of every run it is set in, shown in the table and logged next to the gate logs.
 
 pub mod budget;
+
+/// How many earlier runs' log folders are kept beside the current one.
+const KEEP_RUN_LOGS: usize = 20;
 pub mod deny;
 pub mod exec;
 pub mod gates;
@@ -436,7 +439,12 @@ fn command_in(
     let real = RealExec {
         root: work.clone(),
         env: env.clone(),
-        logs: state.join("logs"),
+        logs: {
+            // One log folder per push run: another run's logs (or an earlier one's) are never this run's (ADR 0102 amendment 2026-11-18).
+            let all = state.join("logs");
+            exec::prune_run_logs(&all, KEEP_RUN_LOGS);
+            all.join(exec::run_token())
+        },
         stop: Arc::clone(&stop),
         built_heavy: Default::default(),
         live_slot: Default::default(),

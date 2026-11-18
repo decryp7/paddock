@@ -1,7 +1,7 @@
 //! Running the gates: each one decided by an [`Exec`] (real processes, or a fake in the tests), several at a time, cheapest first,
 //! inside a total time budget, and stopped when the person stops the push.
 
-use super::budget::{BudgetClock, Slot, Timing, parse_heavy_timing, with_heavy_flags};
+use super::budget::{BudgetClock, Slot, Timing, parse_heavy_timing, with_agent_name, with_heavy_flags};
 use super::gates::{Gate, Need, Planned};
 use super::linux_inputs::{ImageProbe, PROBE_NEXT, image_probe};
 use crate::ci_tool::{Output, ToolCall, tail};
@@ -217,6 +217,63 @@ fn first_word(id: &str) -> &str {
 
 /// The line `heavy` writes when it holds the slot for a step (`<agent> holds the lock (pid N) at ...`): before it, a step is queued.
 const LOCK_TAKEN: &str = " holds the lock (pid ";
+/// What heavy prints when it holds the slot for the step named `name`: before it, that step is queued. The step's own name (not
+/// "pre-push") so a line of another step, in this log or a stale one, is not taken for it.
+fn lock_line(name: &str) -> String {
+    format!("{name}{LOCK_TAKEN}")
+}
+
+/// A step's log read from where it stopped: only the new bytes each time (a log can hold megabytes of compiler output), with the
+/// last bytes of the previous read carried over so a line cut between two reads is still found.
+struct LockSeen {
+    needle: String,
+    pos: u64,
+    carry: String,
+}
+
+impl LockSeen {
+    fn new(needle: String) -> LockSeen {
+        LockSeen {
+            needle,
+            pos: 0,
+            carry: String::new(),
+        }
+    }
+
+    /// Whether the needle is in what `path` holds now (new bytes since the last call and the carried tail).
+    fn seen(&mut self, path: &Path) -> bool {
+        use std::io::{Read, Seek, SeekFrom};
+        let Ok(mut f) = std::fs::File::open(path) else { return false };
+        if f.metadata().is_ok_and(|m| m.len() < self.pos) {
+            // The file was truncated under us: start again.
+            self.pos = 0;
+            self.carry.clear();
+        }
+        if f.seek(SeekFrom::Start(self.pos)).is_err() {
+            return false;
+        }
+        let mut buf = Vec::new();
+        // Bounded per read: heavy's lines are short; the rest comes at the next poll.
+        let Ok(n) = f.take(64 * 1024).read_to_end(&mut buf) else {
+            return false;
+        };
+        self.pos += n as u64;
+        self.carry.push_str(&String::from_utf8_lossy(&buf));
+        if self.carry.contains(&self.needle) {
+            return true;
+        }
+        let keep = self.needle.len().saturating_sub(1);
+        if self.carry.len() > keep {
+            let mut cut = self.carry.len() - keep;
+            while !self.carry.is_char_boundary(cut) {
+                cut += 1;
+            }
+            self.carry.drain(..cut);
+        }
+        false
+    }
+}
+
 /// How often the log of a heavy step is read for [`LOCK_TAKEN`]: the queue time is read to this precision, and a second is
 /// nothing next to the minutes a queue lasts.
 const SLOT_POLL: Duration = Duration::from_millis(250);
@@ -310,9 +367,10 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
         // No slot means the command never ran: not measured, never a pass or a failure (ADR 0102 on ADR 0089's rows).
         Ok(done) if done.no_slot() => Row::not_measured(
             format!(
-                "{} never got a heavy slot (queue allowance spent: queued {:.1} s of the {} min allowed, {}; load {}): the machine was busy with other steps, so nothing was measured",
+                "{} never got a heavy slot (queue allowance spent: queued {:.1} s{} of the {} min allowed, {}; load {}): the machine was busy with other steps, so nothing was measured",
                 gate.rerun(),
                 done.timing.map_or(0.0, |t| t.queued),
+                queue_holder(done.log.as_deref()).map_or(String::new(), |h| format!(" behind {h}")),
                 limits.queue.as_secs() / 60,
                 done.how,
                 load_text(exec.load())
@@ -460,7 +518,10 @@ impl Turns {
                 if !matches!(planned[i], Planned::Run(_)) {
                     return Some((i, None));
                 }
-                let run = clock.left_live(now(), st.1, exec.slot());
+                if let Some(token) = st.1 {
+                    clock.observe(token, exec.slot());
+                }
+                let run = clock.left_live(now());
                 let queue = opts.queue.saturating_sub(clock.credit());
                 let start = if run.is_zero() {
                     Start::BudgetSpent
@@ -468,7 +529,9 @@ impl Turns {
                     Start::QueueSpent
                 } else {
                     if heavy(i) {
-                        st.1 = Some(now());
+                        let token = now();
+                        st.1 = Some(token);
+                        clock.begin_step(token, queue);
                     }
                     Start::Go(Limits { run, queue })
                 };
@@ -561,6 +624,7 @@ pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (V
                                         "report this with the command that ran; re-run it alone",
                                     )
                                 });
+                                clock.end_step();
                                 turns.end(g.heavy);
                                 row
                             }
@@ -667,6 +731,14 @@ pub fn on_path(env: &HashMap<String, String>, program: &str) -> bool {
     std::env::split_paths(&path).any(|d| exists(&d, program))
 }
 
+/// Who held the heavy slot while a step queued, from the step's log (`the lock is held by <who> (pid N) for ...`); `None` when the
+/// log is unreadable or never named one.
+fn queue_holder(log: Option<&str>) -> Option<String> {
+    let text = std::fs::read_to_string(log?).ok()?;
+    let held = text.lines().rev().find_map(|l| l.split("the lock is held by ").nth(1))?;
+    Some(held.split(" for ").next().unwrap_or(held).trim().to_string())
+}
+
 /// Whether the output of a gate run through `heavy` shows that it never got the slot: it printed who holds the lock
 /// ("the lock is held by <name> (pid <n>) ...") and never "<name> holds the lock". Returns the phrase for the verdict.
 pub fn slot_wait(log: &str) -> Option<String> {
@@ -763,18 +835,21 @@ impl RealExec {
             .any(|a| a == "--run-max")
     }
 
-    fn call(&self, gate: &Gate, limits: Limits, log: &Path, label: Option<&str>) -> ToolCall {
+    fn call(&self, gate: &Gate, limits: Limits, log: &Path, label: Option<&str>, name: &str) -> ToolCall {
         let left = limits.run;
         let own = own_run_limit(gate);
         // A heavy step: its run time is limited by heavy itself (`--run-max`), its wait for a slot separately (`--queue-max`);
         // the outer timeout is only a backstop for both plus a minute.
         let run_max = own.min(left);
         let heavy = if gate.heavy {
-            with_heavy_flags(
-                &self.heavy_command(limits.run).unwrap_or_default(),
-                self.priority,
-                limits.queue,
-                run_max,
+            with_agent_name(
+                &with_heavy_flags(
+                    &self.heavy_command(limits.run).unwrap_or_default(),
+                    self.priority,
+                    limits.queue,
+                    run_max,
+                ),
+                name,
             )
         } else {
             Vec::new()
@@ -860,8 +935,30 @@ fn harness_as_gate(program: &str) -> Option<String> {
         .then(|| format!("a unit test would start its own test binary ({program}) as a gate: give command_in a fake executor (exec::Exec)"))
 }
 
+/// The agent name of one heavy step of this process: `pre-push-<pid>-<n>`.
+fn step_name() -> String {
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    format!("pre-push-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst))
+}
+
+/// Deletes all but the newest `keep` run folders under `root` (each push run has its own log folder): a folder at a time, by exact
+/// path, through the one guarded remover. Best effort: a folder that cannot be removed stays.
+pub fn prune_run_logs(root: &Path, keep: usize) {
+    let Ok(read) = std::fs::read_dir(root) else { return };
+    let mut dirs: Vec<(std::time::SystemTime, PathBuf)> = read
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    dirs.sort();
+    let drop = dirs.len().saturating_sub(keep);
+    for (_, d) in dirs.into_iter().take(drop) {
+        let _ = crate::safe_remove::remove_under(root, &d, None);
+    }
+}
+
 /// A token no other run has: process id and clock.
-fn run_token() -> String {
+pub fn run_token() -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
@@ -924,18 +1021,24 @@ impl Exec for RealExec {
         // Best-effort: the .id file only helps a reader; a failed write never stops the gate.
         let _ = std::fs::write(log.with_extension("id"), format!("{}\n", gate.id));
         let label = matches!(gate.need, Need::Docker | Need::LocalCiImage).then(run_token);
-        let call = self.call(gate, limits, &log, label.as_deref());
+        // Each step has a name of its own for heavy (`pre-push-<pid>-<n>`), and its log is new: nothing an earlier or another push
+        // wrote can be read for this step's lines.
+        let name = step_name();
+        let call = self.call(gate, limits, &log, label.as_deref(), &name);
+        let _ = std::fs::File::create(&log);
         // Our `heavy` writes "holds the lock" to the log when the slot is taken: until then every second is waiting for others,
         // and the push's budget does not count it (`Exec::slot`). Another heavy prints no such line: nothing is known then.
         let ours = gate.heavy && self.runs_through_our_heavy(limits);
         let mut ran = if ours {
-            self.set_slot(Slot::Queued);
+            let since = Instant::now();
+            self.set_slot(Slot::Queued { since });
             let done = AtomicBool::new(false);
             let ran = std::thread::scope(|s| {
                 s.spawn(|| {
+                    let mut seen = LockSeen::new(lock_line(&name));
                     while !done.load(Ordering::SeqCst) {
-                        if std::fs::read_to_string(&log).is_ok_and(|t| t.contains(LOCK_TAKEN)) {
-                            self.set_slot(Slot::Taken(Instant::now()));
+                        if seen.seen(&log) {
+                            self.set_slot(Slot::Taken { since, at: Instant::now() });
                             return;
                         }
                         std::thread::sleep(SLOT_POLL);
@@ -1062,6 +1165,60 @@ mod tests {
         }
     }
 
+    /// An executor whose heavy step got no slot: `heavy` exited 79 and its log says who held the slot.
+    struct NoSlot {
+        log: PathBuf,
+    }
+
+    impl Exec for NoSlot {
+        fn has_tool(&self, _: &str) -> bool {
+            true
+        }
+        fn docker_up(&self) -> bool {
+            true
+        }
+        fn run(&self, _: &Gate, _: Limits) -> Result<Done, String> {
+            Ok(Done {
+                success: false,
+                how: "queue limit: no slot taken in time".into(),
+                tail: String::new(),
+                log: Some(self.log.display().to_string()),
+                timing: Some(Timing { queued: 1800.0, ran: 0.0 }),
+            })
+        }
+    }
+
+    #[test]
+    fn a_step_that_got_no_slot_says_who_it_queued_behind() {
+        let d = tempfile::tempdir().unwrap();
+        let log = d.path().join("g.log");
+        std::fs::write(&log, "pre-push waiting: the lock is held by agent-7 (pid 41) for 31 min\n").unwrap();
+        let Planned::Run(g) = gate_row("clippy a", true) else {
+            unreachable!()
+        };
+        let limits = Limits {
+            run: Duration::from_secs(900),
+            queue: Duration::from_secs(1800),
+        };
+        let row = decide_with(&g, &NoSlot { log }, limits, &test_subject(), &mut |_| {});
+        assert!(row.reason().contains("queued 1800.0 s behind agent-7 (pid 41)"), "{}", row.reason());
+        // Without a holder in the log the reason still says the queue time, and does not invent one.
+        let row = decide_with(
+            &g,
+            &NoSlot {
+                log: d.path().join("none.log"),
+            },
+            limits,
+            &test_subject(),
+            &mut |_| {},
+        );
+        assert!(
+            row.reason().contains("queued 1800.0 s") && !row.reason().contains("behind"),
+            "{}",
+            row.reason()
+        );
+    }
+
     fn gate_row(id: &str, heavy: bool) -> Planned {
         Planned::Run(Gate {
             id: id.into(),
@@ -1095,7 +1252,9 @@ mod tests {
         };
         let clock = BudgetClock::new(t0, budget);
         let turns = Turns::new((0..2).collect());
-        let exec = QueuedFor { slot: Slot::Queued };
+        let exec = QueuedFor {
+            slot: Slot::Queued { since: t0 },
+        };
         // The heavy step starts at once ...
         let (i, start) = turns.next(&planned, &clock, &exec, &opts, &|| t0).unwrap();
         assert!(i == 0 && matches!(start, Some(Start::Go(_))));
@@ -1107,13 +1266,6 @@ mod tests {
             Some(Start::Go(l)) => assert_eq!(l.run, budget, "no run time was used: all 1200 s were spent waiting for others"),
             _ => panic!("the light row was held out by a wait for other agents' builds"),
         }
-        // The slot was taken after 5 minutes: those 300 s are credit, the 900 s since are run time: nothing is left.
-        let exec = QueuedFor {
-            slot: Slot::Taken(t0 + Duration::from_secs(300)),
-        };
-        assert_eq!(clock.left_live(later, Some(t0), exec.slot()), Duration::ZERO);
-        let sooner = t0 + Duration::from_secs(700);
-        assert_eq!(clock.left_live(sooner, Some(t0), exec.slot()), Duration::from_secs(500));
     }
 
     #[test]
@@ -1401,7 +1553,7 @@ exit $rc
                 queue: Duration::from_secs(60),
             };
             let log = d.path().join("g.log");
-            let env_of = |ex: &RealExec| ex.call(&g, limits, &log, None).child_env(&ex.env);
+            let env_of = |ex: &RealExec| ex.call(&g, limits, &log, None, "pre-push-1-1").child_env(&ex.env);
             let plain = env_of(&ex);
             assert!(
                 plain.iter().all(|(k, _)| k != "CARGO_TARGET_DIR" && k != "RUSTC_WRAPPER"),
@@ -1417,25 +1569,36 @@ exit $rc
             // A gate that is not cargo (conformance, a script) is never wrapped.
             let mut s = gate("conformance", "true");
             s.heavy = true;
-            let sh = ex.call(&s, limits, &log, None).child_env(&ex.env);
+            let sh = ex.call(&s, limits, &log, None, "pre-push-1-1").child_env(&ex.env);
             assert!(sh.iter().all(|(k, _)| k != "RUSTC_WRAPPER"), "{sh:?}");
         }
 
         /// The live queue state ([`Exec::slot`], ADR 0102 amendment 2026-11-18): queued from the start of a step through our
-        /// heavy, taken when the step's log says heavy holds the slot, unknown again when the step is over. The built heavy is the
-        /// fake of `repo_with_fake_cargo`; the gate's own command writes the line heavy writes, between two waits for the test
-        /// (files, bounded), so the test sees the state before and after it.
+        /// heavy, taken when the step's log says heavy holds the slot FOR THIS STEP (its own agent name), unknown again when the
+        /// step is over. The built heavy is the fake of `repo_with_fake_cargo`; the gate's own command writes the line heavy writes
+        /// (with the name it reads from the fake's record of its arguments), between two waits for the test (files, bounded).
+        /// The log held a line of an earlier run before the step began, and another push's line arrives in it meanwhile: neither
+        /// is this step's.
         #[test]
-        fn the_slot_is_queued_until_the_log_says_heavy_holds_the_lock() {
+        fn the_slot_is_queued_until_the_log_says_heavy_holds_the_lock_for_this_step() {
             let d = tempfile::tempdir().unwrap();
             let dir = d.path().display().to_string();
             let wait = |f: &str| format!("n=0; while [ ! -f {dir}/{f} ] && [ $n -lt 400 ]; do n=$((n+1)); sleep 0.05; done");
+            let mine = format!("sed -n 's/.* \\(pre-push-[0-9]*-[0-9]*\\) -- .*/\\1/p' {dir}/heavy-calls | tail -1");
             let command = format!(
-                ": > {dir}/queued; {}; echo 'pre-push holds the lock (pid 2) at 00:00:00, waited 5s, load 1'; : > {dir}/taken; {}",
+                ": > {dir}/queued; echo 'pre-push-999999-1 holds the lock (pid 5) at 00:00:00, waited 1s, load 1'; : > {dir}/foreign; {}; \
+                 echo \"$({mine}) holds the lock (pid 2) at 00:00:00, waited 5s, load 1\"; : > {dir}/taken; {}",
                 wait("go"),
                 wait("finish"),
             );
             let ex = repo_with_fake_cargo(d.path(), true);
+            // An earlier run's log of this very gate, with heavy's line in it.
+            std::fs::create_dir_all(&ex.logs).unwrap();
+            std::fs::write(
+                ex.logs.join(format!("{}.log", log_name("clippy a"))),
+                "pre-push holds the lock (pid 1) at 00:00:00, waited 0s, load 1\n",
+            )
+            .unwrap();
             let seen = |f: &str| d.path().join(f).is_file();
             let until = |what: &dyn Fn() -> bool| {
                 let t = Instant::now();
@@ -1447,14 +1610,57 @@ exit $rc
             assert_eq!(ex.slot(), Slot::Unknown, "no step in flight");
             std::thread::scope(|sc| {
                 let step = sc.spawn(|| decide(&gate("clippy a", &command), &ex, Duration::from_secs(60), &test_subject()).kind());
-                until(&|| seen("queued"));
-                assert_eq!(ex.slot(), Slot::Queued, "heavy has not said it holds the slot");
+                until(&|| seen("foreign"));
+                assert!(
+                    matches!(ex.slot(), Slot::Queued { .. }),
+                    "neither the earlier run's line nor another push's is this step's: {:?}",
+                    ex.slot()
+                );
                 std::fs::write(d.path().join("go"), "").unwrap();
-                until(&|| matches!(ex.slot(), Slot::Taken(_)));
+                until(&|| matches!(ex.slot(), Slot::Taken { .. }));
                 std::fs::write(d.path().join("finish"), "").unwrap();
                 assert_eq!(step.join().unwrap(), Kind::Passed);
             });
             assert_eq!(ex.slot(), Slot::Unknown, "the step is over");
+        }
+
+        #[test]
+        fn a_log_is_read_from_where_it_stopped_and_only_the_steps_own_line_counts() {
+            let d = tempfile::tempdir().unwrap();
+            let f = d.path().join("g.log");
+            let append = |t: &str| {
+                use std::io::Write;
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&f)
+                    .unwrap()
+                    .write_all(t.as_bytes())
+                    .unwrap();
+            };
+            let mut seen = LockSeen::new(lock_line("pre-push-7-3"));
+            assert!(!seen.seen(&f), "no file yet");
+            append("pre-push holds the lock (pid 1)\npre-push-7-30 holds the lock (pid 2)\n");
+            assert!(
+                !seen.seen(&f),
+                "another step's line, and a name that only starts like ours, are not ours"
+            );
+            // A line cut between two reads is found.
+            append("pre-push-7-3 hol");
+            assert!(!seen.seen(&f));
+            append("ds the lock (pid 4) at x\n");
+            assert!(seen.seen(&f));
+            // Only new bytes are read: a megabyte of output is read once, not at every poll.
+            let mut seen = LockSeen::new(lock_line("pre-push-7-9"));
+            append(&"x".repeat(200 * 1024));
+            while seen.pos < std::fs::metadata(&f).unwrap().len() {
+                let before = seen.pos;
+                assert!(!seen.seen(&f));
+                assert!(seen.pos > before && seen.pos - before <= 64 * 1024, "{} -> {}", before, seen.pos);
+            }
+            let at = seen.pos;
+            assert!(!seen.seen(&f));
+            assert_eq!(seen.pos, at, "nothing new: nothing read");
         }
 
         #[test]
@@ -1476,7 +1682,7 @@ exit $rc
             assert!(decide(&g, &ex, Duration::from_secs(60), &test_subject()).kind() == Kind::Passed);
             let calls = std::fs::read_to_string(d.path().join("heavy-calls")).unwrap();
             assert!(
-                calls.contains("run --queue-max 1800 --run-max ") && calls.contains(" pre-push --"),
+                calls.contains("run --queue-max 1800 --run-max ") && calls.contains(" pre-push-") && calls.contains(" -- "),
                 "{calls}"
             );
             assert!(!calls.contains("--high"), "a normal push does not take the priority lane: {calls}");

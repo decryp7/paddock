@@ -119,18 +119,31 @@ work. The run of train 10 that counted queue time against the budget (837 s for 
 
 ## Amendment 2026-11-18: a step's queue time stops counting the moment it starts, not when it ends
 
-Rows of pushes on 2026-11-18 were "not measured" after the 15 minutes while a heavy step of the same push had only been queued
-(heavy's log: `queue_wait` 183 s and 193 s, then `--run-max 1`). The credit of point 3 came when the step ended (`BudgetClock::record`),
-so a row that started while a heavy step was still waiting for the slot (a light row on another worker, or the next row after a long
-wait) read a clock that counted the whole wait as run time. The wait is now credited while it happens: `Exec::slot()` says whether the
-heavy step in flight is still queued, or got the slot at an instant (`budget::Slot`), and `BudgetClock::left_live` adds that wait to
-the budget a row starts with. The real executor reads it from heavy's own log (`holds the lock (pid ...)`, polled every 250 ms) and only
-for our `heavy`, which writes that line; any other heavy (`heavy.sh`) gives `Unknown` and keeps the credit at the end of the step, so a
-silent tool never extends the budget. No limit changed: the run budget is still 15 min of run time, the queue allowance 30 min.
-The end-of-step credit stays (it is exact, from heavy's own timing line, and it takes the sibling-held part out).
+Rows of pushes on 2026-11-18 were "not measured" while a heavy step of the same push had only been queued. Evidence: heavy's log
+`/private/tmp/claude-501/heavy-logs/heavy.2026-11-18.log`, session `6608a45127eb7-83bf` (apps/pitwall clippy, started 10:14:00 UTC):
+`queue_wait` 182,546 ms, then `command ended`, `Exit: ended after the run limit of 1 s` (`--run-max 1`): the push's budget was
+spent before the step began and the wait behind another push's `pre-push` holder was not what the step's limit was computed from.
+(Session `6608a43eca501-217e`, 192,793 ms of queue, ran 6.5 s and passed; the other "ended after the run limit" rows of that day,
+for example 196 s in `6608a35ee11e4-1761b`, were the budget really spent by 367 s and 278 s of earlier clippy runs, 0 s queued.)
+The credit of point 3 came when the step ended (`BudgetClock::record`), so a row that started while a heavy step was still waiting
+for the slot (a light row on another worker, or the next row after a long wait) read a clock that counted the whole wait as run time.
+
+The wait is now credited while it happens. `Exec::slot()` says whether the heavy step in flight is waiting or got the slot
+(`budget::Slot::Queued { since }`, `Taken { since, at }`), where `since` is when the step was handed to `heavy` (the build of `heavy`
+before it is not waiting for others). `Turns` gives it to the clock (`BudgetClock::begin_step`, `observe`), which keeps it inside
+its one lock with the credit and clears it in `record` and `end_step`, so a wait is never counted twice; `left_live` adds the wait,
+at most the step's own `--queue-max`, to the budget a row starts with. The real executor reads it from heavy's own log: each step
+runs under its own agent name (`pre-push-<pid>-<n>`) in a log folder of its own (one folder per push run under
+`<git common dir>/paddock-pre-push/logs/`, the newest 20 kept), the file is created before the poller starts, and only
+`<that name> holds the lock (pid` counts, read from where the last poll stopped (250 ms). Before this, the shared per-gate log held
+the line of earlier runs (48 of 174 logs there already did) and of another worktree pushing the same gate. Only our `heavy` writes that
+line; any other heavy (`heavy.sh`) gives `Unknown` and keeps the credit at the end of the step, so a silent tool never extends the
+budget. No limit changed: the run budget is still 15 min of run time, the queue allowance 30 min. The end-of-step credit stays (it is
+exact, from heavy's own timing line, and it takes the sibling-held part out).
 
 The member gate also runs the source audits of the tool's own modules. The `member-audits` profile gets one more clause, by name
-(`test(/::no_source_file_/)`, outside the `binary(it)` group), so a guard from one branch (the self_exe audit) meeting code from
+(`test(/::no_source_file_/)`, outside the `binary(it)` group; a test reads the tool's `src` for their names, no process, and takes the clause
+out of the real filter as its control), so a guard from one branch (the self_exe audit) meeting code from
 another (a new `current_exe()` use) is caught at merge time on the combined tree, as train 15 needed. The two audits take 0.17 s
 ([benchmarks](../benchmarks.md#source-audits-in-the-member-gate-2026-11-18-fixpush-gate-queue-time)).
 
