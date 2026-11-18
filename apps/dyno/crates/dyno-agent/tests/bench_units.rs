@@ -10,6 +10,7 @@ use dyno_agent::bench_child::{cleanup_leftovers, write_records, ChildEvents, Chi
 use dyno_core::bench::unit::{self, UnitRecord};
 use dyno_core::bench::wire::{Liveness, PhaseProgress};
 use dyno_core::bench::{BenchKind, BenchStatus};
+use paddock_testkit::Actions;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -20,13 +21,6 @@ fn manager() {
         SystemctlControl::available(),
         "no systemd user manager here (systemctl --user is-system-running must say running or degraded); see docs/linux.md"
     );
-}
-
-/// Writes an executable script and returns its path.
-fn script(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
-    let path = dir.join(name);
-    paddock_testkit::exe::write_program(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-    path
 }
 
 fn request(run: &str) -> ChildRequest {
@@ -94,16 +88,17 @@ fn a_unit_run_waits_for_go_runs_at_nice_0_without_a_memory_limit_and_leaves_noth
     manager();
     let dir = paddock_testkit::private_tempdir().unwrap();
     // The runner reads `go` (stdin through --pipe), then reports its own nice value and memory.high through its result line.
-    let runner = script(
-        dir.path(),
-        "runner.sh",
-        r#"read go
-[ "$go" = go ] || { echo '{"t":"result","status":{"state":"failed","reason":"no go"}}'; exit 0; }
-ni=$(ps -o ni= -p $$ | tr -d ' ')
-mh=$(cat /sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)/memory.high 2>/dev/null || echo none)
-echo '{"t":"heartbeat"}'
-echo "{\"t\":\"result\",\"status\":{\"state\":\"unavailable\",\"reason\":\"ni=$ni mh=$mh\"}}""#,
-    );
+    let runner = paddock_testkit::StandIn::new(dir.path(), "runner")
+        .answers(
+            Actions::new()
+                .reads_stdin_line()
+                .stdout(r#"{"t":"heartbeat"}"#)
+                .stdout_with(r#"{{"t":"result","status":{{"state":"unavailable","reason":"ni={nice} mh={cgroup:memory.high|none}"}}}}"#),
+        )
+        .install()
+        .unwrap()
+        .program()
+        .to_path_buf();
     let records = dir.path().join("bench-units.json");
     let launcher = ProcessLauncher::with_units(&runner, &records);
     let status = launcher.run(&request(&format!("t1-{}", std::process::id())), &Never);
@@ -124,14 +119,25 @@ echo "{\"t\":\"result\",\"status\":{\"state\":\"unavailable\",\"reason\":\"ni=$n
 fn cancel_stops_an_all_core_burner_within_two_seconds_and_nothing_is_left() {
     manager();
     let dir = paddock_testkit::private_tempdir().unwrap();
-    let runner = script(
-        dir.path(),
-        "burner.sh",
-        r#"read go
-for i in 1 2 3 4 5 6 7 8; do (while :; do :; done) & done
-echo '{"t":"progress","phase":"cpu","label":"burning","rep":0,"of":5,"count":0,"total":5}'
-while :; do echo '{"t":"heartbeat"}'; sleep 1; done"#,
-    );
+    // Eight busy children of the runner (one per core is the point: a cancel must end all of them), then progress and heartbeats.
+    let mut burner = Actions::new().reads_stdin_line();
+    paddock_testkit::StandIn::new(dir.path(), "burn")
+        .answers(Actions::new().burns_cpu())
+        .install()
+        .unwrap();
+    for _ in 0..8 {
+        burner = burner.spawns(&paddock_testkit::Spawn::new("burn"));
+    }
+    let runner = paddock_testkit::StandIn::new(dir.path(), "burner")
+        .answers(
+            burner
+                .stdout(r#"{"t":"progress","phase":"cpu","label":"burning","rep":0,"of":5,"count":0,"total":5}"#)
+                .repeats(&Actions::new().stdout(r#"{"t":"heartbeat"}"#).sleeps(Duration::from_secs(1))),
+        )
+        .install()
+        .unwrap()
+        .program()
+        .to_path_buf();
     let records = dir.path().join("bench-units.json");
     let launcher = ProcessLauncher::with_units(&runner, &records);
     let run = format!("t2-{}", std::process::id());
@@ -149,7 +155,8 @@ while :; do echo '{"t":"heartbeat"}'; sleep 1; done"#,
     assert!(!active(&unit::unit_name(&format!("{run}-cpu"))), "the unit is gone");
     let left = dyno_platform::process::command("pgrep")
         .arg("-f")
-        .arg(runner.to_str().unwrap())
+        // The runner and its burners are all programs of this folder.
+        .arg(dir.path().to_str().unwrap())
         .output()
         .unwrap();
     assert!(
