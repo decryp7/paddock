@@ -3,7 +3,9 @@
 //! `tests/fixtures/merge-check/087570da4` holds the real contents of those files at the merge base (e16df7328), the first
 //! parent (80f1021a8) and the second (d3ec06cac), and the real merge message. The others are invented histories.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use paddock_testkit::{Actions, Case, StandIn, TestCommand};
+use paddock_testkit::TestCommand;
+#[cfg(unix)]
+use paddock_testkit::{Actions, Case, StandIn};
 use std::fs;
 use std::path::{Path, PathBuf};
 

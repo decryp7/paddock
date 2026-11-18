@@ -4,7 +4,9 @@
 //! them and the toolchain checks fail on that warning, so a test's result would depend on the build folder the agent running it exports.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::input_hash::{Real, compute, is_hashed_var};
-use paddock_testkit::{Actions, Case, StandIn, TestCommand};
+use paddock_testkit::TestCommand;
+#[cfg(unix)]
+use paddock_testkit::{Actions, Case, StandIn};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
