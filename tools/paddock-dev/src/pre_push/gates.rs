@@ -160,7 +160,7 @@ pub const ROW_SET: &[&str] = &[
 
 /// The id prefixes of the rows planned per workspace (the Linux Clippy names the workspaces it covers and those it leaves out): they
 /// are not in [`ROW_SET`], and the planner's test tells the fixed rows from these.
-pub const PER_WORKSPACE_PREFIXES: &[&str] = &["fmt ", "lockfile ", "clippy ", "clippy-windows ", "clippy-linux "];
+pub const PER_WORKSPACE_PREFIXES: &[&str] = &["fmt ", "lockfile ", "clippy ", "clippy-windows ", "clippy-linux ", "doctest "];
 
 /// Workspaces whose lints are not a push gate: they have a CI job of their own that is not part of a branch run.
 const OWN_JOB: &[&str] = &["/fuzz", "/templates/"];
@@ -222,6 +222,56 @@ pub(super) fn windows_skip_reason(ws: &str) -> String {
     }
 }
 
+/// The crate folders of the `crates` workspace that hold a changed file (`crates/<crate>/...`; a crate's folder is its package name),
+/// or None when a changed file there belongs to no crate (the workspace manifest, its lockfile): every crate is reached then.
+fn changed_crates(files: &[String]) -> Option<BTreeSet<String>> {
+    let mut crates = BTreeSet::new();
+    for f in files.iter().filter_map(|f| f.strip_prefix("crates/")) {
+        match f.split_once('/') {
+            Some((name, _)) => crates.insert(name.to_string()),
+            None => return None,
+        };
+    }
+    Some(crates)
+}
+
+/// The doctests of the crates a change reaches (`cargo test --doc`). nextest does not run doctests, so a broken example passed the
+/// local gates and failed CI (paddock-testkit's `StandIn` doctest, E0308, 2026-11-18); this runs the same command as CI's tests do.
+/// In `crates` only the touched crates (`-p`; every one has a library, and `-p` of a binary-only package is an error), in an app
+/// workspace the whole workspace (cargo skips packages with no library). `RUSTUP_AUTO_INSTALL=0` stops a probe from installing a
+/// toolchain (ER-45). Blocking from the start: CI already runs these tests, so this is an established check moved earlier (as the
+/// member audits are, ER-41), and `cargo test --doc --workspace` in `crates` was green on the real tree (63 test programs ok, 2026-11-18).
+fn doctest(ws: &str, files: &[String], facts: &Facts) -> Gate {
+    let mut args: Vec<String> = strs(&["test", "--doc", "--locked"]);
+    match (ws, changed_crates(files)) {
+        ("crates", Some(names)) if !names.is_empty() => {
+            for n in names {
+                args.extend(["-p".to_string(), n]);
+            }
+        }
+        _ => args.push("--workspace".into()),
+    }
+    let mut g = Gate {
+        heavy: true,
+        env: vec![("RUSTUP_AUTO_INSTALL".into(), "0".into())],
+        args,
+        ..gate(
+            format!("doctest {ws}"),
+            ws,
+            "cargo",
+            &[],
+            4,
+            format!("fix the example it names (`cd {ws} && cargo test --doc`; nextest does not run doctests, CI's tests do)"),
+        )
+    };
+    match (&facts.target_dir, &facts.kept_targets) {
+        (Some(dir), _) => g.args = cargo_target::with_target_dir(&g.args, dir.trim_end_matches('/')),
+        (None, Some(k)) => g.args = cargo_target::with_target_dir(&g.args, &format!("{}/{}", k.trim_end_matches('/'), slug(ws))),
+        (None, None) => {}
+    }
+    g
+}
+
 /// The gates `change` reaches under `plan`, in table order. Each is CI's own command (the one source is named in `next` or the
 /// doc of the check that reads it).
 pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
@@ -271,6 +321,7 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             (None, None) => {}
         }
         out.push(Planned::Run(g));
+        out.push(Planned::Run(doctest(&ws, &change.files, facts)));
         if all_features || facts.windows_clippy.contains(&ws) {
             let mut args: Vec<&str> = vec![
                 "xwin",
@@ -751,7 +802,7 @@ pub const NOT_RUN: &[(&str, &str)] = &[
         "CI covers them (ER-9 overlap); only workspaces with a changed file of their own are linted here",
     ),
     (
-        "tests (nextest, vitest, Playwright) other than the member audits",
-        "slower local checks run beside CI after dispatch (ER-9); the repository-wide audits of tools/paddock-dev run in the push gate (`member-audits`)",
+        "tests (nextest, vitest, Playwright) other than the member audits and the doctests of touched crates",
+        "slower local checks run beside CI after dispatch (ER-9); the repository-wide audits of tools/paddock-dev run in the push gate (`member-audits`), and `doctest <workspace>` runs `cargo test --doc`",
     ),
 ];

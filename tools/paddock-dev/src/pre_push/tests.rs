@@ -213,6 +213,46 @@ fn the_gates_check_runs_on_every_push_whatever_changed_and_names_the_fix() {
     assert!(ids(&none).contains(&"gates-register".to_string()), "also for an empty change");
 }
 
+/// nextest does not run doctests, so a broken example in a crate's docs passed the member gate and failed CI (paddock-testkit's
+/// `StandIn` doctest, E0308, 2026-11-18). The push gate runs `cargo test --doc` for the crates a change reaches.
+#[test]
+fn a_change_to_a_crates_source_plans_its_doctests() {
+    let planned = plan_gates(
+        &plan(),
+        &change(&["crates/paddock-proc/src/lib.rs", "crates/paddock-ipc/fuzz/src/a.rs"]),
+        &facts(),
+    );
+    let g = run_gates(&planned)
+        .into_iter()
+        .find(|g| g.id == "doctest crates")
+        .cloned()
+        .expect("the doctest row is planned");
+    assert_eq!(g.program, "cargo");
+    assert_eq!(g.cwd, "crates");
+    // The build folder is configuration right after the subcommand; only the touched crates, never the whole workspace.
+    assert_eq!(
+        g.args.join(" "),
+        "test --config build.target-dir='/t' --doc --locked -p paddock-ipc -p paddock-proc"
+    );
+    assert_eq!(g.env, vec![("RUSTUP_AUTO_INSTALL".to_string(), "0".to_string())]);
+    assert!(g.heavy);
+}
+
+/// Positive control for the row above: it is planned from the change, not always. A change that reaches no crate source of the
+/// workspace has no row for it, and a file outside any crate (the workspace manifest) widens it to the workspace.
+#[test]
+fn the_doctest_row_follows_the_change() {
+    let got = ids(&plan_gates(&plan(), &change(&["apps/dyno/src/a.rs"]), &facts()));
+    assert!(!got.iter().any(|g| g == "doctest crates"), "{got:?}");
+    assert!(got.iter().any(|g| g == "doctest apps/dyno"), "{got:?}");
+    let planned = plan_gates(&plan(), &change(&["crates/Cargo.toml"]), &facts());
+    let g = run_gates(&planned).into_iter().find(|g| g.id == "doctest crates").cloned().unwrap();
+    assert_eq!(g.args.join(" "), "test --config build.target-dir='/t' --doc --locked --workspace");
+    let none = json!({"conformance": false, "apps": [], "packages": {}});
+    let got = ids(&plan_gates(&none, &change(&["docs/x.md"]), &facts()));
+    assert!(!got.iter().any(|g| g.starts_with("doctest")), "{got:?}");
+}
+
 /// ROW_SET is what a pass record is compared with: it must list every row the planner can add besides the per-workspace ones, so a
 /// new row cannot leave an older pass usable.
 #[test]
