@@ -1547,6 +1547,7 @@ fn kept_clone_the_verify_phase_is_bounded_by_its_own_limit() {
 
 #[test]
 fn kept_clone_every_phase_that_runs_git_has_its_own_limit_test() {
+    // conformance: no-clock-mark - reads the phase ids only; it runs no step and sets no limit
     // The tests above are one per phase that runs git; a phase added to KEPT_PHASES with a git word needs its own, or it is not tested.
     let tested = ["CREATE", "CLEAN", "FETCH", "CHECKOUT", "VERIFY"].map(|p| format!("PADDOCK_KEPT_CLONE_TIMEOUT_{p}"));
     let with_git: Vec<&str> = KEPT_PHASES.iter().filter(|(_, w, _)| !w.is_empty()).map(|(id, ..)| *id).collect();
@@ -1581,6 +1582,7 @@ fn kept_clone_a_phase_that_hangs_ends_in_one_warning_and_never_fails_the_job() {
 
 #[test]
 fn kept_clone_reads_of_the_work_folder_are_not_bound_by_the_phase_limit() {
+    // conformance: no-clock-mark - the limit under test is the general one on reads outside any phase; the sleep is the thing timed
     // `PADDOCK_KEPT_CLONE_TIMEOUT` is seconds per phase. The shell reads the work folder's commit and origin before any phase, without
     // that limit; the Rust command bounded them by it, so under load (a `git rev-parse` over 1 s with the hung-phase test's 1 s limit,
     // 4 of 204 runs) it failed the job with `cannot read the commit and the origin` where the shell went on.

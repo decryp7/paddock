@@ -430,6 +430,71 @@ mod tests {
         assert_eq!(unmarked_phase_tests(&bare), ["slow_git"], "an exemption names its reason");
     }
 
+    /// The top-level functions of an integration test file that set a kept-clone phase limit (`PADDOCK_KEPT_CLONE_TIMEOUT...`) and use
+    /// neither the clock mark (`PADDOCK_KEPT_CLONE_CLOCK_MARK`, `kept_hang_env(`, or `kept_phase_is_bounded_by_its_own_limit(`, which
+    /// sets it) nor the exemption line `// conformance: no-clock-mark - <reason>`: a short limit counted from the phase's start can be
+    /// met by a stand-in that is slow to start (ADR 0103, second amendment). A function ends at its closing brace in column 0.
+    fn unmarked_kept_timeout_fns(text: &str) -> Vec<String> {
+        let limit = regex::Regex::new(concat!(r#""PADDOCK_"#, r#"KEPT_CLONE_TIME"#, "OUT")).unwrap();
+        let marked = regex::Regex::new(concat!(
+            r"CLOCK_",
+            r"MARK|kept_hang_",
+            r"env\(|kept_phase_is_bounded_by_its_own_",
+            r"limit\(|conformance: no-clock",
+            r"-mark - \S"
+        ))
+        .unwrap();
+        let head = regex::Regex::new(r"(?m)^(?:pub )?fn ([a-z0-9_]+)[^\n]*\n(?:.*\n)*?\}$").unwrap();
+        head.captures_iter(text)
+            .filter(|c| limit.is_match(&c[0]) && !marked.is_match(&c[0]))
+            .map(|c| c[1].to_string())
+            .collect()
+    }
+
+    #[test]
+    fn the_audit_of_kept_timeout_tests_sees_one_and_accepts_a_mark_or_a_reason() {
+        // The positive control (ER-33), on synthetic text: a test that sets a phase limit without a mark is found; with the mark,
+        // through the helper that sets it, or with a reasoned exemption it is not; the list of names outside any function is not read.
+        let plain = "const IDS: [&str; 1] = [\"PADDOCK_KEPT_CLONE_TIMEOUT_FETCH\"];\n\nfn slow() {\n    let e = (\"PADDOCK_KEPT_CLONE_TIMEOUT_FETCH\", \"1\");\n}\n\nfn other() {\n}\n";
+        assert_eq!(unmarked_kept_timeout_fns(plain), ["slow"]);
+        let marked = plain.replace("let e =", "let m = \"PADDOCK_KEPT_CLONE_CLOCK_MARK\";\n    let e =");
+        assert!(unmarked_kept_timeout_fns(&marked).is_empty());
+        let helper = plain.replace("let e =", "let e = kept_hang_env(x); let _ =");
+        assert!(unmarked_kept_timeout_fns(&helper).is_empty());
+        let exempt = plain.replace(
+            "let e =",
+            "// conformance: no-clock-mark - the limit is on the reads outside any phase\n    let e =",
+        );
+        assert!(unmarked_kept_timeout_fns(&exempt).is_empty());
+        let bare = plain.replace("let e =", "// conformance: no-clock-mark -\n    let e =");
+        assert_eq!(unmarked_kept_timeout_fns(&bare), ["slow"], "an exemption names its reason");
+    }
+
+    /// The integration tests that set a kept-clone phase limit use the clock mark or say why they need not (ADR 0103, second amendment).
+    #[test]
+    fn no_source_file_sets_a_kept_clone_phase_limit_in_a_test_without_a_clock_mark_or_a_reason() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/it");
+        let mut bad = Vec::new();
+        let mut helper_seen = false;
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|x| x != "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            helper_seen |= text.contains("fn kept_phase_is_bounded_by_its_own_limit(");
+            for name in unmarked_kept_timeout_fns(&text) {
+                bad.push(format!("{}::{name}", path.file_name().unwrap().to_string_lossy()));
+            }
+        }
+        assert!(helper_seen, "the scan read {}: the hung-phase helper is not there", dir.display());
+        assert!(
+            bad.is_empty(),
+            "these tests set a PADDOCK_KEPT_CLONE_TIMEOUT limit without PADDOCK_KEPT_CLONE_CLOCK_MARK (use `kept_hang_env`): the limit would count from the phase's start, \
+             so a slow-starting stand-in could meet it; or add `// conformance: no-clock-mark - <reason>` inside the test: {bad:?}"
+        );
+    }
+
     /// Every test of the phase machinery (the files that use `ci_host::phase`) that bounds work with a phase uses a clock mark or says
     /// why it need not (the class "work before the hang point of a hung-phase test meets its limit under load", ADR 0103).
     #[test]

@@ -1215,9 +1215,9 @@ mod tests {
     fn a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase() {
         use std::sync::mpsc;
         // The fetch phase (own limit 1 s from the hang mark, bound 2 s) runs one git, which hangs and is ended when the phase is
-        // abandoned (a git that logs its call and sleeps), and the phase is then held until it is abandoned. While the next phase runs, the held phase goes on: its second git must not start (the next
-        // phase may be removing or making the same folder), the next phase must not be reported as hung, and its error output must not
-        // carry the abandoned phase's lines.
+        // abandoned (a git that logs its call and sleeps), and the phase is then held until it is abandoned. While the next phase runs,
+        // the held phase goes on: its second git must not start (the next phase may be removing or making the same folder), the next
+        // phase must not be reported as hung, and its error output must not carry the abandoned phase's lines.
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
