@@ -435,3 +435,14 @@ outputs = ["apps/*/app/src-tauri/icons/**", "docs/images/src/icons/*", "apps/*/d
 cost = "fast"
 requires = ["node_modules/.package-lock.json"]
 
+
+[[generator]]
+id = "cargo-lock-tools-git-read-spike"
+what = "tools/git-read-spike/Cargo.lock resolves with --locked (the one-off spike of exp/windows-host-probe, never merged)"
+check = ["sh", "-c", "cargo metadata --locked --format-version 1 >/dev/null"]
+regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
+cwd = "tools/git-read-spike"
+paths = ["tools/git-read-spike/Cargo.toml", "tools/git-read-spike/Cargo.lock"]
+outputs = ["tools/git-read-spike/Cargo.lock"]
+cost = "heavy"
+drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
