@@ -2,7 +2,7 @@
 //! above waives that site. The engine recognises the comment ([`recognise`]) and lists every waived site in the report's `waived`
 //! with the reason, the file and the line (`expires` is `inline`: there is no date), so suppressions stay visible. A check no
 //! longer carries its own waiver regexes: it passes the lines it considers "near" the site and its tag, and builds its finding
-//! through [`InlineWaiver::apply`]. The port of `conformance/src/util/inline-waiver.mjs`; the parity test compares the two.
+//! through [`InlineWaiver::apply`]. The JavaScript `inline-waiver.mjs` was retired with the JS checks that used it (pair P3); `tests/it/check_lex.rs` holds this to the language's answers.
 //!
 //! The marker, the tag, the dashes and the reason are on one line (spaces and tabs only between them): a dash at the end of a line
 //! does not take the next line as its reason, and a list dash on the next line is no dash. A marker without a reason is not a waiver: the site stays a finding, with the check's own text.
