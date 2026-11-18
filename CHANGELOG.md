@@ -4,6 +4,15 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-proc`: a bounded run with input, and a long-lived child spoken to over its pipes (ADR 0108 G1)
+
+- `run_bounded_with_input(cmd, input, limits)`: `run_bounded` with `input` written to the child's stdin on its own thread, then closed
+  (at most `MAX_INPUT`, 64 MiB): a request list for a batch program (`git cat-file --batch`, `diff-tree --stdin`, `hash-object
+  --stdin`) in one start. paddock-dev's input hash moves its private stdin runner onto it.
+- `Session` (`start`, `send`, `read_line`, `read_exact`, `stderr_tail`, `finish`) with `SessionLimits` and `SessionError`: a child whose
+  stdin stays open, every read bounded by its own deadline and an answer cap, its tree ended by identity on `finish`, on a timeout or
+  when dropped. For a request whose next question depends on the last answer (walking trees through one `cat-file --batch`).
+
 ### `paddock-env`: `cachedir`, cargo's `CACHEDIR.TAG` for a target folder cargo did not make (ADR 0107)
 
 - `cachedir::{FILE_NAME, SIGNATURE, CONTENT, is_tag, ensure}`: `./dev ci isolation path target` writes the tag into a kept build folder, and the test kit shares its toolchain link folder only in a folder that has it (also one level up, for `target/<triple>/<profile>`). `is_tag` checks the signature line; `ensure` repairs a missing, empty or partial tag by writing a temporary file and renaming it, and never rewrites a good one. Without the tag every `TestCommand` linked the toolchain into its own folder (testcommand-ab.yml run 8246, Windows); the kit now prints one `TestCommand:` line when it falls back.
