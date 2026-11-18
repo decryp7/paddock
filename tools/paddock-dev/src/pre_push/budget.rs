@@ -19,6 +19,18 @@ pub struct Timing {
     pub ran: f64,
 }
 
+/// How far the heavy step in flight has got, as the executor sees it live.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Slot {
+    /// Nothing is known (the executor does not look).
+    #[default]
+    Unknown,
+    /// Still waiting for the machine-wide slot: every second so far is waiting for others.
+    Queued,
+    /// The slot was taken at this instant; the command has been running since.
+    Taken(Instant),
+}
+
 #[derive(Default)]
 struct Inner {
     credit: Duration,
@@ -69,6 +81,21 @@ impl BudgetClock {
     pub fn left(&self, now: Instant) -> Duration {
         let credit = self.inner.lock().map_or(Duration::ZERO, |i| i.credit);
         (self.start + self.total + credit).saturating_duration_since(now)
+    }
+
+    /// [`BudgetClock::left`] while a heavy step of this push is in flight (`launched` is when it started): its time queued so far is
+    /// not run time either, but it is credited only when the step ends ([`BudgetClock::record`]), so a row that starts meanwhile
+    /// would see the budget spent by waiting for others. `slot` says how far the step is: still queued (all of it since
+    /// `launched` counts), or the slot was taken at an instant (what came before counts), or nothing is known (no live credit:
+    /// the end-of-step credit is all there is, as for a `heavy.sh` of someone else's).
+    pub fn left_live(&self, now: Instant, launched: Option<Instant>, slot: Slot) -> Duration {
+        let waited = match (launched, slot) {
+            (Some(l), Slot::Queued) => now.saturating_duration_since(l),
+            (Some(l), Slot::Taken(t)) => t.min(now).saturating_duration_since(l),
+            _ => Duration::ZERO,
+        };
+        let credit = self.inner.lock().map_or(Duration::ZERO, |i| i.credit);
+        (self.start + self.total + credit + waited).saturating_duration_since(now)
     }
 
     /// The total credit so far.
@@ -176,6 +203,25 @@ mod tests {
         c.record(at(b, 0), at(b, 1500), Duration::from_secs(1200));
         assert_eq!(c.credit(), Duration::from_secs(1200));
         assert_eq!(c.left(at(b, 1500)), Duration::from_secs(600));
+    }
+
+    #[test]
+    fn a_step_still_queued_is_not_run_time_and_one_that_got_the_slot_counts_only_from_then() {
+        let b = Instant::now();
+        let c = BudgetClock::new(b, MIN15);
+        let l = Some(b);
+        // queued the whole 20 minutes: all run time is left
+        assert_eq!(c.left_live(at(b, 1200), l, Slot::Queued), MIN15);
+        // the slot taken at 300 s: at 700 s, 400 s have run
+        assert_eq!(c.left_live(at(b, 700), l, Slot::Taken(at(b, 300))), Duration::from_secs(500));
+        // nothing is known, or no step is in flight: the wall clock
+        assert_eq!(c.left_live(at(b, 700), l, Slot::Unknown), Duration::from_secs(200));
+        assert_eq!(c.left_live(at(b, 700), None, Slot::Queued), Duration::from_secs(200));
+        // a slot taken before the step began (a stale answer of the step before) adds nothing
+        assert_eq!(
+            c.left_live(at(b, 700), Some(at(b, 600)), Slot::Taken(at(b, 100))),
+            Duration::from_secs(200)
+        );
     }
 
     #[test]

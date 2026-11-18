@@ -439,6 +439,7 @@ fn command_in(
         logs: state.join("logs"),
         stop: Arc::clone(&stop),
         built_heavy: Default::default(),
+        live_slot: Default::default(),
         priority: pushes.iter().any(|p| budget::is_landing_ref(&p.remote_ref)),
         wrapper,
     };

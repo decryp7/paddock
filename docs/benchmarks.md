@@ -2038,3 +2038,12 @@ timeout on both tries), and is it the host or the code?
   stopped on a test name the filter left out; all their tests passed.)
 - **Not measured:** a Defender exclusion for the runner's work folder (host configuration, the user's decision); git starts are 38 to
   48 ms there against 5.6 ms on the Mac (`git --version`), and a small repository 220 to 345 ms against 45 ms.
+
+## Source audits in the member gate (2026-11-18, fix/push-gate-queue-time)
+
+Question: what do the source audits of `tools/paddock-dev` (`tool_cache::tests::no_source_file_reads_its_own_path_except_through_self_exe`,
+`git_env::tests::no_source_file_starts_git_without_the_builder`) add to the `member-audits` row?
+
+- **Machine:** the shared Mac mini (arm64), other agents running (15-minute load 16 at the time); `CARGO_BUILD_JOBS=2`
+- **Command:** `cargo nextest run -E 'test(/no_source_file_/)'` in `tools/paddock-dev`, warm build folder, 1 run
+- **Result:** 2 tests, 0.17 s of nextest time; the row's compile is the one the `it` audits already need (same test binaries).

@@ -403,6 +403,50 @@ fn the_member_audits_run_in_the_member_gate_whatever_changed_through_the_one_dec
     }
 }
 
+/// The source audits (the tool's own tests named `no_source_file_*`) are in the member gate by one name rule in the declared profile,
+/// not by a list (ER-42): the rule selects every one of them, and a test that is not one is not selected. The positive control: with
+/// the rule's clause taken out, none is selected, so the gate would run none of them (and `--no-tests=fail` does not notice while the
+/// `it` audits still run).
+#[test]
+fn the_member_gate_runs_the_source_audits_by_their_name_rule() {
+    use super::gates::split_audit_filter;
+    let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".config/nextest.toml")).unwrap();
+    let doc: toml::Table = text.parse().unwrap();
+    let whole = doc["profile"][AUDIT_PROFILE]["default-filter"].as_str().unwrap().to_string();
+    let (_, rest) = split_audit_filter(&whole).expect("the filter starts with its binary(it) group");
+    let names = |filter: &str| -> Vec<String> {
+        let re: Vec<regex::Regex> = filter
+            .split("test(/")
+            .skip(1)
+            .map(|c| regex::Regex::new(c.split("/)").next().unwrap()).unwrap())
+            .collect();
+        let exe = std::env::current_exe().unwrap();
+        let out = paddock_proc::command(exe).args(["--list", "--format", "terse"]).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|l| l.strip_suffix(": test"))
+            .filter(|n| re.iter().any(|r| r.is_match(n)))
+            .map(str::to_string)
+            .collect()
+    };
+    let selected = names(&rest);
+    for audit in [
+        "tool_cache::tests::no_source_file_reads_its_own_path_except_through_self_exe",
+        "git_env::tests::no_source_file_starts_git_without_the_builder",
+    ] {
+        assert!(
+            selected.iter().any(|n| n == audit),
+            "`{audit}` is not selected by the {AUDIT_PROFILE} profile: {selected:?}"
+        );
+    }
+    assert!(
+        selected.iter().all(|n| n.contains("::no_source_file_")),
+        "the rule selects only source audits: {selected:?}"
+    );
+    assert!(names("").is_empty(), "with no clause nothing is selected (the control)");
+}
+
 /// A developer's push does not run the audits (minutes would be added to every push); it says why. The member gate does.
 #[test]
 fn a_developers_push_skips_the_member_audits_with_a_reason_and_the_member_gate_runs_them() {
@@ -3184,6 +3228,7 @@ mod deny_row {
             logs: d.join("logs"),
             stop: Arc::new(AtomicBool::new(false)),
             built_heavy: Default::default(),
+            live_slot: Default::default(),
             priority: false,
             wrapper: crate::local_sccache::Lazy::off(),
         }

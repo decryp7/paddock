@@ -116,3 +116,20 @@ work. The run of train 10 that counted queue time against the budget (837 s for 
    activity log, 145 pre-push steps, queue p50 21 s, p90 386 s, p99 993 s, max 1,187 s
    ([benchmarks](../benchmarks.md#2026-11-15-pre-push-heavy-queue-times-fixpre-push-base-and-budget)). Each run now appends its
    whole queue and run time to `queue-times.log` beside the gate logs; the per-push value is revisited with that log.
+
+## Amendment 2026-11-18: a step's queue time stops counting the moment it starts, not when it ends
+
+Rows of pushes on 2026-11-18 were "not measured" after the 15 minutes while a heavy step of the same push had only been queued
+(heavy's log: `queue_wait` 183 s and 193 s, then `--run-max 1`). The credit of point 3 came when the step ended (`BudgetClock::record`),
+so a row that started while a heavy step was still waiting for the slot (a light row on another worker, or the next row after a long
+wait) read a clock that counted the whole wait as run time. The wait is now credited while it happens: `Exec::slot()` says whether the
+heavy step in flight is still queued, or got the slot at an instant (`budget::Slot`), and `BudgetClock::left_live` adds that wait to
+the budget a row starts with. The real executor reads it from heavy's own log (`holds the lock (pid ...)`, polled every 250 ms) and only
+for our `heavy`, which writes that line; any other heavy (`heavy.sh`) gives `Unknown` and keeps the credit at the end of the step, so a
+silent tool never extends the budget. No limit changed: the run budget is still 15 min of run time, the queue allowance 30 min.
+The end-of-step credit stays (it is exact, from heavy's own timing line, and it takes the sibling-held part out).
+
+The member gate also runs the source audits of the tool's own modules. The `member-audits` profile gets one more clause, by name
+(`test(/::no_source_file_/)`, outside the `binary(it)` group), so a guard from one branch (the self_exe audit) meeting code from
+another (a new `current_exe()` use) is caught at merge time on the combined tree, as train 15 needed. The two audits take 0.17 s
+([benchmarks](../benchmarks.md#source-audits-in-the-member-gate-2026-11-18-fixpush-gate-queue-time)).
