@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { expectListFiltered } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
+import { expectListFiltered, expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 import { openAppWith } from './mock-url';
 import { runCommand } from './ai-support';
 
@@ -25,6 +25,8 @@ test('the welcome page is centred and has a dismissible AI offer', async ({ page
   await runCommand(page, 'Close workspace');
   const offer = page.getByTestId('welcome-ai-offer');
   await expect(offer).toBeVisible();
+  await expectNotMoving(page.locator('#welcome-title'), 'the welcome title');
+  await expectNotMoving(page.locator('debrief-welcome'), 'the welcome screen');
   const centre = await page.locator('#welcome-title').evaluate((e) => {
     const b = e.getBoundingClientRect();
     const host = document.querySelector('debrief-welcome')!.getBoundingClientRect();

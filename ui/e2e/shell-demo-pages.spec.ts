@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { axeViolations, expectNoHorizontalScroll, expectWithinWidth, installTauriFake, LAYOUT_WIDTHS, pressTab, THEMES, type Page } from '@decryp7/paddock-e2e';
+import { axeViolations, expectNoHorizontalScroll, expectWithinWidth, installTauriFake, LAYOUT_WIDTHS, pressTab, THEMES, type Page, expectNotMoving } from '@decryp7/paddock-e2e';
 
 // The pages frame (plan S14) in the shell demo: navigation, lazy pages with their own providers, conditions and badges,
 // the status bar's items, the sidebar by the layout plan at every width, F6 regions, axe in both themes. Only the test
@@ -130,6 +130,7 @@ test.describe('pages frame (plan S14)', () => {
     await page.getByRole('button', { name: 'Break the search index' }).click();
     await page.getByRole('button', { name: 'Start quiet job' }).click();
     await expect(app.statusBar.chip).toBeVisible();
+    await expectNotMoving(app.statusBar.chip, 'the service chip');
     // From the chip's visible edge to the jobs item's dot, and from the jobs text to the bell's icon.
     const gaps = await page.evaluate(() => {
       const r = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();

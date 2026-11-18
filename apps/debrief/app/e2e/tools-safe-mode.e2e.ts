@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import { openAppWith, openView, runCommand } from './tools-support';
 import { chooseMenu } from './menu-support';
 import { nextRender } from './app';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 /** The titles of the views offered (View ▸ Other windows… lists every one). */
 async function viewMenu(page: Page): Promise<string[]> {
@@ -10,6 +11,7 @@ async function viewMenu(page: Page): Promise<string[]> {
   const picker = page.getByRole('dialog', { name: 'Other windows' });
   // The Plugins view (with its Health tab) is always offered: once it shows, the list is complete.
   await expect(picker.getByRole('option', { name: /Plugins$/ })).toBeVisible();
+  await expectNotMoving(picker.getByRole('option').last(), 'the last option');
   const items = await picker.locator('[role=option] .title').allInnerTexts();
   await page.keyboard.press('Escape');
   return items.map((t) => t.trim());

@@ -112,7 +112,9 @@
               "src/**/*.html",
               "e2e/**/*.ts"
             ],
-            "maxWarnings": 0
+            "maxWarnings": 0,
+            "applySuppressions": true,
+            "suppressionsLocation": "eslint-suppressions.json"
           }
         }
       }

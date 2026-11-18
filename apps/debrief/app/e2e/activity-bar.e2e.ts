@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import { openApp } from './app';
 import { openAppWith } from './mock-url';
 import { expectNoSeriousViolations } from './axe';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // The left activity bar: every major area one click (or a few keys) away, built from the activity-item registry.
 
@@ -29,6 +30,8 @@ test.describe('activity bar', () => {
     const menu = page.getByRole('menu', { name: 'Analysis' });
     await expect(menu).toBeVisible();
     // The fly-out opens to the right of the bar.
+    await expectNotMoving(menu, 'the fly-out');
+    await expectNotMoving(barButton(page, 'Analysis'), 'the Analysis button');
     const [menuBox, buttonBox] = await Promise.all([menu.boundingBox(), barButton(page, 'Analysis').boundingBox()]);
     expect(menuBox!.x).toBeGreaterThan(buttonBox!.x + buttonBox!.width);
     expect(Math.abs(menuBox!.y - buttonBox!.y)).toBeLessThan(2);

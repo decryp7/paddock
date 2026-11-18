@@ -1,5 +1,6 @@
 import { expect, test } from './test';
 import { dialogWindowUrl, newPinnedContext } from '@decryp7/paddock-e2e';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 /**
  * Settings > Menu bar items: a number row shows its style whole ("Number" is neither cut nor wrapped, in the
@@ -48,6 +49,7 @@ test('a number row shows its style and description whole', async ({ browser, bas
   await trigger.click();
   const options = page.getByRole('option');
   await expect(options.first()).toBeVisible();
+  await expectNotMoving(options.last(), 'the last option');
   const lines = await options.evaluateAll((os) => os.map((o) => {
     const t = o.querySelector('.mdc-list-item__primary-text') ?? o;
     const range = document.createRange();
@@ -163,6 +165,8 @@ test('the popup widgets chooser with its preview column: rows follow the list wi
   await expect(list.locator('li.pd-wc-row')).not.toHaveCount(0);
   const preview = page.locator('dy-popup-widgets .pd-wc-preview');
   await expect(preview).toBeVisible();
+  await expectNotMoving(list, 'the list');
+  await expectNotMoving(preview, 'the preview');
   const [listBox, previewBox] = [await list.boundingBox(), await preview.boundingBox()];
   expect(previewBox!.x, 'the preview column is beside the list').toBeGreaterThan(listBox!.x + listBox!.width);
   const found = await list.evaluate((ul) => {

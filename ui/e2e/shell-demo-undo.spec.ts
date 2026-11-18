@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { axeViolations, expectNoHorizontalScroll, LAYOUT_WIDTHS, THEMES } from '@decryp7/paddock-e2e';
+import { axeViolations, expectNoHorizontalScroll, LAYOUT_WIDTHS, THEMES, expectNotMoving } from '@decryp7/paddock-e2e';
 
 // Undo and the activity log (plan X44) in the shell demo: a greeting is an undoable edit (Edit > Undo and Redo keys, the
 // "Done, Undo" toast) and an entry of the Activity page, which can take it back. The Lab page exists while there is at least
@@ -37,6 +37,7 @@ test.describe('undo and activity (plan X44)', () => {
     await expect(toast).toBeVisible();
     // The snack bar moves the content into its polite live region a moment after opening.
     await expect(page.locator('.mat-mdc-snack-bar-container [aria-live="polite"]').getByTestId('undo-toast')).toBeVisible();
+    await expectNotMoving(toast, 'the toast');
     expect(await toast.evaluate((e) => e.contains(document.activeElement))).toBe(false);
     // Clear of the status bar and the page footer (guide, Toasts): its bottom edge is above the safe area.
     const safe = await page.evaluate(() => {
@@ -53,6 +54,7 @@ test.describe('undo and activity (plan X44)', () => {
     await page.getByRole('button', { name: 'Say hello' }).click();
     const container = page.locator('.mat-mdc-snack-bar-container.pd-undo-snack');
     await expect(container).toBeVisible();
+    await expect(container, 'the toast is fully drawn').toHaveCSS('opacity', '1');
     const style = await container.evaluate((e) => {
       const cs = getComputedStyle(e);
       return { opacity: cs.opacity, name: cs.animationName, seconds: parseFloat(cs.animationDuration) };
@@ -84,6 +86,7 @@ test.describe('undo and activity (plan X44)', () => {
     // The snack bar scales in for 150 ms, which changes a bounding box: wait for the live region, and read the layout width
     // (transforms do not affect it).
     await expect(page.locator('[aria-live="polite"]').getByTestId('undo-toast')).toBeVisible();
+    await expectNotMoving(page.getByTestId('undo-toast').locator('svg'), 'the toast icon');
     const width = await page.getByTestId('undo-toast').locator('svg').evaluate((e) => parseFloat(getComputedStyle(e).width));
     expect(width).toBeGreaterThanOrEqual(14);
   });

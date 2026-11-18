@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 async function closeWorkspace(page: import('@playwright/test').Page): Promise<void> {
   await chooseMenu(page, 'File', 'Close workspace');
@@ -67,6 +68,7 @@ test.describe('welcome', () => {
     await closeWorkspace(page);
     await expect(page.locator('debrief-welcome')).toBeVisible();
     // At every sash position the topmost element belongs to the welcome screen.
+    await expectNotMoving(page.locator('debrief-welcome'), 'the welcome screen');
     const covered = await page.evaluate(
       (pts) => pts.map((p) => !!document.elementFromPoint(p.x, p.y)?.closest('debrief-welcome')),
       points.filter((p) => p.y > 0),

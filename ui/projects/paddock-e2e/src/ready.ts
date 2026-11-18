@@ -5,7 +5,7 @@ import { settledLayout } from './settled-layout.ts';
  * "Ready" per kind of thing a spec reads or presses. `toBeVisible()` says an element is drawn; it does not say its content, its position or
  * its wiring is final (the sweep of 2026-11-17, docs/lessons.md: a palette still showing the unfiltered list, an overlay not yet positioned, a
  * section whose update pass had not run, an answer still streaming above a card). Wait with the helper of the kind, then read or press. The
- * lint rule `paddock/e2e-ready-reads` (warn) flags a read right after a bare visibility wait.
+ * lint rule `paddock/e2e-ready-reads` (an error) flags a read right after a bare visibility wait.
  */
 
 /** The larger of the offset of `box` from `anchor`'s left edge and the difference of their widths, in px (pure; `null` when either is not drawn). */

@@ -7,7 +7,7 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "lint": "ng lint",
+    "lint": "ng lint && eslint e2e --max-warnings 0",
     "tauri": "tauri",
     "e2e": "playwright test",
     "screenshots": "playwright test --project=screenshots"

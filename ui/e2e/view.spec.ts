@@ -1,6 +1,6 @@
 import { expect, test } from './test';
 import AxeBuilder from '@axe-core/playwright';
-import { Locator, Page } from '@decryp7/paddock-e2e';
+import { Locator, Page, expectNotMoving } from '@decryp7/paddock-e2e';
 
 // <pd-view> (plan X51, ADR 0002) in the gallery: every node kind drawn from one sample document, the actions it sends, patches,
 // the inline errors, axe in both themes, and no horizontal scroll of the page at 320 px (wide tables and drawings scroll in their
@@ -214,6 +214,7 @@ test('P2-5: loading is a skeleton and busy is a visible status', async ({ page }
   await expect(box.getByTestId('view-busy')).toHaveCount(0);
   await page.getByTestId('view-load-demo').click();
   await expect(box.getByTestId('view-loading')).toBeVisible();
+  await expectNotMoving(box.getByTestId('view-loading'), 'the loading state');
   expect((await box.getByTestId('view-loading').boundingBox())!.height).toBeGreaterThan(100);
   await page.getByTestId('view-reload').click();
   await expect(box.locator('article')).toBeVisible();

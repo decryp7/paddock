@@ -1314,3 +1314,35 @@ describe('C100 inputs (ADR 0060): the planner runs conformance for what `./dev g
     assert.equal(because(plan('#[test]\n#[ignore]\nfn a() {}', '// moved\n#[test]\n#[ignore]\nfn a() {}')), false, 'the same ignore on the same test');
   });
 });
+
+// ER-41: a check runs on every change that could bring in its class. A change to a file that sets what an e2e lint block does in one project (its
+// ESLint config, its bulk suppressions, the lint target of angular.json, the ui's lint script) also runs the eslint package's tests, whose wiring test
+// resolves paddock/e2e-ready-reads' severity in every real config. A branch that added `'paddock/e2e-ready-reads': 'off'` to an app's config ran none.
+describe('lint wiring files mark the eslint project', () => {
+  const WIRING = [
+    'apps/dyno/app/eslint.config.js',
+    'apps/debrief/app/eslint.config.js',
+    'apps/pitcrew/app/eslint-suppressions.json',
+    'apps/pitwall/app/angular.json',
+    'ui/eslint.config.cjs',
+    'ui/eslint-suppressions.json',
+    'ui/angular.json',
+    'ui/package.json',
+    'apps/dyno/app/package.json',
+    'apps/spotter/paddock.ci.json',
+    'apps/pitwall/app/eslint.lax.cjs',
+    'apps/dyno/app/eslint.base.mjs',
+    'ui/eslint.other.js',
+    'ui/paddock.ci.json',
+  ];
+  for (const f of WIRING) {
+    test(`${f}`, () => {
+      assert.ok(owners(f).includes('eslint'), `${f}: owners ${JSON.stringify(owners(f))}`);
+      const { plan } = planFor({ files: [f] });
+      assert.equal(plan.eslint, true, `${f} does not run the eslint tests`);
+    });
+  }
+  for (const f of ['apps/dyno/app/e2e/a.spec.ts', 'apps/dyno/app/src/package.json', 'apps/dyno/package.json', 'ui/e2e/a.spec.ts', 'ui/projects/paddock-ui/src/a.ts']) {
+    test(`${f} does not`, () => assert.ok(!owners(f).includes('eslint'), f));
+  }
+});

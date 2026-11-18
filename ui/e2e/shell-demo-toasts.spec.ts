@@ -1,4 +1,5 @@
 import { expect, test } from './test';
+import { expectNotMoving } from '@decryp7/paddock-e2e';
 
 // A toast never covers a page's footer action (a wizard's Next): the host keeps the page-footer safe area above the
 // status bar (design guide, Toasts). The footer is a stand-in a page would render at the bottom of its area. Chromium only
@@ -21,6 +22,7 @@ test('a toast does not overlap a primary button in the page footer', async ({ ap
   await page.getByRole('button', { name: 'Notify three times' }).click();
   const toast = page.getByTestId('notification').last();
   await expect(toast).toBeVisible();
+  await expectNotMoving(toast, 'the toast');
   const [t, b] = [await toast.boundingBox(), await page.getByTestId('fake-next').boundingBox()];
   expect(t).not.toBeNull();
   expect(b).not.toBeNull();

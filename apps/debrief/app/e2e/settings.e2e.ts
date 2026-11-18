@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // The Settings screen runs against the browser build's mock settings backend
 // (src/app/settings/mock-settings-backend.ts), which mimics the engine's schema and messages.
@@ -211,6 +212,7 @@ test('settings: switches keep their labels beside them, readable and clear of ba
   let checked = 0;
   // Wait for the section list (the plugin sections load after the dialog opens).
   await expect(sections.nth(1)).toBeVisible();
+  await expectNotMoving(sections.nth(1), 'the section list');
   for (let i = 0; i < (await sections.count()); i++) {
     const button = sections.nth(i);
     await button.click();

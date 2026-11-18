@@ -2,7 +2,7 @@
  "all": false,
  "crates": false,
  "ui": false,
- "eslint": false,
+ "eslint": true,
  "conformance": true,
  "c99": false,
  "tools": false,
@@ -25,6 +25,9 @@
   ],
   "conformance": [
    "conformance always runs"
+  ],
+  "eslint": [
+   "apps/y/app/angular.json"
   ]
  }
 }
