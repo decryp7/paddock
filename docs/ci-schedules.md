@@ -45,3 +45,29 @@ The Linux-only block (22:03-23:13) is serial so that fuzz, which takes two slots
 nightly and debrief cannot be capped by `max-parallel` (many unrelated jobs); only the stagger and the runner's capacity
 limit them. Gitea counts runner slots per caller, so `max-parallel` inside the reusable `app-fuzz.yml` does not cap
 five separate callers: nightly chains them with `needs:` instead.
+
+## Dependency audits
+
+External advisories turned main and every train red with no code change twice in 12 hours (RUSTSEC-2026-0543 on chrono, run 8214;
+GHSA-fc5q-39xc-vjpf on picomatch, run 8225). As Dependabot and Renovate alerts and a scheduled `cargo deny` do, two questions are kept
+apart, both answered by `./dev audit` (`tools/paddock-dev/src/audit`; `cargo deny check advisories` for every `Cargo.lock` with a
+`Cargo.toml` and a `deny.toml` beside it, `npm audit --omit=dev` for every `package-lock.json` (severity `high` and above, as the apps' plain steps; `--npm-level` and `--npm-omit-dev` declare both)):
+
+- **Does main have a finding?** The `audit` job of nightly.yml runs `./dev audit nightly` every night, outside the gate (an advisory
+  appears while main is unchanged). One `::error::` per advisory names the advisory, the dependency path and the decision step: an
+  exception with a reason and a review date (`deny.toml` `ignore` for cargo; `scripts/npm-audit-allow.json` for npm, the family's list that
+  `scripts/npm-audit.mjs` also reads, which `./dev audit` reads in the same format: an approved entry warns, one on its review day counts as a finding
+  again), which needs the user's approval (ER-46), or a fix. The failed job is the nightly's failure path.
+- **Does this change add one?** The `audit` job of ci.yml runs `./dev audit compare --base <merge base ref>` on every change. It audits the
+  merge base's lockfiles with the same tools, only when the change has a finding. An advisory main has too is a `::warning::` ("already
+  present on main, decided there"); only an advisory the change introduces fails. No list of accepted findings is kept, so none can grow
+  silently (ER-46).
+- **Not measured.** A tool that cannot run, an offline advisory database or registry, a missing merge base or an unreadable answer is
+  reported as NOT MEASURED (exit 6 when enforced), never as a pass (ER-33).
+
+**The switch (ER-41).** Both jobs are report-only until their first green run on the real tree: `--enforce` is passed only when the
+repository variable `PADDOCK_AUDIT_ENFORCE` is `1` (Gitea: repository settings, Actions, variables). Until then the findings print as
+`::warning::report-only, would fail: ...` and the exit is 0. Record the first green run id of each job here when the variable is set
+(nightly `audit`: not yet; ci `audit`: not yet), then add nightly's `audit` to `mark`. The plain audit steps (`cargo deny check` in the
+crates, tauri and paddock-dev jobs, `npm audit` in debrief.yml) stay blocking until then, so nothing gets weaker; after it they move to
+`./dev audit compare` (one job per question, no copied logic).

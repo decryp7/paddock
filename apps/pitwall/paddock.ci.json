@@ -29,7 +29,7 @@
   "ui": [
     "npm run build -w ui",
     "cd apps/pitwall/app",
-    "npm audit --omit=dev --audit-level=high",
+    "node ../../../scripts/npm-audit.mjs",
     "npm run lint",
     "npx ng build",
     "npm run check:index",

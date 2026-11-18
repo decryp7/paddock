@@ -1,0 +1,12 @@
+{
+  "$comment": "Approved exceptions of the app jobs' npm audit (scripts/npm-audit.mjs). ER-46: an entry is added only with the user's approval, and the list only shrinks otherwise; on its review day an entry stops counting and the audit fails until it is renewed or removed.",
+  "allow": [
+    {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "build-time glob in @angular/localize's extract/translate tooling (@angular/localize → tinyglobby → fdir/picomatch); it never ships in an app bundle; no fixed picomatch exists (latest 4.0.7)",
+      "approvedBy": "user",
+      "approved": "2026-11-18",
+      "reviewBy": "2026-12-18"
+    }
+  ]
+}

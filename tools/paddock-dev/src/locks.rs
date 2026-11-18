@@ -66,7 +66,7 @@ fn argv(parts: &[&str]) -> Vec<String> {
 /// skipped; any other lockfile is checked, so a new workspace under a folder named `tests` is not skipped by accident.
 const TEST_DATA: &str = "tools/paddock-dev/tests/golden/fixture/";
 
-fn is_test_data(file: &str) -> bool {
+pub(crate) fn is_test_data(file: &str) -> bool {
     file.starts_with(TEST_DATA)
 }
 
@@ -155,7 +155,7 @@ pub trait Runner: Sync {
 /// was "not available on this computer" on every Windows machine that has it: the program is looked up on `path` the way a job does
 /// (`PATHEXT` order, [`find_program`]), and the bare name stays when nothing is found (the run then says so). Never changes anything
 /// off Windows.
-fn program_for(program: &str, path: &str, pathext: Option<&str>, windows: bool) -> String {
+pub(crate) fn program_for(program: &str, path: &str, pathext: Option<&str>, windows: bool) -> String {
     if !windows {
         return program.to_string();
     }
