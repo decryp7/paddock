@@ -85,8 +85,8 @@ process starts, statements or invokes is a budget a test guards. Full text in do
 |---|---|---|---|---:|
 | G1 | **A bounded run that takes standard input**: `run_bounded` with an input (written on its own thread, size bounded) next to today's stdin-closed form (`crates/paddock-proc/src/run.rs:208-225`); the private stdin runner of `tools/paddock-dev/src/input_hash.rs` (`Exec`, `spawn_piped`) moves onto it. Prerequisite of G2. | paddock-proc | `perf/git-heavy-tests-2` | 0.5 |
 | G2 | **One shared batched git reader**: `files_at(&[(rev, path)]) -> Vec<Result<Option<Vec<u8>>, _>>` and existence checks over one `git cat-file --batch` / `--batch-check` process, with a `starts()` counter. paddock-repo-graph's `History::file_at`, the private reader in `tools/paddock-dev/src/check_ids.rs` and the merge check's per-file `cat-file blob` move onto it. | new crate `crates/paddock-git` (user, 2026-11-18) | `perf/git-heavy-tests-2` | 1.5 |
-| G3 | **Counting seams**: a process-start counter in paddock-proc's one spawn path (`starts_since(mark)`, visible to tests); a counting invoke stub for vitest (every paddock-ui backend and every app's `tauri-backend.ts` already takes an injectable invoke); the Tauri invoke round trip measured once on the Mac and Windows (rule 48 row). Existing per-fake counters stay (`paddock_testkit::FakeRunner::count`, the DuckDB QueryLog count in Debrief's `regress_1_2.rs`, Pitwall `FakeServer.calls()`, Pitcrew `Fake.sent`, Dyno `FakeTools::calls`). | paddock-proc, paddock-ui testing | WP-0 | 1.0 |
-| G4 | **A per-item result type** for bulk commands, `ItemResult<T>` (ok or a typed item error), in Rust with the generated TypeScript twin, so every app reports per item the same way. | the crate that owns the generated command contract | WP-0 | 0.5 |
+| G3 | **Counting seams, scoped to the thread or task** (amended 2026-11-18: the built API differs from the first text, so that parallel tests never share one global count). (a) Rust: `paddock_proc::starts` (a re-export of `paddock_env::starts`): `count_starts()` returns a counter of the commands made on its thread, plus any thread or task its scope is carried into; `assert_starts(n \| at_most(k), \|\| ..)` and `assert_starts_async` assert a budget in one line, after Django's `assertNumQueries`. The count is noted in `paddock_env::command::command`, the one `Command` constructor (Clippy forbids `Command::new` elsewhere); it counts commands made, not successful spawns, and the registered copies of the constructor (`docs/known-copies.toml`, `no-console-command`) are not counted until they call it. (b) TypeScript: `countingBackend` / `provideCountingBackend` / `expectBackendCalls` in `@decryp7/paddock-ui/ipc/testing`, which wrap an app's backend so the code under test runs unchanged. (c) The Tauri invoke round trip measured once on the Mac and Windows (rule 48 row): **still open**. Existing per-fake counters stay (`paddock_testkit::FakeRunner::count`, the DuckDB QueryLog count in Debrief's `regress_1_2.rs`, Pitwall `FakeServer.calls()`, Pitcrew `Fake.sent`, Dyno `FakeTools::calls`). Implementation: `feat/bulk-api-seams` (36a563d58). | paddock-env (re-exported by paddock-proc), paddock-ui `ipc/testing` | `feat/bulk-api-seams`; (c) open | 1.0 |
+| G4 | **A per-item result type** for bulk commands in `paddock_commands` (amended 2026-11-18: no new crate): `ItemResult<T>` (ok or a typed item error), `BulkReply<T>` (`Result<Vec<ItemResult<T>>, CommandError>`, per-item errors) and `AtomicReply<T>` (`Result<Vec<T>, CommandError>`, for operations atomic by design), with the generated TypeScript twin in `@decryp7/paddock-ui/ipc`. Implementation: `feat/bulk-api-seams` (36a563d58). | paddock-commands | `feat/bulk-api-seams` | 0.5 |
 | G5 | **ESLint rule `paddock/no-backend-call-in-loop`** (guard C). | `eslint/src/rules` | WP-0 | 1.0 |
 | G6 | **Rule 85 and the review line** (guard A). | `docs/rules.md`, `.claude/agents/reviewer.md` | this ADR | 0.25 |
 
@@ -100,7 +100,7 @@ process starts, statements or invokes is a budget a test guards. Full text in do
   until its first green run on the real tree, recorded by run id (ER-41). It does not see one call per rendered child
   component (DB-2, SP-4); D covers those.
 - **D.** Every bulk command this ADR adds lands with a budget test: N items cost at most K process starts, statements or
-  invokes, read from G3's seams, and the test fails with the per-item code put back (the failing-first test, ER-11).
+  invokes, read from G3's seams (`assert_starts`, `expectBackendCalls`), and the test fails with the per-item code put back (the failing-first test, ER-11).
 - Not chosen: a static Rust check (conformance or dylint) for spawns, statements or IPC sends inside loops (2-3 d, many
   false positives; Clippy has no custom lints without dylint); `no-await-in-loop` alone (it misses the `Promise.all(map)`
   shape of SP-2, DB-4, DB-5 and DB-18).
@@ -174,5 +174,6 @@ parallelism is added; the bounded-parallel choices (DY-3, DY-4) are the cases wh
 |---|---|
 | Rule 85, reviewer line (G6) | landed with this ADR |
 | G1, G2 (`crates/paddock-git`) | in progress on `perf/git-heavy-tests-2`, not pushed yet |
-| G3, G4, G5 | planned (WP-0) |
+| G3 (a, b), G4, G5 | in progress on `feat/bulk-api-seams` (36a563d58); G5 report-only until its first green run (ER-41) |
+| G3 (c), the measured invoke round trip | open |
 | Budget tests (guard D) | per package; existing per-fake counters are listed under G3 |
