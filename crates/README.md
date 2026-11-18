@@ -115,6 +115,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-cli` | command-line conventions: stable exit codes, errors with a next step, `--json` as one object (errors too), tables as text/CSV/JSON, throttled progress on stderr, `--help`/`--version` style, time and size arguments, the Ctrl+C flag (plan X25) | yes (Pitwall, Dyno, Debrief CLIs; agent and service programs); built |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3); `command`: the canonical no-console `Command` constructor, `RESTRICTING` (variables no policy strips from a child, ER-47) and `clear_env`, the one function that clears a child's environment (ADR 0100); `vars`, the environment as text that never panics on a non-UTF-8 variable | yes (all apps); built |
 | `paddock-files` | user files: path grants (open only paths the user chose, canonicalised), validated open/save pickers behind a port, recent lists (recorded only after a granted open, re-granted on use), reveal, open with the default program (never what runs on open) and web addresses (plan X31; from Debrief `paths.rs`, `recent.rs`, `opener.rs`) | yes (all apps; Pacenotes and Sighter from their first commit); built |
+| `paddock-git` | one batched reader of a repository's objects (blobs, trees, existence) through one long-lived `git cat-file --batch-command` process, with a count of the git processes it started (ADR 0108 G2) | paddock-dev (merge check, plan, pre-push; moving onto it); scaffold |
 | `paddock-storage` | what an app keeps on disk and clearing it safely: declared categories (cache the app can rebuild, the user's data), a bounded size walk (entries, time on an injected clock, depth, no links, one volume), a preview that is measured first, a re-check before every delete, confirmation for data, nothing outside the app's own folders, as jobs with progress and Cancel (plan X32; from Debrief `storage/`, Dyno `cleanup/{walk,guard}.rs`, Pitwall `leftovers.rs`, Pitcrew cache clean) | yes (all apps); built |
 | `paddock-live` | the live feed (plan X29): `Hub<S: LiveState>` holds the state and a sequence number, queues `Frame`s (snapshot, delta `from..=seq`, link) for bounded `Subscription`s (latest-wins merging, a slow consumer is given a snapshot), `run` keeps a `Source` connected with `Backoff` on the shared `Clock` and announces the `Link`; the `tauri` feature emits `paddock://live/<channel>` and answers `live_snapshot` | yes (Pitwall, Dyno, Pitcrew, Spotter, Debrief); built |
 | `paddock-metrics` | tiered metrics store and machine sampler (plan X30): generic `TieredStore<P: Series>` with a checked `Retention` (Pitwall's 4-tier table by default, Pitcrew's sparse table), `MachineSample` series (CPU, memory, free disk, own memory), `Sampler` on the shared `Clock`, free space of a path's volume, bounded `folder_size`, `StoreFile` persistence through paddock-env | yes (Pitcrew, Pitwall, Dyno, Debrief agent); built |
@@ -1262,6 +1263,23 @@ let models = Category::new("models", "Models", Kind::Data).folder(models_dir)
   one job at a time) and return at once; the outcome is a `paddock://storage` event. `Run` is the port, `Recorder` its fake.
 - **UI.** `@decryp7/paddock-ui/shell/storage` (+ `/page`, `/dialog`): `StorageBackend` (Tauri, memory with the same rules),
   `StorageStore`, the Storage page and the `pd.storage.confirm` decision window.
+
+## `paddock-git` (ADR 0108 G2)
+
+One shared batched reader of a git repository's objects. A git start costs about 5 ms on the Mac and 30 to 45 ms on the Windows CI
+runner, where an empty program alone takes about 30 ms (docs/benchmarks.md, 2026-11-18), so a read per git start (`git show
+<rev>:<path>`, `cat-file blob`, `ls-tree -r`) is the cost. `Reader::new(make_git_command)` starts one `git cat-file --batch-command`
+on the first read and answers every later read through it:
+
+- `file_at(rev, path)`, `files_at(&[(rev, path)])`: a file's bytes, `None` when the revision has no such file;
+- `object(spec)`, `info(spec)`: any object, or only its id, type and size, `None` when missing;
+- `tree(spec)`, `walk(spec)`: one tree level, or every file of a tree recursively (what `ls-tree -r` lists);
+- `starts()`: the git processes it started, for spawn-budget tests.
+
+A failure of the process (it ended, did not answer within `READ_TIMEOUT`) is an error naming the request and git's last words; the
+next read starts a new one. The caller builds the `git` command (program, `-C <root>`, environment): the policy is the caller's.
+It runs on `paddock_proc::Session` (ADR 0108 G1). Tests: `tests/it/reader.rs` (against `ls-tree -r`, a 200-read budget of one
+start, a folder asked as a file, a non-repository).
 
 ## `paddock-files` (plan X31)
 

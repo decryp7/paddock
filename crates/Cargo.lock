@@ -3424,6 +3424,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-git"
+version = "0.1.0"
+dependencies = [
+ "paddock-proc",
+ "paddock-testkit",
+ "paddock-workspace-hack",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-guard"
 version = "0.1.0"
 dependencies = [
