@@ -119,6 +119,11 @@ for (const { name, hash, facts } of PAGES) {
     // conformance: e2e-ready — reads the faked clock (Date.now), not the page
     const now = await page.evaluate(() => Date.now());
     await page.clock.runFor(FROZEN + SHOT_AFTER_MS - now);
+    // The page does not draw while the clock is paused (pauseLive): wait for every figure to be drawn first, so the pause freezes a finished page
+    // (the read right after the pause missed a figure in about 1 of 40 runs, with the shell drawn and the page body not yet).
+    for (const [what, expected] of Object.entries(facts)) {
+      await expect.poll(() => page.locator('body').innerText(), { message: `${name}: ${what} is drawn` }).toContain(expected);
+    }
     await pauseLive(page);
     const text = await page.locator('body').innerText();
     for (const [what, expected] of Object.entries(facts)) {
