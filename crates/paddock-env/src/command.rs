@@ -17,6 +17,8 @@ pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// or, under Remote Desktop, show it). The canonical constructor; clippy forbids `Command::new` elsewhere.
 #[allow(clippy::disallowed_methods)] // the canonical constructor
 pub fn command(program: impl AsRef<OsStr>) -> Command {
+    // The counting seam of budget tests (`crate::starts`): one start per command made here.
+    crate::starts::note();
     let cmd = Command::new(program);
     #[cfg(windows)]
     let cmd = {

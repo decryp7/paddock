@@ -114,6 +114,8 @@ pub use login::{
     MAX_PATH_LEN, SHELL_TIMEOUT, ask_shell, login_path, merge_path, parse_probe_output,
     probe_script, shell_candidates,
 };
+/// The process-start counter of budget tests: `starts::assert_starts(1, || ...)` (counted in [`command`]; `paddock_env::starts`).
+pub use paddock_env::starts;
 pub use run::{
     DEFAULT_MAX_OUTPUT, Limits, Outcome, Output, RunError, run_bounded, run_bounded_noting,
 };

@@ -34,6 +34,7 @@ mod folder;
 pub mod home_guard;
 pub mod private;
 mod process_vars;
+pub mod starts;
 pub mod text_busy;
 mod versioned;
 pub mod winpath;
