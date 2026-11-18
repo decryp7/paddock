@@ -121,7 +121,7 @@ fn prefix_hit(prefix: Option<&Value>, argv: &[String]) -> bool {
 }
 
 /// One condition of an `all` case: `args` (a prefix), `arg` (some argument is this), `no_arg_of` (no argument is any of these),
-/// `file` / `no_file` (a path exists / does not), `cwd_ends` (the working folder ends with this text).
+/// `file` / `no_file` (a path exists / does not), `file_has` / `file_lacks` (a file holds a text / does not, or is missing), `args_text` (the arguments joined by single spaces, with a space on each side, hold a text: `case " $* " in *text*)`), `cwd_ends` (the working folder ends with this text).
 fn condition(c: &Value, ctx: &Ctx) -> bool {
     let Some((kind, arg)) = c.as_obj().and_then(|m| m.first()) else {
         return false;
@@ -137,6 +137,15 @@ fn condition(c: &Value, ctx: &Ctx) -> bool {
         }
         "file" => arg.as_str().is_some_and(|p| Path::new(p).exists()),
         "no_file" => arg.as_str().is_some_and(|p| !Path::new(p).exists()),
+        "args_text" => arg
+            .as_str()
+            .is_some_and(|t| format!(" {} ", ctx.argv.join(" ")).contains(t)),
+        "file_has" | "file_lacks" => {
+            let both = texts(Some(arg));
+            let has = both.len() == 2
+                && std::fs::read_to_string(both[0]).is_ok_and(|body| body.contains(both[1]));
+            has == (kind == "file_has")
+        }
         "cwd_ends" => arg.as_str().is_some_and(|t| {
             std::env::current_dir()
                 .is_ok_and(|d| d.to_string_lossy().replace('\\', "/").ends_with(t))
@@ -155,7 +164,7 @@ struct Ctx {
 
 /// Fills a template: `{args}` (the arguments, joined by spaces), `{arg:N}` (the N-th, from 1; empty when absent), `{cwd}`, `{dir}` (the
 /// stand-in's own folder), `{name}`, `{pid}`, `{env:NAME}` and `{env:NAME|fallback}` (empty or the fallback when unset),
-/// `{flag:PREFIX}` (what follows PREFIX in the last argument that starts with it, as `${a#PREFIX}` does), `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
+/// `{flag:PREFIX}` (what follows PREFIX in the last argument that starts with it, as `${a#PREFIX}` does), `{run:program|arg|arg}` (what that program prints in the working folder, without its last newline; empty when it fails; no `|` or `}` inside an argument), `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
 fn expand(text: &str, ctx: &Ctx) -> Result<String, String> {
     let mut out = String::new();
     let mut rest = text;
@@ -195,7 +204,21 @@ fn token(t: &str, ctx: &Ctx) -> Result<String, String> {
         "stdin" => stdin.to_string(),
         "stdin_line" => stdin.lines().next().unwrap_or("").to_string(),
         _ => {
-            if let Some(prefix) = t.strip_prefix("flag:") {
+            if let Some(cmd) = t.strip_prefix("run:") {
+                let mut parts = cmd.split('|');
+                let program = parts.next().unwrap_or_default();
+                std::process::Command::new(program)
+                    .args(parts)
+                    .output()
+                    .ok()
+                    .filter(|o| o.status.success())
+                    .map(|o| {
+                        String::from_utf8_lossy(&o.stdout)
+                            .trim_end_matches(['\r', '\n'])
+                            .to_string()
+                    })
+                    .unwrap_or_default()
+            } else if let Some(prefix) = t.strip_prefix("flag:") {
                 ctx.argv
                     .iter()
                     .rev()

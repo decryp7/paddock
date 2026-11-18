@@ -22,7 +22,7 @@
 //! with [`StandIn::records_env`] and, with [`StandIn::reads_stdin`], what was written to stdin (at most 1 MiB).
 //!
 //! More, for the fixtures that were shell scripts: output filled from the call ([`Actions::stdout_with`] and the other `_with`
-//! methods name `{args}`, `{arg:N}`, `{flag:PREFIX}`, `{cwd}`, `{dir}`, `{name}`, `{pid}`, `{env:NAME}` / `{env:NAME|fallback}`, `{stdin}` and
+//! methods name `{args}`, `{arg:N}`, `{flag:PREFIX}`, `{cwd}`, `{dir}`, `{name}`, `{pid}`, `{run:program|arg|arg}`, `{env:NAME}` / `{env:NAME|fallback}`, `{stdin}` and
 //! `{stdin_line}`; `{{` and `}}` are braces), [`Actions::writes_atomically`], [`Actions::waits_for_file`], named pipes
 //! ([`Actions::makes_fifo`], [`Actions::reads_file`]), [`Actions::ignores_term`] (Unix), [`Actions::installs`] (a second stand-in
 //! written at run time, as a fake `cargo` that "builds" a tool does), [`Actions::exits_with_env`] and [`Actions::execs`] (run another
@@ -444,6 +444,36 @@ impl Case {
     #[must_use]
     pub fn file_missing(self, path: &Path) -> Case {
         self.with("no_file", Value::Str(text(path)))
+    }
+
+    /// The arguments, joined by single spaces with a space on each side, hold `text` (the shell's `case " $* " in *text*)`).
+    #[must_use]
+    pub fn args_text_contains(self, text: &str) -> Case {
+        self.with("args_text", Value::Str(text.to_string()))
+    }
+
+    /// The file exists and holds `text` (a relative path is read from the call's working folder).
+    #[must_use]
+    pub fn file_contains(self, path: &Path, text: &str) -> Case {
+        self.with(
+            "file_has",
+            Value::Arr(vec![
+                Value::Str(self::text(path)),
+                Value::Str(text.to_string()),
+            ]),
+        )
+    }
+
+    /// The file does not hold `text`, or does not exist.
+    #[must_use]
+    pub fn file_lacks(self, path: &Path, text: &str) -> Case {
+        self.with(
+            "file_lacks",
+            Value::Arr(vec![
+                Value::Str(self::text(path)),
+                Value::Str(text.to_string()),
+            ]),
+        )
     }
 
     /// The working folder ends with this text (compared with `/` as the separator).

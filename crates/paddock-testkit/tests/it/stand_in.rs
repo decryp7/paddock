@@ -849,3 +849,70 @@ fn files_are_the_program_and_its_script_to_pack_or_serve_and_they_run_where_they
         .unwrap_err();
     assert!(e.to_string().contains("cannot be packed"), "{e}");
 }
+
+#[test]
+fn a_case_on_the_joined_arguments_and_on_file_contents_answers_only_when_they_hold() {
+    let s = Scratch::new();
+    let work = s.work();
+    std::fs::write(work.join("a.toml"), "x = base64\n").unwrap();
+    std::fs::write(work.join("b.toml"), "y = serde\n").unwrap();
+    let p = StandIn::new(&work, "tool")
+        .when(
+            &Case::new()
+                .args_text_contains(" -C x rev-parse HEAD ")
+                .file_contains(&work.join("a.toml"), "base64")
+                .file_lacks(&work.join("b.toml"), "base64"),
+            Actions::new().exit(3),
+        )
+        .install()
+        .unwrap();
+    let call = |a: &[&str]| run(p.program(), a).status.code();
+    assert_eq!(call(&["-C", "x", "rev-parse", "HEAD"]), Some(3));
+    // Each condition alone can fail it: the joined text is a whole-word match, the files are read at the call.
+    assert_eq!(call(&["-C", "x", "rev-parse", "HEAD2"]), Some(0));
+    assert_eq!(call(&["-C", "xy", "rev-parse", "HEAD"]), Some(0));
+    std::fs::write(work.join("b.toml"), "y = base64\n").unwrap();
+    assert_eq!(
+        call(&["-C", "x", "rev-parse", "HEAD"]),
+        Some(0),
+        "file_lacks"
+    );
+    std::fs::write(work.join("b.toml"), "y = serde\n").unwrap();
+    std::fs::write(work.join("a.toml"), "x = serde\n").unwrap();
+    assert_eq!(
+        call(&["-C", "x", "rev-parse", "HEAD"]),
+        Some(0),
+        "file_contains"
+    );
+    // A missing file holds nothing: file_lacks is true.
+    std::fs::write(work.join("a.toml"), "x = base64\n").unwrap();
+    std::fs::remove_file(work.join("b.toml")).unwrap();
+    assert_eq!(call(&["-C", "x", "rev-parse", "HEAD"]), Some(3));
+}
+
+#[test]
+fn the_run_token_is_what_a_program_prints_in_the_working_folder() {
+    let s = Scratch::new();
+    let work = s.work();
+    let p = StandIn::new(&work, "gates")
+        .answers(Actions::new().stdout_with(
+            "inside=<{run:git|rev-parse|--is-inside-work-tree}> bad=<{run:git|no-such-subcommand}>",
+        ))
+        .install()
+        .unwrap();
+    let repo = work.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    assert!(
+        TestCommand::new("git")
+            .args(["init", "-q"])
+            .current_dir(&repo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let o = TestCommand::new(p.program())
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert_eq!(out(&o), "inside=<true> bad=<>\n");
+}
