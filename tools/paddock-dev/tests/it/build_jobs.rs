@@ -51,7 +51,10 @@ impl Scratch {
 
     /// The first step of every answer: the call's line in `calls`.
     fn logged(&self) -> Actions {
-        Actions::new().appends_with(&self.path("calls").display().to_string(), "{name} {args} token={env:PADDOCK_DEV_TOKEN}\n")
+        Actions::new().appends_with(
+            &self.path("calls").display().to_string(),
+            "{name} {args} token={env:PADDOCK_DEV_TOKEN}\n",
+        )
     }
 
     fn base_env(&self, vars: &[(&str, &str)], with_env_file: bool) -> Vec<(String, String)> {
