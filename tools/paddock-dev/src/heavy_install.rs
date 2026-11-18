@@ -57,6 +57,59 @@ pub fn find_sum(sums: &str, asset: &str) -> Option<String> {
     })
 }
 
+/// The file name of the binary on a machine: `heavy.exe` on Windows.
+pub fn bin_name(os: &str) -> &'static str {
+    if os == "windows" { "heavy.exe" } else { "heavy" }
+}
+
+/// Whether `v` is a semantic version (`1.2.3`, `1.2.3-rc.1`): the only thing a release tag and a folder name are built from.
+pub fn is_semver(v: &str) -> bool {
+    let (core, pre) = v.split_once('-').map_or((v, None), |(c, p)| (c, Some(p)));
+    let nums: Vec<&str> = core.split('.').collect();
+    nums.len() == 3
+        && nums.iter().all(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        && pre.is_none_or(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-'))
+}
+
+/// A releases base URL is `https`, or plain http on this machine's own loopback (a test's fake server): a token is never sent in the
+/// clear to another host.
+pub fn check_base(base: &str) -> Result<(), String> {
+    if base.starts_with("https://") {
+        return Ok(());
+    }
+    let host = base.strip_prefix("http://").map(|r| r.split(['/', ':']).next().unwrap_or(""));
+    match host {
+        Some("127.0.0.1" | "localhost") => Ok(()),
+        Some(h) if h.starts_with("[") && base.starts_with("http://[::1]") => {
+            let _ = h;
+            Ok(())
+        }
+        _ => Err(format!(
+            "{RELEASES_ENV}={base:?} is not an https URL (only a loopback address may be plain http)"
+        )),
+    }
+}
+
+/// Puts `new` at `bin` by rename. When the rename is refused and `bin` exists (Windows: a binary that runs cannot be replaced, but it can
+/// be renamed), the old one is moved aside to `<bin>.old.<pid>` first and the new one renamed into place; the old one is removed
+/// when it can be (a later run sweeps what is left). `rename` is the system's; a test's fake refuses the first call.
+pub fn replace_binary(new: &Path, bin: &Path, rename: &dyn Fn(&Path, &Path) -> std::io::Result<()>) -> std::io::Result<()> {
+    match rename(new, bin) {
+        Ok(()) => Ok(()),
+        Err(first) if bin.exists() => {
+            let old = bin.with_extension(format!("old.{}", std::process::id()));
+            rename(bin, &old).map_err(|_| first)?;
+            if let Err(e) = rename(new, bin) {
+                let _ = rename(&old, bin);
+                return Err(e);
+            }
+            let _ = std::fs::remove_file(&old);
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// What `VERSION` records: the version, the binary's checksum and the asset it came from.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Record {
@@ -113,6 +166,60 @@ fn error(cause: &str, next: &str) -> String {
     format!("::error::heavy-install: {cause} Next step: {next}")
 }
 
+/// Writes `text` to a new file only its owner can read, with that mode from the start (never a moment with a wider one).
+fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    o.open(path)?.write_all(text.as_bytes())
+}
+
+/// Creates the work folder, readable by its owner only.
+fn private_dir(path: &Path) -> std::io::Result<()> {
+    let mut b = std::fs::DirBuilder::new();
+    b.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        b.mode(0o700);
+    }
+    b.create(path)
+}
+
+/// Removes the `.download.<pid>` folders of runs that are gone (killed before they cleaned up) and the binaries a Windows replace moved
+/// aside; a folder of a running process stays. Best effort.
+fn sweep(dir: &Path) {
+    let Ok(read) = std::fs::read_dir(dir) else { return };
+    for e in read.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(pid) = name.strip_prefix(".download.").and_then(|p| p.parse::<u32>().ok()) else {
+            continue;
+        };
+        let written_ms = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+        if pid != std::process::id() && paddock_proc::ProcessId::recorded_presence(pid, written_ms) == paddock_proc::Presence::Gone {
+            let _ = crate::safe_remove::remove_under(dir, &e.path(), None);
+        }
+    }
+    let bin = dir.join("bin");
+    if let Ok(read) = std::fs::read_dir(&bin) {
+        for e in read.flatten() {
+            if e.file_name().to_string_lossy().contains(".old.") {
+                let _ = crate::safe_remove::remove_under(&bin, &e.path(), None);
+            }
+        }
+    }
+}
+
 fn download(i: &Install, work: &Path, file: &str) -> Result<PathBuf, String> {
     let url = format!("{}/heavy-v{}/{file}", i.base.trim_end_matches('/'), i.version);
     let dest = work.join(file);
@@ -124,18 +231,21 @@ fn download(i: &Install, work: &Path, file: &str) -> Result<PathBuf, String> {
     if let Some(t) = i.token {
         // The token goes in through a config file only this user reads (so no process list shows it) and is masked if curl echoes it.
         let cfg = work.join("curl.cfg");
-        std::fs::write(&cfg, format!("header = \"Authorization: token {t}\"\n"))
-            .map_err(|e| format!("cannot write {}: {e}", cfg.display()))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o600));
-        }
+        write_private(&cfg, &format!("header = \"Authorization: token {t}\"\n")).map_err(|e| {
+            error(
+                &format!("cannot write {}: {e}.", cfg.display()),
+                "make the dev-targets folder writable.",
+            )
+        })?;
         call = call.args(["-K".to_string(), cfg.to_string_lossy().into_owned()]).secret(t);
     }
-    let ran = call
-        .run(i.env, &mut std::io::sink())
-        .map_err(|e| error(&format!("cannot start curl ({e})."), "install curl."))?;
+    if i.base.starts_with("https://") {
+        call = call.args(["--proto", "=https"]);
+    }
+    let ran = call.run(i.env, &mut std::io::sink());
+    // The config, and with it the token, is gone as soon as curl has ended, whatever the outcome.
+    let _ = std::fs::remove_file(work.join("curl.cfg"));
+    let ran = ran.map_err(|e| error(&format!("cannot start curl ({e})."), "install curl."))?;
     if !ran.success {
         return Err(error(
             &format!("cannot download {url} ({}): {}", ran.how, tail(&ran.stderr, 3).trim()),
@@ -153,7 +263,14 @@ pub fn install(i: &Install) -> Result<Done, String> {
             "build it from tools/heavy (`cargo install --path tools/heavy --locked --root <dir>`).",
         )
     })?;
-    let bin = i.dir.join("bin").join(if i.os == "windows" { "heavy.exe" } else { "heavy" });
+    check_base(i.base).map_err(|e| error(&format!("{e}."), "use the repository's https release URL."))?;
+    if !is_semver(i.version) {
+        return Err(error(
+            &format!("{:?} is not a version like 1.2.3.", i.version),
+            "pass --version X.Y.Z.",
+        ));
+    }
+    let bin = i.dir.join("bin").join(bin_name(i.os));
     let record_path = i.dir.join("VERSION");
     if let (Ok(text), true) = (std::fs::read_to_string(&record_path), bin.is_file())
         && let Some(r) = Record::parse(&text)
@@ -163,6 +280,7 @@ pub fn install(i: &Install) -> Result<Done, String> {
     {
         return Ok(Done::AlreadyInstalled(bin));
     }
+    sweep(i.dir);
     std::fs::create_dir_all(i.dir.join("bin")).map_err(|e| {
         error(
             &format!("cannot create {}: {e}.", i.dir.join("bin").display()),
@@ -170,7 +288,7 @@ pub fn install(i: &Install) -> Result<Done, String> {
         )
     })?;
     let work = i.dir.join(format!(".download.{}", std::process::id()));
-    std::fs::create_dir_all(&work).map_err(|e| {
+    private_dir(&work).map_err(|e| {
         error(
             &format!("cannot create {}: {e}.", work.display()),
             "make the dev-targets folder writable.",
@@ -199,20 +317,8 @@ pub fn install(i: &Install) -> Result<Done, String> {
             std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755))
                 .map_err(|e| error(&format!("cannot make it executable: {e}."), "run it again."))?;
         }
-        let part = bin.with_extension(format!("part.{}", std::process::id()));
-        std::fs::copy(&file, &part).map_err(|e| {
-            error(
-                &format!("cannot copy into {}: {e}.", part.display()),
-                "make the dev-targets folder writable.",
-            )
-        })?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o755));
-        }
-        std::fs::rename(&part, &bin).map_err(|e| {
-            let _ = std::fs::remove_file(&part);
+        // The verified file itself is renamed into place (same disk, a folder only this user reaches): what was hashed is what runs.
+        replace_binary(&file, &bin, &|a, b| std::fs::rename(a, b)).map_err(|e| {
             error(
                 &format!("cannot put heavy into {}: {e}.", bin.display()),
                 "stop the heavy runs that use it (Windows) and run it again.",
@@ -242,6 +348,11 @@ pub fn command(a: &InstallArgs) -> Result<Report, CliError> {
         Some(v) => v.clone(),
         None => checkout_version(&cwd)?,
     };
+    if !is_semver(&version) {
+        return Err(CliError::failure(format!(
+            "heavy-install: {version:?} is not a version like 1.2.3; pass --version X.Y.Z"
+        )));
+    }
     let base = env
         .get(RELEASES_ENV)
         .cloned()
@@ -292,6 +403,74 @@ fn checkout_version(from: &Path) -> Result<String, CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn versions_are_semver_and_only_loopback_may_be_plain_http() {
+        for ok in ["0.2.0", "10.20.30", "1.0.0-rc.1"] {
+            assert!(is_semver(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "1.2",
+            "1.2.3.4",
+            "v1.2.3",
+            "1.2.3+b",
+            "../1.2.3",
+            "1.2.x",
+            "1.2.3-",
+            "1.2.3/../x",
+        ] {
+            assert!(!is_semver(bad), "{bad}");
+        }
+        for ok in [
+            "https://dev.decryptology.net/r",
+            "http://127.0.0.1:9/r",
+            "http://localhost:1",
+            "http://[::1]:5/x",
+        ] {
+            assert!(check_base(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "http://dev.decryptology.net/r",
+            "ftp://x",
+            "http://127.0.0.1.evil.net/r",
+            "dev.decryptology.net",
+        ] {
+            assert!(check_base(bad).is_err(), "{bad}");
+        }
+    }
+
+    /// Windows: the name of the binary, and replacing one that is in use (its rename over is refused, but it can be renamed away).
+    #[test]
+    fn a_windows_binary_in_use_is_moved_aside_and_the_new_one_renamed_into_place() {
+        assert_eq!(bin_name("windows"), "heavy.exe");
+        assert_eq!(bin_name("linux"), "heavy");
+        let d = tempfile::tempdir().unwrap();
+        let (new, bin) = (d.path().join("new"), d.path().join("heavy.exe"));
+        std::fs::write(&new, "new").unwrap();
+        std::fs::write(&bin, "old").unwrap();
+        // The first rename of anything onto `bin` is refused, as Windows does for a running program.
+        let refused = std::cell::Cell::new(true);
+        let rename = |a: &Path, b: &Path| {
+            if b == bin && refused.replace(false) {
+                return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+            }
+            std::fs::rename(a, b)
+        };
+        replace_binary(&new, &bin, &rename).unwrap();
+        assert_eq!(std::fs::read_to_string(&bin).unwrap(), "new");
+        let left: Vec<String> = std::fs::read_dir(d.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(left, ["heavy.exe"], "the old one is removed when it can be: {left:?}");
+        // When nothing can be renamed, the old binary is untouched and the error is the first one.
+        std::fs::write(&new, "newer").unwrap();
+        let never = |_: &Path, _: &Path| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert!(replace_binary(&new, &bin, &never).is_err());
+        assert_eq!(std::fs::read_to_string(&bin).unwrap(), "new");
+    }
 
     #[test]
     fn the_asset_of_each_supported_machine_and_the_checksum_line() {

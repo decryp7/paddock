@@ -5,6 +5,7 @@
 // windows-twin: none: it serves the release over curl on a loopback port and checks Unix file modes
 #![cfg(unix)]
 use paddock_dev::heavy_install::{Done, Install, asset_name, install};
+use paddock_testkit::StandIn;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Write};
@@ -78,7 +79,16 @@ impl Drop for Server {
 }
 
 const VERSION: &str = "9.9.9";
-const BINARY: &[u8] = b"#!/bin/sh\necho heavy-test\n";
+
+/// The bytes of a stand-in program (the testkit's, not a planted script): what the fake release serves as the binary.
+fn binary() -> &'static [u8] {
+    static BYTES: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    BYTES.get_or_init(|| {
+        let d = tempfile::tempdir().unwrap();
+        let installed = StandIn::new(d.path(), "heavy").stdout("heavy-test").install().unwrap();
+        std::fs::read(installed.program()).unwrap()
+    })
+}
 
 fn hex(b: &[u8]) -> String {
     Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect()
@@ -89,7 +99,7 @@ fn release(sum: &str) -> BTreeMap<String, Vec<u8>> {
     let arch = std::env::consts::ARCH;
     let asset = asset_name(VERSION, os, arch).expect("this machine has a release asset");
     BTreeMap::from([
-        (format!("/heavy-v{VERSION}/{asset}"), BINARY.to_vec()),
+        (format!("/heavy-v{VERSION}/{asset}"), binary().to_vec()),
         (format!("/heavy-v{VERSION}/SHA256SUMS"), format!("{sum}  {asset}\n").into_bytes()),
     ])
 }
@@ -111,17 +121,17 @@ fn run(dir: &std::path::Path, base: &str, token: Option<&str>) -> Result<Done, S
 fn a_good_checksum_installs_atomically_with_the_version_recorded_and_the_token_only_as_a_header() {
     let d = tempfile::tempdir().unwrap();
     let dir = d.path().join("heavy");
-    let server = Server::start(release(&hex(BINARY)));
+    let server = Server::start(release(&hex(binary())));
     let done = run(&dir, &server.base, Some("s3cret-token")).unwrap();
     let bin = dir.join("bin/heavy");
     assert_eq!(done, Done::Installed(bin.clone()));
-    assert_eq!(std::fs::read(&bin).unwrap(), BINARY);
+    assert_eq!(std::fs::read(&bin).unwrap(), binary());
     {
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(std::fs::metadata(&bin).unwrap().permissions().mode() & 0o111, 0o111, "executable");
     }
     let record = std::fs::read_to_string(dir.join("VERSION")).unwrap();
-    assert!(record.starts_with(&format!("{VERSION}\n{}\n", hex(BINARY))), "{record}");
+    assert!(record.starts_with(&format!("{VERSION}\n{}\n", hex(binary()))), "{record}");
     // No download folder and no half-written file is left.
     let left: Vec<String> = std::fs::read_dir(&dir)
         .unwrap()
@@ -166,7 +176,7 @@ fn a_bad_checksum_is_refused_with_an_error_line_and_installs_nothing() {
 fn a_rerun_of_the_same_version_downloads_nothing_and_a_changed_binary_is_installed_again() {
     let d = tempfile::tempdir().unwrap();
     let dir = d.path().join("heavy");
-    let server = Server::start(release(&hex(BINARY)));
+    let server = Server::start(release(&hex(binary())));
     run(&dir, &server.base, None).unwrap();
     let first = server.count();
     assert_eq!(
@@ -177,5 +187,57 @@ fn a_rerun_of_the_same_version_downloads_nothing_and_a_changed_binary_is_install
     // The installed file was changed under us: it is not the recorded one, so it is installed again.
     std::fs::write(dir.join("bin/heavy"), b"tampered").unwrap();
     assert_eq!(run(&dir, &server.base, None).unwrap(), Done::Installed(dir.join("bin/heavy")));
-    assert_eq!(std::fs::read(dir.join("bin/heavy")).unwrap(), BINARY);
+    assert_eq!(std::fs::read(dir.join("bin/heavy")).unwrap(), binary());
+}
+
+#[test]
+fn a_plain_http_release_off_this_machine_and_a_bad_version_are_refused_before_any_request() {
+    let d = tempfile::tempdir().unwrap();
+    let dir = d.path().join("heavy");
+    let err = run(&dir, "http://dev.decryptology.net/decryp7/paddock/releases/download", Some("t")).unwrap_err();
+    assert!(
+        err.starts_with("::error::heavy-install: ") && err.contains("not an https URL") && err.contains("Next step"),
+        "{err}"
+    );
+    let env = HashMap::from([("PATH".to_string(), std::env::var("PATH").unwrap_or_default())]);
+    let bad = install(&Install {
+        dir: &dir,
+        version: "../9.9.9",
+        base: "https://example.invalid",
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        token: None,
+        env: &env,
+    })
+    .unwrap_err();
+    assert!(bad.contains("is not a version like 1.2.3"), "{bad}");
+    assert!(!dir.exists(), "nothing was created");
+}
+
+#[test]
+fn the_download_folder_of_a_gone_run_is_swept_and_the_work_folder_is_private_and_gone_after() {
+    let d = tempfile::tempdir().unwrap();
+    let dir = d.path().join("heavy");
+    std::fs::create_dir_all(dir.join(".download.4000000000")).unwrap();
+    std::fs::write(
+        dir.join(".download.4000000000/curl.cfg"),
+        "header = \"Authorization: token leftover\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.join("bin")).unwrap();
+    std::fs::write(dir.join("bin/heavy.old.1"), "old").unwrap();
+    let server = Server::start(release(&hex(binary())));
+    run(&dir, &server.base, Some("tok")).unwrap();
+    let mut left: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    assert_eq!(
+        left,
+        ["VERSION", "bin"],
+        "the dead run's folder (and its config) is swept, ours is gone: {left:?}"
+    );
+    assert!(!dir.join("bin/heavy.old.1").exists());
 }

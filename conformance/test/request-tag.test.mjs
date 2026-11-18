@@ -19,13 +19,23 @@ test('a heavy-v tag is checked against the version of tools/heavy/Cargo.toml', (
   assert.throws(() => checkVersion('heavy', 'heavy-v0.2.0', files({ [cargo]: toml('0.1.0') })), /says 0\.2\.0, tools\/heavy\/Cargo\.toml says 0\.1\.0/);
   assert.throws(() => checkVersion('heavy', 'heavy-v0.2.0', files({})), /tools\/heavy\/Cargo\.toml is missing/);
   assert.equal(gateWorkflow('heavy', files({})), 'ci.yml');
-  // The publish workflow runs on that tag and on no other.
-  const wf = readFileSync(join(PADDOCK, '.gitea/workflows/heavy-release.yml'), 'utf8');
-  assert.match(wf, /tags: \["heavy-v\*"\]/);
-  assert.match(wf, /cargo publish --locked --registry decryp7/);
-  assert.match(wf, /SHA256SUMS/);
-  assert.match(wf, /conformance\/release\/publish\.mjs/);
-  for (const t of ['aarch64-apple-darwin', 'x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu', 'x86_64-pc-windows-msvc']) assert.ok(wf.includes(t), t);
+  // The release workflow, read through the workflow accessor (not by text): it runs on that tag only, builds the four targets, attaches
+  // SHA256SUMS through the release script, keeps its notes out of the assets and publishes the crate last.
+  const wf = loadWorkflow('heavy-release.yml');
+  assert.deepEqual(wf.on?.push?.tags ?? wf.true?.push?.tags, ['heavy-v*']);
+  const targets = ['build-linux', 'build-host'].flatMap((id) => (wf.jobs[id].strategy.matrix.include ?? []).map((m) => m.target)).sort();
+  assert.deepEqual(targets, ['aarch64-apple-darwin', 'aarch64-unknown-linux-gnu', 'x86_64-pc-windows-msvc', 'x86_64-unknown-linux-gnu']);
+  const run = (id) => (wf.jobs[id].steps ?? []).map((s) => s.run ?? '').join('\n');
+  assert.match(run('release'), /sha256sum heavy-\* > SHA256SUMS/);
+  assert.match(run('release'), /conformance\/release\/publish\.mjs .*--dir release\b/);
+  assert.doesNotMatch(run('release'), /release\/NOTES\.md/, 'the notes are not an uploaded asset');
+  assert.deepEqual(wf.jobs.release.needs, ['build-linux', 'build-host']);
+  const crate = wf.jobs.crate;
+  assert.deepEqual(crate.needs, ['release']);
+  assert.equal(crate['continue-on-error'], true);
+  assert.match(run('crate'), /cargo publish --locked --registry decryp7 \|\| \{ echo "::error::/);
+  assert.match(run('crate'), /crate not published/);
+  assert.ok(!(wf.jobs['build-host'].steps ?? []).some((s) => /Cross linker/.test(s.name ?? '')), 'no dead cross-linker step on the host jobs');
 });
 
 test('tag names: <app>-vX.Y.Z and vX.Y.Z, nothing else', () => {

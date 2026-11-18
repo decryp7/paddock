@@ -156,6 +156,13 @@ version is there and unchanged. It never touches `~/.cargo` or `~/.rustup`. Then
 engineering-rules' `scripts/heavy.sh` wrapper finds it (`HEAVY_BIN`, then PATH, then `$PADDOCK_DEV_TARGETS/heavy/bin/heavy`; when it is missing
 the wrapper prints this one command and exits 127: it never downloads by itself).
 
+**Requirements:** `curl` and a release over `https` (a plain `http` `PADDOCK_HEAVY_RELEASES` is refused unless it is on this machine's loopback, so the
+token is never sent in the clear); the Linux binaries are built in the CI image (Ubuntu 24.04) and need **glibc 2.39 or newer**; the version
+(`--version`) must be a semantic version. Measured 2026-11-19: a HEAD request to an existing release asset of this Gitea
+(`.../releases/download/dyno-latest/latest.json`, no token) answers 200 with no redirect, so the install follows none (curl's default) and uses
+`--proto =https`. The work folder is private (0700), the curl config (the token) is created 0600 and deleted as soon as curl ends, and folders left by a
+killed run are swept at the next start. On Windows a binary that runs is moved aside (`heavy.exe.old.<pid>`) and the new one renamed into place.
+
 **Release (CI):** the tag `heavy-vX.Y.Z` (requested through the tag workflow, after this reaches main) starts `.gitea/workflows/heavy-release.yml`: it
 builds macOS arm64, Linux x86_64 and arm64 and Windows x86_64, attaches `heavy-<version>-<target>[.exe]` and `SHA256SUMS` to the Gitea release
 (`conformance/release/publish.mjs`) and, when `paddock-proc` and `paddock-env` are in the `decryp7` registry at the versions this crate asks for,

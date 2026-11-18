@@ -4,6 +4,8 @@
 # installs it with `./dev heavy-install` (downloads the asset for its OS, verifies the checksum, installs atomically into
 # <dev-targets>/heavy/bin/heavy, records the version; tools/heavy/README.md). The tag is requested through the tag workflow
 # (heavy-vX.Y.Z: conformance/ci/request-tag.mjs reads the version from tools/heavy/Cargo.toml and asks ci.yml's verdict).
+# First green run: pending (ER-41: this workflow has not run yet; the first heavy-v* tag is its first run, recorded here by run id).
+# The Linux binaries are built in the garage image (Ubuntu 24.04): they need glibc 2.39 or newer (tools/heavy/README.md).
 # Secrets: RELEASE_TOKEN (write:repository, as the apps' releases), DOCKER_USERNAME / DOCKER_PASSWORD (the cargo registry, as publish.yml).
 
 name: heavy-release
@@ -36,13 +38,20 @@ jobs:
       # A release job builds the tool from source: it never runs a prebuilt binary (ADR 0022, release jobs bypass every cache).
       PADDOCK_DEV_DOWNLOAD: "0"
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-      # The garage image has only `stable`; rust-toolchain.toml names the pinned version, which rustup would download on every run.
+      # The garage image has only `stable`, which is a different name to rustup than the pinned version: this names the image's compiler
+      # until setup-rust (the first step) settles the toolchain pinned in rust-toolchain.toml for every later step (the image's `stable`
+      # is used as it is when it is that version).
       RUSTUP_TOOLCHAIN: stable
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # The toolchain pinned in rust-toolchain.toml (the image's `stable` when it is that version), settled for every later step.
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          targets: ${{ matrix.target }}
 
       # CARGO_BUILD_JOBS: this runner's share of the host (Linux keeps cargo's default).
       - uses: ./.gitea/actions/build-jobs
@@ -55,10 +64,6 @@ jobs:
           have=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)
           [ "$want" = "$have" ] || { echo "::error::the tag $GITHUB_REF_NAME says $want, tools/heavy/Cargo.toml says $have. Next step: bump the version, then request the tag again."; exit 1; }
           echo "VERSION=$have" >> "$GITHUB_ENV"
-
-      - uses: ./.gitea/actions/setup-rust
-        with:
-          targets: ${{ matrix.target }}
 
       - name: Cross linker (Linux arm64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
@@ -110,7 +115,7 @@ jobs:
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
       - uses: ./.gitea/actions/build-jobs
@@ -130,14 +135,6 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
         with:
           targets: ${{ matrix.target }}
-
-      - name: Cross linker (Linux arm64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        shell: bash
-        run: |
-          sudo apt-get update -qq 2>/dev/null || apt-get update -qq
-          (sudo apt-get install -y -qq gcc-aarch64-linux-gnu 2>/dev/null || apt-get install -y -qq gcc-aarch64-linux-gnu)
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
 
       - name: Build
         shell: bash
@@ -166,9 +163,9 @@ jobs:
     needs: [build-linux, build-host]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
 
@@ -184,8 +181,8 @@ jobs:
           mkdir release && find assets -type f -name 'heavy-*' -exec cp {} release/ \;
           [ "$(ls release | wc -l)" = 4 ] || { echo "::error::expected 4 binaries (macOS arm64, Linux x86_64 and arm64, Windows x86_64), found: $(ls release). Next step: look at the failed build job and re-run it."; exit 1; }
           (cd release && sha256sum heavy-* > SHA256SUMS && cat SHA256SUMS)
-          printf 'heavy %s: the machine-wide heavy-step lock. Install: `./dev heavy-install` in a Paddock checkout (it checks SHA256SUMS).\n' "${GITHUB_REF_NAME#heavy-v}" > release/NOTES.md
-          node conformance/release/publish.mjs --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}" --tag "$GITHUB_REF_NAME" --notes release/NOTES.md --dir release
+          mkdir notes && printf 'heavy %s: the machine-wide heavy-step lock. Install: `./dev heavy-install` in a Paddock checkout (it checks SHA256SUMS).\n' "${GITHUB_REF_NAME#heavy-v}" > notes/NOTES.md
+          node conformance/release/publish.mjs --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}" --tag "$GITHUB_REF_NAME" --notes notes/NOTES.md --dir release
 
   crate:
     name: crate (cargo registry decryp7)
@@ -199,7 +196,7 @@ jobs:
     env:
       RUSTUP_TOOLCHAIN: stable
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Dry run, then publish
         working-directory: tools/heavy
@@ -212,5 +209,6 @@ jobs:
           auth=$(printf '%s:%s' "$DOCKER_USERNAME" "$DOCKER_PASSWORD" | base64 | tr -d '\n')
           echo "::add-mask::$auth"
           export CARGO_REGISTRIES_DECRYP7_TOKEN="Basic $auth"
-          cargo publish --dry-run --locked --registry decryp7 || { echo "::warning::the dry run of paddock-heavy failed (a dependency is probably not in the registry at the version tools/heavy/Cargo.toml asks for: publish the crates with a v* tag first). The release assets are published; the crate is not."; exit 1; }
-          cargo publish --locked --registry decryp7
+          cargo publish --dry-run --locked --registry decryp7 || { echo "::warning::the dry run of paddock-heavy failed (a dependency is probably not in the registry at the version tools/heavy/Cargo.toml asks for: publish the crates with a v* tag first). The release assets are published; the crate is not."; echo "crate not published (dry run failed)" >> "$GITHUB_STEP_SUMMARY"; exit 1; }
+          cargo publish --locked --registry decryp7 || { echo "::error::cargo publish of paddock-heavy failed. Next step: read the output above; the release assets are published and installable, only the crate is not."; echo "crate not published" >> "$GITHUB_STEP_SUMMARY"; exit 1; }
+          echo "crate paddock-heavy published" >> "$GITHUB_STEP_SUMMARY"
