@@ -26,10 +26,13 @@ pub struct Git<'a> {
     /// Texts already read, by revision and path: the detectors read the same file at the same revision more than once.
     texts: RefCell<HashMap<(String, String), Option<String>>>,
     /// Answers of the reads [`cacheable`] allows, by arguments: they depend only on immutable objects.
-    memo: RefCell<HashMap<(Vec<String>, bool), Vec<u8>>>,
+    memo: RefCell<HashMap<MemoKey, Vec<u8>>>,
     /// How many git processes this reader started (tests read it).
     starts: Cell<usize>,
 }
+
+/// A remembered read: its arguments, and whether exit status 1 was an answer.
+type MemoKey = (Vec<String>, bool);
 
 /// The read commands whose answer depends only on the objects their full ids name, when every revision they name is one.
 const IMMUTABLE_READS: &[&str] = &["ls-tree", "diff", "merge-base", "merge-tree", "log", "cat-file"];
