@@ -685,7 +685,7 @@ fn the_checks_the_rust_host_runs_in_ci_are_in_the_plan_for_every_input_they_read
             explain: true,
             ..Default::default()
         };
-        let plan = paddock_dev::plan::affected(&[path.clone()], &graph, &opts).unwrap();
+        let plan = paddock_dev::plan::affected(std::slice::from_ref(path), &graph, &opts).unwrap();
         assert_eq!(
             plan["conformance"], true,
             "a change to {path} (read by a check of the Rust host) must run the conformance job"
