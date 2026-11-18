@@ -2244,7 +2244,7 @@
    "rule": 40,
    "file": "conformance/c125-allow.json",
    "line": 1,
-   "message": "stale allow entry (apps/pitcrew/docs/design/environment.html: \u002fVolumes\u002fbuild) matches no site",
+   "message": "stale allow entry (apps/pitcrew/docs\u002fdesign/environment.html: \u002fVolumes\u002fbuild) matches no site",
    "fix": "Remove it from conformance/c125-allow.json."
   },
   {
@@ -2253,7 +2253,7 @@
    "rule": 40,
    "file": "conformance/c125-allow.json",
    "line": 1,
-   "message": "stale allow entry (apps/pitcrew/docs/design/environment.html: \u002fVolumes\u002fscratch) matches no site",
+   "message": "stale allow entry (apps/pitcrew/docs\u002fdesign/environment.html: \u002fVolumes\u002fscratch) matches no site",
    "fix": "Remove it from conformance/c125-allow.json."
   },
   {

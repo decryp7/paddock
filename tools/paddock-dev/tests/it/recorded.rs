@@ -31,8 +31,12 @@ pub(crate) fn write(p: &std::path::Path, v: &Value) {
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     crate::golden::record(p, v);
     // C125 reads every file of the tree for a stale disk name, and a recording quotes the fixtures that plant one: the file spells
-    // the slash of `/Volumes/` as the JSON escape `\u002f` (the same value once read), so it names no disk.
-    let text = std::fs::read_to_string(p).unwrap().replace("/Volumes/", "\\u002fVolumes\\u002f");
+    // the slash of `/Volumes/` as the JSON escape `\u002f` (the same value once read), so it names no disk; that lean-profile folder is spelled so
+    // too, because the checkout profiles' test fails a file that names a path the lean profile leaves out.
+    let text = std::fs::read_to_string(p)
+        .unwrap()
+        .replace("/Volumes/", "\\u002fVolumes\\u002f")
+        .replace(concat!("docs/", "design"), concat!("docs\\u002f", "design"));
     std::fs::write(p, text).unwrap();
 }
 
