@@ -76,5 +76,5 @@ crates, tauri and paddock-dev jobs, `npm audit` in debrief.yml) stay blocking un
 `advisories` check only when the push changes a `Cargo.lock`, a `Cargo.toml` or the `deny.toml` the workspace depends on (its own, or a
 shared crate's manifest under `crates/`), measured from the same base as the rest of the push (`pre_push/deny.rs`, one value that
 decides the arguments and the printed line). A push that skips them prints `advisories skipped` and names the nightly audit that covers
-them. A push whose base is not known runs them (not measured never passes, ADR 0089). Reason: an outside advisory (lettre 0.11.23,
+them. A run with a file list the caller gave (`--files`) is not measured from the base, so it runs them (not measured never passes, ADR 0089). Reason: an outside advisory (lettre 0.11.23,
 2026-11-18) turned every push of every branch red, also those that touch no dependency.
