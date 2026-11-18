@@ -1269,7 +1269,7 @@ mod tests {
             .stdout("sccache 0.19.0")
             .files()
             .unwrap();
-        paddock_testkit::exe::write_program(&stage.join(&packed.program_name), &packed.bundled()).unwrap();
+        paddock_testkit::exe::write_program(stage.join(&packed.program_name), packed.bundled()).unwrap();
         let archive = dir.join(format!("{name}.tar.gz"));
         let tar = ToolCall::new("tar")
             .args([

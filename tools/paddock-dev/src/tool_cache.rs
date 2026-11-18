@@ -187,7 +187,7 @@ mod tests {
         let bin = dir.join(exe(name));
         // One file with its script at its end: `hold` links it under another name, and it still answers.
         let program = paddock_testkit::StandIn::new(&dir, name).stdout("held").files().unwrap();
-        paddock_testkit::exe::write_program(&bin, &program.bundled()).unwrap();
+        paddock_testkit::exe::write_program(&bin, program.bundled()).unwrap();
         bin
     }
 

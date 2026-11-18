@@ -420,7 +420,7 @@ mod tests {
             .stdout(&format!("cargo-nextest {version} (fixture)"))
             .files()
             .unwrap();
-        paddock_testkit::exe::write_program(&pack.join(&packed.program_name), &packed.bundled()).unwrap();
+        paddock_testkit::exe::write_program(pack.join(&packed.program_name), packed.bundled()).unwrap();
         let tgz = sc.d.path().join("fixture.tar.gz");
         let ok = paddock_proc::command("tar")
             .args([
