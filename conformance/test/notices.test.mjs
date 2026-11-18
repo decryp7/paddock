@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { ALLOWED } from '../src/notices/licences.mjs';
@@ -28,10 +28,11 @@ function npmApp() {
       },
     }),
     'app/node_modules/left-pad/LICENSE': 'MIT License\n\nPermission is hereby granted\n',
-    'app/node_modules/left-pad/package.json': '{"license":"MIT"}',
+    'app/node_modules/left-pad/package.json': '{"version":"1.3.0","license":"MIT"}',
     'app/node_modules/@scope/chart/LICENSE-APACHE': 'Apache text',
     'app/node_modules/@scope/chart/NOTICE': 'Chart notice',
-    'app/node_modules/nolicense/package.json': '{"license":{"type":"ISC"}}',
+    'app/node_modules/@scope/chart/package.json': '{"version":"2.0.0"}',
+    'app/node_modules/nolicense/package.json': '{"version":"0.1.0","license":{"type":"ISC"}}',
   };
   return makeApp(files);
 }
@@ -102,6 +103,70 @@ test('npm packages: licence files found, dev skipped, a missing file is a warnin
   assert.equal(packages.find((p) => p.name === 'nolicense').license, 'ISC');
   assert.deepEqual(warnings, ['npm nolicense@0.1.0: no licence file found (declared ISC)']);
   assert.throws(() => npmPackages(makeApp({ 'a.txt': 'x' })), /package-lock\.json not found/);
+});
+
+/** npmApp() without the installed folders of the named packages (a partial `npm ci -w conformance` install), optionally with another version installed. */
+function partialNpmApp({ drop = [], version = {} } = {}) {
+  const root = npmApp();
+  for (const n of drop) rmSync(join(root, 'app/node_modules', n), { recursive: true, force: true });
+  for (const [n, v] of Object.entries(version)) writeFileSync(join(root, 'app/node_modules', n, 'package.json'), JSON.stringify({ version: v, license: 'MIT' }));
+  return root;
+}
+
+test('npm packages: a production package in the lock that is not installed is an error naming it and the next step, not a warning', () => {
+  const root = partialNpmApp({ drop: ['left-pad', '@scope/chart'] });
+  assert.throws(() => npmPackages(join(root, 'app')), (e) => {
+    assert.match(e.message, /2 production npm packages are not installed/);
+    assert.match(e.message, /left-pad@1\.3\.0/);
+    assert.match(e.message, /@scope\/chart@2\.0\.0/);
+    assert.match(e.message, /run `npm ci` at the repo root/);
+    assert.equal(e.notInstalled, true);
+    return true;
+  });
+});
+
+test('npm packages: an installed version that differs from the lock counts as not installed', () => {
+  const root = partialNpmApp({ version: { 'left-pad': '1.2.0' } });
+  assert.throws(() => npmPackages(join(root, 'app')), /left-pad@1\.3\.0 \(installed 1\.2\.0\)/);
+});
+
+test('npm packages: the error lists at most 5 names and says how many more', () => {
+  const lock = { packages: { '': {} } };
+  for (let i = 0; i < 8; i++) lock.packages[`node_modules/p${i}`] = { version: '1.0.0', license: 'MIT' };
+  const root = makeApp({ 'app/package-lock.json': JSON.stringify(lock) });
+  assert.throws(() => npmPackages(join(root, 'app')), /8 production npm packages are not installed.*p0@1\.0\.0.*p4@1\.0\.0.*and 3 more/);
+});
+
+test('cli: --check with an incomplete npm install is not measured (exit 6), never stale', () => {
+  const root = partialNpmApp({ drop: ['left-pad'] });
+  writeFileSync(join(root, 'about.json'), JSON.stringify(aboutJson([['serde', '1.0.0', 'MIT']])));
+  const out = [];
+  const io = { log() {}, err: (s) => out.push(s) };
+  assert.equal(main(['--app', 'Demo', '--root', root, '--rust-json', 'about.json', '--check'], io), 6);
+  assert.match(out.join('\n'), /not installed.*run `npm ci` at the repo root/s);
+  assert.doesNotMatch(out.join('\n'), /out of date/);
+});
+
+test('cli: a write run with an incomplete npm install refuses and writes nothing', () => {
+  const root = partialNpmApp({ drop: ['left-pad'] });
+  writeFileSync(join(root, 'about.json'), JSON.stringify(aboutJson([['serde', '1.0.0', 'MIT']])));
+  const io = { log() {}, err() {} };
+  assert.equal(main(['--app', 'Demo', '--root', root, '--rust-json', 'about.json'], io), 6);
+  assert.equal(existsSync(join(root, 'app/src-tauri/resources/THIRD_PARTY_NOTICES.md')), false);
+});
+
+test('cli --verify-npm: looks at the npm install only (no cargo-about run); 6 when incomplete, 0 when complete', () => {
+  const io = { log() {}, err() {}, exec: () => assert.fail('cargo about must not run') };
+  assert.equal(main(['--app', 'Demo', '--root', partialNpmApp({ drop: ['left-pad'] }), '--manifest', 'app/src-tauri/Cargo.toml', '--verify-npm'], io), 6);
+  assert.equal(main(['--app', 'Demo', '--root', npmApp(), '--manifest', 'app/src-tauri/Cargo.toml', '--verify-npm'], io), 0);
+});
+
+test('cli: installed packages without a licence file stay a warning and the run goes on', () => {
+  const root = npmApp();
+  writeFileSync(join(root, 'about.json'), JSON.stringify(aboutJson([['serde', '1.0.0', 'MIT']])));
+  const out = [];
+  assert.equal(main(['--app', 'Demo', '--root', root, '--rust-json', 'about.json'], { log() {}, err: (s) => out.push(s) }), 0);
+  assert.match(out.join('\n'), /warning: npm nolicense@0\.1\.0: no licence file found/);
 });
 
 test('cli: writes the file, then --check passes; a changed dependency makes --check fail', () => {
@@ -187,7 +252,9 @@ function monorepo() {
       },
     }),
     'node_modules/shipped/LICENSE': 'MIT License\n\nshipped',
+    'node_modules/shipped/package.json': '{"version":"1.0.0"}',
     'node_modules/nested/LICENSE': 'Apache text',
+    'node_modules/nested/package.json': '{"version":"2.0.0"}',
     'apps/x/app/package.json': '{}',
   });
 }

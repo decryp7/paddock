@@ -1,7 +1,7 @@
 // `paddock-notices`: regenerates (or with --check, verifies) THIRD_PARTY_NOTICES.md.
 //
 //   paddock-notices --app Pitcrew [--root .] [--manifest app/src-tauri/Cargo.toml ...] [--npm app] [--out app/src-tauri/resources ...]
-//                   [--rust-json cargo-about.json ...] [--about about.toml] [--check]
+//                   [--rust-json cargo-about.json ...] [--about about.toml] [--check] [--verify-npm]
 //   paddock-notices --config apps/<app>/paddock.ci.json [--root <repo>] [--check]
 //
 // --config reads the app's `notices` block ({ name, manifests, npm, out, about, rustJson, components }; `components` are markdown files for bundled software that is neither a crate nor an npm package, appended verbatim; paths relative to the app's
@@ -9,9 +9,14 @@
 // folder may be a workspace of the root lock above it (the monorepo). Without an `about.toml` of its own, the app uses the
 // shared one (templates/repo/about.toml), so the accepted licences are one list.
 //
+// --verify-npm only checks that the installed npm packages match the lock (exit 0, or 6): scripts/notices.sh asks before it runs
+// `npm ci`.
+//
 // Rust licences come from `cargo about generate` (run once per --manifest, with a timeout) unless --rust-json files are
 // given. The npm side reads package-lock.json and node_modules of --npm (run `npm ci --omit=dev --ignore-scripts` first).
-// Exit status: 0 written or up to date, 1 --check found a stale file or a non-permissive licence, 2 usage or tool error.
+// Exit status: 0 written or up to date, 1 --check found a stale file or a non-permissive licence, 2 usage or tool error,
+// 6 not measured: the npm install does not match the lock, so nothing was compared or written (ADR 0089; `./dev gen check` reads 6 as
+// "could not look").
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,19 +25,22 @@ import { fileURLToPath } from 'node:url';
 import { lf, nonPermissive, npmPackages, render, rustCrates } from './generate.mjs';
 
 const MANY = new Set(['manifest', 'out', 'rust-json']);
+const FLAGS = new Set(['check', 'verify-npm']);
 const ONE = new Set(['app', 'root', 'npm', 'about', 'config']);
 /** The shared cargo-about configuration (its `accepted` list equals deny.toml's allow list; a test keeps them equal). */
 const SHARED_ABOUT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'templates', 'repo', 'about.toml');
+/** ADR 0089's "not measured": a precondition is missing, so there is no verdict. */
+const NOT_MEASURED = 6;
 const TIMEOUT_MS = 10 * 60 * 1000;
 
 /** Parses the arguments; repeated --manifest/--out/--rust-json collect into arrays. Throws on anything unknown. */
 export function parseArgs(argv) {
-  const o = { manifest: [], out: [], 'rust-json': [], check: false };
+  const o = { manifest: [], out: [], 'rust-json': [], check: false, 'verify-npm': false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (!a.startsWith('--')) throw new Error(`unexpected argument: ${a}`);
     const k = a.slice(2);
-    if (k === 'check') o.check = true;
+    if (FLAGS.has(k)) o[k] = true;
     else if (MANY.has(k) || ONE.has(k)) {
       if (argv[i + 1] === undefined || argv[i + 1].startsWith('--')) throw new Error(`--${k} needs a value`);
       if (MANY.has(k)) o[k].push(argv[++i]);
@@ -95,12 +103,21 @@ export function main(argv, { log = console.log, err = console.error, exec } = {}
     const outs = (outRel.length ? outRel : ['app/src-tauri/resources']).map((d) => resolve(base, d));
     const manifests = manifestRel.length ? manifestRel : existsSync(join(base, 'app/src-tauri/Cargo.toml')) ? ['app/src-tauri/Cargo.toml'] : [];
     const aboutToml = aboutRel ? resolve(base, aboutRel) : existsSync(join(base, 'about.toml')) ? join(base, 'about.toml') : SHARED_ABOUT;
+    let npm;
+    try {
+      npm = npmPackages(npmDir);
+    } catch (e) {
+      if (!e.notInstalled) throw e;
+      err(`paddock-notices: ${e.message}`);
+      err(`paddock-notices: not measured, and ${o.check ? 'nothing compared' : 'nothing written'}`);
+      return NOT_MEASURED;
+    }
+    if (o['verify-npm']) return 0;
     let docs;
     if (jsonRel.length) docs = jsonRel.map((f) => JSON.parse(readFileSync(resolve(base, f), 'utf8')));
     else if (manifests.length) docs = cargoAbout({ manifests: manifests.map((m) => resolve(base, m)), aboutToml, root: base, exec });
     else throw new Error('no Rust manifest: pass --manifest <Cargo.toml> or --rust-json <file>');
     const rust = rustCrates(docs, base);
-    const npm = npmPackages(npmDir);
     const { markdown, counts } = render(rust.packages, npm.packages, name, componentRel.map((f) => readFileSync(resolve(base, f), 'utf8')));
     for (const w of [...rust.warnings, ...npm.warnings]) err(`warning: ${w}`);
     const bad = nonPermissive([...rust.packages, ...npm.packages]);

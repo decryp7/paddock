@@ -2767,3 +2767,22 @@ passed in runs 8218 and 8225 on the same tree and 20 of 20 locally (Chromium, 4 
 recorded here and not blocking, by the coordinator's decision. Next: reproduce in the Linux CI container with a failing run first,
 then wait for the layout to settle (two reads agree, ER-12) before the comparison. **Class: an e2e read before the layout settled
 (the ready-read class; train 13's workbench palette, Dyno alarms, gallery menu, grid header, Pitwall tray and Manage-layouts rename).**
+
+## The notices generator took a missing npm install for an empty one (2026-11-18, ER-33)
+
+`bash scripts/notices.sh dyno --check` in a worktree set up with `npm ci --ignore-scripts -w conformance` said "out of date", and
+a write run would have written a wrong file. `scripts/notices.sh` ran `npm ci` only when the root `node_modules` folder was missing,
+and that recipe leaves one (only `yaml` and the conformance link). `npmPackages` then found no folder for any of Dyno's 76
+production packages, warned `no licence file found` 76 times, rendered each as `[no text]` and dropped the 46 texts only npm
+packages use: 288 distinct texts became 242 and every `[MIT-n]` label moved. With a full root `npm ci` the Mac output is
+byte-identical to the committed file (`--check` exit 0 for Dyno and Pitwall), so the OS was never the cause; the cargo registry,
+CRLF, the cargo-about version and the targets were measured and ruled out (research note
+`/Volumes/vault-dev/dev-targets/scratch/notices-research/research-note.md`). It had cost false "stale" findings; no committed file ever
+carried the shape. Fix: `npmPackages` throws when a production package the lock lists has no installed folder or another installed
+version (only a package npm marks optional may be absent, with a warning; an installed package with no licence file stays a
+warning); `paddock-notices` exits 6 (not measured) and writes nothing; `notices.sh --check` installs nothing (no `npm ci`, no
+cargo-about install) and exits 6 with the cause and the next step, while a write run runs `npm ci --ignore-scripts` itself when
+`--verify-npm` finds the install incomplete. `./dev gen check` already reads 6 as not measured (generators/tests.rs, status
+6). Class: a generator or check that treats a missing input as an empty input; the rule is to compare the input with what declares it
+(here the lock) and stop when they differ.
+**Recurring: input-precondition-not-verified** (ER-33 cases on Dyno 1.1.0, the 2026-11-17 Debrief dock spec, `every()` over nothing in ER-12).
