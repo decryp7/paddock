@@ -5305,6 +5305,7 @@ version = "0.2.0"
 dependencies = [
  "fs4",
  "httpdate",
+ "paddock-env",
  "paddock-jobs",
  "paddock-limits",
  "paddock-workspace-hack",
