@@ -1,7 +1,7 @@
-import { InjectionToken } from '@angular/core';
+import { InjectionToken, computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it } from 'vitest';
-import { countingBackend, expectBackendCalls, provideCountingBackend } from './counting-backend';
+import { countingBackend, countingInvoke, expectBackendCalls, expectInvokes, provideCountingBackend } from './counting-backend';
 
 interface Backend {
   deleteModel(id: string): Promise<void>;
@@ -54,6 +54,29 @@ describe('countingBackend', () => {
     expect(counter.count()).toBe(0);
   });
 
+  it('does not count signal reads or wrap subscribables, and keeps the inner object as the receiver of getters', async () => {
+    const items = signal([1, 2]);
+    const inner = {
+      items,
+      total: computed(() => items().length),
+      changes: { subscribe: (_f: unknown) => ({ unsubscribe: () => undefined }), pipe: () => inner.changes },
+      get onInner(): boolean {
+        return this === inner;
+      },
+      async load() {
+        return items();
+      },
+    };
+    const counter = countingBackend(inner);
+    expect(counter.backend.items()).toEqual([1, 2]);
+    expect(counter.backend.total()).toBe(2);
+    counter.backend.changes.subscribe(() => undefined);
+    expect(counter.backend.changes).toBe(inner.changes);
+    expect(counter.backend.onInner).toBe(true);
+    await counter.backend.load();
+    expect(counter.calls.map((c) => c.method)).toEqual(['load']);
+  });
+
   it('is scoped to its own instance: two counters never see each other', async () => {
     const a = countingBackend<Backend>(new Fake());
     const b = countingBackend<Backend>(new Fake());
@@ -82,6 +105,14 @@ describe('expectBackendCalls (assertNumQueries for the backend)', () => {
     await expectBackendCalls(counter, 0, () => counter.backend.jobs.cancel(1), 'deleteModel');
   });
 
+  it('a budget ({ max }) fails on zero calls (positive control: the work went to another backend instance) unless allowNone says why', async () => {
+    const counter = countingBackend<Backend>(new Fake());
+    const other = new Fake();
+    await expect(expectBackendCalls(counter, { max: 3 }, () => cleanOneByOne(other, ['a', 'b']))).rejects.toThrow(/at least one backend call, got 0/);
+    await expectBackendCalls(counter, { max: 3, allowNone: 'nothing is unused, so nothing is deleted' }, () => cleanOneByOne(counter.backend, []));
+    await expect(expectBackendCalls(counter, { max: 3, allowNone: ' ' }, () => Promise.resolve())).rejects.toThrow(/allowNone needs a reason/);
+  });
+
   it('counts only the calls the code made, not the ones before', async () => {
     const counter = countingBackend<Backend>(new Fake());
     await counter.backend.deleteModel('before');
@@ -101,5 +132,42 @@ describe('provideCountingBackend', () => {
     const injected = TestBed.inject(BACKEND);
     await expectBackendCalls(counter, 3, () => cleanOneByOne(injected, ['a', 'b', 'c']));
     expect(injected).toBe(counter.backend);
+  });
+});
+
+/** The shape of an app's `tauri-backend.ts`: a bridge whose `invoke` is the IPC call, passed in (the real one by default). */
+interface Bridge {
+  invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
+}
+class TauriLikeBackend {
+  constructor(private readonly bridge: Bridge) {}
+  /** The per-item shape the lint's `parallel` finding names: one invoke per id, joined. */
+  async getEach(ids: readonly number[]): Promise<unknown[]> {
+    return Promise.all(ids.map((id) => this.bridge.invoke('get_item', { id })));
+  }
+  async getAll(ids: readonly number[]): Promise<unknown[]> {
+    return this.bridge.invoke('get_items', { ids });
+  }
+}
+
+describe('countingInvoke (the IPC call itself, under a tauri-backend)', () => {
+  const fakeInvoke = async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => ({ cmd, args }) as T;
+
+  it('counts every invoke by command and passes it through', async () => {
+    const counter = countingInvoke(fakeInvoke);
+    const backend = new TauriLikeBackend({ invoke: counter.invoke });
+    expect(await backend.getAll([1, 2])).toEqual({ cmd: 'get_items', args: { ids: [1, 2] } });
+    expect(counter.count()).toBe(1);
+    expect(counter.count('get_items')).toBe(1);
+    expect(counter.calls).toEqual([{ command: 'get_items', args: { ids: [1, 2] } }]);
+  });
+
+  it('positive control (ER-33): Promise.all over ids.map(invoke) fails a budget of 1; the bulk command meets it', async () => {
+    const counter = countingInvoke(fakeInvoke);
+    const backend = new TauriLikeBackend({ invoke: counter.invoke });
+    await expect(expectInvokes(counter, 1, () => backend.getEach([1, 2, 3]))).rejects.toThrow(/expected 1 invoke, got 3: get_item, get_item, get_item/);
+    await expectInvokes(counter, 1, () => backend.getAll([1, 2, 3]));
+    await expect(expectInvokes(counter, { max: 2 }, () => Promise.resolve())).rejects.toThrow(/at least one invoke, got 0/);
+    await expectInvokes(counter, 0, () => backend.getAll([1]), 'get_item');
   });
 });

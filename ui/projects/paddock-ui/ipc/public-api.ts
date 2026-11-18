@@ -4,7 +4,7 @@
  * jobs, rule 12); one result per item for bulk commands (`ItemResult`, generated from `paddock_commands::ItemResult`); and the backend selection (Tauri or the lazily imported mock). The mock kit is `@decryp7/paddock-ui/ipc/testing`.
  */
 export { ERROR_CODES, type CommandError, type ErrorCode, type ItemResult } from './generated/ipc';
-export { isItemOk, parseItemResults, splitItemResults, type SplitItems } from './src/item-result';
+export { acceptAny, isItemOk, parseItemResults, splitItemResults, type SplitItems } from './src/item-result';
 export { isCommandError, toCommandError, fromRejection, isServiceOutage, isUnsupported, CommandFailure } from './src/command-error';
 export {
   DEFAULT_CALL_TIMEOUT_MS,

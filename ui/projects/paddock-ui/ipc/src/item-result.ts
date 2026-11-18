@@ -15,11 +15,17 @@ export function isItemOk<T>(r: ItemResult<T>): r is { ok: T } {
 const bad = (message: string): CommandFailure => new CommandFailure({ code: 'internal', message, retryable: false });
 
 /**
+/** The value check that accepts every value: pass it to `parseItemResults` to say so, when the caller checks the values itself. */
+export const acceptAny = (_v: unknown): _v is unknown => true;
+
+/**
  * The reply of a bulk command for `count` items, checked at the edge: an array of exactly `count` item results, each with exactly one of
- * `ok` or `err`, every error a known `CommandError` (known fields only), and every value accepted by `isValue` when given. Anything else
- * throws an `internal` `CommandFailure`: the backend broke its contract, which is a bug, not one item's failure.
+ * `ok` or `err`, every error a known `CommandError` (known fields only), and every value accepted by `isValue` (required: `acceptAny`
+ * says that any value is fine). Anything else throws an `internal` `CommandFailure`: the backend broke its contract, which is a bug, not
+ * one item's failure.
  */
-export function parseItemResults<T>(reply: unknown, count: number, isValue?: (v: unknown) => v is T): ItemResult<T>[] {
+export function parseItemResults<T>(reply: unknown, count: number, isValue: (v: unknown) => v is T): ItemResult<T>[] {
+  if (typeof isValue !== 'function') throw bad('parseItemResults needs a value check (or acceptAny).');
   if (!Array.isArray(reply)) throw bad('The bulk reply is not a list of item results.');
   if (reply.length !== count) throw bad(`The bulk reply has ${reply.length} results for ${count} items.`);
   return reply.map((r: unknown, i): ItemResult<T> => {
@@ -31,7 +37,7 @@ export function parseItemResults<T>(reply: unknown, count: number, isValue?: (v:
       if (!isCommandError(o['err'])) throw bad(`Item ${i} of the bulk reply has an error of an unknown shape.`);
       return { err: toCommandError(o['err']) };
     }
-    if (isValue && !isValue(o['ok'])) throw bad(`Item ${i} of the bulk reply has a value of an unexpected shape.`);
+    if (!isValue(o['ok'])) throw bad(`Item ${i} of the bulk reply has a value of an unexpected shape.`);
     return { ok: o['ok'] as T };
   });
 }
