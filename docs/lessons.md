@@ -2947,3 +2947,14 @@ tools/paddock-dev/Cargo.toml --profile ci --no-tests=fail -E 'test(/^contracts::
 paddock-ci, `tools/linux-container.sh --ci-image`, 4 CPUs, 2 jobs, a new empty build volume, host load 27): cold 71 s, warm 1 s (the 12
 tests run in 1.2 s). Under the limits set for the choice (30 s warm, 3 min cold), so the step stays a nextest step. Not measured: a
 real amd64 CI runner; read the step's timing from the next train run and revisit if the cold time passes 3 min.
+
+## Fix item: sccache with `SCCACHE_BASEDIRS` once a release ships it (2026-11-19)
+
+sccache 0.19.0 (2026-10-24, the pin in `tools/paddock-dev/src/ci_setup_rust.rs`) keys every Rust compile on the checkout path
+(`CARGO_MANIFEST_DIR`, the working folder), so the workspace's own crates never hit across worktrees and 18% of third-party crates
+(those with `OUT_DIR`) miss too (docs/research/2026-11-19-sccache.md). The fix, PRs #2918 and #3022 (`SCCACHE_BASEDIRS` for rustc and
+`SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS`), was merged on 2026-11-02 and is in no release yet. **To do (user decision 2026-11-19, WP-6):**
+when a release contains both, bump `SCCACHE_VERSION` and the four checksums, start the agents' server with
+`SCCACHE_BASEDIRS=<worktree root>` and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH`
+(`local_sccache.rs`), and measure workspace-crate hits across worktrees with incremental off in the push gates. Check
+<https://github.com/mozilla/sccache/releases> at each train.
