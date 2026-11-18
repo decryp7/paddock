@@ -13,7 +13,8 @@
 //! **Where the constructors are enforced.** Clippy's `disallowed-methods` forbids `std::process::Command::new` (and tokio's) in the
 //! shared crates (`crates/clippy.toml`), in every app (`apps/<app>/clippy.toml`, through `lint/clippy.toml`) and in the dev tools.
 //! A site that keeps a plain start says so with an `allow` or `expect` and a reason, and is not counted: today the measured
-//! baselines of paddock-testkit's `measure_test_command` example, and a few app tests and app build tools with older `allow`s
+//! baselines of paddock-testkit's `measure_test_command` example, the stand-in binary (compiled alone, with no dependencies), the
+//! guardian's own plumbing in paddock-proc (whether a guardian starts depends on the OS and user, not on the code measured), and a few app tests and app build tools with older `allow`s
 //! (grep `Command::new` under `apps/`). Code that has no paddock-env dependency cannot be counted until it takes one.
 //!
 //! **What one start is.** A `Command` made by a constructor, not a spawn: std's `Command` has no hook around `spawn`, `output` and

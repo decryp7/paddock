@@ -944,3 +944,12 @@ fn a_guardian_that_ended_is_started_again_for_the_next_child() {
     second.kill();
     first.kill();
 }
+
+#[test]
+fn the_guardians_plumbing_is_not_counted_as_the_callers_starts() {
+    // Whether a guardian and its keeper start depends on the OS and the user, never on the code under a budget test.
+    let counter = paddock_env::starts::count_starts();
+    let _ = plumbing("true");
+    let _ = crate::command("true");
+    assert_eq!(counter.starts(), 1, "only the caller's own command counts");
+}

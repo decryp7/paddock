@@ -4,8 +4,10 @@
 //! `paddock_proc::command` re-exports [`command`] (the shared crates and tools start programs through it, and clippy forbids
 //! `Command::new` there), and the test kit's `TestCommand` builds on it, so a test's child has the same start flags as the
 //! product's. It lives in this leaf crate because `paddock-proc`'s own tests use the test kit: the kit cannot depend on
-//! `paddock-proc` (that made a publish cycle, ci.yml 7989; ADR 0100). Apps that cannot depend on it keep a registered copy
-//! (`docs/known-copies.toml`, rule 55, entry `no-console-command`); this file is the canonical one.
+//! `paddock-proc` (that made a publish cycle, ci.yml 7989; ADR 0100). Clippy forbids `Command::new` in the shared crates and every
+//! app, so every program is started from here ([`command`], or [`attached_command`] without creation flags), and each start is
+//! counted for budget tests ([`crate::starts`]). The registered copies of this constructor (`docs/known-copies.toml`, rule 55,
+//! entry `no-console-command`) were folded into it; the entry keeps this file as the canonical one.
 
 use std::ffi::{OsStr, OsString};
 use std::process::Command;
