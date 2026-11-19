@@ -13,9 +13,9 @@ mod oracle;
 mod primary;
 
 use paddock_testkit::TestCommand;
-use std::process::Command;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// A bare origin, the primary checkout (cloned, on `main`, one commit pushed) and a folder for worktrees.
 pub struct Fixture {
