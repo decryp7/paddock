@@ -25,12 +25,12 @@ locked worktree, never in the main checkout (rule 2).
    branch, then fix round by failed tests only (ER-10). A failure that also fails on main is nobody's.
 7. **The release sequence, then land.** One command after the fix round's failed run: `./dev train release <train-branch> --since-run <failed run>
    --workflow ci.yml|debrief.yml [--accept-flaky <file:line[:col]>]... [--reuse <workflow>=<run>]... --max <duration>`, run in the worktree
-   that holds the pushed train head. It takes the train-CI hold (`scripts/train-ci-hold.sh`), checks the disk (`./dev disk check`) before
+   that holds the pushed train head. It takes the train-CI hold (`scripts/train-ci-hold.sh`), makes the disk check `ci dispatch` makes (`before_dispatch`, refused under 50 GiB) before
    every dispatch, dispatches the fix round (`since_run`, the failed jobs only; `passed:<run>` for a round that already ran: it is judged,
    not dispatched again), judges a red round with `ci triage`'s verdict (PASS only when triage worked, no job was skipped, the counts add up
    and every row is a FLAKY test, not a job, on the `--accept-flaky` list; anything else stops), then `debrief.yml` with bundles after a
    `ci.yml` round, then the release workflows, and stops at the first run that is not green with one `::error::` (cause and next step).
    `--reuse` names a green run of a release workflow whose app's tree is unchanged; it is checked (exists, that workflow, success) and logged.
    Every wait ends at `--max` (one run at 6 h). Then `./dev train land <train-branch>` fast-forwards `main` to the head (no force, no
-   rebase; it refuses when `origin/main` is not an ancestor) and verifies it with `ls-remote`. These two commands replace the scratch
+   rebase; it refuses when `origin/main` is not an ancestor) and verifies it with `ls-remote`, then runs the bounded, never-blocking disk clean `./dev train landed` (also callable alone). These commands replace the scratch
    scripts of train 14 (`seq-lib.sh`, `seq-release.sh`, `seq-full.sh`, `triage-verdict.py`, `land-*.sh`). Land only after the full green run on the final tree (rule 50 (b)); delete the `trial/*` refs of landed branches with `./dev ci trial-prune` (a trial that is sent back or not dispatched already deletes its own ref).
