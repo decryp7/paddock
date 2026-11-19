@@ -74,13 +74,26 @@ jobs:
       - uses: ./.gitea/actions/build-folder
         with:
           workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
-          name: paddock-${{ github.job }}
+          name: paddock-trial-${{ github.run_id }}
 
       - name: Reach RustFS (an unauthenticated health check)
         run: |
           echo "runner: $RUNNER_NAME ($RUNNER_OS $RUNNER_ARCH)"
           curl -s -o /dev/null -w "health: http %{http_code}, connect %{time_connect} s, total %{time_total} s\n" --connect-timeout 3 --max-time 5 \
             http://172.16.1.220:15000/minio/health/live || echo "::warning::no answer from 172.16.1.220:15000 within 5 s"
+
+      # A cold local cache with a warm S3 store: the L0 disk starts empty, so every hit is read from S3 (L1). The build folder is new
+      # per run (its name has the run id), so cargo calls rustc for every crate.
+      - name: Empty local cache
+        working-directory: .
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            echo "PADDOCK_SCCACHE_MOUNT=/nonexistent-sccache-mount" >> "$GITHUB_ENV"
+          else
+            dir="$("$PADDOCK_DEV" ci isolation path sccache)"
+            echo "local sccache folder: $dir"
+            PADDOCK_PRUNE_UNIT=kb "$PADDOCK_DEV" ci prune-folder "$dir" 0 || echo "::warning::could not empty the local sccache folder"
+          fi
 
       - uses: ./.gitea/actions/setup-rust
         with:
