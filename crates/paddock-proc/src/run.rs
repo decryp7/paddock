@@ -209,7 +209,7 @@ fn take(c: &Arc<Mutex<Captured>>) -> Captured {
 /// error: look at [`Output::outcome`]. A timeout or the output cap ends the program's whole tree (the child leads its
 /// own process group on Unix) and is reported in the outcome, with what it wrote until then.
 pub fn run_bounded(cmd: Command, limits: Limits) -> Result<Output, RunError> {
-    run_bounded_noting(cmd, limits, &|_| {})
+    run_bounded_inner(cmd, limits, None, &|_| {})
 }
 
 /// [`run_bounded`] that tells `on_start` the program's identity right after it started, before the run waits for anything: a caller
@@ -217,14 +217,54 @@ pub fn run_bounded(cmd: Command, limits: Limits) -> Result<Output, RunError> {
 /// leaving it to the run's own timeout. The identity is `None` when the start time cannot be read (the run logs that): such a
 /// program has no identity to end it by.
 pub fn run_bounded_noting(
-    mut cmd: Command,
+    cmd: Command,
     limits: Limits,
     on_start: &dyn Fn(Option<ProcessId>),
 ) -> Result<Output, RunError> {
+    run_bounded_inner(cmd, limits, None, on_start)
+}
+
+/// The most bytes [`run_bounded_with_input`] writes to a child.
+pub const MAX_INPUT: usize = 64 * 1024 * 1024;
+
+/// [`run_bounded`] with `input` written to the child's standard input on a thread of its own, then closed: a request list for a
+/// batch program (`git cat-file --batch`, `git diff-tree --stdin`, `git hash-object --stdin`) in one start. A child that stops
+/// reading early does not block the run (the writer's error is ignored; the outcome says how the child ended).
+///
+/// # Errors
+///
+/// As [`run_bounded`], and [`RunError::Spawn`] when `input` is over [`MAX_INPUT`].
+pub fn run_bounded_with_input(
+    cmd: Command,
+    input: Vec<u8>,
+    limits: Limits,
+) -> Result<Output, RunError> {
+    if input.len() > MAX_INPUT {
+        return Err(RunError::Spawn(
+            program_name(&cmd),
+            std::io::Error::other(format!(
+                "an input of {} bytes is over the {MAX_INPUT}-byte limit",
+                input.len()
+            )),
+        ));
+    }
+    run_bounded_inner(cmd, limits, Some(input), &|_| {})
+}
+
+fn run_bounded_inner(
+    mut cmd: Command,
+    limits: Limits,
+    input: Option<Vec<u8>>,
+    on_start: &dyn Fn(Option<ProcessId>),
+) -> Result<Output, RunError> {
     let name = program_name(&cmd);
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    cmd.stdin(if input.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    })
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
     crate::sys::own_group(&mut cmd);
     let mut child = crate::command::spawn_retrying(&mut cmd).map_err(|e| match e.kind() {
         std::io::ErrorKind::NotFound => RunError::NotFound(name.clone()),
@@ -244,6 +284,14 @@ pub fn run_bounded_noting(
         );
     }
     on_start(root);
+    if let (Some(bytes), Some(mut stdin)) = (input, child.stdin.take()) {
+        std::thread::spawn(move || {
+            use std::io::Write;
+            // silent: a child that stopped reading (or ended) closes the pipe; its outcome is what the run reports
+            #[allow(clippy::let_underscore_must_use)]
+            let _: std::io::Result<()> = stdin.write_all(&bytes);
+        });
+    }
     let (tx, rx) = mpsc::channel();
     let mut pipes = 0;
     let out = child.stdout.take().map(|s| {
@@ -473,6 +521,29 @@ mod tests {
 
     fn limits() -> Limits {
         Limits::new(Duration::from_secs(120))
+    }
+
+    /// The input reaches the child in one start, and a child that never reads a large input still ends the run.
+    #[test]
+    fn a_run_with_input_hands_it_to_the_child_and_a_child_that_ignores_it_does_not_block() {
+        let o = run_bounded_with_input(
+            child(Mode::Answer),
+            b"one\ntwo two\nexit\n".to_vec(),
+            limits(),
+        )
+        .unwrap();
+        assert!(o.success(), "{o:?}");
+        let text = o.stdout_text();
+        assert_eq!(lines(&text), ["len 3", "len 7"], "{text:?}");
+        let o = run_bounded_with_input(child(Mode::Exit3), vec![b'x'; 8 * 1024 * 1024], limits())
+            .unwrap();
+        assert!(
+            matches!(o.outcome, Outcome::Exited(s) if s.code() == Some(3)),
+            "{o:?}"
+        );
+        let e = run_bounded_with_input(child(Mode::Exit3), vec![0; MAX_INPUT + 1], limits())
+            .unwrap_err();
+        assert!(e.to_string().contains("over the"), "{e}");
     }
 
     #[test]

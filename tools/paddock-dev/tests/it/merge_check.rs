@@ -606,37 +606,55 @@ fn a_file_the_other_side_deleted_is_a_conflict_not_a_drop() {
     assert!(!out.contains("[dropped-hunk]"), "{out}");
 }
 
+// Hunks main added to regenerated files are not "dropped" when the merge regenerates them. One test per kind of generated file:
+// the five in one test took 45 to 49 s on the Windows runner under the suite's load (ci.yml 8271, windows-host-probe 8277 and 8280),
+// next to the 60 s slow-timeout; each case alone is a fifth of it.
 #[test]
-fn generated_files_are_skipped_by_every_detector() {
-    // Hunks main added to regenerated files are not "dropped" when the merge regenerates them.
-    for file in [
-        "Cargo.lock",
-        "THIRD_PARTY_NOTICES.md",
-        "docs/x.drawio",
-        "crates/x/widgets/generated.rs",
-        "gen/out.gen.txt",
-    ] {
-        let base = lines(30, "a");
-        let main = format!("{}{}", five(), base);
-        let branch = format!("{base}branch tail one\n");
-        let r = Repo::new();
-        r.write(".gitattributes", "*.gen.txt linguist-generated\n");
-        r.write(file, &base);
-        r.write("other.txt", &lines(10, "o"));
-        r.commit("initial");
-        r.git(&["checkout", "-q", "-b", "feature"]);
-        r.write(file, &branch);
-        r.commit("feat: branch edit");
-        r.git(&["checkout", "-q", "main"]);
-        r.write(file, &main);
-        r.commit("fix: main adds");
-        r.git(&["merge", "-q", "-s", "ours", "--no-commit", "feature"]);
-        r.write(file, &branch);
-        r.git(&["add", "--all"]);
-        r.git(&["commit", "-q", "-m", "Merge feature"]);
-        let (code, out) = r.check(&["HEAD"]);
-        assert_eq!(code, 0, "{file}: {out}");
-    }
+fn generated_files_are_skipped_by_every_detector_a_lockfile() {
+    generated_file_is_skipped("Cargo.lock");
+}
+
+#[test]
+fn generated_files_are_skipped_by_every_detector_notices() {
+    generated_file_is_skipped("THIRD_PARTY_NOTICES.md");
+}
+
+#[test]
+fn generated_files_are_skipped_by_every_detector_a_drawio_file() {
+    generated_file_is_skipped("docs/x.drawio");
+}
+
+#[test]
+fn generated_files_are_skipped_by_every_detector_a_generated_folder() {
+    generated_file_is_skipped("crates/x/widgets/generated.rs");
+}
+
+#[test]
+fn generated_files_are_skipped_by_every_detector_a_linguist_generated_file() {
+    generated_file_is_skipped("gen/out.gen.txt");
+}
+
+fn generated_file_is_skipped(file: &str) {
+    let base = lines(30, "a");
+    let main = format!("{}{}", five(), base);
+    let branch = format!("{base}branch tail one\n");
+    let r = Repo::new();
+    r.write(".gitattributes", "*.gen.txt linguist-generated\n");
+    r.write(file, &base);
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write(file, &branch);
+    r.commit("feat: branch edit");
+    r.git(&["checkout", "-q", "main"]);
+    r.write(file, &main);
+    r.commit("fix: main adds");
+    r.git(&["merge", "-q", "-s", "ours", "--no-commit", "feature"]);
+    r.write(file, &branch);
+    r.git(&["add", "--all"]);
+    r.git(&["commit", "-q", "-m", "Merge feature"]);
+    let (code, out) = r.check(&["HEAD"]);
+    assert_eq!(code, 0, "{file}: {out}");
 }
 
 #[cfg(unix)]
@@ -2163,19 +2181,33 @@ fn on_a_stacked_train_a_member_should_contain_the_previous_trains_commit_the_tra
     }
 }
 
+// The re-merge subject in every spelling the queue and git write. One test per spelling: the four in one test took 44 to 64 s on the
+// Windows runner under the suite's load (ci.yml 8271 timed out at 60 s; windows-host-probe 8277 and 8280), each case a quarter of it.
+fn remerge_subject_is_read(subject: fn(&str) -> String) {
+    let (r, p1) = stacked_train(subject);
+    let (code, text) = tr2(&r, "before_p1");
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains(&p1[..9]) && text.contains("old base"), "{text}");
+}
+
 #[test]
-fn the_remerge_subject_is_read_in_any_case_and_in_the_train_slash_spelling() {
-    for subject in [
-        (|h: &str| format!("CHORE(TRAIN): MERGE TRAIN/PREV ({h}) INTO TRAIN 2")) as fn(&str) -> String,
-        |h: &str| format!("Merge train/prev ({h}) into train/2"),
-        |_: &str| "Merge branch 'train/prev' into tr2".to_string(),
-        |_: &str| "Merge remote-tracking branch 'origin/train/prev' into tr2".to_string(),
-    ] {
-        let (r, p1) = stacked_train(subject);
-        let (code, text) = tr2(&r, "before_p1");
-        assert_eq!(code, 0, "{text}");
-        assert!(text.contains(&p1[..9]) && text.contains("old base"), "{text}");
-    }
+fn the_remerge_subject_is_read_in_upper_case() {
+    remerge_subject_is_read(|h| format!("CHORE(TRAIN): MERGE TRAIN/PREV ({h}) INTO TRAIN 2"));
+}
+
+#[test]
+fn the_remerge_subject_is_read_in_the_train_slash_spelling() {
+    remerge_subject_is_read(|h| format!("Merge train/prev ({h}) into train/2"));
+}
+
+#[test]
+fn the_remerge_subject_is_read_as_gits_merge_branch_message() {
+    remerge_subject_is_read(|_| "Merge branch 'train/prev' into tr2".to_string());
+}
+
+#[test]
+fn the_remerge_subject_is_read_as_gits_merge_remote_tracking_branch_message() {
+    remerge_subject_is_read(|_| "Merge remote-tracking branch 'origin/train/prev' into tr2".to_string());
 }
 
 #[test]
