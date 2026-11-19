@@ -70,6 +70,7 @@ test('switching the theme restyles the timeline: runs, lane fill and surface fol
   const run = page.locator('debrief-timeline-panel debrief-run-track .run[data-status="closed"]:not(.clip-l):not(.clip-r)').first();
   await expect(run).toBeVisible();
   // A run is a line in Calm (no fill) and a pill in Console (a tinted, rounded band).
+  // conformance: e2e-ready — a theme's computed style, set before the first draw
   expect(await run.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
   await page.keyboard.press('ControlOrMeta+k');
   await page.getByRole('combobox', { name: 'Type a command' }).fill('theme: console');

@@ -1,6 +1,7 @@
 import { expect, test } from './test';
 import { openAiApp, releaseMockHolds } from './ai-support';
 import { showProfileEditor } from './menu-support';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // ADR 0061: a view's controls do not move when its data arrives after it opened. A click that starts on a control
 // just after the view opened must end on the same control: if the layout shifts between the press and the release,
@@ -24,6 +25,8 @@ test('the profile editor keeps Propose… in place while its profile loads, and 
   await releaseMockHolds(page);
   await expect(name).toHaveText('OrderService (Serilog) — demo');
   await expect(editor.getByText('Valid', { exact: true })).toBeVisible();
+  // Visible is not placed: read the box once two reads agree (the ready-signal audit, 2026-11-19).
+  await expectNotMoving(propose);
   expect(await propose.boundingBox()).toEqual(before);
   await page.mouse.up();
 

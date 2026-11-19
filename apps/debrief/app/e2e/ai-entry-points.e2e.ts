@@ -4,6 +4,7 @@ import { openQuery } from './analysis-support';
 import { expectNoSeriousViolations } from './axe';
 import { narrativeDialog, openAiApp, releaseMockHolds, rowMenu, runCommand, viewAnswer } from './ai-support';
 import { menuItem, openMenu, showProfileEditor } from './menu-support';
+import { runningToast } from './toast-support';
 
 // The AI entry points outside the chat (query bar, context menu, Overview, Moment, markers manager, profile
 // editor, infer-regex dialog) and AI being absent when it is unavailable. Scripted AI mock.
@@ -34,7 +35,7 @@ test.describe('AI entry points', () => {
     const menu = await rowMenu(page);
     await menu.getByRole('menuitem', { name: 'Explain this event (AI)…' }).click();
     // It runs in the background: a toast says so, then "Explanation ready · View" opens the answer.
-    await expect(page.getByTestId('notification').filter({ hasText: /Explaining event #\d+ — running in Jobs/ })).toBeVisible();
+    await expect(runningToast(page, /Explaining event #\d+ — running in Jobs/)).toBeVisible();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await releaseMockHolds(page);
     await viewAnswer(page, 'Explanation ready');

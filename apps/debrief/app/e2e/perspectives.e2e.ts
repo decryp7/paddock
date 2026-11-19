@@ -3,20 +3,19 @@ import type { Page } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
-import { chooseMenu, menuItem, openMenuPath } from './menu-support';
+import { anchoredMenu, chooseMenu, menuItem, menuNamed, openMenuPath } from './menu-support';
 
 // Perspectives: named window arrangements switched from the activity bar, Window ▸ Perspectives and Ctrl+1…9.
 
 const bar = (page: Page) => page.locator('debrief-activity-bar');
 const switcher = (page: Page) => bar(page).locator('[data-activity-id=perspectives]');
-const flyout = (page: Page) => page.getByRole('menu', { name: 'Perspectives' });
+const flyout = (page: Page) => menuNamed(page, 'Perspectives');
 const tab = (page: Page, name: string) => page.getByRole('tab', { name, exact: true });
 const rowByName = (page: Page, name: string) => page.getByTestId('perspective-row').filter({ hasText: name });
 
 async function openFlyout(page: Page) {
   await switcher(page).click();
-  await expect(flyout(page)).toBeVisible();
-  return flyout(page);
+  return anchoredMenu(page, switcher(page), 'Perspectives', 'popup');
 }
 
 test.describe('perspectives', () => {

@@ -1,7 +1,7 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { openApp, openView } from './app';
-import { chooseMenu } from './menu-support';
+import { anchoredMenu, chooseMenu, contextMenu } from './menu-support';
 import { stableCenter } from '../src/app/layout-plan/layout-scenarios.playwright';
 
 // Dragging a tab: a release on a drop guide docks it; a release inside the window but off every guide cancels the
@@ -130,15 +130,15 @@ test.describe('floating a panel deliberately', () => {
   });
 
   test('from the tab menu ("Float"), then moved by its header', async ({ page }) => {
-    await tab(page, 'Metrics').click({ button: 'right' });
-    await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Float', exact: true }).click();
+    await (await contextMenu(page, tab(page, 'Metrics'))).getByRole('menuitem', { name: 'Float', exact: true }).click();
     await expect(floating(page).getByRole('tab', { name: 'Metrics', exact: true })).toBeVisible();
     await moveFloatingByHeader(page);
   });
 
   test('from the group panel menu (⋯ ▸ Float), then moved by its header', async ({ page }) => {
-    await page.locator('.dv-groupview', { has: tab(page, 'Metrics') }).getByRole('button', { name: 'Panel menu', exact: true }).click();
-    await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Float', exact: true }).click();
+    const button = page.locator('.dv-groupview', { has: tab(page, 'Metrics') }).getByRole('button', { name: 'Panel menu', exact: true });
+    await button.click();
+    await (await anchoredMenu(page, button, 'Actions')).getByRole('menuitem', { name: 'Float', exact: true }).click();
     await expect(floating(page)).toBeVisible();
     await moveFloatingByHeader(page);
   });

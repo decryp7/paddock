@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
-import { chooseMenu, menubar, menuItem, openMenu, openMenuPath } from './menu-support';
+import { anchoredMenu, chooseMenu, menubar, menuItem, menuNamed, openMenu, openMenuPath } from './menu-support';
 
 // The VS-style menus of the in-app menu bar (Windows, Linux and the browser build) and the clean
 // default layout. Also runs against the production build with the Tauri CSP.
@@ -49,7 +49,7 @@ test.describe('menus', () => {
     await expect(menuItem(analysis, 'Anomalies')).toHaveAttribute('aria-checked', 'true');
     await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('menu')).toHaveCount(0);
+    await expect(menuNamed(page)).toHaveCount(0);
     expect(problems).toEqual([]);
   });
 
@@ -59,24 +59,23 @@ test.describe('menus', () => {
     await page.mouse.move(700, 600);
     await menubar(page).getByRole('menuitem', { name: 'File', exact: true }).focus();
     await page.keyboard.press('ArrowDown');
-    await expect(page.getByRole('menu', { name: 'File' })).toBeVisible();
+    await anchoredMenu(page, menubar(page).getByRole('menuitem', { name: 'File', exact: true }), 'File');
     await page.keyboard.press('ArrowRight');
-    await expect(page.getByRole('menu', { name: 'Edit' })).toBeVisible();
+    await anchoredMenu(page, menubar(page).getByRole('menuitem', { name: 'Edit', exact: true }), 'Edit');
     await page.keyboard.press('ArrowRight');
     const view = menubar(page).getByRole('menuitem', { name: 'View', exact: true });
-    await expect(page.getByRole('menu', { name: 'View' })).toBeVisible();
+    const viewMenu = await anchoredMenu(page, view, 'View');
     await expect(view).toHaveAttribute('aria-expanded', 'true');
-    await expect(page.getByRole('menu', { name: 'Edit' })).toHaveCount(0);
+    await expect(menuNamed(page, 'Edit')).toHaveCount(0);
     await expect(view).toBeFocused();
     await page.keyboard.press('ArrowDown');
-    await expect(menuItem(page.getByRole('menu', { name: 'View' }), 'Explorer')).toBeFocused();
+    await expect(menuItem(viewMenu, 'Explorer')).toBeFocused();
     // Type-ahead.
     await page.keyboard.press('l');
-    const live = page.getByRole('menu', { name: 'View' }).getByRole('menuitem', { name: 'Live', exact: true });
+    const live = viewMenu.getByRole('menuitem', { name: 'Live', exact: true });
     await expect(live).toBeFocused();
     await page.keyboard.press('ArrowRight');
-    const sub = page.getByRole('menu', { name: 'Live' });
-    await expect(sub).toBeVisible();
+    const sub = await anchoredMenu(page, live, 'Live');
     // The live tail switch heads the Live submenu (F5), then its views.
     await expect(menuItem(sub, 'Toggle live tail')).toBeFocused();
     await page.keyboard.press('ArrowDown');
@@ -86,20 +85,19 @@ test.describe('menus', () => {
     await expect(live).toBeFocused();
     await page.keyboard.press('ArrowUp');
     await page.keyboard.press('ArrowRight');
-    const analysis = page.getByRole('menu', { name: 'Analysis' });
-    await expect(analysis).toBeVisible();
+    const analysis = await anchoredMenu(page, viewMenu.getByRole('menuitem', { name: 'Analysis', exact: true }), 'Analysis');
     await expect(menuItem(analysis, 'Query results')).toBeFocused();
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('ArrowDown');
     await expect(menuItem(analysis, 'Anomalies')).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(analysis).toHaveCount(0);
-    await expect(page.getByRole('menu', { name: 'View' })).toBeVisible();
+    await expect(viewMenu).toBeVisible();
     await page.keyboard.press('ArrowRight');
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('menu')).toHaveCount(0);
+    await expect(menuNamed(page)).toHaveCount(0);
     await expect(page.getByRole('tab', { name: 'Anomalies' })).toBeVisible();
   });
 

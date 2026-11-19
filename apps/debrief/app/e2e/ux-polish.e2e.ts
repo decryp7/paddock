@@ -1,8 +1,9 @@
 import { expect, test } from './test';
 import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
-import { chooseMenu, openMenuPath } from './menu-support';
+import { anchoredMenu, chooseMenu, openMenuPath } from './menu-support';
 import { openAppWith, openView } from './tools-support';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // The UX polish pass (audit items F5, F7, H2, J1, K1, K2, K5, I4).
 
@@ -37,7 +38,7 @@ test.describe('timeline legend (F7) and explorer (H2)', () => {
   test('the legend is one row until +N more, and the explorer rows keep their names under folder headings', async ({ page }) => {
     await openApp(page);
     const row = page.locator('debrief-timeline-panel .legend-row');
-    await expect(row).toBeVisible();
+    await expectNotMoving(row);
     const heights = await row.evaluate((el) => ({ row: el.getBoundingClientRect().height, line: el.querySelector('.lg')!.getBoundingClientRect().height }));
     // One line of 24 px hit areas, whatever the panel width: the full legend opens as a popover over the lanes.
     expect(heights.row).toBeLessThan(heights.line * 1.8);
@@ -54,9 +55,10 @@ test.describe('inspector (K1), anomalies (K2)', () => {
     await gridRows(page).first().click();
     await expect(page.getByRole('button', { name: 'Mask…' })).toHaveCount(0);
     await page.getByRole('button', { name: 'More actions…' }).click();
-    const mask = page.getByRole('menuitem', { name: 'Mask in message…' });
+    const menu = await anchoredMenu(page, page.getByRole('button', { name: 'More actions…' }));
+    const mask = menu.getByRole('menuitem', { name: 'Mask in message…' });
     await expect(mask).toBeDisabled();
-    await expect(page.getByRole('menu')).toContainText('Select text in the message first');
+    await expect(menu).toContainText('Select text in the message first');
     await page.keyboard.press('Escape');
     await expect(page.locator('debrief-inspector [data-testid=prop-copy]').first()).toBeAttached();
   });

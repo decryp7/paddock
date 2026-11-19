@@ -29,3 +29,4 @@ test('menuGap is Infinity for a menu that covers its trigger or touches none of 
   assert.equal(menuGap(null, { x: 0, y: 0, width: 1, height: 1 }), null);
   assert.equal(menuGap({ x: 0, y: 0, width: 1, height: 1 }, null), null);
 });
+
