@@ -10,6 +10,7 @@
 //! Time queued for the machine-wide heavy slot is never watched (ER-43: the waiter takes no slot and a queue is not a hang): the
 //! executor shows a step to its watch only from the moment the slot is taken (or from the start, for a step that needs none).
 
+use super::progress::Progress;
 use paddock_proc::ProcessId;
 use std::time::{Duration, Instant};
 
@@ -23,6 +24,15 @@ pub struct StepInfo<'a> {
     pub id: &'a str,
     /// Whether it goes through the heavy slot.
     pub heavy: bool,
+    /// How its output is read for progress ([`super::progress`]).
+    pub progress: Progress,
+    /// The row kind without its workspace (`clippy`, `clippy-windows`, `doctest`, ...): the history's key with [`StepInfo::ws`].
+    pub kind: &'a str,
+    /// The workspace folder the step runs in (empty: the repository root).
+    pub ws: &'a str,
+    /// The step's build folder was cold when it started (nothing built in it yet): cold and warm runs differ by about 85 times and
+    /// are never mixed (the research note, section 2).
+    pub cold: bool,
 }
 
 /// What the executor can see of a running step.
@@ -36,6 +46,12 @@ pub struct Observation<'a> {
     pub log_len: u64,
     /// The last non-empty line of the output so far (empty when there is none).
     pub last_line: &'a str,
+    /// How many progress events the step's output has shown ([`super::progress::Counter::events`]): a unit finished, a test line.
+    pub progress: u64,
+    /// The line of the last progress event.
+    pub last_event: &'a str,
+    /// Cargo's wait for another cargo's lock, while the step is in it: a wait state, never a stall.
+    pub waiting_on: Option<&'a str>,
     /// The CPU time of the step's whole process tree, when the OS reports it.
     pub cpu: Option<Duration>,
     /// The step's process (pid and start time).
@@ -57,6 +73,12 @@ pub struct Stuck {
 pub trait StepWatch: Send {
     /// Looks at the step; `Some` ends it. Called about once per [`WATCH_POLL`] while the step runs, never while it queues.
     fn check(&mut self, seen: &Observation<'_>) -> Option<Stuck>;
+
+    /// The step has ended (`ran` seconds, `ok` when it passed): the watch writes what it learned (history) and returns a note for the
+    /// step's phase line (for example "would have stopped at 912 s"), or `None`.
+    fn finish(&mut self, _ran: f64, _ok: bool) -> Option<String> {
+        None
+    }
 }
 
 /// The detector: chooses a watch for each step.
@@ -98,10 +120,11 @@ pub fn ended_by(how: &str) -> Option<String> {
 
 /// One step's phases with their durations, one line (ER-27): queued for the slot, running, and how it ended; the guard that ended it
 /// is named when one did.
-pub fn phase_line(id: &str, queued: Option<f64>, ran: f64, how: &str) -> String {
+pub fn phase_line(id: &str, queued: Option<f64>, ran: f64, how: &str, note: Option<&str>) -> String {
     let queued = queued.map_or(String::new(), |q| format!("queued {q:.1} s, "));
     let guard = ended_by(how).map_or(String::new(), |g| format!("; ended by guard: {g}"));
-    format!("pre-push: {id}: {queued}ran {ran:.1} s; ended: {how}{guard}")
+    let note = note.map_or(String::new(), |n| format!("; watchdog: {n}"));
+    format!("pre-push: {id}: {queued}ran {ran:.1} s; ended: {how}{guard}{note}")
 }
 
 #[cfg(test)]
@@ -127,16 +150,23 @@ mod tests {
     #[test]
     fn a_phase_line_has_the_durations_and_names_the_guard() {
         assert_eq!(
-            phase_line("doctest crates", Some(12.34), 45.6, "exit 0"),
+            phase_line("doctest crates", Some(12.34), 45.6, "exit 0", None),
             "pre-push: doctest crates: queued 12.3 s, ran 45.6 s; ended: exit 0"
         );
-        let line = phase_line("clippy crates", None, 3.0, "timed out after 5 s of running");
+        let line = phase_line("clippy crates", None, 3.0, "timed out after 5 s of running", None);
         assert!(line.contains("ran 3.0 s") && line.ends_with("ended by guard: row cap"), "{line}");
     }
 
     #[test]
     fn no_detector_watches_nothing() {
-        let step = StepInfo { id: "x", heavy: true };
+        let step = StepInfo {
+            id: "x",
+            heavy: true,
+            progress: Progress::Lines,
+            kind: "x",
+            ws: "",
+            cold: false,
+        };
         assert!(Never.watch(&step).is_none());
     }
 }

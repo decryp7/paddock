@@ -939,6 +939,33 @@ fn the_conformance_gate_runs_the_contracts_list_and_a_broken_contract_is_broken_
     );
 }
 
+/// The host and xwin Clippy and the doctests read cargo's JSON messages for progress and name the build folder they use (so a cold one is
+/// told from a warm one); every other row reads output lines. The folder is the one the row is given (`--config build.target-dir`).
+#[test]
+fn the_cargo_rows_read_json_progress_and_name_their_build_folder() {
+    use crate::pre_push::progress::Progress;
+    let mut f = facts();
+    f.target_dir = None;
+    f.kept_targets = Some("/kept".into());
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &f);
+    let get = |id: &str| {
+        planned
+            .iter()
+            .find_map(|p| match p {
+                Planned::Run(g) if g.id == id => Some(g.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no row {id}"))
+    };
+    for id in ["clippy crates", "doctest crates", "clippy-windows crates"] {
+        assert_eq!(get(id).progress, Progress::CargoJson, "{id}");
+    }
+    assert_eq!(get("clippy crates").build_dir.as_deref(), Some("/kept/crates"));
+    assert_eq!(get("clippy-windows crates").build_dir.as_deref(), Some("/kept/crates/xwin"));
+    assert_eq!(get("conformance-tests").progress, Progress::Lines);
+    assert_eq!(get("conformance-tests").build_dir, None);
+}
+
 fn crates_gates() -> Vec<Planned> {
     plan_gates(&plan(), &change(&["crates/a.rs"]), &facts())
 }
@@ -2711,6 +2738,8 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
         next: "fix it".into(),
         workspaces: Vec::new(),
         notice: None,
+        progress: crate::pre_push::progress::Progress::Lines,
+        build_dir: None,
     })
 }
 

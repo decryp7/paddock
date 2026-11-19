@@ -22,7 +22,10 @@
 //! announced at the top of every run it is set in, shown in the table and logged next to the gate logs.
 
 pub mod budget;
+pub mod history;
+pub mod progress;
 pub mod stacks;
+pub mod stall;
 pub mod watchdog;
 
 /// How many earlier runs' log folders are kept beside the current one.
@@ -455,7 +458,11 @@ fn command_in(
         live_slot: Default::default(),
         priority: pushes.iter().any(|p| budget::is_landing_ref(&p.remote_ref)),
         wrapper,
-        watchdog: Arc::new(watchdog::Never),
+        watchdog: Arc::new(stall::StallWatchdog::new(
+            stall::Mode::from_env(env.get("PADDOCK_GATE_WATCHDOG").map(String::as_str)),
+            stall::GAP,
+            Some(Arc::new(history::History::new(state.join("step-history.jsonl")))),
+        )),
         row_cap: exec::ROW_CAP,
     };
     let queue = queue_max(&env);

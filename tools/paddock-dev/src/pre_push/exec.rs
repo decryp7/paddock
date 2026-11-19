@@ -4,6 +4,7 @@
 use super::budget::{BudgetClock, Slot, Timing, parse_heavy_timing, with_agent_name, with_heavy_flags};
 use super::gates::{Gate, Need, Planned};
 use super::linux_inputs::{ImageProbe, PROBE_NEXT, image_probe};
+use super::progress::{Counter, Progress, with_cargo_json, without_json};
 use super::stacks;
 use super::watchdog::{Observation, StepInfo, StepWatch, Stuck, WATCH_POLL, Watchdog, phase_line, stuck_how};
 use crate::ci_tool::{Output, ToolCall, tail};
@@ -902,16 +903,23 @@ impl RealExec {
             Vec::new()
         };
         let limited = heavy.iter().any(|a| a == "--run-max");
+        // Cargo's JSON messages are the progress of a build row (the diagnostics stay rendered on stderr); the command a person re-runs
+        // (`Gate::rerun`) has no such flag.
+        let gate_args = if gate.progress == Progress::CargoJson && crate::cargo_target::is_cargo(&gate.program) {
+            with_cargo_json(&gate.args)
+        } else {
+            gate.args.clone()
+        };
         let (program, args): (String, Vec<String>) = match heavy.split_first() {
             Some((first, rest)) => (
                 first.clone(),
                 rest.iter()
                     .cloned()
                     .chain(std::iter::once(gate.program.clone()))
-                    .chain(gate.args.iter().cloned())
+                    .chain(gate_args.iter().cloned())
                     .collect(),
             ),
-            None => (gate.program.clone(), gate.args.clone()),
+            None => (gate.program.clone(), gate_args),
         };
         // Through our `heavy` the queue and the run are bounded apart (`--queue-max`, `--run-max`); a command not through it has no such
         // split (a foreign heavy's queue is invisible), so there the remaining total budget is the only bound.
@@ -1099,15 +1107,41 @@ impl Exec for RealExec {
         // Each step has a name of its own for heavy (`pre-push-<pid>-<n>`), and its log is new: nothing an earlier or another push
         // wrote can be read for this step's lines.
         let name = step_name();
+        // The cargo build folder is shared by the clippy and doctest rows of a workspace and by other pushes of this checkout: cargo
+        // would make the second wait for the first's lock while it already held a heavy slot (ER-43). The wait is here, before any slot
+        // is taken, counted as queue time and bounded by the queue allowance; the lock is held until the step ends.
+        let (build_lock, lock_wait) = match gate.build_dir.as_deref().filter(|_| gate.heavy) {
+            Some(dir) => match self.lock_build_folder(dir, limits.queue) {
+                Ok(held) => held,
+                Err(waited) => {
+                    return Ok(Done {
+                        success: false,
+                        how: "queue limit: no slot taken in time (the build folder is in use by another run)".to_string(),
+                        tail: String::new(),
+                        log: None,
+                        timing: Some(Timing {
+                            queued: waited.as_secs_f64(),
+                            ran: 0.0,
+                        }),
+                    });
+                }
+            },
+            None => (BuildLock { _held: None }, Duration::ZERO),
+        };
         let call = self.call(gate, limits, &log, label.as_deref(), &name);
         let _ = std::fs::File::create(&log);
         // Our `heavy` writes "holds the lock" to the log when the slot is taken: until then every second is waiting for others,
         // and the push's budget does not count it (`Exec::slot`). Another heavy prints no such line: nothing is known then.
         let ours = gate.heavy && self.runs_through_our_heavy(limits);
-        let watch = self.watchdog.watch(&StepInfo {
+        let info = StepInfo {
             id: &gate.id,
             heavy: gate.heavy,
-        });
+            progress: gate.progress,
+            kind: gate.id.split(' ').next().unwrap_or(&gate.id),
+            ws: &gate.cwd,
+            cold: gate.build_dir.as_deref().is_some_and(|d| build_is_cold(&self.root, d)),
+        };
+        let watch = self.watchdog.watch(&info);
         let root: Arc<Mutex<Option<paddock_proc::ProcessId>>> = Arc::default();
         let call = {
             let root = Arc::clone(&root);
@@ -1141,14 +1175,13 @@ impl Exec for RealExec {
             }
             // Always watched: the row cap is enforced here (so the stacks are written before the tree is ended), and the
             // watchdog, when there is one, judges the step.
-            let (log, root, done, stuck, heavy) = (&log, &root, &done, &stuck, gate.heavy);
-            s.spawn(move || {
-                self.watch_step(watch, log, root, done, stuck, began, ours, heavy);
-            });
+            let (log, root, done, stuck, heavy, progress) = (&log, &root, &done, &stuck, gate.heavy, gate.progress);
+            let watcher = s.spawn(move || self.watch_step(watch, log, root, done, stuck, began, ours, heavy, progress));
             let ran = call.run(&self.env, &mut std::io::sink());
             done.store(true, Ordering::SeqCst);
-            ran
+            (ran, watcher.join().ok().flatten())
         });
+        let (ran, watch) = ran;
         if ours {
             self.set_slot(Slot::Unknown);
         }
@@ -1191,7 +1224,23 @@ impl Exec for RealExec {
         }
         // The step's phases with their durations (ER-27): on the console and beside the gate logs.
         let wall = began.elapsed().as_secs_f64();
-        let line = phase_line(&gate.id, timing.map(|t| t.queued), timing.map_or(wall, |t| t.ran), &ran.how);
+        drop(build_lock);
+        if !lock_wait.is_zero() {
+            // The wait for the folder was queue time (waiting for others), not run time: the push's budget does not count it.
+            let t = timing.get_or_insert(Timing {
+                queued: 0.0,
+                ran: (began.elapsed().saturating_sub(lock_wait)).as_secs_f64(),
+            });
+            t.queued += lock_wait.as_secs_f64();
+        }
+        let note = watch.and_then(|mut w| w.finish(timing.map_or(wall, |t| t.ran), ran.success));
+        let line = phase_line(
+            &gate.id,
+            timing.map(|t| t.queued),
+            timing.map_or(wall, |t| t.ran),
+            &ran.how,
+            note.as_deref(),
+        );
         eprintln!("{line}");
         {
             use std::io::Write;
@@ -1204,11 +1253,25 @@ impl Exec for RealExec {
         Ok(Done {
             success: ran.success,
             how: ran.how,
-            tail: tail(&ran.stderr, 12),
+            tail: tail(
+                &if gate.progress == Progress::CargoJson {
+                    without_json(&ran.stderr)
+                } else {
+                    ran.stderr.clone()
+                },
+                12,
+            ),
             log: Some(log.display().to_string()),
             timing,
         })
     }
+}
+
+/// Whether the cargo build folder `dir` (relative to `root`, or absolute) holds no build yet: neither `debug` nor the Windows target's
+/// `debug` beneath it. The history keeps cold and warm steps apart.
+fn build_is_cold(root: &Path, dir: &str) -> bool {
+    let d = root.join(dir);
+    !d.join("debug").is_dir() && !d.join("x86_64-pc-windows-msvc").join("debug").is_dir()
 }
 
 /// Since when a step counts as running for its watch, or `None` while it must not be watched: our `heavy` queueing (the wait for the
@@ -1224,7 +1287,67 @@ fn active_since(ours: bool, heavy: bool, slot: Slot, began: Instant) -> Option<I
     }
 }
 
+/// A held advisory lock on a build folder; dropping it (or the process ending) releases it.
+pub struct BuildLock {
+    /// The locked file: held for its lock, never read.
+    _held: Option<std::fs::File>,
+}
+
 impl RealExec {
+    /// The lock file of a build folder: in the state folder beside the gate logs, so every push of this checkout names the same file
+    /// for the same folder, and nothing is written into the repository or the build folder.
+    pub(crate) fn build_lock_path(&self, dir: &str) -> PathBuf {
+        let state = self.logs.parent().and_then(Path::parent).unwrap_or(&self.logs);
+        state
+            .join("build-locks")
+            .join(format!("{}.lock", log_name(&self.root.join(dir).to_string_lossy())))
+    }
+
+    /// Takes the lock of build folder `dir`, waiting at most `queue` while another run holds it (the wait is live queue time for the
+    /// budget: [`Slot::Queued`]). `Ok` carries the lock and how long it waited; `Err` how long it waited before giving up (the queue
+    /// allowance, or the person stopped the push). A lock file that cannot be made is not a reason to stop: the step runs unlocked and
+    /// cargo's own lock still serialises it.
+    fn lock_build_folder(&self, dir: &str, queue: Duration) -> Result<(BuildLock, Duration), Duration> {
+        let path = self.build_lock_path(dir);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) else {
+            eprintln!(
+                "pre-push: no lock file for the build folder {dir} ({}): the step runs without it",
+                path.display()
+            );
+            return Ok((BuildLock { _held: None }, Duration::ZERO));
+        };
+        let began = Instant::now();
+        let mut said = false;
+        loop {
+            match file.try_lock() {
+                Ok(()) => {
+                    let waited = began.elapsed();
+                    if said {
+                        eprintln!("pre-push: the build folder {dir} is free after {:.1} s", waited.as_secs_f64());
+                        self.set_slot(Slot::Unknown);
+                    }
+                    return Ok((BuildLock { _held: Some(file) }, if said { waited } else { Duration::ZERO }));
+                }
+                Err(std::fs::TryLockError::WouldBlock) => {}
+                // The OS does not do advisory locks here: cargo's own lock serialises, as before.
+                Err(std::fs::TryLockError::Error(_)) => return Ok((BuildLock { _held: None }, Duration::ZERO)),
+            }
+            if !said {
+                said = true;
+                eprintln!("pre-push: the build folder {dir} is in use by another run; waiting for it before taking a heavy slot (ER-43)");
+                self.set_slot(Slot::Queued { since: began });
+            }
+            if began.elapsed() >= queue || self.stop.load(Ordering::SeqCst) {
+                self.set_slot(Slot::Unknown);
+                return Err(began.elapsed());
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    }
+
     /// Writes down where the step's tree is (process list, stacks) and only then ends it, by identity through `paddock_proc`
     /// (rule 53); the capture is bounded ([`stacks::TOTAL_LIMIT`]) and its file named in the log (ER-27).
     fn capture_then_kill(&self, root: paddock_proc::ProcessId, why: &Stuck, log: &Path) {
@@ -1258,7 +1381,9 @@ impl RealExec {
         began: Instant,
         ours: bool,
         heavy: bool,
-    ) {
+        progress: Progress,
+    ) -> Option<Box<dyn StepWatch>> {
+        let mut counter = Counter::new(progress);
         let mut last_check = Instant::now();
         while !done.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(100));
@@ -1270,6 +1395,7 @@ impl RealExec {
             let (Some(since), Some(id)) = (active_since, root.lock().ok().and_then(|r| *r)) else {
                 continue;
             };
+            counter.read_new(log);
             let tail = crate::ci_tool::read_tail(log, 4096);
             let last_line = tail.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
             let now = Instant::now();
@@ -1287,6 +1413,9 @@ impl RealExec {
                         active_for,
                         log_len: std::fs::metadata(log).map_or(0, |m| m.len()),
                         last_line: &last_line,
+                        progress: counter.events(),
+                        last_event: counter.last_event(),
+                        waiting_on: counter.waiting_on(),
                         cpu: paddock_proc::tree_cpu_time(id),
                         root: id,
                     })
@@ -1304,9 +1433,10 @@ impl RealExec {
                 if let Ok(mut g) = stuck.lock() {
                     *g = Some(s);
                 }
-                return;
+                return w;
             }
         }
+        w
     }
 }
 
@@ -1453,6 +1583,8 @@ mod tests {
             next: String::new(),
             workspaces: Vec::new(),
             notice: None,
+            progress: crate::pre_push::progress::Progress::Lines,
+            build_dir: None,
         })
     }
 
@@ -1589,6 +1721,8 @@ exit $rc
                 next: "fix it".into(),
                 workspaces: Vec::new(),
                 notice: None,
+                progress: crate::pre_push::progress::Progress::Lines,
+                build_dir: None,
             }
         }
 
@@ -2132,6 +2266,126 @@ exit $rc
             });
             let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
             assert_eq!((r.kind(), r.ended_by.clone()), (Kind::Passed, None), "{r:?}");
+        }
+
+        /// A stand-in step printing `lines` (each one output line), then sleeping `sleep` seconds, read as cargo's JSON progress.
+        fn json_step(dir: &Path, lines: &[&str], sleep: u64) -> Gate {
+            let mut step = paddock_testkit::StandIn::new(dir, "json-step");
+            for l in lines {
+                step = step.stdout(l);
+            }
+            let step = step.sleeps(Duration::from_secs(sleep)).install().unwrap();
+            Gate {
+                program: step.program().to_string_lossy().to_string(),
+                args: Vec::new(),
+                heavy: false,
+                progress: crate::pre_push::progress::Progress::CargoJson,
+                ..gate("tests json", "")
+            }
+        }
+
+        const UNIT_LINE: &str = r#"{"reason":"compiler-artifact","package_id":"x 0.1.0","fresh":false}"#;
+
+        fn stall_dog(mode: crate::pre_push::stall::Mode, gap: u64, history: Option<&Path>) -> Arc<dyn Watchdog> {
+            Arc::new(crate::pre_push::stall::StallWatchdog::new(
+                mode,
+                Duration::from_secs(gap),
+                history.map(|p| Arc::new(crate::pre_push::history::History::new(p))),
+            ))
+        }
+
+        /// The positive control of the progress watchdog (ER-33, ER-41): a step that finished one unit and then shows nothing is
+        /// stopped as stuck (enforcing), its stacks written, long before the step would have ended; the same step in report-only
+        /// mode is left running and passes, with "would have stopped" in its phase line.
+        #[test]
+        fn a_step_that_shows_no_progress_for_the_gap_is_stuck_when_enforced_and_only_reported_otherwise() {
+            use crate::pre_push::stall::Mode;
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            ex.watchdog = stall_dog(Mode::Enforce, 3, None);
+            let g = json_step(d.path(), &[UNIT_LINE], 60);
+            let t = Instant::now();
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert!(t.elapsed() < Duration::from_secs(40), "stopped, not waited for: {:?}", t.elapsed());
+            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            assert!(
+                r.reason().starts_with("stuck:") && r.reason().contains("progress watchdog"),
+                "{}",
+                r.reason()
+            );
+            assert!(r.ended_by.as_deref().is_some_and(|g| g.starts_with("progress watchdog")));
+            // the report-only control: the same silence, a step that ends by itself after 8 s
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            ex.watchdog = stall_dog(Mode::ReportOnly, 3, None);
+            let g = json_step(d.path(), &[UNIT_LINE], 8);
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert_eq!(r.kind(), Kind::Passed, "report-only never ends a step: {r:?}");
+            let phases = std::fs::read_to_string(d.path().join("logs/phases.log")).unwrap();
+            assert!(phases.contains("watchdog: would have stopped"), "{phases}");
+        }
+
+        /// Cargo waiting for another cargo's file lock is a wait state, not a stall: the same silence that is stuck above is not
+        /// stuck when the step's last line says it waits for a lock.
+        #[test]
+        fn a_step_waiting_for_a_file_lock_is_not_stuck() {
+            use crate::pre_push::stall::Mode;
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            ex.watchdog = stall_dog(Mode::Enforce, 3, None);
+            let g = json_step(d.path(), &[UNIT_LINE, "    Blocking waiting for file lock on build directory"], 8);
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert_eq!((r.kind(), r.ended_by.clone()), (Kind::Passed, None), "{r:?}");
+        }
+
+        /// A finished step is written to the history, cold or warm by its build folder.
+        #[test]
+        fn a_finished_step_is_recorded_in_the_history_cold_or_warm() {
+            use crate::pre_push::stall::Mode;
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            let h = d.path().join("step-history.jsonl");
+            ex.watchdog = stall_dog(Mode::ReportOnly, 900, Some(&h));
+            // a step shorter than one look (a second) is never watched and so leaves no record: this one lasts two
+            let mut g = json_step(d.path(), &[UNIT_LINE, "error: the lint"], 2);
+            g.id = "clippy crates".into();
+            g.cwd = String::new();
+            g.build_dir = Some("nothing-built-here".into());
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert_eq!(r.kind(), Kind::Passed, "the stand-in exits 0: {r:?}");
+            let recs = crate::pre_push::history::History::new(&h).records();
+            assert_eq!(recs.len(), 1, "{recs:?}");
+            assert_eq!(
+                (recs[0].kind.as_str(), recs[0].cold, recs[0].ok, recs[0].events),
+                ("clippy", true, true, 1)
+            );
+        }
+
+        /// The side finding of the research note (ER-43): a row waits for its build folder BEFORE it takes a heavy slot. With the folder
+        /// held by another run, the step is not measured at the queue allowance (it never started), the heavy slot was never taken
+        /// meanwhile, and once the folder is free the same step passes.
+        #[test]
+        fn a_row_waits_for_its_build_folder_outside_the_heavy_slot() {
+            let d = tempfile::tempdir().unwrap();
+            let slot = d.path().join("l");
+            let ex = real(d.path(), &slot);
+            let mut g = gate("clippy a", "true");
+            g.build_dir = Some("tgt/a".into());
+            let lock_path = ex.build_lock_path("tgt/a");
+            std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+            let other = std::fs::OpenOptions::new().create(true).append(true).open(&lock_path).unwrap();
+            other.lock().unwrap();
+            let limits = Limits {
+                run: Duration::from_secs(300),
+                queue: Duration::from_secs(2),
+            };
+            let r = decide_with(&g, &ex, limits, &test_subject(), &mut |_| {});
+            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            assert!(r.reason().contains("build folder is in use"), "{}", r.reason());
+            assert!(!slot.exists(), "no heavy slot was taken while the folder was busy");
+            drop(other);
+            let r = decide_with(&g, &ex, limits, &test_subject(), &mut |_| {});
+            assert_eq!(r.kind(), Kind::Passed, "the control: free folder, same step: {r:?}");
         }
 
         /// The row cap is the backstop: a step still running when it is spent is stopped (its stacks written first) and "not measured",
