@@ -44,8 +44,28 @@ fn main() {
     std::process::exit(code);
 }
 
-fn run() -> Result<i32, String> {
+/// Its own path, and the file to read its own bytes from. Linux names a running program whose file was replaced (a build that
+/// published the same tool again by a rename) `<path> (deleted)`: the name is the path without that suffix, and the bytes are read
+/// through `/proc/self/exe`, which is the running file whatever the path now names (run 8327: `cannot read its script ...
+/// (deleted).stand-in.json`). Elsewhere both are the path.
+fn own_exe() -> Result<(PathBuf, PathBuf), String> {
     let exe = std::env::current_exe().map_err(|e| format!("cannot find its own path: {e}"))?;
+    #[cfg(target_os = "linux")]
+    {
+        let named = match exe.to_str().and_then(|t| t.strip_suffix(" (deleted)")) {
+            Some(t) => PathBuf::from(t),
+            None => exe,
+        };
+        Ok((named, PathBuf::from("/proc/self/exe")))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok((exe.clone(), exe))
+    }
+}
+
+fn run() -> Result<i32, String> {
+    let (exe, own_bytes) = own_exe()?;
     let dir = exe
         .parent()
         .ok_or("its own path has no folder")?
@@ -62,7 +82,7 @@ fn run() -> Result<i32, String> {
     let script_path = dir.join(format!("{name}.stand-in.json"));
     let text = match std::fs::read_to_string(&script_path) {
         Ok(text) => text,
-        Err(e) => embedded_script(&exe)
+        Err(e) => embedded_script(&own_bytes)
             .ok_or_else(|| format!("cannot read its script {}: {e}", script_path.display()))?,
     };
     let script = json::parse(&text).map_err(|e| format!("{}: {e}", script_path.display()))?;
@@ -646,7 +666,7 @@ fn install(arg: &Value, ctx: &Ctx) -> Result<(), String> {
         .file_name()
         .and_then(|s| s.to_str())
         .ok_or("install: the path has no file name")?;
-    let me = std::env::current_exe().map_err(|e| format!("cannot find its own path: {e}"))?;
+    let (_, me) = own_exe()?;
     // One self-contained file (the program, its script, the marker): the code under test may copy or move it alone.
     let mut bytes = std::fs::read(&me).map_err(|e| format!("cannot read {}: {e}", me.display()))?;
     if let Some(len) = embedded_len(&bytes) {
