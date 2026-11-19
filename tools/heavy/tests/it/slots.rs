@@ -582,3 +582,28 @@ fn a_wait_for_cycle_is_reported_naming_its_members_and_the_drain_owner_withdraws
         }
     }
 }
+
+/// Review (b): the queue's wait-for graph knows a container run from its ticket, before it asks for a drain: the container ticket has
+/// a fifth line, every other ticket keeps the shell plock's four.
+#[test]
+fn a_container_run_is_known_to_the_wait_for_graph_from_its_ticket() {
+    let (rig, cfg) = rig_with(5);
+    let (a, c) = (rig.agent_with(351, cfg.clone()), rig.agent_with(352, cfg));
+    let _ha = Acquirer::new(&a.h, req("A")).unwrap();
+    let _hc = Acquirer::new(&c.h, req_cmd("C", "bash tools/linux-container.sh x")).unwrap();
+    let w = a.h.waiters();
+    let by = |n: &str| w.iter().find(|x| x.name == n).unwrap_or_else(|| panic!("no waiter {n}: {w:?}"));
+    assert!(by("C").container && !by("C").drain_owner, "a container run without a drain marker");
+    assert!(!by("A").container);
+    let lines = |prefix: &str, who: &str| -> usize {
+        std::fs::read_dir(rig.root())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with(prefix))
+            .map(|e| std::fs::read_to_string(e.path()).unwrap())
+            .find(|t| t.lines().nth(2) == Some(who))
+            .map_or(0, |t| t.lines().count())
+    };
+    assert_eq!(lines("pitcrew-heavy.ticket.", "A"), 4, "a normal ticket keeps its four lines");
+    assert_eq!(lines("pitcrew-heavy.ticket.", "C"), 5, "a container ticket says so");
+}

@@ -32,7 +32,10 @@ pub const ROW_CAP_GUARD: &str = "row cap";
 
 /// How long after [`ROW_CAP`] the outer limits of a step (heavy's `--run-max`, the process timeout) still wait: the cap is enforced by
 /// the executor's monitor, which logs the stacks before it ends the tree, so these are only the backstop if the monitor is gone.
-const CAP_GRACE: Duration = Duration::from_secs(60);
+///
+/// At least the stack capture's own bound plus 15 s ([`stacks::TOTAL_LIMIT`]): the monitor ends the tree after the capture, and these
+/// outer limits must not end it first, mid-capture (review d).
+pub const CAP_GRACE: Duration = Duration::from_secs(stacks::TOTAL_LIMIT.as_secs() + 15);
 
 /// The push's queue allowance: the most time all its heavy steps together may wait for the machine-wide slot behind other agents'
 /// steps (`PADDOCK_QUEUE_MAX` seconds overrides). A step that would start after the allowance is spent, or whose wait reaches what
@@ -812,7 +815,18 @@ pub fn heavy_command_for(
     if !found.is_empty() {
         return Ok(found);
     }
-    match built.get_or_init(|| super::heavy_tool::ensure(root, env, left).and_then(|bin| super::heavy_tool::hold(&bin, env))) {
+    // A build that failed for a reason that will not pass on its own is remembered for the run; one that timed out (or ran out of budget)
+    // is not: the next step builds it again instead of every row of the run reading a stale timeout.
+    if built.get().is_none() {
+        let result = super::heavy_tool::ensure(root, env, left).and_then(|bin| super::heavy_tool::hold(&bin, env));
+        if let Err(e) = &result
+            && super::heavy_tool::is_transient(e)
+        {
+            return Err(e.clone());
+        }
+        let _ = built.set(result);
+    }
+    match built.get().ok_or_else(|| "the heavy build was not recorded".to_string())? {
         Ok(held) => Ok(vec![
             held.path().display().to_string(),
             "run".into(),
@@ -922,8 +936,8 @@ impl RealExec {
     ///
     /// `left` is the run time the push has left on its credited clock ([`BudgetClock`]): the build of heavy is cut off there, so
     /// time queued for the slot never counts against it.
-    fn heavy_command(&self, left: Duration) -> Result<Vec<String>, String> {
-        heavy_command_for(&self.root, &self.env, &|p| self.has_tool(p), &self.built_heavy, left)
+    fn heavy_command(&self) -> Result<Vec<String>, String> {
+        heavy_command_for(&self.root, &self.env, &|p| self.has_tool(p), &self.built_heavy, ROW_CAP)
     }
 
     fn set_slot(&self, to: Slot) {
@@ -934,7 +948,7 @@ impl RealExec {
 
     /// Whether this heavy gate goes through the `heavy` of tools/heavy (the one with `--queue-max`, `--run-max` and its log lines).
     fn runs_through_our_heavy(&self, limits: Limits) -> bool {
-        let prefix = self.heavy_command(limits.run).unwrap_or_default();
+        let prefix = self.heavy_command().unwrap_or_default();
         with_heavy_flags(&prefix, false, limits.queue, limits.run)
             .iter()
             .any(|a| a == "--run-max")
@@ -947,12 +961,7 @@ impl RealExec {
         let run_max = own;
         let heavy = if gate.heavy {
             with_agent_name(
-                &with_heavy_flags(
-                    &self.heavy_command(limits.run).unwrap_or_default(),
-                    self.priority,
-                    limits.queue,
-                    run_max,
-                ),
+                &with_heavy_flags(&self.heavy_command().unwrap_or_default(), self.priority, limits.queue, run_max),
                 name,
             )
         } else {
@@ -1114,8 +1123,8 @@ impl Exec for RealExec {
         docker_answers(&self.env)
     }
 
-    fn heavy_unavailable(&self, left: Duration) -> Option<String> {
-        self.heavy_command(left).err()
+    fn heavy_unavailable(&self, _left: Duration) -> Option<String> {
+        self.heavy_command().err()
     }
 
     fn ci_image(&self) -> ImageProbe {
@@ -2054,7 +2063,7 @@ exit $rc
             assert_eq!(ex.slot(), Slot::Unknown, "no step in flight");
             // heavy's build (and the cleanup's process scan, empty in a test: worktree::procs) happens once, here, before anything is observed: the state below is driven
             // by the step's own log lines, not by how long a build or a scan took on a loaded machine (ER-12, ER-28).
-            ex.heavy_command(Duration::from_secs(60)).expect("the fake heavy is built and held");
+            ex.heavy_command().expect("the fake heavy is built and held");
             std::thread::scope(|sc| {
                 let step = sc.spawn(|| decide(&gate("clippy a", &command), &ex, Duration::from_secs(60), &test_subject()).kind());
                 until(&|| seen("foreign"));
@@ -2637,13 +2646,47 @@ exit $rc
             assert_eq!(run_limit_note(&other), "", "any other ending says nothing");
         }
 
+        /// Review (a): the build of `heavy` is not bounded by what is left of the run budget (a step that has started is never cut by it):
+        /// with no budget left the build still happens and the step runs.
         #[test]
-        fn a_build_after_the_budget_is_not_started() {
+        fn the_heavy_build_is_not_bounded_by_the_budget_left() {
             let d = tempfile::tempdir().unwrap();
             let ex = repo_with_fake_cargo(d.path(), true);
             let r = decide(&gate("clippy a", "true"), &ex, Duration::ZERO, &test_subject());
-            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
-            assert!(r.reason().contains("budget was spent"), "{}", r.reason());
+            assert_eq!(r.kind(), Kind::Passed, "{r:?}");
+        }
+
+        /// Review (a): a build that timed out is not remembered as the answer for the whole run. The first call (a cargo that outlasts a
+        /// 1 s limit) is an error that names the timeout; the next call, with the cargo healthy again, builds and answers. A build that
+        /// failed for good (a compile error) IS remembered: the second call does not build again.
+        #[test]
+        fn a_heavy_build_that_timed_out_is_tried_again_and_one_that_failed_for_good_is_not() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = repo_with_fake_cargo(d.path(), true);
+            let cargo = d.path().join("fakebin/cargo");
+            let good = std::fs::read_to_string(&cargo).unwrap();
+            std::fs::write(&cargo, "#!/bin/sh\nsleep 20\n").unwrap();
+            let has = |p: &str| ex.has_tool(p);
+            let first = heavy_command_for(&ex.root, &ex.env, &has, &ex.built_heavy, Duration::from_secs(1));
+            assert!(first.as_ref().is_err_and(|e| e.contains("timed out")), "{first:?}");
+            assert!(ex.built_heavy.get().is_none(), "a timeout is not remembered");
+            std::fs::write(&cargo, good).unwrap();
+            let second = heavy_command_for(&ex.root, &ex.env, &has, &ex.built_heavy, Duration::from_secs(600));
+            assert!(second.is_ok(), "the second call builds it: {second:?}");
+            // a deterministic failure is remembered for the run
+            let d2 = tempfile::tempdir().unwrap();
+            let bad = repo_with_fake_cargo(d2.path(), false);
+            let has2 = |p: &str| bad.has_tool(p);
+            let one = heavy_command_for(&bad.root, &bad.env, &has2, &bad.built_heavy, Duration::from_secs(600));
+            assert!(one.is_err() && bad.built_heavy.get().is_some(), "{one:?}");
+        }
+
+        /// Review (d): the outer limits of a step leave the monitor room to write the stacks (their own bound plus 15 s) before they
+        /// would end the tree themselves.
+        #[test]
+        fn the_grace_beyond_the_row_cap_outlasts_the_stack_capture() {
+            assert!(CAP_GRACE >= stacks::TOTAL_LIMIT + Duration::from_secs(15), "{CAP_GRACE:?}");
+            assert_eq!(own_run_limit(&gate("x", "true")), ROW_CAP + CAP_GRACE);
         }
 
         #[test]

@@ -75,6 +75,10 @@ pub struct Waiter {
     pub high: bool,
     /// It holds a live drain marker (a container run that asked for the machine to drain).
     pub drain_owner: bool,
+    /// It is a container run (its ticket says so; a drain owner is one by definition): `Acquirer::poll` asks `waits_for_drain` of exactly
+    /// this, so the graph does too. A high-priority run has no ticket and is taken as no container run (its edges are over-stated, which
+    /// can only add an edge, never hide one).
+    pub container: bool,
 }
 
 /// The rules the edges follow.
@@ -129,7 +133,7 @@ pub fn edges(w: &[Waiter], rules: Rules) -> Vec<Edge> {
             continue;
         }
         // Past the queue (the head, a high-priority run, a drain owner that goes by its marker): wait for a drain it does not own.
-        if waits_for_drain(x.drain_owner) {
+        if waits_for_drain(x.container || x.drain_owner) {
             for &d in drain.iter().filter(|&&d| d != i) {
                 out.push(Edge {
                     from: i,
@@ -226,6 +230,7 @@ mod tests {
             position,
             high,
             drain_owner,
+            container: drain_owner,
         }
     }
 
@@ -278,6 +283,25 @@ mod tests {
         assert!(yields_to_high(Role::Normal) && !yields_to_high(Role::High) && !yields_to_high(Role::DrainOwner));
         assert!(waits_for_drain(false) && !waits_for_drain(true));
         assert_eq!(Role::of(true, true), Role::DrainOwner, "a drain owner is a drain owner first");
+    }
+
+    /// Review (b): a container run that has no drain marker (it has not waited long enough to ask for one) does not wait for another
+    /// container run's drain: `poll` asks `waits_for_drain(container_req)`, and the graph asks it of the same fact. Taken as a drain
+    /// owner it would have shown an edge that poll never waits on.
+    #[test]
+    fn a_container_run_without_a_drain_marker_does_not_wait_for_a_drain() {
+        let mut head = w("C", Some(1), false, false);
+        head.container = true;
+        let owner = w("D", Some(2), false, true);
+        let state = vec![head, owner];
+        let es = edges(&state, Rules::default());
+        assert!(
+            !es.iter().any(|e| e.from == 0),
+            "the container head waits for nobody's drain: {es:?}"
+        );
+        // the same head as a normal step waits for the drain
+        let normal = vec![w("N", Some(1), false, false), state[1].clone()];
+        assert!(edges(&normal, Rules::default()).iter().any(|e| e.from == 0 && e.to == 1));
     }
 
     /// Two runs with one agent name are two waiters: the graph names them by their tickets, not by what they are called.

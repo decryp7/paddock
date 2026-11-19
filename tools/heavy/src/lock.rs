@@ -713,13 +713,15 @@ impl Heavy {
                 continue;
             }
             let pid = t.pid.unwrap_or(0);
+            let drain_owner = drain.iter().any(|(p, _, _)| *p == pid);
             out.push(Waiter {
                 id: file_name(&f),
                 name: t.name,
                 pid,
                 position: Some(out.len() + 1),
                 high: false,
-                drain_owner: drain.iter().any(|(p, _, _)| *p == pid),
+                drain_owner,
+                container: t.container || drain_owner,
             });
         }
         for (pid, name, id) in high {
@@ -731,6 +733,7 @@ impl Heavy {
                     position: None,
                     high: true,
                     drain_owner: false,
+                    container: false,
                 });
             }
         }
@@ -905,7 +908,13 @@ impl<'a> Acquirer<'a> {
         let n = h.clock.now_micros();
         let ticket = h.cfg.root.join(format!("{TICKET_PREFIX}{n:016}-{}", h.pid));
         let tmp = PathBuf::from(format!("{}.tmp", ticket.display()));
-        let body = record::format_ticket(h.pid, &h.start_text(), &self.req.name, h.now());
+        let body = record::format_ticket(
+            h.pid,
+            &h.start_text(),
+            &self.req.name,
+            h.now(),
+            is_container_command(&self.req.cmdline),
+        );
         let ok = !h.faults.ticket_fail.load(Ordering::SeqCst)
             && fs::write(&tmp, body).is_ok()
             && Heavy::non_empty(&tmp)

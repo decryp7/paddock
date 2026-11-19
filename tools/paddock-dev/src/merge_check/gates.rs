@@ -26,12 +26,16 @@ use std::time::Duration;
 pub const ENFORCED: bool = false;
 
 /// An outer bound on the gate run (ER-32): `check --pre-push` stops starting rows after its run budget, lets a started row run its row
-/// cap, and waits for the slot at most its queue allowance; this one only ends a hang of the gate itself, so it is those three and a
-/// few minutes more, never shorter (it was 20 minutes while the gate's own budget was 15, and a started row was cut by the budget).
+/// cap and the grace beyond it (the stack capture), builds `heavy` once at most (its build limit), and waits for the slot and for
+/// build folders at most its queue allowance; this one only ends a hang of the gate itself, so it is that sum and a few minutes more,
+/// never shorter. The sum, from the constants: 15 min budget + 30 min queue allowance + 60 min row cap + 75 s grace + 20 min heavy
+/// build + 5 min slack = 131 min 15 s (it was 20 minutes while the gate's budget was 15, then 110 without the grace and the build).
 const TIMEOUT: Duration = Duration::from_secs(
     crate::pre_push::exec::BUDGET.as_secs()
-        + crate::pre_push::exec::ROW_CAP.as_secs()
         + crate::pre_push::exec::QUEUE_MAX.as_secs()
+        + crate::pre_push::exec::ROW_CAP.as_secs()
+        + crate::pre_push::exec::CAP_GRACE.as_secs()
+        + crate::pre_push::heavy_tool::BUILD_LIMIT.as_secs()
         + 5 * 60,
 );
 
@@ -353,12 +357,15 @@ mod tests {
         }
     }
 
-    /// The member gate's outer bound is never shorter than what the gate allows itself (budget, one row cap and the queue allowance): a shorter
-    /// one would end a healthy long run as "could not run" before the gate's own guards could say anything.
+    /// The member gate's outer bound is never shorter than what the gate allows itself (budget, queue allowance, one row cap with its
+    /// grace, one heavy build): a shorter one would end a healthy long run as "could not run" before the gate's own guards could say
+    /// anything. The written sum (131 min 15 s) is what the constants give.
     #[test]
-    fn the_outer_bound_outlasts_the_gates_own_cap_and_queue_allowance() {
-        use crate::pre_push::exec::{BUDGET, QUEUE_MAX, ROW_CAP};
-        assert!(TIMEOUT > BUDGET + ROW_CAP + QUEUE_MAX, "{TIMEOUT:?}");
+    fn the_outer_bound_outlasts_everything_the_gate_allows_itself() {
+        use crate::pre_push::exec::{BUDGET, CAP_GRACE, QUEUE_MAX, ROW_CAP};
+        use crate::pre_push::heavy_tool::BUILD_LIMIT;
+        assert!(TIMEOUT > BUDGET + QUEUE_MAX + ROW_CAP + CAP_GRACE + BUILD_LIMIT, "{TIMEOUT:?}");
+        assert_eq!(TIMEOUT, Duration::from_secs(131 * 60 + 15), "the sum written next to the constant");
     }
 
     /// The mapping without the checkout precondition.

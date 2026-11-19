@@ -166,6 +166,17 @@ cold/warm spread (85x) makes it fragile; C2 is covered for the known cycle by 7a
 - **WP-3** (0.5 d, after a week of report-only data): switch the watchdog to stopping rows; serialise own rows that share a
   build folder.
 
+### As built (2026-11-19, feat/gate-budget-per-workspace): preconditions recorded for WP-3
+
+- **Classify after 20 units.** The watchdog classes a cargo step cold or warm from the share of finished units really compiled
+  (`"fresh":false`), and only after `CLASSIFY_AFTER_UNITS` (20) units; until then the fallback gap (`GAP`) is in force, and a step that
+  never reaches 20 units is classed at its end. Before the watchdog may enforce (WP-3), the report-only week must show that (a) the
+  fallback gap alone never calls a healthy step stuck in those first 20 units, and (b) the share of units compiled separates the
+  cold and warm classes in `step-history.jsonl` (records with `events` below 20 are the ones to read). If either fails, the class has
+  to be known at the start (for example from the build folder's own fingerprint count) before enforcement.
+- **The gap and K are measured once per workspace** (docs/benchmarks.md, "Push gate stall gap (WP-0)"): the report-only week also
+  re-checks them against real pushes.
+
 ### Decisions for the user
 
 1. **A (1 d) or B (3 d)?** Recommendation: B, ranked first; A is the fallback and is WP-1 of B anyway.
