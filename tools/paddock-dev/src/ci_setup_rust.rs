@@ -1122,7 +1122,7 @@ mod tests {
             let name = format!("sccache-v{SCCACHE_VERSION}-test-target");
             let stage = root.join("stage").join(&name);
             std::fs::create_dir_all(&stage).unwrap();
-            std::fs::write(stage.join(exe), "#!/bin/sh\necho sccache 0.19.0\n").unwrap();
+            std::fs::write(stage.join(exe), "sccache 0.19.0 stand-in bytes\n").unwrap();
             let rel = root.join("rel").join(format!("v{SCCACHE_VERSION}"));
             std::fs::create_dir_all(&rel).unwrap();
             let archive = rel.join(format!("{name}.tar.gz"));
@@ -1161,7 +1161,7 @@ mod tests {
             let bin = dest.join(exe);
             assert_eq!(step.download(pin, &dest, &bin), Ok(true), "{os}: {}", String::from_utf8_lossy(&out));
             assert_eq!(std::fs::metadata(&bin).unwrap().permissions().mode() & 0o777, 0o755, "{os}");
-            assert_eq!(std::fs::read_to_string(&bin).unwrap(), "#!/bin/sh\necho sccache 0.19.0\n");
+            assert_eq!(std::fs::read_to_string(&bin).unwrap(), "sccache 0.19.0 stand-in bytes\n");
             let left: Vec<_> = std::fs::read_dir(&dest).unwrap().map(|e| e.unwrap().file_name()).collect();
             assert_eq!(left.len(), 1, "{os}: no part file is left: {left:?}");
             assert_eq!(std::fs::read_dir(&temp).unwrap().count(), 0, "{os}: the download folder is removed");

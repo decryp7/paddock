@@ -132,10 +132,13 @@ const DYLD_VARS: [&str; 3] = [
     "DYLD_FRAMEWORK_PATH",
 ];
 
-/// The fake's start script: the loader variables, the fake's own settings and [`CHILD_ENV`], then the test binary
-/// filtered to the one helper test (`--exact`).
+/// The fake as a stand-in program: it writes its command line (one argument per line) to the args file, then runs the test binary
+/// in its place, filtered to the one helper test (`--exact`), with the loader variables, the fake's own settings and
+/// [`CHILD_ENV`] set. The loader variables are set explicitly because the code under test may start the fake with a cleaned
+/// environment.
 #[allow(clippy::too_many_arguments)]
-fn script(
+fn stand_in(
+    dir: &Path,
     dyld: &[(String, String)],
     f: &FakeBrowser,
     mode: &str,
@@ -143,19 +146,37 @@ fn script(
     me: &Path,
     test_path: &str,
     owner: u32,
-) -> String {
-    let dyld: String = dyld
-        .iter()
-        .map(|(k, v)| format!("export {k}='{v}'\n"))
-        .collect();
-    format!(
-        "#!/bin/sh\n{dyld}printf '%s\\n' \"$@\" > '{args}'\nexport {CHILD_ENV}=1 {ARGS_ENV}='{args}' {MODE_ENV}={mode} {TABS_ENV}={tabs} {URL_ENV}='{url}' {CTL_ENV}='{ctl}' {CALLS_ENV}='{calls}' {EVAL_ENV}='{eval}' {OWNER_ENV}={owner}\nexec '{me}' '{test_path}' --exact --nocapture\n",
-        args = f.args_file.display(),
-        url = f.url_file.display(),
-        ctl = f.ctl_file.display(),
-        calls = f.calls_file.display(),
-        eval = f.eval_file.display(),
-        me = me.display(),
+) -> paddock_testkit::StandIn {
+    use paddock_testkit::{Actions, Exec, StandIn, template_literal};
+    let lit = |p: &Path| template_literal(&p.display().to_string());
+    let mut start = Exec::program(&lit(me))
+        .args([
+            template_literal(test_path),
+            "--exact".into(),
+            "--nocapture".into(),
+        ])
+        .without_call_arguments();
+    for (k, v) in dyld {
+        start = start.env(k, &template_literal(v));
+    }
+    let settings = [
+        (CHILD_ENV, "1".to_string()),
+        (ARGS_ENV, lit(&f.args_file)),
+        (MODE_ENV, mode.to_string()),
+        (TABS_ENV, tabs.to_string()),
+        (URL_ENV, lit(&f.url_file)),
+        (CTL_ENV, lit(&f.ctl_file)),
+        (CALLS_ENV, lit(&f.calls_file)),
+        (EVAL_ENV, lit(&f.eval_file)),
+        (OWNER_ENV, owner.to_string()),
+    ];
+    for (k, v) in &settings {
+        start = start.env(k, v);
+    }
+    StandIn::new(dir, "fake-browser").answers(
+        Actions::new()
+            .writes_with(&lit(&f.args_file), "{args_lines}")
+            .execs(&start),
     )
 }
 
@@ -171,8 +192,8 @@ impl FakeBrowser {
         tabs: usize,
     ) -> std::io::Result<FakeBrowser> {
         let me = std::env::current_exe()?;
-        let f = FakeBrowser {
-            exe: dir.join("fake-browser.sh"),
+        let mut f = FakeBrowser {
+            exe: PathBuf::new(),
             args_file: dir.join("args.txt"),
             url_file: dir.join("url.txt"),
             ctl_file: dir.join("ctl.txt"),
@@ -184,10 +205,19 @@ impl FakeBrowser {
             .iter()
             .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
             .collect();
-        paddock_testkit::exe::write_program(
-            &f.exe,
-            script(&dyld, &f, mode, tabs, &me, test_path, std::process::id()),
-        )?;
+        f.exe = stand_in(
+            dir,
+            &dyld,
+            &f,
+            mode,
+            tabs,
+            &me,
+            test_path,
+            std::process::id(),
+        )
+        .install()?
+        .program()
+        .to_path_buf();
         Ok(f)
     }
 
@@ -670,9 +700,23 @@ mod tests {
     }
 
     /// Regression (macOS CI, nextest): the test binary finds its native libraries through `DYLD_FALLBACK_LIBRARY_PATH`,
-    /// which the shell running the fake dropped, so every fake browser exited at once.
+    /// which the shell running the fake dropped, so every fake browser exited at once. The fake is run for real, with a stand-in in
+    /// place of the test binary that writes the environment and the arguments it was given.
     #[test]
-    fn the_script_restores_every_loader_variable_and_marks_the_child() {
+    fn the_fake_restores_every_loader_variable_and_marks_the_child() {
+        let d = tempfile::tempdir().unwrap();
+        let seen = d.path().join("seen");
+        let me = paddock_testkit::StandIn::new(d.path(), "test-binary")
+            .answers(
+                paddock_testkit::Actions::new()
+                    .writes_with(
+                        &paddock_testkit::template_literal(&seen.display().to_string()),
+                        "{environ}\nARGS={args}",
+                    )
+                    .exit(0),
+            )
+            .install()
+            .unwrap();
         let dyld = vec![
             ("DYLD_LIBRARY_PATH".to_string(), "/a".to_string()),
             (
@@ -681,33 +725,46 @@ mod tests {
             ),
         ];
         let f = FakeBrowser {
-            exe: "/t/x".into(),
-            args_file: "/t/args".into(),
-            url_file: "/t/url".into(),
-            ctl_file: "/t/ctl".into(),
-            calls_file: "/t/calls".into(),
-            eval_file: "/t/eval".into(),
+            exe: PathBuf::new(),
+            args_file: d.path().join("args"),
+            url_file: d.path().join("url"),
+            ctl_file: d.path().join("ctl"),
+            calls_file: d.path().join("calls"),
+            eval_file: d.path().join("eval"),
         };
-        let s = script(
+        let exe = stand_in(
+            d.path(),
             &dyld,
             &f,
             "obey",
             1,
-            Path::new("/bin/test"),
+            me.program(),
             "x::fake",
             4242,
+        )
+        .install()
+        .unwrap();
+        let o = paddock_testkit::TestCommand::new(exe.program())
+            .args(["--headless", "a b"])
+            .output()
+            .unwrap();
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        let text = std::fs::read_to_string(&seen).unwrap();
+        for want in [
+            "DYLD_LIBRARY_PATH=/a".to_string(),
+            "DYLD_FALLBACK_LIBRARY_PATH=/b:/c".to_string(),
+            format!("{CHILD_ENV}=1"),
+            format!("{EVAL_ENV}={}", d.path().join("eval").display()),
+            format!("{OWNER_ENV}=4242"),
+            "ARGS=x::fake --exact --nocapture".to_string(),
+        ] {
+            assert!(text.lines().any(|l| l == want), "{want} missing in {text}");
+        }
+        assert_eq!(
+            std::fs::read_to_string(&f.args_file).unwrap(),
+            "--headless\na b\n",
+            "the command line, one argument per line"
         );
-        assert!(s.contains("export DYLD_LIBRARY_PATH='/a'\n"), "{s}");
-        assert!(
-            s.contains("export DYLD_FALLBACK_LIBRARY_PATH='/b:/c'\n"),
-            "{s}"
-        );
-        assert!(s.contains(&format!("export {CHILD_ENV}=1 ")), "{s}");
-        assert!(s.contains(&format!("{EVAL_ENV}='/t/eval'")), "{s}");
-        assert!(s.contains(&format!("{OWNER_ENV}=4242\n")), "{s}");
-        assert!(
-            s.ends_with("exec '/bin/test' 'x::fake' --exact --nocapture\n"),
-            "{s}"
-        );
+        assert!(DYLD_VARS.contains(&"DYLD_FALLBACK_LIBRARY_PATH"));
     }
 }

@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import { gridTotal, initialTotal, openApp, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
+import { heldToast } from './toast-support';
 import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // The filter bar's ONE search field: plain words search the messages live; text with query structure is a query that
@@ -140,7 +141,7 @@ test.describe('search field', () => {
 
     await expect(page.getByTestId('query-save')).toBeEnabled();
     await page.getByTestId('query-save').click();
-    await expect(page.locator('[data-toast]').filter({ hasText: /Saved as "/ })).toBeVisible();
+    await heldToast(page, /Saved as "/);
   });
 
   test('Save is disabled while the field is empty', async ({ page }) => {

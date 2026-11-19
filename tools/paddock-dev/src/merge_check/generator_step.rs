@@ -1,5 +1,5 @@
 //! The generator step of `./dev merge check` (ER-40): which generated or pinned files does this merge make stale? The paths the
-//! two parents changed since their merge base mark the generators of `docs/generators.toml` that are due; their checks run in the
+//! merge changed against its first parent (the train before it) mark the generators of `docs/generators.toml` that are due; their checks run in the
 //! checkout, which must be the merge result (a check reads files, not trees). A checkout that is not the result, or a registry
 //! that cannot be read, is NOT MEASURED, never a pass (ER-33).
 
@@ -50,12 +50,12 @@ pub fn run(root: &Path, git: &Git, merge: &Merge, runner: &dyn Runner, log: &(dy
     if let Some((why, next)) = checkout_problem(git, merge) {
         return Some(unmeasured(&why, &next));
     }
-    let [first, second] = merge.parents.as_slice() else {
+    let [first, _second] = merge.parents.as_slice() else {
         return Some(unmeasured("the merge does not have two parents", "check a two-parent merge"));
     };
-    let changed = git
-        .text(&["merge-base", first, second])
-        .and_then(|b| git.changed_paths(b.trim(), &merge.tree));
+    // Due-ness is what the merge changed against the train before it (the first parent), as ER-8 says: a member cut from an older
+    // train base must not make everything the train changed since then look due (train 15, 2026-11-19: 21 generators for a docs-only member).
+    let changed = git.changed_paths(first, &merge.tree);
     let changed = match changed {
         Ok(c) => c,
         Err(e) => {

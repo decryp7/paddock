@@ -911,8 +911,12 @@ mod tests {
     #[test]
     fn a_browser_that_exits_at_launch_fails_fast_with_a_launch_error() {
         let d = tempfile::tempdir().unwrap();
-        let exe = d.path().join("dies.sh");
-        paddock_testkit::exe::write_program(&exe, "#!/bin/sh\nexit 3\n").unwrap();
+        let exe = paddock_testkit::StandIn::new(d.path(), "dies")
+            .exit(3)
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         let browser = Browser {
             flavor: crate::Flavor::Chromium,
             path: exe,
@@ -989,8 +993,12 @@ mod tests {
     #[test]
     fn a_start_that_outlasts_the_lifetime_is_ended_and_names_the_time_limit() {
         let d = tempfile::tempdir().unwrap();
-        let exe = d.path().join("never-ready.sh");
-        paddock_testkit::exe::write_program(&exe, "#!/bin/sh\nexec sleep 3600\n").unwrap();
+        let exe = paddock_testkit::StandIn::new(d.path(), "never-ready")
+            .sleeps(Duration::from_secs(120))
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         let browser = Browser {
             flavor: crate::Flavor::Chromium,
             path: exe,

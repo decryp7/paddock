@@ -535,8 +535,16 @@ fn the_conformance_list_has_one_copy_the_contract() {
 #[test]
 fn heavy_puts_every_line_through_the_machine_wide_slot_and_refuses_without_one() {
     let r = Repo::new("ui", &json(&["echo ran > out"]));
-    let wrap = r.root().join("wrap.sh");
-    paddock_testkit::exe::write_program(&wrap, "#!/bin/sh\necho slot >> slot-log\nexec \"$@\"\n").unwrap();
+    let slot_log = r.root().join("slot-log").display().to_string();
+    let wrap = paddock_testkit::StandIn::new(r.root(), "wrap")
+        .answers(
+            paddock_testkit::Actions::new()
+                .appends_with(&slot_log, "slot\n")
+                .execs(&paddock_testkit::Exec::call_arguments()),
+        )
+        .install()
+        .unwrap();
+    let wrap = wrap.program();
     let (code, log) = r.run("ui", "checks", |a| a.heavy = true, &[("PADDOCK_HEAVY", wrap.to_str().unwrap())]);
     assert_eq!(code, 0, "{log}");
     assert_eq!(

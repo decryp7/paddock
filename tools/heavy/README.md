@@ -65,6 +65,17 @@ slightly different moments, so they can disagree by one poll: the count can pass
 back costs the younger one that interval. Running steps are never stopped when the load rises. The wait line says what the rule saw: `1 running, 1 of at most 5 at
 once (14 cores, 15-minute load 15.0, CPU idle 80%)`. `HEAVY_CPUS` replaces the OS's core count (tests, a machine whose cores the OS misreports).
 
+## Wait-for cycles
+
+The queue knows who waits for whom (`waitfor.rs`): a ticket behind the head waits for the head; the head, and a high-priority run, wait
+for a live drain marker's owner; a normal waiter waits for a high-priority marker that still counts; a drain owner goes by its marker and
+waits for nobody in the queue (7a4aafbee). `heavy status` prints `WAIT-FOR CYCLE ...` with the members when the folder holds a cycle, and
+a waiting run that is a member says so at once in its wait line and the activity log (`heavy.cycle` in the CLEF log), naming every
+member. A drain owner that is a member withdraws its own marker, which frees the others and loses nothing (a drain only asks for
+fairness); any other member only reports. Under the rules as they are no cycle can form; the detector is the net for a rule that is
+changed wrongly later, and its model test (random normal, high-priority and drain-owning waiters) shows the old deadlock as a cycle when
+the old rule is put back.
+
 ## The shell heavy.sh
 
 **Today** (until the wrapper below lands in engineering-rules) `scripts/heavy.sh` there is still the shell semaphore, with its own 5 slots in its

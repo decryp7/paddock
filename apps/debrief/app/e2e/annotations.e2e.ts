@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import { gridTotal, initialTotal, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
+import { anchoredMenu } from './menu-support';
 
 async function runCommand(page: Page, title: string): Promise<void> {
   await page.keyboard.press('ControlOrMeta+k');
@@ -60,7 +61,7 @@ test.describe('plugin annotations on the timeline', () => {
     const evidence = timeline.getByRole('group', { name: 'Annotations' }).getByRole('button', { name: 'Evidence…' });
     await evidence.focus();
     await page.keyboard.press('Enter');
-    const menu = page.getByRole('menu');
+    const menu = await anchoredMenu(page, evidence);
     const item = menu.getByRole('menuitem', { name: /Unexpected shutdown/ }).first();
     await expect(item).toBeVisible();
     await expectNoSeriousViolations(page, testInfo, 'timeline-evidence-menu');

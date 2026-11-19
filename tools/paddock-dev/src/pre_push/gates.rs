@@ -48,6 +48,12 @@ pub struct Gate {
     pub workspaces: Vec<String>,
     /// One line the push prints when the gate checks less than its full command (the deny row without advisories); `None` otherwise.
     pub notice: Option<String>,
+    /// How its output is read for progress ([`super::progress`]): cargo's JSON messages for the host and xwin Clippy and the doctests
+    /// (the executor adds the flag to the cargo command), every output line for the rest.
+    pub progress: super::progress::Progress,
+    /// The cargo build folder it uses, relative to the repository root or absolute (`None`: not a cargo build, or not known): a step
+    /// whose folder holds no build yet is COLD, and the history keeps cold and warm apart.
+    pub build_dir: Option<String>,
 }
 
 impl Gate {
@@ -201,6 +207,8 @@ fn gate(id: String, cwd: &str, program: &str, args: &[&str], rank: u8, next: Str
         next,
         workspaces: Vec::new(),
         notice: None,
+        progress: super::progress::Progress::Lines,
+        build_dir: None,
     }
 }
 
@@ -243,6 +251,20 @@ pub(super) fn windows_skip_reason(ws: &str) -> String {
         "CI lints this workspace on the host OSes only (no windowsClippy in its paddock.ci.json)".into()
     } else {
         format!("{ws} has no paddock.ci.json contract: CI's own job runs cargo clippy on its Windows leg natively, so no xwin lint here")
+    }
+}
+
+/// The cargo build folder a workspace's host (or, with `suffix`, xwin) row builds in, as the rows are told it: the caller's
+/// `CARGO_TARGET_DIR`, else the kept folder of the workspace, else cargo's own `<workspace>/target`.
+fn build_dir(facts: &Facts, ws: &str, suffix: Option<&str>) -> String {
+    let base = match (&facts.target_dir, &facts.kept_targets) {
+        (Some(dir), _) => dir.trim_end_matches('/').to_string(),
+        (None, Some(k)) => format!("{}/{}", k.trim_end_matches('/'), slug(ws)),
+        (None, None) => format!("{ws}/target"),
+    };
+    match suffix {
+        Some(s) => format!("{base}/{s}"),
+        None => base,
     }
 }
 
@@ -298,6 +320,8 @@ fn doctest(ws: &str, files: &[String], facts: &Facts) -> Planned {
         (None, Some(k)) => g.args = cargo_target::with_target_dir(&g.args, &format!("{}/{}", k.trim_end_matches('/'), slug(ws))),
         (None, None) => {}
     }
+    g.progress = super::progress::Progress::CargoJson;
+    g.build_dir = Some(build_dir(facts, ws, None));
     Planned::Run(g)
 }
 
@@ -349,6 +373,8 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             (None, Some(k)) => g.args = cargo_target::with_target_dir(&g.args, &format!("{}/{}", k.trim_end_matches('/'), slug(&ws))),
             (None, None) => {}
         }
+        g.progress = super::progress::Progress::CargoJson;
+        g.build_dir = Some(build_dir(facts, &ws, None));
         out.push(Planned::Run(g));
         out.push(doctest(&ws, &change.files, facts));
         if all_features || facts.windows_clippy.contains(&ws) {
@@ -381,6 +407,8 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
                 }
                 (None, None) => {}
             }
+            g.progress = super::progress::Progress::CargoJson;
+            g.build_dir = Some(build_dir(facts, &ws, Some("xwin")));
             out.push(Planned::Run(g));
         } else {
             out.push(Planned::Skip {

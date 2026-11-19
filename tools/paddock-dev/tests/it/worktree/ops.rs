@@ -1,5 +1,6 @@
 //! add, claim, reassign, release and drop: ADR 0083 §1 and R8's worktree cases.
 use super::Fixture;
+use paddock_testkit::{Actions, Case};
 
 fn p(path: &std::path::Path) -> &str {
     path.to_str().unwrap()
@@ -1032,9 +1033,14 @@ fn drop_says_so_when_the_lock_could_not_be_put_back() {
     let fx = Fixture::new();
     let path = add_copy(&fx, "copy", "agent-R");
     // git refuses the removal, and then refuses to lock again.
+    let refuse = || Actions::new().stderr("fatal: simulated").exit(1);
     let path_env = fx.fake_git(
         "nolock",
-        r#"case "$*" in *"worktree remove"*|*"worktree lock"*) echo "fatal: simulated" >&2; exit 1;; esac"#,
+        Actions::new(),
+        vec![
+            (Case::new().args_text_contains("worktree remove"), refuse()),
+            (Case::new().args_text_contains("worktree lock"), refuse()),
+        ],
     );
     let out = fx
         .cmd(&fx.primary, &["worktree", "drop", p(&path), "--agent", "agent-R"])

@@ -22,18 +22,18 @@ fn cases() -> Vec<(&'static str, String)> {
             EXCEPTIONS,
             "{\"exceptions\":[{\"path\":\"dev\",\"id\":\"E1\",\"reason\":\"it must start first\",\"owner\":\"plan\"},{\"path\":\"vm/a.ps1\",\"id\":\"E5\",\"reason\":\"runs in the guest\",\"owner\":\"plan\"},{\"path\":\"gone/x.sh\",\"id\":\"E6\",\"reason\":\"names no file\",\"owner\":\"plan\"}]}".into(),
         ),
-        ("dev", "#!/bin/sh\necho\n".into()),
+        ("dev", "#!/bin/sh\necho\n".into()), // conformance: stand-in — shell-file data for the C129 check, never run
         ("vm/a.ps1", "x\n".into()),
         ("vm/sub/b.ps1", "x\n".into()),
         ("new.sh", "a\nb\nc\n".into()),
         ("new.PY", "print(1)".into()),
         ("grew.sh", "1\n2\n3\n".into()),
         ("shrank.sh", "1\n".into()),
-        ("bin/env-bash", "#!/usr/bin/env bash\necho\n".into()),
+        ("bin/env-bash", "#!/usr/bin/env bash\necho\n".into()), // conformance: stand-in — shell-file data for the C129 check, never run
         ("bin/py", "#!/usr/bin/env -S python3 -I\n".into()),
         ("bin/node", "#!/usr/bin/env node\n".into()),
         ("bin/plain", "echo hi\n".into()),
-        ("bin/blob", "#!/bin/sh\0\n".into()),
+        ("bin/blob", "#!/bin/sh\0\n".into()), // conformance: stand-in — shell-file data for the C129 check, never run
         ("é/ü.bat", "echo é\r\nexit\r\n".into()),
         ("apps/d/scripts/in-app.sh", "x\n".into()),
         ("scripts/keep.txt", "a top-level folder the callers' paths start in\n".into()),
@@ -43,7 +43,7 @@ fn cases() -> Vec<(&'static str, String)> {
         ),
         ("apps/d/paddock.ci.json", "{\"prepare\": [\"scripts/in-app.sh\", \"scripts/nope.ps1\"]}".into()),
         ("lefthook.yml", "pre-push:\n  run: ./new.sh\n".into()),
-        ("icons/a.png", "#!/bin/sh bytes".into()),
+        ("icons/a.png", "#!/bin/sh bytes".into()), // conformance: stand-in — shell-file data for the C129 check, never run
     ]
 }
 
@@ -294,7 +294,7 @@ fn c129_an_added_or_widened_exception_is_a_finding_against_the_merge_base() {
     let tree = tree_of(&[
         (BASELINE, "{\"files\":[]}".to_string()),
         (EXCEPTIONS, list(&[("dev", "E1"), ("scripts/b.sh", "E5")])),
-        ("dev", "#!/bin/sh\n".to_string()),
+        ("dev", "#!/bin/sh\n".to_string()), // conformance: stand-in — shell-file data for the C129 check, never run
         ("scripts/a.sh", "x\n".to_string()),
         ("scripts/b.sh", "x\n".to_string()),
     ]);

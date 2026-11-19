@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { ensureInspector, gridRows, openApp, openView } from './app';
 import { expectNoSeriousViolations } from './axe';
-import { chooseMenu, menuItem, openMenu, showProfileEditor } from './menu-support';
+import { chooseMenu, menuItem, openMenu, panelMenuButton, showProfileEditor } from './menu-support';
 
 const tab = (page: Page, name: string) => page.getByRole('tab', { name, exact: true });
 const groups = (page: Page) => page.locator('.dv-groupview');
@@ -91,20 +91,17 @@ test.describe('dock layout', () => {
   });
 
   test('a group can be floated inside the window and closed', async ({ page }) => {
-    await groupOf(page, 'Events').getByRole('button', { name: 'Panel menu', exact: true }).click();
-    await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Float', exact: true }).click();
+    await panelMenuButton(page, groupOf(page, 'Events'), 'Float');
     const floating = page.locator('.dv-resize-container');
     await expect(floating).toBeVisible();
     await expectNoSeriousViolations(page, test.info(), 'floating');
     // Dock it back.
-    await floating.getByRole('button', { name: 'Panel menu', exact: true }).click();
-    await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Dock', exact: true }).click();
+    await panelMenuButton(page, floating, 'Dock');
     await expect(floating).toHaveCount(0);
     await expect(groups(page)).toHaveCount(3);
     // Float again and close its only tab with the keyboard.
     await ensureInspector(page);
-    await groupOf(page, 'Inspector').getByRole('button', { name: 'Panel menu', exact: true }).click();
-    await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Float', exact: true }).click();
+    await panelMenuButton(page, groupOf(page, 'Inspector'), 'Float');
     await expect(floating).toBeVisible();
     await floating.getByRole('tab').first().focus();
     await page.keyboard.press('Delete');

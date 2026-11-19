@@ -1,7 +1,8 @@
 import { expect, test } from './test';
 import type { BrowserContext, ConsoleMessage, Page } from '@playwright/test';
 import { ensureInspector, gridRows, openApp } from './app';
-import { chooseMenu } from './menu-support';
+import { anchoredMenu, chooseMenu } from './menu-support';
+import { heldToast } from './toast-support';
 
 // The activity log in the browser build: entries go to the console logger (the mock "log sink"), as
 // `[Debrief.Activity] User <operation> via <trigger>` with the entry's properties as the second argument.
@@ -33,8 +34,9 @@ const groupOf = (page: Page, name: string) => page.locator('.dv-groupview').filt
 async function popOut(page: Page, context: BrowserContext, name: string): Promise<Page> {
   const opened = context.waitForEvent('page');
   await tab(page, name).click();
-  await groupOf(page, name).getByRole('button', { name: 'Panel menu', exact: true }).click();
-  await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Pop out to window', exact: true }).click();
+  const button = groupOf(page, name).getByRole('button', { name: 'Panel menu', exact: true });
+  await button.click();
+  await (await anchoredMenu(page, button, 'Actions')).getByRole('menuitem', { name: 'Pop out to window', exact: true }).click();
   const popup = await opened;
   await expect(popup.locator('debrief-popout-shell')).toBeVisible();
   return popup;
@@ -94,7 +96,7 @@ test('a user journey is logged once per operation, in order, with triggers and w
   const dialog = page.getByRole('dialog', { name: 'Export events' });
   await dialog.getByRole('button', { name: 'Export…' }).click();
   // A job writes the file; its message reports the result.
-  await expect(page.getByTestId('notification').filter({ hasText: 'Finished: Export events' })).toBeVisible({ timeout: 15_000 });
+  await heldToast(page, 'Finished: Export events', { timeout: 15_000 });
 
   // In order, each with its trigger.
   const steps: Partial<Record<string, string | RegExp>>[] = [

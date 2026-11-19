@@ -194,19 +194,19 @@ mod tests {
     mod shells {
         use super::*;
 
-        fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
-            let p = dir.join(name);
-            paddock_testkit::exe::write_program(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-            p
+        use paddock_testkit::{Actions, Case, Spawn, StandIn};
+
+        fn path_of(stand_in: StandIn) -> PathBuf {
+            stand_in.install().unwrap().program().to_path_buf()
         }
 
         #[test]
         fn a_login_shells_path_is_taken_and_its_noise_ignored() {
             let d = tempfile::tempdir().unwrap();
-            let sh = script(
-                d.path(),
-                "fakezsh",
-                &format!("echo banner; printf '{BEGIN}/home/u/.nvm/bin:/opt/homebrew/bin{END}'"),
+            let sh = path_of(
+                StandIn::new(d.path(), "fakezsh")
+                    .stdout("banner")
+                    .stdout(&format!("{BEGIN}/home/u/.nvm/bin:/opt/homebrew/bin{END}")),
             );
             assert_eq!(
                 ask_shell(&sh, Duration::from_secs(60)).unwrap(),
@@ -217,12 +217,10 @@ mod tests {
         #[test]
         fn an_interactive_failure_falls_back_to_a_plain_login_shell() {
             let d = tempfile::tempdir().unwrap();
-            let sh = script(
-                d.path(),
-                "fakesh",
-                &format!(
-                    "for a in \"$@\"; do [ \"$a\" = -i ] && exit 1; done; printf '{BEGIN}/plain/bin{END}'"
-                ),
+            let sh = path_of(
+                StandIn::new(d.path(), "fakesh")
+                    .stdout(&format!("{BEGIN}/plain/bin{END}"))
+                    .when(&Case::new().has_arg("-i"), Actions::new().exit(1)),
             );
             assert_eq!(
                 ask_shell(&sh, Duration::from_secs(60)).unwrap(),
@@ -233,7 +231,7 @@ mod tests {
         #[test]
         fn a_shell_that_prints_junk_or_is_missing_gives_none() {
             let d = tempfile::tempdir().unwrap();
-            let junk = script(d.path(), "junk", "echo nothing useful");
+            let junk = path_of(StandIn::new(d.path(), "junk").stdout("nothing useful"));
             assert_eq!(ask_shell(&junk, Duration::from_secs(60)), None);
             assert_eq!(
                 ask_shell(&d.path().join("missing"), Duration::from_secs(60)),
@@ -244,12 +242,9 @@ mod tests {
         #[test]
         fn the_first_candidate_shell_that_answers_gives_the_login_path() {
             let d = tempfile::tempdir().unwrap();
-            let junk = script(d.path(), "junk", "echo nothing useful");
-            let good = script(
-                d.path(),
-                "good",
-                &format!("printf '{BEGIN}/login/bin{END}'"),
-            );
+            let junk = path_of(StandIn::new(d.path(), "junk").stdout("nothing useful"));
+            let good =
+                path_of(StandIn::new(d.path(), "good").stdout(&format!("{BEGIN}/login/bin{END}")));
             let junk_path = junk.to_string_lossy().into_owned();
             let good_path = good.to_string_lossy().into_owned();
             // `$SHELL` is tried first and the usual shells are only used where they exist.
@@ -271,11 +266,13 @@ mod tests {
         fn a_hanging_shell_gives_none_in_time_and_leaves_nothing_behind() {
             let d = tempfile::tempdir().unwrap();
             let marker = d.path().file_name().unwrap().to_string_lossy().into_owned();
-            // `exec sleep` keeps the marker on a command line the leak check can find; the timeout ends the tree.
-            let hang = script(
-                d.path(),
-                "hang",
-                &format!("sleep 300 {marker} & sleep 300 {marker}"),
+            // Both stand-ins sit in the folder the marker names, so their command lines hold it for the leak check to find; the
+            // timeout ends the tree.
+            path_of(StandIn::new(d.path(), "hang-child").sleeps(Duration::from_secs(120)));
+            let hang = path_of(
+                StandIn::new(d.path(), "hang")
+                    .spawns(&Spawn::new("hang-child"))
+                    .sleeps(Duration::from_secs(120)),
             );
             // Both attempts end at their timeout (a hanging shell gives no PATH); what counts is the outcome and that the
             // trees are gone, not how long it took.

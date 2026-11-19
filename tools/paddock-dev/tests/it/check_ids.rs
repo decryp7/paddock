@@ -312,13 +312,15 @@ fn a_taken_ref_moves_the_reservation_to_the_next_id() {
 #[cfg(unix)]
 #[test]
 fn a_refusing_server_is_an_error_and_writes_no_file() {
-    use std::os::unix::fs::PermissionsExt;
     let d = repo();
     let a = clone_of(d.path(), "ca");
-    let hook = d.path().join("origin.git/hooks/pre-receive");
-    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
-    std::fs::write(&hook, "#!/bin/sh\necho refused by policy >&2\nexit 1\n").unwrap();
-    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let hooks = d.path().join("origin.git/hooks");
+    std::fs::create_dir_all(&hooks).unwrap();
+    paddock_testkit::StandIn::new(&hooks, "pre-receive")
+        .stderr("refused by policy")
+        .exit(1)
+        .install()
+        .unwrap();
     let (code, _, err) = dev(&a, &["--reserve", "feat/nope"]);
     assert_eq!(code, 1, "{err}");
     assert!(err.contains("::error::") && err.contains("no id was taken"), "{err}");

@@ -89,6 +89,15 @@
    "check": "C130",
    "severity": "warn",
    "rule": 42,
+   "file": "tools/t/src/fake.rs",
+   "line": 2,
+   "message": "a test plants a shell script as a fixture program: it cannot run on Windows and does not say what the real program prints",
+   "fix": "Install the testkit's stand-in instead: `paddock_testkit::StandIn::new(dir, \"name\").stdout(..).exit(..).records_args().install()?` (it runs on Windows and records its calls). A fixture that has to be a script carries `// conformance: stand-in — <why>`; an existing site is listed in conformance/c130-allow.json until it is converted."
+  },
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
    "file": "tools/t/src/tests.rs",
    "line": 1,
    "message": "a test plants a shell script as a fixture program: it cannot run on Windows and does not say what the real program prints",
@@ -133,5 +142,5 @@
  ],
  "waived": [],
  "errors": 0,
- "warnings": 14
+ "warnings": 15
 }

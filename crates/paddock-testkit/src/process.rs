@@ -1270,6 +1270,79 @@ pub(crate) fn resolve(program: &OsStr, path: Option<&OsStr>, pathext: Option<&Os
 mod tests {
     use super::*;
 
+    /// Runs `git config test.mark hostile` in `work` as a [`TestCommand`] made on `machine`, with `extra` set on it afterwards.
+    fn mark(work: &Path, machine: &Ambient, extra: &[(&str, &Path)]) {
+        let mut c = TestCommand::on("git", machine);
+        c.current_dir(work).args(["config", "test.mark", "hostile"]);
+        for (k, v) in extra {
+            c.env(k, v);
+        }
+        let out = c.output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn init(dir: &Path) {
+        let out = TestCommand::new("git")
+            .current_dir(dir)
+            .args(["init", "-q"])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn config_of(dir: &Path) -> String {
+        std::fs::read_to_string(dir.join(".git/config")).unwrap()
+    }
+
+    #[test]
+    fn a_hostile_git_environment_never_reaches_a_command_so_a_second_repository_stays_unchanged() {
+        let (victim, work) = (crate::ambient::tempdir(), crate::ambient::tempdir());
+        init(victim.path());
+        init(work.path());
+        let before = config_of(victim.path());
+        // The machine the command is made on carries every variable that points git at another repository.
+        let mut machine = ambient().clone();
+        let hostile = [
+            ("GIT_DIR", victim.path().join(".git")),
+            ("GIT_WORK_TREE", victim.path().to_path_buf()),
+            ("GIT_INDEX_FILE", victim.path().join(".git/index")),
+            ("GIT_COMMON_DIR", victim.path().join(".git")),
+            ("GIT_OBJECT_DIRECTORY", victim.path().join(".git/objects")),
+        ];
+        for (k, v) in &hostile {
+            machine.vars.push((k.into(), v.into()));
+        }
+        mark(work.path(), &machine, &[]);
+        assert_eq!(
+            config_of(victim.path()),
+            before,
+            "the victim repository was written"
+        );
+        assert!(
+            config_of(work.path()).contains("hostile"),
+            "the command did not act on its own folder"
+        );
+    }
+
+    #[test]
+    fn the_hostile_probe_sees_a_repository_when_git_dir_does_reach_git() {
+        // The positive control (ER-33): the same command with GIT_DIR set on the command itself does write the second repository.
+        let (victim, work) = (crate::ambient::tempdir(), crate::ambient::tempdir());
+        init(victim.path());
+        init(work.path());
+        let git_dir = victim.path().join(".git");
+        mark(work.path(), ambient(), &[("GIT_DIR", &git_dir)]);
+        assert!(config_of(victim.path()).contains("hostile"));
+    }
+
     #[test]
     fn git_s_root_comes_from_its_exec_path_or_its_layout_and_only_a_folder_with_usr_bin_is_git_s() {
         let d = crate::ambient::tempdir();

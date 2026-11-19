@@ -279,31 +279,6 @@ fn run(env: &Env, dir: &Path, program: &str, args: &[&str]) {
     assert!(out.success(), "{program} {args:?}: {}", out.stderr_text());
 }
 
-/// A stand-in for `npm` that answers `npm config get userconfig|globalconfig` the way npm would for this fake install.
-fn write_fake_npm(bin: &Path, prefix: &Path, home: &Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let script = format!(
-            "#!/bin/sh\ncase \"$3\" in\n  globalconfig) echo '{}/etc/npmrc';;\n  userconfig) echo '{}/.npmrc';;\nesac\n",
-            prefix.display(),
-            home.display()
-        );
-        let path = bin.join("npm");
-        fs::write(&path, script).expect("fake npm");
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod");
-    }
-    #[cfg(windows)]
-    {
-        let script = format!(
-            "@echo off\r\nif \"%3\"==\"globalconfig\" echo {}\\bin\\etc\\npmrc\r\nif \"%3\"==\"userconfig\" echo {}\\.npmrc\r\n",
-            prefix.display(),
-            home.display()
-        );
-        fs::write(bin.join("npm.cmd"), script).expect("fake npm");
-    }
-}
-
 /// Marks a fake program executable (Unix; a no-op elsewhere): the probes find programs only when the job could run them.
 fn make_executable(path: &Path) {
     #[cfg(unix)]
@@ -323,8 +298,10 @@ fn path_without(env: &mut Env, names: &[&str]) {
 }
 
 impl Fixture {
-    /// Builds a clean job under `root` (an existing, empty folder).
-    pub fn build(root: &Path) -> Fixture {
+    /// Builds a clean job under `root` (an existing, empty folder). `write_npm(bin, prefix, home)` installs the `npm` the job finds: one
+    /// that answers `npm config get userconfig|globalconfig` as npm would for this fake install (the caller has the testkit's
+    /// `StandIn`; this module is compiled into the library, where the testkit is not a dependency).
+    pub fn build(root: &Path, write_npm: &dyn Fn(&Path, &Path, &Path)) -> Fixture {
         // Plain, not `\\?\C:\...`: the fixture hands these paths to git (HOME) and writes them into files, and git on Windows cannot open
         // a config file through a verbatim path ("unknown error occurred while reading the configuration files").
         assert!(root.exists(), "root exists");
@@ -355,7 +332,7 @@ impl Fixture {
         fs::create_dir_all(&node_bin).expect("node bin");
         fs::write(node_bin.join(NODE_NAME), b"not a real node").expect("fake node");
         make_executable(&node_bin.join(NODE_NAME));
-        write_fake_npm(&node_bin, &node_prefix, &home);
+        write_npm(&node_bin, &node_prefix, &home);
         let path = std::env::join_paths(std::iter::once(node_bin).chain(std::env::split_paths(env.get("PATH").unwrap_or_default())))
             .expect("PATH");
         env.set("PATH", path.to_string_lossy().into_owned());
