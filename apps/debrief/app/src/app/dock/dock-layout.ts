@@ -21,9 +21,6 @@ export interface FitOptions {
 }
 
 /** Grow-back hysteresis: a view the plan moved away returns only once the window is this much larger than where it first fits (px). */
-/** How often, and how far apart, `watchResize` re-checks that dockview has measured the container before it plans. */
-export const RESIZE_SETTLE_TRIES = 20;
-export const RESIZE_SETTLE_MS = 50;
 export const GROW_BACK_MARGIN = { width: 64, height: 48 } as const;
 
 /**
@@ -99,13 +96,22 @@ export class DockLayout {
     this.ctx.userSizes = sizes;
   }
 
+  /**
+   * The dock's room: its container as laid out now (null while the container has no box). Every decision about what fits (the plan, grow-back, the
+   * Explorer verdict) reads this and never dockview's own `width`/`height`: dockview follows its container with an observer of its own and can
+   * report the last size it laid out (WebKit delivered ours first; debrief.yml run 8297). Without a container (unit tests) it is dockview's size.
+   */
+  room(api: DockviewApi): { width: number; height: number } | null {
+    const box = this.ctx.container?.getBoundingClientRect();
+    const size = box ?? { width: api.width, height: api.height };
+    return size.width > 0 && size.height > 0 ? { width: size.width, height: size.height } : null;
+  }
+
   /** The plan for the panels docked now (null while the dock has no measured size). */
   plan(api: DockviewApi, fresh: readonly string[] = []): LayoutPlan | null {
-    if (!(api.width > 0 && api.height > 0)) return null;
-    // A container without a layout box (a detached or not yet laid out dock; dockview then reports its 100x100 default) is not a window.
-    const box = this.ctx.container?.getBoundingClientRect();
-    if (box && (box.width <= 0 || box.height <= 0)) return null;
-    return planLayout({ width: api.width, height: api.height }, this.openViews(api, [], fresh), this.hints());
+    // A container without a layout box (a detached or not yet laid out dock) is not a window.
+    const room = this.room(api);
+    return room ? planLayout(room, this.openViews(api, [], fresh), this.hints()) : null;
   }
 
   /**
@@ -213,10 +219,9 @@ export class DockLayout {
 
   /** Ids of displaced views that may return now: they are placed even with `GROW_BACK_MARGIN` less room. */
   growBackIds(api: DockviewApi): string[] {
-    if (!this.ctx.displaced.size || !(api.width > 0 && api.height > 0)) return [];
-    const box = this.ctx.container?.getBoundingClientRect();
-    if (box && (box.width <= 0 || box.height <= 0)) return [];
-    return restorable({ width: api.width, height: api.height }, this.openViews(api), [...this.ctx.displaced.keys()], GROW_BACK_MARGIN, this.hints());
+    if (!this.ctx.displaced.size) return [];
+    const room = this.room(api);
+    return room ? restorable(room, this.openViews(api), [...this.ctx.displaced.keys()], GROW_BACK_MARGIN, this.hints()) : [];
   }
 
   /** The order displaced views return in: one whose slot is relative to another returning view goes after it (Home beside Registry beside the assistant). */
@@ -307,23 +312,18 @@ export class DockLayout {
       last = now;
       clearTimeout(timer);
       onPending(true);
-      const run = (retries: number) => {
+      const run = () => {
         if (this.ctx.api !== api) {
           onPending(false);
           return;
         }
-        // dockview measures the container with an observer of its own: planning before it has caught up would fit the
-        // old size, and no later resize event comes to correct it (WebKit sometimes delivers ours first and is slow with
-        // the other). Wait until it agrees with the container, a bounded number of times.
-        const b = container.getBoundingClientRect();
-        if (retries > 0 && (Math.abs(api.width - b.width) > 1 || Math.abs(api.height - b.height) > 1)) {
-          timer = setTimeout(() => run(retries - 1), RESIZE_SETTLE_MS);
-          return;
-        }
+        // The plan reads the room from the container (`room`), so it never waits for dockview's own observer; the sizes it sets
+        // need dockview laid out at that room, which `followContainer` does now (it is a no-op when they agree).
+        this.followContainer(api);
         if (!this.ctx.restoring) onResize();
         onPending(false);
       };
-      timer = setTimeout(() => run(RESIZE_SETTLE_TRIES), delayMs);
+      timer = setTimeout(run, delayMs);
     });
     observer.observe(container);
     return () => {
@@ -364,10 +364,8 @@ export class DockLayout {
    * out, so it is only the fallback for a dock without a container (tests).
    */
   explorerVerdict(api: DockviewApi, open: boolean, drawnWidth: number): 'hide' | 'show' | 'keep' {
-    if (!(api.width > 0 && api.height > 0)) return 'keep';
-    const box = this.ctx.container?.getBoundingClientRect();
-    if (box && (box.width <= 0 || box.height <= 0)) return 'keep';
-    const dock = box ?? { width: api.width, height: api.height };
+    const dock = this.room(api);
+    if (!dock) return 'keep';
     const viewport = { width: dock.width + drawnWidth, height: dock.height };
     const explorer: OpenView = { id: EXPLORER_ID, layout: EXPLORER_LAYOUT, group: EXPLORER_ID };
     const views = this.openViews(api, [explorer]);
