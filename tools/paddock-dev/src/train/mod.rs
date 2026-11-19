@@ -34,6 +34,8 @@ pub enum TrainCommand {
     Release(ReleaseArgs),
     /// Fast-forward `main` to the train head (never a force or a rebase) and verify it with `ls-remote`.
     Land(LandArgs),
+    /// After a train landed: the bounded, never-blocking disk clean of the landing step (`train land` runs it itself).
+    Landed(crate::disk::landing::LandedArgs),
 }
 
 /// Arguments of `train release`.
@@ -81,6 +83,7 @@ pub fn command(c: TrainCommand) -> Result<Report, CliError> {
     match c {
         TrainCommand::Release(a) => release(&a),
         TrainCommand::Land(a) => land_cmd(&a),
+        TrainCommand::Landed(a) => run_landed(&a),
     }
 }
 
@@ -219,24 +222,43 @@ fn held(root: &Path) -> Result<Report, CliError> {
     std::process::exit(code);
 }
 
+/// The disk clean after a landing (`disk::landing`): it never blocks, an error or the limit is a warning.
+fn run_landed(a: &crate::disk::landing::LandedArgs) -> Result<Report, CliError> {
+    crate::disk::landing::landed(a, &|k| std::env::var(k).ok(), &mut |l| eprintln!("{l}"), &|| {
+        crate::worktree::procs::process_folders().ok()
+    })
+}
+
 fn land_cmd(a: &LandArgs) -> Result<Report, CliError> {
     land::check_branch(&a.branch).map_err(|e| CliError::usage(e).with_hint("Run `./dev train land --help`."))?;
     let root = crate::gates::command::repo_root(None)?;
     let mut git = real::GitCli { root: &root };
-    match land::land(&a.branch, &mut git, &mut std::io::stderr()) {
-        Ok(land::Landed::FastForwarded { from, to }) => Ok(Report::new(
+    let landed = land::land(&a.branch, &mut git, &mut std::io::stderr())
+        .map_err(|stop| CliError::new(Exit::Findings, stop.annotation().replace("train release", "train land")))?;
+    // The landing is verified; the disk clean that follows can only warn (it never blocks or fails the landing).
+    let clean = run_landed(&crate::disk::landing::LandedArgs {
+        train: a.branch.clone(),
+        common: Default::default(),
+        max: crate::disk::landing::DEFAULT_MAX.to_string(),
+    });
+    let clean_text = match &clean {
+        Ok(r) => r.text.clone(),
+        Err(e) => format!("::warning::train land: the disk clean could not run: {}", e.message),
+    };
+    Ok(match landed {
+        land::Landed::FastForwarded { from, to } => Report::new(
             json!({"landed": true, "from": from, "to": to}),
-            format!("Landed: main is now {} (was {}); verified with ls-remote.", &to[..9], &from[..9]),
-        )),
-        Ok(land::Landed::AlreadyOnMain(sha)) => Ok(Report::new(
+            format!(
+                "Landed: main is now {} (was {}); verified with ls-remote.\n{clean_text}",
+                &to[..9],
+                &from[..9]
+            ),
+        ),
+        land::Landed::AlreadyOnMain(sha) => Report::new(
             json!({"landed": false, "already": true, "main": sha}),
-            format!("main already is {}; nothing was pushed.", &sha[..9]),
-        )),
-        Err(stop) => Err(CliError::new(
-            Exit::Findings,
-            stop.annotation().replace("train release", "train land"),
-        )),
-    }
+            format!("main already is {}; nothing was pushed.\n{clean_text}", &sha[..9]),
+        ),
+    })
 }
 
 #[cfg(test)]

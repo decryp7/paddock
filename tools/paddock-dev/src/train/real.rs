@@ -6,8 +6,6 @@ use super::land::Git;
 use super::sequence::{Ports, RunEnd};
 use crate::ci_runs::client::{Client, RunInfo};
 use crate::ci_runs::{dispatch, time, triage};
-use crate::disk::check::{CheckArgs, run as disk_check};
-use crate::disk::config::CommonArgs;
 use crate::wait::{CiRunProbe, Clock, CurlHttp, Outcome, SystemClock, fmt_duration, wait_for};
 use paddock_proc::{Limits, Outcome as ProcOutcome, command, run_bounded};
 use serde_json::Value;
@@ -49,20 +47,9 @@ impl Ports for RealPorts {
     }
 
     fn disk_check(&mut self) -> Result<(), String> {
-        let args = CheckArgs {
-            paths: vec![self.root.clone()],
-            common: CommonArgs::default(),
-        };
-        let (mut out, mut err) = (Vec::new(), Vec::new());
-        let code = disk_check(&args, &|k| std::env::var(k).ok(), &mut out, &mut err);
-        let (out, err) = (String::from_utf8_lossy(&out), String::from_utf8_lossy(&err));
-        // The check's own lines go to our log; a warning is not a refusal.
-        eprint!("{out}{err}");
-        if code == 0 {
-            return Ok(());
-        }
-        let cause = err.lines().find(|l| l.contains("::error::")).unwrap_or("the disk check refused");
-        Err(cause.trim().trim_start_matches("::error::").trim().to_string())
+        // The check `ci dispatch` makes first (the runner volumes, refused under 50 GiB): this sequence dispatches in-process, so it
+        // asks the same function, once per dispatch, and adds no check of its own.
+        crate::disk::check::before_dispatch(&|k| std::env::var(k).ok(), &mut std::io::stdout(), &mut std::io::stderr())
     }
 
     fn dispatch(&mut self, workflow: &str, inputs: &[(String, String)], wait: Duration) -> Result<u64, String> {

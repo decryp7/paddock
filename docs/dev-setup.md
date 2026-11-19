@@ -201,6 +201,18 @@ no script here makes one), and `scripts/vm-smoke/run*.mjs` record their scratch 
 which skips quietly where `./dev disk` does not exist. The scratch folder an agent's brief names is made by the brief's
 author or by `./dev brief` (not on main yet): that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no folder.
 
+### Disk clean at a landing, disk check before a dispatch
+
+After a train lands on main, the integrator runs `./dev train landed <train>` (for example `train/2026-11-19-16`). It is
+`./dev disk clean --apply` with `--max 10m`: only recorded folders and worktrees that are merged or stale-pushed and not live
+(never unsaved, locked, owned, used by a process, CI slots, runners, sccache, VMs or Docker; a released review worktree whose
+commits are all on origin counts as stale-pushed). It logs each removal and the space freed (the disk's free bytes before and
+after), never blocks the landing (an error or the time limit is a `::warning::`, exit 0), and stays cheap on a large tree: the
+processes are listed once to judge all folders (judging runs on the jobs setting's threads) and once more before the first
+removal, and sizes are not measured for the decision (`--measure` asks for them; the log says "size not measured" otherwise).
+`./dev ci dispatch` runs `./dev disk check` on the dev-targets volume first: a warning with the largest folders and the
+reclaimable total under 200 GiB, an `::error::` and no dispatch under 50 GiB.
+
 ## Tests
 
 - **Rust:** `cargo nextest run` (each app's `.config/nextest.toml`: one test per core but one, slow-test warnings after

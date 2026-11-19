@@ -7,10 +7,10 @@
 
 use super::config::{CommonArgs, Settings, gib};
 use super::index::Index;
-use super::measure::folder_size;
+use super::measure::{folder_size, par_map};
 use super::record::{self, Kind};
-use super::scan::{Found, Sizes, context, discover, scan};
-use super::state::{State, inspect};
+use super::scan::{Found, Sizes, discover, scan};
+use super::state::{Context, State, inspect};
 use crate::safe_remove;
 use clap::Args;
 use paddock_cli::{CliError, Report};
@@ -29,6 +29,13 @@ pub struct CleanArgs {
     /// Say what would be removed and remove nothing (the default).
     #[arg(long)]
     pub dry_run: bool,
+    /// Stop judging and removing after this long (for example 10m); what was not reached stays for the next clean.
+    #[arg(long, value_name = "DURATION")]
+    pub max: Option<String>,
+    /// Measure the folders that have no size in the index (slow on a large tree). By default the log uses the indexed sizes and
+    /// says "size not measured" for the rest.
+    #[arg(long)]
+    pub measure: bool,
 }
 
 /// Why a folder may not be removed, `None` when it may. `kind` and `state` are the freshly worked-out ones.
@@ -58,10 +65,49 @@ pub fn run_with(
     note: &mut dyn FnMut(&str),
     before_remove: &mut dyn FnMut(&Path),
 ) -> Result<Report, CliError> {
+    run_core(a, env, note, before_remove, &|| crate::worktree::procs::process_folders().ok())
+}
+
+type Cached = std::collections::HashMap<String, super::index::SizeRow>;
+
+/// The size shown for a folder: the indexed one, or measured when asked, else `None` (the decision never needs it, ER-20).
+fn size_of(p: &str, path: &Path, cached: &mut Cached, s: &Settings, measure: bool) -> Option<u64> {
+    cached
+        .remove(p)
+        .map(|r| r.bytes)
+        .or_else(|| measure.then(|| folder_size(path, s.folder_timeout).bytes))
+}
+
+fn shown(bytes: Option<u64>) -> String {
+    bytes.map_or_else(|| "size not measured".to_string(), gib)
+}
+
+/// [`run_with`] with the processes' folders read through `procs` (tests count and fake the reads). Listing every process is the
+/// slow step (lsof), so it is read once to judge all folders (the judging runs in parallel) and once more, fresh, before the
+/// first removal; each removal then re-reads its own folder's git state and record.
+pub fn run_core(
+    a: &CleanArgs,
+    env: &dyn Fn(&str) -> Option<String>,
+    note: &mut dyn FnMut(&str),
+    before_remove: &mut dyn FnMut(&Path),
+    procs: &(dyn Fn() -> Option<Vec<std::path::PathBuf>> + Sync),
+) -> Result<Report, CliError> {
+    let started = std::time::Instant::now();
+    let limit = match a.max.as_deref() {
+        Some(m) => Some(crate::wait::parse_duration(m).map_err(|e| CliError::usage(e).with_hint("Write --max as 90s, 10m or 1h."))?),
+        None => None,
+    };
+    let out_of_time = || limit.is_some_and(|l| started.elapsed() >= l);
     let s = Settings::resolve(&a.common, env);
     s.located_roots()?;
     let index_path = s.index_file()?.to_path_buf();
-    if a.apply && context(&s, crate::worktree::note::now_secs()).process_folders.is_none() {
+    let ctx_now = || Context {
+        now: crate::worktree::note::now_secs(),
+        live_secs: s.live_secs,
+        process_folders: procs(),
+    };
+    let first = ctx_now();
+    if a.apply && first.process_folders.is_none() {
         return Err(
             CliError::refused("The processes' current folders cannot be read here, so whether a folder is in use is not known.").with_hint(
                 "Run `./dev disk clean --apply` on a machine where they can be read (Linux, macOS); `--dry-run` works everywhere.",
@@ -74,16 +120,35 @@ pub fn run_with(
     let mut text = String::new();
     let (mut removed, mut kept) = (Vec::new(), Vec::new());
     let mut total = 0u64;
+    let mut unmeasured = 0usize;
     note(&format!(
-        "disk clean: {} (state is worked out fresh; {} thread(s))",
+        "disk clean: {} (state is worked out fresh; {} thread(s){})",
         if a.apply { "APPLY" } else { "dry run, nothing is removed" },
-        s.jobs
+        s.jobs,
+        limit.map_or(String::new(), |l| format!(", at most {}", crate::wait::fmt_duration(l)))
     ));
-    for f in discover(&s) {
-        // The clock and the processes are read again for every folder: a long clean must not judge by what it saw minutes ago.
-        let ctx = context(&s, crate::worktree::note::now_secs());
-        let state = inspect(&f.path, f.record.as_ref(), &ctx).state;
-        if let Some(why) = refusal(&f, state) {
+    let found = discover(&s);
+    note(&format!(
+        "disk clean: {} folder(s) found in {:.1}s",
+        found.len(),
+        started.elapsed().as_secs_f64()
+    ));
+    // Judging is git and file reads per folder: in parallel, bounded by the jobs setting, against the one process listing.
+    let judged: Vec<Option<State>> = par_map(&found, s.jobs, |f| {
+        if out_of_time() {
+            return None;
+        }
+        Some(inspect(&f.path, f.record.as_ref(), &first).state)
+    });
+    note(&format!("disk clean: judged in {:.1}s", started.elapsed().as_secs_f64()));
+    let mut skipped = 0usize;
+    let mut fresh: Option<Context> = None;
+    for (f, state) in found.iter().zip(judged) {
+        let Some(state) = state else {
+            skipped += 1;
+            continue;
+        };
+        if let Some(why) = refusal(f, state) {
             // Orphans and non-reclaimable states are the bulk: only the reclaimable-but-refused ones are worth a line.
             if state.reclaimable() {
                 kept.push(json!({"path": f.path.display().to_string(), "reason": why}));
@@ -91,49 +156,45 @@ pub fn run_with(
             }
             continue;
         }
+        if out_of_time() {
+            skipped += 1;
+            continue;
+        }
         let p = f.path.display().to_string();
         let (kind, owner) = f.record.as_ref().map_or(("", String::new()), |r| (r.kind.word(), r.owner.clone()));
         let result = if a.apply {
             before_remove(&f.path);
-            // Again, right before acting: state, processes and the clock afresh, then the shared check inside `remove`.
-            let ctx = context(&s, crate::worktree::note::now_secs());
-            let again = inspect(&f.path, record::read(&f.path).ok().flatten().as_ref(), &ctx).state;
+            // Again, right before acting: the processes read afresh once for the whole removal pass, the clock and the folder's
+            // own state for each folder, then the shared check inside `remove`.
+            let ctx = fresh.get_or_insert_with(ctx_now);
+            ctx.now = crate::worktree::note::now_secs();
+            let again = inspect(&f.path, record::read(&f.path).ok().flatten().as_ref(), ctx).state;
             if again.reclaimable() {
                 // The size is read before the folder goes.
-                let bytes = cached
-                    .remove(&p)
-                    .map(|r| r.bytes)
-                    .unwrap_or_else(|| folder_size(&f.path, s.folder_timeout).bytes);
+                let bytes = size_of(&p, &f.path, &mut cached, &s, a.measure);
                 safe_remove::remove(&f.path, &s.roots).map(|_| bytes)
             } else {
                 Err(format!("it became {} while cleaning", again.word()))
             }
         } else {
-            let bytes = cached
-                .remove(&p)
-                .map(|r| r.bytes)
-                .unwrap_or_else(|| folder_size(&f.path, s.folder_timeout).bytes);
+            let bytes = size_of(&p, &f.path, &mut cached, &s, a.measure);
             safe_remove::check(&f.path, &s.roots).map(|_| bytes)
         };
         match result {
-            Ok(bytes) if !a.apply => {
-                text.push_str(&format!(
-                    "would remove {p} ({}, {kind}, {}, owner {owner})\n",
-                    gib(bytes),
-                    state.word()
-                ));
-                removed.push(json!({"path": p, "bytes": bytes, "state": state.word(), "kind": kind, "owner": owner, "dry_run": true}));
-                total += bytes;
-            }
             Ok(bytes) => {
-                note(&format!(
-                    "disk clean: removed {p} ({}, {kind}, {}, owner {owner})",
-                    gib(bytes),
-                    state.word()
-                ));
-                text.push_str(&format!("removed {p} ({}, {kind}, {}, owner {owner})\n", gib(bytes), state.word()));
-                removed.push(json!({"path": p, "bytes": bytes, "state": state.word(), "kind": kind, "owner": owner}));
-                total += bytes;
+                let verb = if a.apply { "removed" } else { "would remove" };
+                let line = format!("{p} ({}, {kind}, {}, owner {owner})", shown(bytes), state.word());
+                if a.apply {
+                    note(&format!("disk clean: removed {line}"));
+                }
+                text.push_str(&format!("{verb} {line}\n"));
+                let mut row = json!({"path": p, "bytes": bytes, "state": state.word(), "kind": kind, "owner": owner});
+                if !a.apply {
+                    row["dry_run"] = json!(true);
+                }
+                removed.push(row);
+                total += bytes.unwrap_or(0);
+                unmeasured += usize::from(bytes.is_none());
             }
             Err(why) => {
                 note(&format!("disk clean: kept {p} ({why})"));
@@ -142,20 +203,32 @@ pub fn run_with(
             }
         }
     }
+    if skipped > 0 {
+        let line =
+            format!("disk clean: stopped at the time limit; {skipped} folder(s) were not judged or removed and stay for the next clean");
+        note(&line);
+        text.push_str(&format!("{line}\n"));
+    }
     text.push_str(&format!(
-        "{} {} folder(s), {}\n",
+        "{} {} folder(s), {}{}\n",
         if a.apply { "Removed" } else { "Would remove" },
         removed.len(),
-        gib(total)
+        gib(total),
+        if unmeasured > 0 {
+            format!(" and {unmeasured} folder(s) of size not measured")
+        } else {
+            String::new()
+        }
     ));
-    if a.apply {
+    if a.apply && !out_of_time() {
         let (index, _) = Index::open_or_recover(&index_path, crate::worktree::note::now_secs());
         if let Some(mut i) = index {
             let _ = scan(&s, Sizes::Skip, Some(&mut i), &mut |_| {});
         }
     }
     Ok(Report::new(
-        json!({"apply": a.apply, "removed": removed, "kept": kept, "bytes": total}),
+        json!({"apply": a.apply, "removed": removed, "kept": kept, "bytes": total, "unmeasured": unmeasured, "skipped": skipped,
+            "stoppedAtLimit": skipped > 0, "elapsedMs": started.elapsed().as_millis() as u64}),
         text,
     ))
 }
@@ -234,6 +307,8 @@ mod tests {
             },
             apply: false,
             dry_run: false,
+            max: None,
+            measure: false,
         };
         (d, a)
     }
@@ -267,7 +342,7 @@ mod tests {
         assert!(
             logged
                 .iter()
-                .any(|l| l.contains("removed") && l.contains("stale-build") && l.contains("GiB")),
+                .any(|l| l.contains("removed") && l.contains("stale-build") && l.contains("size not measured")),
             "{logged:?}"
         );
         assert_eq!(r.data["removed"].as_array().unwrap().len(), 1);
@@ -310,6 +385,90 @@ mod tests {
         for n in ["stale-build", "fresh-build", "stale-slot", "stale-orphan"] {
             assert!(d.path().join("dev-targets").join(n).is_dir(), "{n} must still be there");
         }
+    }
+
+    /// The listing of every process is the slow step (lsof): one read judges every folder, one more precedes the first removal.
+    #[cfg(not(windows))]
+    #[test]
+    fn the_processes_are_listed_once_to_judge_and_once_before_removing_not_once_per_folder() {
+        let (_d, mut a) = setup();
+        let reads = std::sync::atomic::AtomicUsize::new(0);
+        let count = || {
+            reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Some(Vec::new())
+        };
+        let r = run_core(&a, &|_| None, &mut |_| {}, &mut |_| {}, &count).unwrap();
+        assert_eq!(r.data["removed"].as_array().unwrap().len(), 1);
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1, "a dry run reads them once");
+        reads.store(0, std::sync::atomic::Ordering::SeqCst);
+        a.apply = true;
+        run_core(&a, &|_| None, &mut |_| {}, &mut |_| {}, &count).unwrap();
+        assert_eq!(
+            reads.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "apply reads them again, once, before removing"
+        );
+    }
+
+    /// Positive control: the one listing really keeps a folder a process is in (the seam is not a way to skip the check).
+    #[cfg(not(windows))]
+    #[test]
+    fn a_folder_a_process_is_in_is_kept_by_the_one_listing() {
+        let (d, mut a) = setup();
+        a.apply = true;
+        let inside = d.path().join("dev-targets/stale-build/src");
+        let procs = move || Some(vec![inside.clone()]);
+        let r = run_core(&a, &|_| None, &mut |_| {}, &mut |_| {}, &procs).unwrap();
+        assert!(d.path().join("dev-targets/stale-build").is_dir());
+        assert_eq!(r.data["removed"].as_array().unwrap().len(), 0, "{}", r.text);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_clean_past_its_time_limit_removes_nothing_more_and_says_what_it_left() {
+        let (d, mut a) = setup();
+        a.apply = true;
+        a.max = Some("0s".to_string());
+        let mut logged = Vec::new();
+        let r = run_core(
+            &a,
+            &|_| None,
+            &mut |l| logged.push(l.to_string()),
+            &mut |_| {},
+            &|| Some(Vec::new()),
+        )
+        .unwrap();
+        assert!(d.path().join("dev-targets/stale-build").is_dir(), "out of time: nothing is removed");
+        assert_eq!(r.data["stoppedAtLimit"], true, "{}", r.text);
+        assert!(logged.iter().any(|l| l.contains("stopped at the time limit")), "{logged:?}");
+        // Control: with room the same tree is cleaned.
+        a.max = Some("10m".to_string());
+        run_core(&a, &|_| None, &mut |_| {}, &mut |_| {}, &|| Some(Vec::new())).unwrap();
+        assert!(!d.path().join("dev-targets/stale-build").exists());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn sizes_are_measured_only_when_asked_and_say_so_when_not() {
+        let (_d, mut a) = setup();
+        let plain = run(&a, &|_| None, &mut |_| {}).unwrap();
+        assert!(plain.text.contains("size not measured"), "{}", plain.text);
+        assert_eq!(plain.data["unmeasured"], 1);
+        a.measure = true;
+        let sized = run(&a, &|_| None, &mut |_| {}).unwrap();
+        assert!(
+            !sized.text.contains("size not measured") && sized.text.contains("GiB"),
+            "{}",
+            sized.text
+        );
+        assert!(sized.data["bytes"].as_u64().unwrap() >= 10_000);
+    }
+
+    #[test]
+    fn a_bad_max_is_a_usage_error() {
+        let (_d, mut a) = setup();
+        a.max = Some("soon".to_string());
+        assert!(run(&a, &|_| None, &mut |_| {}).is_err());
     }
 
     #[test]
