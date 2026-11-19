@@ -284,18 +284,24 @@ const READERS_LIST = 'conformance/ci/run-conclusion-readers.json';
 /**
  * The shrink-only rule of the list (ER-46) against the merge base with the target ref (`targetRef`: PADDOCK_BASE_REF, else
  * origin/main), through the shared baseline reader. An entry not in the base list throws. A list that does not exist at the base is
- * its own creation: that is growth that needs the user's approval (ER-46), and the check is new, so it is report-only until the
- * list is on the target branch (ER-41, and the shared reader's own note on a check's first list): a warning that says so, never
- * silence. Where the base cannot be read it warns, and in CI it throws (not measured is never a pass).
+ * its own creation, which is growth that needs the user's yes: it throws unless the list records that approval (`approved`: who,
+ * the date and the exact entries approved) and every entry listed is one of them. Once the list is on the target branch this path
+ * is never taken again. Where the base cannot be read it warns, and in CI it throws (not measured is never a pass).
  */
 export function listGrowth(listed, extra = {}) {
   const warn = extra.warn ?? console.warn;
+  const approved = extra.approved;
   const g = baselineGrowth({ root: PADDOCK, path: READERS_LIST, current: listed, keyOf: (f) => f, entriesOf: (j) => j.files, ...extra });
   if (g.reason) {
     if (extra.ci ?? isCi()) throw new Error(`${READERS_LIST}: not measured, the target ref is not usable: ${g.reason}`);
     warn(`${READERS_LIST}: the shrink-only rule is not enforced here: ${g.reason}`);
   } else if (g.absent) {
-    warn(`${READERS_LIST}: a new list (${listed.length} entries); its creation is growth that needs the user's approval (ER-46) and it is report-only until it is on the target branch (ER-41)`);
+    const ok = approved?.by && /^\d{4}-\d{2}-\d{2}$/.test(approved.date ?? '') && Array.isArray(approved.files);
+    const extraEntries = ok ? listed.filter((f) => !approved.files.includes(f)) : listed;
+    if (extraEntries.length) {
+      throw new Error(`${READERS_LIST} is a new list and its creation is growth that needs the user's approval (ER-46): ${ok ? 'not approved' : 'no approval is recorded'}: ${extraEntries.slice(0, 5).join('; ')}. Record it as "approved": {by, date, files} only after the user said yes.`);
+    }
+    warn(`${READERS_LIST}: the creation of this list was approved by ${approved.by} on ${approved.date} (${listed.length} entries); it is not asked again once it is on ${'the target branch'}`);
   } else if (g.added.length) {
     throw new Error(`${READERS_LIST} grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base (${g.added.slice(0, 5).join('; ')}). It may only shrink.`);
   }
@@ -316,7 +322,7 @@ test('a pass decision from a run conclusion lives only in ci_runs/verdict.rs, be
     'a listed file no longer reads a conclusion: remove it from conformance/ci/run-conclusion-readers.json (the list only shrinks)',
   );
   // ER-46: against the merge base, never by this test's own memory. The list's first creation is growth until the user approves it.
-  listGrowth(listed);
+  listGrowth(listed, { approved: JSON.parse(readFileSync(join(PADDOCK, READERS_LIST), 'utf8')).approved });
 });
 
 const gitBase = (base) => (args) => {
@@ -333,12 +339,15 @@ test('the shrink-only check sees an added entry, a new list and a target it cann
   const base = JSON.stringify({ files: ['a.rs', 'b.rs'] });
   assert.doesNotThrow(() => listGrowth(['a.rs'], { git: gitBase(base) }), 'shrinking is fine');
   assert.throws(() => listGrowth(['a.rs', 'c.rs'], { git: gitBase(base) }), /grew.*c\.rs/, 'an added entry is growth');
+  // A creation: refused without a recorded approval, refused for an entry the approval does not name, allowed when it covers them.
+  const approval = { by: 'the user', date: '2026-11-20', files: ['a.rs', 'b.rs'] };
+  assert.throws(() => listGrowth(['a.rs', 'b.rs'], { git: gitBase(null) }), /no approval is recorded/, 'a new list with no approval fails');
+  assert.throws(() => listGrowth(['a.rs', 'c.rs'], { git: gitBase(null), approved: approval }), /not approved: c\.rs/, 'an entry the approval does not name fails');
+  assert.throws(() => listGrowth(['a.rs'], { git: gitBase(null), approved: { ...approval, date: 'soon' } }), /no approval is recorded/, 'an approval needs its date');
   const said = [];
-  const created = listGrowth(['a.rs', 'b.rs'], { git: gitBase(null), warn: (m) => said.push(m) });
-  assert.equal(said.length, 1, 'the creation is said out loud, to the control only (the control does not print it)');
-  assert.match(said[0], /a new list \(2 entries\).*needs the user's approval/);
-  assert.equal(created.absent, true, 'a list absent at the base is a creation: reported (a warning), report-only until it is on the target (ER-41)');
-  assert.deepEqual(created.added, ['a.rs', 'b.rs'], 'and every entry of it counts as growth in the reader');
+  const created = listGrowth(['a.rs', 'b.rs'], { git: gitBase(null), approved: approval, warn: (m) => said.push(m) });
+  assert.equal(created.absent, true);
+  assert.match(said[0], /approved by the user on 2026-11-20/);
   const noGit = () => {
     throw new Error('not a git repository');
   };

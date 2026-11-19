@@ -12,5 +12,23 @@
     "tools/paddock-dev/src/plan_cmd.rs",
     "tools/paddock-dev/src/plan_since.rs",
     "tools/paddock-dev/src/queue/real.rs"
-  ]
+  ],
+  "approved": {
+    "by": "the user",
+    "date": "2026-11-20",
+    "what": "the creation of this list with exactly these entries (\"approve the 11\"), ER-46",
+    "files": [
+      "tools/paddock-dev/src/ci_runs/client.rs",
+      "tools/paddock-dev/src/ci_runs/flakes.rs",
+      "tools/paddock-dev/src/ci_runs/record.rs",
+      "tools/paddock-dev/src/ci_runs/schedule_skip.rs",
+      "tools/paddock-dev/src/ci_runs/timings.rs",
+      "tools/paddock-dev/src/ci_runs/triage.rs",
+      "tools/paddock-dev/src/merge_check/other_os.rs",
+      "tools/paddock-dev/src/plan_ci.rs",
+      "tools/paddock-dev/src/plan_cmd.rs",
+      "tools/paddock-dev/src/plan_since.rs",
+      "tools/paddock-dev/src/queue/real.rs"
+    ]
+  }
 }
