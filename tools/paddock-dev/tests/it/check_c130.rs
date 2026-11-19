@@ -36,7 +36,7 @@ fn c130_tree() -> tempfile::TempDir {
             "let a = \"#!/bin/sh\\n\"; // conformance: stand-in \u{2014} ab\r\nlet b = \"#!/bin/sh\\n\"; // conformance: stand-in \u{2014} \u{1F600}a\r\nlet c = \"#!/bin/sh\\n\"; // conformance: stand-in \u{2014} \u{1F600}\r\n".to_string(),
         ),
         // A test-support file outside tests/ and with no cfg(test): it writes programs, so its shebang is a fixture.
-        ("tools/t/src/fake.rs", format!("fn install(p: &Path) {{\n    paddock_testkit::exe::write_program(p, \"#!/bin/sh\\nexit 0\\n\").unwrap();\n}}\n")),
+        ("tools/t/src/fake.rs", "fn install(p: &Path) {\n    paddock_testkit::exe::write_program(p, \"#!/bin/sh\\nexit 0\\n\").unwrap();\n}\n".to_string()),
         ("tools/t/tests/fixtures/f.rs", SH.to_string()),
         ("tools/t/tests/it/script.sh", "#!/bin/sh\necho hi\n".to_string()),
         ("a/tests/crlf.rs", "let a = \"#!/bin/sh\\n\";\r\nlet b = 1;\r\n".to_string()),
