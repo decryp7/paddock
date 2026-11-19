@@ -1286,3 +1286,11 @@ owner = "ER-21 class: a read on 'it is in the DOM' (feat/e2e-ready-gating)"
 since = 2026-11-18
 review_by = 2026-12-18
 approved = "user"
+
+[[report_only]]
+id = "C141"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c141.rs. It reads every workflow with the YAML reader (gates::yaml) and checks that each setup-rust use passes the S3 cache key in its own with: (sccache-s3-access-key-id and sccache-s3-secret-access-key from the repository secrets PADDOCK_SCCACHE_S3_ACCESS_KEY_ID and PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY), that callers of app-fuzz.yml and app-release.yml pass them and those two declare them, and that no other workflow line or action names them; each finding prints the exact lines to paste. First count at 1ee61a03c: 34 setup-rust steps, 8 reusable-workflow calls, 2 declarations to paste (the integrator pastes them once, docs/research/2026-11-19-sccache.md section 8)"
+owner = "WP-8 of docs/research/2026-11-19-sccache.md: CI's sccache on RustFS, the key given to the setup step only (perf/sccache-hit-rate)"
+since = 2026-11-19
+review_by = 2026-12-19
+approved = "user"
