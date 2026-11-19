@@ -4,8 +4,9 @@
 //! refused before it is made when `origin/main` is not an ancestor of the head. The result is verified with the remote's own
 //! answer (`ls-remote`), never with the push's exit code alone. Git is behind [`Git`], so the tests never touch a repository.
 
-use super::sequence::Stop;
+use super::sequence::{FullRun, RELEASE_WORKFLOWS, Stop, app_of};
 use crate::ci_runs::verdict::Verdict;
+use std::collections::BTreeSet;
 use std::io::Write;
 
 /// The git calls `land` needs, on the integrator's own worktree.
@@ -22,12 +23,16 @@ pub trait Git {
     fn push_ff(&mut self, sha: &str, name: &str) -> Result<(), String>;
 }
 
-/// What `land` asks CI about the head: the shared reader's verdict and the planner.
+/// What `land` asks CI about the head.
 pub trait Ci {
     /// The shared reader's verdict ([`crate::ci_runs::verdict::verdict`]) of `workflow` on `sha`.
     fn verdict(&mut self, workflow: &str, sha: &str) -> Verdict;
-    /// Whether the plan of `main..head` reaches the app (or everything).
-    fn reaches(&mut self, app: &str, main: &str, head: &str) -> Result<bool, String>;
+    /// The train-only answer for a full run that is red by failures ER-12 lets a train land on (`ci_runs::landable`), or why not.
+    fn landable(&mut self, workflow: &str, sha: &str) -> Result<FullRun, String>;
+    /// The projects the plan of `from..to` reaches (`*` for everything).
+    fn projects(&mut self, from: &str, to: &str) -> Result<BTreeSet<String>, String>;
+    /// The release runs of `workflow` on this train's ref that succeeded, newest first: run id and the commit it tested.
+    fn release_runs(&mut self, workflow: &str, branch: &str) -> Result<Vec<(u64, String)>, String>;
 }
 
 /// How the landing ended.
@@ -39,6 +44,8 @@ pub enum Landed {
         from: String,
         /// The head it is now.
         to: String,
+        /// What the landing rested on: one line per full run and per accepted row.
+        notes: Vec<String>,
     },
     /// `main` already was the head (a landing that was made before; nothing was pushed).
     AlreadyOnMain(String),
@@ -60,14 +67,38 @@ fn short(sha: &str) -> &str {
     &sha[..sha.len().min(9)]
 }
 
-fn require_green(ci: &mut dyn Ci, wf: &str, head: &str, log: &mut dyn Write) -> Result<(), Stop> {
+/// Green for `wf` on the head by the shared reader, or a full run that is red only by what ER-12 lets a train land on
+/// (`Landable`); every accepted row is logged and noted.
+fn require_full(ci: &mut dyn Ci, wf: &str, head: &str, log: &mut dyn Write, notes: &mut Vec<String>) -> Result<(), Stop> {
     match ci.verdict(wf, head) {
         Verdict::Green { run } => {
-            let _ = writeln!(log, "train land: {wf}: full green run {run} on {} (ci verdict)", short(head));
+            let line = format!("{wf}: full green run {run} on {} (ci verdict)", short(head));
+            let _ = writeln!(log, "train land: {line}");
+            notes.push(line);
             Ok(())
         }
-        Verdict::Red { reason, .. } => Err(Stop::new(
-            format!("{wf} has no full green run on {}: {reason}", short(head)),
+        Verdict::Red { run: Some(_), reason } => match ci.landable(wf, head) {
+            Ok(full) => {
+                let _ = writeln!(log, "train land: {wf}: landed on a {}", full.summary);
+                for l in &full.lines {
+                    let _ = writeln!(log, "train land: {wf}:   {l}");
+                }
+                notes.push(format!("{wf}: landed on a {}", full.summary));
+                notes.extend(full.lines.iter().map(|l| format!("{wf}:   {l}")));
+                Ok(())
+            }
+            Err(why) => Err(Stop::new(
+                format!(
+                    "{wf} has no full green run on {} and its red run is not landable: {reason}; {why}",
+                    short(head)
+                ),
+                format!(
+                    "run the release sequence (`./dev train release`) until `./dev ci verdict --workflow {wf} --sha {head}` is green, or until the only failures are tests ER-12 lets you accept (--accept-flaky), then land"
+                ),
+            )),
+        },
+        Verdict::Red { run: None, reason } => Err(Stop::new(
+            format!("{wf} has no full run of {}: {reason}", short(head)),
             format!(
                 "run the release sequence (`./dev train release`) until `./dev ci verdict --workflow {wf} --sha {head}` is green, then land"
             ),
@@ -77,6 +108,39 @@ fn require_green(ci: &mut dyn Ci, wf: &str, head: &str, log: &mut dyn Write) -> 
             "fix what it names (GITEA_TOKEN, the network); not measured is never a pass, nothing was pushed",
         )),
     }
+}
+
+/// Rule 54: a release workflow's app that the plan from main reaches must have a green release run on this train: one on the head,
+/// or on an earlier commit of the train that is an ancestor of the head with the plan from there to the head not reaching the app.
+fn require_release(ci: &mut dyn Ci, git: &mut dyn Git, branch: &str, wf: &str, head: &str, log: &mut dyn Write) -> Result<(), Stop> {
+    let app = app_of(wf);
+    let runs = ci.release_runs(wf, branch).map_err(|e| {
+        Stop::new(
+            format!("the {wf} runs of {branch} could not be read: {e}"),
+            "check GITEA_TOKEN and the network, then land again",
+        )
+    })?;
+    for (run, sha) in runs {
+        let covered = if sha == head {
+            true
+        } else {
+            git.is_ancestor(&sha, head).unwrap_or(false)
+                && ci
+                    .projects(&sha, head)
+                    .is_ok_and(|p| !p.contains("*") && !p.iter().any(|x| x.eq_ignore_ascii_case(&app)))
+        };
+        if covered {
+            let _ = writeln!(log, "train land: {wf}: green release run {run} covers {} (rule 54)", short(head));
+            return Ok(());
+        }
+    }
+    Err(Stop::new(
+        format!(
+            "the plan reaches {app} but no green {wf} run on {branch} covers {} (rule 54)",
+            short(head)
+        ),
+        format!("run the release sequence (`./dev train release`) so {wf} builds the installers, then land"),
+    ))
 }
 
 /// Fast-forwards `main` to the head of `branch` and verifies it.
@@ -124,17 +188,25 @@ pub fn land(branch: &str, git: &mut dyn Git, ci: &mut dyn Ci, log: &mut dyn Writ
             "merge origin/main into the train, push it through the gate and run the CI sequence again; never force or rebase",
         ));
     }
-    // ER-10: nothing lands without the full green run on this exact head, as the one shared reader says (a missing, partial, red or
-    // not measured verdict pushes nothing). debrief.yml too when the plan from main reaches the Debrief app.
-    require_green(ci, "ci.yml", &head, log)?;
-    let debrief = ci.reaches("debrief", &main, &head).map_err(|e| {
+    // ER-10: nothing lands without the full run on this exact head, green by the one shared reader, or red only by what ER-12 lets
+    // a train land on (a sealed `Landable`, never a weaker `Verdict`); a missing, partial, red or not measured one pushes nothing.
+    let mut notes = Vec::new();
+    require_full(ci, "ci.yml", &head, log, &mut notes)?;
+    let projects = ci.projects(&main, &head).map_err(|e| {
         Stop::new(
             format!("the plan of {}..{} could not be read: {e}", short(&main), short(&head)),
             "fix the planner error above, then run `./dev train land` again",
         )
     })?;
-    if debrief {
-        require_green(ci, "debrief.yml", &head, log)?;
+    let reaches = |app: &str| projects.contains("*") || projects.iter().any(|p| p.eq_ignore_ascii_case(app));
+    if reaches("debrief") {
+        require_full(ci, "debrief.yml", &head, log, &mut notes)?;
+    }
+    for (wf, _) in RELEASE_WORKFLOWS {
+        if reaches(&app_of(wf)) {
+            require_release(ci, git, branch, wf, &head, log)?;
+            notes.push(format!("{wf}: a green release run covers the head (rule 54)"));
+        }
     }
     let _ = writeln!(log, "train land: fast-forwarding main {} -> {}", short(&main), short(&head));
     git.push_ff(&head, "main").map_err(git_err("the push of main was refused"))?;
@@ -153,7 +225,11 @@ pub fn land(branch: &str, git: &mut dyn Git, ci: &mut dyn Ci, log: &mut dyn Writ
         ));
     }
     let _ = writeln!(log, "train land: LANDED main={} (verified with ls-remote)", short(&now));
-    Ok(Landed::FastForwarded { from: main, to: head })
+    Ok(Landed::FastForwarded {
+        from: main,
+        to: head,
+        notes,
+    })
 }
 
 #[cfg(test)]
@@ -215,7 +291,10 @@ mod tests {
 
     struct FakeCi {
         verdicts: BTreeMap<String, Verdict>,
-        debrief_reached: bool,
+        landables: BTreeMap<String, Result<FullRun, String>>,
+        projects: BTreeSet<String>,
+        releases: BTreeMap<String, Vec<(u64, String)>>,
+        later_projects: BTreeSet<String>,
         asked: Vec<String>,
     }
     fn green() -> FakeCi {
@@ -224,8 +303,21 @@ mod tests {
                 ("ci.yml".to_string(), Verdict::Green { run: 1 }),
                 ("debrief.yml".to_string(), Verdict::Green { run: 2 }),
             ]),
-            debrief_reached: false,
+            landables: BTreeMap::new(),
+            projects: BTreeSet::new(),
+            releases: BTreeMap::new(),
+            later_projects: BTreeSet::new(),
             asked: Vec::new(),
+        }
+    }
+    fn red(run: Option<u64>) -> Verdict {
+        Verdict::Red { run, reason: "red".into() }
+    }
+    fn full() -> FullRun {
+        FullRun {
+            run: 5,
+            summary: "full run 5 with 1 accepted FLAKY, 0 already failing on main".into(),
+            lines: vec!["accepted FLAKY (e2e): a test".into()],
         }
     }
     impl Ci for FakeCi {
@@ -236,8 +328,21 @@ mod tests {
                 .cloned()
                 .unwrap_or(Verdict::NotMeasured("no verdict in the table".into()))
         }
-        fn reaches(&mut self, _: &str, _: &str, _: &str) -> Result<bool, String> {
-            Ok(self.debrief_reached)
+        fn landable(&mut self, workflow: &str, _: &str) -> Result<FullRun, String> {
+            self.landables
+                .get(workflow)
+                .cloned()
+                .unwrap_or(Err("no landable in the table".into()))
+        }
+        fn projects(&mut self, from: &str, _: &str) -> Result<BTreeSet<String>, String> {
+            Ok(if from == OLD {
+                self.projects.clone()
+            } else {
+                self.later_projects.clone()
+            })
+        }
+        fn release_runs(&mut self, workflow: &str, _: &str) -> Result<Vec<(u64, String)>, String> {
+            Ok(self.releases.get(workflow).cloned().unwrap_or_default())
         }
     }
 
@@ -245,19 +350,27 @@ mod tests {
         land("train/x", f, &mut green(), &mut Vec::new())
     }
 
-    /// P1-1: a verdict that is not Green for the exact head pushes nothing.
+    /// The positive control: a train that is ahead of main, pushed and checked out, with a green full run, lands, and the remote says so.
+    #[test]
+    fn a_fast_forward_lands_and_is_verified() {
+        let mut f = fake();
+        let got = run(&mut f).unwrap();
+        let Landed::FastForwarded { from, to, notes } = got else {
+            panic!("{got:?}")
+        };
+        assert_eq!((from.as_str(), to.as_str()), (OLD, HEAD));
+        assert!(notes[0].contains("full green run 1"), "{notes:?}");
+        assert_eq!(f.pushed, vec![(HEAD.to_string(), "main".to_string())]);
+        assert_eq!(f.fetched, 1);
+    }
+
+    /// A verdict that is not Green (and not landable) for the exact head pushes nothing.
     #[test]
     fn a_missing_partial_red_or_not_measured_verdict_pushes_nothing() {
         for v in [
             None,
-            Some(Verdict::Red {
-                run: None,
-                reason: "only partial runs".into(),
-            }),
-            Some(Verdict::Red {
-                run: Some(5),
-                reason: "it failed".into(),
-            }),
+            Some(red(None)),
+            Some(red(Some(5))),
             Some(Verdict::NotMeasured("no token".into())),
         ] {
             let mut f = fake();
@@ -272,17 +385,41 @@ mod tests {
         }
     }
 
+    /// ER-12: a red full run lands only when the train-only `Landable` says so; its accepted rows are logged and noted.
+    #[test]
+    fn a_red_full_run_lands_only_when_it_is_landable_and_says_what_was_accepted() {
+        let mut ci = green();
+        ci.verdicts.insert("ci.yml".into(), red(Some(5)));
+        ci.landables.insert("ci.yml".into(), Ok(full()));
+        let (mut f, mut log) = (fake(), Vec::new());
+        let got = land("train/x", &mut f, &mut ci, &mut log).unwrap();
+        let Landed::FastForwarded { notes, .. } = got else { panic!() };
+        assert!(
+            notes
+                .iter()
+                .any(|n| n.contains("landed on a full run 5 with 1 accepted FLAKY, 0 already failing on main")),
+            "{notes:?}"
+        );
+        assert!(String::from_utf8(log).unwrap().contains("accepted FLAKY (e2e): a test"));
+        assert_eq!(f.pushed.len(), 1);
+        // not landable: refused with both reasons, nothing pushed
+        let mut ci = green();
+        ci.verdicts.insert("ci.yml".into(), red(Some(5)));
+        ci.landables.insert("ci.yml".into(), Err("a NEW failure".into()));
+        let mut f = fake();
+        let stop = land("train/x", &mut f, &mut ci, &mut Vec::new()).unwrap_err();
+        assert!(
+            stop.cause.contains("not landable") && stop.cause.contains("a NEW failure"),
+            "{stop:?}"
+        );
+        assert!(f.pushed.is_empty());
+    }
+
     #[test]
     fn debrief_must_be_green_too_when_the_plan_reaches_it_and_only_then() {
         let mut ci = green();
-        ci.debrief_reached = true;
-        ci.verdicts.insert(
-            "debrief.yml".into(),
-            Verdict::Red {
-                run: Some(3),
-                reason: "red".into(),
-            },
-        );
+        ci.projects = BTreeSet::from(["debrief".to_string()]);
+        ci.verdicts.insert("debrief.yml".into(), red(Some(3)));
         let mut f = fake();
         assert!(
             land("train/x", &mut f, &mut ci, &mut Vec::new())
@@ -291,40 +428,64 @@ mod tests {
                 .contains("debrief.yml")
         );
         assert!(f.pushed.is_empty());
-        // not reached: its verdict is not even asked for
         let mut ci = green();
-        ci.verdicts.insert(
-            "debrief.yml".into(),
-            Verdict::Red {
-                run: Some(3),
-                reason: "red".into(),
-            },
-        );
+        ci.verdicts.insert("debrief.yml".into(), red(Some(3)));
         let mut f = fake();
         land("train/x", &mut f, &mut ci, &mut Vec::new()).unwrap();
-        assert_eq!(ci.asked, vec!["ci.yml".to_string()]);
-        // reached and green: lands
+        assert_eq!(ci.asked, vec!["ci.yml".to_string()], "not reached: not even asked");
         let mut ci = green();
-        ci.debrief_reached = true;
+        ci.projects = BTreeSet::from(["debrief".to_string()]);
+        ci.releases.insert("dyno-release.yml".into(), vec![]);
         let mut f = fake();
         land("train/x", &mut f, &mut ci, &mut Vec::new()).unwrap();
         assert_eq!(f.pushed.len(), 1);
     }
 
-    /// The positive control: a train that is ahead of main, pushed and checked out, lands, and the remote says so.
+    /// Rule 54: an app whose release path the plan reaches needs a green release run on the head, or on an earlier train commit with
+    /// the app not reached since; a missing, red-only or unrelated one pushes nothing.
     #[test]
-    fn a_fast_forward_lands_and_is_verified() {
+    fn a_reached_apps_release_run_must_cover_the_head() {
+        let reached = || {
+            let mut ci = green();
+            ci.projects = BTreeSet::from(["dyno".to_string()]);
+            ci
+        };
+        // none
         let mut f = fake();
-        let got = run(&mut f).unwrap();
-        assert_eq!(
-            got,
-            Landed::FastForwarded {
-                from: OLD.into(),
-                to: HEAD.into()
-            }
+        let stop = land("train/x", &mut f, &mut reached(), &mut Vec::new()).unwrap_err();
+        assert!(
+            stop.cause.contains("dyno") && stop.cause.contains("dyno-release.yml") && stop.cause.contains("rule 54"),
+            "{stop:?}"
         );
-        assert_eq!(f.pushed, vec![(HEAD.to_string(), "main".to_string())]);
-        assert_eq!(f.fetched, 1);
+        assert!(f.pushed.is_empty());
+        // on the head
+        let mut ci = reached();
+        ci.releases.insert("dyno-release.yml".into(), vec![(9, HEAD.into())]);
+        let mut f = fake();
+        land("train/x", &mut f, &mut ci, &mut Vec::new()).unwrap();
+        // on an earlier commit, app not reached since
+        let mut ci = reached();
+        ci.releases.insert("dyno-release.yml".into(), vec![(8, "cccccccc".into())]);
+        let mut f = fake();
+        land("train/x", &mut f, &mut ci, &mut Vec::new()).unwrap();
+        // on an earlier commit, app reached since, or not an ancestor
+        let mut ci = reached();
+        ci.releases.insert("dyno-release.yml".into(), vec![(8, "cccccccc".into())]);
+        ci.later_projects = BTreeSet::from(["dyno".to_string()]);
+        let mut f = fake();
+        assert!(land("train/x", &mut f, &mut ci, &mut Vec::new()).is_err());
+        let mut ci = reached();
+        ci.releases.insert("dyno-release.yml".into(), vec![(8, "cccccccc".into())]);
+        let mut f = fake();
+        f.ancestor = false;
+        // (main..head is also "not an ancestor" for the fast-forward check, so this one stops there; both push nothing)
+        assert!(land("train/x", &mut f, &mut ci, &mut Vec::new()).is_err());
+        assert!(f.pushed.is_empty());
+        // everything reached: every release workflow is needed
+        let mut ci = green();
+        ci.projects = BTreeSet::from(["*".to_string()]);
+        let mut f = fake();
+        assert!(land("train/x", &mut f, &mut ci, &mut Vec::new()).is_err());
     }
 
     #[test]

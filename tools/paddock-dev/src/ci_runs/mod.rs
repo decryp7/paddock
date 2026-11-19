@@ -16,6 +16,7 @@
 pub mod client;
 pub mod dispatch;
 pub mod flakes;
+pub mod landable;
 pub mod logfind;
 pub mod members;
 pub mod preconditions;

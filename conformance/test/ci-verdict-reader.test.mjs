@@ -8,6 +8,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { test } from 'node:test';
 import { PADDOCK } from './helpers.mjs';
+import { baselineGrowth, isCi } from '../src/util/baseline.mjs';
 import { conjuncts, expr, job as workflowJob, loadWorkflow, stepsUsing } from './lib/workflow.mjs';
 
 // ---- the marker ---------------------------------------------------------------------------------------------------------------
@@ -278,8 +279,30 @@ export function conclusionReaders(root, dirs = DECISION_DIRS, home = DECISION_HO
     .sort();
 }
 
+const READERS_LIST = 'conformance/ci/run-conclusion-readers.json';
+
+/**
+ * The shrink-only rule of the list (ER-46) against the merge base with the target ref (`targetRef`: PADDOCK_BASE_REF, else
+ * origin/main), through the shared baseline reader. An entry not in the base list throws. A list that does not exist at the base is
+ * its own creation: that is growth that needs the user's approval (ER-46), and the check is new, so it is report-only until the
+ * list is on the target branch (ER-41, and the shared reader's own note on a check's first list): a warning that says so, never
+ * silence. Where the base cannot be read it warns, and in CI it throws (not measured is never a pass).
+ */
+export function listGrowth(listed, extra = {}) {
+  const g = baselineGrowth({ root: PADDOCK, path: READERS_LIST, current: listed, keyOf: (f) => f, entriesOf: (j) => j.files, ...extra });
+  if (g.reason) {
+    if (extra.ci ?? isCi()) throw new Error(`${READERS_LIST}: not measured, the target ref is not usable: ${g.reason}`);
+    console.warn(`${READERS_LIST}: the shrink-only rule is not enforced here: ${g.reason}`);
+  } else if (g.absent) {
+    console.warn(`${READERS_LIST}: a new list (${listed.length} entries); its creation is growth that needs the user's approval (ER-46) and it is report-only until it is on the target branch (ER-41)`);
+  } else if (g.added.length) {
+    throw new Error(`${READERS_LIST} grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base (${g.added.slice(0, 5).join('; ')}). It may only shrink.`);
+  }
+  return g;
+}
+
 test('a pass decision from a run conclusion lives only in ci_runs/verdict.rs, besides the listed old readers, which only shrink', () => {
-  const listed = JSON.parse(readFileSync(join(PADDOCK, 'conformance/ci/run-conclusion-readers.json'), 'utf8')).files;
+  const listed = JSON.parse(readFileSync(join(PADDOCK, READERS_LIST), 'utf8')).files;
   const found = conclusionReaders(PADDOCK);
   assert.deepEqual(
     found.filter((f) => !listed.includes(f)),
@@ -291,6 +314,31 @@ test('a pass decision from a run conclusion lives only in ci_runs/verdict.rs, be
     [],
     'a listed file no longer reads a conclusion: remove it from conformance/ci/run-conclusion-readers.json (the list only shrinks)',
   );
+  // ER-46: against the merge base, never by this test's own memory. The list's first creation is growth until the user approves it.
+  listGrowth(listed);
+});
+
+const gitBase = (base) => (args) => {
+  if (args[0] === 'rev-parse') return args[1] === 'HEAD' ? 'def\n' : 'abc\n';
+  if (args[0] === 'merge-base') return 'abc\n';
+  if (args[0] === 'show') {
+    if (base === null) throw Object.assign(new Error('fatal: path does not exist'), { stderr: 'fatal: path does not exist' });
+    return base;
+  }
+  throw new Error(`unexpected git ${args.join(' ')}`);
+};
+
+test('the shrink-only check sees an added entry, a new list and a target it cannot read (positive control)', () => {
+  const base = JSON.stringify({ files: ['a.rs', 'b.rs'] });
+  assert.doesNotThrow(() => listGrowth(['a.rs'], { git: gitBase(base) }), 'shrinking is fine');
+  assert.throws(() => listGrowth(['a.rs', 'c.rs'], { git: gitBase(base) }), /grew.*c\.rs/, 'an added entry is growth');
+  const created = listGrowth(['a.rs', 'b.rs'], { git: gitBase(null) });
+  assert.equal(created.absent, true, 'a list absent at the base is a creation: reported (a warning), report-only until it is on the target (ER-41)');
+  assert.deepEqual(created.added, ['a.rs', 'b.rs'], 'and every entry of it counts as growth in the reader');
+  const noGit = () => {
+    throw new Error('not a git repository');
+  };
+  assert.throws(() => listGrowth(['a.rs'], { git: noGit, ci: true }), /not measured/, 'in CI an unreadable target is not a pass');
 });
 
 test('the conclusion scan sees a pass decision in Rust and in JavaScript, and not the home or a mere mention (positive control)', async () => {

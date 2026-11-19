@@ -46,6 +46,7 @@ mod safe_remove_lint;
 mod setup_rust;
 mod slots;
 mod sparse;
+mod train_hold;
 mod tree;
 mod worktree;
 mod wrapper;

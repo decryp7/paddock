@@ -123,6 +123,17 @@ pub enum RunEnd {
     Unfinished(String),
 }
 
+/// A full run the train may land on although it is red: the sealed `ci_runs::landable::Landable`, as text (its accepted rows).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FullRun {
+    /// The run.
+    pub run: u64,
+    /// "full run N with M accepted FLAKY, K already failing on main".
+    pub summary: String,
+    /// One line per accepted row.
+    pub lines: Vec<String>,
+}
+
 /// What the planner says about a diff, for one app.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reach {
@@ -146,6 +157,8 @@ pub trait Ports {
     fn run_facts(&mut self, run: u64) -> Result<Option<RunFacts>, String>;
     /// The shared reader's verdict ([`crate::ci_runs::verdict::verdict`]) of a workflow on a commit.
     fn ci_verdict(&mut self, workflow: &str, sha: &str) -> Verdict;
+    /// The train-only answer for a full run that is red by failures ER-12 lets a train land on (`ci_runs::landable`), or why not.
+    fn landable(&mut self, workflow: &str, sha: &str) -> Result<FullRun, String>;
     /// `ci triage <run>` as the JSON `ci triage --json` prints, `ok` included. `Err` when it could not be made.
     fn triage(&mut self, run: u64) -> Result<Value, String>;
     /// Whether `ancestor` is reachable from `of` in this clone.
@@ -192,6 +205,8 @@ pub enum Source {
     Reused(u64),
     /// The shared reader already had a full green run of the head (not dispatched again).
     Verdict(u64),
+    /// A full run that is red only by accepted FLAKY tests and failures already on main (the train-only `Landable`).
+    Landable(u64),
 }
 
 /// A green sequence: the workflows in order and what covered each.
@@ -287,35 +302,71 @@ impl Seq<'_> {
         Ok((run, end))
     }
 
-    /// A full run of `wf` on the train head: the shared reader's verdict decides, the conclusion of one run never does. A green
-    /// verdict that already exists is used; otherwise the workflow is dispatched in full (no `since_run`) and read again.
-    fn full(&mut self, wf: &str, inputs: &[(&str, &str)]) -> Result<(), Stop> {
+    /// The full run of `wf` on the head, if it is acceptable now: green by the shared reader, or red only by what the train may
+    /// land on (`Landable`, every accepted row logged). `None` when there is no such run (yet); `Err` when a full run is red and
+    /// not landable, or cannot be measured.
+    fn accepted_full(&mut self, wf: &str, run_dispatched: Option<u64>) -> Result<Option<Source>, Stop> {
         let sha = self.plan.sha.clone();
-        if let Verdict::Green { run } = self.ports.ci_verdict(wf, &sha) {
-            let _ = writeln!(
-                self.log,
-                "train: {wf}: the shared reader already has a full green run {run} of {}",
-                short(&sha)
-            );
-            self.steps.push((wf.to_string(), Source::Verdict(run)));
+        match self.ports.ci_verdict(wf, &sha) {
+            Verdict::Green { run } => {
+                let _ = writeln!(
+                    self.log,
+                    "train: {wf}: the shared reader has a full green run {run} of {}",
+                    short(&sha)
+                );
+                Ok(Some(Source::Verdict(run)))
+            }
+            Verdict::Red { run: Some(red), reason } => match self.ports.landable(wf, &sha) {
+                Ok(full) => {
+                    let _ = writeln!(self.log, "train: {wf}: landing on a {}", full.summary);
+                    for l in &full.lines {
+                        let _ = writeln!(self.log, "train: {wf}:   {l}");
+                    }
+                    Ok(Some(Source::Landable(full.run)))
+                }
+                Err(why) if run_dispatched.is_some() => Err(Stop::new(
+                    format!("the full {wf} run {red} is not green by `ci verdict` ({reason}) and not landable: {why}"),
+                    format!("read it with `./dev ci triage {red}`, fix the cause in its owner's branch, then run the sequence again"),
+                )),
+                Err(_) => Ok(None),
+            },
+            Verdict::Red { run: None, reason } => match run_dispatched {
+                Some(run) => Err(Stop::new(
+                    format!("the full {wf} run {run} is not green by `ci verdict`: {reason}"),
+                    format!("read it with `./dev ci triage {run}`, fix the cause in its owner's branch, then run the sequence again"),
+                )),
+                None => Ok(None),
+            },
+            Verdict::NotMeasured(why) => match run_dispatched {
+                Some(run) => Err(Stop::new(
+                    format!("the full {wf} run {run} could not be measured by `ci verdict`: {why}"),
+                    "fix what it names (the token, the network, a plan job log) and run the sequence again; not measured is never a pass",
+                )),
+                None => Ok(None),
+            },
+        }
+    }
+
+    /// A full run of `wf` on the train head: the shared reader decides (green), or the sealed `Landable` for a red one whose
+    /// failures ER-12 lets a train land on; the conclusion of one run never does. An acceptable run that already exists is used;
+    /// otherwise the workflow is dispatched in full (no `since_run`) and read again.
+    fn full(&mut self, wf: &str, inputs: &[(&str, &str)]) -> Result<(), Stop> {
+        if let Some(source) = self.accepted_full(wf, None)? {
+            self.steps.push((wf.to_string(), source));
             return Ok(());
         }
         let (run, end) = self.dispatch_and_wait(wf, inputs, None)?;
         if let RunEnd::Unfinished(why) = end {
             return Err(unfinished(wf, run, &why));
         }
-        match self.ports.ci_verdict(wf, &sha) {
-            Verdict::Green { run } => {
-                self.steps.push((wf.to_string(), Source::Verdict(run)));
+        match self.accepted_full(wf, Some(run))? {
+            Some(source) => {
+                self.steps.push((wf.to_string(), source));
                 Ok(())
             }
-            Verdict::Red { reason, .. } => Err(Stop::new(
-                format!("the full {wf} run {run} is not green by `ci verdict`: {reason}"),
-                format!("read it with `./dev ci triage {run}`, fix the cause in its owner's branch, then run the sequence again"),
-            )),
-            Verdict::NotMeasured(why) => Err(Stop::new(
-                format!("the full {wf} run {run} could not be measured by `ci verdict`: {why}"),
-                "fix what it names (the token, the network, a plan job log) and run the sequence again; not measured is never a pass",
+            None => Err(Stop::new(
+                format!("the full {wf} run {run} could not be accepted"),
+                "read it with `./dev ci triage`",
             )),
         }
     }
@@ -445,6 +496,10 @@ impl Seq<'_> {
                 if f.workflow != wf {
                     return Err(wrong(format!("it is a run of {}, not of {wf}", f.workflow)));
                 }
+                let want_ref = format!("refs/heads/{}", self.plan.branch);
+                if f.git_ref != want_ref {
+                    return Err(wrong(format!("it ran on {:?}, not on this train's ref {want_ref}", f.git_ref)));
+                }
                 match f.result {
                     RunResult::Failure => {}
                     RunResult::Success => return Err(wrong("it is green: there is nothing to repeat".into())),
@@ -483,6 +538,10 @@ impl Seq<'_> {
                 };
                 if f.workflow != wf {
                     return Err(wrong(format!("it is a run of {}, not of {wf}", f.workflow)));
+                }
+                let want_ref = format!("refs/heads/{}", self.plan.branch);
+                if f.git_ref != want_ref {
+                    return Err(wrong(format!("it ran on {:?}, not on this train's ref {want_ref}", f.git_ref)));
                 }
                 if f.head_sha != self.plan.sha {
                     return Err(wrong(format!(

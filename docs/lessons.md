@@ -3135,3 +3135,10 @@ accepted flaky tests is red for `ci verdict`, so such a train does not land unti
 green, ER-12). The 60-minute push ceiling in `real.rs` is about ten times the 343 s measured for the pre-push gate of the first push of this branch.
 Not done: counting jobs skipped behind a failed `needs`; Gitea's job list carries no `needs` and the display names carry matrix expressions, so a
 mapping would be a guess. The full-run requirement closes the hole instead: a job hidden behind a failure leaves the full run red.
+
+Second review round (2026-11-20): the shrink-only list is checked against the merge base through the shared baseline reader (its creation
+is growth until the user approves it, ER-46); `land` accepts a red full run only through the sealed `Landable` (ER-12 at the feature level, with
+a per-app location, an optional `feature-sources.json` declaration and fail-closed resolution), never by weakening `Verdict::Green`; `land`
+also requires a release run for every app the plan reaches (rule 54). The held child gets Ctrl-C and SIGTERM and an explicit release after it is
+ended (the exit trap does not run for a tree kill; a later acquire takes the dead holder over, tested with the real scripts); the proof compares
+the lock root with the one `./dev places` derives; the planner is bounded; `--since-run` must be on the train's ref.
