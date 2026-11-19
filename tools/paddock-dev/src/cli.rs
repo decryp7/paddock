@@ -1,7 +1,7 @@
 use crate::{
     audit, brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, disk, gates,
     generators, golden_cmd, heavy_cmd, hook, input_hash, ipc_endpoints, load, local_sccache, locks, merge_check, places, plan, plan_cmd,
-    pr, pre_push, queue, release_isolation, slots, wait, worktree,
+    pr, pre_push, queue, release_isolation, slots, train, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -93,15 +93,16 @@ enum Command {
         #[command(subcommand)]
         command: SccacheCommand,
     },
+    /// The train integrator's release sequence and landing: `release` (a judged failed-only fix round, debrief.yml, the release
+    /// workflows, under the train-CI hold) and `land` (fast-forward main and verify it).
+    Train {
+        #[command(subcommand)]
+        command: train::TrainCommand,
+    },
     /// Disk watch and clean-up: free-space check, usage report, scan, owner records, clean.
     Disk {
         #[command(subcommand)]
         command: disk::DiskCommand,
-    },
-    /// After a train lands on main: the disk clean of the integrator's landing step.
-    Train {
-        #[command(subcommand)]
-        command: TrainCommand,
     },
     /// The branch ledger on Gitea pull requests: open (a draft), label, list, sync (the labels of .gitea/labels.toml) and
     /// plan-status (plan rows checked against the ledger). Reads GITEA_TOKEN; opening a pull request starts no CI run.
@@ -298,14 +299,6 @@ struct MergeCheckArgs {
     /// Any other finding stays a finding for a person to answer.
     #[arg(long, value_name = "FILE")]
     write_reverted: Option<PathBuf>,
-}
-
-#[derive(Subcommand)]
-enum TrainCommand {
-    /// Run the safe disk clean (`disk clean --apply`: merged or stale-pushed folders and worktrees that are not live, and released
-    /// review worktrees whose commits are all on origin) after a train landed on main. Bounded by --max (default 10m); it never
-    /// blocks the landing: an error or a timeout is a `::warning::` and the exit code stays 0. Logs what went and the space freed.
-    Landed(disk::landing::LandedArgs),
 }
 
 #[derive(Subcommand)]
@@ -805,14 +798,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             Ok(Report::new(serde_json::json!({ "lines": lines }), lines.join("\n")))
         }
         Command::Disk { command } => disk::command(command),
-        Command::Train {
-            command: TrainCommand::Landed(a),
-        } => disk::landing::landed(
-            &a,
-            &|k| std::env::var(k).ok(),
-            &mut |l| eprintln!("{l}"),
-            &|| crate::worktree::procs::process_folders().ok(),
-        ),
+        Command::Train { command } => train::command(command),
         Command::Pr { command } => pr::command(command),
         Command::Queue { command } => queue::command(command),
         Command::Merge {

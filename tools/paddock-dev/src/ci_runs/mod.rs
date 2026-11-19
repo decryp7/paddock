@@ -288,7 +288,7 @@ pub struct RecordArgs {
     server: String,
 }
 
-fn token() -> Result<String, CliError> {
+pub(crate) fn token() -> Result<String, CliError> {
     token_from(std::env::var("GITEA_TOKEN").ok())
 }
 
