@@ -1,0 +1,130 @@
+# Trial, never lands (branch diag/sccache-s3-trial): the paddock-dev job's builds on the three runner classes with
+# sccache-backend s3 chosen in the workflow itself (so the repository variable PADDOCK_CI_SCCACHE_BACKEND stays unset), to measure
+# docs/research/2026-11-19-sccache.md WP-8: whether each runner reaches RustFS and the hit rate and time of a cold and a warm run.
+# Run it twice in a row through `./dev ci dispatch sccache-s3-trial.yml --trial diag/sccache-s3-trial`.
+name: sccache-s3-trial
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: The train or main sha the trial branch was merged onto (set by `./dev ci dispatch --trial`).
+        required: false
+        default: ""
+
+env:
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: tools/paddock-dev
+        shell: bash
+    env:
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+        if: runner.os == 'Linux'
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        if: runner.os != 'Linux'
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .cargo
+            .gitea
+            conformance
+            scripts
+            tools
+            crates
+          filter: blob:none
+
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        working-directory: .
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+
+      - uses: ./.gitea/actions/build-jobs
+
+      - uses: ./.gitea/actions/job-isolation
+
+      - uses: ./.gitea/actions/kept-clone
+        if: runner.os != 'Linux'
+        with:
+          name: paddock-checkout-${{ runner.os }}
+          profile: lean
+
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+          name: paddock-trial-${{ github.run_id }}
+
+      - name: Reach RustFS (an unauthenticated health check)
+        run: |
+          echo "runner: $RUNNER_NAME ($RUNNER_OS $RUNNER_ARCH)"
+          curl -s -o /dev/null -w "health: http %{http_code}, connect %{time_connect} s, total %{time_total} s\n" --connect-timeout 3 --max-time 5 \
+            http://172.16.1.220:15000/minio/health/live || echo "::warning::no answer from 172.16.1.220:15000 within 5 s"
+
+      # A cold local cache with a warm S3 store: the L0 disk starts empty, so every hit is read from S3 (L1). The build folder is new
+      # per run (its name has the run id), so cargo calls rustc for every crate.
+      - name: Empty local cache
+        working-directory: .
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            echo "PADDOCK_SCCACHE_MOUNT=/nonexistent-sccache-mount" >> "$GITHUB_ENV"
+          else
+            dir="$("$PADDOCK_DEV" ci isolation path sccache)"
+            echo "local sccache folder: $dir"
+            PADDOCK_PRUNE_UNIT=kb "$PADDOCK_DEV" ci prune-folder "$dir" 0 || echo "::warning::could not empty the local sccache folder"
+          fi
+
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          components: clippy,rustfmt
+          sccache-backend: s3
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
+
+      - uses: ./.gitea/actions/host-tools
+
+      - name: Clippy (builds every dependency and the crate)
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: |
+          start=$(date +%s)
+          cargo clippy --all-targets --locked -- -D warnings
+          echo "clippy took $(( $(date +%s) - start )) s"
+
+      - name: Build the tests
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: |
+          start=$(date +%s)
+          cargo nextest run --profile ci --locked --no-run
+          echo "test build took $(( $(date +%s) - start )) s"
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+      - uses: ./.gitea/actions/prune-build-folder
+        if: always() && runner.os != 'Linux'
+
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release

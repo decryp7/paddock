@@ -131,6 +131,12 @@ on:
         required: false
       RELEASE_TOKEN:
         required: false
+      PADDOCK_SCCACHE_S3_ACCESS_KEY_ID:
+        description: CI's compile cache on the shared S3 store (C141; docs/research/2026-11-19-sccache.md section 8).
+        required: false
+      PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY:
+        description: CI's compile cache on the shared S3 store (C141; docs/research/2026-11-19-sccache.md section 8).
+        required: false
 
 env:
   # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
@@ -221,6 +227,9 @@ jobs:
           name: ${{ inputs.app-id }}-bundle
 
       - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - uses: ./.gitea/actions/setup-node
         if: runner.os == 'Linux' && inputs.setup-node
@@ -452,6 +461,9 @@ jobs:
           done
 
       - uses: ./.paddock/.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       # git-cliff comes with the Paddock CI image; other images build it once.
       - name: Changelog of this release

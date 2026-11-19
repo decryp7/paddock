@@ -57,6 +57,9 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
       - name: C100
         run: ./dev gates check
 
@@ -148,6 +151,8 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
         with:
           tauri-linux-deps: "true"
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - uses: ./.gitea/actions/setup-node
         with:
@@ -269,6 +274,8 @@ jobs:
       TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      PADDOCK_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+      PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   installers-spotter:
     name: installers (Spotter, no publish)
@@ -301,6 +308,8 @@ jobs:
       TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      PADDOCK_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+      PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   installers-pitcrew:
     name: installers (Pitcrew, no publish)
@@ -331,6 +340,8 @@ jobs:
       TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      PADDOCK_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+      PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   installers-pitwall:
     name: installers (Pitwall, no publish)
@@ -372,6 +383,8 @@ jobs:
       TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      PADDOCK_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+      PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   installers-verdict:
     name: installers verdict (the nightly built them, or it fails)
@@ -434,6 +447,9 @@ jobs:
     needs: [gate]
     if: ${{ needs.gate.outputs.run == 'true' }}
     uses: ./.gitea/workflows/app-fuzz.yml
+    secrets:
+      PADDOCK_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+      PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
     with:
       paddock-ref: ${{ github.sha }}
       fuzz-dir: crates/paddock-ipc/fuzz
@@ -446,6 +462,9 @@ jobs:
     needs: [gate]
     if: ${{ needs.gate.outputs.run == 'true' }}
     uses: ./.gitea/workflows/app-fuzz.yml
+    secrets:
+      PADDOCK_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+      PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
     with:
       paddock-ref: ${{ github.sha }}
       fuzz-dir: crates/paddock-plugin-package/fuzz
@@ -458,6 +477,9 @@ jobs:
     needs: [gate, fuzz-ipc]
     if: ${{ !cancelled() && needs.gate.outputs.run == 'true' }}
     uses: ./.gitea/workflows/app-fuzz.yml
+    secrets:
+      PADDOCK_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+      PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
     with:
       paddock-ref: ${{ github.sha }}
       fuzz-dir: crates/paddock-view/fuzz
@@ -470,6 +492,9 @@ jobs:
     needs: [gate, fuzz-plugin-package]
     if: ${{ !cancelled() && needs.gate.outputs.run == 'true' }}
     uses: ./.gitea/workflows/app-fuzz.yml
+    secrets:
+      PADDOCK_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+      PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
     with:
       paddock-ref: ${{ github.sha }}
       fuzz-dir: crates/paddock-archive/fuzz
@@ -482,6 +507,9 @@ jobs:
     needs: [gate, fuzz-view]
     if: ${{ !cancelled() && needs.gate.outputs.run == 'true' }}
     uses: ./.gitea/workflows/app-fuzz.yml
+    secrets:
+      PADDOCK_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+      PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
     with:
       paddock-ref: ${{ github.sha }}
       fuzz-dir: crates/paddock-testplan/fuzz
@@ -515,6 +543,9 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
       - uses: ./.gitea/actions/node-caches
       - name: Install
         run: npm ci
@@ -549,6 +580,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
       - name: Audit main
         run: |
           enforce=()

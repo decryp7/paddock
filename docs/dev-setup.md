@@ -148,15 +148,18 @@ since Rust 1.90), where mold saves a little more per link. macOS keeps the defau
 
 ## Shared build cache
 
-CI Rust jobs on every OS (Linux, Windows, macOS) share one compile cache: a Dragonfly (Redis-compatible) server at
-`172.16.1.188:6379`, no password, cache mode, shared with other services. sccache uses **database 5 only**; never use
-another database number. sccache's keys include the compiler and target, so one database serves every OS.
+CI Rust jobs use sccache's **local disk** on every OS: the job slot's kept folder on a host runner, `/sccache` in a container
+(the `setup-rust` input `sccache-backend` defaults to `local`, and so does `./dev ci setup-rust`, `ci_setup_rust.rs`). No workflow
+picks another backend. The shared Dragonfly (Redis-compatible) server at `172.16.1.188:6379` was CI's backend until 2026-10-25: it
+filled up, the Mac job's sccache server failed to start and every rustc call failed (commit 1383e9898); the user decided against a
+shared backend on 2026-10-28 and again on 2026-11-17 (CI keeps its per-slot caches). The Redis path is kept for a deliberate trial:
 
 - Gitea Actions variables (set by the user, org or repo level): `SCCACHE_REDIS_ENDPOINT=redis://172.16.1.188:6379` and
-  `SCCACHE_REDIS_DB=5`. The `setup-rust` action reads them as its input defaults. Unset, sccache falls back to its local disk.
+  `SCCACHE_REDIS_DB=5`. The `setup-rust` action reads them as its input defaults; they are used only with `auto` or `redis`.
+  sccache uses **database 5 only**; never use another database number.
 - The database goes in `SCCACHE_REDIS_DB`, never in the URL: sccache 0.18 ignores a `/5` path and writes to database 0.
-- `sccache-backend: auto | redis | local` (default `auto`: Redis when an endpoint is set). Use `local` on a runner whose
-  disk is faster than the network (the macOS runner, if it proves so); `redis` fails the job when no endpoint is set.
+- `sccache-backend: local | auto | redis` (default `local`; `auto` is Redis when an endpoint is set, else local; `redis` fails the
+  job when no endpoint is set).
 - `setup-rust` uses the sccache already on the runner, else installs a pinned release (checksum-verified, in the runner's tool
   cache) for Linux x86_64/aarch64, macOS aarch64 and Windows x86_64. Bump the version and the four SHA-256 values together.
 - It also sets `CARGO_INCREMENTAL=0` and `SCCACHE_IGNORE_SERVER_IO_ERROR=1`, so an unreachable cache slows a build and

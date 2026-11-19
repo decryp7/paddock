@@ -60,6 +60,14 @@ tempfile = "3"
 paddock-testkit = { path = "../../crates/paddock-testkit" }
 paddock-testkit-start = { path = "../../crates/paddock-testkit-start" }
 
+# Debug info as the cargo book's build-performance guide and crates/ have it: line tables for this workspace's code (backtraces still
+# name file and line), none for dependencies. Every agent's and gate's build of ./dev wrote full debug info before
+# (docs/research/2026-11-19-sccache.md, section 5). A debugger session with variables: CARGO_PROFILE_DEV_DEBUG=full for that build.
+[profile.dev]
+debug = "line-tables-only"
+[profile.dev.package."*"]
+debug = false
+
 # C102 parses every Rust file of the repository (src/ipc_endpoints.rs): optimised parser crates keep that to seconds in a
 # debug build too (27 s in a debug build before, measured 2026-11-09).
 [profile.dev.package.syn]
