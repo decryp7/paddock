@@ -1252,16 +1252,134 @@ fn repeats_its_steps_until_it_is_ended_and_burns_cpu_until_it_is_ended() {
 #[test]
 fn the_nice_token_is_a_number_and_the_cgroup_token_falls_back_when_the_file_is_not_there() {
     let s = Scratch::new();
+    let fallback = StandIn::new(&s.work(), "cgroup")
+        .answers(Actions::new().stdout_with("mh={cgroup:no-such-file.here|none}"))
+        .install()
+        .unwrap();
+    let o = run(fallback.program(), &[]);
+    assert_eq!(out(&o).trim_end(), "mh=none", "{}", err(&o));
     let p = StandIn::new(&s.work(), "probe")
-        .answers(Actions::new().stdout_with("ni={nice} mh={cgroup:no-such-file.here|none}"))
+        .answers(Actions::new().stdout_with("ni={nice}"))
         .install()
         .unwrap();
     let o = run(p.program(), &[]);
     let text = out(&o);
-    let ni = text
-        .trim_end()
-        .strip_prefix("ni=")
-        .and_then(|t| t.strip_suffix(" mh=none"))
-        .unwrap_or_else(|| panic!("{text}"));
-    assert!(ni.parse::<i32>().is_ok(), "{text}");
+    if cfg!(unix) {
+        let ni = text
+            .trim_end()
+            .strip_prefix("ni=")
+            .unwrap_or_else(|| panic!("stdout {text:?}, stderr {:?}", err(&o)));
+        assert!(ni.parse::<i32>().is_ok(), "{text}");
+    } else {
+        // Windows has no nice value: the token is an error of the script, which names it (run 8327 read it as a number).
+        assert_eq!(
+            o.status.code(),
+            Some(70),
+            "stdout {text:?}, stderr {:?}",
+            err(&o)
+        );
+        assert!(
+            err(&o).contains("{nice} exists only on Unix"),
+            "{}",
+            err(&o)
+        );
+    }
+}
+
+/// Two fake builds of one compiler "build" into one folder at once (a test's stand-in `cargo` has no build-folder lock, which real
+/// cargo has): every install must succeed and leave a whole, runnable program. Run 8327: one install removed the file between the
+/// other's write and its chmod, that stand-in exited 70, its wrapper never reached the barrier, and the test hung to its timeout.
+#[test]
+fn concurrent_installs_of_one_path_all_succeed_and_leave_a_runnable_program() {
+    const BUILDERS: usize = 2;
+    let s = Scratch::new();
+    let out_dir = s.work().join("release");
+    std::fs::create_dir_all(&out_dir).unwrap();
+    let made = out_dir.join(format!("tool{}", std::env::consts::EXE_SUFFIX));
+    let built =
+        StandIn::new(&s.work(), "built").when_args(&["--version"], Actions::new().stdout("0"));
+    let mut builds = Actions::new();
+    // Two builders, as in the wrapper test, 10 installs each of a 1 MB program: the race failed 6 of 20 runs on macOS before the
+    // fix. Six builders x 50 installs stalled a local Linux container (OrbStack kernel 7.2) in openat for up to a minute.
+    for _ in 0..10 {
+        builds = builds.installs(&made.to_string_lossy(), &built);
+    }
+    let builder = StandIn::new(&s.work(), "cargo")
+        .answers(builds)
+        .install()
+        .unwrap();
+    let children: Vec<_> = (0..BUILDERS)
+        .map(|_| {
+            TestCommand::new(builder.program())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    let outs: Vec<_> = children
+        .into_iter()
+        .map(|c| c.wait_with_output().unwrap())
+        .collect();
+    let failed: Vec<String> = outs
+        .iter()
+        .filter(|o| !o.status.success())
+        .map(err)
+        .collect();
+    assert!(
+        failed.is_empty(),
+        "{} of {BUILDERS} concurrent builders failed: {failed:?}",
+        failed.len()
+    );
+    assert_eq!(out(&run(&made, &["--version"])), "0\n");
+}
+
+/// A stand-in whose file is replaced while it starts (a second build publishing the same tool by a rename, as `./dev` does)
+/// still reads its own script: the running program is the old file, whatever the path now names. Run 8327's wrapper test on
+/// Linux, after its install race was fixed: `cannot read its script .../paddock-dev-test-host (deleted).stand-in.json` (exit 70)
+/// in 6 of 300 runs, because the stand-in read its script through the path `current_exe` gave for a replaced file.
+#[cfg(unix)]
+#[test]
+fn a_stand_in_replaced_while_it_starts_still_reads_its_own_script() {
+    let s = Scratch::new();
+    let out_dir = s.work().join("bin");
+    std::fs::create_dir_all(&out_dir).unwrap();
+    let tool_path = out_dir.join("tool");
+    let tool = StandIn::new(&s.work(), "tool").answers(Actions::new().stdout("ok"));
+    // A bounded number of replacements (each writes the 1 MB program): 20 failed 10 of 30 Linux runs before the fix; an endless
+    // publisher wrote gigabytes a run and stalled a local Linux container for a minute.
+    let mut publishing = Actions::new()
+        .installs(&tool_path.to_string_lossy(), &tool)
+        .writes(&s.work().join("ready"), "");
+    for _ in 0..20 {
+        publishing = publishing.installs(&tool_path.to_string_lossy(), &tool);
+    }
+    let publisher = StandIn::new(&s.work(), "publisher")
+        .answers(publishing)
+        .install()
+        .unwrap();
+    let mut publisher = TestCommand::new(publisher.program()).spawn().unwrap();
+    wait_until("the publisher's first install", || {
+        s.work().join("ready").exists()
+    });
+    let (mut starts, mut failed) = (0, Vec::new());
+    // Start the tool while the publisher replaces it, and once more after it has ended.
+    loop {
+        let publishing = matches!(publisher.try_wait(), Ok(None));
+        let o = run(&tool_path, &[]);
+        starts += 1;
+        if o.status.code() != Some(0) || out(&o) != "ok\n" {
+            failed.push(format!("exit {:?}: {}", o.status.code(), err(&o)));
+        }
+        if !publishing {
+            break;
+        }
+    }
+    assert!(publisher.wait().unwrap().success(), "the publisher failed");
+    assert!(
+        failed.is_empty(),
+        "{} of {starts} starts failed while the file was replaced: {:?}",
+        failed.len(),
+        failed.first()
+    );
 }

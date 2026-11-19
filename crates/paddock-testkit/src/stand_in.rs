@@ -22,7 +22,7 @@
 //! with [`StandIn::records_env`] and, with [`StandIn::reads_stdin`], what was written to stdin (at most 1 MiB).
 //!
 //! More, for the fixtures that were shell scripts: output filled from the call ([`Actions::stdout_with`] and the other `_with`
-//! methods name `{args}`, `{arg:N}`, `{flag:PREFIX}`, `{flag_unquoted:PREFIX}`, `{cwd}`, `{dir}`, `{name}`, `{pid}`, `{environ}`, `{flag:PREFIX|SUFFIX}`, `{lines:PATH|MAX}`, `{run:program|arg|arg}`, `{env:NAME}` / `{env:NAME|fallback}`, `{nice}`, `{cgroup:FILE|fallback}`, `{stdin}` and
+//! methods name `{args}`, `{arg:N}`, `{flag:PREFIX}`, `{flag_unquoted:PREFIX}`, `{cwd}`, `{dir}`, `{name}`, `{pid}`, `{environ}`, `{flag:PREFIX|SUFFIX}`, `{lines:PATH|MAX}`, `{run:program|arg|arg}`, `{env:NAME}` / `{env:NAME|fallback}`, `{nice}` (Unix only), `{cgroup:FILE|fallback}`, `{stdin}` and
 //! `{stdin_line}`; `{{` and `}}` are braces), [`Actions::writes_atomically`], [`Actions::waits_for_file`], named pipes
 //! ([`Actions::makes_fifo`], [`Actions::reads_file`]), [`Actions::ignores_term`] (Unix), [`Actions::installs`] (a second stand-in
 //! written at run time, as a fake `cargo` that "builds" a tool does), [`Actions::exits_with_env`] and [`Actions::execs`] (run another
@@ -1172,9 +1172,15 @@ fn compile_stub(profile: &Path, built: &Path) -> Result<(), String> {
     publish_stub(&out, built)
 }
 
-/// Moves the compiled stand-in to its hash-named place. On Windows a rename onto a file another test process already started fails; the
-/// file is then the same program (its name holds the hash of the sources), so a file that is there is success.
+/// Puts the compiled stand-in at its hash-named place, once: a hard link fails when the name is taken, so the first process to
+/// publish wins and its file never changes under a test that reads it twice (each compile differs in its bytes). A file that is
+/// there is success: its name holds the hash of the sources, so it is the same program. Where a hard link cannot be made (a file
+/// system without them), a rename publishes it; on Windows a rename onto a file another test process already started fails, which
+/// is success for the same reason.
 fn publish_stub(out: &Path, built: &Path) -> Result<(), String> {
+    if std::fs::hard_link(out, built).is_ok() || built.is_file() {
+        return Ok(());
+    }
     match std::fs::rename(out, built) {
         Ok(()) => Ok(()),
         Err(_) if built.is_file() => Ok(()),
@@ -1250,6 +1256,28 @@ mod tests {
         assert_eq!(publish_stub(&s.work().join("missing"), &built), Ok(()));
         let err = publish_stub(&s.work().join("missing"), &s.work().join("nothing")).unwrap_err();
         assert!(err.contains("cannot move"), "{err}");
+    }
+
+    /// Two test processes that both compile the stand-in publish one file: the first stays, so a test that reads the binary twice
+    /// reads the same bytes. Each compile is a different file (its temporary build folder is in it), and replacing the first one
+    /// made `a_single_file_stand_in_answers_from_its_own_bytes_when_copied_alone` fail on a cold build (4 of 5 runs on macOS).
+    #[test]
+    fn a_second_compile_leaves_the_published_stand_in_as_it_is() {
+        let s = Scratch::new();
+        let built = s.work().join("paddock-stand-in-x");
+        std::fs::write(&built, "first").unwrap();
+        let second = s.work().join("second");
+        std::fs::write(&second, "second").unwrap();
+        assert_eq!(publish_stub(&second, &built), Ok(()));
+        assert_eq!(
+            std::fs::read_to_string(&built).unwrap(),
+            "first",
+            "the published file was replaced"
+        );
+        // With nothing published yet, the compile is published.
+        let fresh = s.work().join("paddock-stand-in-y");
+        assert_eq!(publish_stub(&second, &fresh), Ok(()));
+        assert_eq!(std::fs::read_to_string(&fresh).unwrap(), "second");
     }
 
     #[test]

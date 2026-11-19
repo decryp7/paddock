@@ -34,14 +34,44 @@ pub(crate) const QUEUED_CHUNKS: usize = 16;
 /// The most one read of the child's pipe takes.
 const CHUNK: usize = 64 * 1024;
 
-/// What the pipe-reading thread did, for the tests: chunks queued now and at most, and whether it found the queue full.
+/// What the pipe-reading thread did, for the tests: chunks sent and taken, the most queued at once, and whether it found the
+/// queue full. Two running totals, never one shared count: the channel hands a chunk to the caller before the thread can count
+/// it, so a caller may take a chunk the thread has not counted yet (run 8327: a single count went below zero, overflowed, and its
+/// panic closed the channel under the caller).
 #[cfg(test)]
 #[derive(Default)]
 pub(crate) struct QueueProbe {
-    pub(crate) queued: std::sync::atomic::AtomicUsize,
+    sent: std::sync::atomic::AtomicUsize,
+    taken: std::sync::atomic::AtomicUsize,
     pub(crate) peak: std::sync::atomic::AtomicUsize,
     pub(crate) blocked: std::sync::atomic::AtomicBool,
 }
+
+#[cfg(test)]
+impl QueueProbe {
+    /// The reading thread queued a chunk. The peak is exact while the caller does not read (the cap test); while it reads, a
+    /// chunk it has taken but not yet counted is still counted as queued, so the peak may be one over.
+    fn sent(&self) {
+        use std::sync::atomic::Ordering::SeqCst;
+        let sent = self.sent.fetch_add(1, SeqCst) + 1;
+        let now = sent.saturating_sub(self.taken.load(SeqCst));
+        self.peak.fetch_max(now, SeqCst);
+    }
+
+    /// The caller took a chunk.
+    fn taken(&self) {
+        self.taken.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Chunks counted as sent and not yet as taken.
+    fn queued(&self) -> usize {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.sent
+            .load(SeqCst)
+            .saturating_sub(self.taken.load(SeqCst))
+    }
+}
+
 /// How long [`Session::finish`] waits for the child to end on its own once its input is closed, before it ends the tree.
 pub const FINISH_GRACE: Duration = Duration::from_secs(2);
 
@@ -222,11 +252,7 @@ impl Session {
                                 break;
                             }
                             #[cfg(test)]
-                            {
-                                use std::sync::atomic::Ordering::SeqCst;
-                                let now = probe.queued.fetch_add(1, SeqCst) + 1;
-                                probe.peak.fetch_max(now, SeqCst);
-                            }
+                            probe.sent();
                         }
                     }
                 }
@@ -318,9 +344,7 @@ impl Session {
             {
                 Ok(c) => {
                     #[cfg(test)]
-                    self.probe
-                        .queued
-                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    self.probe.taken();
                     self.buf.extend_from_slice(&c);
                 }
                 Err(RecvTimeoutError::Disconnected) => self.eof = true,
@@ -452,6 +476,34 @@ mod tests {
         );
         assert!(probe.blocked.load(SeqCst));
         drop(s);
+    }
+
+    /// The caller can take a chunk before the reading thread has counted it (the channel hands it over first): the count must
+    /// survive that order. Run 8327 (Linux and Windows): the thread's count overflowed, it panicked, its end of the channel
+    /// closed, and the caller read `Closed` with an empty stderr in the middle of an answer.
+    #[test]
+    fn the_queue_count_survives_the_caller_taking_a_chunk_before_the_thread_counts_it() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let probe = QueueProbe::default();
+        let counted = std::panic::catch_unwind(|| {
+            probe.taken();
+            probe.sent();
+        });
+        assert!(
+            counted.is_ok(),
+            "the count panicked when the caller took the chunk first"
+        );
+        assert_eq!(
+            probe.queued(),
+            0,
+            "one chunk sent and taken leaves none queued"
+        );
+        probe.sent();
+        assert!(
+            probe.peak.load(SeqCst) <= 1,
+            "peak {}",
+            probe.peak.load(SeqCst)
+        );
     }
 
     #[test]
