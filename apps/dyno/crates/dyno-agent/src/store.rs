@@ -57,16 +57,74 @@ pub struct Store {
     conn: Connection,
 }
 
-/// One transaction over a batch of writes ([`Store::batch`]): committed when dropped, so the statements that succeeded are kept
-/// as they were when each committed alone; a failed commit is logged. Inside an open batch it is a no-op (it joins the open one).
-pub struct Batch<'a>(Option<rusqlite::Transaction<'a>>);
+/// One transaction over a batch of writes ([`Store::batch`]). [`Batch::commit`] commits it and says whether that worked; a
+/// batch dropped without it commits too (the statements that succeeded are kept, as they were when each committed alone), except
+/// when the thread is panicking, which rolls it back. A failed commit is rolled back and logged as such. Inside an open batch it
+/// is a no-op that joins the open one.
+#[must_use = "a batch is committed by commit(), which says whether its writes were stored"]
+pub struct Batch<'a> {
+    tx: Option<rusqlite::Transaction<'a>>,
+    conn: &'a Connection,
+}
+
+impl Batch<'_> {
+    /// Commits the batch (a joined batch is committed with the one it joined: `Ok` here). On an error nothing of the batch is
+    /// stored.
+    pub fn commit(mut self) -> Result<()> {
+        match self.tx.take() {
+            Some(tx) => Self::finish(self.conn, tx),
+            None => Ok(()),
+        }
+    }
+
+    fn finish(conn: &Connection, tx: rusqlite::Transaction<'_>) -> Result<()> {
+        // A refused COMMIT leaves the transaction for rusqlite's guard, which rolls it back as it is dropped here.
+        tx.commit().map_err(|e| {
+            if conn.is_autocommit() {
+                log::error!("dyno-agent: a batch of history writes was not committed and was rolled back: {e}");
+            } else {
+                log::error!("dyno-agent: a batch of history writes was not committed and is still open: {e}");
+            }
+            StoreError::from(e)
+        })
+    }
+}
 
 impl Drop for Batch<'_> {
     fn drop(&mut self) {
-        if let Some(tx) = self.0.take() {
-            if let Err(e) = tx.commit() {
-                log::error!("dyno-agent: a batch of history writes could not be committed: {e}");
-            }
+        let Some(tx) = self.tx.take() else {
+            return;
+        };
+        if std::thread::panicking() {
+            // rusqlite's guard rolls the transaction back as it is dropped: half a tick is never stored.
+            drop(tx);
+            log::error!("dyno-agent: a batch of history writes was rolled back: the thread panicked");
+        } else {
+            let _ = Self::finish(self.conn, tx);
+        }
+    }
+}
+
+/// A savepoint of [`Store::atomic`]: released when its work succeeded, rolled back to (and released) otherwise, also when the
+/// thread panics.
+struct Savepoint<'a> {
+    conn: &'a Connection,
+    done: bool,
+}
+
+impl Savepoint<'_> {
+    fn undo(&mut self) {
+        self.done = true;
+        if let Err(e) = self.conn.execute_batch("ROLLBACK TO dyno_whole; RELEASE dyno_whole") {
+            log::error!("dyno-agent: a failed write could not be undone: {e}");
+        }
+    }
+}
+
+impl Drop for Savepoint<'_> {
+    fn drop(&mut self) {
+        if !self.done {
+            self.undo();
         }
     }
 }
@@ -209,14 +267,40 @@ impl Store {
     /// sampler tick, an alarm batch or a prune is one commit, not one per statement. Inside an open batch it joins that one;
     /// when the transaction cannot be opened, the writes commit one by one as before.
     pub fn batch(&self) -> Batch<'_> {
-        if !self.conn.is_autocommit() {
-            return Batch(None);
-        }
-        match self.conn.unchecked_transaction() {
-            Ok(tx) => Batch(Some(tx)),
+        let tx = if self.conn.is_autocommit() {
+            match self.conn.unchecked_transaction() {
+                Ok(tx) => Some(tx),
+                Err(e) => {
+                    log::warn!("dyno-agent: no transaction for a batch of history writes ({e}); they commit one by one");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        Batch { tx, conn: &self.conn }
+    }
+
+    /// Runs `f` as one whole, inside a batch or alone: a SAVEPOINT, released when `f` succeeds and rolled back to when it fails
+    /// (or panics), so a writer that must store all its rows or none keeps that inside a sampler tick's batch.
+    pub fn atomic<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
+        self.conn.execute_batch("SAVEPOINT dyno_whole")?;
+        let mut point = Savepoint {
+            conn: &self.conn,
+            done: false,
+        };
+        match f() {
+            Ok(v) => {
+                point.done = true;
+                if let Err(e) = self.conn.execute_batch("RELEASE dyno_whole") {
+                    point.undo();
+                    return Err(e.into());
+                }
+                Ok(v)
+            }
             Err(e) => {
-                log::warn!("dyno-agent: no transaction for a batch of history writes ({e}); they commit one by one");
-                Batch(None)
+                point.undo();
+                Err(e)
             }
         }
     }
@@ -262,14 +346,16 @@ impl Store {
 
     /// Stores one minute's top apps.
     pub fn put_app_minutes(&self, rows: &[AppMinute]) -> Result<()> {
-        let _batch = self.batch();
-        let mut st = self
-            .conn
-            .prepare_cached("INSERT INTO app_minutes (at, app, cpu, memory) VALUES (?1, ?2, ?3, ?4)")?;
-        for r in rows {
-            st.execute(params![r.at.millis(), r.app, f64::from(r.cpu), r.memory as i64])?;
-        }
-        Ok(())
+        // All rows or none, as when this was its own transaction.
+        self.atomic(|| {
+            let mut st = self
+                .conn
+                .prepare_cached("INSERT INTO app_minutes (at, app, cpu, memory) VALUES (?1, ?2, ?3, ?4)")?;
+            for r in rows {
+                st.execute(params![r.at.millis(), r.app, f64::from(r.cpu), r.memory as i64])?;
+            }
+            Ok(())
+        })
     }
 
     /// Per-app minutes in `[from, to)`.
@@ -566,7 +652,12 @@ impl Store {
 
     /// Deletes everything older than the retention allows, in one transaction.
     pub fn prune(&self, r: Retention, now: Timestamp) -> Result<()> {
-        let _batch = self.batch();
+        let batch = self.batch();
+        self.prune_in(r, now)?;
+        batch.commit()
+    }
+
+    fn prune_in(&self, r: Retention, now: Timestamp) -> Result<()> {
         for t in Tier::ALL {
             self.conn.execute(
                 "DELETE FROM points WHERE tier = ?1 AND at < ?2",
@@ -596,15 +687,23 @@ impl Store {
 }
 
 /// The commits of a store, counted by SQLite's commit hook (each autocommit statement is one): the budget tests' reading
-/// (ADR 0108 DY-7, guard D).
+/// (ADR 0108 DY-7, guard D). [`Commits::fail`] makes the hook refuse commits, which SQLite then rolls back.
 #[cfg(test)]
-pub(crate) struct Commits(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+pub(crate) struct Commits {
+    count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    refuse: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
 
 #[cfg(test)]
 impl Commits {
     /// Commits since the counter was made or last taken; resets it.
     pub(crate) fn take(&self) -> usize {
-        self.0.swap(0, std::sync::atomic::Ordering::Relaxed)
+        self.count.swap(0, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// From now on every commit fails (`true`) or goes through (`false`).
+    pub(crate) fn fail(&self, refuse: bool) {
+        self.refuse.store(refuse, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -612,15 +711,21 @@ impl Commits {
 impl Store {
     /// Counts this store's commits from now on.
     pub(crate) fn count_commits(&mut self) -> Commits {
-        let n = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let seen = std::sync::Arc::clone(&n);
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let refuse = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (seen, no) = (std::sync::Arc::clone(&count), std::sync::Arc::clone(&refuse));
         self.conn
             .commit_hook(Some(move || {
                 seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                false
+                no.load(std::sync::atomic::Ordering::Relaxed)
             }))
             .expect("the commit hook installs on an open connection");
-        Commits(n)
+        Commits { count, refuse }
+    }
+
+    /// Runs `sql` on the connection (a test's trigger or table).
+    pub(crate) fn exec_for_test(&self, sql: &str) {
+        self.conn.execute_batch(sql).expect("test SQL");
     }
 }
 
@@ -628,6 +733,74 @@ impl Store {
 mod tests {
     use super::*;
     use dyno_core::activity::ActivityKind;
+
+    /// Review P2-1: a batch says whether it was committed, and a failed commit leaves nothing of the batch behind.
+    #[test]
+    fn a_batch_reports_a_failed_commit_and_keeps_nothing_of_it() {
+        let mut store = Store::memory().unwrap();
+        let commits = store.count_commits();
+        commits.fail(true);
+        let b = store.batch();
+        store.set_meta("a", "1").unwrap();
+        assert!(b.commit().is_err(), "the refused commit is an error");
+        commits.fail(false);
+        assert_eq!(store.meta("a").unwrap(), None, "rolled back");
+        assert!(store.conn.is_autocommit(), "no transaction is left open");
+        let b = store.batch();
+        store.set_meta("b", "2").unwrap();
+        b.commit().unwrap();
+        assert_eq!(store.meta("b").unwrap().as_deref(), Some("2"));
+    }
+
+    /// Review P2-1: a batch dropped by a panic is rolled back, never committed half done.
+    #[test]
+    fn a_batch_dropped_by_a_panic_is_rolled_back() {
+        let store = Store::memory().unwrap();
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _b = store.batch();
+            store.set_meta("half", "done").unwrap();
+            panic!("a bug in the tick");
+        }));
+        assert!(r.is_err());
+        assert_eq!(store.meta("half").unwrap(), None);
+        assert!(store.conn.is_autocommit());
+    }
+
+    /// Review P2-2: the writers that must be whole work inside an open batch, and roll back alone when they fail there.
+    #[test]
+    fn whole_writers_work_inside_a_batch_and_roll_back_alone() {
+        use dyno_core::unusual::baseline::Change as BaselineChange;
+        let store = Store::memory().unwrap();
+        store.exec_for_test(
+            "CREATE TRIGGER no_bad BEFORE INSERT ON app_minutes WHEN NEW.app = 'bad' BEGIN SELECT RAISE(ABORT, 'bad row'); END;",
+        );
+        let row = |app: &str| AppMinute {
+            at: Timestamp(MINUTE),
+            app: app.into(),
+            cpu: 1.0,
+            memory: 1,
+        };
+        let b = store.batch();
+        store.set_meta("kept", "yes").unwrap();
+        assert!(store.put_app_minutes(&[row("good"), row("bad")]).is_err());
+        assert!(
+            store.app_minutes(Timestamp(0), Timestamp(HOUR)).unwrap().is_empty(),
+            "the failed call left no row of its own"
+        );
+        store.put_changes(&[], Timestamp(MINUTE)).unwrap();
+        store.put_issues(&[]).unwrap();
+        store.apply_baseline(&[BaselineChange::Since(Timestamp(5))]).unwrap();
+        store.clear_baseline().unwrap();
+        b.commit().unwrap();
+        assert_eq!(
+            store.meta("kept").unwrap().as_deref(),
+            Some("yes"),
+            "the batch's other writes are kept"
+        );
+        // Alone, too: all rows or none.
+        assert!(store.put_app_minutes(&[row("good"), row("bad")]).is_err());
+        assert!(store.app_minutes(Timestamp(0), Timestamp(HOUR)).unwrap().is_empty());
+    }
 
     #[test]
     fn the_commit_counter_counts_each_autocommit_statement() {

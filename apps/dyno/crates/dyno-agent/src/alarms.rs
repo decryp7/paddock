@@ -57,7 +57,7 @@ impl AlarmCentre {
 
     /// Stores a batch of changes in one transaction (rule 85; ADR 0108 DY-7).
     fn persist(store: &Store, changes: &[AlarmChange]) {
-        let _batch = store.batch();
+        let batch = store.batch();
         for c in changes {
             let r = if c.kind == ChangeKind::Pruned {
                 store.delete_alarm(c.alarm.id)
@@ -67,6 +67,9 @@ impl AlarmCentre {
             if let Err(e) = r.and_then(|()| store.put_alarm_event(c)) {
                 log::error!("dyno-agent: could not store an alarm change: {e}");
             }
+        }
+        if let Err(e) = batch.commit() {
+            log::error!("dyno-agent: {} alarm changes were not stored: {e}", changes.len());
         }
     }
 

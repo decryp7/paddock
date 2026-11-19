@@ -186,8 +186,11 @@ impl Sampler {
             core.recorder.record(sample, &core.latest.groups);
         }
         // The tick's writes (history, disks, prune, alerts, alarms) are one transaction, not one commit per statement under the
-        // core lock (rule 85; ADR 0108 DY-7).
+        // core lock (rule 85; ADR 0108 DY-7). What they announce waits for the commit: an app is never told of an alert or an
+        // alarm change that was not stored, and a tick that was not stored leaves the history writer as it was.
+        let writer_before = core.writer.clone();
         let batch = core.store.batch();
+        let mut news: Vec<News> = Vec::new();
         let groups_for_history: &[AppGroup] = if fresh { &core.latest.groups } else { &[] };
         if let Err(e) = core.writer.record(&core.store, sample, groups_for_history) {
             log::error!("dyno-agent: history write failed: {e}");
@@ -204,14 +207,14 @@ impl Sampler {
             for c in &changes {
                 let _ = core.recorder.on_alarm(&core.store, c, t);
             }
-            push_alarm_changes(shared, changes);
+            news.push(News::Alarms(changes));
             if core.store.put_alert(&a).is_ok() {
                 let _ = core.store.put_event(&TimelineEvent {
                     at: a.at,
                     kind: TimelineEventKind::Alert,
                     label: a.title.clone(),
                 });
-                shared.broadcast_alert(&a);
+                news.push(News::Alert(a));
             }
         }
         let custom_rules = core.settings.custom_alerts.clone();
@@ -220,11 +223,33 @@ impl Sampler {
             for c in &changes {
                 let _ = core.recorder.on_alarm(&core.store, c, t);
             }
-            push_alarm_changes(shared, changes);
+            news.push(News::Alarms(changes));
         }
-        let ticked = core.alarms.tick(&core.store, t);
-        drop(batch);
-        push_alarm_changes(shared, ticked);
+        news.push(News::Alarms(core.alarms.tick(&core.store, t)));
+        match batch.commit() {
+            Ok(()) => {
+                for n in news {
+                    match n {
+                        News::Alarms(changes) => push_alarm_changes(shared, changes),
+                        News::Alert(a) => shared.broadcast_alert(&a),
+                    }
+                }
+            }
+            Err(e) => {
+                core.writer = writer_before;
+                let withheld = news
+                    .iter()
+                    .map(|n| match n {
+                        News::Alarms(c) => c.len(),
+                        News::Alert(_) => 1,
+                    })
+                    .sum::<usize>();
+                log::error!(
+                    withheld = withheld;
+                    "dyno-agent: the tick's history, alerts and alarm changes were not stored ({e}); they are not announced, and the next tick writes the history again"
+                );
+            }
+        }
         let pressure = sample
             .memory
             .pressure
@@ -263,6 +288,14 @@ impl Sampler {
 
 fn drop_pressure_unused(_: MemoryPressure) {}
 
+/// What a tick announces to the connected apps once its writes are stored, in the order it happened.
+enum News {
+    /// Alarm changes.
+    Alarms(Vec<dyno_core::alarms::AlarmChange>),
+    /// A new alert.
+    Alert(dyno_core::alerts::Alert),
+}
+
 /// Pushes alarm changes to every connected app.
 pub fn push_alarm_changes(shared: &Shared, changes: Vec<dyno_core::alarms::AlarmChange>) {
     for c in changes {
@@ -299,6 +332,71 @@ mod tests {
     use super::*;
     use dyno_core::time::HOUR;
     use dyno_platform::fake::{process, quiet_sample, Fake};
+
+    fn always_on() -> dyno_core::alarms::custom::CustomAlertRule {
+        dyno_core::alarms::custom::CustomAlertRule {
+            id: "always".into(),
+            name: "Always".into(),
+            metric: dyno_core::alarms::custom::CustomMetric::CpuTotal,
+            op: dyno_core::alarms::custom::CustomOp::Below,
+            limit: 1_000.0,
+            for_secs: 0,
+            severity: dyno_core::health::Severity::Warning,
+            enabled: true,
+        }
+    }
+
+    /// A tick that raises an alarm, with a connected app listening; `refuse` makes the tick's commit fail. Returns the alarm
+    /// messages the app was sent and the alarms stored.
+    fn tick_with_alarm(refuse: bool) -> (usize, usize) {
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let fake = Fake::new();
+        let (shared, sensors, processes) = Shared::build(
+            crate::paths::Dirs::at(tmp.path().join("data")),
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+        )
+        .unwrap();
+        lock(&shared.core).settings.custom_alerts = vec![always_on()];
+        let (tx, _rx) = std::sync::mpsc::sync_channel(64);
+        let pending = Arc::new(crate::agent::Pending::default());
+        lock(&shared.subs).push(crate::agent::Sub {
+            id: 1,
+            detail: Arc::new(std::sync::atomic::AtomicU8::new(1)),
+            tx,
+            scans: Default::default(),
+            volumes: Default::default(),
+            jobs: Default::default(),
+            pending: pending.clone(),
+        });
+        let mut sampler = Sampler::new(sensors, processes);
+        let commits = lock(&shared.core).store.count_commits();
+        commits.fail(refuse);
+        let t = Timestamp(HOUR + 1);
+        let overhead = Overhead {
+            agent_cpu: 0.0,
+            agent_memory: 0,
+            sampling_interval_ms: 2_000,
+            process_interval_ms: 10_000,
+        };
+        sampler.record(&shared, &quiet_sample(t), None, overhead, t);
+        commits.fail(false);
+        let mut alarms = 0;
+        pending.drain(&mut |m| {
+            alarms += usize::from(matches!(m, Message::Alarm(_)));
+            true
+        });
+        let stored = lock(&shared.core).store.alarms(10).unwrap().len();
+        (alarms, stored)
+    }
+
+    /// Review P2-1: a tick announces its alarms after they are stored, and not at all when its commit fails.
+    #[test]
+    fn a_tick_announces_its_alarms_only_once_they_are_stored() {
+        assert_eq!(tick_with_alarm(false), (1, 1), "stored, then announced");
+        assert_eq!(tick_with_alarm(true), (0, 0), "not stored, so not announced");
+    }
 
     /// DY-7 (ADR 0108, guard D): one sampler tick under the core lock writes its history, disks, prune, alerts and alarms in
     /// one transaction, not one autocommit statement each.

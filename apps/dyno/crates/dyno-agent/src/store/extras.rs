@@ -29,16 +29,18 @@ fn kind_from(s: &str) -> Option<ChangeKind> {
 impl Store {
     /// Stores changes and drops those older than half a year.
     pub fn put_changes(&self, changes: &[Change], now: Timestamp) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        {
-            let mut st = tx.prepare_cached("INSERT INTO changes (at, kind, title, detail) VALUES (?1, ?2, ?3, ?4)")?;
+        // One whole (a SAVEPOINT): it joins an open batch instead of failing to start a transaction inside it.
+        self.atomic(|| {
+            let mut st = self
+                .conn
+                .prepare_cached("INSERT INTO changes (at, kind, title, detail) VALUES (?1, ?2, ?3, ?4)")?;
             for c in changes {
                 st.execute(params![c.at.millis(), kind_text(c.kind), c.title, c.detail])?;
             }
-        }
-        tx.execute("DELETE FROM changes WHERE at < ?1", params![now.millis() - KEEP_MS])?;
-        tx.commit()?;
-        Ok(())
+            self.conn
+                .execute("DELETE FROM changes WHERE at < ?1", params![now.millis() - KEEP_MS])?;
+            Ok(())
+        })
     }
 
     /// The stored changes in `[from, to]`, newest first (at most 2 000); rows with an unknown kind are skipped.

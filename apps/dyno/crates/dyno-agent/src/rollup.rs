@@ -23,14 +23,16 @@ fn meta_key(t: Tier) -> String {
 }
 
 /// Per-app sums over the minute in progress.
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct AppAccum {
     minute: Timestamp,
     ticks: u32,
     apps: HashMap<String, (f64, u64)>,
 }
 
-/// Writes history as samples arrive.
+/// Writes history as samples arrive. Cloned before a tick so a tick whose writes were not stored can be forgotten
+/// ([`HistoryWriter::record`], the sampler's tick).
+#[derive(Clone)]
 pub struct HistoryWriter {
     last_raw: Option<Timestamp>,
     apps: AppAccum,
@@ -50,9 +52,21 @@ impl Default for HistoryWriter {
 impl HistoryWriter {
     /// Records one tick: the raw point (when a step has passed), app sums, disk space and any closed buckets.
     /// `groups` is empty on ticks that did not refresh the process table.
-    /// One transaction for the whole tick (rule 85; ADR 0108 DY-7).
+    /// One transaction for the whole tick (rule 85; ADR 0108 DY-7). When the tick is not stored (a write or the commit fails), the
+    /// writer is put back as it was, so the next tick writes the raw point and flushes the minute's apps again (both are
+    /// idempotent: points replace, a minute's apps are one whole).
     pub fn record(&mut self, store: &Store, s: &SystemSample, groups: &[AppGroup]) -> Result<()> {
-        let _batch = store.batch();
+        let before = self.clone();
+        let batch = store.batch();
+        let written = self.write_tick(store, s, groups);
+        let stored = written.and(batch.commit());
+        if stored.is_err() {
+            *self = before;
+        }
+        stored
+    }
+
+    fn write_tick(&mut self, store: &Store, s: &SystemSample, groups: &[AppGroup]) -> Result<()> {
         let at = s.at.floor_to(RAW_STEP_MS);
         if self.last_raw != Some(at) {
             let mut p = point_from(s);
@@ -110,12 +124,12 @@ impl HistoryWriter {
 
     /// Stores each disk's free space once per quarter hour (the trend needs days, not seconds), in one transaction.
     pub fn record_disks(&self, store: &Store, s: &SystemSample) -> Result<()> {
-        let _batch = store.batch();
+        let batch = store.batch();
         let at = s.at.floor_to(15 * MINUTE);
         for d in &s.disks {
             store.put_disk_free(&d.id, at, d.total, d.free)?;
         }
-        Ok(())
+        batch.commit()
     }
 
     /// Prunes at most once an hour.
@@ -257,6 +271,54 @@ mod tests {
         w.record_disks(&store, &s).unwrap();
         assert_eq!(store.disk_free(Timestamp(0), Timestamp(HOUR)).unwrap().len(), 1);
         w.prune(&store, Default::default(), Timestamp(MINUTE)).unwrap();
+    }
+
+    /// Review P2-1: a tick whose commit fails says so, and the writer forgets nothing it did not store: the next tick writes the
+    /// raw point and flushes the minute's apps that the failed one lost.
+    #[test]
+    fn a_tick_whose_commit_fails_is_written_again_by_the_next() {
+        let mut store = Store::memory().unwrap();
+        let commits = store.count_commits();
+        let mut w = HistoryWriter::default();
+        let mut s = dyno_platform::fake::quiet_sample(Timestamp(0));
+        let apps = [AppGroup {
+            id: "busy".into(),
+            name: "busy".into(),
+            exe: None,
+            pids: vec![1],
+            cpu: Measured::Value(50.0),
+            memory: Measured::Value(100),
+            disk_bps: Measured::Value(0.0),
+            partial: false,
+        }];
+        for i in 0..(MINUTE / RAW_STEP_MS) {
+            s.at = Timestamp(i * RAW_STEP_MS);
+            w.record(&store, &s, &apps).unwrap();
+        }
+        commits.fail(true);
+        s.at = Timestamp(MINUTE + 1);
+        assert!(w.record(&store, &s, &apps).is_err(), "the failed commit is reported");
+        commits.fail(false);
+        assert!(store
+            .points(Tier::Raw, Timestamp(MINUTE), Timestamp(MINUTE + RAW_STEP_MS))
+            .unwrap()
+            .is_empty());
+        assert!(store.app_minutes(Timestamp(0), Timestamp(MINUTE)).unwrap().is_empty());
+        s.at = Timestamp(MINUTE + 2);
+        w.record(&store, &s, &apps).unwrap();
+        assert_eq!(
+            store
+                .points(Tier::Raw, Timestamp(MINUTE), Timestamp(MINUTE + RAW_STEP_MS))
+                .unwrap()
+                .len(),
+            1,
+            "the raw point the failed tick lost is written"
+        );
+        assert_eq!(
+            store.app_minutes(Timestamp(0), Timestamp(MINUTE)).unwrap().len(),
+            1,
+            "the first minute's apps are flushed"
+        );
     }
 
     /// DY-7 (ADR 0108, guard D): a tick's rows (the raw and per-core points, the closed minute's apps, every rollup tier and
