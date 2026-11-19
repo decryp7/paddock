@@ -96,6 +96,7 @@ pub mod slots;
 #[cfg(all(test, unix))]
 mod test_sleeper;
 pub mod tool_cache;
+pub mod train;
 pub mod wait;
 pub mod wait_lock;
 pub mod worktree;

@@ -2966,3 +2966,15 @@ ambient load 35 to 40 from other agents): 200 runs of the 4 kept_clone unit test
 executions, 0 failed. **The class is now checked, not reviewed for (ER-21):** `phase::tests::no_source_file_times_a_phase_test_from_its_start_without_a_clock_mark_or_a_reason` fails on any test in a file that uses `ci_host::phase` that calls `.phase(`, `bounded*` or `run_with(` without a `ClockMark` (or `hang_flow`/`hang_env`) or a `// conformance: no-clock-mark - <reason>` line (two exemptions, both fakes with no program); its positive control is `the_audit_of_unmarked_phase_tests_sees_one_and_accepts_a_mark_or_a_reason`. The 20 s general limit is one constant, `phase::HUNG_TEST_GENERAL_LIMIT`. **Rule:** a timed hung-phase test counts every limit it asserts from the stand-in's mark, setup calls included, and proves it
 with a stand-in that is slow before its hang. **Class: work before the hang point of a hung-phase test meeting its limit under load
 (fourth sighting; ADR 0103, second amendment).**
+
+## The train integrator's sequence scripts are a command now (2026-11-19)
+Train 12 and train 14 each had the integrator write the same bash and Python around `ci dispatch`, `ci triage` and `wait --ci-run`: find the new
+run id, stop at the first red, judge a red fix round (`triage-verdict.py`: PASS only for accepted FLAKY tests), reuse green release runs,
+fast-forward main and compare with `ls-remote`. A scratch script is an untested copy of a gate (ER-33), and the verdict is exactly the kind of
+check whose "passed" must come only from the check. It is `./dev train release` and `./dev train land` (tools/paddock-dev/src/train): the
+verdict is a typed function whose only pass is `Pass`, tested with the controls of the Python script (run 8300's new failure, run 8301's
+test that failed every attempt, a skipped job, counts that do not add up, a whole job, no rows, a triage that did not succeed) and a positive
+control; a `passed:<run>` claim is now judged and checked against the train head instead of trusted; `--reuse` of an unknown workflow is refused.
+The scratch scripts (`seq-lib.sh`, `seq-release.sh`, `seq-full.sh`, `triage-verdict.py`, `land-*.sh` in the integrator's scratch folder)
+were never in the repository and are replaced by these commands. **Class: an integrator step written by hand per train (second sighting,
+train 12 and train 14); the tool is the redesign.**

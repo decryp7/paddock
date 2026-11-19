@@ -1,7 +1,7 @@
 use crate::{
     audit, brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_setup_rust,
     disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, load, local_sccache, locks,
-    merge_check, places, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
+    merge_check, places, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, train, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -94,6 +94,12 @@ enum Command {
     Sccache {
         #[command(subcommand)]
         command: SccacheCommand,
+    },
+    /// The train integrator's release sequence and landing: `release` (a judged failed-only fix round, debrief.yml, the release
+    /// workflows, under the train-CI hold) and `land` (fast-forward main and verify it).
+    Train {
+        #[command(subcommand)]
+        command: train::TrainCommand,
     },
     /// Disk watch and clean-up: free-space check, usage report, scan, owner records, clean.
     Disk {
@@ -836,6 +842,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             Ok(Report::new(serde_json::json!({ "lines": lines }), lines.join("\n")))
         }
         Command::Disk { command } => disk::command(command),
+        Command::Train { command } => train::command(command),
         Command::Pr { command } => pr::command(command),
         Command::Queue { command } => queue::command(command),
         Command::Merge {
