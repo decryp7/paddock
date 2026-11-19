@@ -227,7 +227,7 @@ fn a_failing_time_stamp_keeps_the_placeholder_and_warns() {
     let failing = |_: &std::path::Path| Err(std::io::Error::other("no way"));
     let (created, notes) =
         paddock_build::create_placeholders_noted(std::slice::from_ref(&file), &failing).unwrap();
-    assert_eq!(created, [file.clone()]);
+    assert_eq!(created, vec![file.clone()]);
     assert_eq!(std::fs::read(&file).unwrap(), b"");
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(
