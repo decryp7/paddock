@@ -30,9 +30,6 @@ pub struct StepInfo<'a> {
     pub kind: &'a str,
     /// The workspace folder the step runs in (empty: the repository root).
     pub ws: &'a str,
-    /// The step's build folder was cold when it started (nothing built in it yet): cold and warm runs differ by about 85 times and
-    /// are never mixed (the research note, section 2).
-    pub cold: bool,
 }
 
 /// What the executor can see of a running step.
@@ -48,6 +45,11 @@ pub struct Observation<'a> {
     pub last_line: &'a str,
     /// How many progress events the step's output has shown ([`super::progress::Counter::events`]): a unit finished, a test line.
     pub progress: u64,
+    /// Finished units cargo reported so far, and how many of them were really compiled (`"fresh":false`): the share is what tells a
+    /// cold build from a warm one while the step runs (they differ by about 85 times and are never mixed, research note section 2).
+    pub units: u64,
+    /// Units really compiled (see [`Observation::units`]).
+    pub compiled: u64,
     /// The line of the last progress event.
     pub last_event: &'a str,
     /// Cargo's wait for another cargo's lock, while the step is in it: a wait state, never a stall.
@@ -109,20 +111,11 @@ pub fn stuck_how(s: &Stuck) -> String {
     format!("stuck ({}): {}; no progress for {} s", s.guard, s.reason, s.quiet.as_secs())
 }
 
-/// The guard that ended a run, from how it ended: the watchdog's own name for `stuck (...)`, `row cap` for a run that reached the
-/// cap, `None` for a run that ended by itself or that a person interrupted.
-pub fn ended_by(how: &str) -> Option<String> {
-    if let Some(rest) = how.strip_prefix("stuck (") {
-        return rest.split_once(')').map(|(g, _)| g.to_string());
-    }
-    how.starts_with("timed out").then(|| "row cap".to_string())
-}
-
 /// One step's phases with their durations, one line (ER-27): queued for the slot, running, and how it ended; the guard that ended it
 /// is named when one did.
-pub fn phase_line(id: &str, queued: Option<f64>, ran: f64, how: &str, note: Option<&str>) -> String {
+pub fn phase_line(id: &str, queued: Option<f64>, ran: f64, how: &str, guard: Option<&str>, note: Option<&str>) -> String {
     let queued = queued.map_or(String::new(), |q| format!("queued {q:.1} s, "));
-    let guard = ended_by(how).map_or(String::new(), |g| format!("; ended by guard: {g}"));
+    let guard = guard.map_or(String::new(), |g| format!("; ended by guard: {g}"));
     let note = note.map_or(String::new(), |n| format!("; watchdog: {n}"));
     format!("pre-push: {id}: {queued}ran {ran:.1} s; ended: {how}{guard}{note}")
 }
@@ -132,7 +125,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_guard_that_ended_a_step_is_read_back_from_how_it_ended() {
+    fn the_words_of_a_stall_name_the_guard_and_how_long() {
         let s = Stuck {
             guard: "fake".into(),
             reason: "nothing moved".into(),
@@ -140,20 +133,15 @@ mod tests {
         };
         let how = stuck_how(&s);
         assert_eq!(how, "stuck (fake): nothing moved; no progress for 300 s");
-        assert_eq!(ended_by(&how).as_deref(), Some("fake"));
-        assert_eq!(ended_by("timed out after 10800 s of running").as_deref(), Some("row cap"));
-        for by_itself in ["exit 0", "exit 101", "cancelled", "queue limit: no slot taken in time"] {
-            assert_eq!(ended_by(by_itself), None, "{by_itself}");
-        }
     }
 
     #[test]
     fn a_phase_line_has_the_durations_and_names_the_guard() {
         assert_eq!(
-            phase_line("doctest crates", Some(12.34), 45.6, "exit 0", None),
+            phase_line("doctest crates", Some(12.34), 45.6, "exit 0", None, None),
             "pre-push: doctest crates: queued 12.3 s, ran 45.6 s; ended: exit 0"
         );
-        let line = phase_line("clippy crates", None, 3.0, "timed out after 5 s of running", None);
+        let line = phase_line("clippy crates", None, 3.0, "timed out after 5 s of running", Some("row cap"), None);
         assert!(line.contains("ran 3.0 s") && line.ends_with("ended by guard: row cap"), "{line}");
     }
 
@@ -165,7 +153,6 @@ mod tests {
             progress: Progress::Lines,
             kind: "x",
             ws: "",
-            cold: false,
         };
         assert!(Never.watch(&step).is_none());
     }

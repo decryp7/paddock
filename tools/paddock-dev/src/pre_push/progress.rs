@@ -114,6 +114,8 @@ pub struct Counter {
     pos: u64,
     carry: String,
     events: u64,
+    units: u64,
+    compiled: u64,
     waiting: Option<String>,
     last_event: String,
 }
@@ -126,6 +128,8 @@ impl Counter {
             pos: 0,
             carry: String::new(),
             events: 0,
+            units: 0,
+            compiled: 0,
             waiting: None,
             last_event: String::new(),
         }
@@ -134,6 +138,13 @@ impl Counter {
     /// How many progress events so far: grows, never falls.
     pub fn events(&self) -> u64 {
         self.events
+    }
+
+    /// How many finished units cargo reported (`compiler-artifact`), and how many of them were really compiled (`"fresh":false`, not
+    /// taken from the build folder): the share tells a cold build from a warm one (review P2-3). Both stay 0 for a step that is not
+    /// cargo's JSON.
+    pub fn units(&self) -> (u64, u64) {
+        (self.units, self.compiled)
     }
 
     /// The lock wait the step is in (the cargo line), until its next progress event.
@@ -157,9 +168,20 @@ impl Counter {
                     self.events += 1;
                     self.waiting = None;
                     self.last_event = line.chars().take(160).collect();
+                    if line.starts_with('{') && line.contains("\"reason\":\"compiler-artifact\"") {
+                        self.units += 1;
+                        if line.contains("\"fresh\":false") {
+                            self.compiled += 1;
+                        }
+                    }
                 }
                 Line::LockWait => self.waiting = Some(line.trim().chars().take(200).collect()),
-                Line::Other => {}
+                // Any other output means cargo is going on: the wait is over (a blank line is no output).
+                Line::Other => {
+                    if !line.trim().is_empty() {
+                        self.waiting = None;
+                    }
+                }
             }
         }
     }
@@ -181,7 +203,8 @@ impl Counter {
             return;
         };
         self.pos += n as u64;
-        // A multi-byte character cut at the end of this read is completed by the next one: only whole lines are classified.
+        // A multi-byte character cut at the end of a read becomes U+FFFD in its line: harmless, only whole lines are classified and
+        // everything the classes look for is ASCII.
         self.feed(&String::from_utf8_lossy(&buf));
     }
 }
@@ -205,6 +228,21 @@ mod tests {
         assert!(c.last_event().contains("FAILED"));
     }
 
+    /// Review P2-3: cold or warm is read from cargo's own `"fresh":false` on each finished unit, not from a folder.
+    #[test]
+    fn units_really_compiled_are_told_from_units_taken_from_the_build_folder() {
+        let mut c = Counter::new(Progress::CargoJson);
+        c.feed(&format!("{UNIT}\n{UNIT}\n{SCRIPT}\n"));
+        c.feed(r#"{"reason":"compiler-artifact","package_id":"y 0.1.0","fresh":true}"#);
+        c.feed("\n");
+        assert_eq!(
+            c.units(),
+            (3, 2),
+            "three artifacts, two of them compiled; a build script is no unit"
+        );
+        assert_eq!(c.events(), 4);
+    }
+
     #[test]
     fn other_rows_count_every_non_empty_line() {
         let mut c = Counter::new(Progress::Lines);
@@ -223,6 +261,21 @@ mod tests {
             assert!(c.waiting_on().is_some_and(|w| w.contains("build directory")), "{mode:?}");
             c.feed(&format!("{UNIT}\n"));
             assert_eq!((c.events(), c.waiting_on()), (before + 1, None), "{mode:?}: an event ends the wait");
+        }
+    }
+
+    /// Any output after the lock line ends the wait, not only a progress event: cargo prints the lock line, then goes on to print
+    /// (a rendered diagnostic, a "Compiling" line) before its next unit finishes, and a wait that outlived its lock would hide a hang.
+    #[test]
+    fn any_output_line_after_the_lock_line_ends_the_wait() {
+        for mode in [Progress::CargoJson, Progress::Lines] {
+            let mut c = Counter::new(mode);
+            c.feed("    Blocking waiting for file lock on build directory\n");
+            assert!(c.waiting_on().is_some(), "{mode:?}");
+            c.feed("warning: unused variable: `x`\n");
+            assert_eq!(c.waiting_on(), None, "{mode:?}: output means cargo is going on");
+            c.feed("    Blocking waiting for file lock on package cache\n\n");
+            assert!(c.waiting_on().is_some(), "{mode:?}: a blank line is not output");
         }
     }
 

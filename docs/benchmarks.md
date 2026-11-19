@@ -2139,8 +2139,8 @@ Question: with the slot count following the load, how long does a queue of 4 cli
 
 - **Question:** the push gate and the member gate had one fixed 15-minute run budget ([`pre_push::exec`]). A change that reaches every
   Cargo workspace (a lockfile or workspace-hack change) cannot fit it, even one row at a time: a cold doctest build costs minutes per
-  workspace. Train 15's re-merge of train 14 left clippy for `tools/wiki` and the doctests of 10 workspaces "not measured"; it had
-  happened three times before.
+  workspace. Train 15's re-merge of train 14 left clippy for `tools/wiki` and the doctests of 10 workspaces "not measured". The brief counts
+  four such cases; only this one is recorded with its run, the earlier ones are not found in the logs or lessons (the research note, section 0).
 - **Source:** the push gate's own logs under `<git common dir>/paddock-pre-push/` of the main checkout, read on 2026-11-19:
   `queue-times.log` (one line per push run, 2,042 runs: `heavy_steps`, `queued_s`, `ran_s`) and `logs/<run>/<row>.log` (the last
   `heavy: <step> timing queued Q s, ran R s` line of each retained row, 56 rows). Machine: the shared Mac mini, other agents running.
@@ -2183,7 +2183,8 @@ Question: with the slot count following the load, how long does a queue of 4 cli
   run, 25 cold steps over about five hours), at the heavy slot count the load allowed. Not measured: a heavier load than this, a
   second cold run of the same workspace (so run-to-run spread within a workspace is unknown), Windows and Linux hosts, the Linux
   container row (output lines only; the container's CPU is not visible).
-- **Raw figures** (the stamping scripts and JSON are in the agent's scratch folder, not in the repository):
+- **Raw figures** (all runs, with the commands and the fields, in `docs/benchmarks/2026-11-19-gate-stall-gap-wp0.json`; the stamping script is
+  a 30-line wrapper that timestamps each output line):
 
 | Workspace | Step | Run | Seconds | Progress events | Longest gap, s (at s) | p99 gap, s |
 |---|---|---|---:|---:|---:|---:|

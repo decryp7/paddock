@@ -12,6 +12,7 @@
 //! defined, in docs/benchmarks.md "Push gate run time").
 
 use super::history::{History, StepRecord};
+use super::progress::Progress;
 use super::watchdog::{Observation, StepInfo, StepWatch, Stuck, WATCH_POLL, Watchdog};
 use paddock_proc::{Cpu, Liveness, Patience, Reading, StallCause, StartJudge, StartState};
 use std::sync::Arc;
@@ -38,11 +39,15 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// `PADDOCK_GATE_WATCHDOG`: `enforce` or `report` (the default for now).
-    pub fn from_env(value: Option<&str>) -> Mode {
+    /// `PADDOCK_GATE_WATCHDOG`: `enforce`, or `report` / unset for the default (report-only for now). Any other value is an error
+    /// that names the variable and the choices: a typo (`enforced`) must never leave a person thinking the watchdog kills.
+    pub fn from_env(value: Option<&str>) -> Result<Mode, String> {
         match value.map(str::trim) {
-            Some("enforce") => Mode::Enforce,
-            _ => Mode::ReportOnly,
+            None | Some("") | Some("report") => Ok(Mode::ReportOnly),
+            Some("enforce") => Ok(Mode::Enforce),
+            Some(other) => Err(format!(
+                "PADDOCK_GATE_WATCHDOG is `{other}`: it must be `enforce` or `report` (or unset, which is `report`)"
+            )),
         }
     }
 }
@@ -59,6 +64,15 @@ fn patience(gap: Duration) -> Patience {
         // is the limit plus two ticks.
         cpu_every: 1,
     }
+}
+
+/// How many finished units a cargo step shows before it is classed cold or warm from the share of them really compiled.
+pub const CLASSIFY_AFTER_UNITS: u64 = 20;
+
+/// Cold when at least half of the finished units were really compiled (`"fresh":false`): a warm build finds nearly all of them in the
+/// build folder (review P2-3: whether `debug/` exists says nothing about what the step does).
+pub fn is_cold(units: u64, compiled: u64) -> bool {
+    units > 0 && compiled * 2 >= units
 }
 
 /// The progress watchdog: a [`StepWatch`] for every step.
@@ -84,16 +98,15 @@ impl Watchdog for StallWatchdog {
     }
 
     fn watch(&self, step: &StepInfo<'_>) -> Option<Box<dyn StepWatch>> {
-        let limit = self
-            .history
-            .as_ref()
-            .and_then(|h| h.limit(step.kind, step.ws, step.cold, self.gap))
-            .unwrap_or(self.gap);
-        Some(Box::new(StallWatch {
-            judge: StartJudge::new(patience(limit), step.id),
+        let mut w = StallWatch {
+            judge: StartJudge::new(patience(self.gap), step.id),
+            id: step.id.to_string(),
             mode: self.mode,
-            limit,
-            step: (step.kind.to_string(), step.ws.to_string(), step.cold),
+            gap: self.gap,
+            limit: self.gap,
+            step: (step.kind.to_string(), step.ws.to_string()),
+            class: None,
+            units: (0, 0),
             history: self.history.clone(),
             started: None,
             last_progress: 0,
@@ -102,15 +115,26 @@ impl Watchdog for StallWatchdog {
             max_gap: Duration::ZERO,
             events: 0,
             would_stop: None,
-        }))
+        };
+        // A step that is not cargo's JSON has no units to classify by: it is one class (warm, "not a build").
+        if step.progress == Progress::Lines {
+            w.apply_class(false);
+        }
+        Some(Box::new(w))
     }
 }
 
 struct StallWatch {
     judge: StartJudge,
+    id: String,
     mode: Mode,
+    /// The fallback gap and the limit in force (the history's, once the class is known and it has one).
+    gap: Duration,
     limit: Duration,
-    step: (String, String, bool),
+    step: (String, String),
+    /// Cold or warm, known after [`CLASSIFY_AFTER_UNITS`] finished units (or at the end).
+    class: Option<bool>,
+    units: (u64, u64),
     history: Option<Arc<History>>,
     started: Option<Instant>,
     last_progress: u64,
@@ -119,6 +143,23 @@ struct StallWatch {
     max_gap: Duration,
     events: u64,
     would_stop: Option<String>,
+}
+
+impl StallWatch {
+    /// The step is cold (`true`) or warm: its limit is the history's for that class, when the history has one.
+    fn apply_class(&mut self, cold: bool) {
+        self.class = Some(cold);
+        let limit = self
+            .history
+            .as_ref()
+            .and_then(|h| h.limit(&self.step.0, &self.step.1, cold, self.gap))
+            .unwrap_or(self.gap);
+        if limit != self.limit {
+            self.limit = limit;
+            // A new judge: the class is decided right after a unit finished, so nothing it counted so far is lost.
+            self.judge = StartJudge::new(patience(limit), &self.id);
+        }
+    }
 }
 
 /// How the CPU reading words the report: it never decides.
@@ -148,6 +189,10 @@ impl StepWatch for StallWatch {
             self.cpu_then = o.cpu;
         }
         self.events = o.progress;
+        self.units = (o.units, o.compiled);
+        if self.class.is_none() && o.units >= CLASSIFY_AFTER_UNITS {
+            self.apply_class(is_cold(o.units, o.compiled));
+        }
         let reading = Reading {
             // A wait for another cargo's lock is a state of the step, not a stall: the judge counts nothing while it lasts.
             liveness: if o.waiting_on.is_some() {
@@ -199,7 +244,7 @@ impl StepWatch for StallWatch {
             h.append(&StepRecord {
                 kind: self.step.0.clone(),
                 ws: self.step.1.clone(),
-                cold: self.step.2,
+                cold: self.class.unwrap_or_else(|| is_cold(self.units.0, self.units.1)),
                 ok,
                 ran_secs: ran,
                 max_gap_secs: self.max_gap.max(tail).as_secs_f64(),
@@ -223,7 +268,6 @@ mod tests {
             progress: Progress::CargoJson,
             kind: "doctest",
             ws: "crates",
-            cold: true,
         }
     }
 
@@ -254,6 +298,9 @@ mod tests {
                 log_len: 0,
                 last_line: "",
                 progress,
+                // a cold build: every unit really compiled
+                units: progress.max(30),
+                compiled: progress.max(30),
                 last_event: "compiler-artifact x",
                 waiting_on: waiting,
                 cpu: cpu.map(Duration::from_secs),
@@ -372,8 +419,79 @@ mod tests {
 
     #[test]
     fn the_mode_is_report_only_unless_enforce_is_asked_for() {
-        assert_eq!(Mode::from_env(None), Mode::ReportOnly);
-        assert_eq!(Mode::from_env(Some("report")), Mode::ReportOnly);
-        assert_eq!(Mode::from_env(Some(" enforce ")), Mode::Enforce);
+        assert_eq!(Mode::from_env(None), Ok(Mode::ReportOnly));
+        assert_eq!(Mode::from_env(Some("")), Ok(Mode::ReportOnly));
+        assert_eq!(Mode::from_env(Some("report")), Ok(Mode::ReportOnly));
+        assert_eq!(Mode::from_env(Some(" enforce ")), Ok(Mode::Enforce));
+        // a typo is an error, never a silent report-only
+        let why = Mode::from_env(Some("enforced")).unwrap_err();
+        assert!(
+            why.contains("PADDOCK_GATE_WATCHDOG") && why.contains("`enforced`") && why.contains("`enforce`"),
+            "{why}"
+        );
+    }
+
+    /// Cold or warm comes from the share of units really compiled, not from a folder (review P2-3).
+    #[test]
+    fn a_step_is_cold_when_most_of_its_units_were_really_compiled() {
+        assert!(is_cold(100, 100));
+        assert!(is_cold(40, 20), "half or more");
+        assert!(!is_cold(100, 3), "a warm build finds nearly every unit in the build folder");
+        assert!(!is_cold(0, 0), "no units: not a build");
+    }
+
+    /// The class decides which history limits apply: a warm step with a history of quick warm steps gets the tight limit, the same
+    /// step cold (the history of cold steps is slow) keeps a long one.
+    #[test]
+    fn the_history_that_applies_is_the_one_of_the_steps_class() {
+        let d = tempfile::tempdir().unwrap();
+        let h = Arc::new(History::new(d.path().join("h.jsonl")));
+        let add = |cold: bool, gap: f64| {
+            for _ in 0..super::super::history::MIN_SAMPLES {
+                h.append(&StepRecord {
+                    kind: "doctest".into(),
+                    ws: "crates".into(),
+                    cold,
+                    ok: true,
+                    ran_secs: 90.0,
+                    max_gap_secs: gap,
+                    events: 40,
+                });
+            }
+        };
+        add(false, 2.0);
+        add(true, 60.0);
+        let limit = |compiled: u64| {
+            let dog = StallWatchdog::new(Mode::Enforce, Duration::from_secs(900), Some(Arc::clone(&h)));
+            let mut w = dog.watch(&step()).unwrap();
+            let t0 = Instant::now();
+            let me = ProcessId::of(std::process::id()).unwrap();
+            (1..3000u64).find_map(|i| {
+                w.check(&Observation {
+                    now: t0 + Duration::from_secs(i),
+                    active_for: Duration::from_secs(i),
+                    log_len: 0,
+                    last_line: "",
+                    progress: 30,
+                    units: 30,
+                    compiled,
+                    last_event: "",
+                    waiting_on: None,
+                    cpu: None,
+                    root: me,
+                })
+                .map(|s| s.quiet.as_secs())
+            })
+        };
+        assert!(
+            limit(0).is_some_and(|q| (120..=124).contains(&q)),
+            "warm: the floor, {:?}",
+            limit(0)
+        );
+        assert!(
+            limit(30).is_some_and(|q| (240..=244).contains(&q)),
+            "cold: 4 x 60 s, {:?}",
+            limit(30)
+        );
     }
 }

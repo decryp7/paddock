@@ -27,6 +27,11 @@ pub const K: f64 = 4.0;
 /// derived from quick units still leaves room for one slow unit.
 pub const FLOOR: Duration = Duration::from_secs(120);
 
+/// The size at which the file is rotated (review P2-4): the current file becomes `step-history.jsonl.1` (replacing an older one) and a new
+/// one starts, so the history never grows past about twice this. A record is about 150 bytes, so 1 MiB holds about 7,000 steps, many
+/// weeks of pushes; the limit reads at most [`READ_LINES`] of them.
+pub const MAX_BYTES: u64 = 1 << 20;
+
 /// The most records read back (the newest): the file only grows, a limit needs the recent past.
 const READ_LINES: usize = 4000;
 
@@ -89,12 +94,28 @@ pub fn limit_from(records: &[StepRecord], kind: &str, ws: &str, cold: bool, fall
 #[derive(Debug, Clone)]
 pub struct History {
     path: PathBuf,
+    max_bytes: u64,
 }
 
 impl History {
     /// The history in `path` (created on the first record).
     pub fn new(path: impl Into<PathBuf>) -> History {
-        History { path: path.into() }
+        History::with_max(path, MAX_BYTES)
+    }
+
+    /// A history rotated at `max_bytes` (a test makes it small).
+    pub fn with_max(path: impl Into<PathBuf>, max_bytes: u64) -> History {
+        History {
+            path: path.into(),
+            max_bytes,
+        }
+    }
+
+    /// The previous file, `<name>.1`.
+    fn older(&self) -> PathBuf {
+        let mut name = self.path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+        name.push(".1");
+        self.path.with_file_name(name)
     }
 
     /// Adds one record. Best effort: a history that cannot be written only means the next step has less to go on.
@@ -102,6 +123,10 @@ impl History {
         let Ok(line) = serde_json::to_string(&r.to_json()) else { return };
         if let Some(dir) = self.path.parent() {
             let _ = std::fs::create_dir_all(dir);
+        }
+        // A file past its size becomes the older one (best effort: two pushes rotating at once lose at most one old file).
+        if std::fs::metadata(&self.path).is_ok_and(|m| m.len() >= self.max_bytes) {
+            let _ = std::fs::rename(&self.path, self.older());
         }
         // One write of a short line in append mode: concurrent pushes do not interleave inside a line.
         let _ = std::fs::OpenOptions::new()
@@ -113,9 +138,12 @@ impl History {
 
     /// The newest records (a line that does not parse is skipped: the file may hold an older shape).
     pub fn records(&self) -> Vec<StepRecord> {
-        let Ok(text) = std::fs::read_to_string(&self.path) else {
-            return Vec::new();
-        };
+        // The older file first, then the current one: the newest records are the last.
+        let text = format!(
+            "{}{}",
+            std::fs::read_to_string(self.older()).unwrap_or_default(),
+            std::fs::read_to_string(&self.path).unwrap_or_default()
+        );
         let lines: Vec<&str> = text.lines().collect();
         let from = lines.len().saturating_sub(READ_LINES);
         lines[from..]
@@ -191,6 +219,29 @@ mod tests {
             "failed steps are no evidence"
         );
         assert_eq!(limit_from(&v, "clippy", "apps/dyno", true, FALLBACK), None);
+    }
+
+    /// Review P2-4: the file never grows without bound: past the size it becomes the older file (replacing the one before), the records
+    /// of both are read, and the oldest are gone.
+    #[test]
+    fn the_file_is_rotated_by_size_and_both_parts_are_read() {
+        let d = tempfile::tempdir().unwrap();
+        let h = History::with_max(d.path().join("step-history.jsonl"), 600);
+        for i in 0..40 {
+            h.append(&rec("clippy", "crates", false, true, i as f64));
+        }
+        let size = |p: &Path| std::fs::metadata(p).map_or(0, |m| m.len());
+        assert!(
+            size(h.path()) < 600 + 200,
+            "the current file stays near the limit: {}",
+            size(h.path())
+        );
+        assert!(size(&h.older()) > 0, "the previous part was kept");
+        let recs = h.records();
+        assert!(recs.len() > 5 && recs.len() < 40, "the oldest records are gone: {}", recs.len());
+        assert_eq!(recs.last().unwrap().max_gap_secs, 39.0, "the newest is last");
+        let gaps: Vec<f64> = recs.iter().map(|r| r.max_gap_secs).collect();
+        assert!(gaps.windows(2).all(|w| w[0] < w[1]), "in order across the two files: {gaps:?}");
     }
 
     #[test]

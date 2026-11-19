@@ -442,6 +442,9 @@ fn command_in(
             root.clone()
         }
     };
+    // A value of PADDOCK_GATE_WATCHDOG that is not one of the choices is an error before anything runs (a typo must not read as report-only).
+    let watchdog_mode = stall::Mode::from_env(env.get("PADDOCK_GATE_WATCHDOG").map(String::as_str))
+        .map_err(|why| CliError::usage(why).with_hint("Set it to `enforce` or `report`, or unset it."))?;
     let real = RealExec {
         root: work.clone(),
         env: env.clone(),
@@ -459,11 +462,12 @@ fn command_in(
         priority: pushes.iter().any(|p| budget::is_landing_ref(&p.remote_ref)),
         wrapper,
         watchdog: Arc::new(stall::StallWatchdog::new(
-            stall::Mode::from_env(env.get("PADDOCK_GATE_WATCHDOG").map(String::as_str)),
+            watchdog_mode,
             stall::GAP,
             Some(Arc::new(history::History::new(state.join("step-history.jsonl")))),
         )),
         row_cap: exec::ROW_CAP,
+        state: state.clone(),
     };
     let queue = queue_max(&env);
     let history = GitHistory::new(&work, GIT_TIMEOUT);

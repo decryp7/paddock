@@ -1,0 +1,290 @@
+{
+ "what": "WP-0: longest gap between two finished cargo units per workspace, step and run (cold or warm); docs/benchmarks.md, 'Push gate stall gap (WP-0)'",
+ "date": "2026-11-19",
+ "machine": "shared Mac mini, arm64, 14 cores, other agents running; 15-minute load 8 to 10 at the end",
+ "commands": "clippy: cargo clippy --workspace --all-targets [--all-features in crates] --locked --message-format=json-render-diagnostics -- -D warnings; doctest: cargo test --doc [--all-features in crates] --workspace --locked --message-format=json-render-diagnostics; xwin: cargo xwin clippy --target x86_64-pc-windows-msvc (same flags as clippy); one at a time through heavy, CARGO_BUILD_JOBS=2, fresh build folder per step, RUSTC_WRAPPER unset",
+ "counted_events": "compiler-artifact, build-script-executed; for doctests also 'Doc-tests' and 'test ... ok/FAILED' lines",
+ "fields": "ran: seconds the step took; events: counted events; max_gap: longest time between two counted events (start and end included), max_gap_at: second at which that gap ended; first_event: seconds to the first event; p99_gap: 99th percentile of the gaps; rc: exit code of the step",
+ "runs": [
+  {
+   "label": "apps-debrief-clippy cold",
+   "rc": 0,
+   "ran": 375.4871919170255,
+   "events": 1085,
+   "max_gap": 11.164334750035778,
+   "max_gap_at": 330.6711438749917,
+   "first_event": 0.7583335000090301,
+   "p99_gap": 3.4695081249810755
+  },
+  {
+   "label": "apps-debrief-doctest cold",
+   "rc": 0,
+   "ran": 683.7811953329947,
+   "events": 939,
+   "max_gap": 35.14715949998936,
+   "max_gap_at": 532.6412375830114,
+   "first_event": 1.4237523330375552,
+   "p99_gap": 8.111620166979264
+  },
+  {
+   "label": "apps-dyno-clippy cold",
+   "rc": 0,
+   "ran": 288.18236795801204,
+   "events": 833,
+   "max_gap": 12.425868250022177,
+   "max_gap_at": 4.626388375007082,
+   "first_event": 1.0162454170058481,
+   "p99_gap": 3.9248619159916416
+  },
+  {
+   "label": "apps-dyno-doctest cold",
+   "rc": 0,
+   "ran": 504.94926749996375,
+   "events": 680,
+   "max_gap": 22.201696042029653,
+   "max_gap_at": 480.16725958295865,
+   "first_event": 0.7398414999479428,
+   "p99_gap": 8.948281915974803
+  },
+  {
+   "label": "apps-dyno-xwin cold",
+   "rc": 0,
+   "ran": 335.0021966670174,
+   "events": 865,
+   "max_gap": 21.815442332997918,
+   "max_gap_at": 117.63145829201676,
+   "first_event": 1.1789730829768814,
+   "p99_gap": 4.535807290987577
+  },
+  {
+   "label": "apps-pitcrew-clippy cold",
+   "rc": 0,
+   "ran": 222.94616658403538,
+   "events": 631,
+   "max_gap": 10.49227216700092,
+   "max_gap_at": 132.60093741700985,
+   "first_event": 0.6321391670498997,
+   "p99_gap": 3.2727963749784976
+  },
+  {
+   "label": "apps-pitcrew-doctest cold",
+   "rc": 0,
+   "ran": 313.89857525000116,
+   "events": 537,
+   "max_gap": 9.775233416992705,
+   "max_gap_at": 146.04853483301122,
+   "first_event": 0.8421016660286114,
+   "p99_gap": 5.851311249949504
+  },
+  {
+   "label": "apps-pitwall-clippy cold",
+   "rc": 0,
+   "ran": 250.4099337910302,
+   "events": 691,
+   "max_gap": 10.480882916017435,
+   "max_gap_at": 133.05371125001693,
+   "first_event": 0.6464632080169395,
+   "p99_gap": 4.324742124998011
+  },
+  {
+   "label": "apps-pitwall-doctest cold",
+   "rc": 0,
+   "ran": 861.4424646249972,
+   "events": 597,
+   "max_gap": 43.12789275002433,
+   "max_gap_at": 261.1538876249688,
+   "first_event": 0.5419741249643266,
+   "p99_gap": 15.829451333032921
+  },
+  {
+   "label": "apps-pitwall-xwin cold",
+   "rc": 0,
+   "ran": 278.3419651670265,
+   "events": 699,
+   "max_gap": 14.169716375006828,
+   "max_gap_at": 3.378839292039629,
+   "first_event": 1.574835208011791,
+   "p99_gap": 4.198720249987673
+  },
+  {
+   "label": "apps-shell-demo-src-tauri-clippy cold",
+   "rc": 0,
+   "ran": 92.84617525001522,
+   "events": 604,
+   "max_gap": 5.114205833000597,
+   "max_gap_at": 28.23132133303443,
+   "first_event": 0.5723935830174014,
+   "p99_gap": 0.6979680000222288
+  },
+  {
+   "label": "apps-shell-demo-src-tauri-doctest cold",
+   "rc": 0,
+   "ran": 123.74158395797713,
+   "events": 512,
+   "max_gap": 8.947622791980393,
+   "max_gap_at": 114.53472091600997,
+   "first_event": 0.4982677500229329,
+   "p99_gap": 1.5637266249977984
+  },
+  {
+   "label": "apps-spotter-clippy cold",
+   "rc": 0,
+   "ran": 260.0782052910072,
+   "events": 669,
+   "max_gap": 13.027434666000772,
+   "max_gap_at": 188.7641125000082,
+   "first_event": 0.4934898749925196,
+   "p99_gap": 5.215948375000153
+  },
+  {
+   "label": "apps-spotter-doctest cold",
+   "rc": 0,
+   "ran": 363.3826453749789,
+   "events": 584,
+   "max_gap": 12.159173083025962,
+   "max_gap_at": 63.6796802089666,
+   "first_event": 1.7955192920053378,
+   "p99_gap": 6.906451541988645
+  },
+  {
+   "label": "apps-workbench-demo-src-tauri-clippy cold",
+   "rc": 0,
+   "ran": 81.31477629102301,
+   "events": 573,
+   "max_gap": 4.833451832993887,
+   "max_gap_at": 30.259128500008956,
+   "first_event": 0.5755909160361625,
+   "p99_gap": 0.6204270419548266
+  },
+  {
+   "label": "apps-workbench-demo-src-tauri-doctest cold",
+   "rc": 0,
+   "ran": 141.4059547499637,
+   "events": 484,
+   "max_gap": 8.747936292027589,
+   "max_gap_at": 132.4397880829638,
+   "first_event": 0.43108025001129135,
+   "p99_gap": 2.2016748749883845
+  },
+  {
+   "label": "crates-clippy cold",
+   "rc": 0,
+   "ran": 112.45616470795358,
+   "events": 857,
+   "max_gap": 1.1040457500494085,
+   "max_gap_at": 3.5063378329505213,
+   "first_event": 0.7336111249751411,
+   "p99_gap": 0.6715823750128038
+  },
+  {
+   "label": "crates-clippy warm",
+   "rc": 0,
+   "ran": 1.2729598750011064,
+   "events": 857,
+   "max_gap": 1.0011399590293877,
+   "max_gap_at": 0.0,
+   "first_event": 1.0011399590293877,
+   "p99_gap": 0.0006407920154742897
+  },
+  {
+   "label": "crates-doctest cold",
+   "rc": 0,
+   "ran": 198.73906658403575,
+   "events": 746,
+   "max_gap": 7.89035458303988,
+   "max_gap_at": 157.42241808399558,
+   "first_event": 0.6255305840168148,
+   "p99_gap": 1.749496000004001
+  },
+  {
+   "label": "crates-doctest warm",
+   "rc": 0,
+   "ran": 28.234375250001904,
+   "events": 746,
+   "max_gap": 4.2014112080214545,
+   "max_gap_at": 0.0,
+   "first_event": 4.2014112080214545,
+   "p99_gap": 0.8073632500017993
+  },
+  {
+   "label": "crates-xwin cold",
+   "rc": 0,
+   "ran": 121.7774382919888,
+   "events": 871,
+   "max_gap": 1.746636416995898,
+   "max_gap_at": 25.632343999983277,
+   "first_event": 0.8155958339921199,
+   "p99_gap": 0.8155958339921199
+  },
+  {
+   "label": "crates-xwin warm",
+   "rc": 0,
+   "ran": 1.825891624961514,
+   "events": 871,
+   "max_gap": 1.497483333980199,
+   "max_gap_at": 0.0,
+   "first_event": 1.497483333980199,
+   "p99_gap": 0.0010508749983273447
+  },
+  {
+   "label": "tools-heavy-clippy cold",
+   "rc": 0,
+   "ran": 26.50601645797724,
+   "events": 193,
+   "max_gap": 1.0988749170210212,
+   "max_gap_at": 2.1885648329625838,
+   "first_event": 0.4989112909534015,
+   "p99_gap": 0.8887418339727446
+  },
+  {
+   "label": "tools-heavy-doctest cold",
+   "rc": 0,
+   "ran": 39.785660208028276,
+   "events": 178,
+   "max_gap": 3.095982833998278,
+   "max_gap_at": 24.18413608300034,
+   "first_event": 0.2658946250448935,
+   "p99_gap": 2.1953814160078764
+  },
+  {
+   "label": "tools-paddock-dev-clippy cold",
+   "rc": 0,
+   "ran": 51.966216125001665,
+   "events": 250,
+   "max_gap": 11.638249709038064,
+   "max_gap_at": 3.251645332959015,
+   "first_event": 0.49510462500620633,
+   "p99_gap": 1.246452416991815
+  },
+  {
+   "label": "tools-paddock-dev-doctest cold",
+   "rc": 0,
+   "ran": 79.19849525002064,
+   "events": 232,
+   "max_gap": 11.869363542005885,
+   "max_gap_at": 3.347689290996641,
+   "first_event": 0.3233825000352226,
+   "p99_gap": 4.768019374983851
+  },
+  {
+   "label": "tools-wiki-clippy cold",
+   "rc": 0,
+   "ran": 27.406563208031002,
+   "events": 197,
+   "max_gap": 1.2202907499740832,
+   "max_gap_at": 2.1666732910089195,
+   "first_event": 0.5120844159973785,
+   "p99_gap": 0.6810269170091487
+  },
+  {
+   "label": "tools-wiki-doctest cold",
+   "rc": 0,
+   "ran": 36.053771916020196,
+   "events": 182,
+   "max_gap": 4.1309220000403,
+   "max_gap_at": 21.01546349999262,
+   "first_event": 0.3202133330050856,
+   "p99_gap": 1.7105154999881051
+  }
+ ]
+}

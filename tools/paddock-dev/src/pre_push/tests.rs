@@ -749,6 +749,7 @@ impl Exec for Fake {
                 tail: String::new(),
                 log: Some("/logs/x.log".into()),
                 timing: None,
+                ending: crate::pre_push::exec::Ending::RowCap,
             });
         }
         if self.no_slot.contains(&g.id) {
@@ -758,6 +759,7 @@ impl Exec for Fake {
                 tail: String::new(),
                 log: Some("/logs/q.log".into()),
                 timing: Some(Timing { queued: 31.0, ran: 0.0 }),
+                ending: crate::pre_push::exec::Ending::QueueLimit,
             });
         }
         let fail = self.fail.iter().any(|f| f == &g.id);
@@ -767,6 +769,7 @@ impl Exec for Fake {
             tail: if fail { "error: boom".into() } else { String::new() },
             log: None,
             timing: self.timing,
+            ending: crate::pre_push::exec::Ending::Exited,
         })
     }
 }
@@ -898,6 +901,7 @@ fn a_docker_failure_names_its_cause() {
                 tail: String::new(),
                 log: None,
                 timing: None,
+                ending: crate::pre_push::exec::Ending::Exited,
             })
         }
     }
@@ -1062,6 +1066,7 @@ fn ran_ok(id: &str, secs: f64) -> Row {
         tail: String::new(),
         log: None,
         timing: None,
+        ending: crate::pre_push::exec::Ending::Exited,
     };
     Row::from_run(id, &test_subject(), &done, "", secs)
 }
@@ -1075,6 +1080,7 @@ fn a_row_from_a_run_reads_its_exit() {
         tail: String::new(),
         log: None,
         timing: None,
+        ending: crate::pre_push::exec::Ending::Exited,
     };
     assert_eq!(
         Row::from_run("g", &test_subject(), &run(true), "g (exit 1)", 1.0).kind(),
@@ -2721,6 +2727,7 @@ impl Exec for Queued {
                 queued: self.queued.as_secs_f64(),
                 ran: 0.0,
             }),
+            ending: crate::pre_push::exec::Ending::Exited,
         })
     }
 }
@@ -3426,6 +3433,7 @@ mod deny_row {
             wrapper: crate::local_sccache::Lazy::off(),
             watchdog: Arc::new(crate::pre_push::watchdog::Never),
             row_cap: crate::pre_push::exec::ROW_CAP,
+            state: d.join("state"),
         }
     }
 

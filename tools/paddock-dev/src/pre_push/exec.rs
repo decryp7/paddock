@@ -52,6 +52,60 @@ pub struct Limits {
     pub queue: Duration,
 }
 
+/// How a run ended, as a type (review P2-1): every decision about an ending (is it cut short, which guard ended it, must the container be
+/// stopped, did it ever get a slot) reads this and never a text, so a new ending cannot be forgotten by one of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ending {
+    /// It ended by itself, with any exit code.
+    Exited,
+    /// The watchdog ended it as stuck.
+    Stuck {
+        /// The guard's name.
+        guard: String,
+    },
+    /// It reached the row cap (or the backstop beyond it).
+    RowCap,
+    /// The person stopped the push.
+    Cancelled,
+    /// It never got a heavy slot (or its build folder) within the queue allowance: the command never ran.
+    QueueLimit,
+    /// It wrote more output than the cap allows.
+    OutputCap,
+}
+
+impl Ending {
+    /// It did not end by itself: a guard, the cap or the person stopped it. Nothing is proven either way, and anything it started
+    /// (a container) must be stopped.
+    pub fn cut_short(&self) -> bool {
+        !matches!(self, Ending::Exited | Ending::QueueLimit)
+    }
+
+    /// The guard that ended it, as the summary names it.
+    pub fn guard(&self) -> Option<String> {
+        match self {
+            Ending::Stuck { guard } => Some(guard.clone()),
+            Ending::RowCap => Some(ROW_CAP_GUARD.to_string()),
+            _ => None,
+        }
+    }
+
+    /// The ending a process reported in words, for a run that was not made by [`RealExec::run`] (a stand-in executor, `--warm-linux`).
+    /// `RealExec::run` itself sets the ending where it knows why.
+    pub fn from_how(how: &str) -> Ending {
+        if how.starts_with("timed out") {
+            Ending::RowCap
+        } else if how == "cancelled" {
+            Ending::Cancelled
+        } else if how.starts_with("queue limit") {
+            Ending::QueueLimit
+        } else if how.starts_with("stopped at the output cap") {
+            Ending::OutputCap
+        } else {
+            Ending::Exited
+        }
+    }
+}
+
 /// How one run ended.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Done {
@@ -65,25 +119,24 @@ pub struct Done {
     pub log: Option<String>,
     /// Queue and run seconds as `heavy` measured them; none for a gate that did not go through it.
     pub timing: Option<Timing>,
+    /// How it ended, typed ([`Ending`]); `how` is the same in words for a person.
+    pub ending: Ending,
 }
 
 impl Done {
     /// It did not end by itself: the budget or the gate's own limit stopped it, or the person did. Nothing is proven either way.
     pub fn cut_short(&self) -> bool {
-        self.how.starts_with("timed out")
-            || self.how.starts_with("stuck (")
-            || self.how == "cancelled"
-            || self.how.starts_with("stopped at the output cap")
+        self.ending.cut_short()
     }
 
-    /// The guard that ended the run ([`super::watchdog::ended_by`]): the watchdog's name, or `row cap`.
+    /// The guard that ended the run ([`Ending::guard`]): the watchdog's name, or `row cap`.
     pub fn ended_by(&self) -> Option<String> {
-        super::watchdog::ended_by(&self.how)
+        self.ending.guard()
     }
 
     /// `heavy` gave up waiting for a slot: the command never ran.
     pub fn no_slot(&self) -> bool {
-        self.how.starts_with("queue limit")
+        self.ending == Ending::QueueLimit
     }
 }
 
@@ -320,7 +373,7 @@ fn own_run_limit(_gate: &Gate) -> Duration {
 
 /// For a run `heavy` ended at its run limit (the backstop beyond the row cap), with the run time it had (empty for any other ending).
 fn run_limit_note(done: &Done) -> String {
-    match (done.how.starts_with("timed out after"), done.timing) {
+    match (done.ending == Ending::RowCap, done.timing) {
         (true, Some(t)) => format!("; the row cap of {} min spent after {:.0} s of run", ROW_CAP.as_secs() / 60, t.ran),
         _ => String::new(),
     }
@@ -408,7 +461,7 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
         ),
         // The watchdog ended it: the step made no progress. Not measured, never a finding or a pass; the row names the step, the last
         // output line and how long nothing moved.
-        Ok(done) if done.how.starts_with("stuck (") => Row::not_measured(
+        Ok(done) if matches!(done.ending, Ending::Stuck { .. }) => Row::not_measured(
             format!(
                 "stuck: {} was stopped by the watchdog ({}); last output line: {}{}",
                 gate.rerun(),
@@ -817,6 +870,9 @@ pub struct RealExec {
     pub watchdog: Arc<dyn Watchdog>,
     /// What one started row may run ([`ROW_CAP`]); a test sets a short one.
     pub row_cap: Duration,
+    /// The state folder of this checkout (`<git common dir>/paddock-pre-push`): the history and the build-folder locks live in it. Given
+    /// by the caller, never derived from the logs folder (review P2-2: a test's logs folder gave a lock file in `$TMPDIR`).
+    pub state: PathBuf,
 }
 
 /// Variables every gate may see besides the base list: the toolchain, Docker, caches and Paddock's own settings.
@@ -921,12 +977,13 @@ impl RealExec {
             ),
             None => (gate.program.clone(), gate_args),
         };
-        // Through our `heavy` the queue and the run are bounded apart (`--queue-max`, `--run-max`); a command not through it has no such
-        // split (a foreign heavy's queue is invisible), so there the remaining total budget is the only bound.
+        // Through our `heavy` the queue and the run are bounded apart (`--queue-max`, `--run-max`). A started row is never cut by what
+        // is left of the total budget (that was the old budget's failure, review P1-1): the outer limit is only the backstop beyond
+        // the row cap, which the monitor enforces (from the start, for a step through another heavy whose queue cannot be told apart).
         let timeout = if limited {
             run_max + limits.queue + Duration::from_secs(60)
         } else {
-            own.min(limits.run)
+            own
         };
         let mut call = ToolCall::new(program)
             .args(args)
@@ -1123,11 +1180,15 @@ impl Exec for RealExec {
                             queued: waited.as_secs_f64(),
                             ran: 0.0,
                         }),
+                        ending: Ending::QueueLimit,
                     });
                 }
             },
             None => (BuildLock { _held: None }, Duration::ZERO),
         };
+        // What the wait for the folder took is spent from the queue allowance heavy is given (review P2-5): the push's allowance is for
+        // all its waiting together.
+        let limits = queue_after(limits, lock_wait);
         let call = self.call(gate, limits, &log, label.as_deref(), &name);
         let _ = std::fs::File::create(&log);
         // Our `heavy` writes "holds the lock" to the log when the slot is taken: until then every second is waiting for others,
@@ -1139,7 +1200,6 @@ impl Exec for RealExec {
             progress: gate.progress,
             kind: gate.id.split(' ').next().unwrap_or(&gate.id),
             ws: &gate.cwd,
-            cold: gate.build_dir.as_deref().is_some_and(|d| build_is_cold(&self.root, d)),
         };
         let watch = self.watchdog.watch(&info);
         let root: Arc<Mutex<Option<paddock_proc::ProcessId>>> = Arc::default();
@@ -1186,15 +1246,19 @@ impl Exec for RealExec {
             self.set_slot(Slot::Unknown);
         }
         let mut ran = ran?;
-        // The watchdog ended the tree: say so, whatever the OS reported (a signal), so the row is "not measured: stuck".
+        // The one place the tool's words become a typed ending; every later decision reads `ending`.
+        let mut ending = Ending::from_how(&ran.how);
+        // The watchdog or the row cap ended the tree: say so, whatever the OS reported (a signal), so the row is "not measured".
         if let Some(s) = stuck.lock().ok().and_then(|mut g| g.take()) {
             ran.success = false;
-            ran.how = if s.guard == ROW_CAP_GUARD {
+            if s.guard == ROW_CAP_GUARD {
                 // The row cap reads as a timeout (it is one), not as a stall.
-                format!("timed out after {} s of running ({ROW_CAP_GUARD})", s.quiet.as_secs())
+                ran.how = format!("timed out after {} s of running ({ROW_CAP_GUARD})", s.quiet.as_secs());
+                ending = Ending::RowCap;
             } else {
-                stuck_how(&s)
-            };
+                ran.how = stuck_how(&s);
+                ending = Ending::Stuck { guard: s.guard };
+            }
         }
         let mut timing = None;
         if gate.heavy {
@@ -1203,12 +1267,16 @@ impl Exec for RealExec {
             // heavy's own limits: 79 no slot in time (the command never ran), 80 the command was ended at its run limit.
             let how = ran.how.clone();
             match how.as_str() {
-                "exit 79" if timing.is_some() => ran.how = "queue limit: no slot taken in time".into(),
+                "exit 79" if timing.is_some() => {
+                    ran.how = "queue limit: no slot taken in time".into();
+                    ending = Ending::QueueLimit;
+                }
                 "exit 80" if timing.is_some() => {
-                    ran.how = format!("timed out after {} s of running", timing.map_or(0.0, |t| t.ran).round())
+                    ran.how = format!("timed out after {} s of running", timing.map_or(0.0, |t| t.ran).round());
+                    ending = Ending::RowCap;
                 }
                 // Cut short while queued for the heavy slot: say so, the gate itself never ran (ER-33).
-                h if h.starts_with("timed out") && !ran.success => {
+                _ if ending == Ending::RowCap && !ran.success => {
                     if let Some(w) = slot_wait(&text) {
                         ran.how = format!("{}: {w}", ran.how);
                     }
@@ -1216,9 +1284,11 @@ impl Exec for RealExec {
                 _ => {}
             }
         }
+        // Any ending that is not the container run's own (the row cap, the watchdog, the person) stops the container too: the heavy
+        // slot is free when the client ends, and a container left compiling would run beside the next step (review P1-2).
         if let Some(l) = &label
             && !ran.success
-            && matches!(ran.how.as_str(), h if h == "cancelled" || h.starts_with("timed out"))
+            && ending.cut_short()
         {
             self.stop_container(l);
         }
@@ -1239,6 +1309,7 @@ impl Exec for RealExec {
             timing.map(|t| t.queued),
             timing.map_or(wall, |t| t.ran),
             &ran.how,
+            ending.guard().as_deref(),
             note.as_deref(),
         );
         eprintln!("{line}");
@@ -1263,27 +1334,31 @@ impl Exec for RealExec {
             ),
             log: Some(log.display().to_string()),
             timing,
+            ending,
         })
     }
 }
 
-/// Whether the cargo build folder `dir` (relative to `root`, or absolute) holds no build yet: neither `debug` nor the Windows target's
-/// `debug` beneath it. The history keeps cold and warm steps apart.
-fn build_is_cold(root: &Path, dir: &str) -> bool {
-    let d = root.join(dir);
-    !d.join("debug").is_dir() && !d.join("x86_64-pc-windows-msvc").join("debug").is_dir()
-}
-
-/// Since when a step counts as running for its watch, or `None` while it must not be watched: our `heavy` queueing (the wait for the
-/// slot is waiting for others, ER-43), and a heavy step through another `heavy` (no lock line, so a queue cannot be told from a run).
-fn active_since(ours: bool, heavy: bool, slot: Slot, began: Instant) -> Option<Instant> {
+/// Since when a step counts as running, and whether the watchdog may judge it: `None` while it must not be watched at all, our `heavy`
+/// queueing (the wait for the slot is waiting for others, ER-43). A heavy step through another `heavy` has no lock line, so a queue cannot
+/// be told from a run: the row cap counts from its start (its bound is honest, a step that is only queued for an hour is cut) and the
+/// watchdog does not judge it. Every other step runs, and is judged, from its start.
+fn active_since(ours: bool, heavy: bool, slot: Slot, began: Instant) -> Option<(Instant, bool)> {
     match (ours, heavy) {
         (true, _) => match slot {
-            Slot::Taken { at, .. } => Some(at),
+            Slot::Taken { at, .. } => Some((at, true)),
             _ => None,
         },
-        (false, true) => None,
-        (false, false) => Some(began),
+        (false, true) => Some((began, false)),
+        (false, false) => Some((began, true)),
+    }
+}
+
+/// `limits` with the time already waited for the build folder taken off the queue allowance.
+fn queue_after(limits: Limits, waited: Duration) -> Limits {
+    Limits {
+        queue: limits.queue.saturating_sub(waited),
+        ..limits
     }
 }
 
@@ -1297,8 +1372,7 @@ impl RealExec {
     /// The lock file of a build folder: in the state folder beside the gate logs, so every push of this checkout names the same file
     /// for the same folder, and nothing is written into the repository or the build folder.
     pub(crate) fn build_lock_path(&self, dir: &str) -> PathBuf {
-        let state = self.logs.parent().and_then(Path::parent).unwrap_or(&self.logs);
-        state
+        self.state
             .join("build-locks")
             .join(format!("{}.lock", log_name(&self.root.join(dir).to_string_lossy())))
     }
@@ -1392,10 +1466,12 @@ impl RealExec {
             }
             last_check = Instant::now();
             let active_since = active_since(ours, heavy, self.slot(), began);
-            let (Some(since), Some(id)) = (active_since, root.lock().ok().and_then(|r| *r)) else {
+            let (Some((since, judged)), Some(id)) = (active_since, root.lock().ok().and_then(|r| *r)) else {
                 continue;
             };
-            counter.read_new(log);
+            if judged {
+                counter.read_new(log);
+            }
             let tail = crate::ci_tool::read_tail(log, 4096);
             let last_line = tail.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
             let now = Instant::now();
@@ -1406,6 +1482,8 @@ impl RealExec {
                     reason: format!("the row ran its whole cap of {} s", self.row_cap.as_secs()),
                     quiet: active_for,
                 })
+            } else if !judged {
+                None
             } else {
                 w.as_mut().and_then(|w| {
                     w.check(&Observation {
@@ -1414,6 +1492,8 @@ impl RealExec {
                         log_len: std::fs::metadata(log).map_or(0, |m| m.len()),
                         last_line: &last_line,
                         progress: counter.events(),
+                        units: counter.units().0,
+                        compiled: counter.units().1,
                         last_event: counter.last_event(),
                         waiting_on: counter.waiting_on(),
                         cpu: paddock_proc::tree_cpu_time(id),
@@ -1535,6 +1615,7 @@ mod tests {
                 tail: String::new(),
                 log: Some(self.log.display().to_string()),
                 timing: Some(Timing { queued: 1800.0, ran: 0.0 }),
+                ending: Ending::QueueLimit,
             })
         }
     }
@@ -1705,6 +1786,7 @@ exit $rc
                 wrapper: crate::local_sccache::Lazy::off(),
                 watchdog: Arc::new(crate::pre_push::watchdog::Never),
                 row_cap: ROW_CAP,
+                state: dir.join("state"),
             }
         }
 
@@ -1835,9 +1917,11 @@ exit $rc
             let lock = d.path().join("slot.lock");
             std::fs::create_dir(&lock).unwrap();
             std::fs::write(lock.join("owner"), "Bob").unwrap();
-            let ex = real(d.path(), &lock);
+            // The fake heavy is not ours: its queue cannot be told from its run, so the row cap counts from the start (2 s here).
+            let mut ex = real(d.path(), &lock);
+            ex.row_cap = Duration::from_secs(2);
             let g = gate("clippy a", "echo never runs");
-            let r = decide(&g, &ex, Duration::from_secs(2), &test_subject());
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
             assert_eq!(
                 r.kind(),
                 Kind::NotMeasured,
@@ -1893,6 +1977,7 @@ exit $rc
                 wrapper: crate::local_sccache::Lazy::off(),
                 watchdog: Arc::new(crate::pre_push::watchdog::Never),
                 row_cap: ROW_CAP,
+                state: d.join("state"),
             }
         }
 
@@ -2135,6 +2220,7 @@ exit $rc
                 stop: ex.stop.clone(),
                 watchdog: Arc::new(crate::pre_push::watchdog::Never),
                 row_cap: ROW_CAP,
+                state: ex.state.clone(),
             };
             assert!(decide(&g, &ex2, Duration::from_secs(60), &test_subject()).kind() == Kind::Passed);
         }
@@ -2388,6 +2474,99 @@ exit $rc
             assert_eq!(r.kind(), Kind::Passed, "the control: free folder, same step: {r:?}");
         }
 
+        /// A started row is never cut by what is left of the total budget (the old budget's failure, review P1-1): a 6 s step that
+        /// starts with 2 s of budget left finishes and passes, heavy or not, and one that is ended is ended by the row cap, not "budget".
+        #[test]
+        fn a_started_row_runs_past_what_is_left_of_the_total_budget() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = real(d.path(), &d.path().join("l"));
+            let g = quiet_step(d.path(), 6);
+            let r = decide(&g, &ex, Duration::from_secs(2), &test_subject());
+            assert_eq!(r.kind(), Kind::Passed, "the budget only stops rows from starting: {r:?}");
+            // a heavy row through another heavy (no way to split its queue from its run) is bounded by the row cap from its start
+            let mut g = quiet_step(d.path(), 6);
+            g.heavy = true;
+            let r = decide(&g, &ex, Duration::from_secs(2), &test_subject());
+            assert_eq!(r.kind(), Kind::Passed, "{r:?}");
+        }
+
+        /// Review P1-2: a step the watchdog ends as stuck stops its Linux container as well (the heavy slot is freed when the client
+        /// ends, and a container left compiling would run beside the next step). Any cut-short ending stops it.
+        #[test]
+        fn a_container_run_the_watchdog_ends_is_stopped_with_its_label() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            let docker = paddock_testkit::StandIn::new(d.path(), "docker")
+                .records_args()
+                .when_args(&["ps"], paddock_testkit::Actions::new().stdout("abc123").exit(0))
+                .install()
+                .unwrap();
+            ex.env.insert("DOCKER".into(), docker.program().to_string_lossy().to_string());
+            ex.watchdog = Arc::new(Fires {
+                after: 2,
+                seen: Arc::default(),
+            });
+            let mut g = quiet_step(d.path(), 60);
+            g.need = Need::Docker;
+            let limits = Limits {
+                run: Duration::from_secs(300),
+                queue: Duration::from_secs(300),
+            };
+            let done = ex.run(&g, limits).unwrap();
+            assert!(done.cut_short() && !done.success, "{done:?}");
+            let calls = docker.calls().unwrap();
+            assert!(
+                calls.iter().any(|c| c.first().is_some_and(|a| a == "stop")),
+                "the container was stopped: {calls:?}"
+            );
+        }
+
+        /// Review P2-1: every decision about an ending reads the type. A cut-short ending is exactly one that is not the run's own (the
+        /// guards, the cap, the person, the output cap); the guard named is the watchdog's or the row cap.
+        #[test]
+        fn the_ending_type_answers_cut_short_and_guard_for_every_ending() {
+            let stuck = Ending::Stuck { guard: "fake".into() };
+            let all = [
+                (Ending::Exited, false, None),
+                (stuck, true, Some("fake")),
+                (Ending::RowCap, true, Some("row cap")),
+                (Ending::Cancelled, true, None),
+                (Ending::QueueLimit, false, None),
+                (Ending::OutputCap, true, None),
+            ];
+            for (e, cut, guard) in all {
+                assert_eq!(e.cut_short(), cut, "{e:?}");
+                assert_eq!(e.guard().as_deref(), guard, "{e:?}");
+            }
+            assert_eq!(Ending::from_how("timed out after 5 s"), Ending::RowCap);
+            assert_eq!(Ending::from_how("cancelled"), Ending::Cancelled);
+            assert_eq!(Ending::from_how("queue limit: no slot"), Ending::QueueLimit);
+            assert_eq!(Ending::from_how("exit 101"), Ending::Exited);
+        }
+
+        /// Review P2-5: the wait for the build folder is spent from the queue allowance heavy is given; never below zero.
+        #[test]
+        fn the_wait_for_the_build_folder_is_spent_from_the_queue_allowance() {
+            let l = Limits {
+                run: Duration::from_secs(9),
+                queue: Duration::from_secs(100),
+            };
+            assert_eq!(queue_after(l, Duration::from_secs(30)).queue, Duration::from_secs(70));
+            assert_eq!(queue_after(l, Duration::from_secs(300)).queue, Duration::ZERO);
+            assert_eq!(queue_after(l, Duration::from_secs(30)).run, Duration::from_secs(9));
+        }
+
+        /// Review P2-2: the lock files live under the state folder the caller gave, never beside the logs or in the temp folder.
+        #[test]
+        fn the_build_folder_locks_live_under_the_given_state_folder() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = real(d.path(), &d.path().join("l"));
+            let p = ex.build_lock_path("tgt/a");
+            assert!(p.starts_with(d.path().join("state").join("build-locks")), "{}", p.display());
+            assert_ne!(p, ex.build_lock_path("tgt/b"), "one file per folder");
+            assert_eq!(p, ex.build_lock_path("tgt/a"), "the same folder, the same file");
+        }
+
         /// The row cap is the backstop: a step still running when it is spent is stopped (its stacks written first) and "not measured",
         /// never a pass, and the summary names the cap.
         #[test]
@@ -2409,8 +2588,9 @@ exit $rc
             assert!(stacks, "the stacks were written before the tree was ended");
         }
 
-        /// Queue time is never watched (ER-43): a step queued for the slot, or one behind another `heavy` (no lock line to tell a queue
-        /// from a run), is not shown to its watch; a running one is, from the moment it took the slot.
+        /// Queue time is never judged (ER-43): a step queued for our slot is not shown to its watch; a running one is, from the moment it
+        /// took the slot. A step through another `heavy` (no lock line to tell a queue from a run) has its row cap counted from its start
+        /// and is not judged.
         #[test]
         fn only_a_running_step_is_shown_to_its_watch() {
             let t0 = Instant::now();
@@ -2423,24 +2603,19 @@ exit $rc
             assert_eq!(active_since(true, true, Slot::Unknown, t0), None);
             assert_eq!(
                 active_since(true, true, Slot::Taken { since: t0, at }, t0),
-                Some(at),
+                Some((at, true)),
                 "the queue is not run time"
             );
-            assert_eq!(active_since(false, true, Slot::Unknown, t0), None, "another heavy: not told apart");
+            assert_eq!(
+                active_since(false, true, Slot::Unknown, t0),
+                Some((t0, false)),
+                "another heavy: capped from the start, never judged"
+            );
             assert_eq!(
                 active_since(false, false, Slot::Unknown, t0),
-                Some(t0),
+                Some((t0, true)),
                 "a step with no slot runs from its start"
             );
-        }
-
-        #[test]
-        fn the_heavy_build_is_cut_off_by_the_credited_run_time_not_the_wall_clock() {
-            let d = tempfile::tempdir().unwrap();
-            let ex = repo_with_fake_cargo(d.path(), true);
-            // Plenty of credited run time left (the step queued behind others for as long as it liked): the build goes ahead.
-            let r = decide(&gate("clippy a", "true"), &ex, Duration::from_secs(300), &test_subject());
-            assert_eq!(r.kind(), Kind::Passed, "{r:?}");
         }
 
         #[test]
@@ -2451,10 +2626,12 @@ exit $rc
                 tail: String::new(),
                 log: None,
                 timing: Some(Timing { queued: 5.0, ran: 700.0 }),
+                ending: Ending::RowCap,
             };
             assert_eq!(run_limit_note(&done), "; the row cap of 60 min spent after 700 s of run");
             let other = Done {
                 how: "exit 1".into(),
+                ending: Ending::Exited,
                 ..done
             };
             assert_eq!(run_limit_note(&other), "", "any other ending says nothing");
