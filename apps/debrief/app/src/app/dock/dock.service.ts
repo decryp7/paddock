@@ -960,14 +960,15 @@ export class DockService {
   }
 
   /**
-   * Would the Explorer (a side column outside the dock, `explorerWidth` px wide when open) fit beside what is docked?
+   * Would the Explorer (a side column outside the dock) fit beside what is docked? `drawnWidth` is the room the Explorer takes in the window now,
+   * 0 before it is drawn and once it is gone, whatever `open` says: the room is the dock's plus that, the same before and after a render.
    * `hide`: it is open and the plan has no room for it; `show`: it is closed and fits with the grow-back margin;
    * `keep`: nothing to do. The plan decides, with the same priorities as everything else.
    */
-  explorerVerdict(open: boolean, explorerWidth: number): 'hide' | 'show' | 'keep' {
+  explorerVerdict(open: boolean, drawnWidth: number): 'hide' | 'show' | 'keep' {
     const api = this.api;
     if (!api) return 'keep';
-    return this.layout.explorerVerdict(api, open, explorerWidth);
+    return this.layout.explorerVerdict(api, open, drawnWidth);
   }
 
   /** Undo of "Some panes were tabbed to fit": the saved arrangement, unclamped, for this session. */

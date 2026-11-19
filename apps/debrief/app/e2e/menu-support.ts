@@ -1,4 +1,5 @@
 import { Locator, Page } from '@playwright/test';
+import { expectMenuAnchoredTo } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 /** Debrief's in-app menu bar (Windows, Linux and the browser build). */
 export function menubar(page: Page): Locator {
@@ -11,21 +12,26 @@ export function menuItem(scope: Page | Locator, name: string | RegExp): Locator 
   return scope.getByRole('menuitem', opts).or(scope.getByRole('menuitemcheckbox', opts));
 }
 
-/** Opens a top-level menu (File, Edit, View, ...) and returns it. */
+/**
+ * Opens a top-level menu (File, Edit, View, ...) and returns it, once it sits below its trigger: the menu is drawn at the window's top-left until
+ * the overlay is positioned (debrief.yml run 8297: about 500 ms during the first load in WebKit), and a click on an item there misses once it moves.
+ */
 export async function openMenu(page: Page, name: string): Promise<Locator> {
-  await menubar(page).getByRole('menuitem', { name, exact: true }).click();
+  const trigger = menubar(page).getByRole('menuitem', { name, exact: true });
+  await trigger.click();
   const menu = page.getByRole('menu', { name, exact: true });
-  await menu.waitFor();
+  await expectMenuAnchoredTo(menu, trigger);
   return menu;
 }
 
-/** Opens the menus along a path (e.g. "View", "Analysis") and returns the last one, open. */
+/** Opens the menus along a path (e.g. "View", "Analysis") and returns the last one, open and beside its item. */
 export async function openMenuPath(page: Page, ...path: string[]): Promise<Locator> {
   let menu = await openMenu(page, path[0]);
   for (const name of path.slice(1)) {
-    await menu.getByRole('menuitem', { name, exact: true }).click();
+    const trigger = menu.getByRole('menuitem', { name, exact: true });
+    await trigger.click();
     menu = page.getByRole('menu', { name, exact: true });
-    await menu.waitFor();
+    await expectMenuAnchoredTo(menu, trigger);
   }
   return menu;
 }
