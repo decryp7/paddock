@@ -190,6 +190,11 @@ another database number. sccache's keys include the compiler and target, so one 
   `CARGO_ENCODED_RUSTFLAGS` replaces every configured flag, this one included: add `-C target-feature=+crt-static` to
   it when you set it for a Windows build. `node conformance/release/windows-crt-imports.mjs <exe-or-folder>` checks a
   build; cargo-xwin cross-builds pick the setting up as well.
+- **sccache caches rustc, not C (ER-47).** cc-rs puts `RUSTC_WRAPPER` in front of the C compiler when its file name is `sccache`,
+  cargo hands that variable to every build script, and sccache 0.19 cannot probe `clang-cl` (it reads `/Users/...` as `/U`
+  options), so every `cargo xwin` lint that compiles C (ring) failed. cc-rs has no switch for one target, so `./dev sccache env`
+  (and the gates, `./dev gen check`, heavy's build) set `RUSTC_WRAPPER` to `rustc-wrapper`, a one-line program beside sccache that
+  runs it: cargo still caches rustc, cc-rs leaves the C compiler alone. Policy and reason: `local_sccache::rustc_wrapper_for`.
 
 ## Folders tools make (owner records)
 
