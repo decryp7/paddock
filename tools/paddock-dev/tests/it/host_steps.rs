@@ -94,9 +94,12 @@ fn norm(text: &str, fx: &Fx) -> String {
     let secs_cell = regex::Regex::new(r"\| \d+ s \|").unwrap();
     let sizes = regex::Regex::new(r"(is|still) \d+( \(cap|;)").unwrap();
     let bash_killed = regex::Regex::new(r": line \d+: +\d+ Killed ").unwrap();
-    let timed_out_last = regex::Regex::new(r"Last output: kept-clone: git [a-z-]+ failed \(timed out after \d+ s\)\.").unwrap();
-    let timed_out_why = regex::Regex::new(r"\(kept-clone: git [a-z-]+ failed \(timed out after \d+ s\)\)").unwrap();
-    let timed_out_line = regex::Regex::new(r"^kept-clone: git [a-z-]+ failed \(timed out after \d+ s\)$").unwrap();
+    // A hung git ends at its limit (the Rust git's own, outside a clock mark) or, with a clock mark, when the abandoned phase ends it
+    // (`signal 9`: the git's limit is then the general one, so a slow start cannot meet the phase's limit).
+    let timed_out_last =
+        regex::Regex::new(r"Last output: kept-clone: git [a-z-]+ failed \((?:timed out after \d+ s|signal 9)\)\.").unwrap();
+    let timed_out_why = regex::Regex::new(r"\(kept-clone: git [a-z-]+ failed \((?:timed out after \d+ s|signal 9)\)\)").unwrap();
+    let timed_out_line = regex::Regex::new(r"^kept-clone: git [a-z-]+ failed \((?:timed out after \d+ s|signal 9)\)$").unwrap();
     // The Rust phase says how many programs of an abandoned phase it ended and how long that took (ER-27); the shell's `bounded` ends
     // the function's tree and says nothing.
     let ended_line = regex::Regex::new(r": ended \d+ program\(s\) of the abandoned phase in \d+ ms$").unwrap();
@@ -1438,15 +1441,15 @@ const KEPT_PHASES: [(&str, &str, &str); 7] = [
 ];
 
 /// The environment of a hung-phase test: the hanging phase's own limit (1 s), the clock mark its git writes, and a bounded general
-/// limit, which bounds every other phase and the hanging one until its mark. 20 s because the slowest whole hung-phase test took
-/// 17.4 s (300 runs of the six, 6 burners, 1-minute load 18 to 68, 2026-11-15; `fix/kept-clone-phase-state`'s 50-run stress) and
-/// no phase of a test outlasts the test; a git that misses its mark then ends at 20 s with "did not finish within 20 s", not at
-/// nextest's 60 s.
+/// limit, which bounds every other phase and the hanging one until its mark (`HUNG_TEST_GENERAL_LIMIT`, with its measurement).
 fn kept_hang_env(id: &'static str) -> Vec<(&'static str, String)> {
     vec![
         (id, "1".into()),
         ("PADDOCK_KEPT_CLONE_CLOCK_MARK", "<ROOT>/hang-mark".into()),
-        ("PADDOCK_KEPT_CLONE_TIMEOUT", "20".into()),
+        (
+            "PADDOCK_KEPT_CLONE_TIMEOUT",
+            paddock_dev::ci_host::phase::HUNG_TEST_GENERAL_LIMIT.as_secs().to_string(),
+        ),
     ]
 }
 
@@ -1544,6 +1547,7 @@ fn kept_clone_the_verify_phase_is_bounded_by_its_own_limit() {
 
 #[test]
 fn kept_clone_every_phase_that_runs_git_has_its_own_limit_test() {
+    // conformance: no-clock-mark - reads the phase ids only; it runs no step and sets no limit
     // The tests above are one per phase that runs git; a phase added to KEPT_PHASES with a git word needs its own, or it is not tested.
     let tested = ["CREATE", "CLEAN", "FETCH", "CHECKOUT", "VERIFY"].map(|p| format!("PADDOCK_KEPT_CLONE_TIMEOUT_{p}"));
     let with_git: Vec<&str> = KEPT_PHASES.iter().filter(|(_, w, _)| !w.is_empty()).map(|(id, ..)| *id).collect();
@@ -1578,6 +1582,7 @@ fn kept_clone_a_phase_that_hangs_ends_in_one_warning_and_never_fails_the_job() {
 
 #[test]
 fn kept_clone_reads_of_the_work_folder_are_not_bound_by_the_phase_limit() {
+    // conformance: no-clock-mark - the limit under test is the general one on reads outside any phase; the sleep is the thing timed
     // `PADDOCK_KEPT_CLONE_TIMEOUT` is seconds per phase. The shell reads the work folder's commit and origin before any phase, without
     // that limit; the Rust command bounded them by it, so under load (a `git rev-parse` over 1 s with the hung-phase test's 1 s limit,
     // 4 of 204 runs) it failed the job with `cannot read the commit and the origin` where the shell went on.
