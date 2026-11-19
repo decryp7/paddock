@@ -18,7 +18,9 @@ fn is_removed(rule: &str) -> bool {
     rule == "alert:backup"
 }
 
-/// The alarm engine with its store.
+/// The alarm engine with its store. Every change is stored before it is kept: a change whose commit fails is undone and not
+/// returned to push (one rule with the sampler's tick state, `crate::tick_state`).
+#[derive(Clone)]
 pub struct AlarmCentre {
     engine: AlarmEngine,
     last_tick: Timestamp,
@@ -55,9 +57,8 @@ impl AlarmCentre {
         self.engine.set_config(config);
     }
 
-    /// Stores a batch of changes in one transaction (rule 85; ADR 0108 DY-7).
+    /// Writes a batch of changes (the caller's batch commits them: rule 85; ADR 0108 DY-7).
     fn persist(store: &Store, changes: &[AlarmChange]) {
-        let batch = store.batch();
         for c in changes {
             let r = if c.kind == ChangeKind::Pruned {
                 store.delete_alarm(c.alarm.id)
@@ -68,22 +69,41 @@ impl AlarmCentre {
                 log::error!("dyno-agent: could not store an alarm change: {e}");
             }
         }
-        if let Err(e) = batch.commit() {
-            log::error!("dyno-agent: {} alarm changes were not stored: {e}", changes.len());
+    }
+
+    /// Runs `change` on the engine and its writes in one batch: kept and returned (to push) when the batch commits, undone
+    /// otherwise, with nothing to push. Inside the sampler's tick batch the commit is the tick's, whose tick state undoes the
+    /// engine when that fails.
+    fn stored(&mut self, store: &Store, change: impl FnOnce(&mut Self, &Store) -> Vec<AlarmChange>) -> Vec<AlarmChange> {
+        let before = self.clone();
+        let batch = store.batch();
+        let changes = change(self, store);
+        match batch.commit() {
+            Ok(()) => changes,
+            Err(e) => {
+                *self = before;
+                log::error!(
+                    "dyno-agent: {} alarm changes were not stored ({e}); they are undone and not announced",
+                    changes.len()
+                );
+                Vec::new()
+            }
         }
     }
 
-    /// Applies an event and stores its changes; the caller pushes them.
+    /// Applies an event and stores its changes; the caller pushes them (none when they were not stored).
     pub fn apply(&mut self, store: &Store, event: AlarmEvent) -> Vec<AlarmChange> {
         let is_mute = matches!(event, AlarmEvent::Mute { .. });
-        let changes = self.engine.apply(event);
-        Self::persist(store, &changes);
-        if is_mute {
-            if let Err(e) = store.set_muted_rules(&self.engine.muted_rules()) {
-                log::error!("dyno-agent: could not store the muted rules: {e}");
+        self.stored(store, |me, store| {
+            let changes = me.engine.apply(event);
+            Self::persist(store, &changes);
+            if is_mute {
+                if let Err(e) = store.set_muted_rules(&me.engine.muted_rules()) {
+                    log::error!("dyno-agent: could not store the muted rules: {e}");
+                }
             }
-        }
-        changes
+            changes
+        })
     }
 
     /// Raises (or returns) what `observation` describes.
@@ -101,10 +121,12 @@ impl AlarmCentre {
         if now.since(self.last_tick) < TICK_EVERY_MS {
             return Vec::new();
         }
-        self.last_tick = now;
-        let changes = self.engine.tick(now);
-        Self::persist(store, &changes);
-        changes
+        self.stored(store, |me, store| {
+            me.last_tick = now;
+            let changes = me.engine.tick(now);
+            Self::persist(store, &changes);
+            changes
+        })
     }
 
     /// Alarms matching `filter`, newest first.
@@ -169,6 +191,21 @@ mod tests {
         assert_eq!(s.muted_rules().unwrap(), ["alert:lowDisk"]);
     }
 
+    /// Second review: a request (ack, mute, shelve, raise) whose changes were not stored returns none to push and leaves the
+    /// engine as it was, so asking again works.
+    #[test]
+    fn a_request_whose_changes_are_not_stored_changes_nothing() {
+        let mut s = Store::memory().unwrap();
+        let mut c = AlarmCentre::load(&s, AlarmConfig::default(), dyno_core::time::FixedZone::shared(0));
+        let commits = s.count_commits();
+        commits.fail(true);
+        assert!(c.apply(&s, raise("alert:a")).is_empty(), "nothing to push");
+        assert!(!c.exists(1), "the engine did not keep the alarm");
+        commits.fail(false);
+        assert_eq!(c.apply(&s, raise("alert:a")).len(), 1);
+        assert_eq!(s.alarms(10).unwrap().len(), 1);
+    }
+
     /// DY-7 (ADR 0108, guard D): a batch of alarm changes (each an alarm row and a change-log row) is one commit.
     #[test]
     fn an_alarm_batch_is_one_commit() {
@@ -179,9 +216,13 @@ mod tests {
             .flat_map(|r| e.apply(raise(r)))
             .collect();
         assert_eq!(changes.len(), 3);
+        let mut centre = AlarmCentre::load(&s, AlarmConfig::default(), dyno_core::time::FixedZone::shared(0));
         let commits = s.count_commits();
-        AlarmCentre::persist(&s, &changes);
-        assert_eq!(commits.take(), 1);
+        let kept = centre.stored(&s, |_, store| {
+            AlarmCentre::persist(store, &changes);
+            changes.clone()
+        });
+        assert_eq!((commits.take(), kept.len()), (1, 3));
         assert_eq!(s.alarms(10).unwrap().len(), 3);
         assert_eq!(s.alarm_events(None, 10).unwrap().len(), 3);
     }

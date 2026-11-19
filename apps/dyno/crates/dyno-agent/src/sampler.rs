@@ -188,7 +188,7 @@ impl Sampler {
         // The tick's writes (history, disks, prune, alerts, alarms) are one transaction, not one commit per statement under the
         // core lock (rule 85; ADR 0108 DY-7). What they announce waits for the commit: an app is never told of an alert or an
         // alarm change that was not stored, and a tick that was not stored leaves the history writer as it was.
-        let writer_before = core.writer.clone();
+        let before = crate::tick_state::TickState::of(core);
         let batch = core.store.batch();
         let mut news: Vec<News> = Vec::new();
         let groups_for_history: &[AppGroup] = if fresh { &core.latest.groups } else { &[] };
@@ -236,7 +236,7 @@ impl Sampler {
                 }
             }
             Err(e) => {
-                core.writer = writer_before;
+                before.restore(core);
                 let withheld = news
                     .iter()
                     .map(|n| match n {
@@ -246,7 +246,7 @@ impl Sampler {
                     .sum::<usize>();
                 log::error!(
                     withheld = withheld;
-                    "dyno-agent: the tick's history, alerts and alarm changes were not stored ({e}); they are not announced, and the next tick writes the history again"
+                    "dyno-agent: the tick's history, alerts and alarm changes were not stored ({e}); they are not announced, and the tick's state is put back so the next tick writes and announces them again"
                 );
             }
         }
@@ -349,6 +349,17 @@ mod tests {
     /// A tick that raises an alarm, with a connected app listening; `refuse` makes the tick's commit fail. Returns the alarm
     /// messages the app was sent and the alarms stored.
     fn tick_with_alarm(refuse: bool) -> (usize, usize) {
+        ticks_with_alarm(&[refuse])
+    }
+
+    /// Ticks one second apart on one agent, each refused or not; returns what the app was sent and the alarms stored at the end.
+    fn ticks_with_alarm(refused: &[bool]) -> (usize, usize) {
+        let (sent, stored) = ticks_with_alarm_kinds(refused);
+        (sent.len(), stored)
+    }
+
+    /// [`ticks_with_alarm`], with the kind of each alarm change the app was sent.
+    fn ticks_with_alarm_kinds(refused: &[bool]) -> (Vec<dyno_core::alarms::ChangeKind>, usize) {
         let tmp = paddock_testkit::private_tempdir().unwrap();
         let fake = Fake::new();
         let (shared, sensors, processes) = Shared::build(
@@ -372,19 +383,23 @@ mod tests {
         });
         let mut sampler = Sampler::new(sensors, processes);
         let commits = lock(&shared.core).store.count_commits();
-        commits.fail(refuse);
-        let t = Timestamp(HOUR + 1);
         let overhead = Overhead {
             agent_cpu: 0.0,
             agent_memory: 0,
             sampling_interval_ms: 2_000,
             process_interval_ms: 10_000,
         };
-        sampler.record(&shared, &quiet_sample(t), None, overhead, t);
+        for (i, refuse) in refused.iter().enumerate() {
+            commits.fail(*refuse);
+            let t = Timestamp(HOUR + 1 + i as i64 * 1_000);
+            sampler.record(&shared, &quiet_sample(t), None, overhead, t);
+        }
         commits.fail(false);
-        let mut alarms = 0;
+        let mut alarms = Vec::new();
         pending.drain(&mut |m| {
-            alarms += usize::from(matches!(m, Message::Alarm(_)));
+            if let Message::Alarm(c) = m {
+                alarms.push(c.kind);
+            }
             true
         });
         let stored = lock(&shared.core).store.alarms(10).unwrap().len();
@@ -396,6 +411,15 @@ mod tests {
     fn a_tick_announces_its_alarms_only_once_they_are_stored() {
         assert_eq!(tick_with_alarm(false), (1, 1), "stored, then announced");
         assert_eq!(tick_with_alarm(true), (0, 0), "not stored, so not announced");
+    }
+
+    /// Second review: a tick that was not stored leaves the alarm engine, the alert and custom evaluators and the recorder as
+    /// they were, so the next good tick raises, stores and announces the alarm.
+    #[test]
+    fn a_good_tick_after_a_failed_one_raises_the_alarm_again() {
+        assert_eq!(ticks_with_alarm(&[true, false]), (1, 1));
+        // The app never heard of it, so it is told of a new alarm, not a repeat of one the engine kept from the failed tick.
+        assert_eq!(ticks_with_alarm_kinds(&[true, false]).0, [dyno_core::alarms::ChangeKind::Raised]);
     }
 
     /// DY-7 (ADR 0108, guard D): one sampler tick under the core lock writes its history, disks, prune, alerts and alarms in

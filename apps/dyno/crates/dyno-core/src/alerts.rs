@@ -93,7 +93,7 @@ impl AlertSettings {
 pub const HIGH_CPU: f32 = 50.0;
 
 /// Remembers what is building up and what fired recently.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Alerts {
     since: HashMap<String, Timestamp>,
     fired: HashMap<String, Timestamp>,
