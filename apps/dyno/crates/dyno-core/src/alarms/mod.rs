@@ -334,8 +334,8 @@ fn clip(s: &str, max: usize) -> String {
     s.chars().filter(|c| !c.is_control() || *c == '\n').take(max).collect()
 }
 
-/// The alarm list and its rules.
-#[derive(Debug)]
+/// The alarm list and its rules. Cloned before a write so a change that was not stored can be undone (the agent's tick state).
+#[derive(Debug, Clone)]
 pub struct AlarmEngine {
     config: AlarmConfig,
     /// The user's local zone: quiet hours and "until tomorrow" follow it.

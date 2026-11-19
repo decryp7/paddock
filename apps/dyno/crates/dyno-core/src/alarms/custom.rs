@@ -176,7 +176,7 @@ pub fn delete_rule(rules: &mut Vec<CustomAlertRule>, id: &str) -> Result<(), Str
 }
 
 /// Remembers how long each rule's condition has held and which rules are raised.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct CustomEvaluator {
     held_since: HashMap<String, Timestamp>,
     raised: HashMap<String, f64>,

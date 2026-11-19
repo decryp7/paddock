@@ -58,7 +58,9 @@ impl HistoryWriter {
     pub fn record(&mut self, store: &Store, s: &SystemSample, groups: &[AppGroup]) -> Result<()> {
         let before = self.clone();
         let batch = store.batch();
-        let written = self.write_tick(store, s, groups);
+        // One whole: inside the sampler's batch a tick that fails halfway leaves none of its rows, so the restored writer's next
+        // flush of the minute is the only one (second review P1-A).
+        let written = store.atomic(|| self.write_tick(store, s, groups));
         let stored = written.and(batch.commit());
         if stored.is_err() {
             *self = before;
@@ -318,6 +320,44 @@ mod tests {
             store.app_minutes(Timestamp(0), Timestamp(MINUTE)).unwrap().len(),
             1,
             "the first minute's apps are flushed"
+        );
+    }
+
+    /// Second review P1-A: a tick that fails halfway inside the sampler's batch (its rollup mark is refused after the minute's
+    /// apps were written) leaves none of its rows, so the next tick's flush of the same minute is the only one.
+    #[test]
+    fn a_tick_that_fails_inside_a_batch_leaves_none_of_its_rows() {
+        let store = Store::memory().unwrap();
+        let mut w = HistoryWriter::default();
+        let mut s = dyno_platform::fake::quiet_sample(Timestamp(0));
+        let apps = [AppGroup {
+            id: "busy".into(),
+            name: "busy".into(),
+            exe: None,
+            pids: vec![1],
+            cpu: Measured::Value(50.0),
+            memory: Measured::Value(100),
+            disk_bps: Measured::Value(0.0),
+            partial: false,
+        }];
+        for i in 0..(MINUTE / RAW_STEP_MS) {
+            s.at = Timestamp(i * RAW_STEP_MS);
+            w.record(&store, &s, &apps).unwrap();
+        }
+        store.exec_for_test(
+            "CREATE TRIGGER no_mark BEFORE INSERT ON meta WHEN NEW.key LIKE 'rollup.%' BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+        );
+        let batch = store.batch();
+        s.at = Timestamp(MINUTE + 1);
+        assert!(w.record(&store, &s, &apps).is_err());
+        batch.commit().unwrap();
+        store.exec_for_test("DROP TRIGGER no_mark;");
+        s.at = Timestamp(MINUTE + 2);
+        w.record(&store, &s, &apps).unwrap();
+        assert_eq!(
+            store.app_minutes(Timestamp(0), Timestamp(MINUTE)).unwrap().len(),
+            1,
+            "one row for the minute"
         );
     }
 

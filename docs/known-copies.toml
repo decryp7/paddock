@@ -1444,3 +1444,43 @@ status = "built"
   owner = "paddock"
   delete_by = "v0.5.0"
   note = "The commit-msg hook, `commit-lint --range` and C23 run in Node before any binary is built. One case table, conformance/reland-cases.json, is read by both test suites (the Rust test the_shared_case_table_gives_the_same_answers_as_the_javascript_rule and the c23-commit-lint test 're-land rule'), so a case one side fails is a drift. Goes when commit-lint moves into `./dev` (docs/plans/ci-in-rust.md, WP-9)."
+
+# =====================================================================================================================
+# File identity (which file a path names: device and inode, volume serial and file index)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "file-identity"
+title = "Which file a path names and whether it changed (device and inode, or volume serial and file index; rule 53's class)"
+canonical = "paddock-env"
+paths = ["crates/paddock-env/src/file_identity.rs"]
+symbols = ["item:FileIdentity"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/crates/debrief-core/src/workspace/tail/identity.rs"]
+  symbols = ["item:FileIdentity", "item:identity_of"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "The Windows source: volume serial number and file index from GetFileInformationByHandle, which the canonical lacks (it is Unix-only, as stable std has neither). It moves into paddock_env::file_identity with the change time from FILE_BASIC_INFO, and the tail then compares only the identity part (device and index), since size and times change as a followed file grows. Registered 2026-11-19 instead of moved in the Dyno release round (ADR 0108 WP-1 review)."
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/crates/dyno-platform/src/fileid.rs"]
+  symbols = ["item:FileFacts", "item:file_facts"]
+  owner = "dyno"
+  delete_by = "dyno-v1.2.0"
+  note = "The disk map's Windows file facts: volume serial and file index from an open handle, with link count and allocation size. Its identity half goes onto the canonical's Windows half once that exists; the sizes stay the disk map's."
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/crates/dyno-agent/src/helper_readers/holders.rs"]
+  symbols = ["item:device_and_inode"]
+  owner = "dyno"
+  delete_by = "dyno-v1.2.0"
+  note = "stat's st_dev and st_ino of a canonical path for the helper's file-holder answer (Unix)."
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/crates/dyno-agent/src/bench_scratch.rs"]
+  symbols = ["item:identity_of"]
+  owner = "dyno"
+  delete_by = "dyno-v1.2.0"
+  note = "A benchmark scratch folder's identity as text: dev:ino on Unix (symlink_metadata), volume:index from dyno-platform's fileid on Windows."

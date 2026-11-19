@@ -24,6 +24,16 @@ impl Default for Recorder {
 }
 
 impl Recorder {
+    /// When the last automatic capture was taken: the part of the recorder a tick changes besides the store (its tick state).
+    pub fn auto_mark(&self) -> Option<Timestamp> {
+        self.last_auto
+    }
+
+    /// Puts [`Recorder::auto_mark`] back (a tick whose capture was not stored).
+    pub fn restore_auto_mark(&mut self, mark: Option<Timestamp>) {
+        self.last_auto = mark;
+    }
+
     /// An empty recorder.
     pub fn new() -> Recorder {
         Recorder {

@@ -4,28 +4,32 @@
 //! `utimes` cannot set back). A cache keeps an answer only while [`FileIdentity::of`] still gives the same value, and reads it
 //! again after the work it cached, keeping the answer only when the file did not change meanwhile.
 //!
-//! On Windows std gives no file index or change time (the stable `MetadataExt` has neither), so the identity there is the size,
-//! the modification time and the creation time: weaker, said here, and enough for what calls it there today (nothing).
+//! Unix only for now: stable std has no file index or change time on Windows. The family's Windows identity (volume serial
+//! number and file index from `GetFileInformationByHandle`) is in Debrief's tail (`debrief-core/src/workspace/tail/identity.rs`);
+//! moving it here, with the change time from `FILE_BASIC_INFO`, is registered in `docs/known-copies.toml` (`file-identity`).
 
+#[cfg(unix)]
 use std::io;
+#[cfg(unix)]
 use std::path::Path;
 use std::time::SystemTime;
 
 /// A file's identity and stat data at one moment.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FileIdentity {
-    /// The device (Unix `st_dev`); 0 on Windows.
+    /// The device (`st_dev`).
     pub device: u64,
-    /// The inode (Unix `st_ino`); 0 on Windows.
+    /// The inode (`st_ino`).
     pub inode: u64,
     /// The size in bytes.
     pub len: u64,
     /// The modification time.
     pub modified: Option<SystemTime>,
-    /// The inode change time (Unix `st_ctime`, in nanoseconds since 1970), or the creation time on Windows.
+    /// The inode change time (`st_ctime`, in nanoseconds since 1970).
     pub changed: Option<i128>,
 }
 
+#[cfg(unix)]
 impl FileIdentity {
     /// The identity of the file `path` names now (following links, as opening it would).
     pub fn of(path: &Path) -> io::Result<FileIdentity> {
@@ -35,38 +39,18 @@ impl FileIdentity {
 
     /// The identity in `meta`.
     pub fn from_metadata(meta: &std::fs::Metadata) -> FileIdentity {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            FileIdentity {
-                device: meta.dev(),
-                inode: meta.ino(),
-                len: meta.len(),
-                modified: meta.modified().ok(),
-                changed: Some(
-                    i128::from(meta.ctime()) * 1_000_000_000 + i128::from(meta.ctime_nsec()),
-                ),
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            let created = meta
-                .created()
-                .ok()
-                .and_then(|c| c.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_nanos() as i128);
-            FileIdentity {
-                device: 0,
-                inode: 0,
-                len: meta.len(),
-                modified: meta.modified().ok(),
-                changed: created,
-            }
+        use std::os::unix::fs::MetadataExt;
+        FileIdentity {
+            device: meta.dev(),
+            inode: meta.ino(),
+            len: meta.len(),
+            modified: meta.modified().ok(),
+            changed: Some(i128::from(meta.ctime()) * 1_000_000_000 + i128::from(meta.ctime_nsec())),
         }
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
@@ -80,7 +64,6 @@ mod tests {
     }
 
     /// A file renamed over the path with the same size and its modification time set back is still a different file.
-    #[cfg(unix)]
     #[test]
     fn a_file_replaced_with_the_same_size_and_time_is_told_apart() {
         let dir = tempfile::tempdir().unwrap();
