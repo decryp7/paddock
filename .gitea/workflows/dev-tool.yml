@@ -107,6 +107,9 @@ jobs:
       - uses: ./.gitea/actions/job-isolation
 
       - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - name: Build and publish the tool for this runner
         env:
@@ -140,6 +143,9 @@ jobs:
       - uses: ./.gitea/actions/job-isolation
 
       - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - name: Build and publish the tool for this runner
         env:

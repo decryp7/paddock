@@ -52,6 +52,8 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
         with:
           targets: ${{ matrix.target }}
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       # CARGO_BUILD_JOBS: this runner's share of the host (Linux keeps cargo's default).
       - uses: ./.gitea/actions/build-jobs
@@ -140,6 +142,8 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
         with:
           targets: ${{ matrix.target }}
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       # A release is never built with a floating compiler, whatever the job's environment says (RUSTUP_TOOLCHAIN outranks the file):
       # `rustc --version` against the `channel` of rust-toolchain.toml, read with the TOML parser; one ::error:: naming both when they differ.
