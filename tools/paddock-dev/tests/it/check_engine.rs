@@ -134,7 +134,7 @@ fn json_mode_strict_and_the_exit_statuses_agree() {
     );
     assert!(json_run.stdout.trim_start().starts_with('{'));
     // C120 and C119 are report-only: a warning never fails the run, `--strict` makes the named check's warnings fail.
-    // conformance: layout-guess — a shell fixture for the strict-mode test, not a layout this code computes
+    // conformance: stand-in — the shell file is the data of the C120 layout check, never run; conformance: layout-guess — a shell fixture for the strict-mode test, not a layout this code computes
     let bad = tree(&[("scripts/x.sh", "#!/bin/sh\nd=$(dirname \"$0\")/../deps\ncd \"$d\"\n")]);
     let loose = same(
         "engine-loose",

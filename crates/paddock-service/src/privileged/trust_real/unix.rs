@@ -383,6 +383,7 @@ mod unix_tests {
         let elf = dir.path().join("prog");
         std::fs::write(&elf, b"\x7fELFxxxx").unwrap();
         let script = dir.path().join("script");
+        // conformance: stand-in — the shebang is the data: a script, not an ELF file, must be refused
         std::fs::write(&script, b"#!/bin/sh\nexit 0\n").unwrap();
         let tiny = dir.path().join("tiny");
         std::fs::write(&tiny, b"\x7f").unwrap();

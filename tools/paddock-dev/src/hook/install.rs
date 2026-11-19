@@ -340,7 +340,7 @@ mod tests {
         std::fs::create_dir_all(root.join(HOOKS_DIR)).unwrap();
         std::fs::write(root.join(HOOKS_DIR).join("README"), "x\n").unwrap();
         let exe = base.join("fake-paddock-dev");
-        std::fs::write(&exe, "#!/bin/sh\necho fake\n").unwrap();
+        std::fs::write(&exe, "fake paddock-dev bytes\n").unwrap();
         let exec = Isolated { home };
         exec.run("git", &["init", "-q", "-b", "main"], &root, None).unwrap();
         exec.run("git", &["add", "-A"], &root, None).unwrap();
@@ -449,8 +449,10 @@ mod tests {
     #[test]
     fn an_existing_commit_msg_hook_still_runs_after_install() {
         let f = fixture();
-        let hook = f.root.join(".git/hooks/commit-msg");
-        paddock_testkit::exe::write_program(&hook, "#!/bin/sh\necho ran > \"$(dirname \"$0\")/marker\"\nexit 0\n").unwrap();
+        paddock_testkit::StandIn::new(&f.root.join(".git/hooks"), "commit-msg")
+            .answers(paddock_testkit::Actions::new().writes_with("{dir}/marker", "ran\n"))
+            .install()
+            .unwrap();
         install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
         std::fs::write(f.root.join("x.txt"), "x\n").unwrap();
         git(&f, &["add", "-A"]);
@@ -524,11 +526,11 @@ mod tests {
         assert_eq!(missing.data["shim_state"], "missing");
         assert!(missing.text.contains("warning") && !shim.exists(), "{}", missing.text);
         // different: a warning, the file is untouched
-        std::fs::write(&shim, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::write(&shim, "a different shim text\n").unwrap();
         let differs = install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
         assert_eq!(differs.data["shim_state"], "differs");
         assert!(differs.text.contains("warning"), "{}", differs.text);
-        assert_eq!(std::fs::read_to_string(&shim).unwrap(), "#!/bin/sh\nexit 0\n");
+        assert_eq!(std::fs::read_to_string(&shim).unwrap(), "a different shim text\n");
         // same: quiet
         std::fs::write(&shim, SHIM).unwrap();
         let same = install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
@@ -540,10 +542,10 @@ mod tests {
     fn a_second_run_replaces_the_binary_atomically_and_leaves_no_temporary_file() {
         let f = fixture();
         install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
-        std::fs::write(&f.exe, "#!/bin/sh\necho second\n").unwrap();
+        std::fs::write(&f.exe, "second binary bytes\n").unwrap();
         let second = install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
         let installed = std::fs::read_to_string(second.data["binary"].as_str().unwrap()).unwrap();
-        assert_eq!(installed, "#!/bin/sh\necho second\n");
+        assert_eq!(installed, "second binary bytes\n");
         assert_eq!(std::fs::read_dir(common_hooks(&f)).unwrap().count(), 2);
     }
 
@@ -564,6 +566,7 @@ mod tests {
         let tracked = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../githooks/claude-pre-tool-use")).unwrap();
         assert_eq!(tracked, SHIM);
         assert!(SHIM.lines().count() <= 10, "a shim is a few lines");
+        // conformance: stand-in — the shim is a tracked shell script and its first line is what this assertion examines
         assert!(SHIM.starts_with("#!/bin/sh\n"));
         // shell builtins only: no git (about 10 ms a call), no sed, no cat
         for program in ["bash", "jq", "python", "git ", "sed ", "cat", "dirname"] {
@@ -584,8 +587,12 @@ mod tests {
         f.exec.run("env", &args, cwd, Some(input.as_bytes())).unwrap()
     }
 
+    /// The installed guard binary of the shim tests: reads one stdin line and prints its arguments and that line.
     #[cfg(unix)]
-    const BUILTIN_BINARY: &str = "#!/bin/sh\nIFS= read -r l\nprintf 'args: %s <%s>\\n' \"$*\" \"$l\"\n";
+    fn builtin_binary(dir: &Path) -> paddock_testkit::StandIn {
+        paddock_testkit::StandIn::new(dir, "paddock-dev")
+            .answers(paddock_testkit::Actions::new().stdout_with("args: {args} <{stdin_line}>"))
+    }
 
     #[cfg(unix)]
     const BASH_LS: &str = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"}}\n";
@@ -632,8 +639,8 @@ mod tests {
         let f = fixture();
         let shim = f.root.join(SHIM_PATH);
         std::fs::write(&shim, SHIM).unwrap();
-        std::fs::write(&f.exe, BUILTIN_BINARY).unwrap();
         install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
+        builtin_binary(&common_hooks(&f)).install().unwrap();
         let wt = f.root.parent().unwrap().join("wt");
         git(&f, &["worktree", "add", "-q", "-b", "other", wt.to_str().unwrap()]);
         let want = "args: hook pre-tool-use <INPUT>\n";
@@ -686,8 +693,8 @@ mod tests {
         // before the install: denied, with the way out in the text
         let out = shim_without_path(&f, &shim, &bare, None, BASH_LS);
         assert!(out.contains("deny") && out.contains("--local"), "{out}");
-        std::fs::write(&f.exe, BUILTIN_BINARY).unwrap();
         install(&f.exec, &wt, &f.exe, &Origin::Local).unwrap();
+        builtin_binary(&bare.join("paddock/hooks")).install().unwrap();
         for cwd in [&bare, &wt] {
             let out = shim_without_path(&f, &shim, cwd, None, "INPUT\n");
             assert_eq!(out, "args: hook pre-tool-use <INPUT>\n", "{}", cwd.display());
@@ -702,8 +709,15 @@ mod tests {
         std::fs::write(&shim, SHIM).unwrap();
         let dir = f.root.join(".git/paddock/hooks");
         std::fs::create_dir_all(&dir).unwrap();
-        let exe = dir.join("paddock-dev.exe");
-        paddock_testkit::exe::write_program(&exe, BUILTIN_BINARY).unwrap();
+        // The stand-in finds its script by its own file name, so both files take the Windows name together.
+        builtin_binary(&dir).install().unwrap();
+        for suffix in ["", ".stand-in.json"] {
+            std::fs::rename(
+                dir.join(format!("paddock-dev{suffix}")),
+                dir.join(format!("paddock-dev.exe{suffix}")),
+            )
+            .unwrap();
+        }
         assert_eq!(
             shim_without_path(&f, &shim, &f.root, None, "INPUT\n"),
             "args: hook pre-tool-use <INPUT>\n"

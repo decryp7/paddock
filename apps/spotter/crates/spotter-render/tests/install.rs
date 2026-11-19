@@ -16,7 +16,7 @@ fn fake_zip(dir: &Path) -> (Vec<u8>, String) {
     let mut z = zip::ZipWriter::new(std::fs::File::create(&p).unwrap());
     z.start_file("chrome-linux/chrome", zip::write::SimpleFileOptions::default())
         .unwrap();
-    z.write_all(b"#!/bin/sh\necho Chromium 1\n").unwrap();
+    z.write_all(b"Chromium 1 (stand-in bytes)\n").unwrap();
     z.finish().unwrap();
     (std::fs::read(&p).unwrap(), sha256_file(&p).unwrap())
 }

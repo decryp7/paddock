@@ -287,6 +287,7 @@ impl GitTrain {
     /// environment of the one child it runs for.
     fn ensure_askpass(&self) -> Result<(), String> {
         let path = self.scratch.join("askpass.sh");
+        // conformance: stand-in — production code, not a test fixture: git runs this script as GIT_ASKPASS in the real queue
         let body =
             "#!/bin/sh\ncase \"$1\" in\n  Username*) echo queue-bot ;;\n  *) printf '%s\\n' \"$PADDOCK_QUEUE_PUSH_TOKEN\" ;;\nesac\n";
         std::fs::write(&path, body).map_err(|e| format!("cannot write {}: {e}", path.display()))?;

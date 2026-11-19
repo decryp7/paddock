@@ -3,8 +3,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 // windows-twin: none: it runs the ./dev shell wrapper, which Windows runs through Git bash on every job
 #![cfg(unix)]
-use super::wrapper::{Fixture, fake_rustc, shim_cargo, write_script};
+use super::wrapper::{Fixture, building, fake_rustc, install_cargo, shim_cargo, write_tool};
 use paddock_testkit::TestCommand;
+use paddock_testkit::{Actions, StandIn};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
@@ -96,8 +97,15 @@ impl Drop for Server {
 
 /// The text of a stand-in tool that says it was downloaded and claims `hash` as the one it was built for.
 fn published_tool(hash: &str) -> Vec<u8> {
-    format!("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 0; exit 0; fi\nif [ \"$1\" = self ]; then echo \"embedded {hash}\"; exit 0; fi\necho downloaded-binary\n")
-        .into_bytes()
+    downloaded_tool(hash).single_file_bytes().unwrap()
+}
+
+/// The tool itself: answers `--version`, `self` (the hash it claims) and otherwise says it was downloaded.
+fn downloaded_tool(hash: &str) -> StandIn {
+    StandIn::new(Path::new(""), "paddock-dev")
+        .stdout("downloaded-binary")
+        .when_args(&["--version"], Actions::new().stdout("0"))
+        .when_args(&["self"], Actions::new().stdout(&format!("embedded {hash}")))
 }
 
 fn sha256_of(bytes: &[u8], scratch: &Path) -> String {
@@ -147,7 +155,7 @@ impl Setup {
     /// Runs `./dev hello` with a stand-in cargo. `env` is added to a base that downloads from `server`.
     fn run(&self, server: &Server, env: &[(&str, &str)]) -> (i32, String, String) {
         let shims = self.f.cargo_home.path().join("shims");
-        write_script(&shims.join("cargo"), &shim_cargo(0));
+        install_cargo(&shims, true, |c| building(c, shim_cargo()));
         let shims_dir = shims.to_path_buf();
         let mut cmd = TestCommand::new("sh");
         cmd.arg(self.f.root().join("dev"))
@@ -357,7 +365,7 @@ fn a_download_never_touches_the_source_only_cache() {
 fn a_run_that_never_downloads_builds_into_its_own_cache_whatever_bin_holds() {
     let s = setup();
     // An earlier run (or a developer) left a downloaded tool for this very hash in the shared cache.
-    write_script(&s.cached(), "echo downloaded-binary");
+    write_tool(&s.cached(), &StandIn::new(Path::new(""), "paddock-dev").stdout("downloaded-binary"));
     let server = Server::start(vec![]);
     let (code, out, err) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "0")]);
     assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
@@ -365,8 +373,11 @@ fn a_run_that_never_downloads_builds_into_its_own_cache_whatever_bin_holds() {
     assert!(source.exists(), "built into bin-source: {err}");
     assert!(server.requests().is_empty());
     // The shared cache is untouched, and the source cache serves the next release run without a build.
-    let kept = std::fs::read_to_string(s.cached()).unwrap();
-    assert!(kept.contains("downloaded-binary"));
+    let kept = TestCommand::new(s.cached()).output().unwrap();
+    assert!(
+        String::from_utf8_lossy(&kept.stdout).contains("downloaded-binary"),
+        "the shared cache's tool is still the old one"
+    );
     std::fs::remove_dir_all(s.f.cargo_home.path().join("target")).unwrap();
     let (code, out, _) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "0")]);
     assert_eq!((code, out.trim()), (0, "built-by-shim"));
@@ -408,7 +419,7 @@ fn a_shell_trace_of_a_download_never_prints_the_token() {
     let s = setup();
     let server = Server::start(vec![(s.route("paddock-dev-test-host.sha256"), Reply::Status("401 Unauthorized"))]);
     let shims = s.f.cargo_home.path().join("shims");
-    write_script(&shims.join("cargo"), &shim_cargo(0));
+    install_cargo(&shims, true, |c| building(c, shim_cargo()));
     let shims_dir = shims.to_path_buf();
     let out = TestCommand::new("sh")
         .arg("-x")

@@ -924,16 +924,16 @@ mod tests {
             let r = rig(Mode::Obey, 1);
             // A browser that starts only when the test lets it.
             let go = r._dir.path().join("go");
-            let gated = r._dir.path().join("gated.sh");
-            paddock_testkit::exe::write_program(
-                &gated,
-                format!(
-                    "#!/bin/sh\nwhile [ ! -f '{}' ]; do sleep 0.01; done\nexec '{}' \"$@\"\n",
-                    go.display(),
-                    r.fake.exe.display()
-                ),
-            )
-            .unwrap();
+            let gated = paddock_testkit::StandIn::new(r._dir.path(), "gated")
+                .answers(
+                    paddock_testkit::Actions::new()
+                        .waits_for_file(&go.display().to_string())
+                        .execs(&paddock_testkit::Exec::program(&r.fake.exe.display().to_string())),
+                )
+                .install()
+                .unwrap()
+                .program()
+                .to_path_buf();
             r.renderers.set_sources(Sources {
                 configured: Some(gated),
                 installed: None,

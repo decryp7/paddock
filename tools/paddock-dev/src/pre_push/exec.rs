@@ -1515,7 +1515,7 @@ exit $rc
             assert!(r.reason().contains("waiting for the heavy slot, held by Bob"), "{}", r.reason());
         }
 
-        /// A repository with the heavy tool's inputs committed, and a `cargo` that "builds" a fake heavy (a script that records
+        /// A repository with the heavy tool's inputs committed, and a `cargo` that "builds" a fake heavy (a stand-in that records
         /// its arguments and runs the gate's command), found first on the PATH of the run (ER-14: no real build).
         fn repo_with_fake_cargo(d: &Path, cargo_ok: bool) -> RealExec {
             let git = |args: &[&str]| {
@@ -1535,16 +1535,27 @@ exit $rc
             git(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"]);
             let bin = d.join("fakebin");
             std::fs::create_dir_all(&bin).unwrap();
-            let body = if cargo_ok {
-                format!(
-                    "T=$(printf '%s\\n' \"$@\" | sed -n \"s/^build.target-dir='\\(.*\\)'$/\\1/p\")\nmkdir -p \"$T/release\"\ncat > \"$T/release/heavy\" <<'EOS'\n#!/bin/sh\n[ \"$1\" = --version ] && {{ echo heavy-fake; exit 0; }}\necho \"$@\" >> {m}\nwhile [ \"$1\" != -- ]; do shift; done\nshift\nexec \"$@\"\nEOS\nchmod +x \"$T/release/heavy\"\n",
-                    m = d.join("heavy-calls").display()
+            let cargo = paddock_testkit::StandIn::new(&bin, "cargo");
+            let cargo = if cargo_ok {
+                use paddock_testkit::{Actions, Case, Exec, StandIn};
+                // What the build "makes": a heavy that answers `--version`, records its arguments and runs the gate's command.
+                let heavy = StandIn::new(&bin, "heavy")
+                    .answers(
+                        Actions::new()
+                            .appends_with(&d.join("heavy-calls").display().to_string(), "{{args}}\n")
+                            .execs(&Exec::call_arguments().after("--")),
+                    )
+                    .when(&Case::new().args_start_with(&["--version"]), Actions::new().stdout("heavy-fake"));
+                let target = "{flag_unquoted:build.target-dir=}";
+                cargo.answers(
+                    Actions::new()
+                        .makes_dir(&format!("{target}/release"))
+                        .installs(&format!("{target}/release/heavy"), &heavy),
                 )
             } else {
-                "echo 'error[E0432]: unresolved import' >&2\nexit 101\n".to_string()
+                cargo.stderr("error[E0432]: unresolved import").exit(101)
             };
-            let cargo = bin.join("cargo");
-            paddock_testkit::exe::write_program(&cargo, format!("#!/bin/sh\n{body}")).unwrap();
+            cargo.install().unwrap();
             let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
             RealExec {
                 root: d.to_path_buf(),

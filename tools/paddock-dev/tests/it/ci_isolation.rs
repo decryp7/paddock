@@ -6,6 +6,7 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use paddock_testkit::{Actions, StandIn};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Output;
@@ -114,18 +115,19 @@ fn acquires_uses_releases_and_sweeps_with_the_real_binary() {
     assert!(text(&h.run(&["status"], &[], false).stdout).contains("s1 free"));
 }
 
-/// A stand-in for `heavy` that records its arguments (a throw-away script, never a real queue).
+/// A stand-in for `heavy` that records its arguments (a stand-in, never a real queue).
 fn fake_heavy(root: &Path, exit: i32) -> (PathBuf, PathBuf) {
     let log = root.join("heavy-calls");
-    let bin = root.join("fake-heavy");
-    paddock_testkit::exe::write_program(
-        &bin,
-        format!(
-            "#!/bin/sh\necho \"$@\" >> '{}'\necho 'fake heavy says no' >&2\nexit {exit}\n",
-            log.display()
-        ),
-    )
-    .unwrap();
+    let heavy = StandIn::new(root, "fake-heavy")
+        .answers(
+            Actions::new()
+                .appends_with(&log.display().to_string(), "{args}\n")
+                .stderr("fake heavy says no")
+                .exit(exit),
+        )
+        .install()
+        .unwrap();
+    let bin = heavy.program().to_path_buf();
     (bin, log)
 }
 

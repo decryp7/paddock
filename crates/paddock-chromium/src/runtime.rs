@@ -378,9 +378,20 @@ mod tests {
             .unwrap();
         let mut z = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let exec = zip::write::SimpleFileOptions::default().unix_permissions(0o755);
-        z.start_file(exe, exec).unwrap();
-        z.write_all(b"#!/bin/sh\necho 'Google Chrome for Testing 1.2.3'\n")
+        let name = std::path::Path::new(exe)
+            .file_name()
+            .and_then(|n| n.to_str())
             .unwrap();
+        let browser = paddock_testkit::StandIn::new(std::path::Path::new("."), name)
+            .stdout("Google Chrome for Testing 1.2.3")
+            .files()
+            .unwrap();
+        z.start_file(exe, exec).unwrap();
+        z.write_all(&browser.program).unwrap();
+        // The script sits beside the program, under the program's own name.
+        let script = std::path::Path::new(exe).with_file_name(&browser.script_name);
+        z.start_file(script.to_string_lossy(), exec).unwrap();
+        z.write_all(&browser.script).unwrap();
         let bytes = z.finish().unwrap().into_inner();
         let mut h = paddock_jobs::HashingWriter::new(std::io::sink());
         h.write_all(&bytes).unwrap();
@@ -450,14 +461,23 @@ mod tests {
         assert!(e.contains("no 1.2.3.manifest"), "{e}");
     }
 
-    /// The Windows self-test's run, with a script standing in for chrome.exe (it prints a document for `--dump-dom`).
-    #[cfg(unix)]
+    /// The Windows self-test's run, with a stand-in program for chrome.exe (it prints a document for `--dump-dom`).
     #[test]
     fn the_windows_self_test_runs_a_headless_page_dump() {
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("9.9.manifest"), "<assembly/>").unwrap();
-        let exe = d.path().join("chrome.exe");
-        paddock_testkit::exe::write_program(&exe, "#!/bin/sh\ncase \"$*\" in *--dump-dom*about:blank*) echo '<html><head></head><body></body></html>';; *) exit 3;; esac\n").unwrap();
+        let exe = paddock_testkit::StandIn::new(d.path(), "chrome")
+            .exit(3)
+            .when(
+                &paddock_testkit::Case::new()
+                    .has_arg("--dump-dom")
+                    .has_arg(crate::launch::START_PAGE),
+                paddock_testkit::Actions::new().stdout("<html><head></head><body></body></html>"),
+            )
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         let k = ChromeForTesting::new(OsKind::Windows);
         assert_eq!(
             k.self_test(&exe, "9.9"),
@@ -471,12 +491,15 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn the_self_test_runs_the_program() {
         let d = tempfile::tempdir().unwrap();
-        let exe = d.path().join("chrome");
-        paddock_testkit::exe::write_program(&exe, "#!/bin/sh\necho \"Chromium 9.9 $1\"\n").unwrap();
+        let exe = paddock_testkit::StandIn::new(d.path(), "chrome")
+            .answers(paddock_testkit::Actions::new().stdout_with("Chromium 9.9 {arg:1}"))
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         let k = ChromeForTesting::new(OsKind::Linux);
         assert_eq!(
             k.self_test(&exe, "9.9"),
