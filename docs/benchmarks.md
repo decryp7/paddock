@@ -2298,3 +2298,44 @@ save more, on each OS? And did the user's Defender process exclusions for git ch
   | before (the first version) | `rustc-wrapper`, no `sccache` name | 112 s | 0 (no C compile went through sccache) | 311 / 164 |
 
 - **Result:** the shim gives 270 C/C++ hits (libsqlite3-sys, zstd-sys, ring and the like) where the first version gave none, and the run took 95 s against 112 s. **Not measured:** a repeat (one run per row, so the 17 s difference is inside this machine's noise at that load; the hit counts are not), and a Linux or Windows host. A `cargo xwin` build is as uncached for C as before; ring's C is a few seconds.
+
+## CI and landing loop: where a train's time goes (2026-11-20, docs/ci-speed-research)
+
+Quoted by [docs/research/2026-11-20-ci-speed.md](research/2026-11-20-ci-speed.md).
+
+- **Commit:** none built; CI history of `decryp7/paddock`, runs 8134 to 8329 (main at `9cbd77a63`, train 16 at `937d565fe`).
+- **Machine:** the runners as the job logs report them (`build-jobs: this host`): `d-gtr9` Linux, 16 cores, 127,941 MB,
+  container jobs; `decryp7ology-dev` Windows VM, 16 cores, 32,700 MB, capacity 3; `d7-mac-mini`, `-2`, `-3` on one Mac mini
+  M4 Pro, 14 cores, 65,536 MB, shared with agents. The analysis ran read-only on the Mac (load 40 to 58 at 05:26 +08).
+- **Load:** not controlled: trains 12 to 16 in flight.
+- **Corpus:** the Gitea API's run, job and step timestamps of the 53 completed `ci.yml` and `debrief.yml` runs on `train/*`
+  and `main` (not scheduled) from 8134 to 8328, and the logs of all 128 started jobs of 8315, 8316, 8327 and 8328. "Full"
+  runs: 8208, 8209, 8215, 8223, 8225, 8230, 8245, 8271, 8283, 8315, 8327 (`ci.yml`) and 8238, 8243, 8297, 8316, 8328
+  (`debrief.yml`). Local: `.git/paddock-pre-push/queue-times.log` (2026-11-15 to 11-20) and the heavy lock's activity log of
+  2026-11-19. Scripts and downloads kept outside the repository; no user data.
+- **Method:** a job's queue is its start minus the latest end of the jobs its `needs` name (read from the workflow files at
+  the train head); the critical path without queueing replays the `needs` graph with each job's own duration. Phases come
+  from the logs: cargo's `Finished ... in`, Playwright's `N passed (T)`, nextest's `Summary [ Ts]`.
+- **Results:**
+
+  | Measure | Value |
+  | --- | --- |
+  | Job-minutes by class, 16 full runs | Linux 2,003 (63%), Windows 696 (22%), macOS 492 (15%) |
+  | Queue of a ready job, p50 / p90 / max | Linux 13.5 / 42.8 / 72.0 min (416 jobs); macOS 3.8 / 11.9 / 20.8 (103); Windows 0.1 / 10.2 / 15.0 (76) |
+  | `d-gtr9` concurrency over all 53 runs | max 4; of busy time 1 job 27%, 2 jobs 9%, 3 jobs 64%, 4 jobs under 1% |
+  | Full `ci.yml` run, wall / no-queue critical path / Linux job-min | 41 to 78 / 27 to 31 / 117 to 158 min (23 runs) |
+  | Full `debrief.yml` run, same | 35 to 91 / 30 to 41 / 86 to 116 min (11 runs) |
+  | Train 15 round 8327 then 8328 | 56.2 + 57.0 min, dispatched one after the other (8328 created 15 s after 8327 ended) |
+  | Main push 8315 and 8316 together | 78.0 / 89.9 min; Linux queues 71 and 70 min |
+  | Linux phases, 8327 + 8328 (226 job-min) | Playwright 60%, compile 12%, nextest 3% |
+  | macOS (67) / Windows (92) phases | compile 34% / 48%, nextest 22% / 15%, Playwright 19% / 0% |
+  | Longest Linux jobs (median of 11) | Dyno WebKit 27.7 min (448 tests, 1 worker); Debrief shards 3 and 4 22.6 / 24.2 against 11.8 / 12.9 for 1 and 2 (355 tests each, 2 workers); reference apps shard 1 10.6 (521 tests) against shard 2 7.1 (256) |
+  | Linux e2e time before the first test | 33 to 51 s, mean 48 s (32 jobs) |
+  | `./dev` built from source in 8327 + 8328 | 14 jobs, 1,133 s; Windows 69 to 272 s per job |
+  | Debrief Windows bundle (8328) | sidecars `dist` 3 min 58 s, then the app `dist` 12 min 15 s |
+  | Full runs green | 6 of 34 |
+  | Local gate runs with heavy steps, last 24 h | 138; queued p50 3.0 / p90 30.0 min; ran p50 2.1 / p90 10.1; 72% of gate time queued |
+  | Heavy lock, 2026-11-19 | held 19.5 h of 24; callers waited 56.6 h against 18.3 h run; 137 `cargo metadata --locked` checks ran 111 s and waited 497 min |
+
+- **Not measured:** `d-gtr9`'s CPU and memory use during a round (no sampler on the host); per-job slowdown at more lanes;
+  the effect of more Playwright workers on these suites.
