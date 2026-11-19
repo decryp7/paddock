@@ -2767,3 +2767,33 @@ passed in runs 8218 and 8225 on the same tree and 20 of 20 locally (Chromium, 4 
 recorded here and not blocking, by the coordinator's decision. Next: reproduce in the Linux CI container with a failing run first,
 then wait for the layout to settle (two reads agree, ER-12) before the comparison. **Class: an e2e read before the layout settled
 (the ready-read class; train 13's workbench palette, Dyno alarms, gallery menu, grid header, Pitwall tray and Manage-layouts rename).**
+
+## Debrief: four WebKit e2e tests failed once each in debrief.yml run 8297 (train 14, 2026-11-19)
+Each failed on its first try and passed on its retry; none had failed in the 281 earlier Debrief runs of 30 days (`./dev ci flakes`).
+Flows read from the failing attempts' traces and screencasts (playwright-report-3 and -4 of run 8297).
+- **narrow-window.e2e.ts:94, Ctrl+B at 900 px: the Explorer opened and closed again (a product race).** The trace shows one
+  `User view.toggleSidebar via shortcut`, the grid resized twice within 600 ms (opened, then closed) and no second toggle. Causes listed:
+  (1) the key was lost: refuted, the activity line and the first resize; (2) the start-up decision of train 14 (`decideAtStart`) closed it:
+  refuted, it runs once after the first data and its effect is destroyed; (3) a key repeat toggled twice: refuted, one activity line;
+  (4) a re-plan that was due from the service's own close ran after Ctrl+B set the open flag and before the render drew the Explorer, and
+  the verdict added the Explorer's preferred width (300 px) to a dock that had not given it up: confirmed by a test that is red on the old
+  code. The plan saw 1100 px for 800, said "keep", `evaluate` took that as "opened by hand while it fits" (`keptByUser` false), and the
+  next re-plan closed it. The same error happened when dockview had not yet followed its container (its last size plus the drawn width).
+  **Fix:** the verdict is asked with the room the Explorer takes now (`drawnWidth`, 0 before it is drawn) and the dock's container as laid
+  out now, a sum that is the same before and after the render; `NarrowWindow` logs each decision (`ui.layout`). Not caused by train 14:
+  the inference in `evaluate` and the 300 px fallback are on main (84b22df4e); the window is the 150 ms re-plan debounce after the close.
+- **jobs.e2e.ts:62, the toast's View: the toast had timed out.** "Explanation ready" was posted when the explain job ended (2.4 s, before
+  the export dialog had closed); the test then spent about 6.5 s on the export, the Jobs pane and its axe check, saw the toast, ran a
+  second axe check, and the toast left 8 s after it came (TOAST_MS, as designed; VS Code also times out info toasts and holds them under
+  the pointer). Refuted: the export result replaced it (the export still ran), the stack dropped it (two toasts). **Fix (spec):**
+  `mockJobsHold=ai` holds the answer until both jobs were seen; the test hovers the toast (which holds its time) and clicks with the
+  clock paused. Positive control: the old spec with 8.5 s of page time before the toast fails as in CI; the new one passes.
+- **profiling-native.e2e.ts:6 and :29, File > Open performance capture ran nothing.** In both workers the File menu was drawn at the
+  window's top-left for about 500 ms during the first load (CDK positions an overlay after Angular's next render), the click aimed at its
+  item there, the menu moved under File and no command ran (no activity line). **Fix:** `openMenu`/`openMenuPath` wait for the menu to sit
+  against its trigger (`expectMenuAnchoredTo`, a new kind in `ui/projects/paddock-e2e/src/ready.ts`, with `menuGap` tested on the run's boxes);
+  positive control: a menu held at the top-left fails the wait.
+**Why the logs did not show it:** the Explorer's service logged nothing (now it does); the toast and the menu were visible only in the
+screencast. **Class:** the narrow-window race is the third "layout decision from a stale measurement" (dockview's last size: the
+`watchResize` settle loop, train 14's same-frame fix, this one); the other two are the ready-read class (a spec acting on a control that
+is in the DOM but not positioned or not lasting).
