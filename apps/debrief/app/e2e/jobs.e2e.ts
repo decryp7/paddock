@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { ask, openChat, releaseMockHolds, runCommand, waitAnswered } from './ai-support';
 import { gridRows, openAppWith } from './mock-url';
-import { heldToast, pressInToast } from './toast-support';
+import { heldToast, pressInToast, runningToast, toastNamed } from './toast-support';
 
 /** The app with the AI mock at `search` (its own step time: `openAiApp` fixes a fast one). */
 async function openAiApp(page: Page, search: string): Promise<void> {
@@ -40,7 +40,8 @@ async function explainInBackground(page: Page): Promise<void> {
   // The command needs a selected event: a click that landed while the page was reloading selected nothing.
   await expect(row).toHaveAttribute('aria-selected', 'true');
   await runCommand(page, 'AI: Explain the selected event');
-  const started = await heldToast(page, /Explaining event #\d+ — running in Jobs/);
+  const started = toastNamed(page, /Explaining event #\d+ — running in Jobs/);
+  await expect(started).toBeVisible();
   await expect(started.getByTestId('notification-action-primary')).toHaveText('Show in Jobs');
   await expect(page.getByRole('dialog')).toHaveCount(0);
 }
@@ -88,7 +89,7 @@ test.describe('jobs', () => {
     await openAiApp(page, 'mockAiStepMs=2500&mockJobsVisibleMs=0&mockJobsFailOnce=export');
     await explainInBackground(page);
     await runCommand(page, 'AI: Find likely root causes');
-    await heldToast(page, 'Looking for root causes — running in Jobs');
+    await expect(runningToast(page, 'Looking for root causes — running in Jobs')).toBeVisible();
     await openJobs(page);
     const pane = jobsPane(page);
     const waiting = pane.locator('li').filter({ hasText: 'Find likely root causes' });

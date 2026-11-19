@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { gridRows, openView } from './app';
 import { openAppWith, runCommand } from './tools-support';
-import { heldToast } from './toast-support';
+import { heldToast, runningToast } from './toast-support';
 
 /** What the mock share backend "wrote" (it records every report and image save). */
 async function written(page: Page): Promise<{ path: string; kind: string; bytes: number }[]> {
@@ -51,7 +51,7 @@ test.describe('incident report builder', () => {
     await dialog.getByRole('button', { name: 'Export…' }).click();
     // The dialog closes at once; the report is written by a job, and its message offers "Show in folder".
     await expect(dialog).toHaveCount(0);
-    await heldToast(page, 'Exporting the report to checkout-outage.html — running in Jobs');
+    await expect(runningToast(page, 'Exporting the report to checkout-outage.html — running in Jobs')).toBeVisible();
     const done = await heldToast(page, 'Finished: Export report checkout-outage.html', { timeout: 15_000 });
     await expect(done).toContainText(/Report written \(\d+ values redacted\)/);
     await expect(done.getByTestId('notification-action-primary')).toHaveText('Show in folder');

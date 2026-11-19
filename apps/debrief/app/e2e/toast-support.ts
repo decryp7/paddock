@@ -14,7 +14,15 @@ export function toastNamed(page: Page, text?: string | RegExp): Locator {
 }
 
 /**
- * Waits for the toast with `text` and holds it: the pointer rests on it, so it stays while the spec reads or presses it (debrief.yml run 8297:
+ * A "running in Jobs" toast: its job's result replaces it by design (one toast per operation), so a spec only checks that it was seen
+ * (`toBeVisible`), never holds or presses it after other steps (sweep of 2026-11-19: holding one waited on an element its result had replaced).
+ */
+export function runningToast(page: Page, text: string | RegExp): Locator {
+  return toastNamed(page, text);
+}
+
+/**
+ * Waits for the result toast with `text` (not a running one, see `runningToast`) and holds it: the pointer rests on it, so it stays while the spec reads or presses it (debrief.yml run 8297:
  * the steps between a toast and its View took longer than its 8 s). `toast` narrows the locator (`.last()`, a visible one).
  */
 export async function heldToast(page: Page, text: string | RegExp, options: { timeout?: number; pick?: (toasts: Locator) => Locator } = {}): Promise<Locator> {

@@ -1,7 +1,7 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { CAPTURE_TIMEOUT, openApp } from './app';
-import { heldToast } from './toast-support';
+import { heldToast, runningToast } from './toast-support';
 
 // Report a problem (mock backend): an error raises the toast, "Report a problem…" opens the dialog that lists
 // what the zip will contain and the steps to reproduce, and Save writes it (the mock records the save).
@@ -44,7 +44,7 @@ test('an error leads to a problem report the user reviews and saves', async ({ p
   await expect(contents).toContainText('Your description');
   await dialog.getByRole('button', { name: 'Save report…' }).click();
   // Saved by a job: the dialog may close; the message says when the zip is ready, with "Show in folder".
-  await heldToast(page, 'Saving the problem report — running in Jobs');
+  await expect(runningToast(page, 'Saving the problem report — running in Jobs')).toBeVisible();
   await expect(dialog.locator('[data-testid=report-saved]')).toContainText('debrief-problem-report.zip');
   await dialog.getByRole('button', { name: 'Close' }).first().click();
   await expect(dialog).toBeHidden();

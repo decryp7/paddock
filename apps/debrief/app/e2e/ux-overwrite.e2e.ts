@@ -4,7 +4,7 @@ import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith, openView, runCommand } from './tools-support';
 import { chooseMenu } from './menu-support';
-import { heldToast, pressInToast, toastNamed } from './toast-support';
+import { heldToast, pressInToast, runningToast, toastNamed } from './toast-support';
 
 async function exportEvents(page: Page) {
   await page.keyboard.press('ControlOrMeta+Shift+e');
@@ -38,7 +38,7 @@ test('an export never replaces an existing file without asking', async ({ page }
   await dialog.getByRole('button', { name: 'Export…' }).click();
   await page.getByRole('dialog', { name: 'Replace file?' }).getByRole('button', { name: 'Replace' }).click();
   await expect(dialog).toHaveCount(0);
-  await heldToast(page, 'Exporting to events.csv — running in Jobs');
+  await expect(runningToast(page, 'Exporting to events.csv — running in Jobs')).toBeVisible();
 });
 
 test('About says Debrief never modifies your files', async ({ page }) => {

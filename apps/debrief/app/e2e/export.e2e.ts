@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import { gridTotal, initialTotal, openApp, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
-import { heldToast } from './toast-support';
+import { heldToast, runningToast } from './toast-support';
 
 test('export dialog counts events, exports through the backend and reports it', async ({ page }, testInfo) => {
   await openApp(page);
@@ -22,7 +22,7 @@ test('export dialog counts events, exports through the backend and reports it', 
   await dialog.getByRole('button', { name: 'Export…' }).click();
   // The dialog closes at once; a job writes the file and its message offers "Show in folder".
   await expect(dialog).toHaveCount(0);
-  await heldToast(page, 'Exporting to events.clef — running in Jobs');
+  await expect(runningToast(page, 'Exporting to events.clef — running in Jobs')).toBeVisible();
   const done = await heldToast(page, 'Finished: Export events to events.clef', { timeout: 15_000 });
   await expect(done).toContainText(`Exported ${all} events.`);
   await expect(done.getByTestId('notification-action-primary')).toHaveText('Show in folder');
