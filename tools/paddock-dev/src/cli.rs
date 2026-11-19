@@ -309,6 +309,10 @@ struct MergeCheckArgs {
     /// Any other finding stays a finding for a person to answer.
     #[arg(long, value_name = "FILE")]
     write_reverted: Option<PathBuf>,
+    /// Refuse an overlap with another open train that the merge message does not answer with `Train-clash: <path>: <train>: <how it
+    /// fits>` (the merge commit form). Default: `train_clash::ENFORCED`, report-only until its first green real run (ER-41).
+    #[arg(long)]
+    enforce_train_clash: bool,
 }
 
 #[derive(Subcommand)]
@@ -644,6 +648,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                     generators: !a.no_generators,
                     gates: a.gates,
                     write_reverted: a.write_reverted,
+                    train_clash_enforced: a.enforce_train_clash || crate::train_clash::ENFORCED,
                 },
                 out,
                 err,
@@ -848,6 +853,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             generators: !a.no_generators,
             gates: a.gates,
             write_reverted: a.write_reverted,
+            train_clash_enforced: a.enforce_train_clash || crate::train_clash::ENFORCED,
         }),
         Command::Merge {
             command: MergeCommand::SyncMember(a),

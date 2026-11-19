@@ -2667,3 +2667,61 @@ fn a_member_that_changes_the_lockfile_makes_its_generator_due() {
     assert_eq!(code, 0, "{text}");
     assert!(text.contains("gen check: 1 of 2 due: lock-gen"), "{text}");
 }
+
+/// A target train `train`, a member `member` that changes the ESLint rule, and another open train `origin/train/a` that changes it
+/// too; the member is merged into the target with `message`. `origin/main` is the base. Returns the repository at the merge.
+fn clashing_merge(message: &str) -> Repo {
+    let r = Repo::new();
+    r.write("eslint/src/rule.js", "base\n");
+    r.write("a.txt", "a\n");
+    let base = {
+        r.commit("chore: base");
+        r.git(&["rev-parse", "HEAD"])
+    };
+    r.git(&["update-ref", "refs/remotes/origin/main", &base]);
+    r.git(&["checkout", "-q", "-b", "other"]);
+    r.write("eslint/src/rule.js", "blocking\n");
+    let other = r.commit("feat(eslint): make e2e-ready-reads blocking");
+    r.git(&["update-ref", "refs/remotes/origin/train/a", &other]);
+    r.git(&["checkout", "-q", "-b", "member", &base]);
+    r.write("eslint/src/rule.js", "report-only\n");
+    r.commit("feat(eslint): report e2e-ready-reads");
+    r.git(&["checkout", "-q", "-b", "train", &base]);
+    r.write("a.txt", "a2\n");
+    r.commit("feat: train work");
+    r.git(&["merge", "-q", "--no-ff", "-m", message, "member"]);
+    r
+}
+
+const CLASH_TRAILER: &str = "Train-clash: eslint/src/rule.js: train/a: report-only here, the flag train/a adds turns it on\n";
+
+#[test]
+fn an_overlap_with_another_open_train_is_refused_without_the_trailer_when_enforced_and_accepted_with_it() {
+    // Refused: enforced, no trailer.
+    let (code, out) = clashing_merge("Merge member into train").check(&["--no-generators", "--enforce-train-clash", "HEAD"]);
+    assert_eq!(code, 5, "{out}");
+    assert!(out.contains("::error::train clash") && out.contains("train/a") && out.contains("Train-clash: eslint/src/rule.js: train/a:"), "{out}");
+    // Accepted: the same merge with the trailer (the positive control: the same check can see the overlap and let it through).
+    let (code, out) = clashing_merge(&format!("Merge member into train\n\n{CLASH_TRAILER}")).check(&["--no-generators", "--enforce-train-clash", "HEAD"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("::notice::train clash answered") && !out.contains("::error::"), "{out}");
+}
+
+#[test]
+fn a_trailer_for_another_path_does_not_answer_the_overlap() {
+    let message = "Merge member into train\n\nTrain-clash: eslint/src/other.js: train/a: fits\n";
+    let (code, out) = clashing_merge(message).check(&["--no-generators", "--enforce-train-clash", "HEAD"]);
+    assert_eq!(code, 5, "{out}");
+}
+
+#[test]
+fn without_the_switch_an_overlap_is_a_warning_and_a_branch_before_its_merge_never_blocks() {
+    let r = clashing_merge("Merge member into train");
+    let (code, out) = r.check(&["--no-generators", "HEAD"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("::warning::train clash (report-only)") && out.contains("once enforced"), "{out}");
+    // The branch form has no merge message to read: it warns even when enforcing.
+    let (code, out) = r.check(&["--no-generators", "--enforce-train-clash", "--branch", "member", "--target", "train~1"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("::warning::train clash"), "{out}");
+}

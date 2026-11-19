@@ -332,6 +332,9 @@ pub struct Request {
     pub gates: bool,
     /// Write the merge message with the `Reverted:` lines a re-land explains to this file ([`reland`]; findings only).
     pub write_reverted: Option<PathBuf>,
+    /// Refuse an overlap with another open train that the merge message does not answer ([`crate::train_clash`]); the command line sets
+    /// it from `--enforce-train-clash` or [`crate::train_clash::ENFORCED`].
+    pub train_clash_enforced: bool,
 }
 
 /// The step for `--write-reverted`: the lines a re-land explains, written with the message to `file`; says plainly when it tied none.
@@ -597,7 +600,7 @@ fn check(req: &Request) -> Result<Checked, CliError> {
                 if !clash.is_quiet() {
                     let judge = merge.commit.is_some().then(|| crate::train_clash::Judge {
                         message: merge.message.as_str(),
-                        enforced: crate::train_clash::ENFORCED,
+                        enforced: req.train_clash_enforced,
                     });
                     let refused = judge.as_ref().is_some_and(|j| clash.refused(j));
                     steps.push(

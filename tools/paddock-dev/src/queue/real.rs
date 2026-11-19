@@ -607,6 +607,7 @@ impl Train for GitTrain {
                 generators: false,
                 gates: false,
                 write_reverted: None,
+                train_clash_enforced: crate::train_clash::ENFORCED,
             };
             match (self.merge_check)(&req) {
                 Ok(_) => merged.push(pr.number),
