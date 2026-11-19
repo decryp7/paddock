@@ -68,6 +68,12 @@ impl HistoryWriter {
         stored
     }
 
+    /// The raw-point mark (the contract harness reads whether a refused tick moved it).
+    #[cfg(test)]
+    pub(crate) fn raw_mark(&self) -> Option<Timestamp> {
+        self.last_raw
+    }
+
     fn write_tick(&mut self, store: &Store, s: &SystemSample, groups: &[AppGroup]) -> Result<()> {
         let at = s.at.floor_to(RAW_STEP_MS);
         if self.last_raw != Some(at) {
@@ -128,9 +134,12 @@ impl HistoryWriter {
     pub fn record_disks(&self, store: &Store, s: &SystemSample) -> Result<()> {
         let batch = store.batch();
         let at = s.at.floor_to(15 * MINUTE);
-        for d in &s.disks {
-            store.put_disk_free(&d.id, at, d.total, d.free)?;
-        }
+        store.atomic(|| {
+            for d in &s.disks {
+                store.put_disk_free(&d.id, at, d.total, d.free)?;
+            }
+            Ok(())
+        })?;
         batch.commit()
     }
 
@@ -350,7 +359,10 @@ mod tests {
         let batch = store.batch();
         s.at = Timestamp(MINUTE + 1);
         assert!(w.record(&store, &s, &apps).is_err());
-        batch.commit().unwrap();
+        assert!(
+            batch.commit().is_err(),
+            "a failed write fails its batch (Dyno ADR 0008, \"Store writers\")"
+        );
         store.exec_for_test("DROP TRIGGER no_mark;");
         s.at = Timestamp(MINUTE + 2);
         w.record(&store, &s, &apps).unwrap();

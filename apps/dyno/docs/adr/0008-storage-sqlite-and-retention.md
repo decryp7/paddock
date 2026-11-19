@@ -36,3 +36,29 @@ load is frequent small writes and range reads. The user asked for the choice to 
 
 - One writer, many readers: the app never opens the database; it asks the agent.
 - Retention settings change what is kept at the next prune; lowering them deletes older rows.
+
+## Store writers (amendment, 2026-11-19)
+
+Added during the ADR 0108 WP-1 reviews (family ADR 0108, Bulk APIs). The same defect showed up four times on one branch: the
+history writer, the alarm engine, the alert cooldowns and an alarm write that failed while its batch committed all moved
+ahead of a store that had not stored them. One rule now covers every writer: **commit first, then keep and announce.**
+
+1. **Writes go in a batch.** A sampler tick is one transaction (`Store::batch`), and so are an alarm request, a prune and
+   a quarter hour's disks. A writer that must be all or none (`put_app_minutes`, `put_changes`, `put_issues`, the baseline,
+   an alarm change, an alert's rows) is a savepoint (`Store::atomic`), inside a batch or alone.
+2. **A failed write fails its batch.** When a savepoint inside an open batch fails, the batch's `commit()` rolls everything
+   back and returns `StoreError::BatchFailed`, so a caller never commits half its work. A batch dropped while the thread
+   panics is rolled back too.
+3. **In-memory state follows the commit.** What a writer changes in memory is kept only when the commit succeeds, and is put
+   back otherwise. The sampler snapshots its tick state first (`tick_state::TickState`: the history writer, the alert and
+   custom-rule evaluators, the recorder's last capture, and the alarm engine only when the tick has alarm work). An
+   `AlarmCentre` request, the unusual-program look and the recorder's capture each restore their own state.
+4. **Nothing is announced before the commit.** The tick collects its alarm changes and alerts and sends them after the
+   commit; a request returns its changes to push only after its commit. When the commit fails nothing is announced, and the
+   next tick or request does the work again.
+
+Checked by `dyno-agent/src/store_contract.rs`. It runs each writer and request path (the sampler tick, the alarm requests,
+the history writer, `put_changes`, `put_issues` and the baseline writes) with every table refusing writes, and asserts that
+no row changed, nothing was announced and nothing was kept in memory. Its positive control is a writer shaped like the old
+bug (keep the change, swallow the error), which the harness must fail. Removing the alarm restore also turns it red (checked
+by hand, 2026-11-19). The unusual look and the recorder have tests of their own (`unusual::budget_tests`, `recorder::tests`).

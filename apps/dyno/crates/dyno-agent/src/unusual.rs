@@ -93,13 +93,20 @@ impl UnusualCentre {
             };
             signatures = signatures_of(shared.ports.signatures.as_ref(), &fresh);
         }
-        let outcome = {
+        let (outcome, baseline_before) = {
             let mut st = lock(&self.state);
-            st.baseline.observe(t, &settings, current_os(), &seen, &startup, &signatures)
+            let before = st.baseline.clone();
+            (
+                st.baseline.observe(t, &settings, current_os(), &seen, &startup, &signatures),
+                before,
+            )
         };
         let mut core = lock(&shared.core);
         if let Err(e) = core.store.apply_baseline(&outcome.changes) {
-            log::error!("dyno-agent: could not store the program baseline: {e}");
+            // Not stored, so not kept or announced (Dyno ADR 0008, "Store writers"): the next look sees the same programs again.
+            log::error!("dyno-agent: could not store the program baseline: {e}; this look is undone");
+            lock(&self.state).baseline = baseline_before;
+            return;
         }
         let overview = lock(&self.state).baseline.overview(t, &settings);
         for key in outcome.newly_unusual.iter().take(MAX_LINES_PER_LOOK) {
@@ -303,6 +310,41 @@ mod budget_tests {
             self.0.fetch_add(1, Ordering::SeqCst);
             Err(PlatformError::Unsupported("counted".into()))
         }
+    }
+
+    /// The store-writer contract (Dyno ADR 0008): a look whose baseline changes are refused keeps none of them, so the next look
+    /// sees the same programs as new again.
+    #[test]
+    fn a_look_whose_baseline_is_not_stored_keeps_none_of_it() {
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let fake = Fake::new();
+        let (shared, _, _) = Shared::build(
+            crate::paths::Dirs::at(tmp.path().join("data")),
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+        )
+        .unwrap();
+        let fresh = process(100, "fresh", 1.0);
+        let key = program_key(&fresh.name, fresh.exe.as_deref());
+        lock(&shared.core).latest.processes = vec![fresh];
+        let centre = UnusualCentre {
+            state: Mutex::new(State {
+                baseline: Baseline::restore(Some(Timestamp(0)), vec![], vec![]),
+                startup: Some((Instant::now(), vec![])),
+            }),
+        };
+        let core_store = |f: &dyn Fn(&crate::store::Store)| f(&lock(&shared.core).store);
+        let mut result = Ok(());
+        core_store(&|store| store.refuse_writes_for_test(true));
+        centre.look(&shared);
+        core_store(&|store| store.refuse_writes_for_test(false));
+        if !lock(&centre.state).baseline.is_new(&key) {
+            result = Err("the look kept a program in its baseline that it did not store");
+        }
+        assert_eq!(result, Ok(()));
+        centre.look(&shared);
+        assert!(!lock(&centre.state).baseline.is_new(&key), "a stored look keeps it");
     }
 
     /// DY-5 (ADR 0108, guard D): a look that finds N new programs checks their signatures in one call of the signature port,
