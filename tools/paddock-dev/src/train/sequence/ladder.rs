@@ -21,7 +21,6 @@ use crate::ci_runs::verdict::{RunResult, Verdict};
 use crate::wait::fmt_duration;
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::io::Write;
 
 /// The workflow input that selects stage 1 of a staged `ci.yml` (`ci/staged-fast-then-long`), and its value. The one place the
 /// ladder names the layout: when that branch lands with other names, they change here and in the test that reads the workflow.
