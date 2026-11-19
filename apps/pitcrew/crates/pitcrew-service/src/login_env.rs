@@ -100,11 +100,17 @@ impl LoginPath {
 mod tests {
     use super::*;
 
-    fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
-        let p = dir.join(name);
-        paddock_testkit::exe::write_program(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-        p
+    /// A stand-in shell (the testkit's) that answers every call with `actions`.
+    fn fake(dir: &Path, name: &str, actions: paddock_testkit::Actions) -> PathBuf {
+        paddock_testkit::StandIn::new(dir, name)
+            .answers(actions)
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf()
     }
+
+    const MARKED: &str = "__PITCREW_PATH_BEGIN__/plain/bin__PITCREW_PATH_END__";
 
     #[allow(
         clippy::disallowed_methods,
@@ -121,10 +127,12 @@ mod tests {
     fn the_shells_path_is_taken_and_its_noise_ignored() {
         let d = tmp("ok");
         // Like a login shell: prints a banner, then the script's markers with its own PATH.
-        let sh = script(
+        let sh = fake(
             &d,
             "fakezsh",
-            "echo banner; printf '__PITCREW_PATH_BEGIN__/home/u/.nvm/bin:/opt/homebrew/bin__PITCREW_PATH_END__'",
+            paddock_testkit::Actions::new()
+                .stdout("banner")
+                .stdout("__PITCREW_PATH_BEGIN__/home/u/.nvm/bin:/opt/homebrew/bin__PITCREW_PATH_END__"),
         );
         assert_eq!(
             ask_shell(&sh, Duration::from_secs(10)).unwrap(),
@@ -136,11 +144,13 @@ mod tests {
     #[test]
     fn an_interactive_failure_falls_back_to_a_plain_login_shell() {
         let d = tmp("flags");
-        let sh = script(
-            &d,
-            "fakesh",
-            "for a in \"$@\"; do [ \"$a\" = -i ] && exit 1; done; printf '__PITCREW_PATH_BEGIN__/plain/bin__PITCREW_PATH_END__'",
-        );
+        let sh = paddock_testkit::StandIn::new(&d, "fakesh")
+            .answers(paddock_testkit::Actions::new().stdout(MARKED))
+            .when(&paddock_testkit::Case::new().has_arg("-i"), paddock_testkit::Actions::new().exit(1))
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         assert_eq!(ask_shell(&sh, Duration::from_secs(10)).unwrap(), "/plain/bin");
         let _ = std::fs::remove_dir_all(&d);
     }
@@ -148,11 +158,11 @@ mod tests {
     #[test]
     fn a_hanging_or_silent_or_missing_shell_gives_none() {
         let d = tmp("bad");
-        let hang = script(&d, "hang", "sleep 30");
+        let hang = fake(&d, "hang", paddock_testkit::Actions::new().sleeps(Duration::from_secs(30)));
         let started = Instant::now();
         assert_eq!(ask_shell(&hang, Duration::from_millis(300)), None);
         assert!(started.elapsed() < Duration::from_secs(15));
-        let silent = script(&d, "silent", "echo hello");
+        let silent = fake(&d, "silent", paddock_testkit::Actions::new().stdout("hello"));
         assert_eq!(ask_shell(&silent, Duration::from_secs(10)), None);
         assert_eq!(ask_shell(&d.join("missing"), Duration::from_secs(1)), None);
         let _ = std::fs::remove_dir_all(&d);

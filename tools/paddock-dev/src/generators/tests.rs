@@ -267,9 +267,9 @@ fn the_limit_follows_the_cost_class() {
 mod real {
     use super::super::registry::Cost;
     use super::super::run::{Ran, Real, Runner, Spec};
+    use paddock_testkit::{Actions, Exec, StandIn};
     use std::collections::HashMap;
-
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use std::time::Duration;
 
     struct Fixture {
@@ -278,11 +278,7 @@ mod real {
         builds: PathBuf,
     }
 
-    fn script(path: &Path, body: &str) {
-        paddock_testkit::exe::write_program(path, format!("#!/bin/sh\n{body}\n")).unwrap();
-    }
-
-    fn fixture(heavy_body: &str) -> Fixture {
+    fn fixture(heavy: Actions) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path().join("repo");
         let builds = dir.path().join("builds");
@@ -291,14 +287,14 @@ mod real {
             std::fs::create_dir_all(d).unwrap();
         }
         let calls = dir.path().join("calls");
-        script(
-            &bin.join("cargo"),
-            &format!(
-                "echo \"cargo jobs=$CARGO_BUILD_JOBS env_target=[$CARGO_TARGET_DIR] args=$* cwd=$(pwd)\" >> {}",
-                calls.display()
-            ),
-        );
-        script(&bin.join("fake-heavy"), heavy_body);
+        StandIn::new(&bin, "cargo")
+            .answers(Actions::new().appends_with(
+                &calls.display().to_string(),
+                "cargo jobs={env:CARGO_BUILD_JOBS|} env_target=[{env:CARGO_TARGET_DIR|}] args={args} cwd={cwd}\n",
+            ))
+            .install()
+            .unwrap();
+        StandIn::new(&bin, "fake-heavy").answers(heavy).install().unwrap();
         Fixture { dir, repo, builds }
     }
 
@@ -317,7 +313,12 @@ mod real {
         std::fs::read_to_string(f.dir.path().join("calls")).unwrap_or_default()
     }
 
-    const PASS_THROUGH: &str = r#"echo "slot taken" >> "$(dirname "$0")/../slot"; exec "$@""#;
+    /// The slot tool that takes the slot (a file `slot` beside `bin`) and runs the command it was given.
+    fn pass_through() -> Actions {
+        Actions::new()
+            .appends_with("{dir}/../slot", "slot taken\n")
+            .execs(&Exec::call_arguments())
+    }
 
     fn argv() -> Vec<String> {
         vec!["cargo".into(), "metadata".into()]
@@ -325,7 +326,7 @@ mod real {
 
     #[test]
     fn a_heavy_entry_takes_the_slot_and_builds_in_its_workspaces_kept_folder_with_two_jobs() {
-        let f = fixture(PASS_THROUGH);
+        let f = fixture(pass_through());
         let real = Real::with(&f.repo, env(&f), Vec::new());
         let ran = real.run(
             &f.repo,
@@ -356,7 +357,7 @@ mod real {
 
     #[test]
     fn a_fast_entry_skips_the_slot_but_gets_the_same_bounds_and_the_callers_job_count_wins() {
-        let f = fixture(PASS_THROUGH);
+        let f = fixture(pass_through());
         let mut e = env(&f);
         e.insert("CARGO_BUILD_JOBS".into(), "3".into());
         let real = Real::with(&f.repo, e, Vec::new());
@@ -378,7 +379,11 @@ mod real {
 
     #[test]
     fn a_wait_for_the_slot_past_the_hang_guard_is_not_measured_and_names_the_holder() {
-        let f = fixture("echo 'heavy: the lock is held by Bob (pid 12) for 3m, running: cargo test' >&2; sleep 30");
+        let f = fixture(
+            Actions::new()
+                .stderr("heavy: the lock is held by Bob (pid 12) for 3m, running: cargo test")
+                .sleeps(Duration::from_secs(30)),
+        );
         let real = Real::with(&f.repo, env(&f), Vec::new());
         let ran = real.run(
             &f.repo,
@@ -398,7 +403,11 @@ mod real {
 
     #[test]
     fn a_heavy_that_ran_the_command_and_timed_out_later_is_a_plain_timeout() {
-        let f = fixture("echo 'heavy: pre-push holds the lock (pid 9) at 10:00:00Z, waited 0s' >&2; sleep 30");
+        let f = fixture(
+            Actions::new()
+                .stderr("heavy: pre-push holds the lock (pid 9) at 10:00:00Z, waited 0s")
+                .sleeps(Duration::from_secs(30)),
+        );
         let real = Real::with(&f.repo, env(&f), Vec::new());
         let ran = real.run(
             &f.repo,
@@ -414,7 +423,7 @@ mod real {
 
     #[test]
     fn no_build_root_or_one_inside_the_checkout_is_not_measured_rather_than_a_build_in_the_worktree() {
-        let f = fixture(PASS_THROUGH);
+        let f = fixture(pass_through());
         let mut e = env(&f);
         e.remove("PADDOCK_DEV_TARGET_DIR");
         let real = Real::with(&f.repo, e.clone(), Vec::new());
@@ -461,7 +470,7 @@ mod real {
     #[test]
     fn a_build_root_reached_through_a_link_into_the_home_is_refused_too() {
         // The one home guard (paddock_env::home_guard, shared with heavy) resolves links; a plain prefix test did not.
-        let f = fixture(PASS_THROUGH);
+        let f = fixture(pass_through());
         let home = f.dir.path().join("home");
         std::fs::create_dir_all(home.join("builds")).unwrap();
         let link = f.dir.path().join("looks-external");
@@ -475,7 +484,11 @@ mod real {
 
     #[test]
     fn heavy_refusing_the_slot_is_not_the_checks_verdict() {
-        let f = fixture("echo 'heavy 0.1 (macos) exit 0x4b: the lock could not be taken. Next: x' >&2; exit 75");
+        let f = fixture(
+            Actions::new()
+                .stderr("heavy 0.1 (macos) exit 0x4b: the lock could not be taken. Next: x")
+                .exit(75),
+        );
         let real = Real::with(&f.repo, env(&f), Vec::new());
         let ran = real.run(
             &f.repo,

@@ -291,7 +291,7 @@ mod tests {
                     if self.fault != Fault::NoSmartctl {
                         let d = dest.join("smartmontools.pkg/Payload/usr/local/sbin");
                         std::fs::create_dir_all(&d).unwrap();
-                        std::fs::write(d.join("smartctl"), b"#!/bin/sh\n").unwrap();
+                        std::fs::write(d.join("smartctl"), b"smartctl stand-in\n").unwrap();
                     }
                     let s = dest.join("smartmontools.pkg/Payload/usr/local/share/smartmontools");
                     std::fs::create_dir_all(&s).unwrap();

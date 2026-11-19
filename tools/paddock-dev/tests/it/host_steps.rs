@@ -11,9 +11,10 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use paddock_testkit::TestCommand;
+use paddock_testkit::{Actions, Case, Exec, StandIn, TestCommand};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Duration;
 
 fn repo() -> PathBuf {
     paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
@@ -39,19 +40,19 @@ impl Fx {
         std::fs::write(p, text).unwrap();
     }
 
-    fn script(&self, rel: &str, body: &str) {
+    /// A stand-in program at `rel` (its folder is made); install it when its answers are set.
+    fn stand_in(&self, rel: &str) -> StandIn {
         let p = self.p(rel);
-        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        paddock_testkit::exe::write_program(p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        let dir = p.parent().unwrap();
+        std::fs::create_dir_all(dir).unwrap();
+        StandIn::new(dir, p.file_name().unwrap().to_str().unwrap())
     }
 
-    /// A program on the front of PATH that records its call (arguments, and what it saw of the job's token) in `calls`.
-    fn shim(&self, name: &str, body: &str) {
-        let calls = self.p("calls");
-        self.script(
-            &format!("bin/{name}"),
-            &format!("echo \"{name} $* token=${{GITHUB_TOKEN:-}}\" >> '{}'\n{body}", calls.display()),
-        );
+    /// A program on the front of PATH that records its call (arguments, and what it saw of the job's token) in `calls`; `answer` adds
+    /// what it prints and its exit code to that first step.
+    fn shim(&self, name: &str, answer: impl FnOnce(Actions) -> Actions) {
+        let log = Actions::new().appends_with(&self.p("calls").display().to_string(), "{name} {args} token={env:GITHUB_TOKEN}\n");
+        self.stand_in(&format!("bin/{name}")).answers(answer(log)).install().unwrap();
     }
 
     fn big(&self, rel: &str, kb: usize) {
@@ -485,14 +486,17 @@ fn host_tools(os: &'static str) -> Step {
 }
 
 fn nextest(fx: &Fx, dir: &str, version: &str) {
-    fx.script(&format!("{dir}/cargo-nextest"), &format!("echo 'cargo-nextest {version} (x)'"));
+    fx.stand_in(&format!("{dir}/cargo-nextest"))
+        .stdout(&format!("cargo-nextest {version} (x)"))
+        .install()
+        .unwrap();
 }
 
 #[test]
 fn host_tools_keeps_the_pinned_program_and_checks_the_version_on_every_runner() {
     // A download fails the test: a kept or image copy must not be fetched again.
     let kept = |fx: &Fx| {
-        fx.shim("curl", "echo curl was called >&2; exit 7");
+        fx.shim("curl", |a| a.stderr("curl was called").exit(7));
         nextest(fx, &format!("home/.paddock-ci/tools/cargo-nextest/{PIN}"), PIN);
     };
     let seen = same(&kept, &host_tools("macOS"));
@@ -537,7 +541,7 @@ fn sccache_stats(port: Option<&'static str>) -> Step {
 
 #[test]
 fn sccache_stats_prints_the_statistics_and_stops_only_the_jobs_own_server() {
-    let shim = |fx: &Fx| fx.shim("sccache", "echo 'Compile requests 10'");
+    let shim = |fx: &Fx| fx.shim("sccache", |a| a.stdout("Compile requests 10"));
     let own = same(&shim, &sccache_stats(Some("4501")));
     assert_eq!(
         own.calls, "sccache --show-stats token=\nsccache --stop-server token=",
@@ -550,7 +554,7 @@ fn sccache_stats_prints_the_statistics_and_stops_only_the_jobs_own_server() {
         "a server on the default port is left running"
     );
     same(&|_| {}, &sccache_stats(None));
-    let broken = same(&|fx| fx.shim("sccache", "exit 2"), &sccache_stats(None));
+    let broken = same(&|fx| fx.shim("sccache", |a| a.exit(2)), &sccache_stats(None));
     assert!(broken.stdout.contains("::notice::sccache statistics are unavailable"), "{broken:?}");
 }
 
@@ -805,8 +809,8 @@ fn cleanup_fx(fx: &Fx) {
     fx.write("work/dist/x", "1");
     fx.write("work/app/dist/y", "2");
     // Nothing is running that the shim lists, and ps itself is the shim: the real process table is never read or touched (ER-14).
-    fx.script("bin/pkill", "");
-    fx.script("bin/ps", "");
+    fx.stand_in("bin/pkill").install().unwrap();
+    fx.stand_in("bin/ps").install().unwrap();
 }
 
 fn pkill_env(args: &mut Vec<(&'static str, String)>) {
@@ -882,10 +886,12 @@ fn host_cleanup_names_a_process_that_survives_the_same_way_in_both() {
     // the process is never real, so nothing is ended in either implementation (ER-14) and the leak check names the survivor.
     let setup = |fx: &Fx| {
         cleanup_fx(fx);
-        fx.script(
-            "bin/ps",
-            "printf '%s\\n' ' 3999999999 /ci/target-pitwall-app-s2/debug/pitwall-server --fake' ' 3999999998 /ci/target-pitwall-app-s3/debug/pitwall-server --fake' ' 3999999997 /usr/bin/other'",
-        );
+        fx.stand_in("bin/ps")
+            .stdout(" 3999999999 /ci/target-pitwall-app-s2/debug/pitwall-server --fake")
+            .stdout(" 3999999998 /ci/target-pitwall-app-s3/debug/pitwall-server --fake")
+            .stdout(" 3999999997 /usr/bin/other")
+            .install()
+            .unwrap();
     };
     let mut env = vec![("PADDOCK_BUILD_FOLDER", "/ci/target-pitwall-app-s2".to_string())];
     pkill_env(&mut env);
@@ -1398,10 +1404,10 @@ fn kept_clone_plants_in_the_clone_do_not_act_in_the_next_job() {
         &|fx| {
             let k = fx.p("home/.paddock-ci/src/decryp7_paddock-crate-s1");
             // A hook that would leave a mark, an attributes file that would rewrite files, a link of the Angular cache to a kept folder.
-            fx.script(
-                "home/.paddock-ci/src/decryp7_paddock-crate-s1/.git/hooks/post-checkout",
-                &format!("echo ran > '{}'", fx.p("hook-ran").display()),
-            );
+            fx.stand_in("home/.paddock-ci/src/decryp7_paddock-crate-s1/.git/hooks/post-checkout")
+                .writes(&fx.p("hook-ran"), "ran\n")
+                .install()
+                .unwrap();
             fx.write(
                 "home/.paddock-ci/src/decryp7_paddock-crate-s1/.git/info/attributes",
                 "* text eol=crlf\n",
@@ -1481,14 +1487,14 @@ fn kept_phase_is_bounded_by_its_own_limit(id: &str) {
     let real = String::from_utf8(TestCommand::new("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
     let real = real.trim().to_string();
     let shim = |fx: &Fx| {
-        let mark = fx.p("hang-mark");
-        fx.script(
-            "bin/git",
-            &format!(
-                "case \" $* \" in *\"{word}\"*) : > '{}'; exec /bin/sleep 30;; esac\nexec '{real}' \"$@\"",
-                mark.display()
-            ),
-        )
+        fx.stand_in("bin/git")
+            .answers(Actions::new().execs(&Exec::program(&real)))
+            .when(
+                &Case::new().args_text_contains(word),
+                Actions::new().writes(&fx.p("hang-mark"), "").sleeps(Duration::from_secs(30)),
+            )
+            .install()
+            .unwrap();
     };
     let step = kept_step("macOS", "lean", kept_hang_env(id));
     // The clean phase runs only on a reused clone: a first job makes it, then the second job's clean hangs.
@@ -1557,14 +1563,14 @@ fn kept_clone_a_phase_that_hangs_ends_in_one_warning_and_never_fails_the_job() {
     let real = String::from_utf8(TestCommand::new("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
     // The hanging fetch writes the clock mark as it starts; the 1 s counts from it (see kept_phase_is_bounded_by_its_own_limit).
     let setup = move |fx: &Fx| {
-        fx.script(
-            "bin/git",
-            &format!(
-                "case \" $* \" in *\" fetch \"*) : > '{}'; exec sleep 30;; esac\nexec '{}' \"$@\"",
-                fx.p("hang-mark").display(),
-                real.trim()
-            ),
-        )
+        fx.stand_in("bin/git")
+            .answers(Actions::new().execs(&Exec::program(real.trim())))
+            .when(
+                &Case::new().args_text_contains(" fetch "),
+                Actions::new().writes(&fx.p("hang-mark"), "").sleeps(Duration::from_secs(30)),
+            )
+            .install()
+            .unwrap();
     };
     let seen = kept_once(
         &setup,
@@ -1583,13 +1589,14 @@ fn kept_clone_reads_of_the_work_folder_are_not_bound_by_the_phase_limit() {
     // 4 of 204 runs) it failed the job with `cannot read the commit and the origin` where the shell went on.
     let real = String::from_utf8(TestCommand::new("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
     let setup = move |fx: &Fx| {
-        fx.script(
-            "bin/git",
-            &format!(
-                "case \" $* \" in *\"/work/abc/hostexecutor rev-parse HEAD \"*) /bin/sleep 2;; esac\nexec '{}' \"$@\"",
-                real.trim()
-            ),
-        )
+        fx.stand_in("bin/git")
+            .answers(Actions::new().execs(&Exec::program(real.trim())))
+            .when(
+                &Case::new().args_text_contains("/work/abc/hostexecutor rev-parse HEAD "),
+                Actions::new().sleeps(Duration::from_secs(2)).execs(&Exec::program(real.trim())),
+            )
+            .install()
+            .unwrap();
     };
     // The general limit is 1 s; every phase has its own (the default), so only the reads outside the phases could meet the 1 s.
     let mut env = vec![("PADDOCK_KEPT_CLONE_TIMEOUT", "1".to_string())];
@@ -1644,7 +1651,11 @@ fn bounded_sh(body: &str) -> String {
         repo().join("conformance/ci/bounded.sh").display()
     );
     let fx = fixture();
-    fx.script("bin/pgrep", "case \"$2\" in 100) echo 101;; 101) echo 102;; esac");
+    fx.stand_in("bin/pgrep")
+        .when(&Case::new().has_arg("100"), Actions::new().stdout("101"))
+        .when(&Case::new().has_arg("101"), Actions::new().stdout("102"))
+        .install()
+        .unwrap();
     let out = TestCommand::new("bash")
         .args(["-c", &script])
         .env("PATH", format!("{}:/usr/bin:/bin", fx.p("bin").display()))
@@ -1730,26 +1741,42 @@ fn boot_machine(fx: &Fx, mac: &Mac) {
     for d in ["ext/tmp", "home/internal-temp"] {
         std::fs::create_dir_all(fx.p(d)).unwrap();
     }
-    let header = "echo 'Filesystem 512-blocks Used Available Capacity Mounted on'";
-    let df = if mac.no_mount {
-        header.to_string()
-    } else {
-        format!("case \"$2\" in */ext|*/ext/*) m='/Volumes/Ext Disk';; *) m='/';; esac\n{header}\necho \"/dev/disk9s1 100 1 99 1% $m\"")
+    let header = "Filesystem 512-blocks Used Available Capacity Mounted on";
+    let df = |mount: &str| {
+        let a = Actions::new().stdout(header);
+        if mac.no_mount {
+            a
+        } else {
+            a.stdout(&format!("/dev/disk9s1 100 1 99 1% {mount}"))
+        }
     };
-    fx.script("bin/df", &df);
-    let plist = if mac.no_plist {
-        "exit 1".to_string()
-    } else {
-        "case \"$*\" in *Ext*) v='<false/>';; *) v='<true/>';; esac\nprintf '<dict>\\n\\t<key>Internal</key>\\n\\t%s\\n</dict>\\n' \"$v\""
-            .to_string()
+    fx.stand_in("bin/df")
+        .answers(df("/"))
+        .when(&Case::new().args_text_contains("/ext "), df("/Volumes/Ext Disk"))
+        .when(&Case::new().args_text_contains("/ext/"), df("/Volumes/Ext Disk"))
+        .install()
+        .unwrap();
+    let plist = |v: &str| {
+        if mac.no_plist {
+            return Actions::new().exit(1);
+        }
+        Actions::new()
+            .stdout("<dict>")
+            .stdout("\t<key>Internal</key>")
+            .stdout(&format!("\t{v}"))
+            .stdout("</dict>")
     };
-    fx.script("bin/diskutil", &plist);
+    fx.stand_in("bin/diskutil")
+        .answers(plist("<true/>"))
+        .when_arg_contains("Ext", plist("<false/>"))
+        .install()
+        .unwrap();
     let getconf = if mac.getconf.is_empty() {
-        "exit 1".to_string()
+        Actions::new().exit(1)
     } else {
-        format!("printf '%s\\n' '{}'", fill(mac.getconf, fx))
+        Actions::new().stdout(&fill(mac.getconf, fx))
     };
-    fx.script("bin/getconf", &getconf);
+    fx.stand_in("bin/getconf").answers(getconf).install().unwrap();
 }
 
 fn boot(args: &[&'static str], extra: Vec<(&'static str, String)>) -> Step {
@@ -1818,28 +1845,32 @@ fn boot_volume_says_which_volume_a_folder_is_on_and_where_the_boot_volumes_temp_
 /// the paddock-proc test binary exits with; a failing one leaves the guardian's log, as the real tests do.
 fn guardian_machine(fx: &Fx, proc_exit: i32) {
     std::fs::create_dir_all(fx.p("tmp")).unwrap();
-    fx.shim(
-        "cargo",
-        concat!(
-            "echo '   Compiling paddock-proc v0.1.0'\n",
+    fx.shim("cargo", |a| {
+        a.stdout("   Compiling paddock-proc v0.1.0")
             // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-            "echo '  Executable unittests src/lib.rs (target/debug/deps/paddock_proc-0123abcd)' >&2\n",
+            .stderr("  Executable unittests src/lib.rs (target/debug/deps/paddock_proc-0123abcd)")
             // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-            "echo '  Executable tests/it/main.rs (target/debug/deps/it-ff)' >&2\n",
+            .stderr("  Executable tests/it/main.rs (target/debug/deps/it-ff)")
             // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-            "echo '  Executable unittests src/lib.rs (target/debug/deps/paddock_chromium-9f8e7d)' >&2"
-        ),
-    );
-    fx.script(
-        // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-        "crates/target/debug/deps/paddock_proc-0123abcd",
-        &format!(
-            "echo \"proc tests: $*\"\n\
-             [ {proc_exit} = 0 ] || {{ echo 'guardian said no' > \"$PADDOCK_PROC_GUARDIAN_LOG\"; exit {proc_exit}; }}"
-        ),
-    );
+            .stderr("  Executable unittests src/lib.rs (target/debug/deps/paddock_chromium-9f8e7d)")
+    });
+    let proc = Actions::new().stdout_with("proc tests: {args}");
+    let proc = if proc_exit == 0 {
+        proc
+    } else {
+        proc.writes_with("{env:PADDOCK_PROC_GUARDIAN_LOG}", "guardian said no\n")
+            .exit(proc_exit)
+    };
     // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-    fx.script("crates/target/debug/deps/paddock_chromium-9f8e7d", "echo \"chromium tests: $*\"");
+    fx.stand_in("crates/target/debug/deps/paddock_proc-0123abcd")
+        .answers(proc)
+        .install()
+        .unwrap();
+    // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
+    fx.stand_in("crates/target/debug/deps/paddock_chromium-9f8e7d")
+        .answers(Actions::new().stdout_with("chromium tests: {args}"))
+        .install()
+        .unwrap();
 }
 
 fn guardian() -> Step {
@@ -1874,7 +1905,7 @@ fn guardian_rust(setup: &dyn Fn(&Fx)) -> Seen {
 
 fn guardian_broken_build(fx: &Fx) {
     guardian_machine(fx, 0);
-    fx.shim("cargo", "echo 'error[E0425]: nothing here' >&2; exit 101");
+    fx.shim("cargo", |a| a.stderr("error[E0425]: nothing here").exit(101));
 }
 
 /// The script against the command on the same three fixtures. On a bash older than 4.4 the shell side cannot run, so the case is not

@@ -105,14 +105,6 @@ fn backoff_grows_then_caps() {
     assert_eq!(state_after_failures(FAILED_AFTER), AgentState::Failed);
 }
 
-/// A stand-in agent program: a shell script in a temp folder that ignores `run` and does what the test says.
-#[cfg(unix)]
-fn script(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
-    let p = dir.join(name);
-    paddock_testkit::exe::write_program(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-    p
-}
-
 /// The [`Launcher`] contract (ports.rs), the same for every launcher: nothing before a launch, one agent at a time with its pid,
 /// a quit ends it and nothing starts after `close`. `starts` counts the agents started.
 fn contract_one_agent_then_quit(l: &dyn Launcher, starts: &dyn Fn() -> usize) {
@@ -150,11 +142,26 @@ fn contract_exit_code_is_reported(l: &dyn Launcher, exits: &dyn Fn(i32)) {
     assert_eq!(l.child(), Child::Exited { code: Some(code) }, "the exit is remembered");
 }
 
+/// A stand-in agent program (the testkit's) that ignores `run` and does what the test says.
+#[cfg(unix)]
+fn agent(dir: &std::path::Path, name: &str, actions: paddock_testkit::Actions) -> std::path::PathBuf {
+    paddock_testkit::StandIn::new(dir, name)
+        .answers(actions)
+        .install()
+        .unwrap()
+        .program()
+        .to_path_buf()
+}
+
 #[cfg(unix)]
 #[test]
 fn the_process_launcher_keeps_the_launcher_contract() {
     let dir = paddock_testkit::private_tempdir().unwrap();
-    let exe = script(dir.path(), "slow-agent", "exec sleep 600");
+    let exe = agent(
+        dir.path(),
+        "slow-agent",
+        paddock_testkit::Actions::new().sleeps(std::time::Duration::from_secs(120)),
+    );
     let starts = Arc::new(AtomicUsize::new(0));
     let counted = starts.clone();
     let l = ProcessLauncher::new(move || {
@@ -163,7 +170,7 @@ fn the_process_launcher_keeps_the_launcher_contract() {
     });
     contract_one_agent_then_quit(&l, &|| starts.load(Ordering::SeqCst));
     let code = dyno_agent::cli::EXIT_ALREADY_RUNNING;
-    let exe = script(dir.path(), "refused-agent", &format!("exit {code}"));
+    let exe = agent(dir.path(), "refused-agent", paddock_testkit::Actions::new().exit(code));
     contract_exit_code_is_reported(&ProcessLauncher::new(move || Ok(exe.clone())), &|_| {});
     assert_eq!(ProcessLauncher::new(|| Err("x".into())).via(), "child");
 }

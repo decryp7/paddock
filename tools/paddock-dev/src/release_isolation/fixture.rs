@@ -284,6 +284,7 @@ fn write_fake_npm(bin: &Path, prefix: &Path, home: &Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        // conformance: stand-in — this module is compiled into the library for tests/it (paddock-testkit is only a dev-dependency)
         let script = format!(
             "#!/bin/sh\ncase \"$3\" in\n  globalconfig) echo '{}/etc/npmrc';;\n  userconfig) echo '{}/.npmrc';;\nesac\n",
             prefix.display(),

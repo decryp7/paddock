@@ -1220,19 +1220,24 @@ fn one_container_run_covers_every_touched_workspace_and_a_failing_one_fails_the_
     }
     let bin = dir.path().join("bin");
     std::fs::create_dir_all(&bin).unwrap();
-    let log = dir.path().join("calls.log");
-    let stub = format!(
-        "#!/bin/sh\necho \"$PWD|$CARGO_TARGET_DIR|$*\" >> '{}'\ncase \"$PWD\" in */apps/dyno) [ \"$1\" = clippy ] && [ \"$2\" = --version ] || exit 1;; esac\nexit 0\n",
-        log.display()
-    );
+    let log = dir.path().join("calls.log").display().to_string();
+    // Every call is logged; in apps/dyno everything but `clippy --version` fails.
+    let line = "{cwd}|{env:CARGO_TARGET_DIR|}|{args}\n";
     for tool in ["cargo", "rustc"] {
-        let p = bin.join(tool);
-        std::fs::write(&p, &stub).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        paddock_testkit::StandIn::new(&bin, tool)
+            .answers(paddock_testkit::Actions::new().appends_with(&log, line))
+            .when(
+                &paddock_testkit::Case::new().cwd_ends_with("/apps/dyno"),
+                paddock_testkit::Actions::new().appends_with(&log, line).exit(1),
+            )
+            .when(
+                &paddock_testkit::Case::new()
+                    .cwd_ends_with("/apps/dyno")
+                    .args_start_with(&["clippy", "--version"]),
+                paddock_testkit::Actions::new().appends_with(&log, line),
+            )
+            .install()
+            .unwrap();
     }
     let script = g.args.last().unwrap();
     let mut cmd = paddock_proc::command("sh");
@@ -3296,14 +3301,24 @@ mod deny_row {
         let bin = d.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         std::fs::create_dir_all(d.join("apps/pitwall")).unwrap();
-        let script = format!(
-            "#!/bin/sh\necho \"$@\" >> {calls}\n[ \"$1\" = deny ] || exit 0\nall=1\nfor a in \"$@\"; do case $a in advisories|licenses|bans|sources) all=0;; esac; done\nhas() {{ [ $all = 1 ] && return 0; case \" $* \" in *\" $W \"*) return 0;; esac; return 1; }}\nW=advisories; if [ -f {adv} ] && has \"$@\"; then echo 'error[vulnerability]: RUSTSEC-2026-9999 lettre' >&2; exit 1; fi\nW=licenses; if [ -f {lic} ] && has \"$@\"; then echo 'error[rejected]: licence GPL-3.0 is not allowed' >&2; exit 1; fi\nexit 0\n",
-            calls = d.join("calls").display(),
-            adv = d.join("adv").display(),
-            lic = d.join("lic").display()
-        );
+        use paddock_testkit::{Actions, Case, StandIn};
+        let calls = d.join("calls").display().to_string();
+        let categories = ["advisories", "licenses", "bans", "sources"];
         for name in ["cargo", "cargo-deny"] {
-            paddock_testkit::exe::write_program(bin.join(name), script.clone()).unwrap();
+            let mut tool = StandIn::new(&bin, name).answers(Actions::new().appends_with(&calls, "{args}\n"));
+            // Licences first and advisories after, so the later case is asked first (as the script checked advisories first). A
+            // finding fails a `deny` call that names its category, or none (all four are checked then).
+            for (file, category, message) in [
+                ("lic", "licenses", "error[rejected]: licence GPL-3.0 is not allowed"),
+                ("adv", "advisories", "error[vulnerability]: RUSTSEC-2026-9999 lettre"),
+            ] {
+                let fails = Actions::new().appends_with(&calls, "{args}\n").stderr(message).exit(1);
+                let deny = Case::new().args_start_with(&["deny"]).file_exists(&d.join(file));
+                tool = tool
+                    .when(&deny.clone().has_none_of(&categories), fails.clone())
+                    .when(&deny.has_arg(category), fails);
+            }
+            tool.install().unwrap();
         }
         RealExec {
             root: d.to_path_buf(),

@@ -57,11 +57,6 @@
    "hash": "d45e75ef1393fcc6"
   },
   {
-   "file": "apps/debrief/crates/debrief-ipc/src/process.rs",
-   "line": 747,
-   "hash": "fdb5af823cabe9af"
-  },
-  {
    "file": "apps/debrief/crates/debrief-plugin-dotnet/src/process.rs",
    "line": 199,
    "hash": "6c0fc04d3122acaf"

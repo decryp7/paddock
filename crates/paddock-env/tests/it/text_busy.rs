@@ -46,23 +46,14 @@ fn a_file_that_stays_busy_fails_after_the_bound_with_the_same_error() {
 mod real {
     use super::*;
     use std::fs::OpenOptions;
-    use std::io::Write;
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
     use std::sync::mpsc;
 
-    fn script(dir: &std::path::Path, body: &str) -> std::path::PathBuf {
-        let path = dir.join("prog.sh");
-        let mut f = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o755)
-            .open(&path)
-            .unwrap();
-        f.write_all(format!("#!/bin/sh\n{body}\n").as_bytes())
-            .unwrap();
-        drop(f);
+    /// A copy of `true` of its own: a program the kernel maps, not a script.
+    fn program(dir: &std::path::Path) -> std::path::PathBuf {
+        let path = dir.join("prog");
+        std::fs::copy("/bin/true", &path).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         path
     }
@@ -72,7 +63,7 @@ mod real {
     #[test]
     fn a_program_whose_write_handle_is_still_held_starts_after_the_retry() {
         let dir = tempfile::tempdir().unwrap();
-        let path = script(dir.path(), "exit 0");
+        let path = program(dir.path());
         let writer = OpenOptions::new().write(true).open(&path).unwrap();
         // The precondition (ER-33): without the retry this start really is refused.
         let raw = Command::new(&path).spawn();
@@ -86,7 +77,7 @@ mod real {
             drop(writer);
         });
         let mut cmd = Command::new(&path);
-        let mut child = retry("start the script", || {
+        let mut child = retry("start the program", || {
             let r = cmd.spawn();
             if r.as_ref().is_err_and(is_text_busy) {
                 failed_tx.send(()).ok();
@@ -130,14 +121,14 @@ mod real {
         let mut cmd = Command::new(&path);
         cmd.arg("600");
         let mut child = Reap(Some(retry("start the program", || cmd.spawn()).unwrap()));
-        let raw = std::fs::write(&path, b"#!/bin/sh\nexit 0\n");
+        let raw = std::fs::write(&path, b"replacement\n");
         assert!(
             raw.as_ref().is_err_and(is_text_busy),
             "a running program must refuse a write with ETXTBSY, got {raw:?}"
         );
         let mut ended = false;
         retry("replace the program", || {
-            let r = std::fs::write(&path, b"#!/bin/sh\nexit 0\n");
+            let r = std::fs::write(&path, b"replacement\n");
             if r.as_ref().is_err_and(is_text_busy) && !ended {
                 child.end();
                 ended = true;
