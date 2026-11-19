@@ -2535,3 +2535,89 @@ fn an_undone_indentation_only_change_is_not_a_dropped_hunk_and_a_real_one_line_f
     assert!(!text.contains("[dropped-hunk]"), "{text}");
     let _ = code;
 }
+
+/// A registry of two generators that check with `true`: one marked by the lockfile, one by the docs.
+const TWO_GENERATORS: &str = r#"version = 1
+
+[[generator]]
+id = "lock-gen"
+what = "the lockfile"
+check = ["true"]
+regenerate = "none: invented"
+paths = ["crates/Cargo.lock"]
+outputs = []
+cost = "fast"
+
+[[generator]]
+id = "docs-gen"
+what = "the docs"
+check = ["true"]
+regenerate = "none: invented"
+paths = ["docs/**"]
+outputs = []
+cost = "fast"
+"#;
+
+/// `dev merge check HEAD` with the generator step on, its build folder outside the repository (as the tool requires).
+fn check_with_generators(r: &Repo) -> (i32, String) {
+    let builds = tempfile::tempdir().unwrap();
+    let out = r
+        .dev_cmd()
+        .args(["merge", "check", "--root"])
+        .arg(r.path())
+        .arg("HEAD")
+        .env("PADDOCK_DEV_TARGET_DIR", builds.path())
+        .output()
+        .unwrap();
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    (out.status.code().unwrap_or(-1), text)
+}
+
+/// The train moved on (a lockfile change) after the member was cut; the member then changes `member_file` and is merged.
+fn member_cut_from_an_old_base(member_file: &str) -> Repo {
+    let r = Repo::new();
+    r.write("docs/generators.toml", TWO_GENERATORS);
+    r.write("crates/Cargo.lock", "1\n");
+    r.write("docs/a.md", "a\n");
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "member"]);
+    r.write(member_file, "member\n");
+    r.commit("docs: member");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("crates/Cargo.lock", "2\n");
+    r.commit("chore: the train moved on");
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge member", "member"]);
+    r
+}
+
+#[test]
+fn a_member_cut_from_an_old_base_makes_due_only_what_it_changed_from_the_first_parent() {
+    let r = member_cut_from_an_old_base("docs/adr.md");
+    let (code, text) = check_with_generators(&r);
+    assert_eq!(code, 0, "{text}");
+    assert!(
+        text.contains("gen check: 1 of 2 due: docs-gen"),
+        "the lockfile change was the train's, not the member's: {text}"
+    );
+    assert!(!text.contains("lock-gen"), "{text}");
+}
+
+#[test]
+fn a_member_that_changes_the_lockfile_makes_its_generator_due() {
+    // The positive control (ER-33): the same history with a member that really changes the lockfile.
+    let r = Repo::new();
+    r.write("docs/generators.toml", TWO_GENERATORS);
+    r.write("crates/Cargo.lock", "1\n");
+    r.write("docs/a.md", "a\n");
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "member"]);
+    r.write("crates/Cargo.lock", "2\n");
+    r.commit("chore: member lock");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("other.txt", "b\n");
+    r.commit("chore: the train moved on");
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge member", "member"]);
+    let (code, text) = check_with_generators(&r);
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains("gen check: 1 of 2 due: lock-gen"), "{text}");
+}

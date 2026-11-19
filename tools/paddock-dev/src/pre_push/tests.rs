@@ -3521,3 +3521,28 @@ fn the_conformance_tests_row_passes_the_build_folder_to_the_executor_and_runs_he
     assert!(g.env.iter().all(|(k, _)| !k.starts_with("CARGO_")), "{:?}", g.env);
     assert!(g.heavy);
 }
+
+/// Rule 50 for the member gate: `./dev merge check --gates` plans the rows from the first parent's diff (`--base <merge>^1`), so a
+/// docs-only member plans no per-workspace test, doctest, Clippy or fmt row. The only test-time rows left are the two repository-wide
+/// ones the user put on every change (ER-41, 2026-11-14 and 2026-11-17): `conformance-tests` and `member-audits`. They are the
+/// named exceptions; a third one would fail this test.
+#[test]
+fn a_docs_only_change_plans_no_per_workspace_test_clippy_or_fmt_row_in_the_member_gate() {
+    let docs = ids(&plan_gates(&plan(), &change(&["docs/adr/0999-x.md"]), &facts()));
+    let heavy_words = ["test", "nextest", "doctest", "clippy", "fmt", "vitest", "playwright"];
+    let found: Vec<&str> = docs
+        .iter()
+        .map(String::as_str)
+        .filter(|id| heavy_words.iter().any(|w| id.contains(w)))
+        .collect();
+    assert_eq!(found, ["conformance-tests"], "test-time rows of a docs-only change: {docs:?}");
+    assert!(docs.iter().any(|id| id == "member-audits"), "{docs:?}");
+    // The positive control (ER-33): the same probe sees the rows a code change plans.
+    let code = ids(&plan_gates(&plan(), &change(&["crates/paddock-proc/src/lib.rs"]), &facts()));
+    assert!(
+        code.iter().any(|id| id.contains("clippy"))
+            && code.iter().any(|id| id.contains("doctest"))
+            && code.iter().any(|id| id.starts_with("fmt")),
+        "{code:?}"
+    );
+}
