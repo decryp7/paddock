@@ -40,6 +40,15 @@ impl Store {
         Ok(())
     }
 
+    /// The highest alarm id the store has ever named, in the alarms or in the change log a prune keeps (rule 53: an id the
+    /// history still names is never given to a new alarm).
+    pub fn highest_alarm_id(&self) -> Result<Option<u64>> {
+        let max = |sql: &str| -> Result<Option<i64>> { Ok(self.conn.query_row(sql, [], |r| r.get::<_, Option<i64>>(0))?) };
+        let alarms = max("SELECT MAX(id) FROM alarms")?;
+        let events = max("SELECT MAX(alarm_id) FROM alarm_events")?;
+        Ok(alarms.max(events).and_then(|i| u64::try_from(i).ok()))
+    }
+
     /// Deletes an alarm.
     pub fn delete_alarm(&self, id: u64) -> Result<()> {
         self.conn.execute("DELETE FROM alarms WHERE id = ?1", [id as i64])?;

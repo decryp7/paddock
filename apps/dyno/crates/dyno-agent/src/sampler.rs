@@ -227,26 +227,39 @@ impl Sampler {
             before.touch_alarms();
         }
         for a in new_alerts {
-            let changes = core.alarms.alert(&core.store, &a);
-            for c in &changes {
-                let _ = core.recorder.on_alarm(&core.store, c, t);
-            }
-            news.push(News::Alarms(changes));
-            // The alert's rows are one whole, all or none for this alert.
-            let stored = core.store.atomic(|| {
-                core.store.put_alert(&a)?;
-                core.store.put_event(&TimelineEvent {
-                    at: a.at,
-                    kind: TimelineEventKind::Alert,
-                    label: a.title.clone(),
+            // One savepoint per alert, its own rows first: a refused alert changes no alarm (Dyno ADR 0008, "Store writers").
+            let stored = {
+                let (store, alarms) = (&core.store, &mut core.alarms);
+                store.atomic(|| {
+                    store.put_alert(&a)?;
+                    store.put_event(&TimelineEvent {
+                        at: a.at,
+                        kind: TimelineEventKind::Alert,
+                        label: a.title.clone(),
+                    })?;
+                    Ok(alarms.alert(store, &a))
                 })
-            });
+            };
             match stored {
-                Ok(()) => news.push(News::Alert(a)),
+                Ok(changes) => {
+                    for c in &changes {
+                        let _ = core.recorder.on_alarm(&core.store, c, t);
+                    }
+                    core.alerts.stored(&a.id);
+                    news.push(News::Alarms(changes));
+                    news.push(News::Alert(a));
+                }
                 Err(e) => {
-                    // Undone alone (rule 85): its rows are rolled back, its cooldown is taken back, it is not announced.
-                    log::error!("dyno-agent: an alert could not be stored: {e}; it can fire again at the next tick");
-                    core.alerts.unfire(&a.id);
+                    // Undone alone (rule 85): its rows are rolled back and it is not announced; its cooldown is taken back
+                    // for a few tries, then kept.
+                    if core.alerts.unfire(&a.id, crate::rollup::MAX_RECORD_TRIES) {
+                        log::error!("dyno-agent: an alert could not be stored: {e}; it can fire again at the next tick");
+                    } else {
+                        log::error!(
+                            tries = crate::rollup::MAX_RECORD_TRIES;
+                            "dyno-agent: an alert could not be stored: {e}; after its tries it keeps its cooldown and is not tried again until that ends"
+                        );
+                    }
                 }
             }
         }
@@ -535,6 +548,78 @@ mod tests {
             median(quiet),
             median(busy),
             median(reloads)
+        );
+    }
+
+    /// Fifth review P2-2: a refused alert changes no alarm (its rows go first, in one savepoint with its alarm change), and after
+    /// MAX_RECORD_TRIES it keeps its cooldown instead of being tried at every tick.
+    #[test]
+    fn a_refused_alert_changes_no_alarm_and_stops_after_its_tries() {
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let fake = Fake::new();
+        let (shared, sensors, processes) = Shared::build(
+            crate::paths::Dirs::at(tmp.path().join("data")),
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+        )
+        .unwrap();
+        let (tx, _rx) = std::sync::mpsc::sync_channel(64);
+        let pending = Arc::new(crate::agent::Pending::default());
+        lock(&shared.subs).push(crate::agent::Sub {
+            id: 1,
+            detail: Arc::new(std::sync::atomic::AtomicU8::new(1)),
+            tx,
+            scans: Default::default(),
+            volumes: Default::default(),
+            jobs: Default::default(),
+            pending: pending.clone(),
+        });
+        let mut sampler = Sampler::new(sensors, processes);
+        let overhead = Overhead {
+            agent_cpu: 0.0,
+            agent_memory: 0,
+            sampling_interval_ms: 2_000,
+            process_interval_ms: 10_000,
+        };
+        let full = |t: Timestamp| {
+            let mut s = quiet_sample(t);
+            s.disks.push(dyno_core::metrics::DiskSample {
+                id: "d".into(),
+                name: "Disk".into(),
+                mount: "/".into(),
+                total: 100,
+                free: 1,
+                removable: false,
+            });
+            s
+        };
+        let drained = |pending: &crate::agent::Pending| {
+            let (mut alarms, mut alerts) = (0, 0);
+            pending.drain(&mut |m| {
+                alarms += usize::from(matches!(m, Message::Alarm(_)));
+                alerts += usize::from(matches!(m, Message::Alert(_)));
+                true
+            });
+            (alarms, alerts)
+        };
+        lock(&shared.core)
+            .store
+            .exec_for_test("CREATE TRIGGER no_alert BEFORE INSERT ON alerts BEGIN SELECT RAISE(ABORT, 'refused'); END;");
+        // Inside the alarm engine's 30 s tick: the first tick runs it at once, the next 19 ticks do not.
+        for i in 0..20 {
+            let t = Timestamp(HOUR + 1 + i * 1_000);
+            sampler.record(&shared, &full(t), None, overhead, t);
+        }
+        let events = lock(&shared.core).store.alarm_events(None, 500).unwrap().len();
+        assert_eq!((drained(&pending), events), ((0, 0), 0), "a refused alert raised no alarm");
+        lock(&shared.core).store.exec_for_test("DROP TRIGGER no_alert;");
+        let t = Timestamp(HOUR + 21_000);
+        sampler.record(&shared, &full(t), None, overhead, t);
+        assert_eq!(
+            drained(&pending),
+            (0, 0),
+            "after its tries the alert keeps its cooldown, not tried at every tick"
         );
     }
 
