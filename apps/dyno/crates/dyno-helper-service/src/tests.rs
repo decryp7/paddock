@@ -140,9 +140,16 @@ fn turning_on_and_off_asks_once_through_the_os_prompt() {
 fn only_a_protocol_or_minimum_version_change_asks_the_user() {
     let here = env!("CARGO_PKG_VERSION");
     assert_eq!(assess(None), Assessment::NotInstalled);
-    assert_eq!(assess(Some(("1.1.0", HELPER_API))), Assessment::Ready { newer_available: false });
+    // A helper at the minimum with this build's protocol is ready; it is offered the bundled one only when this build is newer
+    // (ER-13: both versions are read from their sources, never typed, so a release bump does not break the test).
     assert_eq!(
-        assess(Some(("1.1.0", HELPER_API + 1))),
+        assess(Some((MIN_HELPER_VERSION, HELPER_API))),
+        Assessment::Ready {
+            newer_available: MIN_HELPER_VERSION != here
+        }
+    );
+    assert_eq!(
+        assess(Some((MIN_HELPER_VERSION, HELPER_API + 1))),
         Assessment::UpdateRequired(UpdateReason::Protocol {
             installed: HELPER_API + 1,
             bundled: HELPER_API
@@ -156,7 +163,7 @@ fn only_a_protocol_or_minimum_version_change_asks_the_user() {
     let ready = assess(Some((here, HELPER_API)));
     assert!(matches!(
         ready,
-        Assessment::Ready { .. } | Assessment::UpdateRequired(UpdateReason::BelowMinimum { .. })
+        Assessment::Ready { newer_available: false } | Assessment::UpdateRequired(UpdateReason::BelowMinimum { .. })
     ));
 }
 
