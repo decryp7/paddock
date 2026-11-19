@@ -39,6 +39,10 @@ on:
         description: "Rerun only what failed in this finished debrief.yml run (its API id, as ./dev ci dispatch and ./dev wait --ci-run print it; not its run number): the failed jobs, the failed e2e shards, inside rust tests only the failed nextest tests and inside the frontend job only the failed vitest files (./dev plan --ci --app debrief; ER-10). A full run's failures need bundles: true too. A full run before landing catches the rest."
         required: false
         default: ""
+      only_tests:
+        description: "With since_run: run only these tests of that run's failed jobs, as JSON from a job's display name to its test ids (the rows of ./dev ci triage <run> --json): nextest `<binary> <test>`, a vitest spec file, a Playwright `[project] > file:line:col > title`. Jobs not named do not run (./dev train release, rung 1: the failed tests only; tools/paddock-dev/src/plan_only). Without since_run the run is refused."
+        required: false
+        default: ""
 
 env:
   # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
@@ -129,6 +133,8 @@ jobs:
           PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
           # The rerun reads the earlier run's jobs and logs through the API; PLAN_FULL says whether this rerun is full.
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
+          # With since_run: only the tests this names (JSON), in the jobs it names (plan_only.rs); refused without since_run.
+          PLAN_ONLY_TESTS: ${{ github.event.inputs.only_tests }}
           PLAN_FULL: ${{ github.event.inputs.bundles }}
           # The `full` output's expression, copied (tools/paddock-dev/tests/it/tree.rs keeps them equal): the mode line below lets a
           # later rerun of this run's failures tell whether it was full (plan_since::read_full). It is the scope only; `plan verdict:`
@@ -659,7 +665,19 @@ jobs:
           # Required by playwright.config.ts in CI (no default port, no reused server): one per shard, as jobs may share a host.
           DEBRIEF_E2E_PORT: "435${{ matrix.shard }}"
           DEBRIEF_E2E_PREBUILT: "1"
-        run: npx playwright test --shard=${{ matrix.shard }}/4 ${{ needs.plan.outputs.full != 'true' && '--project=chromium' || '' }}
+          # The only_tests input narrows a failed shard to the `file:line` locations of its named tests (the plan job writes them into
+          # the leg as `tests`): those run, without --shard (the shard split is of the whole set, not of the named tests).
+          E2E_TESTS: ${{ matrix.tests }}
+          E2E_FULL: ${{ needs.plan.outputs.full }}
+        run: |
+          project=()
+          if [ "$E2E_FULL" != true ]; then project=(--project=chromium); fi
+          if [ -n "$E2E_TESTS" ]; then
+            echo "::notice::Playwright runs only the named tests: $E2E_TESTS"
+            npx playwright test $E2E_TESTS ${project[@]+"${project[@]}"}
+          else
+            npx playwright test --shard=${{ matrix.shard }}/4 ${project[@]+"${project[@]}"}
+          fi
 
       - name: Upload Playwright report
         if: failure()

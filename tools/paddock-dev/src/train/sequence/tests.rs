@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::json;
+use crate::plan_only::Kind;
 use std::cell::Cell;
 
 const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
@@ -30,6 +31,13 @@ struct Table {
     reach: BTreeMap<String, Result<Reach, String>>,
     reach_asked: Vec<(String, String)>,
     landables: BTreeMap<String, Result<Landable, String>>,
+    ran: BTreeMap<u64, Result<Value, String>>,
+    kinds: BTreeMap<String, Kind>,
+    stage1: Result<Option<Vec<(String, String)>>, String>,
+    /// The runs the shared reader counts as a full green run (a defect a rung 3 must catch).
+    counted_full: Vec<u64>,
+    /// Dispatched runs (by id) that end red, whatever their workflow's default.
+    fail_runs: Vec<u64>,
 }
 
 impl Table {
@@ -56,6 +64,11 @@ impl Table {
             reach: BTreeMap::new(),
             reach_asked: Vec::new(),
             landables: BTreeMap::new(),
+            ran: BTreeMap::new(),
+            kinds: BTreeMap::new(),
+            stage1: Ok(None),
+            counted_full: Vec::new(),
+            fail_runs: Vec::new(),
         }
     }
     fn result(mut self, wf: &str, r: RunResult) -> Table {
@@ -89,7 +102,10 @@ impl Ports for Table {
         }
         self.next += 1;
         self.dispatched.push((workflow.into(), inputs.to_vec(), self.next));
-        let result = self.results.get(workflow).cloned().unwrap_or(RunResult::Success);
+        let mut result = self.results.get(workflow).cloned().unwrap_or(RunResult::Success);
+        if self.fail_runs.contains(&self.next) {
+            result = RunResult::Failure;
+        }
         self.runs.insert(self.next, facts(workflow, SHA, result));
         Ok(self.next)
     }
@@ -103,10 +119,14 @@ impl Ports for Table {
         Ok(self.runs.get(&run).cloned())
     }
     fn ci_verdict(&mut self, workflow: &str, _sha: &str) -> Verdict {
+        if let Some(&run) = self.counted_full.first() {
+            return Verdict::Green { run };
+        }
+        // A full run: no since_run and no stage input (stage 1 is a rung, not a full run).
         if self
             .dispatched
             .iter()
-            .any(|d| d.0 == workflow && !d.1.iter().any(|(k, _)| k == "since_run"))
+            .any(|d| d.0 == workflow && !d.1.iter().any(|(k, _)| k == "since_run" || k == "stage"))
         {
             return self.after.get(workflow).cloned().unwrap_or(Verdict::Green { run: 7 });
         }
@@ -127,6 +147,16 @@ impl Ports for Table {
             .get(&run)
             .cloned()
             .unwrap_or_else(|| Err("no triage in the table".into()))
+    }
+    fn triage_ran(&mut self, run: u64) -> Result<Value, String> {
+        self.triaged.push(run);
+        self.ran.get(&run).cloned().unwrap_or_else(|| Err("no counts in the table".into()))
+    }
+    fn job_kind(&mut self, _: &str, job: &str) -> Option<Kind> {
+        self.kinds.get(job).copied()
+    }
+    fn stage1(&mut self, _: &str) -> Result<Option<Vec<(String, String)>>, String> {
+        self.stage1.clone()
     }
     fn is_ancestor(&mut self, _: &str, _: &str) -> Result<bool, String> {
         Ok(self.ancestor)
@@ -149,6 +179,7 @@ fn plan(workflow: FixWorkflow, round: Round) -> Plan {
         accepted: vec![Accepted::parse("apps/debrief/app/e2e/a11y.e2e.ts:6:7").unwrap()],
         reuse: BTreeMap::new(),
         max: Duration::from_secs(14 * 3600),
+        ladder: Ladder::off(),
     }
 }
 
@@ -609,4 +640,207 @@ fn a_since_run_or_passed_run_on_another_ref_is_refused() {
             .cause
             .contains("not on this train's ref")
     );
+}
+
+// ---- the fix ladder ----
+
+const CRATE: &str = "crate (ubuntu-latest)";
+const NX: &str = "paddock-service per_machine::tests::every_adopting_app_is_in_sync";
+
+/// The red run's triage: one NEW nextest failure in the crate job, one whole-job failure elsewhere, one already on main.
+fn red_doc() -> Value {
+    json!({"ok": true, "counts": {"new": 1, "failed": 0, "flaky": 0, "already_failing": 1, "unknown": 0}, "skipped_jobs": 0, "rows": [
+        {"job": CRATE, "test": NX, "whole_job": false, "status": "new"},
+        {"job": "conformance (checks, release scripts)", "test": null, "whole_job": true, "status": "already-failing"}]})
+}
+
+/// What `ci triage --ran` says of a rung run: the crate job ran `n` tests.
+fn ran_doc(n: u64, rows: Value) -> Value {
+    let mut d = json!({"ok": true, "counts": {"new": 0, "failed": 0, "flaky": 0, "already_failing": 0, "unknown": 0}, "skipped_jobs": 0, "rows": rows,
+        "ran": {"total": n, "jobs": [{"job": CRATE, "tests_run": n}, {"job": "plan (affected projects)", "tests_run": 0}]}});
+    if d["rows"].as_array().is_some_and(|r| !r.is_empty()) {
+        d["counts"]["new"] = json!(d["rows"].as_array().map_or(0, Vec::len));
+    }
+    d
+}
+
+fn ladder_plan(round: u32) -> Plan {
+    let mut p = dispatch_plan();
+    p.ladder = Ladder { round, max_rounds: 3 };
+    p
+}
+
+fn ladder_table() -> Table {
+    let mut t = Table::new();
+    t.triage.insert(8300, Ok(red_doc()));
+    t.kinds.insert(CRATE.into(), Kind::Nextest);
+    // The first dispatched run is 9001: the tests-only run.
+    t.ran.insert(9001, Ok(ran_doc(1, json!([]))));
+    t
+}
+
+fn only_dispatch(t: &Table) -> Option<&Dispatch> {
+    t.dispatched.iter().find(|d| d.1.iter().any(|(k, _)| k == "only_tests"))
+}
+
+#[test]
+fn rung_1_runs_the_named_failing_tests_only_then_rung_2_and_the_full_run_decide_the_landing() {
+    let mut t = ladder_table();
+    let (r, log) = go(&ladder_plan(1), &mut t);
+    let done = r.unwrap();
+    let d = only_dispatch(&t).expect("the tests-only run was dispatched");
+    let only = d.1.iter().find(|(k, _)| k == "only_tests").unwrap();
+    // The input carries the failing test of the crate job, and not the whole-job failure of the other job.
+    assert_eq!(only.1, json!({ CRATE: [NX] }).to_string());
+    assert!(d.1.contains(&("since_run".into(), "8300".into())), "rung 1 repeats the red run's failures");
+    // The order of the ladder: the tests-only run, the whole-jobs round, the full runs.
+    assert_eq!(&t.workflows()[..3], ["ci.yml", "ci.yml", "ci.yml"]);
+    assert_eq!(
+        done.rungs
+            .iter()
+            .map(|(r, o)| (r.number(), matches!(o, RungOutcome::Green(_))))
+            .collect::<Vec<_>>(),
+        [(1, true), (2, true), (3, false)]
+    );
+    // Each rung names its tests, its run and its duration in the log.
+    assert!(log.contains("rung 1 (failed tests only), round 1/3: 1 test(s) in 1 job(s) of run 8300"), "{log}");
+    assert!(log.contains(&format!("rung 1:   {CRATE}: {NX}")), "{log}");
+    assert!(log.contains("rung 1 (failed tests only): green, run 9001: 1 named test(s) ran, after"), "{log}");
+    assert!(log.contains("rung 3 (stage 1 on every OS): skipped"), "{log}");
+    // Only the full runs of rung 4 are what a landing reads: the rung steps are not full evidence.
+    let full: Vec<_> = done.steps.iter().filter(|(_, s)| !s.is_rung()).collect();
+    assert!(full.iter().any(|(w, s)| w == "ci.yml" && matches!(s, Source::Verdict(_))));
+    assert!(done.steps.iter().any(|(_, s)| matches!(s, Source::TestsOnly(9001))));
+}
+
+#[test]
+fn a_rung_that_ran_no_test_is_not_measured_and_stops_the_ladder_whatever_the_run_says() {
+    // Positive control: the run is green, but its filter matched nothing (nextest --no-tests=warn).
+    let mut t = ladder_table();
+    t.ran.insert(9001, Ok(ran_doc(0, json!([]))));
+    let (r, _) = go(&ladder_plan(1), &mut t);
+    let stop = r.unwrap_err();
+    assert!(stop.cause.contains("NOT MEASURED") && stop.cause.contains("matched nothing"), "{}", stop.cause);
+    assert_eq!(t.workflows(), ["ci.yml"], "nothing after the unmeasured rung ran");
+    // Fewer tests than ids is as unmeasured.
+    let mut t = ladder_table();
+    t.kinds.insert("other job".into(), Kind::Nextest);
+    let mut doc = red_doc();
+    doc["rows"].as_array_mut().unwrap().push(json!({"job": CRATE, "test": "paddock-service other::t", "whole_job": false, "status": "failed"}));
+    doc["counts"]["failed"] = json!(1);
+    t.triage.insert(8300, Ok(doc));
+    let (r, _) = go(&ladder_plan(1), &mut t);
+    assert!(r.unwrap_err().cause.contains("ran 1 test(s) but 2 were named"));
+    // No counts at all, or counts that could not be read, are not a zero and not a pass.
+    for ran in [Ok(json!({"ok": true, "rows": [], "counts": {}, "skipped_jobs": 0})), Err("the log is gone".to_string())] {
+        let mut t = ladder_table();
+        t.ran.insert(9001, ran);
+        let stop = go(&ladder_plan(1), &mut t).0.unwrap_err();
+        assert!(
+            stop.cause.contains("NOT MEASURED") || stop.cause.contains("test counts failed"),
+            "{}",
+            stop.cause
+        );
+        assert_eq!(t.workflows(), ["ci.yml"]);
+    }
+}
+
+#[test]
+fn a_rung_that_fails_stops_the_ladder_and_a_green_rung_never_lets_a_train_land() {
+    // Rung 1 red with a new failure: stop, with the next round named.
+    let mut t = ladder_table().result("ci.yml", RunResult::Failure);
+    t.ran.insert(9001, Ok(ran_doc(1, json!([{"job": CRATE, "test": NX, "whole_job": false, "status": "new"}]))));
+    let (r, _) = go(&ladder_plan(1), &mut t);
+    let stop = r.unwrap_err();
+    assert!(stop.cause.contains("rung 1 run 9001 is red") && stop.next.contains("--test-round 2"), "{stop:?}");
+    assert_eq!(t.workflows(), ["ci.yml"], "rung 2 and the full runs never started");
+    // Every rung green, the full run red: not green, nothing lands.
+    let mut t = ladder_table();
+    t.verdict_now.insert("ci.yml".into(), Verdict::Red { run: None, reason: "no".into() });
+    t.after.insert("ci.yml".into(), Verdict::Red { run: None, reason: "a full test failed".into() });
+    let (r, _) = go(&ladder_plan(1), &mut t);
+    assert!(r.unwrap_err().cause.contains("not green by `ci verdict`"));
+}
+
+#[test]
+fn rung_1_is_skipped_with_its_reason_when_nothing_can_be_named_and_never_runs_an_empty_filter() {
+    // Only whole-job and already-failing rows: nothing to name.
+    let mut t = ladder_table();
+    t.triage.insert(
+        8300,
+        Ok(json!({"ok": true, "counts": {"new": 0, "already_failing": 1, "failed": 0, "flaky": 0, "unknown": 0}, "skipped_jobs": 0, "rows": [
+            {"job": CRATE, "test": NX, "whole_job": false, "status": "already-failing"}]})),
+    );
+    let (r, log) = go(&ladder_plan(1), &mut t);
+    let done = r.unwrap();
+    assert!(only_dispatch(&t).is_none(), "no only_tests dispatch");
+    assert!(matches!(&done.rungs[0], (Rung::Tests, RungOutcome::Skipped(w)) if w.contains("no named failing test")), "{:?}", done.rungs);
+    assert!(log.contains("rung 1 (failed tests only): skipped"));
+    // A job whose runner takes no test list is left to rung 2.
+    let mut t = ladder_table();
+    t.kinds.clear();
+    assert!(go(&ladder_plan(1), &mut t).0.is_ok());
+    assert!(only_dispatch(&t).is_none());
+    // Past the bound of rounds, and with the rung off: rung 2 starts.
+    for (round, max) in [(4, 3), (1, 0)] {
+        let mut t = ladder_table();
+        let mut p = dispatch_plan();
+        p.ladder = Ladder { round, max_rounds: max };
+        assert!(go(&p, &mut t).0.is_ok());
+        assert!(only_dispatch(&t).is_none(), "round {round} of {max}");
+    }
+}
+
+#[test]
+fn rung_3_dispatches_stage_1_when_the_workflow_has_it_and_never_counts_it_as_a_full_run() {
+    let stage = vec![("stage".to_string(), "fast".to_string())];
+    let mut t = ladder_table();
+    t.stage1 = Ok(Some(stage.clone()));
+    // Dispatch order: 9001 rung 1, 9002 rung 2, 9003 stage 1.
+    t.ran.insert(9003, Ok(ran_doc(40, json!([]))));
+    let (r, log) = go(&ladder_plan(1), &mut t);
+    let done = r.unwrap();
+    let s1 = t.dispatched.iter().find(|d| d.1.iter().any(|(k, _)| k == "stage")).expect("stage 1 dispatched");
+    assert!(!s1.1.iter().any(|(k, _)| k == "since_run"), "stage 1 is a run of its own, not a rerun");
+    assert!(done.rungs.iter().any(|(r, o)| *r == Rung::Stage1 && *o == RungOutcome::Green(s1.2)));
+    assert!(log.contains("rung 3 (stage 1 on every OS): green"), "{log}");
+    // The full runs came after it, in their own dispatches.
+    assert!(t.dispatched.iter().filter(|d| d.0 == "ci.yml").count() >= 4);
+
+    // A stage 1 that ran no test is not measured.
+    let mut t = ladder_table();
+    t.stage1 = Ok(Some(stage.clone()));
+    t.ran.insert(9003, Ok(ran_doc(0, json!([]))));
+    assert!(go(&ladder_plan(1), &mut t).0.unwrap_err().cause.contains("NOT MEASURED"));
+
+    // A reader that counts the stage 1 run as a full green one is a defect that blocks the landing path.
+    let mut t = ladder_table();
+    t.stage1 = Ok(Some(stage.clone()));
+    t.ran.insert(9003, Ok(ran_doc(40, json!([]))));
+    t.counted_full.push(9003);
+    let stop = go(&ladder_plan(1), &mut t).0.unwrap_err();
+    assert!(stop.cause.contains("counts the stage 1 run 9003"), "{stop:?}");
+
+    // A red stage 1 stops the ladder before the full run.
+    let mut t = ladder_table();
+    t.stage1 = Ok(Some(stage));
+    t.fail_runs.push(9003);
+    let stop = go(&ladder_plan(1), &mut t).0.unwrap_err();
+    assert!(stop.cause.contains("rung 3 run 9003") && stop.cause.contains("is red"), "{stop:?}");
+    assert_eq!(t.workflows().len(), 3, "no full run was dispatched");
+}
+
+#[test]
+fn a_workflow_that_cannot_be_read_stops_rung_3_and_a_passed_round_skips_rung_1() {
+    let mut t = ladder_table();
+    t.stage1 = Err("git show failed".into());
+    assert!(go(&ladder_plan(1), &mut t).0.unwrap_err().cause.contains("stage 1 could not be read"));
+    let mut t = ladder_table();
+    t.runs.insert(8307, facts("ci.yml", SHA, RunResult::Failure));
+    t.triage.insert(8307, Ok(flaky_doc()));
+    let mut p = plan(FixWorkflow::Ci, Round::Passed(8307));
+    p.ladder = Ladder { round: 1, max_rounds: 3 };
+    let done = go(&p, &mut t).0.unwrap();
+    assert!(only_dispatch(&t).is_none());
+    assert!(matches!(&done.rungs[0], (Rung::Tests, RungOutcome::Skipped(_))));
 }

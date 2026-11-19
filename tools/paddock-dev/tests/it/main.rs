@@ -38,6 +38,7 @@ mod isolation;
 mod locks;
 mod member_audits;
 mod merge_check;
+mod only_tests_wiring;
 mod parity_corpus;
 mod pr;
 mod pre_push;

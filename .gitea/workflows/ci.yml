@@ -32,6 +32,10 @@ on:
         description: "Rerun only what failed in this finished ci.yml run (its API id, as ./dev ci dispatch and ./dev wait --ci-run print it; not its run number): the failed jobs, and inside a job that failed only in nextest only its failed tests (./dev plan --since-run; ER-10). Passed jobs do not run; a full run before landing catches the rest."
         required: false
         default: ""
+      only_tests:
+        description: "With since_run: run only these tests of that run's failed jobs, as JSON from a job's display name to its test ids (the rows of ./dev ci triage <run> --json): nextest `<binary> <test>`, a vitest spec file, a Playwright `[project] > file:line:col > title`. Jobs not named do not run (./dev train release, rung 1: the failed tests only; tools/paddock-dev/src/plan_only). Without since_run the run is refused."
+        required: false
+        default: ""
   # nightly.yml: everything, with WebKit.
   workflow_call:
     inputs:
@@ -130,6 +134,8 @@ jobs:
           # Fallback for one release (ADR 0022 R4): the repository variable PLAN_PLANNER=node plans with scripts/affected.mjs again
           # (a rerun of failures, PLAN_SINCE_RUN, always uses ./dev plan). Unset: ./dev plan. Remove with the script.
           PLAN_PLANNER: ${{ vars.PLAN_PLANNER }}
+          # With since_run: only the tests this names (JSON), in the jobs it names (plan_only.rs); refused without since_run.
+          PLAN_ONLY_TESTS: ${{ github.event.inputs.only_tests }}
           # The crate and paddock-dev legs when the plan names none of its own (every run but a rerun of their failures).
           PLAN_OS_LEGS: '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]'
           # The scope of this run (tests everything its plan can reach, not a diff from a base or a rerun of failures): a push to

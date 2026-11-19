@@ -128,6 +128,17 @@ pub fn triage_doc(server: &str, repo: &str, token: &str, run: u64) -> Result<Val
     Ok(doc)
 }
 
+/// `ci triage <run> --json --ran`: the triage document with the count of the tests every job ran (`ran`), or why they could not be
+/// counted (then the document has no `ran`, never a zero).
+pub fn triage_ran_doc(server: &str, repo: &str, token: &str, run: u64) -> Result<Value, String> {
+    let mut doc = triage_doc(server, repo, token, run)?;
+    let mut http = CurlHttp;
+    let mut client = Client::new(&mut http, server, repo, token);
+    let counts = super::ran::collect(&mut client, run, &mut |l| eprintln!("{l}"))?;
+    doc["ran"] = super::ran::json(&counts);
+    Ok(doc)
+}
+
 /// The shared reader's verdict of `workflow` on `sha` ([`super::verdict::verdict`]).
 pub fn full_verdict(server: &str, repo: &str, token: &str, workflow: &str, sha: &str) -> super::verdict::Verdict {
     let mut http = CurlHttp;

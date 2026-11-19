@@ -1,11 +1,13 @@
-//! The release sequence of a train (the port of the integrator's `seq-release.sh`): an optional failed-only fix round of
-//! `ci.yml` or `debrief.yml`, judged by [`super::verdict`]; after a `ci.yml` round `debrief.yml` with bundles; then the release
-//! workflows. It stops at the first run that is not green, and says why in one [`Stop`].
+//! The release sequence of a train (the port of the integrator's `seq-release.sh`): the fix ladder ([`ladder`]: the failed tests
+//! only, their whole jobs as a failed-only `since_run` round judged by [`super::verdict`], stage 1 on every OS when the workflow
+//! has it), then the full run of `ci.yml` and of `debrief.yml` with bundles on the exact head, then the release workflows. It stops
+//! at the first run that is not green, and says why in one [`Stop`]; only the full runs allow a landing.
 //!
 //! Everything it touches goes through [`Ports`]: the real ones are in `real.rs`, the tests use a table. Every wait is bounded:
 //! the whole sequence by `--max`, one run by [`RUN_CAP`] (ER-32). Each step logs its phase and how long it took (ER-27).
 
 use super::verdict::{Accepted, verdict};
+use crate::plan_only::Kind;
 use crate::ci_runs::landable::Landable;
 use crate::ci_runs::train_runs::RunFacts;
 use crate::ci_runs::verdict::{RunResult, Verdict};
@@ -27,6 +29,10 @@ pub const RELEASE_WORKFLOWS: [(&str, &[(&str, &str)]); 6] = [
     ("shell-demo-release.yml", &[]),
     ("workbench-demo-release.yml", &[]),
 ];
+
+pub mod ladder;
+
+pub use ladder::{Ladder, Rung, RungOutcome};
 
 /// The workflow of the failed-only fix round.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,6 +106,8 @@ pub struct Plan {
     pub reuse: BTreeMap<String, u64>,
     /// The longest the whole sequence takes.
     pub max: Duration,
+    /// Rung 1 of the fix ladder: the round and its bound.
+    pub ladder: Ladder,
 }
 
 impl Plan {
@@ -155,6 +163,15 @@ pub trait Ports {
     fn is_ancestor(&mut self, ancestor: &str, of: &str) -> Result<bool, String>;
     /// What the planner says `from_sha..train head` reaches, for `app`.
     fn reach(&mut self, app: &str, from_sha: &str) -> Result<Reach, String>;
+    /// `ci triage <run> --json --ran`: the triage document with the count of the tests every job ran (`ran`). `Err` when it could
+    /// not be made, or the counts could not be read: a missing count is never a zero.
+    fn triage_ran(&mut self, run: u64) -> Result<Value, String>;
+    /// What kind of test list the job of this display name takes in `workflow` at the train head (`None`: it takes none, or the
+    /// workflow cannot tell the job).
+    fn job_kind(&mut self, workflow: &str, job: &str) -> Option<Kind>;
+    /// The inputs that select stage 1 of `workflow` at the train head, or `None` when it has no staged layout. `Err` when the
+    /// workflow cannot be read.
+    fn stage1(&mut self, workflow: &str) -> Result<Option<Vec<(String, String)>>, String>;
 }
 
 /// Why the sequence stopped, and what to do next.
@@ -197,6 +214,30 @@ pub enum Source {
     Verdict(u64),
     /// A full run that is red only by accepted FLAKY tests and failures already on main (the train-only `Landable`).
     Landable(u64),
+    /// Rung 1: a run of only the failed tests, green, with their counts shown. Never a reason to land.
+    TestsOnly(u64),
+    /// Rung 3: a stage 1 run, green, with its tests shown. Never a reason to land.
+    Stage1(u64),
+}
+
+impl Source {
+    /// The run that covered the step.
+    pub fn run(&self) -> u64 {
+        match self {
+            Source::Ran(r)
+            | Source::Judged(r)
+            | Source::Reused(r)
+            | Source::Verdict(r)
+            | Source::Landable(r)
+            | Source::TestsOnly(r)
+            | Source::Stage1(r) => *r,
+        }
+    }
+
+    /// Whether the step is evidence only a full run can replace: a rung below 4. A landing never reads these.
+    pub fn is_rung(&self) -> bool {
+        matches!(self, Source::TestsOnly(_) | Source::Stage1(_))
+    }
 }
 
 /// A green sequence: the workflows in order and what covered each.
@@ -204,6 +245,8 @@ pub enum Source {
 pub struct Done {
     /// `(workflow, source)` in order.
     pub steps: Vec<(String, Source)>,
+    /// What each rung of the fix ladder came to (rung 4 is the full runs in `steps`).
+    pub rungs: Vec<(Rung, RungOutcome)>,
 }
 
 struct Seq<'a> {
@@ -211,6 +254,7 @@ struct Seq<'a> {
     ports: &'a mut dyn Ports,
     log: &'a mut dyn Write,
     steps: Vec<(String, Source)>,
+    rungs: Vec<(Rung, RungOutcome)>,
 }
 
 /// Runs the sequence; stops at the first run that is not green.
@@ -221,9 +265,10 @@ pub fn release(plan: &Plan, ports: &mut dyn Ports, log: &mut dyn Write) -> Resul
         ports,
         log,
         steps: Vec::new(),
+        rungs: Vec::new(),
     };
-    s.fix_round()?;
-    // ER-10: nothing lands without the full green run on the final tree, decided by the shared reader (`ci verdict`).
+    s.ladder()?;
+    // Rung 4. ER-10: nothing lands without the full green run on the final tree, decided by the shared reader (`ci verdict`).
     s.full("ci.yml", &[("webkit", "true")])?;
     s.full("debrief.yml", &[("bundles", "true")])?;
     for (wf, inputs) in RELEASE_WORKFLOWS {
@@ -238,10 +283,13 @@ pub fn release(plan: &Plan, ports: &mut dyn Ports, log: &mut dyn Write) -> Resul
         short(&plan.sha),
         fmt_duration(s.ports.elapsed())
     );
-    Ok(Done { steps: s.steps })
+    Ok(Done {
+        steps: s.steps,
+        rungs: s.rungs,
+    })
 }
 
-fn short(sha: &str) -> &str {
+pub(crate) fn short(sha: &str) -> &str {
     &sha[..sha.len().min(9)]
 }
 
@@ -457,45 +505,52 @@ impl Seq<'_> {
         Ok(())
     }
 
-    /// The fix round: green, or red with only accepted flaky tests.
+    /// The checks of the red run a round repeats: it exists, is a finished, red run of the fix workflow on this train's ref.
+    fn since_facts(&mut self, since: u64) -> Result<RunFacts, Stop> {
+        let wf = self.plan.workflow.file();
+        let f = self
+            .ports
+            .run_facts(since)
+            .map_err(|e| {
+                Stop::new(
+                    format!("--since-run {since} could not be read ({e})"),
+                    "check the network and GITEA_TOKEN",
+                )
+            })?
+            .ok_or_else(|| {
+                Stop::new(
+                    format!("--since-run {since}: the server has no such run"),
+                    "name the failed run of the round",
+                )
+            })?;
+        let wrong = |why: String| {
+            Stop::new(
+                format!("--since-run {since}: {why}"),
+                "name a finished, red run of the same workflow (`./dev ci triage` lists them)",
+            )
+        };
+        if f.workflow != wf {
+            return Err(wrong(format!("it is a run of {}, not of {wf}", f.workflow)));
+        }
+        let want_ref = format!("refs/heads/{}", self.plan.branch);
+        if f.git_ref != want_ref {
+            return Err(wrong(format!("it ran on {:?}, not on this train's ref {want_ref}", f.git_ref)));
+        }
+        match &f.result {
+            RunResult::Failure => {}
+            RunResult::Success => return Err(wrong("it is green: there is nothing to repeat".into())),
+            RunResult::Running(s) => return Err(wrong(format!("it is still {s}"))),
+            RunResult::Other(o) => return Err(wrong(format!("it ended {o}, neither green nor red"))),
+        }
+        Ok(f)
+    }
+
+    /// Rung 2, the fix round: green, or red with only accepted flaky tests.
     fn fix_round(&mut self) -> Result<(), Stop> {
         let wf = self.plan.workflow.file();
         let run = match self.plan.round {
             Round::Dispatch(since) => {
-                let f = self
-                    .ports
-                    .run_facts(since)
-                    .map_err(|e| {
-                        Stop::new(
-                            format!("--since-run {since} could not be read ({e})"),
-                            "check the network and GITEA_TOKEN",
-                        )
-                    })?
-                    .ok_or_else(|| {
-                        Stop::new(
-                            format!("--since-run {since}: the server has no such run"),
-                            "name the failed run of the round",
-                        )
-                    })?;
-                let wrong = |why: String| {
-                    Stop::new(
-                        format!("--since-run {since}: {why}"),
-                        "name a finished, red run of the same workflow (`./dev ci triage` lists them)",
-                    )
-                };
-                if f.workflow != wf {
-                    return Err(wrong(format!("it is a run of {}, not of {wf}", f.workflow)));
-                }
-                let want_ref = format!("refs/heads/{}", self.plan.branch);
-                if f.git_ref != want_ref {
-                    return Err(wrong(format!("it ran on {:?}, not on this train's ref {want_ref}", f.git_ref)));
-                }
-                match f.result {
-                    RunResult::Failure => {}
-                    RunResult::Success => return Err(wrong("it is green: there is nothing to repeat".into())),
-                    RunResult::Running(s) => return Err(wrong(format!("it is still {s}"))),
-                    RunResult::Other(o) => return Err(wrong(format!("it ended {o}, neither green nor red"))),
-                }
+                self.since_facts(since)?;
                 let (run, end) = self.dispatch_and_wait(wf, &[self.plan.workflow.input()], Some(since))?;
                 if let RunEnd::Unfinished(why) = end {
                     return Err(unfinished(wf, run, &why));
@@ -594,14 +649,14 @@ pub fn app_of(workflow: &str) -> String {
     workflow.trim_end_matches(".yml").trim_end_matches("-release").to_string()
 }
 
-fn not_a_result(wf: &str, run: u64, r: &RunResult) -> Stop {
+pub(crate) fn not_a_result(wf: &str, run: u64, r: &RunResult) -> Stop {
     Stop::new(
         format!("{wf} run {run} ended {r:?}: neither green nor red"),
         "look at the run in the browser (a cancel or a runner loss is not a result), then run the sequence again",
     )
 }
 
-fn unfinished(wf: &str, run: u64, why: &str) -> Stop {
+pub(crate) fn unfinished(wf: &str, run: u64, why: &str) -> Stop {
     Stop::new(
         format!("{wf} run {run} did not finish: {why}"),
         format!(

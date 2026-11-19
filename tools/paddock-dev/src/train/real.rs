@@ -4,6 +4,7 @@
 use super::accept::{FlakyCheck, Tree};
 use super::land::Git;
 use super::sequence::{Ports, Reach, RunEnd};
+use crate::plan_only::Kind;
 use super::verdict::Accepted;
 use crate::ci_runs::dispatch;
 use crate::ci_runs::landable::Landable;
@@ -123,6 +124,21 @@ impl Ports for RealPorts {
         runs::triage_doc(&self.server, &self.repo, &self.token, run)
     }
 
+    fn triage_ran(&mut self, run: u64) -> Result<Value, String> {
+        runs::triage_ran_doc(&self.server, &self.repo, &self.token, run)
+    }
+
+    fn job_kind(&mut self, workflow: &str, job: &str) -> Option<Kind> {
+        let text = self.workflow_at_head(workflow).ok()?;
+        let key = crate::plan_since::key_by_name(job, &crate::plan_since::name_templates(&text))?;
+        crate::plan_only::job_kind(workflow, &key)
+    }
+
+    fn stage1(&mut self, workflow: &str) -> Result<Option<Vec<(String, String)>>, String> {
+        let text = self.workflow_at_head(workflow)?;
+        stage1_inputs(&text)
+    }
+
     fn is_ancestor(&mut self, ancestor: &str, of: &str) -> Result<bool, String> {
         Git::is_ancestor(&mut GitCli { root: &self.root }, ancestor, of)
     }
@@ -130,6 +146,27 @@ impl Ports for RealPorts {
     fn reach(&mut self, app: &str, from_sha: &str) -> Result<Reach, String> {
         reach_of(&self.root, app, from_sha, &self.sha)
     }
+}
+
+impl RealPorts {
+    /// The workflow file at the train head (what the dispatched run reads).
+    fn workflow_at_head(&self, workflow: &str) -> Result<String, String> {
+        GitCli { root: &self.root }.run(&["show", &format!("{}:.gitea/workflows/{workflow}", self.sha)], QUICK_LIMIT)
+    }
+}
+
+/// The inputs that select stage 1 of a workflow text, read through the YAML accessor (`gates::yaml`): `Some` when its
+/// `workflow_dispatch` declares the stage input ([`super::sequence::ladder::STAGE_INPUT`]), `None` when it does not.
+pub fn stage1_inputs(workflow_text: &str) -> Result<Option<Vec<(String, String)>>, String> {
+    let (name, value) = super::sequence::ladder::STAGE_INPUT;
+    let doc = crate::gates::yaml::parse(workflow_text)?;
+    let declared = doc
+        .get("on")
+        .and_then(|on| on.get("workflow_dispatch"))
+        .and_then(|d| d.get("inputs"))
+        .and_then(|i| i.get(name))
+        .is_some();
+    Ok(declared.then(|| vec![(name.to_string(), value.to_string())]))
 }
 
 /// A ceiling (ER-12: not a tuned limit, nothing waits for it to pass) for one push with the repository's pre-push gate: 60 minutes.

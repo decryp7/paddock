@@ -54,6 +54,11 @@ pub const TEST_STEPS: &[(&str, &str, &[&str], bool)] = &[
 /// `(workflow, job, steps)`. A job whose only failed steps are these reruns only the failed spec files.
 pub const VITEST_STEPS: &[(&str, &str, &[&str])] = &[("debrief.yml", "frontend", &["Frontend unit tests"])];
 
+/// The steps of a workflow's job that run Playwright and take a list of `file:line` locations (the matrix leg's `tests`, written by
+/// the plan job into `<job>_shards`), as `(workflow, job, steps)`. Only a rerun with `only_tests` ([`crate::plan_only`]) narrows to
+/// them: a failed Playwright job otherwise reruns whole (its log names tests, but no rerun reads them).
+pub const PLAYWRIGHT_STEPS: &[(&str, &str, &[&str])] = &[("debrief.yml", "e2e", &["Frontend end-to-end tests"])];
+
 /// An app's own workflow as a rerun of its failures needs it: the jobs only a full run has, and the jobs whose content a full
 /// run changes (Debrief's end-to-end tests add WebKit). A rerun of such a job from a full run must itself be full.
 pub struct AppWorkflow {
@@ -252,7 +257,7 @@ pub fn vitest_failed_files(log: &str) -> Vec<String> {
 }
 
 static VITEST_SUMMARY: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*Test Files\s+(?:(\d+) failed)?"));
-static PLAIN_SPEC: LazyLock<Regex> = LazyLock::new(|| re(r"^[A-Za-z0-9_./-]+$"));
+pub(crate) static PLAIN_SPEC: LazyLock<Regex> = LazyLock::new(|| re(r"^[A-Za-z0-9_./-]+$"));
 
 /// The failed spec files of the vitest run in a job log, or why the log cannot prove that they are all of them: exactly one
 /// `Test Files` summary, whose failed count equals the files named under `Failed Tests`, every name a plain path.
@@ -449,6 +454,9 @@ pub enum Scope {
     },
     /// Only these vitest spec files (the step's file list).
     Specs(Vec<String>),
+    /// Only these Playwright tests, as `file:line` locations (`only_tests`, [`crate::plan_only`]): the failed tests are never read
+    /// from a log, only named.
+    Playwright(Vec<String>),
 }
 
 /// A job of a run as the Gitea API lists it.
@@ -740,7 +748,7 @@ impl SincePlan {
                 match &one.scope {
                     Scope::Tests { filter, .. } => out.push((format!("{name}_filter"), filter.clone())),
                     Scope::Specs(files) => out.push((format!("{name}_include"), files.join(" "))),
-                    Scope::Job(_) => {}
+                    Scope::Job(_) | Scope::Playwright(_) => {}
                 }
             }
             let sharded = APP_WORKFLOWS.iter().any(|a| a.file == self.workflow && a.shard_jobs.contains(key));
@@ -748,7 +756,11 @@ impl SincePlan {
                 let mut shards: Vec<Value> = Vec::new();
                 for r in &runs {
                     let s = r.leg.shard.as_deref().unwrap_or("");
-                    let v = s.parse::<u64>().map_or_else(|_| json!({ "shard": s }), |n| json!({ "shard": n }));
+                    let mut v = s.parse::<u64>().map_or_else(|_| json!({ "shard": s }), |n| json!({ "shard": n }));
+                    // A leg narrowed to named tests runs them (`tests`, `file:line` separated by spaces) without `--shard`.
+                    if let Scope::Playwright(tests) = &r.scope {
+                        v["tests"] = json!(tests.join(" "));
+                    }
                     if !shards.contains(&v) {
                         shards.push(v);
                     }
@@ -801,6 +813,10 @@ impl SincePlan {
                     Scope::Specs(files) => {
                         o.insert("scope".into(), json!("specs"));
                         o.insert("specs".into(), json!(files));
+                    }
+                    Scope::Playwright(tests) => {
+                        o.insert("scope".into(), json!("playwright"));
+                        o.insert("tests".into(), json!(tests));
                     }
                 }
                 if let Some(shard) = &r.leg.shard {
@@ -893,7 +909,7 @@ impl SincePlan {
                 .map(|r| {
                     let filter = match &r.scope {
                         Scope::Tests { filter, .. } => filter.clone(),
-                        Scope::Job(_) | Scope::Specs(_) => String::new(),
+                        Scope::Job(_) | Scope::Specs(_) | Scope::Playwright(_) => String::new(),
                     };
                     json!({ "os": r.leg.os, "filter": filter })
                 })
@@ -936,6 +952,7 @@ impl SincePlan {
                 Scope::Job(why) => format!("the whole job: {why}"),
                 Scope::Tests { tests, .. } => format!("{} failed test(s) only", tests.len()),
                 Scope::Specs(files) => format!("{} failed spec file(s) only", files.len()),
+                Scope::Playwright(tests) => format!("{} named Playwright test(s) only", tests.len()),
             };
             lines.push(format!("| {} | {what} |", r.name.replace('|', "/")));
         }
@@ -1047,6 +1064,7 @@ pub fn since_run(
                 files.len(),
                 files.join(" ")
             )),
+            Scope::Playwright(tests) => log(&format!("{}: {} named Playwright test(s) rerun: {}", r.name, tests.len(), tests.join(" "))),
         }
     }
     Ok(plan)

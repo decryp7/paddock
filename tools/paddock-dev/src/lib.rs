@@ -82,6 +82,7 @@ pub mod plan_ci;
 pub mod plan_cmd;
 pub mod plan_gitea;
 pub mod plan_repo;
+pub mod plan_only;
 pub mod plan_since;
 pub mod pr;
 pub mod pre_push;

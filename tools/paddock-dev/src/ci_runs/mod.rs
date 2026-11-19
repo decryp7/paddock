@@ -19,6 +19,7 @@ pub mod flakes;
 pub mod landable;
 pub mod logfind;
 pub mod members;
+pub mod ran;
 pub mod preconditions;
 pub mod record;
 pub mod reservation;
@@ -193,6 +194,10 @@ pub struct TriageArgs {
     /// Skip the flake history (faster: it reads the failed job logs of the window).
     #[arg(long)]
     no_history: bool,
+    /// Also count the tests every job of the run ran (the `ran` field of `--json`): the evidence that a narrowed rerun (the
+    /// `only_tests` input of the train's fix ladder) ran the tests it named and not nothing. Reads every job's log.
+    #[arg(long)]
+    ran: bool,
     /// Also blame the members of a train built by hand: the first-parent merges between this base (for example `origin/main`) and
     /// the commit the run tested, each with the planner's answer for its own diff (ADR 0098). Read-only; run it in the
     /// integrator's checkout, which holds the train.
@@ -750,6 +755,24 @@ pub fn triage(a: &TriageArgs) -> Result<Report, CliError> {
             .with_hint("Check the network, that GITEA_TOKEN can read the repository, and that the run has finished.")
     })?;
     let (mut text, mut data, mut exit) = (report.text(), report.json(), report.exit());
+    if a.ran {
+        match ran::collect(&mut client, a.run, &mut |l| eprintln!("{l}")) {
+            Ok(counts) => {
+                text.push_str(&format!(
+                    "tests run: {} in {} job(s)\n",
+                    counts.iter().map(|r| r.tests_run).sum::<usize>(),
+                    counts.len()
+                ));
+                data["ran"] = ran::json(&counts);
+            }
+            Err(why) => {
+                // Not measured, never zero: a missing count must not read as "nothing ran" or as "everything ran" (ER-33).
+                text.push_str(&format!("::error::the tests the jobs ran could not be counted: {why}. Next step: check the network and the token, then run it again.\n"));
+                data["ran"] = serde_json::json!({"error": why});
+                exit = Exit::Findings;
+            }
+        }
+    }
     if let Some(base) = &a.members {
         // ADR 0098: blame the members of a hand-built train. Read-only; a member that cannot be read ends the blame (ER-33).
         let answer = (|| -> Result<(String, serde_json::Value), String> {

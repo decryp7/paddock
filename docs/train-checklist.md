@@ -35,6 +35,17 @@ locked worktree, never in the main checkout (rule 2).
    drives, which is `<package>/e2e/feature-sources.json` (an optional JSON object from a spec's file name to the source prefixes it drives,
    `[]` for none) or else the files named like the spec under `<package>/src`; a spec that resolves to neither is refused (fail closed): add its
    declaration. `--since-run` must be on this train's ref.
+   **The fix ladder** (user, 2026-11-20): after a red run the command widens its evidence one rung at a time, each rung only when the one
+   below is green. Rung 1, the failed tests only: the NEW, FAILED and FLAKY rows of `ci triage <run> --json` that a job's runner can take
+   alone (nextest `-E`, vitest files, Playwright `file:line`) go to the workflow's `only_tests` input (a JSON object from a job's display name
+   to its test ids, with `since_run`); jobs not named do not run. Its run is read with `ci triage <run> --ran`: a named job that ran fewer
+   tests than it was given ids, or none, is **NOT MEASURED** and stops the ladder (a green run of an empty filter is not green). A red rung 1
+   stops with the next step: fix, push through the gate, run again with the same `--since-run` and `--test-round n+1` (at most
+   `--max-test-rounds`, default 3; past it, or with 0, the ladder starts at rung 2). Rung 2, their whole jobs: the `since_run` round above.
+   Rung 3, stage 1 on every OS (the fast checks and unit tests): only when the workflow declares the stage input
+   (`ladder::STAGE_INPUT`, the layout of `ci/staged-fast-then-long`), else a logged note and rung 4; the shared reader must not count a stage 1
+   run as a full one, or the sequence stops. Rung 4, the full run on the exact head, below. **Only rung 4 lets a train land**: the report
+   lists each rung (green with its run, or not run with the reason; a rung that had nothing to run is skipped, never a pass).
    Then the full `ci.yml` and `debrief.yml` (no `since_run`, ER-10) are dispatched unless `ci verdict` already has a green full run of the head,
    and each must be green by **`ci verdict`**, the one reader, or red only by what a train may land on (the sealed `Landable` of `ci_runs::landable`:
    the newest complete full run of the exact head, finished `failure` with clean earlier attempts, whose triage is the same run and head with

@@ -14,6 +14,7 @@
 //!
 //! `--ci` with `PLAN_SINCE_RUN` set (ci.yml's `since_run` input) writes the outputs of such a rerun instead: only the failed
 //! jobs run, a narrowed one only its failed tests ([`crate::plan_since`]). The run is read with `PLAN_TOKEN` or `GITEA_TOKEN`.
+//! `PLAN_ONLY_TESTS` (the `only_tests` input, with `since_run`) narrows such a rerun to the tests it names ([`crate::plan_only`]).
 //! `--ci --app <app>` with `PLAN_SINCE_RUN` (the `since_run` input of an app's own workflow, `debrief.yml`) does the same for
 //! a run of that workflow: `true` on stdout and the rerun's outputs ([`SincePlan::app_outputs`]) in `GITHUB_OUTPUT`;
 //! `PLAN_FULL` (`true` for a full manual run) must be set when the earlier run was full and a full-run job reruns.
@@ -174,6 +175,12 @@ pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliErro
 /// CI: the plan for this event. Without `app`, the ci.yml job outputs and summary; with `app` (an app's own workflow),
 /// `true` or `false` on stdout for whether the change reaches that app.
 fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> Result<Report, CliError> {
+    if env("PLAN_ONLY_TESTS").is_some_and(|t| !t.trim().is_empty()) && env("PLAN_SINCE_RUN").is_none_or(|r| r.trim().is_empty()) {
+        // Named tests are the failed tests of a run: without that run the input would be ignored and a full run would claim to be one.
+        return Err(fail(
+            "only_tests needs since_run: the tests it names are read against the failed run (dispatch both, or neither)",
+        ));
+    }
     if let Some(run) = env("PLAN_SINCE_RUN").filter(|r| !r.trim().is_empty()) {
         return match app {
             None => since_ci(root, env, run.trim()),
@@ -296,7 +303,15 @@ fn read_since_run(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64) ->
         .unwrap_or_default();
     let mut http = CurlHttp;
     let mut runs = GiteaRuns::new(&mut http, &server, &repo, token);
-    since_run(&mut runs, id, &|f| workflow_text(root, f), &mut |l| eprintln!("{l}"))
+    let mut plan = since_run(&mut runs, id, &|f| workflow_text(root, f), &mut |l| eprintln!("{l}"))?;
+    // `only_tests` (a rung of `train release`'s fix ladder): the named tests only, jobs not named do not rerun. An input that cannot be
+    // honoured stops the plan: a rerun that was asked for named tests never quietly becomes more (or less) than that.
+    if let Some(text) = env("PLAN_ONLY_TESTS").filter(|t| !t.trim().is_empty()) {
+        let only = crate::plan_only::OnlyTests::parse(&text)?;
+        plan.apply_only_tests(&only)?;
+        eprintln!("only_tests: {} test(s) in {} job(s), every other job is skipped", only.count(), only.jobs().len());
+    }
+    Ok(plan)
 }
 
 /// Appends the outputs and the summary of a `--ci` run to the files the workflow names.
