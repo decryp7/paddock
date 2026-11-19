@@ -1,7 +1,7 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { gridRows, openApp } from './app';
-import { anchoredMenu, clickPoint, contextMenu, menuNamed } from './menu-support';
+import { anchoredMenu, contextMenu, menuNamed } from './menu-support';
 
 // The app should feel like a desktop app: no browser context menu on its chrome, no reload, page zoom or other
 // browser keys. The guard only prevents the browser's default, so Debrief's own menus and shortcuts keep working.
@@ -77,10 +77,9 @@ test.describe('native feel', () => {
     await message.dblclick({ position: { x: 12, y: 6 } });
     await expect.poll(() => page.evaluate(() => window.getSelection()?.toString().trim() ?? '')).not.toBe('');
     await watch(page, ['contextmenu']);
-    const at = await clickPoint(message, { x: 12, y: 6 });
     await message.click({ button: 'right', position: { x: 12, y: 6 } });
     await expect.poll(() => prevented(page, 'contextmenu')).toEqual([true]);
-    const menu = await anchoredMenu(page, at);
+    const menu = await anchoredMenu(page, message);
     await expect(menu.getByRole('menuitem', { name: 'Copy', exact: true })).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);

@@ -2807,10 +2807,11 @@ Follow-ups of run 8297 that the user approved.
   `RESIZE_SETTLE_TRIES`): it lays dockview out at the container (`followContainer`) and re-plans after the 150 ms debounce, and
   `fitToWindow` does the same first. Third instance of the class "a layout decision from dockview's last size" (the settle loop,
   f253014fa's same-frame fix, run 8297's Explorer race), so the class is closed by construction rather than by another wait.
-- **Menus through one helper.** All 59 `getByRole('menu')` sites of Debrief's specs moved onto `menu-support.ts` (`anchoredMenu`,
-  `contextMenu` for a right-click at a point, `panelMenuButton`, `menuNamed` for closed or text checks); `menuGap` also measures a menu
-  against a point. The ESLint rule `paddock/e2e-menu-wait` reports a spec that finds a menu by role itself; report-only (ER-41,
-  `PADDOCK_E2E_MENU_LINT=warn`): 59 findings on the old specs, 0 after.
+- **Menus and toasts through one helper each.** All 59 `getByRole('menu')` sites of Debrief's specs moved onto `menu-support.ts`
+  (`anchoredMenu`, `contextMenu`, `panelMenuButton`, `menuNamed` for closed or text checks), and all 29 toast sites onto `toast-support.ts`
+  (`heldToast`, `pressInToast`, `runningToast`, `toastNamed`). The ESLint rule `paddock/e2e-transient-wait` reports a spec that finds a menu
+  or a toast itself (by role, test id or a `locator()` selector); report-only (ER-41, `PADDOCK_E2E_TRANSIENT_LINT=warn`, reported in
+  Debrief's lint job): 88 findings on the old specs (59 menus + 29 toasts), 0 after.
 - **Why the menu waited (measured, not guessed).** Every Debrief spec runs on Playwright's installed clock (`pinnedClockTest`), which fakes
   `setTimeout` and `requestAnimationFrame`. Angular's zoneless scheduler renders in whichever of the two fires first
   (`scheduleCallbackWithRafRace`, @angular/core 22.2.3), and CDK positions an overlay in `afterNextRender` (`OverlayRef.attach`). With the real
@@ -2828,8 +2829,10 @@ the app's render out of the browser's frame.
 ## Fix item: live-tail-follow.e2e.ts:298 "a wheel at once after Follow on is not pulled back" (Debrief, 2026-11-19)
 Failed once in a full local WebKit run of fix/debrief-webkit-flakes (689 passed; `onNewest` was true after `runFor(1_500)`); passed 40 of 40
 right after (20 runs x 4 workers, WebKit, load 43); `ci flakes` lists it flaky on Chromium on 2026-11-19. The spec touches no menu,
-toast or Explorer code of that branch. Not blocking (ER-12: reached only through dependencies). Next: reproduce with the trace on
+toast or Explorer code of that branch. A local failure, not a CI result, so ER-12 does not apply yet (it judges CI runs); the Chromium flake
+in CI is the CI evidence. Next: reproduce with the trace on
 (`--trace on`, WebKit, under load) and read the grid's `Scroll written` lines around the wheel and the Follow request before fixing.
+
 ## Debrief: ai-chat.e2e.ts:130 red on both tries in debrief.yml run 8300; two more WebKit FLAKYs (train 14, 2026-11-19)
 - **ai-chat.e2e.ts:130 "a long conversation scrolls in its list only".** `waitAnswered` (ready.ts `expectStreamDone`, 5 s) saw the third
   answer still streaming. Trace: answers took 3.2 s and 2.4 s from the turn to `aria-busy="false"`, the third more than 5.5 s. Causes listed:

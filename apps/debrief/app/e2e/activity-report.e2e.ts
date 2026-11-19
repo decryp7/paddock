@@ -1,7 +1,7 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { CAPTURE_TIMEOUT, openApp } from './app';
-import { heldToast, runningToast } from './toast-support';
+import { heldToast, pressInToast, runningToast, toastByCause } from './toast-support';
 
 // Report a problem (mock backend): an error raises the toast, "Report a problem…" opens the dialog that lists
 // what the zip will contain and the steps to reproduce, and Save writes it (the mock records the save).
@@ -19,9 +19,9 @@ test('an error leads to a problem report the user reviews and saves', async ({ p
   await expect(page.locator('debrief-error-snapshots-view')).toBeVisible();
 
   await page.evaluate(() => void setTimeout(() => { throw new Error('e2e report boom'); }, 0));
-  const toast = page.locator('[data-testid=notification][data-cause="diagnostics.snapshot"]');
+  const toast = toastByCause(page, 'diagnostics.snapshot');
   await expect(toast).toContainText('Something went wrong', { timeout: CAPTURE_TIMEOUT });
-  await toast.getByRole('button', { name: 'Report a problem…' }).click();
+  await pressInToast(page, toast, toast.getByRole('button', { name: 'Report a problem…' }));
 
   const dialog = page.getByRole('dialog', { name: 'Report a problem' });
   await expect(dialog).toBeVisible();

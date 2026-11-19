@@ -14,43 +14,38 @@ export function menuItem(scope: Page | Locator, name: string | RegExp): Locator 
 
 /**
  * A menu by its accessible name (exact for a string), or every open menu without one: for checks that a menu is closed, open, checked or says
- * something. Specs find menus only here (the lint rule `paddock/e2e-menu-wait`); before pressing in one, wait for its place with `anchoredMenu`.
+ * something. Specs find menus only here (the lint rule `paddock/e2e-transient-wait`); before pressing in one, wait for its place with `anchoredMenu`.
  */
 export function menuNamed(page: Page, name?: string | RegExp): Locator {
   return name === undefined ? page.getByRole('menu') : page.getByRole('menu', { name, exact: typeof name === 'string' });
 }
 
 /**
- * The menu `name` once it sits against `anchor`: the element that opened it (a button, a menu-bar or submenu item, the row of a Shift+F10) or the
- * point of a right-click (`clickPoint`). The caller opens it (click, keys, right-click); this waits until it is in its place, so a press lands on
- * the item it aims at (a menu drawn before it is positioned moves under the pointer: debrief.yml run 8297).
+ * How far a CDK menu may sit from its trigger on purpose: `flush` (menu-bar menus and submenus, 0 px: 2 px for rounding) or `popup` (the
+ * activity bar's fly-outs, 6 px, and button menus such as the filter bar's More, 4 px: 8 px). An unplaced menu is hundreds of px away or covers
+ * its trigger, so either bound tells it apart.
  */
-export async function anchoredMenu(page: Page, anchor: Locator | { x: number; y: number }, name?: string | RegExp): Promise<Locator> {
+const MENU_OFFSET_PX = { flush: 2, popup: 8 } as const;
+
+/**
+ * The menu `name` once it is in its place, opened by `anchor` (a button, a menu-bar or submenu item, a right-clicked element, the row of a
+ * Shift+F10). The caller opens it (click, keys, right-click); this waits until it is placed, so a press lands on the item it aims at (a menu
+ * drawn before it is positioned moves under the pointer: debrief.yml run 8297).
+ */
+export async function anchoredMenu(page: Page, anchor: Locator, name?: string | RegExp, offset: keyof typeof MENU_OFFSET_PX = 'flush'): Promise<Locator> {
   const menu = name === undefined ? menuNamed(page).last() : menuNamed(page, name);
   await expect(menu).toBeAttached();
-  // Debrief's own context menu (ContextMenuHost: right-click, Shift+F10, panel menus) says when it is placed; it is drawn at its point and
-  // only moves to stay inside the window. A CDK menu (menu bar, fly-outs, buttons) is placed by its overlay: wait until it sits against its
-  // trigger (within the menus' own offsets, up to 6 px; an unplaced one is hundreds of px away or covers it).
+  // Debrief's own context menu (ContextMenuHost: right-click, Shift+F10, panel menus) says when it is placed: it is drawn at its point and only
+  // moves to stay inside the window. A CDK menu (menu bar, fly-outs, buttons) is placed by its overlay: wait until it sits against its trigger.
   if (await menu.evaluate((el) => el.closest('debrief-context-menu-host') !== null)) await expect(menu, 'the context menu is placed').toHaveAttribute('data-placed', 'true');
-  else await expectMenuAnchoredTo(menu, anchor, MENU_OFFSET_PX);
+  else await expectMenuAnchoredTo(menu, anchor, MENU_OFFSET_PX[offset]);
   return menu;
 }
 
-/** The largest gap Debrief's menus leave on purpose between a menu and its trigger (activity-bar fly-outs: 6 px). */
-const MENU_OFFSET_PX = 8;
-
-/** The page point a click on `target` lands on: `position` within it, else its centre (Playwright's default), for `anchoredMenu` after a right-click. */
-export async function clickPoint(target: Locator, position?: { x: number; y: number }): Promise<{ x: number; y: number }> {
-  const box = await target.boundingBox();
-  if (!box) throw new Error('clickPoint: the target is not drawn');
-  return position ? { x: box.x + position.x, y: box.y + position.y } : { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-}
-
-/** Right-clicks `target` (at `position`, else its centre) and returns its context menu (`name`, default "Actions") once it sits at the pointer. */
+/** Right-clicks `target` (at `position`, else its centre) and returns its context menu (`name`, default "Actions") once it is placed. */
 export async function contextMenu(page: Page, target: Locator, options: { position?: { x: number; y: number }; name?: string | RegExp } = {}): Promise<Locator> {
-  const at = await clickPoint(target, options.position);
   await target.click({ button: 'right', ...(options.position ? { position: options.position } : {}) });
-  return anchoredMenu(page, at, options.name ?? 'Actions');
+  return anchoredMenu(page, target, options.name ?? 'Actions');
 }
 
 /** Opens a dock group's panel menu (its ⋯ button) and chooses `item` (Float, Dock, Auto hide, ...) once the menu sits below the button. */

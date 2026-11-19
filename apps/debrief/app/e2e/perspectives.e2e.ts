@@ -15,7 +15,7 @@ const rowByName = (page: Page, name: string) => page.getByTestId('perspective-ro
 
 async function openFlyout(page: Page) {
   await switcher(page).click();
-  return anchoredMenu(page, switcher(page), 'Perspectives');
+  return anchoredMenu(page, switcher(page), 'Perspectives', 'popup');
 }
 
 test.describe('perspectives', () => {

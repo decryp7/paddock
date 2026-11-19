@@ -184,13 +184,16 @@ test('e2e-transient-wait: a spec that finds a menu or a toast itself is reported
       "  const item = page.getByRole('menuitem', { name: 'Copy' });",
       "  await page.getByTestId('notification').filter({ hasText: 'Done' }).click();",
       "  const n = page.getByTestId('notification-action-primary');",
+      "  const c = page.locator('[data-testid=notification][data-cause=\"x\"]');",
+      "  const m = page.locator('[role=menu] [role=menuitem]');",
+      "  const d = page.locator('[data-testid=notification-details]');",
       '});',
       '',
     ].join('\n'),
     'e2e/menu-support.ts': "export const menuNamed = (page) => page.getByRole('menu');\nexport const t = (page) => page.getByTestId('notification');\n",
     'e2e/toast-support.ts': "export const toastNamed = (page) => page.getByTestId('notification');\n",
   });
-  assert.deepEqual(menuLines(found, 'e2e/menus.spec.ts'), [3, 4, 7], found.join(' | '));
+  assert.deepEqual(menuLines(found, 'e2e/menus.spec.ts'), [3, 4, 7, 9, 10], found.join(' | '));
   assert.deepEqual(menuLines(found, 'e2e/menu-support.ts'), [2], found.join(' | '));
   assert.deepEqual(menuLines(found, 'e2e/toast-support.ts'), [], found.join(' | '));
 });

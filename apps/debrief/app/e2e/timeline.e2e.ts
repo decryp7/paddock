@@ -3,6 +3,7 @@ import type { Locator, Page } from '@playwright/test';
 import { gridTotal, initialTotal, openApp } from './app';
 import { openAppWith } from './mock-url';
 import { contextMenu } from './menu-support';
+import { toastByCause } from './toast-support';
 
 /** The button in the filter bar that shows (and resets) the visible time range. */
 const rangeButton = (page: Page) => page.getByTitle(/Reset to the full range|Drag on the timeline to zoom/);
@@ -103,7 +104,7 @@ test.describe('timeline and analysis', () => {
     const card = page.locator('debrief-timeline-panel .err-card');
     await expect(card).toContainText("Couldn't load the timeline.");
     await expect(card).toContainText('Simulated queryTimeline failure');
-    await expect(page.locator('[data-testid=notification][data-cause="workspace.error"]')).toHaveCount(0);
+    await expect(toastByCause(page, 'workspace.error')).toHaveCount(0);
     await card.getByRole('button', { name: 'Retry' }).click();
     await expect(card).toHaveCount(0);
     await expect(page.locator('debrief-timeline-panel .lane').first()).toBeVisible();

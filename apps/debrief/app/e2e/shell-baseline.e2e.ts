@@ -168,7 +168,7 @@ async function openThemedApp(page: Page, scheme: Scheme, size: Size, search = ''
 async function perspective(page: Page, name: string): Promise<void> {
   const switcher = page.locator('debrief-activity-bar [data-activity-id=perspectives]');
   await switcher.click();
-  const menu = await anchoredMenu(page, switcher, 'Perspectives');
+  const menu = await anchoredMenu(page, switcher, 'Perspectives', 'popup');
   await menu.getByRole('menuitemcheckbox', { name }).click();
   await expect(menu).toHaveCount(0);
   await expect(page.locator('debrief-activity-bar [data-activity-id=perspectives]')).toBeVisible();

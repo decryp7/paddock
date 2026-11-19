@@ -49,14 +49,14 @@ test.describe('narrow window', () => {
 
     await page.getByRole('toolbar', { name: 'Levels' }).getByRole('button', { name: /^ERR/ }).click();
     await more(page).click();
-    const menu = await anchoredMenu(page, more(page), 'More filter controls');
+    const menu = await anchoredMenu(page, more(page), 'More filter controls', 'popup');
     await expect(menu.getByRole('menuitem', { name: /Time zone/ })).toBeVisible();
     await expect(menu.getByRole('menuitem', { name: 'Clear all' })).toBeVisible();
     await expectNoSeriousViolations(page, testInfo, 'narrow-900-more', 'debrief-filter-bar');
     await menu.getByRole('menuitem', { name: /Time zone/ }).click();
     await expect(menu).toHaveCount(0);
     await more(page).click();
-    await (await anchoredMenu(page, more(page), 'More filter controls')).getByRole('menuitem', { name: 'Clear all' }).click();
+    await (await anchoredMenu(page, more(page), 'More filter controls', 'popup')).getByRole('menuitem', { name: 'Clear all' }).click();
     await expect(page.getByRole('toolbar', { name: 'Levels' }).getByRole('button', { name: /^ERR/ })).toHaveAttribute('aria-pressed', 'false');
   });
 
