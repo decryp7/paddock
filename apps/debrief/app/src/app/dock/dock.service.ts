@@ -849,8 +849,6 @@ export class DockService {
    */
   private fitToWindow(api: DockviewApi, before: SavedLayout | null): void {
     if (this.ctx.api !== api || this.ctx.restoring) return;
-    // The plan reads the room from the container; the sizes `fit` sets need dockview laid out at that room (a no-op when they agree).
-    this.layout.followContainer(api);
     const plan = this.layout.plan(api);
     if (!plan) {
       this.layout.constrain(api);

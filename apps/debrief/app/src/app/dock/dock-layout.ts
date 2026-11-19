@@ -119,6 +119,9 @@ export class DockLayout {
    * planned sizes. Returns the plan, or null when the dock is not measured yet (groups are still constrained).
    */
   fit(api: DockviewApi, options: FitOptions = {}): LayoutPlan | null {
+    // The plan reads the room from the container; the sizes set below need dockview laid out at that room (a no-op when they agree), whoever
+    // calls: a re-plan after a resize, or a view added while dockview still has its last size.
+    this.followContainer(api);
     if (options.fresh?.length) this.opened = [...options.fresh, ...this.opened.filter((id) => !options.fresh!.includes(id))].slice(0, 16);
     const plan = this.plan(api, options.fresh);
     if (plan) this.displace(api, plan, options);

@@ -307,6 +307,21 @@ describe('the dock\'s room', () => {
     expect(reads).toEqual([]);
   });
 
+  it('fit lays dockview out at the room before it sets any size (a view added while dockview still has its last size: addView)', () => {
+    const layout = setup();
+    const ctx = TestBed.inject(DockContext);
+    const container = document.createElement('div');
+    vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({ width: 800, height: 900 } as DOMRect);
+    ctx.container = container;
+    const dock = fakeDock(1440, 900, { 'timeline+events': { width: 1440, height: 900 }, 'ai-chat': { width: 400, height: 900 } });
+    const calls: string[] = [];
+    (dock.api as unknown as { layout: (w: number, h: number) => void }).layout = (w, h) => calls.push(`layout ${w}x${h}`);
+    for (const g of dock.groups) g.api.setSize.mockImplementation(() => calls.push(`setSize ${g.id}`));
+    layout.fit(dock.api, { sizes: true, fresh: ['ai-chat'] });
+    expect(calls[0]).toBe('layout 800x900');
+    expect(calls.filter((c) => c.startsWith('layout'))).toHaveLength(1);
+  });
+
   it('is dockview\'s size only without a container (unit tests of the plan)', () => {
     expect(setup().room(fakeDock(1440, 800, {}).api)).toEqual({ width: 1440, height: 800 });
   });
