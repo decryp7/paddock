@@ -246,6 +246,7 @@ static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
             Marks::Owner,
         ),
         (re(r"^docs/rules\.md$"), Marks::Projects(&["conformance", "tools"])),
+        (re(r"^docs/adr/README\.md$"), Marks::Projects(&["conformance"])), // the generated ADR index: conformance/bin/paddock-adr-index.mjs reads and checks it
         (re(r"^docs/blocks/"), Marks::Projects(&["conformance", "tools"])),
         (re(r"^docs/(design-guide|benchmarks)\.md$"), Marks::Projects(&["conformance"])),
         (re(r"^docs/wiki/"), Marks::Projects(&["tools"])),

@@ -13,9 +13,15 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 
 const adr = (n, title, status = 'Accepted 2026-11-01', date = '2026-11-01') => `# ${n}. ${title}\n\n- Status: ${status}\n- Date: ${date}\n\nBody.\n`;
 const run = (root, ...args) => spawnSync('node', [BIN, '--root', root, ...args], { encoding: 'utf8', env: { ...process.env, CI: '' } });
+/** git in a scratch repo only: the caller's GIT_* variables (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE of a hook run) are dropped so it can never reach the real repository, and identity comes from -c, never from `git config` (ER-45, ER-47: pass the environment except what would redirect the child). */
 const git = (cwd, ...args) => {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } });
-  return r;
+  assert.ok(cwd.startsWith(scratch), `git runs only inside the scratch folder, not in ${cwd}`);
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
+  return spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], {
+    cwd,
+    encoding: 'utf8',
+    env: { ...env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+  });
 };
 /** A scratch repo root with docs/adr (a README with markers and the given ADR files). */
 function makeRoot(name, files) {
@@ -69,8 +75,6 @@ test('two branches that each add an ADR file merge without a conflict, and the r
   writeFileSync(join(root, 'CHANGELOG.md'), '# Changelog\n\n## Unreleased\n\n- base entry\n');
   assert.equal(run(root).status, 0);
   git(root, 'init', '-q', '-b', 'main');
-  git(root, 'config', 'user.email', 'test@example.invalid');
-  git(root, 'config', 'user.name', 'test');
   git(root, 'add', '-A');
   assert.equal(git(root, 'commit', '-q', '-m', 'base').status, 0);
   const branch = (name, n) => {
@@ -104,8 +108,6 @@ test('positive control for the changelog rule: without the union attribute the s
   const root = makeRoot('noattr', { '0001-a.md': adr(1, 'First') });
   writeFileSync(join(root, 'CHANGELOG.md'), '# Changelog\n\n## Unreleased\n\n- base entry\n');
   git(root, 'init', '-q', '-b', 'main');
-  git(root, 'config', 'user.email', 'test@example.invalid');
-  git(root, 'config', 'user.name', 'test');
   git(root, 'add', '-A');
   git(root, 'commit', '-q', '-m', 'base');
   for (const name of ['one', 'two']) {
