@@ -2998,3 +2998,12 @@ test's 188 git starts were its own fixture. Split into one test per case with th
 expensive fixture for several inputs is one test per input (a shared helper, one `#[test]` each), so a test's time is one case's and
 nextest spreads the cases; never raise the timeout for it (ER-12). **Class: one per-item cost summed into one bound** (the same class
 as ADR 0108's one git start per item, here inside a test).
+
+## A fixed total run budget cuts started rows that are healthy (2026-11-19, feat/gate-budget-per-workspace)
+
+The push gate's 15-minute total ended rows that had started: 87 steps in five days, median 33 s of run, because earlier rows had used
+the total (docs/research/2026-11-19-gate-hang-detection.md). A cold build costs minutes, a warm one seconds, and a total over all rows
+scales with the workspace count. Do not replace one fixed number by another: the total now only stops new rows from starting, a
+started row has its own generous cap (60 min) with the process list and stacks written before the kill, and a stall judgement on the
+row's own progress follows. Recurring: a wall-clock bound judges liveness (ADR 0031's class; CI run 7096, the 2026-11-12 slot-acquire
+wait, ER-12).

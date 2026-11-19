@@ -141,7 +141,7 @@ pub use usage::{
     tree_cpu_time_from, tree_cpu_time_of, tree_memory, tree_memory_from, tree_memory_of,
     tree_memory_with,
 };
-pub use waited::{Sink, run_waited, run_waited_cancellable};
+pub use waited::{Sink, run_waited, run_waited_cancellable, run_waited_noting};
 pub use warm::warm_up;
 pub use watch::{
     MemoryEvent, MemoryListener, MemoryUse, MemoryWatch, REARM_PERCENT, Verdict, WARN_PERCENT,

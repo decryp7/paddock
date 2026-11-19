@@ -17,7 +17,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-const BUILD_LIMIT: Duration = Duration::from_secs(1200);
+/// The most the build of `heavy` may take (it is a cold release build of tools/heavy: 58 s measured in the research note, section 2).
+pub const BUILD_LIMIT: Duration = Duration::from_secs(1200);
+
+/// Whether an `ensure` or `hold` error is one that may pass on its own (a build that timed out on a busy machine, a budget that was
+/// spent): it is reported for the step but never remembered as the answer for the whole run.
+pub fn is_transient(err: &str) -> bool {
+    err.contains("(timed out after ") || err.contains("budget was spent")
+}
 const PASS: &[&str] = &[
     "PATH",
     "HOME",

@@ -4,6 +4,9 @@
 use super::budget::{BudgetClock, Slot, Timing, parse_heavy_timing, with_agent_name, with_heavy_flags};
 use super::gates::{Gate, Need, Planned};
 use super::linux_inputs::{ImageProbe, PROBE_NEXT, image_probe};
+use super::progress::{Counter, Progress, with_cargo_json, without_json};
+use super::stacks;
+use super::watchdog::{Observation, StepInfo, StepWatch, Stuck, WATCH_POLL, Watchdog, phase_line, stuck_how};
 use crate::ci_tool::{Output, ToolCall, tail};
 use paddock_cli::{CheckId, Finding, Outcome, Reason, Subject, ToolVersion, UnixSeconds, measure};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -12,10 +15,27 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// The push gate's total budget (ADR 0038 amendment A2.5): what has not run by then is "not measured". It counts RUN time: time a
-/// step queued for the heavy slot behind other agents' steps is credited back ([`BudgetClock`], ADR 0102) and bounded on its own
-/// by [`QUEUE_MAX`].
+/// The push gate's total budget (ADR 0038 amendment A2.5): after it, no NEW row starts (it is "not measured", never a pass). It no
+/// longer ends a row that has started: that is [`ROW_CAP`]'s and the watchdog's work (docs/research/2026-11-19-gate-hang-detection.md).
+/// It counts RUN time: time a step queued for the heavy slot behind other agents' steps is credited back ([`BudgetClock`], ADR
+/// 0102) and bounded on its own by [`QUEUE_MAX`].
 pub const BUDGET: Duration = Duration::from_secs(15 * 60);
+
+/// What one row may run on its own, started or not by the total budget: the backstop, GitLab's default job timeout. Measured cause
+/// (docs/research/2026-11-19-gate-hang-detection.md section 0, heavy's activity log 2026-11-14 to 19): the slowest healthy row known is
+/// a cold app doctest build, 1122 s (docs/benchmarks.md, "Doctest row of the push gate"); 60 min is over three times it; no healthy
+/// row ran longer. Before the stall judgement (WP-2) it is the only thing that ends a hung row. Queue time is not in it.
+pub const ROW_CAP: Duration = Duration::from_secs(60 * 60);
+
+/// The name the summary gives the row cap as the guard that ended a step.
+pub const ROW_CAP_GUARD: &str = "row cap";
+
+/// How long after [`ROW_CAP`] the outer limits of a step (heavy's `--run-max`, the process timeout) still wait: the cap is enforced by
+/// the executor's monitor, which logs the stacks before it ends the tree, so these are only the backstop if the monitor is gone.
+///
+/// At least the stack capture's own bound plus 15 s ([`stacks::TOTAL_LIMIT`]): the monitor ends the tree after the capture, and these
+/// outer limits must not end it first, mid-capture (review d).
+pub const CAP_GRACE: Duration = Duration::from_secs(stacks::TOTAL_LIMIT.as_secs() + 15);
 
 /// The push's queue allowance: the most time all its heavy steps together may wait for the machine-wide slot behind other agents'
 /// steps (`PADDOCK_QUEUE_MAX` seconds overrides). A step that would start after the allowance is spent, or whose wait reaches what
@@ -35,6 +55,60 @@ pub struct Limits {
     pub queue: Duration,
 }
 
+/// How a run ended, as a type (review P2-1): every decision about an ending (is it cut short, which guard ended it, must the container be
+/// stopped, did it ever get a slot) reads this and never a text, so a new ending cannot be forgotten by one of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ending {
+    /// It ended by itself, with any exit code.
+    Exited,
+    /// The watchdog ended it as stuck.
+    Stuck {
+        /// The guard's name.
+        guard: String,
+    },
+    /// It reached the row cap (or the backstop beyond it).
+    RowCap,
+    /// The person stopped the push.
+    Cancelled,
+    /// It never got a heavy slot (or its build folder) within the queue allowance: the command never ran.
+    QueueLimit,
+    /// It wrote more output than the cap allows.
+    OutputCap,
+}
+
+impl Ending {
+    /// It did not end by itself: a guard, the cap or the person stopped it. Nothing is proven either way, and anything it started
+    /// (a container) must be stopped.
+    pub fn cut_short(&self) -> bool {
+        !matches!(self, Ending::Exited | Ending::QueueLimit)
+    }
+
+    /// The guard that ended it, as the summary names it.
+    pub fn guard(&self) -> Option<String> {
+        match self {
+            Ending::Stuck { guard } => Some(guard.clone()),
+            Ending::RowCap => Some(ROW_CAP_GUARD.to_string()),
+            _ => None,
+        }
+    }
+
+    /// The ending a process reported in words, for a run that was not made by [`RealExec::run`] (a stand-in executor, `--warm-linux`).
+    /// `RealExec::run` itself sets the ending where it knows why.
+    pub fn from_how(how: &str) -> Ending {
+        if how.starts_with("timed out") {
+            Ending::RowCap
+        } else if how == "cancelled" {
+            Ending::Cancelled
+        } else if how.starts_with("queue limit") {
+            Ending::QueueLimit
+        } else if how.starts_with("stopped at the output cap") {
+            Ending::OutputCap
+        } else {
+            Ending::Exited
+        }
+    }
+}
+
 /// How one run ended.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Done {
@@ -48,17 +122,24 @@ pub struct Done {
     pub log: Option<String>,
     /// Queue and run seconds as `heavy` measured them; none for a gate that did not go through it.
     pub timing: Option<Timing>,
+    /// How it ended, typed ([`Ending`]); `how` is the same in words for a person.
+    pub ending: Ending,
 }
 
 impl Done {
     /// It did not end by itself: the budget or the gate's own limit stopped it, or the person did. Nothing is proven either way.
     pub fn cut_short(&self) -> bool {
-        self.how.starts_with("timed out") || self.how == "cancelled" || self.how.starts_with("stopped at the output cap")
+        self.ending.cut_short()
+    }
+
+    /// The guard that ended the run ([`Ending::guard`]): the watchdog's name, or `row cap`.
+    pub fn ended_by(&self) -> Option<String> {
+        self.ending.guard()
     }
 
     /// `heavy` gave up waiting for a slot: the command never ran.
     pub fn no_slot(&self) -> bool {
-        self.how.starts_with("queue limit")
+        self.ending == Ending::QueueLimit
     }
 }
 
@@ -117,6 +198,8 @@ pub struct Row {
     pub next: String,
     /// A not-measured row a person named in the override: who. Logged; the push may go, but the row is still not proven.
     pub excused_by: Option<String>,
+    /// The guard that ended the step: the watchdog's name, or `row cap` (the summary names it).
+    pub ended_by: Option<String>,
 }
 
 /// The kind of a row, for the table and its JSON.
@@ -148,7 +231,14 @@ impl Row {
             tail,
             next,
             excused_by: None,
+            ended_by: None,
         }
+    }
+
+    /// The row with the guard that ended its step named.
+    pub fn ended_by_guard(mut self, guard: Option<String>) -> Row {
+        self.ended_by = guard;
+        self
     }
 
     /// The gate `id` ran to its end (not cut short): the measurement reads how it ended. A clean exit finds nothing; any other ends in
@@ -278,25 +368,17 @@ impl LockSeen {
 /// nothing next to the minutes a queue lasts.
 const SLOT_POLL: Duration = Duration::from_millis(250);
 
-/// The most one step may run on its own (heavy's `--run-max` is this or what the push's budget has left, whichever is less).
-fn own_run_limit(gate: &Gate) -> Duration {
-    Duration::from_secs(if gate.heavy { 3000 } else { 900 })
+/// The outer limit of one step (heavy's `--run-max`, the process timeout): [`ROW_CAP`] and [`CAP_GRACE`], whatever is left of the
+/// total budget: a started row is never cut by it (that was the old budget's failure: a step got what earlier rows left of it).
+fn own_run_limit(_gate: &Gate) -> Duration {
+    ROW_CAP + CAP_GRACE
 }
 
-/// For a run `heavy` ended at its run limit: which limit it was, with the run time it had, so a row says whether the push's run
-/// budget or the gate's own limit ran out (empty for any other ending).
-fn run_limit_note(gate: &Gate, limits: Limits, done: &Done) -> String {
-    let (true, Some(t)) = (done.how.starts_with("timed out after"), done.timing) else {
-        return String::new();
-    };
-    if limits.run < own_run_limit(gate) {
-        format!("; run budget spent after {:.0} s of run", t.ran)
-    } else {
-        format!(
-            "; the gate's own run limit of {} s spent after {:.0} s of run",
-            own_run_limit(gate).as_secs(),
-            t.ran
-        )
+/// For a run `heavy` ended at its run limit (the backstop beyond the row cap), with the run time it had (empty for any other ending).
+fn run_limit_note(done: &Done) -> String {
+    match (done.ending == Ending::RowCap, done.timing) {
+        (true, Some(t)) => format!("; the row cap of {} min spent after {:.0} s of run", ROW_CAP.as_secs() / 60, t.ran),
+        _ => String::new(),
     }
 }
 
@@ -380,12 +462,28 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
                 first_word(&gate.id)
             ),
         ),
+        // The watchdog ended it: the step made no progress. Not measured, never a finding or a pass; the row names the step, the last
+        // output line and how long nothing moved.
+        Ok(done) if matches!(done.ending, Ending::Stuck { .. }) => Row::not_measured(
+            format!(
+                "stuck: {} was stopped by the watchdog ({}); last output line: {}{}",
+                gate.rerun(),
+                done.how,
+                done.tail.trim_end().lines().last().map_or("(none)", str::trim),
+                done.log.as_ref().map_or(String::new(), |l| format!("; output so far in {l}"))
+            ),
+            format!(
+                "read the log, then re-run it alone: {} (a step the watchdog stops is hung or deadlocked, not a finding in your change); an agent reports it (ER-33)",
+                gate.rerun()
+            ),
+        )
+        .ended_by_guard(done.ended_by()),
         Ok(done) if done.cut_short() => Row::not_measured(
             format!(
                 "{} ({}{}) before it finished{}",
                 gate.rerun(),
                 done.how,
-                run_limit_note(gate, limits, &done),
+                run_limit_note(&done),
                 done.log.as_ref().map_or(String::new(), |l| format!("; output so far in {l}"))
             ),
             if gate.id.starts_with("clippy-linux") {
@@ -395,12 +493,14 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
                 )
             } else {
                 format!(
-                    "re-run it alone: {} (the whole gate has a budget of {} min)",
+                    "re-run it alone: {} (a row may run {} min; the total budget of {} min only stops new rows from starting)",
                     gate.rerun(),
+                    ROW_CAP.as_secs() / 60,
                     BUDGET.as_secs() / 60
                 )
             },
-        ),
+        )
+        .ended_by_guard(done.ended_by()),
         Ok(done) => {
             let hint = match (gate.id.starts_with("clippy-linux"), done.how.as_str()) {
                 (true, "exit 125") => {
@@ -427,7 +527,7 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
 pub struct RunOpts<'a> {
     /// Gates at a time.
     pub workers: usize,
-    /// The total budget of run time: a gate that would start later is not measured, one that runs over is stopped.
+    /// The total budget of run time ([`BUDGET`]): a gate that would start later is not measured; one that has started is not cut by it.
     pub budget: Duration,
     /// The push's queue allowance ([`QUEUE_MAX`]): the time its heavy steps may wait for the slot in all.
     pub queue: Duration,
@@ -587,12 +687,13 @@ pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (V
                             ),
                             Start::BudgetSpent => Row::not_measured(
                                 format!(
-                                    "run budget spent: the {} min of run time of the push gate was used by earlier steps before this one started ({:.1} s queued for other agents' heavy steps did not count against it)",
+                                    "run budget spent: the {} min of run time of the push gate was used by earlier steps before this one started ({:.1} s queued for other agents' heavy steps did not count against it); a row that has started is not cut by it",
                                     opts.budget.as_secs() / 60,
                                     clock.credit().as_secs_f64()
                                 ),
                                 format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
-                            ),
+                            )
+                            .ended_by_guard(Some("budget".into())),
                             Start::QueueSpent => Row::not_measured(
                                 format!(
                                     "never started: the push's queue allowance of {} min was spent waiting for other agents' heavy steps (queued {:.1} s in all, load {})",
@@ -714,7 +815,18 @@ pub fn heavy_command_for(
     if !found.is_empty() {
         return Ok(found);
     }
-    match built.get_or_init(|| super::heavy_tool::ensure(root, env, left).and_then(|bin| super::heavy_tool::hold(&bin, env))) {
+    // A build that failed for a reason that will not pass on its own is remembered for the run; one that timed out (or ran out of budget)
+    // is not: the next step builds it again instead of every row of the run reading a stale timeout.
+    if built.get().is_none() {
+        let result = super::heavy_tool::ensure(root, env, left).and_then(|bin| super::heavy_tool::hold(&bin, env));
+        if let Err(e) = &result
+            && super::heavy_tool::is_transient(e)
+        {
+            return Err(e.clone());
+        }
+        let _ = built.set(result);
+    }
+    match built.get().ok_or_else(|| "the heavy build was not recorded".to_string())? {
         Ok(held) => Ok(vec![
             held.path().display().to_string(),
             "run".into(),
@@ -768,6 +880,13 @@ pub struct RealExec {
     pub priority: bool,
     /// The local sccache wrapper for the gates that compile (`None`: off, or CI; [`crate::local_sccache`]).
     pub wrapper: crate::local_sccache::Lazy,
+    /// What ends a step that has stopped making progress ([`super::watchdog`]); [`super::watchdog::Never`] leaves it to the row cap.
+    pub watchdog: Arc<dyn Watchdog>,
+    /// What one started row may run ([`ROW_CAP`]); a test sets a short one.
+    pub row_cap: Duration,
+    /// The state folder of this checkout (`<git common dir>/paddock-pre-push`): the history and the build-folder locks live in it. Given
+    /// by the caller, never derived from the logs folder (review P2-2: a test's logs folder gave a lock file in `$TMPDIR`).
+    pub state: PathBuf,
 }
 
 /// Variables every gate may see besides the base list: the toolchain, Docker, caches and Paddock's own settings.
@@ -817,8 +936,8 @@ impl RealExec {
     ///
     /// `left` is the run time the push has left on its credited clock ([`BudgetClock`]): the build of heavy is cut off there, so
     /// time queued for the slot never counts against it.
-    fn heavy_command(&self, left: Duration) -> Result<Vec<String>, String> {
-        heavy_command_for(&self.root, &self.env, &|p| self.has_tool(p), &self.built_heavy, left)
+    fn heavy_command(&self) -> Result<Vec<String>, String> {
+        heavy_command_for(&self.root, &self.env, &|p| self.has_tool(p), &self.built_heavy, ROW_CAP)
     }
 
     fn set_slot(&self, to: Slot) {
@@ -829,47 +948,51 @@ impl RealExec {
 
     /// Whether this heavy gate goes through the `heavy` of tools/heavy (the one with `--queue-max`, `--run-max` and its log lines).
     fn runs_through_our_heavy(&self, limits: Limits) -> bool {
-        let prefix = self.heavy_command(limits.run).unwrap_or_default();
+        let prefix = self.heavy_command().unwrap_or_default();
         with_heavy_flags(&prefix, false, limits.queue, limits.run)
             .iter()
             .any(|a| a == "--run-max")
     }
 
     fn call(&self, gate: &Gate, limits: Limits, log: &Path, label: Option<&str>, name: &str) -> ToolCall {
-        let left = limits.run;
         let own = own_run_limit(gate);
         // A heavy step: its run time is limited by heavy itself (`--run-max`), its wait for a slot separately (`--queue-max`);
         // the outer timeout is only a backstop for both plus a minute.
-        let run_max = own.min(left);
+        let run_max = own;
         let heavy = if gate.heavy {
             with_agent_name(
-                &with_heavy_flags(
-                    &self.heavy_command(limits.run).unwrap_or_default(),
-                    self.priority,
-                    limits.queue,
-                    run_max,
-                ),
+                &with_heavy_flags(&self.heavy_command().unwrap_or_default(), self.priority, limits.queue, run_max),
                 name,
             )
         } else {
             Vec::new()
         };
         let limited = heavy.iter().any(|a| a == "--run-max");
+        // Cargo's JSON messages are the progress of a build row (the diagnostics stay rendered on stderr); the command a person re-runs
+        // (`Gate::rerun`) has no such flag.
+        let gate_args = if gate.progress == Progress::CargoJson && crate::cargo_target::is_cargo(&gate.program) {
+            with_cargo_json(&gate.args)
+        } else {
+            gate.args.clone()
+        };
         let (program, args): (String, Vec<String>) = match heavy.split_first() {
             Some((first, rest)) => (
                 first.clone(),
                 rest.iter()
                     .cloned()
                     .chain(std::iter::once(gate.program.clone()))
-                    .chain(gate.args.iter().cloned())
+                    .chain(gate_args.iter().cloned())
                     .collect(),
             ),
-            None => (gate.program.clone(), gate.args.clone()),
+            None => (gate.program.clone(), gate_args),
         };
+        // Through our `heavy` the queue and the run are bounded apart (`--queue-max`, `--run-max`). A started row is never cut by what
+        // is left of the total budget (that was the old budget's failure, review P1-1): the outer limit is only the backstop beyond
+        // the row cap, which the monitor enforces (from the start, for a step through another heavy whose queue cannot be told apart).
         let timeout = if limited {
             run_max + limits.queue + Duration::from_secs(60)
         } else {
-            own.min(left)
+            own
         };
         let mut call = ToolCall::new(program)
             .args(args)
@@ -1000,8 +1123,8 @@ impl Exec for RealExec {
         docker_answers(&self.env)
     }
 
-    fn heavy_unavailable(&self, left: Duration) -> Option<String> {
-        self.heavy_command(left).err()
+    fn heavy_unavailable(&self, _left: Duration) -> Option<String> {
+        self.heavy_command().err()
     }
 
     fn ci_image(&self) -> ImageProbe {
@@ -1050,35 +1173,102 @@ impl Exec for RealExec {
         // Each step has a name of its own for heavy (`pre-push-<pid>-<n>`), and its log is new: nothing an earlier or another push
         // wrote can be read for this step's lines.
         let name = step_name();
+        // The cargo build folder is shared by the clippy and doctest rows of a workspace and by other pushes of this checkout: cargo
+        // would make the second wait for the first's lock while it already held a heavy slot (ER-43). The wait is here, before any slot
+        // is taken, counted as queue time and bounded by the queue allowance; the lock is held until the step ends.
+        let (build_lock, lock_wait) = match gate.build_dir.as_deref().filter(|_| gate.heavy) {
+            Some(dir) => match self.lock_build_folder(dir, limits.queue) {
+                Ok(held) => held,
+                Err(waited) => {
+                    return Ok(Done {
+                        success: false,
+                        how: "queue limit: no slot taken in time (the build folder is in use by another run)".to_string(),
+                        tail: String::new(),
+                        log: None,
+                        timing: Some(Timing {
+                            queued: waited.as_secs_f64(),
+                            ran: 0.0,
+                        }),
+                        ending: Ending::QueueLimit,
+                    });
+                }
+            },
+            None => (BuildLock { _held: None }, Duration::ZERO),
+        };
+        // What the wait for the folder took is spent from the queue allowance heavy is given (review P2-5): the push's allowance is for
+        // all its waiting together.
+        let limits = queue_after(limits, lock_wait);
         let call = self.call(gate, limits, &log, label.as_deref(), &name);
         let _ = std::fs::File::create(&log);
         // Our `heavy` writes "holds the lock" to the log when the slot is taken: until then every second is waiting for others,
         // and the push's budget does not count it (`Exec::slot`). Another heavy prints no such line: nothing is known then.
         let ours = gate.heavy && self.runs_through_our_heavy(limits);
-        let mut ran = if ours {
-            let since = Instant::now();
-            self.set_slot(Slot::Queued { since });
-            let done = AtomicBool::new(false);
-            let ran = std::thread::scope(|s| {
+        let info = StepInfo {
+            id: &gate.id,
+            heavy: gate.heavy,
+            progress: gate.progress,
+            kind: gate.id.split(' ').next().unwrap_or(&gate.id),
+            ws: &gate.cwd,
+        };
+        let watch = self.watchdog.watch(&info);
+        let root: Arc<Mutex<Option<paddock_proc::ProcessId>>> = Arc::default();
+        let call = {
+            let root = Arc::clone(&root);
+            call.on_start(Arc::new(move |id| {
+                if let Ok(mut r) = root.lock() {
+                    *r = id;
+                }
+            }))
+        };
+        let stuck: Mutex<Option<Stuck>> = Mutex::new(None);
+        let began = Instant::now();
+        if ours {
+            self.set_slot(Slot::Queued { since: began });
+        }
+        let done = AtomicBool::new(false);
+        let ran = std::thread::scope(|s| {
+            if ours {
                 s.spawn(|| {
                     let mut seen = LockSeen::new(lock_line(&name));
                     while !done.load(Ordering::SeqCst) {
                         if seen.seen(&log) {
-                            self.set_slot(Slot::Taken { since, at: Instant::now() });
+                            self.set_slot(Slot::Taken {
+                                since: began,
+                                at: Instant::now(),
+                            });
                             return;
                         }
                         std::thread::sleep(SLOT_POLL);
                     }
                 });
-                let ran = call.run(&self.env, &mut std::io::sink());
-                done.store(true, Ordering::SeqCst);
-                ran
-            });
+            }
+            // Always watched: the row cap is enforced here (so the stacks are written before the tree is ended), and the
+            // watchdog, when there is one, judges the step.
+            let (log, root, done, stuck, heavy, progress) = (&log, &root, &done, &stuck, gate.heavy, gate.progress);
+            let watcher = s.spawn(move || self.watch_step(watch, log, root, done, stuck, began, ours, heavy, progress));
+            let ran = call.run(&self.env, &mut std::io::sink());
+            done.store(true, Ordering::SeqCst);
+            (ran, watcher.join().ok().flatten())
+        });
+        let (ran, watch) = ran;
+        if ours {
             self.set_slot(Slot::Unknown);
-            ran?
-        } else {
-            call.run(&self.env, &mut std::io::sink())?
-        };
+        }
+        let mut ran = ran?;
+        // The one place the tool's words become a typed ending; every later decision reads `ending`.
+        let mut ending = Ending::from_how(&ran.how);
+        // The watchdog or the row cap ended the tree: say so, whatever the OS reported (a signal), so the row is "not measured".
+        if let Some(s) = stuck.lock().ok().and_then(|mut g| g.take()) {
+            ran.success = false;
+            if s.guard == ROW_CAP_GUARD {
+                // The row cap reads as a timeout (it is one), not as a stall.
+                ran.how = format!("timed out after {} s of running ({ROW_CAP_GUARD})", s.quiet.as_secs());
+                ending = Ending::RowCap;
+            } else {
+                ran.how = stuck_how(&s);
+                ending = Ending::Stuck { guard: s.guard };
+            }
+        }
         let mut timing = None;
         if gate.heavy {
             let text = std::fs::read_to_string(&log).unwrap_or_default();
@@ -1086,12 +1276,16 @@ impl Exec for RealExec {
             // heavy's own limits: 79 no slot in time (the command never ran), 80 the command was ended at its run limit.
             let how = ran.how.clone();
             match how.as_str() {
-                "exit 79" if timing.is_some() => ran.how = "queue limit: no slot taken in time".into(),
+                "exit 79" if timing.is_some() => {
+                    ran.how = "queue limit: no slot taken in time".into();
+                    ending = Ending::QueueLimit;
+                }
                 "exit 80" if timing.is_some() => {
-                    ran.how = format!("timed out after {} s of running", timing.map_or(0.0, |t| t.ran).round())
+                    ran.how = format!("timed out after {} s of running", timing.map_or(0.0, |t| t.ran).round());
+                    ending = Ending::RowCap;
                 }
                 // Cut short while queued for the heavy slot: say so, the gate itself never ran (ER-33).
-                h if h.starts_with("timed out") && !ran.success => {
+                _ if ending == Ending::RowCap && !ran.success => {
                     if let Some(w) = slot_wait(&text) {
                         ran.how = format!("{}: {w}", ran.how);
                     }
@@ -1099,19 +1293,239 @@ impl Exec for RealExec {
                 _ => {}
             }
         }
+        // Any ending that is not the container run's own (the row cap, the watchdog, the person) stops the container too: the heavy
+        // slot is free when the client ends, and a container left compiling would run beside the next step (review P1-2).
         if let Some(l) = &label
             && !ran.success
-            && matches!(ran.how.as_str(), h if h == "cancelled" || h.starts_with("timed out"))
+            && ending.cut_short()
         {
             self.stop_container(l);
+        }
+        // The step's phases with their durations (ER-27): on the console and beside the gate logs.
+        let wall = began.elapsed().as_secs_f64();
+        drop(build_lock);
+        if !lock_wait.is_zero() {
+            // The wait for the folder was queue time (waiting for others), not run time: the push's budget does not count it.
+            let t = timing.get_or_insert(Timing {
+                queued: 0.0,
+                ran: (began.elapsed().saturating_sub(lock_wait)).as_secs_f64(),
+            });
+            t.queued += lock_wait.as_secs_f64();
+        }
+        let note = watch.and_then(|mut w| w.finish(timing.map_or(wall, |t| t.ran), ran.success));
+        let line = phase_line(
+            &gate.id,
+            timing.map(|t| t.queued),
+            timing.map_or(wall, |t| t.ran),
+            &ran.how,
+            ending.guard().as_deref(),
+            note.as_deref(),
+        );
+        eprintln!("{line}");
+        {
+            use std::io::Write;
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(self.logs.join("phases.log"))
+                .and_then(|mut f| writeln!(f, "{line}"));
         }
         Ok(Done {
             success: ran.success,
             how: ran.how,
-            tail: tail(&ran.stderr, 12),
+            tail: tail(
+                &if gate.progress == Progress::CargoJson {
+                    without_json(&ran.stderr)
+                } else {
+                    ran.stderr.clone()
+                },
+                12,
+            ),
             log: Some(log.display().to_string()),
             timing,
+            ending,
         })
+    }
+}
+
+/// Since when a step counts as running, and whether the watchdog may judge it: `None` while it must not be watched at all, our `heavy`
+/// queueing (the wait for the slot is waiting for others, ER-43). A heavy step through another `heavy` has no lock line, so a queue cannot
+/// be told from a run: the row cap counts from its start (its bound is honest, a step that is only queued for an hour is cut) and the
+/// watchdog does not judge it. Every other step runs, and is judged, from its start.
+fn active_since(ours: bool, heavy: bool, slot: Slot, began: Instant) -> Option<(Instant, bool)> {
+    match (ours, heavy) {
+        (true, _) => match slot {
+            Slot::Taken { at, .. } => Some((at, true)),
+            _ => None,
+        },
+        (false, true) => Some((began, false)),
+        (false, false) => Some((began, true)),
+    }
+}
+
+/// `limits` with the time already waited for the build folder taken off the queue allowance.
+fn queue_after(limits: Limits, waited: Duration) -> Limits {
+    Limits {
+        queue: limits.queue.saturating_sub(waited),
+        ..limits
+    }
+}
+
+/// A held advisory lock on a build folder; dropping it (or the process ending) releases it.
+pub struct BuildLock {
+    /// The locked file: held for its lock, never read.
+    _held: Option<std::fs::File>,
+}
+
+impl RealExec {
+    /// The lock file of a build folder: in the state folder beside the gate logs, so every push of this checkout names the same file
+    /// for the same folder, and nothing is written into the repository or the build folder.
+    pub(crate) fn build_lock_path(&self, dir: &str) -> PathBuf {
+        self.state
+            .join("build-locks")
+            .join(format!("{}.lock", log_name(&self.root.join(dir).to_string_lossy())))
+    }
+
+    /// Takes the lock of build folder `dir`, waiting at most `queue` while another run holds it (the wait is live queue time for the
+    /// budget: [`Slot::Queued`]). `Ok` carries the lock and how long it waited; `Err` how long it waited before giving up (the queue
+    /// allowance, or the person stopped the push). A lock file that cannot be made is not a reason to stop: the step runs unlocked and
+    /// cargo's own lock still serialises it.
+    fn lock_build_folder(&self, dir: &str, queue: Duration) -> Result<(BuildLock, Duration), Duration> {
+        let path = self.build_lock_path(dir);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) else {
+            eprintln!(
+                "pre-push: no lock file for the build folder {dir} ({}): the step runs without it",
+                path.display()
+            );
+            return Ok((BuildLock { _held: None }, Duration::ZERO));
+        };
+        let began = Instant::now();
+        let mut said = false;
+        loop {
+            match file.try_lock() {
+                Ok(()) => {
+                    let waited = began.elapsed();
+                    if said {
+                        eprintln!("pre-push: the build folder {dir} is free after {:.1} s", waited.as_secs_f64());
+                        self.set_slot(Slot::Unknown);
+                    }
+                    return Ok((BuildLock { _held: Some(file) }, if said { waited } else { Duration::ZERO }));
+                }
+                Err(std::fs::TryLockError::WouldBlock) => {}
+                // The OS does not do advisory locks here: cargo's own lock serialises, as before.
+                Err(std::fs::TryLockError::Error(_)) => return Ok((BuildLock { _held: None }, Duration::ZERO)),
+            }
+            if !said {
+                said = true;
+                eprintln!("pre-push: the build folder {dir} is in use by another run; waiting for it before taking a heavy slot (ER-43)");
+                self.set_slot(Slot::Queued { since: began });
+            }
+            if began.elapsed() >= queue || self.stop.load(Ordering::SeqCst) {
+                self.set_slot(Slot::Unknown);
+                return Err(began.elapsed());
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    }
+
+    /// Writes down where the step's tree is (process list, stacks) and only then ends it, by identity through `paddock_proc`
+    /// (rule 53); the capture is bounded ([`stacks::TOTAL_LIMIT`]) and its file named in the log (ER-27).
+    fn capture_then_kill(&self, root: paddock_proc::ProcessId, why: &Stuck, log: &Path) {
+        let name = log.file_stem().map_or("step".to_string(), |n| n.to_string_lossy().to_string());
+        let pids: Vec<u32> = stacks::tree(root).iter().map(|p| p.pid()).collect();
+        let c = stacks::capture(
+            stacks::this_os(),
+            &pids,
+            &format!("{}: {} (no progress for {} s)", why.guard, why.reason, why.quiet.as_secs()),
+            &self.logs,
+            &name,
+            &self.env,
+            &|p| self.has_tool(p),
+        );
+        eprintln!("pre-push: {name}: {}", c.note);
+        paddock_proc::kill_tree(root);
+    }
+
+    /// Shows a running step to its watch once per [`WATCH_POLL`] until it ends; a `Some` verdict ends the step's whole process tree
+    /// through `paddock_proc` (by identity, rule 53) and is left in `stuck`. A step is shown only while it runs: not while it queues
+    /// for the slot (ER-43; our `heavy` is known to hold the slot from [`Slot::Taken`]), and a heavy step through another `heavy`
+    /// (no lock line, so no way to tell a queue from a run) is not watched, the row cap ends it.
+    #[allow(clippy::too_many_arguments)]
+    fn watch_step(
+        &self,
+        mut w: Option<Box<dyn StepWatch>>,
+        log: &Path,
+        root: &Mutex<Option<paddock_proc::ProcessId>>,
+        done: &AtomicBool,
+        stuck: &Mutex<Option<Stuck>>,
+        began: Instant,
+        ours: bool,
+        heavy: bool,
+        progress: Progress,
+    ) -> Option<Box<dyn StepWatch>> {
+        let mut counter = Counter::new(progress);
+        let mut last_check = Instant::now();
+        while !done.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(100));
+            if last_check.elapsed() < WATCH_POLL {
+                continue;
+            }
+            last_check = Instant::now();
+            let active_since = active_since(ours, heavy, self.slot(), began);
+            let (Some((since, judged)), Some(id)) = (active_since, root.lock().ok().and_then(|r| *r)) else {
+                continue;
+            };
+            if judged {
+                counter.read_new(log);
+            }
+            let tail = crate::ci_tool::read_tail(log, 4096);
+            let last_line = tail.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
+            let now = Instant::now();
+            let active_for = now.saturating_duration_since(since);
+            let verdict = if active_for >= self.row_cap {
+                Some(Stuck {
+                    guard: ROW_CAP_GUARD.into(),
+                    reason: format!("the row ran its whole cap of {} s", self.row_cap.as_secs()),
+                    quiet: active_for,
+                })
+            } else if !judged {
+                None
+            } else {
+                w.as_mut().and_then(|w| {
+                    w.check(&Observation {
+                        now,
+                        active_for,
+                        log_len: std::fs::metadata(log).map_or(0, |m| m.len()),
+                        last_line: &last_line,
+                        progress: counter.events(),
+                        units: counter.units().0,
+                        compiled: counter.units().1,
+                        last_event: counter.last_event(),
+                        waiting_on: counter.waiting_on(),
+                        cpu: paddock_proc::tree_cpu_time(id),
+                        root: id,
+                    })
+                })
+            };
+            if let Some(s) = verdict {
+                eprintln!(
+                    "pre-push: {} ends the step: {} (after {} s; last output line: {})",
+                    s.guard,
+                    s.reason,
+                    s.quiet.as_secs(),
+                    last_line
+                );
+                self.capture_then_kill(id, &s, log);
+                if let Ok(mut g) = stuck.lock() {
+                    *g = Some(s);
+                }
+                return w;
+            }
+        }
+        w
     }
 }
 
@@ -1210,6 +1624,7 @@ mod tests {
                 tail: String::new(),
                 log: Some(self.log.display().to_string()),
                 timing: Some(Timing { queued: 1800.0, ran: 0.0 }),
+                ending: Ending::QueueLimit,
             })
         }
     }
@@ -1258,6 +1673,8 @@ mod tests {
             next: String::new(),
             workspaces: Vec::new(),
             notice: None,
+            progress: crate::pre_push::progress::Progress::Lines,
+            build_dir: None,
         })
     }
 
@@ -1376,6 +1793,9 @@ exit $rc
                 live_slot: Default::default(),
                 priority: false,
                 wrapper: crate::local_sccache::Lazy::off(),
+                watchdog: Arc::new(crate::pre_push::watchdog::Never),
+                row_cap: ROW_CAP,
+                state: dir.join("state"),
             }
         }
 
@@ -1392,6 +1812,8 @@ exit $rc
                 next: "fix it".into(),
                 workspaces: Vec::new(),
                 notice: None,
+                progress: crate::pre_push::progress::Progress::Lines,
+                build_dir: None,
             }
         }
 
@@ -1504,9 +1926,11 @@ exit $rc
             let lock = d.path().join("slot.lock");
             std::fs::create_dir(&lock).unwrap();
             std::fs::write(lock.join("owner"), "Bob").unwrap();
-            let ex = real(d.path(), &lock);
+            // The fake heavy is not ours: its queue cannot be told from its run, so the row cap counts from the start (2 s here).
+            let mut ex = real(d.path(), &lock);
+            ex.row_cap = Duration::from_secs(2);
             let g = gate("clippy a", "echo never runs");
-            let r = decide(&g, &ex, Duration::from_secs(2), &test_subject());
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
             assert_eq!(
                 r.kind(),
                 Kind::NotMeasured,
@@ -1571,6 +1995,9 @@ exit $rc
                 live_slot: Default::default(),
                 priority: false,
                 wrapper: crate::local_sccache::Lazy::off(),
+                watchdog: Arc::new(crate::pre_push::watchdog::Never),
+                row_cap: ROW_CAP,
+                state: d.join("state"),
             }
         }
 
@@ -1647,7 +2074,7 @@ exit $rc
             assert_eq!(ex.slot(), Slot::Unknown, "no step in flight");
             // heavy's build (and the cleanup's process scan, empty in a test: worktree::procs) happens once, here, before anything is observed: the state below is driven
             // by the step's own log lines, not by how long a build or a scan took on a loaded machine (ER-12, ER-28).
-            ex.heavy_command(Duration::from_secs(60)).expect("the fake heavy is built and held");
+            ex.heavy_command().expect("the fake heavy is built and held");
             std::thread::scope(|sc| {
                 let step = sc.spawn(|| decide(&gate("clippy a", &command), &ex, Duration::from_secs(60), &test_subject()).kind());
                 until(&|| seen("foreign"));
@@ -1811,6 +2238,9 @@ exit $rc
                 root: ex.root.clone(),
                 logs: ex.logs.clone(),
                 stop: ex.stop.clone(),
+                watchdog: Arc::new(crate::pre_push::watchdog::Never),
+                row_cap: ROW_CAP,
+                state: ex.state.clone(),
             };
             assert!(decide(&g, &ex2, Duration::from_secs(60), &test_subject()).kind() == Kind::Passed);
         }
@@ -1839,68 +2269,440 @@ exit $rc
             assert!(r.reason().contains("OVERRIDE SET"), "{}", r.reason());
         }
 
+        /// A stand-in step (paddock-testkit's `StandIn`, C130: no shell fixture) that prints one line and then sleeps `sleep` seconds.
+        fn quiet_step(dir: &Path, sleep: u64) -> Gate {
+            let step = paddock_testkit::StandIn::new(dir, "quiet-step")
+                .stdout("compiling x")
+                .sleeps(Duration::from_secs(sleep))
+                .install()
+                .unwrap();
+            Gate {
+                program: step.program().to_string_lossy().to_string(),
+                args: Vec::new(),
+                heavy: false,
+                ..gate("tests quiet", "")
+            }
+        }
+
+        /// A watchdog for the tests: watches every step and ends it at its `after`-th look; records what it was shown.
+        struct Fires {
+            after: u32,
+            seen: Arc<Mutex<Vec<(u64, String, bool)>>>,
+        }
+
+        struct FiresWatch {
+            n: u32,
+            after: u32,
+            seen: Arc<Mutex<Vec<(u64, String, bool)>>>,
+        }
+
+        impl Watchdog for Fires {
+            fn name(&self) -> &str {
+                "fake"
+            }
+            fn watch(&self, _step: &StepInfo<'_>) -> Option<Box<dyn StepWatch>> {
+                Some(Box::new(FiresWatch {
+                    n: 0,
+                    after: self.after,
+                    seen: Arc::clone(&self.seen),
+                }))
+            }
+        }
+
+        impl StepWatch for FiresWatch {
+            fn check(&mut self, o: &Observation<'_>) -> Option<Stuck> {
+                self.seen
+                    .lock()
+                    .unwrap()
+                    .push((o.log_len, o.last_line.to_string(), o.cpu.is_some()));
+                self.n += 1;
+                (self.n >= self.after).then(|| Stuck {
+                    guard: "fake".into(),
+                    reason: "the stand-in went quiet".into(),
+                    quiet: Duration::from_secs(300),
+                })
+            }
+        }
+
+        /// The positive control of the watchdog plumbing (ER-33): a step its watch ends is stopped long before it would have ended,
+        /// and its row is "not measured: stuck", never a pass, with the step, the last output line and the guard named.
         #[test]
-        fn the_heavy_build_is_cut_off_by_the_credited_run_time_not_the_wall_clock() {
+        fn a_step_the_watchdog_ends_is_not_measured_stuck_and_the_guard_is_named() {
             let d = tempfile::tempdir().unwrap();
-            let ex = repo_with_fake_cargo(d.path(), true);
-            // Plenty of credited run time left (the step queued behind others for as long as it liked): the build goes ahead.
-            let r = decide(&gate("clippy a", "true"), &ex, Duration::from_secs(300), &test_subject());
+            let mut ex = real(d.path(), &d.path().join("l"));
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            ex.watchdog = Arc::new(Fires {
+                after: 2,
+                seen: Arc::clone(&seen),
+            });
+            let g = quiet_step(d.path(), 60);
+            let t = Instant::now();
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert!(
+                t.elapsed() < Duration::from_secs(30),
+                "the 60 s step was stopped, not waited for: {:?}",
+                t.elapsed()
+            );
+            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            let why = r.reason();
+            assert!(why.starts_with("stuck:") && why.contains("last output line: compiling x"), "{why}");
+            assert!(why.contains("stuck (fake)") && why.contains("no progress for 300 s"), "{why}");
+            assert_eq!(r.ended_by.as_deref(), Some("fake"));
+            let seen = seen.lock().unwrap();
+            assert!(
+                seen.len() >= 2 && seen.iter().all(|(len, line, cpu)| *len > 0 && line == "compiling x" && *cpu),
+                "{seen:?}"
+            );
+            let phases = std::fs::read_to_string(d.path().join("logs/phases.log")).unwrap();
+            assert!(phases.contains("ended by guard: fake"), "{phases}");
+        }
+
+        /// The same step with a watch that never fires, and with no watchdog, runs to its end and passes: the guard ends nothing by
+        /// itself, only what its watch says.
+        #[test]
+        fn a_step_whose_watch_stays_silent_runs_to_its_end_and_passes() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            let g = quiet_step(d.path(), 2);
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert_eq!((r.kind(), r.ended_by.clone()), (Kind::Passed, None), "{r:?}");
+            ex.watchdog = Arc::new(Fires {
+                after: u32::MAX,
+                seen: Arc::default(),
+            });
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert_eq!((r.kind(), r.ended_by.clone()), (Kind::Passed, None), "{r:?}");
+        }
+
+        /// A stand-in step printing `lines` (each one output line), then sleeping `sleep` seconds, read as cargo's JSON progress.
+        fn json_step(dir: &Path, lines: &[&str], sleep: u64) -> Gate {
+            let mut step = paddock_testkit::StandIn::new(dir, "json-step");
+            for l in lines {
+                step = step.stdout(l);
+            }
+            let step = step.sleeps(Duration::from_secs(sleep)).install().unwrap();
+            Gate {
+                program: step.program().to_string_lossy().to_string(),
+                args: Vec::new(),
+                heavy: false,
+                progress: crate::pre_push::progress::Progress::CargoJson,
+                ..gate("tests json", "")
+            }
+        }
+
+        const UNIT_LINE: &str = r#"{"reason":"compiler-artifact","package_id":"x 0.1.0","fresh":false}"#;
+
+        fn stall_dog(mode: crate::pre_push::stall::Mode, gap: u64, history: Option<&Path>) -> Arc<dyn Watchdog> {
+            Arc::new(crate::pre_push::stall::StallWatchdog::new(
+                mode,
+                Duration::from_secs(gap),
+                history.map(|p| Arc::new(crate::pre_push::history::History::new(p))),
+            ))
+        }
+
+        /// The positive control of the progress watchdog (ER-33, ER-41): a step that finished one unit and then shows nothing is
+        /// stopped as stuck (enforcing), its stacks written, long before the step would have ended; the same step in report-only
+        /// mode is left running and passes, with "would have stopped" in its phase line.
+        #[test]
+        fn a_step_that_shows_no_progress_for_the_gap_is_stuck_when_enforced_and_only_reported_otherwise() {
+            use crate::pre_push::stall::Mode;
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            ex.watchdog = stall_dog(Mode::Enforce, 3, None);
+            let g = json_step(d.path(), &[UNIT_LINE], 60);
+            let t = Instant::now();
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert!(t.elapsed() < Duration::from_secs(40), "stopped, not waited for: {:?}", t.elapsed());
+            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            assert!(
+                r.reason().starts_with("stuck:") && r.reason().contains("progress watchdog"),
+                "{}",
+                r.reason()
+            );
+            assert!(r.ended_by.as_deref().is_some_and(|g| g.starts_with("progress watchdog")));
+            // the report-only control: the same silence, a step that ends by itself after 8 s
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            ex.watchdog = stall_dog(Mode::ReportOnly, 3, None);
+            let g = json_step(d.path(), &[UNIT_LINE], 8);
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert_eq!(r.kind(), Kind::Passed, "report-only never ends a step: {r:?}");
+            let phases = std::fs::read_to_string(d.path().join("logs/phases.log")).unwrap();
+            assert!(phases.contains("watchdog: would have stopped"), "{phases}");
+        }
+
+        /// Cargo waiting for another cargo's file lock is a wait state, not a stall: the same silence that is stuck above is not
+        /// stuck when the step's last line says it waits for a lock.
+        #[test]
+        fn a_step_waiting_for_a_file_lock_is_not_stuck() {
+            use crate::pre_push::stall::Mode;
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            ex.watchdog = stall_dog(Mode::Enforce, 3, None);
+            let g = json_step(d.path(), &[UNIT_LINE, "    Blocking waiting for file lock on build directory"], 8);
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert_eq!((r.kind(), r.ended_by.clone()), (Kind::Passed, None), "{r:?}");
+        }
+
+        /// A finished step is written to the history, cold or warm by its build folder.
+        #[test]
+        fn a_finished_step_is_recorded_in_the_history_cold_or_warm() {
+            use crate::pre_push::stall::Mode;
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            let h = d.path().join("step-history.jsonl");
+            ex.watchdog = stall_dog(Mode::ReportOnly, 900, Some(&h));
+            // a step shorter than one look (a second) is never watched and so leaves no record: this one lasts two
+            let mut g = json_step(d.path(), &[UNIT_LINE, "error: the lint"], 2);
+            g.id = "clippy crates".into();
+            g.cwd = String::new();
+            g.build_dir = Some("nothing-built-here".into());
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert_eq!(r.kind(), Kind::Passed, "the stand-in exits 0: {r:?}");
+            let recs = crate::pre_push::history::History::new(&h).records();
+            assert_eq!(recs.len(), 1, "{recs:?}");
+            assert_eq!(
+                (recs[0].kind.as_str(), recs[0].cold, recs[0].ok, recs[0].events),
+                ("clippy", true, true, 1)
+            );
+        }
+
+        /// The side finding of the research note (ER-43): a row waits for its build folder BEFORE it takes a heavy slot. With the folder
+        /// held by another run, the step is not measured at the queue allowance (it never started), the heavy slot was never taken
+        /// meanwhile, and once the folder is free the same step passes.
+        #[test]
+        fn a_row_waits_for_its_build_folder_outside_the_heavy_slot() {
+            let d = tempfile::tempdir().unwrap();
+            let slot = d.path().join("l");
+            let ex = real(d.path(), &slot);
+            let mut g = gate("clippy a", "true");
+            g.build_dir = Some("tgt/a".into());
+            let lock_path = ex.build_lock_path("tgt/a");
+            std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+            let other = std::fs::OpenOptions::new().create(true).append(true).open(&lock_path).unwrap();
+            other.lock().unwrap();
+            let limits = Limits {
+                run: Duration::from_secs(300),
+                queue: Duration::from_secs(2),
+            };
+            let r = decide_with(&g, &ex, limits, &test_subject(), &mut |_| {});
+            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            assert!(r.reason().contains("build folder is in use"), "{}", r.reason());
+            assert!(!slot.exists(), "no heavy slot was taken while the folder was busy");
+            drop(other);
+            let r = decide_with(&g, &ex, limits, &test_subject(), &mut |_| {});
+            assert_eq!(r.kind(), Kind::Passed, "the control: free folder, same step: {r:?}");
+        }
+
+        /// A started row is never cut by what is left of the total budget (the old budget's failure, review P1-1): a 6 s step that
+        /// starts with 2 s of budget left finishes and passes, heavy or not, and one that is ended is ended by the row cap, not "budget".
+        #[test]
+        fn a_started_row_runs_past_what_is_left_of_the_total_budget() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = real(d.path(), &d.path().join("l"));
+            let g = quiet_step(d.path(), 6);
+            let r = decide(&g, &ex, Duration::from_secs(2), &test_subject());
+            assert_eq!(r.kind(), Kind::Passed, "the budget only stops rows from starting: {r:?}");
+            // a heavy row through another heavy (no way to split its queue from its run) is bounded by the row cap from its start
+            let mut g = quiet_step(d.path(), 6);
+            g.heavy = true;
+            let r = decide(&g, &ex, Duration::from_secs(2), &test_subject());
             assert_eq!(r.kind(), Kind::Passed, "{r:?}");
+        }
+
+        /// Review P1-2: a step the watchdog ends as stuck stops its Linux container as well (the heavy slot is freed when the client
+        /// ends, and a container left compiling would run beside the next step). Any cut-short ending stops it.
+        #[test]
+        fn a_container_run_the_watchdog_ends_is_stopped_with_its_label() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            let docker = paddock_testkit::StandIn::new(d.path(), "docker")
+                .records_args()
+                .when_args(&["ps"], paddock_testkit::Actions::new().stdout("abc123").exit(0))
+                .install()
+                .unwrap();
+            ex.env.insert("DOCKER".into(), docker.program().to_string_lossy().to_string());
+            ex.watchdog = Arc::new(Fires {
+                after: 2,
+                seen: Arc::default(),
+            });
+            let mut g = quiet_step(d.path(), 60);
+            g.need = Need::Docker;
+            let limits = Limits {
+                run: Duration::from_secs(300),
+                queue: Duration::from_secs(300),
+            };
+            let done = ex.run(&g, limits).unwrap();
+            assert!(done.cut_short() && !done.success, "{done:?}");
+            let calls = docker.calls().unwrap();
+            assert!(
+                calls.iter().any(|c| c.first().is_some_and(|a| a == "stop")),
+                "the container was stopped: {calls:?}"
+            );
+        }
+
+        /// Review P2-1: every decision about an ending reads the type. A cut-short ending is exactly one that is not the run's own (the
+        /// guards, the cap, the person, the output cap); the guard named is the watchdog's or the row cap.
+        #[test]
+        fn the_ending_type_answers_cut_short_and_guard_for_every_ending() {
+            let stuck = Ending::Stuck { guard: "fake".into() };
+            let all = [
+                (Ending::Exited, false, None),
+                (stuck, true, Some("fake")),
+                (Ending::RowCap, true, Some("row cap")),
+                (Ending::Cancelled, true, None),
+                (Ending::QueueLimit, false, None),
+                (Ending::OutputCap, true, None),
+            ];
+            for (e, cut, guard) in all {
+                assert_eq!(e.cut_short(), cut, "{e:?}");
+                assert_eq!(e.guard().as_deref(), guard, "{e:?}");
+            }
+            assert_eq!(Ending::from_how("timed out after 5 s"), Ending::RowCap);
+            assert_eq!(Ending::from_how("cancelled"), Ending::Cancelled);
+            assert_eq!(Ending::from_how("queue limit: no slot"), Ending::QueueLimit);
+            assert_eq!(Ending::from_how("exit 101"), Ending::Exited);
+        }
+
+        /// Review P2-5: the wait for the build folder is spent from the queue allowance heavy is given; never below zero.
+        #[test]
+        fn the_wait_for_the_build_folder_is_spent_from_the_queue_allowance() {
+            let l = Limits {
+                run: Duration::from_secs(9),
+                queue: Duration::from_secs(100),
+            };
+            assert_eq!(queue_after(l, Duration::from_secs(30)).queue, Duration::from_secs(70));
+            assert_eq!(queue_after(l, Duration::from_secs(300)).queue, Duration::ZERO);
+            assert_eq!(queue_after(l, Duration::from_secs(30)).run, Duration::from_secs(9));
+        }
+
+        /// Review P2-2: the lock files live under the state folder the caller gave, never beside the logs or in the temp folder.
+        #[test]
+        fn the_build_folder_locks_live_under_the_given_state_folder() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = real(d.path(), &d.path().join("l"));
+            let p = ex.build_lock_path("tgt/a");
+            assert!(p.starts_with(d.path().join("state").join("build-locks")), "{}", p.display());
+            assert_ne!(p, ex.build_lock_path("tgt/b"), "one file per folder");
+            assert_eq!(p, ex.build_lock_path("tgt/a"), "the same folder, the same file");
+        }
+
+        /// The row cap is the backstop: a step still running when it is spent is stopped (its stacks written first) and "not measured",
+        /// never a pass, and the summary names the cap.
+        #[test]
+        fn a_step_still_running_at_the_row_cap_is_not_measured_and_names_it() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            ex.row_cap = Duration::from_secs(2);
+            let g = quiet_step(d.path(), 60);
+            let t = Instant::now();
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert!(t.elapsed() < Duration::from_secs(30), "{:?}", t.elapsed());
+            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            assert_eq!(r.ended_by.as_deref(), Some("row cap"));
+            assert!(r.reason().contains("timed out"), "{}", r.reason());
+            let stacks = std::fs::read_dir(d.path().join("logs"))
+                .unwrap()
+                .flatten()
+                .any(|f| f.file_name().to_string_lossy().ends_with(".stacks.txt"));
+            assert!(stacks, "the stacks were written before the tree was ended");
+        }
+
+        /// Queue time is never judged (ER-43): a step queued for our slot is not shown to its watch; a running one is, from the moment it
+        /// took the slot. A step through another `heavy` (no lock line to tell a queue from a run) has its row cap counted from its start
+        /// and is not judged.
+        #[test]
+        fn only_a_running_step_is_shown_to_its_watch() {
+            let t0 = Instant::now();
+            let at = t0 + Duration::from_secs(40);
+            assert_eq!(
+                active_since(true, true, Slot::Queued { since: t0 }, t0),
+                None,
+                "queued behind others"
+            );
+            assert_eq!(active_since(true, true, Slot::Unknown, t0), None);
+            assert_eq!(
+                active_since(true, true, Slot::Taken { since: t0, at }, t0),
+                Some((at, true)),
+                "the queue is not run time"
+            );
+            assert_eq!(
+                active_since(false, true, Slot::Unknown, t0),
+                Some((t0, false)),
+                "another heavy: capped from the start, never judged"
+            );
+            assert_eq!(
+                active_since(false, false, Slot::Unknown, t0),
+                Some((t0, true)),
+                "a step with no slot runs from its start"
+            );
         }
 
         #[test]
         fn a_run_ended_at_its_limit_says_which_limit_ran_out() {
-            let g = gate("clippy a", "true");
             let done = Done {
                 success: false,
                 how: "timed out after 700 s of running".into(),
                 tail: String::new(),
                 log: None,
                 timing: Some(Timing { queued: 5.0, ran: 700.0 }),
+                ending: Ending::RowCap,
             };
-            let budget = run_limit_note(
-                &g,
-                Limits {
-                    run: Duration::from_secs(700),
-                    queue: QUEUE_MAX,
-                },
-                &done,
-            );
-            assert_eq!(budget, "; run budget spent after 700 s of run");
-            let own = run_limit_note(
-                &g,
-                Limits {
-                    run: own_run_limit(&g),
-                    queue: QUEUE_MAX,
-                },
-                &done,
-            );
-            assert!(own.contains("own run limit") && own.contains("after 700 s of run"), "{own}");
+            assert_eq!(run_limit_note(&done), "; the row cap of 60 min spent after 700 s of run");
             let other = Done {
                 how: "exit 1".into(),
+                ending: Ending::Exited,
                 ..done
             };
-            assert_eq!(
-                run_limit_note(
-                    &g,
-                    Limits {
-                        run: own_run_limit(&g),
-                        queue: QUEUE_MAX
-                    },
-                    &other
-                ),
-                "",
-                "any other ending says nothing"
-            );
+            assert_eq!(run_limit_note(&other), "", "any other ending says nothing");
         }
 
+        /// Review (a): the build of `heavy` is not bounded by what is left of the run budget (a step that has started is never cut by it):
+        /// with no budget left the build still happens and the step runs.
         #[test]
-        fn a_build_after_the_budget_is_not_started() {
+        fn the_heavy_build_is_not_bounded_by_the_budget_left() {
             let d = tempfile::tempdir().unwrap();
             let ex = repo_with_fake_cargo(d.path(), true);
             let r = decide(&gate("clippy a", "true"), &ex, Duration::ZERO, &test_subject());
-            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
-            assert!(r.reason().contains("budget was spent"), "{}", r.reason());
+            assert_eq!(r.kind(), Kind::Passed, "{r:?}");
+        }
+
+        /// Review (a): a build that timed out is not remembered as the answer for the whole run. The first call (a cargo that outlasts a
+        /// 1 s limit) is an error that names the timeout; the next call, with the cargo healthy again, builds and answers. A build that
+        /// failed for good (a compile error) IS remembered: the second call does not build again.
+        #[test]
+        fn a_heavy_build_that_timed_out_is_tried_again_and_one_that_failed_for_good_is_not() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = repo_with_fake_cargo(d.path(), true);
+            // The fake cargo is a StandIn: its behaviour is the spec beside it. Swap in one that outlasts the limit, then put the
+            // healthy spec back.
+            let spec = d.path().join("fakebin/cargo.stand-in.json");
+            let good = std::fs::read_to_string(&spec).unwrap();
+            paddock_testkit::StandIn::new(&d.path().join("fakebin"), "cargo")
+                .sleeps(Duration::from_secs(20))
+                .install()
+                .unwrap();
+            let has = |p: &str| ex.has_tool(p);
+            let first = heavy_command_for(&ex.root, &ex.env, &has, &ex.built_heavy, Duration::from_secs(1));
+            assert!(first.as_ref().is_err_and(|e| e.contains("timed out")), "{first:?}");
+            assert!(ex.built_heavy.get().is_none(), "a timeout is not remembered");
+            std::fs::write(&spec, good).unwrap();
+            let second = heavy_command_for(&ex.root, &ex.env, &has, &ex.built_heavy, Duration::from_secs(600));
+            assert!(second.is_ok(), "the second call builds it: {second:?}");
+            // a deterministic failure is remembered for the run
+            let d2 = tempfile::tempdir().unwrap();
+            let bad = repo_with_fake_cargo(d2.path(), false);
+            let has2 = |p: &str| bad.has_tool(p);
+            let one = heavy_command_for(&bad.root, &bad.env, &has2, &bad.built_heavy, Duration::from_secs(600));
+            assert!(one.is_err() && bad.built_heavy.get().is_some(), "{one:?}");
+        }
+
+        /// Review (d): the outer limits of a step leave the monitor room to write the stacks (their own bound plus 15 s) before they
+        /// would end the tree themselves.
+        #[test]
+        fn the_grace_beyond_the_row_cap_outlasts_the_stack_capture() {
+            assert!(CAP_GRACE >= stacks::TOTAL_LIMIT + Duration::from_secs(15), "{CAP_GRACE:?}");
+            assert_eq!(own_run_limit(&gate("x", "true")), ROW_CAP + CAP_GRACE);
         }
 
         #[test]

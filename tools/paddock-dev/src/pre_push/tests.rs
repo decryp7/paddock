@@ -749,6 +749,7 @@ impl Exec for Fake {
                 tail: String::new(),
                 log: Some("/logs/x.log".into()),
                 timing: None,
+                ending: crate::pre_push::exec::Ending::RowCap,
             });
         }
         if self.no_slot.contains(&g.id) {
@@ -758,6 +759,7 @@ impl Exec for Fake {
                 tail: String::new(),
                 log: Some("/logs/q.log".into()),
                 timing: Some(Timing { queued: 31.0, ran: 0.0 }),
+                ending: crate::pre_push::exec::Ending::QueueLimit,
             });
         }
         let fail = self.fail.iter().any(|f| f == &g.id);
@@ -767,6 +769,7 @@ impl Exec for Fake {
             tail: if fail { "error: boom".into() } else { String::new() },
             log: None,
             timing: self.timing,
+            ending: crate::pre_push::exec::Ending::Exited,
         })
     }
 }
@@ -898,6 +901,7 @@ fn a_docker_failure_names_its_cause() {
                 tail: String::new(),
                 log: None,
                 timing: None,
+                ending: crate::pre_push::exec::Ending::Exited,
             })
         }
     }
@@ -937,6 +941,33 @@ fn the_conformance_gate_runs_the_contracts_list_and_a_broken_contract_is_broken_
             .iter()
             .any(|p| matches!(p, Planned::Broken { id, .. } if id == "conformance"))
     );
+}
+
+/// The host and xwin Clippy and the doctests read cargo's JSON messages for progress and name the build folder they use (so a cold one is
+/// told from a warm one); every other row reads output lines. The folder is the one the row is given (`--config build.target-dir`).
+#[test]
+fn the_cargo_rows_read_json_progress_and_name_their_build_folder() {
+    use crate::pre_push::progress::Progress;
+    let mut f = facts();
+    f.target_dir = None;
+    f.kept_targets = Some("/kept".into());
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &f);
+    let get = |id: &str| {
+        planned
+            .iter()
+            .find_map(|p| match p {
+                Planned::Run(g) if g.id == id => Some(g.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no row {id}"))
+    };
+    for id in ["clippy crates", "doctest crates", "clippy-windows crates"] {
+        assert_eq!(get(id).progress, Progress::CargoJson, "{id}");
+    }
+    assert_eq!(get("clippy crates").build_dir.as_deref(), Some("/kept/crates"));
+    assert_eq!(get("clippy-windows crates").build_dir.as_deref(), Some("/kept/crates/xwin"));
+    assert_eq!(get("conformance-tests").progress, Progress::Lines);
+    assert_eq!(get("conformance-tests").build_dir, None);
 }
 
 fn crates_gates() -> Vec<Planned> {
@@ -985,6 +1016,8 @@ fn a_crashed_runner_and_a_row_that_never_ran_are_not_measured() {
         assert!(!matches!(v.kind(), Kind::Passed | Kind::Failed), "{id}: {v:?}");
     }
     assert!(matches!(nm(&verdicts(&rows)["fmt crates"]), Some((reason, _)) if reason.contains("budget")));
+    let fmt = &rows.iter().find(|(id, _)| id == "fmt crates").expect("the row").1;
+    assert_eq!(fmt.ended_by.as_deref(), Some("budget"), "the summary names what stopped it");
     // A signal stops the rest the same way.
     let fake = Fake::default();
     let rows = run_all_with(
@@ -1033,6 +1066,7 @@ fn ran_ok(id: &str, secs: f64) -> Row {
         tail: String::new(),
         log: None,
         timing: None,
+        ending: crate::pre_push::exec::Ending::Exited,
     };
     Row::from_run(id, &test_subject(), &done, "", secs)
 }
@@ -1046,6 +1080,7 @@ fn a_row_from_a_run_reads_its_exit() {
         tail: String::new(),
         log: None,
         timing: None,
+        ending: crate::pre_push::exec::Ending::Exited,
     };
     assert_eq!(
         Row::from_run("g", &test_subject(), &run(true), "g (exit 1)", 1.0).kind(),
@@ -2697,6 +2732,7 @@ impl Exec for Queued {
                 queued: self.queued.as_secs_f64(),
                 ran: 0.0,
             }),
+            ending: crate::pre_push::exec::Ending::Exited,
         })
     }
 }
@@ -2714,6 +2750,8 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
         next: "fix it".into(),
         workspaces: Vec::new(),
         notice: None,
+        progress: crate::pre_push::progress::Progress::Lines,
+        build_dir: None,
     })
 }
 
@@ -3408,6 +3446,9 @@ mod deny_row {
             live_slot: Default::default(),
             priority: false,
             wrapper: crate::local_sccache::Lazy::off(),
+            watchdog: Arc::new(crate::pre_push::watchdog::Never),
+            row_cap: crate::pre_push::exec::ROW_CAP,
+            state: d.join("state"),
         }
     }
 

@@ -108,6 +108,9 @@ pub struct Ticket {
     pub name: String,
     /// The epoch (line 4), when written.
     pub epoch: Option<u64>,
+    /// The run is a container run (line 5, `container`; only a container run writes it, so every other ticket keeps the shell plock's
+    /// four lines): the queue's wait-for graph needs it, because a container run does not wait for a drain.
+    pub container: bool,
 }
 
 /// Parses a ticket.
@@ -120,12 +123,14 @@ pub fn parse_ticket(bytes: &[u8]) -> Ticket {
         pid_text,
         name: get(2),
         epoch: digits(&get(3)),
+        container: get(4) == "container",
     }
 }
 
 /// Formats a ticket.
-pub fn format_ticket(pid: u32, start_text: &str, name: &str, epoch: u64) -> String {
-    format!("{pid}\n{start_text}\n{}\n{epoch}\n", crate::timefmt::oneline(name))
+pub fn format_ticket(pid: u32, start_text: &str, name: &str, epoch: u64, container: bool) -> String {
+    let extra = if container { "container\n" } else { "" };
+    format!("{pid}\n{start_text}\n{}\n{epoch}\n{extra}", crate::timefmt::oneline(name))
 }
 
 /// The epoch of a high marker (line 3).

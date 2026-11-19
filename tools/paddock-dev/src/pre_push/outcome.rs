@@ -150,6 +150,7 @@ mod tests {
             tail: String::new(),
             log: None,
             timing: None,
+            ending: crate::pre_push::exec::Ending::Exited,
         };
         Row::from_run("x", &subject(), &done, "", 1.0)
     }
