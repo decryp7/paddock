@@ -69,12 +69,12 @@ impl Validate for String {
     }
 }
 
+/// A list of ids (a bulk call): only its length is checked here, with the same function and bound as the server
+/// ([`pitwall_core::mgmt::check_bulk`]). An id that is too long or malformed is that id's own result from the server
+/// (`invalid`), never a refusal of the whole call (ADR 0108: errors per item).
 impl Validate for Vec<String> {
     fn validate(&self, field: &str) -> Result<(), CommandError> {
-        if self.len() > pitwall_core::mgmt::MAX_BULK_IDS {
-            return Err(bad(field, "too many items in one call"));
-        }
-        self.iter().try_for_each(|s| s.validate(field))
+        pitwall_core::mgmt::check_bulk(self.len(), field)
     }
 }
 
@@ -496,15 +496,23 @@ mod tests {
         assert!(Some("a\nb".to_string()).validate("p").is_err());
     }
 
-    /// A list of ids (a bulk call) is bounded and each id is checked like a single one (ADR 0108).
+    /// A list of ids (a bulk call) is bounded as a whole; a bad id in it is not refused here but answered by the server as that
+    /// id's own result (ADR 0108), so one bad id never fails the rest.
     #[test]
-    fn a_list_of_ids_is_bounded_and_each_id_checked() {
+    fn a_list_of_ids_is_bounded_and_a_bad_id_is_left_to_the_server() {
         assert!(vec!["a".to_string(), "b".to_string()].validate("ids").is_ok());
         assert!(Vec::<String>::new().validate("ids").is_ok());
         let many = vec!["a".to_string(); pitwall_core::mgmt::MAX_BULK_IDS + 1];
-        assert_eq!(many.validate("ids").unwrap_err().code, ErrorCode::BadRequest);
-        let e = vec!["ok".to_string(), "a\u{0}b".to_string()].validate("ids").unwrap_err();
-        assert!(e.message.starts_with("ids:"), "{}", e.message);
+        let e = many.validate("ids").unwrap_err();
+        assert_eq!(e.code, ErrorCode::BadRequest);
+        assert_eq!(
+            e.message,
+            pitwall_core::mgmt::check_bulk(many.len(), "ids").unwrap_err().message,
+            "the server's text"
+        );
+        assert!(vec!["ok".to_string(), "a\u{0}b".to_string(), "x".repeat(MAX_TEXT + 1)]
+            .validate("ids")
+            .is_ok());
     }
 
     #[test]

@@ -11,7 +11,7 @@
 use pitwall_core::cache::{CacheStore, Expiry, Key, Kind, KindStats, Limits, Meta, Scope};
 use pitwall_core::time::Millis;
 use rusqlite::{params, Connection, OpenFlags};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -32,12 +32,15 @@ type Pending = Arc<Mutex<HashMap<(Kind, Key), (Vec<u8>, Meta, Millis)>>>;
 type Item = (Key, Vec<u8>, Meta);
 
 enum Job {
-    /// A batch of stores of one kind: one transaction, one trim.
+    /// A batch of stores of one kind: one transaction, one trim. All or nothing, atomic by design: if one row fails the
+    /// transaction rolls back and none of the batch is stored (the error is kept for [`SqliteStore::last_error`]); a cache may
+    /// lose a store, so there are no per-item errors (PRINCIPLES: Bulk APIs, atomic by design).
     PutMany(Kind, Vec<Item>, Millis),
     /// Hit counts of a batch of reads: one transaction.
     TouchMany(Kind, Vec<Key>, Millis),
-    /// Expired entries found by a read: one transaction.
-    DeleteMany(Kind, Vec<Key>),
+    /// Expired entries found by a read, each with the `created` time the reader saw: one transaction. A row stored again since
+    /// has another `created` and stays.
+    DeleteMany(Kind, Vec<(Key, i64)>),
     Clear(Scope, SyncSender<u64>),
     Sweep(Kind, Millis, u64, SyncSender<u64>),
     Trim(Kind),
@@ -159,7 +162,7 @@ impl SqliteStore {
         Ok(s)
     }
 
-    /// The last write error, if any (cleared by the next successful write).
+    /// The last write or read error, if any (a write error is cleared by the next successful write).
     pub fn last_error(&self) -> Option<String> {
         lock(&self.last_error).clone()
     }
@@ -229,16 +232,7 @@ fn writer_loop(c: &Connection, rx: &Receiver<Job>, limits: &Limiter, pending: &P
             ),
             Job::DeleteMany(kind, keys) => {
                 sizes.remove(&kind);
-                record(
-                    err,
-                    in_tx(c, |c| {
-                        let mut q = c.prepare_cached("DELETE FROM entries WHERE kind=?1 AND key=?2")?;
-                        for key in &keys {
-                            q.execute(params![kind.name(), key.as_slice()])?;
-                        }
-                        Ok(())
-                    }),
-                );
+                record(err, in_tx(c, |c| delete_expired(c, kind, &keys)));
             }
             Job::Clear(scope, reply) => {
                 sizes.clear();
@@ -269,6 +263,16 @@ fn writer_loop(c: &Connection, rx: &Receiver<Job>, limits: &Limiter, pending: &P
             }
         }
     }
+}
+
+/// Deletes the entries a reader found expired, only while they are still the rows it saw (same `created`): a value stored
+/// again after the read is fresh and stays.
+fn delete_expired(c: &Connection, kind: Kind, seen: &[(Key, i64)]) -> rusqlite::Result<()> {
+    let mut q = c.prepare_cached("DELETE FROM entries WHERE kind=?1 AND key=?2 AND created=?3")?;
+    for (key, created) in seen {
+        q.execute(params![kind.name(), key.as_slice(), created])?;
+    }
+    Ok(())
 }
 
 /// What `kind` holds, in bytes: the running figure, read from the table once.
@@ -427,22 +431,25 @@ impl CacheStore for SqliteStore {
                     }
                     Ok(())
                 })();
-                // A read that fails is a miss, as for a single key.
-                let _ = read;
+                // A read that fails is a miss, as for a single key, but not a silent one: the cause is kept for `last_error`.
+                if let Err(e) = read {
+                    *lock(&self.last_error) = Some(format!("cache read failed: {e}"));
+                }
             }
         }
         let (mut touched, mut expired) = (vec![], vec![]);
+        let (mut seen_touched, mut seen_expired): (HashSet<Key>, HashSet<Key>) = (HashSet::new(), HashSet::new());
         for i in want {
             let Some((value, created, used)) = rows.get(&keys[i]) else {
                 continue;
             };
             if exp.expired(*created as Millis, *used as Millis, now) {
-                if !expired.contains(&keys[i]) {
-                    expired.push(keys[i]);
+                if seen_expired.insert(keys[i]) {
+                    expired.push((keys[i], *created));
                 }
             } else {
                 out[i] = Some(value.clone());
-                if !touched.contains(&keys[i]) {
+                if seen_touched.insert(keys[i]) {
                     touched.push(keys[i]);
                 }
             }
@@ -460,7 +467,7 @@ impl CacheStore for SqliteStore {
         self.put_many(kind, vec![(key, value, meta)], now);
     }
 
-    /// One job for the whole batch: one transaction, one trim.
+    /// One job for the whole batch: one transaction, one trim. All or nothing, atomic by design (see [`Job::PutMany`]).
     fn put_many(&self, kind: Kind, items: Vec<(Key, Vec<u8>, Meta)>, now: Millis) {
         let Some(l) = self.limits_of(kind) else { return };
         let items: Vec<Item> = items.into_iter().filter(|(_, v, _)| v.len() as u64 <= l.max_bytes).collect();
@@ -627,7 +634,10 @@ mod tests {
         s.flush();
         assert_eq!(spy.commits() - commits, 1, "one commit for 60 vectors");
         let used = spy.all_statements() - statements;
-        assert!(used <= 60 + 6, "one insert per row and a handful around them, got {used}");
+        assert!(
+            (60..=60 + 6).contains(&used),
+            "one insert per row (the floor shows the spy counts them) and a handful around them, got {used}"
+        );
         assert_eq!(s.stats(Kind::Embedding).entries, 60);
         assert!(s.last_error().is_none());
     }
@@ -651,6 +661,10 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let (s, spy) = open_spied(d.path(), 1_000_000);
         let before = spy.statements("sum(size)");
+        assert!(
+            before >= 1,
+            "the spy sees the sum the open made (else the 0 below proves nothing), got {before}"
+        );
         for round in 0..5u8 {
             s.put_many(Kind::Embedding, batch(round * 10, 10, 16), 5);
             s.flush();
@@ -760,6 +774,47 @@ mod tests {
         assert!(got.iter().all(Option::is_none), "created at 10, ttl 1000");
         s.flush();
         assert_eq!(s.stats(Kind::Response).entries, 0);
+    }
+
+    /// An expired entry found by a read is deleted only while it is still the row the reader saw: a value stored again
+    /// meanwhile has another `created` and stays (and a stale one goes), so a fresh value is never removed.
+    #[test]
+    fn deleting_an_expired_entry_leaves_a_value_stored_again_since() {
+        let d = tempfile::tempdir().unwrap();
+        let s = open(d.path(), 10_000);
+        s.put_many(Kind::Response, batch(1, 2, 4), 10);
+        s.flush();
+        // The reader saw [1] and [2] created at 10; [2] is stored again (created 900) before the delete job runs.
+        s.put_many(Kind::Response, batch(2, 1, 4), 900);
+        s.flush();
+        let c = Connection::open(d.path().join("cache.sqlite")).unwrap();
+        in_tx(&c, |c| delete_expired(c, Kind::Response, &[([1; 32], 10), ([2; 32], 10)])).unwrap();
+        let left: Vec<Vec<u8>> = c
+            .prepare("SELECT key FROM entries WHERE kind='response' ORDER BY key")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(left, vec![vec![2u8; 32]], "the stale row went, the fresh one stayed");
+    }
+
+    /// A batch read that fails is a miss in place, and the cause is kept for `last_error` instead of being dropped.
+    #[test]
+    fn a_failed_batch_read_is_a_miss_and_is_recorded() {
+        let d = tempfile::tempdir().unwrap();
+        let s = open(d.path(), 10_000);
+        s.put_many(Kind::Embedding, batch(1, 2, 4), 10);
+        s.flush();
+        assert!(s.last_error().is_none());
+        Connection::open(d.path().join("cache.sqlite"))
+            .unwrap()
+            .execute_batch("ALTER TABLE entries RENAME TO gone")
+            .unwrap();
+        let got = s.get_many(Kind::Embedding, &[[1; 32], [2; 32]], 11);
+        assert!(got.iter().all(Option::is_none));
+        let e = s.last_error().expect("the failed read is recorded");
+        assert!(e.contains("cache read failed") && e.contains("no such table"), "{e}");
     }
 
     #[test]

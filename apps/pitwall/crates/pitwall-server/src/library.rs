@@ -152,10 +152,11 @@ fn delete_in(all: &[LocalFile], id: &ModelId) -> std::io::Result<()> {
     let f = all
         .iter()
         .find(|f| &f.id == id)
-        .ok_or_else(|| std::io::Error::other("no such model"))?;
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no such model"))?;
     let dir = f.path.parent().map(Path::to_path_buf).unwrap_or_default();
     let name = f.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let base = pitwall_core::ids::strip_split_suffix(name.trim_end_matches(".gguf")).to_string();
+    let mut removed = 0usize;
     for e in std::fs::read_dir(&dir)?.filter_map(Result::ok) {
         let n = e.file_name().to_string_lossy().into_owned();
         let stem = n.trim_end_matches(".gguf");
@@ -164,7 +165,15 @@ fn delete_in(all: &[LocalFile], id: &ModelId) -> std::io::Result<()> {
                 || (pitwall_core::ids::split_part(stem).is_some() && pitwall_core::ids::strip_split_suffix(stem) == base))
         {
             std::fs::remove_file(e.path())?;
+            removed += 1;
         }
+    }
+    if removed == 0 {
+        // The scan saw the model, but its files are gone now (deleted meanwhile): nothing was deleted by this call.
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "the model's files are already gone",
+        ));
     }
     let _ = std::fs::remove_file(sidecar_path(&f.path));
     let _ = std::fs::remove_dir(&dir);
@@ -249,13 +258,26 @@ impl Library {
     }
 
     /// Delete many models, scanning the folder once. One result per id, in request order: a model that is gone or cannot be
-    /// removed fails alone. A model deleted earlier in the same call counts as gone for a repeated id.
+    /// removed fails alone. An id that appears again in the same call is a `NotFound` the second time (the call keeps a set
+    /// of the ids it has handled, so the answer does not depend on what the stale scan still lists).
     pub fn delete_many(&self, ids: &[ModelId]) -> Vec<std::io::Result<()>> {
         if ids.is_empty() {
             return vec![];
         }
         let all = self.local();
-        ids.iter().map(|id| delete_in(&all, id)).collect()
+        let mut handled: std::collections::HashSet<&ModelId> = std::collections::HashSet::new();
+        ids.iter()
+            .map(|id| {
+                if handled.insert(id) {
+                    delete_in(&all, id)
+                } else {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "the model is listed twice in this call",
+                    ))
+                }
+            })
+            .collect()
     }
 
     /// Hugging Face search (GGUF models).
@@ -666,6 +688,34 @@ mod tests {
         );
         let left: Vec<_> = lib.local().into_iter().map(|f| f.id).collect();
         assert_eq!(left, [keep]);
+    }
+
+    /// A repeated id answers `NotFound` the second time, and a model whose files vanished after the scan is `NotFound` too,
+    /// never a silent ok that deleted nothing.
+    #[test]
+    fn a_repeated_or_vanished_model_is_not_found_not_ok() {
+        use std::io::ErrorKind;
+        let d = tempfile::tempdir().unwrap();
+        let lib = Library::new(Dirs::at(d.path()), Egress::unreachable());
+        let dir = lib.dirs.models().join("o/a");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a-q4_k_m.gguf"), gguf_with("llama", &[])).unwrap();
+        let id = ModelId::from_file_name("a-q4_k_m.gguf").unwrap();
+        let kinds: Vec<_> = lib
+            .delete_many(&[id.clone(), id.clone()])
+            .into_iter()
+            .map(|r| r.map_err(|e| e.kind()))
+            .collect();
+        assert_eq!(kinds, [Ok(()), Err(ErrorKind::NotFound)]);
+        // Scanned, then the file goes: nothing matches any more.
+        let other = lib.dirs.models().join("o/b");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("b-q4_k_m.gguf"), gguf_with("llama", &[])).unwrap();
+        let all = lib.local();
+        std::fs::remove_file(other.join("b-q4_k_m.gguf")).unwrap();
+        let b = ModelId::from_file_name("b-q4_k_m.gguf").unwrap();
+        assert_eq!(delete_in(&all, &b).unwrap_err().kind(), ErrorKind::NotFound);
+        assert_eq!(delete_in(&all, &id).unwrap_err().kind(), ErrorKind::NotFound, "unknown id");
     }
 
     #[test]

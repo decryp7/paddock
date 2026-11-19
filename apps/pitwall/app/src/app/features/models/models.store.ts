@@ -1,11 +1,13 @@
 import { computed, inject } from '@angular/core';
-import { splitItemResults } from '@decryp7/paddock-ui/ipc';
+import { splitItemResults, type ItemResult } from '@decryp7/paddock-ui/ipc';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import type { CommandError, DiskUsage, EnginePinState, HfModel, HfRepo, InstalledBuild, LocalModel, PacksInfo, PinChange, QuantVariant, Recommendation, SlotsChange } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
+import { APP_COMMANDS } from '../../generated/app-commands';
 import { toCommandError } from '../../core/command-error';
 import { Toasts } from '../../core/toasts';
 import { bytes, slotsText } from '../../shared/format';
+import { chunkIds } from './chunk-ids';
 
 interface ModelsState {
   library: LocalModel[];
@@ -250,11 +252,14 @@ export const ModelsStore = signalStore(
         const models = store.unusedModels();
         if (!models.length) return;
         const ids = models.map((m) => m.id);
-        // One call for all of them (one scan of the library on the server); each model answers for itself.
+        // One call for all of them (one scan of the library on the server); each model answers for itself. A list too large for
+        // one call (the command's request limit, the server's bound) goes in as few calls as fit, half the limit each.
         await act(
           'cleanup',
           async () => {
-            const { ok, failed } = splitItemResults(ids, await backend.deleteModels(ids));
+            const results: ItemResult<null>[] = [];
+            for (const chunk of chunkIds(ids, APP_COMMANDS.delete_models.limit / 2)) results.push(...(await backend.deleteModels(chunk)));
+            const { ok, failed } = splitItemResults(ids, results);
             const freed = ok.reduce((sum, { item }) => sum + (models.find((m) => m.id === item)?.sizeBytes ?? 0), 0);
             if (failed.length) {
               const first = failed[0]!;
@@ -265,7 +270,7 @@ export const ModelsStore = signalStore(
           },
           (freed) => `Freed ${bytes(freed)}.`,
         );
-        // Reload either way: a failure part-way still deleted the models before it.
+        // Reload either way: each model answers for itself, so the ones that were deleted are gone even when others failed.
         await load();
       },
     };

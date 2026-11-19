@@ -381,3 +381,31 @@ async fn the_clean_up_pass_removes_stale_prefix_files_and_keeps_fresh_answers() 
     let info = h.rpc("cache_info", json!({})).await.json();
     assert!(info["nextSweepAt"].as_u64().unwrap() > 0 && info["keepWarmFiles"] == 0);
 }
+
+/// PW-2 budget on the request path (ADR 0108): N inputs through the embeddings endpoint with the disk cache on are exactly
+/// one bulk read and one bulk write of the cache, not one call per input; an all-hit request is one read and no write.
+#[tokio::test]
+async fn an_embeddings_request_reads_and_writes_the_disk_cache_once() {
+    let h = harness(false).await;
+    let key = h.make_key("Budget Probe").await;
+    let inputs = ["a", "bb", "ccc", "dddd", "eeeee", "ffffff"];
+    let before = h.st.caches.store_calls();
+    let first = embed(&h, &key, &inputs, &[]).await;
+    assert_eq!(
+        (first.status, first.header("x-pitwall-cache")),
+        (200, Some("miss")),
+        "{}",
+        first.body
+    );
+    let after = h.st.caches.store_calls();
+    assert_eq!(after.reads - before.reads, 1, "one bulk read for {} inputs", inputs.len());
+    assert_eq!(after.writes - before.writes, 1, "one bulk write for {} vectors", inputs.len());
+    let again = embed(&h, &key, &inputs, &[]).await;
+    assert_eq!(again.header("x-pitwall-cache"), Some("hit"));
+    let last = h.st.caches.store_calls();
+    assert_eq!(
+        (last.reads - after.reads, last.writes - after.writes),
+        (1, 0),
+        "all hits: one read, nothing to store"
+    );
+}

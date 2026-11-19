@@ -147,7 +147,9 @@ describe('MockBackend', () => {
 
   it('manages the model library', async () => {
     const mock = new MockBackend({ now: clock });
-    await expect(mock.deleteModel('qwen3.5-9b-q4_k_m')).rejects.toMatchObject({ code: 'conflict' });
+    // One code for the single and the bulk delete of a loaded model.
+    await expect(mock.deleteModel('qwen3.5-9b-q4_k_m')).rejects.toMatchObject({ code: 'busy', message: 'Unload the model before deleting it.' });
+    expect(await mock.deleteModels(['qwen3.5-9b-q4_k_m'])).toEqual([{ err: { code: 'busy', message: 'Unload the model before deleting it.', retryable: false } }]);
     await mock.deleteModel('qwen3.5-2b-q8_0');
     expect((await mock.localModels()).length).toBe(7);
     await mock.loadModel('gemma-4-12b-it-q4_k_m');

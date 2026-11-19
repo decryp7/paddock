@@ -3,6 +3,7 @@ import type { PitwallBackend } from '../../core/backend';
 import { provideCountingBackend, expectBackendCalls } from '@decryp7/paddock-ui/ipc/testing';
 import { BACKEND } from '../../core/backend';
 import { MockBackend, type MockOptions } from '../../core/mock-backend';
+import { APP_COMMANDS } from '../../generated/app-commands';
 import { Toasts } from '../../core/toasts';
 import { ModelsStore } from './models.store';
 
@@ -163,6 +164,30 @@ describe('ModelsStore', () => {
     await expectBackendCalls(counter, 1, () => store.cleanUnused(), 'deleteModels');
     expect(counter.count('deleteModel')).toBe(0);
     expect(store.library().some((m) => unused.includes(m.id))).toBe(false);
+    expect(toasts.toasts().at(-1)?.message).toMatch(/^Freed /);
+  });
+
+  /** A list too large for one call goes in chunks that each fit the command's request limit, in order, and the results agree. */
+  it('cleans up a very long list in chunks, each under the call limit', async () => {
+    const mock = new MockBackend();
+    const base = (await mock.localModels())[1]!;
+    const many = Array.from({ length: 1300 }, (_, i) => ({ ...base, id: `model-${i}`.padEnd(200, 'x') }));
+    const disk = await mock.diskUsage();
+    vi.spyOn(mock, 'localModels').mockResolvedValue(many);
+    vi.spyOn(mock, 'diskUsage').mockResolvedValue({ ...disk, unused: many.map((m) => m.id) });
+    const sent: string[][] = [];
+    vi.spyOn(mock, 'deleteModels').mockImplementation(async (ids) => {
+      sent.push([...ids]);
+      return ids.map(() => ({ ok: null }));
+    });
+    const { store, toasts } = setup(mock);
+    await store.load();
+    await store.cleanUnused();
+    expect(sent.length).toBeGreaterThan(1);
+    for (const ids of sent) {
+      expect(new TextEncoder().encode(JSON.stringify({ ids })).length).toBeLessThan(APP_COMMANDS.delete_models.limit);
+    }
+    expect(sent.flat()).toEqual(many.map((m) => m.id));
     expect(toasts.toasts().at(-1)?.message).toMatch(/^Freed /);
   });
 

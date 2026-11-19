@@ -96,44 +96,124 @@ pub fn undo_cancelled_load(st: &AppState, id: &ModelId, loaded_here: bool) {
     }
 }
 
-/// `delete_models` (ADR 0108, PW-1): unloads and deletes many models with one scan of the library and answers one
-/// `ItemResult` per id, in request order. A bad id or a model that is gone fails alone.
-async fn delete_models(st: &AppState, a: &Value) -> R<Value> {
+/// A failed removal as the item's own error, by what the OS said: a model that is gone is `notFound`, one that may not be
+/// removed `denied`, anything else `io` (retryable by default).
+fn delete_error(e: &std::io::Error) -> paddock_commands::CommandError {
+    use paddock_commands::CommandError as ItemError;
+    use std::io::ErrorKind;
+    match e.kind() {
+        ErrorKind::NotFound => ItemError::not_found(e.to_string()),
+        ErrorKind::PermissionDenied => ItemError::denied(e.to_string()),
+        _ => ItemError::io(e.to_string()),
+    }
+    .field("ids")
+}
+
+/// Unloads and deletes `ids` (ADR 0108, PW-1): one result per id, in order, from one scan of the library. A model a request is
+/// using answers `busy` and is neither unloaded nor deleted; every other id is marked as being deleted (loads of it are refused
+/// until its files are gone, see `Serving::begin_delete`), then removed on a blocking thread. The one path of `delete_model` and
+/// `delete_models`.
+async fn delete_ids(st: &Arc<AppState>, ids: Vec<ModelId>) -> R<Vec<paddock_commands::ItemResult<()>>> {
+    use paddock_commands::{CommandError as ItemError, ItemResult};
+    use std::collections::HashMap;
+    let mut out: Vec<Option<ItemResult<()>>> = vec![None; ids.len()];
+    let mut guards = HashMap::new();
+    let mut refused: HashMap<ModelId, ItemError> = HashMap::new();
+    let mut slots = vec![];
+    for (i, id) in ids.iter().enumerate() {
+        if let Some(why) = refused.get(id) {
+            out[i] = Some(ItemResult::Err(why.clone()));
+        } else if guards.contains_key(id) {
+            // A repeated id goes to the library, which answers it `notFound` the second time.
+            slots.push(i);
+        } else {
+            match st.serving.begin_delete(id) {
+                Ok(g) => {
+                    guards.insert(id.clone(), g);
+                    st.serving.retry(id);
+                    slots.push(i);
+                }
+                Err(why) => {
+                    let e = match why {
+                        crate::serving::DeleteRefused::Busy => {
+                            ItemError::busy(format!("{id} is in use by a running request; try again when it ends"))
+                        }
+                        crate::serving::DeleteRefused::AlreadyDeleting => ItemError::busy(format!("{id} is already being deleted")),
+                    }
+                    .field("ids");
+                    refused.insert(id.clone(), e.clone());
+                    out[i] = Some(ItemResult::Err(e));
+                }
+            }
+        }
+    }
+    let owned: Vec<ModelId> = slots.iter().map(|i| ids[*i].clone()).collect();
+    let state = st.clone();
+    let done = tokio::task::spawn_blocking(move || {
+        let results = state.library.delete_many(&owned);
+        for (id, r) in owned.iter().zip(&results) {
+            if r.is_ok() {
+                state.invalidate_model(id);
+            }
+        }
+        results
+    })
+    .await
+    .map_err(|e| err(mgmt::ErrorCode::Internal, e.to_string()))?;
+    drop(guards);
+    for (i, r) in slots.into_iter().zip(done) {
+        out[i] = Some(match r {
+            Ok(()) => ItemResult::Ok(()),
+            Err(e) => ItemResult::Err(delete_error(&e)),
+        });
+    }
+    Ok(out
+        .into_iter()
+        .map(|r| r.unwrap_or_else(|| ItemResult::Err(ItemError::internal("no result"))))
+        .collect())
+}
+
+/// `delete_models`: a bad id fails alone (`invalid`), the others go through [`delete_ids`].
+async fn delete_models(st: &Arc<AppState>, a: &Value) -> R<Value> {
     use paddock_commands::{CommandError as ItemError, ItemResult};
     let raw: Vec<String> = arg(a, "ids")?;
-    paddock_commands::check_batch(raw.len(), mgmt::MAX_BULK_IDS, "ids").map_err(|e| err(mgmt::ErrorCode::BadRequest, e.message))?;
+    mgmt::check_bulk(raw.len(), "ids")?;
     let mut out: Vec<Option<ItemResult<()>>> = vec![None; raw.len()];
-    let mut ids = vec![];
-    let mut slots = vec![];
+    let (mut ids, mut slots) = (vec![], vec![]);
     for (i, s) in raw.iter().enumerate() {
         match ModelId::parse(s) {
             Ok(id) => {
-                st.serving.unload(&id, pitwall_core::memory::ReleaseReason::Manual);
-                st.serving.retry(&id);
                 ids.push(id);
                 slots.push(i);
             }
             Err(e) => out[i] = Some(ItemResult::Err(ItemError::invalid(e.to_string()).field("ids"))),
         }
     }
-    let library = st.library.clone();
-    let owned = ids.clone();
-    let done = tokio::task::spawn_blocking(move || library.delete_many(&owned))
-        .await
-        .map_err(|e| err(mgmt::ErrorCode::Internal, e.to_string()))?;
-    for ((i, id), r) in slots.into_iter().zip(&ids).zip(done) {
-        out[i] = Some(match r {
-            Ok(()) => {
-                st.invalidate_model(id);
-                ItemResult::Ok(())
-            }
-            Err(e) => ItemResult::Err(ItemError::not_found(e.to_string()).field("ids")),
-        });
+    for (i, r) in slots.into_iter().zip(delete_ids(st, ids).await?) {
+        out[i] = Some(r);
     }
     ok(out
         .into_iter()
-        .map(|r| r.unwrap_or(ItemResult::Err(ItemError::internal("no result"))))
+        .map(|r| r.unwrap_or_else(|| ItemResult::Err(ItemError::internal("no result"))))
         .collect::<Vec<_>>())
+}
+
+/// `delete_model`: the bulk path with one id; its failure is the command's error, in the code the item carried.
+async fn delete_model(st: &Arc<AppState>, id: ModelId) -> R<Value> {
+    use paddock_commands::{ErrorCode as Item, ItemResult};
+    match delete_ids(st, vec![id]).await?.pop() {
+        Some(ItemResult::Ok(())) => ok(()),
+        Some(ItemResult::Err(e)) => Err(err(
+            match e.code {
+                Item::NotFound => mgmt::ErrorCode::NotFound,
+                Item::Busy => mgmt::ErrorCode::Busy,
+                Item::Denied => mgmt::ErrorCode::Forbidden,
+                _ => mgmt::ErrorCode::Internal,
+            },
+            e.message,
+        )),
+        None => Err(err(mgmt::ErrorCode::Internal, "no result")),
+    }
 }
 
 fn model(a: &Value, name: &str) -> R<ModelId> {
@@ -307,14 +387,7 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
                 Err(err(mgmt::ErrorCode::NotFound, "no such download"))
             }
         }
-        "delete_model" => {
-            let id = model(a, "id")?;
-            st.serving.unload(&id, pitwall_core::memory::ReleaseReason::Manual);
-            st.serving.retry(&id);
-            st.library.delete(&id).map_err(|e| err(mgmt::ErrorCode::NotFound, e.to_string()))?;
-            st.invalidate_model(&id);
-            ok(())
-        }
+        "delete_model" => delete_model(st, model(a, "id")?).await,
         "delete_models" => delete_models(st, a).await,
         "load_model" => {
             let id = model(a, "id")?;

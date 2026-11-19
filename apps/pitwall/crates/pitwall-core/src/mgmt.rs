@@ -24,6 +24,12 @@ use serde::{Deserialize, Serialize};
 /// stay bounded).
 pub const MAX_BULK_IDS: usize = 4096;
 
+/// Refuses a bulk call of `len` ids over [`MAX_BULK_IDS`] as a whole (`badRequest`, with the shared `check_batch` text): the
+/// one check the app's commands and the server both make, so they answer alike. Everything about one id is that id's own result.
+pub fn check_bulk(len: usize, field: &str) -> Result<(), CommandError> {
+    paddock_commands::check_batch(len, MAX_BULK_IDS, field).map_err(|e| CommandError::new(ErrorCode::BadRequest, e.message))
+}
+
 /// A typed error for the UI (`CommandError`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(rename_all = "camelCase")]
@@ -1534,6 +1540,15 @@ mod tests {
     use super::*;
 
     use serde_json::json;
+
+    #[test]
+    fn a_bulk_call_over_its_bound_is_refused_as_a_whole_with_the_shared_text() {
+        assert!(check_bulk(0, "ids").is_ok() && check_bulk(MAX_BULK_IDS, "ids").is_ok());
+        let e = check_bulk(MAX_BULK_IDS + 1, "ids").unwrap_err();
+        assert_eq!(e.code, ErrorCode::BadRequest);
+        let shared = paddock_commands::check_batch(MAX_BULK_IDS + 1, MAX_BULK_IDS, "ids").unwrap_err();
+        assert_eq!(e.message, shared.message, "one text for the app and the server");
+    }
 
     #[test]
     fn shapes_match_api_types_ts() {

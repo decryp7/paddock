@@ -764,7 +764,7 @@ export class MockBackend implements PitwallBackend {
 
   deleteModel(id: string): Promise<void> {
     return this.reply('deleteModel', () => {
-      if (this.loaded.some((m) => m.modelId === id)) this.fail('conflict', 'Unload the model before deleting it.');
+      if (this.loaded.some((m) => m.modelId === id)) this.fail('busy', 'Unload the model before deleting it.');
       this.library = this.library.filter((m) => m.id !== id);
     });
   }
