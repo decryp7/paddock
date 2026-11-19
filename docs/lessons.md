@@ -2966,3 +2966,35 @@ ambient load 35 to 40 from other agents): 200 runs of the 4 kept_clone unit test
 executions, 0 failed. **The class is now checked, not reviewed for (ER-21):** `phase::tests::no_source_file_times_a_phase_test_from_its_start_without_a_clock_mark_or_a_reason` fails on any test in a file that uses `ci_host::phase` that calls `.phase(`, `bounded*` or `run_with(` without a `ClockMark` (or `hang_flow`/`hang_env`) or a `// conformance: no-clock-mark - <reason>` line (two exemptions, both fakes with no program); its positive control is `the_audit_of_unmarked_phase_tests_sees_one_and_accepts_a_mark_or_a_reason`. The 20 s general limit is one constant, `phase::HUNG_TEST_GENERAL_LIMIT`. **Rule:** a timed hung-phase test counts every limit it asserts from the stand-in's mark, setup calls included, and proves it
 with a stand-in that is slow before its hang. **Class: work before the hang point of a hung-phase test meeting its limit under load
 (fourth sighting; ADR 0103, second amendment).**
+## Fix item: `./dev ci dispatch --trial --onto` and `--json` (2026-11-18, Windows slowdown trials 8251 to 8257)
+- **`--onto` with a branch pushed after the trial clone was made** ("trial: git rev-parse failed: fatal: Needed a single revision").
+  Already fixed on train 14 in ae662f1e9 (`trial::prepare` fetches an `origin/<branch>` target; test
+  `onto_a_branch_that_is_neither_main_nor_a_train_fetches_it`); the failure came from a `./dev` built from main's tree, which lacks
+  it. Still open: `--onto <sha>` of a commit no fetched ref holds fails with the same bare git message. Next: name the ref to fetch, or
+  say "fetch a branch that holds it" in the error.
+- **`dispatch --json` returns no run id** (`{"ok":true,"dispatched":true,"waitedMs":535}`): Gitea's dispatch endpoint answers with no
+  body, so a script cannot tell its run from another agent's. A script that took the newest run took another agent's ci.yml trial
+  (8256) as its own. Next: read the run list just before and after the dispatch (`client.rs` `runs_page`), return the new run whose
+  `path` is `<workflow>@refs/heads/<ref>` and whose head is the dispatched commit, as `runId`; the dispatch tests' `Script` fake
+  answers both lists. More than an hour with the fake's ordering, so not done in that series.
+**Class: a tool's answer that a caller has to guess around (ER-27).**
+
+## Fix item: the notices generator says STALE, not NOT MEASURED, in a worktree without the root `npm ci` (2026-11-18)
+`./dev merge check HEAD` on perf/git-heavy-tests-2 (the merge of fix/lettre-0.11.24) reported `notices-debrief`, `notices-dyno` and
+`notices-pitwall` STALE. The worktree had only conformance's npm packages (`./dev worktree add` installs those), so
+`scripts/notices.sh` found no licence texts for the npm production packages: a regenerated Dyno file had 242 distinct licence texts
+against the committed 288. After a root `npm ci --ignore-scripts` all three checks were current. Next: the generator's check (and
+`scripts/notices.sh --check`) reports NOT MEASURED, naming `npm ci` as the next step, when `node_modules` lacks a package the
+lockfile lists, instead of comparing an incomplete file. **Class: a check that compares output its missing input made (not
+measured read as a finding; ADR 0089).**
+
+## One test per fixture case, not a loop of cases inside one test (2026-11-19, train 14 run 8271)
+`merge_check::the_remerge_subject_is_read_in_any_case_and_in_the_train_slash_spelling` built four fixture repositories and ran four
+merge checks in one test, and `generated_files_are_skipped_by_every_detector` five. On the Windows runner under the suite's 8 test
+threads they took 44 to 64 s against nextest's 60 s slow-timeout (ci.yml 8271 timed out on the first try; windows-host-probe 8277 on
+train 14 and 8280 with the batched git reader: still 44.4 s FLAKY and 49.3 s). The batched reader did not move them: 116 of the remerge
+test's 188 git starts were its own fixture. Split into one test per case with the same assertions (perf/merge-check-batched-reads
+381137e33), the cases took 12.0 to 19.2 s each and nothing in merge_check went over 27.3 s (8281). **Rule:** a test that repeats an
+expensive fixture for several inputs is one test per input (a shared helper, one `#[test]` each), so a test's time is one case's and
+nextest spreads the cases; never raise the timeout for it (ER-12). **Class: one per-item cost summed into one bound** (the same class
+as ADR 0108's one git start per item, here inside a test).

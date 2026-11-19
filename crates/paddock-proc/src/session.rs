@@ -28,6 +28,20 @@ use std::time::{Duration, Instant};
 
 /// Most bytes of the child's error output kept for messages.
 const STDERR_KEPT: usize = 16 * 1024;
+/// How many chunks of the child's output (each at most [`CHUNK`]) wait between the thread that reads its pipe and the caller: a
+/// child that writes faster than the caller reads is then held by its pipe, never buffered without bound (1 MiB at most here).
+pub(crate) const QUEUED_CHUNKS: usize = 16;
+/// The most one read of the child's pipe takes.
+const CHUNK: usize = 64 * 1024;
+
+/// What the pipe-reading thread did, for the tests: chunks queued now and at most, and whether it found the queue full.
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct QueueProbe {
+    pub(crate) queued: std::sync::atomic::AtomicUsize,
+    pub(crate) peak: std::sync::atomic::AtomicUsize,
+    pub(crate) blocked: std::sync::atomic::AtomicBool,
+}
 /// How long [`Session::finish`] waits for the child to end on its own once its input is closed, before it ends the tree.
 pub const FINISH_GRACE: Duration = Duration::from_secs(2);
 
@@ -145,6 +159,8 @@ pub struct Session {
     stderr: Arc<Mutex<Vec<u8>>>,
     limits: SessionLimits,
     ended: bool,
+    #[cfg(test)]
+    probe: Arc<QueueProbe>,
 }
 
 impl std::fmt::Debug for Session {
@@ -177,16 +193,39 @@ impl Session {
         })?;
         let root = ProcessId::of(child.id());
         let stdin = child.stdin.take();
-        let (tx, chunks) = mpsc::channel();
+        let (tx, chunks) = mpsc::sync_channel::<Vec<u8>>(QUEUED_CHUNKS);
+        #[cfg(test)]
+        let probe = Arc::new(QueueProbe::default());
         if let Some(mut out) = child.stdout.take() {
+            #[cfg(test)]
+            let probe = probe.clone();
             std::thread::spawn(move || {
-                let mut chunk = vec![0u8; 64 * 1024];
+                let mut chunk = vec![0u8; CHUNK];
                 loop {
                     match out.read(&mut chunk) {
                         Ok(0) | Err(_) => break,
                         Ok(n) => {
-                            if tx.send(chunk[..n].to_vec()).is_err() {
+                            let sent = match tx.try_send(chunk[..n].to_vec()) {
+                                Ok(()) => Ok(()),
+                                Err(mpsc::TrySendError::Full(c)) => {
+                                    #[cfg(test)]
+                                    probe
+                                        .blocked
+                                        .store(true, std::sync::atomic::Ordering::SeqCst);
+                                    // The caller has not taken the queued chunks yet: wait for room, which holds the child at
+                                    // its pipe.
+                                    tx.send(c).map_err(|_| ())
+                                }
+                                Err(mpsc::TrySendError::Disconnected(_)) => Err(()),
+                            };
+                            if sent.is_err() {
                                 break;
+                            }
+                            #[cfg(test)]
+                            {
+                                use std::sync::atomic::Ordering::SeqCst;
+                                let now = probe.queued.fetch_add(1, SeqCst) + 1;
+                                probe.peak.fetch_max(now, SeqCst);
                             }
                         }
                     }
@@ -220,6 +259,8 @@ impl Session {
             stderr,
             limits,
             ended: false,
+            #[cfg(test)]
+            probe,
         })
     }
 
@@ -275,7 +316,13 @@ impl Session {
                 .chunks
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
             {
-                Ok(c) => self.buf.extend_from_slice(&c),
+                Ok(c) => {
+                    #[cfg(test)]
+                    self.probe
+                        .queued
+                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    self.buf.extend_from_slice(&c);
+                }
                 Err(RecvTimeoutError::Disconnected) => self.eof = true,
                 Err(RecvTimeoutError::Timeout) => {
                     self.end();
@@ -380,6 +427,31 @@ mod tests {
 
     fn limits() -> SessionLimits {
         SessionLimits::new(Duration::from_secs(60))
+    }
+
+    /// A child that writes without pause while nobody reads is held by its pipe: the thread that reads the pipe queues at most
+    /// [`QUEUED_CHUNKS`] chunks and then waits, so the caller's memory stays bounded however much the child writes.
+    #[test]
+    fn a_child_that_writes_faster_than_it_is_read_is_held_at_the_queue_cap() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let s = Session::start(child(Mode::Endless), limits()).unwrap();
+        let probe = s.probe.clone();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        // Either the thread finds the queue full (bounded) or it queues past the cap (unbounded); wait for one of the two.
+        while !probe.blocked.load(SeqCst) && probe.peak.load(SeqCst) <= QUEUED_CHUNKS {
+            assert!(
+                Instant::now() < deadline,
+                "the reading thread neither queued past the cap nor found the queue full in 60 s"
+            );
+            std::thread::yield_now();
+        }
+        assert!(
+            probe.peak.load(SeqCst) <= QUEUED_CHUNKS,
+            "{} chunks queued, over the cap of {QUEUED_CHUNKS}",
+            probe.peak.load(SeqCst)
+        );
+        assert!(probe.blocked.load(SeqCst));
+        drop(s);
     }
 
     #[test]

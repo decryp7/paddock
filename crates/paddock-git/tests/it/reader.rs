@@ -261,3 +261,57 @@ fn a_folder_gix_cannot_open_is_read_through_git_alone() {
     let g = gix_reader(d.path());
     assert!(!g.in_process());
 }
+
+/// An object over the reader's size cap is an error naming its size, on both paths, and gix never loads it to find out: the cap is
+/// checked against the object's header first. The commit and trees on the way are under the cap.
+#[test]
+fn an_object_over_the_cap_is_an_error_in_process_and_through_git() {
+    let (d, _, _) = repo();
+    std::fs::write(d.path().join("big.txt"), "x".repeat(10_000)).unwrap();
+    git(d.path(), &["add", "big.txt"]);
+    git(d.path(), &["commit", "-q", "-m", "big"]);
+    let head = git(d.path(), &["rev-parse", "HEAD"]).trim().to_string();
+    let oid = git(d.path(), &["rev-parse", &format!("{head}:big.txt")])
+        .trim()
+        .to_string();
+    let mut g = gix_reader(d.path()).with_max_object(5_000);
+    assert!(g.in_process());
+    for spec in [oid.clone(), format!("{head}:big.txt")] {
+        match g.object(&spec) {
+            Err(GitError::TooLarge { size, max, .. }) => {
+                assert_eq!((size, max), (10_000, 5_000), "{spec}")
+            }
+            other => panic!("{spec}: {other:?}"),
+        }
+    }
+    assert_eq!(
+        g.info(&oid).unwrap().map(|i| i.size),
+        Some(10_000),
+        "info reads the header only, whatever the size"
+    );
+    assert_eq!(
+        g.file_at(&head, "a.txt").unwrap().as_deref(),
+        Some(b"two\n".as_slice()),
+        "a file under the cap still reads"
+    );
+    assert_eq!(g.starts(), 0, "all of it in process");
+    let mut r = reader(d.path()).with_max_object(5_000);
+    match r.file_at(&head, "big.txt") {
+        Err(GitError::TooLarge { size, max, .. }) => assert_eq!((size, max), (10_000, 5_000)),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        r.file_at(&head, "a.txt").unwrap().as_deref(),
+        Some(b"two\n".as_slice()),
+        "the next read starts a new git"
+    );
+    assert_eq!(r.starts(), 2);
+}
+
+/// A tree's mode digits come from the repository, which the caller may not trust: no input makes the parser panic (C36).
+#[test]
+fn a_mode_never_panics_on_hostile_bytes() {
+    paddock_testkit::assert_never_panics(&[b"100644".as_slice(), b"040000", b"160000"], |b| {
+        paddock_git::Mode::parse(b)
+    });
+}
