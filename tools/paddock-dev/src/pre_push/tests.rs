@@ -3602,3 +3602,50 @@ fn a_docs_only_change_plans_no_per_workspace_test_clippy_or_fmt_row_in_the_membe
         "{code:?}"
     );
 }
+
+mod only_selection {
+    use super::super::{gates::Planned, select_rows};
+
+    fn rows() -> Vec<Planned> {
+        ["doctest crates", "clippy crates", "fmt"]
+            .iter()
+            .map(|id| Planned::Skip {
+                id: (*id).into(),
+                reason: "not reached".into(),
+            })
+            .collect()
+    }
+
+    fn ids(p: &[Planned]) -> Vec<String> {
+        p.iter()
+            .map(|r| match r {
+                Planned::Skip { id, .. } => id.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect()
+    }
+
+    /// Positive control: the same rows with a selector that names them are kept, so the error below is the selection's, not the rows'.
+    #[test]
+    fn a_whole_row_name_and_a_first_word_both_select() {
+        let got = select_rows(rows(), &["doctest crates".into()]).unwrap();
+        assert_eq!(ids(&got), ["doctest crates"]);
+        let got = select_rows(rows(), &["clippy".into(), "fmt".into()]).unwrap();
+        assert_eq!(ids(&got), ["clippy crates", "fmt"]);
+        assert_eq!(select_rows(rows(), &[]).unwrap().len(), 3, "no selector keeps every row");
+    }
+
+    #[test]
+    fn a_selection_that_matches_no_row_is_an_error_naming_it_and_the_valid_rows_never_an_empty_pass() {
+        let e = select_rows(rows(), &["no such gate".into()]).unwrap_err();
+        let shown = e.text();
+        assert!(shown.contains("no such gate"), "{shown}");
+        for valid in ["doctest crates", "clippy crates", "fmt"] {
+            assert!(shown.contains(valid), "{valid} missing from {shown}");
+        }
+        assert!(
+            select_rows(Vec::new(), &["fmt".into()]).is_err(),
+            "no rows at all is also not a pass"
+        );
+    }
+}
