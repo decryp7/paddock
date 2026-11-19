@@ -486,15 +486,7 @@ fn command_in(
     facts.member_gate = args.member_gate;
     facts.kept_targets = kept_targets;
     let mut planned = gates::plan_gates(&plan, &change, &facts);
-    if !args.only.is_empty() {
-        planned.retain(|p| {
-            let id = match p {
-                gates::Planned::Run(g) => &g.id,
-                gates::Planned::Skip { id, .. } | gates::Planned::NotMeasured { id, .. } | gates::Planned::Broken { id, .. } => id,
-            };
-            args.only.iter().any(|w| id.split(' ').next() == Some(w.as_str()))
-        });
-    }
+    planned = select_rows(planned, &args.only)?;
     notes.extend(
         planned
             .iter()
@@ -1111,6 +1103,43 @@ pub fn accept_not_measured(rows: &mut [(String, Row)], accept: &[String], state:
         }
         v.excused_by = Some(std::env::var("USER").unwrap_or_else(|_| "a person".into()));
     }
+}
+
+/// The row name of a planned gate.
+fn row_id(p: &gates::Planned) -> &str {
+    match p {
+        gates::Planned::Run(g) => &g.id,
+        gates::Planned::Skip { id, .. } | gates::Planned::NotMeasured { id, .. } | gates::Planned::Broken { id, .. } => id,
+    }
+}
+
+/// `--only`: keep the rows a selector names (a whole row name such as `clippy crates`, or its first word). No selector keeps every
+/// row. A selection that keeps no row is an error that names what was given and the valid row names, never an empty run that
+/// reads as "0 passed, safe to push" (ER-33: a check that cannot see its subject is not a pass).
+fn select_rows(planned: Vec<gates::Planned>, only: &[String]) -> Result<Vec<gates::Planned>, CliError> {
+    if only.is_empty() {
+        return Ok(planned);
+    }
+    let first = |id: &str| id.split(' ').next().unwrap_or(id).to_string();
+    let kept: Vec<gates::Planned> = planned
+        .iter()
+        .filter(|p| only.iter().any(|w| w == row_id(p) || *w == first(row_id(p))))
+        .cloned()
+        .collect();
+    if kept.is_empty() {
+        let mut valid: Vec<&str> = planned.iter().map(row_id).collect();
+        valid.sort_unstable();
+        valid.dedup();
+        return Err(CliError::usage(format!(
+            "--only {:?} matches no gate row, so nothing would run and nothing would be checked.",
+            only.join(",")
+        ))
+        .with_hint(format!(
+            "Valid row names: {}. A selector is a whole row name or its first word.",
+            valid.join(", ")
+        )));
+    }
+    Ok(kept)
 }
 
 fn dry_run(planned: &[gates::Planned]) -> Report {
