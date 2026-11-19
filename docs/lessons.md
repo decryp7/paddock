@@ -2858,3 +2858,15 @@ toast or Explorer code of that branch. Not blocking (ER-12: reached only through
   TestCommand, the jobs hold and the AI chunk switch do not reach the status bar or `?mock-tasks`. The audit branch had not touched this spec.
   **Fix:** the click is made with the clock paused (`clickWithTimePaused`, the status-bar case its doc names); the product fix is ADR 0061
   extended to the status bar (approved 2026-11-15).
+
+## The ready-signal audit's sweep: 10 WebKit passes of the whole Debrief suite, 6,899 of 6,900 (2026-11-19)
+Ten passes of the full Debrief e2e suite in WebKit at 4 workers (pass 1 on fc18530b9, passes 2-10 with ab099989b's windowing fix; load from
+11 to 34 at the starts), cut from 20 to 10 so landings go first (ER-24): 6,899 of 6,900 green. Pass 1 of an earlier start had found one
+defect of the audit's own helper (holding a "running in Jobs" toast its result replaces), fixed before these ten.
+**Fix item, open: live-tail-follow.e2e.ts:240 "scrollbar drag during a reveal (real input) leaves the view where the user put it" (pass 10,
+load 31).** The grid logged `User took over {Input: scrollbar, Pinned: true}` at the press and no scroll at all during the drag (no `Scroll
+origin` from the user; the drag's moves took 13 ms), so `expectLeftNewest` ended with "taken over, the view never left" and, by design, sent
+nothing again. This is the open measurement recorded above (headless WebKit under load: a take-over with no scroll; a scrollbar press can
+miss the thumb), not a view pulled back after a delivered gesture; the deterministic ownership rows of the same spec (dispatched input)
+passed in all ten passes. Next: when a take-over came with no scroll event, read the thumb's position at the press (it can move while the
+reveal grows the total, `Total grew outside a round` 7 ms after the press here) before deciding whether a resend is safe.

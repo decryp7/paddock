@@ -50,6 +50,7 @@ export class ContextMenuHost {
   protected readonly placed = signal<OpenMenu | null>(null);
 
   constructor() {
+    // effect-state: the menu's place is known only after the render that measures it (clamped inside the window), not derived state
     effect(() => {
       const menu = this.service.menu();
       if (!menu) return;
