@@ -18,8 +18,8 @@ fn is_removed(rule: &str) -> bool {
     rule == "alert:backup"
 }
 
-/// The alarm engine with its store. Every change is stored before it is kept: a change whose commit fails is undone and not
-/// returned to push (one rule with the sampler's tick state, `crate::tick_state`).
+/// The alarm engine with its store. Every change is stored before it is kept and pushed (Dyno ADR 0008, "Store writers"): a
+/// change whose write or commit fails is undone by reading the alarms back from the store, and not returned to push.
 #[derive(Clone)]
 pub struct AlarmCentre {
     engine: AlarmEngine,
@@ -73,47 +73,67 @@ impl AlarmCentre {
         })
     }
 
-    /// Runs `change` on the engine and its writes in one batch: kept and returned (to push) when the batch commits, undone
-    /// otherwise, with nothing to push. Inside the sampler's tick batch the commit is the tick's, whose tick state undoes the
-    /// engine when that fails.
-    ///
-    /// Its writes go through [`Store::atomic`], so a failed write fails the batch and its commit (Dyno ADR 0008, "Store
-    /// writers"). Inside a tick's batch the centre is not copied: the tick's state is the undo.
-    fn stored(&mut self, store: &Store, change: impl FnOnce(&mut Self, &Store) -> Vec<AlarmChange>) -> Vec<AlarmChange> {
-        let before = (!store.in_batch()).then(|| self.clone());
+    /// Runs `change` on the engine and its writes (rule 85; Dyno ADR 0008, "Store writers"): its writes are one savepoint, so
+    /// it is all or none for this call, and a failure stays inside it (inside a sampler tick, the tick's other writers
+    /// commit). The changes are returned to push only once stored. When its writes or the commit fail, the centre is read
+    /// back from the store ([`AlarmCentre::reload`]): the store is what was stored, so nothing is copied on the way that
+    /// succeeds. `change` reports a failed write through its `Result`.
+    fn stored_try(
+        &mut self,
+        store: &Store,
+        change: impl FnOnce(&mut Self, &Store) -> crate::store::Result<Vec<AlarmChange>>,
+    ) -> Vec<AlarmChange> {
         let batch = store.batch();
-        let changes = change(self, store);
-        match batch.commit() {
-            Ok(()) => changes,
+        let written = store.atomic(|| change(&mut *self, store));
+        let stored = match written {
+            Ok(changes) => batch.commit().map(|()| changes),
             Err(e) => {
-                if let Some(before) = before {
-                    *self = before;
-                }
+                // The savepoint is already rolled back; the batch holds nothing of this call.
+                let _ = batch.commit();
+                Err(e)
+            }
+        };
+        match stored {
+            Ok(changes) => changes,
+            Err(e) => {
                 log::error!(
-                    "dyno-agent: {} alarm changes were not stored ({e}); they are undone and not announced",
-                    changes.len()
+                    "dyno-agent: alarm changes were not stored ({e}); the alarms are read back from the store and nothing is announced"
                 );
+                self.reload(store);
                 Vec::new()
             }
         }
     }
 
+    /// [`AlarmCentre::stored_try`] for a change that reports no write errors of its own (its writes still go through the
+    /// store, and a failed commit still undoes it).
+    #[allow(
+        dead_code,
+        reason = "the commit-then-return rule's simple form, kept with its signature for the agent's other request paths"
+    )]
+    fn stored(&mut self, store: &Store, change: impl FnOnce(&mut Self, &Store) -> Vec<AlarmChange>) -> Vec<AlarmChange> {
+        self.stored_try(store, |me, store| Ok(change(me, store)))
+    }
+
+    /// Reads the alarms back from the store, keeping the settings and the 30 s tick mark: what a change that was not stored is
+    /// undone to. The engine's in-memory counts for chattering and acknowledgement statistics start again from the stored
+    /// alarms (they are not stored).
+    pub fn reload(&mut self, store: &Store) {
+        let last_tick = self.last_tick;
+        *self = AlarmCentre::load(store, self.engine.config(), self.engine.zone());
+        self.last_tick = last_tick;
+    }
+
     /// Applies an event and stores its changes; the caller pushes them (none when they were not stored).
     pub fn apply(&mut self, store: &Store, event: AlarmEvent) -> Vec<AlarmChange> {
         let is_mute = matches!(event, AlarmEvent::Mute { .. });
-        self.stored(store, |me, store| {
+        self.stored_try(store, |me, store| {
             let changes = me.engine.apply(event);
-            let written = Self::persist(store, &changes).and_then(|()| {
-                if is_mute {
-                    store.atomic(|| store.set_muted_rules(&me.engine.muted_rules()))
-                } else {
-                    Ok(())
-                }
-            });
-            if let Err(e) = written {
-                log::error!("dyno-agent: could not store an alarm change: {e}");
+            Self::persist(store, &changes)?;
+            if is_mute {
+                store.set_muted_rules(&me.engine.muted_rules())?;
             }
-            changes
+            Ok(changes)
         })
     }
 
@@ -137,13 +157,11 @@ impl AlarmCentre {
         if now.since(self.last_tick) < TICK_EVERY_MS {
             return Vec::new();
         }
-        self.stored(store, |me, store| {
-            me.last_tick = now;
+        self.last_tick = now;
+        self.stored_try(store, |me, store| {
             let changes = me.engine.tick(now);
-            if let Err(e) = Self::persist(store, &changes) {
-                log::error!("dyno-agent: could not store an alarm change: {e}");
-            }
-            changes
+            Self::persist(store, &changes)?;
+            Ok(changes)
         })
     }
 
@@ -207,6 +225,22 @@ mod tests {
         assert_eq!(c.engine.muted_rules(), ["alert:lowDisk"]);
         assert_eq!(s.alarms(10).unwrap().len(), 1);
         assert_eq!(s.muted_rules().unwrap(), ["alert:lowDisk"]);
+    }
+
+    /// Fourth review: inside a batch, a change whose write fails is undone in the centre too, and the batch's other writes
+    /// commit.
+    #[test]
+    fn inside_a_batch_a_change_whose_write_fails_is_undone_alone() {
+        let s = Store::memory().unwrap();
+        let mut c = AlarmCentre::load(&s, AlarmConfig::default(), dyno_core::time::FixedZone::shared(0));
+        s.exec_for_test("CREATE TRIGGER no_alarm BEFORE INSERT ON alarms BEGIN SELECT RAISE(ABORT, 'refused'); END;");
+        let b = s.batch();
+        s.set_meta("other", "kept").unwrap();
+        assert!(c.apply(&s, raise("alert:a")).is_empty(), "nothing to push");
+        assert!(!c.exists(1), "the centre did not keep it");
+        b.commit().unwrap();
+        assert_eq!(s.meta("other").unwrap().as_deref(), Some("kept"));
+        assert!(s.alarms(10).unwrap().is_empty());
     }
 
     /// Third review D1: a change whose write fails (the alarm row refused, the commit itself fine) is not kept, stored or pushed.

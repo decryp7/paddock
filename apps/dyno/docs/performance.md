@@ -17,7 +17,7 @@ Dyno has two things called "bench":
 | `cargo test --release -p dyno-agent --test finder_bench -- --ignored --nocapture` (`crates/dyno-agent/tests/finder_bench.rs`) | The file finder (large and duplicate files) on a generated tree, by the number of threads reading it | the command | 400 folders, 50,000 small files and 300 files of about 1 MiB (100 files with two copies each), made in a temp folder | none (a measurement; the checks are the finder's unit tests) | no | [File finder](#file-finder-2026-10-29) |
 | `cargo test --release -p dyno-platform --test maintenance_bench -- --ignored --nocapture` (`crates/dyno-platform/tests/maintenance_bench.rs`) | The Maintenance view's status (when the windows close or open next) in the worst case, with the OS zone and a POSIX zone with summer time | the command | 14 windows, all closed now, the next opening almost a week ahead (generated in the test) | none (a measurement; `jumping_to_window_edges_finds_what_scanning_every_minute_finds` checks the answers) | no | [Maintenance status](#maintenance-status-2026-10-30) |
 | `cargo test --release -p dyno-agent --test disk_cache_bench -- --nocapture --include-ignored` (`crates/dyno-agent/tests/disk_cache_bench.rs`) | A saved disk map ([ADR 0029](adr/0029-saved-views-disk-map-cache.md)): the packed record stream raw and deflated (`flate2` level 1), saving into `cache.db`, the start-up listing, loading a first level, and the footprint of a loaded map against a live one | the command (the `--include-ignored` part adds the 5M-node tree) | A generated tree of 1M (and 5M) nodes with `Node`'s real fields (folders, files, refused and partly refused folders, loose totals), names of 8 to 40 bytes, seed fixed in the test | in release builds: start-up listing < 20 ms; first level of a 1M-node map < 300 ms from the request; saving 1M nodes < 2 s; loaded map within 10 % of a live one (debug builds run 30,000 nodes and assert only the round trip) | no | [Saved disk maps](#2026-11-03-a-saved-disk-map-of-1m-and-5m-nodes-in-cachedb-dyno-cached-views) |
-| `cargo test --release -p dyno-agent --lib tick_state_cost -- --ignored --nocapture` (`crates/dyno-agent/src/sampler.rs`) | One sampler tick under the core lock with 5,000 alarms loaded (`LOAD_LIMIT`), with and without alarm work, and the copy of the tick state with the alarm engine (Dyno ADR 0008, "Store writers") | the command | 5,000 stored alarms, loaded as the agent loads them (generated in the test) | none (a measurement) | no | [Tick state with 5,000 alarms](#2026-11-19-tick-state-with-5000-alarms-adr-0108-wp-1-review) |
+| `cargo test --release -p dyno-agent --lib tick_state_cost -- --ignored --nocapture` (`crates/dyno-agent/src/sampler.rs`) | One sampler tick under the core lock with 5,000 alarms loaded (`LOAD_LIMIT`), with and without alarm work, and the failed-commit path's reading of the alarms back (Dyno ADR 0008, "Store writers") | the command | 5,000 stored alarms, loaded as the agent loads them (generated in the test) | none (a measurement) | no | [Tick state with 5,000 alarms](#2026-11-19-tick-state-with-5000-alarms-adr-0108-wp-1-review) |
 | `app/angular.json` budgets | The initial bundle | `cd app && npx ng build` | — | initial warn 900 kB / error 1.5 MB; component style warn 16 kB / error 32 kB | `ci.yml` Dyno leg | — |
 
 ## Budgets
@@ -39,23 +39,25 @@ Dyno has two things called "bench":
 
 ### 2026-11-19, tick state with 5,000 alarms (ADR 0108 WP-1 review)
 
-- **What:** the cost of the store-writer contract's tick state (Dyno ADR 0008, "Store writers") on the sampler's path,
-  under the core lock. The tick copies the alarm engine only when it has alarm work: a new alert, a custom-rule
-  observation, or the alarm tick that is due every 30 s.
-- **Where:** `feat/dyno-bulk-wp1` on top of e395f5eda, release build, Apple M4 Pro (14 cores), 1-minute load 12 to 13
-  (other agents' builds running), in-memory store, the fake platform.
+- **What:** the cost of the store-writer contract (Dyno ADR 0008, "Store writers") on the sampler's path, under the core
+  lock. Each writer is its own savepoint. The alarm engine is never copied: a change or a tick that was not stored reads the
+  alarms back from the store.
+- **Where:** `feat/dyno-bulk-wp1`, release build, Apple M4 Pro (14 cores), in-memory store, the fake platform. Other agents'
+  builds were running: the 1-minute load was 7 in run 1 and 29 in runs 2 and 3.
 - **Command:** `cargo test --release -p dyno-agent --lib tick_state_cost -- --ignored --nocapture`.
 - **Results:** median of 20 ticks each, three runs.
 
-  | Run | Quiet tick (no alarm copy) | Tick with alarm work | Tick-state copy with 5,000 alarms |
+  | Run | Quiet tick | Tick with alarm work | Failed-commit path: tick state plus reading 5,000 alarms back |
   |---|---|---|---|
-  | 1 | 10.1 µs | 197.8 µs | 94.5 µs |
-  | 2 | 9.3 µs | 206.5 µs | 91.6 µs |
-  | 3 | 8.8 µs | 195.0 µs | 95.0 µs |
+  | 1 | 18.0 µs | 129.2 µs | 383.3 µs |
+  | 2 | 23.9 µs | 203.2 µs | 749.1 µs |
+  | 3 | 17.6 µs | 97.1 µs | 394.5 µs |
 
-- **Reading:** a tick with no alarm work, the usual case, pays nothing for the alarms. One with alarm work pays about
-  0.1 ms for the copy at the worst-case alarm count, inside a tick of about 0.2 ms, far below the 1 to 2 s sampling
-  interval. An alarm request outside a tick copies the centre once per request.
+- **Reading:** a tick pays nothing for the alarms, with or without alarm work. A tick whose commit fails pays about 0.4 ms
+  (0.75 ms under load) to read the alarms back, once, on a path that should not happen. All of it is far below the 1 to
+  2 s sampling interval.
+- **Earlier (superseded):** the copy-based tick state of the same day measured a quiet tick at 8.8 to 10.1 µs, a tick
+  with alarm work at 195 to 207 µs and the copy at 91.6 to 95.0 µs.
 
 ### 2026-11-03, a saved disk-map tree of 1M nodes in SQLite: rows against packed chunks (docs/dyno-cached-views)
 

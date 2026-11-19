@@ -17,6 +17,9 @@ const LEVELS: [(Tier, Tier); 3] = [
 ];
 /// The most buckets caught up per level in one pass.
 const MAX_CATCH_UP: i64 = 12;
+/// How many ticks in a row may fail to store a record before the stuck minute's app sums are dropped (fourth review: a
+/// writer that keeps failing must not stop the history; the newer ticks' sums are not given up for an old minute).
+pub const MAX_RECORD_TRIES: u32 = 3;
 
 fn meta_key(t: Tier) -> String {
     format!("rollup.{}", t.step_ms())
@@ -37,6 +40,8 @@ pub struct HistoryWriter {
     last_raw: Option<Timestamp>,
     apps: AppAccum,
     last_prune: Timestamp,
+    /// Ticks in a row whose record was not stored.
+    failed: u32,
 }
 
 impl Default for HistoryWriter {
@@ -45,6 +50,7 @@ impl Default for HistoryWriter {
             last_raw: None,
             apps: AppAccum::default(),
             last_prune: Timestamp(0),
+            failed: 0,
         }
     }
 }
@@ -52,20 +58,44 @@ impl Default for HistoryWriter {
 impl HistoryWriter {
     /// Records one tick: the raw point (when a step has passed), app sums, disk space and any closed buckets.
     /// `groups` is empty on ticks that did not refresh the process table.
-    /// One transaction for the whole tick (rule 85; ADR 0108 DY-7). When the tick is not stored (a write or the commit fails), the
-    /// writer is put back as it was, so the next tick writes the raw point and flushes the minute's apps again (both are
-    /// idempotent: points replace, a minute's apps are one whole).
+    /// One transaction for the whole tick (rule 85; ADR 0108 DY-7), with two writers in it (Dyno ADR 0008, "Store writers"):
+    ///
+    /// - the record (the raw and per-core points and a closed minute's apps), one savepoint: all or none for the record. When it
+    ///   fails the writer is put back as it was, so the next tick writes the raw point and flushes the minute again (points
+    ///   replace, a minute's apps are one whole: never twice). After [`MAX_RECORD_TRIES`] failures in a row the stuck minute's
+    ///   app sums are dropped, with an error naming the minute and the cause, and the writer moves on.
+    /// - the rollup, its own savepoint: it keeps nothing in memory (its progress marks are in the store), so a failed one is
+    ///   rolled back alone and done again by the next tick; it never costs the raw points.
+    ///
+    /// Returns the record's error, if any. A failed commit (alone, outside the sampler's batch) puts the writer back too.
     pub fn record(&mut self, store: &Store, s: &SystemSample, groups: &[AppGroup]) -> Result<()> {
         let before = self.clone();
         let batch = store.batch();
-        // One whole: inside the sampler's batch a tick that fails halfway leaves none of its rows, so the restored writer's next
-        // flush of the minute is the only one (second review P1-A).
-        let written = store.atomic(|| self.write_tick(store, s, groups));
-        let stored = written.and(batch.commit());
-        if stored.is_err() {
+        let written = store.atomic(|| self.write_record(store, s, groups));
+        if let Err(e) = &written {
+            let failed = before.failed + 1;
+            *self = before.clone();
+            self.failed = failed;
+            if failed >= MAX_RECORD_TRIES {
+                log::error!(
+                    minute = self.apps.minute.millis(), tries = failed;
+                    "dyno-agent: the history of a minute could not be stored ({e}); its app sums are dropped and the history goes on"
+                );
+                self.apps = AppAccum::default();
+                self.failed = 0;
+            }
+        } else {
+            self.failed = 0;
+        }
+        if let Err(e) = store.atomic(|| roll_up(store, s.at)) {
+            log::error!("dyno-agent: the history rollup could not be stored ({e}); the next tick rolls up again");
+        }
+        let committed = batch.commit();
+        if committed.is_err() {
+            // Nothing of this tick was stored: as it was before it.
             *self = before;
         }
-        stored
+        written.and(committed)
     }
 
     /// The raw-point mark (the contract harness reads whether a refused tick moved it).
@@ -74,7 +104,7 @@ impl HistoryWriter {
         self.last_raw
     }
 
-    fn write_tick(&mut self, store: &Store, s: &SystemSample, groups: &[AppGroup]) -> Result<()> {
+    fn write_record(&mut self, store: &Store, s: &SystemSample, groups: &[AppGroup]) -> Result<()> {
         let at = s.at.floor_to(RAW_STEP_MS);
         if self.last_raw != Some(at) {
             let mut p = point_from(s);
@@ -85,8 +115,7 @@ impl HistoryWriter {
             store.put_core_point(Tier::Raw, &c)?;
             self.last_raw = Some(at);
         }
-        self.add_apps(store, s.at, groups)?;
-        roll_up(store, s.at)
+        self.add_apps(store, s.at, groups)
     }
 
     fn add_apps(&mut self, store: &Store, now: Timestamp, groups: &[AppGroup]) -> Result<()> {
@@ -146,8 +175,9 @@ impl HistoryWriter {
     /// Prunes at most once an hour.
     pub fn prune(&mut self, store: &Store, retention: dyno_core::history::Retention, now: Timestamp) -> Result<()> {
         if now.since(self.last_prune) >= HOUR {
-            self.last_prune = now;
+            // Undone alone: a prune that was not stored is tried again at the next tick.
             store.prune(retention, now)?;
+            self.last_prune = now;
         }
         Ok(())
     }
@@ -332,8 +362,8 @@ mod tests {
         );
     }
 
-    /// Second review P1-A: a tick that fails halfway inside the sampler's batch (its rollup mark is refused after the minute's
-    /// apps were written) leaves none of its rows, so the next tick's flush of the same minute is the only one.
+    /// Second review P1-A, as the fourth review set it: a record that fails inside the sampler's batch (the closed minute's
+    /// apps refused) leaves none of its own rows, the batch commits, and the next tick's flush of that minute is the only one.
     #[test]
     fn a_tick_that_fails_inside_a_batch_leaves_none_of_its_rows() {
         let store = Store::memory().unwrap();
@@ -354,22 +384,91 @@ mod tests {
             w.record(&store, &s, &apps).unwrap();
         }
         store.exec_for_test(
-            "CREATE TRIGGER no_mark BEFORE INSERT ON meta WHEN NEW.key LIKE 'rollup.%' BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+            "CREATE TRIGGER no_busy BEFORE INSERT ON app_minutes WHEN NEW.app = 'busy' BEGIN SELECT RAISE(ABORT, 'refused'); END;",
         );
         let batch = store.batch();
         s.at = Timestamp(MINUTE + 1);
         assert!(w.record(&store, &s, &apps).is_err());
+        batch.commit().unwrap();
         assert!(
-            batch.commit().is_err(),
-            "a failed write fails its batch (Dyno ADR 0008, \"Store writers\")"
+            store
+                .points(Tier::Raw, Timestamp(MINUTE), Timestamp(MINUTE + RAW_STEP_MS))
+                .unwrap()
+                .is_empty(),
+            "none of the failed record's rows"
         );
-        store.exec_for_test("DROP TRIGGER no_mark;");
+        store.exec_for_test("DROP TRIGGER no_busy;");
         s.at = Timestamp(MINUTE + 2);
         w.record(&store, &s, &apps).unwrap();
         assert_eq!(
             store.app_minutes(Timestamp(0), Timestamp(MINUTE)).unwrap().len(),
             1,
             "one row for the minute"
+        );
+    }
+
+    /// Fourth review: the rollup keeps no state in memory (it reads its progress marks from the store), so a refused rollup is
+    /// its own savepoint: the record's raw points are kept, and the next tick rolls up again.
+    #[test]
+    fn a_refused_rollup_does_not_cost_the_raw_points() {
+        let store = Store::memory().unwrap();
+        let mut w = HistoryWriter::default();
+        let mut s = dyno_platform::fake::quiet_sample(Timestamp(0));
+        store.exec_for_test(
+            "CREATE TRIGGER no_mark BEFORE INSERT ON meta WHEN NEW.key LIKE 'rollup.%' BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+        );
+        for i in 0..(2 * MINUTE / RAW_STEP_MS) {
+            s.at = Timestamp(i * RAW_STEP_MS);
+            let _ = w.record(&store, &s, &[]);
+        }
+        assert_eq!(store.points(Tier::Raw, Timestamp(0), Timestamp(2 * MINUTE)).unwrap().len(), 24);
+        store.exec_for_test("DROP TRIGGER no_mark;");
+        s.at = Timestamp(2 * MINUTE + 1);
+        w.record(&store, &s, &[]).unwrap();
+        assert!(
+            !store.points(Tier::Minute, Timestamp(0), Timestamp(2 * MINUTE)).unwrap().is_empty(),
+            "rolled up again"
+        );
+    }
+
+    /// Fourth review: a minute whose apps cannot be stored is tried three times and then dropped with an error, so the ticks
+    /// after it store their own points and sums instead of failing with it for ever.
+    #[test]
+    fn a_minute_that_cannot_be_stored_is_dropped_after_three_tries() {
+        let store = Store::memory().unwrap();
+        let mut w = HistoryWriter::default();
+        let mut s = dyno_platform::fake::quiet_sample(Timestamp(0));
+        let apps = [AppGroup {
+            id: "stuck".into(),
+            name: "stuck".into(),
+            exe: None,
+            pids: vec![1],
+            cpu: Measured::Value(50.0),
+            memory: Measured::Value(100),
+            disk_bps: Measured::Value(0.0),
+            partial: false,
+        }];
+        for i in 0..(MINUTE / RAW_STEP_MS) {
+            s.at = Timestamp(i * RAW_STEP_MS);
+            w.record(&store, &s, &apps).unwrap();
+        }
+        store.exec_for_test(
+            "CREATE TRIGGER no_stuck BEFORE INSERT ON app_minutes WHEN NEW.app = 'stuck' BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+        );
+        let mut results = Vec::new();
+        for i in 0..6 {
+            s.at = Timestamp(MINUTE + 1 + i * RAW_STEP_MS);
+            results.push(w.record(&store, &s, &[]).is_ok());
+        }
+        assert_eq!(
+            results,
+            [false, false, false, true, true, true],
+            "three tries, then the minute is dropped"
+        );
+        assert_eq!(
+            store.points(Tier::Raw, Timestamp(MINUTE), Timestamp(2 * MINUTE)).unwrap().len(),
+            3,
+            "the ticks after it store their points"
         );
     }
 

@@ -98,9 +98,23 @@ pub struct Alerts {
     since: HashMap<String, Timestamp>,
     fired: HashMap<String, Timestamp>,
     counter: u64,
+    /// The alerts of the latest tick: their id, condition key and the cooldown mark the key had before ([`Alerts::unfire`]).
+    latest: Vec<(String, String, Option<Timestamp>)>,
 }
 
 impl Alerts {
+    /// Takes back the alert `id` of the latest tick, which was not stored: its condition's cooldown is as it was before it fired,
+    /// so the next tick can fire it again (Dyno ADR 0008, "Store writers").
+    pub fn unfire(&mut self, id: &str) {
+        if let Some(i) = self.latest.iter().position(|(a, _, _)| a == id) {
+            let (_, key, previous) = self.latest.remove(i);
+            match previous {
+                Some(at) => self.fired.insert(key, at),
+                None => self.fired.remove(&key),
+            };
+        }
+    }
+
     /// A fresh evaluator.
     pub fn new() -> Alerts {
         Alerts::default()
@@ -108,6 +122,7 @@ impl Alerts {
 
     /// Evaluates one tick.
     pub fn tick(&mut self, settings: &AlertSettings, s: &SystemSample, groups: &[AppGroup], anomalies: &[Anomaly]) -> Vec<Alert> {
+        self.latest.clear();
         let st = settings.clamped();
         if !st.enabled {
             self.since.clear();
@@ -227,10 +242,12 @@ impl Alerts {
         if self.fired.get(&key).is_some_and(|f| now.since(*f) < cooldown) {
             return;
         }
-        self.fired.insert(key, now);
+        let previous = self.fired.insert(key.clone(), now);
         self.counter += 1;
+        let id = format!("alert-{}-{}", now.millis() / SECOND, self.counter);
+        self.latest.push((id.clone(), key, previous));
         out.push(Alert {
-            id: format!("alert-{}-{}", now.millis() / SECOND, self.counter),
+            id,
             at: now,
             kind,
             severity,
