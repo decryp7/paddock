@@ -2852,3 +2852,9 @@ toast or Explorer code of that branch. Not blocking (ER-12: reached only through
   moment the animation wait returned (7605 ms), so the Inspector's content may have started a fade after the wait; the screencast shows
   no Inspector on screen at all. Not reproduced yet. Next: run the spec with the trace on under load and read the Inspector's animations
   (`document.getAnimations()`) when axe starts; wait for the Inspector to show the clicked record before settling.
+- **windowing.e2e.ts:93 "background work lists running tasks and stops one", red on both tries in run 8301 (shard 4/4, 2 of 144 before).**
+  The click on the status bar's Background work chip came 40 ms after the status bar showed "events"; the screencast shows the problems badge
+  arriving to the chip's right right after, which moved the chip about 55 px left, and the popover never opened (no listitems). Not train 14:
+  TestCommand, the jobs hold and the AI chunk switch do not reach the status bar or `?mock-tasks`. The audit branch had not touched this spec.
+  **Fix:** the click is made with the clock paused (`clickWithTimePaused`, the status-bar case its doc names); the product fix is ADR 0061
+  extended to the status bar (approved 2026-11-15).
