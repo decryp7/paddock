@@ -20,6 +20,7 @@ use crate::probe::file_id;
 use crate::procs::{Presence, Procs, evidence, pid_alive};
 use crate::record::{self, Owner, OwnerRead};
 use crate::timefmt::{clock_text, day_text, mins, oneline, utc_text};
+use crate::waitfor::{self, Break, Rules, Waiter};
 use serde_json::{Value, json};
 use std::fs;
 use std::io::Read;
@@ -59,6 +60,9 @@ pub struct Faults {
     pub after_take: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     /// Runs once inside a release, after the owner check and before the rename aside (race tests).
     pub before_release: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// The wait-for graph is read with the rule from before 7a4aafbee (a drain owner waits for the head of the queue): the model of
+    /// the deadlock of 2026-11-18, so a test can see the cycle reported and broken without the deadlock itself being possible.
+    pub old_drain_rule: AtomicBool,
 }
 
 fn take_one(c: &AtomicU32) -> bool {
@@ -674,6 +678,66 @@ impl Heavy {
     }
 
     /// The text of `status`.
+    /// Everyone who waits, as the folder shows it, without changing anything: the live tickets in queue order, the live high-priority
+    /// markers and the live drain markers (a dead holder's file is left for the next run that removes stale things).
+    pub fn waiters(&self) -> Vec<Waiter> {
+        let live = |pid: Option<u32>, ep: Option<u64>| pid.is_some_and(|p| pid_alive(&*self.procs, p, ep));
+        let marker_pids = |prefix: &str| -> Vec<(u32, String)> {
+            self.dir_entries(prefix)
+                .iter()
+                .filter_map(|f| {
+                    let b = file_name(f);
+                    let suffix = &b[prefix.len()..];
+                    let bytes = read_bounded(f).ok()?;
+                    let ep = record::parse_marker_epoch(&bytes).or_else(|| mtime(f));
+                    let pid = record::marker_pid(suffix);
+                    live(pid, ep).then(|| (pid.unwrap_or(0), suffix.split_once('-').map_or(suffix, |(_, n)| n).to_string()))
+                })
+                .collect()
+        };
+        let drain = marker_pids(DRAIN_PREFIX);
+        let high = marker_pids(HIGH_PREFIX);
+        let mut out: Vec<Waiter> = Vec::new();
+        for f in self.dir_entries(TICKET_PREFIX) {
+            if file_name(&f).ends_with(".tmp") {
+                continue;
+            }
+            let Ok(bytes) = read_bounded(&f) else { continue };
+            let t = record::parse_ticket(&bytes);
+            if !live(t.pid, t.epoch.or_else(|| mtime(&f))) {
+                continue;
+            }
+            let pid = t.pid.unwrap_or(0);
+            out.push(Waiter {
+                name: t.name,
+                pid,
+                position: Some(out.len() + 1),
+                high: false,
+                drain_owner: drain.iter().any(|(p, _)| *p == pid),
+            });
+        }
+        for (pid, name) in high {
+            if !out.iter().any(|w| w.pid == pid) {
+                out.push(Waiter {
+                    name,
+                    pid,
+                    position: None,
+                    high: true,
+                    drain_owner: false,
+                });
+            }
+        }
+        out
+    }
+
+    /// The cycle in the wait-for graph of the folder now, if there is one: the members' names in order.
+    pub fn wait_cycle(&self) -> Option<Vec<String>> {
+        let rules = Rules {
+            drain_owner_follows_queue: self.faults.old_drain_rule.load(Ordering::SeqCst),
+        };
+        waitfor::find_cycle(&self.waiters(), rules)
+    }
+
     pub fn status(&self) -> String {
         let mut out = String::new();
         let multi = self.cfg.slots > 1;
@@ -738,6 +802,9 @@ impl Heavy {
         for f in self.dir_entries(HIGH_PREFIX) {
             out += &format!("high marker: {}\n", f.display());
         }
+        if let Some(c) = self.wait_cycle() {
+            out += &format!("WAIT-FOR CYCLE (nobody can go first): {}\n", waitfor::describe(&c));
+        }
         for (label, name, n) in [("breaks (last 5):", BREAKS_LOG, 5), ("activity (last 3):", ACTIVITY_LOG, 3)] {
             if let Ok(text) = fs::read_to_string(self.cfg.root.join(name)) {
                 let lines: Vec<&str> = text.lines().collect();
@@ -769,6 +836,8 @@ pub struct Acquirer<'a> {
     bound_said: bool,
     /// The drain marker of this run, once it asked for the machine to drain.
     drain: Option<PathBuf>,
+    /// When a wait-for cycle was last reported by this run (it is said once a minute at most).
+    cycle_said: Option<u64>,
 }
 
 impl<'a> Acquirer<'a> {
@@ -791,6 +860,7 @@ impl<'a> Acquirer<'a> {
             waited_micros: 0,
             bound_said: false,
             drain: None,
+            cycle_said: None,
         };
         if a.req.high {
             let m = h
@@ -861,6 +931,50 @@ impl<'a> Acquirer<'a> {
             p.extend(props.iter().map(|(k, v)| (*k, v.clone())));
             h.log.info("heavy.wait", &format!("still waiting: {msg}"), &p);
             self.last_note = t;
+        }
+    }
+
+    /// Looks for a cycle in who waits for whom and, when this run is part of one, says so at once, naming the members. A drain owner
+    /// among them withdraws its own marker (the drain is only a fairness aid: withdrawing it frees the others and loses nothing); any
+    /// other member only reports. A run outside the cycle says nothing.
+    fn check_cycle(&mut self) {
+        let h = self.h;
+        let now = h.now();
+        if self.cycle_said.is_some_and(|t| now.saturating_sub(t) < 60) {
+            return;
+        }
+        let waiters = h.waiters();
+        let rules = Rules {
+            drain_owner_follows_queue: h.faults.old_drain_rule.load(Ordering::SeqCst),
+        };
+        let Some(cycle) = waitfor::find_cycle(&waiters, rules) else {
+            return;
+        };
+        let Some(me) = waiters.iter().find(|w| w.pid == h.pid && w.name == self.req.name) else {
+            return;
+        };
+        let action = waitfor::break_action(&cycle, me);
+        if action == Break::Outside {
+            return;
+        }
+        self.cycle_said = Some(now);
+        let msg = format!(
+            "{} is in a wait-for cycle: {}; {}",
+            self.req.name,
+            waitfor::describe(&cycle),
+            if action == Break::WithdrawDrain {
+                "it withdraws its drain marker so the others can go on"
+            } else {
+                "it waits (the drain owner of the cycle withdraws its marker)"
+            }
+        );
+        (h.say)(&msg);
+        h.alog(&msg);
+        h.log.warn("heavy.cycle", &msg, &[("Members", json!(cycle))]);
+        if action == Break::WithdrawDrain
+            && let Some(d) = self.drain.take()
+        {
+            let _ = fs::remove_file(d);
         }
     }
 
@@ -942,6 +1056,7 @@ impl<'a> Acquirer<'a> {
                 }
                 let (pos, len, head) = h.queue(&self.ticket, &name);
                 if pos != 1 {
+                    self.check_cycle();
                     self.wait_for(
                         "queue",
                         &format!("queued, position {pos} of {len}, behind {head}"),
@@ -956,6 +1071,7 @@ impl<'a> Acquirer<'a> {
                 }
             }
             if !container_req && let Some(m) = h.live_drain_marker(&name) {
+                self.check_cycle();
                 self.wait_for(
                     "drain",
                     &format!("a container run waits for the machine to drain ({m}); nothing starts before it"),
@@ -1068,6 +1184,10 @@ impl<'a> Acquirer<'a> {
                         return Poll::Waiting;
                     }
                 }
+            }
+            if self.drain.is_some() {
+                // A drain owner waits here for the running steps to end; it is the member of a cycle that can withdraw its marker.
+                self.check_cycle();
             }
             if let Some(dir) = busy {
                 let (mut msg, props) = h.holder_note(&dir);

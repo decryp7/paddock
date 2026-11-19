@@ -531,3 +531,54 @@ fn the_queue_model_has_no_wait_cycle_and_never_exceeds_the_maximum() {
         }
     }
 }
+
+/// The wait-for detector (C2 of docs/research/2026-11-19-gate-hang-detection.md) on the real folder: the deadlock of 2026-11-18 cannot
+/// happen any more (7a4aafbee), so the old rule is switched on in the detector only, and the head and the drain owner see the cycle,
+/// name both members, and the drain owner withdraws its marker. The control: with the rule as it is, nobody reports anything.
+#[test]
+fn a_wait_for_cycle_is_reported_naming_its_members_and_the_drain_owner_withdraws_its_marker() {
+    for old_rule in [false, true] {
+        let (rig, mut cfg) = rig_with(5);
+        cfg.drain_after = std::time::Duration::from_secs(300);
+        let (a, h, c) = (
+            rig.agent_with(341, cfg.clone()),
+            rig.agent_with(342, cfg.clone()),
+            rig.agent_with(343, cfg),
+        );
+        for ag in [&h, &c] {
+            ag.h.faults.old_drain_rule.store(old_rule, std::sync::atomic::Ordering::SeqCst);
+        }
+        rig.load.set(15.0);
+        let mut ha = Acquirer::new(&a.h, req("A")).unwrap();
+        assert_eq!(ha.poll(), Poll::Held);
+        let mut hh = Acquirer::new(&h.h, req("H")).unwrap();
+        rig.clock.advance(std::time::Duration::from_millis(5));
+        let mut hc = Acquirer::new(&c.h, req_cmd("C", "bash tools/linux-container.sh x")).unwrap();
+        assert_eq!(hh.poll(), Poll::Waiting);
+        assert_eq!(hc.poll(), Poll::Waiting);
+        rig.clock.advance(std::time::Duration::from_secs(301));
+        assert_eq!(hc.poll(), Poll::Waiting);
+        if old_rule {
+            // The drain owner sees the cycle in the very poll that made its marker, says so naming both members, and withdraws it.
+            assert!(c.said().contains("wait-for cycle"), "{}", c.said());
+            assert!(c.said().contains("H -> C -> H") || c.said().contains("C -> H -> C"), "{}", c.said());
+            assert_eq!(
+                rig.count("pitcrew-heavy.drain."),
+                0,
+                "the drain owner withdrew its marker: {}",
+                c.said()
+            );
+            assert!(
+                !h.h.status().contains("WAIT-FOR CYCLE"),
+                "the cycle is gone once the marker is withdrawn"
+            );
+        } else {
+            assert_eq!(rig.count("pitcrew-heavy.drain."), 1, "{}", c.said());
+            assert!(!h.h.status().contains("WAIT-FOR CYCLE"));
+            assert_eq!(hh.poll(), Poll::Waiting);
+            assert_eq!(hc.poll(), Poll::Waiting);
+            let said = format!("{}\n{}", h.said(), c.said());
+            assert!(!said.contains("wait-for cycle"), "no cycle under the rules as they are: {said}");
+        }
+    }
+}
