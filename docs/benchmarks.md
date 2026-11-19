@@ -2167,3 +2167,60 @@ Question: with the slot count following the load, how long does a queue of 4 cli
   the process list and a stack sample of the tree (`sample` on macOS, `eu-stack` on Linux when installed, the process list on
   Windows) to `<row>.stacks.txt` beside the row's log before it ends the tree through `paddock_proc` (pid plus start time). The stall
   judgement (WP-2) and history limits plug into the per-step watchdog (`pre_push/watchdog.rs`).
+
+## Push gate stall gap (WP-0) (2026-11-19, feat/gate-budget-per-workspace)
+
+- **Question:** the progress watchdog (docs/research/2026-11-19-gate-hang-detection.md, WP-2) calls a step stuck after a gap with no
+  finished unit. How long is the longest gap between two finished units that a healthy cold step shows, per workspace?
+- **Method:** the gate's own cargo commands (`cargo clippy --workspace --all-targets --locked`, `cargo test --doc --workspace --locked`, and
+  `cargo xwin clippy --target x86_64-pc-windows-msvc` for crates, apps/dyno and apps/pitwall; `--all-features` in `crates`), each with
+  `--message-format=json-render-diagnostics`, one step at a time through `heavy` with `CARGO_BUILD_JOBS=2`, in a fresh build folder
+  (`--config build.target-dir`, on the dev volume, removed afterwards), no sccache (`RUSTC_WRAPPER` unset: the worst case, every
+  compile is real). A wrapper stamped every output line with a monotonic clock and counted what the watchdog counts: `compiler-artifact`,
+  `build-script-executed`, and for doctests the `Doc-tests` and `test ... ok/FAILED` lines; the gap is the time between two counted
+  events, from the start to the first and from the last to the end included. `crates` was also run warm right after the cold run.
+- **Machine:** the shared Mac mini (arm64, 14 cores), other agents' pushes and trains running (15-minute load 8 to 10 at the end of the
+  run, 25 cold steps over about five hours), at the heavy slot count the load allowed. Not measured: a heavier load than this, a
+  second cold run of the same workspace (so run-to-run spread within a workspace is unknown), Windows and Linux hosts, the Linux
+  container row (output lines only; the container's CPU is not visible).
+- **Raw figures** (the stamping scripts and JSON are in the agent's scratch folder, not in the repository):
+
+| Workspace | Step | Run | Seconds | Progress events | Longest gap, s (at s) | p99 gap, s |
+|---|---|---|---:|---:|---:|---:|
+| `apps/debrief` | clippy | cold | 375 | 1085 | 11.2 (331) | 3.5 |
+| `apps/debrief` | doctest | cold | 684 | 939 | 35.1 (533) | 8.1 |
+| `apps/dyno` | clippy | cold | 288 | 833 | 12.4 (5) | 3.9 |
+| `apps/dyno` | doctest | cold | 505 | 680 | 22.2 (480) | 8.9 |
+| `apps/dyno` | xwin | cold | 335 | 865 | 21.8 (118) | 4.5 |
+| `apps/pitcrew` | clippy | cold | 223 | 631 | 10.5 (133) | 3.3 |
+| `apps/pitcrew` | doctest | cold | 314 | 537 | 9.8 (146) | 5.9 |
+| `apps/pitwall` | clippy | cold | 250 | 691 | 10.5 (133) | 4.3 |
+| `apps/pitwall` | doctest | cold | 861 | 597 | 43.1 (261) | 15.8 |
+| `apps/pitwall` | xwin | cold | 278 | 699 | 14.2 (3) | 4.2 |
+| `apps/shell-demo/src-tauri` | clippy | cold | 93 | 604 | 5.1 (28) | 0.7 |
+| `apps/shell-demo/src-tauri` | doctest | cold | 124 | 512 | 8.9 (115) | 1.6 |
+| `apps/spotter` | clippy | cold | 260 | 669 | 13.0 (189) | 5.2 |
+| `apps/spotter` | doctest | cold | 363 | 584 | 12.2 (64) | 6.9 |
+| `apps/workbench-demo/src-tauri` | clippy | cold | 81 | 573 | 4.8 (30) | 0.6 |
+| `apps/workbench-demo/src-tauri` | doctest | cold | 141 | 484 | 8.7 (132) | 2.2 |
+| `crates` | clippy | cold | 112 | 857 | 1.1 (4) | 0.7 |
+| `crates` | clippy | warm | 1 | 857 | 1.0 (0) | 0.0 |
+| `crates` | doctest | cold | 199 | 746 | 7.9 (157) | 1.7 |
+| `crates` | doctest | warm | 28 | 746 | 4.2 (0) | 0.8 |
+| `crates` | xwin | cold | 122 | 871 | 1.7 (26) | 0.8 |
+| `crates` | xwin | warm | 2 | 871 | 1.5 (0) | 0.0 |
+| `tools/heavy` | clippy | cold | 27 | 193 | 1.1 (2) | 0.9 |
+| `tools/heavy` | doctest | cold | 40 | 178 | 3.1 (24) | 2.2 |
+| `tools/paddock-dev` | clippy | cold | 52 | 250 | 11.6 (3) | 1.2 |
+| `tools/paddock-dev` | doctest | cold | 79 | 232 | 11.9 (3) | 4.8 |
+| `tools/wiki` | clippy | cold | 27 | 197 | 1.2 (2) | 0.7 |
+| `tools/wiki` | doctest | cold | 36 | 182 | 4.1 (21) | 1.7 |
+
+- **Result:** the longest gap in any cold run is **43.1 s** (`cargo test --doc` of apps/pitwall, at 261 s of 861 s), then 35.1 s
+  (doctests of apps/debrief) and 22.2 s (doctests of apps/dyno); clippy's longest gap is 13.0 s (apps/spotter); the median of the
+  25 cold runs' longest gaps is 10.5 s, so the longest is 4.1 times the median. Warm runs replay every unit at once: 1.0 to 4.2 s.
+  Every step passed (exit 0).
+- **Set from it** (constants in `pre_push/stall.rs` and `pre_push/history.rs`, figures next to them): the fallback gap `GAP` is 5 min
+  (7 times the longest gap seen, replacing the 15 minutes that was only a guess); `K` stays 4 (the max-to-median ratio of 4.1);
+  `FLOOR` stays 120 s (2.8 times the longest gap). One cold run per workspace is a small sample: the watchdog stays report-only
+  (`PADDOCK_GATE_WATCHDOG=enforce` to kill) until a week of `step-history.jsonl` records of real pushes agrees (ER-12, ER-41).

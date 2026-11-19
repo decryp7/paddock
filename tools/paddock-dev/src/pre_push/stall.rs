@@ -17,12 +17,16 @@ use paddock_proc::{Cpu, Liveness, Patience, Reading, StallCause, StartJudge, Sta
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// The longest a step may go without a finished unit (or test line) when the gate has no history of its kind: 15 minutes, the old
-/// per-step value re-scoped from "a whole row" to "one gap between finished units". NOT MEASURED where it matters: the largest gap
-/// measured so far is 7.1 s (a cold release build of tools/heavy, 139 units, load about 19) and 20.3 s (a synthetic spinning build
-/// script); the longest unit of each app workspace cold under load is WP-0 (`cargo build --timings`) and is still to do, so this
-/// is a generous value that the report-only phase checks against real pushes (ER-12, ER-41), not a measured limit.
-pub const GAP: Duration = Duration::from_secs(15 * 60);
+/// The longest a step may go without a finished unit (or test line) when the gate has no history of its kind: 5 minutes.
+///
+/// Measured cause (WP-0, 2026-11-19, docs/benchmarks.md "Push gate stall gap (WP-0)"): the gate's own cargo commands run cold, one
+/// workspace at a time through heavy with `CARGO_BUILD_JOBS=2`, no sccache, on the shared Mac mini with other agents running (15-minute
+/// load 9 on 14 cores), 11 workspaces, clippy, doctests and, for three, the xwin Clippy: 25 cold runs with 178 to 1085 progress events
+/// each. The longest gap between two events in any run was 43.1 s (`cargo test --doc` of apps/pitwall, at 261 s of a 861 s run), then
+/// 35.1 s (doctests of apps/debrief) and 22.2 s (apps/dyno); the median of the runs' longest gaps was 10.5 s. 5 minutes is 7 times the
+/// largest, the same margin the old 15-minute figure had over the 7.1 s and 20.3 s of the first look. It is still a first value: each
+/// workspace was measured once, so the report-only phase checks it against real pushes before the watchdog may enforce (ER-12, ER-41).
+pub const GAP: Duration = Duration::from_secs(5 * 60);
 
 /// Whether the watchdog may end a step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -16,13 +16,15 @@ use std::time::Duration;
 /// How many passed steps of one class must be on record before a limit is derived from them.
 pub const MIN_SAMPLES: usize = 5;
 
-/// The multiple of the longest recorded gap a step may go without progress. A placeholder, not a measurement: the loaded-to-unloaded
-/// ratio of a unit's time is to be measured in WP-0 (cargo `--timings` of every app workspace cold, under load), and until then the
-/// limit only tightens the fallback and the watchdog reports before it kills (ER-12, ER-41).
+/// The multiple of the longest recorded gap a step may go without progress: 4. Measured basis (WP-0, docs/benchmarks.md "Push gate stall
+/// gap (WP-0)"): across 25 cold runs the longest gap was 43.1 s against a median of the runs' longest gaps of 10.5 s, a ratio of 4.1, so
+/// a run that has gone 4 times the longest gap seen for its kind is beyond what a healthy run of any kind showed. One cold run per
+/// workspace is a small sample: the limit only tightens the fallback (never loosens it) and the watchdog reports before it kills
+/// (ER-12, ER-41); revisit K with the week of report-only records in `step-history.jsonl`.
 pub const K: f64 = 4.0;
 
-/// The shortest limit a history can give: six times the longest gap measured on a unit-by-unit build (20.3 s, a synthetic spinning
-/// build script, research note section 2), so a limit derived from quick units still leaves room for one slow unit.
+/// The shortest limit a history can give: 120 s, 2.8 times the longest gap measured on any real cold run (43.1 s, WP-0), so a limit
+/// derived from quick units still leaves room for one slow unit.
 pub const FLOOR: Duration = Duration::from_secs(120);
 
 /// The most records read back (the newest): the file only grows, a limit needs the recent past.
