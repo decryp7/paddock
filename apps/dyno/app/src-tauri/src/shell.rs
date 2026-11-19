@@ -824,8 +824,9 @@ impl<R: Runtime> Sink for ShellOf<R> {
 
     fn alarm(&self, change: dyno_core::alarms::AlarmChange) {
         {
-            // The tray items whose metric an alarm rule covers show their alert while an alarm for it is open.
-            let metrics = lock(&self.open_alarms).update(change.alarm.id, change.alarm.metric.as_ref(), change.alarm.state.is_open());
+            // The tray items whose metric an alarm rule covers show their alert while the condition of an alarm for it holds now (an alarm
+            // that cleared and was not acknowledged stays in the list, not on the tray).
+            let metrics = lock(&self.open_alarms).update(change.alarm.id, change.alarm.metric.as_ref(), change.alarm.state);
             self.tray.lock().unwrap_or_else(|e| e.into_inner()).set_alarmed(metrics);
         }
         if change.notify {

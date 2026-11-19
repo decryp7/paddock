@@ -48,8 +48,13 @@ pub struct PowerCentre {
     signals: Arc<dyn IdleSignals>,
     idle: Mutex<IdleMachine>,
     skew_ms: std::sync::atomic::AtomicI64,
+    /// Generations of the views pushed to the apps (Dyno ADR 0034).
+    views: dyno_core::newer::Generation,
     pending: Mutex<VecDeque<PowerEvent>>,
     wake: (Mutex<bool>, Condvar),
+    /// Runs once right after the idle machine took a due timed action (tests only: holds that thread there).
+    #[cfg(test)]
+    after_timed_accept: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -92,27 +97,39 @@ impl PowerCentre {
             signals,
             idle: Mutex::new(IdleMachine::new()),
             skew_ms: std::sync::atomic::AtomicI64::new(0),
+            views: dyno_core::newer::Generation::new(),
             pending: Mutex::new(VecDeque::new()),
             wake: (Mutex::new(false), Condvar::new()),
+            #[cfg(test)]
+            after_timed_accept: Mutex::new(None),
         }
     }
 
     /// The power view now.
     pub fn view(&self) -> PowerView {
-        let (awake, keep_awake) = {
-            let inner = locked(&self.inner);
-            let keep_awake = match &inner.unavailable {
-                Some(reason) => Capability::CantTell { reason: reason.clone() },
-                None => Capability::Known,
-            };
-            (inner.machine.view(), keep_awake)
+        self.view_stamped().1
+    }
+
+    /// The power view now, with the generation taken in the same hold of both machines' locks (Dyno ADR 0034): every change of either machine
+    /// is made under its lock, so a view with a higher generation is never older than one with a lower one, and `broadcast_power`'s slot
+    /// refuses the older one whichever thread pushes last. Lock order: inner, then idle.
+    pub fn view_stamped(&self) -> (u64, PowerView) {
+        let inner = locked(&self.inner);
+        let idle_machine = locked(&self.idle);
+        let generation = self.views.next();
+        let keep_awake = match &inner.unavailable {
+            Some(reason) => Capability::CantTell { reason: reason.clone() },
+            None => Capability::Known,
         };
-        let idle = locked(&self.idle).view();
+        let awake = inner.machine.view();
+        let idle = idle_machine.view();
+        drop(idle_machine);
+        drop(inner);
         let cap = |a: IdleAction| match self.actions.can(a) {
             Reading::Available(()) => Capability::Known,
             Reading::Unavailable(reason) => Capability::CantTell { reason },
         };
-        PowerView {
+        let view = PowerView {
             awake,
             idle,
             caps: PowerCaps {
@@ -121,7 +138,8 @@ impl PowerCentre {
                 hibernate: cap(IdleAction::Hibernate),
                 shut_down: cap(IdleAction::ShutDown),
             },
-        }
+        };
+        (generation, view)
     }
 
     /// Cuts the power thread's wait short.
@@ -174,14 +192,21 @@ impl PowerCentre {
     /// Feeds one event to the machine, runs the effects it asks for and what they lead to, pushes the view when it changed, and
     /// returns it.
     fn apply(&self, shared: &Shared, event: Event, at: Timestamp) -> PowerView {
+        self.apply_with(shared, event, at, &|| {})
+    }
+
+    /// [`apply`](Self::apply) with `between` run after the view was read (and stamped) and before it is pushed: the moment another
+    /// request can change the state and push a newer view (tests do it there).
+    fn apply_with(&self, shared: &Shared, event: Event, at: Timestamp, between: &dyn Fn()) -> PowerView {
         let before = self.view();
         {
             let mut inner = locked(&self.inner);
             self.run(&mut inner, event, at);
         }
-        let after = self.view();
+        let (generation, after) = self.view_stamped();
+        between();
         if before != after {
-            shared.broadcast_power(&after);
+            shared.broadcast_power(generation, &after);
         }
         after
     }
@@ -333,19 +358,22 @@ impl PowerCentre {
     }
 
     /// Reads the idle and timed settings into the machine (at start and after every settings save).
+    ///
+    /// The settings are read and given to the machine under one hold of the core lock (core, then idle): the power thread's
+    /// configure at start and a save's configure can run at once, and the one that read older settings must never be applied
+    /// last, or the machine keeps rules the person has since switched on or off.
     pub fn configure_idle(&self, shared: &Shared) {
-        let (idle, timed_on) = {
+        let before = self.view();
+        let at = self.at();
+        let effects = {
             let core = lock(&shared.core);
-            (core.settings.power.idle.clone(), core.settings.power.timed.enabled)
+            let event = IdleEvent::Configure {
+                idle: Box::new(core.settings.power.idle.clone()),
+                timed_on: core.settings.power.timed.enabled,
+            };
+            locked(&self.idle).step(event, at)
         };
-        self.idle_apply(
-            shared,
-            IdleEvent::Configure {
-                idle: Box::new(idle),
-                timed_on,
-            },
-            self.at(),
-        );
+        self.idle_effects(shared, before, effects, at);
         self.wake();
     }
 
@@ -365,6 +393,11 @@ impl PowerCentre {
     fn idle_apply(&self, shared: &Shared, event: IdleEvent, at: Timestamp) {
         let before = self.view();
         let effects = locked(&self.idle).step(event, at);
+        self.idle_effects(shared, before, effects, at);
+    }
+
+    /// Runs what the idle machine asked for and pushes the view when it changed from `before`.
+    fn idle_effects(&self, shared: &Shared, before: PowerView, effects: Vec<IdleEffect>, at: Timestamp) {
         let mut failed: Option<String> = None;
         for effect in effects {
             match effect {
@@ -392,9 +425,9 @@ impl PowerCentre {
                 }
             }
         }
-        let after = self.view();
+        let (generation, after) = self.view_stamped();
         if before != after {
-            shared.broadcast_power(&after);
+            shared.broadcast_power(generation, &after);
         }
     }
 
@@ -404,35 +437,40 @@ impl PowerCentre {
             return;
         }
         let at = self.at();
-        // A timed action whose time has come starts its countdown (one at a time; the others stay due).
-        let (timed, countdown) = {
-            let core = lock(&shared.core);
-            (
-                core.settings.power.timed.due(at, core.zone.as_ref()),
-                core.settings.power.idle.countdown_secs,
-            )
-        };
-        if let Some((id, action)) = timed.first().copied() {
+        // A timed action whose time has come starts its countdown (one at a time; the others stay due). Reading what is due,
+        // starting the countdown and noting the entry as run happen under one hold of the core lock: another caller of this
+        // function (the tests drive it beside the power thread) or a settings read must never see the countdown with the entry
+        // not yet noted, or it counts down, acts and finds a once entry that is not done (train 14, run 8283).
+        let accepted = {
+            let mut core = lock(&shared.core);
+            let zone = core.zone.clone();
+            let due = core.settings.power.timed.due(at, zone.as_ref()).first().copied();
+            let countdown_secs = core.settings.power.idle.countdown_secs;
             // The machine decides whether it can take it (it ignores a due action while one is counting down or being asked).
-            let accepted = locked(&self.idle)
-                .step(
-                    IdleEvent::TimedDue {
-                        action,
-                        countdown_secs: countdown,
-                    },
-                    at,
-                )
-                .iter()
-                .any(|e| matches!(e, IdleEffect::ShowCountdown { .. }));
-            if accepted {
-                let mut core = lock(&shared.core);
-                let zone = core.zone.clone();
+            // Lock order: core, then idle; nothing takes core while holding idle.
+            let accepted = due.filter(|&(_, action)| {
+                locked(&self.idle)
+                    .step(IdleEvent::TimedDue { action, countdown_secs }, at)
+                    .iter()
+                    .any(|e| matches!(e, IdleEffect::ShowCountdown { .. }))
+            });
+            #[cfg(test)]
+            if accepted.is_some() {
+                let hook = locked(&self.after_timed_accept).take();
+                if let Some(hook) = hook {
+                    hook();
+                }
+            }
+            if let Some((id, action)) = accepted {
                 core.settings.power.timed.mark_run(id, at, zone.as_ref());
                 core.save_settings(&shared.dirs);
-                drop(core);
-                let v = self.view();
-                shared.broadcast_power(&v);
+                log::info!(target: "dyno_agent::power", "timed entry {id} is due: the {} countdown started and the entry is noted as run", action.verb());
             }
+            accepted.is_some()
+        };
+        if accepted {
+            let (generation, v) = self.view_stamped();
+            shared.broadcast_power(generation, &v);
         }
         let inputs = self.idle_inputs(shared);
         self.idle_apply(shared, IdleEvent::Tick(Box::new(inputs)), at);
@@ -512,6 +550,7 @@ fn read_inputs(shared: &Shared, watching: Option<dyno_core::process::ProcessRef>
         disk_bytes_per_s: sample.map(|s| s.disk_io.read_bps + s.disk_io.write_bps),
         programs: (!processes.is_empty()).then(|| processes.iter().map(|p| p.name.clone()).collect()),
         process_alive: watching.and_then(|w| alive(processes, w)),
+        watched: watching,
     }
 }
 
@@ -581,4 +620,115 @@ pub fn run(shared: &Arc<Shared>) {
     }
     drop(subscription);
     centre.shutdown(shared);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dyno_core::power::idle::{Repeat, TimedAction};
+    use std::sync::mpsc::channel;
+
+    /// A guard against a hung run, never the expected wait.
+    const HANG_GUARD: Duration = Duration::from_secs(30);
+
+    /// Dyno ADR 0034: a hold starts and its view is read and stamped; before it is pushed, the hold is stopped and that (newer) view is
+    /// pushed. The older view then arrives last and must be refused: the app ends with "not held", the state the agent ended in.
+    #[test]
+    fn a_power_view_read_before_a_newer_change_is_not_pushed_over_it() {
+        use dyno_core::power::awake::{AwakeScope, AwakeSpec, AwakeUntil, AwakeView};
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let fake = dyno_platform::fake::Fake::new();
+        let (shared, _, _) = Shared::build(
+            crate::paths::Dirs::at(tmp.path().join("data")),
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+        )
+        .unwrap();
+        let pending = Arc::new(crate::agent::Pending::default());
+        let (tx, _rx) = std::sync::mpsc::sync_channel(1);
+        lock(&shared.subs).push(crate::agent::Sub {
+            id: 1,
+            detail: Arc::new(std::sync::atomic::AtomicU8::new(1)),
+            tx,
+            scans: Default::default(),
+            volumes: Default::default(),
+            jobs: Default::default(),
+            pending: pending.clone(),
+        });
+        let spec = AwakeSpec {
+            scope: AwakeScope::System,
+            until: AwakeUntil::Indefinite,
+        };
+        let at = now();
+        let centre = &shared.power;
+        let started = centre.apply_with(&shared, Event::Start { spec, ends: None }, at, &|| {
+            drop(centre.apply(&shared, Event::Stop, at))
+        });
+        assert!(
+            matches!(started.awake, AwakeView::Holding { .. }),
+            "the start's own caller got the view it read"
+        );
+        let told = pending.power.take().expect("the app was told");
+        assert_eq!(told.awake, AwakeView::Off, "the app ends in the state the agent ended in");
+    }
+
+    /// The agent's own power thread and a caller of [`PowerCentre::idle_tick`] (the tests) both run the timed rule. Whoever
+    /// starts the countdown must have noted the entry as run before anyone can read the settings: otherwise the other caller
+    /// can count down, act, and read a once entry that is not done (train 14, run 8283, `tests/power.rs:592`).
+    #[test]
+    fn a_timed_entry_is_noted_as_run_before_anyone_can_read_the_settings_after_its_countdown_starts() {
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let dirs = crate::paths::Dirs::at(tmp.path().join("data"));
+        std::fs::create_dir_all(dirs.root()).unwrap();
+        let fake = dyno_platform::fake::Fake::new();
+        let running = crate::Running::start(dirs, fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
+        let shared = running.shared.clone();
+        // Hold the power thread right after its machine took the timed action, and tell the test.
+        let (accepted_tx, accepted_rx) = channel();
+        let (go_tx, go_rx) = channel::<()>();
+        *locked(&shared.power.after_timed_accept) = Some(Box::new(move || {
+            accepted_tx.send(()).unwrap();
+            let _ = go_rx.recv_timeout(HANG_GUARD);
+        }));
+        // Switching the rule on runs on its own thread. The hook holds the core lock while it waits for `go`, and the power
+        // thread may take the action from its own start configure before this configure runs: the thread that releases the
+        // hook must never wait for the core lock itself (it did, and waited out the guard: train 14's stress, 1 of 3).
+        let enable = {
+            let shared = shared.clone();
+            std::thread::spawn(move || {
+                {
+                    let mut core = lock(&shared.core);
+                    core.settings.power.timed.enabled = true;
+                    // Minute 0: due at any time of the day, so a run near midnight cannot miss it.
+                    core.settings.power.timed.entries = vec![TimedAction {
+                        id: 7,
+                        action: IdleAction::Hibernate,
+                        at_minute: 0,
+                        repeat: Repeat::Once,
+                        last_day: None,
+                        done: false,
+                    }];
+                }
+                // Configuring wakes the power thread, which finds the entry due.
+                shared.power.configure_idle(&shared);
+            })
+        };
+        accepted_rx
+            .recv_timeout(HANG_GUARD)
+            .expect("the power thread never took the timed action");
+        let read = match shared.core.try_lock() {
+            // Nobody can read the settings while the countdown is being started: that is the fix.
+            Err(std::sync::TryLockError::WouldBlock) => None,
+            Err(std::sync::TryLockError::Poisoned(e)) => Some(e.into_inner().settings.power.timed.entries[0].done),
+            Ok(core) => Some(core.settings.power.timed.entries[0].done),
+        };
+        go_tx.send(()).expect("the hook waited out the guard: the test held it too long");
+        enable.join().unwrap();
+        if let Some(done) = read {
+            assert!(done, "a once entry does not run again");
+        }
+        assert!(lock(&shared.core).settings.power.timed.entries[0].done);
+        running.stop();
+    }
 }

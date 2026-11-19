@@ -33,6 +33,7 @@ pub fn platform(secrets_dir: &std::path::Path) -> Platform {
         facts: Box::new(facts::os_facts()),
         sensors: Box::new(SysinfoSensors::new(Box::new(pdh::WinProbe::new()))),
         processes: Box::new(SysinfoProcesses::new(Box::new(NoDetails)).with_nt(Box::new(nt_query::NtQuery::load()))),
+        signatures: crate::signatures::system(),
         activity: Box::new(activity::WinActivity),
         issues: crate::issues::os_sources(),
         links: Box::new(crate::links::OsLinks::new()),

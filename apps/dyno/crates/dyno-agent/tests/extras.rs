@@ -264,6 +264,7 @@ fn maintenance_windows_are_validated_and_reported() {
         &peer,
         Request::SaveSettings {
             settings: settings.clone(),
+            base_revision: None,
         },
     )
     .unwrap_err();
@@ -281,7 +282,14 @@ fn maintenance_windows_are_validated_and_reported() {
         start_minute: 0,
         end_minute: 1439,
     }];
-    ask(&peer, Request::SaveSettings { settings }).unwrap();
+    ask(
+        &peer,
+        Request::SaveSettings {
+            settings,
+            base_revision: None,
+        },
+    )
+    .unwrap();
     let Reply::Maintenance(m) = ask(&peer, Request::Maintenance).unwrap() else {
         panic!("maintenance")
     };

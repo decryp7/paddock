@@ -885,6 +885,16 @@ review_by = 2026-12-20
 approved = "coordinator"
 
 [[ignored]]
+path = "apps/dyno/crates/dyno-agent/src/sampler.rs"
+tests = ["tick_state_cost_with_5000_alarms"]
+gate = "not-gated"
+reason = "performance test run by hand: a measurement, not a check: run it by hand in release mode (apps/dyno/docs/performance.md, tick state with 5,000 alarms)"
+owner = "Dyno 1.1.1"
+since = 2026-11-19
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
 path = "apps/dyno/crates/dyno-agent/tests/finder_bench.rs"
 tests = ["the_finder_on_a_generated_tree"]
 gate = "not-gated"

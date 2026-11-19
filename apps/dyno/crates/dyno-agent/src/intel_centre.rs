@@ -23,6 +23,7 @@ use dyno_core::intel_lists::{
 use dyno_core::intel_sub::Schedule;
 use dyno_core::intel_text::parse_list;
 use dyno_core::jobs::JobSpec;
+use dyno_core::newer::NewerSlot;
 use paddock_download::schedule::next_allowed;
 use paddock_jobs::time::Clock;
 use paddock_jobs::{JobContext, JobError, Phase};
@@ -101,14 +102,48 @@ pub struct HomeInfo {
     pub source: String,
 }
 
+#[derive(Default)]
+struct RebuildState {
+    /// How many builds are between their start and the decision to end.
+    looping: u32,
+    /// A job start asked the running build to cover it.
+    dirty: bool,
+}
+
+/// A build counted as in its loop; counted out when dropped (an early error or a panic), or by the normal end under the lock.
+struct RebuildLoop<'a> {
+    state: &'a Mutex<RebuildState>,
+    /// Counted out already, under the lock, by the decision to end.
+    left: bool,
+}
+
+impl<'a> RebuildLoop<'a> {
+    fn enter(state: &'a Mutex<RebuildState>) -> RebuildLoop<'a> {
+        lock(state).looping += 1;
+        RebuildLoop { state, left: false }
+    }
+}
+
+impl Drop for RebuildLoop<'_> {
+    fn drop(&mut self) {
+        if !self.left {
+            let mut state = lock(self.state);
+            state.looping = state.looping.saturating_sub(1);
+        }
+    }
+}
+
 /// The lists, the index and the location data.
 pub struct IntelCentre {
     dirs: Dirs,
     clock: Arc<dyn Clock>,
     lists: Mutex<UserLists>,
     fetch: Mutex<FetchStore>,
-    index: RwLock<Arc<IntelIndex>>,
+    /// The installed index, with the revision of the lists it was built from (Dyno ADR 0034).
+    index: NewerSlot<Arc<IntelIndex>>,
     index_error: Mutex<Option<String>>,
+    /// Which builds are in their loop and whether one was asked to build again (Dyno ADR 0034).
+    rebuild_state: Mutex<RebuildState>,
     geo: RwLock<Arc<GeoReader>>,
     home: Mutex<HomeInfo>,
     home_tried_ms: Mutex<Option<i64>>,
@@ -136,8 +171,9 @@ impl IntelCentre {
             lists: Mutex::new(load_lists(&dirs)),
             fetch: Mutex::new(FetchStore::load(&dirs)),
             geo: RwLock::new(Arc::new(geo_fetch::load_reader(&dirs, now_secs))),
-            index: RwLock::new(Arc::new(IntelIndex::default())),
+            index: NewerSlot::new(),
             index_error: Mutex::new(None),
+            rebuild_state: Mutex::new(RebuildState::default()),
             home: Mutex::new(HomeInfo {
                 country: None,
                 source: HOME_NOT_LOOKED_UP.into(),
@@ -171,7 +207,7 @@ impl IntelCentre {
 
     /// The current index (cheap to clone).
     pub fn index(&self) -> Arc<IntelIndex> {
-        self.index.read().unwrap_or_else(PoisonError::into_inner).clone()
+        self.index.get().unwrap_or_default()
     }
 
     /// The current location databases.
@@ -191,6 +227,7 @@ impl IntelCentre {
             let _ = lock(&self.fetch).save(&self.dirs);
         }
         *lists = next;
+        lists.revision += 1;
         if let Err(e) = save_lists(&self.dirs, &lists) {
             log::warn!(target: "dyno::intel", "lists not saved: {}", e.kind());
         }
@@ -273,8 +310,60 @@ impl IntelCentre {
     /// Builds the index from the enabled lists as the job `ctx`: phase `index` counts the entries taken. Cancel stops it and keeps
     /// the old index; a limit reached is reported in the status and keeps the old index too.
     pub fn rebuild(&self, ctx: &JobContext) -> Result<(), JobError> {
+        self.rebuild_with(ctx, &|_| {})
+    }
+
+    /// [`rebuild`](Self::rebuild) with `after_snapshot(pass)` run once a pass has read the lists and before it builds: the moment an
+    /// edit can land while a build runs on the older lists (tests edit there).
+    #[doc(hidden)]
+    pub fn rebuild_with(&self, ctx: &JobContext, after_snapshot: &dyn Fn(u32)) -> Result<(), JobError> {
+        self.rebuild_hooked(ctx, after_snapshot, &|| {})
+    }
+
+    /// [`rebuild_with`](Self::rebuild_with) and `before_end`, run each time a pass is done and before the decision whether to build
+    /// again: the moment a job start can still ask the running build to cover it (tests ask there).
+    #[doc(hidden)]
+    pub fn rebuild_hooked(&self, ctx: &JobContext, after_snapshot: &dyn Fn(u32), before_end: &dyn Fn()) -> Result<(), JobError> {
+        // A running rebuild covers an edit made after it began (the job start answers the running job), so a build whose lists moved
+        // on by its end, or that a job start asked to cover it, builds again from the new ones; the slot refuses an index of an older
+        // revision than the installed one. The decision to end is made under the same lock a job start asks under
+        // ([`coalesce_into_running`](Self::coalesce_into_running)), so a request is covered or starts a job of its own, never lost
+        // between the last look and the end of the job (Dyno ADR 0034).
+        let mut in_loop = RebuildLoop::enter(&self.rebuild_state);
+        let mut pass = 0;
+        loop {
+            let revision = lock(&self.lists).revision;
+            self.rebuild_pass(ctx, pass, after_snapshot)?;
+            pass += 1;
+            before_end();
+            let mut state = lock(&self.rebuild_state);
+            let moved = lock(&self.lists).revision != revision;
+            if (!moved && !state.dirty) || ctx.cancel_token().is_cancelled() {
+                // Leaving: counted out under the lock, so a request that comes after this finds no running build.
+                state.looping -= 1;
+                in_loop.left = true;
+                return Ok(());
+            }
+            state.dirty = false;
+            log::info!(target: "dyno::intel", "the lists changed while the index was built; building again");
+        }
+    }
+
+    /// Asks the running rebuild to cover a rebuild that was just asked for: true when a build is in its loop (it builds again before it
+    /// ends), false when none is, and the caller must start a job of its own.
+    pub fn coalesce_into_running(&self) -> bool {
+        let mut state = lock(&self.rebuild_state);
+        if state.looping == 0 {
+            return false;
+        }
+        state.dirty = true;
+        true
+    }
+
+    fn rebuild_pass(&self, ctx: &JobContext, pass: u32, after_snapshot: &dyn Fn(u32)) -> Result<(), JobError> {
         let started = self.clock.monotonic();
         let lists = lock(&self.lists).clone();
+        after_snapshot(pass);
         let mut inputs = Vec::with_capacity(lists.lists.len());
         for l in &lists.lists {
             let text_entries = match &l.source {
@@ -302,7 +391,9 @@ impl IntelCentre {
         match built {
             Ok(ix) => {
                 log::info!(target: "dyno::intel", "index built: lists={} entries={total} ranges={} duration_ms={ms}", inputs.len(), ix.stored_ranges());
-                *self.index.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(ix);
+                if !self.index.put(lists.revision, Arc::new(ix)) {
+                    log::info!(target: "dyno::intel", "index of lists revision {} dropped: a newer one is installed", lists.revision);
+                }
                 *lock(&self.index_error) = None;
                 Ok(())
             }
@@ -648,6 +739,63 @@ mod tests {
         ));
         let st = r.centre.status();
         assert_eq!((st.index_ranges, st.index_error), (1, None));
+    }
+
+    /// Dyno ADR 0034: an edit lands after a rebuild read the lists; the job start answers the running job, so the edit's own rebuild never
+    /// runs. The running build builds again from the new lists, and the disabled list stops matching.
+    #[test]
+    fn a_rebuild_whose_lists_changed_meanwhile_builds_again() {
+        let r = rig(vec![]);
+        let id = add_manual(&r.centre, "A", "8.8.8.8");
+        let edited = std::cell::Cell::new(false);
+        r.centre
+            .rebuild_with(&ctx(), &|pass| {
+                if pass == 0 {
+                    r.centre
+                        .edit(IntelEdit::SetEnabled {
+                            id: id.clone(),
+                            enabled: false,
+                        })
+                        .unwrap();
+                    edited.set(true);
+                }
+            })
+            .unwrap();
+        assert!(edited.get());
+        assert!(
+            !matches!(r.centre.index().check(&ip("8.8.8.8"), None), Verdict::Flagged { .. }),
+            "the disabled list no longer matches"
+        );
+    }
+
+    /// Dyno ADR 0034: a job start asks the running rebuild to cover it. While the build is in its loop it does (and builds again though the
+    /// lists did not move); once it decided to end it does not, and the start makes a job of its own.
+    #[test]
+    fn a_rebuild_asked_to_cover_a_start_builds_again_and_one_that_ended_does_not() {
+        let r = rig(vec![]);
+        add_manual(&r.centre, "A", "8.8.8.8");
+        let passes = std::cell::Cell::new(0);
+        let asked = std::cell::Cell::new(false);
+        r.centre
+            .rebuild_hooked(&ctx(), &|pass| passes.set(pass + 1), &|| {
+                if !asked.replace(true) {
+                    assert!(r.centre.coalesce_into_running(), "the build is still in its loop");
+                }
+            })
+            .unwrap();
+        assert_eq!(passes.get(), 2, "the covered request made it build once more");
+        assert!(!r.centre.coalesce_into_running(), "it ended: a start must make a job of its own");
+    }
+
+    /// Dyno ADR 0034: an index of an older revision does not replace an installed newer one.
+    #[test]
+    fn an_index_of_an_older_revision_is_refused() {
+        let r = rig(vec![]);
+        add_manual(&r.centre, "A", "8.8.8.8");
+        r.centre.rebuild(&ctx()).unwrap();
+        let installed = r.centre.index();
+        assert!(!r.centre.index.put(0, Arc::new(IntelIndex::default())));
+        assert!(Arc::ptr_eq(&installed, &r.centre.index()));
     }
 
     #[test]

@@ -133,6 +133,9 @@ pub struct Settings {
     pub maintenance: crate::extras::maintenance::MaintenanceSettings,
     /// Power: keep awake (ADR 0032).
     pub power: crate::power::settings::PowerSettings,
+    /// Counts the changes made through `SaveSettings` and the alert-rule requests (Dyno ADR 0034). The agent owns it: a save is refused as
+    /// stale when it names an older one (`base_revision`), so a window's copy never overwrites what another window or request changed.
+    pub revision: u64,
 }
 
 /// Which hardware findings may raise an alarm (the pages always show them).
@@ -181,6 +184,7 @@ impl Default for Settings {
             jobs: Default::default(),
             maintenance: Default::default(),
             power: Default::default(),
+            revision: 0,
         }
     }
 }

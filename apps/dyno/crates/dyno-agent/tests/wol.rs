@@ -243,6 +243,32 @@ fn adding_changing_and_removing_is_validated_pushed_and_keeps_the_password_in_th
     assert!(wol(ask(&c, Request::WolRemove { id: 1 }).unwrap()).devices.is_empty());
 }
 
+/// Dyno ADR 0034 (P2-6): a change that read the list before another change read and pushed a newer one must not push its older list over
+/// it. Without the generation the app was left with the computer that had just been removed.
+#[test]
+fn a_list_read_before_a_newer_change_is_not_pushed_over_it() {
+    let h = Harness::start();
+    let c = h.client();
+    let v = save(&c, input("Media PC", MAC)).unwrap();
+    let id = v.devices[0].id;
+    let shared = h.running.as_ref().unwrap().shared.clone();
+    let pending = Arc::new(dyno_agent::agent::Pending::default());
+    let (tx, _rx) = std::sync::mpsc::sync_channel(1);
+    shared.subs.lock().unwrap().push(dyno_agent::agent::Sub {
+        id: 99,
+        detail: Arc::new(std::sync::atomic::AtomicU8::new(1)),
+        tx,
+        scans: Default::default(),
+        volumes: Default::default(),
+        jobs: Default::default(),
+        pending: pending.clone(),
+    });
+    // This change reads the list with the computer in it; before it pushes, the computer is removed (read and pushed in full).
+    shared.wol.changed_with(&shared, &|| drop(shared.wol.remove(&shared, id))).unwrap();
+    let told = pending.wol.take().expect("the app was told");
+    assert!(told.devices.is_empty(), "the app ends with the list the agent ended with");
+}
+
 #[test]
 fn a_wake_sends_three_rounds_of_magic_packets_through_the_card_and_saves_how_it_ended() {
     let h = Harness::start();
@@ -370,7 +396,14 @@ fn a_wake_is_refused_for_an_unknown_computer_and_when_the_feature_is_off() {
     };
     let mut s = *s;
     s.power.wol.enabled = false;
-    ask(&c, Request::SaveSettings { settings: Box::new(s) }).unwrap();
+    ask(
+        &c,
+        Request::SaveSettings {
+            settings: Box::new(s),
+            base_revision: None,
+        },
+    )
+    .unwrap();
     assert!(ask(&c, Request::WolWake { id: 1, test: false })
         .unwrap_err()
         .contains("turned off in Settings"));
@@ -435,7 +468,14 @@ fn add_from_network_lists_only_unsaved_computers_and_can_be_turned_off() {
     };
     let mut s = *s;
     s.power.wol.discovery = false;
-    ask(&c, Request::SaveSettings { settings: Box::new(s) }).unwrap();
+    ask(
+        &c,
+        Request::SaveSettings {
+            settings: Box::new(s),
+            base_revision: None,
+        },
+    )
+    .unwrap();
     assert!(ask(&c, Request::WolCandidates).unwrap_err().contains("turned off in Settings"));
 }
 

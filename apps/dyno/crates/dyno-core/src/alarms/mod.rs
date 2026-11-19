@@ -44,6 +44,12 @@ impl AlarmState {
     pub fn is_open(self) -> bool {
         self != AlarmState::Cleared
     }
+
+    /// Whether the condition still holds ([`AlarmState::Active`] or [`AlarmState::Acknowledged`]): only such an alarm can
+    /// expire or return; one that returned already does not return again.
+    pub fn holds(self) -> bool {
+        matches!(self, AlarmState::Active | AlarmState::Acknowledged)
+    }
 }
 
 /// How long a shelved alarm stays quiet.
@@ -328,14 +334,18 @@ pub struct AlarmChange {
     pub notify: bool,
     /// When.
     pub at: Timestamp,
+    /// The agent's number of this change, taken under the lock that produced it (Dyno ADR 0034): a connection's slot keeps the change with
+    /// the highest ticket of its alarm, whichever thread pushes last. Not part of the wire; 0 outside the agent.
+    #[serde(skip)]
+    pub ticket: u64,
 }
 
 fn clip(s: &str, max: usize) -> String {
     s.chars().filter(|c| !c.is_control() || *c == '\n').take(max).collect()
 }
 
-/// The alarm list and its rules.
-#[derive(Debug)]
+/// The alarm list and its rules. Cloned before a write so a change that was not stored can be undone (the agent's tick state).
+#[derive(Debug, Clone)]
 pub struct AlarmEngine {
     config: AlarmConfig,
     /// The user's local zone: quiet hours and "until tomorrow" follow it.
@@ -377,6 +387,21 @@ impl AlarmEngine {
         e.alarms = alarms;
         e.muted_rules = muted_rules.into_iter().collect();
         e
+    }
+
+    /// Gives new alarms ids above `id` (the highest id the history still names, so an id is never given twice: rule 53).
+    pub fn reserve_ids_through(&mut self, id: u64) {
+        self.next_id = self.next_id.max(id.saturating_add(1));
+    }
+
+    /// The settings.
+    pub fn config(&self) -> AlarmConfig {
+        self.config
+    }
+
+    /// The local zone quiet hours follow.
+    pub fn zone(&self) -> Zone {
+        Zone::clone(&self.zone)
     }
 
     /// Replaces the settings.
@@ -434,6 +459,7 @@ impl AlarmEngine {
             alarm: alarm.clone(),
             notify,
             at,
+            ticket: 0,
         }
     }
 
@@ -576,7 +602,7 @@ impl AlarmEngine {
     }
 
     fn returned(&mut self, key: &str, at: Timestamp) -> Vec<AlarmChange> {
-        let Some(i) = self.alarms.iter().position(|a| a.key == key && a.state.is_open()) else {
+        let Some(i) = self.alarms.iter().position(|a| a.key == key && a.state.holds()) else {
             return Vec::new();
         };
         let a = &mut self.alarms[i];
@@ -696,7 +722,7 @@ impl AlarmEngine {
         let expired: Vec<String> = self
             .alarms
             .iter()
-            .filter(|a| a.state.is_open() && a.expires_at.is_some_and(|t| now >= t))
+            .filter(|a| a.state.holds() && a.expires_at.is_some_and(|t| now >= t))
             .map(|a| a.key.clone())
             .collect();
         for key in expired {
@@ -810,6 +836,30 @@ mod tests {
             key: key.into(),
             at: Timestamp(at),
         }
+    }
+
+    /// An alarm whose condition went away returns once: the ticks after its expiry do not return it again (each one stored
+    /// and announced another "returned", shipped since dyno-v1.0.0; found by the ADR 0108 WP-1 cooldown probe).
+    #[test]
+    fn an_expired_alarm_returns_once_not_at_every_tick() {
+        let mut e = AlarmEngine::new(AlarmConfig::default(), crate::time::FixedZone::shared(0));
+        e.apply(AlarmEvent::Raise {
+            rule: "alert:disk".into(),
+            key: "alert:disk:d".into(),
+            severity: Severity::Warning,
+            title: "t".into(),
+            detail: String::new(),
+            value: None,
+            metric: None,
+            ttl_ms: Some(1_000),
+            at: Timestamp(1),
+        });
+        let kinds = |c: Vec<AlarmChange>| c.into_iter().map(|c| c.kind).collect::<Vec<_>>();
+        assert_eq!(kinds(e.tick(Timestamp(2_000))), [ChangeKind::Returned]);
+        assert_eq!(kinds(e.tick(Timestamp(40_000))), [], "returned once");
+        assert_eq!(kinds(e.tick(Timestamp(80_000))), []);
+        // An event that says it went away does not return it again either.
+        assert!(e.apply(ret("alert:disk:d", 90_000)).is_empty());
     }
 
     fn state(e: &AlarmEngine, id: u64) -> AlarmState {

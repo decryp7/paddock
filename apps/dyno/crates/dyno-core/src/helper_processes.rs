@@ -168,6 +168,71 @@ pub struct Sweep {
     pub taken_at: i64,
 }
 
+/// How long a sweep serves the follow-up pages of a paged read (ADR 0108 DY-2). The agent asks for the next page as soon as
+/// one arrives, over the connection it keeps, so the pages of one read come within milliseconds; a page later than this is
+/// read from a new sweep.
+pub const PAGE_SWEEP_TTL: std::time::Duration = std::time::Duration::from_secs(2);
+/// The most callers whose paged reads keep a sweep at once (each holds up to [`MAX_SWEEP`] processes).
+pub const MAX_KEPT_SWEEPS: usize = 4;
+
+/// The sweep the pages of one paged read share (ADR 0108 DY-2), kept per caller account: a first page (no cursor) always takes a
+/// new sweep, and that caller's follow-up pages within [`PAGE_SWEEP_TTL`] read the same one, so a read of N pages costs one sweep
+/// and its pages show one moment, also while another account pages at the same time. At most [`MAX_KEPT_SWEEPS`] callers keep
+/// one (the oldest is dropped). Kept unscoped (the raw sweep): each page is scoped to its own caller by [`build_page`]. Two first
+/// pages of one caller that sweep at once keep the sweep that began later (a ticket taken before the sweep, Dyno ADR 0034): the one that
+/// finishes last does not replace the newer one, though its own page is answered from its own sweep.
+#[derive(Default)]
+pub struct PageSweeps {
+    /// The ticket a sweep takes before it starts (Dyno ADR 0034).
+    tickets: crate::newer::Generation,
+    kept: std::sync::Mutex<KeptSweeps>,
+}
+
+#[derive(Default)]
+struct KeptSweeps {
+    /// Per caller: when it was kept, the sweep and the ticket of the sweep.
+    sweeps: Vec<(HelperUser, std::time::Duration, std::sync::Arc<Sweep>, u64)>,
+}
+
+impl PageSweeps {
+    /// The sweep for `caller`'s page asked at `now` (a monotonic clock): the caller's kept one for a `follow_up` page within the
+    /// TTL, else a new one from `sweep`, kept for the caller's pages that follow. A failed sweep keeps nothing.
+    pub fn for_page(
+        &self,
+        caller: &HelperUser,
+        now: std::time::Duration,
+        follow_up: bool,
+        sweep: impl FnOnce() -> Result<Sweep, PlatformError>,
+    ) -> Result<std::sync::Arc<Sweep>, PlatformError> {
+        let kept = || self.kept.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let ticket = {
+            let k = kept();
+            if follow_up {
+                if let Some((_, at, s, _)) = k.sweeps.iter().find(|(c, _, _, _)| c == caller) {
+                    if now.saturating_sub(*at) <= PAGE_SWEEP_TTL {
+                        return Ok(std::sync::Arc::clone(s));
+                    }
+                }
+            }
+            self.tickets.next()
+        };
+        let fresh = std::sync::Arc::new(sweep()?);
+        let mut k = kept();
+        if k.sweeps.iter().any(|(c, _, _, t)| c == caller && *t > ticket) {
+            // A sweep of this caller that began after this one is kept already: this page is answered from its own sweep only.
+            return Ok(fresh);
+        }
+        k.sweeps.retain(|(c, _, _, _)| c != caller);
+        if k.sweeps.len() >= MAX_KEPT_SWEEPS {
+            if let Some(oldest) = k.sweeps.iter().enumerate().min_by_key(|(_, (_, at, _, _))| *at).map(|(i, _)| i) {
+                k.sweeps.remove(oldest);
+            }
+        }
+        k.sweeps.push((caller.clone(), now, std::sync::Arc::clone(&fresh), ticket));
+        Ok(fresh)
+    }
+}
+
 /// The helper's reader of the machine's processes.
 pub trait ProcessSweeper: Send + Sync {
     /// Reads every process once.
@@ -208,7 +273,8 @@ pub fn classify_owner(id: &HelperUser, name: Option<&str>, first_person: u32) ->
     match id {
         HelperUser::Uid(0) => RawOwner::System,
         HelperUser::Uid(uid) => {
-            if *uid < first_person || *uid == 65_534 {
+            // 65534 is `nobody` on Linux, 4294967294 (-2) on macOS: never a person, never a home to redact.
+            if *uid < first_person || *uid == 65_534 || *uid == 4_294_967_294 {
                 service("system service")
             } else {
                 RawOwner::Account {
@@ -221,7 +287,14 @@ pub fn classify_owner(id: &HelperUser, name: Option<&str>, first_person: u32) ->
             "S-1-5-18" => RawOwner::System,
             "S-1-5-19" => RawOwner::Service("LOCAL SERVICE".into(), Some(id.clone())),
             "S-1-5-20" => RawOwner::Service("NETWORK SERVICE".into(), Some(id.clone())),
-            s if s.starts_with("S-1-5-80-") || s.starts_with("S-1-5-90-") || s.starts_with("S-1-5-96-") => service("system service"),
+            // Service SIDs (80), IIS AppPool identities (82), Hyper-V virtual machines (83), window managers (90), font drivers
+            // (96): accounts with no profile, never a person.
+            s if ["S-1-5-80-", "S-1-5-82-", "S-1-5-83-", "S-1-5-90-", "S-1-5-96-"]
+                .iter()
+                .any(|p| s.starts_with(p)) =>
+            {
+                service("system service")
+            }
             _ => RawOwner::Account {
                 id: id.clone(),
                 name: name.map(str::to_string),
@@ -338,6 +411,85 @@ pub fn build_page(sweep: &Sweep, caller: &HelperUser, scope: Visibility, query: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Third review: the accounts that never have a home to redact are services, not people (Windows IIS AppPool and Hyper-V
+    /// virtual machine SIDs, macOS `nobody`), so they never make the helper read the account list again.
+    #[test]
+    fn homeless_account_kinds_are_services() {
+        for sid in ["S-1-5-82-1-2-3-4-5", "S-1-5-83-1-2-3-4-5"] {
+            assert!(
+                matches!(classify_owner(&HelperUser::Sid(sid.into()), None, 1_000), RawOwner::Service(..)),
+                "{sid}"
+            );
+        }
+        assert!(matches!(
+            classify_owner(&HelperUser::Uid(4_294_967_294), Some("nobody"), 500),
+            RawOwner::Service(..)
+        ));
+        assert!(matches!(
+            classify_owner(&HelperUser::Uid(501), Some("ana"), 500),
+            RawOwner::Account { .. }
+        ));
+    }
+
+    /// Review P2-6: two callers paging at once each read the pages of their own first page's sweep, not the other's newer one.
+    #[test]
+    fn each_callers_follow_up_pages_come_from_its_own_sweep() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        use std::time::Duration;
+        let kept = PageSweeps::default();
+        let n = AtomicI64::new(0);
+        let sweep = || {
+            Ok(Sweep {
+                processes: vec![],
+                homes: vec![],
+                taken_at: n.fetch_add(1, Ordering::SeqCst) + 1,
+            })
+        };
+        let (a, b) = (HelperUser::Uid(501), HelperUser::Uid(502));
+        let ms = Duration::from_millis;
+        assert_eq!(kept.for_page(&a, ms(0), false, sweep).unwrap().taken_at, 1);
+        assert_eq!(kept.for_page(&b, ms(10), false, sweep).unwrap().taken_at, 2);
+        assert_eq!(
+            kept.for_page(&a, ms(20), true, sweep).unwrap().taken_at,
+            1,
+            "a's pages are a's sweep"
+        );
+        assert_eq!(kept.for_page(&b, ms(30), true, sweep).unwrap().taken_at, 2);
+        // Bounded: after MAX_KEPT_SWEEPS other callers, a's sweep is gone and its follow-up page sweeps anew.
+        for uid in 0..MAX_KEPT_SWEEPS as u32 {
+            kept.for_page(&HelperUser::Uid(1_000 + uid), ms(40), false, sweep).unwrap();
+        }
+        let fresh = kept.for_page(&a, ms(50), true, sweep).unwrap().taken_at;
+        assert!(fresh > 2, "{fresh}");
+    }
+
+    /// Dyno ADR 0034 (P2-9): two first pages of one caller sweep at once; the one that began first finishes last and must not replace
+    /// the later one's sweep, which the caller's follow-up pages read.
+    #[test]
+    fn a_first_page_that_finishes_last_does_not_replace_a_sweep_that_began_after_it() {
+        use std::time::Duration;
+        let kept = PageSweeps::default();
+        let a = HelperUser::Uid(501);
+        let sweep_at = |taken_at| {
+            Ok(Sweep {
+                taken_at,
+                ..Sweep::default()
+            })
+        };
+        let first = kept
+            .for_page(&a, Duration::from_millis(0), false, || {
+                // While this sweep runs, a later first page of the same caller sweeps and is kept.
+                let later = kept.for_page(&a, Duration::from_millis(5), false, || sweep_at(2)).unwrap();
+                assert_eq!(later.taken_at, 2);
+                sweep_at(1)
+            })
+            .unwrap();
+        assert_eq!(first.taken_at, 1, "its own page comes from its own sweep");
+        let follow_up = kept.for_page(&a, Duration::from_millis(10), true, || sweep_at(3)).unwrap();
+        assert_eq!(follow_up.taken_at, 2, "the follow-up pages read the sweep that began last");
+    }
+
     use crate::helper_requests::RequestClass;
 
     fn raw(pid: u32, owner: RawOwner, path: Option<&str>) -> RawProcess {

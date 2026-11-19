@@ -83,7 +83,9 @@ export class AlarmSettings {
 
   private async save(change: (s: Settings) => Settings): Promise<void> {
     const error: CommandError | null = await this.alarms.updateSettings(change);
-    if (error) this.notifier.error(error);
+    // The settings store already said what went wrong for a failed save (and, for a stale one, that it reloaded): only an error it did
+    // not report (settings not loaded yet) is reported here.
+    if (error && error !== this.settings.saveError()) this.notifier.error(error);
   }
 
   protected setNet(patch: Partial<NetworkAlerts>): Promise<void> {

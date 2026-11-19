@@ -14,6 +14,7 @@ pub fn platform(secrets_dir: &std::path::Path) -> Platform {
     Platform {
         sensors: Box::new(SysinfoSensors::new(Box::new(NoProbe))),
         processes: Box::new(SysinfoProcesses::new(Box::new(NoDetails))),
+        signatures: crate::signatures::system(),
         locks: Box::new(NotReadHere::new("File locks", NOT_YET)),
         startup: Box::new(NotReadHere::new("Startup items", NOT_YET)),
         facts: Box::new(NotReadHere::new("System facts", NOT_YET)),

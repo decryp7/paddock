@@ -38,6 +38,7 @@ so the numbering is fixed.
 | [0031](0031-network-threat-lists-world-map-and-firewall-view.md) | Network threat lists, the connections world map and a read-only firewall view: core features over opt-in downloaded data (Accepted) |
 | [0032](0032-power-keep-awake-wake-on-lan-idle-actions-energy.md) | Power: keep awake, Wake-on-LAN, idle and timed sleep or shut down, scheduled wake and an energy report; amends 0021 and 0027 (Accepted 2026-11-03) |
 | [0033](0033-no-test-fake-in-a-release-build.md) | No test fake in a release build: fakes compiled only for tests, every platform names every port, a wiring test and a shipped-feature check; real Windows readers for startup items, facts and file locks (Accepted 2026-11-08, for 1.1.1) |
+| [0034](0034-newer-only-state.md) | Newer-only state: what is read under a lock is stored, pushed or installed only if nothing newer was stored (a generation and a newer-only slot; the settings carry a revision), replacing a dozen per-instance races (Accepted 2026-11-19) |
 
 New records: copy the shape of an existing one (status, related, context, decision, consequences). ADR numbers are
 allocated at merge time; renumber on a clash and fix the code comments that cite them.

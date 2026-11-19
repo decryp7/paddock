@@ -154,6 +154,18 @@ describe('AlarmsStore', () => {
     expect(store.saving()).toBe(false);
   });
 
+  it('a save of a copy that another change outdated is refused as stale, the settings store reloads, and the retry goes through', async () => {
+    const { store, settings, mock } = setup();
+    await settings.load();
+    await mock.upsertAlertRule({ id: 'r1', name: 'R1', metric: 'cpuTotal', op: 'above', limit: 90, forSecs: 0, severity: 'warning', enabled: true } as never);
+    const error = await store.updateSettings((s) => ({ ...s, notifications: !s.notifications }));
+    expect(error?.code).toBe('stale');
+    expect(settings.settings()?.revision).toBe((await mock.settings()).revision);
+    expect(settings.settings()?.customAlerts?.map((r) => r.id)).toContain('r1');
+    expect(store.saving()).toBe(false);
+    expect(await store.updateSettings((s) => ({ ...s, notifications: !s.notifications }))).toBeNull();
+  });
+
   it('answers the engine error instead of throwing, and says when settings are not loaded', async () => {
     const { store, settings, mock } = setup();
     expect((await store.updateSettings((s) => s))?.message).toMatch(/not loaded/);

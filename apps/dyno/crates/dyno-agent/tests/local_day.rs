@@ -86,7 +86,14 @@ fn settings(peer: &BodyPeer<Message>) -> dyno_core::settings::Settings {
 }
 
 fn save(peer: &BodyPeer<Message>, s: dyno_core::settings::Settings) {
-    ask(peer, Request::SaveSettings { settings: Box::new(s) }).unwrap();
+    ask(
+        peer,
+        Request::SaveSettings {
+            settings: Box::new(s),
+            base_revision: None,
+        },
+    )
+    .unwrap();
 }
 
 /// Minutes `m` around the current local minute, wrapping past midnight.

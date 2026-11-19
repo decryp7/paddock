@@ -269,6 +269,7 @@ fn change(id: u64, kind: ChangeKind) -> AlarmChange {
         alarm: alarm(id, "lowDisk", "Disk C: is nearly full"),
         notify: true,
         at: Timestamp(1_699_999_950_000),
+        ticket: 0,
     }
 }
 

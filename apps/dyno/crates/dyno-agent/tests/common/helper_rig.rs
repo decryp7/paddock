@@ -276,15 +276,17 @@ impl dyno_core::wake::WakeScheduler for GatedWakes {
 
 struct Counters(Vec<CounterAnswer>, Option<Arc<Gate>>);
 impl CounterReader for Counters {
-    fn read(&self, id: CounterId) -> Result<CounterValue, PlatformError> {
+    fn read_many(&self, ids: &[CounterId]) -> Vec<Result<CounterValue, PlatformError>> {
         if let Some(gate) = &self.1 {
             gate.pass();
         }
-        match self.0.iter().find(|a| a.id == id).map(|a| &a.value) {
-            Some(CounterValue::Unavailable(why)) => Err(PlatformError::Unsupported(why.clone())),
-            Some(v) => Ok(v.clone()),
-            None => Err(PlatformError::Unsupported("The rig has no such reading.".into())),
-        }
+        ids.iter()
+            .map(|id| match self.0.iter().find(|a| a.id == *id).map(|a| &a.value) {
+                Some(CounterValue::Unavailable(why)) => Err(PlatformError::Unsupported(why.clone())),
+                Some(v) => Ok(v.clone()),
+                None => Err(PlatformError::Unsupported("The rig has no such reading.".into())),
+            })
+            .collect()
     }
 }
 struct Wol(Option<WolReply>);

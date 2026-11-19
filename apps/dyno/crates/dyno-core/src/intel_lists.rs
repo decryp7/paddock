@@ -99,6 +99,9 @@ pub struct UserLists {
     pub switches: NetSwitches,
     /// The number the next list id takes.
     pub next_id: u32,
+    /// Counts the edits kept (Dyno ADR 0034): an index built from the lists as of one revision is installed only if no index of a newer
+    /// revision is, and a build whose lists changed meanwhile builds again.
+    pub revision: u64,
 }
 
 impl Default for UserLists {
@@ -109,6 +112,7 @@ impl Default for UserLists {
             allow: String::new(),
             switches: NetSwitches::default(),
             next_id: 1,
+            revision: 0,
         }
     }
 }

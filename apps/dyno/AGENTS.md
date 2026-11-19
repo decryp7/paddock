@@ -547,6 +547,10 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
   frame size, Dyno's own CPU budget of ~1 %) and add limits for any new unbounded input.
 - **Every robustness behaviour has a test that triggers the failure** (crashing or hanging plugins, corrupt
   settings, a reused pid, a protected process, locked files, a stale scan, a missing sensor).
+- **Newer-only state (ADR 0034).** State read under a lock and then stored, pushed or acted on after the lock was let go carries
+  the generation it was read at (`dyno_core::newer`: a `Generation` and a `NewerSlot`), or the read and the act are one hold of the
+  lock, or the check is made by the one thread that orders the work. A review asks it of every new read-then-act, and a new one has
+  a seam test (`scan_with` style) that runs the other caller in between and fails without the fix.
 
 <!-- paddock:block working-in-parallel rev=0507b1ce -->
 ## Working in parallel (agents)

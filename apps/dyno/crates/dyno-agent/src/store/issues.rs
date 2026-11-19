@@ -29,18 +29,19 @@ fn kind_text(k: IssueKind) -> String {
 impl Store {
     /// Stores issues; those already stored (same id) are ignored. Returns the ones that were new.
     pub fn put_issues(&self, issues: &[Issue]) -> Result<Vec<Issue>> {
-        let tx = self.conn.unchecked_transaction()?;
-        let mut added = Vec::new();
-        {
-            let mut st = tx.prepare_cached("INSERT OR IGNORE INTO issues (id, at, kind, data) VALUES (?1, ?2, ?3, ?4)")?;
+        // One whole (a SAVEPOINT), inside a batch or alone.
+        self.atomic(|| {
+            let mut added = Vec::new();
+            let mut st = self
+                .conn
+                .prepare_cached("INSERT OR IGNORE INTO issues (id, at, kind, data) VALUES (?1, ?2, ?3, ?4)")?;
             for i in issues {
                 if st.execute(params![i.id, i.at.millis(), kind_text(i.kind), json(i)?])? > 0 {
                     added.push(i.clone());
                 }
             }
-        }
-        tx.commit()?;
-        Ok(added)
+            Ok(added)
+        })
     }
 
     /// The issues in `[from, to]`, newest first, at most `limit`; rows that no longer parse are skipped.
@@ -80,7 +81,12 @@ impl Store {
         if changes.is_empty() {
             return Ok(());
         }
-        let tx = self.conn.unchecked_transaction()?;
+        // One whole (a SAVEPOINT), inside a batch or alone.
+        self.atomic(|| self.apply_baseline_in(changes))
+    }
+
+    fn apply_baseline_in(&self, changes: &[Change]) -> Result<()> {
+        let tx = &self.conn;
         for c in changes {
             match c {
                 Change::Entry(e) => {
@@ -108,18 +114,17 @@ impl Store {
                 }
             }
         }
-        tx.commit()?;
         Ok(())
     }
 
-    /// Forgets the baseline.
+    /// Forgets the baseline, as one whole (a SAVEPOINT), inside a batch or alone.
     pub fn clear_baseline(&self) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM baseline", [])?;
-        tx.execute("DELETE FROM baseline_startup", [])?;
-        tx.execute("DELETE FROM meta WHERE key = ?1", [SINCE_KEY])?;
-        tx.commit()?;
-        Ok(())
+        self.atomic(|| {
+            self.conn.execute("DELETE FROM baseline", [])?;
+            self.conn.execute("DELETE FROM baseline_startup", [])?;
+            self.conn.execute("DELETE FROM meta WHERE key = ?1", [SINCE_KEY])?;
+            Ok(())
+        })
     }
 }
 

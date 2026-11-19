@@ -66,6 +66,10 @@ pub struct FakeState {
     pub failures: HashMap<FakeOp, (PlatformError, Option<u32>)>,
     /// The thread role the last sample was taken at ([`crate::priority::current_role`]).
     pub sample_role: Option<crate::priority::ThreadRole>,
+    /// Calls of the signature probe (each a batch).
+    pub signature_calls: usize,
+    /// Files the signature probe was asked about.
+    pub signature_checks: usize,
 }
 
 impl FakeState {
@@ -203,11 +207,18 @@ impl Fake {
         self.lock().failures.clear();
     }
 
+    /// How often the signature probe was called, and for how many files in all.
+    pub fn signature_counts(&self) -> (usize, usize) {
+        let st = self.lock();
+        (st.signature_calls, st.signature_checks)
+    }
+
     /// A [`Platform`] whose ports are these fakes, in UTC (a test that cares about local days sets `zone`).
     pub fn platform(&self) -> Platform {
         Platform {
             sensors: Box::new(self.clone()),
             processes: Box::new(self.clone()),
+            signatures: Arc::new(self.clone()),
             locks: Box::new(self.clone()),
             startup: Box::new(self.clone()),
             facts: Box::new(self.clone()),
@@ -285,6 +296,16 @@ impl SystemSensors for Fake {
         st.sample_role = crate::priority::current_role();
         st.last_sample = Some(s.clone());
         s
+    }
+}
+
+/// The fake machine's programs carry no signature to check; each call and file is counted in [`FakeState`].
+impl dyno_core::ports::SignatureProbe for Fake {
+    fn signatures(&self, exes: &[&Path]) -> Vec<SignatureInfo> {
+        let mut st = self.lock();
+        st.signature_calls += 1;
+        st.signature_checks += exes.len();
+        exes.iter().map(|_| SignatureInfo::Unknown("Fake".into())).collect()
     }
 }
 

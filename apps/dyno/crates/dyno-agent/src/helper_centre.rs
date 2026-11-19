@@ -107,9 +107,11 @@ impl<T: HelperTransport> HelperCentre<T> {
 
     /// What Settings shows.
     pub fn status(&self) -> HelperStatus {
+        // The stamp is taken before the read: a probe that began after it and answered first keeps its answer (Dyno ADR 0034).
+        let stamp = self.gate.stamp();
         let status = self.link.status(self.host, self.supported.clone(), &self.version);
         // The readers learn what Settings just learned.
-        self.gate.record(Availability::from_status(&status), self.link.faults());
+        self.gate.record(stamp, Availability::from_status(&status), self.link.faults());
         status
     }
 
