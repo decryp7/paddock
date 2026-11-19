@@ -111,7 +111,7 @@ impl WolCentre {
         Ok(self.read(shared)?.2)
     }
 
-    /// The setting and the saved computers, with a view generation, read in one hold of the core lock (ADR 0034).
+    /// The setting and the saved computers, with a view generation, read in one hold of the core lock (Dyno ADR 0034).
     fn read(&self, shared: &Shared) -> Result<(u64, bool, Vec<WolDevice>), AgentError> {
         let core = lock(&shared.core);
         let generation = shared.next_view_generation();

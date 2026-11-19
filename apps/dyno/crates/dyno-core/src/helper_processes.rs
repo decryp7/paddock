@@ -179,17 +179,17 @@ pub const MAX_KEPT_SWEEPS: usize = 4;
 /// new sweep, and that caller's follow-up pages within [`PAGE_SWEEP_TTL`] read the same one, so a read of N pages costs one sweep
 /// and its pages show one moment, also while another account pages at the same time. At most [`MAX_KEPT_SWEEPS`] callers keep
 /// one (the oldest is dropped). Kept unscoped (the raw sweep): each page is scoped to its own caller by [`build_page`]. Two first
-/// pages of one caller that sweep at once keep the sweep that began later (a ticket taken before the sweep, ADR 0034): the one that
+/// pages of one caller that sweep at once keep the sweep that began later (a ticket taken before the sweep, Dyno ADR 0034): the one that
 /// finishes last does not replace the newer one, though its own page is answered from its own sweep.
 #[derive(Default)]
 pub struct PageSweeps {
+    /// The ticket a sweep takes before it starts (Dyno ADR 0034).
+    tickets: crate::newer::Generation,
     kept: std::sync::Mutex<KeptSweeps>,
 }
 
 #[derive(Default)]
 struct KeptSweeps {
-    /// The ticket the next sweep takes before it starts.
-    next: u64,
     /// Per caller: when it was kept, the sweep and the ticket of the sweep.
     sweeps: Vec<(HelperUser, std::time::Duration, std::sync::Arc<Sweep>, u64)>,
 }
@@ -206,7 +206,7 @@ impl PageSweeps {
     ) -> Result<std::sync::Arc<Sweep>, PlatformError> {
         let kept = || self.kept.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let ticket = {
-            let mut k = kept();
+            let k = kept();
             if follow_up {
                 if let Some((_, at, s, _)) = k.sweeps.iter().find(|(c, _, _, _)| c == caller) {
                     if now.saturating_sub(*at) <= PAGE_SWEEP_TTL {
@@ -214,8 +214,7 @@ impl PageSweeps {
                     }
                 }
             }
-            k.next += 1;
-            k.next
+            self.tickets.next()
         };
         let fresh = std::sync::Arc::new(sweep()?);
         let mut k = kept();
@@ -465,7 +464,7 @@ mod tests {
         assert!(fresh > 2, "{fresh}");
     }
 
-    /// ADR 0034 (P2-9): two first pages of one caller sweep at once; the one that began first finishes last and must not replace
+    /// Dyno ADR 0034 (P2-9): two first pages of one caller sweep at once; the one that began first finishes last and must not replace
     /// the later one's sweep, which the caller's follow-up pages read.
     #[test]
     fn a_first_page_that_finishes_last_does_not_replace_a_sweep_that_began_after_it() {

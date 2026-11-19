@@ -188,7 +188,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             Ok(()) => {
                 // The wear reading was made with the tool: read again now, not at the next slow cycle (hours away). Off the request
                 // (ER-17): the answer does not wait for smartctl. Through the one re-read guard: a read that is running when the tool
-                // goes is followed by one more, and two never run at once (ADR 0034).
+                // goes is followed by one more, and two never run at once (Dyno ADR 0034).
                 crate::hardware::request_reread(shared, std::time::Duration::ZERO);
                 Ok(Reply::Ok)
             }
@@ -481,7 +481,7 @@ fn save_settings(
         );
         return Err(AgentError::new(
             ErrorCode::Stale,
-            "The settings changed since this window read them; they were reloaded. Check them and save again.",
+            "The settings changed since this window read them.",
         ));
     }
     // The layouts change only through `EditWidgetLayout`: a window's copy of the settings, taken before an edit,
@@ -538,7 +538,7 @@ fn alarm_event(shared: &Shared, event: AlarmEvent) -> Answer {
 
 /// [`alarm_event`] with `between` run after the core lock was let go and before the changes are pushed: the moment another request
 /// can change the same alarm and push first (tests do it there). The changes carry the tickets taken under the lock, so the older
-/// ones are refused by the connections' slots then (ADR 0034).
+/// ones are refused by the connections' slots then (Dyno ADR 0034).
 fn alarm_event_with(shared: &Shared, event: AlarmEvent, between: &dyn Fn()) -> Answer {
     let changes = {
         let mut core = lock(&shared.core);
@@ -908,7 +908,7 @@ mod tests {
     use dyno_core::widgets::{DashboardKind, DashboardWidget, Metric};
     use paddock_widgets::Edit;
 
-    /// ADR 0034, P2-3: a request that read an alarm's change before another request changed and pushed it must not push it over
+    /// Dyno ADR 0034, P2-3: a request that read an alarm's change before another request changed and pushed it must not push it over
     /// the newer change: what a connected app is told last for the alarm is the state the engine ended in.
     #[test]
     fn the_last_alarm_change_an_app_gets_is_the_state_the_engine_ended_in() {
@@ -963,7 +963,7 @@ mod tests {
         matches!(m.try_lock(), Err(std::sync::TryLockError::WouldBlock))
     }
 
-    /// ADR 0034 (P2-1): a settings save holds the apply lock from its merge through its effects, with the core lock let go in between
+    /// Dyno ADR 0034 (P2-1): a settings save holds the apply lock from its merge through its effects, with the core lock let go in between
     /// (the sampler needs it every tick). Another save, or anything else that takes the apply lock, waits for the whole of it.
     #[test]
     fn a_settings_save_holds_the_apply_lock_through_its_effects_and_not_the_core_lock() {

@@ -232,7 +232,7 @@ pub struct Inputs {
     pub programs: Option<Vec<String>>,
     /// Whether the process `watched` still runs (pid and start time checked).
     pub process_alive: Option<bool>,
-    /// The process `process_alive` was read for (ADR 0034). The reading is taken after the machine said which process it watches and
+    /// The process `process_alive` was read for (Dyno ADR 0034). The reading is taken after the machine said which process it watches and
     /// before it is fed, so the hold may have changed meanwhile: the machine uses `process_alive` only when this is the process of its
     /// hold now.
     pub watched: Option<ProcessRef>,
@@ -639,7 +639,7 @@ mod tests {
         assert!(m.step(Event::Tick(gone), T0.plus(3 * SECOND)).contains(&Effect::Release));
     }
 
-    /// ADR 0034: the reading was taken for another program than the hold has now (the hold changed between the question and the
+    /// Dyno ADR 0034: the reading was taken for another program than the hold has now (the hold changed between the question and the
     /// feeding), so "that one quit" says nothing about this hold, and an unlabelled reading is not trusted either.
     #[test]
     fn a_reading_taken_for_another_process_is_ignored() {

@@ -243,7 +243,7 @@ fn adding_changing_and_removing_is_validated_pushed_and_keeps_the_password_in_th
     assert!(wol(ask(&c, Request::WolRemove { id: 1 }).unwrap()).devices.is_empty());
 }
 
-/// ADR 0034 (P2-6): a change that read the list before another change read and pushed a newer one must not push its older list over
+/// Dyno ADR 0034 (P2-6): a change that read the list before another change read and pushed a newer one must not push its older list over
 /// it. Without the generation the app was left with the computer that had just been removed.
 #[test]
 fn a_list_read_before_a_newer_change_is_not_pushed_over_it() {

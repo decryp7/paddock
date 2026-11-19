@@ -70,7 +70,7 @@ impl UnusualCentre {
     /// [`look`](Self::look) with `during` run after the baseline observed and before its changes are stored: the moment a "forget"
     /// can come in (tests start one there). The core lock and the baseline lock are held from the observation through the store and
     /// the overview, in the order `forget` takes them (core, then baseline): a forget comes before the look or after it, never
-    /// between, so the store never keeps rows of a baseline that was forgotten (ADR 0034).
+    /// between, so the store never keeps rows of a baseline that was forgotten (Dyno ADR 0034).
     #[doc(hidden)]
     pub fn look_with(&self, shared: &Shared, during: &dyn Fn()) {
         let settings = lock(&shared.core).settings.unusual;
@@ -392,7 +392,7 @@ mod budget_tests {
         matches!(m.try_lock(), Err(std::sync::TryLockError::WouldBlock))
     }
 
-    /// ADR 0034: between the look's observation and its store, nothing else may change the store or the baseline: the look holds the
+    /// Dyno ADR 0034: between the look's observation and its store, nothing else may change the store or the baseline: the look holds the
     /// core lock and the baseline lock across both, in the order `forget` takes them, so a "forget" comes before the look or after
     /// it. A look that let go of them in between could store rows of a baseline that a forget had just cleared.
     #[test]

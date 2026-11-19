@@ -308,7 +308,7 @@ fn an_alert_rule_is_added_changed_and_deleted_without_touching_the_other_setting
     assert!(gone.custom_alerts.is_empty());
 }
 
-/// ADR 0034: a window's copy of the settings, taken before an alert rule was added, is refused when it is saved with the revision it
+/// Dyno ADR 0034: a window's copy of the settings, taken before an alert rule was added, is refused when it is saved with the revision it
 /// was taken at, and the rule stays. Saving at the current revision works and moves the revision on.
 #[test]
 fn a_settings_save_taken_before_another_change_is_refused_as_stale_and_loses_nothing() {

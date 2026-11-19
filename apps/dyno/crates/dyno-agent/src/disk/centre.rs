@@ -411,16 +411,18 @@ pub struct DiskCentre {
     refreshing: std::sync::atomic::AtomicBool,
     /// An OS event arrived while a listing ran: list once more when it ends.
     relist_again: std::sync::atomic::AtomicBool,
-    listing_ticket: AtomicU64,
-    listing_applied: AtomicU64,
+    /// Tickets of the listings, and the newest one applied (Dyno ADR 0034): an older listing that comes back last is refused.
+    listing_ticket: dyno_core::newer::Generation,
+    listing_applied: dyno_core::newer::NewerSlot<()>,
     /// When the volumes' figures were last read (listing or space reading), on the clock.
     space_at: Mutex<Option<u64>>,
     /// Seconds between two space readings, as the Setting resolved it.
     space_secs: AtomicU64,
     space_ticks: AtomicU64,
     space_reading: std::sync::atomic::AtomicBool,
-    space_ticket: AtomicU64,
-    space_applied: AtomicU64,
+    /// The same for the space readings.
+    space_ticket: dyno_core::newer::Generation,
+    space_applied: dyno_core::newer::NewerSlot<()>,
     next: AtomicU64,
     scans: Mutex<Vec<Arc<Entry>>>,
     live: Mutex<HashMap<String, Arc<LiveWorkers>>>,
@@ -495,14 +497,14 @@ impl DiskCentre {
             kept_nodes: AtomicUsize::new(MAX_KEPT_NODES),
             refreshing: std::sync::atomic::AtomicBool::new(false),
             relist_again: std::sync::atomic::AtomicBool::new(false),
-            listing_ticket: AtomicU64::new(0),
-            listing_applied: AtomicU64::new(0),
+            listing_ticket: dyno_core::newer::Generation::new(),
+            listing_applied: dyno_core::newer::NewerSlot::new(),
             space_at: Mutex::new(None),
             space_secs: AtomicU64::new(u64::from(dyno_core::disk::settings::SPACE_REFRESH_AUTO_SECS)),
             space_ticks: AtomicU64::new(0),
             space_reading: std::sync::atomic::AtomicBool::new(false),
-            space_ticket: AtomicU64::new(0),
-            space_applied: AtomicU64::new(0),
+            space_ticket: dyno_core::newer::Generation::new(),
+            space_applied: dyno_core::newer::NewerSlot::new(),
             next: AtomicU64::new(1),
             scans: Mutex::new(Vec::new()),
             live: Mutex::new(HashMap::new()),
@@ -623,17 +625,16 @@ impl DiskCentre {
     /// its last figures and its time, and is marked not answering if it is a share). Announces a change like a listing does.
     fn read_space_now(&self, trigger: &'static str) {
         let began = std::time::Instant::now();
-        let ticket = self.space_ticket.fetch_add(1, Ordering::SeqCst) + 1;
+        let ticket = self.space_ticket.next();
         let Some(listed) = lock(&self.known).clone() else { return };
         let reads: Vec<(String, Option<(u64, u64)>)> = listed.iter().map(|l| (l.volume.id.clone(), self.lister.space_now(l))).collect();
         let (wall, now) = (self.clock.wall_ms(), self.clock.now_ms());
         let (changed, volumes) = {
             let mut known = lock(&self.known);
             let Some(known) = known.as_mut() else { return };
-            if ticket <= self.space_applied.load(Ordering::SeqCst) {
+            if !self.space_applied.put(ticket, ()) {
                 return;
             }
-            self.space_applied.store(ticket, Ordering::SeqCst);
             let mut changed = false;
             for (id, read) in &reads {
                 let Some(l) = known.iter_mut().find(|l| &l.volume.id == id) else {
@@ -727,7 +728,7 @@ impl DiskCentre {
     /// free space moved by more than 1% of its capacity.
     fn refresh_as(&self, trigger: &'static str) -> Vec<ListedVolume> {
         let began = std::time::Instant::now();
-        let ticket = self.listing_ticket.fetch_add(1, Ordering::SeqCst) + 1;
+        let ticket = self.listing_ticket.next();
         let mut listed = self.lister.list();
         let (wall, now) = (self.clock.wall_ms(), self.clock.now_ms());
         for l in &mut listed {
@@ -735,10 +736,9 @@ impl DiskCentre {
         }
         let changed = {
             let mut known = lock(&self.known);
-            if ticket <= self.listing_applied.load(Ordering::SeqCst) {
+            if !self.listing_applied.put(ticket, ()) {
                 return listed;
             }
-            self.listing_applied.store(ticket, Ordering::SeqCst);
             let identity = |l: &Vec<ListedVolume>| l.iter().map(|v| (v.volume.id.clone(), v.volume.reachable)).collect::<Vec<_>>();
             let changed = known
                 .as_ref()

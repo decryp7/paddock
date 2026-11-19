@@ -62,7 +62,7 @@ The class is already solved where someone met it first, each time with its own c
    change is stored (not on the wire). Power views take their generation with both machines' locks held (`view_stamped`); the
    Wake-on-LAN list takes it in the hold that reads the list.
 3. Where state is **installed** rather than pushed, the same slot is used (the intel index with the revision of the lists it was built
-   from) and a build whose inputs moved on builds again.
+   from) and a build whose inputs moved on, or that a job start asked to cover it, builds again; the decision to end is taken under the lock the start asks under, so a request is covered or gets a job of its own. The counters this needs (`Generation`, `NewerSlot`, `NewestPerKey`) are the one mechanism: the disk centre's listing and space tickets, `ReadyGate`, `AlarmCentre` and `PageSweeps` use it too.
 4. Where a value is checked and then acted on, the check moves into the owner of the order (the cache writer reads `enabled` when it
    pops a job) or the lock is held across both (the unusual look, the settings apply mutex, the firewall's atomic).
 5. A user-visible overwrite is refused, not merged: `Settings.revision` and `SaveSettings.base_revision`, answered `Stale`, as the

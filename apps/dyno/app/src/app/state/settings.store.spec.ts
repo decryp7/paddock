@@ -67,6 +67,31 @@ describe('SettingsStore', () => {
     expect(store.settings()?.sampling.intervalMs).toBe(2000);
     expect(store.settings()?.customAlerts?.map((r) => r.id)).toContain('r1');
   });
+  it('two quick saves from one window do not refuse each other as another window', async () => {
+    const { store, mock } = setup();
+    await store.load();
+    const first = structuredClone(store.settings()!);
+    first.sampling.intervalMs = 2000;
+    const second = structuredClone(first);
+    second.launchAtLogin = !second.launchAtLogin;
+    const both = await Promise.all([store.save(first, null), store.save(second, null)]);
+    expect(both).toEqual([true, true]);
+    expect(store.settings()?.launchAtLogin).toBe(second.launchAtLogin);
+    expect((await mock.settings()).revision).toBe(first.revision + 2);
+  });
+  it('a stale refusal keeps what the window tried to save for the page to carry over', async () => {
+    const { store, mock } = setup();
+    await store.load();
+    const s0 = structuredClone(store.settings()!);
+    await mock.upsertAlertRule({ id: 'r1', name: 'R1', metric: 'cpuTotal', op: 'above', limit: 90, forSecs: 0, severity: 'warning', enabled: true } as never);
+    const attempted = structuredClone(s0);
+    attempted.launchAtLogin = !attempted.launchAtLogin;
+    expect(await store.save(attempted)).toBe(false);
+    expect(store.stale()?.attempted).toEqual(attempted);
+    expect(store.stale()?.base?.revision).toBe(s0.revision);
+    store.clearStale();
+    expect(store.stale()).toBeNull();
+  });
   it('save without a message stays quiet', async () => {
     const { store, mock, notifier } = setup();
     expect(await store.save(structuredClone(await mock.settings()), null)).toBe(true);

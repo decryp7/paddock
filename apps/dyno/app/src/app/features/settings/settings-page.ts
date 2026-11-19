@@ -1,3 +1,4 @@
+import { rebaseDraft } from './rebase-draft';
 import { ChangeDetectionStrategy, Component, DestroyRef, Injector, OnInit, afterNextRender, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DEFAULT_POWER } from '../power/power-model';
@@ -513,6 +514,14 @@ export class SettingsPage implements OnInit {
     effect(() => {
       const s = this.store.settings();
       untracked(() => {
+        // After a stale refusal the reloaded settings come with the edits the window tried to save: they stay, on the new copy, and
+        // the page stays dirty.
+        const stale = this.store.stale();
+        if (s && stale) {
+          this.store.clearStale();
+          this.draft.set(rebaseDraft(stale.base, stale.attempted, s));
+          return;
+        }
         this.draft.set(s ? structuredClone(s) : null);
       });
     });

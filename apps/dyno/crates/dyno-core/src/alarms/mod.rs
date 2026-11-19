@@ -328,7 +328,7 @@ pub struct AlarmChange {
     pub notify: bool,
     /// When.
     pub at: Timestamp,
-    /// The agent's number of this change, taken under the lock that produced it (ADR 0034): a connection's slot keeps the change with
+    /// The agent's number of this change, taken under the lock that produced it (Dyno ADR 0034): a connection's slot keeps the change with
     /// the highest ticket of its alarm, whichever thread pushes last. Not part of the wire; 0 outside the agent.
     #[serde(skip)]
     pub ticket: u64,

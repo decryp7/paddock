@@ -77,7 +77,7 @@ use serde::{Deserialize, Serialize};
 /// `LiveVia` (inside `LiveUpdate.via`, `Message::Live`) also gained `processes_hint: Option<String>` at the end, always sent (postcard
 /// has no skipped fields); like the other `via` fields it is unreleased and pinned by `tests/wire/read_via.rs` and `read-via.wire.json`.
 ///
-/// Also in version 8 (still unreleased, so no further bump; ADR 0034): `Settings` gained `revision` (last field) and
+/// Also in version 8 (still unreleased, so no further bump; Dyno ADR 0034): `Settings` gained `revision` (last field) and
 /// `Request::SaveSettings` gained `base_revision`; a save that names an older revision is refused as `ErrorCode::Stale`.
 ///
 /// Also in version 8 (still unreleased, so no further bump; ADR 0033, WP-4): `StartupOverview` gained `signer_read` and `coverage`, and
@@ -1207,6 +1207,19 @@ mod tests {
     use super::*;
     use crate::metrics::fixtures::sample;
     use crate::ports::PlatformError;
+
+    /// Dyno ADR 0034: the JSON key the webview sends for the revision a settings copy was read at. The app's `tauri-backend` sends
+    /// `baseRevision`; a rename on one side would make every save skip the stale check, so the key is pinned here and in its spec.
+    #[test]
+    fn a_save_settings_request_carries_base_revision_under_its_wire_key() {
+        let json = r#"{"saveSettings":{"settings":{"revision":3},"baseRevision":3}}"#;
+        let Request::SaveSettings { settings, base_revision } = serde_json::from_str(json).unwrap() else {
+            panic!("not a save")
+        };
+        assert_eq!((base_revision, settings.revision), (Some(3), 3));
+        let back = serde_json::to_value(Request::SaveSettings { settings, base_revision }).unwrap();
+        assert_eq!(back["saveSettings"]["baseRevision"], 3);
+    }
 
     fn round(m: &Message) -> Message {
         postcard::from_bytes(&postcard::to_stdvec(m).unwrap()).unwrap()

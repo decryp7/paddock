@@ -1452,7 +1452,7 @@ export class MockBackend implements DynoBackend {
       const extras = mockMaintenanceProblem(settings.maintenance);
       if (extras) throw err('badRequest', extras);
       if (settings.revision !== this.settingsValue.revision) {
-        throw err('stale', 'The settings changed since this window read them; they were reloaded. Check them and save again.');
+        throw err('stale', 'The settings changed since this window read them.');
       }
       // Alert rules belong to the engine (upsertAlertRule, deleteAlertRule), whatever a window's copy holds.
       this.settingsValue = copy({ ...settings, customAlerts: this.settingsValue.customAlerts, revision: this.settingsValue.revision + 1 });

@@ -464,7 +464,7 @@ mod tests {
         assert_eq!((items.len(), activity, alerts), (EVENT_QUEUE, 0, 2));
     }
 
-    /// ADR 0034: a change that was read earlier but arrives after a newer one of its alarm is refused, also after the app took the
+    /// Dyno ADR 0034: a change that was read earlier but arrives after a newer one of its alarm is refused, also after the app took the
     /// newer one; another alarm is not affected.
     #[test]
     fn an_older_alarm_change_arriving_late_is_refused() {
@@ -483,7 +483,7 @@ mod tests {
         assert!(slot.put(at(3, alarm(8, Raised, true))), "another alarm is its own sequence");
     }
 
-    /// ADR 0034 (P2-4): the power view read earlier, pushed later, never replaces the newer one, also after the newer was taken.
+    /// Dyno ADR 0034 (P2-4): the power view read earlier, pushed later, never replaces the newer one, also after the newer was taken.
     #[test]
     fn an_older_power_view_arriving_late_is_refused() {
         let pending = Pending::default();

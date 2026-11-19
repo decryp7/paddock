@@ -138,7 +138,7 @@ struct Inner {
     readers: Readers,
     helper_sources: Mutex<HelperSources>,
     /// Whether there are sources only the helper reads: set when they are made and by [`FirewallCentre::bind_helper`], so
-    /// [`Inner::epoch`] never waits for `helper_sources`, which a running read holds for its whole length (ADR 0034).
+    /// [`Inner::epoch`] never waits for `helper_sources`, which a running read holds for its whole length (Dyno ADR 0034).
     has_helper_sources: std::sync::atomic::AtomicBool,
     /// The helper the sources over the seam ask; [`FirewallCentre::bind_helper`] replaces the "no helper" one it starts with.
     helper_port: Mutex<Arc<dyn HelperPort>>,
@@ -461,7 +461,7 @@ mod tests {
         assert_eq!((&v.sources[0].via, v.sources[0].rules.len()), (&ReadVia::Helper, 3));
     }
 
-    /// ADR 0034 (P2-7): a read holds the helper sources for its whole length; a second `view()` must still answer inside its wait
+    /// Dyno ADR 0034 (P2-7): a read holds the helper sources for its whole length; a second `view()` must still answer inside its wait
     /// (`Busy`), not wait for that read to end before it asks the helper's epoch.
     #[test]
     fn a_view_asked_while_a_read_holds_the_helper_sources_still_answers_within_its_bound() {

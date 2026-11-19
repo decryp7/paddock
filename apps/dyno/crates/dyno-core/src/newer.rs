@@ -1,4 +1,4 @@
-//! Newer-only state (ADR 0034): a value that was read under a lock and is stored or pushed after the lock is let go carries the
+//! Newer-only state (Dyno ADR 0034): a value that was read under a lock and is stored or pushed after the lock is let go carries the
 //! generation it was read at, and a slot keeps it only when nothing newer has been stored. The generation is taken where the state is
 //! read (under the lock that guards it), so the order of the generations is the order of the states, whichever thread stores last.
 
@@ -87,6 +87,37 @@ impl<T> NewerSlot<T> {
     }
 }
 
+/// The newest generation seen per key, for state that is ordered per key (one alarm's changes, not all alarms'). Not locked: the caller
+/// holds the lock that guards the state it orders, so the check and the store are one hold. Bounded: past `cap` keys the smallest keys
+/// are forgotten (the oldest alarms), and a late value for a forgotten key is accepted.
+#[derive(Debug)]
+pub struct NewestPerKey<K: Ord> {
+    newest: std::collections::BTreeMap<K, u64>,
+    cap: usize,
+}
+
+impl<K: Ord> NewestPerKey<K> {
+    /// An empty map keeping at most `cap` keys.
+    pub fn new(cap: usize) -> NewestPerKey<K> {
+        NewestPerKey {
+            newest: std::collections::BTreeMap::new(),
+            cap,
+        }
+    }
+
+    /// Records `generation` for `key` and returns true, unless a newer one was recorded for it (then false and nothing changes).
+    pub fn accept(&mut self, key: K, generation: u64) -> bool {
+        if self.newest.get(&key).is_some_and(|newest| generation < *newest) {
+            return false;
+        }
+        self.newest.insert(key, generation);
+        while self.newest.len() > self.cap {
+            self.newest.pop_first();
+        }
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,6 +184,16 @@ mod tests {
         assert!(slot.put(3, "b"));
         assert_eq!(slot.get(), Some("b"));
         assert_eq!(slot.get(), Some("b"));
+    }
+
+    #[test]
+    fn per_key_generations_are_independent_and_bounded() {
+        let mut m = NewestPerKey::new(2);
+        assert!(m.accept("a", 5));
+        assert!(!m.accept("a", 4), "older than a's newest");
+        assert!(m.accept("b", 1), "another key is its own sequence");
+        assert!(m.accept("c", 1));
+        assert!(m.accept("a", 4), "a was forgotten beyond the cap, so a late value is accepted");
     }
 
     #[test]

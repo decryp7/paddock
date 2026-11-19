@@ -58,7 +58,7 @@ struct Reread {
     running: bool,
     last: Option<Instant>,
     /// A request came while a read was running: that read may have started before the change the request is about (a tool
-    /// installed or removed), so one more read follows it (ADR 0034).
+    /// installed or removed), so one more read follows it (Dyno ADR 0034).
     again: bool,
 }
 
@@ -374,13 +374,7 @@ pub fn request_reread(shared: &Arc<Shared>, min_gap: Duration) -> bool {
     let shared = Arc::clone(shared);
     let spawned = std::thread::Builder::new().name("dyno-wear-reread".into()).spawn({
         let shared = Arc::clone(&shared);
-        move || loop {
-            slow_cycle(&shared);
-            if !shared.hardware.end_reread() {
-                break;
-            }
-            log::info!(target: "dyno::hardware", "SSD wear: asked again while reading; reading once more");
-        }
+        move || run_started_reread(&shared)
     });
     if let Err(e) = spawned {
         log::warn!(target: "dyno::hardware", "SSD wear: the re-read thread could not start: {e}");
@@ -388,6 +382,27 @@ pub fn request_reread(shared: &Arc<Shared>, min_gap: Duration) -> bool {
         return false;
     }
     true
+}
+
+/// The body of a read that [`Reread::begin`] allowed: reads, and once more for each request that came meanwhile.
+fn run_started_reread(shared: &Arc<Shared>) {
+    loop {
+        slow_cycle(shared);
+        if !shared.hardware.end_reread() {
+            break;
+        }
+        log::info!(target: "dyno::hardware", "SSD wear: asked again while reading; reading once more");
+    }
+}
+
+/// The scheduled slow cycle, on the background thread, through the same guard as a request: when a requested read is running it asks
+/// for one more and returns, so no two slow cycles run at once (Dyno ADR 0034).
+fn scheduled_slow_cycle(shared: &Arc<Shared>) {
+    if shared.hardware.begin_reread(Duration::ZERO) {
+        run_started_reread(shared);
+    } else {
+        log::debug!(target: "dyno::hardware", "SSD wear: the scheduled read found one running; it will read once more");
+    }
 }
 
 /// One slow cycle: reads the hardware, stores the readings that are due and raises or returns the lifespan alarms.
@@ -456,7 +471,7 @@ pub fn run_background(shared: &Arc<Shared>) {
             };
             if slow_due {
                 last_slow = Some(Instant::now());
-                slow_cycle(shared);
+                scheduled_slow_cycle(shared);
             }
             if last_baselines.is_none_or(|t| t.elapsed() >= crate::baselines::EVALUATE_EVERY)
                 && started.elapsed() >= Duration::from_secs(30)
@@ -473,7 +488,7 @@ pub fn run_background(shared: &Arc<Shared>) {
 
 #[cfg(test)]
 mod tests {
-    /// ADR 0034 (P2-9): a request that arrives while a read runs (the tool was removed after that read began) is not lost: one more
+    /// Dyno ADR 0034 (P2-9): a request that arrives while a read runs (the tool was removed after that read began) is not lost: one more
     /// read follows, and a request while it runs asks for no more than one.
     #[test]
     fn a_request_while_a_read_runs_asks_for_one_more_read() {
@@ -487,6 +502,33 @@ mod tests {
         assert!(r.end(), "the read ended and a request came meanwhile: read again");
         assert!(!r.end(), "that was one more read, not one per request");
         assert!(r.begin(Duration::ZERO), "idle again: the next request starts a read");
+    }
+
+    /// Dyno ADR 0034: the scheduled slow cycle goes through the same guard as a requested read. With a requested read running it does not
+    /// run a second `slow_cycle` beside it; it asks for one more read after it, and with none running it reads at once.
+    #[test]
+    fn the_scheduled_cycle_never_runs_beside_a_requested_read() {
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let fake = dyno_platform::fake::Fake::new();
+        let (shared, _, _) = Shared::build(
+            crate::paths::Dirs::at(tmp.path().join("data")),
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+        )
+        .unwrap();
+        assert!(shared.hardware.begin_reread(Duration::ZERO), "a requested read is running");
+        scheduled_slow_cycle(&shared);
+        assert!(
+            shared.hardware.end_reread(),
+            "the scheduled cycle asked for one more read instead of running beside it"
+        );
+        assert!(!shared.hardware.end_reread());
+        scheduled_slow_cycle(&shared);
+        assert!(
+            shared.hardware.begin_reread(Duration::ZERO),
+            "idle: the scheduled cycle ran to its end and let go"
+        );
     }
 
     #[test]

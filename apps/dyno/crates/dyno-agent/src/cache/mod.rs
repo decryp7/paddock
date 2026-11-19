@@ -614,7 +614,7 @@ mod tests {
         assert_eq!(rx.recv().unwrap().1, SaveOutcome::Disabled);
     }
 
-    /// ADR 0034: saving is switched off after `save` read the setting and before the job was queued; the writer pops the job after
+    /// Dyno ADR 0034: saving is switched off after `save` read the setting and before the job was queued; the writer pops the job after
     /// the `ForgetAll` and must not write a row the user just asked to be gone.
     #[test]
     fn a_save_queued_after_the_setting_went_off_writes_nothing_and_says_disabled() {

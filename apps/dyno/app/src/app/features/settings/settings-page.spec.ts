@@ -67,6 +67,24 @@ describe('SettingsPage', () => {
     expect(saveButton()).toBeUndefined();
     expect(TestBed.inject(Notifier).recent().at(-1)?.text).toBe('Settings saved');
   });
+  it('a save refused as stale keeps the unsaved edit on the reloaded settings and the bar stays', async () => {
+    const { f, mock, el, saveButton, store } = await make();
+    const before = store.settings()!;
+    toggle(el, 'Start Dyno at login').click();
+    f.detectChanges();
+    // Another change lands after this window read the settings.
+    await mock.upsertAlertRule({ id: 'r1', name: 'R1', metric: 'cpuTotal', op: 'above', limit: 90, forSecs: 0, severity: 'warning', enabled: true } as never);
+    saveButton()!.click();
+    await vi.waitFor(() => expect(store.settings()!.revision).toBeGreaterThan(before.revision));
+    await settle(f);
+    expect(store.settings()!.customAlerts?.map((r) => r.id)).toContain('r1');
+    expect(toggle(el, 'Start Dyno at login').getAttribute('aria-checked')).toBe(String(!before.launchAtLogin));
+    expect(saveButton()).toBeDefined();
+    saveButton()!.click();
+    await vi.waitFor(() => expect(store.settings()!.launchAtLogin).toBe(!before.launchAtLogin));
+    await settle(f);
+    expect(saveButton()).toBeUndefined();
+  });
   it('Discard restores the saved values', async () => {
     const { f, mock, el, saveButton, discardButton, store } = await make();
     const spy = vi.spyOn(mock, 'saveSettings');

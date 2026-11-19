@@ -93,7 +93,7 @@ impl JobSlot {
 
 /// The newest volume list waiting for one app, with the ticket of the listing it came from: an older listing never replaces a
 /// newer one (also when the newer one was already taken), and the list is never dropped for a full queue. Built on the newer-only
-/// slot of ADR 0034.
+/// slot of Dyno ADR 0034.
 #[derive(Default)]
 pub struct VolumesSlot(NewerSlot<Vec<dyno_core::disk::volume::Volume>>);
 
@@ -111,7 +111,7 @@ impl VolumesSlot {
 
 /// The newest value of one whole-state event, waiting for a connection's push thread: it replaces an older one that was not sent yet, so
 /// a full queue can never lose it (a lost push left a window showing an old state until it asked again). A value carries the generation
-/// it was read at (ADR 0034): one that arrives after a newer one was stored is refused, however the pushing threads were scheduled.
+/// it was read at (Dyno ADR 0034): one that arrives after a newer one was stored is refused, however the pushing threads were scheduled.
 pub struct LatestSlot<T>(NewerSlot<T>);
 
 impl<T> Default for LatestSlot<T> {
@@ -135,19 +135,28 @@ impl<T> LatestSlot<T> {
 /// Most alarms with changes waiting for one connection (a few per rule; a slow app that falls further behind loses the oldest).
 pub const MAX_PENDING_ALARMS: usize = 4096;
 
-#[derive(Default)]
 struct PendingAlarms {
     /// Per alarm id: the first change that asks to notify the user, and the latest change.
     by_id: std::collections::BTreeMap<u64, (Option<AlarmChange>, AlarmChange)>,
     /// Per alarm id: the newest ticket stored, kept after a take so a late older change of the alarm is still refused (the oldest
     /// alarms' entries are given up beyond [`MAX_PENDING_ALARMS`]).
-    newest: std::collections::BTreeMap<u64, u64>,
+    newest: dyno_core::newer::NewestPerKey<u64>,
     lost: u32,
+}
+
+impl Default for PendingAlarms {
+    fn default() -> Self {
+        PendingAlarms {
+            by_id: Default::default(),
+            newest: dyno_core::newer::NewestPerKey::new(MAX_PENDING_ALARMS),
+            lost: 0,
+        }
+    }
 }
 
 /// Alarm changes waiting for one connection, per alarm: the first one that notifies (so "raised, then cleared before the app read
 /// either" still notifies) and the latest one (so the tray ends with the final state). At most [`MAX_PENDING_ALARMS`] alarms. A change
-/// carries the ticket taken with the state it describes (ADR 0034); a change older than one already stored for its alarm is refused.
+/// carries the ticket taken with the state it describes (Dyno ADR 0034); a change older than one already stored for its alarm is refused.
 #[derive(Default)]
 pub struct AlarmSlot(Mutex<PendingAlarms>);
 
@@ -157,12 +166,8 @@ impl AlarmSlot {
         let mut pending = lock(&self.0);
         let id = change.alarm.id;
         let ticket = change.ticket;
-        if pending.newest.get(&id).is_some_and(|newest| ticket < *newest) {
+        if !pending.newest.accept(id, ticket) {
             return false;
-        }
-        pending.newest.insert(id, ticket);
-        while pending.newest.len() > MAX_PENDING_ALARMS {
-            pending.newest.pop_first();
         }
         if let Some(entry) = pending.by_id.get_mut(&id) {
             if change.notify && entry.0.is_none() {
@@ -483,7 +488,7 @@ pub struct Shared {
     /// What must not start once the agent stops (a keep-awake, a job, a due wake's actions and its saved next time): the stop
     /// closes it and waits for what is already inside.
     pub stop_gate: StopGate,
-    /// Generations of the pushed whole-state views that have no generation of their own (ADR 0034).
+    /// Generations of the pushed whole-state views that have no generation of their own (Dyno ADR 0034).
     views: Generation,
     stop: AtomicBool,
     wake: (Mutex<bool>, Condvar),
@@ -999,7 +1004,7 @@ impl Shared {
         }
     }
 
-    /// A new generation for a whole-state view that is read under the core lock (ADR 0034): take it in the same hold that reads the
+    /// A new generation for a whole-state view that is read under the core lock (Dyno ADR 0034): take it in the same hold that reads the
     /// state, and hand it to the `broadcast_*` function with the view.
     pub fn next_view_generation(&self) -> u64 {
         self.views.next()

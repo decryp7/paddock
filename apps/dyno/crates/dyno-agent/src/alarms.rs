@@ -24,8 +24,8 @@ fn is_removed(rule: &str) -> bool {
 pub struct AlarmCentre {
     engine: AlarmEngine,
     last_tick: Timestamp,
-    /// The last ticket given to a change (ADR 0034).
-    tickets: u64,
+    /// Tickets of the changes (Dyno ADR 0034). Shared by a clone, so a rollback of the engine does not give a ticket twice.
+    tickets: std::sync::Arc<dyno_core::newer::Generation>,
 }
 
 impl AlarmCentre {
@@ -51,7 +51,7 @@ impl AlarmCentre {
         AlarmCentre {
             engine: AlarmEngine::restore(config, zone, alarms, muted),
             last_tick: Timestamp(0),
-            tickets: 0,
+            tickets: Default::default(),
         }
     }
 
@@ -91,8 +91,7 @@ impl AlarmCentre {
                 .into_iter()
                 .map(|mut c| {
                     // The ticket is taken here, under the caller's hold of the core lock, in the order the changes were made.
-                    self.tickets += 1;
-                    c.ticket = self.tickets;
+                    c.ticket = self.tickets.next();
                     c
                 })
                 .collect(),

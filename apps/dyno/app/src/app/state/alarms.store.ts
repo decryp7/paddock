@@ -145,11 +145,9 @@ export const AlarmsStore = signalStore(
         if (!current) return { code: 'internal', message: 'Settings are not loaded yet. Try again in a moment.' };
         patchState(store, { saving: true });
         try {
-          await backend.saveSettings(change(current));
-          await settings.load();
-          return null;
-        } catch (e) {
-          return toCommandError(e);
+          // Through the settings store: a save taken before another change is refused as stale there, and the store reloads and says so.
+          const saved = await settings.save(change(current), null);
+          return saved ? null : (settings.saveError() ?? { code: 'internal', message: 'The settings were not saved.' });
         } finally {
           patchState(store, { saving: false });
         }
