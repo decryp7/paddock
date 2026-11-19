@@ -12,6 +12,9 @@ on:
         required: false
         default: ""
 
+env:
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
+
 jobs:
   build:
     name: build (${{ matrix.os }})
@@ -27,6 +30,7 @@ jobs:
         working-directory: tools/paddock-dev
         shell: bash
     env:
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       CARGO_TERM_COLOR: always
     steps:
