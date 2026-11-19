@@ -289,12 +289,13 @@ const READERS_LIST = 'conformance/ci/run-conclusion-readers.json';
  * silence. Where the base cannot be read it warns, and in CI it throws (not measured is never a pass).
  */
 export function listGrowth(listed, extra = {}) {
+  const warn = extra.warn ?? console.warn;
   const g = baselineGrowth({ root: PADDOCK, path: READERS_LIST, current: listed, keyOf: (f) => f, entriesOf: (j) => j.files, ...extra });
   if (g.reason) {
     if (extra.ci ?? isCi()) throw new Error(`${READERS_LIST}: not measured, the target ref is not usable: ${g.reason}`);
-    console.warn(`${READERS_LIST}: the shrink-only rule is not enforced here: ${g.reason}`);
+    warn(`${READERS_LIST}: the shrink-only rule is not enforced here: ${g.reason}`);
   } else if (g.absent) {
-    console.warn(`${READERS_LIST}: a new list (${listed.length} entries); its creation is growth that needs the user's approval (ER-46) and it is report-only until it is on the target branch (ER-41)`);
+    warn(`${READERS_LIST}: a new list (${listed.length} entries); its creation is growth that needs the user's approval (ER-46) and it is report-only until it is on the target branch (ER-41)`);
   } else if (g.added.length) {
     throw new Error(`${READERS_LIST} grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base (${g.added.slice(0, 5).join('; ')}). It may only shrink.`);
   }
@@ -332,12 +333,16 @@ test('the shrink-only check sees an added entry, a new list and a target it cann
   const base = JSON.stringify({ files: ['a.rs', 'b.rs'] });
   assert.doesNotThrow(() => listGrowth(['a.rs'], { git: gitBase(base) }), 'shrinking is fine');
   assert.throws(() => listGrowth(['a.rs', 'c.rs'], { git: gitBase(base) }), /grew.*c\.rs/, 'an added entry is growth');
-  const created = listGrowth(['a.rs', 'b.rs'], { git: gitBase(null) });
+  const said = [];
+  const created = listGrowth(['a.rs', 'b.rs'], { git: gitBase(null), warn: (m) => said.push(m) });
+  assert.equal(said.length, 1, 'the creation is said out loud, to the control only (the control does not print it)');
+  assert.match(said[0], /a new list \(2 entries\).*needs the user's approval/);
   assert.equal(created.absent, true, 'a list absent at the base is a creation: reported (a warning), report-only until it is on the target (ER-41)');
   assert.deepEqual(created.added, ['a.rs', 'b.rs'], 'and every entry of it counts as growth in the reader');
   const noGit = () => {
     throw new Error('not a git repository');
   };
+  listGrowth(['a.rs'], { git: noGit, ci: false, warn: () => {} });
   assert.throws(() => listGrowth(['a.rs'], { git: noGit, ci: true }), /not measured/, 'in CI an unreadable target is not a pass');
 });
 

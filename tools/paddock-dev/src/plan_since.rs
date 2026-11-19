@@ -315,7 +315,7 @@ pub fn name_templates(workflow: &str) -> Vec<(String, String)> {
 }
 
 /// The job key whose `name:` template matches a display name (`${{ ... }}` matches anything), when exactly one does.
-fn key_by_name(name: &str, templates: &[(String, String)]) -> Option<String> {
+pub(crate) fn key_by_name(name: &str, templates: &[(String, String)]) -> Option<String> {
     static EXPR: LazyLock<Regex> = LazyLock::new(|| re(r"\$\{\{.*?\}\}"));
     let hits: Vec<&String> = templates
         .iter()

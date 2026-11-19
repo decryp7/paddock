@@ -3,9 +3,10 @@
 
 use super::accept::{FlakyCheck, Tree};
 use super::land::Git;
-use super::sequence::{FullRun, Ports, Reach, RunEnd};
+use super::sequence::{Ports, Reach, RunEnd};
 use super::verdict::Accepted;
 use crate::ci_runs::dispatch;
+use crate::ci_runs::landable::Landable;
 use crate::ci_runs::train_runs::{self as runs, RunFacts};
 use crate::ci_runs::verdict::Verdict;
 use crate::wait::{CiRunProbe, Clock, CurlHttp, Outcome, SystemClock, fmt_duration, wait_for};
@@ -107,7 +108,7 @@ impl Ports for RealPorts {
         runs::full_verdict(&self.server, &self.repo, &self.token, workflow, sha)
     }
 
-    fn landable(&mut self, workflow: &str, sha: &str) -> Result<FullRun, String> {
+    fn landable(&mut self, workflow: &str, sha: &str) -> Result<Landable, String> {
         landable_of(
             &self.root,
             (&self.server, &self.repo, &self.token),
@@ -214,19 +215,15 @@ pub fn landable_of(
     sha: &str,
     accepted: &[Accepted],
     changed: &[String],
-) -> Result<FullRun, String> {
+) -> Result<Landable, String> {
     let tree = |a: &Accepted| tree_of(root, a);
     let check = FlakyCheck {
         accepted,
         changed,
         tree: &tree,
     };
-    let l = crate::ci_runs::landable::landable(server, repo, token, workflow, sha, &|t| check.check(t))?;
-    Ok(FullRun {
-        run: l.run,
-        summary: l.summary(),
-        lines: l.lines.clone(),
-    })
+    let text = GitCli { root }.run(&["show", &format!("{sha}:.gitea/workflows/{workflow}")], QUICK_LIMIT)?;
+    crate::ci_runs::landable::landable((server, repo, token), workflow, sha, &text, &|app, t| check.check(app, t))
 }
 
 /// What `train land` asks CI about the head.
@@ -250,7 +247,7 @@ impl super::land::Ci for RealCi {
         runs::full_verdict(&self.server, &self.repo, &self.token, workflow, sha)
     }
 
-    fn landable(&mut self, workflow: &str, sha: &str) -> Result<FullRun, String> {
+    fn landable(&mut self, workflow: &str, sha: &str) -> Result<Landable, String> {
         landable_of(
             &self.root,
             (&self.server, &self.repo, &self.token),

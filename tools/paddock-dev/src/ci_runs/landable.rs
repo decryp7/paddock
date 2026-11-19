@@ -10,13 +10,14 @@
 //! caller's `flaky_ok`) or ALREADY FAILING ON MAIN (the baseline is a main run). A NEW, UNKNOWN or FAILED row, a job row, a skipped
 //! job, another run or commit refuses it.
 
-use super::client::{Client, RunInfo};
+use super::client::{Client, RunInfo, TimedJob};
 use super::verdict::{Earlier, RunResult, Verdict, read_earlier, run_result, verdict};
+use crate::plan_since::{job_needs, key_by_name, name_templates};
 use crate::wait::CurlHttp;
 use serde_json::Value;
 
 /// A full run that may be landed on, with what was accepted. Only [`judge`] makes one.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Landable {
     /// The run.
     pub run: u64,
@@ -30,10 +31,22 @@ pub struct Landable {
 }
 
 /// Private: nothing outside this module can name it, so nothing outside can build a [`Landable`].
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Seal;
 
 impl Landable {
+    /// A value for the tests of the callers (sequence, landing): the real one only comes from [`judge`].
+    #[cfg(test)]
+    pub fn for_test(run: u64, flaky: usize, already_failing: usize, lines: &[&str]) -> Landable {
+        Landable {
+            run,
+            flaky,
+            already_failing,
+            lines: lines.iter().map(|l| l.to_string()).collect(),
+            _seal: Seal,
+        }
+    }
+
     /// "landed on a full run with N accepted FLAKY, M already failing on main".
     pub fn summary(&self) -> String {
         format!(
@@ -70,15 +83,63 @@ pub fn check_run(run: &RunInfo, workflow: &str, sha: &str, earlier: &mut dyn FnM
     Ok(())
 }
 
-/// Builds a [`Landable`] for the full `workflow` run of `sha` (see the module). `flaky_ok(test)` is the caller's ER-12 check of a
-/// FLAKY row's test name. `Err` is the reason it is not landable (and nothing else: a green run needs no `Landable`).
+/// The names of the jobs that were skipped because a job they `need` failed (a failed job hides its dependents: they end `skipped`
+/// and name no failure). The needs and the display-name templates are read from the workflow text with `plan_since`'s readers; a
+/// job whose name matches no single job key is not placed (it cannot be judged). Dependents of dependents count.
+pub fn skipped_behind_failed(jobs: &[TimedJob], workflow_text: &str) -> Vec<String> {
+    let templates = name_templates(workflow_text);
+    let needs = job_needs(workflow_text);
+    let mut failed: std::collections::BTreeSet<String> = jobs
+        .iter()
+        .filter(|j| j.failed())
+        .filter_map(|j| key_by_name(&j.name, &templates))
+        .collect();
+    let mut hidden: Vec<String> = Vec::new();
+    loop {
+        let mut added = false;
+        let pending: Vec<&TimedJob> = jobs
+            .iter()
+            .filter(|j| j.conclusion == "skipped" && !hidden.contains(&j.name))
+            .collect();
+        for j in pending {
+            let Some(key) = key_by_name(&j.name, &templates) else { continue };
+            let behind = needs
+                .iter()
+                .find(|(k, _)| *k == key)
+                .is_some_and(|(_, n)| n.iter().any(|n| n != "plan" && failed.contains(n)));
+            if behind {
+                hidden.push(j.name.clone());
+                failed.insert(key);
+                added = true;
+            }
+        }
+        if !added {
+            break;
+        }
+    }
+    hidden
+}
+
+/// The app a failing row belongs to: the `app <name>` of its job, else the workflow's own app (`debrief.yml` is `debrief`; `ci.yml`
+/// is no app). `None` when it cannot be told, which no accepted test may be.
+pub fn app_of_job(workflow: &str, job: &str) -> Option<String> {
+    let head = job.split(" (").next().unwrap_or(job);
+    if let Some(app) = head.strip_prefix("app ") {
+        return Some(app.trim().to_string());
+    }
+    let stem = workflow.strip_suffix(".yml")?;
+    (stem != "ci" && !stem.contains('-')).then(|| stem.to_string())
+}
+
+/// Builds a [`Landable`] for the full `workflow` run of `sha` (see the module). `workflow_text` is the workflow file at `sha` (for
+/// the `needs` of its jobs); `flaky_ok(app, test)` is the caller's ER-12 check of a FLAKY row's test name and its app (empty when it
+/// cannot be told). `Err` is the reason it is not landable (a green run needs no `Landable`).
 pub fn landable(
-    server: &str,
-    repo: &str,
-    token: &str,
+    (server, repo, token): (&str, &str, &str),
     workflow: &str,
     sha: &str,
-    flaky_ok: &dyn Fn(&str) -> Result<(), String>,
+    workflow_text: &str,
+    flaky_ok: &dyn Fn(&str, &str) -> Result<(), String>,
 ) -> Result<Landable, String> {
     let mut http = CurlHttp;
     let mut client = Client::new(&mut http, server, repo, token);
@@ -93,6 +154,17 @@ pub fn landable(
         let cell = std::cell::RefCell::new(&mut client);
         check_run(&info, workflow, sha, &mut |r| read_earlier(&mut cell.borrow_mut(), r))?;
     }
+    let jobs = client
+        .timed_jobs(run)?
+        .ok_or_else(|| format!("the server has no job list for run {run}"))?;
+    let hidden = skipped_behind_failed(&jobs, workflow_text);
+    if !hidden.is_empty() {
+        return Err(format!(
+            "{} job(s) were skipped behind a failed job they need and name no failure: {}",
+            hidden.len(),
+            hidden.join(", ")
+        ));
+    }
     let req = super::triage::Request {
         run,
         against: None,
@@ -105,11 +177,23 @@ pub fn landable(
     let report = super::triage::collect(&mut client, &req, &mut |l| eprintln!("{l}"))?;
     let mut doc = report.json();
     doc["ok"] = Value::Bool(true);
-    judge(&doc, run, sha, flaky_ok).map_err(|reasons| reasons.join("; "))
+    let landable = judge(&doc, run, sha, workflow, flaky_ok).map_err(|reasons| reasons.join("; "))?;
+    // Read the verdict again: the answer is the same run as when it was judged (a newer full run, started meanwhile, would decide
+    // otherwise and this one is no longer the newest).
+    match verdict(&mut client, workflow, sha) {
+        Verdict::Red { run: Some(again), .. } if again == run => Ok(landable),
+        other => Err(format!("the newest full run changed while it was judged ({other:?}); ask again")),
+    }
 }
 
 /// The pure judgement of the triage document of `run` at `sha`. Every reason is a line.
-pub fn judge(doc: &Value, run: u64, sha: &str, flaky_ok: &dyn Fn(&str) -> Result<(), String>) -> Result<Landable, Vec<String>> {
+pub fn judge(
+    doc: &Value,
+    run: u64,
+    sha: &str,
+    workflow: &str,
+    flaky_ok: &dyn Fn(&str, &str) -> Result<(), String>,
+) -> Result<Landable, Vec<String>> {
     if doc.get("ok") != Some(&Value::Bool(true)) {
         return Err(vec!["the triage did not succeed (ok is not true)".into()]);
     }
@@ -164,7 +248,7 @@ pub fn judge(doc: &Value, run: u64, sha: &str, flaky_ok: &dyn Fn(&str) -> Result
         };
         let cut: String = test.chars().take(120).collect();
         match status {
-            "flaky" => match flaky_ok(test) {
+            "flaky" => match flaky_ok(app_of_job(workflow, job).as_deref().unwrap_or(""), test) {
                 Ok(()) => {
                     flaky += 1;
                     lines.push(format!("accepted FLAKY ({job}): {cut}"));
@@ -211,7 +295,7 @@ mod tests {
                "baseline": {"run": 8289, "head": "f5f", "main": true}, "rows": rows})
     }
 
-    fn yes(_: &str) -> Result<(), String> {
+    fn yes(_: &str, _: &str) -> Result<(), String> {
         Ok(())
     }
 
@@ -222,14 +306,14 @@ mod tests {
             row("e2e", Some(A11Y), false, "flaky"),
             row("e2e", Some(OLD), false, "already-failing"),
         ]);
-        let l = judge(&d, 8400, SHA, &yes).unwrap();
+        let l = judge(&d, 8400, SHA, "debrief.yml", &yes).unwrap();
         assert_eq!((l.run, l.flaky, l.already_failing), (8400, 1, 1));
         assert_eq!(l.lines.len(), 2);
         assert_eq!(l.summary(), "full run 8400 with 1 accepted FLAKY, 1 already failing on main");
     }
 
-    fn refused(d: &Value, ok: &dyn Fn(&str) -> Result<(), String>) -> String {
-        judge(d, 8400, SHA, ok).expect_err("must refuse").join("; ")
+    fn refused(d: &Value, ok: &dyn Fn(&str, &str) -> Result<(), String>) -> String {
+        judge(d, 8400, SHA, "debrief.yml", ok).expect_err("must refuse").join("; ")
     }
 
     #[test]
@@ -249,7 +333,7 @@ mod tests {
     #[test]
     fn a_flaky_test_the_train_touches_is_refused_by_the_callers_check() {
         let d = doc(vec![row("e2e", Some(A11Y), false, "flaky")]);
-        let why = refused(&d, &|_| Err("the train changes its feature".into()));
+        let why = refused(&d, &|_, _| Err("the train changes its feature".into()));
         assert!(
             why.contains("FLAKY and not acceptable") && why.contains("changes its feature"),
             "{why}"
@@ -332,5 +416,72 @@ mod tests {
         );
         let unknown = &mut |_: &RunInfo| Earlier::Unknown("404".into());
         assert!(check_run(&info(SHA, "failure", 3), "ci.yml", SHA, unknown).is_err());
+    }
+
+    #[test]
+    fn the_app_of_a_row_comes_from_its_job_or_the_apps_own_workflow() {
+        assert_eq!(app_of_job("ci.yml", "app dyno (macOS)"), Some("dyno".into()));
+        assert_eq!(app_of_job("ci.yml", "app debrief"), Some("debrief".into()));
+        assert_eq!(app_of_job("debrief.yml", "end-to-end (shard 3/4)"), Some("debrief".into()));
+        assert_eq!(app_of_job("ci.yml", "ui"), None, "ci.yml is no app");
+        assert_eq!(app_of_job("dyno-release.yml", "build"), None);
+    }
+
+    /// The judge hands the closure the row's app, so a check can tie the test to its own app.
+    #[test]
+    fn the_flaky_check_gets_the_rows_app() {
+        use std::cell::RefCell;
+        let seen = RefCell::new(Vec::new());
+        let d = doc(vec![
+            row("end-to-end (shard 3/4)", Some(A11Y), false, "flaky"),
+            row("app dyno (macOS)", Some(A11Y), false, "flaky"),
+        ]);
+        let rec = |app: &str, _: &str| {
+            seen.borrow_mut().push(app.to_string());
+            Ok(())
+        };
+        judge(&d, 8400, SHA, "debrief.yml", &rec).unwrap();
+        assert_eq!(*seen.borrow(), vec!["debrief".to_string(), "dyno".to_string()]);
+    }
+
+    fn job(name: &str, conclusion: &str) -> TimedJob {
+        TimedJob {
+            id: 1,
+            name: name.into(),
+            runner_id: 1,
+            runner: None,
+            conclusion: conclusion.into(),
+            start: None,
+            end: None,
+            steps: Vec::new(),
+            status: "completed".into(),
+            labels: Vec::new(),
+        }
+    }
+
+    const WORKFLOW: &str = "name: x\njobs:\n  plan:\n    name: plan\n  rust-lint:\n    name: rust format + clippy\n    needs: [plan]\n  bundle:\n    name: bundle (${{ matrix.os }})\n    needs: [plan, rust-lint]\n  release:\n    name: release\n    needs: [plan, bundle]\n  docs:\n    name: docs\n    needs: [plan]\n";
+
+    /// A job that failed hides the jobs that need it (and theirs): they end `skipped` and name no failure.
+    #[test]
+    fn jobs_skipped_behind_a_failed_need_are_counted_and_a_skip_by_design_is_not() {
+        let jobs = vec![
+            job("plan", "success"),
+            job("rust format + clippy", "failure"),
+            job("bundle (macOS)", "skipped"),
+            job("release", "skipped"),
+            job("docs", "skipped"),
+        ];
+        assert_eq!(
+            skipped_behind_failed(&jobs, WORKFLOW),
+            vec!["bundle (macOS)".to_string(), "release".to_string()]
+        );
+        // nothing failed: the same skips are by design
+        let jobs = vec![
+            job("plan", "success"),
+            job("rust format + clippy", "success"),
+            job("bundle (macOS)", "skipped"),
+            job("release", "skipped"),
+        ];
+        assert!(skipped_behind_failed(&jobs, WORKFLOW).is_empty());
     }
 }

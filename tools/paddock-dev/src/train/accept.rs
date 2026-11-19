@@ -127,13 +127,17 @@ pub struct FlakyCheck<'a> {
 
 impl FlakyCheck<'_> {
     /// `Ok` when the test (a name from a triage row) may be accepted.
-    pub fn check(&self, test: &str) -> Result<(), String> {
+    pub fn check(&self, app: &str, test: &str) -> Result<(), String> {
         let loc = location_of(test).ok_or_else(|| "the test name carries no spec location".to_string())?;
-        let a = self
-            .accepted
-            .iter()
-            .find(|a| a.covers(&loc))
-            .ok_or_else(|| format!("{loc} is not on the --accept-flaky list"))?;
+        let a = self.accepted.iter().find(|a| a.covers(&loc) && a.app() == app).ok_or_else(|| {
+            if app.is_empty() {
+                format!(
+                    "{loc}: the app of the row cannot be told (no `app <name>` job, not an app's own workflow), so it cannot be accepted"
+                )
+            } else {
+                format!("{loc} of app {app} is not on the --accept-flaky list")
+            }
+        })?;
         let touched = touched(std::slice::from_ref(a), self.changed, self.tree)?;
         if touched.is_empty() {
             Ok(())
@@ -251,21 +255,21 @@ mod tests {
             changed: &untouched,
             tree: &t,
         };
-        assert_eq!(check.check(log), Ok(()));
+        assert_eq!(check.check("debrief", log), Ok(()));
         assert!(
             check
-                .check("[webkit] › e2e/other.e2e.ts:1:1 › x")
+                .check("debrief", "[webkit] › e2e/other.e2e.ts:1:1 › x")
                 .unwrap_err()
                 .contains("not on the --accept-flaky list")
         );
-        assert!(check.check("no location here").is_err());
+        assert!(check.check("debrief", "no location here").is_err());
         let touched = ch(&["src/app/live-tail/live-tail.component.ts"]);
         let check = FlakyCheck {
             accepted: &accepted,
             changed: &touched,
             tree: &t,
         };
-        assert!(check.check(log).unwrap_err().contains("touches what it accepts"));
+        assert!(check.check("debrief", log).unwrap_err().contains("touches what it accepts"));
         // an unresolved feature is refused here too
         let none = tree(&[], None);
         let check = FlakyCheck {
@@ -273,6 +277,29 @@ mod tests {
             changed: &untouched,
             tree: &none,
         };
-        assert!(check.check(log).unwrap_err().contains("cannot be resolved"));
+        assert!(check.check("debrief", log).unwrap_err().contains("cannot be resolved"));
+    }
+
+    /// Two apps share a spec name: an acceptance for one is no acceptance for the other's row.
+    #[test]
+    fn a_spec_name_shared_by_two_apps_is_accepted_for_its_own_app_only() {
+        let accepted = vec![Accepted::parse("apps/debrief/app/e2e/a11y.e2e.ts:6:7").unwrap()];
+        let t = |_: &Accepted| {
+            Ok(Tree {
+                tracked: vec!["apps/debrief/app/src/app/a11y/a11y.ts".to_string()],
+                declaration: None,
+            })
+        };
+        let none: Vec<String> = Vec::new();
+        let check = FlakyCheck {
+            accepted: &accepted,
+            changed: &none,
+            tree: &t,
+        };
+        let row = "[webkit] › e2e/a11y.e2e.ts:6:7 › main screen";
+        assert_eq!(check.check("debrief", row), Ok(()));
+        let err = check.check("dyno", row).unwrap_err();
+        assert!(err.contains("of app dyno is not on the --accept-flaky list"), "{err}");
+        assert!(check.check("", row).unwrap_err().contains("the app of the row cannot be told"));
     }
 }

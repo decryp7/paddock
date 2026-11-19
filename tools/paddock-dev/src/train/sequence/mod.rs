@@ -6,6 +6,7 @@
 //! the whole sequence by `--max`, one run by [`RUN_CAP`] (ER-32). Each step logs its phase and how long it took (ER-27).
 
 use super::verdict::{Accepted, verdict};
+use crate::ci_runs::landable::Landable;
 use crate::ci_runs::train_runs::RunFacts;
 use crate::ci_runs::verdict::{RunResult, Verdict};
 use crate::wait::fmt_duration;
@@ -123,17 +124,6 @@ pub enum RunEnd {
     Unfinished(String),
 }
 
-/// A full run the train may land on although it is red: the sealed `ci_runs::landable::Landable`, as text (its accepted rows).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FullRun {
-    /// The run.
-    pub run: u64,
-    /// "full run N with M accepted FLAKY, K already failing on main".
-    pub summary: String,
-    /// One line per accepted row.
-    pub lines: Vec<String>,
-}
-
 /// What the planner says about a diff, for one app.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reach {
@@ -158,7 +148,7 @@ pub trait Ports {
     /// The shared reader's verdict ([`crate::ci_runs::verdict::verdict`]) of a workflow on a commit.
     fn ci_verdict(&mut self, workflow: &str, sha: &str) -> Verdict;
     /// The train-only answer for a full run that is red by failures ER-12 lets a train land on (`ci_runs::landable`), or why not.
-    fn landable(&mut self, workflow: &str, sha: &str) -> Result<FullRun, String>;
+    fn landable(&mut self, workflow: &str, sha: &str) -> Result<Landable, String>;
     /// `ci triage <run>` as the JSON `ci triage --json` prints, `ok` included. `Err` when it could not be made.
     fn triage(&mut self, run: u64) -> Result<Value, String>;
     /// Whether `ancestor` is reachable from `of` in this clone.
@@ -318,7 +308,7 @@ impl Seq<'_> {
             }
             Verdict::Red { run: Some(red), reason } => match self.ports.landable(wf, &sha) {
                 Ok(full) => {
-                    let _ = writeln!(self.log, "train: {wf}: landing on a {}", full.summary);
+                    let _ = writeln!(self.log, "train: {wf}: landing on a {}", full.summary());
                     for l in &full.lines {
                         let _ = writeln!(self.log, "train: {wf}:   {l}");
                     }
@@ -577,7 +567,7 @@ impl Seq<'_> {
                 format!("run `./dev ci triage {run}` by hand and read why"),
             )
         })?;
-        let result = verdict(&doc, &self.plan.accepted);
+        let result = verdict(&doc, wf, &self.plan.accepted);
         let took = fmt_duration(self.ports.elapsed().saturating_sub(t0));
         match result {
             Ok(pass) => {

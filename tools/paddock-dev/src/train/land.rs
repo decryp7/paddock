@@ -4,7 +4,8 @@
 //! refused before it is made when `origin/main` is not an ancestor of the head. The result is verified with the remote's own
 //! answer (`ls-remote`), never with the push's exit code alone. Git is behind [`Git`], so the tests never touch a repository.
 
-use super::sequence::{FullRun, RELEASE_WORKFLOWS, Stop, app_of};
+use super::sequence::{RELEASE_WORKFLOWS, Stop, app_of};
+use crate::ci_runs::landable::Landable;
 use crate::ci_runs::verdict::Verdict;
 use std::collections::BTreeSet;
 use std::io::Write;
@@ -28,7 +29,7 @@ pub trait Ci {
     /// The shared reader's verdict ([`crate::ci_runs::verdict::verdict`]) of `workflow` on `sha`.
     fn verdict(&mut self, workflow: &str, sha: &str) -> Verdict;
     /// The train-only answer for a full run that is red by failures ER-12 lets a train land on (`ci_runs::landable`), or why not.
-    fn landable(&mut self, workflow: &str, sha: &str) -> Result<FullRun, String>;
+    fn landable(&mut self, workflow: &str, sha: &str) -> Result<Landable, String>;
     /// The projects the plan of `from..to` reaches (`*` for everything).
     fn projects(&mut self, from: &str, to: &str) -> Result<BTreeSet<String>, String>;
     /// The release runs of `workflow` on this train's ref that succeeded, newest first: run id and the commit it tested.
@@ -79,11 +80,11 @@ fn require_full(ci: &mut dyn Ci, wf: &str, head: &str, log: &mut dyn Write, note
         }
         Verdict::Red { run: Some(_), reason } => match ci.landable(wf, head) {
             Ok(full) => {
-                let _ = writeln!(log, "train land: {wf}: landed on a {}", full.summary);
+                let _ = writeln!(log, "train land: {wf}: landed on a {}", full.summary());
                 for l in &full.lines {
                     let _ = writeln!(log, "train land: {wf}:   {l}");
                 }
-                notes.push(format!("{wf}: landed on a {}", full.summary));
+                notes.push(format!("{wf}: landed on a {}", full.summary()));
                 notes.extend(full.lines.iter().map(|l| format!("{wf}:   {l}")));
                 Ok(())
             }
@@ -291,7 +292,7 @@ mod tests {
 
     struct FakeCi {
         verdicts: BTreeMap<String, Verdict>,
-        landables: BTreeMap<String, Result<FullRun, String>>,
+        landables: BTreeMap<String, Result<Landable, String>>,
         projects: BTreeSet<String>,
         releases: BTreeMap<String, Vec<(u64, String)>>,
         later_projects: BTreeSet<String>,
@@ -313,12 +314,8 @@ mod tests {
     fn red(run: Option<u64>) -> Verdict {
         Verdict::Red { run, reason: "red".into() }
     }
-    fn full() -> FullRun {
-        FullRun {
-            run: 5,
-            summary: "full run 5 with 1 accepted FLAKY, 0 already failing on main".into(),
-            lines: vec!["accepted FLAKY (e2e): a test".into()],
-        }
+    fn full() -> Landable {
+        Landable::for_test(5, 1, 0, &["accepted FLAKY (e2e): a test"])
     }
     impl Ci for FakeCi {
         fn verdict(&mut self, workflow: &str, _: &str) -> Verdict {
@@ -328,7 +325,7 @@ mod tests {
                 .cloned()
                 .unwrap_or(Verdict::NotMeasured("no verdict in the table".into()))
         }
-        fn landable(&mut self, workflow: &str, _: &str) -> Result<FullRun, String> {
+        fn landable(&mut self, workflow: &str, _: &str) -> Result<Landable, String> {
             self.landables
                 .get(workflow)
                 .cloned()
