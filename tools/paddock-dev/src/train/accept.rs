@@ -78,7 +78,7 @@ mod tests {
     #[test]
     fn a_test_the_train_did_not_touch_is_accepted() {
         let changed = ch(&[
-            "docs/lessons.md",
+            "docs/notes.txt",
             "apps/debrief/app/src/app/explorer/grid.ts",
             "apps/debrief/app/e2e/other.e2e.ts",
         ]);

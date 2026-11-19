@@ -116,7 +116,7 @@ impl Ports for RealPorts {
 
 /// A ceiling (ER-12: not a tuned limit, nothing waits for it to pass) for one push with the repository's pre-push gate: 60 minutes.
 /// Measured 2026-11-19: the pre-push gate of the push that carried this very change took 342.75 s (push log of that push, recorded
-/// in docs/lessons.md, "The train integrator's sequence scripts are a command now"), so the ceiling is about ten times the
+/// in the lessons file, "The train integrator's sequence scripts are a command now"), so the ceiling is about ten times the
 /// measurement. Its only job is to keep a hung push from holding the train's runners for ever (ER-32); the gate's own steps have
 /// their own bounds.
 const PUSH_LIMIT: Duration = Duration::from_secs(60 * 60);
