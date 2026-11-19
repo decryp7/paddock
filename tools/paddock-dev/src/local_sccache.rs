@@ -1013,9 +1013,13 @@ exit 0
         (home, e, bin)
     }
 
-    /// A port the OS just handed out and nothing listens on any more.
+    /// A port that is taken for the rest of the test process and nothing listens on (HeldPort::refusing, kept by `forget`): no
+    /// other process can be given it while a test reads it.
     fn free_port() -> u16 {
-        std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+        let held = paddock_testkit::net::HeldPort::refusing();
+        let port = held.port();
+        std::mem::forget(held);
+        port
     }
 
     #[test]

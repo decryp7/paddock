@@ -1043,11 +1043,9 @@ mod tests {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let open = l.local_addr().unwrap().to_string();
         assert!(reachable(&open, S3_CONNECT));
-        let free = {
-            let f = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            f.local_addr().unwrap().to_string()
-        };
-        assert!(!reachable(&free, Duration::from_millis(500)));
+        // A port that is taken and does not listen (HeldPort::refusing): no other process can be given it meanwhile.
+        let closed = paddock_testkit::net::HeldPort::refusing();
+        assert!(!reachable(&closed.addr().to_string(), Duration::from_millis(500)));
         assert!(!reachable("not an endpoint", Duration::from_millis(500)));
     }
 
