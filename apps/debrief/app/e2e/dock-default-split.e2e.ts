@@ -21,13 +21,14 @@ interface Reading {
   readonly heights: readonly number[];
 }
 
-// Not covered yet, an open finding (docs/lessons.md): 920 to 934 px wide. There the layout plan keeps the Explorer when the first frame is drawn and
-// closes it by the dock's first plan, and dockview lays the dock out at the new container size three frames later (the dock's left edge moves 320 to 48
-// and its width 580 to 852 in drawn frames, measured with requestAnimationFrame). The constant of NarrowWindow.start (920) stops the jump below that.
+// Around 920 to 934 px the layout plan closes the Explorer after the first draw (the dock's left edge moved 320 to 48): those widths are cases now.
 for (const size of [
   { width: 1440, height: 900 },
   { width: 1100, height: 900 },
   { width: 1000, height: 700 },
+  { width: 936, height: 900 },
+  { width: 928, height: 700 },
+  { width: 920, height: 600 },
   { width: 900, height: 900 },
   { width: 700, height: 900 },
 ]) {
