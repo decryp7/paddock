@@ -1,7 +1,8 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
-import { ask, openChat, runCommand, waitAnswered } from './ai-support';
+import { ask, openChat, releaseMockHolds, runCommand, waitAnswered } from './ai-support';
+import { clickWithTimePaused } from './app';
 import { gridRows, openAppWith } from './mock-url';
 
 /** The app with the AI mock at `search` (its own step time: `openAiApp` fixes a fast one). */
@@ -60,7 +61,10 @@ async function exportReport(page: Page, title: string): Promise<void> {
 test.describe('jobs', () => {
   test.slow();
   test('a slow AI answer and a slow export run side by side; the toast View opens the answer', async ({ page }, testInfo) => {
-    await openAiApp(page, 'mockAiStepMs=600&mockExportMs=8000&mockJobsVisibleMs=200&mockJobsAttentionMs=1000');
+    // The explanation is held at its end (`mockJobsHold=ai`) until both jobs were seen side by side. Its "Explanation ready" toast times out
+    // after TOAST_MS (8 s) like every toast that is not an error: answered before the export dialog had closed, a slow WebKit run spent those
+    // 8 s on the export, the Jobs pane and its axe check, and the toast was gone when View was pressed (debrief.yml run 8297).
+    await openAiApp(page, 'mockAiStepMs=600&mockJobsHold=ai&mockExportMs=8000&mockJobsVisibleMs=200&mockJobsAttentionMs=1000');
     await explainInBackground(page);
     await exportReport(page, 'Case 7');
     await openJobs(page);
@@ -70,11 +74,14 @@ test.describe('jobs', () => {
     await expect(page.getByTestId('status-jobs')).toBeVisible();
     await expectNoSeriousViolations(page, testInfo, 'jobs-pane', 'debrief-jobs-panel');
 
-    // The AI answer finishes first: "Explanation ready" with View, and View opens the answer with its citations.
+    // The AI answer finishes first: "Explanation ready" with View, and View opens the answer with its citations. The pointer on the toast
+    // holds its time (notification-host.ts) while it is checked; the click is made with the clock paused (a toast stack can move under it).
+    await releaseMockHolds(page);
     const toast = page.getByTestId('notification').filter({ hasText: 'Explanation ready' });
     await expect(toast).toBeVisible({ timeout: 15_000 });
+    await toast.hover();
     await expectNoSeriousViolations(page, testInfo, 'jobs-toast', 'debrief-notification-host');
-    await toast.getByTestId('notification-action-primary').click();
+    await clickWithTimePaused(page, toast.getByTestId('notification-action-primary'));
     await expect(page.getByTestId('ai-narrative')).toContainText('failed order submission');
     await page.keyboard.press('Escape');
     await expect((await openJobs(page)).locator('li').filter({ hasText: 'Explain event' })).toContainText('Done');
