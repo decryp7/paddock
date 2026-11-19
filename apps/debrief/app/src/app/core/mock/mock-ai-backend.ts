@@ -54,8 +54,6 @@ export interface MockAiOptions {
   mode?: 'ready' | 'setup' | 'off';
   /** Delay between streamed pieces, ms (0 in unit tests). */
   stepMs?: number;
-  /** Characters per streamed piece (default 12): a spec that needs answers, not streaming, sends each in one piece (`?mockAiChunkChars=`). */
-  chunkChars?: number;
   fail?: AiFailable[];
   /** Image support of the model Pitwall serves (ADR 0025): `on` (default) or `none` (text only). */
   vision?: MockVisionMode;
@@ -81,7 +79,6 @@ export type MockVisionMode = 'on' | 'none';
  *   ?mockAiVision=none       the model Pitwall serves reads text only
  *   ?mockPitwall=running|deny|installed|paired  Pitwall found on this computer (see MockAiOptions.pitwall)
  *   ?mockAiStepMs=5          streaming speed
- *   ?mockAiChunkChars=100000 characters per streamed piece (default 12; a large value sends each answer in one piece)
  */
 export function mockAiOptionsFromSearch(search: string): MockAiOptions {
   const p = new URLSearchParams(search);
@@ -90,8 +87,6 @@ export function mockAiOptionsFromSearch(search: string): MockAiOptions {
   if (mode === 'setup' || mode === 'off' || mode === 'ready') o.mode = mode;
   const step = p.get('mockAiStepMs');
   if (step !== null && /^\d{1,4}$/.test(step)) o.stepMs = Number(step);
-  const chunk = p.get('mockAiChunkChars');
-  if (chunk !== null && /^[1-9]\d{0,5}$/.test(chunk)) o.chunkChars = Number(chunk);
   const fail = (p.get('mockAiFail') ?? '')
     .split(',')
     .filter((f): f is AiFailable => (AI_FAILABLE as readonly string[]).includes(f));
@@ -114,7 +109,6 @@ interface MockChat {
 export class MockAiBackend extends AiBackend {
   private readonly mode: 'ready' | 'setup' | 'off';
   private readonly stepMs: number;
-  private readonly chunkChars: number;
   private readonly clock: MockClock;
   private readonly fails: Set<AiFailable>;
   private readonly chats = new Map<string, MockChat>();
@@ -136,7 +130,6 @@ export class MockAiBackend extends AiBackend {
     super();
     this.mode = options.mode ?? 'ready';
     this.stepMs = options.stepMs ?? 25;
-    this.chunkChars = options.chunkChars ?? 12;
     this.clock = options.clock ?? systemMockClock;
     this.fails = new Set(options.fail ?? []);
     this.pitwallMode = options.pitwall ?? (this.mode === 'ready' ? 'paired' : 'absent');
@@ -617,7 +610,7 @@ export class MockAiBackend extends AiBackend {
   }
 
   private async stream(c: MockChat, text: string): Promise<boolean> {
-    for (const piece of text.match(new RegExp(`.{1,${this.chunkChars}}`, 'gs')) ?? []) {
+    for (const piece of text.match(/.{1,12}/gs) ?? []) {
       if (c.cancel) return false;
       this.emitChat(c, { type: 'delta', text: piece });
       await this.clock.sleep(this.stepMs);

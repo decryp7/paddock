@@ -3,7 +3,6 @@ import type { Page } from '@playwright/test';
 import { gridTotal, initialTotal, openApp, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
-import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 async function setAutoOpen(page: Page, on: boolean): Promise<void> {
   await page.getByRole('button', { name: 'Settings' }).click();
@@ -76,13 +75,7 @@ test.describe('home (dashboard and health check)', () => {
     await page.locator('debrief-sidebar').getByRole('button', { name: 'Open files' }).click();
     const home = page.locator('debrief-home-view');
     await expect(home).toBeVisible({ timeout: 10_000 });
-    // Home fills in stages (the summary, then the health check's findings) and the checkbox below them moves down as each arrives: in
-    // debrief.yml run 8300 the click landed on a health card that had just taken its place. Press it once both are drawn and it stands still.
-    const auto = home.getByRole('checkbox', { name: 'Show Home after opening files' });
-    await expect(home.getByTestId('home-refresh')).toBeEnabled();
-    await expect(home.getByTestId('home-findings').locator('.finding').first()).toBeVisible();
-    await expectNotMoving(auto, 'the "Show Home after opening files" checkbox');
-    await auto.uncheck();
+    await home.getByRole('checkbox', { name: 'Show Home after opening files' }).uncheck();
     // Close the panel (View ▸ Home toggles it), open more files: it stays closed.
     await chooseMenu(page, 'View', 'Home');
     await expect(home).toHaveCount(0);
