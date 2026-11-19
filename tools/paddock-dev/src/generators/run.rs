@@ -498,11 +498,22 @@ fn one(root: &Path, g: &Generator, runner: &dyn Runner, subject: &Subject, log: 
     let took = start.elapsed();
     if !g.build.is_empty()
         && let Ran::Exited { text, .. } = &ran
-        && text.lines().any(|l| l.trim_start().starts_with("Compiling "))
+        && let compiled = text
+            .lines()
+            .filter(|l| l.trim_start().starts_with("Compiling "))
+            .map(str::trim)
+            .collect::<Vec<_>>()
+        && !compiled.is_empty()
     {
         log(&format!(
-            "::warning::gen {}: the check compiled after its build phase, so its build [{}] does not build what it runs and the run was timed with a build in it. Next: make `build` in {} match the check's package, targets and features",
+            "::warning::gen {}: the check compiled after its build phase ({}{}), so its build [{}] does not build what it runs and the run was timed with a build in it. Next: make `build` in {} match the check's package, targets and features",
             g.id,
+            compiled.iter().take(3).copied().collect::<Vec<_>>().join("; "),
+            if compiled.len() > 3 {
+                format!("; and {} more", compiled.len() - 3)
+            } else {
+                String::new()
+            },
             g.build_line(),
             super::registry::PATH
         ));

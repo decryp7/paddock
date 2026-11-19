@@ -192,3 +192,29 @@ fn the_process_environment_is_readable() {
         1
     );
 }
+
+/// A placeholder is listed in `cargo:rerun-if-changed`. Cargo reruns a build script whose listed file is newer than the run's start,
+/// and a placeholder the script itself created during that run always is, so the next cargo call (the check after a build step in
+/// `./dev gen check`: Dyno's `ts-dyno-shell`) rebuilt the crate once for nothing. It is created with the oldest modification time:
+/// a sidecar that becomes real is written later and still counts as changed.
+#[test]
+fn a_placeholder_never_looks_newer_than_the_build_script_run_that_made_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("binaries").join("svc-x");
+    let before = std::time::SystemTime::now();
+    assert_eq!(
+        create_placeholders(std::slice::from_ref(&file))
+            .unwrap()
+            .len(),
+        1
+    );
+    let modified = std::fs::metadata(&file).unwrap().modified().unwrap();
+    assert!(
+        modified < before,
+        "created at {modified:?}, after the run started at {before:?}"
+    );
+    // Positive control: a file written the ordinary way is newer than `before`, so the assertion above can see a difference.
+    let real = dir.path().join("real");
+    std::fs::write(&real, b"x").unwrap();
+    assert!(std::fs::metadata(&real).unwrap().modified().unwrap() >= before);
+}

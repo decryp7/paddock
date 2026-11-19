@@ -291,7 +291,8 @@ pub fn write_manifest(dir: &Path) -> Result<PathBuf, BuildError> {
     Ok(path)
 }
 
-/// Creates each missing file as an empty one, with its folder; a file that exists (the real sidecar) is never touched.
+/// Creates each missing file as an empty one with the oldest modification time, with its folder; a file that exists (the real sidecar)
+/// is never touched.
 /// Returns the files created.
 pub fn create_placeholders(files: &[PathBuf]) -> Result<Vec<PathBuf>, BuildError> {
     let mut created = Vec::new();
@@ -305,6 +306,14 @@ pub fn create_placeholders(files: &[PathBuf]) -> Result<Vec<PathBuf>, BuildError
         };
         fs::create_dir_all(file.parent().unwrap_or(Path::new(""))).map_err(io)?;
         fs::write(file, b"").map_err(io)?;
+        // The placeholder is in `cargo:rerun-if-changed`, and cargo reruns a build script whose listed file is newer than the run's
+        // start: one made during the run would make the next cargo call rebuild the crate. The oldest time says "nothing changed";
+        // a sidecar that becomes real is written later and still counts.
+        fs::File::options()
+            .write(true)
+            .open(file)
+            .and_then(|f| f.set_modified(std::time::UNIX_EPOCH))
+            .map_err(io)?;
         created.push(file.clone());
     }
     Ok(created)
