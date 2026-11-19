@@ -11,12 +11,13 @@
 //   - refuses git's own arguments that leave the folder: the global options -C, --git-dir, --work-tree and --namespace (both
 //     spellings), `config --file/-f/--global/--system`, a configuration key that moves the work tree or the hooks, the options
 //     --separate-git-dir, --template, --reference and --upload-pack, and any path argument (absolute, `~` or with a `..`
-//     segment, also after `--opt=`) that resolves outside the temp folder: so `clone` into, `init` in, `worktree add` at or
-//     `bundle create` of a path outside it is refused before git starts.
+//     segment, also after `--opt=` or a glued short option, or a relative one whose first segment exists, so a symlink inside the
+//     folder is followed) that resolves outside the temp folder: so `clone` into, `init` in, `worktree add` at, `bundle create`,
+//     `archive --output`, `push`, `fetch` or `remote add` of a path outside it is refused before git starts.
 // Read-only calls on the real tree (`git ls-files` over PADDOCK) are not scratch work and carry `// conformance: raw-git — <why>`
 // (check C142 reports a raw git spawn in a test that has neither this helper nor that comment).
 import { spawnSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
@@ -62,13 +63,20 @@ const PLACEMENT_OPTION = /^(?:--separate-git-dir|--template|--reference|--refere
 /** Configuration keys that move the work tree or run code from outside (in `-c k=v` and in `config k v`). */
 const DANGEROUS_KEY = /\b(?:core\.worktree|core\.hookspath|include\.path|includeif\.[^=\s]*\.path)\b/i;
 
-/** The path of `arg` when it looks like one (absolute, `~`, a `file://` URL or a `..` segment), else null; `--opt=path` is read too. */
-function pathOf(arg) {
+/**
+ * The path `arg` names, or null when it is no path: an absolute path, `~`, a `file://` URL, a `..` segment, or a relative path whose
+ * first segment EXISTS under `cwd` (so `lnk/x` through a symlink `lnk` is read, `HEAD` and `main` are not). `--opt=path` and a glued
+ * short option (`-o/abs`, `-ofile`) are read too.
+ */
+function pathOf(cwd, arg) {
   let a = arg.replace(/^--[a-z-]+=/, '');
+  const glued = /^-[A-Za-z]([^=\s].*)$/.exec(a);
+  if (glued && !a.startsWith('--')) a = glued[1];
   if (a.startsWith('file://')) a = a.slice('file://'.length);
-  if (a === '/dev/null' || a === 'NUL') return null;
+  if (a === '' || a.startsWith('-') || a === '/dev/null' || a === 'NUL') return null;
   if (a.startsWith('~') || isAbsolute(a) || /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(a)) return a;
-  return null;
+  const first = a.split(/[\\/]/)[0];
+  return first !== '' && existsSync(resolve(cwd, first)) ? a : null;
 }
 
 /** Whether `path` (made absolute against `cwd`) is inside the scratch root, through its nearest existing ancestor. */
@@ -117,7 +125,7 @@ export function refuseEscapingArgs(cwd, args) {
       if ((verb === 'init' || verb === 'clone') && PLACEMENT_OPTION.test(a)) refuse(`\`git ${verb}\` placing its git dir elsewhere`, a);
     }
     if (args[i - 1] === '-c') continue; // a `-c key=value` pair: the key was checked above, the value is not a path
-    const path = pathOf(a);
+    const path = pathOf(cwd, a);
     if (path !== null && !pathInside(cwd, path)) refuse('a path outside the temp folder', a);
   }
 }

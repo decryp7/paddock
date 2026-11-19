@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { after, test } from 'node:test';
@@ -156,4 +156,73 @@ test('a path argument that stays inside the scratch folder still works (the conv
   assert.match(git(d, 'config', '--local', '--list'), /autocrlf=false/);
   assert.equal(git(d, 'show', 'HEAD:f'), 'x');
   git(d, 'bundle', 'create', join(scratch, 'args.bundle'), 'HEAD');
+});
+
+// ---- a relative argument through a symlink inside the temp folder is an escape too --------------------------------------------
+test('arguments that reach outside through a symlink inside the scratch folder are refused (clone, init, worktree add, bundle, archive, push, remote add)', () => {
+  const d = repoIn();
+  writeFileSync(join(d, 'f'), 'x');
+  git(d, 'add', '-A');
+  git(d, 'commit', '-q', '-m', 'c');
+  const outsideRepo = join(outsideDir, 'repo');
+  mkdirSync(outsideRepo);
+  // conformance: raw-git — makes the stand-in bare repository OUTSIDE the temp folder, which the helper refuses by design; GIT_* removed
+  assert.equal(spawnSync('git', ['init', '-q', '--bare', outsideRepo], { env: scratchEnv() }).status, 0);
+  symlinkSync(outsideDir, join(d, 'lnk'), 'junction'); // a link to a folder outside the temp folder
+  symlinkSync(outsideRepo, join(d, 'lnk-repo'), 'junction'); // a link to a repository outside it
+  const before = readdirSync(outsideDir).sort();
+  const abs = join(outsideDir, 'abs.tar');
+  for (const args of [
+    ['clone', '-q', '.', 'lnk/x'],
+    ['init', '-q', 'lnk-repo'],
+    ['worktree', 'add', 'lnk/wt'],
+    ['bundle', 'create', 'lnk/b', 'HEAD'],
+    ['archive', '--output=lnk/a.tar', 'HEAD'],
+    ['archive', '-o', 'lnk/a.tar', 'HEAD'],
+    ['archive', `-o${abs}`, 'HEAD'],
+    ['archive', '-o', abs, 'HEAD'],
+    ['push', 'lnk-repo', 'HEAD:refs/heads/x'],
+    ['remote', 'add', 'o', 'lnk-repo'],
+    ['remote', 'set-url', 'origin', 'lnk-repo'],
+    ['fetch', 'lnk-repo'],
+  ]) {
+    assert.throws(() => gitResult(d, args), REFUSED, `git ${args.join(' ')}`);
+  }
+  assert.deepEqual(readdirSync(outsideDir).sort(), before, 'nothing was written outside the temp folder');
+});
+
+test('a symlink that stays inside the scratch folder and a plain relative path still work', () => {
+  const d = repoIn();
+  writeFileSync(join(d, 'f'), 'x');
+  git(d, 'add', '-A');
+  git(d, 'commit', '-q', '-m', 'c');
+  mkdirSync(join(d, 'real'));
+  symlinkSync(join(d, 'real'), join(d, 'inner'), 'junction');
+  git(d, 'clone', '-q', '.', 'inner/x');
+  git(d, 'bundle', 'create', 'b.bundle', 'HEAD');
+  git(d, 'archive', '--output=a.tar', 'HEAD');
+  git(d, 'add', '.');
+});
+
+test('every refusal the helper lists has a case: the remaining global options, config file options, placement options and keys', () => {
+  const d = repoIn();
+  for (const args of [
+    ['--exec-path=/x', 'status'],
+    ['--exec-path', 'x', 'status'],
+    ['--super-prefix=x/', 'status'],
+    ['--config-env=a.b=VAR', 'status'],
+    ['config', '--blob', 'HEAD:f', 'a.b'],
+    ['config', '--worktree', 'a.b', 'c'],
+    ['clone', '-q', '--template', 'tpl', d, 'dest'],
+    ['clone', '-q', '--template=tpl', d, 'dest'],
+    ['clone', '-q', '--reference', d, d, 'dest'],
+    ['clone', '-q', '--reference-if-able', d, d, 'dest'],
+    ['clone', '-q', '--upload-pack', 'x', d, 'dest'],
+    ['clone', '-q', '-u', 'x', d, 'dest'],
+    ['init', '-q', '--template=tpl'],
+    ['config', 'includeIf.gitdir:/x.path', 'y'],
+    ['-c', 'includeif.onbranch:x.path=/y', 'status'],
+  ]) {
+    assert.throws(() => gitResult(d, args), REFUSED, `git ${args.join(' ')}`);
+  }
 });

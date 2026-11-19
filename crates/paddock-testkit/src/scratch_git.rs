@@ -15,6 +15,11 @@
 //!   `--upload-pack`; a configuration key that moves the work tree or the hooks (`core.worktree`, `core.hooksPath`, `include.path`);
 //! - any path argument (absolute, `~` or with a `..` segment, also after `--opt=` or in a `file://` URL) that resolves outside the
 //!   temp folder: `clone` into, `init` in, `worktree add` at or `bundle create` of such a path;
+//! - the same through a symlink inside the temp folder (`clone . lnk/x`, `push lnk-repo`, `remote add o lnk-repo`): a relative
+//!   argument whose first segment exists under the folder is resolved through the operating system, and so is a glued short option
+//!   (`-o/abs`);
+//! - a repository whose git dir (found with `rev-parse --absolute-git-dir`, once per folder) is outside the temp folder, such as a
+//!   `.git` file that points elsewhere;
 //! - for every verb that is not a read (`ls-files`, `rev-parse`, `log`, `show`, `diff`, `cat-file`, `check-ignore`, `check-attr`,
 //!   `rev-list`, `ls-tree`, `for-each-ref`, `merge-base`, `describe`, `grep`, `count-objects`, `status --no-optional-locks`): a
 //!   working folder that is not set or is not inside the temp folder. A read may run in the real tree (`current_dir(repo_root)`),
@@ -60,6 +65,25 @@ const REPOSITORY_VARS: &[&str] = &[
     "GIT_CONFIG_COUNT",
     "GIT_CONFIG_PARAMETERS",
 ];
+
+/// Folders whose git dir was found inside the temp folder (asked once).
+static CHECKED_DIRS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> =
+    std::sync::OnceLock::new();
+
+/// The verb of `args`: the first argument that is no option (`-c key=value` pairs skipped), or `""`.
+fn verb_of(args: &[String]) -> &str {
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "-c" {
+            i += 2;
+        } else if args[i].starts_with('-') {
+            i += 1;
+        } else {
+            return &args[i];
+        }
+    }
+    ""
+}
 
 /// A `git` for a scratch repository; see the module documentation.
 pub struct ScratchGit {
@@ -162,7 +186,61 @@ impl ScratchGit {
             )));
         }
         let temp = temp_root();
-        refuse_escaping(self.cwd.as_deref(), &self.args, &temp).map_err(refusal)
+        refuse_escaping(self.cwd.as_deref(), &self.args, &temp).map_err(refusal)?;
+        self.check_git_dir(&temp)
+    }
+
+    /// For a verb that writes (but is not `init` or `clone`): the repository git finds from the folder has its git dir inside the temp
+    /// folder, so a `.git` file that points elsewhere is refused. Asked once per folder.
+    fn check_git_dir(&self, temp: &Path) -> io::Result<()> {
+        let args: Vec<String> = self
+            .args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let verb = verb_of(&args);
+        let Some(cwd) = &self.cwd else { return Ok(()) };
+        let reads = READ_ONLY.contains(&verb)
+            && (verb != "status" || args.iter().any(|a| a == "--no-optional-locks"));
+        let key = paddock_env::winpath::real(cwd).unwrap_or_else(|_| cwd.clone());
+        if verb == "init" || verb == "clone" {
+            // A new repository: whatever was known about this folder is stale.
+            if let Some(known) = CHECKED_DIRS.get() {
+                known
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .remove(&key);
+            }
+            return Ok(());
+        }
+        if reads {
+            return Ok(());
+        }
+        let known = CHECKED_DIRS.get_or_init(Default::default);
+        if known
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(&key)
+        {
+            return Ok(());
+        }
+        let out = TestCommand::new("git")
+            .args(["rev-parse", "--absolute-git-dir"])
+            .current_dir(cwd)
+            .output()?;
+        let dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !out.status.success() || !inside(temp, Path::new(""), Path::new(&dir)) {
+            return Err(refusal(format!(
+                "the repository git finds from {} has its git dir at {dir:?}, not inside the temp folder {}; run `git init` there first",
+                cwd.display(),
+                temp.display()
+            )));
+        }
+        known
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key);
+        Ok(())
     }
 
     /// Runs git to its end and collects its output.
@@ -247,18 +325,31 @@ fn inside(temp: &Path, base: &Path, path: &Path) -> bool {
     }
 }
 
-/// The path an argument names when it looks like one (absolute, `~`, a `file://` URL or a `..` segment; `--opt=path` is read too).
-fn path_of(arg: &str) -> Option<String> {
+/// The path an argument names, or `None` when it is no path: an absolute path, `~`, a `file://` URL, a `..` segment, or a relative
+/// path whose first segment EXISTS under `cwd` (so `lnk/x` through a symlink `lnk` is read; `HEAD` and `main` are not). `--opt=path`
+/// and a glued short option (`-o/abs`, `-ofile`) are read too.
+fn path_of(cwd: &Path, arg: &str) -> Option<String> {
     let mut a = arg;
     if let Some(rest) = a.strip_prefix("--").and_then(|r| r.split_once('=')) {
         a = rest.1;
+    } else if !a.starts_with("--")
+        && a.len() > 2
+        && a.starts_with('-')
+        && a.as_bytes()[1].is_ascii_alphabetic()
+        && !a[2..].starts_with('=')
+    {
+        a = &a[2..];
     }
     let a = a.strip_prefix("file://").unwrap_or(a);
-    if a == "/dev/null" || a == "NUL" {
+    if a.is_empty() || a.starts_with('-') || a == "/dev/null" || a == "NUL" {
         return None;
     }
     let climbs = Path::new(a).components().any(|c| c == Component::ParentDir);
-    (a.starts_with('~') || Path::new(a).is_absolute() || climbs).then(|| a.to_string())
+    if a.starts_with('~') || Path::new(a).is_absolute() || climbs {
+        return Some(a.to_string());
+    }
+    let first = a.split(['/', '\\']).next().unwrap_or("");
+    (!first.is_empty() && cwd.join(first).symlink_metadata().is_ok()).then(|| a.to_string())
 }
 
 const GLOBAL_OPTIONS: &[&str] = &[
@@ -342,7 +433,12 @@ fn refuse_escaping(cwd: Option<&Path>, args: &[OsString], temp: &Path) -> Result
             if (verb == "init" || verb == "clone") && is_option(a, PLACEMENT_OPTIONS) {
                 return refuse("a git dir, template or object store placed elsewhere", a);
             }
-            if reads && (a == "--output" || a == "-o" || a.starts_with("--output=")) {
+            if reads
+                && (a == "--output"
+                    || a == "-o"
+                    || a.starts_with("--output=")
+                    || (a.starts_with("-o") && a.len() > 2 && verb != "ls-files"))
+            {
                 return refuse("a read that writes a file", a);
             }
         }
@@ -350,7 +446,7 @@ fn refuse_escaping(cwd: Option<&Path>, args: &[OsString], temp: &Path) -> Result
             continue; // the value of a `-c key=value` pair: the key was checked above
         }
         if !reads
-            && let Some(p) = path_of(a)
+            && let Some(p) = path_of(cwd.unwrap_or(Path::new("")), a)
             && !inside(temp, cwd.unwrap_or(Path::new("")), Path::new(&p))
         {
             return refuse("a path outside the temp folder", a);
@@ -444,6 +540,22 @@ mod tests {
             vec!["-c", "core.hooksPath=x", "status"],
             vec!["config", "include.path", "x"],
             vec!["diff", "--output=/x"],
+            vec!["diff", "-ox"],
+            vec!["--exec-path=/x", "status"],
+            vec!["--exec-path", "x", "status"],
+            vec!["--super-prefix=x/", "status"],
+            vec!["--config-env=a.b=VAR", "status"],
+            vec!["config", "--blob", "HEAD:f", "a.b"],
+            vec!["config", "--worktree", "a.b", "c"],
+            vec!["clone", "-q", "--template", "tpl", "src", "dest"],
+            vec!["clone", "-q", "--template=tpl", "src", "dest"],
+            vec!["clone", "-q", "--reference", "x", "src", "dest"],
+            vec!["clone", "-q", "--reference-if-able", "x", "src", "dest"],
+            vec!["clone", "-q", "--upload-pack", "x", "src", "dest"],
+            vec!["clone", "-q", "-u", "x", "src", "dest"],
+            vec!["init", "-q", "--template=tpl"],
+            vec!["config", "includeIf.gitdir:/x.path", "y"],
+            vec!["-c", "includeif.onbranch:x.path=/y", "status"],
         ] {
             assert!(
                 refuse_escaping(Some(&work), &argv(&args), &temp).is_err(),
@@ -509,6 +621,100 @@ mod tests {
                 "git {args:?}"
             );
         }
+    }
+
+    /// Real symlinks (unix: creating one on Windows needs a privilege a test must not assume; the check itself resolves every path
+    /// through the OS on all platforms).
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_argument_through_a_symlink_inside_the_temp_folder_is_refused() {
+        let (_root, temp, outside) = world();
+        let work = temp.join("work");
+        std::fs::create_dir_all(outside.join("repo")).unwrap();
+        std::os::unix::fs::symlink(&outside, work.join("lnk")).unwrap();
+        std::os::unix::fs::symlink(outside.join("repo"), work.join("lnk-repo")).unwrap();
+        let abs = outside.join("abs.tar").display().to_string();
+        let glued = format!("-o{abs}");
+        for args in [
+            vec!["clone", "-q", ".", "lnk/x"],
+            vec!["init", "-q", "lnk-repo"],
+            vec!["worktree", "add", "lnk/wt"],
+            vec!["bundle", "create", "lnk/b", "HEAD"],
+            vec!["archive", "--output=lnk/a.tar", "HEAD"],
+            vec!["archive", "-o", "lnk/a.tar", "HEAD"],
+            vec!["archive", glued.as_str(), "HEAD"],
+            vec!["archive", "-o", abs.as_str(), "HEAD"],
+            vec!["push", "lnk-repo", "HEAD:refs/heads/x"],
+            vec!["remote", "add", "o", "lnk-repo"],
+            vec!["remote", "set-url", "origin", "lnk-repo"],
+            vec!["fetch", "lnk-repo"],
+        ] {
+            assert!(
+                refuse_escaping(Some(&work), &argv(&args), &temp).is_err(),
+                "git {args:?}"
+            );
+        }
+        // A link that stays inside the temp folder, and a plain relative path, still work.
+        std::fs::create_dir_all(work.join("real")).unwrap();
+        std::os::unix::fs::symlink(work.join("real"), work.join("inner")).unwrap();
+        for args in [
+            vec!["clone", "-q", ".", "inner/x"],
+            vec!["bundle", "create", "b.bundle", "HEAD"],
+            vec!["add", "."],
+        ] {
+            assert!(
+                refuse_escaping(Some(&work), &argv(&args), &temp).is_ok(),
+                "git {args:?}"
+            );
+        }
+    }
+
+    /// A `.git` file that points at a repository outside the temp folder: the scratch git refuses to write through it, and that
+    /// repository is untouched.
+    #[cfg(unix)]
+    #[test]
+    fn a_gitfile_that_points_outside_the_temp_folder_is_refused() {
+        let outside = tempfile::tempdir_in("/var/tmp").unwrap();
+        let init = TestCommand::new("git")
+            .args(["init", "-q"])
+            .current_dir(outside.path())
+            .output()
+            .unwrap();
+        assert!(init.status.success());
+        let work = tempfile::tempdir().unwrap();
+        std::fs::write(
+            work.path().join(".git"),
+            format!("gitdir: {}\n", outside.path().join(".git").display()),
+        )
+        .unwrap();
+        let head = std::fs::read_to_string(outside.path().join(".git/HEAD")).unwrap();
+        let err = scratch_git()
+            .current_dir(work.path())
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "x",
+            ])
+            .output()
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("not inside the temp folder"),
+            "{err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join(".git/HEAD")).unwrap(),
+            head
+        );
+        assert!(
+            !outside.path().join(".git/refs/heads/main").exists()
+                && !outside.path().join(".git/refs/heads/master").exists(),
+            "no commit was made there"
+        );
     }
 
     #[test]
