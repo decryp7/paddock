@@ -1,7 +1,8 @@
 //! Who waits for whom in the queue, as a graph, so a cycle is reported at once (docs/research/2026-11-19-gate-hang-detection.md, C2)
 //! instead of showing only as two waits that never end (the drain deadlock of 2026-11-18, fixed in 7a4aafbee).
 //!
-//! The edges are what `Acquirer::poll` waits on, read off the folder:
+//! The edges are what `Acquirer::poll` waits on, read off the folder. They come from the same predicates `poll` itself asks
+//! ([`follows_queue`], [`yields_to_high`], [`waits_for_drain`]), so a change to a rule changes the graph with it (review P2-6):
 //! - a waiter that is not high-priority and holds ticket number `p > 1` waits for the head of the queue (every ticket ahead of it, so
 //!   the head stands for them);
 //! - a waiter that is the head (or high-priority, which has no ticket) waits for the owner of a live drain marker, unless it is that
@@ -13,10 +14,58 @@
 //!
 //! Pure: a list of waiters in, a cycle out.
 
+/// What a run is, for the rules of the queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    /// A normal step: it queues behind the head and yields to high-priority runs and to a drain.
+    Normal,
+    /// A high-priority run: no ticket, it goes before the queue.
+    High,
+    /// A container run that asked for the machine to drain: it goes by its marker.
+    DrainOwner,
+}
+
+impl Role {
+    /// The role of a run that is high-priority, or that owns a drain marker (which wins).
+    pub fn of(high: bool, drain_owner: bool) -> Role {
+        if drain_owner {
+            Role::DrainOwner
+        } else if high {
+            Role::High
+        } else {
+            Role::Normal
+        }
+    }
+}
+
+/// Whether a run waits for its place in the FIFO queue (`Acquirer::poll`'s queue check). A drain owner does not (7a4aafbee), unless the
+/// old rule is put back for a test.
+pub fn follows_queue(role: Role, rules: Rules) -> bool {
+    match role {
+        Role::Normal => true,
+        Role::High => false,
+        Role::DrainOwner => rules.drain_owner_follows_queue,
+    }
+}
+
+/// Whether a run yields to the high-priority runs that still count (`Acquirer::poll`'s high-marker check): only a normal step.
+pub fn yields_to_high(role: Role) -> bool {
+    role == Role::Normal
+}
+
+/// Whether a run past the queue waits for another run's drain marker: every run that is not itself a container run (a container run,
+/// the drain owner above all, does not wait for a drain).
+pub fn waits_for_drain(container_run: bool) -> bool {
+    !container_run
+}
+
 /// What a waiter is, as the folder shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Waiter {
-    /// The agent's name.
+    /// Who it is: the file name of its ticket (or, for a high-priority run, of its marker), which holds its pid and the time it was made
+    /// (review P2-6: two runs of one agent name and pid are told apart by it, a name is not an identity).
+    pub id: String,
+    /// The agent's name, for people.
     pub name: String,
     /// The pid of the heavy that waits.
     pub pid: u32,
@@ -59,8 +108,8 @@ pub fn edges(w: &[Waiter], rules: Rules) -> Vec<Edge> {
     let drain: Vec<usize> = w.iter().enumerate().filter(|(_, x)| x.drain_owner).map(|(i, _)| i).collect();
     let high: Vec<usize> = w.iter().enumerate().filter(|(_, x)| x.high).map(|(i, _)| i).collect();
     for (i, x) in w.iter().enumerate() {
-        // A high-priority run yields to nobody but a drain; the others yield to high-priority runs.
-        if !x.high && !x.drain_owner {
+        let role = Role::of(x.high, x.drain_owner);
+        if yields_to_high(role) {
             for &h in &high {
                 out.push(Edge {
                     from: i,
@@ -69,8 +118,7 @@ pub fn edges(w: &[Waiter], rules: Rules) -> Vec<Edge> {
                 });
             }
         }
-        let queued_behind_head = x.position.is_some_and(|p| p > 1);
-        if queued_behind_head && (!x.drain_owner || rules.drain_owner_follows_queue) {
+        if follows_queue(role, rules) && x.position.is_some_and(|p| p > 1) {
             if let Some(h) = head.filter(|&h| h != i) {
                 out.push(Edge {
                     from: i,
@@ -80,8 +128,8 @@ pub fn edges(w: &[Waiter], rules: Rules) -> Vec<Edge> {
             }
             continue;
         }
-        // The head, a high-priority run and a drain owner are past the queue: they wait for a drain they do not own.
-        if !x.drain_owner || rules.drain_owner_follows_queue {
+        // Past the queue (the head, a high-priority run, a drain owner that goes by its marker): wait for a drain it does not own.
+        if waits_for_drain(x.drain_owner) {
             for &d in drain.iter().filter(|&&d| d != i) {
                 out.push(Edge {
                     from: i,
@@ -94,8 +142,8 @@ pub fn edges(w: &[Waiter], rules: Rules) -> Vec<Edge> {
     out
 }
 
-/// A cycle in the wait-for graph: the names of its members in order (each waits for the next, the last for the first), or `None`.
-pub fn find_cycle(w: &[Waiter], rules: Rules) -> Option<Vec<String>> {
+/// A cycle in the wait-for graph: the indices of its members in order (each waits for the next, the last for the first), or `None`.
+pub fn find_cycle(w: &[Waiter], rules: Rules) -> Option<Vec<usize>> {
     let es = edges(w, rules);
     // 0 unvisited, 1 on the path, 2 done
     let mut state = vec![0u8; w.len()];
@@ -125,7 +173,7 @@ pub fn find_cycle(w: &[Waiter], rules: Rules) -> Option<Vec<String>> {
         if state[s] == 0
             && let Some(c) = go(s, &es, &mut state, &mut path)
         {
-            return Some(c.into_iter().map(|i| w[i].name.clone()).collect());
+            return Some(c);
         }
     }
     None
@@ -143,21 +191,23 @@ pub enum Break {
     Outside,
 }
 
-/// What `me` does about `cycle`: only a drain owner that is a member breaks it, by withdrawing its own marker.
-pub fn break_action(cycle: &[String], me: &Waiter) -> Break {
-    if !cycle.iter().any(|n| n == &me.name) {
+/// What the waiter `me` (an index into `w`) does about `cycle`: only a drain owner that is a member breaks it, by withdrawing its own
+/// marker.
+pub fn break_action(w: &[Waiter], cycle: &[usize], me: usize) -> Break {
+    if !cycle.contains(&me) {
         Break::Outside
-    } else if me.drain_owner {
+    } else if w[me].drain_owner {
         Break::WithdrawDrain
     } else {
         Break::ReportOnly
     }
 }
 
-/// `a -> b -> a`, for the log and `heavy status`.
-pub fn describe(cycle: &[String]) -> String {
-    let mut s = cycle.join(" -> ");
-    if let Some(first) = cycle.first() {
+/// The names of the members, `a -> b -> a`, for the log and `heavy status`.
+pub fn describe(w: &[Waiter], cycle: &[usize]) -> String {
+    let names: Vec<&str> = cycle.iter().map(|&i| w[i].name.as_str()).collect();
+    let mut s = names.join(" -> ");
+    if let Some(first) = names.first() {
         s.push_str(" -> ");
         s.push_str(first);
     }
@@ -170,6 +220,7 @@ mod tests {
 
     fn w(name: &str, position: Option<usize>, high: bool, drain_owner: bool) -> Waiter {
         Waiter {
+            id: format!("ticket-{name}"),
             name: name.into(),
             pid: 1,
             position,
@@ -187,8 +238,9 @@ mod tests {
             drain_owner_follows_queue: true,
         };
         let cycle = find_cycle(&state, old).expect("the old rule has a cycle");
-        assert_eq!(describe(&cycle).split(" -> ").count(), 3, "{cycle:?}");
-        assert!(cycle.contains(&"H".to_string()) && cycle.contains(&"C".to_string()), "{cycle:?}");
+        let said = describe(&state, &cycle);
+        assert_eq!(said.split(" -> ").count(), 3, "{said}");
+        assert!(said.contains('H') && said.contains('C'), "{said}");
         assert_eq!(
             find_cycle(&state, Rules::default()),
             None,
@@ -210,9 +262,45 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(break_action(&cycle, &state[1]), Break::WithdrawDrain);
-        assert_eq!(break_action(&cycle, &state[0]), Break::ReportOnly);
-        assert_eq!(break_action(&cycle, &state[2]), Break::Outside);
+        assert_eq!(break_action(&state, &cycle, 1), Break::WithdrawDrain);
+        assert_eq!(break_action(&state, &cycle, 0), Break::ReportOnly);
+        assert_eq!(break_action(&state, &cycle, 2), Break::Outside);
+    }
+
+    /// The graph and `poll` ask the same predicates: the roles' answers are what the edges are built from.
+    #[test]
+    fn the_roles_answer_what_poll_asks() {
+        let old = Rules {
+            drain_owner_follows_queue: true,
+        };
+        assert!(follows_queue(Role::Normal, Rules::default()) && !follows_queue(Role::High, Rules::default()));
+        assert!(!follows_queue(Role::DrainOwner, Rules::default()) && follows_queue(Role::DrainOwner, old));
+        assert!(yields_to_high(Role::Normal) && !yields_to_high(Role::High) && !yields_to_high(Role::DrainOwner));
+        assert!(waits_for_drain(false) && !waits_for_drain(true));
+        assert_eq!(Role::of(true, true), Role::DrainOwner, "a drain owner is a drain owner first");
+    }
+
+    /// Two runs with one agent name are two waiters: the graph names them by their tickets, not by what they are called.
+    #[test]
+    fn waiters_are_told_apart_by_their_ticket_not_by_name() {
+        let mut a = w("same", Some(1), false, false);
+        let mut b = w("same", Some(2), false, true);
+        a.id = "ticket-1-pid7".into();
+        b.id = "ticket-2-pid8".into();
+        let state = vec![a, b];
+        let cycle = find_cycle(
+            &state,
+            Rules {
+                drain_owner_follows_queue: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            break_action(&state, &cycle, 1),
+            Break::WithdrawDrain,
+            "only the drain owner of the two breaks"
+        );
+        assert_eq!(break_action(&state, &cycle, 0), Break::ReportOnly);
     }
 
     #[test]

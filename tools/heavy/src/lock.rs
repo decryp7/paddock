@@ -20,7 +20,7 @@ use crate::probe::file_id;
 use crate::procs::{Presence, Procs, evidence, pid_alive};
 use crate::record::{self, Owner, OwnerRead};
 use crate::timefmt::{clock_text, day_text, mins, oneline, utc_text};
-use crate::waitfor::{self, Break, Rules, Waiter};
+use crate::waitfor::{self, Break, Role, Rules, Waiter};
 use serde_json::{Value, json};
 use std::fs;
 use std::io::Read;
@@ -681,7 +681,7 @@ impl Heavy {
     /// markers and the live drain markers (a dead holder's file is left for the next run that removes stale things).
     pub fn waiters(&self) -> Vec<Waiter> {
         let live = |pid: Option<u32>, ep: Option<u64>| pid.is_some_and(|p| pid_alive(&*self.procs, p, ep));
-        let marker_pids = |prefix: &str| -> Vec<(u32, String)> {
+        let marker_pids = |prefix: &str| -> Vec<(u32, String, String)> {
             self.dir_entries(prefix)
                 .iter()
                 .filter_map(|f| {
@@ -690,7 +690,13 @@ impl Heavy {
                     let bytes = read_bounded(f).ok()?;
                     let ep = record::parse_marker_epoch(&bytes).or_else(|| mtime(f));
                     let pid = record::marker_pid(suffix);
-                    live(pid, ep).then(|| (pid.unwrap_or(0), suffix.split_once('-').map_or(suffix, |(_, n)| n).to_string()))
+                    live(pid, ep).then(|| {
+                        (
+                            pid.unwrap_or(0),
+                            suffix.split_once('-').map_or(suffix, |(_, n)| n).to_string(),
+                            b.clone(),
+                        )
+                    })
                 })
                 .collect()
         };
@@ -708,16 +714,18 @@ impl Heavy {
             }
             let pid = t.pid.unwrap_or(0);
             out.push(Waiter {
+                id: file_name(&f),
                 name: t.name,
                 pid,
                 position: Some(out.len() + 1),
                 high: false,
-                drain_owner: drain.iter().any(|(p, _)| *p == pid),
+                drain_owner: drain.iter().any(|(p, _, _)| *p == pid),
             });
         }
-        for (pid, name) in high {
+        for (pid, name, id) in high {
             if !out.iter().any(|w| w.pid == pid) {
                 out.push(Waiter {
+                    id,
                     name,
                     pid,
                     position: None,
@@ -734,7 +742,8 @@ impl Heavy {
         let rules = Rules {
             drain_owner_follows_queue: self.faults.old_drain_rule.load(Ordering::SeqCst),
         };
-        waitfor::find_cycle(&self.waiters(), rules)
+        let w = self.waiters();
+        waitfor::find_cycle(&w, rules).map(|c| c.iter().map(|&i| w[i].name.clone()).collect())
     }
 
     /// The text of `status`.
@@ -803,7 +812,10 @@ impl Heavy {
             out += &format!("high marker: {}\n", f.display());
         }
         if let Some(c) = self.wait_cycle() {
-            out += &format!("WAIT-FOR CYCLE (nobody can go first): {}\n", waitfor::describe(&c));
+            let mut s = c.join(" -> ");
+            s.push_str(" -> ");
+            s.push_str(c.first().map_or("", String::as_str));
+            out += &format!("WAIT-FOR CYCLE (nobody can go first): {s}\n");
         }
         for (label, name, n) in [("breaks (last 5):", BREAKS_LOG, 5), ("activity (last 3):", ACTIVITY_LOG, 3)] {
             if let Ok(text) = fs::read_to_string(self.cfg.root.join(name)) {
@@ -950,10 +962,12 @@ impl<'a> Acquirer<'a> {
         let Some(cycle) = waitfor::find_cycle(&waiters, rules) else {
             return;
         };
-        let Some(me) = waiters.iter().find(|w| w.pid == h.pid && w.name == self.req.name) else {
+        // Who this run is: its ticket, or its high-priority marker (never its name, which two runs can share).
+        let mine = self.ticket.file_name().or_else(|| self.marker.as_deref().and_then(Path::file_name));
+        let Some(me) = waiters.iter().position(|w| mine.is_some_and(|m| m.to_string_lossy() == w.id)) else {
             return;
         };
-        let action = waitfor::break_action(&cycle, me);
+        let action = waitfor::break_action(&waiters, &cycle, me);
         if action == Break::Outside {
             return;
         }
@@ -961,7 +975,7 @@ impl<'a> Acquirer<'a> {
         let msg = format!(
             "{} is in a wait-for cycle: {}; {}",
             self.req.name,
-            waitfor::describe(&cycle),
+            waitfor::describe(&waiters, &cycle),
             if action == Break::WithdrawDrain {
                 "it withdraws its drain marker so the others can go on"
             } else {
@@ -970,7 +984,11 @@ impl<'a> Acquirer<'a> {
         );
         (h.say)(&msg);
         h.alog(&msg);
-        h.log.warn("heavy.cycle", &msg, &[("Members", json!(cycle))]);
+        h.log.warn(
+            "heavy.cycle",
+            &msg,
+            &[("Members", json!(cycle.iter().map(|&i| waiters[i].name.clone()).collect::<Vec<_>>()))],
+        );
         if action == Break::WithdrawDrain
             && let Some(d) = self.drain.take()
         {
@@ -1005,7 +1023,11 @@ impl<'a> Acquirer<'a> {
                 }
             }
             // A container run that asked for the machine to drain goes before the high-priority runs it made wait.
-            if !self.req.high && self.drain.is_none() {
+            let role = Role::of(self.req.high, self.drain.is_some());
+            let rules = Rules {
+                drain_owner_follows_queue: false,
+            };
+            if waitfor::yields_to_high(role) {
                 let waited = h.now().saturating_sub(self.t0);
                 let (counts, ignored) = h.counting_high_marker(&name, waited);
                 if !ignored.is_empty() && !self.bound_said {
@@ -1048,7 +1070,7 @@ impl<'a> Acquirer<'a> {
             // A container run that asked for the drain goes by its own marker, not by its place in the queue: every other step waits for
             // the drain (above), so a head that waits for it would otherwise wait for a drain owner queued behind it, which waits for
             // the head (the deadlock of 2026-11-18). Its ticket stays until it holds a slot.
-            if !self.req.high && self.drain.is_none() {
+            if waitfor::follows_queue(role, rules) {
                 if !self.ticket.is_file()
                     && let Err(e) = self.make_ticket()
                 {
@@ -1070,7 +1092,9 @@ impl<'a> Acquirer<'a> {
                     return Poll::Waiting;
                 }
             }
-            if !container_req && let Some(m) = h.live_drain_marker(&name) {
+            if waitfor::waits_for_drain(container_req)
+                && let Some(m) = h.live_drain_marker(&name)
+            {
                 self.check_cycle();
                 self.wait_for(
                     "drain",
