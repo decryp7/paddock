@@ -2797,3 +2797,36 @@ Flows read from the failing attempts' traces and screencasts (playwright-report-
 screencast. **Class:** the narrow-window race is the third "layout decision from a stale measurement" (dockview's last size: the
 `watchResize` settle loop, train 14's same-frame fix, this one); the other two are the ready-read class (a spec acting on a control that
 is in the DOM but not positioned or not lasting).
+
+## The dock's room has one reader; menus are found through one helper; why the File menu sat at the top-left (Debrief, 2026-11-19)
+Follow-ups of run 8297 that the user approved.
+- **One reader of the dock's room.** `DockLayout.room(api)` is the dock's container as laid out now (null without a box); `plan`, grow-back
+  (`growBackIds`, `restorable`) and the Explorer verdict read it, and a test makes dockview's `width`/`height` throw a record on every read
+  (red before: ten reads in one plan, verdict and grow-back). `needsFit` compares the plan with the groups' own sizes and reads no room.
+  With the plan reading the container, `watchResize` no longer waits up to 20 x 50 ms for dockview to agree (the settle loop of
+  `RESIZE_SETTLE_TRIES`): it lays dockview out at the container (`followContainer`) and re-plans after the 150 ms debounce, and
+  `fitToWindow` does the same first. Third instance of the class "a layout decision from dockview's last size" (the settle loop,
+  f253014fa's same-frame fix, run 8297's Explorer race), so the class is closed by construction rather than by another wait.
+- **Menus through one helper.** All 59 `getByRole('menu')` sites of Debrief's specs moved onto `menu-support.ts` (`anchoredMenu`,
+  `contextMenu` for a right-click at a point, `panelMenuButton`, `menuNamed` for closed or text checks); `menuGap` also measures a menu
+  against a point. The ESLint rule `paddock/e2e-menu-wait` reports a spec that finds a menu by role itself; report-only (ER-41,
+  `PADDOCK_E2E_MENU_LINT=warn`): 59 findings on the old specs, 0 after.
+- **Why the menu waited (measured, not guessed).** Every Debrief spec runs on Playwright's installed clock (`pinnedClockTest`), which fakes
+  `setTimeout` and `requestAnimationFrame`. Angular's zoneless scheduler renders in whichever of the two fires first
+  (`scheduleCallbackWithRafRace`, @angular/core 22.2.3), and CDK positions an overlay in `afterNextRender` (`OverlayRef.attach`). With the real
+  clock the rAF branch runs in the browser's rendering step, before paint, so the menu is placed before its first frame: sampled at the
+  start of every frame, 0 of 6 WebKit opens and 6 of 6 Chromium opens showed one frame (the sampler's rAF runs before Angular's in the same
+  frame, so that frame is read before CDK positions the menu, not necessarily painted). With the clock installed the fake rAF fires from
+  the clock's own timer, outside the rendering step: up to 5 frames (41 ms) on Chromium locally, and in run 8297, under CI load, about
+  500 ms. A CPU profile of the window (Chromium, the browser build) showed the mock backend's queries (`mock-backend.ts`, `mock-engine.ts`)
+  and the clock's `_runTo` on the main thread, not a stall in Angular. **Users:** no jump to fix in the app; the menu is in place before
+  it is painted. Hiding an overlay until it is positioned (opacity 0) would not help the specs either (Playwright counts opacity 0 as
+  visible), so no product change; the specs wait for the place instead.
+**Class:** the ready-read class (a spec acts on an element that is in the DOM but not yet placed); amplifier: the installed clock moves
+the app's render out of the browser's frame.
+
+## Fix item: live-tail-follow.e2e.ts:298 "a wheel at once after Follow on is not pulled back" (Debrief, 2026-11-19)
+Failed once in a full local WebKit run of fix/debrief-webkit-flakes (689 passed; `onNewest` was true after `runFor(1_500)`); passed 40 of 40
+right after (20 runs x 4 workers, WebKit, load 43); `ci flakes` lists it flaky on Chromium on 2026-11-19. The spec touches no menu,
+toast or Explorer code of that branch. Not blocking (ER-12: reached only through dependencies). Next: reproduce with the trace on
+(`--trace on`, WebKit, under load) and read the grid's `Scroll written` lines around the wheel and the Follow request before fixing.
