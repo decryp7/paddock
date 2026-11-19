@@ -37,7 +37,7 @@ export function errorHint(code: ErrorCode): string | null {
     case 'busy':
       return 'Dyno is busy with another task. Try again when it finishes.';
     case 'stale':
-      return 'The layout changed in another window. It was reloaded; try again.';
+      return 'It changed in another window. It was reloaded; try again.';
     case 'notFound':
       return 'It no longer exists (the process may have exited).';
     default:

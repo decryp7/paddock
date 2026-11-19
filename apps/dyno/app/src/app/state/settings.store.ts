@@ -20,8 +20,8 @@ interface SettingsState {
 export const SettingsStore = signalStore(
   { providedIn: 'root' },
   withState<SettingsState>({ settings: null, error: null, saving: false, saveError: null, plugins: [], pluginsLoaded: false, pluginsError: null }),
-  withMethods((store, backend = inject(BACKEND), notifier = inject(Notifier)) => ({
-    async load(): Promise<void> {
+  withMethods((store, backend = inject(BACKEND), notifier = inject(Notifier)) => {
+    const load = async (): Promise<void> => {
       patchState(store, { error: null });
       try {
         const settings = await backend.settings();
@@ -29,29 +29,39 @@ export const SettingsStore = signalStore(
       } catch (e) {
         patchState(store, { error: toCommandError(e) });
       }
-    },
-    async loadPlugins(): Promise<void> {
-      patchState(store, { pluginsError: null });
-      try {
-        patchState(store, { plugins: await backend.plugins(), pluginsLoaded: true });
-      } catch (e) {
-        patchState(store, { pluginsError: toCommandError(e) });
-      }
-    },
-    /** Saves the whole settings object; the engine validates it and returns what it stored. */
-    async save(settings: Settings, message: string | null = 'Settings saved'): Promise<boolean> {
-      patchState(store, { saving: true, saveError: null });
-      try {
-        const saved = await backend.saveSettings(settings);
-        patchState(store, { settings: saved, saving: false, saveError: null });
-        if (message) notifier.show(message);
-        return true;
-      } catch (e) {
-        const saveError = toCommandError(e);
-        patchState(store, { saving: false, saveError });
-        notifier.error(saveError);
-        return false;
-      }
-    },
-  })),
+    };
+    return {
+      load,
+      async loadPlugins(): Promise<void> {
+        patchState(store, { pluginsError: null });
+        try {
+          patchState(store, { plugins: await backend.plugins(), pluginsLoaded: true });
+        } catch (e) {
+          patchState(store, { pluginsError: toCommandError(e) });
+        }
+      },
+      /** Saves the whole settings object; the engine validates it and returns what it stored. */
+      async save(settings: Settings, message: string | null = 'Settings saved'): Promise<boolean> {
+        patchState(store, { saving: true, saveError: null });
+        try {
+          const saved = await backend.saveSettings(settings);
+          patchState(store, { settings: saved, saving: false, saveError: null });
+          if (message) notifier.show(message);
+          return true;
+        } catch (e) {
+          const saveError = toCommandError(e);
+          patchState(store, { saving: false, saveError });
+          if (saveError.code === 'stale') {
+            // Another window or request changed the settings after this copy was read: show the current ones instead of
+            // overwriting them, and say so.
+            await load();
+            notifier.show('The settings changed in another window and were reloaded. Check them and save again.', 'warn');
+            return false;
+          }
+          notifier.error(saveError);
+          return false;
+        }
+      },
+    };
+  }),
 );

@@ -44,6 +44,29 @@ describe('SettingsStore', () => {
     expect(store.saving()).toBe(false);
     expect(notifier.recent().at(-1)?.text).toBe('Settings saved');
   });
+  it('a save taken before another change is refused as stale: the store reloads and says so, and nothing is lost', async () => {
+    const { store, mock, notifier } = setup();
+    await store.load();
+    const s0 = structuredClone(store.settings()!);
+    // Another window (or the alert-rule editor) changes the settings after this window read them.
+    await mock.upsertAlertRule({ id: 'r1', name: 'R1', metric: 'cpuTotal', op: 'above', limit: 90, forSecs: 0, severity: 'warning', enabled: true } as never);
+    const loads = vi.spyOn(mock, 'settings');
+    const changed = structuredClone(s0);
+    changed.sampling.intervalMs = 2000;
+    expect(await store.save(changed)).toBe(false);
+    expect(loads).toHaveBeenCalled();
+    expect(store.settings()?.customAlerts?.map((r) => r.id)).toContain('r1');
+    expect(store.settings()?.sampling.intervalMs).not.toBe(2000);
+    expect(store.saving()).toBe(false);
+    const last = notifier.recent().at(-1);
+    expect(last?.text).toMatch(/changed.*reloaded/i);
+    expect(last?.tone).toBe('warn');
+    // The reloaded copy saves.
+    changed.revision = store.settings()!.revision;
+    expect(await store.save(changed)).toBe(true);
+    expect(store.settings()?.sampling.intervalMs).toBe(2000);
+    expect(store.settings()?.customAlerts?.map((r) => r.id)).toContain('r1');
+  });
   it('save without a message stays quiet', async () => {
     const { store, mock, notifier } = setup();
     expect(await store.save(structuredClone(await mock.settings()), null)).toBe(true);

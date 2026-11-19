@@ -1451,7 +1451,11 @@ export class MockBackend implements DynoBackend {
       if (settings.webApi.port < 1024 || settings.webApi.port > 65535) throw err('badRequest', 'Choose a port between 1024 and 65535.');
       const extras = mockMaintenanceProblem(settings.maintenance);
       if (extras) throw err('badRequest', extras);
-      this.settingsValue = copy(settings);
+      if (settings.revision !== this.settingsValue.revision) {
+        throw err('stale', 'The settings changed since this window read them; they were reloaded. Check them and save again.');
+      }
+      // Alert rules belong to the engine (upsertAlertRule, deleteAlertRule), whatever a window's copy holds.
+      this.settingsValue = copy({ ...settings, customAlerts: this.settingsValue.customAlerts, revision: this.settingsValue.revision + 1 });
       return this.settingsValue;
     });
   }
@@ -1553,14 +1557,22 @@ export class MockBackend implements DynoBackend {
       if (!rule.name.trim()) throw err('badRequest', 'Give the rule a name.');
       const rules = this.settingsValue.customAlerts ?? [];
       const exists = rules.some((r) => r.id === rule.id);
-      this.settingsValue = copy({ ...this.settingsValue, customAlerts: exists ? rules.map((r) => (r.id === rule.id ? rule : r)) : [...rules, rule] });
+      this.settingsValue = copy({
+        ...this.settingsValue,
+        customAlerts: exists ? rules.map((r) => (r.id === rule.id ? rule : r)) : [...rules, rule],
+        revision: this.settingsValue.revision + 1,
+      });
       return this.settingsValue;
     });
   }
 
   deleteAlertRule(id: string): Promise<Settings> {
     return this.reply('deleteAlertRule', () => {
-      this.settingsValue = copy({ ...this.settingsValue, customAlerts: (this.settingsValue.customAlerts ?? []).filter((r) => r.id !== id) });
+      this.settingsValue = copy({
+        ...this.settingsValue,
+        customAlerts: (this.settingsValue.customAlerts ?? []).filter((r) => r.id !== id),
+        revision: this.settingsValue.revision + 1,
+      });
       return this.settingsValue;
     });
   }
