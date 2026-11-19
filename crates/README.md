@@ -1278,10 +1278,16 @@ partial clone's omitted blob, which git fetches from the promisor remote):
 - `tree(spec)`, `walk(spec)`: one tree level, or every file of a tree recursively (what `ls-tree -r` lists);
 - `starts()`: the git processes it started, for spawn-budget tests.
 
+A tree entry's `mode` is a `Mode`, read as a number and canonicalised as git reads it (`040000` is a tree, an old `100664` file is
+`100644`), so two trees that only spell a mode differently compare equal; a name that is not UTF-8 is `GitError::NotUtf8`, never
+decoded lossily. An object over `MAX_OBJECT` (256 MiB, or `with_max_object`) is `GitError::TooLarge`, on both paths: gix checks the
+object's header before it loads it, and the walk of `<oid>:<path>` reads each tree on the way the same way.
+
 A failure of the process (it ended, did not answer within `READ_TIMEOUT`) is an error naming the request and git's last words; the
 next read starts a new one. The caller builds the `git` command (program, `-C <root>`, environment): the policy is the caller's.
 It runs on `paddock_proc::Session` (ADR 0108 G1). Tests: `tests/it/reader.rs` (against `ls-tree -r`, a 200-read budget of one
-start, a folder asked as a file, a non-repository).
+start, a folder asked as a file, an object over the cap, a non-repository) and the unit tests of the tree parser (modes, names
+that are not UTF-8).
 
 ## `paddock-files` (plan X31)
 

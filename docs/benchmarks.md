@@ -2080,3 +2080,63 @@ A `-p` selection rebuilds once when the previous run used another selection (fea
 `--workspace` takes about 30 s every time. The dependents row therefore costs at most about as much as `--workspace` and usually far less,
 so it is kept (the root crates `paddock-env`, `paddock-limits` and the workspace hack reach nearly all 57 and cost what `--workspace` does).
 Not measured: the CI runner; load was 13 to 28, so absolute values are noisy.
+
+## Batched git reads: per-call git against one cat-file process against gix, and the Defender exclusions (2026-11-18, perf/git-heavy-tests-2, ADR 0108 G1 and G2)
+
+Question: how much does one long-lived `git cat-file` process save over one git start per read, and does reading in process with gix
+save more, on each OS? And did the user's Defender process exclusions for git change the Windows runner's numbers?
+
+- **Machines:** the Windows CI runner (windows-latest, `windows-host-probe.yml` on `exp/windows-host-probe`, never merged, nothing else
+  on the runner); the Mac mini (load 8.5 to 10.7, an indication); the local Linux CI-image container (arm64, an indication, ER-9).
+- **Spike:** `tools/git-read-spike` on that branch (release build): a synthetic repository made by one `git fast-import` stream (2,000
+  or 12,000 files in 40 folders, 20 commits), then the same reads three ways, each 3 times in rotated order with the results compared:
+  every commit's tree listed recursively (`git ls-tree -r` per commit) plus 300 blobs (`git cat-file blob` per blob); the same through
+  one `git cat-file --batch` process with trees parsed in process (paddock-git's `Reader` does the same over `--batch-command`); the
+  same with gix 0.90 in process.
+
+| ms, median of 3 | Windows runner (8267) | Mac | Linux container |
+|---|---:|---:|---:|
+| 2,000 files: per call | 11,145 | 2,418 (1,806 min) | 159 |
+| 2,000 files: one cat-file | 428 | 508 (83 min) | 34 |
+| 2,000 files: gix | 9.4 | 14.2 | 8.0 |
+| 12,000 files: per call | 11,950 | 1,776 | 233 |
+| 12,000 files: one cat-file | 685 | 231 | 145 |
+| 12,000 files: gix | 39.4 | 28.8 | 29.8 |
+
+- **Host probe (`./dev ci host-probe`, medians, ms):** on the Windows runner an empty program (`cmd /d /c exit 0`) takes 28 to 45 ms to
+  start, `git --version` 32 to 42 ms, a one-commit repository (4 git starts) 229 to 325 ms, a 4 KiB file 1.0 to 1.6 ms. On the Mac:
+  1.7, 5.2, 37.0 and 0.2 ms. So on Windows the cost is the OS's process start itself, not git: git adds 3 to 8 ms to an empty start.
+- **Defender process exclusions for git (applied by the user on 2026-11-18, before run 8265; the "before" figures are runs 8251 to
+  8257 of the same day's morning and run 8263, whose timing relative to the change is not known):** git start 32 to 41 ms after
+  (8265) against 37 to 48 ms (8251 to 8257) and 33 to 42 ms (8263); a repository 238 to 306 ms against 220 to 346 and 239 to 325 ms;
+  empty start 28 to 39 ms against 30 to 45 ms (8263). merge_check serial, 84 tests on the same tree: 289.5 s (8265) against 353.5 s
+  (8263); 340.2 s on the fix tree (8255, morning). **No change in any host-probe phase beyond the run-to-run spread**; the one serial
+  merge_check run was 18% faster, which one run per side cannot separate from the spread. The fixtures' repositories and the test
+  programs were already in excluded folders (`C:\gitea-runner\work\<job>\tmp`, `C:\Users\<user>\.paddock-ci`).
+- **Not measured:** gix against a partial clone (`--filter=blob:none`, as the CI kept clones are): gix does not fetch a missing blob
+  from the promisor remote, git does.
+
+## The shared reader moved in: git starts per merge check, gix's build cost, and the windows-sys edges (2026-11-18, perf/git-heavy-tests-2, ADR 0108 G2 and TD-1, TD-3 to TD-6, TD-8, TD-10)
+
+- **Git starts of `./dev merge check`** (counted on the Mac with a logging `git` first on `PATH`, the starts whose parent is
+  paddock-dev): `merge_check::a_clean_merge_is_clean` 67 before the memo (a06109c92), 43 now; `a_hunk_with_most_of_its_lines_kept...`
+  151, 97 now. The rest are `diff -U0`, `log`, `merge-base`, `merge-tree` and `rev-parse` of ref names, which the reader does not
+  answer.
+- **`pr plan-status` (TD-10):** 61 references (20 on main, 10 off it, 30 short ids, one missing) cost at most 2 git starts (the
+  base's `rev-list`; short ids through the reader's git), against up to 3 per reference before (`repo_git_tests`).
+- **`GitHistory::file_at` (TD-1):** 121 reads of 60 files at two revisions start the reader 0 times (gix in process) plus one
+  `rev-parse` per revision (`file_at_for_many_files_starts_no_git_per_file`); before, one `git show` per read.
+- **Cold debug build, paddock-proc alone against paddock-git with gix, `CARGO_BUILD_JOBS=2`, no sccache:** Mac 44 s against 37 s at a
+  load of 32 to 80 (other agents' builds): **not measured** (the order and the load decided it). Windows runner: not measured yet.
+- **Windows runner, the whole paddock-dev suite at 8 test threads** (`windows-host-probe.yml`, nothing else on the runner; host probes
+  the same in all three: empty start 29 to 41 ms, git start 33 to 44 ms, a small repository 238 to 323 ms):
+
+  | | 8277: train 14 + memo | 8280: + the gix reader (f4b085304) | 8281: + one test per case (381137e33) |
+  |---|---:|---:|---:|
+  | `merge_check::the_remerge_subject_...` | 63.6 s timeout, then 45.2 s (FLAKY) | 60.0 s timeout, then 44.4 s (FLAKY) | 4 tests, 15.1 to 19.2 s |
+  | `merge_check::generated_files_are_skipped_...` | 45.1 s | 49.3 s | 5 tests, 12.0 to 14.9 s |
+  | `merge_check::a_clean_merge_is_clean` | 6.7 s | 3.9 s | 4.0 s |
+  | merge_check tests: n, median, max | 86, 8.8 s, 45.2 s | 86, 7.3 s, 49.3 s | 92, 8.8 s, 27.3 s |
+
+  The slow tests were fixture-bound (116 of the remerge test's 188 git starts were its own fixture): the reader cut the merge check's
+  part, the split cut each test to one case (docs/lessons.md, "One test per fixture case").
