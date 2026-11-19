@@ -371,10 +371,50 @@ impl Server<'_> {
     }
 }
 
+/// The file name of the program `RUSTC_WRAPPER` names: not `sccache`.
+const WRAPPER_SHIM: &str = "rustc-wrapper";
+
+/// What `RUSTC_WRAPPER` names: a one-line shell program beside `bin` that runs sccache (Unix), never sccache itself.
+///
+/// Policy (ER-47, the one place that decides it): rustc is cached, the C compiler is not. Cargo hands `RUSTC_WRAPPER` to every build
+/// script, and cc-rs (1.8 to 1.11, every lockfile) puts it in front of the C compiler whenever its file name is `sccache` (also
+/// `cachepot`, `buildcache`, `kache`); it has no switch for one target and cargo cannot hide the variable from build scripts. sccache
+/// 0.19's compiler probe cannot read `clang-cl`'s arguments (it takes `/Users/...` for `/U` options: "Compiler not supported"), so
+/// `RUSTC_WRAPPER=sccache` failed every `cargo xwin` lint that compiles C (ring). A wrapper with another file name is still run by
+/// cargo in front of rustc, and cc-rs leaves the C compiler alone, in the push gates, `./dev gen check`, `./dev heavy` and an agent's
+/// own shell alike. The cost: C code (ring, a few seconds) is compiled every time.
+fn rustc_wrapper_for(bin: &Path) -> PathBuf {
+    if cfg!(unix) {
+        bin.with_file_name(WRAPPER_SHIM)
+    } else {
+        bin.to_path_buf()
+    }
+}
+
+/// Writes the program [`rustc_wrapper_for`] names (the same content is left alone). Not on Windows, where the local sccache is not installed.
+fn write_rustc_wrapper(bin: &Path) -> std::io::Result<()> {
+    let target = rustc_wrapper_for(bin);
+    if target == bin {
+        return Ok(());
+    }
+    let text = format!("#!/bin/sh\nexec '{}' \"$@\"\n", bin.display().to_string().replace('\'', r"'\''"));
+    if std::fs::read_to_string(&target).is_ok_and(|t| t == text) {
+        return Ok(());
+    }
+    let tmp = target.with_extension(format!("tmp{}", std::process::id()));
+    std::fs::write(&tmp, &text)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+    }
+    std::fs::rename(&tmp, &target)
+}
+
 /// The variables a build gets: the wrapper, the settings the server runs with and the two that keep a server a build starts itself
 /// from replacing ours or hanging (never a credential).
 fn ready_vars(bin: &Path, backend: &Backend) -> Vec<(String, String)> {
-    let mut vars = vec![("RUSTC_WRAPPER".to_string(), bin.display().to_string())];
+    let mut vars = vec![("RUSTC_WRAPPER".to_string(), rustc_wrapper_for(bin).display().to_string())];
     vars.extend(backend.vars());
     vars.push(("SCCACHE_IGNORE_SERVER_IO_ERROR".into(), "1".into()));
     vars.push(("SCCACHE_IDLE_TIMEOUT".into(), "0".into()));
@@ -662,6 +702,15 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
         started.elapsed().as_secs_f64(),
         log.display()
     );
+    if let Err(e) = write_rustc_wrapper(&bin) {
+        return off(
+            format!(
+                "the program RUSTC_WRAPPER names ({}) could not be written: {e}. Next: make the folder writable or remove the file, then run `./dev sccache env` again",
+                rustc_wrapper_for(&bin).display()
+            ),
+            true,
+        );
+    }
     Outcome::Ready(Ready {
         vars: ready_vars(&bin, &backend),
         bin,
@@ -1267,5 +1316,81 @@ exit 0
         install_from(&bin, &url, "t", "tar.gz", &sum, &e).unwrap();
         assert!(bin.is_file());
         assert_eq!(version_of(&bin, &e).as_deref(), Some("0.19.0"));
+    }
+
+    /// ER-33 and ER-47: cc-rs wraps `clang-cl` in whatever `RUSTC_WRAPPER` names when its file name is `sccache`, and sccache 0.19 answers
+    /// "Compiler not supported" for `clang-cl`. The stand-in `sccache` fails for `clang-cl` the same way; the test plays cc-rs over the
+    /// `RUSTC_WRAPPER` a build gets and the program that variable names.
+    #[cfg(unix)]
+    mod msvc {
+        use super::super::*;
+        use paddock_testkit::{Actions, StandIn};
+
+        /// What cc-rs does with the `RUSTC_WRAPPER` the build script sees: wrap the C compiler when its file name is `sccache`.
+        fn cc_rs_wraps(wrapper: &str) -> bool {
+            Path::new(wrapper).file_stem().is_some_and(|s| s.eq_ignore_ascii_case("sccache"))
+        }
+
+        /// Runs the compile the way cc-rs would, with `sccache` (the stand-in) in front or not.
+        fn compile(wrapper: &str, sccache: &Path, clang_cl: &Path) -> Result<(), String> {
+            let (program, args): (&Path, Vec<&str>) = if cc_rs_wraps(wrapper) {
+                (sccache, vec!["clang-cl", "/c", "/Users/x/ring.c"])
+            } else {
+                (clang_cl, vec!["/c", "/Users/x/ring.c"])
+            };
+            let ran = ToolCall::new(program.to_string_lossy())
+                .args(args)
+                .run(&HashMap::new(), &mut std::io::sink())?;
+            if ran.success { Ok(()) } else { Err(ran.stderr) }
+        }
+
+        fn failing_sccache(dir: &Path) -> paddock_testkit::Installed {
+            StandIn::new(dir, "sccache")
+                .when_args(&["clang-cl"], Actions::new().stderr("Compiler not supported").exit(1))
+                .when_args(&["rustc"], Actions::new().stdout("rustc-through-sccache").exit(0))
+                .records_args()
+                .install()
+                .unwrap()
+        }
+
+        #[test]
+        fn the_variable_names_a_program_cc_rs_does_not_wrap_and_that_still_runs_sccache_for_rustc() {
+            let d = tempfile::tempdir().unwrap();
+            let sccache = failing_sccache(d.path());
+            std::fs::create_dir(d.path().join("c")).unwrap();
+            let clang_cl = StandIn::new(&d.path().join("c"), "clang-cl").exit(0).install().unwrap();
+            write_rustc_wrapper(sccache.program()).unwrap();
+            let vars = ready_vars(
+                sccache.program(),
+                &Backend::Local {
+                    dir: "/c".into(),
+                    size: "1G".into(),
+                },
+            );
+            let wrapper = &vars.iter().find(|(k, _)| k == "RUSTC_WRAPPER").unwrap().1;
+            assert!(!cc_rs_wraps(wrapper), "{wrapper}");
+            compile(wrapper, sccache.program(), clang_cl.program()).unwrap();
+            // cargo still runs it in front of rustc, and it reaches sccache with the arguments.
+            let ran = ToolCall::new(wrapper.clone())
+                .args(["rustc", "--version"])
+                .run(&HashMap::new(), &mut std::io::sink())
+                .unwrap();
+            assert!(ran.success && ran.stdout.contains("rustc-through-sccache"), "{ran:?}");
+            assert_eq!(sccache.calls().unwrap(), vec![vec!["rustc".to_string(), "--version".to_string()]]);
+            // Written twice: the same file, still runnable.
+            write_rustc_wrapper(sccache.program()).unwrap();
+        }
+
+        /// Positive control: with `RUSTC_WRAPPER` naming sccache itself, the same stand-ins fail at `clang-cl`, so the test above can see
+        /// the failure it guards.
+        #[test]
+        fn naming_sccache_itself_fails_the_clang_cl_compile() {
+            let d = tempfile::tempdir().unwrap();
+            let sccache = failing_sccache(d.path());
+            std::fs::create_dir(d.path().join("c")).unwrap();
+            let clang_cl = StandIn::new(&d.path().join("c"), "clang-cl").exit(0).install().unwrap();
+            let err = compile(&sccache.program().display().to_string(), sccache.program(), clang_cl.program()).unwrap_err();
+            assert!(err.contains("Compiler not supported"), "{err}");
+        }
     }
 }
