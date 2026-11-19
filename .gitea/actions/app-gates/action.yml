@@ -31,6 +31,9 @@ inputs:
   e2e-shard:
     description: "This leg's shard, i/N (paddock.ci.json e2eShards)."
     default: ""
+  e2e-leg:
+    description: "This leg's name (`e2e-1`, `e2e-webkit`, `e2e-webkit-2`): a name that starts with `e2e-webkit` runs the `e2eWebkit` list, every other the `e2e` list."
+    default: ""
   rust:
     description: "'true' runs the Rust half."
     default: "true"
@@ -184,6 +187,7 @@ runs:
       env:
         APP: ${{ inputs.app }}
         E2E_SHARD: ${{ inputs.e2e-shard }}
-        # A shard (i/N) runs the Chromium list, the leg without one the WebKit list; `./dev ci run` derives E2E_INDEX from E2E_SHARD.
-        E2E_PHASE: ${{ inputs.e2e-shard != '' && 'e2e' || 'e2eWebkit' }}
+        # A WebKit leg (its name starts with e2e-webkit, one shard or several) runs the WebKit list, every other leg the Chromium list;
+        # `./dev ci run` derives E2E_INDEX from E2E_SHARD.
+        E2E_PHASE: ${{ startsWith(inputs.e2e-leg, 'e2e-webkit') && 'e2eWebkit' || 'e2e' }}
       run: ./dev ci run "$APP" "$E2E_PHASE"

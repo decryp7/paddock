@@ -1073,8 +1073,10 @@ test('every e2e job of every kit app, ci.yml and debrief.yml runs on a port no o
       else if (/playwright test/.test(line)) assert.fail(`${app}: "${line}" names no port: another job could hold the default`);
     }
     for (const line of c.e2eWebkit ?? []) {
+      const range = /PORT=\$\(\((\d+) \+ E2E_INDEX\)\)/.exec(line);
       const m = /PORT=(\d+)/.exec(line);
-      if (m) ports.push([`${app} webkit`, Number(m[1])]);
+      if (range) for (let i = 1; i <= (c.e2eWebkitShards ?? 1); i += 1) ports.push([`${app} webkit shard ${i}`, Number(range[1]) + i]);
+      else if (m) ports.push([`${app} webkit`, Number(m[1])]);
       else if (/playwright test/.test(line)) assert.fail(`${app}: "${line}" names no port`);
     }
   }
@@ -1199,7 +1201,9 @@ test('the real-browser tests of the crates and of Debrief take turns under nexte
 
 test("a kit app's end-to-end legs and failure report: ci.yml forwards the shard, the webkit input and uploads the report from the stable workspace", () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
-  assert.match(ci, /e2e-checks: \$\{\{ matrix\.e2e_checks \}\}\n\s+e2e-shard: \$\{\{ matrix\.e2e_shard \}\}/);
+  assert.match(ci, /e2e-checks: \$\{\{ matrix\.e2e_checks \}\}\n\s+e2e-shard: \$\{\{ matrix\.e2e_shard \}\}\n\s+e2e-leg: \$\{\{ matrix\.e2e_leg \}\}/);
+  // A WebKit leg (one shard or several) runs the WebKit list: the phase comes from the leg's name, not from having a shard.
+  assert.match(read(join(ACTIONS, 'app-gates', 'action.yml')), /E2E_PHASE: \$\{\{ startsWith\(inputs\.e2e-leg, 'e2e-webkit'\) && 'e2eWebkit' \|\| 'e2e' \}\}/);
   const step = /- uses: actions\/upload-artifact@\S+ # v3\n\s+if: failure\(\) && matrix\.e2e_artifacts != ''\n[\s\S]*?\n\n/.exec(ci)?.[0] ?? '';
   assert.match(step, /path: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}\/\$\{\{ matrix\.e2e_artifacts \}\}/, 'under the stable workspace');
   assert.match(step, /name: \$\{\{ matrix\.app \}\}-\$\{\{ matrix\.e2e_leg \|\| 'ui' \}\}-results-\$\{\{ strategy\.job-index \}\}/, 'one name per leg');
@@ -1321,13 +1325,15 @@ test('Debrief\'s end-to-end tests run sharded on the image\'s browsers with kept
   const wf = loadWorkflow('debrief.yml');
   assert.equal(expr(workflowJob(wf, 'e2e').strategy.matrix.include), 'fromJSON(needs.plan.outputs.e2e_shards)');
   const planRun = stepsOf(workflowJob(wf, 'plan')).map((st) => st.run ?? '').join('\n');
-  const shards = JSON.parse(planRun.match(/e2e_shards=(\[[^\]]*\])/)?.[1] ?? '[]').map((l) => l.shard);
-  assert.ok(shards.length >= 2, 'sharded');
-  assert.deepEqual(shards, shards.map((_, i) => i + 1));
-  assert.match(block, new RegExp(`--shard=\\$\\{\\{ matrix\\.shard \\}\\}/${shards.length} `), 'every shard runs its part');
+  // A full run: five shards (Chromium 1 and 2 of 2, WebKit 3 to 5 as 1 to 3 of 3); a branch run: four Chromium shards.
+  const lists = [...planRun.matchAll(/shards='(\[[^\]]*\])'/g)].map((m) => JSON.parse(m[1]).map((l) => l.shard));
+  assert.deepEqual(lists, [[1, 2, 3, 4, 5], [1, 2, 3, 4]], 'the full list, then the branch list');
+  assert.match(block, /--project=chromium --shard=\$SHARD\/4/, 'a branch run: four Chromium shards');
+  assert.match(block, /--project=chromium --shard=\$SHARD\/2/, 'a full run: Chromium has its own two shards');
+  assert.match(block, /--project=webkit --shard=\$\(\(SHARD - 2\)\)\/3/, 'a full run: WebKit has its own three shards');
   assert.match(block, /uses: \.\/\.gitea\/actions\/node-caches\n\s+with:\n\s+angular-dir: apps\/debrief\/app\n\s+name: debrief-e2e-\$\{\{ matrix\.shard \}\}/, 'one Angular cache per shard');
   assert.match(block, /DEBRIEF_E2E_PORT: "435\$\{\{ matrix\.shard \}\}"/, 'one port per shard');
-  assert.match(block, /needs\.plan\.outputs\.full != 'true' && '--project=chromium'/, 'branch runs test in Chromium only (rule 3)');
+  assert.match(block, /FULL: \$\{\{ needs\.plan\.outputs\.full \}\}/, 'the shard command reads the run mode; a branch run tests in Chromium only (rule 3)');
   // The W0 shell baseline is a manual, macOS-only baseline: never in the default projects (CI 6381 failed every screenshot).
   const pw = read(join(PADDOCK, 'apps', 'debrief', 'app', 'playwright.config.ts'));
   assert.match(pw, /name: 'chromium', testIgnore: SHELL_BASELINE/);

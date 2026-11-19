@@ -155,7 +155,11 @@ jobs:
           if [ "$EVENT" = schedule ] && [ "$TRAIN_SKIP" = true ]; then
             run=false
           fi
-          grep -q '^e2e_shards=' "$GITHUB_OUTPUT" || echo 'e2e_shards=[{"shard":1},{"shard":2},{"shard":3},{"shard":4}]' >> "$GITHUB_OUTPUT"
+          # The end-to-end shards (the e2e job maps a number to its project and part): a full run has two Chromium shards and three
+          # WebKit shards (WebKit is about twice as slow per test, so the two projects no longer share shards), a branch run
+          # (Chromium only, rule 3) four Chromium shards.
+          if [ "$PLAN_MODE_FULL" = true ]; then shards='[{"shard":1},{"shard":2},{"shard":3},{"shard":4},{"shard":5}]'; else shards='[{"shard":1},{"shard":2},{"shard":3},{"shard":4}]'; fi
+          grep -q '^e2e_shards=' "$GITHUB_OUTPUT" || echo "e2e_shards=$shards" >> "$GITHUB_OUTPUT"
           if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then
             # Lightweight tags list the commit itself, annotated ones list the tag object and the peeled commit (^{}).
             tag=$(git ls-remote --tags origin 'refs/tags/debrief-v*' | awk -v sha="$SHA" '$1 == sha { sub("refs/tags/", "", $2); sub(/\^\{\}$/, "", $2); print $2; exit }')
@@ -632,7 +636,7 @@ jobs:
   # Playwright's Chromium and WebKit come with the image: nothing is downloaded. Branch and pull request runs test in
   # Chromium only; full runs (main, tags, nightly, `bundles: true`) in Chromium and WebKit (Paddock rule 3).
   e2e:
-    name: end-to-end (shard ${{ matrix.shard }}/4)
+    name: end-to-end (shard ${{ matrix.shard }})
     needs: [plan, stage1]
     if: github.event.inputs.stage != 'fast' && needs.stage1.result == 'success' && needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e"]'), 'e2e')
     runs-on: ubuntu-latest
@@ -672,7 +676,16 @@ jobs:
           # Required by playwright.config.ts in CI (no default port, no reused server): one per shard, as jobs may share a host.
           DEBRIEF_E2E_PORT: "435${{ matrix.shard }}"
           DEBRIEF_E2E_PREBUILT: "1"
-        run: npx playwright test --shard=${{ matrix.shard }}/4 ${{ needs.plan.outputs.full != 'true' && '--project=chromium' || '' }}
+          SHARD: ${{ matrix.shard }}
+          FULL: ${{ needs.plan.outputs.full }}
+        # A full run: shards 1 and 2 are the Chromium project (1/2, 2/2), shards 3 to 5 the WebKit project (1/3 to 3/3). A branch run:
+        # four Chromium shards (rule 3).
+        run: |
+          if [ "$FULL" != true ]; then args="--project=chromium --shard=$SHARD/4"
+          elif [ "$SHARD" -le 2 ]; then args="--project=chromium --shard=$SHARD/2"
+          else args="--project=webkit --shard=$((SHARD - 2))/3"; fi
+          echo "playwright test $args"
+          npx playwright test $args
 
       - name: Upload Playwright report
         if: failure()

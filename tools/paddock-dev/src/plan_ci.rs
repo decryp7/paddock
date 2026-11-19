@@ -182,8 +182,11 @@ pub fn matrix(plan: &Value, graph: &RepoGraph, opts: MatrixOpts) -> Result<Vec<V
             legs.push(derived(join("e2e", "\n"), format!("{i}/{shards}"), format!("e2e-{i}")));
         }
         // `e2eWebkit` (commands): the WebKit end-to-end tests, a leg of their own when the run asks for WebKit.
+        // `e2eWebkitShards` (default 1) splits it like `e2e`: `e2e-webkit` alone, or `e2e-webkit-<i>` with the shard `i/N`.
         if ui && opts.webkit && has_len(app.get("e2eWebkit")) {
-            legs.push(derived(join("e2eWebkit", "\n"), String::new(), "e2e-webkit".to_string()));
+            for (leg, shard) in webkit_legs(app.get("e2eWebkitShards").and_then(Value::as_u64).unwrap_or(1)) {
+                legs.push(derived(join("e2eWebkit", "\n"), shard, leg));
+            }
         }
         legs_out.extend(legs);
     }
@@ -298,6 +301,16 @@ pub fn is_ci_yml(path: &str) -> bool {
 }
 
 // --------------------------------------------------------------------------------------------------------------- outputs
+
+/// The WebKit legs of an app with `n` shards, as `(leg name, shard)`: one leg `e2e-webkit` without a shard, or `e2e-webkit-<i>` with
+/// `i/n`. Shared with the CI model (`gates::ci`), so the two cannot disagree.
+pub fn webkit_legs(n: u64) -> Vec<(String, String)> {
+    let n = n.max(1);
+    if n == 1 {
+        return vec![("e2e-webkit".to_string(), String::new())];
+    }
+    (1..=n).map(|i| (format!("e2e-webkit-{i}"), format!("{i}/{n}"))).collect()
+}
 
 /// Whether an app leg is an end-to-end leg (`e2e-1`, `e2e-webkit`): a stage-2 job of ci.yml (`app-e2e`); the other legs are stage 1
 /// (`app`). The one place that says which is which: the plan's outputs and the rerun of a failed run both split through it.
@@ -825,6 +838,21 @@ mod tests {
         assert!(checked[0]["os"] == LINUX && checked[0]["e2e_leg"] == "", "the Linux main leg");
         let none = matrix(&p, &graph_with(vec![("x", without)], Graph::new()), opts).unwrap();
         assert!(none.iter().all(|l| l["notices"] == "false"), "no block, no check");
+    }
+
+    #[test]
+    fn the_webkit_leg_is_one_leg_or_one_per_shard_and_the_model_builds_the_same_names() {
+        assert_eq!(webkit_legs(0), webkit_legs(1));
+        assert_eq!(webkit_legs(1), vec![("e2e-webkit".to_string(), String::new())]);
+        let three = webkit_legs(3);
+        assert_eq!(
+            three.iter().map(|(l, s)| (l.as_str(), s.as_str())).collect::<Vec<_>>(),
+            [("e2e-webkit-1", "1/3"), ("e2e-webkit-2", "2/3"), ("e2e-webkit-3", "3/3")]
+        );
+        // Every name is an end-to-end leg that reruns as WebKit and parses back from its job name.
+        for (leg, _) in &three {
+            assert!(is_e2e_leg(&json!({ "e2e_leg": leg })) && leg.starts_with("e2e-webkit"));
+        }
     }
 
     #[test]

@@ -967,8 +967,10 @@ fn debrief_yml_takes_a_rerun_of_its_failures() {
     }
     assert!(plan.contains("PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}"));
     assert!(
-        plan.contains(r#"e2e_shards=[{"shard":1},{"shard":2},{"shard":3},{"shard":4}]"#),
-        "the plan step writes every shard when no rerun names some"
+        plan.contains(r#"shards='[{"shard":1},{"shard":2},{"shard":3},{"shard":4},{"shard":5}]'"#)
+            && plan.contains(r#"shards='[{"shard":1},{"shard":2},{"shard":3},{"shard":4}]'"#)
+            && plan.contains(r#"echo "e2e_shards=$shards""#),
+        "the plan step writes every shard (five on a full run, four otherwise) when no rerun names some"
     );
     assert!(text.contains("include: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}"));
     // The mode line a rerun reads (plan_since::read_full) prints the `full` output's own expression.

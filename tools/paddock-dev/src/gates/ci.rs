@@ -560,7 +560,9 @@ fn app_legs(app: &str, contract: &Json, webkit: bool) -> Result<Vec<BTreeMap<Str
         }
     }
     if webkit && has("e2eWebkit") {
-        legs.push(blank(base, join_lines(contract, "e2eWebkit"), String::new(), "e2e-webkit".into()));
+        for (leg, shard) in crate::plan_ci::webkit_legs(contract.get("e2eWebkitShards").and_then(Json::as_u64).unwrap_or(1)) {
+            legs.push(blank(base.clone(), join_lines(contract, "e2eWebkit"), shard, leg));
+        }
     }
     Ok(legs)
 }

@@ -775,9 +775,9 @@ impl SincePlan {
     pub fn needs_webkit(&self) -> bool {
         self.reruns.iter().any(|r| match r.key.as_deref() {
             Some("e2e-webkit") => true,
-            Some("app-e2e") => r.leg.e2e_leg.as_deref().is_none_or(|e| e == "e2e-webkit"),
+            Some("app-e2e") => r.leg.e2e_leg.as_deref().is_none_or(|e| e.starts_with("e2e-webkit")),
             // A run from before the stages: its app job held the end-to-end legs too.
-            Some("app") => r.leg.e2e_leg.as_deref().is_none_or(|e| e == "e2e-webkit"),
+            Some("app") => r.leg.e2e_leg.as_deref().is_none_or(|e| e.starts_with("e2e-webkit")),
             _ => false,
         })
     }

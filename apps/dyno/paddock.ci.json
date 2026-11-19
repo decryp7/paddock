@@ -63,11 +63,12 @@
   ],
   "e2eShards": 2,
   "e2eArtifacts": "apps/dyno/app/.angular/playwright-results",
+  "e2eWebkitShards": 3,
   "e2eWebkit": [
     "npm run build -w ui",
     "npm run build:e2e -w ui",
     "cd apps/dyno/app",
-    "PW_PORT=4362 npx playwright test --project=webkit --workers=1"
+    "PW_PORT=$((4362 + E2E_INDEX)) npx playwright test --project=webkit --workers=1 --fully-parallel --shard=$E2E_SHARD"
   ],
   "notices": {
     "name": "Dyno",

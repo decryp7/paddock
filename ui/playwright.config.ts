@@ -31,7 +31,8 @@ export default assertChromeForTesting(
   defineConfig({
     testDir: './e2e',
     outputDir: './.angular/playwright-results',
-    fullyParallel: false,
+    // Tests, not files, are what `--shard` balances (the shards were 521 and 256 tests when it split by file); one worker still runs them one at a time.
+    fullyParallel: true,
     workers: 1,
     // A flake is fixed, not retried (rule 5, ER-12): a retry hides it and runs the test twice on every CI failure.
     retries: 0,

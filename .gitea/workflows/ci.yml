@@ -1358,6 +1358,7 @@ jobs:
           display: ${{ matrix.display }}
           e2e-checks: ${{ matrix.e2e_checks }}
           e2e-shard: ${{ matrix.e2e_shard }}
+          e2e-leg: ${{ matrix.e2e_leg }}
 
       # The failure report of the app's browser tests (paddock.ci.json `e2eArtifacts`, a folder from the repo root); Gitea has the v3 artifact actions.
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
@@ -1463,6 +1464,7 @@ jobs:
           display: ${{ matrix.display }}
           e2e-checks: ${{ matrix.e2e_checks }}
           e2e-shard: ${{ matrix.e2e_shard }}
+          e2e-leg: ${{ matrix.e2e_leg }}
 
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
         if: failure() && matrix.e2e_artifacts != ''
