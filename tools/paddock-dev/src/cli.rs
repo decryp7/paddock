@@ -303,6 +303,10 @@ struct MergeCheckArgs {
     /// (ADR 0098). The checkout must be the merge result. Report-only until its first green run on a real train is recorded.
     #[arg(long)]
     gates: bool,
+    /// Accept an other-OS row that is NOT MEASURED (no runner within the bound), with the reason (kept in the output). Never
+    /// accepts a failure. Needs `--gates`.
+    #[arg(long, value_name = "REASON", requires = "gates")]
+    accept_other_os: Option<String>,
     /// A member that re-lands work the target reverted (`revert: reapply ...`, `Reapply "..."`) goes backwards by design: write
     /// the merge message with one `Reverted: <path>: <reason>` line for each backwards finding the re-land explains (its commit
     /// undoes the revert that changed the file) to this file, for `git commit --amend -F <file>` or `git merge -F <file>`.
@@ -643,6 +647,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                     target: a.target,
                     generators: !a.no_generators,
                     gates: a.gates,
+                    accept_other_os: a.accept_other_os,
                     write_reverted: a.write_reverted,
                 },
                 out,
@@ -847,6 +852,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             target: a.target,
             generators: !a.no_generators,
             gates: a.gates,
+            accept_other_os: a.accept_other_os,
             write_reverted: a.write_reverted,
         }),
         Command::Merge {

@@ -34,9 +34,13 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Whether a failing or unmeasured row changes the exit code. False until the first green report-only run on a real train is
-/// recorded in the ADR 0087 amendment of 2026-11-16 (ER-41); the change that records it flips this.
-pub const ENFORCED: bool = false;
+/// The run id of the first green report-only run of this gate on a real member (ER-41), recorded here and in the ADR 0087
+/// amendment of 2026-11-16. `None` until it exists; the change that records it makes the row blocking.
+pub const FIRST_GREEN_RUN: Option<u64> = None;
+
+/// Whether a failing or unmeasured row changes the exit code: exactly when [`FIRST_GREEN_RUN`] is recorded, so the gate cannot
+/// block before its first green run and cannot stay report-only after it.
+pub const ENFORCED: bool = FIRST_GREEN_RUN.is_some();
 
 /// The workflow the member's run uses: the plan's own jobs.
 pub const WORKFLOW: &str = "ci.yml";
@@ -121,6 +125,11 @@ pub trait Runs {
     fn jobs(&mut self, run: u64) -> Result<Vec<JobRow>, String>;
     /// The failures of the finished run, each blamed by `ci triage`.
     fn failures(&mut self, run: u64) -> Result<Vec<Failure>, String>;
+    /// A finished run whose trial was green for this exact tree and base, if one was remembered (`None` when there is none or it
+    /// cannot be told).
+    fn reusable(&mut self, commit: &str, base: &str) -> Option<u64>;
+    /// Remembers that `run` was green for the tree of `commit` on `base`.
+    fn remember(&mut self, commit: &str, base: &str, run: u64);
     /// Deletes the scratch ref (best effort: `ci trial-prune` catches the rest).
     fn delete(&mut self, git_ref: &str);
 }
@@ -269,8 +278,9 @@ fn wording(enforced: bool) -> (&'static str, &'static str) {
     }
 }
 
-/// The step for the rows of a run.
-pub fn step_of(rows: &[Row], run: u64, git_ref: &str, base: &str, enforced: bool) -> Step {
+/// The step for the rows of a run. `accept` is the reason a person accepted a NOT MEASURED row with: it clears the exit of an
+/// unmeasured row (never of a failure) and stays in the output and the JSON.
+pub fn step_of(rows: &[Row], run: u64, git_ref: &str, base: &str, enforced: bool, accept: Option<&str>) -> Step {
     let (level, report_only) = wording(enforced);
     let mut text = vec![format!(
         "member gate other-os (base {base}, run {run} on {git_ref}, real CI runners):"
@@ -301,7 +311,12 @@ pub fn step_of(rows: &[Row], run: u64, git_ref: &str, base: &str, enforced: bool
             )),
             _ => {}
         }
-        exit = worst(exit, cost(enforced, &r.outcome));
+        let mut row_exit = cost(enforced, &r.outcome);
+        if let (Exit::NotMeasured, Some(why)) = (row_exit, accept) {
+            text.push(format!("    ACCEPTED not measured on {}: {why}", r.os.name()));
+            row_exit = Exit::Ok;
+        }
+        exit = worst(exit, row_exit);
         data.push(json!({
             "os": r.os.name(),
             "outcome": r.outcome.json(),
@@ -323,7 +338,7 @@ pub fn step_of(rows: &[Row], run: u64, git_ref: &str, base: &str, enforced: bool
     };
     Step {
         text,
-        data: json!({"outcome": word, "base": base, "run": run, "ref": git_ref, "enforced": enforced, "rows": data}),
+        data: json!({"outcome": word, "base": base, "run": run, "ref": git_ref, "enforced": enforced, "accepted": accept, "rows": data}),
         exit,
     }
 }
@@ -338,14 +353,20 @@ pub fn not_run(why: &str) -> Step {
 }
 
 /// The step when nothing could be measured: report-only keeps the exit, enforced is the not-measured exit.
-pub fn unmeasured(enforced: bool, why: &str) -> Step {
+pub fn unmeasured(enforced: bool, accept: Option<&str>, why: &str) -> Step {
     let (level, report_only) = wording(enforced);
+    let accepted = accept.map(|a| format!("\n  ACCEPTED not measured: {a}"));
     Step {
         text: vec![format!(
-            "{level}::member gate other-os NOT MEASURED: {why}. Next step: dispatch `ci.yml` on the member yourself (`./dev ci dispatch ci.yml --trial <branch> --max 45m`); a member whose other-OS tests did not run is not a member that passed.{report_only}"
+            "{level}::member gate other-os NOT MEASURED: {why}. Next step: dispatch `ci.yml` on the member yourself (`./dev ci dispatch ci.yml --trial <branch> --max 45m`); a member whose other-OS tests did not run is not a member that passed.{report_only}{}",
+            accepted.unwrap_or_default()
         )],
-        data: json!({"outcome": "not measured", "why": why, "enforced": enforced}),
-        exit: if enforced { Exit::NotMeasured } else { Exit::Ok },
+        data: json!({"outcome": "not measured", "why": why, "enforced": enforced, "accepted": accept}),
+        exit: if enforced && accept.is_none() {
+            Exit::NotMeasured
+        } else {
+            Exit::Ok
+        },
     }
 }
 
@@ -355,30 +376,53 @@ pub fn scratch_ref(commit: &str) -> String {
 }
 
 /// Runs the gate for a merge: plan, push, dispatch, wait, read, rows. The scratch ref is deleted whatever happens.
-pub fn run(merge: &Merge, runs: &mut dyn Runs, enforced: bool) -> Step {
+pub fn run(merge: &Merge, runs: &mut dyn Runs, enforced: bool, accept: Option<&str>) -> Step {
     let (Some(base), Some(commit)) = (merge.parents.first(), merge.commit.as_deref()) else {
         return not_run("the merge has no parents or no commit");
     };
     match runs.reaches(base, commit) {
-        Err(e) => return unmeasured(enforced, &format!("the plan could not be asked: {e}")),
+        Err(e) => return unmeasured(enforced, accept, &format!("the plan could not be asked: {e}")),
         Ok(Reach::Nothing) => return not_run("the plan reaches no project for this member (documentation only)"),
         Ok(Reach::Projects) => {}
     }
     let git_ref = scratch_ref(commit);
-    let step = measure_on_runners(runs, commit, base, &git_ref, enforced);
+    // A green trial of this very tree on this very base is reused: nothing is pushed or dispatched (cost, ER-36). The old run is
+    // read again, so the row is still made from a run's jobs and triage, never from the memory of one.
+    if let Some(old) = runs.reusable(commit, base)
+        && let Some(step) = read_run(runs, old, commit, &git_ref, base, enforced, accept)
+        && step.data["outcome"] == "passed"
+    {
+        return step;
+    }
+    let step = measure_on_runners(runs, commit, base, &git_ref, enforced, accept);
     runs.delete(&git_ref);
     step
 }
 
-fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &str, enforced: bool) -> Step {
+/// The rows of a finished run, or `None` when its jobs or failures cannot be read.
+fn read_run(runs: &mut dyn Runs, run: u64, commit: &str, git_ref: &str, base: &str, enforced: bool, accept: Option<&str>) -> Option<Step> {
+    let jobs = runs.jobs(run).ok()?;
+    let failures = runs.failures(run).ok()?;
+    Some(step_of(
+        &rows(run, commit, &jobs, &failures),
+        run,
+        git_ref,
+        short(base),
+        enforced,
+        accept,
+    ))
+}
+
+fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &str, enforced: bool, accept: Option<&str>) -> Step {
     if let Err(e) = runs.publish(commit, git_ref) {
-        return unmeasured(enforced, &format!("the merge could not be pushed to {git_ref}: {e}"));
+        return unmeasured(enforced, accept, &format!("the merge could not be pushed to {git_ref}: {e}"));
     }
     match runs.dispatch(git_ref, base) {
-        Err(e) => return unmeasured(enforced, &format!("ci.yml could not be dispatched on {git_ref}: {e}")),
+        Err(e) => return unmeasured(enforced, accept, &format!("ci.yml could not be dispatched on {git_ref}: {e}")),
         Ok(Sent::Busy(last)) => {
             return unmeasured(
                 enforced,
+                accept,
                 &format!("the runner stayed busy for {MAX_DISPATCH_WAIT} ({last}); one train's CI per runner class at a time (ER-24)"),
             );
         }
@@ -386,23 +430,27 @@ fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &s
     }
     let run = match runs.find_run(commit) {
         Ok(Some(id)) => id,
-        Ok(None) => return unmeasured(enforced, &format!("no run of ci.yml appeared for {git_ref}")),
-        Err(e) => return unmeasured(enforced, &format!("the run could not be found: {e}")),
+        Ok(None) => return unmeasured(enforced, accept, &format!("no run of ci.yml appeared for {git_ref}")),
+        Err(e) => return unmeasured(enforced, accept, &format!("the run could not be found: {e}")),
     };
     match runs.wait(run) {
-        Err(e) => return unmeasured(enforced, &format!("run {run} could not be waited for: {e}")),
-        Ok(RunEnd::StillRunning) => return unmeasured(enforced, &format!("run {run} was still going after {MAX_RUN_WAIT}")),
+        Err(e) => return unmeasured(enforced, accept, &format!("run {run} could not be waited for: {e}")),
+        Ok(RunEnd::StillRunning) => return unmeasured(enforced, accept, &format!("run {run} was still going after {MAX_RUN_WAIT}")),
         Ok(RunEnd::Finished) => {}
     }
     let jobs = match runs.jobs(run) {
         Ok(j) => j,
-        Err(e) => return unmeasured(enforced, &format!("the jobs of run {run} could not be read: {e}")),
+        Err(e) => return unmeasured(enforced, accept, &format!("the jobs of run {run} could not be read: {e}")),
     };
     let failures = match runs.failures(run) {
         Ok(f) => f,
-        Err(e) => return unmeasured(enforced, &format!("the failures of run {run} could not be triaged: {e}")),
+        Err(e) => return unmeasured(enforced, accept, &format!("the failures of run {run} could not be triaged: {e}")),
     };
-    step_of(&rows(run, commit, &jobs, &failures), run, git_ref, short(base), enforced)
+    let step = step_of(&rows(run, commit, &jobs, &failures), run, git_ref, short(base), enforced, accept);
+    if step.data["outcome"] == "passed" {
+        runs.remember(commit, base, run);
+    }
+    step
 }
 
 /// The real CI: Gitea's API with `GITEA_TOKEN`, the tool's own git for the push, the tool's own planner and waiter.
@@ -416,16 +464,14 @@ pub struct Gitea {
 }
 
 impl Gitea {
-    /// Reads the settings from the environment: `GITEA_TOKEN` (write access: it pushes the scratch ref) and `PADDOCK_TRIAL_DIR`
-    /// (a folder for the askpass program, like `ci dispatch --trial`). `Err` says what is missing.
+    /// Reads the settings from the environment: `GITEA_TOKEN` (write access: it pushes the scratch ref); the trial folder is machine config
+    /// ([`crate::places::trial_dir`]: `PADDOCK_TRIAL_DIR`, else `<dev-targets>/trial`). `Err` says what is missing.
     pub fn from_env(root: &Path) -> Result<Gitea, String> {
         let token = std::env::var("GITEA_TOKEN")
             .ok()
             .filter(|t| !t.is_empty())
             .ok_or("GITEA_TOKEN is not set (it needs write access)")?;
-        let scratch = std::env::var_os("PADDOCK_TRIAL_DIR")
-            .map(PathBuf::from)
-            .ok_or("PADDOCK_TRIAL_DIR is not set (a folder on a data drive, like `ci dispatch --trial`)")?;
+        let scratch = crate::places::trial_dir(root, &|k| std::env::var(k).ok()).map_err(|e| e.text().to_string())?;
         std::fs::create_dir_all(&scratch).map_err(|e| format!("cannot create {}: {e}", scratch.display()))?;
         Ok(Gitea {
             root: root.to_path_buf(),
@@ -450,6 +496,17 @@ impl Gitea {
             planner: crate::queue::real::run_planner,
             timeout: crate::queue::real::GIT_TIMEOUT,
         }
+    }
+
+    /// The cache key of a green trial: the tree of the merge and the base the plan was asked against.
+    fn green_key(&self, commit: &str, base: &str) -> Option<String> {
+        let (ok, out) = self
+            .git()
+            .run_git(Child::Local, &["rev-parse", &format!("{commit}^{{tree}}")])
+            .ok()?;
+        let tree = out.trim();
+        (ok && tree.len() == 40 && tree.bytes().all(|b| b.is_ascii_hexdigit()) && base.bytes().all(|b| b.is_ascii_hexdigit()))
+            .then(|| format!("{tree}-{base}"))
     }
 
     fn me() -> Result<PathBuf, String> {
@@ -569,6 +626,23 @@ impl Runs for Gitea {
         Ok(failures_of(&report, run, http, &self.server, &self.repo, &self.token))
     }
 
+    fn reusable(&mut self, commit: &str, base: &str) -> Option<u64> {
+        let key = self.green_key(commit, base)?;
+        std::fs::read_to_string(self.scratch.join("other-os-green").join(key))
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+    }
+
+    fn remember(&mut self, commit: &str, base: &str, run: u64) {
+        let Some(key) = self.green_key(commit, base) else { return };
+        let dir = self.scratch.join("other-os-green");
+        if let Err(e) = std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(dir.join(key), run.to_string())) {
+            eprintln!("::warning::other-os: the green run {run} could not be remembered ({e}); the next check dispatches again");
+        }
+    }
+
     fn delete(&mut self, git_ref: &str) {
         if let Err(e) = trial::delete(&self.git(), git_ref) {
             eprintln!("::warning::other-os: {git_ref} could not be deleted ({e}); run `./dev ci trial-prune`");
@@ -577,10 +651,10 @@ impl Runs for Gitea {
 }
 
 /// The real step for `merge check --gates`: a missing token or scratch folder is `not measured`, with what to set.
-pub fn run_real(root: &Path, _git: &Git, merge: &Merge, enforced: bool) -> Step {
+pub fn run_real(root: &Path, _git: &Git, merge: &Merge, enforced: bool, accept: Option<&str>) -> Step {
     match Gitea::from_env(root) {
-        Err(why) => unmeasured(enforced, &why),
-        Ok(mut g) => run(merge, &mut g, enforced),
+        Err(why) => unmeasured(enforced, accept, &why),
+        Ok(mut g) => run(merge, &mut g, enforced, accept),
     }
 }
 
@@ -685,6 +759,8 @@ mod tests {
         jobs: Vec<JobRow>,
         failures: Vec<Failure>,
         asked: Vec<String>,
+        reuse: Option<u64>,
+        remembered: Vec<(String, u64)>,
     }
 
     impl Fake {
@@ -697,6 +773,8 @@ mod tests {
                 jobs: vec![job("crates (ubuntu-latest)", "success"), job("crates (windows-latest)", "success")],
                 failures: Vec::new(),
                 asked: Vec::new(),
+                reuse: None,
+                remembered: Vec::new(),
             }
         }
     }
@@ -726,6 +804,12 @@ mod tests {
         fn failures(&mut self, _run: u64) -> Result<Vec<Failure>, String> {
             Ok(self.failures.clone())
         }
+        fn reusable(&mut self, _commit: &str, _base: &str) -> Option<u64> {
+            self.reuse
+        }
+        fn remember(&mut self, commit: &str, _base: &str, run: u64) {
+            self.remembered.push((commit.to_string(), run));
+        }
         fn delete(&mut self, git_ref: &str) {
             self.asked.push(format!("delete {git_ref}"));
         }
@@ -747,7 +831,7 @@ mod tests {
     fn a_member_the_plan_does_not_reach_is_not_run_and_nothing_is_pushed() {
         let mut f = Fake::green();
         f.reach = Ok(Reach::Nothing);
-        let s = run(&merge(), &mut f, true);
+        let s = run(&merge(), &mut f, true, None);
         assert_eq!(s.data["outcome"], "not run");
         assert_eq!(f.asked.len(), 1, "{:?}", f.asked);
     }
@@ -755,7 +839,7 @@ mod tests {
     #[test]
     fn the_merge_is_pushed_dispatched_with_the_train_before_as_base_and_the_scratch_ref_is_always_deleted() {
         let mut f = Fake::green();
-        let s = run(&merge(), &mut f, true);
+        let s = run(&merge(), &mut f, true, None);
         assert_eq!(s.data["outcome"], "passed");
         assert_eq!(s.exit, Exit::Ok);
         let sref = "trial/member-abcdef012345";
@@ -771,7 +855,7 @@ mod tests {
         // Also when the dispatch did not happen.
         let mut f = Fake::green();
         f.sent = Ok(Sent::Busy("run 8200".into()));
-        let s = run(&merge(), &mut f, true);
+        let s = run(&merge(), &mut f, true, None);
         assert_eq!(s.data["outcome"], "not measured");
         assert!(f.asked.last().unwrap().starts_with("delete "));
     }
@@ -784,7 +868,7 @@ mod tests {
             let mut f = Fake::green();
             f.jobs = vec![job("crates (ubuntu-latest)", "success"), job("crates (windows-latest)", "failure")];
             f.failures = vec![fail("crates (windows-latest)", "sh_fixture", Blame::New)];
-            let s = run(&merge(), &mut f, enforced);
+            let s = run(&merge(), &mut f, enforced, None);
             assert_eq!(s.exit, want, "enforced={enforced}");
             assert_eq!(s.data["outcome"], "failed");
             assert_eq!(s.data["rows"][0]["os"], "linux");
@@ -800,18 +884,86 @@ mod tests {
         }
         let mut f = Fake::green();
         f.end = RunEnd::StillRunning;
-        assert_eq!(run(&merge(), &mut f, true).exit, Exit::NotMeasured);
+        assert_eq!(run(&merge(), &mut f, true, None).exit, Exit::NotMeasured);
         let mut f = Fake::green();
         f.run = None;
-        assert_eq!(run(&merge(), &mut f, true).data["outcome"], "not measured");
+        assert_eq!(run(&merge(), &mut f, true, None).data["outcome"], "not measured");
         let mut f = Fake::green();
         f.reach = Err("no plan".into());
-        assert_eq!(run(&merge(), &mut f, true).data["outcome"], "not measured");
+        assert_eq!(run(&merge(), &mut f, true, None).data["outcome"], "not measured");
     }
 
     #[test]
     fn the_scratch_ref_is_in_the_trial_namespace_that_trial_prune_cleans() {
         assert_eq!(scratch_ref("abcdef0123456789"), "trial/member-abcdef012345");
         assert!(scratch_ref("ab").starts_with("trial/"));
+    }
+
+    /// ER-33 positive control: a red trial fails the row and is never remembered, so a later check cannot reuse it.
+    #[test]
+    fn a_red_trial_fails_the_row_and_is_not_remembered() {
+        let mut f = Fake::green();
+        f.jobs = vec![job("crates (windows-latest)", "failure")];
+        f.failures = vec![fail("crates (windows-latest)", "t", Blame::New)];
+        let s = run(&merge(), &mut f, true, None);
+        assert_eq!(s.data["outcome"], "failed");
+        assert_eq!(s.exit, Exit::Findings);
+        assert!(f.remembered.is_empty());
+        // Even a person's acceptance never clears a failure.
+        let s = run(&merge(), &mut f, true, Some("runner down"));
+        assert_eq!(s.exit, Exit::Findings);
+    }
+
+    #[test]
+    fn a_green_trial_is_remembered_and_reused_without_a_dispatch() {
+        let mut f = Fake::green();
+        assert_eq!(run(&merge(), &mut f, true, None).data["outcome"], "passed");
+        assert_eq!(f.remembered, vec![("abcdef0123456789abcdef0123456789abcdef01".to_string(), 9)]);
+        let mut g = Fake::green();
+        g.reuse = Some(7);
+        let s = run(&merge(), &mut g, true, None);
+        assert_eq!(s.data["outcome"], "passed");
+        assert_eq!(s.data["run"], 7);
+        assert!(
+            g.asked.iter().all(|a| !a.starts_with("publish") && !a.starts_with("dispatch")),
+            "{:?}",
+            g.asked
+        );
+        // A remembered run that is now red (or unreadable) is not trusted: the member is measured afresh.
+        let mut h = Fake::green();
+        h.reuse = Some(7);
+        h.jobs = vec![job("crates (windows-latest)", "failure")];
+        h.failures = vec![fail("crates (windows-latest)", "t", Blame::New)];
+        let s = run(&merge(), &mut h, true, None);
+        assert!(h.asked.iter().any(|a| a.starts_with("dispatch")), "{:?}", h.asked);
+        assert_eq!(s.data["outcome"], "failed");
+    }
+
+    /// Not measured blocks once enforced, unless a person accepts it with a reason, which stays in the output.
+    #[test]
+    fn not_measured_blocks_unless_accepted_with_a_reason() {
+        let mut f = Fake::green();
+        f.sent = Ok(Sent::Busy("run 8200".into()));
+        assert_eq!(run(&merge(), &mut f, true, None).exit, Exit::NotMeasured);
+        let mut f = Fake::green();
+        f.sent = Ok(Sent::Busy("run 8200".into()));
+        let s = run(&merge(), &mut f, true, Some("the Windows runner is down for backup"));
+        assert_eq!(s.exit, Exit::Ok);
+        assert_eq!(s.data["outcome"], "not measured");
+        assert_eq!(s.data["accepted"], "the Windows runner is down for backup");
+        assert!(s.text.join("\n").contains("ACCEPTED not measured"));
+        // A finished run with an unmeasurable row is accepted the same way.
+        let mut f = Fake::green();
+        f.jobs = vec![job("crates (ubuntu-latest)", "cancelled")];
+        assert_eq!(run(&merge(), &mut f, true, None).exit, Exit::NotMeasured);
+        let mut f = Fake::green();
+        f.jobs = vec![job("crates (ubuntu-latest)", "cancelled")];
+        assert_eq!(run(&merge(), &mut f, true, Some("why")).exit, Exit::Ok);
+    }
+
+    /// The gate blocks exactly when its first green run is recorded (ER-41).
+    #[test]
+    fn the_gate_blocks_exactly_when_its_first_green_run_is_recorded() {
+        assert_eq!(ENFORCED, FIRST_GREEN_RUN.is_some());
     }
 }

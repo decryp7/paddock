@@ -81,7 +81,7 @@ pub struct DispatchArgs {
     /// The trial before approval (ADR 0098 WP-4): merge this branch's head onto the open train (origin/main when none is open) in
     /// the tool's own clone, report a conflict or a merge-check finding instead of dispatching, push `trial/<branch>` and
     /// dispatch it with `base` = the target's sha. The branch's one CI run (rule 50 (a)); the scratch clone lives in
-    /// PADDOCK_TRIAL_DIR (required: a folder on a data drive). Needs GITEA_TOKEN with write access.
+    /// the trial folder (`PADDOCK_TRIAL_DIR`, else `<dev-targets>/trial`). Needs GITEA_TOKEN with write access.
     #[arg(long, value_name = "BRANCH")]
     trial: Option<String>,
     /// With --trial: merge onto this ref (for example `origin/train/2026-11-13-8`) instead of the open train.
@@ -617,14 +617,17 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     }
 }
 
+/// The trial's scratch folder from machine config (`PADDOCK_TRIAL_DIR`, else `<dev-targets>/trial`; docs/dev-setup.md).
+fn trial_scratch() -> Result<PathBuf, CliError> {
+    let from = std::env::current_dir().map_err(|e| CliError::failure(format!("cannot read the current folder: {e}.")))?;
+    crate::places::trial_dir(&from, &|k| std::env::var(k).ok())
+}
+
 /// The trial merge of `--trial`: the ref to dispatch and the `base` input. A conflict or a merge-check finding is a failure with
 /// its `::error::` line and nothing is pushed.
 fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(crate::queue::real::GitTrain, String, String), CliError> {
     use crate::queue::real::GitTrain;
-    let scratch = std::env::var_os("PADDOCK_TRIAL_DIR").map(PathBuf::from).ok_or_else(|| {
-        CliError::usage("PADDOCK_TRIAL_DIR is not set.")
-            .with_hint("Set it to a folder on a data drive for the trial's scratch clone (not under your home).")
-    })?;
+    let scratch = trial_scratch()?;
     let url = format!("{}/{}.git", a.server.trim_end_matches('/'), a.repo);
     let fail = |why: String| {
         eprintln!("::error::trial: {why}");
@@ -640,6 +643,7 @@ fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(crate::qu
             // The trial runs no code of the branch: generator checks and the member gate need a checkout.
             generators: false,
             gates: false,
+            accept_other_os: None,
             write_reverted: None,
         })
         .map(|_| ())
@@ -695,13 +699,11 @@ pub struct TrialPruneArgs {
 }
 
 /// `ci trial-prune`: deletes the `trial/*` refs (ADR 0098 WP-4) of branches that are gone or landed on main. Needs GITEA_TOKEN with
-/// write access and PADDOCK_TRIAL_DIR (the trial's scratch clone).
+/// write access and the trial folder (`PADDOCK_TRIAL_DIR`, else `<dev-targets>/trial`: the trial's scratch clone).
 pub fn trial_prune(a: &TrialPruneArgs) -> Result<Report, CliError> {
     use crate::queue::real::GitTrain;
     let token = token()?;
-    let scratch = std::env::var_os("PADDOCK_TRIAL_DIR")
-        .map(PathBuf::from)
-        .ok_or_else(|| CliError::usage("PADDOCK_TRIAL_DIR is not set.").with_hint("Set it to the folder of the trial's scratch clone."))?;
+    let scratch = trial_scratch()?;
     let url = format!("{}/{}.git", a.server.trim_end_matches('/'), a.repo);
     let fail = |why: String| {
         CliError::failure(format!("::error::trial-prune: {why}")).with_hint("Check GITEA_TOKEN's write scope and the network.")

@@ -56,8 +56,9 @@ own planner already selects the jobs.
 "never counts"). The pass or fail of a partial member run is this step's, built on the same `Client` and `triage` readers the train
 queue uses.
 
-Needs `GITEA_TOKEN` (write access: it pushes the scratch ref) and `PADDOCK_TRIAL_DIR` (a folder for the askpass program, as
-`ci dispatch --trial`); either missing is `not measured` with what to set.
+Needs `GITEA_TOKEN` (write access: it pushes the scratch ref). The trial folder is machine config since 2026-11-20
+(`places::trial_dir`: `PADDOCK_TRIAL_DIR`, else `<dev-targets>/trial`, docs/dev-setup.md), so the row runs by default; a missing
+token is `not measured` with what to set.
 
 ## What stays of the VM work
 
@@ -106,3 +107,18 @@ every dispatch that is not a train's waits on it.
 - **The integrator must wrap each train's sequence in `train-ci-hold.sh`** (brief template change; the rule rests on the
   integrator until a hook exists). A member run that is already running when a sequence starts is not stopped: the train's own
   runner-wait waits for it, as before.
+
+## Amendment 2026-11-20 (user approved): by default, accepted not-measured, reuse
+
+- **Runs by default.** The trial folder is derived (`<dev-targets>/trial`), no agent sets `PADDOCK_TRIAL_DIR`.
+- **Blocking is tied to the record.** `other_os::FIRST_GREEN_RUN` holds the run id of the first green report-only run on a real
+  member (ER-41); `ENFORCED` is true exactly when it is `Some`. It is `None` until that run exists: the gate stays report-only.
+  Once enforced: green passes; a failure fails the member (back to its author); `not measured` blocks, unless the integrator
+  passes `--accept-other-os "<reason>"`, which clears only a not-measured row and keeps the reason in the output and the JSON.
+  A failure is never accepted.
+- **Cost.** Only the plan's affected jobs run (as before). A green trial is remembered by the merge's tree and base
+  (`<trial dir>/other-os-green/<tree>-<base>`); the next check of the same tree reads that run's jobs and triage again (never trusts
+  the file alone) and pushes and dispatches nothing. A red, unreadable or changed one is measured afresh.
+- **Parallel members.** Each check publishes its own `trial/member-<sha>` ref, so checks of different members can run side by
+  side; the dispatch still waits for a busy single-machine runner and for the train's reservation (ER-24), so the runner, not the
+  tool, bounds the parallelism.

@@ -606,6 +606,7 @@ impl Train for GitTrain {
                 // registry's commands in the tree, so they are the landing gates' job, not the queue's.
                 generators: false,
                 gates: false,
+                accept_other_os: None,
                 write_reverted: None,
             };
             match (self.merge_check)(&req) {

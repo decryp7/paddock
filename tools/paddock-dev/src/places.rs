@@ -28,6 +28,9 @@ use std::path::{Path, PathBuf};
 /// The environment variable that names the dev-targets folder outright.
 pub const DEV_TARGETS_ENV: &str = "PADDOCK_DEV_TARGETS";
 
+/// The environment variable that names the trial's scratch folder outright.
+pub const TRIAL_DIR_ENV: &str = "PADDOCK_TRIAL_DIR";
+
 const HINT: &str = "Run `git config paddock.worktreeRoot <dev-targets>/wt` once in the main checkout (docs/dev-setup.md), or set \
                     PADDOCK_DEV_TARGETS to the folder that holds the worktrees, build folders and scratch.";
 
@@ -43,6 +46,18 @@ pub fn dev_targets(from: &Path, env: &dyn Fn(&str) -> Option<String>) -> Result<
         }
     };
     dev_targets_of(set, root)
+}
+
+/// The scratch folder of `ci dispatch --trial`, `ci trial-prune` and the member gate's other-OS row: `PADDOCK_TRIAL_DIR` when set,
+/// else `<dev-targets>/trial` (derived like every other place, so no agent sets it by hand). `Err` says what to configure.
+pub fn trial_dir(from: &Path, env: &dyn Fn(&str) -> Option<String>) -> Result<PathBuf, CliError> {
+    match env(TRIAL_DIR_ENV).filter(|v| !v.trim().is_empty()) {
+        Some(v) => dev_targets_of(Some(v), None).map_err(|e| CliError::usage(format!("{TRIAL_DIR_ENV}: {}", e.text()))),
+        None => dev_targets(from, env).map(|d| d.join("trial")).map_err(|e| {
+            CliError::usage(format!("The trial scratch folder cannot be derived: {}", e.text()))
+                .with_hint("Run `git config paddock.worktreeRoot <dev-targets>/wt` once in the main checkout (docs/dev-setup.md), or set PADDOCK_TRIAL_DIR.")
+        }),
+    }
 }
 
 /// The dev-targets folder from the repository's own git config alone (`git config --local`; on Unix git runs with an empty
@@ -277,6 +292,22 @@ mod tests {
     fn the_named_folder_beats_the_worktree_root() {
         let got = dev_targets_of(Some(abs("/srv/dt")), Some(abs("/elsewhere/dev-targets/wt").into())).unwrap();
         assert_eq!(got, PathBuf::from(abs("/srv/dt")));
+    }
+
+    #[test]
+    fn the_trial_folder_is_named_or_below_dev_targets_and_fails_closed() {
+        let named = |k: &str| (k == TRIAL_DIR_ENV).then(|| abs("/srv/trial-x"));
+        assert_eq!(trial_dir(Path::new("/nope"), &named).unwrap(), PathBuf::from(abs("/srv/trial-x")));
+        let dt = |k: &str| (k == DEV_TARGETS_ENV).then(|| abs("/srv/dt"));
+        assert_eq!(
+            trial_dir(Path::new("/nope"), &dt).unwrap(),
+            PathBuf::from(abs("/srv/dt")).join("trial")
+        );
+        let rel = |k: &str| (k == TRIAL_DIR_ENV).then(|| "relative/t".to_string());
+        assert!(trial_dir(Path::new("/nope"), &rel).unwrap_err().to_string().contains(TRIAL_DIR_ENV));
+        let none = |_: &str| None;
+        let e = trial_dir(Path::new("/nope"), &none).unwrap_err().to_string();
+        assert!(e.contains("trial scratch folder"), "{e}");
     }
 
     #[test]

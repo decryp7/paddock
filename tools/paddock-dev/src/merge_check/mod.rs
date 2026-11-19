@@ -330,6 +330,8 @@ pub struct Request {
     /// Run the member gate (`./dev check --pre-push --member-gate --base <merge>^1`) on the merge (the commit form only; the checkout must be
     /// the merge result). ADR 0098 WP-1; report-only until its first green run ([`gates::ENFORCED`]).
     pub gates: bool,
+    /// The reason for accepting an other-OS row that is not measured (`--accept-other-os`); a failure is never accepted.
+    pub accept_other_os: Option<String>,
     /// Write the merge message with the `Reverted:` lines a re-land explains to this file ([`reland`]; findings only).
     pub write_reverted: Option<PathBuf>,
 }
@@ -606,7 +608,7 @@ fn check(req: &Request) -> Result<Checked, CliError> {
                     Some(if req.commit.is_none() {
                         other_os::not_run("a branch is checked before it is merged, so there is no checkout of the result")
                     } else {
-                        other_os::run_real(&root, &git, &merge, other_os::ENFORCED)
+                        other_os::run_real(&root, &git, &merge, other_os::ENFORCED, req.accept_other_os.as_deref())
                     }),
                 );
             }
