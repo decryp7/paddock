@@ -122,6 +122,9 @@ struct CachedHomes {
     at: Instant,
     db_modified: Option<SystemTime>,
     homes: Vec<(HelperUser, String)>,
+    /// Owners this list was read again for and still does not name (a Hyper-V or IIS AppPool account, `nobody`): they have
+    /// no home to redact, so they do not make it be read again for as long as it is kept.
+    no_home: Vec<HelperUser>,
 }
 
 impl SystemSweeper {
@@ -171,12 +174,39 @@ impl SystemSweeper {
     /// account unredacted.
     fn homes_for(&self, owners: &[&HelperUser], now: Instant) -> Result<Vec<(HelperUser, String)>, PlatformError> {
         let homes = self.homes_at(now)?;
-        let missing = owners.iter().filter(|o| !homes.iter().any(|(u, _)| u == **o)).count();
-        if missing == 0 || self.host == HelperHost::Linux {
+        if self.host == HelperHost::Linux {
             return Ok(homes);
         }
-        log::info!(missing = missing; "Helper: a process owner is not in the kept account list; it is read again");
-        self.read_and_keep(now)
+        let known_without = |o: &HelperUser| {
+            self.homes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .is_some_and(|c| c.no_home.contains(o))
+        };
+        let missing: Vec<&HelperUser> = owners
+            .iter()
+            .copied()
+            .filter(|o| !homes.iter().any(|(u, _)| u == *o) && !known_without(o))
+            .collect();
+        if missing.is_empty() {
+            return Ok(homes);
+        }
+        log::info!(missing = missing.len(); "Helper: a process owner is not in the kept account list; it is read again");
+        let homes = self.read_and_keep(now)?;
+        let still: Vec<HelperUser> = missing
+            .into_iter()
+            .filter(|o| !homes.iter().any(|(u, _)| u == *o))
+            .cloned()
+            .collect();
+        if !still.is_empty() {
+            log::info!(owners = still.len(); "Helper: process owners with no home in the account list; not read again for them");
+            if let Some(c) = self.homes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut() {
+                c.no_home.extend(still);
+                c.no_home.truncate(MAX_HOMES);
+            }
+        }
+        Ok(homes)
     }
 
     fn read_and_keep(&self, now: Instant) -> Result<Vec<(HelperUser, String)>, PlatformError> {
@@ -187,6 +217,7 @@ impl SystemSweeper {
             at: now,
             db_modified,
             homes: homes.clone(),
+            no_home: Vec::new(),
         });
         Ok(homes)
     }
@@ -458,9 +489,53 @@ mod tests {
             mac.homes_for(&[&ana, &new], start + Duration::from_secs(2))
         })
         .unwrap();
-        // An owner the OS lists without a usable home is asked about once per sweep, never more.
+        // An owner still missing after a fresh read (a Hyper-V or IIS AppPool account, `nobody`) is remembered for the life of
+        // that list: one re-read, then none (second review P2-b).
         let ghost = HelperUser::Uid(777);
         assert_starts(2, || mac.homes_for(&[&ghost], start + Duration::from_secs(3))).unwrap();
+        assert_starts(at_most_or_none(0, "the owner is known to have no home in this list"), || {
+            mac.homes_for(&[&ghost], start + Duration::from_secs(4))
+        })
+        .unwrap();
+    }
+
+    /// A `reg` whose second answer adds a profile (an account made in between).
+    struct ChangingReg(std::sync::atomic::AtomicUsize);
+    impl ToolRunner for ChangingReg {
+        fn run_tool(&self, t: &Tool, _: Duration) -> Result<ToolOutput, PlatformError> {
+            let _counted = crate::process::command(&t.program);
+            let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let key = |sid: &str, home: &str| {
+                format!("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\{sid}\n    ProfileImagePath    REG_EXPAND_SZ    {home}\n\n")
+            };
+            let mut text = key("S-1-5-21-1-2-3-1001", r"C:\Users\Ana");
+            if n > 0 {
+                text.push_str(&key("S-1-5-21-1-2-3-1002", r"C:\Users\New"));
+            }
+            Ok(ToolOutput {
+                ok: true,
+                stdout: text,
+                error: String::new(),
+            })
+        }
+    }
+
+    /// Second review P2-a: the P1 fix on a Windows host, where no account database tells the cache it is stale: an owner with a
+    /// new profile's SID forces exactly one `reg` run, and its home is in the list. Pure, so it runs on every OS.
+    #[test]
+    fn a_windows_owner_missing_from_the_kept_profile_list_reads_it_again_once() {
+        use paddock_proc::starts::{assert_starts, at_most_or_none};
+        let win = SystemSweeper::new(HelperHost::Windows, Box::new(ChangingReg(Default::default())));
+        let ana = HelperUser::Sid("S-1-5-21-1-2-3-1001".into());
+        let new = HelperUser::Sid("S-1-5-21-1-2-3-1002".into());
+        let start = Instant::now();
+        assert_starts(1, || win.homes_for(&[&ana], start)).unwrap();
+        let homes = assert_starts(1, || win.homes_for(&[&ana, &new], start + Duration::from_secs(1))).unwrap();
+        assert!(homes.iter().any(|(u, h)| *u == new && h == r"C:\Users\New"), "{homes:?}");
+        assert_starts(at_most_or_none(0, "the re-read list names both"), || {
+            win.homes_for(&[&ana, &new], start + Duration::from_secs(2))
+        })
+        .unwrap();
     }
 
     /// The same through a real sweep: this test's own account owns this process; a kept list without it is read again.
