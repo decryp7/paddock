@@ -85,6 +85,21 @@ describe('SettingsPage', () => {
     await settle(f);
     expect(saveButton()).toBeUndefined();
   });
+  it('a save refused as stale keeps another window\'s change inside a field this draft also changed', async () => {
+    const { f, mock, saveButton, store } = await make();
+    const before = structuredClone(store.settings()!);
+    (f.componentInstance as unknown as { setSampling(p: object): void }).setSampling({ intervalMs: before.sampling.intervalMs + 1000 });
+    f.detectChanges();
+    // Another window changes the process interval, in the same `sampling` field, and saves first.
+    await mock.saveSettings({ ...before, sampling: { ...before.sampling, processIntervalMs: before.sampling.processIntervalMs + 1000 } });
+    saveButton()!.click();
+    await vi.waitFor(() => expect(store.settings()!.revision).toBeGreaterThan(before.revision));
+    await settle(f);
+    expect(saveButton()).toBeDefined();
+    saveButton()!.click();
+    await vi.waitFor(() => expect(store.settings()!.sampling.intervalMs).toBe(before.sampling.intervalMs + 1000));
+    expect(store.settings()!.sampling.processIntervalMs).toBe(before.sampling.processIntervalMs + 1000);
+  });
   it('Discard restores the saved values', async () => {
     const { f, mock, el, saveButton, discardButton, store } = await make();
     const spy = vi.spyOn(mock, 'saveSettings');
