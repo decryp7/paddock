@@ -79,6 +79,26 @@ describe('SettingsStore', () => {
     expect(store.settings()?.launchAtLogin).toBe(second.launchAtLogin);
     expect((await mock.settings()).revision).toBe(first.revision + 2);
   });
+  it('two quick saves taken from the same base that change different fields keep both changes', async () => {
+    const { store } = setup();
+    await store.load();
+    const base = store.settings()!;
+    const first = structuredClone(base);
+    first.sampling.intervalMs = 2000;
+    const second = structuredClone(base);
+    second.launchAtLogin = !second.launchAtLogin;
+    expect(await Promise.all([store.save(first, null), store.save(second, null)])).toEqual([true, true]);
+    expect(store.settings()?.sampling.intervalMs).toBe(2000);
+    expect(store.settings()?.launchAtLogin).toBe(second.launchAtLogin);
+  });
+  it('the stale notice only says what the store did: it reloaded', async () => {
+    const { store, mock, notifier } = setup();
+    await store.load();
+    const s0 = structuredClone(store.settings()!);
+    await mock.upsertAlertRule({ id: 'r1', name: 'R1', metric: 'cpuTotal', op: 'above', limit: 90, forSecs: 0, severity: 'warning', enabled: true } as never);
+    expect(await store.save(s0)).toBe(false);
+    expect(notifier.recent().at(-1)?.text).toBe('The settings changed in another window and were reloaded. Try again.');
+  });
   it('a stale refusal keeps what the window tried to save for the page to carry over', async () => {
     const { store, mock } = setup();
     await store.load();

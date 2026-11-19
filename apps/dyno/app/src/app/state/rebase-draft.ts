@@ -1,4 +1,4 @@
-import type { Settings } from '../../core/api.types';
+import type { Settings } from '../core/api.types';
 
 /**
  * Carries the edits of a settings draft onto a copy that was reloaded after a stale refusal: every top-level field the draft

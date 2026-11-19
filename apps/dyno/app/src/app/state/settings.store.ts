@@ -4,6 +4,7 @@ import type { CommandError, PluginInfo, Settings } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 import { Notifier } from '../shared/notifier';
+import { rebaseDraft } from './rebase-draft';
 
 interface SettingsState {
   settings: Settings | null;
@@ -34,14 +35,18 @@ export const SettingsStore = signalStore(
     };
     /** Saves in order (see `save`). */
     let inFlight: Promise<void> | null = null;
-    /** What this window's own saves made: copies read at `from` or `to` differ from the saved settings by this window's own changes only. */
-    let own: { from: number; to: number } | null = null;
-    const saveNow = async (settings: Settings, message: string | null): Promise<boolean> => {
-      const rebased = own && (settings.revision === own.from || settings.revision === own.to) ? { ...settings, revision: own.to } : settings;
+    /** The revisions this window's own saves made: a settings revision that is one of them differs from a copy's base by this window's saves only. */
+    const ownRevisions = new Set<number>();
+    const saveNow = async (settings: Settings, base: Settings | null, message: string | null): Promise<boolean> => {
+      // A copy taken before an earlier save of this window finished lacks that save's change: its own edits (against its base) are put
+      // onto the settings as they are now, so the earlier change is not undone. A revision another window made is not carried: that save
+      // is refused as stale below.
+      const current = store.settings();
+      const rebased = base && current && current.revision !== base.revision && ownRevisions.has(current.revision) ? rebaseDraft(base, settings, current) : settings;
       patchState(store, { saving: true, saveError: null, stale: null });
       try {
         const saved = await backend.saveSettings(rebased);
-        own = { from: own && (settings.revision === own.from || settings.revision === own.to) ? own.from : settings.revision, to: saved.revision };
+        ownRevisions.add(saved.revision);
         patchState(store, { settings: saved, saving: false, saveError: null });
         if (message) notifier.show(message);
         return true;
@@ -50,10 +55,10 @@ export const SettingsStore = signalStore(
         patchState(store, { saving: false, saveError });
         if (saveError.code === 'stale') {
           // Another window or request changed the settings after this copy was read: show the current ones instead of overwriting
-          // them, keep what was attempted for the page to carry over, and say so.
+          // them, keep what was attempted for the page to carry over (the page says so when it does), and say what was done here.
           patchState(store, { stale: { base: store.settings(), attempted: settings } });
           await load();
-          notifier.show('The settings changed in another window and were reloaded. Your edits are kept; check them and save again.', 'warn');
+          notifier.show('The settings changed in another window and were reloaded. Try again.', 'warn');
           return false;
         }
         notifier.error(saveError);
@@ -76,13 +81,14 @@ export const SettingsStore = signalStore(
       },
       /**
        * Saves the whole settings object; the engine validates it and returns what it stored. Saves run one after the other: a second
-       * save of the same window waits for the first and is sent at the revision the first made, so two quick saves never refuse each
+       * save of the same window waits for the first and carries its own edits onto the settings the first made, so two quick saves never refuse each
        * other as "another window". A save of a copy that another window or request outdated is refused as stale: the store reloads,
        * keeps what was attempted in `stale` for the page to carry over, and says so.
        */
       save(settings: Settings, message: string | null = 'Settings saved'): Promise<boolean> {
         // With no save in flight it starts at once; otherwise it waits for the one in flight.
-        const run: Promise<boolean> = inFlight ? inFlight.then(() => saveNow(settings, message)) : saveNow(settings, message);
+        const base = store.settings();
+        const run: Promise<boolean> = inFlight ? inFlight.then(() => saveNow(settings, base, message)) : saveNow(settings, base, message);
         const mine = run.then(
           () => undefined,
           () => undefined,

@@ -3,6 +3,7 @@ import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { provideRouter } from '@angular/router';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
+import { Notifier } from '../../shared/notifier';
 import { SettingsStore } from '../../state/settings.store';
 import { AlarmsPage } from './alarms-page';
 import { MAC_DISK_USED_PERCENT } from '../../core/mock/mac-machine';
@@ -443,6 +444,18 @@ describe('dy-alarms-page, Rules', () => {
     sw('New exposed listener').click();
     await settle(f);
     expect(TestBed.inject(SettingsStore).settings()!.networkAlerts).toEqual({ newExposedListener: false, newRemoteHost: true });
+  });
+
+  it('a save refused as stale says once that the settings were reloaded, and does not claim edits were kept or raise an error', async () => {
+    const { f, el, mock } = render();
+    await settle(f);
+    await tab(f, el, 'Rules');
+    await mock.upsertAlertRule({ id: 'r1', name: 'R1', metric: 'cpuTotal', op: 'above', limit: 90, forSecs: 0, severity: 'warning', enabled: true } as never);
+    el.querySelector<HTMLButtonElement>('button[role="switch"][aria-label="Desktop notifications"]')!.click();
+    await settle(f);
+    const notices = TestBed.inject(Notifier).recent();
+    expect(notices.map((n) => n.text)).toEqual(['The settings changed in another window and were reloaded. Try again.']);
+    expect(notices[0]!.tone).toBe('warn');
   });
 
   it('edits notifications and quiet hours, converting HH:MM to minutes', async () => {

@@ -1,4 +1,4 @@
-import type { Settings } from '../../core/api.types';
+import type { Settings } from '../core/api.types';
 import { rebaseDraft } from './rebase-draft';
 
 const s = (over: Record<string, unknown>) => ({ revision: 1, launchAtLogin: false, notifications: true, sampling: { intervalMs: 1000 }, ...over }) as unknown as Settings;
