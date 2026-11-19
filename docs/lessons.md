@@ -2966,3 +2966,12 @@ ambient load 35 to 40 from other agents): 200 runs of the 4 kept_clone unit test
 executions, 0 failed. **The class is now checked, not reviewed for (ER-21):** `phase::tests::no_source_file_times_a_phase_test_from_its_start_without_a_clock_mark_or_a_reason` fails on any test in a file that uses `ci_host::phase` that calls `.phase(`, `bounded*` or `run_with(` without a `ClockMark` (or `hang_flow`/`hang_env`) or a `// conformance: no-clock-mark - <reason>` line (two exemptions, both fakes with no program); its positive control is `the_audit_of_unmarked_phase_tests_sees_one_and_accepts_a_mark_or_a_reason`. The 20 s general limit is one constant, `phase::HUNG_TEST_GENERAL_LIMIT`. **Rule:** a timed hung-phase test counts every limit it asserts from the stand-in's mark, setup calls included, and proves it
 with a stand-in that is slow before its hang. **Class: work before the hang point of a hung-phase test meeting its limit under load
 (fourth sighting; ADR 0103, second amendment).**
+
+## A FLAKY test blocks only when the change touches its feature (train 14, runs 8297 and 8300, 2026-11-19)
+
+Debrief train 14 was held by rare WebKit flakes (1 in 145 runs) in the accessibility check and the home dashboard. The train changed
+other Debrief source, so the plan reached both tests through the app package, but it touched neither feature. **Rule:** a FLAKY test
+blocks a landing only when the change touches the test itself or the source it exercises (its feature or module: the files it drives,
+not just any file in the same app package or crate); every other FLAKY is recorded with its log as a fix item for the next train or batch
+(ER-12, user, 2026-11-19; rule 50 (k) and the train sequence (4) in `docs/rules.md`). **Open:** `./dev ci triage --members` still blames a
+flaky failure on every member whose plan reaches its project (`tools/paddock-dev/src/queue/blame.rs:34-50`); that is a separate code change.

@@ -20,8 +20,8 @@ changes here, every app's copy is updated in the same change.
    raised without a named, measured cause recorded next to it (ER-12); otherwise the cause is fixed. A new gate, CI job or
    check starts report-only and blocks only after its first green run on the real tree, recorded by run id where the
    gate is defined (ER-41).
-   A FLAKY test (fails, then passes on its one retry) blocks a landing only when the change reaches its code per the affected
-   plan; see rule 50 (k) (ER-12, user, 2026-11-16).
+   A FLAKY test (fails, then passes on its one retry) blocks a landing only when the change touches the test itself or the
+   source it exercises (its feature or module); see rule 50 (k) (ER-12, user, 2026-11-19).
    A reviewer of a bug fix runs a mutation check on it (user, 2026-10-30), in their own worktree: for Rust,
    `cargo mutants --in-diff <diff> -p <crate> --timeout-multiplier 3` with `CARGO_BUILD_JOBS=2` (install once with
    `cargo install cargo-mutants --locked`); for TypeScript, revert the fix and run the new test. The review reports whether
@@ -271,8 +271,9 @@ changes here, every app's copy is updated in the same change.
     all local gates, and re-merges the running train's final head when it lands, so the next CI starts at once. (3) The
     train dispatches an app's release gate only when the plan marks it (rule 54 (a2)), and with `gates=false` once the counting
     full `ci.yml` run is green on that exact commit (rule 54 (a3)).
-    (4) A test that fails and then passes on its one retry (FLAKY) blocks the landing only when the train's change reaches that
-    test's code (`./dev plan` over the train's diff). Otherwise the landing goes ahead: the flake is recorded with its log as a
+    (4) A test that fails and then passes on its one retry (FLAKY) blocks the landing only when the train's change touches the test
+    itself or the source it exercises (its feature or module: the files it drives, not any file of the same app package or crate;
+    ER-12, user, 2026-11-19). Otherwise the landing goes ahead: the flake is recorded with its log as a
     fix item and fixed in the next train or batch, with a failing reproduction first (rule 5). A test that fails both tries always
     blocks, and a retry never turns the run itself green: the report still marks it FLAKY. *Why (ER-12):* on 2026-11-16 two old
     races in unchanged shared crates (run 8174: `paddock-ipc` endings, plugin-host ETXTBSY) held train 12 for hours. *Why:* release gates cost about 77 minutes of the Mac runner
