@@ -3007,3 +3007,12 @@ scales with the workspace count. Do not replace one fixed number by another: the
 started row has its own generous cap (60 min) with the process list and stacks written before the kill, and a stall judgement on the
 row's own progress follows. Recurring: a wall-clock bound judges liveness (ADR 0031's class; CI run 7096, the 2026-11-12 slot-acquire
 wait, ER-12).
+
+## A FLAKY test blocks only when the change touches its feature (train 14, runs 8297 and 8300, 2026-11-19)
+
+Debrief train 14 was held by rare WebKit flakes (1 in 145 runs) in the accessibility check and the home dashboard. The train changed
+other Debrief source, so the plan reached both tests through the app package, but it touched neither feature. **Rule:** a FLAKY test
+blocks a landing only when the change touches the test itself or the source it exercises (its feature or module: the files it drives,
+not just any file in the same app package or crate); every other FLAKY is recorded with its log as a fix item for the next train or batch
+(ER-12, user, 2026-11-19; rule 50 (k) and the train sequence (4) in `docs/rules.md`). **Open:** `./dev ci triage --members` still blames a
+flaky failure on every member whose plan reaches its project (`tools/paddock-dev/src/queue/blame.rs:34-50`); that is a separate code change.
