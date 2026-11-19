@@ -26,13 +26,13 @@ const MANAGERS: [(&str, &[&str], OwnerParser); 3] = [
 
 /// Looks up package ownership for a batch of files ([`crate::signatures::CachedSignatures`] keeps the answers): one `dpkg -S`
 /// or `pacman -Qo` run for the whole batch (both take many paths and name each in their answer); `rpm -qf` once per file.
-pub struct PackageLookup {
+pub(crate) struct PackageLookup {
     tools: Arc<dyn Tools>,
 }
 
 impl PackageLookup {
     /// A lookup using `tools`.
-    pub fn new(tools: Arc<dyn Tools>) -> Self {
+    pub(crate) fn new(tools: Arc<dyn Tools>) -> Self {
         PackageLookup { tools }
     }
 

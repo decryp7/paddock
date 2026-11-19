@@ -8,7 +8,7 @@ use dyno_core::helper::HelperHost;
 use dyno_core::helper_processes::{classify_owner, default_first_person, ProcState, ProcessSweeper, RawOwner, RawProcess, Sweep};
 use dyno_core::helper_wire::HelperUser;
 use dyno_core::ports::PlatformError;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sysinfo::{ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System, UpdateKind, Users};
@@ -136,7 +136,8 @@ impl SystemSweeper {
     }
 
     /// The same, watching `dir` instead of macOS' account database for changes (tests).
-    pub fn with_account_db(mut self, dir: &Path) -> SystemSweeper {
+    #[cfg(test)]
+    pub(crate) fn with_account_db(mut self, dir: &std::path::Path) -> SystemSweeper {
         self.account_db = dir.to_path_buf();
         self
     }

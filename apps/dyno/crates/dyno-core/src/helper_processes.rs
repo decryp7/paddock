@@ -172,34 +172,45 @@ pub struct Sweep {
 /// one arrives, over the connection it keeps, so the pages of one read come within milliseconds; a page later than this is
 /// read from a new sweep.
 pub const PAGE_SWEEP_TTL: std::time::Duration = std::time::Duration::from_secs(2);
+/// The most callers whose paged reads keep a sweep at once (each holds up to [`MAX_SWEEP`] processes).
+pub const MAX_KEPT_SWEEPS: usize = 4;
 
-/// The sweep the pages of one paged read share (ADR 0108 DY-2): a first page (no cursor) always takes a new sweep, and a
-/// follow-up page within [`PAGE_SWEEP_TTL`] of it reads the same one, so a read of N pages costs one sweep and its pages show
-/// one moment. Kept unscoped (the raw sweep): each page is scoped to its own caller by [`build_page`].
+/// The sweep the pages of one paged read share (ADR 0108 DY-2), kept per caller account: a first page (no cursor) always takes a
+/// new sweep, and that caller's follow-up pages within [`PAGE_SWEEP_TTL`] read the same one, so a read of N pages costs one sweep
+/// and its pages show one moment, also while another account pages at the same time. At most [`MAX_KEPT_SWEEPS`] callers keep
+/// one (the oldest is dropped). Kept unscoped (the raw sweep): each page is scoped to its own caller by [`build_page`].
 #[derive(Default)]
 pub struct PageSweeps {
-    last: std::sync::Mutex<Option<(std::time::Duration, std::sync::Arc<Sweep>)>>,
+    kept: std::sync::Mutex<Vec<(HelperUser, std::time::Duration, std::sync::Arc<Sweep>)>>,
 }
 
 impl PageSweeps {
-    /// The sweep for a page asked at `now` (a monotonic clock): the kept one for a `follow_up` page within the TTL, else a new
-    /// one from `sweep`, kept for the pages that follow. A failed sweep keeps nothing.
+    /// The sweep for `caller`'s page asked at `now` (a monotonic clock): the caller's kept one for a `follow_up` page within the
+    /// TTL, else a new one from `sweep`, kept for the caller's pages that follow. A failed sweep keeps nothing.
     pub fn for_page(
         &self,
+        caller: &HelperUser,
         now: std::time::Duration,
         follow_up: bool,
         sweep: impl FnOnce() -> Result<Sweep, PlatformError>,
     ) -> Result<std::sync::Arc<Sweep>, PlatformError> {
-        let last = || self.last.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let kept = || self.kept.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if follow_up {
-            if let Some((at, kept)) = last().as_ref() {
+            if let Some((_, at, s)) = kept().iter().find(|(c, _, _)| c == caller) {
                 if now.saturating_sub(*at) <= PAGE_SWEEP_TTL {
-                    return Ok(std::sync::Arc::clone(kept));
+                    return Ok(std::sync::Arc::clone(s));
                 }
             }
         }
         let fresh = std::sync::Arc::new(sweep()?);
-        *last() = Some((now, std::sync::Arc::clone(&fresh)));
+        let mut kept = kept();
+        kept.retain(|(c, _, _)| c != caller);
+        if kept.len() >= MAX_KEPT_SWEEPS {
+            if let Some(oldest) = kept.iter().enumerate().min_by_key(|(_, (_, at, _))| *at).map(|(i, _)| i) {
+                kept.remove(oldest);
+            }
+        }
+        kept.push((caller.clone(), now, std::sync::Arc::clone(&fresh)));
         Ok(fresh)
     }
 }
@@ -374,6 +385,38 @@ pub fn build_page(sweep: &Sweep, caller: &HelperUser, scope: Visibility, query: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Review P2-6: two callers paging at once each read the pages of their own first page's sweep, not the other's newer one.
+    #[test]
+    fn each_callers_follow_up_pages_come_from_its_own_sweep() {
+        use std::sync::atomic::{AtomicI64, Ordering};
+        use std::time::Duration;
+        let kept = PageSweeps::default();
+        let n = AtomicI64::new(0);
+        let sweep = || {
+            Ok(Sweep {
+                processes: vec![],
+                homes: vec![],
+                taken_at: n.fetch_add(1, Ordering::SeqCst) + 1,
+            })
+        };
+        let (a, b) = (HelperUser::Uid(501), HelperUser::Uid(502));
+        let ms = Duration::from_millis;
+        assert_eq!(kept.for_page(&a, ms(0), false, sweep).unwrap().taken_at, 1);
+        assert_eq!(kept.for_page(&b, ms(10), false, sweep).unwrap().taken_at, 2);
+        assert_eq!(
+            kept.for_page(&a, ms(20), true, sweep).unwrap().taken_at,
+            1,
+            "a's pages are a's sweep"
+        );
+        assert_eq!(kept.for_page(&b, ms(30), true, sweep).unwrap().taken_at, 2);
+        // Bounded: after MAX_KEPT_SWEEPS other callers, a's sweep is gone and its follow-up page sweeps anew.
+        for uid in 0..MAX_KEPT_SWEEPS as u32 {
+            kept.for_page(&HelperUser::Uid(1_000 + uid), ms(40), false, sweep).unwrap();
+        }
+        let fresh = kept.for_page(&a, ms(50), true, sweep).unwrap().taken_at;
+        assert!(fresh > 2, "{fresh}");
+    }
     use crate::helper_requests::RequestClass;
 
     fn raw(pid: u32, owner: RawOwner, path: Option<&str>) -> RawProcess {

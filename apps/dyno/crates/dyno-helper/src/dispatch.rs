@@ -154,7 +154,8 @@ impl Dispatcher {
     }
 
     /// The same dispatcher on the monotonic clock `clock` (tests).
-    pub fn with_monotonic(mut self, clock: Box<dyn Fn() -> std::time::Duration + Send + Sync>) -> Dispatcher {
+    #[cfg(test)]
+    pub(crate) fn with_monotonic(mut self, clock: Box<dyn Fn() -> std::time::Duration + Send + Sync>) -> Dispatcher {
         self.monotonic = clock;
         self
     }
@@ -259,7 +260,7 @@ impl Dispatcher {
                 // One sweep per paged read, not per page (ADR 0108 DY-2): a follow-up page reads the sweep of the first.
                 let sweep = self
                     .page_sweeps
-                    .for_page((self.monotonic)(), q.after.is_some(), || self.processes.sweep())
+                    .for_page(&who, (self.monotonic)(), q.after.is_some(), || self.processes.sweep())
                     .map_err(|e| remote(&e))?;
                 let page = build_page(&sweep, &who, ctx.view.scope, &q);
                 // `sweep_at` tells the pages of one read apart from pages of separate sweeps (ER-27).

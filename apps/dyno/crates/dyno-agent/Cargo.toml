@@ -42,7 +42,7 @@ paddock-power = { path = "../../../../crates/paddock-power" }
 # A Wake-on-LAN computer's SecureOn password is kept in an owner-only file on macOS and in the OS credential store elsewhere (ADR 0032, D6, amended 2026-11-05).
 paddock-secrets = { path = "../../../../crates/paddock-secrets" }
 log = { version = "0.4", features = ["kv"] }
-rusqlite = { version = "0.41", features = ["bundled"] }
+rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -69,7 +69,7 @@ dyno-platform = { workspace = true, features = ["test-support"] }
 dyno-helper = { path = "../dyno-helper" }
 postcard.workspace = true
 # The commit hook counts a tick's transactions in the budget tests (ADR 0108 DY-7, guard D); test builds only.
-rusqlite = { version = "0.41", features = ["bundled", "hooks"] }
+rusqlite = { workspace = true, features = ["hooks"] }
 plist = "1"
 tempfile.workspace = true
 proptest = "1"

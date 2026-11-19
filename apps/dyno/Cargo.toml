@@ -28,6 +28,8 @@ version = "1.1.0"
 # Versions of the dependencies that two or more members use, so they stay on one version.
 [workspace.dependencies]
 dyno-core = { path = "crates/dyno-core" }
+# The history store (dyno-agent); its tests add the "hooks" feature to count and refuse commits.
+rusqlite = { version = "0.41", features = ["bundled"] }
 paddock-ipc = { path = "../../crates/paddock-ipc" }
 dyno-plugin-api = { path = "crates/dyno-plugin-api" }
 dyno-plugin-host = { path = "crates/dyno-plugin-host" }

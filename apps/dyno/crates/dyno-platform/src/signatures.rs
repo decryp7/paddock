@@ -7,23 +7,31 @@
 //! The cache is shared by the agent's look at new programs and the details a person opens ([`system`]), and its lock is never
 //! held while a tool runs.
 
+#![cfg_attr(
+    all(not(test), not(target_os = "macos")),
+    expect(
+        dead_code,
+        reason = "the codesign lookup serves macOS (and the cache macOS and Linux); elsewhere it is unused outside the tests, which build it on every OS"
+    )
+)]
+
 use dyno_core::ports::{PlatformError, SignatureProbe};
 use dyno_core::process::SignatureInfo;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
-use std::time::{Duration, SystemTime};
 
 /// Answers kept; the cache is emptied when it grows past this (a bound on a machine that runs many short-lived programs).
 pub const CACHE_LIMIT: usize = 1024;
+#[cfg(target_os = "macos")]
 /// How long one `codesign` run may take (it reads the signature, it does not verify the whole file).
-const CODESIGN_TIMEOUT: Duration = Duration::from_secs(8);
+const CODESIGN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 const CODESIGN: &str = "/usr/bin/codesign";
 
 /// One file's answer from a [`SignatureLookup`]: kept while the file is unchanged, or asked again next time (a tool that timed
 /// out or could not start may answer later).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Looked {
+pub(crate) enum Looked {
     /// The file's answer as long as it is unchanged.
     Kept(SignatureInfo),
     /// This time's answer only.
@@ -39,40 +47,45 @@ impl Looked {
 }
 
 /// The OS-specific check behind [`CachedSignatures`]: one answer per file, in order, for as few tool runs as the tool allows.
-pub trait SignatureLookup: Send + Sync {
+pub(crate) trait SignatureLookup: Send + Sync {
+    /// The concrete lookup (what [`CachedSignatures`] names for the wiring check). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Checks every file of `exes` now.
     fn lookup(&self, exes: &[&Path]) -> Vec<Looked>;
 }
 
-/// A file as the cache knows it: unchanged while its path, size and modification time are.
+/// A file as the cache knows it: its path and its identity ([`paddock_env::file_identity::FileIdentity`]: device, inode, size,
+/// modification and change time, git's index stat data), so a file renamed over the path is another file even with the same size
+/// and time.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct FileKey {
     path: PathBuf,
-    len: u64,
-    modified: Option<SystemTime>,
+    identity: paddock_env::file_identity::FileIdentity,
 }
 
 fn key_of(path: &Path) -> Option<FileKey> {
     if !path.is_absolute() {
         return None;
     }
-    let meta = std::fs::metadata(path).ok()?;
     Some(FileKey {
         path: path.to_path_buf(),
-        len: meta.len(),
-        modified: meta.modified().ok(),
+        identity: paddock_env::file_identity::FileIdentity::of(path).ok()?,
     })
 }
 
+const NOT_A_FULL_PATH: &str = "The program file is not named by a full path";
+
 /// The cached probe: files checked before come from the cache, the rest from one lookup call.
-pub struct CachedSignatures {
+pub(crate) struct CachedSignatures {
     lookup: Box<dyn SignatureLookup>,
     cache: Mutex<HashMap<FileKey, SignatureInfo>>,
 }
 
 impl CachedSignatures {
     /// A probe over `lookup` with an empty cache.
-    pub fn new(lookup: Box<dyn SignatureLookup>) -> CachedSignatures {
+    pub(crate) fn new(lookup: Box<dyn SignatureLookup>) -> CachedSignatures {
         CachedSignatures {
             lookup,
             cache: Mutex::new(HashMap::new()),
@@ -81,12 +94,23 @@ impl CachedSignatures {
 }
 
 impl SignatureProbe for CachedSignatures {
+    /// The lookup behind the cache, so the wiring check sees a test double through it.
+    fn adapter(&self) -> &'static str {
+        self.lookup.adapter()
+    }
+
     fn signatures(&self, exes: &[&Path]) -> Vec<SignatureInfo> {
         let keys: Vec<Option<FileKey>> = exes.iter().map(|p| key_of(p)).collect();
         let mut out: Vec<Option<SignatureInfo>> = {
             let cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
             keys.iter().map(|k| k.as_ref().and_then(|k| cache.get(k).cloned())).collect()
         };
+        // A path that is not absolute is never handed to a tool: it would be read against the helper's folder, or as an option.
+        for (i, p) in exes.iter().enumerate() {
+            if !p.is_absolute() {
+                out[i] = Some(SignatureInfo::Unknown(NOT_A_FULL_PATH.into()));
+            }
+        }
         // Each file not in the cache once, in first-seen order; the tool runs without the cache's lock.
         let mut wanted: Vec<&Path> = Vec::new();
         for (i, p) in exes.iter().enumerate() {
@@ -96,6 +120,8 @@ impl SignatureProbe for CachedSignatures {
         }
         if !wanted.is_empty() {
             let looked = self.lookup.lookup(&wanted);
+            // Read again after the check: an answer is kept only for a file that did not change while it was checked.
+            let after: Vec<Option<FileKey>> = exes.iter().map(|p| key_of(p)).collect();
             let mut cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
             for (j, path) in wanted.iter().enumerate() {
                 let answer = looked
@@ -105,7 +131,7 @@ impl SignatureProbe for CachedSignatures {
                 for (i, p) in exes.iter().enumerate() {
                     if p == path && out[i].is_none() {
                         out[i] = Some(answer.info().clone());
-                        if let (Looked::Kept(info), Some(key)) = (&answer, &keys[i]) {
+                        if let (Looked::Kept(info), Some(key)) = (&answer, keys[i].as_ref().filter(|k| after[i].as_ref() == Some(*k))) {
                             if cache.len() >= CACHE_LIMIT {
                                 cache.clear();
                             }
@@ -133,32 +159,42 @@ impl SignatureProbe for NoSignatures {
 }
 
 /// One `codesign -dv --verbose=2 <paths>` run: whether it exited successfully, and its error output (where codesign reports).
-pub trait CodesignRun: Send + Sync {
+pub(crate) trait CodesignRun: Send + Sync {
     /// Runs codesign over `paths`.
     fn run(&self, paths: &[String]) -> Result<(bool, String), PlatformError>;
 }
 
 /// The real `/usr/bin/codesign`, with a timeout and bounded output.
-pub struct SystemCodesign;
+#[cfg(target_os = "macos")]
+pub(crate) struct SystemCodesign;
 
+#[cfg(target_os = "macos")]
 impl CodesignRun for SystemCodesign {
     fn run(&self, paths: &[String]) -> Result<(bool, String), PlatformError> {
         let mut cmd = crate::process::command(CODESIGN);
-        cmd.args(["-dv", "--verbose=2"]).args(paths);
+        cmd.args(codesign_args(paths));
         let out = crate::process::run_with_timeout(cmd, CODESIGN_TIMEOUT)?;
         Ok((out.status.success(), String::from_utf8_lossy(&out.stderr).into_owned()))
     }
 }
 
+/// The arguments of one codesign run over `paths`.
+fn codesign_args(paths: &[String]) -> Vec<String> {
+    // `--`: every file after it is a file, never an option.
+    let mut args = vec!["-dv".to_string(), "--verbose=2".to_string(), "--".to_string()];
+    args.extend(paths.iter().cloned());
+    args
+}
+
 /// macOS: `codesign` over the whole batch. It stops at the first file it cannot read (an unsigned one), so the run is repeated
 /// for the files after it: one run for a batch of signed programs, one more per unsigned file before the last.
-pub struct CodesignLookup {
+pub(crate) struct CodesignLookup {
     run: Box<dyn CodesignRun>,
 }
 
 impl CodesignLookup {
     /// A lookup through `run`.
-    pub fn new(run: Box<dyn CodesignRun>) -> CodesignLookup {
+    pub(crate) fn new(run: Box<dyn CodesignRun>) -> CodesignLookup {
         CodesignLookup { run }
     }
 }
@@ -309,6 +345,86 @@ mod tests {
             NoSignatures.signatures(&[gone]),
             [SignatureInfo::Unknown("Not available on this OS".into())]
         );
+    }
+
+    /// Review P2-3: a file renamed over the path with the same size and modification time is another file, checked again.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_replaced_with_the_same_size_and_time_is_checked_again() {
+        let dir = paddock_testkit::private_tempdir().unwrap();
+        let exes = files(dir.path(), &["a"]);
+        let probe = CachedSignatures::new(Box::new(CodesignLookup::new(Box::new(Scripted(codesign)))));
+        assert_starts(1, || probe.signatures(&[&exes[0]]));
+        let old_time = std::fs::metadata(&exes[0]).unwrap().modified().unwrap();
+        let other = dir.path().join("b");
+        std::fs::write(&other, b"b").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&other)
+            .unwrap()
+            .set_modified(old_time)
+            .unwrap();
+        std::fs::rename(&other, &exes[0]).unwrap();
+        assert_starts(1, || probe.signatures(&[&exes[0]]));
+    }
+
+    /// Review P2-3: a file replaced while it is checked (same size and time, so only the inode and change time tell) keeps no
+    /// answer: the answer may describe the file before the change.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_replaced_while_it_is_checked_keeps_no_answer() {
+        struct Replaces(PathBuf);
+        impl CodesignRun for Replaces {
+            fn run(&self, paths: &[String]) -> Result<(bool, String), PlatformError> {
+                let _counted = crate::process::command(CODESIGN);
+                let old_time = std::fs::metadata(&self.0).unwrap().modified().unwrap();
+                let other = self.0.with_extension("new");
+                std::fs::write(&other, b"b").unwrap();
+                std::fs::File::options()
+                    .write(true)
+                    .open(&other)
+                    .unwrap()
+                    .set_modified(old_time)
+                    .unwrap();
+                std::fs::rename(&other, &self.0).unwrap();
+                Ok(codesign(paths))
+            }
+        }
+        let dir = paddock_testkit::private_tempdir().unwrap();
+        let exes = files(dir.path(), &["a"]);
+        let probe = CachedSignatures::new(Box::new(CodesignLookup::new(Box::new(Replaces(exes[0].clone())))));
+        assert_starts(1, || probe.signatures(&[&exes[0]]));
+        assert_starts(1, || probe.signatures(&[&exes[0]]));
+    }
+
+    /// Review P2-4: a path that is not absolute is not handed to the tool (it would be read against the helper's folder, or as an
+    /// option).
+    #[test]
+    fn a_path_that_is_not_absolute_is_unknown_without_a_check() {
+        let probe = CachedSignatures::new(Box::new(CodesignLookup::new(Box::new(Scripted(codesign)))));
+        let got = assert_starts(at_most_or_none(0, "nothing is checked"), || {
+            probe.signatures(&[Path::new("-x"), Path::new("rel/p")])
+        });
+        assert!(got.iter().all(|s| matches!(s, SignatureInfo::Unknown(_))), "{got:?}");
+    }
+
+    /// Review P2-4: codesign reads every file after `--`, so a file name never becomes an option.
+    #[test]
+    fn codesign_gets_its_files_after_a_double_dash() {
+        assert_eq!(codesign_args(&["/a".into(), "-b".into()]), ["-dv", "--verbose=2", "--", "/a", "-b"]);
+    }
+
+    /// Review P2-7: the cached probe is named after its lookup, so the wiring check sees a test double behind it.
+    #[test]
+    fn the_cached_probe_is_named_after_its_lookup() {
+        struct FakeLookup;
+        impl SignatureLookup for FakeLookup {
+            fn lookup(&self, exes: &[&Path]) -> Vec<Looked> {
+                exes.iter().map(|_| Looked::Once(SignatureInfo::Unsigned)).collect()
+            }
+        }
+        let name = CachedSignatures::new(Box::new(FakeLookup)).adapter();
+        assert!(name.ends_with("FakeLookup"), "{name}");
     }
 
     #[cfg(target_os = "macos")]
