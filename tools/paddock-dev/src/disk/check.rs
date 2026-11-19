@@ -103,6 +103,67 @@ fn largest(s: &Settings) -> Vec<String> {
     }
 }
 
+/// The reclaimable total the index knows: the merged and stale-pushed folders `clean --apply` may remove (CI slot folders are the
+/// CI kit's, so they do not count), with how many have no size yet.
+pub fn reclaimable_line(s: &Settings) -> String {
+    let Some(index) = s.index.as_deref().filter(|i| i.exists()) else {
+        return "reclaimable: not measured (no size index; run ./dev disk scan)".to_string();
+    };
+    let Ok(i) = Index::open_read_only(index) else {
+        return "reclaimable: not measured (the size index could not be opened; run ./dev disk scan)".to_string();
+    };
+    let (Ok(folders), Ok(sizes)) = (i.folders(), i.latest_sizes()) else {
+        return "reclaimable: not measured (the size index could not be read; run ./dev disk scan)".to_string();
+    };
+    let (mut bytes, mut count, mut unmeasured) = (0u64, 0usize, 0usize);
+    for f in folders
+        .iter()
+        .filter(|f| f.kind != "slot" && super::state::State::parse(&f.state).is_some_and(super::state::State::reclaimable))
+    {
+        count += 1;
+        match sizes.get(&f.path) {
+            Some(r) => bytes += r.bytes,
+            None => unmeasured += 1,
+        }
+    }
+    format!(
+        "reclaimable: {} in {count} merged or stale-pushed folder(s){} (./dev disk clean --apply)",
+        gib(bytes),
+        if unmeasured > 0 {
+            format!(", {unmeasured} not measured")
+        } else {
+            String::new()
+        }
+    )
+}
+
+/// The check before a CI dispatch or a release sequence, on the runner volumes (the disks under the configured roots): `Err`
+/// with the text for the `::error::` when one is below the refusal level, before any CI time is spent. Below the warning level it
+/// prints the warning, the largest folders and the reclaimable total. A disk that cannot be read is "not measured" and passes.
+pub fn before_dispatch(env: &dyn Fn(&str) -> Option<String>, out: &mut dyn Write, err: &mut dyn Write) -> Result<(), String> {
+    let s = Settings::resolve(&CommonArgs::default(), env);
+    let mut paths: Vec<PathBuf> = s.roots.iter().filter(|r| r.is_dir()).cloned().collect();
+    paths.truncate(1);
+    if paths.is_empty() {
+        let _ = writeln!(
+            err,
+            "::warning::disk: no runner volume found under the dev-targets roots; the disk check did not run"
+        );
+        return Ok(());
+    }
+    let a = CheckArgs {
+        paths,
+        common: CommonArgs::default(),
+    };
+    match run(&a, env, out, err) {
+        0 => Ok(()),
+        _ => Err(
+            "the disk is below the refusal level, so nothing is dispatched; free disk first (see the lines above), then dispatch again"
+                .to_string(),
+        ),
+    }
+}
+
 /// Runs the check; returns the exit code (0, or 1 when a disk is below the refusal level).
 pub fn run(a: &CheckArgs, env: &dyn Fn(&str) -> Option<String>, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let s = Settings::resolve(&a.common, env);
@@ -163,6 +224,7 @@ pub fn run(a: &CheckArgs, env: &dyn Fn(&str) -> Option<String>, out: &mut dyn Wr
         for l in largest(&s) {
             let _ = writeln!(err, "  {l}");
         }
+        let _ = writeln!(err, "disk: {}", reclaimable_line(&s));
     }
     code
 }
@@ -289,5 +351,89 @@ mod tests {
         let (code, _out, err) = run_with(d.path().join("missing-df").to_str().unwrap(), &d.path().join("i.sqlite"));
         assert_eq!(code, 0);
         assert!(err.contains("not measured"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_warning_names_the_reclaimable_total_from_the_index() {
+        use crate::disk::index::FolderRow;
+        let d = tempfile::tempdir().unwrap();
+        let idx = d.path().join("i.sqlite");
+        let mut i = Index::open(&idx).unwrap();
+        let row = |path: &str, kind: &str, state: &str| FolderRow {
+            path: path.into(),
+            kind: kind.into(),
+            owner: "a:b".into(),
+            state: state.into(),
+            ..FolderRow::default()
+        };
+        i.sync_folders(&[
+            row("/m", "worktree", "merged"),
+            row("/s", "slot", "stale-pushed"),
+            row("/l", "build", "live"),
+        ])
+        .unwrap();
+        let size = |p: &str, g: u64| SizeRow {
+            path: p.into(),
+            bytes: g * GIB,
+            partial: false,
+            measured_at: 5,
+        };
+        i.record_sizes(&[size("/m", 7), size("/s", 50), size("/l", 90)], 5).unwrap();
+        drop(i);
+        let (code, _out, err) = run_with(&fake_df(d.path(), 120), &idx);
+        assert_eq!(code, 0);
+        assert!(
+            err.contains("reclaimable: 7.0 GiB in 1 merged or stale-pushed folder(s)"),
+            "slots and live folders do not count: {err}"
+        );
+    }
+
+    #[cfg(unix)]
+    fn before(avail_gib: u64) -> (Result<(), String>, String, String, tempfile::TempDir) {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("dev-targets");
+        std::fs::create_dir_all(&root).unwrap();
+        let df = fake_df(d.path(), avail_gib);
+        let root_s = root.to_string_lossy().to_string();
+        let env = move |k: &str| match k {
+            "PADDOCK_DF" => Some(df.clone()),
+            "PADDOCK_DEV_TARGETS" => Some(root_s.clone()),
+            _ => None,
+        };
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let r = before_dispatch(&env, &mut out, &mut err);
+        (
+            r,
+            String::from_utf8_lossy(&out).to_string(),
+            String::from_utf8_lossy(&err).to_string(),
+            d,
+        )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dispatch_is_refused_below_the_refusal_level_before_any_ci_time_is_spent() {
+        let (r, _out, err, _d) = before(10);
+        assert!(r.is_err(), "{err}");
+        assert_eq!(err.matches("::error::").count(), 1, "{err}");
+        assert!(err.contains("./dev disk clean"), "the next step is named: {err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dispatch_warns_with_the_reclaimable_total_under_the_warning_level_and_goes_on() {
+        let (r, _out, err, _d) = before(120);
+        assert!(r.is_ok(), "{err}");
+        assert_eq!(err.matches("::warning::").count(), 1, "{err}");
+        assert!(err.contains("reclaimable:"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dispatch_with_room_is_silent_and_goes_on() {
+        let (r, out, err, _d) = before(500);
+        assert!(r.is_ok() && err.is_empty(), "{err}");
+        assert!(out.contains("500.0 GiB free"), "{out}");
     }
 }

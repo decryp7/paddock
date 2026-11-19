@@ -522,6 +522,11 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         .clone()
         .or_else(|| std::env::current_dir().ok().and_then(|d| find_root(&d)))
         .ok_or_else(|| CliError::usage("not inside a repository checkout.").with_hint("Pass --root <checkout>."))?;
+    // The disk first: a dispatch into a full runner volume fails jobs after queue time was spent. Under the refusal level nothing
+    // is pushed or dispatched (`disk check`'s own `::error::` names the next step); under the warning level it warns and goes on.
+    crate::disk::check::before_dispatch(&|k| std::env::var(k).ok(), &mut std::io::stdout(), &mut std::io::stderr()).map_err(|e| {
+        CliError::refused(e).with_hint("Run `./dev disk report`, then `./dev disk clean --dry-run` and `--apply`, then dispatch again.")
+    })?;
     let read = |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
     let mut inputs = a.inputs.clone();
     let mut git_ref = a.git_ref.clone().unwrap_or_default();

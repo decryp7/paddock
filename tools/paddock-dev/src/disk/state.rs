@@ -151,6 +151,14 @@ fn git_facts(dir: &Path, rec: &Record, ctx: &Context) -> GitFacts {
     // Locked, claimed by an agent (an unreadable owner map counts as claimed), or a train: never touched.
     let owned = OwnerStore::open(&repo.common_dir).read().map_or(true, |m| m.get(&me).is_some());
     f.live = entry.locked.is_some() || owned || branch.starts_with("train/") || rec.owner.starts_with("integrator");
+    if let Some(folders) = &ctx.process_folders {
+        f.live |= crate::worktree::procs::any_inside(folders, dir);
+    }
+    // A live folder is never touched, whatever else is true of it: its status, unpushed commits and merged state (the slow reads,
+    // on a large worktree) are not needed to decide that (ER-20).
+    if f.live {
+        return f;
+    }
     f.dirty = git
         .text(&[
             "status",
@@ -178,9 +186,6 @@ fn git_facts(dir: &Path, rec: &Record, ctx: &Context) -> GitFacts {
         ])
         .ok()
         .map(|s| !s.trim().is_empty());
-    if let Some(folders) = &ctx.process_folders {
-        f.live |= crate::worktree::procs::any_inside(folders, dir);
-    }
     f
 }
 
@@ -200,6 +205,10 @@ pub fn inspect(dir: &Path, rec: Option<&Record>, ctx: &Context) -> Inspected {
         live: recent,
         ..Facts::default()
     };
+    // A process working in the folder itself keeps it, whatever it is (a build folder with no worktree to judge it by included).
+    if let Some(folders) = &ctx.process_folders {
+        facts.live |= crate::worktree::procs::any_inside(folders, dir);
+    }
     // A worktree is judged by its own git state; a build folder or scratch by the worktree it serves, when it names one.
     let judged: Option<PathBuf> = match rec.kind {
         Kind::Worktree => Some(dir.to_path_buf()),
@@ -207,6 +216,8 @@ pub fn inspect(dir: &Path, rec: Option<&Record>, ctx: &Context) -> Inspected {
         _ => None,
     };
     match judged {
+        // Already live (used within the window, or a process is in it): nothing else can change the state, so git is not asked.
+        Some(_) if facts.live => {}
         Some(wt) => {
             let linked = if wt == dir { None } else { record::read(&wt).ok().flatten() };
             let g = git_facts(&wt, linked.as_ref().unwrap_or(rec), ctx);
@@ -330,5 +341,77 @@ mod tests {
             assert_eq!(s.reclaimable(), want);
             assert_eq!(State::parse(s.word()), Some(s));
         }
+    }
+
+    /// A clock far after the scratch folders' real modification times, so that only a record's last use makes a folder recent.
+    const NOW: u64 = 4_000_000_000;
+
+    /// A real git folder (a stand-in repository in a scratch folder, ER-14).
+    #[cfg(unix)]
+    fn repo() -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        let mut cmd = paddock_proc::command("git");
+        cmd.args(["init", "-q"]).arg(d.path());
+        let ok = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(std::time::Duration::from_secs(60)))
+            .unwrap()
+            .success();
+        assert!(ok, "git init");
+        d
+    }
+
+    #[cfg(unix)]
+    fn ctx() -> Context {
+        Context {
+            now: NOW,
+            live_secs: 1000,
+            process_folders: Some(Vec::new()),
+        }
+    }
+
+    #[cfg(unix)]
+    fn rec(owner: &str, last_used: u64) -> Record {
+        let mut r = Record::new(Kind::Worktree, owner);
+        r.last_used = last_used;
+        r
+    }
+
+    /// The slow git reads (status over a large worktree) are not made for a folder that is live anyway (ER-20), and the
+    /// control: the same folder, not live, is read.
+    #[cfg(unix)]
+    #[test]
+    fn a_live_worktree_is_not_read_by_git_and_a_stale_one_is() {
+        let d = repo();
+        let stale = inspect(d.path(), Some(&rec("implementer:t", 1)), &ctx());
+        assert_eq!(stale.facts.dirty, Some(false), "control: git was asked about a stale folder");
+        assert_ne!(stale.state, State::Live);
+        let recent = inspect(d.path(), Some(&rec("implementer:t", NOW - 10)), &ctx());
+        assert_eq!((recent.state, recent.facts.git_ok, recent.facts.dirty), (State::Live, false, None));
+        let owned = inspect(d.path(), Some(&rec("integrator:x", 1)), &ctx());
+        assert_eq!(
+            (owned.state, owned.facts.dirty),
+            (State::Live, None),
+            "an integrator's folder is live without a status read"
+        );
+    }
+
+    /// A process in a folder keeps it, also a build folder that names no worktree.
+    #[test]
+    fn a_process_in_a_build_folder_keeps_it() {
+        let d = tempfile::tempdir().unwrap();
+        let mut c = Context {
+            now: NOW,
+            live_secs: 1000,
+            process_folders: Some(vec![d.path().join("src")]),
+        };
+        let r = Record::new(Kind::Build, "implementer:t");
+        let mut old = r.clone();
+        old.last_used = 1;
+        assert_eq!(inspect(d.path(), Some(&old), &c).state, State::Live);
+        c.process_folders = Some(Vec::new());
+        assert_ne!(
+            inspect(d.path(), Some(&old), &c).state,
+            State::Live,
+            "control: without the process it is not live"
+        );
     }
 }

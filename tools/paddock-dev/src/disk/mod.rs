@@ -13,6 +13,7 @@ pub mod check;
 pub mod clean;
 pub mod config;
 pub mod index;
+pub mod landing;
 pub mod measure;
 pub mod record;
 pub mod report;
