@@ -18,7 +18,7 @@
 //! entry's count is reported at its own line, an unreadable list makes the check broken. Convert a site to `StandIn` and delete its
 //! entry. The check's own files are not read ([`IMPLEMENTATION`]).
 //!
-//! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet.
+//! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: pending (2026-11-19): the train integrator records the run id of the first green run on the real tree here, in c130.rs and in docs/gates.toml, and only then is `mode` switched to blocking.
 //!
 //! Rust host; `conformance/src/checks/C130-stand-in-fixtures.mjs` is the port and `tests/it/check_c130.rs` compares them.
 

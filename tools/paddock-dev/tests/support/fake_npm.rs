@@ -11,22 +11,20 @@ pub fn build(root: &Path) -> Fixture {
     Fixture::build(root, &|bin, prefix, home| {
         // The global config sits under the prefix: `<prefix>/etc/npmrc`, and on Windows `<prefix>\bin\etc\npmrc`.
         let global = if cfg!(windows) {
-            format!("{}\\bin\\etc\\npmrc", prefix.display())
+            prefix.join("bin").join("etc").join("npmrc")
         } else {
-            format!("{}/etc/npmrc", prefix.display())
+            prefix.join("etc").join("npmrc")
         };
+        let user = home.join(".npmrc");
+        let literal = |p: &Path| template_literal(&p.to_string_lossy());
         StandIn::new(bin, "npm")
             .when(
                 &paddock_testkit::Case::new().has_arg("globalconfig"),
-                Actions::new().stdout_with(&template_literal(&global)),
+                Actions::new().stdout_with(&literal(&global)),
             )
             .when(
                 &paddock_testkit::Case::new().has_arg("userconfig"),
-                Actions::new().stdout_with(&template_literal(&format!(
-                    "{}{}.npmrc",
-                    home.display(),
-                    if cfg!(windows) { '\\' } else { '/' }
-                ))),
+                Actions::new().stdout_with(&literal(&user)),
             )
             .install()
             .expect("fake npm");

@@ -3,7 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_dev::release_isolation::fixture::{Fixture, Leak};
-#[path = "fake_npm.rs"]
+#[path = "../support/fake_npm.rs"]
 mod fake_npm;
 use fake_npm::build;
 use std::process::Output;

@@ -2,7 +2,7 @@
 //! its probe, and turning that probe off lets the same leak through (the mutation check: the test depends on the probe).
 
 use super::fixture::{Fixture, Leak};
-#[path = "../../tests/it/fake_npm.rs"]
+#[path = "../../tests/support/fake_npm.rs"]
 mod fake_npm;
 use super::ledger::Kind;
 use super::verify::{Env, VerifyOptions, verify};
