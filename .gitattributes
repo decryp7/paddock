@@ -49,3 +49,18 @@ conformance/ci/*.txt text eol=lf
 # benchmarks.md and the apps' performance.md (results blocks are corrected in place), registers and generated files are never
 # listed here. See docs/lessons.md (2026-11-15).
 /docs/lessons.md merge=union
+
+# Append-only changelogs: every member adds its entry at the top of a section, so two branches (and a train merge or a member
+# revert) conflicted on the same lines. union keeps both sides' lines and never conflicts. Trade-off: the order within a section
+# is not guaranteed (the two sides' lines come one after the other), and an entry edited in place by both sides is kept twice
+# instead of conflicting, so a reviewer reads the merged section.
+/CHANGELOG.md merge=union
+/apps/*/CHANGELOG.md merge=union
+
+# The generated ADR index: every member's regenerate adds its row at the end, so two branches that each add an ADR conflicted.
+# union lets the merge go through; the generator's --check (./dev gen check, CI, pre-push) then fails on the merged file until
+# `node conformance/bin/paddock-adr-index.mjs` is run: one command, never a hand merge. This is the exception to the rule above
+# (generated files are not listed) and holds only because the file has a --check that refuses a stale merge result. The check list
+# (conformance/src/checks/index.mjs, paddock.ci.json) is NOT listed: union breaks the JSON (the last array element needs no comma),
+# and the generator cannot repair what it cannot parse.
+/docs/adr/README.md merge=union
