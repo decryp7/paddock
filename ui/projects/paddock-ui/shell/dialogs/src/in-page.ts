@@ -13,7 +13,7 @@ export interface InPageDialog {
   readonly ref: DialogRef;
   content: DialogContent | null;
   injector: Injector | null;
-  /** The frame's dismissal (busy and required-choice rules); until the view is there, a plain dismissal. */
+  /** The frame's dismissal (busy and required-choice rules); until the view is there, a plain one that a required choice ignores. */
   requestDismiss: (() => void) | null;
   /** The frame's refit request, once the view is there. */
   requestFit: (() => void) | null;
@@ -55,7 +55,12 @@ export class InPageDialogBackend extends DialogPresenter {
     const ref: DialogRef = {
       closed,
       answer: (value) => end(answered(value)),
-      dismiss: () => (entry.requestDismiss ? entry.requestDismiss() : void dismissNow()),
+      // Before the view is there, the frame's rule for a loading dialog: a required choice ignores the dismissal (an Escape
+      // pressed in the same task as the open, main run 8315), any other dialog closes dismissed.
+      dismiss: () => {
+        if (entry.requestDismiss) entry.requestDismiss();
+        else if (!request.def.requiredChoice) dismissNow();
+      },
       setTitle: (text) => {
         if (text.trim()) title.set(text.trim());
       },

@@ -3065,3 +3065,24 @@ nothing again. This is the open measurement recorded above (headless WebKit unde
 miss the thumb), not a view pulled back after a delivered gesture; the deterministic ownership rows of the same spec (dispatched input)
 passed in all ten passes. Next: when a take-over came with no scroll event, read the thumb's position at the press (it can move while the
 reveal grows the total, `Total grew outside a round` 7 ms after the press here) before deciding whether a resend is safe.
+
+## Main run 8315: a required choice dismissed before its frame existed; a tray height read during the entry slide (2026-11-19)
+- **shell-demo.spec.ts:696 (reference apps shard 2/2): "How should the demo greet you?" not found after Escape.** The test opens
+  `sd.choose-style` (a required choice) and presses Escape at once. `InPageDialogBackend` pushes the dialog on its stack synchronously,
+  but the frame that applies the required-choice rule only exists after the host renders it (`ngAfterViewInit` sets `requestDismiss`).
+  Until then `ref.dismiss()` was a plain dismissal, so an Escape in that window closed a dialog that must be answered. Chromium runs
+  input before timers, so a loaded runner widens the window. Causes listed: (1) the pre-view dismissal: confirmed, the shell-demo page
+  with the main thread slowed 20x (CDP CPU throttling) and Escape right after the open fails 17 of 20 with the CI message, 20 of 20
+  green with the fix; (2) the lazy content chunk stalled over 5 s on the dev server (the run 7854 class): refuted by (1), the same
+  slowed page shows the dialog in time once the dismissal is refused; (3) the click did not open it: refuted by the same runs. Not
+  caused by a train-14 member: the code dates from 2026-10-31; local unthrottled runs are 40 of 40 green before the fix. **Fix:** before
+  its view exists a dialog follows the frame's loading rule (a required choice ignores a dismissal); unit test in `ui.spec.ts`.
+- **tray.e2e.ts:112 (Pitwall e2e-webkit, Linux): Activity 80 while loading against 81 ready.** Activity is 80.5 px tall (its `.big`
+  line box is 22.5 px). The popover slides in (`pd-tray-in`, translateY 4 px); a read during the slide sits at a fractional offset and
+  carries the transform's float error (80.49999237 or 80.50000763), and `Math.round` turned that into 1 px. Run 8212's fix (two reads
+  agree) did not hold: both reads agreed on rounded values while the popover still moved (y from 49.0 to 53.0 over the reads). Measured
+  in the arm64 CI image (Linux WebKit, 4 workers): raw heights read before the fix 3 of 20 red; with the wait for the entry animation's
+  end, 60 of 60 green at load 17-35; the whole file 19 of 19 there and 38 of 38 on macOS (both engines). Not caused by a train-14
+  member (same symptom in run 8212, before the train). **Fix:** `openTray` waits until the popover's finite animations have finished,
+  and the test compares unrounded heights. Class: a layout read during an entry animation (the "two reads agree" rule does not catch a
+  box that moves while its rounded size stays).
