@@ -2134,3 +2134,16 @@ Question: with the slot count following the load, how long does a queue of 4 cli
   neither changes these rows (the 15-minute load decided them).
 - **Cost to note:** the 15-minute load lags, so after a spike the count stays at 1 for up to a quarter of an hour; the 1-minute
   load had fallen to 7 while the 15-minute was still 44 (second `after` row's neighbours).
+
+## The sccache shim named `sccache`: native C stays cached (2026-11-19, fix/gate-tooling-env-select)
+
+- **Question:** a wrapper with another file name (`rustc-wrapper`) kept cc-rs from wrapping `clang-cl`, but also from wrapping every native C compile. The shim named `sccache` (`local_sccache::shim_text`) keeps native C cached and sends only the Windows C compiles past sccache. What does that cost or save on a cold build?
+- **Method:** `cargo check --locked` of `apps/spotter/app/src-tauri` in a fresh build folder each time, `CARGO_BUILD_JOBS=2`, sccache 0.19.0 with the shared local cache (`--zero-stats` before each run), through `./dev heavy`, one run per row, macOS arm64, 1-minute load 9 to 12 from other agents. The first row filled the cache; the other two ran after it, so rustc hits are the same and only C differs. Script and logs: `<dev-targets>/gtf-bench/` (scratch; not kept).
+
+  | Row | `RUSTC_WRAPPER` | Wall time | C/C++ cache hits | Rust hits / misses |
+  | --- | --- | --- | --- | --- |
+  | warm-up (cache fill) | the shim | 116 s | 270 | 241 / 234 |
+  | after | the shim | 95 s | 270 | 311 / 164 |
+  | before (the first version) | `rustc-wrapper`, no `sccache` name | 112 s | 0 (no C compile went through sccache) | 311 / 164 |
+
+- **Result:** the shim gives 270 C/C++ hits (libsqlite3-sys, zstd-sys, ring and the like) where the first version gave none, and the run took 95 s against 112 s. **Not measured:** a repeat (one run per row, so the 17 s difference is inside this machine's noise at that load; the hit counts are not), and a Linux or Windows host. A `cargo xwin` build is as uncached for C as before; ring's C is a few seconds.
