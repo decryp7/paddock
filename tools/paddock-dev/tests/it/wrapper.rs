@@ -13,9 +13,8 @@ fn repo_root() -> PathBuf {
 }
 
 fn git(dir: &Path, args: &[&str]) {
-    let st = paddock_dev::git_env::scratch_git()
-        .arg("-C")
-        .arg(dir)
+    let st = paddock_testkit::scratch_git()
+        .current_dir(dir)
         .args([
             "-c",
             "user.name=t",

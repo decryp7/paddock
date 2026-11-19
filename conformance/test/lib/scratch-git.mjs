@@ -7,13 +7,18 @@
 //   - pins GIT_CONFIG_GLOBAL and GIT_CONFIG_SYSTEM to /dev/null and passes the identity with -c, never through `git config`,
 //   - sets GIT_CEILING_DIRECTORIES to the temp folder, so repository discovery never walks above it,
 //   - refuses to run unless the folder is inside the machine's temp folder, and (for every command but `init` and `clone`)
-//     unless the repository git resolves there has its git dir inside that folder too.
+//     unless the repository git resolves there has its git dir inside that folder too,
+//   - refuses git's own arguments that leave the folder: the global options -C, --git-dir, --work-tree and --namespace (both
+//     spellings), `config --file/-f/--global/--system`, a configuration key that moves the work tree or the hooks, the options
+//     --separate-git-dir, --template, --reference and --upload-pack, and any path argument (absolute, `~` or with a `..`
+//     segment, also after `--opt=`) that resolves outside the temp folder: so `clone` into, `init` in, `worktree add` at or
+//     `bundle create` of a path outside it is refused before git starts.
 // Read-only calls on the real tree (`git ls-files` over PADDOCK) are not scratch work and carry `// conformance: raw-git — <why>`
 // (check C142 reports a raw git spawn in a test that has neither this helper nor that comment).
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 /** Variables that point git at another repository: never passed through, never accepted in `env`. */
 const REDIRECTING = /^GIT_(DIR|WORK_TREE|INDEX_FILE|OBJECT_DIRECTORY|COMMON_DIR|NAMESPACE|ALTERNATE_OBJECT_DIRECTORIES|CEILING_DIRECTORIES|CONFIG_COUNT|CONFIG_PARAMETERS)$|^GIT_CONFIG_(KEY|VALUE)_/;
@@ -48,6 +53,75 @@ const CONFIG = ['user.name=t', 'user.email=t@example.invalid', 'commit.gpgsign=f
 
 const checked = new Set();
 
+/** Global options (before the command) that point git at another repository, folder or namespace. */
+const GLOBAL_OPTION = /^(?:-C|--git-dir|--work-tree|--namespace|--exec-path|--super-prefix|--config-env)(?:=|$)/;
+/** `git config` options that choose another file than the repository's own. */
+const CONFIG_FILE_OPTION = /^(?:--global|--system|--file|-f|--blob|--worktree)(?:=|$)/;
+/** Options of init and clone that put a git dir, template or object store somewhere else. */
+const PLACEMENT_OPTION = /^(?:--separate-git-dir|--template|--reference|--reference-if-able|--upload-pack|-u)(?:=|$)/;
+/** Configuration keys that move the work tree or run code from outside (in `-c k=v` and in `config k v`). */
+const DANGEROUS_KEY = /\b(?:core\.worktree|core\.hookspath|include\.path|includeif\.[^=\s]*\.path)\b/i;
+
+/** The path of `arg` when it looks like one (absolute, `~`, a `file://` URL or a `..` segment), else null; `--opt=path` is read too. */
+function pathOf(arg) {
+  let a = arg.replace(/^--[a-z-]+=/, '');
+  if (a.startsWith('file://')) a = a.slice('file://'.length);
+  if (a === '/dev/null' || a === 'NUL') return null;
+  if (a.startsWith('~') || isAbsolute(a) || /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(a)) return a;
+  return null;
+}
+
+/** Whether `path` (made absolute against `cwd`) is inside the scratch root, through its nearest existing ancestor. */
+function pathInside(cwd, path) {
+  if (path.startsWith('~')) return false;
+  let p = resolve(cwd, path);
+  const rest = [];
+  for (;;) {
+    try {
+      const real = realpathSync(p);
+      const rel = relative(SCRATCH_ROOT, resolve(real, ...rest.reverse()));
+      return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+    } catch {
+      rest.push(p.slice(dirname(p).length + 1));
+      const up = dirname(p);
+      if (up === p) return false;
+      p = up;
+    }
+  }
+}
+
+/** Throws when `args` (git's arguments, before the identity pairs are added) would let git act outside the scratch folder. */
+export function refuseEscapingArgs(cwd, args) {
+  const refuse = (why, arg) => {
+    throw new Error(`scratch-git: ${why} (\`git ${args.join(' ')}\`) refused: ${arg} could leave the scratch folder; run it in the scratch folder with a path inside it`);
+  };
+  let verbAt = -1;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '-c') {
+      i++;
+      continue;
+    }
+    if (a === '-C' || GLOBAL_OPTION.test(a)) refuse('a global option', a);
+    if (!a.startsWith('-')) {
+      verbAt = i;
+      break;
+    }
+  }
+  const verb = verbAt >= 0 ? args[verbAt] : '';
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (DANGEROUS_KEY.test(a)) refuse('a configuration key that moves the work tree or the hooks', a);
+    if (i > verbAt && verbAt >= 0) {
+      if (verb === 'config' && CONFIG_FILE_OPTION.test(a)) refuse('`git config` naming another file', a);
+      if ((verb === 'init' || verb === 'clone') && PLACEMENT_OPTION.test(a)) refuse(`\`git ${verb}\` placing its git dir elsewhere`, a);
+    }
+    if (args[i - 1] === '-c') continue; // a `-c key=value` pair: the key was checked above, the value is not a path
+    const path = pathOf(a);
+    if (path !== null && !pathInside(cwd, path)) refuse('a path outside the temp folder', a);
+  }
+}
+
 function refuseOutside(cwd, env) {
   if (!insideScratch(cwd)) throw new Error(`scratch-git: ${cwd} is not inside the temp folder ${SCRATCH_ROOT}; a scratch git never runs elsewhere`);
   const real = realpathSync(resolve(cwd));
@@ -65,6 +139,7 @@ function refuseOutside(cwd, env) {
  */
 export function gitResult(cwd, args, opts = {}) {
   const env = scratchEnv(opts.env);
+  refuseEscapingArgs(cwd, args);
   const verb = args.find((a, i) => !a.startsWith('-') && args[i - 1] !== '-c' && args[i - 1] !== '-C');
   if (verb === 'init' || verb === 'clone') {
     if (!insideScratch(cwd)) throw new Error(`scratch-git: ${cwd} is not inside the temp folder ${SCRATCH_ROOT}; a scratch git never runs elsewhere`);

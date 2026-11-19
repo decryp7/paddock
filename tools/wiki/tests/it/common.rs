@@ -109,22 +109,11 @@ pub fn cli_in(args: &[&str], ctx: &paddock_wiki::Context) -> (i32, String, Strin
     )
 }
 
-/// Runs git in `dir` against nothing of the user's machine.
+/// Runs git in `dir` against nothing of the user's machine (`paddock_testkit::scratch_git`: no `GIT_*`, a checked folder and arguments).
 pub fn git(dir: &Path, args: &[&str]) {
-    let mut cmd = paddock_proc::command("git");
-    let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
-    cmd.args([
-        "-c",
-        "user.name=t",
-        "-c",
-        "user.email=t@example.invalid",
-        "-c",
-        "commit.gpgsign=false",
-    ])
-    .args(args)
-    .current_dir(dir)
-    .env("GIT_CONFIG_GLOBAL", null)
-    .env("GIT_CONFIG_SYSTEM", null);
+    let mut git = paddock_testkit::scratch_git();
+    git.current_dir(dir).args(args);
+    let (cmd, _guard) = git.into_parts().unwrap();
     let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(std::time::Duration::from_secs(30))).unwrap();
     assert!(out.success(), "git {args:?}: {}", out.stderr_text());
 }

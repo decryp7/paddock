@@ -213,9 +213,8 @@ fn merge_check_without_a_registry_runs_as_before() {
 // Starts git, never a process by pid.
 #[allow(clippy::disallowed_methods)]
 fn git_files(root: &Path) -> Vec<String> {
-    let out = paddock_dev::git_env::scratch_git()
-        .arg("-C")
-        .arg(root)
+    let out = paddock_testkit::scratch_git()
+        .current_dir(root)
         .args(["ls-files"])
         .output()
         .unwrap();

@@ -14,9 +14,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /** The append-only log: new sections are added, earlier ones are not rewritten. Only its git attribute is read, never its text
  * (the planner's DOC_INPUTS, tools/paddock-dev/src/plan.rs, lists this file as not reading docs). */
-const APPEND_ONLY = ['docs/lessons.md'];
+const APPEND_ONLY = ['docs/lessons.md', 'CHANGELOG.md', 'apps/dyno/CHANGELOG.md', 'apps/debrief/CHANGELOG.md', 'docs/adr/README.md'];
 /** Edited in place (a corrected results block): union would keep both versions silently. */
-const EDITED_IN_PLACE = ['docs/benchmarks.md', 'apps/dyno/docs/performance.md', 'docs/gates.toml'];
+const EDITED_IN_PLACE = ['docs/benchmarks.md', 'apps/dyno/docs/performance.md', 'docs/gates.toml', 'conformance/paddock.ci.json', 'conformance/src/checks/index.mjs', 'conformance/README.md'];
 
 /** The real repository is read with `git check-attr` only (a read; no scratch repo yet): raw, on purpose. */
 function checkAttr(file) {

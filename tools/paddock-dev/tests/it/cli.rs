@@ -127,7 +127,7 @@ fn self_hash_outside_a_repository_or_without_an_input_list_names_the_next_step()
     assert_eq!(code, 1);
     assert!(err.contains("Paddock repository"), "{err}");
     // A repository that is not Paddock's: no tools/paddock-dev/inputs.txt.
-    let init = paddock_dev::git_env::scratch_git()
+    let init = paddock_testkit::scratch_git()
         .args(["init", "-q"])
         .current_dir(d.path())
         .status()
@@ -158,9 +158,8 @@ fn plan_commit_range_and_flags_lint_only_what_main_itself_adds_and_refuse_values
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path();
     let git = |args: &[&str]| {
-        let out = paddock_dev::git_env::scratch_git()
-            .arg("-C")
-            .arg(repo)
+        let out = paddock_testkit::scratch_git()
+            .current_dir(repo)
             .args([
                 "-c",
                 "user.name=t",

@@ -15,8 +15,9 @@ import { join } from 'node:path';
 const GALLERY = `http://localhost:${process.env['PW_PORT'] ?? 4300}`;
 // The commit every shot of this run was taken from (the sources are committed before the sheet is made, so it names the code on screen).
 const commit = ((): string => {
+  // conformance: raw-git — read-only `rev-parse` and `status --no-optional-locks` of the real tree, to name the commit
   const git = (...args: string[]): string => execFileSync('git', args, { cwd: __dirname, encoding: 'utf8' }).trim();
-  const dirty = git('status', '--porcelain', '--', '../projects', '../e2e/view.spec.ts').length > 0;
+  const dirty = git('--no-optional-locks', 'status', '--porcelain', '--', '../projects', '../e2e/view.spec.ts').length > 0;
   return `${git('rev-parse', '--short=10', 'HEAD')}${dirty ? ' + uncommitted changes' : ''}`;
 })();
 const OUT = join(__dirname, '..', 'docs', 'review', 'x51-view', 'review-5');

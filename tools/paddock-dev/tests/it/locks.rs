@@ -226,9 +226,8 @@ fn a_folder_without_lockfiles_is_an_error_that_says_what_to_do() {
 #[allow(clippy::disallowed_methods)] // git on this repository
 fn the_real_tracked_list_skips_only_the_golden_fixture_and_every_other_lockfile_is_a_target() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap();
-    let out = paddock_dev::git_env::scratch_git()
-        .args(["-C"])
-        .arg(root)
+    let out = paddock_testkit::scratch_git()
+        .current_dir(root)
         .args(["ls-files", "--", "*Cargo.lock", "*Cargo.toml", "*package-lock.json", "*hakari.toml"])
         .output()
         .unwrap();

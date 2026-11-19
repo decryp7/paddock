@@ -148,7 +148,7 @@ fn c130_does_not_read_its_own_files() {
 
 #[allow(clippy::disallowed_methods, reason = "a test spawns git; it ends it itself")]
 fn git(root: &Path, args: &[&str]) {
-    let out = paddock_dev::git_env::scratch_git()
+    let out = paddock_testkit::scratch_git()
         .args([
             "-c",
             "user.name=t",

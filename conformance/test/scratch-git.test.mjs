@@ -91,3 +91,69 @@ test('a git failure throws with the command and stderr; gitResult reports it ins
   git(d, 'commit', '-q', '-m', 'c');
   assert.equal(git(d, 'log', '--format=%an').trim(), 't', 'the identity comes from -c');
 });
+
+// ---- git's own arguments must not escape the scratch folder either (the cwd check alone let them through) --------------------
+const OUTSIDE_PARENT = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'Temp') : '/var/tmp';
+const outsideDir = mkdtempSync(join(OUTSIDE_PARENT, 'scratch-git-outside-'));
+after(() => rmSync(outsideDir, { recursive: true, force: true }));
+const repoIn = () => {
+  const d = mkdtempSync(join(scratch, 'args-'));
+  git(d, 'init', '-q');
+  return d;
+};
+const REFUSED = /scratch-git: .*(refused|not inside)/;
+
+test('git global options that name another repository or folder are refused, in both spellings', () => {
+  const d = repoIn();
+  for (const args of [
+    ['-C', outsideDir, 'rev-parse', '--git-dir'],
+    ['--git-dir', join(outsideDir, '.git'), 'status'],
+    [`--git-dir=${join(outsideDir, '.git')}`, 'status'],
+    ['--work-tree', outsideDir, 'status'],
+    [`--work-tree=${outsideDir}`, 'status'],
+    ['--namespace', 'x', 'status'],
+    ['--namespace=x', 'status'],
+    ['-c', 'user.name=t', '-C', '..', 'status'],
+  ]) {
+    assert.throws(() => gitResult(d, args), REFUSED, `git ${args.join(' ')}`);
+  }
+});
+
+test('config may not name another file; clone, init and worktree add may not write outside; no key can move the work tree', () => {
+  const d = repoIn();
+  const target = join(outsideDir, 'cfg');
+  for (const args of [
+    ['config', '--file', target, 'a.b', 'c'],
+    ['config', `--file=${target}`, 'a.b', 'c'],
+    ['config', '-f', target, 'a.b', 'c'],
+    ['config', '--global', 'a.b', 'c'],
+    ['config', '--system', 'a.b', 'c'],
+    ['clone', '-q', d, join(outsideDir, 'clone')],
+    ['clone', '-q', d, '../../../clone-escape'],
+    ['clone', '-q', '--separate-git-dir', join(scratch, 'sep'), d, join(scratch, 'dest')],
+    ['init', '-q', join(outsideDir, 'init')],
+    ['init', '-q', '--separate-git-dir', join(outsideDir, 'sep')],
+    ['worktree', 'add', join(outsideDir, 'wt')],
+    ['config', 'core.worktree', outsideDir],
+    ['-c', `core.worktree=${outsideDir}`, 'status'],
+    ['-c', 'core.hooksPath=/x', 'status'],
+    ['config', 'include.path', 'x'],
+  ]) {
+    assert.throws(() => gitResult(d, args), REFUSED, `git ${args.join(' ')}`);
+  }
+  assert.equal(readdirSync(outsideDir).length, 0, 'nothing was written outside the scratch folder');
+});
+
+test('a path argument that stays inside the scratch folder still works (the converted tests rely on it)', () => {
+  const d = repoIn();
+  writeFileSync(join(d, 'f'), 'x');
+  git(d, 'add', '-A');
+  git(d, 'commit', '-q', '-m', 'c');
+  const copy = join(scratch, 'args-copy');
+  git(d, 'clone', '-q', d, copy);
+  git(d, 'clone', '-q', '--bare', `file://${d}`, join(scratch, 'args-bare'));
+  git(d, 'config', '--local', 'core.autocrlf', 'false');
+  assert.match(git(d, 'config', '--local', '--list'), /autocrlf=false/);
+  assert.equal(git(d, 'show', 'HEAD:f'), 'x');
+  git(d, 'bundle', 'create', join(scratch, 'args.bundle'), 'HEAD');
+});

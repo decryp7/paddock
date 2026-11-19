@@ -2976,9 +2976,15 @@ older ones (`union-merge`, `c85-features-register`) that passed `...process.env`
 caller's environment; GIT_* variables select the repository. **Fix, the class (ER-21, ER-44, ER-45, ER-47):** one helper for the
 JavaScript tests, `conformance/test/lib/scratch-git.mjs` (drops every GIT_* variable, pins the global and system configuration to
 /dev/null, passes the identity by `-c`, sets `GIT_CEILING_DIRECTORIES`, refuses a folder outside the temp folder or a repository
-whose git dir is outside it) and its Rust twin `paddock_dev::git_env::scratch_git()`; about 20 JavaScript test files and 19 Rust test
-files converted; check C142 (report-only, JavaScript) and `git_env::tests::no_test_file_starts_git_without_the_builder` (Rust)
-refuse a raw git start in a test. **Positive controls:** `scratch-git.test.mjs` shows a raw git leaking under a hostile `GIT_DIR` into
+whose git dir is outside it) and its Rust twin `paddock_testkit::scratch_git()` (a `TestCommand`, so an empty environment plus a private git configuration, and the
+same refusals: git's own `-C`, `--git-dir`, `--work-tree`, `--namespace`, `config --file`, `clone` or `init` into a path outside the temp
+folder, a key that moves the work tree); the first version checked only the working folder and the review found five ways out through
+git's own arguments (`-C <outside>`, `--git-dir=`, `--work-tree`, `config --file <outside>`, `clone` into an outside destination), so
+the argument check is part of the helper and each escape has a negative test. `conformance/test/run-tests.mjs` also strips every
+`GIT_*` variable from the test processes (git's own `t/test-lib.sh` does the same). Test files converted: about 20 JavaScript and 19
+Rust, plus `crates/paddock-repo-graph` and `tools/wiki`; C142 (report-only, JavaScript; async `exec`, templates, `bash -c`, execa, zx,
+a variable that holds `git`, `*.spec.ts`; `status` counts as a write) and `git_env::tests::no_test_file_starts_git_without_the_builder`
+(Rust, every `tests` folder under crates, tools and apps) refuse a raw git start in a test. **Positive controls:** `scratch-git.test.mjs` shows a raw git leaking under a hostile `GIT_DIR` into
 a stand-in "real" repository and the helper leaving its config, HEAD and refs unchanged; the Rust control checks the builder's
 environment. **Earlier instances of the class:** the hook's `GIT_DIR` reaching `git -C <other folder>` (train 14, 2026-11-17; four
 instances, fixed in `git_env::git()` for the tool's own code) and this one for the tests. **Never run a test by hand with `GIT_DIR` or

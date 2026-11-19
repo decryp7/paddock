@@ -20,24 +20,6 @@ pub fn git() -> Command {
     cmd
 }
 
-/// A `git` for a test that works in a scratch repository (the Rust twin of conformance/test/lib/scratch-git.mjs): no
-/// repository-selecting variable, and the global and system git configuration pinned to `/dev/null`, so a `git init`, `git config`
-/// or `git commit` in a temporary folder can never write into the repository a hook or a shell names with `GIT_DIR` and
-/// `GIT_WORK_TREE` (2026-11-19: `core.worktree` and `user.*` landed in the shared .git/config), nor read the machine's own
-/// configuration. Identity is still passed by `-c`; the default branch is `main` (a pinned global configuration has none, so `git init`
-/// would make `master`).
-pub fn scratch_git() -> Command {
-    let mut cmd = git();
-    cmd.env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_CONFIG_COUNT", "1")
-        .env("GIT_CONFIG_KEY_0", "init.defaultBranch")
-        .env("GIT_CONFIG_VALUE_0", "main");
-    cmd
-}
-
 /// Removes them from one child's environment.
 pub fn remove_from(cmd: &mut Command) {
     for v in REPO_VARS {
@@ -109,43 +91,54 @@ mod tests {
         );
     }
 
-    /// Every integration test of this tool starts git through [`scratch_git`] (or [`git`] for a real-tree read), never bare: a bare
-    /// start inherits `GIT_DIR` and `GIT_WORK_TREE` from a git hook and wrote into the real repository (2026-11-19).
+    /// The `.rs` files below every folder named `tests` under `crates/`, `tools/` and `apps/` (not `target`, `node_modules` or fixtures).
+    fn test_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+        fn walk(dir: &std::path::Path, in_tests: bool, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                let name = e.file_name().to_string_lossy().into_owned();
+                if p.is_dir() {
+                    if matches!(name.as_str(), "target" | "node_modules" | "fixtures" | ".git") {
+                        continue;
+                    }
+                    walk(&p, in_tests || name == "tests", out);
+                } else if in_tests && p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        for top in ["crates", "tools", "apps"] {
+            walk(&root.join(top), false, &mut out);
+        }
+        out
+    }
+
+    /// Every test of the repository starts git through `paddock_testkit::scratch_git()` (or `TestCommand`), never bare: a bare start
+    /// inherits `GIT_DIR` and `GIT_WORK_TREE` from a git hook and wrote into the real repository (2026-11-19).
     #[test]
     fn no_test_file_starts_git_without_the_builder() {
-        let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-        let mut files = Vec::new();
-        rust_files(&tests, &mut files);
-        assert!(files.len() > 30, "the scan read {} files: wrong folder?", files.len());
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let files = test_files(&root);
+        for must in [
+            "tools/paddock-dev/tests/it/main.rs",
+            "tools/wiki/tests/it/common.rs",
+            "crates/paddock-repo-graph/tests/it/adapters.rs",
+        ] {
+            assert!(
+                files.iter().any(|f| f.ends_with(must)),
+                "the scan did not read {must}: wrong folder?"
+            );
+        }
         let mut bad = Vec::new();
         for f in &files {
             for n in bare_git_lines(&std::fs::read_to_string(f).unwrap()) {
-                bad.push(format!("{}:{n}", f.strip_prefix(&tests).unwrap().display()));
+                bad.push(format!("{}:{n}", f.strip_prefix(&root).unwrap().display()));
             }
         }
         assert!(
             bad.is_empty(),
-            "start git with `paddock_dev::git_env::scratch_git()` (a scratch repository) or `git_env::git()` (a read), not a bare command: {bad:?}"
-        );
-    }
-
-    /// Positive control: the builder for scratch repositories loses the repository variables of a hook and pins the configuration.
-    #[test]
-    fn a_scratch_git_loses_the_repository_variables_and_pins_the_configuration() {
-        let cmd = scratch_git();
-        let envs: HashMap<_, _> = cmd
-            .get_envs()
-            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned())))
-            .collect();
-        for v in REPO_VARS {
-            assert_eq!(envs.get(v), Some(&None), "{v} is removed from the child");
-        }
-        assert_eq!(envs["GIT_CONFIG_GLOBAL"].as_deref(), Some("/dev/null"));
-        assert_eq!(envs["GIT_CONFIG_SYSTEM"].as_deref(), Some("/dev/null"));
-        assert_eq!(
-            envs["GIT_CONFIG_VALUE_0"].as_deref(),
-            Some("main"),
-            "a repository it makes starts on main, as the machine's own configuration did"
+            "start git in a test with `paddock_testkit::scratch_git()` (it drops GIT_*, checks its folder and arguments) or `TestCommand`, not a bare command: {bad:?}"
         );
     }
 

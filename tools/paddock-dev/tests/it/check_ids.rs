@@ -8,7 +8,7 @@ use std::path::Path;
 // Plain `git` and the tool under test, started and awaited here; nothing is killed by pid.
 #[allow(clippy::disallowed_methods)]
 fn git(dir: &Path, args: &[&str]) {
-    let out = paddock_dev::git_env::scratch_git()
+    let out = paddock_testkit::scratch_git()
         .args(["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"])
         .args(args)
         .current_dir(dir)
@@ -19,7 +19,7 @@ fn git(dir: &Path, args: &[&str]) {
 
 #[allow(clippy::disallowed_methods)]
 fn git_out(dir: &Path, args: &[&str]) -> String {
-    let out = paddock_dev::git_env::scratch_git().args(args).current_dir(dir).output().unwrap();
+    let out = paddock_testkit::scratch_git().args(args).current_dir(dir).output().unwrap();
     assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
     String::from_utf8_lossy(&out.stdout).into_owned()
 }

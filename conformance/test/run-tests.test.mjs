@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { testArgs } from './run-tests.mjs';
+import { testArgs, testEnv } from './run-tests.mjs';
 
 // The push gate runs these tests beside Clippy rows; without a cap `node --test` starts one process per core (ER-24). The cap is
 // PADDOCK_TEST_CONCURRENCY, and it must come before the file patterns: after them, node ignores the flag (measured 2026-11-15).
@@ -23,4 +23,9 @@ test('a value that is not a positive whole number fails with what to set, never 
 
 test('the arguments start with --test (the patterns stay in package.json, where test-files-run reads them)', () => {
   assert.throws(() => testArgs(['test/a.test.mjs'], {}), /usage: node test\/run-tests.mjs --test/);
+});
+
+test('testEnv drops every GIT_* variable (a git hook sets GIT_DIR and GIT_WORK_TREE) and the CI markers, and keeps the rest', () => {
+  const e = testEnv({ PATH: '/bin', HOME: '/h', CI: 'true', GITHUB_ACTIONS: 'true', GIT_DIR: '/x', GIT_WORK_TREE: '/y', GIT_INDEX_FILE: '/z', GIT_AUTHOR_NAME: 'a', GIT_CONFIG_COUNT: '1' });
+  assert.deepEqual(e, { PATH: '/bin', HOME: '/h' });
 });

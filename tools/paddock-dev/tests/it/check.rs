@@ -246,7 +246,7 @@ fn live_mask_equals_the_js_mask_on_every_tracked_rust_file() {
         return skip("node is not installed");
     }
     let root = repo_root();
-    let listed = paddock_dev::git_env::scratch_git()
+    let listed = paddock_testkit::scratch_git()
         .args(["ls-files", "-z", "--", "*.rs"])
         .current_dir(&root)
         .output()
@@ -884,7 +884,7 @@ const BASELINE: &str = "conformance/baselines/C53.json";
     reason = "a test spawns node, git or the built binary; it ends them itself"
 )]
 fn git(root: &Path, args: &[&str]) {
-    let out = paddock_dev::git_env::scratch_git()
+    let out = paddock_testkit::scratch_git()
         .args([
             "-c",
             "user.name=t",

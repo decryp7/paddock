@@ -301,7 +301,7 @@ async function plantedControls(dir) {
   return { results, timings, scratch };
 }
 
-const gitStatus = () => execFileSync('git', ['status', '--porcelain'], { cwd: REPO, encoding: 'utf8' });
+const gitStatus = () => execFileSync('git', ['--no-optional-locks', 'status', '--porcelain'], { cwd: REPO, encoding: 'utf8' });
 
 describe('the real lint command goes red', { concurrency: targets.length }, () => {
   let statusBefore;

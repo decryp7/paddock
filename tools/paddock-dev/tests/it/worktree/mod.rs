@@ -13,9 +13,9 @@ mod oracle;
 mod primary;
 
 use paddock_testkit::TestCommand;
+use std::process::Command;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// A bare origin, the primary checkout (cloned, on `main`, one commit pushed) and a folder for worktrees.
 pub struct Fixture {
@@ -72,10 +72,9 @@ impl Fixture {
 
     // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
     #[allow(clippy::disallowed_methods)]
-    fn git_cmd(&self, dir: &Path) -> Command {
-        let mut c = paddock_dev::git_env::scratch_git();
-        c.arg("-C")
-            .arg(dir)
+    fn git_cmd(&self, dir: &Path) -> paddock_testkit::ScratchGit {
+        let mut c = paddock_testkit::scratch_git();
+        c.current_dir(dir)
             .env("GIT_CONFIG_GLOBAL", &self.gitconfig)
             .env("GIT_CONFIG_NOSYSTEM", "1");
         c

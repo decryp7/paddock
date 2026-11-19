@@ -197,7 +197,7 @@ test('a shallow checkout of the first tag is the first release', () => {
 
 test('an origin that cannot be reached fails loudly and blames the tag listing, not the CHANGELOG', () => {
   const dir = shallowClone([], 'dyno-v1.0.0');
-  sgit(dir, 'remote', 'set-url', 'origin', 'file:///nonexistent/origin.git');
+  sgit(dir, 'remote', 'set-url', 'origin', `file://${join(scratch, 'nonexistent', 'origin.git')}`); // a path that does not exist, inside the scratch folder
   const r = runIn(notesStep, dir, 'dyno-v1.0.0');
   assert.notEqual(r.status, 0);
   assert.match(r.stdout + r.stderr, /could not list the tags of origin/);

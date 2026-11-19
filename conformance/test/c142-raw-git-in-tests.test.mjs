@@ -29,6 +29,29 @@ test('C142: a waiver with a reason on the line or the line above removes the sit
   assert.deepEqual(lines("// conformance: raw-git\nspawnSync('git', a);\n"), [2]);
 });
 
+test('C142 catches the other spellings: async exec, templates, a variable that holds git, a shell script, execa, zx, a URL before the call, .spec.ts', () => {
+  assert.deepEqual(lines("exec('git init', cb);\n"), [1], 'async exec');
+  assert.deepEqual(lines("execSync(`cd ${dir} && git init`);\n"), [1], 'a template with cd and git');
+  assert.deepEqual(lines("execSync(`git -C ${d} config a b`);\n"), [1], 'a template');
+  assert.deepEqual(lines("const GIT = 'git';\nspawnSync(GIT, ['init']);\n"), [2], 'a variable that holds git');
+  assert.deepEqual(lines("spawnSync('bash', ['-c', 'cd d && git init']);\n"), [1], 'bash -c');
+  assert.deepEqual(lines("spawnSync('sh', ['-c', `git config a b`]);\n"), [1], 'sh -c with a template');
+  assert.deepEqual(lines("await execa('git', ['init']);\n"), [1], 'execa');
+  assert.deepEqual(lines("await $`git init`;\n"), [1], 'zx');
+  assert.deepEqual(lines("const u = 'https://x.invalid/a'; spawnSync('git', ['init']);\n"), [1], 'a // inside a string is not a comment');
+  assert.deepEqual(lines("spawnSync('git', ['init']); // https://x\n"), [1]);
+  assert.deepEqual(rawGitSites("spawnSync('git', ['init']);\n", 'ui/e2e/a.spec.ts').length, 1, '.spec.ts is read');
+});
+
+test('C142: status is a write (it refreshes the index) unless --no-optional-locks; bash without git is not a site', () => {
+  assert.deepEqual(lines("spawnSync('git', ['status', '--short']);\n"), [1]);
+  assert.deepEqual(lines("spawnSync('git', ['--no-optional-locks', 'status', '--short']);\n"), []);
+  assert.deepEqual(lines("spawnSync('bash', ['-c', 'echo hi']);\n"), []);
+  assert.deepEqual(lines("const GIT = 'git';\nspawnSync('node', [GIT]);\n"), [], 'the variable is not the program');
+  assert.deepEqual(lines("const m = /x/.exec('git status ok');\n"), [], 'RegExp.exec is not a process');
+  assert.equal(C142.rule, 84, 'cites rule 84 (ER-47), not the image-viewer rule 45');
+});
+
 test('C142: only test files are read; the helper itself and other code are not', () => {
   assert.deepEqual(rawGitSites("spawnSync('git', ['init']);\n", 'conformance/test/lib/scratch-git.mjs'), []);
   assert.deepEqual(rawGitSites("spawnSync('git', ['init']);\n", 'scripts/publish.mjs'), []);

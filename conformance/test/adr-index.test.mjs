@@ -61,6 +61,12 @@ test('entryOf: status keyword and date from the status line when there is no Dat
   assert.deepEqual(adrFiles(['README.md', '0002-b.md', 'trims-2026.md', '0001-a.md', 'amendments']), ['0001-a.md', '0002-b.md']);
 });
 
+test('entryOf: the status is the word that comes first in the status text, not the first one in a word list', () => {
+  assert.equal(entryOf('0009-x.md', '# 9. X\n\n- Status: Proposed 2026-11-01; accepted by the user later\n').status, 'Proposed');
+  assert.equal(entryOf('0009-x.md', '# 9. X\n\n- Status: Withdrawn 2026-11-11 (user); was accepted before\n').status, 'Withdrawn');
+  assert.equal(entryOf('0009-x.md', '# 9. X\n\n- Status: Accepted (2026-10-30). Proposed 2026-10-23; built\n').status, 'Accepted');
+});
+
 test('two branches that each add an ADR file merge without a conflict, and the regenerated index lists both', () => {
   const root = makeRoot('merge', { '0001-a.md': adr(1, 'First') });
   cpSync(join(ROOT, '.gitattributes'), join(root, '.gitattributes'));
@@ -110,11 +116,4 @@ test('positive control for the changelog rule: without the union attribute the s
   }
   git(root, 'checkout', '-q', 'one');
   assert.notEqual(git(root, 'merge', '--no-edit', 'two').status, 0);
-});
-
-test('.gitattributes lists the changelogs as union', () => {
-  const have = readFileSync(join(ROOT, '.gitattributes'), 'utf8');
-  assert.match(have, /^\/CHANGELOG\.md merge=union$/m);
-  assert.match(have, /^\/apps\/\*\/CHANGELOG\.md merge=union$/m);
-  assert.ok(have.split('\n').includes('/docs/adr/README.md merge=union'), "the ADR index must be union (its generator's --check holds the merge result)");
 });

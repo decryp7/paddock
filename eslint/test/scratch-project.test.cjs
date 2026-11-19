@@ -9,7 +9,7 @@ const { test } = require('node:test');
 const { scratchProject } = require('../../scripts/test-helpers/scratch-project.cjs');
 
 const REPO = resolve(__dirname, '..', '..');
-const status = () => execFileSync('git', ['status', '--porcelain'], { cwd: REPO, encoding: 'utf8' });
+const status = () => execFileSync('git', ['--no-optional-locks', 'status', '--porcelain'], { cwd: REPO, encoding: 'utf8' });
 
 test('scratchProject: the layout is there, a planted file stays in the copy, cleanup removes it', async () => {
   const before = status();

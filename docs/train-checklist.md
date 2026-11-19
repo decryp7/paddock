@@ -24,3 +24,13 @@ locked worktree, never in the main checkout (rule 2).
    reaches, and for every new failure the members that reach it. Take out every suspect, or fix the cause in its owner's
    branch, then fix round by failed tests only (ER-10). A failure that also fails on main is nobody's.
 7. **Land** only after the full green run on the final tree (rule 50 (b)); delete the `trial/*` refs of landed branches with `./dev ci trial-prune` (a trial that is sent back or not dispatched already deletes its own ref).
+8. **Generated and append-only files after each merge** (`merge=union` in `.gitattributes`: both sides' lines survive and nothing conflicts).
+   Run `./dev gen check --only adr-index,conformance-check-lists`; when one is stale, run its regenerate command
+   (`node conformance/bin/paddock-adr-index.mjs`, `node conformance/bin/paddock-check-lists.mjs`) and commit the result with the
+   merge. A check-list change still conflicts in `conformance/paddock.ci.json` (union is not set there: it breaks the JSON): take
+   either side, then regenerate.
+9. **A release cut on the train.** Union has no idea which section a line belongs to: a member that added its CHANGELOG entry under
+   `Unreleased` while another change cut that section into a released version gets its entry filed under the released section
+   with no conflict. After merging a member into a train that holds a release cut (a CHANGELOG heading moved or renamed), read
+   `git diff <train-before-merge> HEAD -- CHANGELOG.md apps/*/CHANGELOG.md` and move each entry that the member added to the section
+   it belongs to, in the merge commit. The order of entries within a section is not guaranteed either; that is accepted.

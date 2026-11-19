@@ -33,7 +33,10 @@ export function entryOf(file, text) {
   const head = lines.slice(0, 40);
   const statusLine = head.find((l) => /^(-\s*)?\*{0,2}Status:?\*{0,2}:?\s/i.test(l)) ?? '';
   const statusText = statusLine.replace(/^(-\s*)?\*{0,2}Status:?\*{0,2}:?\s*/i, '');
-  const word = STATUS_WORDS.find((w) => new RegExp(`\\b${w}\\b`, 'i').test(statusText.slice(0, 60)));
+  // The word that comes first in the text (a status line may mention a later one: "Proposed ...; accepted by the user later").
+  const word = STATUS_WORDS.map((w) => ({ w, at: statusText.search(new RegExp(`\\b${w}\\b`, 'i')) }))
+    .filter((c) => c.at >= 0)
+    .sort((a, b) => a.at - b.at)[0]?.w;
   const status = word ? word[0].toUpperCase() + word.slice(1) : statusText ? statusText.slice(0, 40) : 'No status line';
   const dateLine = head.find((l) => /^(-\s*)?\*{0,2}Date:?\*{0,2}:?\s/i.test(l)) ?? '';
   const date = DATE.exec(dateLine)?.[0] ?? DATE.exec(statusText)?.[0] ?? '';

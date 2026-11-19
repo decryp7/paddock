@@ -57,6 +57,7 @@ pub mod private_temp;
 pub mod process;
 pub mod runner;
 pub mod scratch;
+pub mod scratch_git;
 pub mod stand_in;
 mod stand_in_json;
 pub mod wait;
@@ -74,6 +75,7 @@ pub use runner::{Call, FakeRunner, Reply};
 pub use scratch::{
     CanonicalTempDir, Leftovers, Scratch, ScratchError, canonical_tempdir, try_canonical_tempdir,
 };
+pub use scratch_git::{ScratchGit, scratch_git};
 pub use stand_in::{Actions, Installed, Invocation, Spawn, StandIn};
 pub use wait::{
     HANG_GUARD, Look, Progress, StallGuard, guarded, poll_for, poll_until_within, recv,

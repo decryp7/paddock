@@ -53,7 +53,9 @@ conformance/ci/*.txt text eol=lf
 # Append-only changelogs: every member adds its entry at the top of a section, so two branches (and a train merge or a member
 # revert) conflicted on the same lines. union keeps both sides' lines and never conflicts. Trade-off: the order within a section
 # is not guaranteed (the two sides' lines come one after the other), and an entry edited in place by both sides is kept twice
-# instead of conflicting, so a reviewer reads the merged section.
+# instead of conflicting, so a reviewer reads the merged section. Union also files a member's entry under a released section with no
+# conflict when another change cut the Unreleased heading in the meantime: the integrator reads the CHANGELOG diff at a release cut
+# (docs/train-checklist.md, step 9).
 /CHANGELOG.md merge=union
 /apps/*/CHANGELOG.md merge=union
 

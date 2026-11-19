@@ -27,7 +27,7 @@ fn write(root: &Path, files: &[(&str, String)]) {
 
 #[allow(clippy::disallowed_methods, reason = "a test spawns git; it ends it itself")]
 fn git(root: &Path, args: &[&str]) {
-    let st = paddock_dev::git_env::scratch_git()
+    let st = paddock_testkit::scratch_git()
         .args([
             "-c",
             "user.name=t",

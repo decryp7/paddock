@@ -14,7 +14,7 @@ fn root() -> PathBuf {
 }
 
 fn tracked() -> Vec<String> {
-    let out = paddock_dev::git_env::scratch_git()
+    let out = paddock_testkit::scratch_git()
         .current_dir(root())
         .args(["ls-files"])
         .output()
@@ -361,12 +361,12 @@ fn job_isolation_refuses_a_process_pattern_that_names_no_folder_of_the_job() {
 fn markdown_that_code_reads(root: &Path) -> (BTreeSet<String>, Vec<String>) {
     // include_str!("rel.md") is resolved from its file; quoted repo paths ('docs/x.md', "apps/a/README.md") are taken as is.
     let pattern = r#"include_str!\("[^"]+\.md"\)|['"](docs|apps|crates|ui)/[A-Za-z0-9_./-]+\.md['"]"#;
-    let out = paddock_dev::git_env::scratch_git()
+    let out = paddock_testkit::scratch_git()
         .current_dir(root)
         .args(["grep", "-E", pattern, "--", "*.rs", "*.mjs", "*.ts", "*.cjs"])
         .output()
         .unwrap();
-    let ls = paddock_dev::git_env::scratch_git()
+    let ls = paddock_testkit::scratch_git()
         .current_dir(root)
         .args(["ls-files"])
         .output()
@@ -425,11 +425,7 @@ fn every_markdown_file_that_code_reads_is_a_declared_doc_input() {
 fn a_script_reading_an_undeclared_markdown_file_is_found() {
     let dir = tempfile::tempdir().unwrap();
     let git = |args: &[&str]| {
-        let out = paddock_dev::git_env::scratch_git()
-            .current_dir(dir.path())
-            .args(args)
-            .output()
-            .unwrap();
+        let out = paddock_testkit::scratch_git().current_dir(dir.path()).args(args).output().unwrap();
         assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
     };
     git(&["init", "-q"]);

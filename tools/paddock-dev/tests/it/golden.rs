@@ -201,9 +201,8 @@ fn files_below(dir: &Path, base: &Path, out: &mut Vec<PathBuf>) {
 }
 
 pub(crate) fn git(dir: &Path, args: &[&str]) {
-    let st = paddock_dev::git_env::scratch_git()
-        .arg("-C")
-        .arg(dir)
+    let st = paddock_testkit::scratch_git()
+        .current_dir(dir)
         .args([
             "-c",
             "user.name=t",
@@ -328,9 +327,8 @@ fn the_recorded_cases_cover_what_the_review_asked_for() {
 fn run_cli(program: &mut TestCommand, root: &Path, case: &Value) -> Value {
     let dir = tempfile::tempdir().unwrap();
     let head = String::from_utf8(
-        paddock_dev::git_env::scratch_git()
-            .arg("-C")
-            .arg(root)
+        paddock_testkit::scratch_git()
+            .current_dir(root)
             .args(["rev-parse", "fixture-head"])
             .output()
             .unwrap()
@@ -482,14 +480,13 @@ fn copy_checked_out_files(src: &Path, dst: &Path) {
     use std::io::Write;
     use std::process::Stdio;
     let git = |dir: &Path, args: &[&str]| {
-        let out = paddock_dev::git_env::scratch_git().arg("-C").arg(dir).args(args).output().unwrap();
+        let out = paddock_testkit::scratch_git().current_dir(dir).args(args).output().unwrap();
         assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
         out.stdout
     };
     let git_with_input = |dir: &Path, args: &[&str], input: Vec<u8>| {
-        let mut child = paddock_dev::git_env::scratch_git()
-            .arg("-C")
-            .arg(dir)
+        let mut child = paddock_testkit::scratch_git()
+            .current_dir(dir)
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -574,9 +571,8 @@ fn copy_checked_out_files(src: &Path, dst: &Path) {
 
 /// Tracked files of `src` whose content on disk differs from the index (`git ls-files -m`).
 fn modified_files(src: &Path) -> Vec<String> {
-    let out = paddock_dev::git_env::scratch_git()
-        .arg("-C")
-        .arg(src)
+    let out = paddock_testkit::scratch_git()
+        .current_dir(src)
         .args(["ls-files", "-m", "-z"])
         .output()
         .unwrap();
@@ -591,9 +587,8 @@ fn modified_files(src: &Path) -> Vec<String> {
 /// Objects in `repo`'s own store, loose and packed (`count` plus `in-pack` of `git count-objects -v`; its alternates are not
 /// counted). Both, because `gc --auto` may pack loose objects at any time.
 fn own_objects(repo: &Path) -> usize {
-    let out = paddock_dev::git_env::scratch_git()
-        .arg("-C")
-        .arg(repo)
+    let out = paddock_testkit::scratch_git()
+        .current_dir(repo)
         .args(["count-objects", "-v"])
         .output()
         .unwrap();
@@ -616,9 +611,8 @@ fn the_repository_copy_reuses_the_source_objects_instead_of_hashing_every_file()
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("copy");
     copy_checked_out_files(&repo_root(), &copy);
-    let listed = paddock_dev::git_env::scratch_git()
-        .arg("-C")
-        .arg(&copy)
+    let listed = paddock_testkit::scratch_git()
+        .current_dir(&copy)
         .args(["ls-files", "-z"])
         .output()
         .unwrap()
@@ -757,9 +751,8 @@ fn edits_on_a_copy(edits: &[(String, Option<String>)], narrowed: &std::sync::ato
             None => assert_eq!(got["all"], false, "an edit of {rel} is narrowed"),
         }
         narrowed.fetch_add(usize::from(got["all"] == false), std::sync::atomic::Ordering::Relaxed);
-        let restored = paddock_dev::git_env::scratch_git()
-            .arg("-C")
-            .arg(&copy)
+        let restored = paddock_testkit::scratch_git()
+            .current_dir(&copy)
             .args(["checkout", "-q", "--", rel])
             .status()
             .unwrap();

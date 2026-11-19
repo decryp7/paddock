@@ -7,26 +7,9 @@ use std::time::Duration;
 const T: Duration = Duration::from_secs(60);
 
 fn git(dir: &Path, args: &[&str]) {
-    let st = paddock_proc::command("git")
-        .arg("-C")
-        .arg(dir)
-        .args([
-            "-c",
-            "user.name=t",
-            "-c",
-            "user.email=t@example.invalid",
-            "-c",
-            "commit.gpgsign=false",
-        ])
+    let st = paddock_testkit::scratch_git()
+        .current_dir(dir)
         .args(args)
-        .env(
-            "GIT_CONFIG_GLOBAL",
-            if cfg!(windows) { "NUL" } else { "/dev/null" },
-        )
-        .env(
-            "GIT_CONFIG_SYSTEM",
-            if cfg!(windows) { "NUL" } else { "/dev/null" },
-        )
         .status()
         .unwrap();
     assert!(st.success(), "git {args:?}");

@@ -8,7 +8,7 @@ use std::path::Path;
 // Starts git by program name in a throw-away fixture, never a process by pid (C53).
 #[allow(clippy::disallowed_methods)]
 fn git(dir: &Path, args: &[&str]) {
-    let out = paddock_dev::git_env::scratch_git()
+    let out = paddock_testkit::scratch_git()
         .args([
             "-c",
             "user.name=t",

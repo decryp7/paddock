@@ -65,7 +65,7 @@ fn legs(plan: &Value, opts: MatrixOpts) -> Vec<Value> {
 }
 
 fn tracked() -> Vec<String> {
-    let out = paddock_dev::git_env::scratch_git()
+    let out = paddock_testkit::scratch_git()
         .current_dir(root())
         .args(["ls-files"])
         .output()
@@ -628,9 +628,8 @@ fn a_tags_gates_keep_one_app_both_halves_and_no_other_project() {
 // ----------------------------------------------------------------------------------------- the plan read from git
 
 fn sh(dir: &Path, args: &[&str]) -> String {
-    let out = paddock_dev::git_env::scratch_git()
-        .arg("-C")
-        .arg(dir)
+    let out = paddock_testkit::scratch_git()
+        .current_dir(dir)
         .args([
             "-c",
             "user.name=t",

@@ -18,6 +18,9 @@ export function testArgs(argv, env) {
 /** `env` without the variables that say "this is CI": a test passes `options.ci` when it needs either answer, so the tests give the same result on a laptop and in a CI job (the growth checks turn a target they cannot see into an error in CI). */
 export function testEnv(env) {
   const e = { ...env };
+  // Also without every GIT_* variable, as git's own t/test-lib.sh does: a git hook (the pre-push gate) sets GIT_DIR and GIT_WORK_TREE,
+  // and a test's git would then act on the real repository (2026-11-19).
+  for (const k of Object.keys(e)) if (k.startsWith('GIT_')) delete e[k];
   for (const k of ['CI', 'GITEA_ACTIONS', 'GITHUB_ACTIONS']) delete e[k];
   return e;
 }
