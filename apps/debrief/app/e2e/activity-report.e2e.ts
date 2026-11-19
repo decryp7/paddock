@@ -1,6 +1,7 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { CAPTURE_TIMEOUT, openApp } from './app';
+import { heldToast, pressInToast, runningToast, toastByCause } from './toast-support';
 
 // Report a problem (mock backend): an error raises the toast, "Report a problem…" opens the dialog that lists
 // what the zip will contain and the steps to reproduce, and Save writes it (the mock records the save).
@@ -18,9 +19,9 @@ test('an error leads to a problem report the user reviews and saves', async ({ p
   await expect(page.locator('debrief-error-snapshots-view')).toBeVisible();
 
   await page.evaluate(() => void setTimeout(() => { throw new Error('e2e report boom'); }, 0));
-  const toast = page.locator('[data-testid=notification][data-cause="diagnostics.snapshot"]');
+  const toast = toastByCause(page, 'diagnostics.snapshot');
   await expect(toast).toContainText('Something went wrong', { timeout: CAPTURE_TIMEOUT });
-  await toast.getByRole('button', { name: 'Report a problem…' }).click();
+  await pressInToast(page, toast, toast.getByRole('button', { name: 'Report a problem…' }));
 
   const dialog = page.getByRole('dialog', { name: 'Report a problem' });
   await expect(dialog).toBeVisible();
@@ -43,12 +44,11 @@ test('an error leads to a problem report the user reviews and saves', async ({ p
   await expect(contents).toContainText('Your description');
   await dialog.getByRole('button', { name: 'Save report…' }).click();
   // Saved by a job: the dialog may close; the message says when the zip is ready, with "Show in folder".
-  await expect(page.getByTestId('notification').filter({ hasText: 'Saving the problem report — running in Jobs' })).toBeVisible();
+  await expect(runningToast(page, 'Saving the problem report — running in Jobs')).toBeVisible();
   await expect(dialog.locator('[data-testid=report-saved]')).toContainText('debrief-problem-report.zip');
   await dialog.getByRole('button', { name: 'Close' }).first().click();
   await expect(dialog).toBeHidden();
-  const done = page.getByTestId('notification').filter({ hasText: 'Finished: Save problem report debrief-problem-report.zip' });
-  await expect(done).toBeVisible({ timeout: 15_000 });
+  const done = await heldToast(page, 'Finished: Save problem report debrief-problem-report.zip', { timeout: 15_000 });
   await expect(done).toContainText('files zipped.');
   await expect(done.getByTestId('notification-action-primary')).toHaveText('Show in folder');
 });

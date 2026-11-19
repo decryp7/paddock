@@ -243,9 +243,102 @@ describe('displaced views and grow-back', () => {
     expect(layout.explorerVerdict(narrow.api, true, 300)).toBe('hide');
     const roomy = fakeDock(1200, 900, { 'timeline+events': { width: 1200, height: 900 } });
     expect(layout.explorerVerdict(roomy.api, true, 300)).toBe('keep');
-    // Closed: the dock has the Explorer's room too; it needs 300 + 560 + the margin.
-    expect(layout.explorerVerdict(fakeDock(923, 900, { 'timeline+events': { width: 923, height: 900 } }).api, false, 300)).toBe('keep');
-    expect(layout.explorerVerdict(fakeDock(925, 900, { 'timeline+events': { width: 925, height: 900 } }).api, false, 300)).toBe('show');
+    // Closed (and not drawn): the dock has the Explorer's room too; it needs 300 + 560 + the margin.
+    expect(layout.explorerVerdict(fakeDock(923, 900, { 'timeline+events': { width: 923, height: 900 } }).api, false, 0)).toBe('keep');
+    expect(layout.explorerVerdict(fakeDock(925, 900, { 'timeline+events': { width: 925, height: 900 } }).api, false, 0)).toBe('show');
+  });
+
+  it('the Explorer verdict is the same before and after the render that draws it: the room is the container as laid out now plus what the Explorer takes now', () => {
+    // debrief.yml run 8297: Ctrl+B opened the Explorer while a re-plan was due. The re-plan ran before the render (dock still 800 px, Explorer
+    // not drawn) or before dockview followed its container (dockview 800 px, container 527 px beside a drawn Explorer); adding the Explorer's width
+    // to dockview's last size made the plan see 1100 px, say "keep", and the next re-plan closed the Explorer the user had just opened.
+    const layout = setup();
+    const ctx = TestBed.inject(DockContext);
+    const container = document.createElement('div');
+    let width = 0;
+    vi.spyOn(container, 'getBoundingClientRect').mockImplementation(() => ({ width, height: 900 }) as DOMRect);
+    ctx.container = container;
+    const verdict = (room: number, drawn: number, open: boolean) => {
+      const { api } = fakeDock(room, 900, { 'timeline+events': { width: room, height: 900 } });
+      width = room - drawn;
+      return layout.explorerVerdict(api, open, drawn);
+    };
+    // 800 px of room: the Explorer (min 300) and the events (min 560) do not fit, drawn or not yet drawn.
+    expect(verdict(800, 0, true)).toBe('hide');
+    expect(verdict(800, 273, true)).toBe('hide');
+    // 1300 px of room: they fit, drawn or not.
+    expect(verdict(1300, 0, true)).toBe('keep');
+    expect(verdict(1300, 273, true)).toBe('keep');
+    // Closed but still drawn (the render that removes it has not run): the same room, so the same answer as closed and gone.
+    expect(verdict(1300, 273, false)).toBe(verdict(1300, 0, false));
+    expect(verdict(800, 273, false)).toBe('keep');
+  });
+});
+
+describe('the dock\'s room', () => {
+  /** A dockview whose own size the decisions must not read: every read of `width` or `height` is recorded. */
+  function untouchable(width: number, height: number) {
+    const { api } = fakeDock(width, height, { 'timeline+events': { width, height } });
+    const reads: string[] = [];
+    for (const k of ['width', 'height'] as const) Object.defineProperty(api, k, { get: () => (reads.push(k), k === 'width' ? width : height) });
+    return { api, reads };
+  }
+
+  function withContainer(width: number, height: number) {
+    const layout = setup();
+    const ctx = TestBed.inject(DockContext);
+    const container = document.createElement('div');
+    vi.spyOn(container, 'getBoundingClientRect').mockImplementation(() => ({ width, height }) as DOMRect);
+    ctx.container = container;
+    return layout;
+  }
+
+  it('is the container as laid out now, null while it has no box', () => {
+    const layout = setup();
+    const ctx = TestBed.inject(DockContext);
+    const size = { width: 900, height: 700 };
+    const container = document.createElement('div');
+    vi.spyOn(container, 'getBoundingClientRect').mockImplementation(() => ({ ...size }) as DOMRect);
+    ctx.container = container;
+    const { api, reads } = untouchable(1440, 800);
+    expect(layout.room(api)).toEqual({ width: 900, height: 700 });
+    size.width = 0;
+    expect(layout.room(api)).toBeNull();
+    expect(reads).toEqual([]);
+  });
+
+  it('fit lays dockview out at the room before it sets any size (a view added while dockview still has its last size: addView)', () => {
+    const layout = setup();
+    const ctx = TestBed.inject(DockContext);
+    const container = document.createElement('div');
+    vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({ width: 800, height: 900 } as DOMRect);
+    ctx.container = container;
+    const dock = fakeDock(1440, 900, { 'timeline+events': { width: 1440, height: 900 }, 'ai-chat': { width: 400, height: 900 } });
+    const calls: string[] = [];
+    (dock.api as unknown as { layout: (w: number, h: number) => void }).layout = (w, h) => calls.push(`layout ${w}x${h}`);
+    for (const g of dock.groups) g.api.setSize.mockImplementation(() => calls.push(`setSize ${g.id}`));
+    layout.fit(dock.api, { sizes: true, fresh: ['ai-chat'] });
+    expect(calls[0]).toBe('layout 800x900');
+    expect(calls.filter((c) => c.startsWith('layout'))).toHaveLength(1);
+  });
+
+  it('is dockview\'s size only without a container (unit tests of the plan)', () => {
+    expect(setup().room(fakeDock(1440, 800, {}).api)).toEqual({ width: 1440, height: 800 });
+  });
+
+  it('plan, grow-back, needsFit and the Explorer verdict read the room, never dockview\'s size (it can lag its container)', () => {
+    const layout = withContainer(800, 900);
+    const { api, reads } = untouchable(1440, 900);
+    const plan = layout.plan(api);
+    expect(plan).not.toBeNull();
+    layout.needsFit(api, plan!);
+    // A displaced view, so grow-back asks the plan (it returns early with none).
+    TestBed.inject(DockContext).displaced.set('home', { id: 'home', slot: { referencePanel: null, direction: 'within' }, into: 'events' });
+    layout.growBackIds(api);
+    layout.explorerVerdict(api, true, 0);
+    expect(reads).toEqual([]);
+    // And the answers are the container's: 800 px has no room for the Explorer beside the events, 1440 would have.
+    expect(layout.explorerVerdict(api, true, 0)).toBe('hide');
   });
 });
 
@@ -280,31 +373,19 @@ describe('watchResize', () => {
     return { layout, api, size, fire: () => fire() };
   }
 
-  it('plans once dockview has measured the new size, not before (a plan on the old size is never corrected)', () => {
+  it('re-plans once after the burst, from the container, without waiting for dockview to agree (the plan reads the room, not dockview)', () => {
     vi.useFakeTimers();
     const { layout, api, size, fire } = resizing({ width: 1440, height: 800 });
     const onResize = vi.fn();
     layout.watchResize(api, onResize);
     size.width = 900;
     fire();
-    vi.advanceTimersByTime(150);
-    expect(onResize).not.toHaveBeenCalled(); // dockview still reports 1440
-    vi.advanceTimersByTime(100);
+    vi.advanceTimersByTime(149);
     expect(onResize).not.toHaveBeenCalled();
-    (api as { width: number }).width = 900;
-    vi.advanceTimersByTime(50);
+    vi.advanceTimersByTime(1);
+    // dockview still reports 1440 (its own observer is late): the re-plan runs anyway, and it is laid out at the container's size first.
     expect(onResize).toHaveBeenCalledTimes(1);
-  });
-
-  it('still plans when dockview never agrees (bounded wait)', () => {
-    vi.useFakeTimers();
-    const { layout, api, size, fire } = resizing({ width: 1440, height: 800 });
-    const onResize = vi.fn();
-    layout.watchResize(api, onResize);
-    size.width = 900;
-    fire();
-    vi.advanceTimersByTime(150 + 50 * 20 + 50);
-    expect(onResize).toHaveBeenCalledTimes(1);
+    expect(api.layout).toHaveBeenLastCalledWith(900, 800);
   });
 
   it('says a re-plan is pending from the first resize until it has run, and not before', () => {
@@ -316,7 +397,6 @@ describe('watchResize', () => {
     size.width = 900;
     fire();
     expect(pending).toEqual([true]);
-    (api as { width: number }).width = 900;
     vi.advanceTimersByTime(150);
     expect(pending).toEqual([true, false]);
   });

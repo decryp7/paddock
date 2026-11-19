@@ -1,0 +1,49 @@
+import { expect, Locator, Page } from '@playwright/test';
+import { clickWithTimePaused } from './app';
+
+/**
+ * Toasts (the notification host's stack). A toast that is not an error leaves after its time (TOAST_MS, 8 s) and the stack moves as toasts come
+ * and go, so specs find toasts only here (the lint rule `paddock/e2e-transient-wait`): `heldToast` waits for one and holds it while the spec
+ * reads it (the pointer on a toast stops its time, notification-host.ts), `pressInToast` presses a button in one with the clock paused.
+ */
+
+/** Toasts whose text contains `text` (every toast without it): for a count or a text check, never for a press. */
+export function toastNamed(page: Page, text?: string | RegExp): Locator {
+  const all = page.getByTestId('notification');
+  return text === undefined ? all : all.filter({ hasText: text });
+}
+
+/** The toast of one cause (`data-cause`: `diagnostics.snapshot`, `workspace.error`, ...): for a count or a text check, never for a press. */
+export function toastByCause(page: Page, cause: string): Locator {
+  return page.getByTestId('notification').and(page.locator(`[data-cause="${cause}"]`));
+}
+
+/**
+ * A "running in Jobs" toast: its job's result replaces it by design (one toast per operation), so a spec only checks that it was seen
+ * (`toBeVisible`), never holds or presses it after other steps (sweep of 2026-11-19: holding one waited on an element its result had replaced).
+ */
+export function runningToast(page: Page, text: string | RegExp): Locator {
+  return toastNamed(page, text);
+}
+
+/**
+ * Waits for the result toast with `text` (not a running one, see `runningToast`) and holds it: the pointer rests on it, so it stays while the spec reads or presses it (debrief.yml run 8297:
+ * the steps between a toast and its View took longer than its 8 s). `pick` narrows the toasts to one (`.last()`, a visible one).
+ */
+export async function heldToast(page: Page, text: string | RegExp, options: { timeout?: number; pick?: (toasts: Locator) => Locator } = {}): Promise<Locator> {
+  const toasts = toastNamed(page, text);
+  const toast = options.pick ? options.pick(toasts) : toasts.first();
+  await expect(toast).toBeVisible(options.timeout === undefined ? {} : { timeout: options.timeout });
+  await toast.hover();
+  return toast;
+}
+
+/**
+ * Presses `button` (a locator inside `toast`) with the toast held and the clock paused: a new toast cannot move the stack under the pointer
+ * (runs 7941, 8004). The pause (`clickWithTimePaused` → `pauseAhead`) first jumps the page clock 5 s ahead and runs the timers due on the way
+ * once each (a toast's time, a mock's step), before the press; the held toast's own time is stopped and is not one of them.
+ */
+export async function pressInToast(page: Page, toast: Locator, button: Locator): Promise<void> {
+  await toast.hover();
+  await clickWithTimePaused(page, button);
+}

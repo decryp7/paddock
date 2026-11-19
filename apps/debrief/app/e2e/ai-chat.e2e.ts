@@ -1,7 +1,7 @@
 import { expect, test } from './test';
 import { expectNoSeriousViolations } from './axe';
 import { ask, openAiApp, openChat, runCommand, waitAnswered } from './ai-support';
-import { openMenu } from './menu-support';
+import { anchoredMenu, openMenu } from './menu-support';
 import { gridRows, hideInspectorFlyout } from './app';
 import { openAppWith } from './mock-url';
 
@@ -40,7 +40,7 @@ test.describe('AI chat', () => {
     // Keyboard reachable: Enter on the button opens the menu with its first item focused.
     await context.focus();
     await page.keyboard.press('Enter');
-    const menu = page.getByRole('menu', { name: 'Context sent with your question' });
+    const menu = await anchoredMenu(page, context, 'Context sent with your question');
     await expect(menu.getByRole('menuitemradio', { name: /^Selected events \(1\)/ })).toHaveAttribute('aria-checked', 'true');
     await expect(menu).toContainText('Nothing leaves this computer.');
     await expectNoSeriousViolations(page, testInfo, 'ai-context-menu', '[role=menu]');
@@ -128,7 +128,9 @@ test.describe('AI chat', () => {
   });
 
   test('a long conversation scrolls in its list only: the panel has no extra scroll space and the composer stays at the bottom', async ({ page }) => {
-    await openAiApp(page);
+    // Six answers, not their streaming: each comes in one piece (`mockAiChunkChars`). Streamed 12 characters a step, an answer took 2.4 to
+    // 3.2 s on a loaded WebKit runner and the third ran past the 5 s wait (debrief.yml run 8300); streaming has its own tests above.
+    await openAiApp(page, 'mockAiChunkChars=100000');
     const chat = await openChat(page);
     for (let i = 0; i < 6; i++) {
       await ask(chat, 'What crashed?');
