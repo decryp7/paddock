@@ -22,3 +22,4 @@ pub mod procs;
 pub mod record;
 pub mod runner;
 pub mod timefmt;
+pub mod waitfor;

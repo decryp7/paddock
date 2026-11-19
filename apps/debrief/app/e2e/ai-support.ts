@@ -1,6 +1,8 @@
 import { expect, Locator, Page } from '@playwright/test';
 import { gridRows, openAppWith } from './mock-url';
 import { expectStreamDone } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
+import { contextMenu } from './menu-support';
+import { heldToast, pressInToast } from './toast-support';
 
 /** Opens the app with the scripted AI mock (fast streaming) plus `extra` switches, and waits for the grid. */
 export async function openAiApp(page: Page, extra = ''): Promise<void> {
@@ -40,10 +42,7 @@ export async function waitAnswered(panel: Locator): Promise<void> {
 
 /** Right-clicks the first grid row and returns the context menu. */
 export async function rowMenu(page: Page): Promise<Locator> {
-  await gridRows(page).first().click({ button: 'right' });
-  const menu = page.getByRole('menu', { name: 'Actions' });
-  await expect(menu).toBeVisible();
-  return menu;
+  return contextMenu(page, gridRows(page).first());
 }
 
 /** Runs a palette command by title (options are looked up in the palette only: the chat has <option>s too). */
@@ -59,9 +58,8 @@ export async function runCommand(page: Page, title: string): Promise<void> {
 
 /** Waits for the toast of a background AI answer ("Explanation ready") and opens it with View. */
 export async function viewAnswer(page: Page, title: string): Promise<void> {
-  const toast = page.getByTestId('notification').filter({ hasText: title });
-  await expect(toast).toBeVisible({ timeout: 15_000 });
-  await toast.getByTestId('notification-action-primary').click();
+  const toast = await heldToast(page, title, { timeout: 15_000 });
+  await pressInToast(page, toast, toast.getByTestId('notification-action-primary'));
 }
 
 /** The dialog that shows an AI answer (opened by View). */

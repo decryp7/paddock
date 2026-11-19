@@ -13,6 +13,7 @@ module.exports = {
   'no-backend-call-in-loop': require('./no-backend-call-in-loop.cjs'),
   'e2e-pinned-clock': require('./e2e-pinned-clock.cjs'),
   'e2e-ready-reads': require('./e2e-ready-reads.cjs'),
+  'e2e-transient-wait': require('./e2e-transient-wait.cjs'),
   ...templateRules,
   ...dialogRules,
 };

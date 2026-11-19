@@ -500,17 +500,19 @@ mod tests {
         assert!(check_root_outside_owner(&d.path().join("ci"), &job).is_ok());
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_holder_that_never_answers_is_stopped_and_reported() {
         let d = tempfile::tempdir().unwrap();
         let job = d.path().join("job");
         std::fs::create_dir(&job).unwrap();
-        let silent = d.path().join("silent-dev");
-        paddock_testkit::exe::write_program(&silent, "#!/bin/sh\nexec sleep 30\n").unwrap();
+        let silent = paddock_testkit::StandIn::new(d.path(), "silent-dev")
+            .sleeps(Duration::from_secs(30))
+            .install()
+            .unwrap();
+        let silent = silent.program();
         let mut a = args(&d.path().join("ci"), &job);
         a.holder_timeout_secs = 1;
-        let err = acquire_with(&a, &silent).unwrap_err();
+        let err = acquire_with(&a, silent).unwrap_err();
         assert_eq!(err.exit, paddock_cli::Exit::Failure);
         assert!(err.text().contains("did not answer within 1 seconds"), "{}", err.text());
     }

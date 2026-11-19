@@ -3,7 +3,7 @@ import type { Locator, Page } from '@playwright/test';
 import { ensureInspector, openApp, openView } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
-import { showProfileEditor } from './menu-support';
+import { anchoredMenu, contextMenu, panelMenuButton, showProfileEditor } from './menu-support';
 
 // Visual Studio-style docking: drop guides, auto hide, the panel menu, pinned tabs, the Ctrl+Tab navigator and
 // named perspectives.
@@ -32,10 +32,7 @@ async function dragTabTo(page: Page, name: string, x: number, y: number): Promis
 
 /** Opens the panel menu of a tab (right click). */
 async function panelMenu(page: Page, name: string) {
-  await tab(page, name).click({ button: 'right' });
-  const menu = page.getByRole('menu', { name: 'Actions' });
-  await expect(menu).toBeVisible();
-  return menu;
+  return contextMenu(page, tab(page, name));
 }
 
 test.describe('VS-style docking', () => {
@@ -94,8 +91,7 @@ test.describe('VS-style docking', () => {
   });
 
   test('auto hide: the inspector collapses to a side bar, slides out on hover, hides on Escape, pins back', async ({ page }) => {
-    await groupOf(page, 'Inspector').getByRole('button', { name: 'Panel menu', exact: true }).click();
-    await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Auto hide', exact: true }).click();
+    await panelMenuButton(page, groupOf(page, 'Inspector'), 'Auto hide');
     await expect(tab(page, 'Inspector')).toHaveCount(0);
     const sideTab = page.getByRole('navigation', { name: 'Auto-hidden tool windows (right)' }).getByRole('button', { name: 'Inspector' });
     await expect(sideTab).toBeVisible();
@@ -168,8 +164,7 @@ test.describe('VS-style docking', () => {
     await expect(tab(page, 'Inspector')).toBeVisible();
 
     // The choice (right-click or Shift+F10 on the button): left, right or bottom, never the top.
-    await button.click({ button: 'right' });
-    const menu = page.getByRole('menu', { name: 'Actions' });
+    const menu = await contextMenu(page, button);
     await expect(menu.getByRole('menuitem')).toHaveText(['Auto-hide to the left', 'Auto-hide to the right', 'Auto-hide to the bottom']);
     await menu.getByRole('menuitem', { name: 'Auto-hide to the bottom' }).click();
     const bottom = page.getByRole('navigation', { name: 'Auto-hidden tool windows (bottom)' }).getByRole('button', { name: 'Inspector' });
@@ -186,7 +181,7 @@ test.describe('VS-style docking', () => {
     await flyout.getByRole('button', { name: 'Pin Inspector' }).click();
     await button.focus();
     await page.keyboard.press('Shift+F10');
-    await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Auto-hide to the left' }).click();
+    await (await anchoredMenu(page, button, 'Actions')).getByRole('menuitem', { name: 'Auto-hide to the left' }).click();
     await expect(page.getByRole('navigation', { name: 'Auto-hidden tool windows (left)' }).getByRole('button', { name: 'Inspector' })).toBeVisible();
   });
 
@@ -210,7 +205,7 @@ test.describe('VS-style docking', () => {
     // Keyboard: Shift+F10 on a focused tab.
     await tab(page, 'Inspector').focus();
     await page.keyboard.press('Shift+F10');
-    const toolMenu = page.getByRole('menu', { name: 'Actions' });
+    const toolMenu = await anchoredMenu(page, tab(page, 'Inspector'), 'Actions');
     await expect(toolMenu.getByRole('menuitem', { name: 'Auto hide' })).toBeVisible();
     await expect(toolMenu.getByRole('menuitem', { name: 'Dock as tabbed document' })).toBeVisible();
     await page.keyboard.press('Escape');
@@ -252,8 +247,7 @@ test.describe('VS-style docking', () => {
     await expect(name).toHaveCount(0);
     await tab(page, 'Metrics').focus();
     await page.keyboard.press('Delete');
-    await groupOf(page, 'Inspector').getByRole('button', { name: 'Panel menu', exact: true }).click();
-    await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Auto hide', exact: true }).click();
+    await panelMenuButton(page, groupOf(page, 'Inspector'), 'Auto hide');
     await expect(tab(page, 'Metrics')).toHaveCount(0);
     // Triage is the active perspective; resetting it rebuilds the arrangement that was saved.
     await runCommand(page, 'Reset perspective');
@@ -288,8 +282,7 @@ test.describe('VS-style docking', () => {
   });
 
   test('auto-hidden tool windows and pinned tabs survive a reload', async ({ page }) => {
-    await groupOf(page, 'Inspector').getByRole('button', { name: 'Panel menu', exact: true }).click();
-    await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Auto hide', exact: true }).click();
+    await panelMenuButton(page, groupOf(page, 'Inspector'), 'Auto hide');
     await (await panelMenu(page, 'Metrics')).getByRole('menuitem', { name: 'Pin tab' }).click();
     await expect
       .poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('debrief.layout') ?? 'null')?.extras))

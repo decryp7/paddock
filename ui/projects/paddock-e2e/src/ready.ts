@@ -35,6 +35,39 @@ export async function expectOverlayAlignedWith(panel: Locator, anchor: Locator, 
     .toBeLessThanOrEqual(tolerance);
 }
 
+type Box = { x: number; y: number; width: number; height: number };
+
+/**
+ * How far a menu is from sitting against its trigger, in px (pure; `null` when either is not drawn): the smallest distance between an edge of
+ * `panel` and the facing edge of `anchor`, over the sides where the two overlap along the edge (below or above a menu-bar item, beside a
+ * submenu item). A panel that covers its anchor is not positioned yet (CDK draws an overlay at the top-left until its first `apply()`, which
+ * comes with Angular's next render): `Infinity`, as is a panel that touches no side of it.
+ */
+export function menuGap(panel: Box | null, anchor: Box | null): number | null {
+  if (!panel || !anchor) return null;
+  const overlapX = Math.min(panel.x + panel.width, anchor.x + anchor.width) - Math.max(panel.x, anchor.x);
+  const overlapY = Math.min(panel.y + panel.height, anchor.y + anchor.height) - Math.max(panel.y, anchor.y);
+  if (overlapX > 0 && overlapY > 0) return Number.POSITIVE_INFINITY;
+  const gaps: number[] = [];
+  if (overlapX > 0) gaps.push(Math.abs(panel.y - (anchor.y + anchor.height)), Math.abs(panel.y + panel.height - anchor.y));
+  if (overlapY > 0) gaps.push(Math.abs(panel.x - (anchor.x + anchor.width)), Math.abs(panel.x + panel.width - anchor.x));
+  return gaps.length ? Math.min(...gaps) : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Waits until a menu sits against its trigger (`menuGap` within `tolerance` px): below or above a menu-bar item, beside a submenu item. The menu is
+ * visible, and stays still, at the top-left of the window until the overlay is positioned, which waits for the app's next render (Debrief's File
+ * menu sat there for about 500 ms during the first load in WebKit, debrief.yml run 8297); a click aimed there lands on another item once the menu
+ * moves. Fails with the last gap.
+ */
+export async function expectMenuAnchoredTo(panel: Locator, anchor: Locator, tolerance = 2): Promise<void> {
+  await expect
+    .poll(async () => menuGap(await panel.boundingBox(), await anchor.boundingBox()) ?? Number.POSITIVE_INFINITY, {
+      message: `the menu sits against its trigger: no edge of it within ${tolerance} px of the trigger's facing edge (or it covers the trigger, or one is not drawn)`,
+    })
+    .toBeLessThanOrEqual(tolerance);
+}
+
 /**
  * Waits until a control is wired: the attribute only the update pass sets is there (default `aria-expanded` of a select or a menu trigger,
  * "false"). A control in the DOM from the creation pass answers a click or a key with "onContainerClick of undefined".

@@ -26,6 +26,7 @@ fn the_pinned_oracle_names_its_source_commit() {
         .and_then(|r| r.split_whitespace().next())
         .unwrap_or("");
     assert!(sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit()), "{first}");
+    // conformance: stand-in — the assertion is on the oracle script's own second line, a shebang by design
     assert_eq!(text.lines().nth(1), Some("#!/bin/bash"), "the script follows its header line");
 }
 

@@ -1,6 +1,7 @@
 //! `dev disk` end to end against the throw-away repositories of [`Fixture`] (ER-14): the owner record `worktree add` writes,
 //! the states of real worktrees, what `clean` removes and keeps, and `adopt`.
 use super::{Fixture, Run};
+use paddock_testkit::Actions;
 use std::path::{Path, PathBuf};
 
 fn s(p: &Path) -> &str {
@@ -374,7 +375,11 @@ fn every_git_call_of_a_scan_runs_without_optional_locks() {
     let fx = Fixture::new();
     let _wt = fx.add("locks-wt");
     let log = fx.root.join("git-env.log");
-    let path_env = fx.fake_git("locks", &format!("echo \"${{GIT_OPTIONAL_LOCKS:-unset}}\" >> '{}'", log.display()));
+    let path_env = fx.fake_git(
+        "locks",
+        Actions::new().appends_with(&log.display().to_string(), "{env:GIT_OPTIONAL_LOCKS|unset}\n"),
+        vec![],
+    );
     let index = fx.root.join("index.sqlite");
     let out = fx
         .cmd(

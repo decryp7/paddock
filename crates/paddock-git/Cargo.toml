@@ -1,0 +1,21 @@
+[package]
+name = "paddock-git"
+version = "0.1.0"
+description = "One shared batched reader of a git repository's objects: blobs, trees and existence checks through one long-lived `git cat-file --batch-command` process, or in process with gix, instead of one git start per item, with a count of the git processes it started (ADR 0108 G2)."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[package.metadata.paddock]
+scaffold = true
+
+[dependencies]
+# Reads in process (ADR 0108 G2, measured in docs/benchmarks.md): only the object database, no network, no index, no worktree.
+gix = { version = "0.90.0", default-features = false, features = ["sha1"] }
+paddock-proc = { workspace = true }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+tempfile = "3"
+paddock-testkit = { workspace = true }

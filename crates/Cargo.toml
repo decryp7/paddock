@@ -21,6 +21,7 @@ members = [
     "paddock-env",
     "paddock-guard",
     "paddock-files",
+    "paddock-git",
     "paddock-health",
     "paddock-ipc",
     "paddock-jobs",
@@ -100,6 +101,7 @@ paddock-download = { path = "paddock-download", version = "0.2.0", registry = "d
 paddock-env = { path = "paddock-env", version = "0.1.0", registry = "decryp7" }
 paddock-guard = { path = "paddock-guard", version = "0.1.0", registry = "decryp7" }
 paddock-files = { path = "paddock-files", version = "0.1.0", registry = "decryp7" }
+paddock-git = { path = "paddock-git", version = "0.1.0", registry = "decryp7" }
 paddock-health = { path = "paddock-health", version = "0.2.0", registry = "decryp7" }
 paddock-ipc = { path = "paddock-ipc", version = "0.1.0", registry = "decryp7" }
 paddock-jobs = { path = "paddock-jobs", version = "0.2.0", registry = "decryp7" }

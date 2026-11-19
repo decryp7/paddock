@@ -1,5 +1,6 @@
 //! list and clean: only unlocked, merged, clean, unused worktrees go; never `rm`, never a forced removal.
 use super::Fixture;
+use paddock_testkit::{Actions, Case};
 use serde_json::Value;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -307,7 +308,17 @@ fn clean_deletes_a_branch_only_at_the_head_it_looked_at() {
     );
     let path_env = fx.fake_git(
         "move",
-        &format!(r#"case "$*" in *"update-ref -d"*) "$REAL" update-ref refs/heads/gone {moved_to};; esac"#),
+        Actions::new(),
+        vec![(
+            Case::new().args_text_contains("update-ref -d"),
+            Actions::new()
+                .runs(
+                    &fx.real_git()
+                        .args(["update-ref", "refs/heads/gone", &moved_to])
+                        .without_call_arguments(),
+                )
+                .execs(&fx.real_git()),
+        )],
     );
     let r = run_with_path(&fx, &["worktree", "clean"], &path_env);
     assert_eq!(r.code, 0, "{} {}", r.json, r.err);

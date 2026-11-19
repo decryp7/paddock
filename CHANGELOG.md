@@ -51,6 +51,40 @@ Conventional Commits; one semver tag for the whole repo.
   it started (`None`: its start time is unreadable), so a caller that gives up on the run can end the tree itself. `run_bounded` is
   unchanged. Used by paddock-dev's bounded phases (`Held`), which end the programs of an abandoned phase before the step goes on.
 
+### `paddock-git`: one batched reader of git objects, in process with gix (ADR 0108 G2)
+
+- New crate. `Reader::open(root, make_git)` reads blobs, trees and existence in process with gix (0.90, the object database only:
+  no network, index or worktree features) for revisions named by full object ids, and through one long-lived `git cat-file
+  --batch-command` for the rest (a ref name, a short id, a partial clone's omitted blob). `Reader::new(make_git)` is the git-only
+  form. `starts()` counts git processes. Windows runner, 20 trees and 300 blobs: 11.1 s one git start per read, 428 ms one
+  `cat-file`, 9.4 ms gix (docs/benchmarks.md).
+- paddock-dev's merge check reads through it: `blob_ids` (was `ls-tree -r`), `file_at` (`cat-file blob`), `has_commit`
+  (`cat-file -e`) and `changed_paths` (`diff --name-only`, now from the two trees' listings in process).
+- A tree's modes are read as numbers and canonicalised as git does (`Mode`: `040000` is a tree, an old `100664` file is `100644`), a
+  tree name that is not UTF-8 is an error (`GitError::NotUtf8`), never decoded lossily, and an object over the size cap
+  (`MAX_OBJECT`, `with_max_object`) is `GitError::TooLarge`, checked against its header before gix loads it. The merge check's
+  `changed_paths` is tested as a table against `git diff --name-only --no-renames -z` (a mode change, a mode spelled another way, a
+  symlink, a submodule, a file that becomes a folder and back, a case-only rename, a linked worktree), and it remembers listings and
+  texts by full object id only, never by a ref name; a read that selects refs (`--all`, `--branches`, `--glob`) is never memoised.
+- gix is outside the workspace hack (`crates/.config/hakari.toml` traversal-excludes), so it unifies no features into the hack. The
+  lockfiles were re-resolved from their base with the least change. In the nine app lockfiles one line changes: the hack no longer
+  lists windows-sys 0.59; no package is added, removed or moves, on any OS. In `crates/` and `tools/paddock-dev`, which build gix,
+  gix adds its packages (60 and 71), a few Windows-only edges move from windows-sys 0.59 to 0.61 (`crates/`: dirs-sys, errno, rustix,
+  rustls-platform-verifier, tempfile, winapi-util, winreg) or 0.60, and gix's features reach two crates on every OS: bstr gains its
+  regex-automata edge (`crates/`) and hashbrown its allocator-api2 and equivalent edges (`tools/paddock-dev`). The fuzz workspaces,
+  tools/heavy and tools/wiki drop the windows-sys 0.59 and windows-targets 0.52 packages (Windows only).
+
+### `paddock-proc`: a bounded run with input, and a long-lived child spoken to over its pipes (ADR 0108 G1)
+
+- `run_bounded_with_input(cmd, input, limits)`: `run_bounded` with `input` written to the child's stdin on its own thread, then closed
+  (at most `MAX_INPUT`, 64 MiB): a request list for a batch program (`git cat-file --batch`, `diff-tree --stdin`, `hash-object
+  --stdin`) in one start. paddock-dev's input hash moves its private stdin runner onto it.
+- `Session` (`start`, `send`, `read_line`, `read_exact`, `stderr_tail`, `finish`) with `SessionLimits` and `SessionError`: a child whose
+  stdin stays open, every read bounded by its own deadline and an answer cap, its tree ended by identity on `finish`, on a timeout or
+  when dropped. For a request whose next question depends on the last answer (walking trees through one `cat-file --batch`). The thread that
+  reads the child's output queues at most 16 chunks of 64 KiB (a bounded `sync_channel`): a child that writes faster than it is read
+  is held by its pipe, never buffered without bound.
+
 ### `paddock-env`: `cachedir`, cargo's `CACHEDIR.TAG` for a target folder cargo did not make (ADR 0107)
 
 - `cachedir::{FILE_NAME, SIGNATURE, CONTENT, is_tag, ensure}`: `./dev ci isolation path target` writes the tag into a kept build folder, and the test kit shares its toolchain link folder only in a folder that has it (also one level up, for `target/<triple>/<profile>`). `is_tag` checks the signature line; `ensure` repairs a missing, empty or partial tag by writing a temporary file and renaming it, and never rewrites a good one. Without the tag every `TestCommand` linked the toolchain into its own folder (testcommand-ab.yml run 8246, Windows); the kit now prints one `TestCommand:` line when it falls back.

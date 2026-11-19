@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import { expectNoSeriousViolations } from './axe';
 import { ask, openAiApp, openChat, rowMenu, waitAnswered } from './ai-support';
 import { clickWithTimePaused } from './app';
+import { anchoredMenu } from './menu-support';
 
 // The AI's browser against the mock backends (src/app/browser/mock-browser-backend.ts and the AI mock): search the web
 // for an error (the AI drafts the search text; the search opens in the default browser), the composer's Browser modes,
@@ -29,7 +30,7 @@ test.describe('AI browser', () => {
     const chat = await openChat(page);
     await expect(chat.getByTestId('chat-capture')).toHaveCount(0);
     await chat.getByTestId('ai-browser-menu').click();
-    await page.getByRole('menu', { name: 'Browser for this chat' }).getByRole('menuitemradio', { name: /^Read along/ }).click();
+    await (await anchoredMenu(page, chat.getByTestId('ai-browser-menu'), 'Browser for this chat')).getByRole('menuitemradio', { name: /^Read along/ }).click();
     await expect(chat.getByTestId('ai-browser-menu')).toContainText('Browser: Read along');
     await chat.getByRole('button', { name: 'Add the open page to the question' }).click();
     await expect(chat.getByTestId('chat-source')).toContainText('untrusted web content');
@@ -44,7 +45,7 @@ test.describe('AI browser', () => {
     await openAiApp(page);
     const chat = await openChat(page);
     await chat.getByTestId('ai-browser-menu').click();
-    await page.getByRole('menu', { name: 'Browser for this chat' }).getByRole('menuitemradio', { name: /^Read along/ }).click();
+    await (await anchoredMenu(page, chat.getByTestId('ai-browser-menu'), 'Browser for this chat')).getByRole('menuitemradio', { name: /^Read along/ }).click();
     await chat.getByRole('button', { name: 'Add the open page to the question' }).click();
     await expect(chat.getByRole('alert')).toContainText('No page is open');
   });
@@ -55,16 +56,16 @@ test.describe('AI browser', () => {
     const menu = chat.getByTestId('ai-browser-menu');
     await expect(menu).toContainText('Browser: Off');
     await menu.click();
-    const list = page.getByRole('menu', { name: 'Browser for this chat' });
+    const list = await anchoredMenu(page, menu, 'Browser for this chat');
     await expect(list.getByRole('menuitemradio', { name: /^Agent/ })).toContainText('A real browser window will open next to the app');
     await list.getByRole('menuitemradio', { name: /^Agent/ }).click();
     await expect(menu).toContainText('Browser: Agent');
     await expect(chat).toContainText('A real browser window will open next to the app');
     await menu.click();
-    await page.getByRole('menu', { name: 'Browser for this chat' }).getByRole('menuitemradio', { name: /^Read along/ }).click();
+    await (await anchoredMenu(page, menu, 'Browser for this chat')).getByRole('menuitemradio', { name: /^Read along/ }).click();
     await expect(menu).toContainText('Browser: Read along');
     await menu.click();
-    await page.getByRole('menu', { name: 'Browser for this chat' }).getByRole('menuitemradio', { name: /^Off/ }).click();
+    await (await anchoredMenu(page, menu, 'Browser for this chat')).getByRole('menuitemradio', { name: /^Off/ }).click();
     await expect(menu).toContainText('Browser: Off');
     await expect(chat.getByTestId('chat-capture')).toHaveCount(0);
   });
@@ -73,7 +74,7 @@ test.describe('AI browser', () => {
     await openAiApp(page);
     const chat = await openChat(page);
     await chat.getByTestId('ai-browser-menu').click();
-    await page.getByRole('menu', { name: 'Browser for this chat' }).getByRole('menuitemradio', { name: /^Agent/ }).click();
+    await (await anchoredMenu(page, chat.getByTestId('ai-browser-menu'), 'Browser for this chat')).getByRole('menuitemradio', { name: /^Agent/ }).click();
     await expect(chat.getByTestId('ai-browser-menu')).toContainText('Browser: Agent');
     await expect(chat).toContainText('New sites, typing and forms need your approval');
 

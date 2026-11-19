@@ -421,6 +421,7 @@ fn the_polkit_rule_allows_starting_the_helpers_unit_from_a_local_active_session_
 fn the_maintainer_scripts_are_posix_sh_skip_without_systemd_and_touch_only_the_helpers_own_things() {
     for script in ["postinst", "prerm", "postrm"] {
         let text = package_file(script);
+        // conformance: stand-in — the shipped maintainer scripts are the product under test: their shebang is what is asserted
         assert!(text.starts_with("#!/bin/sh\n"), "{script}");
         assert!(text.contains("\nset -e\n"), "{script}");
         assert!(text.contains("/run/systemd/system"), "{script} skips where systemd is not running");
@@ -465,16 +466,17 @@ fn run_maintainer_script(tmp: &std::path::Path, script: &str, args: &[&str], ena
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::create_dir_all(&systemd).unwrap();
     let calls = tmp.join("calls");
-    let fake = bin.join("systemctl");
-    paddock_testkit::exe::write_program(
-        &fake,
-        format!(
-            "#!/bin/sh\necho \"$*\" >> '{}'\ncase \"$1\" in is-enabled) exit {} ;; esac\nexit 0\n",
-            calls.display(),
-            if enabled { 0 } else { 1 }
-        ),
-    )
-    .unwrap();
+    let log = calls.display().to_string();
+    paddock_testkit::StandIn::new(&bin, "systemctl")
+        .answers(paddock_testkit::Actions::new().appends_with(&log, "{args}\n"))
+        .when_args(
+            &["is-enabled"],
+            paddock_testkit::Actions::new()
+                .appends_with(&log, "{args}\n")
+                .exit(if enabled { 0 } else { 1 }),
+        )
+        .install()
+        .unwrap();
     let text = package_file(script);
     assert!(text.contains("/run/systemd/system"), "{script} looks for a running systemd");
     let copy = tmp.join(script);

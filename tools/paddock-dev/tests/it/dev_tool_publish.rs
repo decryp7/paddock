@@ -3,8 +3,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 // windows-twin: none: it runs a shell script that only runs on Linux and macOS
 #![cfg(unix)]
-use super::wrapper::{Fixture, fake_rustc, shim_cargo, write_script_plain as write_script};
+use super::wrapper::{BUILD_FOLDER_ENV, Fixture, built_tool, cargo_builds, fake_rustc, install_cargo};
 use paddock_testkit::TestCommand;
+use paddock_testkit::{Actions, Case};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -115,7 +116,17 @@ fn publish(store: &Store) -> Run {
     let scratch = tempfile::tempdir().unwrap();
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     let shims = f.cargo_home.path().join("shims");
-    write_script(&shims.join("cargo"), &shim_cargo(0));
+    // The publish script passes `CARGO_TARGET_DIR` (one throw-away tool, no compile cache), not `--config build.target-dir`.
+    install_cargo(&shims, false, |c| {
+        c.when(
+            &Case::new().env_is_set("CARGO_TARGET_DIR"),
+            cargo_builds(
+                BUILD_FOLDER_ENV,
+                Actions::new(),
+                &built_tool("built-by-shim", "{env:PADDOCK_DEV_HASH}"),
+            ),
+        )
+    });
     std::fs::copy(rustc, shims.join("rustc")).unwrap();
     std::fs::create_dir_all(f.root().join("conformance/ci")).unwrap();
     let script = f.root().join("conformance/ci/dev-tool-publish.sh");

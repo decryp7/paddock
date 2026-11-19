@@ -1,8 +1,9 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
-import { ask, openChat, runCommand, waitAnswered } from './ai-support';
+import { ask, openChat, releaseMockHolds, runCommand, waitAnswered } from './ai-support';
 import { gridRows, openAppWith } from './mock-url';
+import { heldToast, pressInToast, runningToast, toastNamed } from './toast-support';
 
 /** The app with the AI mock at `search` (its own step time: `openAiApp` fixes a fast one). */
 async function openAiApp(page: Page, search: string): Promise<void> {
@@ -39,7 +40,7 @@ async function explainInBackground(page: Page): Promise<void> {
   // The command needs a selected event: a click that landed while the page was reloading selected nothing.
   await expect(row).toHaveAttribute('aria-selected', 'true');
   await runCommand(page, 'AI: Explain the selected event');
-  const started = page.getByTestId('notification').filter({ hasText: /Explaining event #\d+ — running in Jobs/ });
+  const started = toastNamed(page, /Explaining event #\d+ — running in Jobs/);
   await expect(started).toBeVisible();
   await expect(started.getByTestId('notification-action-primary')).toHaveText('Show in Jobs');
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -60,7 +61,10 @@ async function exportReport(page: Page, title: string): Promise<void> {
 test.describe('jobs', () => {
   test.slow();
   test('a slow AI answer and a slow export run side by side; the toast View opens the answer', async ({ page }, testInfo) => {
-    await openAiApp(page, 'mockAiStepMs=600&mockExportMs=8000&mockJobsVisibleMs=200&mockJobsAttentionMs=1000');
+    // The explanation is held at its end (`mockJobsHold=ai`) until both jobs were seen side by side. Its "Explanation ready" toast times out
+    // after TOAST_MS (8 s) like every toast that is not an error: answered before the export dialog had closed, a slow WebKit run spent those
+    // 8 s on the export, the Jobs pane and its axe check, and the toast was gone when View was pressed (debrief.yml run 8297).
+    await openAiApp(page, 'mockAiStepMs=600&mockJobsHold=ai&mockExportMs=8000&mockJobsVisibleMs=200&mockJobsAttentionMs=1000');
     await explainInBackground(page);
     await exportReport(page, 'Case 7');
     await openJobs(page);
@@ -70,11 +74,12 @@ test.describe('jobs', () => {
     await expect(page.getByTestId('status-jobs')).toBeVisible();
     await expectNoSeriousViolations(page, testInfo, 'jobs-pane', 'debrief-jobs-panel');
 
-    // The AI answer finishes first: "Explanation ready" with View, and View opens the answer with its citations.
-    const toast = page.getByTestId('notification').filter({ hasText: 'Explanation ready' });
-    await expect(toast).toBeVisible({ timeout: 15_000 });
+    // The AI answer finishes first: "Explanation ready" with View, and View opens the answer with its citations. The pointer on the toast
+    // holds its time (notification-host.ts) while it is checked; the click is made with the clock paused (a toast stack can move under it).
+    await releaseMockHolds(page);
+    const toast = await heldToast(page, 'Explanation ready', { timeout: 15_000 });
     await expectNoSeriousViolations(page, testInfo, 'jobs-toast', 'debrief-notification-host');
-    await toast.getByTestId('notification-action-primary').click();
+    await pressInToast(page, toast, toast.getByTestId('notification-action-primary'));
     await expect(page.getByTestId('ai-narrative')).toContainText('failed order submission');
     await page.keyboard.press('Escape');
     await expect((await openJobs(page)).locator('li').filter({ hasText: 'Explain event' })).toContainText('Done');
@@ -84,7 +89,7 @@ test.describe('jobs', () => {
     await openAiApp(page, 'mockAiStepMs=2500&mockJobsVisibleMs=0&mockJobsFailOnce=export');
     await explainInBackground(page);
     await runCommand(page, 'AI: Find likely root causes');
-    await expect(page.getByTestId('notification').filter({ hasText: 'Looking for root causes — running in Jobs' })).toBeVisible();
+    await expect(runningToast(page, 'Looking for root causes — running in Jobs')).toBeVisible();
     await openJobs(page);
     const pane = jobsPane(page);
     const waiting = pane.locator('li').filter({ hasText: 'Find likely root causes' });
@@ -154,7 +159,7 @@ test.describe('research', () => {
     await expect(answer).toContainText('skipped: a login');
     await expect(chat.getByTestId('ai-browser-menu')).toContainText('Browser: Off');
     // The research ran as a job: "Research finished" with View.
-    await expect(page.getByTestId('notification').filter({ hasText: 'Research finished' })).toBeVisible();
+    await heldToast(page, 'Research finished');
     await expect((await openJobs(page)).locator('li').filter({ hasText: 'Research: what does HRESULT 0x80070005' })).toContainText('Done');
     await expectNoSeriousViolations(page, testInfo, 'research-answer', 'debrief-ai-chat-panel');
   });
@@ -176,9 +181,8 @@ test.describe('research', () => {
     await dialog.getByLabel('Results to read').selectOption('10');
     await dialog.getByTestId('research-run').click();
     await expect(dialog).toHaveCount(0);
-    const toast = page.getByTestId('notification').filter({ hasText: 'Research finished' });
-    await expect(toast).toBeVisible({ timeout: 15_000 });
-    await toast.getByTestId('notification-action-primary').click();
+    const toast = await heldToast(page, 'Research finished', { timeout: 15_000 });
+    await pressInToast(page, toast, toast.getByTestId('notification-action-primary'));
     await expect(chat).toContainText('E_ACCESSDENIED');
   });
 

@@ -94,7 +94,18 @@ pub fn declined(env: &HashMap<String, String>) -> Option<String> {
     } else if set("CI") || set("GITHUB_ACTIONS") {
         Some("this is a CI run (CI keeps its own setup-rust)".into())
     } else if set("RUSTC_WRAPPER") {
-        Some(format!("RUSTC_WRAPPER is already set ({})", env["RUSTC_WRAPPER"]))
+        let wrapper = &env["RUSTC_WRAPPER"];
+        let path = Path::new(wrapper);
+        // Our own shim (a nested `./dev` in a shell that loaded `sccache env`) is also named `sccache`, and is the fix, not the cause.
+        let ours = path.parent().and_then(Path::file_name).is_some_and(|d| d == SHIM_DIR);
+        let sccache = !ours && path.file_stem().is_some_and(|s| s.eq_ignore_ascii_case("sccache"));
+        Some(if sccache {
+            format!(
+                "RUSTC_WRAPPER is already set ({wrapper}) to sccache itself: cc-rs wraps clang-cl in it and sccache 0.19 cannot probe clang-cl, so every `cargo xwin` lint that compiles C fails. Next: remove it from the shell profile and run `eval \"$(./dev sccache env)\"`, whose shim leaves clang-cl alone"
+            )
+        } else {
+            format!("RUSTC_WRAPPER is already set ({wrapper})")
+        })
     } else {
         None
     }
@@ -371,10 +382,90 @@ impl Server<'_> {
     }
 }
 
+/// The folder beside the sccache binary that holds the shim, so the shim can be called `sccache`.
+const SHIM_DIR: &str = "shim";
+
+/// The shim's text: a program named `sccache` that runs the real one for everything except an MSVC-target C compile, which it runs
+/// directly (`sccache clang-cl ...` becomes `clang-cl ...`).
+///
+/// Policy (ER-47, the one place that decides it): sccache 0.19 cannot probe `clang-cl` (it reads the `/Users/...` paths of the probe as
+/// `/U` options: "Compiler not supported"), and cc-rs puts `RUSTC_WRAPPER` in front of the C compiler whenever its file name is
+/// `sccache` (also `cachepot`, `buildcache`, `kache`). cc-rs has no switch for one target and cargo gives every build script
+/// `RUSTC_WRAPPER`, so `RUSTC_WRAPPER=sccache` failed every `cargo xwin` lint that compiles C (ring). The shim keeps the name cc-rs
+/// wraps, so native C (libsqlite3-sys, aws-lc-sys, zstd-sys, ring) stays cached on macOS and Linux, and sends only the cross
+/// `clang-cl` (and `cl`, or any compiler with `--target=...-windows-msvc`) past sccache. A `rustc` call always goes to sccache. The
+/// cost: the Windows cross C compiles are not cached. The documented cc-rs range is 1.8 to 1.11 ([`CC_RANGE`]; a test reads every
+/// lockfile).
+fn shim_text(bin: &Path) -> String {
+    let real = bin.display().to_string().replace('\'', r"'\''");
+    format!(
+        "#!/bin/sh\n\
+# Written by `./dev sccache env` (tools/paddock-dev/src/local_sccache.rs, shim_text): sccache for everything but a Windows (MSVC) C compile.\n\
+case \"$(basename -- \"$1\")\" in\n\
+  rustc | rustc.exe) exec '{real}' \"$@\" ;;\n\
+  clang-cl | clang-cl.exe | cl | cl.exe) exec \"$@\" ;;\n\
+esac\n\
+for a in \"$@\"; do\n\
+  case \"$a\" in --target=*-windows-msvc) exec \"$@\" ;; esac\n\
+done\n\
+exec '{real}' \"$@\"\n"
+    )
+}
+
+/// The cc-rs versions the shim policy was written for, as (major, minor) bounds: 1.8 to 1.11.
+pub const CC_RANGE: ((u64, u64), (u64, u64)) = ((1, 8), (1, 11));
+
+/// Where the shim is: `<bin dir>/shim/sccache` on Unix; on any other OS the binary itself (the local sccache is Unix only).
+fn shim_for(bin: &Path, unix: bool) -> PathBuf {
+    if unix {
+        bin.with_file_name(SHIM_DIR).join("sccache")
+    } else {
+        bin.to_path_buf()
+    }
+}
+
+/// What `RUSTC_WRAPPER` names on this OS.
+fn rustc_wrapper_for(bin: &Path) -> PathBuf {
+    shim_for(bin, cfg!(unix))
+}
+
+/// Writes the shim at install time (`Install::OnDemand`); the same content is left alone.
+fn write_shim(bin: &Path) -> std::io::Result<()> {
+    let target = rustc_wrapper_for(bin);
+    if target == bin {
+        return Ok(());
+    }
+    let text = shim_text(bin);
+    if std::fs::read_to_string(&target).is_ok_and(|t| t == text) {
+        return Ok(());
+    }
+    std::fs::create_dir_all(target.parent().unwrap_or(Path::new(".")))?;
+    let tmp = target.with_extension(format!("tmp{}", std::process::id()));
+    std::fs::write(&tmp, &text)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+    }
+    std::fs::rename(&tmp, &target)
+}
+
+/// A gate's path (`Install::Never`) writes nothing (ER-45): a missing or stale shim is a reason with its next step.
+fn check_shim(bin: &Path) -> Result<(), String> {
+    let target = rustc_wrapper_for(bin);
+    if target == bin || std::fs::read_to_string(&target).is_ok_and(|t| t == shim_text(bin)) {
+        return Ok(());
+    }
+    Err(format!(
+        "the sccache shim {} is missing or out of date. Next: run `./dev sccache env` once on this machine (it writes the shim)",
+        target.display()
+    ))
+}
+
 /// The variables a build gets: the wrapper, the settings the server runs with and the two that keep a server a build starts itself
 /// from replacing ours or hanging (never a credential).
 fn ready_vars(bin: &Path, backend: &Backend) -> Vec<(String, String)> {
-    let mut vars = vec![("RUSTC_WRAPPER".to_string(), bin.display().to_string())];
+    let mut vars = vec![("RUSTC_WRAPPER".to_string(), rustc_wrapper_for(bin).display().to_string())];
     vars.extend(backend.vars());
     vars.push(("SCCACHE_IGNORE_SERVER_IO_ERROR".into(), "1".into()));
     vars.push(("SCCACHE_IDLE_TIMEOUT".into(), "0".into()));
@@ -662,6 +753,18 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
         started.elapsed().as_secs_f64(),
         log.display()
     );
+    let shim = match install {
+        Install::OnDemand => write_shim(&bin).map_err(|e| {
+            format!(
+                "the sccache shim {} could not be written: {e}. Next: make the folder writable or remove the file, then run `./dev sccache env` again",
+                rustc_wrapper_for(&bin).display()
+            )
+        }),
+        Install::Never => check_shim(&bin),
+    };
+    if let Err(why) = shim {
+        return off(why, true);
+    }
     Outcome::Ready(Ready {
         vars: ready_vars(&bin, &backend),
         bin,
@@ -951,11 +1054,15 @@ mod tests {
         assert_eq!(cache_mode("Cache location  x\n"), None);
     }
 
-    /// A stand-in sccache: `--version`, start and stop count in files beside it, and the stats say read-only for the first
-    /// `readonly-starts` starts (sccache 0.19.0 keeps a failed startup write check for the server's whole life).
+    /// A stand-in sccache: `--version`, start and stop are recorded, and the stats say read-only for the first `readonly_starts`
+    /// starts (sccache 0.19.0 keeps a failed startup write check for the server's whole life). Each start makes a file
+    /// `starts-<n>` beside it (up to four), so the number of starts is which of them exist.
     #[cfg(unix)]
-    fn fake(readonly_starts: u32, foreign_location: Option<&str>) -> (tempfile::TempDir, HashMap<String, String>, PathBuf) {
-        use std::os::unix::fs::PermissionsExt;
+    fn fake(
+        readonly_starts: u32,
+        foreign_location: Option<&str>,
+    ) -> (tempfile::TempDir, HashMap<String, String>, paddock_testkit::Installed) {
+        use paddock_testkit::{Actions, Case, StandIn};
         let home = tempfile::tempdir().unwrap();
         let e = env(&[
             ("PADDOCK_DEV_HOME", home.path().to_str().unwrap()),
@@ -963,40 +1070,60 @@ mod tests {
             ("PATH", "/usr/bin:/bin"),
         ]);
         let bin = install_path(&e).unwrap();
-        std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
-        let script = r#"#!/bin/sh
-d=$(dirname "$0")
-echo "$1" >> "$d/calls"
-case "$1" in
-  --version) echo "sccache 0.19.0";;
-  --start-server)
-    if [ -f "$d/address-in-use" ]; then echo "Address in use (os error 48)" >&2; exit 1; fi
-    n=$(cat "$d/starts" 2>/dev/null || echo 0); echo $((n+1)) > "$d/starts";;
-  --stop-server) ;;
-  --show-adv-stats)
-    n=$(cat "$d/starts" 2>/dev/null || echo 0); ro=$(cat "$d/readonly-starts" 2>/dev/null || echo 0)
-    mode=ReadWrite; [ "$n" -le "$ro" ] && mode=ReadOnly
-    if [ -f "$d/location" ]; then cat "$d/location"; else echo "Cache location                  Local disk: \"$SCCACHE_DIR\""; fi
-    echo "Effective cache mode            $mode";;
-esac
-exit 0
-"#;
-        std::fs::write(&bin, script).unwrap();
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::fs::write(bin.with_file_name("readonly-starts"), readonly_starts.to_string()).unwrap();
-        if let Some(l) = foreign_location {
-            std::fs::write(bin.with_file_name("location"), format!("Cache location                  {l}\n")).unwrap();
+        let dir = bin.parent().unwrap();
+        std::fs::create_dir_all(dir).unwrap();
+        let starts = |n: u32| dir.join(format!("starts-{n}"));
+        let location = match foreign_location {
+            Some(l) => format!("Cache location                  {l}"),
+            None => "Cache location                  Local disk: \"{env:SCCACHE_DIR}\"".to_string(),
+        };
+        let stats = |mode: &str| {
+            Actions::new()
+                .stdout_with(&location)
+                .stdout(&format!("Effective cache mode            {mode}"))
+        };
+        let mut fake = StandIn::new(dir, "sccache")
+            .records_args()
+            .stdout("sccache 0.19.0")
+            .when_args(&["--stop-server"], Actions::new())
+            .when(
+                &Case::new()
+                    .args_start_with(&["--show-adv-stats"])
+                    .file_missing(&starts(readonly_starts + 1)),
+                stats("ReadOnly"),
+            )
+            .when(
+                &Case::new()
+                    .args_start_with(&["--show-adv-stats"])
+                    .file_exists(&starts(readonly_starts + 1)),
+                stats("ReadWrite"),
+            );
+        for n in 1..=4 {
+            let mut case = Case::new().args_start_with(&["--start-server"]).file_missing(&starts(n));
+            if n > 1 {
+                case = case.file_exists(&starts(n - 1));
+            }
+            fake = fake.when(&case, Actions::new().writes(&starts(n), ""));
         }
-        (home, e, bin)
+        // Last, so it is asked first: a server that is already up answers every start with this.
+        fake = fake.when(
+            &Case::new()
+                .args_start_with(&["--start-server"])
+                .file_exists(&dir.join("address-in-use")),
+            Actions::new().stderr("Address in use (os error 48)").exit(1),
+        );
+        let installed = fake.install().unwrap();
+        write_shim(installed.program()).unwrap(); // what `./dev sccache env` did once on this machine
+        (home, e, installed)
     }
 
     #[cfg(unix)]
-    fn calls(bin: &Path) -> Vec<String> {
-        std::fs::read_to_string(bin.with_file_name("calls"))
-            .unwrap_or_default()
-            .lines()
-            .filter(|l| l.starts_with("--start") || l.starts_with("--stop"))
-            .map(str::to_string)
+    fn calls(bin: &paddock_testkit::Installed) -> Vec<String> {
+        bin.calls()
+            .unwrap()
+            .into_iter()
+            .filter_map(|a| a.into_iter().next())
+            .filter(|a| a.starts_with("--start") || a.starts_with("--stop"))
             .collect()
     }
 
@@ -1028,6 +1155,24 @@ exit 0
         assert_eq!(calls(&bin), ["--start-server", "--stop-server", "--start-server"], "no third start");
     }
 
+    /// ER-45: a gate (`Install::Never`) never writes the shim; with none it is off, with the next step.
+    #[cfg(unix)]
+    #[test]
+    fn a_gate_without_the_shim_turns_the_wrapper_off_and_writes_nothing() {
+        let (_h, e, bin) = fake(0, None);
+        std::fs::remove_file(rustc_wrapper_for(bin.program())).unwrap();
+        match prepare(&e, Install::Never) {
+            Outcome::Off { reason, warn } => assert!(warn && reason.contains("Next: run `./dev sccache env`"), "{reason}"),
+            Outcome::Ready(_) => panic!("no shim"),
+        }
+        assert!(!rustc_wrapper_for(bin.program()).exists());
+        assert!(
+            matches!(prepare(&e, Install::OnDemand), Outcome::Ready(_)),
+            "the install path writes it"
+        );
+        assert!(rustc_wrapper_for(bin.program()).exists());
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_read_write_server_is_left_running() {
@@ -1042,8 +1187,8 @@ exit 0
     #[test]
     fn an_already_running_read_only_server_is_never_stopped_and_is_warned_about() {
         let (h, e, bin) = fake(5, None);
-        std::fs::write(bin.with_file_name("address-in-use"), "").unwrap();
-        std::fs::write(bin.with_file_name("starts"), "1").unwrap(); // the other owner's start: stats say read-only
+        std::fs::write(bin.dir().join("address-in-use"), "").unwrap();
+        std::fs::write(bin.dir().join("starts-1"), "").unwrap(); // the other owner's start: stats say read-only
         assert!(
             matches!(prepare(&e, Install::Never), Outcome::Ready(_)),
             "read-only is still used for reads"
@@ -1242,7 +1387,11 @@ exit 0
         std::fs::create_dir_all(&dir).unwrap();
         let stage = home.path().join("stage").join(&name);
         std::fs::create_dir_all(&stage).unwrap();
-        std::fs::write(stage.join("sccache"), "#!/bin/sh\necho sccache 0.19.0\n").unwrap();
+        let packed = paddock_testkit::StandIn::new(&stage, "sccache")
+            .stdout("sccache 0.19.0")
+            .files()
+            .unwrap();
+        paddock_testkit::exe::write_program(stage.join(&packed.program_name), packed.bundled()).unwrap();
         let archive = dir.join(format!("{name}.tar.gz"));
         let tar = ToolCall::new("tar")
             .args([
@@ -1267,5 +1416,188 @@ exit 0
         install_from(&bin, &url, "t", "tar.gz", &sum, &e).unwrap();
         assert!(bin.is_file());
         assert_eq!(version_of(&bin, &e).as_deref(), Some("0.19.0"));
+    }
+
+    /// ER-33 and ER-47: cc-rs wraps `clang-cl` in whatever `RUSTC_WRAPPER` names when its file name is `sccache`, and sccache 0.19 answers
+    /// "Compiler not supported" for `clang-cl`. The stand-in `sccache` fails for `clang-cl` the same way; the shim must send that one compile
+    /// past it and nothing else.
+    #[cfg(unix)]
+    mod shim {
+        use super::super::*;
+        use paddock_testkit::{Actions, Installed, StandIn};
+
+        struct Rig {
+            _d: tempfile::TempDir,
+            sccache: Installed,
+            compilers: Vec<Installed>,
+            path: String,
+        }
+
+        fn rig() -> Rig {
+            let d = tempfile::tempdir().unwrap();
+            let dir = |n: &str| {
+                let p = d.path().join(n);
+                std::fs::create_dir(&p).unwrap();
+                p
+            };
+            let sccache = StandIn::new(&dir("a"), "sccache")
+                .when_args(&["clang-cl"], Actions::new().stderr("Compiler not supported").exit(1))
+                .records_args()
+                .install()
+                .unwrap();
+            let compilers: Vec<Installed> = ["clang-cl", "clang", "cc"]
+                .iter()
+                .map(|n| StandIn::new(&dir(n), n).records_args().install().unwrap())
+                .collect();
+            let path = compilers
+                .iter()
+                .map(|c| c.dir().display().to_string())
+                .collect::<Vec<_>>()
+                .join(":");
+            write_shim(sccache.program()).unwrap();
+            Rig {
+                _d: d,
+                sccache,
+                compilers,
+                path,
+            }
+        }
+
+        impl Rig {
+            fn shim(&self) -> PathBuf {
+                rustc_wrapper_for(self.sccache.program())
+            }
+
+            fn run(&self, args: &[&str]) -> bool {
+                let ran = ToolCall::new(self.shim().to_string_lossy())
+                    .args(args.iter().copied())
+                    .env("PATH", format!("{}:/usr/bin:/bin", self.path))
+                    .run(&HashMap::new(), &mut std::io::sink())
+                    .unwrap();
+                ran.success
+            }
+
+            fn seen(&self, which: &str) -> usize {
+                let calls = |i: &Installed| i.calls().unwrap().len();
+                match which {
+                    "sccache" => calls(&self.sccache),
+                    other => calls(self.compilers.iter().find(|c| c.dir().ends_with(other)).unwrap()),
+                }
+            }
+        }
+
+        #[test]
+        fn the_shim_is_named_sccache_so_native_c_stays_cached_and_runs_the_msvc_compilers_directly() {
+            let r = rig();
+            assert_eq!(r.shim().file_stem().unwrap(), "sccache");
+            // The cross compile cc-rs wraps: run directly, never through sccache.
+            for (compiler, args) in [
+                ("clang-cl", vec!["clang-cl", "/c", "/Users/x/ring.c"]),
+                ("clang", vec!["clang", "--target=x86_64-pc-windows-msvc", "-c", "/Users/x/ring.c"]),
+            ] {
+                assert!(r.run(&args), "{args:?}");
+                assert!(r.seen(compiler) >= 1, "{compiler} did not run");
+            }
+            assert_eq!(r.seen("sccache"), 0, "a Windows C compile reached sccache");
+            // Native C and rustc: sccache gets them, whole.
+            assert!(r.run(&["cc", "-c", "/Users/x/sqlite3.c"]));
+            assert!(r.run(&["rustc", "--version"]));
+            assert!(r.run(&["/some/where/rustc", "--target", "x86_64-pc-windows-msvc"]));
+            let calls = r.sccache.calls().unwrap();
+            assert_eq!(calls.len(), 3, "{calls:?}");
+            assert_eq!(calls[0][0], "cc");
+            assert_eq!(calls[2], ["/some/where/rustc", "--target", "x86_64-pc-windows-msvc"]);
+            assert_eq!(r.seen("cc"), 0, "native C ran past sccache");
+        }
+
+        /// Positive control: the stand-in sccache itself fails for `clang-cl`, so the test above can see the failure it guards.
+        #[test]
+        fn naming_sccache_itself_fails_the_clang_cl_compile() {
+            let r = rig();
+            let ran = ToolCall::new(r.sccache.program().to_string_lossy())
+                .args(["clang-cl", "/c", "/Users/x/ring.c"])
+                .run(&HashMap::new(), &mut std::io::sink())
+                .unwrap();
+            assert!(!ran.success && ran.stderr.contains("Compiler not supported"), "{ran:?}");
+        }
+
+        #[test]
+        fn a_gate_never_writes_the_shim_and_a_missing_one_is_a_reason_with_a_next_step() {
+            let d = tempfile::tempdir().unwrap();
+            let bin = d.path().join("sccache");
+            std::fs::write(&bin, "x").unwrap();
+            let why = check_shim(&bin).unwrap_err();
+            assert!(why.contains("Next: run `./dev sccache env`"), "{why}");
+            assert!(!d.path().join(SHIM_DIR).exists(), "the check wrote it");
+            write_shim(&bin).unwrap();
+            check_shim(&bin).unwrap();
+            std::fs::write(rustc_wrapper_for(&bin), "#!/bin/sh\nexec old\n").unwrap();
+            assert!(check_shim(&bin).is_err(), "an out-of-date shim is not accepted");
+        }
+    }
+
+    #[test]
+    fn off_unix_the_wrapper_is_the_binary_itself_and_on_unix_a_shim_beside_it() {
+        let bin = Path::new("/t/sccache/0.19.0/sccache");
+        assert_eq!(shim_for(bin, false), bin);
+        assert_eq!(shim_for(bin, true), Path::new("/t/sccache/0.19.0/shim/sccache"));
+    }
+
+    #[test]
+    fn an_existing_wrapper_that_is_sccache_itself_is_declined_with_the_cc_rs_cause() {
+        let e = env(&[("RUSTC_WRAPPER", "/opt/bin/sccache")]);
+        let why = declined(&e).unwrap();
+        assert!(
+            why.contains("cc-rs") && why.contains("clang-cl") && why.contains("./dev sccache env"),
+            "{why}"
+        );
+        let ours = declined(&env(&[("RUSTC_WRAPPER", "/t/sccache/0.19.0/shim/sccache")])).unwrap();
+        assert!(!ours.contains("cc-rs"), "our own shim is not the cause: {ours}");
+        // Positive control: another wrapper gets the short message.
+        let other = declined(&env(&[("RUSTC_WRAPPER", "/opt/bin/other")])).unwrap();
+        assert!(!other.contains("cc-rs"), "{other}");
+    }
+
+    /// The shim policy was written for cc-rs 1.8 to 1.11 ([`CC_RANGE`]); a lockfile outside it needs its behaviour re-read first.
+    fn cc_outside_range(lock: &str) -> Vec<String> {
+        let doc: toml::Table = lock.parse().unwrap();
+        let ((lo_major, lo_minor), (hi_major, hi_minor)) = CC_RANGE;
+        doc.get("package")
+            .and_then(|p| p.as_array())
+            .into_iter()
+            .flatten()
+            .filter(|p| p.get("name").and_then(|n| n.as_str()) == Some("cc"))
+            .filter_map(|p| p.get("version").and_then(|v| v.as_str()))
+            .filter(|v| {
+                let mut it = v.split('.').map(|n| n.parse::<u64>().unwrap_or(u64::MAX));
+                let at = (it.next().unwrap_or(0), it.next().unwrap_or(0));
+                !((lo_major, lo_minor) <= at && at <= (hi_major, hi_minor))
+            })
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn the_range_check_sees_a_cc_outside_it() {
+        let lock = |v: &str| format!("[[package]]\nname = \"cc\"\nversion = \"{v}\"\n");
+        assert_eq!(cc_outside_range(&lock("1.12.0")), ["1.12.0"]);
+        assert_eq!(cc_outside_range(&lock("1.7.9")), ["1.7.9"]);
+        assert!(cc_outside_range(&lock("1.8.0")).is_empty() && cc_outside_range(&lock("1.11.1")).is_empty());
+    }
+
+    #[test]
+    fn every_lockfile_of_the_repository_has_a_cc_inside_the_documented_range() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let listed = crate::plan_repo::git_text(&root, &["ls-files", "*Cargo.lock"]).expect("git lists the lockfiles");
+        let locks: Vec<&str> = listed.lines().collect();
+        assert!(locks.len() > 5, "the lockfiles were not found: {locks:?}");
+        for l in locks {
+            let text = std::fs::read_to_string(root.join(l)).unwrap();
+            let out = cc_outside_range(&text);
+            assert!(
+                out.is_empty(),
+                "{l} locks cc {out:?}, outside {CC_RANGE:?}: re-read local_sccache::shim_text against that cc-rs, then widen CC_RANGE"
+            );
+        }
     }
 }

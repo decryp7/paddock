@@ -749,6 +749,7 @@ impl Exec for Fake {
                 tail: String::new(),
                 log: Some("/logs/x.log".into()),
                 timing: None,
+                ending: crate::pre_push::exec::Ending::RowCap,
             });
         }
         if self.no_slot.contains(&g.id) {
@@ -758,6 +759,7 @@ impl Exec for Fake {
                 tail: String::new(),
                 log: Some("/logs/q.log".into()),
                 timing: Some(Timing { queued: 31.0, ran: 0.0 }),
+                ending: crate::pre_push::exec::Ending::QueueLimit,
             });
         }
         let fail = self.fail.iter().any(|f| f == &g.id);
@@ -767,6 +769,7 @@ impl Exec for Fake {
             tail: if fail { "error: boom".into() } else { String::new() },
             log: None,
             timing: self.timing,
+            ending: crate::pre_push::exec::Ending::Exited,
         })
     }
 }
@@ -898,6 +901,7 @@ fn a_docker_failure_names_its_cause() {
                 tail: String::new(),
                 log: None,
                 timing: None,
+                ending: crate::pre_push::exec::Ending::Exited,
             })
         }
     }
@@ -937,6 +941,33 @@ fn the_conformance_gate_runs_the_contracts_list_and_a_broken_contract_is_broken_
             .iter()
             .any(|p| matches!(p, Planned::Broken { id, .. } if id == "conformance"))
     );
+}
+
+/// The host and xwin Clippy and the doctests read cargo's JSON messages for progress and name the build folder they use (so a cold one is
+/// told from a warm one); every other row reads output lines. The folder is the one the row is given (`--config build.target-dir`).
+#[test]
+fn the_cargo_rows_read_json_progress_and_name_their_build_folder() {
+    use crate::pre_push::progress::Progress;
+    let mut f = facts();
+    f.target_dir = None;
+    f.kept_targets = Some("/kept".into());
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &f);
+    let get = |id: &str| {
+        planned
+            .iter()
+            .find_map(|p| match p {
+                Planned::Run(g) if g.id == id => Some(g.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no row {id}"))
+    };
+    for id in ["clippy crates", "doctest crates", "clippy-windows crates"] {
+        assert_eq!(get(id).progress, Progress::CargoJson, "{id}");
+    }
+    assert_eq!(get("clippy crates").build_dir.as_deref(), Some("/kept/crates"));
+    assert_eq!(get("clippy-windows crates").build_dir.as_deref(), Some("/kept/crates/xwin"));
+    assert_eq!(get("conformance-tests").progress, Progress::Lines);
+    assert_eq!(get("conformance-tests").build_dir, None);
 }
 
 fn crates_gates() -> Vec<Planned> {
@@ -985,6 +1016,8 @@ fn a_crashed_runner_and_a_row_that_never_ran_are_not_measured() {
         assert!(!matches!(v.kind(), Kind::Passed | Kind::Failed), "{id}: {v:?}");
     }
     assert!(matches!(nm(&verdicts(&rows)["fmt crates"]), Some((reason, _)) if reason.contains("budget")));
+    let fmt = &rows.iter().find(|(id, _)| id == "fmt crates").expect("the row").1;
+    assert_eq!(fmt.ended_by.as_deref(), Some("budget"), "the summary names what stopped it");
     // A signal stops the rest the same way.
     let fake = Fake::default();
     let rows = run_all_with(
@@ -1033,6 +1066,7 @@ fn ran_ok(id: &str, secs: f64) -> Row {
         tail: String::new(),
         log: None,
         timing: None,
+        ending: crate::pre_push::exec::Ending::Exited,
     };
     Row::from_run(id, &test_subject(), &done, "", secs)
 }
@@ -1046,6 +1080,7 @@ fn a_row_from_a_run_reads_its_exit() {
         tail: String::new(),
         log: None,
         timing: None,
+        ending: crate::pre_push::exec::Ending::Exited,
     };
     assert_eq!(
         Row::from_run("g", &test_subject(), &run(true), "g (exit 1)", 1.0).kind(),
@@ -1293,19 +1328,24 @@ fn one_container_run_covers_every_touched_workspace_and_a_failing_one_fails_the_
     }
     let bin = dir.path().join("bin");
     std::fs::create_dir_all(&bin).unwrap();
-    let log = dir.path().join("calls.log");
-    let stub = format!(
-        "#!/bin/sh\necho \"$PWD|$CARGO_TARGET_DIR|$*\" >> '{}'\ncase \"$PWD\" in */apps/dyno) [ \"$1\" = clippy ] && [ \"$2\" = --version ] || exit 1;; esac\nexit 0\n",
-        log.display()
-    );
+    let log = dir.path().join("calls.log").display().to_string();
+    // Every call is logged; in apps/dyno everything but `clippy --version` fails.
+    let line = "{cwd}|{env:CARGO_TARGET_DIR|}|{args}\n";
     for tool in ["cargo", "rustc"] {
-        let p = bin.join(tool);
-        std::fs::write(&p, &stub).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        paddock_testkit::StandIn::new(&bin, tool)
+            .answers(paddock_testkit::Actions::new().appends_with(&log, line))
+            .when(
+                &paddock_testkit::Case::new().cwd_ends_with("/apps/dyno"),
+                paddock_testkit::Actions::new().appends_with(&log, line).exit(1),
+            )
+            .when(
+                &paddock_testkit::Case::new()
+                    .cwd_ends_with("/apps/dyno")
+                    .args_start_with(&["clippy", "--version"]),
+                paddock_testkit::Actions::new().appends_with(&log, line),
+            )
+            .install()
+            .unwrap();
     }
     let script = g.args.last().unwrap();
     let mut cmd = paddock_proc::command("sh");
@@ -2692,6 +2732,7 @@ impl Exec for Queued {
                 queued: self.queued.as_secs_f64(),
                 ran: 0.0,
             }),
+            ending: crate::pre_push::exec::Ending::Exited,
         })
     }
 }
@@ -2709,6 +2750,8 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
         next: "fix it".into(),
         workspaces: Vec::new(),
         notice: None,
+        progress: crate::pre_push::progress::Progress::Lines,
+        build_dir: None,
     })
 }
 
@@ -3369,14 +3412,24 @@ mod deny_row {
         let bin = d.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         std::fs::create_dir_all(d.join("apps/pitwall")).unwrap();
-        let script = format!(
-            "#!/bin/sh\necho \"$@\" >> {calls}\n[ \"$1\" = deny ] || exit 0\nall=1\nfor a in \"$@\"; do case $a in advisories|licenses|bans|sources) all=0;; esac; done\nhas() {{ [ $all = 1 ] && return 0; case \" $* \" in *\" $W \"*) return 0;; esac; return 1; }}\nW=advisories; if [ -f {adv} ] && has \"$@\"; then echo 'error[vulnerability]: RUSTSEC-2026-9999 lettre' >&2; exit 1; fi\nW=licenses; if [ -f {lic} ] && has \"$@\"; then echo 'error[rejected]: licence GPL-3.0 is not allowed' >&2; exit 1; fi\nexit 0\n",
-            calls = d.join("calls").display(),
-            adv = d.join("adv").display(),
-            lic = d.join("lic").display()
-        );
+        use paddock_testkit::{Actions, Case, StandIn};
+        let calls = d.join("calls").display().to_string();
+        let categories = ["advisories", "licenses", "bans", "sources"];
         for name in ["cargo", "cargo-deny"] {
-            paddock_testkit::exe::write_program(bin.join(name), script.clone()).unwrap();
+            let mut tool = StandIn::new(&bin, name).answers(Actions::new().appends_with(&calls, "{args}\n"));
+            // Licences first and advisories after, so the later case is asked first (as the script checked advisories first). A
+            // finding fails a `deny` call that names its category, or none (all four are checked then).
+            for (file, category, message) in [
+                ("lic", "licenses", "error[rejected]: licence GPL-3.0 is not allowed"),
+                ("adv", "advisories", "error[vulnerability]: RUSTSEC-2026-9999 lettre"),
+            ] {
+                let fails = Actions::new().appends_with(&calls, "{args}\n").stderr(message).exit(1);
+                let deny = Case::new().args_start_with(&["deny"]).file_exists(&d.join(file));
+                tool = tool
+                    .when(&deny.clone().has_none_of(&categories), fails.clone())
+                    .when(&deny.has_arg(category), fails);
+            }
+            tool.install().unwrap();
         }
         RealExec {
             root: d.to_path_buf(),
@@ -3393,6 +3446,9 @@ mod deny_row {
             live_slot: Default::default(),
             priority: false,
             wrapper: crate::local_sccache::Lazy::off(),
+            watchdog: Arc::new(crate::pre_push::watchdog::Never),
+            row_cap: crate::pre_push::exec::ROW_CAP,
+            state: d.join("state"),
         }
     }
 
@@ -3520,4 +3576,76 @@ fn the_conformance_tests_row_passes_the_build_folder_to_the_executor_and_runs_he
     );
     assert!(g.env.iter().all(|(k, _)| !k.starts_with("CARGO_")), "{:?}", g.env);
     assert!(g.heavy);
+}
+
+/// Rule 50 for the member gate: `./dev merge check --gates` plans the rows from the first parent's diff (`--base <merge>^1`), so a
+/// docs-only member plans no per-workspace test, doctest, Clippy or fmt row. The only test-time rows left are the two repository-wide
+/// ones the user put on every change (ER-41, 2026-11-14 and 2026-11-17): `conformance-tests` and `member-audits`. They are the
+/// named exceptions; a third one would fail this test.
+#[test]
+fn a_docs_only_change_plans_no_per_workspace_test_clippy_or_fmt_row_in_the_member_gate() {
+    let docs = ids(&plan_gates(&plan(), &change(&["docs/adr/0999-x.md"]), &facts()));
+    let heavy_words = ["test", "nextest", "doctest", "clippy", "fmt", "vitest", "playwright"];
+    let found: Vec<&str> = docs
+        .iter()
+        .map(String::as_str)
+        .filter(|id| heavy_words.iter().any(|w| id.contains(w)))
+        .collect();
+    assert_eq!(found, ["conformance-tests"], "test-time rows of a docs-only change: {docs:?}");
+    assert!(docs.iter().any(|id| id == "member-audits"), "{docs:?}");
+    // The positive control (ER-33): the same probe sees the rows a code change plans.
+    let code = ids(&plan_gates(&plan(), &change(&["crates/paddock-proc/src/lib.rs"]), &facts()));
+    assert!(
+        code.iter().any(|id| id.contains("clippy"))
+            && code.iter().any(|id| id.contains("doctest"))
+            && code.iter().any(|id| id.starts_with("fmt")),
+        "{code:?}"
+    );
+}
+
+mod only_selection {
+    use super::super::{gates::Planned, select_rows};
+
+    fn rows() -> Vec<Planned> {
+        ["doctest crates", "clippy crates", "fmt"]
+            .iter()
+            .map(|id| Planned::Skip {
+                id: (*id).into(),
+                reason: "not reached".into(),
+            })
+            .collect()
+    }
+
+    fn ids(p: &[Planned]) -> Vec<String> {
+        p.iter()
+            .map(|r| match r {
+                Planned::Skip { id, .. } => id.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect()
+    }
+
+    /// Positive control: the same rows with a selector that names them are kept, so the error below is the selection's, not the rows'.
+    #[test]
+    fn a_whole_row_name_and_a_first_word_both_select() {
+        let got = select_rows(rows(), &["doctest crates".into()]).unwrap();
+        assert_eq!(ids(&got), ["doctest crates"]);
+        let got = select_rows(rows(), &["clippy".into(), "fmt".into()]).unwrap();
+        assert_eq!(ids(&got), ["clippy crates", "fmt"]);
+        assert_eq!(select_rows(rows(), &[]).unwrap().len(), 3, "no selector keeps every row");
+    }
+
+    #[test]
+    fn a_selection_that_matches_no_row_is_an_error_naming_it_and_the_valid_rows_never_an_empty_pass() {
+        let e = select_rows(rows(), &["no such gate".into()]).unwrap_err();
+        let shown = e.text();
+        assert!(shown.contains("no such gate"), "{shown}");
+        for valid in ["doctest crates", "clippy crates", "fmt"] {
+            assert!(shown.contains(valid), "{valid} missing from {shown}");
+        }
+        assert!(
+            select_rows(Vec::new(), &["fmt".into()]).is_err(),
+            "no rows at all is also not a pass"
+        );
+    }
 }

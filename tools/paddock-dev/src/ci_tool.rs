@@ -17,7 +17,7 @@
 //! timeout; and the duration). The caller decides what a failure means and prints exactly one `::error::` line for it with
 //! [`error_line`]: the cause, then `Next step:`.
 
-use paddock_proc::{KEPT_ENV, Limits, Outcome, RunError, Sink, command, run_bounded_noting, run_waited_cancellable};
+use paddock_proc::{KEPT_ENV, Limits, Outcome, RunError, Sink, command, run_bounded_noting, run_waited_noting};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Write;
@@ -72,6 +72,16 @@ pub enum Output {
     File(PathBuf),
 }
 
+/// Who is told the identity of a streamed or file run's program when it has started ([`ToolCall::on_start`]).
+#[derive(Clone)]
+struct StartNote(std::sync::Arc<dyn Fn(Option<paddock_proc::ProcessId>) + Send + Sync>);
+
+impl std::fmt::Debug for StartNote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("StartNote")
+    }
+}
+
 /// One run of a third-party program.
 #[derive(Debug, Clone)]
 pub struct ToolCall {
@@ -86,6 +96,7 @@ pub struct ToolCall {
     unset: Vec<String>,
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     held: Option<std::sync::Arc<crate::ci_host::phase::Held>>,
+    started: Option<StartNote>,
 }
 
 /// How a run ended.
@@ -123,6 +134,7 @@ impl ToolCall {
             unset,
             cancel: None,
             held: None,
+            started: None,
         }
     }
 
@@ -199,6 +211,13 @@ impl ToolCall {
     /// Tells `held` who this program is when it starts, so its caller can end it (captured runs only).
     pub fn held_by(mut self, held: std::sync::Arc<crate::ci_host::phase::Held>) -> ToolCall {
         self.held = Some(held);
+        self
+    }
+
+    /// Tells `note` who the program is (pid and start time, rule 53) as soon as it has started, so a watcher can read its tree's CPU
+    /// time and end it through `paddock_proc`. Only for [`Output::Stream`] and [`Output::File`] runs.
+    pub fn on_start(mut self, note: std::sync::Arc<dyn Fn(Option<paddock_proc::ProcessId>) + Send + Sync>) -> ToolCall {
+        self.started = Some(StartNote(note));
         self
     }
 
@@ -309,7 +328,12 @@ impl ToolCall {
         );
         let idle = std::sync::atomic::AtomicBool::new(false);
         let flag: &std::sync::atomic::AtomicBool = self.cancel.as_deref().unwrap_or(&idle);
-        let (outcome, cancelled) = run_waited_cancellable(cmd, self.timeout, sink, flag).map_err(|e| self.not_started(e))?;
+        let noted = |id: Option<paddock_proc::ProcessId>| {
+            if let Some(n) = &self.started {
+                (n.0)(id);
+            }
+        };
+        let (outcome, cancelled) = run_waited_noting(cmd, self.timeout, sink, flag, &noted).map_err(|e| self.not_started(e))?;
         let text = file.map(|p| read_tail(p, FILE_TAIL_BYTES)).unwrap_or_default();
         let (success, how) = match outcome {
             Outcome::Exited(s) => (s.success(), describe_status(s)),

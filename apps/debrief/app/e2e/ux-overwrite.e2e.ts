@@ -4,6 +4,7 @@ import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith, openView, runCommand } from './tools-support';
 import { chooseMenu } from './menu-support';
+import { heldToast, pressInToast, runningToast, toastNamed } from './toast-support';
 
 async function exportEvents(page: Page) {
   await page.keyboard.press('ControlOrMeta+Shift+e');
@@ -18,11 +19,10 @@ test('an export never replaces an existing file without asking', async ({ page }
   // First export: a new file, no question.
   let dialog = await exportEvents(page);
   await expect(dialog).toHaveCount(0);
-  const done = page.getByTestId('notification').filter({ hasText: 'Finished: Export events to events.csv' });
-  await expect(done).toBeVisible({ timeout: 15_000 });
+  const done = await heldToast(page, 'Finished: Export events to events.csv', { timeout: 15_000 });
   // One toast per operation: the result replaced the "running in Jobs" one.
-  await expect(page.getByTestId('notification').filter({ hasText: 'running in Jobs' })).toHaveCount(0);
-  await done.getByRole('button', { name: 'Dismiss notification' }).click();
+  await expect(toastNamed(page, 'running in Jobs')).toHaveCount(0);
+  await pressInToast(page, done, done.getByRole('button', { name: 'Dismiss notification' }));
 
   // Same file again: the engine refuses, the app asks.
   dialog = await exportEvents(page);
@@ -33,12 +33,12 @@ test('an export never replaces an existing file without asking', async ({ page }
   await expect(confirm).toHaveCount(0);
   // Nothing was written and the export dialog is still there to choose another name.
   await expect(dialog).toBeVisible();
-  await expect(page.getByTestId('notification').filter({ hasText: 'Exporting to events.csv' })).toHaveCount(0);
+  await expect(toastNamed(page, 'Exporting to events.csv')).toHaveCount(0);
 
   await dialog.getByRole('button', { name: 'Export…' }).click();
   await page.getByRole('dialog', { name: 'Replace file?' }).getByRole('button', { name: 'Replace' }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByTestId('notification').filter({ hasText: 'Exporting to events.csv — running in Jobs' })).toBeVisible();
+  await expect(runningToast(page, 'Exporting to events.csv — running in Jobs')).toBeVisible();
 });
 
 test('About says Debrief never modifies your files', async ({ page }) => {
