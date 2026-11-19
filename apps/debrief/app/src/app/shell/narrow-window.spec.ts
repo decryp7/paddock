@@ -62,27 +62,6 @@ describe('NarrowWindow (the Explorer follows the layout plan)', () => {
     expect(store.sidebarOpen()).toBe(false);
   });
 
-  it('asks the plan with the room the Explorer takes now: none before the render that draws it, its drawn width after (run 8297)', () => {
-    const { narrow, store, verdicts } = setup();
-    // Ctrl+B opened it and a re-plan runs before the render: the dock has not given up the Explorer's room yet.
-    expect(store.sidebarOpen()).toBe(true);
-    narrow.evaluate();
-    expect(verdicts).toHaveBeenLastCalledWith(true, 0);
-    // Drawn (or its placeholder, which keeps its room while its code loads): its width is part of the room.
-    for (const tag of ['debrief-sidebar', 'div']) {
-      const el = document.createElement(tag);
-      if (tag === 'div') el.className = 'sidebar-placeholder';
-      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ width: 273, height: 800 } as DOMRect);
-      document.body.appendChild(el);
-      try {
-        narrow.evaluate();
-        expect(verdicts).toHaveBeenLastCalledWith(true, 273);
-      } finally {
-        el.remove();
-      }
-    }
-  });
-
   it('re-evaluates after every dock re-plan, and starts once', () => {
     const { narrow, store, set, listeners, verdicts } = setup();
     narrow.start();

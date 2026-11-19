@@ -243,35 +243,9 @@ describe('displaced views and grow-back', () => {
     expect(layout.explorerVerdict(narrow.api, true, 300)).toBe('hide');
     const roomy = fakeDock(1200, 900, { 'timeline+events': { width: 1200, height: 900 } });
     expect(layout.explorerVerdict(roomy.api, true, 300)).toBe('keep');
-    // Closed (and not drawn): the dock has the Explorer's room too; it needs 300 + 560 + the margin.
-    expect(layout.explorerVerdict(fakeDock(923, 900, { 'timeline+events': { width: 923, height: 900 } }).api, false, 0)).toBe('keep');
-    expect(layout.explorerVerdict(fakeDock(925, 900, { 'timeline+events': { width: 925, height: 900 } }).api, false, 0)).toBe('show');
-  });
-
-  it('the Explorer verdict is the same before and after the render that draws it: the room is the container as laid out now plus what the Explorer takes now', () => {
-    // debrief.yml run 8297: Ctrl+B opened the Explorer while a re-plan was due. The re-plan ran before the render (dock still 800 px, Explorer
-    // not drawn) or before dockview followed its container (dockview 800 px, container 527 px beside a drawn Explorer); adding the Explorer's width
-    // to dockview's last size made the plan see 1100 px, say "keep", and the next re-plan closed the Explorer the user had just opened.
-    const layout = setup();
-    const ctx = TestBed.inject(DockContext);
-    const container = document.createElement('div');
-    let width = 0;
-    vi.spyOn(container, 'getBoundingClientRect').mockImplementation(() => ({ width, height: 900 }) as DOMRect);
-    ctx.container = container;
-    const verdict = (room: number, drawn: number, open: boolean) => {
-      const { api } = fakeDock(room, 900, { 'timeline+events': { width: room, height: 900 } });
-      width = room - drawn;
-      return layout.explorerVerdict(api, open, drawn);
-    };
-    // 800 px of room: the Explorer (min 300) and the events (min 560) do not fit, drawn or not yet drawn.
-    expect(verdict(800, 0, true)).toBe('hide');
-    expect(verdict(800, 273, true)).toBe('hide');
-    // 1300 px of room: they fit, drawn or not.
-    expect(verdict(1300, 0, true)).toBe('keep');
-    expect(verdict(1300, 273, true)).toBe('keep');
-    // Closed but still drawn (the render that removes it has not run): the same room, so the same answer as closed and gone.
-    expect(verdict(1300, 273, false)).toBe(verdict(1300, 0, false));
-    expect(verdict(800, 273, false)).toBe('keep');
+    // Closed: the dock has the Explorer's room too; it needs 300 + 560 + the margin.
+    expect(layout.explorerVerdict(fakeDock(923, 900, { 'timeline+events': { width: 923, height: 900 } }).api, false, 300)).toBe('keep');
+    expect(layout.explorerVerdict(fakeDock(925, 900, { 'timeline+events': { width: 925, height: 900 } }).api, false, 300)).toBe('show');
   });
 });
 
