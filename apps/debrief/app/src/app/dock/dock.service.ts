@@ -953,12 +953,6 @@ export class DockService {
     return () => this.windowListeners.delete(listener);
   }
 
-  /** Lays the dock out at its container's size now (`DockLayout.followContainer`); the shell calls it after a change it made to the container. */
-  followContainer(): void {
-    const api = this.api;
-    if (api) this.layout.followContainer(api);
-  }
-
   /**
    * Would the Explorer (a side column outside the dock, `explorerWidth` px wide when open) fit beside what is docked?
    * `hide`: it is open and the plan has no room for it; `show`: it is closed and fits with the grow-back margin;

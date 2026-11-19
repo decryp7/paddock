@@ -1541,30 +1541,3 @@ Mechanism: [benchmarks.md](../../../docs/benchmarks.md#timing-benchmarks-on-a-bu
   `/Volumes/vault-dev/dev-targets/scratch/implementer-bench-busy/m-*.json` (scratch, not kept). A check run with the first
   (3 x, 561 ms) thresholds: unstressed and 28 `yes`, `PASS` (CPU 510 and 490 ms); overloaded, `FAIL` on CPU 650 ms, the reason for the
   thresholds above.
-
-## The dock follows its container in the same frame (2026-11-17, `DockLayout.followContainer`)
-
-The resize observer of `DockLayout.watchResize` now lays dockview out at the container's size at once (`api.layout(width, height)` when the two differ) instead of
-waiting for dockview's own observer, which drew the old size for three frames (49 ms) after the Explorer closed. The cost was measured before
-(`fix/sweep-e2e-failures`, 944f4a7e5) and after (`fix/debrief-dock-same-frame`), Chromium, Playwright 1.64, the e2e production build with the pinned clock, the
-mock backend, 1440x900 start, an idle machine (CPU idle 33 to 49 % on two readings before each batch). The probe is a throw-away spec (not kept): 40 calls of
-`page.setViewportSize` alternating 1000 and 1440 px wide, each followed by waiting for `[data-dock-planned]`; Chrome DevTools `Performance.getMetrics` taken before
-and after the loop (differences); a `requestAnimationFrame` sampler of `stage.width - dock grid width` over the run, where the resting offset is 28 px (the
-auto-hide bar) and a "lagged frame" is a sampled frame with another offset. Three runs each, one worker:
-
-| per run of 40 resizes | before, runs 1 to 3 | after, runs 1 to 3 |
-|---|---|---|
-| script time (`ScriptDuration`) | 0.265, 0.457, 0.251 s | 0.303, 0.495, 0.344 s |
-| layout time (`LayoutDuration`) | 0.070, 0.140, 0.072 s | 0.075, 0.124, 0.078 s |
-| style recalculation | 0.089, 0.180, 0.088 s | 0.092, 0.150, 0.100 s |
-| layouts (`LayoutCount`) | 248, 396, 262 | 277, 350, 270 |
-| frames sampled | 315, 484, 310 | 352, 411, 336 |
-| lagged frames (dock not as wide as its stage) | 33, 52, 33 | 24, 18, 16 |
-| wall time of the loop | 5.0, 7.8, 5.0 s | 5.6, 6.6, 5.4 s |
-
-The runs were not alternated (three before, then three after) and n is 3 per side, so no cost difference is claimed: the script-time medians are 0.265 s
-(range 0.251 to 0.457) before and 0.344 s (range 0.303 to 0.495) after, about +2 ms per resize, and the ranges overlap; layout and style times and the number of
-layouts per resize (6 to 7) look the same. A resize that is slower by more than about 5 ms was not seen, and a smaller one cannot be excluded with n = 3. The lagged-frame
-result below does not depend on that. What changed is
-the lagged frames, from 0.8 to 1.3 per resize to 0.4 to 0.5: the three frames the dock drew at the old width after the Explorer closed are gone; the lag
-that remains (the dock's own first plan changing group sizes) is not width lag of the container.
