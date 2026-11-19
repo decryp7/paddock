@@ -58,6 +58,19 @@ test('a failed or cancelled stage-2 job is stage2=failed', () => {
   }
 });
 
+test('stage=fast: a passed stage 1 passes the run but stage 2 is not-run, never complete', () => {
+  const r = final(ctx({ plan: 'success', stage1: 'success', e2e: 'skipped' }), 'fast');
+  assert.equal(r.ok, true);
+  assert.equal(r.lines[0], `${STAGE_LINE}stage1=passed stage2=not-run`);
+  // A failed stage 1 is still a failure under fast.
+  assert.equal(final(ctx({ plan: 'success', stage1: 'failure' }), 'fast').ok, false);
+  // The CLI reads STAGE from the environment (the workflows' `stage` input); empty and `all` are the full run.
+  const needs = JSON.stringify(ctx({ stage1: 'success', e2e: 'success' }));
+  const cli = (stage) => spawnSync('node', [script, 'final'], { encoding: 'utf8', env: { ...process.env, NEEDS: needs, STAGE: stage } });
+  assert.match(cli('fast').stdout, /^stage verdict: stage1=passed stage2=not-run$/m);
+  for (const s of ['', 'all']) assert.match(cli(s).stdout, /^stage verdict: stage1=passed stage2=complete$/m, s);
+});
+
 test('the final job without a stage1 need is broken', () => {
   assert.throws(() => final(ctx({ plan: 'success', e2e: 'success' })), /no `stage1` job/);
 });
@@ -100,6 +113,19 @@ for (const [file, stage2, last] of [
     const needs = needsOf(workflowJob(wf, 'stages'));
     for (const id of ['stage1', ...stage2]) assert.ok(needs.includes(id), `stages needs ${id}`);
     for (const id of ['stage1', 'stages']) assert.match(String(workflowJob(wf, id).if), /always\(\)/, `${id} runs after a failure too`);
+  });
+}
+
+for (const file of ['ci.yml', 'debrief.yml']) {
+  test(`${file}: the stage input exists, every stage-2 job honours stage=fast, and the plan is never complete under it`, () => {
+    const wf = loadWorkflow(file);
+    assert.ok(wf.on.workflow_dispatch.inputs.stage, 'the stage dispatch input');
+    const stage2 = file === 'ci.yml' ? ['e2e', 'e2e-webkit', 'app-e2e'] : ['e2e', 'bundle', 'tauri-smoke'];
+    for (const id of stage2) assert.match(String(workflowJob(wf, id).if), /github\.event\.inputs\.stage != 'fast'/, `${id} is skipped by stage=fast`);
+    const plan = workflowJob(wf, 'plan').steps.map((s) => s.run ?? '').join('\n');
+    assert.match(plan, /"\$PLAN_STAGE" != fast/);
+    const env = workflowJob(wf, 'stages').steps.find((s) => s.name === 'Stage verdict').env;
+    assert.match(String(env.STAGE), /github\.event\.inputs\.stage/);
   });
 }
 

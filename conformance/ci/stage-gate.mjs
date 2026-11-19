@@ -8,6 +8,8 @@
 //   node conformance/ci/stage-gate.mjs final    the last job (`needs`: plan, stage1 and every stage-2 job): prints the line
 //                                               `stage verdict: stage1=<passed|failed> stage2=<complete|not-run|failed>` that
 //                                               `./dev ci verdict` reads (a run counts as full only with `stage2=complete`, ER-33).
+//                                               With STAGE=fast (the workflows' `stage` dispatch input) stage 2 is left out on purpose:
+//                                               `stage2=not-run`, exit 0.
 //
 // A gate that saw no jobs, or an unreadable context, is broken and fails: it never passes on nothing (ER-33).
 import { isMain } from '../src/util/is-main.mjs';
@@ -55,7 +57,7 @@ export function stage1(needs) {
 }
 
 /** The final job: the verdict line, and a failure for anything but a complete stage 2 after a passed stage 1. */
-export function final(needs) {
+export function final(needs, stage = '') {
   if (!needs.stage1) {
     throw new Error('the needs context has no `stage1` job: the final job must need the stage-1 gate. Fix: add stage1 to its `needs:`');
   }
@@ -67,6 +69,10 @@ export function final(needs) {
         `::error::stage 1 did not pass (${needs.stage1.result || 'no result'}): stage 2 did not run, so this run tested less than a full run. Next: fix stage 1 and run again.`,
       ],
     };
+  }
+  if (stage === 'fast') {
+    // A fast dispatch (only stage 1 was asked for): stage 2 was left out on purpose, so the run passes but is never complete.
+    return { ok: true, lines: [`${STAGE_LINE}stage1=passed stage2=not-run`, '::notice::stage=fast: stage 2 did not run, so this is not a full run'] };
   }
   const bad = notPassed(needs, ['stage1']);
   if (bad.length) {
@@ -83,7 +89,7 @@ if (isMain(import.meta.url)) {
   try {
     if (mode !== 'stage1' && mode !== 'final') throw new Error(`usage: stage-gate.mjs stage1|final (got ${mode ?? 'nothing'})`);
     const needs = parseNeeds(process.env.NEEDS);
-    const r = mode === 'stage1' ? stage1(needs) : final(needs);
+    const r = mode === 'stage1' ? stage1(needs) : final(needs, process.env.STAGE ?? '');
     for (const l of r.lines) console.log(l);
     process.exit(r.ok ? 0 : 1);
   } catch (e) {

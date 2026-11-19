@@ -800,6 +800,22 @@ mod tests {
         }
     }
 
+    /// A `stage=fast` dispatch passes with `stage1=passed stage2=not-run` (and its plan logs complete=false): never a full green run.
+    #[test]
+    fn a_stage_fast_run_is_never_a_full_green_run() {
+        let fast = "stage verdict: stage1=passed stage2=not-run\n::notice::stage=fast\n";
+        // The stages line alone (an older plan log that said complete=true).
+        let v = ask(&mut staged("success", Some(Some(fast))));
+        assert_eq!(code(&v), 5, "{v:?}");
+        assert!(matches!(&v, Verdict::Red { run: None, reason } if reason.contains("stage1=passed stage2=not-run")), "{v:?}");
+        // The plan's own line: complete=false under stage=fast.
+        let mut f = server(
+            vec![dispatch(9, "success")],
+            &[(9, 90, Some("plan verdict: complete=false\nplan layout: staged\n"))],
+        );
+        assert_eq!(code(&ask(&mut f)), 5);
+    }
+
     #[test]
     fn a_staged_run_whose_stages_log_cannot_be_read_is_not_measured() {
         assert_eq!(code(&ask(&mut staged("success", Some(None)))), 6);
