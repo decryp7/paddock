@@ -11,6 +11,8 @@ use std::io::Write;
 use std::time::Duration;
 
 const STATS_TIMEOUT: Duration = Duration::from_secs(120);
+/// How many lines of the server's error log the job log shows.
+const ERROR_LOG_LINES: usize = 20;
 
 /// The command over the real machine.
 pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
@@ -35,6 +37,21 @@ pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
             step.say(r.stdout.trim_end());
         }
         _ => step.say("::notice::sccache statistics are unavailable (the cache server was not reachable)."),
+    }
+    // What the server logged as an error (setup-rust puts it in the job's temp folder when the S3 level is on): a failed S3 write
+    // never fails a build, so this is where it shows (ER-27).
+    if let Some(log) = step.var("SCCACHE_ERROR_LOG")
+        && let Ok(text) = std::fs::read_to_string(log)
+        && !text.trim().is_empty()
+    {
+        let lines: Vec<&str> = text.trim_end().lines().collect();
+        let from = lines.len().saturating_sub(ERROR_LOG_LINES);
+        step.say(format!(
+            "::warning::sccache's error log {log} is not empty ({} lines); the last {}:\n{}",
+            lines.len(),
+            lines.len() - from,
+            lines[from..].join("\n")
+        ));
     }
     // Only CI's own server (setup-rust sets its port); a server on the default port is never stopped.
     if step.var("SCCACHE_SERVER_PORT").is_some() {
@@ -119,5 +136,26 @@ mod tests {
         let d = crate::ci_host::canonical_tempdir();
         let (code, out, calls) = go(d.path(), &[]);
         assert_eq!((code, out.as_str(), calls.as_str()), (0, "", ""));
+    }
+
+    #[test]
+    fn a_non_empty_error_log_is_shown_and_an_empty_one_is_not() {
+        let d = crate::ci_host::canonical_tempdir();
+        let calls = d.path().join("calls").display().to_string();
+        StandIn::new(d.path(), "sccache")
+            .answers(Actions::new().appends_with(&calls, CALL_LINE).stdout("stats"))
+            .install()
+            .unwrap();
+        let log = d.path().join("sccache-error.log");
+        let log_s = log.display().to_string();
+        std::fs::write(&log, "").unwrap();
+        let (_, out, _) = go(d.path(), &[("SCCACHE_ERROR_LOG", &log_s)]);
+        assert!(!out.contains("error log"), "an empty log says nothing: {out}");
+        std::fs::write(&log, "S3 write failed: timeout\n").unwrap();
+        let (code, out, _) = go(d.path(), &[("SCCACHE_ERROR_LOG", &log_s)]);
+        assert_eq!(code, 0, "it never fails the job");
+        assert!(out.contains("::warning::sccache's error log") && out.contains("S3 write failed: timeout"), "{out}");
+        let (_, out, _) = go(d.path(), &[("SCCACHE_ERROR_LOG", &d.path().join("absent.log").display().to_string())]);
+        assert!(!out.contains("error log"), "a missing log says nothing: {out}");
     }
 }

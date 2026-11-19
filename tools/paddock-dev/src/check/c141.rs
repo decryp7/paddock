@@ -12,7 +12,12 @@
 //! - every job that calls the reusable `./.gitea/workflows/app-fuzz.yml` or `app-release.yml` passes both secrets in its `secrets:`
 //!   (`secrets: inherit` counts);
 //! - those two reusable workflows declare both under `on.workflow_call.secrets`;
-//! - no other line of a workflow, and no action other than setup-rust, names either secret (a job `env:`, a `run:`).
+//! - no other line of a workflow, and no action other than setup-rust, names either secret (a job `env:`, a `run:`);
+//! - the jobs and workflows in [`NO_SECRET`] hold no secret at all: a gates job that must run without any (conformance test
+//!   `the_local_gates_are_the_first_jobs_of_a_trains_dispatch_run_and_run_without_a_token`) and the release path, whose kit steps
+//!   run in the shell, where the `s3` backend is the local disk (a key passed there is exposure for nothing);
+//! - setup-rust's own `action.yml` hands each `inputs.sccache-s3-*` to exactly one step and no step that holds one writes to
+//!   `$GITHUB_ENV` (read with the YAML reader, per step).
 //!
 //! Each finding is one spot, with the exact text to paste and where (after which line, at which indentation). A part the reader finds
 //! but cannot place lines in (a flow mapping, a `uses:` not on its own line) is a finding that says so. No workflow read is not measured.
@@ -40,9 +45,26 @@ const WORKFLOWS: &str = ".gitea/workflows";
 const ACTION: &str = ".gitea/actions/setup-rust/action.yml";
 /// How a workflow names the action: from this repository, or from the kit checked out at `.paddock` (the reusable workflows).
 const SETUP_USES: [&str; 2] = ["./.gitea/actions/setup-rust", "./.paddock/.gitea/actions/setup-rust"];
-/// The reusable workflows whose setup-rust steps read the secrets their callers pass.
-const REUSABLE: [&str; 2] = ["app-fuzz.yml", "app-release.yml"];
+/// The reusable workflows whose setup-rust steps read the secrets their callers pass (app-release.yml does not: it is on the release
+/// path, [`NO_SECRET`]).
+const REUSABLE: [&str; 1] = ["app-fuzz.yml"];
 const RULE: u32 = 79;
+
+/// The workflows (`file.yml`) and jobs (`file.yml:job`) that hold no S3 key. Only ever shrinks: a new entry is a decision of the
+/// user (ER-46), and the test `the_no_secret_list_only_shrinks` pins its content so a growing list shows in a diff.
+pub const NO_SECRET: [&str; 7] = [
+    "ci.yml:train-gates",
+    "app-release.yml",
+    "heavy-release.yml",
+    "dyno-release.yml",
+    "pitcrew-release.yml",
+    "pitwall-release.yml",
+    "spotter-release.yml",
+];
+
+fn no_secret(workflow: &str, job: &str) -> bool {
+    NO_SECRET.iter().any(|e| *e == workflow || *e == format!("{workflow}:{job}"))
+}
 
 /// One spot that lacks lines.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,7 +191,10 @@ pub fn plan(name: &str, text: &str) -> Result<(Vec<Edit>, BTreeSet<usize>), Stri
     let inputs: Vec<(String, String)> = KEYS.iter().map(|(i, s)| (i.to_string(), secret_value(s))).collect();
     let passed: Vec<(String, String)> = KEYS.iter().map(|(_, s)| (s.to_string(), secret_value(s))).collect();
 
-    for (_, job) in doc.get("jobs").map(Node::entries).unwrap_or_default() {
+    for (job_id, job) in doc.get("jobs").map(Node::entries).unwrap_or_default() {
+        if no_secret(name, job_id) {
+            continue;
+        }
         for step in job.get("steps").map(Node::items).unwrap_or_default() {
             let Some(uses) = step.get("uses") else { continue };
             if !uses.text().is_some_and(|u| SETUP_USES.contains(&u.trim())) {
@@ -264,6 +289,54 @@ pub fn stray_lines(text: &str, owned: &BTreeSet<usize>) -> Vec<usize> {
         .collect()
 }
 
+/// The `inputs.sccache-s3-*` of setup-rust's `action.yml` and where they go: exactly one step names each, and no step that names one
+/// writes to `$GITHUB_ENV` (a later step, test or build script would see the key). The findings are `(line, message)`; a file the
+/// reader cannot parse or without steps is a finding too. Read per step: the step's text is from its own first line to the next
+/// step's.
+pub fn action_leaks(text: &str) -> Vec<(usize, String)> {
+    let doc = match yaml::parse(text) {
+        Ok(d) => d,
+        Err(e) => return vec![(1, format!("setup-rust's action.yml cannot be read: {e}"))],
+    };
+    let steps = doc.get("runs").and_then(|r| r.get("steps")).map(Node::items).unwrap_or_default();
+    if steps.is_empty() {
+        return vec![(1, "setup-rust's action.yml has no steps the check can read".into())];
+    }
+    let lines: Vec<&str> = text.split('\n').collect();
+    let starts: Vec<usize> = steps.iter().map(|n| n.line).collect();
+    let mut out = Vec::new();
+    for (key_input, _) in KEYS {
+        let name = format!("inputs.{key_input}");
+        let holders: Vec<usize> = starts
+            .iter()
+            .enumerate()
+            .filter(|(i, from)| {
+                let to = starts.get(i + 1).copied().unwrap_or(lines.len() + 1);
+                lines[from.saturating_sub(1)..(to - 1).min(lines.len())]
+                    .iter()
+                    .any(|l| !l.trim_start().starts_with('#') && l.contains(&name))
+            })
+            .map(|(_, from)| *from)
+            .collect();
+        if holders.len() != 1 {
+            out.push((
+                holders.get(1).copied().unwrap_or(1),
+                format!("`{name}` is named by {} steps; exactly one (the step that runs `./dev ci setup-rust`) may name it", holders.len()),
+            ));
+        }
+        for from in holders {
+            let to = starts.iter().copied().find(|s| *s > from).unwrap_or(lines.len() + 1);
+            if lines[from - 1..(to - 1).min(lines.len())]
+                .iter()
+                .any(|l| !l.trim_start().starts_with('#') && l.contains("GITHUB_ENV"))
+            {
+                out.push((from, format!("the step that names `{name}` also writes to $GITHUB_ENV: a later step would see the key")));
+            }
+        }
+    }
+    out
+}
+
 /// The finding for one spot: where, and the exact text to paste.
 fn spot(file: &str, e: &Edit) -> Finding {
     let (line, message) = match e {
@@ -318,12 +391,31 @@ impl Check for C141 {
                     ".gitea/workflows/unwired.yml",
                     "jobs:\n  a:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n      - run: echo hi\n",
                 ),
+                // On the no-secret list: unwired is right here (no finding) and a key passed is a stray line.
+                (
+                    ".gitea/workflows/app-release.yml",
+                    "jobs:\n  a:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n",
+                ),
+                (
+                    ".gitea/workflows/dyno-release.yml",
+                    "jobs:\n  a:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n        with:\n          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}\n",
+                ),
+                (
+                    ".gitea/actions/setup-rust/action.yml",
+                    "name: setup-rust\nruns:\n  using: composite\n  steps:\n    - name: one\n      env:\n        K: ${{ inputs.sccache-s3-access-key-id }}\n        S: ${{ inputs.sccache-s3-secret-access-key }}\n      run: echo hi\n    - name: leak\n      run: echo \"K=${{ inputs.sccache-s3-secret-access-key }}\" >> \"$GITHUB_ENV\"\n",
+                ),
                 (
                     "docs/not-a-workflow.yml",
                     "jobs:\n  a:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n",
                 ),
             ],
-            expect: vec![(".gitea/workflows/unwired.yml", 4)],
+            // The action's second step names the secret input again and writes to $GITHUB_ENV (two findings at its line 10).
+            expect: vec![
+                (".gitea/actions/setup-rust/action.yml", 10),
+                (".gitea/actions/setup-rust/action.yml", 10),
+                (".gitea/workflows/dyno-release.yml", 6),
+                (".gitea/workflows/unwired.yml", 4),
+            ],
         }
     }
 
@@ -390,6 +482,18 @@ impl Check for C141 {
                     format!("the S3 key lines cannot be placed: {e}"),
                     "Write that part as a block on lines of its own.",
                 )),
+            }
+        }
+        if let Some(text) = ctx.read(ACTION) {
+            for (line, message) in action_leaks(&text) {
+                findings.push(Finding::warn(
+                    "C141",
+                    RULE,
+                    ACTION,
+                    line,
+                    message,
+                    "Hand each input to the one step that runs ./dev ci setup-rust, in its `env:`, and write nothing of it to $GITHUB_ENV.",
+                ));
             }
         }
         for f in files
@@ -487,8 +591,8 @@ mod tests {
 
     #[test]
     fn a_caller_of_a_reusable_workflow_passes_the_secrets_and_inherit_counts() {
-        let caller = "jobs:\n  rel:\n    uses: ./.gitea/workflows/app-release.yml\n    with:\n      app-id: dyno\n  other:\n    uses: ./.gitea/workflows/app-fuzz.yml\n    secrets: inherit\n";
-        let (edits, _) = plan("dyno-release.yml", caller).unwrap();
+        let caller = "jobs:\n  rel:\n    uses: ./.gitea/workflows/app-fuzz.yml\n    with:\n      app-id: dyno\n  other:\n    uses: ./.gitea/workflows/app-fuzz.yml\n    secrets: inherit\n  release:\n    uses: ./.gitea/workflows/app-release.yml\n";
+        let (edits, _) = plan("nightly.yml", caller).unwrap();
         assert_eq!(
             edits,
             vec![Edit::Insert(
@@ -498,7 +602,8 @@ mod tests {
                     "      PADDOCK_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}".into(),
                     "      PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}".into(),
                 ]
-            )]
+            )],
+            "only the app-fuzz caller is told to pass the key: app-release is on the release path and takes none"
         );
     }
 
@@ -512,5 +617,41 @@ mod tests {
         assert_eq!(new[0], "    secrets:");
         assert_eq!(new[1], "      PADDOCK_SCCACHE_S3_ACCESS_KEY_ID:");
         assert!(new.contains(&"        required: false".to_string()));
+    }
+
+    #[test]
+    fn the_no_secret_list_only_shrinks() {
+        // Pinned: a longer list shows in this diff and needs the user's yes (ER-46).
+        assert_eq!(
+            NO_SECRET,
+            ["ci.yml:train-gates", "app-release.yml", "heavy-release.yml", "dyno-release.yml", "pitcrew-release.yml", "pitwall-release.yml", "spotter-release.yml"]
+        );
+    }
+
+    #[test]
+    fn a_job_on_the_no_secret_list_is_not_asked_for_the_key_and_a_key_there_is_a_stray_line() {
+        let (edits, _) = plan("ci.yml", "jobs:\n  train-gates:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n  other:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n").unwrap();
+        assert_eq!(edits.len(), 1, "only `other` is told to pass the key: {edits:?}");
+        let with_key = "jobs:\n  train-gates:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n        with:\n          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}\n";
+        let (edits, owned) = plan("ci.yml", with_key).unwrap();
+        assert!(edits.is_empty());
+        assert_eq!(stray_lines(with_key, &owned), vec![5], "the key in a no-secret job is a stray line");
+    }
+
+    #[test]
+    fn the_action_hands_each_input_to_one_step_that_does_not_write_to_github_env() {
+        let ok = "runs:\n  using: composite\n  steps:\n    - name: a\n      run: echo\n    - name: b\n      env:\n        K: ${{ inputs.sccache-s3-access-key-id }}\n        S: ${{ inputs.sccache-s3-secret-access-key }}\n      run: ./dev\n";
+        assert!(action_leaks(ok).is_empty(), "{:?}", action_leaks(ok));
+        let twice = format!("{ok}    - name: c\n      run: echo ${{{{ inputs.sccache-s3-access-key-id }}}}\n");
+        assert_eq!(action_leaks(&twice).len(), 1, "{:?}", action_leaks(&twice));
+        let to_env = ok.replace("run: ./dev", "run: echo \"K=$K\" >> \"$GITHUB_ENV\"");
+        assert_eq!(action_leaks(&to_env).len(), 2, "one per input: {:?}", action_leaks(&to_env));
+        assert_eq!(action_leaks("name: x\n").len(), 1, "an action without steps is a finding, not a pass");
+    }
+
+    #[test]
+    fn the_real_setup_rust_action_hands_the_keys_to_one_step() {
+        let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitea/actions/setup-rust/action.yml")).unwrap();
+        assert_eq!(action_leaks(&text), Vec::new());
     }
 }

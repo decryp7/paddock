@@ -204,7 +204,7 @@ fn write_shim(path: &Path, calls: &Path, fail: Fail) {
             .appends_with(&calls.with_file_name("tokens").display().to_string(), "tok={env:PADDOCK_DEV_TOKEN}\n")
             .appends_with(
                 &calls.display().to_string(),
-                "{args} port={env:SCCACHE_SERVER_PORT} io={env:SCCACHE_IGNORE_SERVER_IO_ERROR} dir={env:SCCACHE_DIR} size={env:SCCACHE_CACHE_SIZE} redis={env:SCCACHE_REDIS_ENDPOINT} db={env:SCCACHE_REDIS_DB}\n",
+                "{args} port={env:SCCACHE_SERVER_PORT} io={env:SCCACHE_IGNORE_SERVER_IO_ERROR} dir={env:SCCACHE_DIR} size={env:SCCACHE_CACHE_SIZE} redis={env:SCCACHE_REDIS_ENDPOINT} db={env:SCCACHE_REDIS_DB} chain={env:SCCACHE_MULTILEVEL_CHAIN} bucket={env:SCCACHE_BUCKET} idle={env:SCCACHE_IDLE_TIMEOUT} meta={env:AWS_EC2_METADATA_DISABLED} key={env:AWS_ACCESS_KEY_ID} secret={env:AWS_SECRET_ACCESS_KEY} errlog={env:SCCACHE_ERROR_LOG}\n",
             )
     };
     let mut shim = StandIn::new(path.parent().unwrap(), path.file_name().unwrap().to_str().unwrap())
@@ -358,7 +358,7 @@ fn wrong_inputs_fail_the_step_with_the_shells_message() {
     assert_eq!(rs.code, 1);
     assert!(
         rs.out
-            .contains("::error::sccache-backend must be auto, redis or local (got 'disk')"),
+            .contains("::error::sccache-backend must be auto, redis, local or s3 (got 'disk')"),
         "{}",
         rs.out
     );
@@ -602,4 +602,63 @@ fn in_a_container_a_pinned_copy_in_the_tool_cache_is_put_on_path() {
         rs.calls
     );
     assert_eq!(rest, sh.calls);
+}
+
+const S3_INPUT: Input = Input {
+    backend: "s3",
+    endpoint: "",
+    db: "",
+    tauri: false,
+};
+
+const S3_ENV: [(&str, &str); 4] = [
+    ("PADDOCK_SCCACHE_S3_BUCKET", "sccache-paddock"),
+    ("PADDOCK_SCCACHE_S3_ENDPOINT", "http://192.0.2.10:15000"),
+    ("PADDOCK_SCCACHE_S3_ACCESS_KEY_ID", "test-key-id"),
+    ("PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY", "test-secret"),
+];
+
+/// A `curl` that answers the S3 health check as `status` says (0: healthy) and logs its arguments.
+fn health_curl(r: &Runner, status: i32) {
+    let calls = r.calls.display().to_string();
+    StandIn::new(&r.bin, "curl")
+        .answers(Actions::new().appends_with(&calls, "curl {args}\n").exit(status))
+        .install()
+        .unwrap();
+}
+
+/// The chain, the bucket and the keys are the server's alone. A server a later rustc starts (ours ended) gets `$GITHUB_ENV`, which
+/// holds the local disk only: with the chain and no keys it failed the build after 10 s (review of 534918839, exit 2 in 2 of 2 runs).
+#[test]
+fn the_s3_chain_and_keys_reach_the_servers_start_and_nothing_a_later_step_sees() {
+    let r = Runner::new(Some(Fail::Never));
+    health_curl(&r, 0);
+    let rs = r.rust(&S3_INPUT, &S3_ENV);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    let start = rs.calls.lines().find(|l| l.starts_with("--start-server")).expect("the server is started");
+    for want in ["chain=disk,s3", "bucket=sccache-paddock", "idle=0", "meta=true", "key=test-key-id", "secret=test-secret", "errlog="] {
+        assert!(start.contains(want), "the server's start lacks `{want}`: {start}");
+    }
+    assert!(!start.ends_with("errlog="), "the server writes its errors to the job's temp folder: {start}");
+    for gone in ["MULTILEVEL", "SCCACHE_BUCKET", "SCCACHE_ENDPOINT", "AWS_ACCESS", "AWS_SECRET", "test-secret", "test-key-id"] {
+        assert!(!rs.env.contains(gone), "$GITHUB_ENV holds `{gone}`:\n{}", rs.env);
+    }
+    for want in ["SCCACHE_IDLE_TIMEOUT=0\n", "AWS_EC2_METADATA_DISABLED=true\n", "SCCACHE_DIR=", "SCCACHE_ERROR_LOG="] {
+        assert!(rs.env.contains(want), "$GITHUB_ENV lacks `{want}`:\n{}", rs.env);
+    }
+    assert!(rs.calls.contains("curl ") && rs.calls.contains("/minio/health/live"), "the health check is an HTTP request: {}", rs.calls);
+    assert!(!rs.out.contains("test-secret") && !rs.out.contains("test-key-id"), "{}", rs.out);
+}
+
+/// A store whose health check fails is not used: the job warns and runs on its local disk (never fails the build).
+#[test]
+fn a_store_that_fails_its_health_check_leaves_the_job_on_its_local_disk() {
+    let r = Runner::new(Some(Fail::Never));
+    health_curl(&r, 22);
+    let rs = r.rust(&S3_INPUT, &S3_ENV);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    assert!(rs.out.contains("::warning::sccache: the S3 health check"), "{}", rs.out);
+    let start = rs.calls.lines().find(|l| l.starts_with("--start-server")).expect("the server is started");
+    assert!(start.contains("chain= ") && start.contains("key= "), "no chain and no key: {start}");
+    assert!(rs.env.contains("RUSTC_WRAPPER=sccache\n") && !rs.env.contains("MULTILEVEL"), "{}", rs.env);
 }

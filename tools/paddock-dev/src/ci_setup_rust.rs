@@ -25,6 +25,7 @@
 //! base, so a test never reaches the network; the pinned checksum still decides).
 
 use crate::ci_isolation::{self, Ctx, Sinks, home};
+use crate::local_sccache::server_env;
 use crate::ci_tool::{NETWORK_ENV, Output, TAIL_LINES, ToolCall, error_line, tail};
 use clap::Args;
 use sha2::{Digest, Sha256};
@@ -118,7 +119,7 @@ pub enum Backend {
     },
     /// sccache's disk cache.
     Local,
-    /// The job's local disk cache first, the shared S3 store behind it ([`s3_level_settings`]); resolved when the step runs, and
+    /// The job's local disk cache first, the shared S3 store behind it ([`s3_server_settings`]); resolved when the step runs, and
     /// the local disk alone when S3 cannot be used ([`S3Ci::from_env`]).
     S3,
 }
@@ -131,7 +132,7 @@ pub enum Backend {
 /// the server read-only; sccache v0.19.0 docs/MultiLevel.md); S3 is used only when this step was given its runner class's key
 /// (`PADDOCK_SCCACHE_S3_ACCESS_KEY_ID` and `PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY`, Gitea repository secrets passed through the
 /// setup-rust inputs to this step's environment only and never to `$GITHUB_ENV`; user decision 2026-11-19, least privilege) and its endpoint answers a TCP connect
-/// within [`S3_CONNECT`]; the store's size is the store's job (the bucket quota and a lifecycle expiry rule set by the user on
+/// by its health check ([`S3_HEALTH_PATH`]); the store's size is the store's job (the bucket quota and a lifecycle expiry rule set by the user on
 /// RustFS, since sccache never evicts from S3).
 #[derive(Clone, PartialEq, Eq)]
 pub struct S3Ci {
@@ -168,10 +169,15 @@ pub struct S3Off {
     pub why: String,
 }
 
-/// How long the endpoint may take to accept a TCP connect before the job uses its local disk alone. On the LAN the round trip was
-/// 1.8 to 7.1 ms and the health check 12 to 78 ms (measured 2026-11-19 from the Mac, research note section 3); 3 s is far above
-/// that and short against a job, so a dead or overloaded store costs at most 3 s.
-pub const S3_CONNECT: Duration = Duration::from_secs(3);
+/// The health check of the S3 store before a job uses it: an HTTP GET of [`S3_HEALTH_PATH`] that must answer 2xx. A TCP connect proved
+/// only that something listens (a store that accepts connections and then hangs passed it). curl's own limits end a dead or slow
+/// store at [`S3_HEALTH_CONNECT`] / [`S3_HEALTH_MAX`] seconds, the DNS lookup included. On the LAN the health check took 1 to 119 ms
+/// (measured 2026-11-19 from the Mac, Linux and Windows runners, docs/benchmarks.md).
+pub const S3_HEALTH_PATH: &str = "/minio/health/live";
+/// curl `--connect-timeout`, in seconds.
+pub const S3_HEALTH_CONNECT: u64 = 3;
+/// curl `--max-time`, in seconds: the whole check.
+pub const S3_HEALTH_MAX: u64 = 5;
 
 impl S3Ci {
     /// The S3 level from the step's environment, or why it cannot be used. The key is `PADDOCK_SCCACHE_S3_ACCESS_KEY_ID` and
@@ -208,6 +214,12 @@ impl S3Ci {
             (false, endpoint.strip_prefix("http://").unwrap_or(&endpoint))
         };
         let host_port = host_port.trim_end_matches('/').to_string();
+        if host_port.contains('@') {
+            // `user:password@host` would put a credential into a variable that is logged and into the health check's URL.
+            return Err(warn(
+                "PADDOCK_SCCACHE_S3_ENDPOINT holds `@`; it is http://host:port with no user or password (the key is the two secrets)".into(),
+            ));
+        }
         if host_port.contains("://") || host_port.contains('/') || !host_port.contains(':') {
             return Err(warn(format!(
                 "PADDOCK_SCCACHE_S3_ENDPOINT is `{endpoint}`; it is http://host:port (or https://), with no path"
@@ -223,8 +235,16 @@ impl S3Ci {
     }
 }
 
-/// The settings that put the S3 store behind the local disk (`dir`, `size`): sccache's multi-level chain `disk,s3`.
-pub fn s3_level_settings(s3: &S3Ci, dir: &str, size: &str) -> Vec<(String, String)> {
+impl S3Ci {
+    /// The URL of the health check.
+    pub fn health_url(&self) -> String {
+        format!("{}://{}{S3_HEALTH_PATH}", if self.ssl { "https" } else { "http" }, self.endpoint)
+    }
+}
+
+/// The settings the sccache SERVER starts with (never a build's environment): the multi-level chain `disk,s3` behind the local disk
+/// (`dir`, `size`) and the S3 store. Only the start call gets these; `$GITHUB_ENV` gets [`s3_build_settings`].
+pub fn s3_server_settings(s3: &S3Ci, dir: &str, size: &str) -> Vec<(String, String)> {
     [
         ("SCCACHE_DIR", dir),
         ("SCCACHE_CACHE_SIZE", size),
@@ -241,15 +261,18 @@ pub fn s3_level_settings(s3: &S3Ci, dir: &str, size: &str) -> Vec<(String, Strin
     .collect()
 }
 
-/// Whether `endpoint` (`host:port`) accepts a TCP connect within `limit`: a connect has no side effect on the store.
-pub fn reachable(endpoint: &str, limit: Duration) -> bool {
-    use std::net::ToSocketAddrs;
-    let Ok(mut addrs) = endpoint.to_socket_addrs() else {
-        return false;
-    };
-    addrs
-        .next()
-        .is_some_and(|a| std::net::TcpStream::connect_timeout(&a, limit).is_ok())
+/// The settings every later step of the job gets in `$GITHUB_ENV` when the S3 level is on: the local disk only, the two that keep
+/// a server a build starts itself alive and off the metadata lookup, and where the server writes its errors. No chain, no bucket, no
+/// key: a server started by a later rustc (ours ended) then serves from the local disk instead of failing 10 s into the build for
+/// lack of keys (measured in review of 534918839: exit 2 in 2 of 2 runs).
+pub fn s3_build_settings(dir: &str, size: &str, error_log: &str) -> Vec<(String, String)> {
+    let mut v = vec![
+        ("SCCACHE_DIR".to_string(), dir.to_string()),
+        ("SCCACHE_CACHE_SIZE".to_string(), size.to_string()),
+        ("SCCACHE_ERROR_LOG".to_string(), error_log.to_string()),
+    ];
+    v.extend(crate::local_sccache::survival_vars(true));
+    v
 }
 
 /// The backend the inputs ask for, or the `::error::` text when they are wrong.
@@ -638,7 +661,10 @@ impl Step<'_> {
         } else {
             self.isolation(&["port", "sccache"])?
         };
+        // `settings` go to $GITHUB_ENV (every later step); `server_settings` only to the server's own start. They differ for S3: the
+        // chain, the bucket and the keys belong to the server alone.
         let mut settings: Vec<(String, String)> = Vec::new();
+        let mut server_settings: Option<Vec<(String, String)>> = None;
         // The S3 keys, for the server's start only: never in `settings`, which go to $GITHUB_ENV.
         let mut s3_keys: Vec<(String, String)> = Vec::new();
         match &backend {
@@ -656,20 +682,7 @@ impl Step<'_> {
             Backend::S3 => {
                 let (dir, size) = self.local_cache()?;
                 let get = |k: &str| self.get(k).map(str::to_string);
-                let level = S3Ci::from_env(&get, self.os(), std::env::consts::ARCH).and_then(|s3| {
-                    if reachable(&s3.endpoint, S3_CONNECT) {
-                        Ok(s3)
-                    } else {
-                        Err(S3Off {
-                            warn: true,
-                            why: format!(
-                                "the S3 endpoint {} did not accept a connection within {} s",
-                                s3.endpoint,
-                                S3_CONNECT.as_secs()
-                            ),
-                        })
-                    }
-                });
+                let level = S3Ci::from_env(&get, self.os(), std::env::consts::ARCH).and_then(|s3| self.health(&s3).map(|()| s3));
                 match level {
                     Ok(s3) => {
                         // Gitea masks secrets it passes itself; masking them again here also covers a value reaching the step another way.
@@ -683,7 +696,12 @@ impl Step<'_> {
                             "sccache: local disk {dir}, then S3 bucket {} at {} under {} (credentials configured)",
                             s3.bucket, s3.endpoint, s3.prefix
                         ));
-                        settings.extend(s3_level_settings(&s3, &dir, &size));
+                        let error_log = self.temp_base().join("sccache-error.log").display().to_string();
+                        let mut full = s3_server_settings(&s3, &dir, &size);
+                        // The server writes its errors into the job's temp folder, so `sccache-stats` can show them (ER-27).
+                        full.push(("SCCACHE_ERROR_LOG".into(), error_log.clone()));
+                        server_settings = Some(full);
+                        settings.extend(s3_build_settings(&dir, &size, &error_log));
                     }
                     Err(off) => {
                         self.say(format!(
@@ -703,21 +721,16 @@ impl Step<'_> {
             .unwrap_or_default();
         let password = endpoint_password(&endpoint).unwrap_or_default();
         let call = |a: &str| {
-            let mut c = ToolCall::new(sccache.to_string_lossy())
+            let c = ToolCall::new(sccache.to_string_lossy())
                 .args([a])
                 .env("SCCACHE_SERVER_PORT", port.as_str())
-                .env("SCCACHE_IGNORE_SERVER_IO_ERROR", "1")
                 .secret(secret.clone())
                 .secret(password.clone())
                 .pass(SCCACHE_PASS)
                 .timeout(Duration::from_secs(60));
-            for (k, v) in &settings {
-                c = c.env(k.as_str(), v.as_str());
-            }
-            for (k, v) in &s3_keys {
-                c = c.env(k.as_str(), v.as_str()).secret(v.clone());
-            }
-            c
+            // One shared way to start a server that may serve S3 (local_sccache.rs, also the agents' server).
+            let s3 = !s3_keys.is_empty();
+            server_env(c, server_settings.as_deref().unwrap_or(&settings), s3, s3, &s3_keys)
         };
         if let Ok(r) = self.run(&call("--version")) {
             let v = r.stdout.trim().to_string();
@@ -748,6 +761,31 @@ impl Step<'_> {
         // command line rustc's arguments for a large crate exceed). Cached builds are not incremental.
         let windows = self.os() == "Windows";
         self.append("GITHUB_ENV", &env_lines(&port, &settings, windows))
+    }
+
+    /// The S3 store's health check: an HTTP GET that answers 2xx within curl's own limits ([`S3_HEALTH_CONNECT`], [`S3_HEALTH_MAX`]).
+    /// A store that accepts a connection and then hangs (or answers an error) is not used: this job runs on its local disk alone.
+    fn health(&mut self, s3: &S3Ci) -> Result<(), S3Off> {
+        let call = ToolCall::new("curl")
+            .args(["-fsS", "--noproxy", "*", "--connect-timeout"])
+            .args([S3_HEALTH_CONNECT.to_string(), "--max-time".to_string(), S3_HEALTH_MAX.to_string(), s3.health_url()])
+            .timeout(Duration::from_secs(S3_HEALTH_MAX + 5));
+        match self.run(&call) {
+            Ok(r) if r.success => Ok(()),
+            Ok(r) => Err(S3Off {
+                warn: true,
+                why: format!(
+                    "the S3 health check {} failed ({}): {}",
+                    s3.health_url(),
+                    r.how,
+                    r.stderr.trim().lines().last().unwrap_or("no message")
+                ),
+            }),
+            Err(e) => Err(S3Off {
+                warn: true,
+                why: format!("the S3 health check could not run curl: {e}"),
+            }),
+        }
     }
 
     /// The local disk cache: a host slot's kept folder with its share of the budget, else the container's mount (or a folder
@@ -1019,34 +1057,46 @@ mod tests {
     }
 
     #[test]
-    fn the_s3_level_sits_behind_the_local_disk_and_its_settings_never_hold_a_key() {
+    fn the_server_gets_the_chain_and_the_job_only_the_disk() {
         let s3 = S3Ci::from_env(&vars(&S3_VARS), "Linux", "x86_64").unwrap();
-        let s = s3_level_settings(&s3, "/sccache", "20G");
-        let get = |k: &str| s.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
-        assert_eq!(get("SCCACHE_MULTILEVEL_CHAIN"), Some("disk,s3"), "the local disk is level 0");
+        let server = s3_server_settings(&s3, "/sccache", "20G");
+        let get = |s: &[(String, String)], k: &str| s.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+        assert_eq!(get(&server, "SCCACHE_MULTILEVEL_CHAIN").as_deref(), Some("disk,s3"), "the local disk is level 0");
         assert_eq!(
-            get("SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY"),
+            get(&server, "SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY").as_deref(),
             Some("l0"),
             "an S3 failure never fails a compile"
         );
-        assert_eq!(get("SCCACHE_DIR"), Some("/sccache"));
-        assert_eq!(get("SCCACHE_S3_KEY_PREFIX"), Some("paddock-ci/Linux-x86_64"));
-        let lines = env_lines("4227", &s, false).join("\n");
-        assert!(
-            !lines.contains("test-secret") && !lines.contains("test-key-id") && !lines.contains("AWS_"),
-            "{lines}"
+        assert_eq!(get(&server, "SCCACHE_S3_KEY_PREFIX").as_deref(), Some("paddock-ci/Linux-x86_64"));
+        // What every later step gets: no chain, no bucket, no key; the survival settings and the error log.
+        let build = s3_build_settings("/sccache", "20G", "/tmp/sccache-error.log");
+        let lines = env_lines("4227", &build, false).join("\n");
+        for gone in ["MULTILEVEL", "SCCACHE_BUCKET", "SCCACHE_ENDPOINT", "SCCACHE_S3", "AWS_ACCESS", "AWS_SECRET", "test-secret", "test-key-id"] {
+            assert!(!lines.contains(gone), "`{gone}` in {lines}");
+        }
+        for want in ["SCCACHE_DIR=/sccache", "SCCACHE_IDLE_TIMEOUT=0", "AWS_EC2_METADATA_DISABLED=true", "SCCACHE_ERROR_LOG=/tmp/sccache-error.log"] {
+            assert!(lines.contains(want), "`{want}` missing in {lines}");
+        }
+    }
+
+    #[test]
+    fn the_health_check_is_an_http_get_of_the_stores_own_endpoint() {
+        let s3 = S3Ci::from_env(&vars(&S3_VARS), "Linux", "x86_64").unwrap();
+        assert_eq!(s3.health_url(), "http://192.0.2.10:15000/minio/health/live");
+        let mut v = S3_VARS.to_vec();
+        v[1] = ("PADDOCK_SCCACHE_S3_ENDPOINT", "https://s3.example.test:443");
+        assert_eq!(
+            S3Ci::from_env(&vars(&v), "Linux", "x86_64").unwrap().health_url(),
+            "https://s3.example.test:443/minio/health/live"
         );
     }
 
     #[test]
-    fn an_endpoint_that_accepts_no_connection_is_not_reachable() {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let open = l.local_addr().unwrap().to_string();
-        assert!(reachable(&open, S3_CONNECT));
-        // A port that is taken and does not listen (HeldPort::refusing): no other process can be given it meanwhile.
-        let closed = paddock_testkit::net::HeldPort::refusing();
-        assert!(!reachable(&closed.addr().to_string(), Duration::from_millis(500)));
-        assert!(!reachable("not an endpoint", Duration::from_millis(500)));
+    fn an_endpoint_with_a_user_or_password_is_refused() {
+        let mut v = S3_VARS.to_vec();
+        v[1] = ("PADDOCK_SCCACHE_S3_ENDPOINT", "http://user:pw@192.0.2.10:15000");
+        let off = S3Ci::from_env(&vars(&v), "Linux", "x86_64").unwrap_err();
+        assert!(off.warn && off.why.contains('@') && !off.why.contains("pw"), "{off:?}");
     }
 
     #[test]

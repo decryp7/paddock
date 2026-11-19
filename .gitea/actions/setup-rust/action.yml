@@ -112,6 +112,16 @@ runs:
         kit="$(bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" which)"
         echo "kit=$kit" >> "$GITHUB_OUTPUT"
         echo "setup-rust: compile cache through the $kit implementation"
+    # ./dev builds itself from source when no pinned copy exists (cargo, build scripts): that runs here, in a step that holds no S3 key.
+    # The step below then only runs the built tool, which hands the key to the sccache server and to nothing else.
+    - name: Build ./dev
+      if: steps.kit.outputs.kit == 'dev'
+      shell: bash
+      run: |
+        if [ -z "${PADDOCK_DEV:-}" ]; then
+          if [ -z "${PADDOCK_DEV_TOKEN-}${GITHUB_TOKEN-}" ]; then export PADDOCK_DEV_DOWNLOAD=0; fi
+          bash "${{ github.action_path }}/../../../dev" ci setup-rust --help >/dev/null
+        fi
     - name: Compile cache and Tauri libraries
       if: steps.kit.outputs.kit == 'dev'
       shell: bash
@@ -193,7 +203,7 @@ runs:
           echo "::notice::sccache-backend s3 is not used by this shell path (a release, rule 54 or tag run); the local disk is used until the release lane runs ./dev ci setup-rust."
           BACKEND=local
         fi
-        case "$BACKEND" in auto|redis|local) ;; *) echo "::error::sccache-backend must be auto, redis or local (got '$BACKEND')"; exit 1 ;; esac
+        case "$BACKEND" in auto|redis|local) ;; *) echo "::error::sccache-backend must be auto, redis, local or s3 (got '$BACKEND')"; exit 1 ;; esac
         if [ "$BACKEND" = redis ] && [ -z "$REDIS_ENDPOINT" ]; then
           echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"; exit 1
         fi

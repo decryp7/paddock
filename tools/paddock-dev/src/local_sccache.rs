@@ -359,7 +359,7 @@ struct Server<'a> {
 impl Server<'_> {
     fn call(&self, arg: &str) -> ToolCall {
         let run = self.run.to_string_lossy();
-        let mut c = ToolCall::new(self.bin.to_string_lossy())
+        let c = ToolCall::new(self.bin.to_string_lossy())
             .args([arg])
             .pass(PASS)
             .cwd(self.run.to_path_buf())
@@ -371,24 +371,41 @@ impl Server<'_> {
             .env("TEMP", run.as_ref())
             .env("SCCACHE_ERROR_LOG", error_log(self.run).to_string_lossy())
             .env("SCCACHE_LOG", self.log_level.as_str())
-            // The server never exits on its own: a build that finds none would start one with the build's environment (and, for S3,
-            // without the keys), and that one would replace ours.
-            .env("SCCACHE_IDLE_TIMEOUT", "0")
-            .env("SCCACHE_IGNORE_SERVER_IO_ERROR", "1")
             .timeout(Duration::from_secs(60));
-        for (k, v) in self.backend.vars() {
-            c = c.env(k, v);
-        }
-        if matches!(self.backend, Backend::S3(_)) {
-            // No instance-metadata lookup: with no keys it hangs for about 75 s before it fails.
-            c = c.env("AWS_EC2_METADATA_DISABLED", "true");
-        }
-        // Only the server needs the keys, and the logged command masks them.
-        for (k, v) in self.creds.map(Creds::pairs).unwrap_or_default() {
-            c = c.env(k.as_str(), v.as_str()).secret(v.as_str());
-        }
-        c
+        let creds = self.creds.map(Creds::pairs).unwrap_or_default();
+        server_env(c, &self.backend.vars(), true, matches!(self.backend, Backend::S3(_)), creds)
     }
+}
+
+/// The two settings that keep the server we start the only one: it never exits on its own (a build that finds none would start one
+/// with the build's environment, and for S3 without the keys, and that one would replace ours and fail), and with S3 there is no
+/// instance-metadata lookup (with no keys it hangs for about 75 s before it fails). Builds get these too (`ready_vars`, setup-rust's
+/// `$GITHUB_ENV`), so a server a build starts anyway behaves the same way. Never a credential.
+pub(crate) fn survival_vars(s3: bool) -> Vec<(String, String)> {
+    let mut v = vec![("SCCACHE_IDLE_TIMEOUT".to_string(), "0".to_string())];
+    if s3 {
+        v.push(("AWS_EC2_METADATA_DISABLED".to_string(), "true".to_string()));
+    }
+    v
+}
+
+/// The one place a sccache server gets its environment (ER-22, rule 55: the agents' local server and CI's setup-rust both start
+/// through it): `settings` (what the server runs with), [`survival_vars`] when `survive`, and the credentials in `creds`, which only
+/// the server gets and the logged command masks. `s3` turns the metadata lookup off.
+pub(crate) fn server_env(mut c: ToolCall, settings: &[(String, String)], survive: bool, s3: bool, creds: &[(String, String)]) -> ToolCall {
+    c = c.env("SCCACHE_IGNORE_SERVER_IO_ERROR", "1");
+    for (k, v) in settings {
+        c = c.env(k.as_str(), v.as_str());
+    }
+    if survive {
+        for (k, v) in survival_vars(s3) {
+            c = c.env(k.as_str(), v.as_str());
+        }
+    }
+    for (k, v) in creds {
+        c = c.env(k.as_str(), v.as_str()).secret(v.as_str());
+    }
+    c
 }
 
 /// The folder beside the sccache binary that holds the shim, so the shim can be called `sccache`.
@@ -477,10 +494,7 @@ fn ready_vars(bin: &Path, backend: &Backend) -> Vec<(String, String)> {
     let mut vars = vec![("RUSTC_WRAPPER".to_string(), rustc_wrapper_for(bin).display().to_string())];
     vars.extend(backend.vars());
     vars.push(("SCCACHE_IGNORE_SERVER_IO_ERROR".into(), "1".into()));
-    vars.push(("SCCACHE_IDLE_TIMEOUT".into(), "0".into()));
-    if matches!(backend, Backend::S3(_)) {
-        vars.push(("AWS_EC2_METADATA_DISABLED".into(), "true".into()));
-    }
+    vars.extend(survival_vars(matches!(backend, Backend::S3(_))));
     vars
 }
 

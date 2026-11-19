@@ -30,9 +30,33 @@ pub const CAP_GB: u64 = 20;
 /// The cargo lock files cargo takes in a build folder.
 const LOCK_FILES: [&str; 2] = [".cargo-build-lock", ".cargo-lock"];
 
-/// Prunes every kept folder under `targets` (see the module). Messages go to `out`, one line each; nothing here fails a push.
+/// The pass runs at most this often (the time of the last one is in [`STAMP`]): the folders grow by days, and a pass walks every
+/// incremental folder of every kept folder and takes their cargo locks, work that every push after a gate run would repeat for
+/// nothing (review of 534918839).
+pub const MIN_INTERVAL: Duration = Duration::from_secs(3600);
+
+/// The file in `targets` that holds the time of the last pass, in seconds since the Unix epoch.
+const STAMP: &str = ".last-prune";
+
+/// Whether a pass ran less than [`MIN_INTERVAL`] before `now` (an unreadable or future stamp counts as no pass).
+fn pruned_recently(targets: &Path, now: SystemTime) -> bool {
+    let last = std::fs::read_to_string(targets.join(STAMP))
+        .ok()
+        .and_then(|t| t.trim().parse::<u64>().ok())
+        .map(|s| SystemTime::UNIX_EPOCH + Duration::from_secs(s));
+    last.and_then(|l| now.duration_since(l).ok()).is_some_and(|age| age < MIN_INTERVAL)
+}
+
+/// Prunes every kept folder under `targets` (see the module), at most once per [`MIN_INTERVAL`]. Messages go to `out`, one line
+/// each; nothing here fails a push.
 pub fn prune_all(env: &HashMap<String, String>, targets: &Path, now: SystemTime, out: &mut dyn Write) {
     let Ok(entries) = std::fs::read_dir(targets) else { return };
+    if pruned_recently(targets, now) {
+        return;
+    }
+    if let Ok(since) = now.duration_since(SystemTime::UNIX_EPOCH) {
+        let _ = std::fs::write(targets.join(STAMP), since.as_secs().to_string());
+    }
     let mut folders: Vec<PathBuf> = entries
         .flatten()
         .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
@@ -238,5 +262,21 @@ mod tests {
         prune_all(&HashMap::new(), &d.path().join("ci/targets"), SystemTime::now(), &mut out);
         let out = String::from_utf8(out).unwrap();
         assert!(!old.exists() && !other.join("debug/incremental/b-1").exists(), "{out}");
+    }
+
+    #[test]
+    fn the_pass_runs_at_most_once_an_hour() {
+        let (d, ws) = kept();
+        let targets = d.path().join("ci/targets");
+        let first = crate_folder(&ws, "a-1", STALE + Duration::from_secs(3600));
+        let now = SystemTime::now();
+        let mut out = Vec::new();
+        prune_all(&HashMap::new(), &targets, now, &mut out);
+        assert!(!first.exists(), "the first pass runs");
+        let second = crate_folder(&ws, "a-2", STALE + Duration::from_secs(3600));
+        prune_all(&HashMap::new(), &targets, now + Duration::from_secs(59 * 60), &mut out);
+        assert!(second.exists(), "a pass 59 minutes after the last one does nothing");
+        prune_all(&HashMap::new(), &targets, now + MIN_INTERVAL + Duration::from_secs(60), &mut out);
+        assert!(!second.exists(), "a pass an hour later runs again");
     }
 }

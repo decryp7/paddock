@@ -156,7 +156,7 @@ test('setup-rust declares the sccache backend inputs: local disk by default, Red
   assert.doesNotMatch(text, /GITHUB_ENV.*S3_SECRET/);
   assert.match(text, /BACKEND: \$\{\{ inputs\.sccache-backend \}\}/);
   assert.match(text, /REDIS_ENDPOINT: \$\{\{ inputs\.sccache-redis-endpoint \}\}/);
-  assert.match(text, /sccache-backend must be auto, redis or local/);
+  assert.match(text, /sccache-backend must be auto, redis, local or s3/);
   assert.match(text, /sccache-backend is redis but sccache-redis-endpoint is empty/);
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   assert.doesNotMatch(ci, /sccache-redis|SCCACHE_REDIS|sccache-backend/, 'Paddock CI no longer uses the shared Redis backend');
