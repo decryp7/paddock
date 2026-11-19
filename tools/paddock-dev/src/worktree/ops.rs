@@ -383,11 +383,23 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
     if let Err(e) = crate::disk::record::exclude_in_repo(&repo.common_dir).and_then(|()| crate::disk::record::write(Path::new(&k), &rec)) {
         record_note = format!("\nNo disk owner record written: {e}. `./dev disk adopt` can write it.");
     }
+    // Report-only (ER-41): shared integration points the base carries that another open train changes too.
+    let clash = if req.branch.is_some() {
+        crate::train_clash::for_branch_cut(&git, &head)
+    } else {
+        crate::train_clash::Outcome::default()
+    };
+    let clash_note = if clash.is_quiet() {
+        String::new()
+    } else {
+        format!("\n{}", clash.lines(&format!("the base of {}", req.branch.unwrap_or("this worktree"))).join("\n"))
+    };
     Ok(Report::new(
         json!({"path": k, "branch": req.branch, "head": head, "owner": req.owner, "locked": true, "note": note,
-               "claimed_by": caller.agent.as_ref().map(|a| a.id.clone()), "attached": attach.describe(), "drift": drift.as_ref().map(Drift::json)}),
+               "claimed_by": caller.agent.as_ref().map(|a| a.id.clone()), "attached": attach.describe(), "drift": drift.as_ref().map(Drift::json),
+               "train_clash": clash.json()}),
         format!(
-            "Made {k} ({}{}), locked: {note}{record_note}{deps_note}",
+            "Made {k} ({}{}), locked: {note}{record_note}{deps_note}{clash_note}",
             req.branch.map_or("detached".to_string(), |b| format!("branch {b}")),
             attach
                 .describe()

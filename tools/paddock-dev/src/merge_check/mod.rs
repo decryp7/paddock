@@ -589,6 +589,20 @@ fn check(req: &Request) -> Result<Checked, CliError> {
                     }),
                 );
             }
+            // Report-only (ER-41): a shared integration point that the member changes and another open train changes too.
+            if let [train, member] = merge.parents.as_slice() {
+                let clash = crate::train_clash::for_merge(&git, train, member);
+                if !clash.is_quiet() {
+                    steps.push(
+                        "train-clash",
+                        Some(generator_step::Step {
+                            text: clash.lines(&merge.member_name),
+                            data: clash.json(),
+                            exit: Exit::Ok,
+                        }),
+                    );
+                }
+            }
             if let (Some(file), false) = (&req.write_reverted, found.is_empty()) {
                 steps.push("write-reverted", Some(write_reverted_step(&git, &merge, &found, file)));
             }
