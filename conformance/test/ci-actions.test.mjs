@@ -148,8 +148,12 @@ test('the shared actions follow the repo rules: no AI attribution text, Gitea-co
 test('setup-rust declares the sccache backend inputs: local disk by default, Redis only when asked for', () => {
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const declared = declaredInputs(text);
-  for (const i of ['sccache-backend', 'sccache-redis-endpoint', 'sccache-redis-db']) assert.ok(declared.includes(i), `${i} is declared`);
-  assert.match(text, /sccache-backend:\n(?:.*\n)*?\s+default: local/);
+  for (const i of ['sccache-backend', 'sccache-redis-endpoint', 'sccache-redis-db', 'sccache-s3-access-key-id', 'sccache-s3-secret-access-key', 'sccache-s3-endpoint', 'sccache-s3-bucket']) assert.ok(declared.includes(i), `${i} is declared`);
+  // The switch is the Gitea variable, local when it is unset (ER-41: s3 only after its first green run).
+  assert.match(text, /sccache-backend:\n(?:.*\n)*?\s+default: \$\{\{ vars\.PADDOCK_CI_SCCACHE_BACKEND \|\| 'local' \}\}/);
+  // The S3 key reaches the one step that runs ./dev ci setup-rust, never $GITHUB_ENV or another step (conformance C141 checks the callers).
+  assert.equal(text.split('PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ inputs.sccache-s3-secret-access-key }}').length - 1, 1, 'one step receives the secret');
+  assert.doesNotMatch(text, /GITHUB_ENV.*S3_SECRET/);
   assert.match(text, /BACKEND: \$\{\{ inputs\.sccache-backend \}\}/);
   assert.match(text, /REDIS_ENDPOINT: \$\{\{ inputs\.sccache-redis-endpoint \}\}/);
   assert.match(text, /sccache-backend must be auto, redis or local/);
