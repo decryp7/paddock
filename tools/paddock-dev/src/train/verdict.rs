@@ -107,7 +107,7 @@ fn cut(text: &str) -> String {
 
 /// Judges `doc` (`ci triage --json`: `ok`, `rows`, `counts`, `skipped_jobs`). `Ok(Pass)` only when nothing stops it; otherwise
 /// every reason, each one line.
-pub fn verdict(doc: &Value, accepted: &[Accepted]) -> Result<Pass, Vec<String>> {
+pub fn verdict(doc: &Value, workflow: &str, accepted: &[Accepted]) -> Result<Pass, Vec<String>> {
     if doc.get("ok") != Some(&Value::Bool(true)) {
         return Err(vec!["the triage did not succeed (ok is not true)".into()]);
     }
@@ -154,8 +154,9 @@ pub fn verdict(doc: &Value, accepted: &[Accepted]) -> Result<Pass, Vec<String>> 
             reasons.push(format!("flaky whole job, not a test: {}", cut(test)));
             continue;
         }
+        let app = crate::ci_runs::landable::app_of_job(workflow, row.get("job").and_then(Value::as_str).unwrap_or("")).unwrap_or_default();
         match location_of(test) {
-            Some(loc) if accepted.iter().any(|a| a.covers(&loc)) => {}
+            Some(loc) if accepted.iter().any(|a| a.covers(&loc) && a.app() == app) => {}
             _ => reasons.push(format!("flaky and not accepted: {}", cut(test))),
         }
     }
@@ -201,7 +202,7 @@ mod tests {
     }
 
     fn stops(d: &Value, list: &[&str]) -> Vec<String> {
-        verdict(d, &accepted(list)).expect_err("must stop")
+        verdict(d, "debrief.yml", &accepted(list)).expect_err("must stop")
     }
 
     /// The positive control: the check does produce a pass, for exactly the accepted flaky tests (a column-less entry covers
@@ -210,6 +211,7 @@ mod tests {
     fn only_accepted_flaky_tests_pass() {
         let pass = verdict(
             &two_flaky(),
+            "debrief.yml",
             &accepted(&["apps/debrief/app/e2e/a11y.e2e.ts:6:7", "apps/debrief/app/e2e/ux-home.e2e.ts:73"]),
         )
         .unwrap();
@@ -232,7 +234,7 @@ mod tests {
         let d = doc(vec![flaky(WINDOWING)], json!({"flaky": 1}));
         assert!(!stops(&d, &["apps/debrief/app/e2e/windowing.e2e.ts:94"]).is_empty());
         assert!(!stops(&d, &["apps/debrief/app/e2e/windowing.e2e.ts:93:6"]).is_empty());
-        assert!(verdict(&d, &accepted(&["apps/debrief/app/e2e/windowing.e2e.ts:93"])).is_ok());
+        assert!(verdict(&d, "debrief.yml", &accepted(&["apps/debrief/app/e2e/windowing.e2e.ts:93"])).is_ok());
     }
 
     /// Run 8300: a NEW failure beside two accepted flakes is a STOP.
@@ -362,5 +364,16 @@ mod tests {
         ] {
             assert!(Accepted::parse(bad).is_err(), "{bad}");
         }
+    }
+
+    /// A fix-round row is tied to its app too: the same spec name accepted for another app is not this app's acceptance.
+    #[test]
+    fn a_flaky_test_accepted_for_another_app_stops() {
+        let why = stops(
+            &two_flaky(),
+            &["apps/dyno/app/e2e/a11y.e2e.ts:6:7", "apps/dyno/app/e2e/ux-home.e2e.ts:73"],
+        );
+        assert_eq!(why.len(), 2, "{why:?}");
+        assert!(why.iter().all(|w| w.starts_with("flaky and not accepted")));
     }
 }

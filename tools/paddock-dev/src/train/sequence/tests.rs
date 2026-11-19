@@ -29,7 +29,7 @@ struct Table {
     ancestor: bool,
     reach: BTreeMap<String, Result<Reach, String>>,
     reach_asked: Vec<(String, String)>,
-    landables: BTreeMap<String, Result<FullRun, String>>,
+    landables: BTreeMap<String, Result<Landable, String>>,
 }
 
 impl Table {
@@ -115,7 +115,7 @@ impl Ports for Table {
             reason: "no full run".into(),
         })
     }
-    fn landable(&mut self, workflow: &str, _: &str) -> Result<FullRun, String> {
+    fn landable(&mut self, workflow: &str, _: &str) -> Result<Landable, String> {
         self.landables
             .get(workflow)
             .cloned()
@@ -158,12 +158,12 @@ fn dispatch_plan() -> Plan {
 
 fn flaky_doc() -> Value {
     json!({"ok": true, "counts": {"flaky": 1}, "skipped_jobs": 0, "rows": [
-        {"job": "j", "test": A11Y, "whole_job": false, "status": "flaky"}]})
+        {"job": "app debrief", "test": A11Y, "whole_job": false, "status": "flaky"}]})
 }
 
 fn new_doc() -> Value {
     json!({"ok": true, "counts": {"flaky": 1, "new": 1}, "skipped_jobs": 0, "rows": [
-        {"job": "j", "test": A11Y, "whole_job": false, "status": "flaky"},
+        {"job": "app debrief", "test": A11Y, "whole_job": false, "status": "flaky"},
         {"job": "j", "test": CHAT, "whole_job": false, "status": "new"}]})
 }
 
@@ -533,12 +533,8 @@ fn the_round_and_workflow_arguments_are_parsed_strictly() {
     assert_eq!(app_of("shell-demo-release.yml"), "shell-demo");
 }
 
-fn landable_full() -> FullRun {
-    FullRun {
-        run: 9002,
-        summary: "full run 9002 with 1 accepted FLAKY, 0 already failing on main".into(),
-        lines: vec!["accepted FLAKY (e2e): a test".into()],
-    }
+fn landable_full() -> Landable {
+    Landable::for_test(9002, 1, 0, &["accepted FLAKY (e2e): a test"])
 }
 
 /// ER-12: a full run that is red only by accepted FLAKY tests is accepted through the train-only `Landable`, every row logged.

@@ -2752,6 +2752,7 @@ fn a_planner_that_hangs_is_ended_at_its_limit() {
     let started = std::time::Instant::now();
     let err = real::run_planner_command(paddock_proc::command(&p), std::time::Duration::from_secs(1), "aaa", "bbb").unwrap_err();
     assert!(err.contains("did not finish within 1s on aaa..bbb"), "{err}");
+    // conformance: hang-guard - the hung program sleeps 60 s and the planner is ended at 1 s; 30 s only catches a limit that never fires
     assert!(
         started.elapsed() < std::time::Duration::from_secs(30),
         "it was ended, not waited for"
