@@ -25,8 +25,15 @@ use std::time::Duration;
 /// Whether a failing member gate changes the exit code. False until ADR 0098 records the first green run on a real train.
 pub const ENFORCED: bool = false;
 
-/// An outer bound on the gate run (ER-32): `check --pre-push` has its own 15 minute budget; this one only ends a hang.
-const TIMEOUT: Duration = Duration::from_secs(20 * 60);
+/// An outer bound on the gate run (ER-32): `check --pre-push` stops starting rows after its run budget, lets a started row run its row
+/// cap, and waits for the slot at most its queue allowance; this one only ends a hang of the gate itself, so it is those three and a
+/// few minutes more, never shorter (it was 20 minutes while the gate's own budget was 15, and a started row was cut by the budget).
+const TIMEOUT: Duration = Duration::from_secs(
+    crate::pre_push::exec::BUDGET.as_secs()
+        + crate::pre_push::exec::ROW_CAP.as_secs()
+        + crate::pre_push::exec::QUEUE_MAX.as_secs()
+        + 5 * 60,
+);
 
 /// What the gates said.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -344,6 +351,14 @@ mod tests {
             assert_eq!(s.exit, Exit::NotMeasured, "{:?}", g.0);
             assert_ne!(s.data["outcome"], "passed", "{:?}", g.0);
         }
+    }
+
+    /// The member gate's outer bound is never shorter than what the gate allows itself (budget, one row cap and the queue allowance): a shorter
+    /// one would end a healthy long run as "could not run" before the gate's own guards could say anything.
+    #[test]
+    fn the_outer_bound_outlasts_the_gates_own_cap_and_queue_allowance() {
+        use crate::pre_push::exec::{BUDGET, QUEUE_MAX, ROW_CAP};
+        assert!(TIMEOUT > BUDGET + ROW_CAP + QUEUE_MAX, "{TIMEOUT:?}");
     }
 
     /// The mapping without the checkout precondition.

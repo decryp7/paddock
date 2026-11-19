@@ -2134,3 +2134,36 @@ Question: with the slot count following the load, how long does a queue of 4 cli
   neither changes these rows (the 15-minute load decided them).
 - **Cost to note:** the 15-minute load lags, so after a spike the count stays at 1 for up to a quarter of an hour; the 1-minute
   load had fallen to 7 while the 15-minute was still 44 (second `after` row's neighbours).
+
+## Push gate run time: what the old 15-minute budget cut, and the per-row cap (WP-1) (2026-11-19, feat/gate-budget-per-workspace)
+
+- **Question:** the push gate and the member gate had one fixed 15-minute run budget ([`pre_push::exec`]). A change that reaches every
+  Cargo workspace (a lockfile or workspace-hack change) cannot fit it, even one row at a time: a cold doctest build costs minutes per
+  workspace. Train 15's re-merge of train 14 left clippy for `tools/wiki` and the doctests of 10 workspaces "not measured"; it had
+  happened three times before.
+- **Source:** the push gate's own logs under `<git common dir>/paddock-pre-push/` of the main checkout, read on 2026-11-19:
+  `queue-times.log` (one line per push run, 2,042 runs: `heavy_steps`, `queued_s`, `ran_s`) and `logs/<run>/<row>.log` (the last
+  `heavy: <step> timing queued Q s, ran R s` line of each retained row, 56 rows). Machine: the shared Mac mini, other agents running.
+- **Result, runs:** the run time of a push (`ran_s`, summed over its heavy steps): 8 of 2,042 ended at the 900 s limit, 52 ran 600 s or
+  more, the mean is 38.5 s. The limit is the maximum seen (900.8 s), so the real time of the longest runs was never measured.
+- **Result, rows (run seconds, warm and cold mixed, retained logs only):**
+
+  | Row kind | Runs | Typical (warm) | Cold runs seen |
+  |---|---|---|---|
+  | `clippy <ws>` | 24 | 0.2 to 93.1 s (median about 4 s) | `apps/spotter` 258.4 s, `apps/pitwall` 256.0 s |
+  | `clippy-windows <ws>` | 6 | 4.9 to 78.1 s | `apps/dyno` 410.8 s, `apps/pitwall` 354.8 s |
+  | `doctest <ws>` | 5 | 1.1 to 32.3 s | `apps/debrief` 672.1 s, `apps/dyno` 227.1 s |
+  | `clippy-linux <ws>` | 17 | 2.6 to 125.3 s | (kept container volume; `--warm-linux`) |
+  | `conformance-tests` | 4 | 78.5 to 104.3 s | |
+  | `member-audits` | 3 | 57.0 to 157.8 s | |
+
+- **Reading:** a cold build costs 10 to 100 times a warm one and which one a run meets is not known in advance, so any total over the
+  rows, and any per-row figure scaled by workspace count, is a second fixed limit with the same failure. heavy's activity log (the
+  research note's section 0) shows the budget cut 87 steps in five days at a median of 33 s of run: they got what earlier rows had
+  left of the total.
+- **Decision (WP-1, option A of docs/research/2026-11-19-gate-hang-detection.md):** the 15-minute total (`BUDGET`) only stops new rows
+  from starting; a started row runs until it ends or reaches `ROW_CAP`, 60 min (GitLab's default job timeout; the slowest healthy row
+  known is a cold app doctest, 1122 s, so the cap is over three times it). The cap is enforced by the executor's monitor, which writes
+  the process list and a stack sample of the tree (`sample` on macOS, `eu-stack` on Linux when installed, the process list on
+  Windows) to `<row>.stacks.txt` beside the row's log before it ends the tree through `paddock_proc` (pid plus start time). The stall
+  judgement (WP-2) and history limits plug into the per-step watchdog (`pre_push/watchdog.rs`).

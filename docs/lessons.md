@@ -2947,3 +2947,12 @@ tools/paddock-dev/Cargo.toml --profile ci --no-tests=fail -E 'test(/^contracts::
 paddock-ci, `tools/linux-container.sh --ci-image`, 4 CPUs, 2 jobs, a new empty build volume, host load 27): cold 71 s, warm 1 s (the 12
 tests run in 1.2 s). Under the limits set for the choice (30 s warm, 3 min cold), so the step stays a nextest step. Not measured: a
 real amd64 CI runner; read the step's timing from the next train run and revisit if the cold time passes 3 min.
+
+## A fixed total run budget cuts started rows that are healthy (2026-11-19, feat/gate-budget-per-workspace)
+
+The push gate's 15-minute total ended rows that had started: 87 steps in five days, median 33 s of run, because earlier rows had used
+the total (docs/research/2026-11-19-gate-hang-detection.md). A cold build costs minutes, a warm one seconds, and a total over all rows
+scales with the workspace count. Do not replace one fixed number by another: the total now only stops new rows from starting, a
+started row has its own generous cap (60 min) with the process list and stacks written before the kill, and a stall judgement on the
+row's own progress follows. Recurring: a wall-clock bound judges liveness (ADR 0031's class; CI run 7096, the 2026-11-12 slot-acquire
+wait, ER-12).

@@ -15,13 +15,15 @@
 //!
 //! One table at the end: what ran, what was skipped and why, what could not be measured (ER-33: never a pass), and for each
 //! failure one line with its cause and the next step. Exit 0 all passed, accepted or skipped; 5 something failed; 6 only "not
-//! measured" (a gate that could not run, was cut off by the 15-minute budget or by a timeout blocks the push); 7 a check is broken
+//! measured" (a gate that could not run, was ended by its watchdog as stuck, or cut off by the row cap or by a timeout blocks the push); 7 a check is broken
 //! (beats 5 and 6); 130 the person stopped it (a second Ctrl+C stops at once). The gates the table does not run but CI does are
 //! listed under it ([`gates::NOT_RUN`]). One named override exists so nobody reaches for `LEFTHOOK=0`:
 //! `PADDOCK_ACCEPT_NOT_MEASURED=<full row ids>` (or `--accept-not-measured`) lets those not-measured rows pass the push; it is
 //! announced at the top of every run it is set in, shown in the table and logged next to the gate logs.
 
 pub mod budget;
+pub mod stacks;
+pub mod watchdog;
 
 /// How many earlier runs' log folders are kept beside the current one.
 const KEEP_RUN_LOGS: usize = 20;
@@ -453,6 +455,8 @@ fn command_in(
         live_slot: Default::default(),
         priority: pushes.iter().any(|p| budget::is_landing_ref(&p.remote_ref)),
         wrapper,
+        watchdog: Arc::new(watchdog::Never),
+        row_cap: exec::ROW_CAP,
     };
     let queue = queue_max(&env);
     let history = GitHistory::new(&work, GIT_TIMEOUT);
@@ -517,7 +521,7 @@ fn command_in(
         notes.push("no heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
-        "{overridden}pre-push: base {} ({}), {} commit(s) beyond it; {} changed file(s); {} gate(s) at a time (1-minute load {}); budget {} min of run time (time queued for the heavy slot behind other agents is reported apart and bounded on its own: {} min for the whole push; {}); logs in {}\n{}",
+        "{overridden}pre-push: base {} ({}), {} commit(s) beyond it; {} changed file(s); {} gate(s) at a time (1-minute load {}); run budget {} min (after it no new row starts; a started row is not cut by it) and a cap of {} min per row, stacks logged before a step is ended; watchdog: {} (time queued for the heavy slot behind other agents is reported apart and bounded on its own: {} min for the whole push; {}); logs in {}\n{}",
         base,
         base_why,
         commit_count(&root, &base, pushed.first().map_or("HEAD", String::as_str)),
@@ -525,6 +529,8 @@ fn command_in(
         n,
         load.map_or("unknown".to_string(), |l| format!("{l:.1}")),
         BUDGET.as_secs() / 60,
+        exec::ROW_CAP.as_secs() / 60,
+        real.watchdog.name(),
         queue.as_secs() / 60,
         if real.priority {
             "priority lane: this push lands on a train, main or a release tag"
@@ -1154,6 +1160,7 @@ pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collectio
     let mut text = format!("{head}\n");
     let (mut ok, mut fail, mut skip, mut unmeasured, mut broken, mut accepted) = (0, 0, 0, 0, 0, 0);
     let mut data = Vec::new();
+    let mut ended: Vec<String> = Vec::new();
     let (mut unmeasured_ids, mut failed_ids): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
     for (id, v) in rows {
         let reason = v.reason();
@@ -1207,8 +1214,18 @@ pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collectio
             row["run_secs"] = json!(t.ran);
             row["queued_secs"] = json!(t.queued);
         }
+        if let Some(g) = &v.ended_by {
+            row["ended_by"] = json!(g);
+            ended.push(format!("{id}: {g}"));
+        }
         data.push(row);
     }
+    // Which guard ended a step, in the summary (ER-27): a row that is not measured because its step was stopped says by what.
+    text.push_str(&if ended.is_empty() {
+        "guards: no step was ended by the watchdog or the row cap\n".to_string()
+    } else {
+        format!("guards: {} step(s) ended by a guard: {}\n", ended.len(), ended.join("; "))
+    });
     text.push_str("CI also runs, and this gate does not:\n");
     for (what, why) in gates::NOT_RUN {
         text.push_str(&format!("  - {what}: {why}\n"));

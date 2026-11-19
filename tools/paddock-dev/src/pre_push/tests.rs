@@ -985,6 +985,8 @@ fn a_crashed_runner_and_a_row_that_never_ran_are_not_measured() {
         assert!(!matches!(v.kind(), Kind::Passed | Kind::Failed), "{id}: {v:?}");
     }
     assert!(matches!(nm(&verdicts(&rows)["fmt crates"]), Some((reason, _)) if reason.contains("budget")));
+    let fmt = &rows.iter().find(|(id, _)| id == "fmt crates").expect("the row").1;
+    assert_eq!(fmt.ended_by.as_deref(), Some("budget"), "the summary names what stopped it");
     // A signal stops the rest the same way.
     let fake = Fake::default();
     let rows = run_all_with(
@@ -3393,6 +3395,8 @@ mod deny_row {
             live_slot: Default::default(),
             priority: false,
             wrapper: crate::local_sccache::Lazy::off(),
+            watchdog: Arc::new(crate::pre_push::watchdog::Never),
+            row_cap: crate::pre_push::exec::ROW_CAP,
         }
     }
 

@@ -4,6 +4,8 @@
 use super::budget::{BudgetClock, Slot, Timing, parse_heavy_timing, with_agent_name, with_heavy_flags};
 use super::gates::{Gate, Need, Planned};
 use super::linux_inputs::{ImageProbe, PROBE_NEXT, image_probe};
+use super::stacks;
+use super::watchdog::{Observation, StepInfo, StepWatch, Stuck, WATCH_POLL, Watchdog, phase_line, stuck_how};
 use crate::ci_tool::{Output, ToolCall, tail};
 use paddock_cli::{CheckId, Finding, Outcome, Reason, Subject, ToolVersion, UnixSeconds, measure};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -12,10 +14,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// The push gate's total budget (ADR 0038 amendment A2.5): what has not run by then is "not measured". It counts RUN time: time a
-/// step queued for the heavy slot behind other agents' steps is credited back ([`BudgetClock`], ADR 0102) and bounded on its own
-/// by [`QUEUE_MAX`].
+/// The push gate's total budget (ADR 0038 amendment A2.5): after it, no NEW row starts (it is "not measured", never a pass). It no
+/// longer ends a row that has started: that is [`ROW_CAP`]'s and the watchdog's work (docs/research/2026-11-19-gate-hang-detection.md).
+/// It counts RUN time: time a step queued for the heavy slot behind other agents' steps is credited back ([`BudgetClock`], ADR
+/// 0102) and bounded on its own by [`QUEUE_MAX`].
 pub const BUDGET: Duration = Duration::from_secs(15 * 60);
+
+/// What one row may run on its own, started or not by the total budget: the backstop, GitLab's default job timeout. Measured cause
+/// (docs/research/2026-11-19-gate-hang-detection.md section 0, heavy's activity log 2026-11-14 to 19): the slowest healthy row known is
+/// a cold app doctest build, 1122 s (docs/benchmarks.md, "Doctest row of the push gate"); 60 min is over three times it; no healthy
+/// row ran longer. Before the stall judgement (WP-2) it is the only thing that ends a hung row. Queue time is not in it.
+pub const ROW_CAP: Duration = Duration::from_secs(60 * 60);
+
+/// The name the summary gives the row cap as the guard that ended a step.
+pub const ROW_CAP_GUARD: &str = "row cap";
+
+/// How long after [`ROW_CAP`] the outer limits of a step (heavy's `--run-max`, the process timeout) still wait: the cap is enforced by
+/// the executor's monitor, which logs the stacks before it ends the tree, so these are only the backstop if the monitor is gone.
+const CAP_GRACE: Duration = Duration::from_secs(60);
 
 /// The push's queue allowance: the most time all its heavy steps together may wait for the machine-wide slot behind other agents'
 /// steps (`PADDOCK_QUEUE_MAX` seconds overrides). A step that would start after the allowance is spent, or whose wait reaches what
@@ -53,7 +69,15 @@ pub struct Done {
 impl Done {
     /// It did not end by itself: the budget or the gate's own limit stopped it, or the person did. Nothing is proven either way.
     pub fn cut_short(&self) -> bool {
-        self.how.starts_with("timed out") || self.how == "cancelled" || self.how.starts_with("stopped at the output cap")
+        self.how.starts_with("timed out")
+            || self.how.starts_with("stuck (")
+            || self.how == "cancelled"
+            || self.how.starts_with("stopped at the output cap")
+    }
+
+    /// The guard that ended the run ([`super::watchdog::ended_by`]): the watchdog's name, or `row cap`.
+    pub fn ended_by(&self) -> Option<String> {
+        super::watchdog::ended_by(&self.how)
     }
 
     /// `heavy` gave up waiting for a slot: the command never ran.
@@ -117,6 +141,8 @@ pub struct Row {
     pub next: String,
     /// A not-measured row a person named in the override: who. Logged; the push may go, but the row is still not proven.
     pub excused_by: Option<String>,
+    /// The guard that ended the step: the watchdog's name, or `row cap` (the summary names it).
+    pub ended_by: Option<String>,
 }
 
 /// The kind of a row, for the table and its JSON.
@@ -148,7 +174,14 @@ impl Row {
             tail,
             next,
             excused_by: None,
+            ended_by: None,
         }
+    }
+
+    /// The row with the guard that ended its step named.
+    pub fn ended_by_guard(mut self, guard: Option<String>) -> Row {
+        self.ended_by = guard;
+        self
     }
 
     /// The gate `id` ran to its end (not cut short): the measurement reads how it ended. A clean exit finds nothing; any other ends in
@@ -278,25 +311,17 @@ impl LockSeen {
 /// nothing next to the minutes a queue lasts.
 const SLOT_POLL: Duration = Duration::from_millis(250);
 
-/// The most one step may run on its own (heavy's `--run-max` is this or what the push's budget has left, whichever is less).
-fn own_run_limit(gate: &Gate) -> Duration {
-    Duration::from_secs(if gate.heavy { 3000 } else { 900 })
+/// The outer limit of one step (heavy's `--run-max`, the process timeout): [`ROW_CAP`] and [`CAP_GRACE`], whatever is left of the
+/// total budget: a started row is never cut by it (that was the old budget's failure: a step got what earlier rows left of it).
+fn own_run_limit(_gate: &Gate) -> Duration {
+    ROW_CAP + CAP_GRACE
 }
 
-/// For a run `heavy` ended at its run limit: which limit it was, with the run time it had, so a row says whether the push's run
-/// budget or the gate's own limit ran out (empty for any other ending).
-fn run_limit_note(gate: &Gate, limits: Limits, done: &Done) -> String {
-    let (true, Some(t)) = (done.how.starts_with("timed out after"), done.timing) else {
-        return String::new();
-    };
-    if limits.run < own_run_limit(gate) {
-        format!("; run budget spent after {:.0} s of run", t.ran)
-    } else {
-        format!(
-            "; the gate's own run limit of {} s spent after {:.0} s of run",
-            own_run_limit(gate).as_secs(),
-            t.ran
-        )
+/// For a run `heavy` ended at its run limit (the backstop beyond the row cap), with the run time it had (empty for any other ending).
+fn run_limit_note(done: &Done) -> String {
+    match (done.how.starts_with("timed out after"), done.timing) {
+        (true, Some(t)) => format!("; the row cap of {} min spent after {:.0} s of run", ROW_CAP.as_secs() / 60, t.ran),
+        _ => String::new(),
     }
 }
 
@@ -380,12 +405,28 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
                 first_word(&gate.id)
             ),
         ),
+        // The watchdog ended it: the step made no progress. Not measured, never a finding or a pass; the row names the step, the last
+        // output line and how long nothing moved.
+        Ok(done) if done.how.starts_with("stuck (") => Row::not_measured(
+            format!(
+                "stuck: {} was stopped by the watchdog ({}); last output line: {}{}",
+                gate.rerun(),
+                done.how,
+                done.tail.trim_end().lines().last().map_or("(none)", str::trim),
+                done.log.as_ref().map_or(String::new(), |l| format!("; output so far in {l}"))
+            ),
+            format!(
+                "read the log, then re-run it alone: {} (a step the watchdog stops is hung or deadlocked, not a finding in your change); an agent reports it (ER-33)",
+                gate.rerun()
+            ),
+        )
+        .ended_by_guard(done.ended_by()),
         Ok(done) if done.cut_short() => Row::not_measured(
             format!(
                 "{} ({}{}) before it finished{}",
                 gate.rerun(),
                 done.how,
-                run_limit_note(gate, limits, &done),
+                run_limit_note(&done),
                 done.log.as_ref().map_or(String::new(), |l| format!("; output so far in {l}"))
             ),
             if gate.id.starts_with("clippy-linux") {
@@ -395,12 +436,14 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
                 )
             } else {
                 format!(
-                    "re-run it alone: {} (the whole gate has a budget of {} min)",
+                    "re-run it alone: {} (a row may run {} min; the total budget of {} min only stops new rows from starting)",
                     gate.rerun(),
+                    ROW_CAP.as_secs() / 60,
                     BUDGET.as_secs() / 60
                 )
             },
-        ),
+        )
+        .ended_by_guard(done.ended_by()),
         Ok(done) => {
             let hint = match (gate.id.starts_with("clippy-linux"), done.how.as_str()) {
                 (true, "exit 125") => {
@@ -427,7 +470,7 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
 pub struct RunOpts<'a> {
     /// Gates at a time.
     pub workers: usize,
-    /// The total budget of run time: a gate that would start later is not measured, one that runs over is stopped.
+    /// The total budget of run time ([`BUDGET`]): a gate that would start later is not measured; one that has started is not cut by it.
     pub budget: Duration,
     /// The push's queue allowance ([`QUEUE_MAX`]): the time its heavy steps may wait for the slot in all.
     pub queue: Duration,
@@ -587,12 +630,13 @@ pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (V
                             ),
                             Start::BudgetSpent => Row::not_measured(
                                 format!(
-                                    "run budget spent: the {} min of run time of the push gate was used by earlier steps before this one started ({:.1} s queued for other agents' heavy steps did not count against it)",
+                                    "run budget spent: the {} min of run time of the push gate was used by earlier steps before this one started ({:.1} s queued for other agents' heavy steps did not count against it); a row that has started is not cut by it",
                                     opts.budget.as_secs() / 60,
                                     clock.credit().as_secs_f64()
                                 ),
                                 format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
-                            ),
+                            )
+                            .ended_by_guard(Some("budget".into())),
                             Start::QueueSpent => Row::not_measured(
                                 format!(
                                     "never started: the push's queue allowance of {} min was spent waiting for other agents' heavy steps (queued {:.1} s in all, load {})",
@@ -768,6 +812,10 @@ pub struct RealExec {
     pub priority: bool,
     /// The local sccache wrapper for the gates that compile (`None`: off, or CI; [`crate::local_sccache`]).
     pub wrapper: crate::local_sccache::Lazy,
+    /// What ends a step that has stopped making progress ([`super::watchdog`]); [`super::watchdog::Never`] leaves it to the row cap.
+    pub watchdog: Arc<dyn Watchdog>,
+    /// What one started row may run ([`ROW_CAP`]); a test sets a short one.
+    pub row_cap: Duration,
 }
 
 /// Variables every gate may see besides the base list: the toolchain, Docker, caches and Paddock's own settings.
@@ -836,11 +884,10 @@ impl RealExec {
     }
 
     fn call(&self, gate: &Gate, limits: Limits, log: &Path, label: Option<&str>, name: &str) -> ToolCall {
-        let left = limits.run;
         let own = own_run_limit(gate);
         // A heavy step: its run time is limited by heavy itself (`--run-max`), its wait for a slot separately (`--queue-max`);
         // the outer timeout is only a backstop for both plus a minute.
-        let run_max = own.min(left);
+        let run_max = own;
         let heavy = if gate.heavy {
             with_agent_name(
                 &with_heavy_flags(
@@ -866,10 +913,12 @@ impl RealExec {
             ),
             None => (gate.program.clone(), gate.args.clone()),
         };
+        // Through our `heavy` the queue and the run are bounded apart (`--queue-max`, `--run-max`); a command not through it has no such
+        // split (a foreign heavy's queue is invisible), so there the remaining total budget is the only bound.
         let timeout = if limited {
             run_max + limits.queue + Duration::from_secs(60)
         } else {
-            own.min(left)
+            own.min(limits.run)
         };
         let mut call = ToolCall::new(program)
             .args(args)
@@ -1055,30 +1104,65 @@ impl Exec for RealExec {
         // Our `heavy` writes "holds the lock" to the log when the slot is taken: until then every second is waiting for others,
         // and the push's budget does not count it (`Exec::slot`). Another heavy prints no such line: nothing is known then.
         let ours = gate.heavy && self.runs_through_our_heavy(limits);
-        let mut ran = if ours {
-            let since = Instant::now();
-            self.set_slot(Slot::Queued { since });
-            let done = AtomicBool::new(false);
-            let ran = std::thread::scope(|s| {
+        let watch = self.watchdog.watch(&StepInfo {
+            id: &gate.id,
+            heavy: gate.heavy,
+        });
+        let root: Arc<Mutex<Option<paddock_proc::ProcessId>>> = Arc::default();
+        let call = {
+            let root = Arc::clone(&root);
+            call.on_start(Arc::new(move |id| {
+                if let Ok(mut r) = root.lock() {
+                    *r = id;
+                }
+            }))
+        };
+        let stuck: Mutex<Option<Stuck>> = Mutex::new(None);
+        let began = Instant::now();
+        if ours {
+            self.set_slot(Slot::Queued { since: began });
+        }
+        let done = AtomicBool::new(false);
+        let ran = std::thread::scope(|s| {
+            if ours {
                 s.spawn(|| {
                     let mut seen = LockSeen::new(lock_line(&name));
                     while !done.load(Ordering::SeqCst) {
                         if seen.seen(&log) {
-                            self.set_slot(Slot::Taken { since, at: Instant::now() });
+                            self.set_slot(Slot::Taken {
+                                since: began,
+                                at: Instant::now(),
+                            });
                             return;
                         }
                         std::thread::sleep(SLOT_POLL);
                     }
                 });
-                let ran = call.run(&self.env, &mut std::io::sink());
-                done.store(true, Ordering::SeqCst);
-                ran
+            }
+            // Always watched: the row cap is enforced here (so the stacks are written before the tree is ended), and the
+            // watchdog, when there is one, judges the step.
+            let (log, root, done, stuck, heavy) = (&log, &root, &done, &stuck, gate.heavy);
+            s.spawn(move || {
+                self.watch_step(watch, log, root, done, stuck, began, ours, heavy);
             });
+            let ran = call.run(&self.env, &mut std::io::sink());
+            done.store(true, Ordering::SeqCst);
+            ran
+        });
+        if ours {
             self.set_slot(Slot::Unknown);
-            ran?
-        } else {
-            call.run(&self.env, &mut std::io::sink())?
-        };
+        }
+        let mut ran = ran?;
+        // The watchdog ended the tree: say so, whatever the OS reported (a signal), so the row is "not measured: stuck".
+        if let Some(s) = stuck.lock().ok().and_then(|mut g| g.take()) {
+            ran.success = false;
+            ran.how = if s.guard == ROW_CAP_GUARD {
+                // The row cap reads as a timeout (it is one), not as a stall.
+                format!("timed out after {} s of running ({ROW_CAP_GUARD})", s.quiet.as_secs())
+            } else {
+                stuck_how(&s)
+            };
+        }
         let mut timing = None;
         if gate.heavy {
             let text = std::fs::read_to_string(&log).unwrap_or_default();
@@ -1105,6 +1189,18 @@ impl Exec for RealExec {
         {
             self.stop_container(l);
         }
+        // The step's phases with their durations (ER-27): on the console and beside the gate logs.
+        let wall = began.elapsed().as_secs_f64();
+        let line = phase_line(&gate.id, timing.map(|t| t.queued), timing.map_or(wall, |t| t.ran), &ran.how);
+        eprintln!("{line}");
+        {
+            use std::io::Write;
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(self.logs.join("phases.log"))
+                .and_then(|mut f| writeln!(f, "{line}"));
+        }
         Ok(Done {
             success: ran.success,
             how: ran.how,
@@ -1112,6 +1208,105 @@ impl Exec for RealExec {
             log: Some(log.display().to_string()),
             timing,
         })
+    }
+}
+
+/// Since when a step counts as running for its watch, or `None` while it must not be watched: our `heavy` queueing (the wait for the
+/// slot is waiting for others, ER-43), and a heavy step through another `heavy` (no lock line, so a queue cannot be told from a run).
+fn active_since(ours: bool, heavy: bool, slot: Slot, began: Instant) -> Option<Instant> {
+    match (ours, heavy) {
+        (true, _) => match slot {
+            Slot::Taken { at, .. } => Some(at),
+            _ => None,
+        },
+        (false, true) => None,
+        (false, false) => Some(began),
+    }
+}
+
+impl RealExec {
+    /// Writes down where the step's tree is (process list, stacks) and only then ends it, by identity through `paddock_proc`
+    /// (rule 53); the capture is bounded ([`stacks::TOTAL_LIMIT`]) and its file named in the log (ER-27).
+    fn capture_then_kill(&self, root: paddock_proc::ProcessId, why: &Stuck, log: &Path) {
+        let name = log.file_stem().map_or("step".to_string(), |n| n.to_string_lossy().to_string());
+        let pids: Vec<u32> = stacks::tree(root).iter().map(|p| p.pid()).collect();
+        let c = stacks::capture(
+            stacks::this_os(),
+            &pids,
+            &format!("{}: {} (no progress for {} s)", why.guard, why.reason, why.quiet.as_secs()),
+            &self.logs,
+            &name,
+            &self.env,
+            &|p| self.has_tool(p),
+        );
+        eprintln!("pre-push: {name}: {}", c.note);
+        paddock_proc::kill_tree(root);
+    }
+
+    /// Shows a running step to its watch once per [`WATCH_POLL`] until it ends; a `Some` verdict ends the step's whole process tree
+    /// through `paddock_proc` (by identity, rule 53) and is left in `stuck`. A step is shown only while it runs: not while it queues
+    /// for the slot (ER-43; our `heavy` is known to hold the slot from [`Slot::Taken`]), and a heavy step through another `heavy`
+    /// (no lock line, so no way to tell a queue from a run) is not watched, the row cap ends it.
+    #[allow(clippy::too_many_arguments)]
+    fn watch_step(
+        &self,
+        mut w: Option<Box<dyn StepWatch>>,
+        log: &Path,
+        root: &Mutex<Option<paddock_proc::ProcessId>>,
+        done: &AtomicBool,
+        stuck: &Mutex<Option<Stuck>>,
+        began: Instant,
+        ours: bool,
+        heavy: bool,
+    ) {
+        let mut last_check = Instant::now();
+        while !done.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(100));
+            if last_check.elapsed() < WATCH_POLL {
+                continue;
+            }
+            last_check = Instant::now();
+            let active_since = active_since(ours, heavy, self.slot(), began);
+            let (Some(since), Some(id)) = (active_since, root.lock().ok().and_then(|r| *r)) else {
+                continue;
+            };
+            let tail = crate::ci_tool::read_tail(log, 4096);
+            let last_line = tail.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
+            let now = Instant::now();
+            let active_for = now.saturating_duration_since(since);
+            let verdict = if active_for >= self.row_cap {
+                Some(Stuck {
+                    guard: ROW_CAP_GUARD.into(),
+                    reason: format!("the row ran its whole cap of {} s", self.row_cap.as_secs()),
+                    quiet: active_for,
+                })
+            } else {
+                w.as_mut().and_then(|w| {
+                    w.check(&Observation {
+                        now,
+                        active_for,
+                        log_len: std::fs::metadata(log).map_or(0, |m| m.len()),
+                        last_line: &last_line,
+                        cpu: paddock_proc::tree_cpu_time(id),
+                        root: id,
+                    })
+                })
+            };
+            if let Some(s) = verdict {
+                eprintln!(
+                    "pre-push: {} ends the step: {} (after {} s; last output line: {})",
+                    s.guard,
+                    s.reason,
+                    s.quiet.as_secs(),
+                    last_line
+                );
+                self.capture_then_kill(id, &s, log);
+                if let Ok(mut g) = stuck.lock() {
+                    *g = Some(s);
+                }
+                return;
+            }
+        }
     }
 }
 
@@ -1376,6 +1571,8 @@ exit $rc
                 live_slot: Default::default(),
                 priority: false,
                 wrapper: crate::local_sccache::Lazy::off(),
+                watchdog: Arc::new(crate::pre_push::watchdog::Never),
+                row_cap: ROW_CAP,
             }
         }
 
@@ -1560,6 +1757,8 @@ exit $rc
                 live_slot: Default::default(),
                 priority: false,
                 wrapper: crate::local_sccache::Lazy::off(),
+                watchdog: Arc::new(crate::pre_push::watchdog::Never),
+                row_cap: ROW_CAP,
             }
         }
 
@@ -1800,6 +1999,8 @@ exit $rc
                 root: ex.root.clone(),
                 logs: ex.logs.clone(),
                 stop: ex.stop.clone(),
+                watchdog: Arc::new(crate::pre_push::watchdog::Never),
+                row_cap: ROW_CAP,
             };
             assert!(decide(&g, &ex2, Duration::from_secs(60), &test_subject()).kind() == Kind::Passed);
         }
@@ -1828,6 +2029,157 @@ exit $rc
             assert!(r.reason().contains("OVERRIDE SET"), "{}", r.reason());
         }
 
+        /// A stand-in step (paddock-testkit's `StandIn`, C130: no shell fixture) that prints one line and then sleeps `sleep` seconds.
+        fn quiet_step(dir: &Path, sleep: u64) -> Gate {
+            let step = paddock_testkit::StandIn::new(dir, "quiet-step")
+                .stdout("compiling x")
+                .sleeps(Duration::from_secs(sleep))
+                .install()
+                .unwrap();
+            Gate {
+                program: step.program().to_string_lossy().to_string(),
+                args: Vec::new(),
+                heavy: false,
+                ..gate("tests quiet", "")
+            }
+        }
+
+        /// A watchdog for the tests: watches every step and ends it at its `after`-th look; records what it was shown.
+        struct Fires {
+            after: u32,
+            seen: Arc<Mutex<Vec<(u64, String, bool)>>>,
+        }
+
+        struct FiresWatch {
+            n: u32,
+            after: u32,
+            seen: Arc<Mutex<Vec<(u64, String, bool)>>>,
+        }
+
+        impl Watchdog for Fires {
+            fn name(&self) -> &str {
+                "fake"
+            }
+            fn watch(&self, _step: &StepInfo<'_>) -> Option<Box<dyn StepWatch>> {
+                Some(Box::new(FiresWatch {
+                    n: 0,
+                    after: self.after,
+                    seen: Arc::clone(&self.seen),
+                }))
+            }
+        }
+
+        impl StepWatch for FiresWatch {
+            fn check(&mut self, o: &Observation<'_>) -> Option<Stuck> {
+                self.seen
+                    .lock()
+                    .unwrap()
+                    .push((o.log_len, o.last_line.to_string(), o.cpu.is_some()));
+                self.n += 1;
+                (self.n >= self.after).then(|| Stuck {
+                    guard: "fake".into(),
+                    reason: "the stand-in went quiet".into(),
+                    quiet: Duration::from_secs(300),
+                })
+            }
+        }
+
+        /// The positive control of the watchdog plumbing (ER-33): a step its watch ends is stopped long before it would have ended,
+        /// and its row is "not measured: stuck", never a pass, with the step, the last output line and the guard named.
+        #[test]
+        fn a_step_the_watchdog_ends_is_not_measured_stuck_and_the_guard_is_named() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            ex.watchdog = Arc::new(Fires {
+                after: 2,
+                seen: Arc::clone(&seen),
+            });
+            let g = quiet_step(d.path(), 60);
+            let t = Instant::now();
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert!(
+                t.elapsed() < Duration::from_secs(30),
+                "the 60 s step was stopped, not waited for: {:?}",
+                t.elapsed()
+            );
+            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            let why = r.reason();
+            assert!(why.starts_with("stuck:") && why.contains("last output line: compiling x"), "{why}");
+            assert!(why.contains("stuck (fake)") && why.contains("no progress for 300 s"), "{why}");
+            assert_eq!(r.ended_by.as_deref(), Some("fake"));
+            let seen = seen.lock().unwrap();
+            assert!(
+                seen.len() >= 2 && seen.iter().all(|(len, line, cpu)| *len > 0 && line == "compiling x" && *cpu),
+                "{seen:?}"
+            );
+            let phases = std::fs::read_to_string(d.path().join("logs/phases.log")).unwrap();
+            assert!(phases.contains("ended by guard: fake"), "{phases}");
+        }
+
+        /// The same step with a watch that never fires, and with no watchdog, runs to its end and passes: the guard ends nothing by
+        /// itself, only what its watch says.
+        #[test]
+        fn a_step_whose_watch_stays_silent_runs_to_its_end_and_passes() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            let g = quiet_step(d.path(), 2);
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert_eq!((r.kind(), r.ended_by.clone()), (Kind::Passed, None), "{r:?}");
+            ex.watchdog = Arc::new(Fires {
+                after: u32::MAX,
+                seen: Arc::default(),
+            });
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert_eq!((r.kind(), r.ended_by.clone()), (Kind::Passed, None), "{r:?}");
+        }
+
+        /// The row cap is the backstop: a step still running when it is spent is stopped (its stacks written first) and "not measured",
+        /// never a pass, and the summary names the cap.
+        #[test]
+        fn a_step_still_running_at_the_row_cap_is_not_measured_and_names_it() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            ex.row_cap = Duration::from_secs(2);
+            let g = quiet_step(d.path(), 60);
+            let t = Instant::now();
+            let r = decide(&g, &ex, Duration::from_secs(300), &test_subject());
+            assert!(t.elapsed() < Duration::from_secs(30), "{:?}", t.elapsed());
+            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            assert_eq!(r.ended_by.as_deref(), Some("row cap"));
+            assert!(r.reason().contains("timed out"), "{}", r.reason());
+            let stacks = std::fs::read_dir(d.path().join("logs"))
+                .unwrap()
+                .flatten()
+                .any(|f| f.file_name().to_string_lossy().ends_with(".stacks.txt"));
+            assert!(stacks, "the stacks were written before the tree was ended");
+        }
+
+        /// Queue time is never watched (ER-43): a step queued for the slot, or one behind another `heavy` (no lock line to tell a queue
+        /// from a run), is not shown to its watch; a running one is, from the moment it took the slot.
+        #[test]
+        fn only_a_running_step_is_shown_to_its_watch() {
+            let t0 = Instant::now();
+            let at = t0 + Duration::from_secs(40);
+            assert_eq!(
+                active_since(true, true, Slot::Queued { since: t0 }, t0),
+                None,
+                "queued behind others"
+            );
+            assert_eq!(active_since(true, true, Slot::Unknown, t0), None);
+            assert_eq!(
+                active_since(true, true, Slot::Taken { since: t0, at }, t0),
+                Some(at),
+                "the queue is not run time"
+            );
+            assert_eq!(active_since(false, true, Slot::Unknown, t0), None, "another heavy: not told apart");
+            assert_eq!(
+                active_since(false, false, Slot::Unknown, t0),
+                Some(t0),
+                "a step with no slot runs from its start"
+            );
+        }
+
         #[test]
         fn the_heavy_build_is_cut_off_by_the_credited_run_time_not_the_wall_clock() {
             let d = tempfile::tempdir().unwrap();
@@ -1839,7 +2191,6 @@ exit $rc
 
         #[test]
         fn a_run_ended_at_its_limit_says_which_limit_ran_out() {
-            let g = gate("clippy a", "true");
             let done = Done {
                 success: false,
                 how: "timed out after 700 s of running".into(),
@@ -1847,40 +2198,12 @@ exit $rc
                 log: None,
                 timing: Some(Timing { queued: 5.0, ran: 700.0 }),
             };
-            let budget = run_limit_note(
-                &g,
-                Limits {
-                    run: Duration::from_secs(700),
-                    queue: QUEUE_MAX,
-                },
-                &done,
-            );
-            assert_eq!(budget, "; run budget spent after 700 s of run");
-            let own = run_limit_note(
-                &g,
-                Limits {
-                    run: own_run_limit(&g),
-                    queue: QUEUE_MAX,
-                },
-                &done,
-            );
-            assert!(own.contains("own run limit") && own.contains("after 700 s of run"), "{own}");
+            assert_eq!(run_limit_note(&done), "; the row cap of 60 min spent after 700 s of run");
             let other = Done {
                 how: "exit 1".into(),
                 ..done
             };
-            assert_eq!(
-                run_limit_note(
-                    &g,
-                    Limits {
-                        run: own_run_limit(&g),
-                        queue: QUEUE_MAX
-                    },
-                    &other
-                ),
-                "",
-                "any other ending says nothing"
-            );
+            assert_eq!(run_limit_note(&other), "", "any other ending says nothing");
         }
 
         #[test]
