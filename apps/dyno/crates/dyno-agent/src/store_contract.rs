@@ -242,3 +242,165 @@ fn issue() -> dyno_core::issues::Issue {
         "a",
     )
 }
+
+/// What N ticks wrote and announced: rows added per table, and the alarm and alert messages sent.
+struct Ticked {
+    added: std::collections::BTreeMap<String, i64>,
+    alarms: usize,
+    alerts: usize,
+}
+
+/// Runs 13 ticks five seconds apart (a minute boundary, a quarter-hour mark, an always-held custom rule, a full disk, one
+/// app), with `refused` (a table) refusing every write, if given.
+fn ticks(refused: Option<&str>) -> Ticked {
+    let tmp = paddock_testkit::private_tempdir().unwrap();
+    let fake = Fake::new();
+    let (shared, sensors, processes) = Shared::build(
+        crate::paths::Dirs::at(tmp.path().join("data")),
+        fake.platform(),
+        Box::new(fake.clone()),
+        Box::new(|_| Ok(())),
+    )
+    .unwrap();
+    lock(&shared.core).settings.custom_alerts = vec![dyno_core::alarms::custom::CustomAlertRule {
+        id: "always".into(),
+        name: "Always".into(),
+        metric: dyno_core::alarms::custom::CustomMetric::CpuTotal,
+        op: dyno_core::alarms::custom::CustomOp::Below,
+        limit: 1_000.0,
+        for_secs: 0,
+        severity: Severity::Warning,
+        enabled: true,
+    }];
+    let pending = subscribe(&shared);
+    let mut sampler = Sampler::new(sensors, processes);
+    let overhead = Overhead {
+        agent_cpu: 0.0,
+        agent_memory: 0,
+        sampling_interval_ms: 2_000,
+        process_interval_ms: 10_000,
+    };
+    let before = lock(&shared.core).store.row_counts_for_test();
+    if let Some(t) = refused {
+        let core = lock(&shared.core);
+        for op in ["INSERT", "UPDATE", "DELETE"] {
+            core.store.exec_for_test(&format!(
+                "CREATE TRIGGER \"refuse_{op}\" BEFORE {op} ON \"{t}\" BEGIN SELECT RAISE(ABORT, 'refused'); END;"
+            ));
+        }
+    }
+    let procs = vec![dyno_platform::fake::process(100, "busy", 40.0)];
+    let groups = dyno_core::grouping::group(&procs);
+    for i in 0..13 {
+        let t = Timestamp(HOUR + 1 + i * 5_000);
+        let mut s = quiet_sample(t);
+        s.disks.push(dyno_core::metrics::DiskSample {
+            id: "d".into(),
+            name: "Disk".into(),
+            mount: "/".into(),
+            total: 100,
+            free: 1,
+            removable: false,
+        });
+        sampler.record_with_table_for_test(&shared, &s, (procs.clone(), groups.clone()), overhead, t);
+    }
+    let after = lock(&shared.core).store.row_counts_for_test();
+    let added = after
+        .iter()
+        .map(|(n, c)| (n.clone(), c - before.iter().find(|(b, _)| b == n).map_or(0, |(_, c)| *c)))
+        .collect();
+    let (mut alarms, mut alerts) = (0, 0);
+    pending.drain(&mut |m| {
+        alarms += usize::from(matches!(m, Message::Alarm(_)));
+        alerts += usize::from(matches!(m, Message::Alert(_)));
+        true
+    });
+    Ticked { added, alarms, alerts }
+}
+
+/// The tables one writer stores together (all or none for that writer).
+const WRITERS: &[&[&str]] = &[
+    // HistoryWriter::record: the raw and per-core points and a closed minute's apps.
+    &["points", "core_points", "app_minutes"],
+    // The rollup: the tiers' points and their progress marks.
+    &["points", "meta"],
+    // An alarm change.
+    &["alarms", "alarm_events"],
+    // An alert and its timeline mark.
+    &["alerts", "events"],
+    &["disk_free"],
+    // The recorder's automatic capture, which an alarm change starts.
+    &["recorder_snapshots"],
+];
+
+/// Writers that run only after another stored its rows: (depends on, dependent).
+const DEPENDS: &[(&str, &str)] = &[("alarms", "recorder_snapshots"), ("alarm_events", "recorder_snapshots")];
+
+/// The tables whose writers a refusal of `table` stops: its own writers' tables and the writers that depend on them.
+fn affected_by(table: &str) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = WRITERS
+        .iter()
+        .filter(|w| w.contains(&table))
+        .flat_map(|w| w.iter().copied())
+        .collect();
+    out.extend(DEPENDS.iter().filter(|(on, _)| *on == table).map(|(_, d)| *d));
+    out
+}
+
+/// Whether `table` is written by the writer of `kind`'s announcements (an alarm change or an alert).
+fn owns(table: &str, kind: &str) -> bool {
+    WRITERS.iter().any(|w| w.contains(&kind) && w.contains(&table))
+}
+
+/// Fourth review: rule 85 for the store. Each table the ticks write refuses on its own for 13 ticks; every other writer's rows
+/// keep being stored, and nothing of the refusing writer is announced.
+#[test]
+fn one_refusing_table_costs_only_its_own_writer() {
+    let control = ticks(None);
+    let written: Vec<String> = control.added.iter().filter(|(_, n)| **n > 0).map(|(t, _)| t.clone()).collect();
+    for needed in ["points", "app_minutes", "alarms", "alerts", "disk_free"] {
+        assert!(
+            written.iter().any(|t| t == needed),
+            "precondition: the ticks write {needed}: {written:?}"
+        );
+    }
+    assert!(
+        control.alarms > 0 && control.alerts > 0,
+        "precondition: the ticks announce alarms and alerts"
+    );
+    let mut broken = Vec::new();
+    for t in &written {
+        let r = ticks(Some(t));
+        let affected = affected_by(t);
+        assert!(
+            !affected.is_empty(),
+            "the harness names the writer of every table the ticks write: {t}"
+        );
+        for other in written.iter().filter(|o| !affected.contains(&o.as_str())) {
+            if r.added.get(other).copied().unwrap_or(0) <= 0 {
+                broken.push(format!("{t} refused: {other} stopped being stored"));
+            }
+        }
+        if r.added.get(t).copied().unwrap_or(0) != 0 {
+            broken.push(format!("{t} refused: rows were still added to it"));
+        }
+        // All or none for the refused writer: where every call of a writer fills all its tables (an alarm change, an alert),
+        // its other tables stay as they were. (The record fills app_minutes only when a minute closes, and meta has writers
+        // besides the rollup, so those are judged by the checks above.)
+        const EVERY_CALL: &[&[&str]] = &[&["alarms", "alarm_events"], &["alerts", "events"]];
+        for w in EVERY_CALL.iter().filter(|w| w.contains(&t.as_str())) {
+            for partner in w.iter().filter(|p| **p != t.as_str()) {
+                if r.added.get(*partner).copied().unwrap_or(0) != 0 {
+                    broken.push(format!("{t} refused: its writer still stored rows in {partner}"));
+                }
+            }
+        }
+        if owns(t, "alarms") && r.alarms > 0 {
+            broken.push(format!("{t} refused: {} alarm changes announced", r.alarms));
+        }
+        if owns(t, "alerts") && r.alerts > 0 {
+            broken.push(format!("{t} refused: {} alerts announced", r.alerts));
+        }
+    }
+    assert!(broken.is_empty(), "{broken:#?}");
+}

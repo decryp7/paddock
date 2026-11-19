@@ -383,6 +383,16 @@ impl AlarmEngine {
         e
     }
 
+    /// The settings.
+    pub fn config(&self) -> AlarmConfig {
+        self.config
+    }
+
+    /// The local zone quiet hours follow.
+    pub fn zone(&self) -> Zone {
+        Zone::clone(&self.zone)
+    }
+
     /// Replaces the settings.
     pub fn set_config(&mut self, config: AlarmConfig) {
         self.config = config.clamped();

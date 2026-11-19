@@ -47,9 +47,6 @@ pub enum StoreError {
     /// A value didn't (de)serialise.
     #[error("history database value: {0}")]
     Json(#[from] serde_json::Error),
-    /// A write inside the batch failed, so the batch was rolled back instead of committed ([`Store::atomic`]).
-    #[error("history database: a write in this batch failed ({0}); nothing of the batch was stored")]
-    BatchFailed(String),
 }
 
 /// The store's result type.
@@ -60,8 +57,6 @@ pub struct Store {
     conn: Connection,
     /// A [`Batch`] is open (its transaction is this store's).
     batch_open: std::sync::atomic::AtomicBool,
-    /// A write inside the open batch failed: its commit rolls back instead ([`Store::atomic`]).
-    batch_failed: std::sync::Mutex<Option<String>>,
 }
 
 /// One transaction over a batch of writes ([`Store::batch`]). [`Batch::commit`] commits it and says whether that worked; a
@@ -86,13 +81,6 @@ impl Batch<'_> {
 
     fn finish(store: &Store, tx: rusqlite::Transaction<'_>) -> Result<()> {
         store.batch_open.store(false, std::sync::atomic::Ordering::SeqCst);
-        let failed = store.batch_failed.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
-        if let Some(why) = failed {
-            // The store-writer contract (Dyno ADR 0008, "Store writers"): a write that failed fails its batch; nothing of it is kept.
-            drop(tx);
-            log::error!("dyno-agent: a batch of history writes was rolled back: a write in it failed ({why})");
-            return Err(StoreError::BatchFailed(why));
-        }
         let conn = &store.conn;
         // A refused COMMIT leaves the transaction for rusqlite's guard, which rolls it back as it is dropped here.
         tx.commit().map_err(|e| {
@@ -114,7 +102,6 @@ impl Drop for Batch<'_> {
         if std::thread::panicking() {
             // rusqlite's guard rolls the transaction back as it is dropped: half a tick is never stored.
             self.store.batch_open.store(false, std::sync::atomic::Ordering::SeqCst);
-            *self.store.batch_failed.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
             drop(tx);
             log::error!("dyno-agent: a batch of history writes was rolled back: the thread panicked");
         } else {
@@ -251,7 +238,6 @@ impl Store {
         Ok(Store {
             conn,
             batch_open: std::sync::atomic::AtomicBool::new(false),
-            batch_failed: std::sync::Mutex::new(None),
         })
     }
 
@@ -285,7 +271,6 @@ impl Store {
         Ok(Store {
             conn,
             batch_open: std::sync::atomic::AtomicBool::new(false),
-            batch_failed: std::sync::Mutex::new(None),
         })
     }
 
@@ -311,7 +296,8 @@ impl Store {
     }
 
     /// Runs `f` as one whole, inside a batch or alone: a SAVEPOINT, released when `f` succeeds and rolled back to when it fails
-    /// (or panics), so a writer that must store all its rows or none keeps that inside a sampler tick's batch.
+    /// (or panics). A writer is all or none for itself; a failure stays inside its savepoint and the batch's other writers
+    /// commit (rule 85; Dyno ADR 0008, "Store writers"): only a failed commit fails a batch.
     pub fn atomic<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
         self.conn.execute_batch("SAVEPOINT dyno_whole")?;
         let mut point = Savepoint {
@@ -323,27 +309,13 @@ impl Store {
                 point.done = true;
                 if let Err(e) = self.conn.execute_batch("RELEASE dyno_whole") {
                     point.undo();
-                    let e = StoreError::from(e);
-                    self.fail_batch(&e);
-                    return Err(e);
+                    return Err(e.into());
                 }
                 Ok(v)
             }
             Err(e) => {
                 point.undo();
-                self.fail_batch(&e);
                 Err(e)
-            }
-        }
-    }
-
-    /// The store-writer contract (Dyno ADR 0008, "Store writers"): a write that fails inside an open batch fails the batch, whose commit then
-    /// rolls everything back, so its caller keeps and announces nothing (a sampler tick restores its tick state).
-    fn fail_batch(&self, e: &StoreError) {
-        if self.batch_open.load(std::sync::atomic::Ordering::SeqCst) {
-            let mut failed = self.batch_failed.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            if failed.is_none() {
-                *failed = Some(e.to_string());
             }
         }
     }
@@ -878,11 +850,11 @@ mod tests {
             store.app_minutes(Timestamp(0), Timestamp(HOUR)).unwrap().is_empty(),
             "the failed call left no row of its own"
         );
-        assert!(matches!(b.commit(), Err(StoreError::BatchFailed(_))));
+        b.commit().unwrap();
         assert_eq!(
-            store.meta("lost").unwrap(),
-            None,
-            "the batch's other writes are rolled back with it"
+            store.meta("lost").unwrap().as_deref(),
+            Some("yes"),
+            "the batch's other writers commit (rule 85)"
         );
         // Alone, too: all rows or none.
         assert!(store.put_app_minutes(&[row("good"), row("bad")]).is_err());
