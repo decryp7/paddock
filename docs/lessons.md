@@ -2798,7 +2798,21 @@ screencast. **Class:** the narrow-window race is the third "layout decision from
 `watchResize` settle loop, train 14's same-frame fix, this one); the other two are the ready-read class (a spec acting on a control that
 is in the DOM but not positioned or not lasting).
 
+## Fix item: Debrief WebKit a11y (dark) read colour contrast mid-change (2026-11-19, CI run 8300)
+`main screen has no serious accessibility violations (dark)` (apps/debrief/app/e2e/a11y.e2e.ts:6) failed once in debrief.yml run
+8300 (job 41629, end-to-end shard 3/4, WebKit) and passed on its retry: axe reported `color-contrast` (serious, 3 nodes in
+`timeline-dark`). It had failed 1 of 145 runs before (`./dev ci flakes`). FLAKY in a feature train 14 does not touch; recorded here
+and not blocking, by the user's feature-level reading of ER-12 (2026-11-19). Next: reproduce in WebKit with a failing run first;
+check that the dark theme had settled before the scan (`axeViolations` holds transitions still, so the suspect is the theme switch
+itself). **Class: an e2e read before the page settled (the ready-read class).**
 
+## Fix item: Debrief WebKit home "turn off for later imports" click did not take (2026-11-19, CI run 8300)
+`home (dashboard and health check) › can be turned off for later imports` (apps/debrief/app/e2e/ux-home.e2e.ts:73) failed once in
+debrief.yml run 8300 (job 41639, end-to-end shard 4/4, WebKit) and passed on its retry: `locator.uncheck: Clicking the checkbox did
+not change its state` on 'Show Home after opening files'. It had failed 1 of 145 runs before. FLAKY in a feature train 14 does not
+touch; recorded here and not blocking, by the user's feature-level reading of ER-12 (2026-11-19). Next: reproduce in WebKit first;
+suspect the checkbox's state being written back by a settings round trip that lands after the click. **Class: an e2e action on an
+element whose state the app still changes (the ready-read class).**
 ## Debrief: ai-chat.e2e.ts:130 red on both tries in debrief.yml run 8300; two more WebKit FLAKYs (train 14, 2026-11-19)
 - **ai-chat.e2e.ts:130 "a long conversation scrolls in its list only".** `waitAnswered` (ready.ts `expectStreamDone`, 5 s) saw the third
   answer still streaming. Trace: answers took 3.2 s and 2.4 s from the turn to `aria-busy="false"`, the third more than 5.5 s. Causes listed:
