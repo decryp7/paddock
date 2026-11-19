@@ -256,3 +256,55 @@ test('the stale-marker scan sees a marker without a read (positive control)', as
   });
   assert.deepEqual(staleMarkers(root, ['scripts']), ['scripts/stale.mjs']);
 });
+
+// ---- no second pass/fail decision from a run's conclusion -----------------------------------------------------------------------
+// A run that ended `success` is not "green" (a rerun of failures, a schedule-skipped run and a partial run all end `success`), and a
+// run that ended `cancelled` is neither green nor red. The pass decision of one run lives in tools/paddock-dev/src/ci_runs/verdict.rs
+// (`run_result`, `decide`) and nowhere else; the train commands ask it. Files that still compare a conclusion with "success" are
+// listed in conformance/ci/run-conclusion-readers.json: the list only shrinks (ER-46), a listed file that no longer matches is
+// stale, and a new file that matches fails here.
+
+/** A comparison of a conclusion with "success" that decides something (`== "success"`, `matches!(... "success" ...)`, `=== 'success'`). */
+export const PASS_DECISION =
+  /conclusion[^\n]{0,60}?(?:===?|!==?)\s*['"]success['"]|['"]success['"]\s*(?:===?|!==?)[^\n]{0,60}?conclusion|matches!\([^\n]*conclusion[^\n]*['"]success['"]|conclusion[^\n]{0,40}\bSome\(\s*['"]success['"]|status\s*==\s*['"]success['"]/;
+const DECISION_HOME = 'tools/paddock-dev/src/ci_runs/verdict.rs';
+const DECISION_DIRS = ['tools/paddock-dev/src', 'scripts', 'conformance/src', 'conformance/ci', '.gitea'];
+
+/** The files under `dirs` of `root` that compare a run's conclusion with "success", outside the decision's home. */
+export function conclusionReaders(root, dirs = DECISION_DIRS, home = DECISION_HOME) {
+  return sources(root, dirs)
+    .filter(([rel, text]) => rel !== home && PASS_DECISION.test(text))
+    .map(([rel]) => rel)
+    .sort();
+}
+
+test('a pass decision from a run conclusion lives only in ci_runs/verdict.rs, besides the listed old readers, which only shrink', () => {
+  const listed = JSON.parse(readFileSync(join(PADDOCK, 'conformance/ci/run-conclusion-readers.json'), 'utf8')).files;
+  const found = conclusionReaders(PADDOCK);
+  assert.deepEqual(
+    found.filter((f) => !listed.includes(f)),
+    [],
+    'a new reader of a run conclusion: ask `ci_runs::verdict::run_result` (one run) or `ci_runs::verdict::verdict` (is there a full green run); the list in conformance/ci/run-conclusion-readers.json never grows',
+  );
+  assert.deepEqual(
+    listed.filter((f) => !found.includes(f)),
+    [],
+    'a listed file no longer reads a conclusion: remove it from conformance/ci/run-conclusion-readers.json (the list only shrinks)',
+  );
+});
+
+test('the conclusion scan sees a pass decision in Rust and in JavaScript, and not the home or a mere mention (positive control)', async () => {
+  const { makeApp } = await import('./helpers.mjs');
+  const root = makeApp({
+    'tools/paddock-dev/src/train/bad.rs': 'if run.conclusion == "success" { go(); }\n',
+    'tools/paddock-dev/src/train/bad2.rs': 'if matches!(r.conclusion.as_str(), "success") { go(); }\n',
+    'scripts/bad.mjs': "if (run.conclusion === 'success') go();\n",
+    'tools/paddock-dev/src/ci_runs/verdict.rs': 'if run.conclusion == "success" {}\n',
+    'tools/paddock-dev/src/train/good.rs': '// a run ends success or failure\nlet x = run_result(&r);\n',
+  });
+  assert.deepEqual(conclusionReaders(root), [
+    'scripts/bad.mjs',
+    'tools/paddock-dev/src/train/bad.rs',
+    'tools/paddock-dev/src/train/bad2.rs',
+  ]);
+});

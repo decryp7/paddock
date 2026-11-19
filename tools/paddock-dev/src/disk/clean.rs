@@ -82,6 +82,14 @@ fn shown(bytes: Option<u64>) -> String {
     bytes.map_or_else(|| "size not measured".to_string(), gib)
 }
 
+/// How old the processes' listing of the removal pass may get before it is read again.
+pub const RELIST_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Whether a listing of this age is read again.
+pub fn needs_relist(age: std::time::Duration) -> bool {
+    age > RELIST_AFTER
+}
+
 /// [`run_with`] with the processes' folders read through `procs` (tests count and fake the reads). Listing every process is the
 /// slow step (lsof), so it is read once to judge all folders (the judging runs in parallel) and once more, fresh, before the
 /// first removal; each removal then re-reads its own folder's git state and record.
@@ -142,7 +150,9 @@ pub fn run_core(
     });
     note(&format!("disk clean: judged in {:.1}s", started.elapsed().as_secs_f64()));
     let mut skipped = 0usize;
-    let mut fresh: Option<Context> = None;
+    // The processes' listing for the removal pass: read once, and again when it is older than `RELIST_AFTER` (a long pass must not
+    // act on a minutes-old listing).
+    let mut fresh: Option<(std::time::Instant, Context)> = None;
     for (f, state) in found.iter().zip(judged) {
         let Some(state) = state else {
             skipped += 1;
@@ -166,7 +176,10 @@ pub fn run_core(
             before_remove(&f.path);
             // Again, right before acting: the processes read afresh once for the whole removal pass, the clock and the folder's
             // own state for each folder, then the shared check inside `remove`.
-            let ctx = fresh.get_or_insert_with(ctx_now);
+            if fresh.as_ref().is_some_and(|(at, _)| needs_relist(at.elapsed())) {
+                fresh = None;
+            }
+            let (_, ctx) = fresh.get_or_insert_with(|| (std::time::Instant::now(), ctx_now()));
             ctx.now = crate::worktree::note::now_secs();
             let again = inspect(&f.path, record::read(&f.path).ok().flatten().as_ref(), ctx).state;
             if again.reclaimable() {
@@ -235,6 +248,14 @@ pub fn run_core(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_process_listing_older_than_30_seconds_is_read_again() {
+        use std::time::Duration;
+        assert!(!needs_relist(Duration::ZERO));
+        assert!(!needs_relist(Duration::from_secs(30)));
+        assert!(needs_relist(Duration::from_secs(31)));
+    }
+
     use super::*;
     use crate::disk::record::Record;
 

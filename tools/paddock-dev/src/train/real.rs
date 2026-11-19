@@ -1,14 +1,13 @@
-// ci-runs-reader: train release: finds the run it dispatched and waits for its end; a red round is judged by ci triage, never by its conclusion alone
 //! The real ports of `train release` and `train land`: Gitea through the shared client, the disk check, the triage and `git`.
 //! Nothing here decides anything; the tests of the logic use tables (`sequence`, `land`), never Gitea or a repository (ER-14).
 
-use super::find;
 use super::land::Git;
-use super::sequence::{Ports, RunEnd};
-use crate::ci_runs::client::{Client, RunInfo};
-use crate::ci_runs::{dispatch, time, triage};
+use super::sequence::{Ports, Reach, RunEnd};
+use crate::ci_runs::dispatch;
+use crate::ci_runs::train_runs::{self as runs, RunFacts};
+use crate::ci_runs::verdict::Verdict;
 use crate::wait::{CiRunProbe, Clock, CurlHttp, Outcome, SystemClock, fmt_duration, wait_for};
-use paddock_proc::{Limits, Outcome as ProcOutcome, command, run_bounded};
+use paddock_proc::{Limits, Outcome as ProcOutcome, run_bounded};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -34,14 +33,6 @@ pub struct RealPorts {
     pub clock: SystemClock,
 }
 
-impl RealPorts {
-    fn newest_runs(&self) -> Result<Vec<RunInfo>, String> {
-        let mut http = CurlHttp;
-        let mut client = Client::new(&mut http, &self.server, &self.repo, &self.token);
-        Ok(client.runs_page(1)?.runs)
-    }
-}
-
 impl Ports for RealPorts {
     fn elapsed(&self) -> Duration {
         self.clock.elapsed()
@@ -50,7 +41,7 @@ impl Ports for RealPorts {
     fn disk_check(&mut self) -> Result<(), String> {
         // The check `ci dispatch` makes first (the runner volumes, refused under 50 GiB): this sequence dispatches in-process, so it
         // asks the same function, once per dispatch, and adds no check of its own.
-        crate::disk::check::before_dispatch(&|k| std::env::var(k).ok(), &mut std::io::stdout(), &mut std::io::stderr())
+        crate::disk::check::before_dispatch(&|k| std::env::var(k).ok(), &mut std::io::stderr())
     }
 
     fn dispatch(&mut self, workflow: &str, inputs: &[(String, String)], wait: Duration) -> Result<u64, String> {
@@ -61,7 +52,12 @@ impl Ports for RealPorts {
             Ok(n) => req.train_waiters = n,
             Err(e) => eprintln!("::warning::train release: {e}; a train run waits here, not in its first job."),
         }
-        let before = find::newest(&self.newest_runs()?, workflow, &self.branch, &self.sha);
+        let before = runs::newest(
+            &runs::newest_runs(&self.server, &self.repo, &self.token)?,
+            workflow,
+            &self.branch,
+            &self.sha,
+        );
         let read = |name: &str| std::fs::read_to_string(self.root.join(".gitea/workflows").join(name)).ok();
         let mut http = CurlHttp;
         let mut clock = dispatch::system_clock();
@@ -75,13 +71,13 @@ impl Ports for RealPorts {
             dispatch::Dispatched::StillBusy { last } => return Err(format!("the runner stayed busy ({last})")),
         }
         let mut sleeper = SystemClock::new();
-        find::find_new_run(
-            &mut || self.newest_runs(),
+        runs::find_new_run(
+            &mut || runs::newest_runs(&self.server, &self.repo, &self.token),
             &mut |d| sleeper.sleep(d),
             (workflow, &self.branch, &self.sha),
             before,
-            find::TRIES,
-            find::PAUSE,
+            runs::TRIES,
+            runs::PAUSE,
         )
     }
 
@@ -90,45 +86,44 @@ impl Ports for RealPorts {
         let mut probe = CiRunProbe::new(&mut http, &self.server, &self.repo, run, self.token.clone());
         let mut clock = SystemClock::new();
         match wait_for(&mut probe, &mut clock, max, POLL, &mut std::io::stderr()) {
-            Outcome::Done { .. } => RunEnd::Green,
-            Outcome::Failed { .. } => RunEnd::Red,
+            // The probe's own pass/fail wording is not read: it only says the run is over; the result is read from the run.
+            Outcome::Done { .. } | Outcome::Failed { .. } => RunEnd::Finished,
             Outcome::TimedOut { last, max } => RunEnd::Unfinished(format!("{last} after {} (the bound)", fmt_duration(max))),
             Outcome::Broken { error, .. } => RunEnd::Unfinished(format!("the run could not be read: {error}")),
         }
     }
 
-    fn run_info(&mut self, run: u64) -> Result<Option<RunInfo>, String> {
-        let mut http = CurlHttp;
-        Client::new(&mut http, &self.server, &self.repo, &self.token).run(run)
+    fn run_facts(&mut self, run: u64) -> Result<Option<RunFacts>, String> {
+        runs::facts(&self.server, &self.repo, &self.token, run)
+    }
+
+    fn ci_verdict(&mut self, workflow: &str, sha: &str) -> Verdict {
+        runs::full_verdict(&self.server, &self.repo, &self.token, workflow, sha)
     }
 
     fn triage(&mut self, run: u64) -> Result<Value, String> {
-        let mut http = CurlHttp;
-        let mut client = Client::new(&mut http, &self.server, &self.repo, &self.token);
-        let req = triage::Request {
-            run,
-            against: None,
-            app: None,
-            days: 14,
-            history: true,
-            repo: self.repo.clone(),
-            now_secs: time::now_secs(),
-        };
-        let report = triage::collect(&mut client, &req, &mut |l| eprintln!("{l}"))?;
-        let mut doc = report.json();
-        // `ci triage --json` adds `ok` when the triage worked; here it worked, or `collect` returned the error above.
-        doc["ok"] = Value::Bool(true);
-        Ok(doc)
+        runs::triage_doc(&self.server, &self.repo, &self.token, run)
+    }
+
+    fn is_ancestor(&mut self, ancestor: &str, of: &str) -> Result<bool, String> {
+        Git::is_ancestor(&mut GitCli { root: &self.root }, ancestor, of)
+    }
+
+    fn reach(&mut self, app: &str, from_sha: &str) -> Result<Reach, String> {
+        reach_of(&self.root, app, from_sha, &self.sha)
     }
 }
 
-/// An upper bound for one push, the repository's pre-push gate included. Not a measured value: the gate's own steps are bounded
-/// by themselves, and this only keeps a hung push from holding the train for ever (ER-32).
+/// A ceiling (ER-12: not a tuned limit, nothing waits for it to pass) for one push with the repository's pre-push gate: 60 minutes.
+/// Measured 2026-11-19: the pre-push gate of the push that carried this very change took 342.75 s (push log of that push, recorded
+/// in docs/lessons.md, "The train integrator's sequence scripts are a command now"), so the ceiling is about ten times the
+/// measurement. Its only job is to keep a hung push from holding the train's runners for ever (ER-32); the gate's own steps have
+/// their own bounds.
 const PUSH_LIMIT: Duration = Duration::from_secs(60 * 60);
 const QUICK_LIMIT: Duration = Duration::from_secs(300);
 
-/// `git` on the integrator's worktree. It never runs with `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` set: those point git at
-/// another repository.
+/// `git` on the integrator's worktree, started through `git_env::git()`: never with `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE`
+/// set (those point git at another repository).
 pub struct GitCli<'a> {
     /// The worktree.
     pub root: &'a Path,
@@ -136,11 +131,8 @@ pub struct GitCli<'a> {
 
 impl GitCli<'_> {
     fn base(&self, args: &[&str]) -> std::process::Command {
-        let mut cmd = command("git");
+        let mut cmd = crate::git_env::git();
         cmd.arg("-C").arg(self.root).args(args);
-        for var in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"] {
-            cmd.env_remove(var);
-        }
         cmd
     }
 
@@ -167,6 +159,54 @@ impl GitCli<'_> {
             }
         }
     }
+}
+
+impl GitCli<'_> {
+    /// The files `git diff --name-only <range>` lists.
+    pub fn changed(&mut self, range: &str) -> Result<Vec<String>, String> {
+        Ok(self
+            .run(&["diff", "--name-only", range], QUICK_LIMIT)?
+            .lines()
+            .map(str::to_string)
+            .collect())
+    }
+}
+
+/// What `train land` asks CI about the head.
+pub struct RealCi {
+    /// The worktree.
+    pub root: PathBuf,
+    /// The Gitea server.
+    pub server: String,
+    /// The repository.
+    pub repo: String,
+    /// The API token.
+    pub token: String,
+}
+
+impl super::land::Ci for RealCi {
+    fn verdict(&mut self, workflow: &str, sha: &str) -> Verdict {
+        runs::full_verdict(&self.server, &self.repo, &self.token, workflow, sha)
+    }
+
+    fn reaches(&mut self, app: &str, main: &str, head: &str) -> Result<bool, String> {
+        reach_of(&self.root, app, main, head).map(|r| r.reached)
+    }
+}
+
+/// What the planner says `from..to` reaches, for `app`.
+pub fn reach_of(root: &Path, app: &str, from: &str, to: &str) -> Result<Reach, String> {
+    let plan = crate::queue::real::run_planner(root, from, to)?;
+    let projects = crate::queue::real::projects_of_plan(&plan);
+    let reached = projects.contains("*") || projects.iter().any(|p| p.eq_ignore_ascii_case(app));
+    Ok(Reach {
+        reached,
+        diff: if projects.is_empty() {
+            "nothing".into()
+        } else {
+            projects.into_iter().collect::<Vec<_>>().join(", ")
+        },
+    })
 }
 
 impl Git for GitCli<'_> {

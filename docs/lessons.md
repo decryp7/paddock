@@ -2978,3 +2978,16 @@ control; a `passed:<run>` claim is now judged and checked against the train head
 The scratch scripts (`seq-lib.sh`, `seq-release.sh`, `seq-full.sh`, `triage-verdict.py`, `land-*.sh` in the integrator's scratch folder)
 were never in the repository and are replaced by these commands. **Class: an integrator step written by hand per train (second sighting,
 train 12 and train 14); the tool is the redesign.**
+
+Review round on the first version (2026-11-19, four P1): a landing command that did not ask the shared reader, a `--since-run` taken on trust, a
+`--reuse` that checked only the run's own conclusion, and a hold taken on a flag instead of proven. Fixed in one round (ER-44): `train land` asks
+`ci verdict`; the full ci.yml and debrief.yml are dispatched after a fix round and decided by `ci verdict`; one run's pass or red is
+`ci_runs::verdict::run_result` (cancelled and other ends are neither); a reuse needs an ancestor commit on this train ref and a plan that does not
+reach the app; the hold is proven with the lock scripts' own check, with a hard deadline around the held child; an accepted flaky test must be
+untouched by the train (ER-12 enforced, matched by name: a stated approximation). The class is checked now: conformance
+`ci-verdict-reader.test.mjs` fails on a new file that compares a run conclusion with "success" outside `ci_runs/verdict.rs`; eleven older files
+are listed in `conformance/ci/run-conclusion-readers.json`, which only shrinks (ER-46). Consequence to know: a full run whose only failures are
+accepted flaky tests is red for `ci verdict`, so such a train does not land until the full run is green (the rule that a retry never turns a run
+green, ER-12). The 60-minute push ceiling in `real.rs` is about ten times the 343 s measured for the pre-push gate of the first push of this branch.
+Not done: counting jobs skipped behind a failed `needs`; Gitea's job list carries no `needs` and the display names carry matrix expressions, so a
+mapping would be a guess. The full-run requirement closes the hole instead: a job hidden behind a failure leaves the full run red.

@@ -1,0 +1,16 @@
+{
+  "comment": "Files that compare a run conclusion with \"success\" outside ci_runs/verdict.rs. This list only shrinks (ER-46): move the decision into the verdict reader and delete the entry.",
+  "files": [
+    "tools/paddock-dev/src/ci_runs/client.rs",
+    "tools/paddock-dev/src/ci_runs/flakes.rs",
+    "tools/paddock-dev/src/ci_runs/record.rs",
+    "tools/paddock-dev/src/ci_runs/schedule_skip.rs",
+    "tools/paddock-dev/src/ci_runs/timings.rs",
+    "tools/paddock-dev/src/ci_runs/triage.rs",
+    "tools/paddock-dev/src/merge_check/other_os.rs",
+    "tools/paddock-dev/src/plan_ci.rs",
+    "tools/paddock-dev/src/plan_cmd.rs",
+    "tools/paddock-dev/src/plan_since.rs",
+    "tools/paddock-dev/src/queue/real.rs"
+  ]
+}

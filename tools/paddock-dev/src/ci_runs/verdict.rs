@@ -201,6 +201,33 @@ fn read_mode(client: &mut Client, run: &RunInfo) -> Mode {
     }
 }
 
+/// How one finished-or-not run ended, decided here and nowhere else (a second reader of `conclusion` is what
+/// `conformance/test/ci-verdict-reader.test.mjs` refuses): only `success` is a pass and only `failure` is red; a cancel, a skip, a
+/// timeout or a conclusion the server adds later is `Other`, which no caller may read as either.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunResult {
+    /// Not finished: its status.
+    Running(String),
+    /// Finished with `success`.
+    Success,
+    /// Finished with `failure`.
+    Failure,
+    /// Finished with anything else (`cancelled`, `skipped`, empty...): neither green nor red.
+    Other(String),
+}
+
+/// The result of one run (see [`RunResult`]).
+pub fn run_result(run: &RunInfo) -> RunResult {
+    if !run.finished() {
+        return RunResult::Running(run.status.clone());
+    }
+    match run.conclusion.as_str() {
+        "success" => RunResult::Success,
+        "failure" => RunResult::Failure,
+        other => RunResult::Other(if other.is_empty() { run.status.clone() } else { other.to_string() }),
+    }
+}
+
 /// Reads the runs listed for `sha` (up to four pages of 50) and decides.
 pub fn verdict(client: &mut Client, workflow: &str, sha: &str) -> Verdict {
     let query = format!("head_sha={sha}");
@@ -686,5 +713,26 @@ mod tests {
         assert!(matches!(Outcome::from_wire(&green, &other, true), Outcome::NotMeasured(_)));
         assert!(matches!(Outcome::from_wire(&green, &asked, false), Outcome::NotMeasured(_)));
         assert!(matches!(Outcome::from_wire(&green, &asked, true), Outcome::KnownCommit(_)));
+    }
+
+    #[test]
+    fn a_run_is_a_pass_only_for_success_and_red_only_for_failure() {
+        let mk = |status: &str, conclusion: &str| RunInfo {
+            id: 1,
+            path: "ci.yml@refs/heads/x".into(),
+            event: String::new(),
+            status: status.into(),
+            conclusion: conclusion.into(),
+            head_sha: String::new(),
+            head_branch: String::new(),
+            created_at: String::new(),
+            run_attempt: 1,
+        };
+        assert_eq!(run_result(&mk("completed", "success")), RunResult::Success);
+        assert_eq!(run_result(&mk("completed", "failure")), RunResult::Failure);
+        assert_eq!(run_result(&mk("completed", "cancelled")), RunResult::Other("cancelled".into()));
+        assert_eq!(run_result(&mk("completed", "skipped")), RunResult::Other("skipped".into()));
+        assert_eq!(run_result(&mk("completed", "")), RunResult::Other("completed".into()));
+        assert_eq!(run_result(&mk("in_progress", "")), RunResult::Running("in_progress".into()));
     }
 }

@@ -140,13 +140,14 @@ pub fn reclaimable_line(s: &Settings) -> String {
 /// The check before a CI dispatch or a release sequence, on the runner volumes (the disks under the configured roots): `Err`
 /// with the text for the `::error::` when one is below the refusal level, before any CI time is spent. Below the warning level it
 /// prints the warning, the largest folders and the reclaimable total. A disk that cannot be read is "not measured" and passes.
-pub fn before_dispatch(env: &dyn Fn(&str) -> Option<String>, out: &mut dyn Write, err: &mut dyn Write) -> Result<(), String> {
+pub fn before_dispatch(env: &dyn Fn(&str) -> Option<String>, log: &mut dyn Write) -> Result<(), String> {
     let s = Settings::resolve(&CommonArgs::default(), env);
-    let mut paths: Vec<PathBuf> = s.roots.iter().filter(|r| r.is_dir()).cloned().collect();
-    paths.truncate(1);
+    // Every configured root: each is a disk a run can fill. Everything goes to `log` (standard error in the commands), so a
+    // `--json` command keeps standard output for its one object.
+    let paths: Vec<PathBuf> = s.roots.iter().filter(|r| r.is_dir()).cloned().collect();
     if paths.is_empty() {
         let _ = writeln!(
-            err,
+            log,
             "::warning::disk: no runner volume found under the dev-targets roots; the disk check did not run"
         );
         return Ok(());
@@ -155,7 +156,10 @@ pub fn before_dispatch(env: &dyn Fn(&str) -> Option<String>, out: &mut dyn Write
         paths,
         common: CommonArgs::default(),
     };
-    match run(&a, env, out, err) {
+    let mut out = Vec::new();
+    let code = run(&a, env, &mut out, log);
+    let _ = log.write_all(&out);
+    match code {
         0 => Ok(()),
         _ => Err(
             "the disk is below the refusal level, so nothing is dispatched; free disk first (see the lines above), then dispatch again"
@@ -401,14 +405,9 @@ mod tests {
             "PADDOCK_DEV_TARGETS" => Some(root_s.clone()),
             _ => None,
         };
-        let (mut out, mut err) = (Vec::new(), Vec::new());
-        let r = before_dispatch(&env, &mut out, &mut err);
-        (
-            r,
-            String::from_utf8_lossy(&out).to_string(),
-            String::from_utf8_lossy(&err).to_string(),
-            d,
-        )
+        let mut log = Vec::new();
+        let r = before_dispatch(&env, &mut log);
+        (r, String::new(), String::from_utf8_lossy(&log).to_string(), d)
     }
 
     #[cfg(unix)]
@@ -432,8 +431,32 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_dispatch_with_room_is_silent_and_goes_on() {
-        let (r, out, err, _d) = before(500);
-        assert!(r.is_ok() && err.is_empty(), "{err}");
-        assert!(out.contains("500.0 GiB free"), "{out}");
+        let (r, _out, err, _d) = before(500);
+        assert!(r.is_ok() && !err.contains("::"), "{err}");
+        assert!(
+            err.contains("500.0 GiB free"),
+            "everything is on the log stream, none on standard output: {err}"
+        );
+    }
+
+    /// Every configured root is checked, not the first only: two roots on a full disk are two refusals.
+    #[cfg(unix)]
+    #[test]
+    fn every_configured_root_is_checked() {
+        let d = tempfile::tempdir().unwrap();
+        let (a, b) = (d.path().join("a"), d.path().join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let df = fake_df(d.path(), 10);
+        let roots = std::env::join_paths([&a, &b]).unwrap().to_string_lossy().to_string();
+        let env = move |k: &str| match k {
+            "PADDOCK_DF" => Some(df.clone()),
+            "PADDOCK_DISK_ROOTS" => Some(roots.clone()),
+            _ => None,
+        };
+        let mut log = Vec::new();
+        assert!(before_dispatch(&env, &mut log).is_err());
+        let text = String::from_utf8_lossy(&log);
+        assert_eq!(text.matches("::error::").count(), 2, "{text}");
     }
 }

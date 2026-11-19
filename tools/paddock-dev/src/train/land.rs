@@ -5,6 +5,7 @@
 //! answer (`ls-remote`), never with the push's exit code alone. Git is behind [`Git`], so the tests never touch a repository.
 
 use super::sequence::Stop;
+use crate::ci_runs::verdict::Verdict;
 use std::io::Write;
 
 /// The git calls `land` needs, on the integrator's own worktree.
@@ -19,6 +20,14 @@ pub trait Git {
     fn is_ancestor(&mut self, ancestor: &str, of: &str) -> Result<bool, String>;
     /// Pushes `sha` as the new value of the remote branch `name`, never forced. The repository's own pre-push gate runs.
     fn push_ff(&mut self, sha: &str, name: &str) -> Result<(), String>;
+}
+
+/// What `land` asks CI about the head: the shared reader's verdict and the planner.
+pub trait Ci {
+    /// The shared reader's verdict ([`crate::ci_runs::verdict::verdict`]) of `workflow` on `sha`.
+    fn verdict(&mut self, workflow: &str, sha: &str) -> Verdict;
+    /// Whether the plan of `main..head` reaches the app (or everything).
+    fn reaches(&mut self, app: &str, main: &str, head: &str) -> Result<bool, String>;
 }
 
 /// How the landing ended.
@@ -51,8 +60,27 @@ fn short(sha: &str) -> &str {
     &sha[..sha.len().min(9)]
 }
 
+fn require_green(ci: &mut dyn Ci, wf: &str, head: &str, log: &mut dyn Write) -> Result<(), Stop> {
+    match ci.verdict(wf, head) {
+        Verdict::Green { run } => {
+            let _ = writeln!(log, "train land: {wf}: full green run {run} on {} (ci verdict)", short(head));
+            Ok(())
+        }
+        Verdict::Red { reason, .. } => Err(Stop::new(
+            format!("{wf} has no full green run on {}: {reason}", short(head)),
+            format!(
+                "run the release sequence (`./dev train release`) until `./dev ci verdict --workflow {wf} --sha {head}` is green, then land"
+            ),
+        )),
+        Verdict::NotMeasured(why) => Err(Stop::new(
+            format!("{wf} on {} could not be measured: {why}", short(head)),
+            "fix what it names (GITEA_TOKEN, the network); not measured is never a pass, nothing was pushed",
+        )),
+    }
+}
+
 /// Fast-forwards `main` to the head of `branch` and verifies it.
-pub fn land(branch: &str, git: &mut dyn Git, log: &mut dyn Write) -> Result<Landed, Stop> {
+pub fn land(branch: &str, git: &mut dyn Git, ci: &mut dyn Ci, log: &mut dyn Write) -> Result<Landed, Stop> {
     check_branch(branch).map_err(|e| Stop::new(e, "name the train branch, for example train/2026-11-19-16"))?;
     let git_err = |what: &str| {
         let what = what.to_string();
@@ -95,6 +123,18 @@ pub fn land(branch: &str, git: &mut dyn Git, log: &mut dyn Write) -> Result<Land
             ),
             "merge origin/main into the train, push it through the gate and run the CI sequence again; never force or rebase",
         ));
+    }
+    // ER-10: nothing lands without the full green run on this exact head, as the one shared reader says (a missing, partial, red or
+    // not measured verdict pushes nothing). debrief.yml too when the plan from main reaches the Debrief app.
+    require_green(ci, "ci.yml", &head, log)?;
+    let debrief = ci.reaches("debrief", &main, &head).map_err(|e| {
+        Stop::new(
+            format!("the plan of {}..{} could not be read: {e}", short(&main), short(&head)),
+            "fix the planner error above, then run `./dev train land` again",
+        )
+    })?;
+    if debrief {
+        require_green(ci, "debrief.yml", &head, log)?;
     }
     let _ = writeln!(log, "train land: fast-forwarding main {} -> {}", short(&main), short(&head));
     git.push_ff(&head, "main").map_err(git_err("the push of main was refused"))?;
@@ -173,8 +213,102 @@ mod tests {
         }
     }
 
+    struct FakeCi {
+        verdicts: BTreeMap<String, Verdict>,
+        debrief_reached: bool,
+        asked: Vec<String>,
+    }
+    fn green() -> FakeCi {
+        FakeCi {
+            verdicts: BTreeMap::from([
+                ("ci.yml".to_string(), Verdict::Green { run: 1 }),
+                ("debrief.yml".to_string(), Verdict::Green { run: 2 }),
+            ]),
+            debrief_reached: false,
+            asked: Vec::new(),
+        }
+    }
+    impl Ci for FakeCi {
+        fn verdict(&mut self, workflow: &str, _: &str) -> Verdict {
+            self.asked.push(workflow.into());
+            self.verdicts
+                .get(workflow)
+                .cloned()
+                .unwrap_or(Verdict::NotMeasured("no verdict in the table".into()))
+        }
+        fn reaches(&mut self, _: &str, _: &str, _: &str) -> Result<bool, String> {
+            Ok(self.debrief_reached)
+        }
+    }
+
     fn run(f: &mut Fake) -> Result<Landed, Stop> {
-        land("train/x", f, &mut Vec::new())
+        land("train/x", f, &mut green(), &mut Vec::new())
+    }
+
+    /// P1-1: a verdict that is not Green for the exact head pushes nothing.
+    #[test]
+    fn a_missing_partial_red_or_not_measured_verdict_pushes_nothing() {
+        for v in [
+            None,
+            Some(Verdict::Red {
+                run: None,
+                reason: "only partial runs".into(),
+            }),
+            Some(Verdict::Red {
+                run: Some(5),
+                reason: "it failed".into(),
+            }),
+            Some(Verdict::NotMeasured("no token".into())),
+        ] {
+            let mut f = fake();
+            let mut ci = green();
+            match v.clone() {
+                Some(v) => ci.verdicts.insert("ci.yml".into(), v),
+                None => ci.verdicts.remove("ci.yml"),
+            };
+            let stop = land("train/x", &mut f, &mut ci, &mut Vec::new()).unwrap_err();
+            assert!(stop.cause.contains("ci.yml"), "{stop:?}");
+            assert!(f.pushed.is_empty(), "{v:?}");
+        }
+    }
+
+    #[test]
+    fn debrief_must_be_green_too_when_the_plan_reaches_it_and_only_then() {
+        let mut ci = green();
+        ci.debrief_reached = true;
+        ci.verdicts.insert(
+            "debrief.yml".into(),
+            Verdict::Red {
+                run: Some(3),
+                reason: "red".into(),
+            },
+        );
+        let mut f = fake();
+        assert!(
+            land("train/x", &mut f, &mut ci, &mut Vec::new())
+                .unwrap_err()
+                .cause
+                .contains("debrief.yml")
+        );
+        assert!(f.pushed.is_empty());
+        // not reached: its verdict is not even asked for
+        let mut ci = green();
+        ci.verdicts.insert(
+            "debrief.yml".into(),
+            Verdict::Red {
+                run: Some(3),
+                reason: "red".into(),
+            },
+        );
+        let mut f = fake();
+        land("train/x", &mut f, &mut ci, &mut Vec::new()).unwrap();
+        assert_eq!(ci.asked, vec!["ci.yml".to_string()]);
+        // reached and green: lands
+        let mut ci = green();
+        ci.debrief_reached = true;
+        let mut f = fake();
+        land("train/x", &mut f, &mut ci, &mut Vec::new()).unwrap();
+        assert_eq!(f.pushed.len(), 1);
     }
 
     /// The positive control: a train that is ahead of main, pushed and checked out, lands, and the remote says so.
@@ -257,7 +391,7 @@ mod tests {
     fn only_train_branches_land() {
         for bad in ["main", "feat/x", "train/", "train/a b", "train/x;rm", "", "refs/heads/train/x"] {
             let mut f = fake();
-            assert!(land(bad, &mut f, &mut Vec::new()).is_err(), "{bad}");
+            assert!(land(bad, &mut f, &mut green(), &mut Vec::new()).is_err(), "{bad}");
             assert!(f.pushed.is_empty());
         }
     }
