@@ -258,7 +258,10 @@ impl Build {
         if plan.own_manifest {
             write_manifest(Path::new(env.get("OUT_DIR").unwrap_or_default()))?;
         }
-        create_placeholders(&plan.placeholders)?;
+        let (_, notes) = create_placeholders_noted(&plan.placeholders, &oldest_mtime)?;
+        for note in &notes {
+            print(note);
+        }
         let (tauri_config, removed) = if sidecars::any_placeholder(&plan.placeholders) {
             let removed = sidecars::remove_files(&sidecars::stale_copies(&plan.copies))?;
             (
@@ -292,10 +295,32 @@ pub fn write_manifest(dir: &Path) -> Result<PathBuf, BuildError> {
 }
 
 /// Creates each missing file as an empty one with the oldest modification time, with its folder; a file that exists (the real sidecar)
-/// is never touched.
-/// Returns the files created.
+/// is never touched. Returns the files created.
+///
+/// The old time keeps the placeholder from looking newer than the build script run that made it (it is in `cargo:rerun-if-changed`).
+/// Setting it is best effort ([`create_placeholders_noted`] reports a failure). A tool that copies a real sidecar over a placeholder
+/// with its old time (`cp -p`, `tar` x) gives the file an old time too, so cargo does not rerun the build script: touch the file or
+/// build with a fresh `OUT_DIR` after such a copy.
 pub fn create_placeholders(files: &[PathBuf]) -> Result<Vec<PathBuf>, BuildError> {
+    create_placeholders_noted(files, &oldest_mtime).map(|(created, _)| created)
+}
+
+/// Sets the oldest modification time on `file`.
+fn oldest_mtime(file: &Path) -> std::io::Result<()> {
+    fs::File::options()
+        .write(true)
+        .open(file)
+        .and_then(|f| f.set_modified(std::time::UNIX_EPOCH))
+}
+
+/// [`create_placeholders`] with the stamp as a parameter and a note for each file whose time could not be set: the placeholder exists
+/// then (an empty file is what matters), and the note is a `cargo:warning` line for the build output.
+pub fn create_placeholders_noted(
+    files: &[PathBuf],
+    stamp: &dyn Fn(&Path) -> std::io::Result<()>,
+) -> Result<(Vec<PathBuf>, Vec<String>), BuildError> {
     let mut created = Vec::new();
+    let mut notes = Vec::new();
     for file in files {
         if file.exists() {
             continue;
@@ -306,15 +331,13 @@ pub fn create_placeholders(files: &[PathBuf]) -> Result<Vec<PathBuf>, BuildError
         };
         fs::create_dir_all(file.parent().unwrap_or(Path::new(""))).map_err(io)?;
         fs::write(file, b"").map_err(io)?;
-        // The placeholder is in `cargo:rerun-if-changed`, and cargo reruns a build script whose listed file is newer than the run's
-        // start: one made during the run would make the next cargo call rebuild the crate. The oldest time says "nothing changed";
-        // a sidecar that becomes real is written later and still counts.
-        fs::File::options()
-            .write(true)
-            .open(file)
-            .and_then(|f| f.set_modified(std::time::UNIX_EPOCH))
-            .map_err(io)?;
+        if let Err(e) = stamp(file) {
+            notes.push(format!(
+                "cargo:warning=paddock-build: the placeholder {} could not get the oldest modification time ({e}); the next cargo call may rebuild this crate once",
+                file.display()
+            ));
+        }
         created.push(file.clone());
     }
-    Ok(created)
+    Ok((created, notes))
 }

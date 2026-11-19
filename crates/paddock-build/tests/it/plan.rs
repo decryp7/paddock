@@ -218,3 +218,36 @@ fn a_placeholder_never_looks_newer_than_the_build_script_run_that_made_it() {
     std::fs::write(&real, b"x").unwrap();
     assert!(std::fs::metadata(&real).unwrap().modified().unwrap() >= before);
 }
+
+/// Setting the time is best effort: a stamp that fails leaves the placeholder in place and yields one `cargo:warning` line naming it.
+#[test]
+fn a_failing_time_stamp_keeps_the_placeholder_and_warns() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("binaries").join("svc-x");
+    let failing = |_: &std::path::Path| Err(std::io::Error::other("no way"));
+    let (created, notes) =
+        paddock_build::create_placeholders_noted(std::slice::from_ref(&file), &failing).unwrap();
+    assert_eq!(created, [file.clone()]);
+    assert_eq!(std::fs::read(&file).unwrap(), b"");
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(
+        notes[0].starts_with("cargo:warning=")
+            && notes[0].contains("svc-x")
+            && notes[0].contains("no way"),
+        "{notes:?}"
+    );
+    // Positive control: the real stamp gives no note.
+    let other = dir.path().join("binaries").join("svc-y");
+    let ok = |f: &std::path::Path| {
+        std::fs::File::options()
+            .write(true)
+            .open(f)?
+            .set_modified(std::time::UNIX_EPOCH)
+    };
+    assert!(
+        paddock_build::create_placeholders_noted(&[other], &ok)
+            .unwrap()
+            .1
+            .is_empty()
+    );
+}

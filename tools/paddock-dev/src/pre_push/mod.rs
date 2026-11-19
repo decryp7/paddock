@@ -65,7 +65,7 @@ pub struct PrePushArgs {
     /// The remote being pushed to (git's first pre-push argument; the hook passes it): the only remote evidence and bases are read from.
     #[arg(long)]
     pub remote: Option<String>,
-    /// Only the gates whose row starts with one of these words (for example `fmt,clippy`); the hook always runs them all.
+    /// Only the gates named by these selectors, each a whole row name (`doctest crates`) or a row's first word (`fmt,clippy`); the hook always runs them all. A selector that matches no row is an error that lists the valid row names.
     #[arg(long, value_delimiter = ',')]
     pub only: Vec<String>,
     /// Print the gates and their commands; run nothing.
@@ -1113,33 +1113,36 @@ fn row_id(p: &gates::Planned) -> &str {
     }
 }
 
-/// `--only`: keep the rows a selector names (a whole row name such as `clippy crates`, or its first word). No selector keeps every
-/// row. A selection that keeps no row is an error that names what was given and the valid row names, never an empty run that
-/// reads as "0 passed, safe to push" (ER-33: a check that cannot see its subject is not a pass).
+/// `--only`: keep the rows the selectors name (a whole row name such as `clippy crates`, or its first word without a trailing comma).
+/// No selector keeps every row. A selector that names no row is an error, whichever others do: it lists every such selector and the valid
+/// row names, so a typo never turns into a smaller run that reads as "passed, safe to push" (ER-33).
 fn select_rows(planned: Vec<gates::Planned>, only: &[String]) -> Result<Vec<gates::Planned>, CliError> {
     if only.is_empty() {
         return Ok(planned);
     }
-    let first = |id: &str| id.split(' ').next().unwrap_or(id).to_string();
-    let kept: Vec<gates::Planned> = planned
-        .iter()
-        .filter(|p| only.iter().any(|w| w == row_id(p) || *w == first(row_id(p))))
-        .cloned()
-        .collect();
-    if kept.is_empty() {
+    let names = |p: &gates::Planned| {
+        let id = row_id(p);
+        (id.to_string(), exec::first_word(id).trim_end_matches(',').to_string())
+    };
+    let hit = |w: &String, p: &gates::Planned| {
+        let (full, first) = names(p);
+        *w == full || *w == first
+    };
+    let unmatched: Vec<&String> = only.iter().filter(|w| !planned.iter().any(|p| hit(w, p))).collect();
+    if !unmatched.is_empty() {
         let mut valid: Vec<&str> = planned.iter().map(row_id).collect();
         valid.sort_unstable();
         valid.dedup();
         return Err(CliError::usage(format!(
-            "--only {:?} matches no gate row, so nothing would run and nothing would be checked.",
-            only.join(",")
+            "--only names no gate row for: {}. Nothing is run for a selector that matches nothing.",
+            unmatched.iter().map(|w| format!("{w:?}")).collect::<Vec<_>>().join(", ")
         ))
         .with_hint(format!(
             "Valid row names: {}. A selector is a whole row name or its first word.",
-            valid.join(", ")
+            valid.join("; ")
         )));
     }
-    Ok(kept)
+    Ok(planned.into_iter().filter(|p| only.iter().any(|w| hit(w, p))).collect())
 }
 
 fn dry_run(planned: &[gates::Planned]) -> Report {

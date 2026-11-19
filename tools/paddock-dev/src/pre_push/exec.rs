@@ -211,7 +211,7 @@ pub fn tool() -> ToolVersion {
     ToolVersion::new(concat!("paddock-dev pre-push ", env!("CARGO_PKG_VERSION")))
 }
 
-fn first_word(id: &str) -> &str {
+pub(crate) fn first_word(id: &str) -> &str {
     id.split(' ').next().unwrap_or(id)
 }
 
