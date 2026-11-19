@@ -422,4 +422,69 @@ mod tests {
         assert!(w.contains("/some/worktree"), "{w}");
         assert!(forget_owner(d.path(), "/some/worktree").is_none());
     }
+
+    /// Lines of a source file's TEST code (from its `#[cfg(test)]` on) that call the real process scan: `real_process_folders`, or
+    /// `lsof` as a program, without a `// conformance: real-scan — <reason>` comment on the line or the one before. Only the line numbers.
+    /// The scan is `lsof` on macOS and took 60 s and more under load (train 16), so a test uses the seam ([`crate::worktree::procs`]) or says why not.
+    fn real_scan_lines(text: &str) -> Vec<usize> {
+        let Some(from) = text.find("#[cfg(test)]\nmod ") else {
+            return Vec::new();
+        };
+        let first = text[..from].lines().count();
+        let lines: Vec<&str> = text[from..].lines().collect();
+        let needle = [concat!("real_", "process_folders("), concat!("\"l", "sof\"")];
+        (0..lines.len())
+            .filter(|&i| needle.iter().any(|n| lines[i].contains(n)))
+            .filter(|&i| !lines[i].trim_start().starts_with("//"))
+            .filter(|&i| {
+                let exempt = |l: &str| l.contains("conformance: real-scan") && l.contains('—');
+                !(exempt(lines[i]) || i > 0 && exempt(lines[i - 1]))
+            })
+            .map(|i| first + i + 1)
+            .collect()
+    }
+
+    /// No test module in the crate calls the real process scan unless it says why (the seam: `worktree::procs::process_folders` is empty
+    /// in this crate's unit tests). The control: the same text with the exemption removed is found, and the scan's own definition and its
+    /// one exempt test are not.
+    #[test]
+    fn no_source_file_calls_the_real_process_scan_in_a_test() {
+        fn rs(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    rs(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rs(&src, &mut files);
+        assert!(files.len() > 50, "the scan read {} files: wrong folder?", files.len());
+        let mut bad = Vec::new();
+        for f in &files {
+            for n in real_scan_lines(&std::fs::read_to_string(f).unwrap()) {
+                bad.push(format!("{}:{n}", f.strip_prefix(&src).unwrap().display()));
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "a test calls the real process scan (lsof): use worktree::procs::process_folders, or add `// conformance: real-scan — <why>`: {bad:?}"
+        );
+        // Positive control: the exempt test of the scan itself is found once its reason is taken away.
+        let procs = std::fs::read_to_string(src.join("worktree/procs.rs")).unwrap();
+        assert!(real_scan_lines(&procs).is_empty());
+        let without = procs.replace("conformance: real-scan", "reason");
+        assert!(
+            !real_scan_lines(&without).is_empty(),
+            "the check does not see a test that calls the real scan"
+        );
+        let call = concat!("real_", "process_folders()");
+        let sample = format!("fn x() {{}}\n#[cfg(test)]\nmod t {{\n    fn a() {{ let _ = {call}; }}\n}}\n");
+        assert_eq!(real_scan_lines(&sample), [4]);
+        let exempt = sample.replace("fn a()", "// conformance: real-scan — the scan's own test\n    fn a()");
+        assert!(real_scan_lines(&exempt).is_empty());
+    }
 }

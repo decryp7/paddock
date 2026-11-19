@@ -931,7 +931,10 @@ impl<'a> Acquirer<'a> {
                 );
                 return Poll::Waiting;
             }
-            if !self.req.high {
+            // A container run that asked for the drain goes by its own marker, not by its place in the queue: every other step waits for
+            // the drain (above), so a head that waits for it would otherwise wait for a drain owner queued behind it, which waits for
+            // the head (the deadlock of 2026-11-18). Its ticket stays until it holds a slot.
+            if !self.req.high && self.drain.is_none() {
                 if !self.ticket.is_file()
                     && let Err(e) = self.make_ticket()
                 {

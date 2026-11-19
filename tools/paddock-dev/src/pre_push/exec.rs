@@ -1634,6 +1634,9 @@ exit $rc
                 assert!(what(), "the step never got there");
             };
             assert_eq!(ex.slot(), Slot::Unknown, "no step in flight");
+            // heavy's build (and the cleanup's process scan, empty in a test: worktree::procs) happens once, here, before anything is observed: the state below is driven
+            // by the step's own log lines, not by how long a build or a scan took on a loaded machine (ER-12, ER-28).
+            ex.heavy_command(Duration::from_secs(60)).expect("the fake heavy is built and held");
             std::thread::scope(|sc| {
                 let step = sc.spawn(|| decide(&gate("clippy a", &command), &ex, Duration::from_secs(60), &test_subject()).kind());
                 until(&|| seen("foreign"));

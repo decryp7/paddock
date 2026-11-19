@@ -798,13 +798,17 @@ impl Flow {
         // the git command's end that is seen first, and a phase that hangs elsewhere (a file call) is abandoned after that. The phase's
         // thread writes only to `out`: what it wrote by now becomes the step's, anything it writes after that goes nowhere.
         // With a clock mark (tests only, `PADDOCK_KEPT_CLONE_CLOCK_MARK`, the shell's `clock_mark`) that bound counts from the mark the
-        // test's hanging git writes, and until then the general limit bounds the phase. A git command's own limit needs no mark: it
-        // counts from that command's start, and the hanging git writes the mark as it starts.
+        // test's hanging git writes, and until then the general limit bounds the phase. A git command's own limit counts from its start,
+        // which a stand-in that is slow to start would meet before its mark: under a mark it is the general limit (below).
         let mark_file = self.kc.env.get(CLOCK_MARK).filter(|v| !v.is_empty()).map(PathBuf::from);
         let mark = mark_file.as_deref().map(|file| ClockMark { file, wait: self.limit });
         let bound = limit + Duration::from_secs(1);
+        // With a mark, a git command's own limit is the general one too (as the shell's commands have): a stand-in that is slow to
+        // start would otherwise meet the phase's limit before it reaches its hang, and the phase's bound, counted from the mark, ends
+        // the hanging git through the phase's `Held`.
+        let git_limit = if mark_file.is_some() { self.limit } else { limit };
         let (r, before_mark) = bounded_marked(step, label, bound, Some(&out.timed_out), mark, move |held| {
-            IN_PHASE.with(|p| p.set(Some(limit)));
+            IN_PHASE.with(|p| p.set(Some(git_limit)));
             PHASE_HELD.with(|h| *h.borrow_mut() = Some(held));
             PHASE_OUT.with(|p| *p.borrow_mut() = Some(mine));
             f(&kc)
@@ -1110,6 +1114,7 @@ mod tests {
     ];
 
     /// The step's shared context with a `git` of the test's own (a script in `bin`) first on PATH.
+    #[cfg(unix)]
     fn kc_with_git(bin: &Path, env: &[(&str, &str)]) -> Arc<Kc> {
         let mut env: HashMap<String, String> = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         let mut path = vec![bin.to_path_buf()];
@@ -1128,6 +1133,7 @@ mod tests {
         })
     }
 
+    #[cfg(unix)]
     fn flow_of(kc: Arc<Kc>) -> Flow {
         Flow {
             kc,
@@ -1142,25 +1148,89 @@ mod tests {
         }
     }
 
+    /// The environment of a hung-phase test: the fetch phase has a 1 s limit, which counts from the mark the stand-in git writes as it
+    /// enters its hang (ADR 0103, "Hang-point signal"), and the general limit ([`crate::ci_host::phase::HUNG_TEST_GENERAL_LIMIT`]) bounds
+    /// everything before it, so no setup call (a git that is slow to start) can meet the 1 s. `Flow::limit` is that general limit.
+    #[cfg(unix)]
+    fn hang_env(mark: &Path) -> Vec<(&'static str, String)> {
+        vec![
+            (PhaseId::Fetch.var(), "1".into()),
+            (CLOCK_MARK, mark.display().to_string()),
+            (
+                "PADDOCK_KEPT_CLONE_TIMEOUT",
+                crate::ci_host::phase::HUNG_TEST_GENERAL_LIMIT.as_secs().to_string(),
+            ),
+        ]
+    }
+
+    #[cfg(unix)]
+    fn hang_flow(bin: &Path, mark: &Path) -> Flow {
+        let env = hang_env(mark);
+        let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let mut flow = flow_of(kc_with_git(bin, &env));
+        flow.limit = crate::ci_host::phase::HUNG_TEST_GENERAL_LIMIT;
+        flow
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hung_phase_counts_its_limit_from_the_hang_mark_not_from_its_first_git_call() {
+        // The class of the kept-clone flake (fourth sighting, 2026-11-19; load 31): a stand-in git that is slow before it enters its hang
+        // (a loaded machine starting it) met the phase's 1 s limit in that setup, recorded no call and the test failed on the setup.
+        // Here the stand-in takes 1.5 s, past the limit, before it writes its mark and hangs: the limit must count from the mark.
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let mark = dir.path().join("hang-mark");
+        let git = paddock_testkit::StandIn::new(&bin, "git")
+            .records_args()
+            .sleeps(Duration::from_millis(1500))
+            .writes(&mark, "hang")
+            .sleeps(Duration::from_secs(30))
+            .install()
+            .unwrap();
+        let flow = hang_flow(&bin, &mark);
+        let mut out = Vec::new();
+        let mut step = Step {
+            env: &flow.kc.env.clone(),
+            out: &mut out,
+            windows: false,
+            name: NAME,
+        };
+        let r = flow.phase(&mut step, PhaseId::Fetch, "fetch", |kc| kc.git(true, &["fetch"]));
+        let text = String::from_utf8_lossy(&out).into_owned();
+        assert!(matches!(r, Err(Hung)), "the hang is reported as a hung phase: {text}");
+        assert!(
+            text.contains("'fetch' did not finish within 1 s"),
+            "the limit counted from the mark is the phase's own, 1 s, not the setup's: {text}"
+        );
+        assert!(
+            mark.exists() && git.calls().unwrap().len() == 1,
+            "the git reached its hang (mark written, one call recorded) before the phase ended"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase() {
         use std::sync::mpsc;
-        // The fetch phase (own limit 1 s, bound 2 s) runs one git, which ends at its limit (a git that logs its call and sleeps), and is
-        // then held until it is abandoned. While the next phase runs, the held phase goes on: its second git must not start (the next
-        // phase may be removing or making the same folder), the next phase must not be reported as hung, and its error output must not
-        // carry the abandoned phase's lines.
+        // The fetch phase (own limit 1 s from the hang mark, bound 2 s) runs one git, which hangs and is ended when the phase is
+        // abandoned (a git that logs its call and sleeps), and the phase is then held until it is abandoned. While the next phase runs,
+        // the held phase goes on: its second git must not start (the next phase may be removing or making the same folder), the next
+        // phase must not be reported as hung, and its error output must not carry the abandoned phase's lines.
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
-        // A git that logs its call and sleeps (the stand-in records every call's arguments and stays for 30 s).
+        // A git that logs its call, writes the hang mark and sleeps (the stand-in records every call's arguments and stays for 30 s);
+        // the phase's 1 s counts from the mark, so the stand-in's start-up under load is not in it.
+        let mark = dir.path().join("hang-mark");
         let git = paddock_testkit::StandIn::new(&bin, "git")
             .records_args()
+            .writes(&mark, "hang")
             .sleeps(Duration::from_secs(30))
             .install()
             .unwrap();
-        let kc = kc_with_git(&bin, &[(PhaseId::Fetch.var(), "1")]);
-        let flow = flow_of(kc);
+        let flow = hang_flow(&bin, &mark);
         let mut out = Vec::new();
         let mut step = Step {
             env: &flow.kc.env.clone(),
@@ -1171,7 +1241,7 @@ mod tests {
         let (go_tx, go_rx) = mpsc::channel::<()>();
         let (done_tx, done_rx) = mpsc::channel::<()>();
         let first = flow.phase(&mut step, PhaseId::Fetch, "fetch", move |kc| {
-            let _ = kc.git(true, &["fetch", "first"]); // ends at its 1 s limit
+            let _ = kc.git(true, &["fetch", "first"]); // ended when the phase is abandoned
             go_rx.recv().ok(); // held past the phase's bound (limit + 1 s)
             let r = kc.git(true, &["fetch", "late"]);
             done_tx.send(()).ok();
@@ -1180,7 +1250,7 @@ mod tests {
         assert!(matches!(first, Err(Hung)), "the held phase is abandoned at its bound");
         let second = flow.phase(&mut step, PhaseId::Checkout, "check out", move |_| {
             go_tx.send(()).ok();
-            done_rx.recv().ok(); // the abandoned phase's git has ended at its limit and written what it writes
+            done_rx.recv().ok(); // the abandoned phase's git has ended and written what it writes
             Ok(())
         });
         let text = String::from_utf8_lossy(&out).into_owned();
@@ -1199,28 +1269,37 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_phase_abandoned_at_its_bound_leaves_no_program_of_its_own_running() {
-        // The git command ends itself at the phase's limit, one second before the phase's bound; but ending it takes time (a loaded
-        // machine), and when it outlasts that second the phase is abandoned with its git still running, and the step ends with it:
-        // the program outlives the step (the reaper's "below a child", run 2026-11-18 of
-        // `kept_clone_the_create_phase_is_bounded_by_its_own_limit`). Stood in here by a git whose own limit is far past the bound, with
-        // a program below it (a `git fetch` has helpers); both must be gone when `phase` returns.
+    /// The stand-ins of the abandoned-phase test: a `sleeper`, and a git that waits `delay` (a loaded machine starting it), starts the
+    /// sleeper below it (as a `git fetch` has helpers), writes the hang mark and hangs.
+    #[cfg(unix)]
+    fn git_with_a_program_below(bin: &Path, pid_file: &Path, mark: &Path, delay: Duration) {
+        paddock_testkit::StandIn::new(bin, "sleeper")
+            .sleeps(Duration::from_secs(30))
+            .install()
+            .unwrap();
+        paddock_testkit::StandIn::new(bin, "git")
+            .sleeps(delay)
+            .spawns(&paddock_testkit::Spawn::new("sleeper").pid_file(pid_file))
+            .writes(mark, "hang")
+            .sleeps(Duration::from_secs(30))
+            .install()
+            .unwrap();
+    }
+
+    /// The git command ends itself at the phase's limit, one second before the phase's bound; but ending it takes time (a loaded
+    /// machine), and when it outlasts that second the phase is abandoned with its git still running, and the step ends with it: the
+    /// program outlives the step (the reaper's "below a child", run 2026-11-18 of
+    /// `kept_clone_the_create_phase_is_bounded_by_its_own_limit`). Stood in here by a git whose own limit is far past the bound (60 s),
+    /// with a program below it; both must be gone when `phase` returns. `delay` is how long the git takes to start: the phase's limit
+    /// counts from the hang mark, so a start past the bound (2.5 s, the control) must not end the phase before the program below runs.
+    #[cfg(unix)]
+    fn a_phase_abandoned_at_its_bound_ends_its_programs(delay: Duration) {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
-        let pid_file = dir.path().join("below.pid");
-        paddock_testkit::StandIn::new(&bin, "sleeper")
-            .sleeps(Duration::from_secs(30))
-            .install()
-            .unwrap();
-        paddock_testkit::StandIn::new(&bin, "git")
-            .spawns(&paddock_testkit::Spawn::new("sleeper").pid_file(&pid_file))
-            .sleeps(Duration::from_secs(30))
-            .install()
-            .unwrap();
-        let kc = kc_with_git(&bin, &[(PhaseId::Fetch.var(), "1")]);
-        let flow = flow_of(kc);
+        let (pid_file, mark) = (dir.path().join("below.pid"), dir.path().join("hang-mark"));
+        git_with_a_program_below(&bin, &pid_file, &mark, delay);
+        let flow = hang_flow(&bin, &mark);
         let mut out = Vec::new();
         let mut step = Step {
             env: &flow.kc.env.clone(),
@@ -1239,6 +1318,20 @@ mod tests {
             "a program below the abandoned phase's git ({}) still runs when the phase returns",
             below.pid()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_phase_abandoned_at_its_bound_leaves_no_program_of_its_own_running() {
+        a_phase_abandoned_at_its_bound_ends_its_programs(Duration::ZERO);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_phase_abandoned_at_its_bound_ends_its_programs_when_the_git_was_slow_to_start() {
+        // The control: red without the mark (a start past the phase's bound, 2 s from its start, ended the phase before the git had started
+        // the program below).
+        a_phase_abandoned_at_its_bound_ends_its_programs(Duration::from_millis(2500));
     }
 
     #[test]
