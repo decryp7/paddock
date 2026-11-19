@@ -1252,16 +1252,81 @@ fn repeats_its_steps_until_it_is_ended_and_burns_cpu_until_it_is_ended() {
 #[test]
 fn the_nice_token_is_a_number_and_the_cgroup_token_falls_back_when_the_file_is_not_there() {
     let s = Scratch::new();
+    let fallback = StandIn::new(&s.work(), "cgroup")
+        .answers(Actions::new().stdout_with("mh={cgroup:no-such-file.here|none}"))
+        .install()
+        .unwrap();
+    let o = run(fallback.program(), &[]);
+    assert_eq!(out(&o).trim_end(), "mh=none", "{}", err(&o));
     let p = StandIn::new(&s.work(), "probe")
-        .answers(Actions::new().stdout_with("ni={nice} mh={cgroup:no-such-file.here|none}"))
+        .answers(Actions::new().stdout_with("ni={nice}"))
         .install()
         .unwrap();
     let o = run(p.program(), &[]);
     let text = out(&o);
-    let ni = text
-        .trim_end()
-        .strip_prefix("ni=")
-        .and_then(|t| t.strip_suffix(" mh=none"))
-        .unwrap_or_else(|| panic!("{text}"));
-    assert!(ni.parse::<i32>().is_ok(), "{text}");
+    if cfg!(unix) {
+        let ni = text
+            .trim_end()
+            .strip_prefix("ni=")
+            .unwrap_or_else(|| panic!("stdout {text:?}, stderr {:?}", err(&o)));
+        assert!(ni.parse::<i32>().is_ok(), "{text}");
+    } else {
+        // Windows has no nice value: the token is an error of the script, which names it (run 8327 read it as a number).
+        assert_eq!(
+            o.status.code(),
+            Some(70),
+            "stdout {text:?}, stderr {:?}",
+            err(&o)
+        );
+        assert!(
+            err(&o).contains("{nice} exists only on Unix"),
+            "{}",
+            err(&o)
+        );
+    }
+}
+
+/// Two fake builds of one compiler "build" into one folder at once (a test's stand-in `cargo` has no build-folder lock, which real
+/// cargo has): every install must succeed and leave a whole, runnable program. Run 8327: one install removed the file between the
+/// other's write and its chmod, that stand-in exited 70, its wrapper never reached the barrier, and the test hung to its timeout.
+#[test]
+fn concurrent_installs_of_one_path_all_succeed_and_leave_a_runnable_program() {
+    let s = Scratch::new();
+    let out_dir = s.work().join("release");
+    std::fs::create_dir_all(&out_dir).unwrap();
+    let made = out_dir.join(format!("tool{}", std::env::consts::EXE_SUFFIX));
+    let built =
+        StandIn::new(&s.work(), "built").when_args(&["--version"], Actions::new().stdout("0"));
+    let mut builds = Actions::new();
+    for _ in 0..50 {
+        builds = builds.installs(&made.to_string_lossy(), &built);
+    }
+    let builder = StandIn::new(&s.work(), "cargo")
+        .answers(builds)
+        .install()
+        .unwrap();
+    let children: Vec<_> = (0..6)
+        .map(|_| {
+            TestCommand::new(builder.program())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    let outs: Vec<_> = children
+        .into_iter()
+        .map(|c| c.wait_with_output().unwrap())
+        .collect();
+    let failed: Vec<String> = outs
+        .iter()
+        .filter(|o| !o.status.success())
+        .map(err)
+        .collect();
+    assert!(
+        failed.is_empty(),
+        "{} of 6 concurrent builders failed: {failed:?}",
+        failed.len()
+    );
+    assert_eq!(out(&run(&made, &["--version"])), "0\n");
 }

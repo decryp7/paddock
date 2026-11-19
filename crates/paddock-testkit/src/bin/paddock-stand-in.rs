@@ -196,7 +196,7 @@ struct Ctx {
 
 /// Fills a template: `{args}` (the arguments, joined by spaces), `{arg:N}` (the N-th, from 1; empty when absent), `{cwd}`, `{dir}` (the
 /// stand-in's own folder), `{name}`, `{pid}`, `{environ}` (every variable as a `NAME=value` line, as `env` prints them), `{env:NAME}` and `{env:NAME|fallback}` (empty or the fallback when unset),
-/// `{flag_unquoted:PREFIX}` (the same without one pair of single quotes around it, as cargo's `--config key='value'` has), `{flag:PREFIX}` or `{flag:PREFIX|SUFFIX}` (what follows PREFIX in the last argument that starts with it, as `${a#PREFIX}` does, without a trailing SUFFIX when it has one), `{lines:PATH}` or `{lines:PATH|MAX}` (how many lines the file has, 0 when it is missing, at most MAX: `wc -l`), `{run:program|arg|arg}` (what that program prints in the working folder, without its last newline; empty when it fails; no `|` or `}` inside an argument), `{nice}` (its own nice value), `{cgroup:FILE|fallback}` (that file of its own cgroup v2), `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
+/// `{flag_unquoted:PREFIX}` (the same without one pair of single quotes around it, as cargo's `--config key='value'` has), `{flag:PREFIX}` or `{flag:PREFIX|SUFFIX}` (what follows PREFIX in the last argument that starts with it, as `${a#PREFIX}` does, without a trailing SUFFIX when it has one), `{lines:PATH}` or `{lines:PATH|MAX}` (how many lines the file has, 0 when it is missing, at most MAX: `wc -l`), `{run:program|arg|arg}` (what that program prints in the working folder, without its last newline; empty when it fails; no `|` or `}` inside an argument), `{nice}` (its own nice value; Unix only, an error of the script on Windows), `{cgroup:FILE|fallback}` (that file of its own cgroup v2), `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
 fn expand(text: &str, ctx: &Ctx) -> Result<String, String> {
     let mut out = String::new();
     let mut rest = text;
@@ -646,7 +646,6 @@ fn install(arg: &Value, ctx: &Ctx) -> Result<(), String> {
         .file_name()
         .and_then(|s| s.to_str())
         .ok_or("install: the path has no file name")?;
-    let _ = file;
     let me = std::env::current_exe().map_err(|e| format!("cannot find its own path: {e}"))?;
     // One self-contained file (the program, its script, the marker): the code under test may copy or move it alone.
     let mut bytes = std::fs::read(&me).map_err(|e| format!("cannot read {}: {e}", me.display()))?;
@@ -657,14 +656,22 @@ fn install(arg: &Value, ctx: &Ctx) -> Result<(), String> {
     bytes.extend_from_slice(&script);
     bytes.extend_from_slice(&(script.len() as u64).to_le_bytes());
     bytes.extend_from_slice(b"PDSTNDIN");
-    let _ = std::fs::remove_file(&target);
-    std::fs::write(&target, bytes).map_err(|e| format!("cannot install {path}: {e}"))?;
+    // Written whole under a name of its own, made executable, then renamed over the target, as a linker's output appears: two
+    // installs of one path at once (two fake builds in one folder, which real cargo's folder lock would serialise) each leave a
+    // whole program and neither fails. Removing the target and writing it in place let one install remove the file between the
+    // other's write and its chmod (run 8327: `cannot make ... executable`, exit 70).
+    let tmp = target.with_file_name(format!(".{file}.{}.install", std::process::id()));
+    std::fs::write(&tmp, bytes).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755))
-            .map_err(|e| format!("cannot make {path} executable: {e}"))?;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("cannot make {} executable: {e}", tmp.display()))?;
     }
+    std::fs::rename(&tmp, &target).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("cannot install {path}: {e}")
+    })?;
     Ok(())
 }
 
