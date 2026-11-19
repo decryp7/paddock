@@ -72,6 +72,15 @@ The class is already solved where someone met it first, each time with its own c
 Each fix started with a test that fails without it, through a seam in the style of `scan_with` (`save_with`, `rebuild_with`,
 `alarm_event_with`, `changed_with`, `look_with`): the seam runs the other caller at the moment between the read and the act.
 
+## Next to the store-writer contract
+
+[ADR 0008, "Store writers"](0008-storage-sqlite-and-retention.md#store-writers-amendment-2026-11-19) says what a writer to the store
+does with its in-memory state: it is kept and announced only after the commit, and a failed commit puts it back (a failed savepoint in
+a batch fails the whole batch). This record covers the other side: what is read under a lock and then stored or pushed later. The two
+meet in the unusual look (core lock and baseline held across observe and store, the baseline restored when the store fails) and in the
+alarm changes (stored first, then given their ticket under the same lock). This change adds no new store writer, so nothing joins
+`store_contract.rs`.
+
 ## Review checklist line
 
 Added to the review checklist of the agent: "State read under a lock and then stored, pushed or acted on after the lock was let go:
