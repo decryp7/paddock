@@ -60,6 +60,10 @@ pub(crate) trait SignatureLookup: Send + Sync {
 /// modification and change time, git's index stat data), so a file renamed over the path is another file even with the same size
 /// and time.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    not(unix),
+    allow(dead_code, reason = "a file identity is read on Unix only; elsewhere nothing is cached")
+)]
 struct FileKey {
     path: PathBuf,
     identity: paddock_env::file_identity::FileIdentity,
@@ -69,10 +73,18 @@ fn key_of(path: &Path) -> Option<FileKey> {
     if !path.is_absolute() {
         return None;
     }
-    Some(FileKey {
-        path: path.to_path_buf(),
-        identity: paddock_env::file_identity::FileIdentity::of(path).ok()?,
-    })
+    // The identity is Unix-only (paddock_env::file_identity); elsewhere nothing is cached, and nothing uses the cache there.
+    #[cfg(unix)]
+    {
+        Some(FileKey {
+            path: path.to_path_buf(),
+            identity: paddock_env::file_identity::FileIdentity::of(path).ok()?,
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
 }
 
 const NOT_A_FULL_PATH: &str = "The program file is not named by a full path";
