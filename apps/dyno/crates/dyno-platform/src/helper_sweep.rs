@@ -19,8 +19,10 @@ const REG: &str = r"C:\Windows\System32\reg.exe";
 const PROFILE_LIST: &str = r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList";
 /// The most account homes read (a bound on a hostile or huge directory).
 const MAX_HOMES: usize = 4_096;
-/// How long the account list is reused at most (ADR 0108 DY-2). On macOS a change of the account database's folder ends it
-/// sooner; an account made within this time whose files a process runs from is the case it bounds.
+/// How long the account list is reused at most (ADR 0108 DY-2), the outer bound of the cache. A sweep that finds a person's
+/// process whose account the kept list does not name reads the list again at once ([`SystemSweeper::sweep`]), so a new account's
+/// own processes are always redacted for others; on macOS a change of the account database's folder also ends the cache. What
+/// this bounds is the rare rest: a path in the home of an account that has no process of its own yet, made within this time.
 pub const HOMES_TTL: Duration = Duration::from_secs(60);
 /// The local account database of macOS (one plist per account): its modification time changes when an account is added or
 /// removed. The helper runs as root and can read it; when it cannot, [`HOMES_TTL`] alone bounds the cache.
@@ -159,9 +161,28 @@ impl SystemSweeper {
                 return Ok(c.homes.clone());
             }
         }
+        self.read_and_keep(now)
+    }
+
+    /// The account list for a sweep whose people's accounts are `owners`: the kept one when it names every owner, else read
+    /// again once, past the cache (an account made since it was read, which Windows cannot see in an account database and macOS
+    /// misses when a record is edited in place). Paths in an owner's home that the list does not name would reach another
+    /// account unredacted.
+    fn homes_for(&self, owners: &[&HelperUser], now: Instant) -> Result<Vec<(HelperUser, String)>, PlatformError> {
+        let homes = self.homes_at(now)?;
+        let missing = owners.iter().filter(|o| !homes.iter().any(|(u, _)| u == **o)).count();
+        if missing == 0 || self.host == HelperHost::Linux {
+            return Ok(homes);
+        }
+        log::info!(missing = missing; "Helper: a process owner is not in the kept account list; it is read again");
+        self.read_and_keep(now)
+    }
+
+    fn read_and_keep(&self, now: Instant) -> Result<Vec<(HelperUser, String)>, PlatformError> {
+        let db_modified = std::fs::metadata(&self.account_db).and_then(|m| m.modified()).ok();
         let homes = self.read_homes()?;
         log::debug!(accounts = homes.len(); "Helper: the account list was read");
-        *cache() = Some(CachedHomes {
+        *self.homes.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(CachedHomes {
             at: now,
             db_modified,
             homes: homes.clone(),
@@ -202,7 +223,6 @@ fn user_of(u: &sysinfo::Uid) -> HelperUser {
 
 impl ProcessSweeper for SystemSweeper {
     fn sweep(&self) -> Result<Sweep, PlatformError> {
-        let homes = self.homes()?;
         let mut sys = System::new().map_err(|why| {
             log::warn!("the OS process table is unavailable (sysinfo): {why}; the sweep is refused");
             PlatformError::Failed(format!("The OS process table could not be read ({why})."))
@@ -219,7 +239,7 @@ impl ProcessSweeper for SystemSweeper {
             PlatformError::Failed(format!("The OS user list could not be read ({why})."))
         })?;
         let first_person = first_person_uid(self.host);
-        let processes = sys
+        let processes: Vec<RawProcess> = sys
             .processes()
             .values()
             .map(|p| {
@@ -245,6 +265,20 @@ impl ProcessSweeper for SystemSweeper {
                 }
             })
             .collect();
+        // The account list after the processes, so it can be checked to name every person who owns one.
+        let owners: Vec<&HelperUser> = {
+            let mut v: Vec<&HelperUser> = processes
+                .iter()
+                .filter_map(|p| match &p.owner {
+                    RawOwner::Account { id, .. } => Some(id),
+                    _ => None,
+                })
+                .collect();
+            v.sort_by_key(|u| format!("{u:?}"));
+            v.dedup();
+            v
+        };
+        let homes = self.homes_for(&owners, Instant::now())?;
         let taken_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0));
@@ -358,6 +392,111 @@ mod tests {
         let failing = SystemSweeper::new(HelperHost::Macos, Box::new(Counted(Fake(vec![])))).with_account_db(db.path());
         assert_starts(1, || failing.homes_at(start)).unwrap_err();
         assert_starts(1, || failing.homes_at(start)).unwrap_err();
+    }
+
+    /// A dscl whose list changes between reads: the first pair of runs lists `before`, every later pair `after` (an account
+    /// made in between).
+    struct Changing {
+        runs: std::sync::atomic::AtomicUsize,
+        before: String,
+        after: String,
+    }
+    impl ToolRunner for Changing {
+        fn run_tool(&self, t: &Tool, _: Duration) -> Result<ToolOutput, PlatformError> {
+            let _counted = crate::process::command(&t.program);
+            let n = self.runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let list = if n < 2 { &self.before } else { &self.after };
+            let homes = t.args.iter().any(|a| a == "NFSHomeDirectory");
+            let text = list
+                .lines()
+                .map(|l| {
+                    let (name, uid) = l.split_once(' ').unwrap();
+                    if homes {
+                        format!("{name} /Users/{name}\n")
+                    } else {
+                        format!("{name} {uid}\n")
+                    }
+                })
+                .collect();
+            Ok(ToolOutput {
+                ok: true,
+                stdout: text,
+                error: String::new(),
+            })
+        }
+    }
+
+    /// P1 of the DY-2 review (redaction): a person whose account is not in the kept list (made since it was read; Windows has
+    /// no account database to watch, and macOS misses an edit in place) makes the list be read again at once, within the TTL,
+    /// so their paths are never shown to another account unredacted.
+    #[test]
+    fn an_owner_missing_from_the_kept_list_reads_it_again_at_once() {
+        use paddock_proc::starts::{assert_starts, at_most_or_none};
+        let db = paddock_testkit::private_tempdir().unwrap();
+        let mac = SystemSweeper::new(
+            HelperHost::Macos,
+            Box::new(Changing {
+                runs: Default::default(),
+                before: "ana 501".into(),
+                after: "ana 501\nnew 502".into(),
+            }),
+        )
+        .with_account_db(db.path());
+        let ana = HelperUser::Uid(501);
+        let new = HelperUser::Uid(502);
+        let start = Instant::now();
+        assert_starts(2, || mac.homes_for(&[&ana], start)).unwrap();
+        assert_starts(at_most_or_none(0, "every owner is in the kept list"), || {
+            mac.homes_for(&[&ana], start)
+        })
+        .unwrap();
+        let homes = assert_starts(2, || mac.homes_for(&[&ana, &new], start + Duration::from_secs(1))).unwrap();
+        assert!(homes.iter().any(|(u, h)| *u == new && h == "/Users/new"), "{homes:?}");
+        // The new list is kept: the next sweep with both is free.
+        assert_starts(at_most_or_none(0, "the re-read list is kept"), || {
+            mac.homes_for(&[&ana, &new], start + Duration::from_secs(2))
+        })
+        .unwrap();
+        // An owner the OS lists without a usable home is asked about once per sweep, never more.
+        let ghost = HelperUser::Uid(777);
+        assert_starts(2, || mac.homes_for(&[&ghost], start + Duration::from_secs(3))).unwrap();
+    }
+
+    /// The same through a real sweep: this test's own account owns this process; a kept list without it is read again.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_sweep_with_an_owner_missing_from_the_list_reads_the_list_again() {
+        let me = std::process::id();
+        let uid = nix_uid();
+        assert!(
+            uid >= 500,
+            "precondition: the test runs as a person's account (uid {uid}), which macOS numbers from 501"
+        );
+        let db = paddock_testkit::private_tempdir().unwrap();
+        let mac = SystemSweeper::new(
+            HelperHost::Macos,
+            Box::new(Changing {
+                runs: Default::default(),
+                before: "someone 9999".into(),
+                after: format!("someone 9999\nme {uid}"),
+            }),
+        )
+        .with_account_db(db.path());
+        let sweep = paddock_proc::starts::assert_starts(4, || mac.sweep()).unwrap();
+        assert!(
+            sweep.processes.iter().any(|p| p.pid == me),
+            "precondition: the sweep sees this process"
+        );
+        assert!(sweep.homes.iter().any(|(u, _)| *u == HelperUser::Uid(uid)), "{:?}", sweep.homes);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn nix_uid() -> u32 {
+        // SAFETY: getuid(2) cannot fail and has no preconditions.
+        #[allow(unsafe_code)]
+        unsafe {
+            libc::getuid()
+        }
     }
 
     fn filetime_plus(t: SystemTime) -> SystemTime {
