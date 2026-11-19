@@ -2015,7 +2015,12 @@ fn the_lockfile_loop_of_the_train_gates_runs_on_the_real_repository_and_visits_n
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let visited = std::fs::read_to_string(&log).unwrap();
+    // The stand-in writes its working folder as the OS names it (`C:\...\crates` on Windows; run 8327): compare with `/`.
+    let visited: String = std::fs::read_to_string(&log)
+        .unwrap()
+        .lines()
+        .map(|l| paddock_env::winpath::lexical_text(Path::new(l), paddock_env::Os::current()) + "\n")
+        .collect();
     assert!(
         visited.lines().any(|l| l.ends_with("/crates")) && visited.lines().any(|l| l.ends_with("/tools/paddock-dev")),
         "{visited}"
@@ -2025,16 +2030,8 @@ fn the_lockfile_loop_of_the_train_gates_runs_on_the_real_repository_and_visits_n
         "the golden fixture is a repository inside the repository, not a workspace:\n{visited}"
     );
     // And every folder it visits is one `cargo metadata` can resolve, not a fixture a test makes.
-    for l in visited.lines() {
-        let dir = if cfg!(windows) {
-            paddock_env::winpath::from_git_bash(l, paddock_env::Os::current())
-        } else {
-            l.to_string()
-        };
-        assert!(
-            Path::new(&dir).join("Cargo.toml").exists(),
-            "{l} has no Cargo.toml (looked at {dir})"
-        );
+    for dir in visited.lines() {
+        assert!(Path::new(dir).join("Cargo.toml").exists(), "{dir} has no Cargo.toml");
     }
 }
 
