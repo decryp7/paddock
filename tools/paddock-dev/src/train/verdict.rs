@@ -28,6 +28,19 @@ impl Accepted {
         }
     }
 
+    /// The test file of the location (`e2e/a11y.e2e.ts`), without line and column.
+    pub fn file(&self) -> &str {
+        let mut parts = self.0.rsplitn(3, ':');
+        let last = parts.next().unwrap_or("");
+        let mid = parts.next();
+        let rest = parts.next();
+        match (mid, rest) {
+            (Some(_), Some(file)) => file,
+            (Some(file), None) => file,
+            _ => last,
+        }
+    }
+
     fn covers(&self, location: &str) -> bool {
         let line_only = location.rsplit_once(':').map_or("", |(l, _)| l);
         self.0 == location || self.0 == line_only
@@ -75,11 +88,20 @@ pub fn verdict(doc: &Value, accepted: &[Accepted]) -> Result<Pass, Vec<String>> 
     if rows.is_empty() {
         reasons.push("a red run with no failing rows: the triage could not see the failure".to_string());
     }
-    let skipped = doc.get("skipped_jobs");
-    if skipped.is_some_and(|s| !matches!(s, Value::Null | Value::Bool(false)) && s.as_u64() != Some(0)) {
-        reasons.push(format!("{} job(s) were skipped", skipped.map(Value::to_string).unwrap_or_default()));
+    // `skipped_jobs` must be there and be a count: a triage that does not say how many jobs never ran has not looked.
+    match doc.get("skipped_jobs").and_then(Value::as_u64) {
+        Some(0) => {}
+        Some(n) => reasons.push(format!("{n} job(s) were skipped")),
+        None => reasons.push("the triage has no skipped_jobs count (missing or not a number)".to_string()),
     }
-    let counted: u64 = counts.values().filter_map(Value::as_u64).sum();
+    // Every count must be a whole number: one that is not (null, text, a negative) cannot be added up to the rows.
+    let mut counted: u64 = 0;
+    for (name, v) in counts {
+        match v.as_u64() {
+            Some(n) => counted += n,
+            None => reasons.push(format!("count {name} is not a whole number ({v})")),
+        }
+    }
     if counted != rows.len() as u64 {
         reasons.push(format!(
             "counts {} do not add up to the {} row(s)",
@@ -287,6 +309,25 @@ mod tests {
             "e2e/a11y.e2e.ts:6:7|e2e/b.e2e.ts:1",
         ] {
             assert!(Accepted::parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_count_that_is_not_a_whole_number_or_a_missing_skipped_count_stops() {
+        let ok = ["e2e/a11y.e2e.ts:6:7", "e2e/ux-home.e2e.ts:73:7"];
+        for bad in [json!(null), json!("2"), json!(-1), json!(1.5)] {
+            let mut d = two_flaky();
+            d["counts"]["flaky"] = bad.clone();
+            let why = stops(&d, &ok);
+            assert!(why.iter().any(|w| w.contains("not a whole number")), "{bad}: {why:?}");
+        }
+        let mut d = two_flaky();
+        d.as_object_mut().unwrap().remove("skipped_jobs");
+        assert!(stops(&d, &ok).iter().any(|w| w.contains("no skipped_jobs count")));
+        for bad in [json!(null), json!("0"), json!(false), json!(-1)] {
+            let mut d = two_flaky();
+            d["skipped_jobs"] = bad.clone();
+            assert!(stops(&d, &ok).iter().any(|w| w.contains("no skipped_jobs count")), "{bad}");
         }
     }
 }

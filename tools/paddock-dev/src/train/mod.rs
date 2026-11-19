@@ -9,7 +9,8 @@
 //! The logic is pure behind ports ([`sequence`], [`land`]); [`real`] holds the Gitea and git side. ADR 0098 and the train checklist
 //! (docs/train-checklist.md) say where in a train's life each runs.
 
-pub mod find;
+pub mod accept;
+pub mod hold;
 pub mod land;
 pub mod real;
 pub mod sequence;
@@ -17,15 +18,12 @@ pub mod verdict;
 
 use crate::wait::{MAX_LIMIT, fmt_duration, parse_duration};
 use clap::{Args, Subcommand};
+use land::Git as _;
 use paddock_cli::{CliError, Exit, Report};
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::path::Path;
 
 const SERVER: &str = "https://dev.decryptology.net";
-/// The exit code of the hold when another train's sequence holds it (`scripts/vm-lock.sh`: EX_TEMPFAIL).
-const HOLD_BUSY: i32 = 75;
-
 /// The `train` commands.
 #[derive(Subcommand)]
 pub enum TrainCommand {
@@ -58,9 +56,6 @@ pub struct ReleaseArgs {
     /// The longest the whole sequence takes, for example 14h. Required: every wait ends.
     #[arg(long, value_name = "DURATION")]
     max: String,
-    /// Internal: the hold is already taken (this process runs under `scripts/train-ci-hold.sh`).
-    #[arg(long, hide = true)]
-    already_held: bool,
     /// The repository.
     #[arg(long, default_value = "decryp7/paddock")]
     repo: String,
@@ -130,8 +125,8 @@ fn release(a: &ReleaseArgs) -> Result<Report, CliError> {
     let token = crate::ci_runs::token().map_err(|e| e.with_hint("The sequence needs a token that can write Actions."))?;
     let root = crate::gates::command::repo_root(None)?;
     let mut git = real::GitCli { root: &root };
-    let local = land::Git::head(&mut git).map_err(CliError::failure)?;
-    let remote = land::Git::remote_branch(&mut git, &a.branch).map_err(CliError::failure)?;
+    let local = git.head().map_err(CliError::failure)?;
+    let remote = git.remote_branch(&a.branch).map_err(CliError::failure)?;
     if remote.as_deref() != Some(local.as_str()) {
         return Err(CliError::new(
             Exit::Findings,
@@ -144,8 +139,33 @@ fn release(a: &ReleaseArgs) -> Result<Report, CliError> {
         ));
     }
     plan.sha = local;
-    if !a.already_held {
-        return held(&root);
+    // ER-12, enforced: an accepted flaky test is one this train did not touch.
+    if !plan.accepted.is_empty() {
+        git.fetch().map_err(CliError::failure)?;
+        let changed = git.changed("origin/main...HEAD").map_err(CliError::failure)?;
+        let touched = accept::touched(&plan.accepted, &changed);
+        if !touched.is_empty() {
+            return Err(CliError::new(
+                Exit::Findings,
+                format!(
+                    "::error::train release: --accept-flaky is refused, the train touches what it accepts: {}. Next step: fix the test in its owner's branch (a flaky test the change touches blocks the landing, ER-12), or drop that --accept-flaky.",
+                    touched.join("; ")
+                ),
+            ));
+        }
+    }
+    // The hold: run only while holding the train-CI reservation, proven; else run again under it (a hard deadline around the child).
+    let mut hold = hold::ShellHold {
+        repo: root.clone(),
+        args: std::env::args().skip(1).collect(),
+        max: plan.max,
+    };
+    let reexecuted = std::env::var_os(hold::REEXEC_VAR).is_some();
+    match hold::enter(&mut hold, reexecuted, &mut std::io::stderr()) {
+        hold::Enter::Run => {}
+        // The child printed its own report or its one `::error::`; its exit code is ours.
+        hold::Enter::Exit(code) => std::process::exit(code),
+        hold::Enter::Refuse(line) => return Err(CliError::new(Exit::Findings, line)),
     }
     let mut ports = real::RealPorts {
         root,
@@ -166,6 +186,7 @@ fn release(a: &ReleaseArgs) -> Result<Report, CliError> {
                     sequence::Source::Ran(r) => format!("{wf}: run {r} green"),
                     sequence::Source::Judged(r) => format!("{wf}: run {r} judged: only accepted flaky tests failed"),
                     sequence::Source::Reused(r) => format!("{wf}: reused green run {r}"),
+                    sequence::Source::Verdict(r) => format!("{wf}: full green run {r} by `ci verdict`"),
                 })
                 .collect();
             let steps: Vec<_> = done
@@ -188,43 +209,35 @@ fn release(a: &ReleaseArgs) -> Result<Report, CliError> {
     }
 }
 
-/// Runs this same command again under the train-CI hold and ends with its exit code: the reservation is the lock
-/// `scripts/train-ci-hold.sh` takes (a detached holder, freed when the command ends), which has no in-process library, so it
-/// wraps the child that does the work. The child bounds itself with `--max`.
-fn held(root: &Path) -> Result<Report, CliError> {
-    let exe = crate::tool_cache::self_exe().map_err(|e| CliError::failure(format!("this program cannot be found: {e}")))?;
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let started = std::time::Instant::now();
-    eprintln!("train release: taking the train-CI hold (scripts/train-ci-hold.sh)");
-    let status = paddock_proc::command("bash")
-        .arg(root.join("scripts/train-ci-hold.sh"))
-        .arg("train-release")
-        .arg("--")
-        .arg(exe)
-        .args(&args)
-        .arg("--already-held")
-        .status()
-        .map_err(|e| CliError::failure(format!("the hold could not be started: {e}")))?;
-    let code = status.code().unwrap_or(1);
-    eprintln!(
-        "train release: the hold ended after {} (exit {code})",
-        fmt_duration(started.elapsed())
-    );
-    if code == HOLD_BUSY {
-        eprintln!(
-            "::error::train release: another train's CI sequence holds the runners. Next step: `scripts/train-ci-hold.sh --status` names it; wait for it to end, then run this again."
-        );
-    }
-    // The child printed its own report or its one `::error::`; its exit code is ours.
-    std::process::exit(code);
+/// The disk clean after a landing (`disk::landing`): it never blocks, an error or the limit is a warning.
+fn run_landed(a: &crate::disk::landing::LandedArgs) -> Result<Report, CliError> {
+    crate::disk::landing::landed(a, &|k| std::env::var(k).ok(), &mut |l| eprintln!("{l}"), &|| {
+        crate::worktree::procs::process_folders().ok()
+    })
 }
+
+/// The longest the landing clean may take beyond its own `--max`: a hung phase (a process listing, a git read) must not hold a
+/// landing that is already verified. It is a hard deadline around the whole clean, not a tuned limit.
+const CLEAN_GRACE: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn land_cmd(a: &LandArgs) -> Result<Report, CliError> {
     land::check_branch(&a.branch).map_err(|e| CliError::usage(e).with_hint("Run `./dev train land --help`."))?;
+    let token = crate::ci_runs::token()
+        .map_err(|e| e.with_hint("The landing asks the shared verdict reader, which needs a token that can read Actions."))?;
     let root = crate::gates::command::repo_root(None)?;
     let mut git = real::GitCli { root: &root };
-    match land::land(&a.branch, &mut git, &mut std::io::stderr()) {
-        Ok(land::Landed::FastForwarded { from, to }) => Ok(Report::new(
+    let mut ci = real::RealCi {
+        root: root.clone(),
+        server: SERVER.to_string(),
+        repo: "decryp7/paddock".to_string(),
+        token,
+    };
+    let landed = land::land(&a.branch, &mut git, &mut ci, &mut std::io::stderr())
+        .map_err(|stop| CliError::new(Exit::Findings, stop.annotation().replace("train release", "train land")))?;
+    // The landing is verified; the disk clean that follows can only warn (it never blocks or fails the landing).
+    let clean_text = landing_clean(&a.branch);
+    Ok(match landed {
+        land::Landed::FastForwarded { from, to } => Report::new(
             json!({"landed": true, "from": from, "to": to}),
             format!("Landed: main is now {} (was {}); verified with ls-remote.", &to[..9], &from[..9]),
         )),
@@ -236,6 +249,30 @@ fn land_cmd(a: &LandArgs) -> Result<Report, CliError> {
             Exit::Findings,
             stop.annotation().replace("train release", "train land"),
         )),
+    }
+}
+
+/// The clean of `train landed`, in a thread with a hard deadline (its own `--max` plus [`CLEAN_GRACE`]); the text for the report.
+fn landing_clean(train: &str) -> String {
+    let args = crate::disk::landing::LandedArgs {
+        train: train.to_string(),
+        common: Default::default(),
+        max: crate::disk::landing::DEFAULT_MAX.to_string(),
+    };
+    let own = parse_duration(&args.max).unwrap_or(std::time::Duration::from_secs(600));
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        // silent: the receiver is gone once the deadline passed, and the landing no longer waits for this
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
+        let _ = tx.send(run_landed(&args).map(|r| r.text).map_err(|e| e.message));
+    });
+    match rx.recv_timeout(own + CLEAN_GRACE) {
+        Ok(Ok(text)) => text,
+        Ok(Err(e)) => format!("::warning::train land: the disk clean could not run: {e}"),
+        Err(_) => format!(
+            "::warning::train land: the disk clean did not finish within {} (its limit plus a grace); the landing stands. Next step: run `./dev train landed {train}` later.",
+            fmt_duration(own + CLEAN_GRACE)
+        ),
     }
 }
 
@@ -251,7 +288,6 @@ mod tests {
             accept_flaky: vec![],
             reuse: vec![],
             max: "14h".into(),
-            already_held: false,
             repo: "decryp7/paddock".into(),
             server: "https://gitea.invalid".into(),
         };

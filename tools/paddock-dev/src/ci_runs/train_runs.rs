@@ -1,8 +1,12 @@
-// ci-runs-reader: train release: finds the run it dispatched and waits for its end; a red round is judged by ci triage, never by its conclusion alone
-//! Finds the run a dispatch started. Gitea's dispatch answers with no run id, so the run is the newest run of that workflow on
-//! the train's ref and commit that is newer than the newest one seen before the dispatch.
+// ci-runs-reader: train release: finds the run it dispatched and reads its facts; pass or red is decided only in ci_runs::verdict
+//! The runs side of `train release`: finds the run a dispatch started and reads one run's facts, and the triage document. It
+//! decides nothing about pass or red (that is [`super::verdict`], the one reader). Gitea's dispatch answers with no run id, so the
+//! run is the newest run of that workflow on the train's ref and commit that is newer than the newest one seen before the dispatch.
 
-use crate::ci_runs::client::RunInfo;
+use super::client::{Client, RunInfo};
+use super::verdict::{RunResult, run_result};
+use crate::wait::CurlHttp;
+use serde_json::Value;
 use std::time::Duration;
 
 /// How many times the run list is read after a dispatch, and the pause between reads: 10 minutes in all, the script's bound.
@@ -43,6 +47,68 @@ pub fn find_new_run(
         &sha[..sha.len().min(9)],
         pause.as_secs()
     ))
+}
+
+/// What the sequence knows of one run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunFacts {
+    /// The workflow file.
+    pub workflow: String,
+    /// The ref it ran on (`refs/heads/train/x`).
+    pub git_ref: String,
+    /// The commit it tested.
+    pub head_sha: String,
+    /// How it ended ([`run_result`]).
+    pub result: RunResult,
+}
+
+impl RunFacts {
+    /// The facts of a listed run.
+    pub fn of(r: &RunInfo) -> RunFacts {
+        RunFacts {
+            workflow: r.workflow().to_string(),
+            git_ref: r.git_ref().to_string(),
+            head_sha: r.head_sha.clone(),
+            result: run_result(r),
+        }
+    }
+}
+
+/// The facts of run `run`; `None` when the server has no such run.
+pub fn facts(server: &str, repo: &str, token: &str, run: u64) -> Result<Option<RunFacts>, String> {
+    let mut http = CurlHttp;
+    Ok(Client::new(&mut http, server, repo, token).run(run)?.map(|r| RunFacts::of(&r)))
+}
+
+/// The newest 50 runs.
+pub fn newest_runs(server: &str, repo: &str, token: &str) -> Result<Vec<RunInfo>, String> {
+    let mut http = CurlHttp;
+    Ok(Client::new(&mut http, server, repo, token).runs_page(1)?.runs)
+}
+
+/// `ci triage <run>` as the JSON `ci triage --json` prints, with `ok: true` (it worked, or this returns the error).
+pub fn triage_doc(server: &str, repo: &str, token: &str, run: u64) -> Result<Value, String> {
+    let mut http = CurlHttp;
+    let mut client = Client::new(&mut http, server, repo, token);
+    let req = super::triage::Request {
+        run,
+        against: None,
+        app: None,
+        days: 14,
+        history: true,
+        repo: repo.to_string(),
+        now_secs: super::time::now_secs(),
+    };
+    let report = super::triage::collect(&mut client, &req, &mut |l| eprintln!("{l}"))?;
+    let mut doc = report.json();
+    doc["ok"] = Value::Bool(true);
+    Ok(doc)
+}
+
+/// The shared reader's verdict of `workflow` on `sha` ([`super::verdict::verdict`]).
+pub fn full_verdict(server: &str, repo: &str, token: &str, workflow: &str, sha: &str) -> super::verdict::Verdict {
+    let mut http = CurlHttp;
+    super::verdict::verdict(&mut Client::new(&mut http, server, repo, token), workflow, sha)
 }
 
 #[cfg(test)]

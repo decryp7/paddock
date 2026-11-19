@@ -1,4 +1,3 @@
-// ci-runs-reader: train release: finds the run it dispatched and waits for its end; a red round is judged by ci triage, never by its conclusion alone
 //! The release sequence of a train (the port of the integrator's `seq-release.sh`): an optional failed-only fix round of
 //! `ci.yml` or `debrief.yml`, judged by [`super::verdict`]; after a `ci.yml` round `debrief.yml` with bundles; then the release
 //! workflows. It stops at the first run that is not green, and says why in one [`Stop`].
@@ -7,7 +6,8 @@
 //! the whole sequence by `--max`, one run by [`RUN_CAP`] (ER-32). Each step logs its phase and how long it took (ER-27).
 
 use super::verdict::{Accepted, verdict};
-use crate::ci_runs::client::RunInfo;
+use crate::ci_runs::train_runs::RunFacts;
+use crate::ci_runs::verdict::{RunResult, Verdict};
 use crate::wait::fmt_duration;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -114,31 +114,44 @@ impl Plan {
     }
 }
 
-/// How a waited-for run ended.
+/// How a wait for a run ended. Whether the run passed is never decided from this: see [`Ports::run_facts`] and the shared reader.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunEnd {
-    /// Finished with success.
-    Green,
-    /// Finished and did not succeed.
-    Red,
+    /// The run finished (read its result).
+    Finished,
     /// Not finished (the bound, or the run list could not be read): nothing is known about the run.
     Unfinished(String),
+}
+
+/// What the planner says about a diff, for one app.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reach {
+    /// Whether the app is reached (or everything is).
+    pub reached: bool,
+    /// The projects the plan reaches, as text for the log.
+    pub diff: String,
 }
 
 /// What the sequence needs from the outside.
 pub trait Ports {
     /// How long the sequence has run.
     fn elapsed(&self) -> Duration;
-    /// The disk check before a dispatch; `Err` is the cause, for the one `::error::`.
+    /// The disk check before a dispatch (the one `ci dispatch` makes); `Err` is the cause, for the one `::error::`.
     fn disk_check(&mut self) -> Result<(), String>;
     /// Dispatches `workflow` on the train branch (waiting at most `wait` for a busy runner) and returns the new run's id.
     fn dispatch(&mut self, workflow: &str, inputs: &[(String, String)], wait: Duration) -> Result<u64, String>;
     /// Waits, at most `max`, for the run to finish.
     fn wait_run(&mut self, run: u64, max: Duration) -> RunEnd;
-    /// One run by id (`None`: the server has none).
-    fn run_info(&mut self, run: u64) -> Result<Option<RunInfo>, String>;
+    /// One run's facts by id (`None`: the server has none).
+    fn run_facts(&mut self, run: u64) -> Result<Option<RunFacts>, String>;
+    /// The shared reader's verdict ([`crate::ci_runs::verdict::verdict`]) of a workflow on a commit.
+    fn ci_verdict(&mut self, workflow: &str, sha: &str) -> Verdict;
     /// `ci triage <run>` as the JSON `ci triage --json` prints, `ok` included. `Err` when it could not be made.
     fn triage(&mut self, run: u64) -> Result<Value, String>;
+    /// Whether `ancestor` is reachable from `of` in this clone.
+    fn is_ancestor(&mut self, ancestor: &str, of: &str) -> Result<bool, String>;
+    /// What the planner says `from_sha..train head` reaches, for `app`.
+    fn reach(&mut self, app: &str, from_sha: &str) -> Result<Reach, String>;
 }
 
 /// Why the sequence stopped, and what to do next.
@@ -177,6 +190,8 @@ pub enum Source {
     Judged(u64),
     /// A green run of an unchanged tree, used instead of a dispatch.
     Reused(u64),
+    /// The shared reader already had a full green run of the head (not dispatched again).
+    Verdict(u64),
 }
 
 /// A green sequence: the workflows in order and what covered each.
@@ -203,13 +218,13 @@ pub fn release(plan: &Plan, ports: &mut dyn Ports, log: &mut dyn Write) -> Resul
         steps: Vec::new(),
     };
     s.fix_round()?;
-    if plan.workflow == FixWorkflow::Ci {
-        s.green("debrief.yml", &[("bundles", "true")])?;
-    }
+    // ER-10: nothing lands without the full green run on the final tree, decided by the shared reader (`ci verdict`).
+    s.full("ci.yml", &[("webkit", "true")])?;
+    s.full("debrief.yml", &[("bundles", "true")])?;
     for (wf, inputs) in RELEASE_WORKFLOWS {
         match plan.reuse.get(wf) {
             Some(&run) => s.reuse(wf, run)?,
-            None => s.green(wf, inputs)?,
+            None => s.release_run(wf, inputs)?,
         }
     }
     let _ = writeln!(
@@ -272,50 +287,131 @@ impl Seq<'_> {
         Ok((run, end))
     }
 
-    /// A workflow that must finish green.
-    fn green(&mut self, wf: &str, inputs: &[(&str, &str)]) -> Result<(), Stop> {
+    /// A full run of `wf` on the train head: the shared reader's verdict decides, the conclusion of one run never does. A green
+    /// verdict that already exists is used; otherwise the workflow is dispatched in full (no `since_run`) and read again.
+    fn full(&mut self, wf: &str, inputs: &[(&str, &str)]) -> Result<(), Stop> {
+        let sha = self.plan.sha.clone();
+        if let Verdict::Green { run } = self.ports.ci_verdict(wf, &sha) {
+            let _ = writeln!(
+                self.log,
+                "train: {wf}: the shared reader already has a full green run {run} of {}",
+                short(&sha)
+            );
+            self.steps.push((wf.to_string(), Source::Verdict(run)));
+            return Ok(());
+        }
         let (run, end) = self.dispatch_and_wait(wf, inputs, None)?;
-        match end {
-            RunEnd::Green => {
-                self.steps.push((wf.to_string(), Source::Ran(run)));
+        if let RunEnd::Unfinished(why) = end {
+            return Err(unfinished(wf, run, &why));
+        }
+        match self.ports.ci_verdict(wf, &sha) {
+            Verdict::Green { run } => {
+                self.steps.push((wf.to_string(), Source::Verdict(run)));
                 Ok(())
             }
-            RunEnd::Red => Err(Stop::new(
-                format!("{wf} run {run} is red"),
+            Verdict::Red { reason, .. } => Err(Stop::new(
+                format!("the full {wf} run {run} is not green by `ci verdict`: {reason}"),
                 format!("read it with `./dev ci triage {run}`, fix the cause in its owner's branch, then run the sequence again"),
             )),
-            RunEnd::Unfinished(why) => Err(unfinished(wf, run, &why)),
+            Verdict::NotMeasured(why) => Err(Stop::new(
+                format!("the full {wf} run {run} could not be measured by `ci verdict`: {why}"),
+                "fix what it names (the token, the network, a plan job log) and run the sequence again; not measured is never a pass",
+            )),
         }
     }
 
-    /// A green run of an unchanged tree, used again: it must exist, be a run of that workflow and have succeeded.
+    /// A release workflow's own run: it must finish with `success`; any other end stops.
+    fn release_run(&mut self, wf: &str, inputs: &[(&str, &str)]) -> Result<(), Stop> {
+        let (run, end) = self.dispatch_and_wait(wf, inputs, None)?;
+        if let RunEnd::Unfinished(why) = end {
+            return Err(unfinished(wf, run, &why));
+        }
+        match self.result_of(run)? {
+            RunResult::Success => {
+                self.steps.push((wf.to_string(), Source::Ran(run)));
+                Ok(())
+            }
+            RunResult::Failure => Err(Stop::new(
+                format!("{wf} run {run} is red"),
+                format!("read it with `./dev ci triage {run}`, fix the cause in its owner's branch, then run the sequence again"),
+            )),
+            other => Err(not_a_result(wf, run, &other)),
+        }
+    }
+
+    fn result_of(&mut self, run: u64) -> Result<RunResult, Stop> {
+        self.ports
+            .run_facts(run)
+            .map_err(|e| {
+                Stop::new(
+                    format!("run {run} could not be read ({e})"),
+                    "check the network and GITEA_TOKEN, then run it again",
+                )
+            })?
+            .map(|f| f.result)
+            .ok_or_else(|| Stop::new(format!("run {run}: the server has no such run"), "check the run id"))
+    }
+
+    /// A green run of an unchanged tree, used again. It must exist, be a run of that workflow on this train's ref that
+    /// succeeded, its commit must be an ancestor of the train head, and the planner from that commit to the head must not reach the
+    /// workflow's app (the diff is logged). An unrelated tree, or a plan that cannot be read, is refused.
     fn reuse(&mut self, wf: &str, run: u64) -> Result<(), Stop> {
         let bad = |why: String| {
             Stop::new(
                 format!("--reuse {wf}={run}: {why}"),
-                "name a green run of that workflow, or leave --reuse out to dispatch it",
+                "name a green run of that workflow from this train's earlier head with the app unchanged, or leave --reuse out to dispatch it",
             )
         };
-        let info = self
+        let f = self
             .ports
-            .run_info(run)
+            .run_facts(run)
             .map_err(|e| bad(format!("the run could not be read ({e})")))?
             .ok_or_else(|| bad("the server has no such run".into()))?;
-        if info.workflow() != wf {
-            return Err(bad(format!("it is a run of {}", info.workflow())));
+        if f.workflow != wf {
+            return Err(bad(format!("it is a run of {}", f.workflow)));
         }
-        if !info.finished() || info.conclusion != "success" {
+        if f.result != RunResult::Success {
+            return Err(bad(format!("it did not succeed ({:?})", f.result)));
+        }
+        let want_ref = format!("refs/heads/{}", self.plan.branch);
+        if f.git_ref != want_ref {
+            return Err(bad(format!("it ran on {:?}, not on {want_ref}", f.git_ref)));
+        }
+        let anc = self
+            .ports
+            .is_ancestor(&f.head_sha, &self.plan.sha)
+            .map_err(|e| bad(format!("its commit could not be compared with the train head ({e})")))?;
+        if !anc {
             return Err(bad(format!(
-                "it is {} ({})",
-                info.status,
-                if info.conclusion.is_empty() {
-                    "no conclusion"
-                } else {
-                    &info.conclusion
-                }
+                "its commit {} is not an ancestor of the train head {}: an unrelated tree",
+                short(&f.head_sha),
+                short(&self.plan.sha)
             )));
         }
-        let _ = writeln!(self.log, "train: {wf}: reusing green run {run} (tree unchanged for its app)");
+        let app = app_of(wf);
+        let reach = self.ports.reach(&app, &f.head_sha).map_err(|e| {
+            bad(format!(
+                "the planner could not say what {}..{} reaches ({e})",
+                short(&f.head_sha),
+                short(&self.plan.sha)
+            ))
+        })?;
+        let _ = writeln!(
+            self.log,
+            "train: {wf}: plan {}..{} reaches: {}",
+            short(&f.head_sha),
+            short(&self.plan.sha),
+            reach.diff
+        );
+        if reach.reached {
+            return Err(bad(format!(
+                "the app {app} is reached by {}..{} ({}): its tree changed",
+                short(&f.head_sha),
+                short(&self.plan.sha),
+                reach.diff
+            )));
+        }
+        let _ = writeln!(self.log, "train: {wf}: reusing green run {run} (the plan does not reach {app})");
         self.steps.push((wf.to_string(), Source::Reused(run)));
         Ok(())
     }
@@ -325,20 +421,53 @@ impl Seq<'_> {
         let wf = self.plan.workflow.file();
         let run = match self.plan.round {
             Round::Dispatch(since) => {
+                let f = self
+                    .ports
+                    .run_facts(since)
+                    .map_err(|e| {
+                        Stop::new(
+                            format!("--since-run {since} could not be read ({e})"),
+                            "check the network and GITEA_TOKEN",
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        Stop::new(
+                            format!("--since-run {since}: the server has no such run"),
+                            "name the failed run of the round",
+                        )
+                    })?;
+                let wrong = |why: String| {
+                    Stop::new(
+                        format!("--since-run {since}: {why}"),
+                        "name a finished, red run of the same workflow (`./dev ci triage` lists them)",
+                    )
+                };
+                if f.workflow != wf {
+                    return Err(wrong(format!("it is a run of {}, not of {wf}", f.workflow)));
+                }
+                match f.result {
+                    RunResult::Failure => {}
+                    RunResult::Success => return Err(wrong("it is green: there is nothing to repeat".into())),
+                    RunResult::Running(s) => return Err(wrong(format!("it is still {s}"))),
+                    RunResult::Other(o) => return Err(wrong(format!("it ended {o}, neither green nor red"))),
+                }
                 let (run, end) = self.dispatch_and_wait(wf, &[self.plan.workflow.input()], Some(since))?;
-                match end {
-                    RunEnd::Green => {
+                if let RunEnd::Unfinished(why) = end {
+                    return Err(unfinished(wf, run, &why));
+                }
+                match self.result_of(run)? {
+                    RunResult::Success => {
                         self.steps.push((wf.to_string(), Source::Ran(run)));
                         return Ok(());
                     }
-                    RunEnd::Red => run,
-                    RunEnd::Unfinished(why) => return Err(unfinished(wf, run, &why)),
+                    RunResult::Failure => run,
+                    other => return Err(not_a_result(wf, run, &other)),
                 }
             }
             Round::Passed(run) => {
-                let info = self
+                let f = self
                     .ports
-                    .run_info(run)
+                    .run_facts(run)
                     .map_err(|e| {
                         Stop::new(
                             format!("passed:{run}: the run could not be read ({e})"),
@@ -352,28 +481,29 @@ impl Seq<'_> {
                         "name the finished fix round of this train head, or give --since-run <failed run> to dispatch it",
                     )
                 };
-                if info.workflow() != wf {
-                    return Err(wrong(format!("it is a run of {}, not of {wf}", info.workflow())));
+                if f.workflow != wf {
+                    return Err(wrong(format!("it is a run of {}, not of {wf}", f.workflow)));
                 }
-                if info.head_sha != self.plan.sha {
+                if f.head_sha != self.plan.sha {
                     return Err(wrong(format!(
                         "it tested {}, the train head is {}",
-                        short(&info.head_sha),
+                        short(&f.head_sha),
                         short(&self.plan.sha)
                     )));
-                }
-                if !info.finished() {
-                    return Err(wrong(format!("it is still {}", info.status)));
                 }
                 let _ = writeln!(
                     self.log,
                     "train: {wf}: fix round already ran as run {run}; judged now, not dispatched again"
                 );
-                if info.conclusion == "success" {
-                    self.steps.push((wf.to_string(), Source::Judged(run)));
-                    return Ok(());
+                match f.result {
+                    RunResult::Success => {
+                        self.steps.push((wf.to_string(), Source::Judged(run)));
+                        return Ok(());
+                    }
+                    RunResult::Failure => run,
+                    RunResult::Running(s) => return Err(wrong(format!("it is still {s}"))),
+                    RunResult::Other(o) => return Err(wrong(format!("it ended {o}, neither green nor red"))),
                 }
-                run
             }
         };
         self.judge(wf, run)
@@ -408,6 +538,18 @@ impl Seq<'_> {
             )),
         }
     }
+}
+
+/// The app a release workflow belongs to (`dyno-release.yml` is `dyno`).
+pub fn app_of(workflow: &str) -> String {
+    workflow.trim_end_matches(".yml").trim_end_matches("-release").to_string()
+}
+
+fn not_a_result(wf: &str, run: u64, r: &RunResult) -> Stop {
+    Stop::new(
+        format!("{wf} run {run} ended {r:?}: neither green nor red"),
+        "look at the run in the browser (a cancel or a runner loss is not a result), then run the sequence again",
+    )
 }
 
 fn unfinished(wf: &str, run: u64, why: &str) -> Stop {

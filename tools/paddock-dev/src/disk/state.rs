@@ -350,7 +350,7 @@ mod tests {
     #[cfg(unix)]
     fn repo() -> tempfile::TempDir {
         let d = tempfile::tempdir().unwrap();
-        let mut cmd = paddock_proc::command("git");
+        let mut cmd = crate::git_env::git();
         cmd.args(["init", "-q"]).arg(d.path());
         let ok = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(std::time::Duration::from_secs(60)))
             .unwrap()
