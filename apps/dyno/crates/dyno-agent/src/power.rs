@@ -628,21 +628,29 @@ mod tests {
             accepted_tx.send(()).unwrap();
             let _ = go_rx.recv_timeout(HANG_GUARD);
         }));
-        {
-            let mut core = lock(&shared.core);
-            core.settings.power.timed.enabled = true;
-            // Minute 0: due at any time of the day, so a run near midnight cannot miss it.
-            core.settings.power.timed.entries = vec![TimedAction {
-                id: 7,
-                action: IdleAction::Hibernate,
-                at_minute: 0,
-                repeat: Repeat::Once,
-                last_day: None,
-                done: false,
-            }];
-        }
-        // Configuring wakes the power thread, which finds the entry due.
-        shared.power.configure_idle(&shared);
+        // Switching the rule on runs on its own thread. The hook holds the core lock while it waits for `go`, and the power
+        // thread may take the action from its own start configure before this configure runs: the thread that releases the
+        // hook must never wait for the core lock itself (it did, and waited out the guard: train 14's stress, 1 of 3).
+        let enable = {
+            let shared = shared.clone();
+            std::thread::spawn(move || {
+                {
+                    let mut core = lock(&shared.core);
+                    core.settings.power.timed.enabled = true;
+                    // Minute 0: due at any time of the day, so a run near midnight cannot miss it.
+                    core.settings.power.timed.entries = vec![TimedAction {
+                        id: 7,
+                        action: IdleAction::Hibernate,
+                        at_minute: 0,
+                        repeat: Repeat::Once,
+                        last_day: None,
+                        done: false,
+                    }];
+                }
+                // Configuring wakes the power thread, which finds the entry due.
+                shared.power.configure_idle(&shared);
+            })
+        };
         accepted_rx
             .recv_timeout(HANG_GUARD)
             .expect("the power thread never took the timed action");
@@ -652,7 +660,8 @@ mod tests {
             Err(std::sync::TryLockError::Poisoned(e)) => Some(e.into_inner().settings.power.timed.entries[0].done),
             Ok(core) => Some(core.settings.power.timed.entries[0].done),
         };
-        go_tx.send(()).unwrap();
+        go_tx.send(()).expect("the hook waited out the guard: the test held it too long");
+        enable.join().unwrap();
         if let Some(done) = read {
             assert!(done, "a once entry does not run again");
         }
