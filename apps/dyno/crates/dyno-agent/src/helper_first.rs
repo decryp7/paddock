@@ -322,7 +322,8 @@ impl HelperPort for SharedPort {
 
 /// An answer about the helper kept for a while. It is dropped at once when a call finds the helper unreachable (the link counts
 /// those as faults) or when [`ReadyGate::forget`] says a job changed the helper, and a probe that was in flight during a
-/// `forget` does not store its stale answer (the generation).
+/// `forget` does not store its stale answer (the generation), and a probe that began before the one whose answer is kept does not
+/// replace it (the ticket, ADR 0034): the later probe saw the later state of the helper.
 pub struct ReadyGate {
     clock: Arc<dyn Clock>,
     epoch: AtomicU64,
@@ -338,6 +339,17 @@ struct GateState {
     generation: u64,
     /// Whether the last stored answer was Ready.
     was_ready: bool,
+    /// The ticket the next probe takes when it begins.
+    next_ticket: u64,
+    /// The ticket of the probe whose answer is kept (or was, before a forget).
+    kept_ticket: u64,
+}
+
+impl GateState {
+    fn take_ticket(&mut self) -> u64 {
+        self.next_ticket += 1;
+        self.next_ticket
+    }
 }
 
 struct Cached {
@@ -364,31 +376,36 @@ impl ReadyGate {
     /// The kept answer when it is fresh and no call found the helper unreachable since (`faults` is the link\'s counter), else
     /// `probe()`\'s, which is then kept.
     pub fn availability(&self, faults: impl Fn() -> u64, probe: impl FnOnce() -> Availability) -> Availability {
-        let generation = {
-            let state = self.lock();
+        let (generation, ticket) = {
+            let mut state = self.lock();
             if let Some(c) = &state.cached {
                 if self.clock.monotonic().saturating_sub(c.at) < c.ttl && c.faults == faults() {
                     return c.answer.clone();
                 }
             }
-            state.generation
+            (state.generation, state.take_ticket())
         };
         let answer = probe();
-        self.store(generation, answer.clone(), faults());
+        self.store(generation, ticket, answer.clone(), faults());
         answer
     }
 
     /// Keeps an answer someone else just learned (Settings polls the status).
     pub fn record(&self, answer: Availability, faults: u64) {
-        let generation = self.lock().generation;
-        self.store(generation, answer, faults);
+        let (generation, ticket) = {
+            let mut state = self.lock();
+            (state.generation, state.take_ticket())
+        };
+        self.store(generation, ticket, answer, faults);
     }
 
-    fn store(&self, generation: u64, answer: Availability, faults: u64) {
+    /// Keeps the answer of the probe that began at `ticket` unless a forget came meanwhile or the kept answer is of a later probe.
+    fn store(&self, generation: u64, ticket: u64, answer: Availability, faults: u64) {
         let mut state = self.lock();
-        if state.generation != generation {
+        if state.generation != generation || ticket < state.kept_ticket {
             return;
         }
+        state.kept_ticket = ticket;
         state.strikes = if answer.is_unreachable() {
             state.strikes.saturating_add(1)
         } else {
@@ -989,6 +1006,26 @@ mod tests {
             },
         );
         assert_eq!(asked.load(Ordering::SeqCst), 2, "the stale answer was not kept");
+    }
+
+    /// ADR 0034 (P2-8): a probe that began first and answered last (it read the helper's older state) must not replace the answer of
+    /// the probe that began after it.
+    #[test]
+    fn a_probe_that_began_before_the_kept_one_does_not_replace_its_answer() {
+        let clock = FakeClock::new();
+        let gate = ReadyGate::new(Arc::new(clock.clone()));
+        let slow = gate.availability(
+            || 0,
+            || {
+                // While this probe is out, a later one begins, answers and is kept.
+                let later = gate.availability(|| 0, || Availability::Ready);
+                assert!(later.is_ready());
+                Availability::Off
+            },
+        );
+        assert!(!slow.is_ready(), "the slow probe's caller still gets what it read");
+        let kept = gate.availability(|| 0, || panic!("the kept answer is fresh"));
+        assert!(kept.is_ready(), "the later probe's answer is the one kept");
     }
 
     #[test]

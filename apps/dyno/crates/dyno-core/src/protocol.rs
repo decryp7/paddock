@@ -77,6 +77,9 @@ use serde::{Deserialize, Serialize};
 /// `LiveVia` (inside `LiveUpdate.via`, `Message::Live`) also gained `processes_hint: Option<String>` at the end, always sent (postcard
 /// has no skipped fields); like the other `via` fields it is unreleased and pinned by `tests/wire/read_via.rs` and `read-via.wire.json`.
 ///
+/// Also in version 8 (still unreleased, so no further bump; ADR 0034): `Settings` gained `revision` (last field) and
+/// `Request::SaveSettings` gained `base_revision`; a save that names an older revision is refused as `ErrorCode::Stale`.
+///
 /// Also in version 8 (still unreleased, so no further bump; ADR 0033, WP-4): `StartupOverview` gained `signer_read` and `coverage`, and
 /// `StartupLocation` gained `UserRunOnceKey`, `MachineRunOnceKey` and `PackagedApp` appended after `LoginItem`. `tests/wire/startup.rs` pins both.
 pub const PROTOCOL_VERSION: u32 = 8;
@@ -193,6 +196,9 @@ pub enum Request {
     SaveSettings {
         /// The new settings.
         settings: Box<Settings>,
+        /// The `revision` of the settings the window's copy was taken from. When it is not the agent's current one the save is
+        /// refused as [`ErrorCode::Stale`] (something changed them meanwhile) and the window reloads. `None`: saved as is.
+        base_revision: Option<u64>,
     },
     /// Plugins.
     Plugins,
@@ -1493,7 +1499,10 @@ mod tests {
             via: Default::default(),
         };
         for m in [
-            Message::Request(Box::new(Request::SaveSettings { settings: Box::default() })),
+            Message::Request(Box::new(Request::SaveSettings {
+                settings: Box::default(),
+                base_revision: Some(3),
+            })),
             Message::Live(Box::new(live)),
             Message::Reply(Box::new(Ok(Reply::Settings(Box::default())))),
             Message::Reply(Box::new(Err(AgentError::new(ErrorCode::Busy, "no")))),

@@ -57,6 +57,36 @@ pub struct HardwareCentre {
 struct Reread {
     running: bool,
     last: Option<Instant>,
+    /// A request came while a read was running: that read may have started before the change the request is about (a tool
+    /// installed or removed), so one more read follows it (ADR 0034).
+    again: bool,
+}
+
+impl Reread {
+    /// Whether a read may start now (none runs and the last began at least `min_gap` ago); marks it running. A request that finds one
+    /// running is remembered for [`Reread::end`].
+    fn begin(&mut self, min_gap: Duration) -> bool {
+        if self.running {
+            self.again = true;
+            return false;
+        }
+        if self.last.is_some_and(|t| t.elapsed() < min_gap) {
+            return false;
+        }
+        self.running = true;
+        self.last = Some(Instant::now());
+        true
+    }
+
+    /// The running read ended; true when a request came meanwhile and the caller reads once more (it stays running).
+    fn end(&mut self) -> bool {
+        if std::mem::take(&mut self.again) {
+            self.last = Some(Instant::now());
+            return true;
+        }
+        self.running = false;
+        false
+    }
 }
 
 impl HardwareCentre {
@@ -100,17 +130,12 @@ impl HardwareCentre {
 
     /// Whether a re-read may start now: none is running and the last one began at least `min_gap` ago. Marks it running.
     fn begin_reread(&self, min_gap: Duration) -> bool {
-        let mut r = lock(&self.reread);
-        if r.running || r.last.is_some_and(|t| t.elapsed() < min_gap) {
-            return false;
-        }
-        r.running = true;
-        r.last = Some(Instant::now());
-        true
+        lock(&self.reread).begin(min_gap)
     }
 
-    fn end_reread(&self) {
-        lock(&self.reread).running = false;
+    /// The running re-read ended; true when another request came meanwhile and one more read is due.
+    fn end_reread(&self) -> bool {
+        lock(&self.reread).end()
     }
 
     /// Remembers whether a battery-saving mode is on (from the facts, refreshed by the background cycle).
@@ -349,14 +374,17 @@ pub fn request_reread(shared: &Arc<Shared>, min_gap: Duration) -> bool {
     let shared = Arc::clone(shared);
     let spawned = std::thread::Builder::new().name("dyno-wear-reread".into()).spawn({
         let shared = Arc::clone(&shared);
-        move || {
+        move || loop {
             slow_cycle(&shared);
-            shared.hardware.end_reread();
+            if !shared.hardware.end_reread() {
+                break;
+            }
+            log::info!(target: "dyno::hardware", "SSD wear: asked again while reading; reading once more");
         }
     });
     if let Err(e) = spawned {
         log::warn!(target: "dyno::hardware", "SSD wear: the re-read thread could not start: {e}");
-        shared.hardware.end_reread();
+        while shared.hardware.end_reread() {}
         return false;
     }
     true
@@ -445,6 +473,31 @@ pub fn run_background(shared: &Arc<Shared>) {
 
 #[cfg(test)]
 mod tests {
+    /// ADR 0034 (P2-9): a request that arrives while a read runs (the tool was removed after that read began) is not lost: one more
+    /// read follows, and a request while it runs asks for no more than one.
+    #[test]
+    fn a_request_while_a_read_runs_asks_for_one_more_read() {
+        let mut r = Reread::default();
+        assert!(r.begin(Duration::ZERO), "the first request starts a read");
+        assert!(
+            !r.begin(Duration::ZERO),
+            "one is running: nothing starts, the request is remembered"
+        );
+        assert!(!r.begin(Duration::from_secs(30)), "also for a request with a gap");
+        assert!(r.end(), "the read ended and a request came meanwhile: read again");
+        assert!(!r.end(), "that was one more read, not one per request");
+        assert!(r.begin(Duration::ZERO), "idle again: the next request starts a read");
+    }
+
+    #[test]
+    fn a_request_inside_the_gap_of_an_idle_centre_starts_nothing_and_is_not_remembered() {
+        let mut r = Reread::default();
+        assert!(r.begin(Duration::from_secs(30)));
+        assert!(!r.end());
+        assert!(!r.begin(Duration::from_secs(30)), "the last read began a moment ago");
+        assert!(!r.again);
+    }
+
     use super::*;
     use dyno_core::hardware::OsThrottle;
     use dyno_core::metrics::{BatterySample, PowerSource, Temperature};

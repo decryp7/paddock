@@ -48,6 +48,7 @@ pub mod network;
 pub mod network_alerts;
 pub mod network_names;
 pub mod network_traffic;
+pub mod newer;
 pub mod os;
 pub mod others;
 pub mod ports;

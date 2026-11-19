@@ -129,54 +129,11 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             lock(&shared.core).store.alerts(limit.clamp(1, 500)).map_err(internal)?,
         )),
         Request::Settings => Ok(Reply::Settings(Box::new(lock(&shared.core).settings.clone()))),
-        Request::SaveSettings { settings } => {
-            settings.check_extras().map_err(bad)?;
-            let mut core = lock(&shared.core);
-            // The layouts change only through `EditWidgetLayout`: a window's copy of the settings, taken before an edit,
-            // must never put an old layout back.
-            let mut incoming = (*settings).normalised();
-            incoming.dashboard = core.settings.dashboard.clone();
-            incoming.dashboard_v1 = core.settings.dashboard_v1.clone();
-            incoming.menu_bar = core.settings.menu_bar.clone();
-            incoming.popover = core.settings.popover.clone();
-            // What the timed actions did (last day run, done) is the agent's own: a window's copy never rewinds it.
-            for e in &mut incoming.power.timed.entries {
-                if let Some(cur) = core
-                    .settings
-                    .power
-                    .timed
-                    .entries
-                    .iter()
-                    .find(|c| c.id == e.id && c.at_minute == e.at_minute && c.repeat == e.repeat)
-                {
-                    (e.last_day, e.done) = (cur.last_day, cur.done);
-                }
-            }
-            core.settings = incoming;
-            let alarm_config = core.settings.alarms;
-            core.alarms.set_config(alarm_config);
-            shared.disk.set_limits(core.settings.disk.limits());
-            shared.disk.set_read_threads(core.settings.disk.read_threads);
-            shared.disk.set_space_refresh(core.settings.disk.space_refresh_secs);
-            core.save_settings(&shared.dirs);
-            let s = core.settings.clone();
-            drop(core);
-            // After the core lock is released: switching saved maps off waits for the cache writer (a save in progress can take
-            // seconds), and the sampler takes the core lock every tick.
-            shared.disk.apply_saved_maps(s.disk.saved_maps);
-            shared.power.configure_idle(shared);
-            if !s.power.keep_awake.enabled {
-                // Turning the feature off ends a hold already taken (and clears a notice).
-                shared.power.stop(shared);
-            }
-            // Turning scheduled wake on or off sets or clears the OS wakes now.
-            shared.wakes.sync_all(shared);
-            shared.wake_sampler();
-            Ok(Reply::Settings(Box::new(s)))
-        }
+        Request::SaveSettings { settings, base_revision } => save_settings(shared, settings, base_revision, &|| {}),
         Request::UpsertAlertRule { rule } => {
             let mut core = lock(&shared.core);
             dyno_core::alarms::custom::upsert_rule(&mut core.settings.custom_alerts, rule).map_err(bad)?;
+            core.settings.revision += 1;
             core.save_settings(&shared.dirs);
             let s = core.settings.clone();
             drop(core);
@@ -186,6 +143,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::DeleteAlertRule { id } => {
             let mut core = lock(&shared.core);
             dyno_core::alarms::custom::delete_rule(&mut core.settings.custom_alerts, &id).map_err(bad)?;
+            core.settings.revision += 1;
             core.save_settings(&shared.dirs);
             let s = core.settings.clone();
             drop(core);
@@ -228,13 +186,10 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         }
         Request::RemoveTool => match crate::tool_own_copy::remove(&shared.dirs.tools()) {
             Ok(()) => {
-                // The wear reading was made with the tool: read again now, not at the next slow cycle (hours away).
-                // Off the request (ER-17): the answer does not wait for smartctl.
-                let shared = Arc::clone(shared);
-                std::thread::Builder::new()
-                    .name("dyno-wear-reread".into())
-                    .spawn(move || crate::hardware::slow_cycle(&shared))
-                    .map_err(|e| AgentError::new(ErrorCode::Internal, format!("The reading could not be refreshed ({}).", e.kind())))?;
+                // The wear reading was made with the tool: read again now, not at the next slow cycle (hours away). Off the request
+                // (ER-17): the answer does not wait for smartctl. Through the one re-read guard: a read that is running when the tool
+                // goes is followed by one more, and two never run at once (ADR 0034).
+                crate::hardware::request_reread(shared, std::time::Duration::ZERO);
                 Ok(Reply::Ok)
             }
             Err(e) => Err(AgentError::new(
@@ -506,13 +461,91 @@ fn known_alarm(shared: &Shared, id: u64) -> Result<(), AgentError> {
     }
 }
 
+/// Saves the settings a window sent (the `SaveSettings` request); `during` runs after the merge, once the core lock is let go and
+/// before the effects, while the apply lock is held (tests look at the locks there).
+fn save_settings(
+    shared: &Arc<Shared>,
+    settings: Box<dyno_core::settings::Settings>,
+    base_revision: Option<u64>,
+    during: &dyn Fn(),
+) -> Answer {
+    settings.check_extras().map_err(bad)?;
+    // One save applies at a time, from the merge through the effects, taken before the core lock (nothing takes it while
+    // holding core): two saves cannot interleave their effects and leave the machines on the older one's settings.
+    let _applying = lock(&shared.settings_apply);
+    let mut core = lock(&shared.core);
+    if let Some(base) = base_revision.filter(|b| *b != core.settings.revision) {
+        log::info!(
+            "dyno-agent: a settings save was refused: it was taken at revision {base}, the settings are at {}",
+            core.settings.revision
+        );
+        return Err(AgentError::new(
+            ErrorCode::Stale,
+            "The settings changed since this window read them; they were reloaded. Check them and save again.",
+        ));
+    }
+    // The layouts change only through `EditWidgetLayout`: a window's copy of the settings, taken before an edit,
+    // must never put an old layout back.
+    let mut incoming = (*settings).normalised();
+    incoming.dashboard = core.settings.dashboard.clone();
+    incoming.dashboard_v1 = core.settings.dashboard_v1.clone();
+    incoming.menu_bar = core.settings.menu_bar.clone();
+    incoming.popover = core.settings.popover.clone();
+    // The alert rules change only through `UpsertAlertRule` and `DeleteAlertRule`, whatever a window's copy holds.
+    incoming.custom_alerts = core.settings.custom_alerts.clone();
+    incoming.revision = core.settings.revision + 1;
+    // What the timed actions did (last day run, done) is the agent's own: a window's copy never rewinds it.
+    for e in &mut incoming.power.timed.entries {
+        if let Some(cur) = core
+            .settings
+            .power
+            .timed
+            .entries
+            .iter()
+            .find(|c| c.id == e.id && c.at_minute == e.at_minute && c.repeat == e.repeat)
+        {
+            (e.last_day, e.done) = (cur.last_day, cur.done);
+        }
+    }
+    core.settings = incoming;
+    let alarm_config = core.settings.alarms;
+    core.alarms.set_config(alarm_config);
+    shared.disk.set_limits(core.settings.disk.limits());
+    shared.disk.set_read_threads(core.settings.disk.read_threads);
+    shared.disk.set_space_refresh(core.settings.disk.space_refresh_secs);
+    core.save_settings(&shared.dirs);
+    let s = core.settings.clone();
+    drop(core);
+    during();
+    // After the core lock is released: switching saved maps off waits for the cache writer (a save in progress can take
+    // seconds), and the sampler takes the core lock every tick.
+    shared.disk.apply_saved_maps(s.disk.saved_maps);
+    shared.power.configure_idle(shared);
+    if !s.power.keep_awake.enabled {
+        // Turning the feature off ends a hold already taken (and clears a notice).
+        shared.power.stop(shared);
+    }
+    // Turning scheduled wake on or off sets or clears the OS wakes now.
+    shared.wakes.sync_all(shared);
+    shared.wake_sampler();
+    Ok(Reply::Settings(Box::new(s)))
+}
+
 /// Applies an alarm event, pushes its changes and answers the changed alarms.
 fn alarm_event(shared: &Shared, event: AlarmEvent) -> Answer {
+    alarm_event_with(shared, event, &|| {})
+}
+
+/// [`alarm_event`] with `between` run after the core lock was let go and before the changes are pushed: the moment another request
+/// can change the same alarm and push first (tests do it there). The changes carry the tickets taken under the lock, so the older
+/// ones are refused by the connections' slots then (ADR 0034).
+fn alarm_event_with(shared: &Shared, event: AlarmEvent, between: &dyn Fn()) -> Answer {
     let changes = {
         let mut core = lock(&shared.core);
         let core = &mut *core;
         core.alarms.apply(&core.store, event)
     };
+    between();
     let alarms: Vec<Alarm> = changes.iter().map(|c| c.alarm.clone()).collect();
     crate::sampler::push_alarm_changes(shared, changes);
     Ok(Reply::Alarms(alarms))
@@ -874,6 +907,88 @@ mod tests {
     use dyno_core::widgets::dashboard::{Thresholds, ValueTone};
     use dyno_core::widgets::{DashboardKind, DashboardWidget, Metric};
     use paddock_widgets::Edit;
+
+    /// ADR 0034, P2-3: a request that read an alarm's change before another request changed and pushed it must not push it over
+    /// the newer change: what a connected app is told last for the alarm is the state the engine ended in.
+    #[test]
+    fn the_last_alarm_change_an_app_gets_is_the_state_the_engine_ended_in() {
+        use dyno_core::alarms::{AlarmEvent, AlarmFilter};
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let fake = dyno_platform::fake::Fake::new();
+        let (shared, _sensors, _processes) = Shared::build(
+            crate::paths::Dirs::at(tmp.path().join("data")),
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+        )
+        .unwrap();
+        let (tx, _rx) = std::sync::mpsc::sync_channel(1);
+        let pending = Arc::new(crate::agent::Pending::default());
+        lock(&shared.subs).push(crate::agent::Sub {
+            id: 1,
+            detail: Arc::new(std::sync::atomic::AtomicU8::new(1)),
+            tx,
+            scans: Default::default(),
+            volumes: Default::default(),
+            jobs: Default::default(),
+            pending: pending.clone(),
+        });
+        let raise = |n: i64| AlarmEvent::Raise {
+            rule: "alert:test".into(),
+            key: "alert:test:".into(),
+            severity: dyno_core::health::Severity::Warning,
+            title: "t".into(),
+            detail: String::new(),
+            value: None,
+            metric: None,
+            ttl_ms: None,
+            at: Timestamp(1_000_000 + n),
+        };
+        let back = |n: i64| AlarmEvent::Return {
+            key: "alert:test:".into(),
+            at: Timestamp(1_000_000 + n),
+        };
+        // The raise is read first, the return runs completely (and is pushed) before the raise is pushed.
+        let first = alarm_event_with(&shared, raise(0), &|| drop(alarm_event(&shared, back(1))));
+        assert!(first.is_ok());
+        let (told, _) = pending.alarms.take();
+        let ended = lock(&shared.core).alarms.list(&AlarmFilter::default(), Timestamp(2_000_000));
+        assert_eq!(ended.len(), 1);
+        let last = told.last().expect("the app was told");
+        assert_eq!(last.alarm.state, ended[0].state, "the app ends in the state the engine ended in");
+    }
+
+    /// Whether `m` is locked by someone (a `try_lock` that would block).
+    fn lock_is_held<T>(m: &std::sync::Mutex<T>) -> bool {
+        matches!(m.try_lock(), Err(std::sync::TryLockError::WouldBlock))
+    }
+
+    /// ADR 0034 (P2-1): a settings save holds the apply lock from its merge through its effects, with the core lock let go in between
+    /// (the sampler needs it every tick). Another save, or anything else that takes the apply lock, waits for the whole of it.
+    #[test]
+    fn a_settings_save_holds_the_apply_lock_through_its_effects_and_not_the_core_lock() {
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let fake = dyno_platform::fake::Fake::new();
+        let (shared, _sensors, _processes) = Shared::build(
+            crate::paths::Dirs::at(tmp.path().join("data")),
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+        )
+        .unwrap();
+        let settings = Box::new(lock(&shared.core).settings.clone());
+        let seen = std::cell::Cell::new(None);
+        let saved = save_settings(&shared, settings, None, &|| {
+            seen.set(Some((lock_is_held(&shared.settings_apply), lock_is_held(&shared.core))));
+        });
+        assert!(saved.is_ok());
+        assert_eq!(
+            seen.get(),
+            Some((true, false)),
+            "(apply lock held, core lock free) between the merge and the effects"
+        );
+        assert!(shared.settings_apply.try_lock().is_ok(), "and let go at the end");
+    }
 
     const PATH: &str = r"\Processor(_Total)\% Processor Time";
 

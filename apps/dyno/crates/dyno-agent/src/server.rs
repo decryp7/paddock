@@ -190,9 +190,15 @@ pub fn unreadable() -> AgentError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::{EVENT_QUEUE, MAX_PENDING_ALARMS};
+    use crate::agent::{AlarmSlot, EVENT_QUEUE, MAX_PENDING_ALARMS};
     use dyno_core::disk::scan::*;
     use std::sync::mpsc::sync_channel;
+
+    /// A new ticket for an alarm change, as `Shared::broadcast_alarm` takes one.
+    fn next_ticket() -> u64 {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    }
 
     fn status(scan: u64, seq: u64, state: ScanState) -> DiskScanStatus {
         DiskScanStatus {
@@ -315,14 +321,17 @@ mod tests {
         let (tx, rx) = full_queue();
         let pending = Pending::default();
         for round in 0..2 {
-            pending.wol.put(list(round == 1));
-            pending.power.put(dyno_core::power::PowerView::default());
-            pending.wakes.put(wakes(round));
-            pending.layout.put(if round == 0 {
-                dyno_core::widgets::DynoSurface::MenuBar
-            } else {
-                dyno_core::widgets::DynoSurface::Popover
-            });
+            pending.wol.put(round as u64 + 1, list(round == 1));
+            pending.power.put(round as u64 + 1, dyno_core::power::PowerView::default());
+            pending.wakes.put(round as u64 + 1, wakes(round));
+            pending.layout.put(
+                round as u64 + 1,
+                if round == 0 {
+                    dyno_core::widgets::DynoSurface::MenuBar
+                } else {
+                    dyno_core::widgets::DynoSurface::Popover
+                },
+            );
             assert!(
                 tx.try_send(Message::WolChanged(Box::new(list(round == 1)))).is_err(),
                 "the queue is full"
@@ -356,6 +365,7 @@ mod tests {
 
     fn alarm(id: u64, kind: dyno_core::alarms::ChangeKind, notify: bool) -> dyno_core::alarms::AlarmChange {
         dyno_core::alarms::AlarmChange {
+            ticket: next_ticket(),
             kind,
             alarm: dyno_core::alarms::Alarm {
                 id,
@@ -452,6 +462,37 @@ mod tests {
         }
         let (items, activity, alerts) = pending.events.take();
         assert_eq!((items.len(), activity, alerts), (EVENT_QUEUE, 0, 2));
+    }
+
+    /// ADR 0034: a change that was read earlier but arrives after a newer one of its alarm is refused, also after the app took the
+    /// newer one; another alarm is not affected.
+    #[test]
+    fn an_older_alarm_change_arriving_late_is_refused() {
+        use dyno_core::alarms::ChangeKind::{Raised, Returned};
+        let slot = AlarmSlot::default();
+        let at = |ticket, mut c: dyno_core::alarms::AlarmChange| {
+            c.ticket = ticket;
+            c
+        };
+        assert!(slot.put(at(5, alarm(7, Returned, false))));
+        assert!(!slot.put(at(4, alarm(7, Raised, true))), "older than the stored change of alarm 7");
+        let (got, _) = slot.take();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].kind, Returned);
+        assert!(!slot.put(at(3, alarm(7, Raised, true))), "still refused after the take");
+        assert!(slot.put(at(3, alarm(8, Raised, true))), "another alarm is its own sequence");
+    }
+
+    /// ADR 0034 (P2-4): the power view read earlier, pushed later, never replaces the newer one, also after the newer was taken.
+    #[test]
+    fn an_older_power_view_arriving_late_is_refused() {
+        let pending = Pending::default();
+        let on = dyno_core::power::PowerView::default();
+        assert!(pending.power.put(2, on.clone()));
+        assert!(!pending.power.put(1, on));
+        assert!(pending.power.take().is_some());
+        assert!(!pending.power.put(1, dyno_core::power::PowerView::default()));
+        assert!(pending.power.take().is_none());
     }
 
     #[test]

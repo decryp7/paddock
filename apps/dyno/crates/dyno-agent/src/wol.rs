@@ -108,12 +108,19 @@ impl WolCentre {
     }
 
     fn devices(&self, shared: &Shared) -> Result<Vec<WolDevice>, AgentError> {
-        let mut all = lock(&shared.core)
+        Ok(self.read(shared)?.2)
+    }
+
+    /// The setting and the saved computers, with a view generation, read in one hold of the core lock (ADR 0034).
+    fn read(&self, shared: &Shared) -> Result<(u64, bool, Vec<WolDevice>), AgentError> {
+        let core = lock(&shared.core);
+        let generation = shared.next_view_generation();
+        let mut all = core
             .store
             .wol_devices()
             .map_err(|e| internal(format!("The saved computers could not be read: {e}")))?;
         all.sort_by_key(|d| (d.name.to_lowercase(), d.id));
-        Ok(all)
+        Ok((generation, core.settings.power.wol.enabled, all))
     }
 
     fn enabled(shared: &Shared) -> bool {
@@ -122,6 +129,13 @@ impl WolCentre {
 
     /// The list, with whether this computer can send at all.
     pub fn view(&self, shared: &Shared) -> Result<WolView, AgentError> {
+        self.view_stamped(shared).map(|(_, v)| v)
+    }
+
+    /// The list now, with the generation taken when it was read: a list pushed with an older generation than one already pushed is
+    /// refused by the connections' slots, however the pushing threads were scheduled.
+    pub fn view_stamped(&self, shared: &Shared) -> Result<(u64, WolView), AgentError> {
+        let (generation, enabled, devices) = self.read(shared)?;
         let can_send = if self.ports.interfaces.ipv4().is_empty() {
             Capability::CantTell {
                 reason: "No network card with an IPv4 address is connected.".into(),
@@ -129,11 +143,14 @@ impl WolCentre {
         } else {
             Capability::Known
         };
-        Ok(WolView {
-            enabled: Self::enabled(shared),
-            devices: self.devices(shared)?,
-            can_send,
-        })
+        Ok((
+            generation,
+            WolView {
+                enabled,
+                devices,
+                can_send,
+            },
+        ))
     }
 
     /// Neighbour-table entries that are not saved yet. Read on demand; refused when discovery is off.
@@ -226,8 +243,16 @@ impl WolCentre {
 
     /// The list after a change, pushed to every connected app (the tray's Wake submenu follows it).
     fn changed(&self, shared: &Shared) -> Result<WolView, AgentError> {
-        let view = self.view(shared)?;
-        shared.broadcast_wol(&view);
+        self.changed_with(shared, &|| {})
+    }
+
+    /// [`changed`](Self::changed) with `between` run after the list was read and before it is pushed: the moment another change can
+    /// read and push a newer list (tests do it there).
+    #[doc(hidden)]
+    pub fn changed_with(&self, shared: &Shared, between: &dyn Fn()) -> Result<WolView, AgentError> {
+        let (generation, view) = self.view_stamped(shared)?;
+        between();
+        shared.broadcast_wol(generation, &view);
         Ok(view)
     }
 

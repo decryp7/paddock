@@ -48,6 +48,8 @@ pub struct PowerCentre {
     signals: Arc<dyn IdleSignals>,
     idle: Mutex<IdleMachine>,
     skew_ms: std::sync::atomic::AtomicI64,
+    /// Generations of the views pushed to the apps (ADR 0034).
+    views: dyno_core::newer::Generation,
     pending: Mutex<VecDeque<PowerEvent>>,
     wake: (Mutex<bool>, Condvar),
     /// Runs once right after the idle machine took a due timed action (tests only: holds that thread there).
@@ -95,6 +97,7 @@ impl PowerCentre {
             signals,
             idle: Mutex::new(IdleMachine::new()),
             skew_ms: std::sync::atomic::AtomicI64::new(0),
+            views: dyno_core::newer::Generation::new(),
             pending: Mutex::new(VecDeque::new()),
             wake: (Mutex::new(false), Condvar::new()),
             #[cfg(test)]
@@ -104,20 +107,29 @@ impl PowerCentre {
 
     /// The power view now.
     pub fn view(&self) -> PowerView {
-        let (awake, keep_awake) = {
-            let inner = locked(&self.inner);
-            let keep_awake = match &inner.unavailable {
-                Some(reason) => Capability::CantTell { reason: reason.clone() },
-                None => Capability::Known,
-            };
-            (inner.machine.view(), keep_awake)
+        self.view_stamped().1
+    }
+
+    /// The power view now, with the generation taken in the same hold of both machines' locks (ADR 0034): every change of either machine
+    /// is made under its lock, so a view with a higher generation is never older than one with a lower one, and `broadcast_power`'s slot
+    /// refuses the older one whichever thread pushes last. Lock order: inner, then idle.
+    pub fn view_stamped(&self) -> (u64, PowerView) {
+        let inner = locked(&self.inner);
+        let idle_machine = locked(&self.idle);
+        let generation = self.views.next();
+        let keep_awake = match &inner.unavailable {
+            Some(reason) => Capability::CantTell { reason: reason.clone() },
+            None => Capability::Known,
         };
-        let idle = locked(&self.idle).view();
+        let awake = inner.machine.view();
+        let idle = idle_machine.view();
+        drop(idle_machine);
+        drop(inner);
         let cap = |a: IdleAction| match self.actions.can(a) {
             Reading::Available(()) => Capability::Known,
             Reading::Unavailable(reason) => Capability::CantTell { reason },
         };
-        PowerView {
+        let view = PowerView {
             awake,
             idle,
             caps: PowerCaps {
@@ -126,7 +138,8 @@ impl PowerCentre {
                 hibernate: cap(IdleAction::Hibernate),
                 shut_down: cap(IdleAction::ShutDown),
             },
-        }
+        };
+        (generation, view)
     }
 
     /// Cuts the power thread's wait short.
@@ -184,9 +197,9 @@ impl PowerCentre {
             let mut inner = locked(&self.inner);
             self.run(&mut inner, event, at);
         }
-        let after = self.view();
+        let (generation, after) = self.view_stamped();
         if before != after {
-            shared.broadcast_power(&after);
+            shared.broadcast_power(generation, &after);
         }
         after
     }
@@ -405,9 +418,9 @@ impl PowerCentre {
                 }
             }
         }
-        let after = self.view();
+        let (generation, after) = self.view_stamped();
         if before != after {
-            shared.broadcast_power(&after);
+            shared.broadcast_power(generation, &after);
         }
     }
 
@@ -449,8 +462,8 @@ impl PowerCentre {
             accepted.is_some()
         };
         if accepted {
-            let v = self.view();
-            shared.broadcast_power(&v);
+            let (generation, v) = self.view_stamped();
+            shared.broadcast_power(generation, &v);
         }
         let inputs = self.idle_inputs(shared);
         self.idle_apply(shared, IdleEvent::Tick(Box::new(inputs)), at);
@@ -530,6 +543,7 @@ fn read_inputs(shared: &Shared, watching: Option<dyno_core::process::ProcessRef>
         disk_bytes_per_s: sample.map(|s| s.disk_io.read_bps + s.disk_io.write_bps),
         programs: (!processes.is_empty()).then(|| processes.iter().map(|p| p.name.clone()).collect()),
         process_alive: watching.and_then(|w| alive(processes, w)),
+        watched: watching,
     }
 }
 

@@ -64,6 +64,15 @@ impl UnusualCentre {
 
     /// One look at the process table.
     pub fn look(&self, shared: &Shared) {
+        self.look_with(shared, &|| {});
+    }
+
+    /// [`look`](Self::look) with `during` run after the baseline observed and before its changes are stored: the moment a "forget"
+    /// can come in (tests start one there). The core lock and the baseline lock are held from the observation through the store and
+    /// the overview, in the order `forget` takes them (core, then baseline): a forget comes before the look or after it, never
+    /// between, so the store never keeps rows of a baseline that was forgotten (ADR 0034).
+    #[doc(hidden)]
+    pub fn look_with(&self, shared: &Shared, during: &dyn Fn()) {
         let settings = lock(&shared.core).settings.unusual;
         if !settings.enabled {
             return;
@@ -93,15 +102,17 @@ impl UnusualCentre {
             };
             signatures = signatures_of(shared.ports.signatures.as_ref(), &fresh);
         }
-        let outcome = {
-            let mut st = lock(&self.state);
-            st.baseline.observe(t, &settings, current_os(), &seen, &startup, &signatures)
-        };
         let mut core = lock(&shared.core);
-        if let Err(e) = core.store.apply_baseline(&outcome.changes) {
-            log::error!("dyno-agent: could not store the program baseline: {e}");
-        }
-        let overview = lock(&self.state).baseline.overview(t, &settings);
+        let (outcome, overview) = {
+            let mut st = lock(&self.state);
+            let outcome = st.baseline.observe(t, &settings, current_os(), &seen, &startup, &signatures);
+            during();
+            if let Err(e) = core.store.apply_baseline(&outcome.changes) {
+                log::error!("dyno-agent: could not store the program baseline: {e}");
+            }
+            let overview = st.baseline.overview(t, &settings);
+            (outcome, overview)
+        };
         for key in outcome.newly_unusual.iter().take(MAX_LINES_PER_LOOK) {
             let Some(item) = overview.items.iter().find(|i| &i.key == key) else {
                 continue;
@@ -153,10 +164,9 @@ impl UnusualCentre {
         core.store
             .clear_baseline()
             .map_err(|e| AgentError::new(ErrorCode::Internal, e.to_string()))?;
-        lock(&self.state).baseline.forget();
-        let settings = core.settings.unusual;
-        drop(core);
-        Ok(lock(&self.state).baseline.overview(now(), &settings))
+        let mut st = lock(&self.state);
+        st.baseline.forget();
+        Ok(st.baseline.overview(now(), &core.settings.unusual))
     }
 }
 
@@ -336,5 +346,44 @@ mod budget_tests {
         centre.look(&shared);
         assert_eq!(details.load(Ordering::SeqCst), 0, "the look never takes the details port");
         assert_eq!(fake.signature_counts(), (1, 3), "three new programs, one signature call");
+    }
+
+    /// Whether `m` is locked by someone (a `try_lock` that would block).
+    fn lock_is_held<T>(m: &Mutex<T>) -> bool {
+        matches!(m.try_lock(), Err(std::sync::TryLockError::WouldBlock))
+    }
+
+    /// ADR 0034: between the look's observation and its store, nothing else may change the store or the baseline: the look holds the
+    /// core lock and the baseline lock across both, in the order `forget` takes them, so a "forget" comes before the look or after
+    /// it. A look that let go of them in between could store rows of a baseline that a forget had just cleared.
+    #[test]
+    fn a_look_holds_the_core_and_baseline_locks_from_its_observation_to_its_store() {
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let fake = Fake::new();
+        let (shared, _, _) = Shared::build(
+            crate::paths::Dirs::at(tmp.path().join("data")),
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+        )
+        .unwrap();
+        lock(&shared.core).latest.processes = vec![process(100, "newcomer", 1.0)];
+        let centre = UnusualCentre {
+            state: Mutex::new(State {
+                baseline: Baseline::restore(Some(Timestamp(0)), vec![], vec![]),
+                startup: Some((Instant::now(), vec![])),
+            }),
+        };
+        let held = std::cell::Cell::new(None);
+        centre.look_with(&shared, &|| {
+            held.set(Some((lock_is_held(&shared.core), lock_is_held(&centre.state))));
+        });
+        assert_eq!(
+            held.get(),
+            Some((true, true)),
+            "(core, baseline) were held while the observed programs were stored"
+        );
+        let (_, entries, _) = lock(&shared.core).store.load_baseline().unwrap();
+        assert_eq!(entries.len(), 1, "the look stored what it observed");
     }
 }

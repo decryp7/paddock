@@ -74,7 +74,14 @@ impl Harness {
         };
         let mut s = *s;
         s.power.wake.enabled = on;
-        ask(c, Request::SaveSettings { settings: Box::new(s) }).unwrap();
+        ask(
+            c,
+            Request::SaveSettings {
+                settings: Box::new(s),
+                base_revision: None,
+            },
+        )
+        .unwrap();
     }
 }
 

@@ -252,7 +252,14 @@ fn settings_round_trip_and_survive_a_restart() {
     };
     s.launch_at_login = true;
     s.sampling.interval_ms = 700;
-    ask(&peer, Request::SaveSettings { settings: s }).unwrap();
+    ask(
+        &peer,
+        Request::SaveSettings {
+            settings: s,
+            base_revision: None,
+        },
+    )
+    .unwrap();
     let Reply::Settings(back) = ask(&peer, Request::Settings).unwrap() else {
         panic!("settings")
     };
@@ -299,6 +306,60 @@ fn an_alert_rule_is_added_changed_and_deleted_without_touching_the_other_setting
         panic!("settings")
     };
     assert!(gone.custom_alerts.is_empty());
+}
+
+/// ADR 0034: a window's copy of the settings, taken before an alert rule was added, is refused when it is saved with the revision it
+/// was taken at, and the rule stays. Saving at the current revision works and moves the revision on.
+#[test]
+fn a_settings_save_taken_before_another_change_is_refused_as_stale_and_loses_nothing() {
+    let h = Harness::start();
+    let peer = h.client();
+    let Reply::Settings(s0) = ask(&peer, Request::Settings).unwrap() else {
+        panic!("settings")
+    };
+    let rule = dyno_core::alarms::custom::CustomAlertRule {
+        id: "r1".into(),
+        name: "R1".into(),
+        metric: dyno_core::alarms::custom::CustomMetric::CpuTotal,
+        op: dyno_core::alarms::custom::CustomOp::Above,
+        limit: 90.0,
+        for_secs: 0,
+        severity: dyno_core::health::Severity::Warning,
+        enabled: true,
+    };
+    ask(&peer, Request::UpsertAlertRule { rule }).unwrap();
+    let mut changed = (*s0).clone();
+    changed.launch_at_login = !changed.launch_at_login;
+    let code = ask_code(
+        &peer,
+        Request::SaveSettings {
+            settings: Box::new(changed.clone()),
+            base_revision: Some(s0.revision),
+        },
+    );
+    assert_eq!(code, ErrorCode::Stale);
+    let Reply::Settings(now) = ask(&peer, Request::Settings).unwrap() else {
+        panic!("settings")
+    };
+    assert_eq!(now.custom_alerts.len(), 1, "the rule is kept");
+    assert_eq!(now.launch_at_login, s0.launch_at_login, "the refused save changed nothing");
+    // The window reloads and saves again at the new revision.
+    let Reply::Settings(saved) = ask(
+        &peer,
+        Request::SaveSettings {
+            settings: Box::new(changed),
+            base_revision: Some(now.revision),
+        },
+    )
+    .unwrap() else {
+        panic!("settings")
+    };
+    assert_eq!(
+        saved.custom_alerts.len(),
+        1,
+        "alert rules are the agent's, whatever the window's copy holds"
+    );
+    assert_eq!(saved.revision, now.revision + 1);
 }
 
 #[test]
@@ -805,7 +866,14 @@ fn pinned_counters_and_saved_sets_are_validated_and_survive_a_restart() {
         name: "Memory".into(),
         paths: vec!["\\Memory\\Free".into(), "bad".into()],
     }];
-    let Reply::Settings(saved) = ask(&peer, Request::SaveSettings { settings: s }).unwrap() else {
+    let Reply::Settings(saved) = ask(
+        &peer,
+        Request::SaveSettings {
+            settings: s,
+            base_revision: None,
+        },
+    )
+    .unwrap() else {
         panic!("settings")
     };
     assert_eq!(saved.counters.pinned, ["\\Memory\\Free"]);
@@ -893,6 +961,7 @@ fn throttling_alarms_can_be_switched_off_but_the_episode_is_still_recorded() {
         &peer,
         Request::SaveSettings {
             settings: Box::new(settings),
+            base_revision: None,
         },
     )
     .unwrap();
@@ -1114,6 +1183,7 @@ fn baselines_learn_silently_then_judge_and_alarm_only_when_asked() {
         &peer,
         Request::SaveSettings {
             settings: Box::new(settings),
+            base_revision: None,
         },
     )
     .unwrap();
@@ -1478,7 +1548,14 @@ mod widget_layouts {
         // A window that read the settings before the edit saves them with another change.
         let mut stale = old.clone();
         stale.launch_at_login = true;
-        ask(&peer, Request::SaveSettings { settings: stale }).unwrap();
+        ask(
+            &peer,
+            Request::SaveSettings {
+                settings: stale,
+                base_revision: None,
+            },
+        )
+        .unwrap();
         let Reply::Settings(now) = ask(&peer, Request::Settings).unwrap() else {
             panic!("settings")
         };

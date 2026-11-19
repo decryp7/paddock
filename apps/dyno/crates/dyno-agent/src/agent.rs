@@ -12,6 +12,7 @@ use dyno_core::alerts::Alerts;
 use dyno_core::facts::SystemFacts;
 use dyno_core::grouping::AppGroup;
 use dyno_core::metrics::SystemSample;
+use dyno_core::newer::{Generation, NewerSlot};
 use dyno_core::ports::{FactsSource, FileLocks, PlatformError, ProcessSource, StartupItems, SystemSensors, UserActivity};
 use dyno_core::process::ProcessSample;
 use dyno_core::protocol::{LiveDetail, LiveUpdate, Message};
@@ -91,44 +92,43 @@ impl JobSlot {
 }
 
 /// The newest volume list waiting for one app, with the ticket of the listing it came from: an older listing never replaces a
-/// newer one, and the list is never dropped for a full queue.
+/// newer one (also when the newer one was already taken), and the list is never dropped for a full queue. Built on the newer-only
+/// slot of ADR 0034.
 #[derive(Default)]
-pub struct VolumesSlot(Mutex<Option<(u64, Vec<dyno_core::disk::volume::Volume>)>>);
+pub struct VolumesSlot(NewerSlot<Vec<dyno_core::disk::volume::Volume>>);
 
 impl VolumesSlot {
-    /// Keeps the list unless a newer listing's is already waiting.
+    /// Keeps the list unless a newer listing's was stored before.
     pub fn put(&self, ticket: u64, volumes: Vec<dyno_core::disk::volume::Volume>) {
-        let mut m = lock(&self.0);
-        if m.as_ref().is_none_or(|(old, _)| *old < ticket) {
-            *m = Some((ticket, volumes));
-        }
+        self.0.put(ticket, volumes);
     }
 
     /// The list waiting, if any; the slot is empty afterwards.
     pub fn take(&self) -> Option<Vec<dyno_core::disk::volume::Volume>> {
-        lock(&self.0).take().map(|(_, v)| v)
+        self.0.take()
     }
 }
 
 /// The newest value of one whole-state event, waiting for a connection's push thread: it replaces an older one that was not sent yet, so
-/// a full queue can never lose it (a lost push left a window showing an old state until it asked again).
-pub struct LatestSlot<T>(Mutex<Option<T>>);
+/// a full queue can never lose it (a lost push left a window showing an old state until it asked again). A value carries the generation
+/// it was read at (ADR 0034): one that arrives after a newer one was stored is refused, however the pushing threads were scheduled.
+pub struct LatestSlot<T>(NewerSlot<T>);
 
 impl<T> Default for LatestSlot<T> {
     fn default() -> Self {
-        LatestSlot(Mutex::new(None))
+        LatestSlot(NewerSlot::new())
     }
 }
 
 impl<T> LatestSlot<T> {
-    /// Keeps `value` as the one waiting, replacing an older one.
-    pub fn put(&self, value: T) {
-        *lock(&self.0) = Some(value);
+    /// Keeps `value`, read at `generation`, as the one waiting unless a newer generation was stored before; true when it was kept.
+    pub fn put(&self, generation: u64, value: T) -> bool {
+        self.0.put(generation, value)
     }
 
     /// The value waiting, if any; the slot is empty afterwards.
     pub fn take(&self) -> Option<T> {
-        lock(&self.0).take()
+        self.0.take()
     }
 }
 
@@ -139,31 +139,44 @@ pub const MAX_PENDING_ALARMS: usize = 4096;
 struct PendingAlarms {
     /// Per alarm id: the first change that asks to notify the user, and the latest change.
     by_id: std::collections::BTreeMap<u64, (Option<AlarmChange>, AlarmChange)>,
+    /// Per alarm id: the newest ticket stored, kept after a take so a late older change of the alarm is still refused (the oldest
+    /// alarms' entries are given up beyond [`MAX_PENDING_ALARMS`]).
+    newest: std::collections::BTreeMap<u64, u64>,
     lost: u32,
 }
 
 /// Alarm changes waiting for one connection, per alarm: the first one that notifies (so "raised, then cleared before the app read
-/// either" still notifies) and the latest one (so the tray ends with the final state). At most [`MAX_PENDING_ALARMS`] alarms.
+/// either" still notifies) and the latest one (so the tray ends with the final state). At most [`MAX_PENDING_ALARMS`] alarms. A change
+/// carries the ticket taken with the state it describes (ADR 0034); a change older than one already stored for its alarm is refused.
 #[derive(Default)]
 pub struct AlarmSlot(Mutex<PendingAlarms>);
 
 impl AlarmSlot {
-    /// Adds a change.
-    pub fn put(&self, change: AlarmChange) {
+    /// Adds a change; false when a change of the same alarm with a higher ticket was stored before.
+    pub fn put(&self, change: AlarmChange) -> bool {
         let mut pending = lock(&self.0);
         let id = change.alarm.id;
+        let ticket = change.ticket;
+        if pending.newest.get(&id).is_some_and(|newest| ticket < *newest) {
+            return false;
+        }
+        pending.newest.insert(id, ticket);
+        while pending.newest.len() > MAX_PENDING_ALARMS {
+            pending.newest.pop_first();
+        }
         if let Some(entry) = pending.by_id.get_mut(&id) {
             if change.notify && entry.0.is_none() {
                 entry.0 = Some(change.clone());
             }
             entry.1 = change;
-            return;
+            return true;
         }
         if pending.by_id.len() >= MAX_PENDING_ALARMS {
             pending.by_id.pop_first();
             pending.lost = pending.lost.saturating_add(1);
         }
         pending.by_id.insert(id, (change.notify.then(|| change.clone()), change));
+        true
     }
 
     /// The waiting changes in alarm order (the notifying one before the latest), and how many alarms were given up.
@@ -430,6 +443,8 @@ pub struct Shared {
     pub extras: crate::extras::ExtrasCentre,
     /// Benchmark runs (only on the user's click).
     pub bench: crate::bench::BenchCentre,
+    /// Held by `SaveSettings` from the merge through the effects, taken before `core`: two saves never interleave their effects.
+    pub settings_apply: Mutex<()>,
     /// Network change events on the timeline (WP-35).
     pub netwatch: crate::netwatch::NetWatchCentre,
     /// Long operations (find files, read the OS logs, hash a file) as jobs with progress and Cancel.
@@ -468,6 +483,8 @@ pub struct Shared {
     /// What must not start once the agent stops (a keep-awake, a job, a due wake's actions and its saved next time): the stop
     /// closes it and waits for what is already inside.
     pub stop_gate: StopGate,
+    /// Generations of the pushed whole-state views that have no generation of their own (ADR 0034).
+    views: Generation,
     stop: AtomicBool,
     wake: (Mutex<bool>, Condvar),
     next_conn: AtomicU64,
@@ -854,6 +871,8 @@ impl Shared {
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),
             next_conn: AtomicU64::new(1),
+            settings_apply: Mutex::new(()),
+            views: Generation::new(),
         });
         // What the helper reads for the agent (wake requests on Windows, the firewall, login items on macOS) is bound here.
         if helper_first {
@@ -980,29 +999,66 @@ impl Shared {
         }
     }
 
-    /// The Wake-on-LAN list changed; the newest replaces an older one that was not sent yet.
-    pub fn broadcast_wol(&self, view: &dyno_core::wol::WolView) {
-        self.publish(|p| p.wol.put(view.clone()), &Message::WolChanged(Box::new(view.clone())));
+    /// A new generation for a whole-state view that is read under the core lock (ADR 0034): take it in the same hold that reads the
+    /// state, and hand it to the `broadcast_*` function with the view.
+    pub fn next_view_generation(&self) -> u64 {
+        self.views.next()
     }
 
-    /// The power view changed; the newest replaces an older one that was not sent yet.
-    pub fn broadcast_power(&self, view: &dyno_core::power::PowerView) {
-        self.publish(|p| p.power.put(view.clone()), &Message::PowerChanged(Box::new(view.clone())));
+    /// The Wake-on-LAN list changed; the newest replaces an older one that was not sent yet. `generation` is the one taken with the
+    /// list ([`WolCentre::view_stamped`](crate::wol::WolCentre::view_stamped)).
+    pub fn broadcast_wol(&self, generation: u64, view: &dyno_core::wol::WolView) {
+        self.publish(
+            |p| {
+                let _ = p.wol.put(generation, view.clone());
+            },
+            &Message::WolChanged(Box::new(view.clone())),
+        );
     }
 
-    /// The scheduled wakes changed; the newest replaces an older one that was not sent yet.
+    /// The power view changed; the newest replaces an older one that was not sent yet. `generation` is the one taken with the view
+    /// (`PowerCentre::view_stamped`), so a view that is read earlier but pushed later is refused.
+    pub fn broadcast_power(&self, generation: u64, view: &dyno_core::power::PowerView) {
+        self.publish(
+            |p| {
+                let _ = p.power.put(generation, view.clone());
+            },
+            &Message::PowerChanged(Box::new(view.clone())),
+        );
+    }
+
+    /// The scheduled wakes changed; the newest replaces an older one that was not sent yet (the caller holds `WakeCentre::exclusive`).
     pub fn broadcast_wakes(&self, view: &dyno_core::power::schedule::WakesView) {
-        self.publish(|p| p.wakes.put(view.clone()), &Message::WakesChanged(Box::new(view.clone())));
+        let generation = self.views.next();
+        self.publish(
+            |p| {
+                let _ = p.wakes.put(generation, view.clone());
+            },
+            &Message::WakesChanged(Box::new(view.clone())),
+        );
     }
 
     /// A surface's widget layout changed; the newest replaces an older one that was not sent yet.
     pub fn broadcast_layout(&self, surface: &dyno_core::widgets::DynoSurface) {
-        self.publish(|p| p.layout.put(*surface), &Message::WidgetLayoutChanged(*surface));
+        let generation = self.views.next();
+        self.publish(
+            |p| {
+                let _ = p.layout.put(generation, *surface);
+            },
+            &Message::WidgetLayoutChanged(*surface),
+        );
     }
 
-    /// An alarm changed: every connection keeps the first change that notifies and the latest one, per alarm.
+    /// An alarm changed: every connection keeps the first change that notifies and the latest one, per alarm. The change carries the
+    /// ticket the alarm centre took under the core lock, so a caller that pushes after letting go of the lock cannot put an older
+    /// change over a newer one of its alarm.
     pub fn broadcast_alarm(&self, change: &AlarmChange) {
-        self.publish(|p| p.alarms.put(change.clone()), &Message::Alarm(change.clone()));
+        self.publish(
+            |p| {
+                let _ = p.alarms.put(change.clone());
+            },
+            &Message::Alarm(change.clone()),
+        );
     }
 
     /// An activity row was appended: every connection queues it, in order, up to [`EVENT_QUEUE`].

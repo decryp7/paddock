@@ -23,6 +23,7 @@ use dyno_core::intel_lists::{
 use dyno_core::intel_sub::Schedule;
 use dyno_core::intel_text::parse_list;
 use dyno_core::jobs::JobSpec;
+use dyno_core::newer::NewerSlot;
 use paddock_download::schedule::next_allowed;
 use paddock_jobs::time::Clock;
 use paddock_jobs::{JobContext, JobError, Phase};
@@ -107,7 +108,8 @@ pub struct IntelCentre {
     clock: Arc<dyn Clock>,
     lists: Mutex<UserLists>,
     fetch: Mutex<FetchStore>,
-    index: RwLock<Arc<IntelIndex>>,
+    /// The installed index, with the revision of the lists it was built from (ADR 0034).
+    index: NewerSlot<Arc<IntelIndex>>,
     index_error: Mutex<Option<String>>,
     geo: RwLock<Arc<GeoReader>>,
     home: Mutex<HomeInfo>,
@@ -136,7 +138,7 @@ impl IntelCentre {
             lists: Mutex::new(load_lists(&dirs)),
             fetch: Mutex::new(FetchStore::load(&dirs)),
             geo: RwLock::new(Arc::new(geo_fetch::load_reader(&dirs, now_secs))),
-            index: RwLock::new(Arc::new(IntelIndex::default())),
+            index: NewerSlot::new(),
             index_error: Mutex::new(None),
             home: Mutex::new(HomeInfo {
                 country: None,
@@ -171,7 +173,7 @@ impl IntelCentre {
 
     /// The current index (cheap to clone).
     pub fn index(&self) -> Arc<IntelIndex> {
-        self.index.read().unwrap_or_else(PoisonError::into_inner).clone()
+        self.index.get().unwrap_or_default()
     }
 
     /// The current location databases.
@@ -191,6 +193,7 @@ impl IntelCentre {
             let _ = lock(&self.fetch).save(&self.dirs);
         }
         *lists = next;
+        lists.revision += 1;
         if let Err(e) = save_lists(&self.dirs, &lists) {
             log::warn!(target: "dyno::intel", "lists not saved: {}", e.kind());
         }
@@ -273,8 +276,31 @@ impl IntelCentre {
     /// Builds the index from the enabled lists as the job `ctx`: phase `index` counts the entries taken. Cancel stops it and keeps
     /// the old index; a limit reached is reported in the status and keeps the old index too.
     pub fn rebuild(&self, ctx: &JobContext) -> Result<(), JobError> {
+        self.rebuild_with(ctx, &|_| {})
+    }
+
+    /// [`rebuild`](Self::rebuild) with `after_snapshot(pass)` run once a pass has read the lists and before it builds: the moment an
+    /// edit can land while a build runs on the older lists (tests edit there).
+    #[doc(hidden)]
+    pub fn rebuild_with(&self, ctx: &JobContext, after_snapshot: &dyn Fn(u32)) -> Result<(), JobError> {
+        // A running rebuild covers an edit made after it began (the job start answers the running job), so a build whose lists moved
+        // on by its end builds again from the new ones; the slot refuses an index of an older revision than the installed one.
+        let mut pass = 0;
+        loop {
+            let revision = lock(&self.lists).revision;
+            self.rebuild_pass(ctx, pass, after_snapshot)?;
+            pass += 1;
+            if lock(&self.lists).revision == revision || ctx.cancel_token().is_cancelled() {
+                return Ok(());
+            }
+            log::info!(target: "dyno::intel", "the lists changed while the index was built; building again");
+        }
+    }
+
+    fn rebuild_pass(&self, ctx: &JobContext, pass: u32, after_snapshot: &dyn Fn(u32)) -> Result<(), JobError> {
         let started = self.clock.monotonic();
         let lists = lock(&self.lists).clone();
+        after_snapshot(pass);
         let mut inputs = Vec::with_capacity(lists.lists.len());
         for l in &lists.lists {
             let text_entries = match &l.source {
@@ -302,7 +328,9 @@ impl IntelCentre {
         match built {
             Ok(ix) => {
                 log::info!(target: "dyno::intel", "index built: lists={} entries={total} ranges={} duration_ms={ms}", inputs.len(), ix.stored_ranges());
-                *self.index.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(ix);
+                if !self.index.put(lists.revision, Arc::new(ix)) {
+                    log::info!(target: "dyno::intel", "index of lists revision {} dropped: a newer one is installed", lists.revision);
+                }
                 *lock(&self.index_error) = None;
                 Ok(())
             }
@@ -648,6 +676,44 @@ mod tests {
         ));
         let st = r.centre.status();
         assert_eq!((st.index_ranges, st.index_error), (1, None));
+    }
+
+    /// ADR 0034: an edit lands after a rebuild read the lists; the job start answers the running job, so the edit's own rebuild never
+    /// runs. The running build builds again from the new lists, and the disabled list stops matching.
+    #[test]
+    fn a_rebuild_whose_lists_changed_meanwhile_builds_again() {
+        let r = rig(vec![]);
+        let id = add_manual(&r.centre, "A", "8.8.8.8");
+        let edited = std::cell::Cell::new(false);
+        r.centre
+            .rebuild_with(&ctx(), &|pass| {
+                if pass == 0 {
+                    r.centre
+                        .edit(IntelEdit::SetEnabled {
+                            id: id.clone(),
+                            enabled: false,
+                        })
+                        .unwrap();
+                    edited.set(true);
+                }
+            })
+            .unwrap();
+        assert!(edited.get());
+        assert!(
+            !matches!(r.centre.index().check(&ip("8.8.8.8"), None), Verdict::Flagged { .. }),
+            "the disabled list no longer matches"
+        );
+    }
+
+    /// ADR 0034: an index of an older revision does not replace an installed newer one.
+    #[test]
+    fn an_index_of_an_older_revision_is_refused() {
+        let r = rig(vec![]);
+        add_manual(&r.centre, "A", "8.8.8.8");
+        r.centre.rebuild(&ctx()).unwrap();
+        let installed = r.centre.index();
+        assert!(!r.centre.index.put(0, Arc::new(IntelIndex::default())));
+        assert!(Arc::ptr_eq(&installed, &r.centre.index()));
     }
 
     #[test]

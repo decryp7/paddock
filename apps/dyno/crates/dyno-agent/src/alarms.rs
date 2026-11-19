@@ -24,6 +24,8 @@ fn is_removed(rule: &str) -> bool {
 pub struct AlarmCentre {
     engine: AlarmEngine,
     last_tick: Timestamp,
+    /// The last ticket given to a change (ADR 0034).
+    tickets: u64,
 }
 
 impl AlarmCentre {
@@ -49,6 +51,7 @@ impl AlarmCentre {
         AlarmCentre {
             engine: AlarmEngine::restore(config, zone, alarms, muted),
             last_tick: Timestamp(0),
+            tickets: 0,
         }
     }
 
@@ -79,7 +82,15 @@ impl AlarmCentre {
         let batch = store.batch();
         let changes = change(self, store);
         match batch.commit() {
-            Ok(()) => changes,
+            Ok(()) => changes
+                .into_iter()
+                .map(|mut c| {
+                    // The ticket is taken here, under the caller's hold of the core lock, in the order the changes were made.
+                    self.tickets += 1;
+                    c.ticket = self.tickets;
+                    c
+                })
+                .collect(),
             Err(e) => {
                 *self = before;
                 log::error!(

@@ -328,6 +328,10 @@ pub struct AlarmChange {
     pub notify: bool,
     /// When.
     pub at: Timestamp,
+    /// The agent's number of this change, taken under the lock that produced it (ADR 0034): a connection's slot keeps the change with
+    /// the highest ticket of its alarm, whichever thread pushes last. Not part of the wire; 0 outside the agent.
+    #[serde(skip)]
+    pub ticket: u64,
 }
 
 fn clip(s: &str, max: usize) -> String {
@@ -434,6 +438,7 @@ impl AlarmEngine {
             alarm: alarm.clone(),
             notify,
             at,
+            ticket: 0,
         }
     }
 
