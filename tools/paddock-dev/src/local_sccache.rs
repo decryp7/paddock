@@ -37,6 +37,15 @@ pub fn server_port(env: &HashMap<String, String>) -> String {
         .unwrap_or_else(|| "4226".into())
 }
 
+/// Whether a server listens on [`server_port`] on this machine (sccache listens on 127.0.0.1). A connect has no side effect, unlike
+/// `--show-stats`, which starts a server when none runs (ER-45). Which server it is, ours or not, is decided by its stats.
+pub fn listening(env: &HashMap<String, String>) -> bool {
+    let Ok(port) = server_port(env).parse::<u16>() else {
+        return false;
+    };
+    std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127, 0, 0, 1], port)), Duration::from_millis(300)).is_ok()
+}
+
 /// Whether [`prepare`] may download the pinned release.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Install {
@@ -593,15 +602,27 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
         let start_log = run.join(format!("start-{}.log", std::process::id()));
         // The server outlives this process and would hold a pipe open, so its starter writes to a file.
         let mut started_here = false;
-        let start = server
-            .call("--start-server")
-            .output(Output::File(start_log.clone()))
-            .run(env, &mut std::io::sink())
-            .map(|mut s| {
-                started_here = s.success;
-                s.success |= already_running(&s);
-                s
-            });
+        // A server already listening is not started again: the start would only fail with "Address in use" and write that to the
+        // running server's error log, the log every warning names (247 times in two days, docs/research/2026-11-19-sccache.md).
+        // After a restart of our own server the port is started without asking.
+        let start = if !restarted && listening(env) {
+            Ok(crate::ci_tool::Ran {
+                success: true,
+                how: "already listening".into(),
+                stdout: String::new(),
+                stderr: String::new(),
+            })
+        } else {
+            server
+                .call("--start-server")
+                .output(Output::File(start_log.clone()))
+                .run(env, &mut std::io::sink())
+                .map(|mut s| {
+                    started_here = s.success;
+                    s.success |= already_running(&s);
+                    s
+                })
+        };
         let _ = std::fs::remove_file(&start_log);
         let stats = server.call("--show-adv-stats").run(env, &mut std::io::sink());
         let (start, stats) = match (start, stats) {
@@ -961,6 +982,8 @@ mod tests {
             ("PADDOCK_DEV_HOME", home.path().to_str().unwrap()),
             ("SCCACHE_DIR", home.path().join("cache").to_str().unwrap()),
             ("PATH", "/usr/bin:/bin"),
+            // A port nothing listens on: the default 4226 is the machine's own server, which a test must never see (ER-14).
+            ("SCCACHE_SERVER_PORT", free_port().to_string().as_str()),
         ]);
         let bin = install_path(&e).unwrap();
         std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
@@ -988,6 +1011,33 @@ exit 0
             std::fs::write(bin.with_file_name("location"), format!("Cache location                  {l}\n")).unwrap();
         }
         (home, e, bin)
+    }
+
+    /// A port the OS just handed out and nothing listens on any more.
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    }
+
+    #[test]
+    fn listening_sees_a_listener_and_not_a_free_port() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port().to_string();
+        assert!(listening(&env(&[("SCCACHE_SERVER_PORT", port.as_str())])));
+        drop(l);
+        assert!(!listening(&env(&[("SCCACHE_SERVER_PORT", free_port().to_string().as_str())])));
+        assert!(!listening(&env(&[("SCCACHE_SERVER_PORT", "not-a-port")])));
+    }
+
+    /// A server already listening on the port is not started again (its error log would get "Address in use" on every call),
+    /// and it is not ours, so a read-only one is not stopped either.
+    #[cfg(unix)]
+    #[test]
+    fn a_listening_server_is_not_started_again() {
+        let (_h, mut e, bin) = fake(0, None);
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        e.insert("SCCACHE_SERVER_PORT".into(), l.local_addr().unwrap().port().to_string());
+        assert!(matches!(prepare(&e, Install::Never), Outcome::Ready(_)));
+        assert_eq!(calls(&bin), Vec::<String>::new(), "no --start-server, no --stop-server");
     }
 
     #[cfg(unix)]
