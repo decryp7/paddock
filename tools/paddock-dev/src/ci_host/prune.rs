@@ -163,7 +163,7 @@ fn home_of(env: &HashMap<String, String>) -> Option<PathBuf> {
 }
 
 /// Every folder named `incremental` below `dir` (not looking inside one), never through a link.
-fn incremental_folders(dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn incremental_folders(dir: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
