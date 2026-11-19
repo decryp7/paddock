@@ -2298,3 +2298,20 @@ save more, on each OS? And did the user's Defender process exclusions for git ch
   | before (the first version) | `rustc-wrapper`, no `sccache` name | 112 s | 0 (no C compile went through sccache) | 311 / 164 |
 
 - **Result:** the shim gives 270 C/C++ hits (libsqlite3-sys, zstd-sys, ring and the like) where the first version gave none, and the run took 95 s against 112 s. **Not measured:** a repeat (one run per row, so the 17 s difference is inside this machine's noise at that load; the hit counts are not), and a Linux or Windows host. A `cargo xwin` build is as uncached for C as before; ring's C is a few seconds.
+
+## CI's sccache on RustFS: the `s3` backend on the three runner classes (2026-11-19, perf/sccache-hit-rate, docs/research/2026-11-19-sccache.md WP-8)
+
+- **Question:** does each CI runner class reach the user's RustFS S3 store, write to it and read from it through `./dev ci setup-rust --sccache-backend s3` (sccache's chain `disk,s3`, the local disk first), and what does it save?
+- **Method:** the workflow `sccache-s3-trial.yml` of the branch `diag/sccache-s3-trial` (not for landing), merged onto `origin/train/2026-11-19-16` (7af38a878) by `./dev ci dispatch --trial`, on the real runners: the Mac mini runners (macOS arm64), the Linux job in the `paddock-ci:v3` container and the Windows runner (x86_64). Each job: `cargo clippy --all-targets --locked` and `cargo nextest run --profile ci --locked --no-run` in `tools/paddock-dev`, sccache 0.19.0, per-level numbers from `sccache --show-stats`. From run 8312 on, the local disk was emptied before the server started and the build folder was new (its name has the run id), so every compile went through sccache and every hit came from S3 (L1). One run per row; the three runner classes ran at the same time, each on its own machine or slot. The S3 key was never printed.
+- **Reach:** the unauthenticated health check `GET /minio/health/live` answered 200 on every runner: Mac 4 to 7 ms connect, 10 to 119 ms total; Linux 0.3 to 0.5 ms connect, 0.8 to 1.2 ms total; Windows 3 to 23 ms connect, 5 to 24 ms total.
+
+  | Run | What | Mac | Linux | Windows |
+  | --- | --- | --- | --- | --- |
+  | 8305 | first run, S3 empty | 4 of 319 hits (1.3%); L1 writes 312, 0 failures; clippy 37 s + test build 33 s | 163 of 337 hits (48.8%, all from the container's `/sccache` mount, L1 hits 0); L1 writes 171, 0 failures; 22 s + 24 s | 2 of 325 hits (0.6%); L1 writes 320, 0 failures; 73 s + 76 s |
+  | 8306 | second run, nothing emptied | 0 compile requests (the kept build folder; cargo ran no rustc) | 334 of 337 hits, all L0; L1 hits 0; 14 s + 17 s | 0 compile requests (kept build folder) |
+  | 8312 | local disk emptied, new build folder | not run: the job was refused for disk (39.7 GiB free, below the runner's 50 GiB refusal level) | 171 of 337 hits (50.7%), all L1; 18 s + 19 s | 243 of 325 hits (74.8%), all L1; 38 s + 39 s |
+  | 8323 | the same as 8312, after the Mac volume was freed | 237 of 319 hits (74.3%), all L1; 0 L1 write failures; 25 s + 25 s | not read | not read |
+
+- **Result:** all three runner classes reach RustFS, write to it (S3 writes equal local writes, 0 failures) and read from it with a cold local disk. With S3 warm and the local disk empty, clippy plus test build took 77 s on Windows against 149 s cold (48% less) and 50 s on the Mac against 70 s cold (29% less); on Linux 37 s against 46 s with 49% local hits already (there is no fully cold Linux baseline in these runs). The L1 hit rate of 50 to 75% is lower than the 99 to 100% a warm local disk gives (run 8306, Linux): the misses are probably cache keys that contain the per-run build folder path (`paddock-trial-<run id>`); that is a guess, not investigated.
+- **Not measured:** a store that hangs in the middle of a job (accepted risk); a large workspace (Spotter, Debrief) and a whole train's CI; a repeat of each row (one run each, so a 10% difference in seconds is inside the noise of a shared machine); the Linux and Windows rows of run 8323.
+

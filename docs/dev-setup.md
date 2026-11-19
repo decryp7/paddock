@@ -148,8 +148,9 @@ since Rust 1.90), where mold saves a little more per link. macOS keeps the defau
 ## Shared build cache
 
 CI Rust jobs use sccache's **local disk** on every OS: the job slot's kept folder on a host runner, `/sccache` in a container
-(the `setup-rust` input `sccache-backend` defaults to `local`, and so does `./dev ci setup-rust`, `ci_setup_rust.rs`). No workflow
-picks another backend. The shared Dragonfly (Redis-compatible) server at `172.16.1.188:6379` was CI's backend until 2026-10-25: it
+(the `setup-rust` input `sccache-backend` defaults to the variable `PADDOCK_CI_SCCACHE_BACKEND`, `local` when it is unset, and so does
+`./dev ci setup-rust`, `ci_setup_rust.rs`). No workflow picks another backend; the RustFS store behind the disk is switched on by that
+variable (below). The shared Dragonfly (Redis-compatible) server at `172.16.1.188:6379` was CI's backend until 2026-10-25: it
 filled up, the Mac job's sccache server failed to start and every rustc call failed (commit 1383e9898); the user decided against a
 shared backend on 2026-10-28 and again on 2026-11-17 (CI keeps its per-slot caches). The Redis path is kept for a deliberate trial:
 
@@ -157,8 +158,19 @@ shared backend on 2026-10-28 and again on 2026-11-17 (CI keeps its per-slot cach
   `SCCACHE_REDIS_DB=5`. The `setup-rust` action reads them as its input defaults; they are used only with `auto` or `redis`.
   sccache uses **database 5 only**; never use another database number.
 - The database goes in `SCCACHE_REDIS_DB`, never in the URL: sccache 0.18 ignores a `/5` path and writes to database 0.
-- `sccache-backend: local | auto | redis` (default `local`; `auto` is Redis when an endpoint is set, else local; `redis` fails the
-  job when no endpoint is set).
+- `sccache-backend: local | auto | redis | s3` (default: the Gitea variable `PADDOCK_CI_SCCACHE_BACKEND`, `local` when it is unset;
+  `auto` is Redis when an endpoint is set, else local; `redis` fails the job when no endpoint is set).
+- **`s3`: the local disk first, the shared RustFS store behind it** (docs/research/2026-11-19-sccache.md section 8, user decision
+  2026-11-19; trial numbers in docs/benchmarks.md, "CI's sccache on RustFS"). Settings, all in Gitea (Settings, Actions): the
+  variables `PADDOCK_SCCACHE_S3_ENDPOINT` (`http://172.16.1.220:15000`) and `PADDOCK_SCCACHE_S3_BUCKET` (`sccache-paddock`), the
+  secrets `PADDOCK_SCCACHE_S3_ACCESS_KEY_ID` and `PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY` (one key for every runner class, scoped to
+  `sccache-paddock/paddock-ci/*`), and the variable `PADDOCK_CI_SCCACHE_BACKEND=s3` to switch it on (delete it to switch off: every
+  job is back on its local disk at the next run). The key reaches only the `setup-rust` step (each use passes it; conformance C141
+  checks that, and that the gates job and the release workflows hold none); the sccache server gets the chain and the key, every
+  later step only the local disk. A job falls back to its local disk, with a `::warning::`, when the store's HTTP health check
+  (`/minio/health/live`, 5 s at most) fails, and a failed S3 write never fails a build. A store that hangs in the middle of a job
+  can slow that job: accepted (user, 2026-11-20). The store's size is the store's job: before a release check
+  `rc bucket lifecycle rule list <alias>/sccache-paddock` shows the 14-day expiry rule, as sccache never evicts from S3.
 - `setup-rust` uses the sccache already on the runner, else installs a pinned release (checksum-verified, in the runner's tool
   cache) for Linux x86_64/aarch64, macOS aarch64 and Windows x86_64. Bump the version and the four SHA-256 values together.
 - It also sets `CARGO_INCREMENTAL=0` and `SCCACHE_IGNORE_SERVER_IO_ERROR=1`, so an unreachable cache slows a build and
