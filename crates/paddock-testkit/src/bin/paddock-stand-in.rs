@@ -29,6 +29,16 @@ const MAX_STDIN: u64 = 1 << 20;
 /// What the stand-in exits with when its own script is wrong (sysexits EX_SOFTWARE), distinct from the codes a script asks for.
 const BROKEN: i32 = 70;
 
+/// The cap of a `burn` and a `repeat`: two minutes, or less when `PADDOCK_STAND_IN_CAP_MS` says so (the stand-in's own test).
+fn cap() -> Duration {
+    let ms = std::env::var("PADDOCK_STAND_IN_CAP_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok());
+    Duration::from_millis(ms.map_or(MAX_SLEEP_MS.unsigned_abs(), |m| {
+        m.min(MAX_SLEEP_MS.unsigned_abs())
+    }))
+}
+
 fn main() {
     if std::env::var_os("PADDOCK_STAND_IN_PRINT_HASH").is_some() {
         println!("{}", json::source_hash(STUB_SOURCE, JSON_SOURCE));
@@ -194,7 +204,7 @@ struct Ctx {
     line: std::cell::RefCell<Option<String>>,
 }
 
-/// Fills a template: `{args}` (the arguments, joined by spaces), `{arg:N}` (the N-th, from 1; empty when absent), `{cwd}`, `{dir}` (the
+/// Fills a template: `{args}` (the arguments, joined by spaces), `{args_lines}` (one per line, each ended by a newline, as `printf '%s\n' "$@"`), `{arg:N}` (the N-th, from 1; empty when absent), `{cwd}`, `{dir}` (the
 /// stand-in's own folder), `{name}`, `{pid}`, `{environ}` (every variable as a `NAME=value` line, as `env` prints them), `{env:NAME}` and `{env:NAME|fallback}` (empty or the fallback when unset),
 /// `{flag_unquoted:PREFIX}` (the same without one pair of single quotes around it, as cargo's `--config key='value'` has), `{flag:PREFIX}` or `{flag:PREFIX|SUFFIX}` (what follows PREFIX in the last argument that starts with it, as `${a#PREFIX}` does, without a trailing SUFFIX when it has one), `{lines:PATH}` or `{lines:PATH|MAX}` (how many lines the file has, 0 when it is missing, at most MAX: `wc -l`), `{run:program|arg|arg}` (what that program prints in the working folder, without its last newline; empty when it fails; no `|` or `}` inside an argument), `{nice}` (its own nice value), `{cgroup:FILE|fallback}` (that file of its own cgroup v2), `{stdin}` and `{stdin_line}` (stdin, or its first line); `{{` and `}}` are a brace. An unknown token is an error of the script.
 fn expand(text: &str, ctx: &Ctx) -> Result<String, String> {
@@ -227,6 +237,9 @@ fn token(t: &str, ctx: &Ctx) -> Result<String, String> {
     let stdin = ctx.stdin.as_deref().unwrap_or("");
     Ok(match t {
         "args" => ctx.argv.join(" "),
+        // As `printf '%s\n' "$@"`: each argument and a newline (a single newline when there are none).
+        "args_lines" if ctx.argv.is_empty() => "\n".to_string(),
+        "args_lines" => ctx.argv.iter().map(|a| format!("{a}\n")).collect(),
         "cwd" => std::env::current_dir()
             .map(|d| d.display().to_string())
             .unwrap_or_default(),
@@ -434,14 +447,23 @@ fn run_steps(actions: &Value, ctx: &Ctx) -> Result<Option<i32>, String> {
                     .map_err(|e| format!("cannot start {program}: {e}"))?;
             }
             "read_line" => read_stdin_line(ctx)?,
-            "burn" => loop {
-                std::hint::black_box(0u64);
-            },
-            "repeat" => loop {
-                if let Some(code) = run_steps(arg, ctx)? {
-                    return Ok(Some(code));
+            // Both end at the cap of a sleep (a stand-in that outlives its test is broken, not a leak).
+            "burn" => {
+                let until = std::time::Instant::now() + cap();
+                while std::time::Instant::now() < until {
+                    std::hint::black_box(0u64);
                 }
-            },
+                return Err("burn ran to its cap of two minutes".into());
+            }
+            "repeat" => {
+                let until = std::time::Instant::now() + cap();
+                while std::time::Instant::now() < until {
+                    if let Some(code) = run_steps(arg, ctx)? {
+                        return Ok(Some(code));
+                    }
+                }
+                return Err("repeat ran to its cap of two minutes".into());
+            }
             other => return Err(format!("unknown step `{other}`")),
         }
     }

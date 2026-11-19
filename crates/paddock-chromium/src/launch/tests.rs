@@ -812,7 +812,7 @@ fn a_start_ended_by_the_callers_cap_says_it_was_the_time_limit() {
     let d = tempfile::tempdir().unwrap();
     let silent = Browser::chromium(
         paddock_testkit::StandIn::new(d.path(), "silent")
-            .sleeps(Duration::from_secs(300))
+            .sleeps(paddock_testkit::MAX_SLEEP)
             .install()
             .unwrap()
             .program(),

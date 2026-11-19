@@ -14,15 +14,17 @@
 //! # Ok(()) }
 //! ```
 //!
-//! What a stand-in can do, in this order: print stdout and stderr lines, write or append files, sleep (at most two minutes),
-//! start a named grandchild (for tree-kill tests, optionally writing its pid to a file), echo what it read on stdin, then exit
-//! with a code. [`StandIn::when_args`] answers a call whose first arguments match differently (the first match wins), so one
+//! What a stand-in can do: the steps of an [`Actions`] run top to bottom in the order they were added, then it exits with the code
+//! (default 0). The steps: print stdout and stderr lines, write or append files, sleep (at most two minutes: a longer sleep is refused
+//! at install), start a named grandchild (for tree-kill tests, optionally writing its pid to a file), echo what it read on stdin.
+//! A path or text that has to reach the stand-in untouched goes through [`template_literal`] (or a non-template method such as
+//! [`Actions::writes`]), since the `_with` methods read `{` and `}` as template syntax. [`StandIn::when_args`] answers a call whose first arguments match differently (the first match wins), so one
 //! program answers `--version` and `build` its own way. Calls are recorded when [`StandIn::records_args`] is set: arguments
 //! (with spaces, quotes and non-ASCII as they were given; a non-UTF-8 argument is lossy), the environment variables asked for
 //! with [`StandIn::records_env`] and, with [`StandIn::reads_stdin`], what was written to stdin (at most 1 MiB).
 //!
 //! More, for the fixtures that were shell scripts: output filled from the call ([`Actions::stdout_with`] and the other `_with`
-//! methods name `{args}`, `{arg:N}`, `{flag:PREFIX}`, `{flag_unquoted:PREFIX}`, `{cwd}`, `{dir}`, `{name}`, `{pid}`, `{environ}`, `{flag:PREFIX|SUFFIX}`, `{lines:PATH|MAX}`, `{run:program|arg|arg}`, `{env:NAME}` / `{env:NAME|fallback}`, `{nice}`, `{cgroup:FILE|fallback}`, `{stdin}` and
+//! methods name `{args}`, `{args_lines}`, `{arg:N}`, `{flag:PREFIX}`, `{flag_unquoted:PREFIX}`, `{cwd}`, `{dir}`, `{name}`, `{pid}`, `{environ}`, `{flag:PREFIX|SUFFIX}`, `{lines:PATH|MAX}`, `{run:program|arg|arg}`, `{env:NAME}` / `{env:NAME|fallback}`, `{nice}`, `{cgroup:FILE|fallback}`, `{stdin}` and
 //! `{stdin_line}`; `{{` and `}}` are braces), [`Actions::writes_atomically`], [`Actions::waits_for_file`], named pipes
 //! ([`Actions::makes_fifo`], [`Actions::reads_file`]), [`Actions::ignores_term`] (Unix), [`Actions::installs`] (a second stand-in
 //! written at run time, as a fake `cargo` that "builds" a tool does), [`Actions::exits_with_env`] and [`Actions::execs`] (run another
@@ -122,7 +124,17 @@ pub struct Actions {
     /// A template names a stdin token (which needs stdin read whole, unless a `read_line` step reads the one line).
     stdin_tokens: bool,
     reads_line: bool,
+    /// The first thing a test asked for that a stand-in cannot do (a sleep over the cap); `install` and `files` refuse with it.
+    refused: Option<String>,
 }
+
+/// Escapes `text` for a `_with` method, so that braces in it (a path, JSON) are printed as they are and not read as tokens.
+pub fn template_literal(text: &str) -> String {
+    text.replace('{', "{{").replace('}', "}}")
+}
+
+/// The longest a `sleep` step, a `wait_for_file`, a `burn` and a `repeat` run (the stand-in binary has the same cap).
+pub const MAX_SLEEP: Duration = Duration::from_secs(120);
 
 impl Actions {
     /// No steps, exit code 0.
@@ -172,9 +184,15 @@ impl Actions {
         self.step("write", Value::Obj(m))
     }
 
-    /// Sleeps for `d`, at most two minutes (the stand-in cuts a longer one). A test that wants a hung program bounds its own wait.
+    /// Sleeps for `d`, at most [`MAX_SLEEP`]: a longer one is refused when the stand-in is installed (a program that sleeps for
+    /// minutes outlives its test). A test that wants a hung program bounds its own wait.
     #[must_use]
-    pub fn sleeps(self, d: Duration) -> Actions {
+    pub fn sleeps(mut self, d: Duration) -> Actions {
+        if d > MAX_SLEEP && self.refused.is_none() {
+            self.refused = Some(format!(
+                "a sleep of {d:?} is over the cap of {MAX_SLEEP:?}: ask for at most the cap"
+            ));
+        }
         let ms = i64::try_from(d.as_millis()).unwrap_or(i64::MAX);
         self.step("sleep_ms", Value::Num(ms))
     }
@@ -295,7 +313,8 @@ impl Actions {
     /// Runs `each` again and again until the program is ended, as `while :; do ...; done` does (`each` should print or sleep).
     /// An `exit_env` or `exec` inside ends the program.
     #[must_use]
-    pub fn repeats(self, each: &Actions) -> Actions {
+    pub fn repeats(mut self, each: &Actions) -> Actions {
+        self.refused = self.refused.or_else(|| each.refused.clone());
         self.step("repeat", each.to_value())
     }
 
@@ -309,7 +328,8 @@ impl Actions {
     /// `cargo` does when it "builds" a tool. The strings of `program` are filled with the call's values now; write `{{args}}` for a
     /// token the installed program should fill when it runs. `program`'s own folder and recording are not used.
     #[must_use]
-    pub fn installs(self, path_template: &str, program: &StandIn) -> Actions {
+    pub fn installs(mut self, path_template: &str, program: &StandIn) -> Actions {
+        self.refused = self.refused.or_else(|| program.refusal());
         let m = vec![
             ("path".to_string(), Value::Str(path_template.to_string())),
             ("script".to_string(), program.script(Path::new(""))),
@@ -783,6 +803,13 @@ impl StandIn {
         self.actions.reads_whole_stdin() || self.cases.iter().any(|(_, a)| a.reads_whole_stdin())
     }
 
+    /// What a stand-in cannot do that a test asked for (see [`Actions::sleeps`]).
+    fn refusal(&self) -> Option<String> {
+        std::iter::once(&self.actions)
+            .chain(self.cases.iter().map(|(_, a)| a))
+            .find_map(|a| a.refused.clone())
+    }
+
     /// Every exit code the stand-in can end with.
     fn exit_codes(&self) -> impl Iterator<Item = i32> + '_ {
         std::iter::once(self.actions.exit).chain(self.cases.iter().map(|(_, a)| a.exit))
@@ -856,14 +883,8 @@ impl StandIn {
     ///
     /// As [`StandIn::files`], or when the file cannot be written.
     pub fn write_single_file(&self, path: &Path) -> io::Result<()> {
-        let _ = std::fs::remove_file(path);
-        std::fs::write(path, self.single_file_bytes()?)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
-        }
-        Ok(())
+        // Through `write_program`, which never holds a write handle on the program (a forked child would, ETXTBSY: run 8174).
+        crate::exe::write_program(path, self.single_file_bytes()?)
     }
 
     fn check_name(&self) -> io::Result<()> {
@@ -876,7 +897,10 @@ impl StandIn {
                 self.name
             )));
         }
-        Ok(())
+        match self.refusal() {
+            Some(why) => Err(invalid(format!("stand-in `{}`: {why}", self.name))),
+            None => Ok(()),
+        }
     }
 
     /// Installs the stand-in under its name in the folder and writes its script. A stand-in of the same name already there is

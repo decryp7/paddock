@@ -3,6 +3,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_dev::release_isolation::fixture::{Fixture, Leak};
+#[path = "../support/fake_npm.rs"]
+mod fake_npm;
+use fake_npm::build;
 use std::process::Output;
 
 // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
@@ -42,7 +45,7 @@ fn run_verify(f: &Fixture) -> Output {
 #[test]
 fn verify_passes_a_clean_job_with_the_summary_line_and_fails_a_leak_with_one_error_per_finding() {
     let dir = tempfile::tempdir().unwrap();
-    let mut f = Fixture::build(dir.path());
+    let mut f = build(dir.path());
     let ok = run_verify(&f);
     assert!(
         ok.status.success(),
@@ -65,7 +68,7 @@ fn verify_passes_a_clean_job_with_the_summary_line_and_fails_a_leak_with_one_err
 #[test]
 fn record_is_the_one_writer_one_line_per_kind() {
     let dir = tempfile::tempdir().unwrap();
-    let f = Fixture::build(dir.path());
+    let f = build(dir.path());
     let again = dev(&f, &["record", "libduckdb", "job", "--path", &f.npm.display().to_string()]);
     assert!(again.status.success(), "{}", String::from_utf8_lossy(&again.stderr));
     let twice = dev(&f, &["record", "libduckdb", "job", "--path", &f.npm.display().to_string()]);
