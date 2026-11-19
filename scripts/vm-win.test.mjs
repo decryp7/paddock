@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { efiBootImages, patchNoPrompt } from './vm-win/noprompt-iso.mjs';
 import { waitProgressing } from './test-kit.mjs';
 import { endHolders, fileReaper, macOnly, warmDev } from './vm-test-support.mjs';
+import { gitResult } from '../conformance/test/lib/scratch-git.mjs';
 
 /** Waits until `cond` holds (the kit's backing-off poll, ADR 0103), for at most `ms` without it holding: a bound that only stops a hung child. */
 const until = (what, cond, ms) => waitProgressing(what, cond, { noProgressMs: ms }).then(() => true, () => cond());
@@ -173,7 +174,7 @@ describe('guard rails', () => {
     assert.equal(/git -C "\$here" update-ref/.test(sh), false);
     // The same commands in a scratch repository: the bundle carries the tree and the source repository gets no ref.
     const src = join(scratch, 'bundle-src');
-    const g = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+    const g = (cwd, ...a) => gitResult(cwd, a);
     mkdirSync(src, { recursive: true });
     g(src, 'init', '-q'); writeFileSync(join(src, 'a.txt'), 'x\n'); g(src, 'add', '.'); g(src, 'commit', '-qm', 'one');
     const before = g(src, 'for-each-ref').stdout;

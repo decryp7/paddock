@@ -4,6 +4,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { after, test } from 'node:test';
+import { gitResult } from './lib/scratch-git.mjs';
 import { README_BEGIN, README_END, README_PATH, REGENERATE, adrFiles, entryOf, readmeText } from '../src/adr-index.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
@@ -13,16 +14,7 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 
 const adr = (n, title, status = 'Accepted 2026-11-01', date = '2026-11-01') => `# ${n}. ${title}\n\n- Status: ${status}\n- Date: ${date}\n\nBody.\n`;
 const run = (root, ...args) => spawnSync('node', [BIN, '--root', root, ...args], { encoding: 'utf8', env: { ...process.env, CI: '' } });
-/** git in a scratch repo only: the caller's GIT_* variables (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE of a hook run) are dropped so it can never reach the real repository, and identity comes from -c, never from `git config` (ER-45, ER-47: pass the environment except what would redirect the child). */
-const git = (cwd, ...args) => {
-  assert.ok(cwd.startsWith(scratch), `git runs only inside the scratch folder, not in ${cwd}`);
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
-  return spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], {
-    cwd,
-    encoding: 'utf8',
-    env: { ...env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
-  });
-};
+const git = (cwd, ...args) => gitResult(cwd, args);
 /** A scratch repo root with docs/adr (a README with markers and the given ADR files). */
 function makeRoot(name, files) {
   const root = join(scratch, name);

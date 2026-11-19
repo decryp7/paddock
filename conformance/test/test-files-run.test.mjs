@@ -41,6 +41,7 @@ test('the reader finds the paths a node --test command names', () => {
 });
 
 test('every test file under scripts, conformance and tools is run by a CI step or a package script', () => {
+  // conformance: raw-git — read-only `git ls-files` over the real tree; it writes nothing
   const git = (...a) => execFileSync('git', ['-C', PADDOCK, ...a], { encoding: 'utf8', maxBuffer: 1 << 26 }).split('\n').filter(Boolean);
   const files = git('ls-files', '--', 'scripts/**/*.test.mjs', 'scripts/*.test.mjs', 'conformance/**/*.test.mjs', 'tools/**/*.test.mjs');
   const runners = git('ls-files', '--', '.gitea/workflows/*.yml', '.gitea/actions/*/action.yml', 'package.json', '*/package.json', '*/paddock.ci.json');

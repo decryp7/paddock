@@ -73,7 +73,7 @@ impl Fixture {
     // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
     #[allow(clippy::disallowed_methods)]
     fn git_cmd(&self, dir: &Path) -> Command {
-        let mut c = Command::new("git");
+        let mut c = paddock_dev::git_env::scratch_git();
         c.arg("-C")
             .arg(dir)
             .env("GIT_CONFIG_GLOBAL", &self.gitconfig)

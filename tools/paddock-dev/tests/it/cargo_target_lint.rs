@@ -135,7 +135,7 @@ fn the_shared_comparison_finds_an_added_entry_and_not_a_removed_one() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     let git = |args: &[&str]| {
-        let out = paddock_proc::command("git")
+        let out = paddock_dev::git_env::scratch_git()
             .arg("-C")
             .arg(root)
             .args([

@@ -768,11 +768,7 @@ test('stable-workspace gives every run of a host job the same physical checkout 
 test('stable-workspace keeps a clone at the stable path at the checkout\'s commit where the work folder cannot move (Windows)', () => {
   const root = stableFixture();
   const ws = join(root, 'work', 'abc', 'hostexecutor');
-  const git = (cwd, ...args) => {
-    const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'init.defaultBranch=main', ...args], { cwd, encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home') } });
-    assert.equal(r.status, 0, r.stderr);
-    return r.stdout.trim();
-  };
+  const git = (cwd, ...args) => sgit(cwd, ...args).trim();
   git(ws, 'init', '-q');
   git(ws, 'add', 'Cargo.toml');
   git(ws, 'commit', '-qm', 'one');
@@ -2378,6 +2374,7 @@ test('the tag-rule check sees a mutated workflow: a token without the rule, and 
 });
 
 import { bashBeforeGitBash } from '../src/util/windows-bash.mjs';
+import { git as sgit } from './lib/scratch-git.mjs';
 
 test('no Windows host job runs a bash step before Git bash is on PATH (there bash is WSL: run 7880)', () => {
   const bad = [];

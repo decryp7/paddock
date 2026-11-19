@@ -166,10 +166,10 @@ test('C30 grace through the runner: a warning for an unguarded assert over close
 });
 
 // ---- the allow list of today's sites (conformance/c30-allow.json): listed sites pass, new ones are reported, the list only shrinks ----
-import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ALLOW, BLOCKING } from '../src/checks/C30-wall-clock.mjs';
+import { git } from './lib/scratch-git.mjs';
 
 const SITE = 'assert!(t.elapsed() < Duration::from_millis(700));';
 const twoSites = wrap(`    let t = Instant::now();\n    ${SITE}\n    work();\n    ${SITE}`);
@@ -200,7 +200,7 @@ test('C30 allow list: a broken or missing list is one check-broken finding, noth
   }
 });
 
-const sh = (root, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: root, stdio: 'ignore' });
+const sh = (root, ...args) => git(root, ...args);
 /** A repository whose `main` has `baseFiles` and the list `base`, and whose `topic` commit has `nowFiles` and the list `now`. */
 function repo(baseFiles, base, nowFiles, now) {
   const root = c30App(baseFiles, base);

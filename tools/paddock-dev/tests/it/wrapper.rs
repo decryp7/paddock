@@ -12,12 +12,8 @@ fn repo_root() -> PathBuf {
     crate::full_tree(Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap())
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
-)]
 fn git(dir: &Path, args: &[&str]) {
-    let st = Command::new("git")
+    let st = paddock_dev::git_env::scratch_git()
         .arg("-C")
         .arg(dir)
         .args([

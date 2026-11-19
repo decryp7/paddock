@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { parseSteps } from '../src/util/workflows.mjs';
 import { PADDOCK } from './helpers.mjs';
+import { gitIn } from './lib/scratch-git.mjs';
 
 const read = (p) => readFileSync(p, 'utf8');
 const SCRIPT = join(PADDOCK, 'conformance', 'ci', 'kept-clone.sh');
@@ -27,9 +28,7 @@ function declared(file = PROFILES) {
 
 const ENV = (root) => ({ PATH: process.env.PATH, HOME: join(root, 'home'), GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' });
 function git(cwd, root, ...args) {
-  const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'init.defaultBranch=main', '-c', 'protocol.file.allow=always', ...args], { cwd, encoding: 'utf8', env: ENV(root) });
-  assert.equal(r.status, 0, `git ${args.join(' ')}: ${r.stderr}`);
-  return r.stdout.trim();
+  return gitIn(cwd, { env: { HOME: join(root, 'home') } }, ...args).trim();
 }
 
 // Every fixture's temp root is removed when the file's tests are done (they leaked paddock-kept-* folders in $TMPDIR).
@@ -369,7 +368,7 @@ test('kept-clone with FRESH=true makes the clone again: a planted object does no
   const blob = git(k, fx.root, 'rev-parse', `${sha}:crates/a/lib.rs`);
   const dir = join(k, '.git', 'objects', blob.slice(0, 2));
   mkdirSync(dir, { recursive: true });
-  const evil = spawnSync('git', ['hash-object', '-w', '--stdin'], { cwd: k, input: 'evil', encoding: 'utf8', env: ENV(fx.root) }).stdout.trim();
+  const evil = gitIn(k, { input: 'evil', env: { HOME: join(fx.root, 'home') } }, 'hash-object', '-w', '--stdin').trim();
   const evilFile = join(k, '.git', 'objects', evil.slice(0, 2), evil.slice(2));
   const target = join(dir, blob.slice(2));
   rmSync(target, { force: true });
@@ -383,7 +382,7 @@ test('kept-clone with FRESH=true makes the clone again: a planted object does no
   const listed = git(k, fx.root, 'ls-files', '-s').split('\n').map((l) => l.split(/\s+/));
   for (const [, id, , file] of listed) {
     if (!existsSync(join(k, file))) continue; // outside the profile
-    const h = spawnSync('git', ['hash-object', file], { cwd: k, encoding: 'utf8', env: ENV(fx.root) }).stdout.trim();
+    const h = gitIn(k, { env: { HOME: join(fx.root, 'home') } }, 'hash-object', file).trim();
     assert.equal(h, id, `${file}: the blob on disk is the commit's`);
   }
   const reused = job(fx, sha);

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
 import { identityHits, isPlaceholder } from '../src/checks/C110-fixture-identity.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
+import { git as sgit } from './lib/scratch-git.mjs';
 
-const git = (root, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args], { cwd: root, encoding: 'utf8' });
+const git = (root, ...args) => sgit(root, ...args);
 
 test('C110 placeholders are an allow-list; a real-looking value is not one', () => {
   for (const ok of ['', 'user', 'example', 'Example User', 'runner-1', 'runner-12', 'a@example.com', 'https://gitea.invalid/avatar.png', 'example/paddock', 'undefined']) {

@@ -4,12 +4,11 @@
 #![cfg(unix)]
 // windows-twin: none: owed; the test came Unix-only with the worktree gates profile (73fad2308) and has no Windows run yet
 use std::path::Path;
-use std::process::Command;
 
 // Starts git by program name in a throw-away fixture, never a process by pid (C53).
 #[allow(clippy::disallowed_methods)]
 fn git(dir: &Path, args: &[&str]) {
-    let out = Command::new("git")
+    let out = paddock_dev::git_env::scratch_git()
         .args([
             "-c",
             "user.name=t",

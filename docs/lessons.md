@@ -2966,3 +2966,20 @@ ambient load 35 to 40 from other agents): 200 runs of the 4 kept_clone unit test
 executions, 0 failed. **The class is now checked, not reviewed for (ER-21):** `phase::tests::no_source_file_times_a_phase_test_from_its_start_without_a_clock_mark_or_a_reason` fails on any test in a file that uses `ci_host::phase` that calls `.phase(`, `bounded*` or `run_with(` without a `ClockMark` (or `hang_flow`/`hang_env`) or a `// conformance: no-clock-mark - <reason>` line (two exemptions, both fakes with no program); its positive control is `the_audit_of_unmarked_phase_tests_sees_one_and_accepts_a_mark_or_a_reason`. The 20 s general limit is one constant, `phase::HUNG_TEST_GENERAL_LIMIT`. **Rule:** a timed hung-phase test counts every limit it asserts from the stand-in's mark, setup calls included, and proves it
 with a stand-in that is slow before its hang. **Class: work before the hang point of a hung-phase test meeting its limit under load
 (fourth sighting; ADR 0103, second amendment).**
+
+## A test's git inherited GIT_DIR and wrote into the real repository (2026-11-19)
+
+Running the new ADR-index test by hand with `GIT_DIR` and `GIT_WORK_TREE` set (what a git hook, such as the pre-push gate, sets for
+its children) made the test's scratch `git init`, `git config` and `git checkout -b` act on the real repository: `core.worktree` and
+`user.*` landed in the shared .git/config and broke every worktree until the coordinator removed them. The test had copied the shape of
+older ones (`union-merge`, `c85-features-register`) that passed `...process.env` to git. **Cause:** a test that starts git passes the
+caller's environment; GIT_* variables select the repository. **Fix, the class (ER-21, ER-44, ER-45, ER-47):** one helper for the
+JavaScript tests, `conformance/test/lib/scratch-git.mjs` (drops every GIT_* variable, pins the global and system configuration to
+/dev/null, passes the identity by `-c`, sets `GIT_CEILING_DIRECTORIES`, refuses a folder outside the temp folder or a repository
+whose git dir is outside it) and its Rust twin `paddock_dev::git_env::scratch_git()`; about 20 JavaScript test files and 19 Rust test
+files converted; check C142 (report-only, JavaScript) and `git_env::tests::no_test_file_starts_git_without_the_builder` (Rust)
+refuse a raw git start in a test. **Positive controls:** `scratch-git.test.mjs` shows a raw git leaking under a hostile `GIT_DIR` into
+a stand-in "real" repository and the helper leaving its config, HEAD and refs unchanged; the Rust control checks the builder's
+environment. **Earlier instances of the class:** the hook's `GIT_DIR` reaching `git -C <other folder>` (train 14, 2026-11-17; four
+instances, fixed in `git_env::git()` for the tool's own code) and this one for the tests. **Never run a test by hand with `GIT_DIR` or
+`GIT_WORK_TREE` set against the real repository** (the first reproduction of the failure was exactly that).

@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { gitResult } from './lib/scratch-git.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -17,23 +18,25 @@ const APPEND_ONLY = ['docs/lessons.md'];
 /** Edited in place (a corrected results block): union would keep both versions silently. */
 const EDITED_IN_PLACE = ['docs/benchmarks.md', 'apps/dyno/docs/performance.md', 'docs/gates.toml'];
 
-function git(cwd, ...args) {
-  const r = spawnSync('git', args, {
-    cwd,
-    encoding: 'utf8',
-    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' },
-  });
+/** The real repository is read with `git check-attr` only (a read; no scratch repo yet): raw, on purpose. */
+function checkAttr(file) {
+  // conformance: raw-git — a read-only `git check-attr` over the real tree, never a write
+  const r = spawnSync('git', ['check-attr', 'merge', '--', file], { cwd: root, encoding: 'utf8' });
   return { status: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') };
 }
+const git = (cwd, ...args) => {
+  const r = gitResult(cwd, args);
+  return { status: r.status, out: r.stdout + r.stderr };
+};
 
 test('the append-only docs use the union merge driver', () => {
   for (const file of APPEND_ONLY) {
-    const r = git(root, 'check-attr', 'merge', '--', file);
+    const r = checkAttr(file);
     assert.equal(r.status, 0, r.out);
     assert.match(r.out, /: merge: union$/m, `${file} has no merge=union in .gitattributes: ${r.out}`);
   }
   // Files edited in place must conflict on two edits of one line, not keep both.
-  for (const file of EDITED_IN_PLACE) assert.match(git(root, 'check-attr', 'merge', '--', file).out, /: merge: unspecified$/m, file);
+  for (const file of EDITED_IN_PLACE) assert.match(checkAttr(file).out, /: merge: unspecified$/m, file);
 });
 
 test('two branches that each add a lesson at the end merge without a conflict and keep both', () => {

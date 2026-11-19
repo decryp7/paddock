@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
 import { committedSvg, differs, main, normalise, regenerate } from './svg-drift.mjs';
+import { gitResult } from '../conformance/test/lib/scratch-git.mjs';
 
 const scratch = mkdtempSync(join(tmpdir(), 'svg-drift-test-'));
 after(() => rmSync(scratch, { recursive: true, force: true }));
@@ -56,7 +57,7 @@ function repo(name, { label = 'Hello world', fill = '#aabbcc', width = 100 } = {
   const f = join(svgDir, 'svg/a.svg');
   writeFileSync(f, readFileSync(f, 'utf8').replace(/<image [^>]*\/>/, ''));
   for (const c of [['init', '-q'], ['add', '-A'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x']]) {
-    assert.equal(spawnSync('git', c, { cwd: root }).status, 0);
+    assert.equal(gitResult(root, c).status, 0);
   }
   return { root, shim, svgDir };
 }
@@ -127,7 +128,7 @@ describe('the check on a repository', () => {
   test('a .drawio with no export, in a folder that keeps exports, is drift', () => {
     const r = repo('missing');
     writeFileSync(join(r.svgDir, 'b.drawio'), '<mxfile/>');
-    spawnSync('git', ['add', '-A'], { cwd: r.root });
+    gitResult(r.root, ['add', '-A']);
     const { code, out } = check(r);
     assert.equal(code, 1);
     assert.match(out, /::error file=apps\/x\/docs\/diagrams\/b\.drawio::.*no committed/);
@@ -144,7 +145,7 @@ describe('the check on a repository', () => {
 
   test('a source whose SVGs are nowhere is an error, "not measured", never a note', () => {
     const r = repo('nothing');
-    spawnSync('git', ['rm', '-rq', 'apps/x/docs/diagrams/svg'], { cwd: r.root });
+    gitResult(r.root, ['rm', '-rq', 'apps/x/docs/diagrams/svg']);
     const { code, out } = check(r);
     assert.equal(code, 1);
     assert.match(out, /::error file=apps\/x\/docs\/diagrams\/a\.drawio::.*not measured/);
@@ -155,9 +156,9 @@ describe('the check on a repository', () => {
     const r = repo('sighter');
     const from = join(r.root, 'apps/x/docs/diagrams'), to = join(r.root, 'apps/sighter/docs');
     mkdirSync(join(to, 'images/diagrams'), { recursive: true });
-    spawnSync('git', ['mv', from, join(to, 'diagrams')], { cwd: r.root });
+    gitResult(r.root, ['mv', from, join(to, 'diagrams')]);
     mkdirSync(join(to, 'images/diagrams'), { recursive: true });
-    spawnSync('git', ['mv', join(to, 'diagrams/svg'), join(to, 'images/diagrams/svg')], { cwd: r.root });
+    gitResult(r.root, ['mv', join(to, 'diagrams/svg'), join(to, 'images/diagrams/svg')]);
     assert.equal(check(r).code, 0);
     writeFileSync(join(to, 'images/diagrams/svg/a.svg'), readFileSync(join(to, 'images/diagrams/svg/a.svg'), 'utf8').replace('#aabbcc', '#aabbcd'));
     assert.equal(check(r).code, 1);

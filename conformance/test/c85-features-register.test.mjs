@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -8,6 +7,7 @@ import { judge, owedSummary, parseDate, rustProduction, sources, testExists, unt
 import C85 from '../src/checks/C85-features-register.mjs';
 import { main } from '../src/cli.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
+import { git as sgit } from './lib/scratch-git.mjs';
 
 const now = new Date('2026-11-12T12:00:00Z');
 const NAV = `export const NAV = [\n  { id: 'models', label: 'Models' },\n  { id: 'chat', label: 'Chat' },\n];\n`;
@@ -249,7 +249,7 @@ test('an expired or reached owed entry is a warning in a release run too: C85 is
 });
 
 test('the CLI reads the tags and the commit date from git: an owed entry is a warning (exit 0) in a branch run and with --version too', async () => {
-  const git = (root, ...a) => execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...a], { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } });
+  const git = (root, ...a) => sgit(root, ...a);
   const root = build({}, owedRow('demo-v1.0.3'));
   git(root, 'init', '-q');
   git(root, 'add', '-A');

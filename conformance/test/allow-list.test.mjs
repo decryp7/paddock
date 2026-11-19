@@ -130,11 +130,10 @@ test('allow list: a file the check cannot read is a not-measured error at that f
 });
 
 // ---- the list only shrinks: every entry, counted `count` times, against the merge base (the reader's own growth rule, driven here through C135, the one check left on the JavaScript host that reads a list) ----
-import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 
 const allowJson = (entries) => JSON.stringify({ allow: entries });
-const sh = (root, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: root, stdio: 'ignore' });
+const sh = (root, ...args) => git(root, ...args);
 /** A repository whose merge base (`main`) has the allow list `base` and whose `topic` commit has `now`. */
 function growthRepo(base, now) {
   const SHELL = "installLeakDetector({ mode: 'off' });\n";
@@ -182,6 +181,7 @@ test('allow list growth: a list new at the merge base is an empty base, so its e
 // ---- the target ref: a member branch of a train is measured against the train, not main (ER-21; ADR 0098 amendment of 2026-11-16) ----
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { isCi, targetRef } from '../src/util/baseline.mjs';
+import { git } from './lib/scratch-git.mjs';
 
 /** main has the list `base`; `train` (off main) has `trainList`; `member` (off train) has `memberList`. */
 function trainRepo(base, trainList, memberList) {

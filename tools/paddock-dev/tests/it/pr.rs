@@ -121,7 +121,7 @@ fn serve() -> (String, Arc<Mutex<State>>) {
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
-    let out = paddock_proc::command("git")
+    let out = paddock_dev::git_env::scratch_git()
         .args([
             "-c",
             "user.name=t",

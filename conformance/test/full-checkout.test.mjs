@@ -6,8 +6,9 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { main } from '../src/cli.mjs';
 import { fullCheckoutProblem } from '../src/util/full-checkout.mjs';
+import { git as sgit } from './lib/scratch-git.mjs';
 
-const git = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.test', '-c', 'commit.gpgsign=false', ...a], { cwd, stdio: 'pipe', encoding: 'utf8' });
+const git = (cwd, ...a) => sgit(cwd, ...a);
 
 /** A throw-away repository with folders `apps/one`, `apps/two`, `crates` and `ui`, optionally sparse on `crates`. */
 function repo({ sparse }) {

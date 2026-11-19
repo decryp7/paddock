@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { SPARSE_MESSAGE, isSparse } from './require-full-tree.mjs';
+import { git as sgit } from './lib/scratch-git.mjs';
 
 const script = fileURLToPath(new URL('./require-full-tree.mjs', import.meta.url));
 const NEEDED = ['tools/paddock-dev/Cargo.toml', 'conformance/package.json', '.gitea/workflows/ci.yml'];
@@ -29,7 +30,7 @@ test('a tree missing a needed folder stops the tests with one line', () => {
 
 test('a non-cone sparse tree that has the paths passes, as the CI host clones do', () => {
   const dir = tree(NEEDED);
-  const git = (...a) => execFileSync('git', ['-C', dir, ...a], { stdio: 'ignore' });
+  const git = (...a) => sgit(dir, ...a);
   git('init', '-q');
   git('config', 'core.sparseCheckout', 'true');
   git('config', 'core.sparseCheckoutCone', 'false');

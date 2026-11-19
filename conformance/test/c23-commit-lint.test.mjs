@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { commitLintMain, isRelandSubject, lint, revertsTargets } from '../src/commit-lint.mjs';
 import { runChecks } from '../src/runner.mjs';
 import { findingsOf, makeApp, messages } from './helpers.mjs';
+import { git as sgit } from './lib/scratch-git.mjs';
 
 test('lint good: Conventional Commits, scope, breaking mark, merge commits', () => {
   for (const m of ['feat: add x', 'fix(core): y\n\nBody text.', 'fix(spotter,debrief): both apps', 'chore!: drop z', 'Merge branch main', 'docs: a [skip ci]']) assert.deepEqual(lint(m), [], m);
@@ -80,7 +80,7 @@ test('commitLintMain: --file and --range, exit codes', () => {
 
 function repo(messages) {
   const dir = makeApp({ 'a.txt': 'x' });
-  const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.test', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, stdio: 'pipe' });
+  const git = (...a) => sgit(dir, ...a);
   git('init', '-q');
   messages.forEach((m, i) => {
     writeFileSync(join(dir, 'a.txt'), String(i));
@@ -105,7 +105,7 @@ test('C23 good: git\'s Reapply and Revert subjects in a history are accepted; a 
   assert.deepEqual(await findingsOf('C23', repo(['feat: one', 'Revert "feat: one"', 'Reapply "feat: one"\n\nThis reverts commit 0123456789abcdef0123456789abcdef01234567.'])), []);
   // C23 scans a window of landed history, which holds re-lands from before the rule: it does not judge them (the commit-msg hook and the range check judge new commits).
   const old = repo(['feat: one', 'feat: the rule lands', 'Reapply "feat: one"', 'revert: reapply feat: one']);
-  const ruleOfOld = execFileSync('git', ['rev-parse', 'HEAD~2'], { cwd: old, encoding: 'utf8' }).trim();
+  const ruleOfOld = sgit(old, 'rev-parse', 'HEAD~2').trim();
   assert.deepEqual(await findingsOf('C23', repo(['feat: one', 'Reapply "feat: one"', 'revert: reapply feat: one']), { options: { relandRule: '1'.repeat(40), strictUnmeasured: false } }).then((f) => f.map((x) => x.severity)), ['warn'], 'the rule commit missing from the clone: said, not passed silently');
   assert.deepEqual(await findingsOf('C23', repo(['feat: one', 'Reapply "feat: one"']), { options: { relandRule: '1'.repeat(40), strictUnmeasured: true } }).then((f) => f.map((x) => x.severity)), ['error'], 'in CI (a shallow clone would hide the rule) it fails');
   assert.deepEqual(await findingsOf('C23', old, { options: { relandRule: ruleOfOld } }).then((f) => f.map((x) => x.severity)), ['error', 'error'], 'descending from the rule commit: judged');
@@ -120,7 +120,7 @@ test('C23 warns instead of passing silently when there is no history', async () 
 // commit-lint honours the C23 waivers of paddock.waivers.toml (the file and format the conformance run uses).
 function waiverRepo(waiver) {
   const dir = repo(['feat: one', 'wip: not conventional', 'fix: three']);
-  const sha = execFileSync('git', ['rev-parse', 'HEAD~1'], { cwd: dir, encoding: 'utf8' }).trim();
+  const sha = sgit(dir, 'rev-parse', 'HEAD~1').trim();
   if (waiver) writeFileSync(join(dir, 'paddock.waivers.toml'), waiver(sha));
   return { dir, sha };
 }
@@ -182,7 +182,7 @@ test('C23 commit waivers match exactly: 10 or 40 hex characters, any case; a glo
 
 test('commit-lint --first-parent also lints the merge commit itself (its Merge header is exempt, its attribution is not)', () => {
   const dir = repo(['feat: one']);
-  const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.test', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, stdio: 'pipe', encoding: 'utf8' });
+  const git = (...a) => sgit(dir, ...a);
   const base = git('rev-parse', 'HEAD').trim();
   git('checkout', '-q', '-b', 'f');
   git('commit', '-q', '--allow-empty', '-m', 'wip: branch work');
@@ -253,8 +253,8 @@ test('commit-lint --subject: a correct re-land subject passes, the missing body 
 // A history with re-lands before and after the commit that introduces the rule: the range judges only the later ones.
 function relandHistory() {
   const dir = repo(['feat: one', 'revert: reapply old one', 'feat: the rule lands']);
-  const rule = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
-  const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.test', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, stdio: 'pipe' });
+  const rule = sgit(dir, 'rev-parse', 'HEAD').trim();
+  const git = (...a) => sgit(dir, ...a);
   const add = (m, n) => {
     writeFileSync(join(dir, 'a.txt'), n);
     git('add', '.');
@@ -276,7 +276,7 @@ test('commit-lint --range and C23 judge a re-land that descends from the rule co
   assert.equal(f.errors, 1, JSON.stringify(f.findings));
   // Without the later re-land, the history is clean: the one before the rule is not judged.
   const clean = repo(['feat: one', 'revert: reapply old one', 'feat: the rule lands']);
-  const cleanRule = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: clean, encoding: 'utf8' }).trim();
+  const cleanRule = sgit(clean, 'rev-parse', 'HEAD').trim();
   assert.equal(commitLintMain(['--range', 'HEAD~2..HEAD'], clean, () => {}, new Date(), { relandRule: cleanRule }), 0);
   // The rule's commit missing from the clone is "not measured", said aloud, and does not pass silently.
   const lost = [];

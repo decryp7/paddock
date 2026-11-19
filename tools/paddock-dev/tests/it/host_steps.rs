@@ -969,7 +969,7 @@ const KEPT_PROFILES: &str =
 
 /// `git` in `dir` with a fixed identity and dates (both fixtures get the same commit ids) and no user or system configuration.
 fn git(fx: &Fx, dir: &Path, args: &[&str]) -> String {
-    let out = paddock_proc::command("git")
+    let out = paddock_dev::git_env::scratch_git()
         .args(["-c", "protocol.file.allow=always", "-c", "init.defaultBranch=main"])
         .args(args)
         .current_dir(dir)
@@ -1110,7 +1110,7 @@ fn kept_facts(fx: &Fx) -> Vec<String> {
         return vec!["facts: no kept clone".into()];
     };
     let q = |args: &[&str]| -> String {
-        let out = paddock_proc::command("git")
+        let out = paddock_dev::git_env::scratch_git()
             .args(args)
             .current_dir(&stable)
             .env("HOME", fx.p("home"))
@@ -1622,7 +1622,7 @@ fn kept_fixture_repos_start_no_background_git_maintenance() {
     ] {
         // The step's environment (a cleared one, the fixture's HOME) and the fixture's own git (the test's PATH).
         let get = |key: &str| {
-            let mut git = paddock_proc::command("git");
+            let mut git = paddock_dev::git_env::scratch_git();
             git.args(["config", "--get", key]).current_dir(fx.p(dir));
             paddock_proc::clean_env(&mut git, &[]);
             let out = git

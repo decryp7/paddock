@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { tableFindings, splitRow, isDelimiterRow } from '../src/util/md-tables.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
+import { git as sgit } from './lib/scratch-git.mjs';
 
-const git = (root, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args], { cwd: root, encoding: 'utf8' });
+const git = (root, ...args) => sgit(root, ...args);
 const T = (...rows) => rows.join('\n') + '\n';
 const OLD_CRATES_README = new URL('./fixtures/crates-readme-broken-table.md.txt', import.meta.url);
 

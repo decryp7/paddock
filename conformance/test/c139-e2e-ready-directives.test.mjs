@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { entriesOf } from '../src/checks/C139-e2e-ready-directives.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
+import { git } from './lib/scratch-git.mjs';
 
 const R = 'paddock/e2e-ready-reads';
 const supp = (n, file = 'e2e/a.spec.ts') => JSON.stringify({ [file]: { [R]: { count: n } } });
 const SPEC = { 'ui/e2e/a.spec.ts': 'const a = 1;\n' };
-const sh = (root, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: root, stdio: 'ignore' });
+const sh = (root, ...args) => git(root, ...args);
 /** A repository whose merge base (`main`) has the ui suppressions `base` and whose `topic` commit has `now`. */
 function repo(base, now) {
   const root = makeApp({ ...SPEC, 'ui/eslint-suppressions.json': base });

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { devCommands, maskCode, namedMechanisms, relativeLinks } from '../src/checks/C104-doc-links.mjs';
 import { findingsOf as run, makeApp } from './helpers.mjs';
+import { git as sgit } from './lib/scratch-git.mjs';
 
 // Without a RULES.md beside the temp folder every run also reports it as not measured; tests that are not about that drop it.
 const findingsOf = async (...a) => (await run(...a)).filter((x) => !/RULES\.md: not measured/.test(x.message));
@@ -107,7 +107,7 @@ test('C104 reports RULES.md as not measured when it was not read, and ignores it
 });
 
 test('C104 shrink-only is judged against the merge base: main dropping an entry after the fork does not fail the branch', async () => {
-  const git = (root, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: root, encoding: 'utf8' });
+  const git = (root, ...a) => sgit(root, ...a);
   const entry = (t) => ({ file: 'AGENTS.md', target: t });
   const baselineOf = (...ts) => JSON.stringify({ mentions: ts.map(entry) });
   const root = makeApp({ ...base, 'AGENTS.md': 'Use `scripts/a.sh` and `scripts/b.sh`.\n', 'conformance/baselines/C104.json': baselineOf('scripts/a.sh', 'scripts/b.sh') });

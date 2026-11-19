@@ -1,7 +1,6 @@
 //! The command line contract: one JSON object with --json, stable exit codes, help and errors that name the next step.
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
 use serde_json::Value;
-use std::process::Command;
 
 fn dev(args: &[&str]) -> (i32, String, String) {
     dev_in(None, args)
@@ -128,7 +127,11 @@ fn self_hash_outside_a_repository_or_without_an_input_list_names_the_next_step()
     assert_eq!(code, 1);
     assert!(err.contains("Paddock repository"), "{err}");
     // A repository that is not Paddock's: no tools/paddock-dev/inputs.txt.
-    let init = Command::new("git").args(["init", "-q"]).current_dir(d.path()).status().unwrap();
+    let init = paddock_dev::git_env::scratch_git()
+        .args(["init", "-q"])
+        .current_dir(d.path())
+        .status()
+        .unwrap();
     assert!(init.success());
     let (code, err) = run(d.path());
     assert_eq!(code, 1);
@@ -155,7 +158,7 @@ fn plan_commit_range_and_flags_lint_only_what_main_itself_adds_and_refuse_values
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path();
     let git = |args: &[&str]| {
-        let out = Command::new("git")
+        let out = paddock_dev::git_env::scratch_git()
             .arg("-C")
             .arg(repo)
             .args([

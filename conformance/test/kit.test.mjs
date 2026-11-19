@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { PADDOCK } from './helpers.mjs';
+import { gitResult } from './lib/scratch-git.mjs';
 
 const exe = (p, body) => {
   writeFileSync(p, `#!/bin/sh\n${body}\n`);
@@ -31,8 +32,7 @@ function checkout({ tools = true, rustc = true } = {}) {
     mkdirSync(join(root, 'tools', 'paddock-dev'), { recursive: true });
     writeFileSync(join(root, 'tools', 'paddock-dev', 'Cargo.toml'), '');
   }
-  const git = spawnSync('git', ['init', '-q'], { cwd: root });
-  assert.equal(git.status, 0);
+  assert.equal(gitResult(root, ['init', '-q']).status, 0);
   const run = (args, env = {}) => {
     writeFileSync(log, '');
     const r = spawnSync('sh', [join(root, 'conformance', 'ci', 'kit.sh'), ...args], {
@@ -79,7 +79,7 @@ test('another repository using the actions (its checkout has no tools/paddock-de
       encoding: 'utf8',
     }).stdout.trim();
   try {
-    spawnSync('git', ['init', '-q'], { cwd: other });
+    gitResult(other, ['init', '-q']);
     assert.equal(run(other), 'shell');
     // The kept clone of a host job: the actions come from the bootstrap checkout, the steps run in another tree with the tool.
     mkdirSync(join(other, 'tools', 'paddock-dev'), { recursive: true });

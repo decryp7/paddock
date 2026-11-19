@@ -5,7 +5,6 @@ use super::check::{has_node, node, repo_root, skip};
 use paddock_dev::check::{RunOptions, registry, run_checks};
 use serde_json::{Value, json};
 use std::path::Path;
-use std::process::Command;
 
 /// The part of a report the JS host also writes.
 fn shared_part(v: &Value) -> Value {
@@ -28,7 +27,7 @@ fn write(root: &Path, files: &[(&str, String)]) {
 
 #[allow(clippy::disallowed_methods, reason = "a test spawns git; it ends it itself")]
 fn git(root: &Path, args: &[&str]) {
-    let st = Command::new("git")
+    let st = paddock_dev::git_env::scratch_git()
         .args([
             "-c",
             "user.name=t",

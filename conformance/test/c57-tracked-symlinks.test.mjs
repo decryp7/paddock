@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { trackedSymlinks } from '../src/checks/C57-tracked-symlinks.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
+import { git as sgit } from './lib/scratch-git.mjs';
 
-const git = (root, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args], { cwd: root, encoding: 'utf8' });
+const git = (root, ...args) => sgit(root, ...args);
 
 test('C57 lists only mode 120000 entries, minus the allow-list', () => {
   const out = '100644 aaaa 0\ta.txt\n120000 bbbb 0\tnode_modules\n100755 cccc 0\trun.sh\n120000 dddd 0\tdocs/x link\n160000 eeee 0\tvendor/sub\n';

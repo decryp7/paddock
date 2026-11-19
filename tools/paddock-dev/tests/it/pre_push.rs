@@ -223,7 +223,7 @@ fn a_run_never_sees_the_machines_environment_or_takes_a_real_slot() {
 fn a_push_of_a_commit_that_is_not_head_plans_that_commit_even_with_git_dir_set_as_the_hook_sets_it() {
     let d = tempfile::tempdir().unwrap();
     let git = |dir: &Path, args: &[&str]| -> String {
-        let out = paddock_proc::command("git")
+        let out = paddock_dev::git_env::scratch_git()
             .args(["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"])
             .args(args)
             .current_dir(dir)
@@ -293,7 +293,7 @@ fn a_push_of_a_commit_that_is_not_head_plans_that_commit_even_with_git_dir_set_a
 fn worktree_list_reads_its_own_repository_when_git_dir_names_another_one() {
     let d = tempfile::tempdir().unwrap();
     let git = |dir: &Path, args: &[&str]| {
-        let out = paddock_proc::command("git")
+        let out = paddock_dev::git_env::scratch_git()
             .args(["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"])
             .args(args)
             .current_dir(dir)

@@ -15,7 +15,6 @@ use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
 use paddock_testkit::TestCommand;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// The checks the recorded JS findings cover (C39 and C53); later checks have their own parity tests (check_c119.rs).
 fn legacy_registry() -> Vec<Box<dyn paddock_dev::check::Check>> {
@@ -247,7 +246,7 @@ fn live_mask_equals_the_js_mask_on_every_tracked_rust_file() {
         return skip("node is not installed");
     }
     let root = repo_root();
-    let listed = Command::new("git")
+    let listed = paddock_dev::git_env::scratch_git()
         .args(["ls-files", "-z", "--", "*.rs"])
         .current_dir(&root)
         .output()
@@ -885,7 +884,7 @@ const BASELINE: &str = "conformance/baselines/C53.json";
     reason = "a test spawns node, git or the built binary; it ends them itself"
 )]
 fn git(root: &Path, args: &[&str]) {
-    let out = Command::new("git")
+    let out = paddock_dev::git_env::scratch_git()
         .args([
             "-c",
             "user.name=t",

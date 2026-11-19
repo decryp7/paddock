@@ -271,7 +271,7 @@ fn live_c129_tree_run_is_sound() {
 // Plain `git` in a scratch repository, started and awaited here; nothing is killed by pid.
 #[allow(clippy::disallowed_methods)]
 fn git(dir: &Path, args: &[&str]) {
-    let out = std::process::Command::new("git")
+    let out = paddock_dev::git_env::scratch_git()
         .args(["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"])
         .args(args)
         .current_dir(dir)

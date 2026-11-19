@@ -1,13 +1,14 @@
 // The notes of an app's first release come from its CHANGELOG (conformance/ci/first-release-notes.sh), in two steps of
 // app-release.yml. The steps are read out of the workflow with parseSteps and run for real in a scratch repository.
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { parseSteps } from '../src/util/workflows.mjs';
+import { git as sgit } from './lib/scratch-git.mjs';
 
 const PADDOCK = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const steps = parseSteps(readFileSync(join(PADDOCK, '.gitea/workflows/app-release.yml'), 'utf8'));
@@ -30,7 +31,7 @@ function repo(changelog, { earlier = [] } = {}) {
   mkdirSync(join(dir, 'release'), { recursive: true });
   symlinkSync(PADDOCK, join(dir, '.paddock'));
   symlinkSync(join(PADDOCK, 'conformance'), join(dir, 'conformance')); // the bundle job runs the kit's scripts from its own commit
-  const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'pipe' });
+  const git = (...a) => sgit(dir, ...a);
   git('init', '-q');
   git('config', 'user.email', 't@example.invalid');
   git('config', 'user.name', 't');
@@ -154,7 +155,7 @@ test('the workflow passes notes-from-changelog to both steps, and Dyno switches 
 /** A bare "origin" that holds the given tags, and a --depth 1 clone of its tag `at` (what a CI checkout holds). */
 function shallowClone(originTags, at, changelog = GOOD) {
   const work = repo(changelog);
-  const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe' });
+  const git = (cwd, ...a) => sgit(cwd, ...a);
   git(work, 'tag', '-d', 'dyno-v1.0.0');
   // The earlier tags sit on an older commit, as real ones do: a shallow clone of the newer one does not receive them.
   for (const t of originTags) git(work, 'tag', t);
@@ -162,9 +163,9 @@ function shallowClone(originTags, at, changelog = GOOD) {
   git(work, 'commit', '-q', '-a', '--allow-empty', '-m', 'feat: y');
   git(work, 'tag', at);
   const origin = `${work}-origin.git`;
-  execFileSync('git', ['clone', '-q', '--bare', work, origin], { stdio: 'pipe' });
+  sgit(scratch, 'clone', '-q', '--bare', work, origin);
   const dir = `${work}-ci`;
-  execFileSync('git', ['clone', '-q', '--depth', '1', '--branch', at, `file://${origin}`, dir], { stdio: 'pipe' });
+  sgit(scratch, 'clone', '-q', '--depth', '1', '--branch', at, `file://${origin}`, dir);
   mkdirSync(join(dir, 'release'), { recursive: true });
   symlinkSync(PADDOCK, join(dir, '.paddock'));
   symlinkSync(join(PADDOCK, 'conformance'), join(dir, 'conformance')); // the bundle job runs the kit's scripts from its own commit
@@ -179,13 +180,13 @@ const runIn = (step, dir, tag) =>
 
 test('a shallow CI checkout finds the earlier tags on the server, without fetching them', () => {
   const dir = shallowClone(['dyno-v1.0.0'], 'dyno-v1.0.1', '# Changelog\n');
-  assert.equal(execFileSync('git', ['tag', '-l'], { cwd: dir, encoding: 'utf8' }).trim(), 'dyno-v1.0.1', 'the checkout holds only its own tag');
+  assert.equal(sgit(dir, 'tag', '-l').trim(), 'dyno-v1.0.1', 'the checkout holds only its own tag');
   for (const step of [notesStep, failFastStep]) {
     const r = runIn(step, dir, 'dyno-v1.0.1');
     assert.equal(r.status, 0, `${step.name}: ${r.stdout}${r.stderr}`);
   }
   assert.equal(notes(dir), 'FROM GIT-CLIFF\n', 'not the first release: git-cliff writes the notes');
-  assert.equal(execFileSync('git', ['tag', '-l'], { cwd: dir, encoding: 'utf8' }).trim(), 'dyno-v1.0.1', 'no tag was fetched');
+  assert.equal(sgit(dir, 'tag', '-l').trim(), 'dyno-v1.0.1', 'no tag was fetched');
 });
 
 test('a shallow checkout of the first tag is the first release', () => {
@@ -196,7 +197,7 @@ test('a shallow checkout of the first tag is the first release', () => {
 
 test('an origin that cannot be reached fails loudly and blames the tag listing, not the CHANGELOG', () => {
   const dir = shallowClone([], 'dyno-v1.0.0');
-  execFileSync('git', ['remote', 'set-url', 'origin', 'file:///nonexistent/origin.git'], { cwd: dir });
+  sgit(dir, 'remote', 'set-url', 'origin', 'file:///nonexistent/origin.git');
   const r = runIn(notesStep, dir, 'dyno-v1.0.0');
   assert.notEqual(r.status, 0);
   assert.match(r.stdout + r.stderr, /could not list the tags of origin/);

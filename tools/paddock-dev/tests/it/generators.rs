@@ -5,7 +5,6 @@ use paddock_dev::generators::registry::Registry;
 use paddock_testkit::TestCommand;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(paddock_env::winpath::real_for_tools(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap())
@@ -214,7 +213,12 @@ fn merge_check_without_a_registry_runs_as_before() {
 // Starts git, never a process by pid.
 #[allow(clippy::disallowed_methods)]
 fn git_files(root: &Path) -> Vec<String> {
-    let out = Command::new("git").arg("-C").arg(root).args(["ls-files"]).output().unwrap();
+    let out = paddock_dev::git_env::scratch_git()
+        .arg("-C")
+        .arg(root)
+        .args(["ls-files"])
+        .output()
+        .unwrap();
     String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
 }
 

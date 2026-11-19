@@ -640,7 +640,7 @@ fn the_scan_reads_the_files_git_knows_and_not_the_file_system() {
         reason = "builds a throwaway git repository in a temp folder; the test owns it"
     )]
     let git = |args: &[&str]| {
-        let out = std::process::Command::new("git")
+        let out = paddock_dev::git_env::scratch_git()
             .args(args)
             .current_dir(dir.path())
             .output()
