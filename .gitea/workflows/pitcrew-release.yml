@@ -119,8 +119,6 @@ jobs:
       TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-      PADDOCK_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
-      PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   # A tag: the gates first (ER-15: no release past red gates), then the same installers and the Gitea release. Only a tag run has
   # the gates, so this job never waits on a skipped need.
@@ -153,8 +151,6 @@ jobs:
       TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-      PADDOCK_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
-      PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   # What this run proves about the installers (rule 54): "installers: built" or "installers: not built (why)" in the summary, and a
   # red run when a manual run or a tag was meant to build them and did not. The verdict reads whichever of the two installer jobs ran.
