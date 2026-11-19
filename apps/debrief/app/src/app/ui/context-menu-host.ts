@@ -1,5 +1,5 @@
-import { afterNextRender, ChangeDetectionStrategy, Component, effect, ElementRef, inject, Injector, untracked, viewChild } from '@angular/core';
-import { ContextMenuService, MenuEntry } from './context-menu.service';
+import { afterNextRender, ChangeDetectionStrategy, Component, effect, ElementRef, inject, Injector, signal, untracked, viewChild } from '@angular/core';
+import { ContextMenuService, MenuEntry, OpenMenu } from './context-menu.service';
 import { formatKeybinding, isMac } from '../extensions/keybinding';
 
 /** Accessible context menu: `role=menu`, arrow keys, Home/End, Escape (focus returns), click outside closes. */
@@ -9,7 +9,7 @@ import { formatKeybinding, isMac } from '../extensions/keybinding';
   template: `
     @if (service.menu(); as m) {
       <div class="backdrop" data-debrief-overlay (mousedown)="service.close()" (contextmenu)="$event.preventDefault(); service.close()"></div>
-      <div #box class="menu popover" role="menu" aria-label="Actions" i18n-aria-label="@@ui.contextMenu.actions" [style.left.px]="m.x" [style.top.px]="m.y" (keydown)="onKey($event)">
+      <div #box class="menu popover" role="menu" aria-label="Actions" i18n-aria-label="@@ui.contextMenu.actions" [style.left.px]="m.x" [style.top.px]="m.y" [attr.data-placed]="placed() === m ? 'true' : null" (keydown)="onKey($event)">
         @for (item of m.items; track item.label; let i = $index) {
           @if (i > 0 && item.group !== m.items[i - 1]?.group) {
             <div class="sep" role="separator"></div>
@@ -43,8 +43,14 @@ export class ContextMenuHost {
   protected readonly service = inject(ContextMenuService);
   private readonly injector = inject(Injector);
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
+  /**
+   * The opening whose menu is in its final place (`data-placed="true"`): set after the render that keeps it inside the window, so a test, or
+   * anything that measures the menu, waits for it instead of reading the first draw (the ready-signal audit, 2026-11-19).
+   */
+  protected readonly placed = signal<OpenMenu | null>(null);
 
   constructor() {
+    // effect-state: the menu's place is known only after the render that measures it (clamped inside the window), not derived state
     effect(() => {
       const menu = this.service.menu();
       if (!menu) return;
@@ -57,6 +63,7 @@ export class ContextMenuHost {
             const r = el.getBoundingClientRect();
             if (r.right > window.innerWidth) el.style.left = `${Math.max(0, window.innerWidth - r.width - 8)}px`;
             if (r.bottom > window.innerHeight) el.style.top = `${Math.max(0, window.innerHeight - r.height - 8)}px`;
+            this.placed.set(menu);
             this.items()[0]?.focus();
           },
           { injector: this.injector },

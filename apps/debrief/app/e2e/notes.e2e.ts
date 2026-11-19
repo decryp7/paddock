@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import { runCommand } from './analysis-support';
 import { expectNoSeriousViolations } from './axe';
 import { gridRows, openAppWith } from './mock-url';
+import { contextMenu } from './menu-support';
 
 // Notes (ADR 0021) against the browser build's mock notes backend (src/app/notes/mock/mock-notes-backend.ts): a note
 // on an event row shows a glyph on the row and is listed in the Notes panel, which jumps back to the event; an area
@@ -12,8 +13,7 @@ test('a note on an event row is marked on the row, listed and jumped to', async 
   await openAppWith(page, '');
   const row = gridRows(page).nth(2);
   await expect(row).toBeVisible();
-  await row.click({ button: 'right' });
-  await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Add note…' }).click();
+  await (await contextMenu(page, row)).getByRole('menuitem', { name: 'Add note…' }).click();
 
   const editor = page.getByRole('dialog', { name: 'Add a note' });
   await editor.getByTestId('note-text').fill('**Root cause**: the disk filled up');

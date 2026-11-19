@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
+import { anchoredMenu } from './menu-support';
 
 // Narrow windows: the filter bar folds range, time zone and Clear all into a ⋯ menu (bar < 1000 px), the Explorer
 // closes by itself when the layout plan has no room for it beside the events grid (and comes back with a margin), low-priority
@@ -48,14 +49,14 @@ test.describe('narrow window', () => {
 
     await page.getByRole('toolbar', { name: 'Levels' }).getByRole('button', { name: /^ERR/ }).click();
     await more(page).click();
-    const menu = page.getByRole('menu', { name: 'More filter controls' });
+    const menu = await anchoredMenu(page, more(page), 'More filter controls', 'popup');
     await expect(menu.getByRole('menuitem', { name: /Time zone/ })).toBeVisible();
     await expect(menu.getByRole('menuitem', { name: 'Clear all' })).toBeVisible();
     await expectNoSeriousViolations(page, testInfo, 'narrow-900-more', 'debrief-filter-bar');
     await menu.getByRole('menuitem', { name: /Time zone/ }).click();
     await expect(menu).toHaveCount(0);
     await more(page).click();
-    await page.getByRole('menu', { name: 'More filter controls' }).getByRole('menuitem', { name: 'Clear all' }).click();
+    await (await anchoredMenu(page, more(page), 'More filter controls', 'popup')).getByRole('menuitem', { name: 'Clear all' }).click();
     await expect(page.getByRole('toolbar', { name: 'Levels' }).getByRole('button', { name: /^ERR/ })).toHaveAttribute('aria-pressed', 'false');
   });
 

@@ -2,12 +2,14 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { CAPTURE_TIMEOUT, openApp, openView } from './app';
 import { openAppWith } from './mock-url';
+import { heldToast, toastByCause } from './toast-support';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // Error snapshots: the window is rendered to an image inside the webview (html-to-image), so this runs
 // against the real capture code in every project. The production build is served with the Tauri CSP,
 // which proves the capture needs no blob:, remote or inline-script permission.
 
-const toast = (page: Page) => page.locator('[data-testid=notification][data-cause="diagnostics.snapshot"]');
+const toast = (page: Page) => toastByCause(page, 'diagnostics.snapshot');
 
 /** Raises an uncaught error the way a bug would: from a timer, outside Angular's zone of control. */
 async function throwUncaught(page: Page, message: string): Promise<void> {
@@ -89,8 +91,8 @@ test('an uncaught error saves a snapshot, shows the toast and the notice, and th
   // reports the result.
   await view.getByRole('button', { name: 'Export diagnostics…' }).click();
   await expect(view.getByRole('status')).toContainText('Exporting 1 snapshot');
-  const exported = page.getByTestId('notification').filter({ hasText: 'Finished: Export diagnostics to' });
-  await expect(exported).toContainText('files zipped.', { timeout: 15_000 });
+  const exported = await heldToast(page, 'Finished: Export diagnostics to', { timeout: 15_000 });
+  await expect(exported).toContainText('files zipped.');
 
   await view.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(view.locator('[data-testid=snapshot-card]')).toHaveCount(0);
@@ -171,8 +173,11 @@ test('toasts stack one above the other instead of on top of each other', async (
   await throwUncaught(page, 'stacked boom');
   await expect(toast(page)).toContainText('Something went wrong', { timeout: CAPTURE_TIMEOUT });
   await page.keyboard.press('ControlOrMeta+s');
-  const notice = page.locator('[data-testid=notification][data-cause="workspace.notice"]');
+  const notice = toastByCause(page, 'workspace.notice');
   await expect(notice).toContainText('Saved');
+  // The stack re-lays out as the second toast arrives: read both once they stand still.
+  await expectNotMoving(toast(page));
+  await expectNotMoving(notice);
   const a = (await toast(page).boundingBox())!;
   const b = (await notice.boundingBox())!;
   const overlap = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);

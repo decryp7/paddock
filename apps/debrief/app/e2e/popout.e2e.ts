@@ -4,7 +4,7 @@ import { openQuery } from './analysis-support';
 import { ensureInspector, gridRows, openApp, openView } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
-import { menuItem, openMenu } from './menu-support';
+import { anchoredMenu, menuItem, openMenu } from './menu-support';
 import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // Pop-out windows in the browser build: `window.open` popups of the same app, synced over a BroadcastChannel (the
@@ -17,8 +17,9 @@ const groupOf = (page: Page, name: string) => page.locator('.dv-groupview').filt
 async function popOut(page: Page, context: BrowserContext, name: string): Promise<Page> {
   const opened = context.waitForEvent('page');
   await tab(page, name).click();
-  await groupOf(page, name).getByRole('button', { name: 'Panel menu', exact: true }).click();
-  await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Pop out to window', exact: true }).click();
+  const button = groupOf(page, name).getByRole('button', { name: 'Panel menu', exact: true });
+  await button.click();
+  await (await anchoredMenu(page, button, 'Actions')).getByRole('menuitem', { name: 'Pop out to window', exact: true }).click();
   const popup = await opened;
   await expect(popup.locator('debrief-popout-shell')).toBeVisible();
   await expect(popup.getByRole('heading', { level: 1, name })).toBeVisible();

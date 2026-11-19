@@ -1,6 +1,7 @@
 import { expect, test } from './test';
 import type { Locator, Page } from '@playwright/test';
 import { APP_LOAD_TIMEOUT, gridRows } from './app';
+import { anchoredMenu, menuNamed } from './menu-support';
 
 // The generated pseudo-locale (Settings ▸ General ▸ Language ▸ Pseudo): accented, longer, bracketed (⟦…⟧) text.
 // Smoke test of runtime translation loading, and a guard against unmarked English in the shell chrome and menus.
@@ -70,16 +71,17 @@ test.describe('pseudo-locale', () => {
     const menubar = page.getByRole('menubar');
     expect(await unmarkedEnglish(menubar)).toEqual([]);
     const top = menubar.getByRole('menuitem');
-    const count = await top.count();
-    expect(count).toBeGreaterThan(3);
-    for (let i = 0; i < count; i++) {
-      await top.nth(i).click();
-      const menu = page.getByRole('menu').last();
-      await expect(menu).toBeVisible();
+    // By name, not by index: an item found by its label is the same item in every pass.
+    const names = (await top.allInnerTexts()).map((t) => t.trim());
+    expect(names.length).toBeGreaterThan(3);
+    for (const [i, name] of names.entries()) {
+      const item = menubar.getByRole('menuitem', { name, exact: true });
+      await item.click();
+      const menu = await anchoredMenu(page, item);
       // Recent files/projects and similar list data; everything else in a menu is UI text.
       expect(await unmarkedEnglish(menu.locator('[role^=menuitem]:not([data-recent]), [role=separator] + [role=presentation]')), `menu ${i}`).toEqual([]);
       await page.keyboard.press('Escape');
-      await expect(page.getByRole('menu')).toHaveCount(0);
+      await expect(menuNamed(page)).toHaveCount(0);
     }
   });
 

@@ -1,6 +1,7 @@
 import { expect, test } from './test';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith, runCommand } from './tools-support';
+import { heldToast } from './toast-support';
 
 test.describe('lifecycle banners and elevation', () => {
   test('safe mode shows a banner with Restart normally', async ({ page }, testInfo) => {
@@ -15,8 +16,8 @@ test.describe('lifecycle banners and elevation', () => {
     // message reports the result.
     await banner.getByTestId('save-diagnostics').click();
     await expect(page.getByTestId('diagnostics-export-status')).toContainText(/Saving diagnostics to debrief-diagnostics-\d{8}-\d{6}\.zip/);
-    const saved = page.getByTestId('notification').filter({ hasText: /Finished: .*debrief-diagnostics-\d{8}-\d{6}\.zip/ });
-    await expect(saved).toContainText('files zipped.', { timeout: 15_000 });
+    const saved = await heldToast(page, /Finished: .*debrief-diagnostics-\d{8}-\d{6}\.zip/, { timeout: 15_000 });
+    await expect(saved).toContainText('files zipped.');
     await page.getByTestId('diagnostics-export-status').getByRole('button', { name: 'Dismiss' }).click();
     await banner.getByRole('button', { name: 'Restart normally' }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'Could not restart' })).toHaveCount(0);

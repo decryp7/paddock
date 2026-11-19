@@ -3024,3 +3024,139 @@ flaky failure on every member whose plan reaches its project (`tools/paddock-dev
 - `ts-dyno-shell` warned that its build step "does not build what it runs". Cause (measured, not guessed): `paddock-build` creates the sidecar placeholders during the build script's run and lists them in `rerun-if-changed`, so cargo saw them as newer than the run and rebuilt `dyno-app` once on the next call. Placeholders now get the oldest mtime (best effort, with a `cargo:warning` when it fails); the registry entry was right. A tool that copies a real sidecar over a placeholder with its old time (`cp -p`, `tar` x) will not make cargo rerun the build script: touch the file. The warning also names the first crates that compiled.
 
 Recurring: a check or run that cannot see its subject reads as a pass (ER-33; also lessons of 2026-11-17 on C137 and `expectIdle`).
+## Debrief: four WebKit e2e tests failed once each in debrief.yml run 8297 (train 14, 2026-11-19)
+Each failed on its first try and passed on its retry; none had failed in the 281 earlier Debrief runs of 30 days (`./dev ci flakes`).
+Flows read from the failing attempts' traces and screencasts (playwright-report-3 and -4 of run 8297).
+- **narrow-window.e2e.ts:94, Ctrl+B at 900 px: the Explorer opened and closed again (a product race).** The trace shows one
+  `User view.toggleSidebar via shortcut`, the grid resized twice within 600 ms (opened, then closed) and no second toggle. Causes listed:
+  (1) the key was lost: refuted, the activity line and the first resize; (2) the start-up decision of train 14 (`decideAtStart`) closed it:
+  refuted, it runs once after the first data and its effect is destroyed; (3) a key repeat toggled twice: refuted, one activity line;
+  (4) a re-plan that was due from the service's own close ran after Ctrl+B set the open flag and before the render drew the Explorer, and
+  the verdict added the Explorer's preferred width (300 px) to a dock that had not given it up: confirmed by a test that is red on the old
+  code. The plan saw 1100 px for 800, said "keep", `evaluate` took that as "opened by hand while it fits" (`keptByUser` false), and the
+  next re-plan closed it. The same error happened when dockview had not yet followed its container (its last size plus the drawn width).
+  **Fix:** the verdict is asked with the room the Explorer takes now (`drawnWidth`, 0 before it is drawn) and the dock's container as laid
+  out now, a sum that is the same before and after the render; `NarrowWindow` logs each decision (`ui.layout`). Not caused by train 14:
+  the inference in `evaluate` and the 300 px fallback are on main (84b22df4e); the window is the 150 ms re-plan debounce after the close.
+- **jobs.e2e.ts:62, the toast's View: the toast had timed out.** "Explanation ready" was posted when the explain job ended (2.4 s, before
+  the export dialog had closed); the test then spent about 6.5 s on the export, the Jobs pane and its axe check, saw the toast, ran a
+  second axe check, and the toast left 8 s after it came (TOAST_MS, as designed; VS Code also times out info toasts and holds them under
+  the pointer). Refuted: the export result replaced it (the export still ran), the stack dropped it (two toasts). **Fix (spec):**
+  `mockJobsHold=ai` holds the answer until both jobs were seen; the test hovers the toast (which holds its time) and clicks with the
+  clock paused. Positive control: the old spec with 8.5 s of page time before the toast fails as in CI; the new one passes.
+- **profiling-native.e2e.ts:6 and :29, File > Open performance capture ran nothing.** In both workers the File menu was drawn at the
+  window's top-left for about 500 ms during the first load (CDK positions an overlay after Angular's next render), the click aimed at its
+  item there, the menu moved under File and no command ran (no activity line). **Fix:** `openMenu`/`openMenuPath` wait for the menu to sit
+  against its trigger (`expectMenuAnchoredTo`, a new kind in `ui/projects/paddock-e2e/src/ready.ts`, with `menuGap` tested on the run's boxes);
+  positive control: a menu held at the top-left fails the wait.
+**Why the logs did not show it:** the Explorer's service logged nothing (now it does); the toast and the menu were visible only in the
+screencast. **Class:** the narrow-window race is the third "layout decision from a stale measurement" (dockview's last size: the
+`watchResize` settle loop, train 14's same-frame fix, this one); the other two are the ready-read class (a spec acting on a control that
+is in the DOM but not positioned or not lasting).
+
+## The dock's room has one reader; menus are found through one helper; why the File menu sat at the top-left (Debrief, 2026-11-19)
+Follow-ups of run 8297 that the user approved.
+- **One reader of the dock's room.** `DockLayout.room(api)` is the dock's container as laid out now (null without a box); `plan`, grow-back
+  (`growBackIds`, `restorable`) and the Explorer verdict read it, and a test makes dockview's `width`/`height` throw a record on every read
+  (red before: ten reads in one plan, verdict and grow-back). `needsFit` compares the plan with the groups' own sizes and reads no room.
+  With the plan reading the container, `watchResize` no longer waits up to 20 x 50 ms for dockview to agree (the settle loop of
+  `RESIZE_SETTLE_TRIES`): it lays dockview out at the container (`followContainer`) and re-plans after the 150 ms debounce, and
+  `fitToWindow` does the same first. Third instance of the class "a layout decision from dockview's last size" (the settle loop,
+  f253014fa's same-frame fix, run 8297's Explorer race), so the class is closed by construction rather than by another wait.
+- **Menus and toasts through one helper each.** All 59 `getByRole('menu')` sites of Debrief's specs moved onto `menu-support.ts`
+  (`anchoredMenu`, `contextMenu`, `panelMenuButton`, `menuNamed` for closed or text checks), and all 29 toast sites onto `toast-support.ts`
+  (`heldToast`, `pressInToast`, `runningToast`, `toastNamed`). The ESLint rule `paddock/e2e-transient-wait` reports a spec that finds a menu
+  or a toast itself (by role, test id or a `locator()` selector); report-only (ER-41, `PADDOCK_E2E_TRANSIENT_LINT=warn`, reported in
+  Debrief's lint job): 88 findings on the old specs (59 menus + 29 toasts), 0 after.
+- **Why the menu waited (measured, not guessed).** Every Debrief spec runs on Playwright's installed clock (`pinnedClockTest`), which fakes
+  `setTimeout` and `requestAnimationFrame`. Angular's zoneless scheduler renders in whichever of the two fires first
+  (`scheduleCallbackWithRafRace`, @angular/core 22.2.3), and CDK positions an overlay in `afterNextRender` (`OverlayRef.attach`). With the real
+  clock the rAF branch runs in the browser's rendering step, before paint, so the menu is placed before its first frame: sampled at the
+  start of every frame, 0 of 6 WebKit opens and 6 of 6 Chromium opens showed one frame (the sampler's rAF runs before Angular's in the same
+  frame, so that frame is read before CDK positions the menu, not necessarily painted). With the clock installed the fake rAF fires from
+  the clock's own timer, outside the rendering step: up to 5 frames (41 ms) on Chromium locally, and in run 8297, under CI load, about
+  500 ms. A CPU profile of the window (Chromium, the browser build) showed the mock backend's queries (`mock-backend.ts`, `mock-engine.ts`)
+  and the clock's `_runTo` on the main thread, not a stall in Angular. **Users:** no jump to fix in the app; the menu is in place before
+  it is painted. Hiding an overlay until it is positioned (opacity 0) would not help the specs either (Playwright counts opacity 0 as
+  visible), so no product change; the specs wait for the place instead.
+**Class:** the ready-read class (a spec acts on an element that is in the DOM but not yet placed); amplifier: the installed clock moves
+the app's render out of the browser's frame.
+
+## Fix item: live-tail-follow.e2e.ts:298 "a wheel at once after Follow on is not pulled back" (Debrief, 2026-11-19)
+Failed once in a full local WebKit run of fix/debrief-webkit-flakes (689 passed; `onNewest` was true after `runFor(1_500)`); passed 40 of 40
+right after (20 runs x 4 workers, WebKit, load 43); `ci flakes` lists it flaky on Chromium on 2026-11-19. The spec touches no menu,
+toast or Explorer code of that branch. A local failure, not a CI result, so ER-12 does not apply yet (it judges CI runs); the Chromium flake
+in CI is the CI evidence. Next: reproduce with the trace on
+(`--trace on`, WebKit, under load) and read the grid's `Scroll written` lines around the wheel and the Follow request before fixing.
+
+## Debrief: ai-chat.e2e.ts:130 red on both tries in debrief.yml run 8300; two more WebKit FLAKYs (train 14, 2026-11-19)
+- **ai-chat.e2e.ts:130 "a long conversation scrolls in its list only".** `waitAnswered` (ready.ts `expectStreamDone`, 5 s) saw the third
+  answer still streaming. Trace: answers took 3.2 s and 2.4 s from the turn to `aria-busy="false"`, the third more than 5.5 s. Causes listed:
+  (1) the `mockJobsHold=ai` hold of jobs.e2e.ts (624910cb0) outlived its test: refuted, jobs.e2e.ts ran after ai-chat in that shard (tests 286
+  and 27), every test has a fresh page and the hold lives in the page, and ai-chat after jobs in one WebKit worker passed with and without
+  624910cb0 (12 of 12 each); (2) a dock or Explorer re-plan loop from the same member: refuted, no `ui.layout` and no grid resize lines after
+  the first question; (3) the stream's cost on a loaded runner: the shard ran 1.7 to 1.9 times slower than in 8297 (ai-chat:101 21.9 s
+  against 11.0 s, :116 19.9 s against 11.8 s) and this test already took 22.0 s in 8297, about 3.3 s per answer against a 5 s wait.
+  **Fix:** the test needs six answers, not their streaming: `?mockAiChunkChars=100000` (new mock switch, unit-tested: one delta instead of
+  one per 12 characters) sends each answer in one piece. Locally (WebKit, 4 workers) the test went from 4.7-5.4 s to 3.9-5.0 s; 20 of 20
+  green at 4 workers, load 26-30. Streaming keeps its own tests (:12, :116).
+- **Fix item, fixed: ux-home.e2e.ts:73 "can be turned off for later imports" (shard 4/4, 1 of 145).** `uncheck` failed with "Clicking
+  the checkbox did not change its state": the screencast shows the health check's findings arriving while the click was made, which pushed
+  the checkbox about 90 px down, so the click landed on a health card. The spec now waits for the summary (Refresh enabled), the first
+  finding and a still checkbox (`expectNotMoving`) before pressing. The product moves a control as content arrives above it (the ADR 0061
+  class: controls that do not move); left as is.
+- **Fix item, open: a11y.e2e.ts:6 "main screen has no serious accessibility violations (dark)" (shard 3/4, 1 of 145).** axe saw
+  `--faint` text in the Inspector at 4.36-4.38:1 (#797d86 on #15161a, #787d85 on #151619) where the calm dark tokens give #8d929c on
+  #141518/#17181b: values that fit the Inspector drawn at about 85% opacity over `--bg-0`, i.e. mid-fade. The selection was logged at the
+  moment the animation wait returned (7605 ms), so the Inspector's content may have started a fade after the wait; the screencast shows
+  no Inspector on screen at all. Not reproduced yet. Next: run the spec with the trace on under load and read the Inspector's animations
+  (`document.getAnimations()`) when axe starts; wait for the Inspector to show the clicked record before settling.
+
+## Fix item: Debrief WebKit ai-chat "regex proposal as a highlight rule" saw the marker dialog still open (2026-11-19, local)
+`AI chat › a regex proposal is applied as a highlight rule through the marker dialog` (apps/debrief/app/e2e/ai-chat.e2e.ts:77)
+failed once in 170 local WebKit runs (ai-chat, ux-home and jobs at 10 repeats, 4 workers, retries off, on train 14 bfa9f914d): after
+the rule was filled in and applied, `getByRole('dialog', { name: 'Highlight lines' })` still counted 1 for the whole 5 s. The
+machine was at 17% CPU idle and the base was not measured on it, so this is a finding only (ER-9), not a CI result; train 14 does
+not touch this test or the marker-dialog path (fix/debrief-webkit-flakes changes only `:130` and a mock switch whose default stays
+12 characters). Not blocking, by the coordinator's reading of ER-12's feature-level scope (2026-11-19). Next: reproduce under load
+with a failing run first, then wait for the dialog's close to finish before the count. **Class: an e2e read before the page settled
+(the ready-read class); covered by the ready audit the user approved.**
+- **windowing.e2e.ts:93 "background work lists running tasks and stops one", red on both tries in run 8301 (shard 4/4, 2 of 144 before).**
+  The click on the status bar's Background work chip came 40 ms after the status bar showed "events"; the screencast shows the problems badge
+  arriving to the chip's right right after, which moved the chip about 55 px left, and the popover never opened (no listitems). Not train 14:
+  TestCommand, the jobs hold and the AI chunk switch do not reach the status bar or `?mock-tasks`. The audit branch had not touched this spec.
+  **Fix:** the click is made with the clock paused (`clickWithTimePaused`, the status-bar case its doc names); the product fix is ADR 0061
+  extended to the status bar (approved 2026-11-15).
+
+## The ready-signal audit's sweep: 10 WebKit passes of the whole Debrief suite, 6,899 of 6,900 (2026-11-19)
+Ten passes of the full Debrief e2e suite in WebKit at 4 workers (pass 1 on fc18530b9, passes 2-10 with ab099989b's windowing fix; load from
+11 to 34 at the starts), cut from 20 to 10 so landings go first (ER-24): 6,899 of 6,900 green. Pass 1 of an earlier start had found one
+defect of the audit's own helper (holding a "running in Jobs" toast its result replaces), fixed before these ten.
+**Fix item, open: live-tail-follow.e2e.ts:240 "scrollbar drag during a reveal (real input) leaves the view where the user put it" (pass 10,
+load 31).** The grid logged `User took over {Input: scrollbar, Pinned: true}` at the press and no scroll at all during the drag (no `Scroll
+origin` from the user; the drag's moves took 13 ms), so `expectLeftNewest` ended with "taken over, the view never left" and, by design, sent
+nothing again. This is the open measurement recorded above (headless WebKit under load: a take-over with no scroll; a scrollbar press can
+miss the thumb), not a view pulled back after a delivered gesture; the deterministic ownership rows of the same spec (dispatched input)
+passed in all ten passes. Next: when a take-over came with no scroll event, read the thumb's position at the press (it can move while the
+reveal grows the total, `Total grew outside a round` 7 ms after the press here) before deciding whether a resend is safe.
+
+## Main run 8315: a required choice dismissed before its frame existed; a tray height read during the entry slide (2026-11-19)
+- **shell-demo.spec.ts:696 (reference apps shard 2/2): "How should the demo greet you?" not found after Escape.** The test opens
+  `sd.choose-style` (a required choice) and presses Escape at once. `InPageDialogBackend` pushes the dialog on its stack synchronously,
+  but the frame that applies the required-choice rule only exists after the host renders it (`ngAfterViewInit` sets `requestDismiss`).
+  Until then `ref.dismiss()` was a plain dismissal, so an Escape in that window closed a dialog that must be answered. Chromium runs
+  input before timers, so a loaded runner widens the window. Causes listed: (1) the pre-view dismissal: confirmed, the shell-demo page
+  with the main thread slowed 20x (CDP CPU throttling) and Escape right after the open fails 17 of 20 with the CI message, 20 of 20
+  green with the fix; (2) the lazy content chunk stalled over 5 s on the dev server (the run 7854 class): refuted by (1), the same
+  slowed page shows the dialog in time once the dismissal is refused; (3) the click did not open it: refuted by the same runs. Not
+  caused by a train-14 member: the code dates from 2026-10-31; local unthrottled runs are 40 of 40 green before the fix. **Fix:** before
+  its view exists a dialog follows the frame's loading rule (a required choice ignores a dismissal); unit test in `ui.spec.ts`.
+- **tray.e2e.ts:112 (Pitwall e2e-webkit, Linux): Activity 80 while loading against 81 ready.** Activity is 80.5 px tall (its `.big`
+  line box is 22.5 px). The popover slides in (`pd-tray-in`, translateY 4 px); a read during the slide sits at a fractional offset and
+  carries the transform's float error (80.49999237 or 80.50000763), and `Math.round` turned that into 1 px. Run 8212's fix (two reads
+  agree) did not hold: both reads agreed on rounded values while the popover still moved (y from 49.0 to 53.0 over the reads). Measured
+  in the arm64 CI image (Linux WebKit, 4 workers): raw heights read before the fix 3 of 20 red; with the wait for the entry animation's
+  end, 60 of 60 green at load 17-35; the whole file 19 of 19 there and 38 of 38 on macOS (both engines). Not caused by a train-14
+  member (same symptom in run 8212, before the train). **Fix:** `openTray` waits until the popover's finite animations have finished,
+  and the test compares unrounded heights. Class: a layout read during an entry animation (the "two reads agree" rule does not catch a
+  box that moves while its rounded size stays).
