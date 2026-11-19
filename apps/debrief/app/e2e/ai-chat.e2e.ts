@@ -128,7 +128,9 @@ test.describe('AI chat', () => {
   });
 
   test('a long conversation scrolls in its list only: the panel has no extra scroll space and the composer stays at the bottom', async ({ page }) => {
-    await openAiApp(page);
+    // Six answers, not their streaming: each comes in one piece (`mockAiChunkChars`). Streamed 12 characters a step, an answer took 2.4 to
+    // 3.2 s on a loaded WebKit runner and the third ran past the 5 s wait (debrief.yml run 8300); streaming has its own tests above.
+    await openAiApp(page, 'mockAiChunkChars=100000');
     const chat = await openChat(page);
     for (let i = 0; i < 6; i++) {
       await ask(chat, 'What crashed?');
