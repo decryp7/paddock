@@ -677,7 +677,6 @@ impl Heavy {
         !stop()
     }
 
-    /// The text of `status`.
     /// Everyone who waits, as the folder shows it, without changing anything: the live tickets in queue order, the live high-priority
     /// markers and the live drain markers (a dead holder's file is left for the next run that removes stale things).
     pub fn waiters(&self) -> Vec<Waiter> {
@@ -738,6 +737,7 @@ impl Heavy {
         waitfor::find_cycle(&self.waiters(), rules)
     }
 
+    /// The text of `status`.
     pub fn status(&self) -> String {
         let mut out = String::new();
         let multi = self.cfg.slots > 1;
