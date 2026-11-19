@@ -100,6 +100,11 @@ enum Command {
         #[command(subcommand)]
         command: disk::DiskCommand,
     },
+    /// After a train lands on main: the disk clean of the integrator's landing step.
+    Train {
+        #[command(subcommand)]
+        command: TrainCommand,
+    },
     /// The branch ledger on Gitea pull requests: open (a draft), label, list, sync (the labels of .gitea/labels.toml) and
     /// plan-status (plan rows checked against the ledger). Reads GITEA_TOKEN; opening a pull request starts no CI run.
     Pr {
@@ -309,6 +314,14 @@ struct MergeCheckArgs {
     /// Any other finding stays a finding for a person to answer.
     #[arg(long, value_name = "FILE")]
     write_reverted: Option<PathBuf>,
+}
+
+#[derive(Subcommand)]
+enum TrainCommand {
+    /// Run the safe disk clean (`disk clean --apply`: merged or stale-pushed folders and worktrees that are not live, and released
+    /// review worktrees whose commits are all on origin) after a train landed on main. Bounded by --max (default 10m); it never
+    /// blocks the landing: an error or a timeout is a `::warning::` and the exit code stays 0. Logs what went and the space freed.
+    Landed(disk::landing::LandedArgs),
 }
 
 #[derive(Subcommand)]
@@ -836,6 +849,14 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             Ok(Report::new(serde_json::json!({ "lines": lines }), lines.join("\n")))
         }
         Command::Disk { command } => disk::command(command),
+        Command::Train {
+            command: TrainCommand::Landed(a),
+        } => disk::landing::landed(
+            &a,
+            &|k| std::env::var(k).ok(),
+            &mut |l| eprintln!("{l}"),
+            &|| crate::worktree::procs::process_folders().ok(),
+        ),
         Command::Pr { command } => pr::command(command),
         Command::Queue { command } => queue::command(command),
         Command::Merge {

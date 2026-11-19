@@ -372,14 +372,26 @@ fn safe_remove_refuses_a_locked_or_claimed_worktree_even_with_an_old_record() {
 #[test]
 fn every_git_call_of_a_scan_runs_without_optional_locks() {
     let fx = Fixture::new();
-    let _wt = fx.add("locks-wt");
+    // Released (unlocked, unowned) and with no live window: a live folder is not read by git at all, and this test needs the
+    // status, rev-list and for-each-ref reads of a folder that is judged.
+    let _wt = released(&fx, "locks-wt");
     let log = fx.root.join("git-env.log");
     let path_env = fx.fake_git("locks", &format!("echo \"${{GIT_OPTIONAL_LOCKS:-unset}}\" >> '{}'", log.display()));
     let index = fx.root.join("index.sqlite");
     let out = fx
         .cmd(
             &fx.primary,
-            &["disk", "scan", "--no-sizes", "--root", s(&fx.root), "--index", s(&index)],
+            &[
+                "disk",
+                "scan",
+                "--no-sizes",
+                "--live-hours",
+                "0",
+                "--root",
+                s(&fx.root),
+                "--index",
+                s(&index),
+            ],
         )
         .path_first(&path_env)
         .output()
