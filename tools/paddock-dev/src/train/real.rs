@@ -1,8 +1,10 @@
 //! The real ports of `train release` and `train land`: Gitea through the shared client, the disk check, the triage and `git`.
 //! Nothing here decides anything; the tests of the logic use tables (`sequence`, `land`), never Gitea or a repository (ER-14).
 
+use super::accept::{FlakyCheck, Tree};
 use super::land::Git;
-use super::sequence::{Ports, Reach, RunEnd};
+use super::sequence::{FullRun, Ports, Reach, RunEnd};
+use super::verdict::Accepted;
 use crate::ci_runs::dispatch;
 use crate::ci_runs::train_runs::{self as runs, RunFacts};
 use crate::ci_runs::verdict::Verdict;
@@ -31,6 +33,10 @@ pub struct RealPorts {
     pub token: String,
     /// Started with the sequence.
     pub clock: SystemClock,
+    /// What `--accept-flaky` named.
+    pub accepted: Vec<Accepted>,
+    /// The files the train changes against main.
+    pub changed: Vec<String>,
 }
 
 impl Ports for RealPorts {
@@ -99,6 +105,17 @@ impl Ports for RealPorts {
 
     fn ci_verdict(&mut self, workflow: &str, sha: &str) -> Verdict {
         runs::full_verdict(&self.server, &self.repo, &self.token, workflow, sha)
+    }
+
+    fn landable(&mut self, workflow: &str, sha: &str) -> Result<FullRun, String> {
+        landable_of(
+            &self.root,
+            (&self.server, &self.repo, &self.token),
+            workflow,
+            sha,
+            &self.accepted,
+            &self.changed,
+        )
     }
 
     fn triage(&mut self, run: u64) -> Result<Value, String> {
@@ -172,6 +189,46 @@ impl GitCli<'_> {
     }
 }
 
+/// The tracked source and the declaration of an app's package at the worktree's head (what [`super::accept`] resolves features from).
+pub fn tree_of(root: &Path, a: &Accepted) -> Result<Tree, String> {
+    let pkg = a.package();
+    let tracked = GitCli { root }
+        .run(&["ls-files", "--", &format!("{pkg}/src")], QUICK_LIMIT)?
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let decl_path = root.join(&pkg).join(super::accept::DECLARATION);
+    let declaration = match std::fs::read_to_string(&decl_path) {
+        Ok(t) => Some(t),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("{} cannot be read: {e}", decl_path.display())),
+    };
+    Ok(Tree { tracked, declaration })
+}
+
+/// The `Landable` of a full run (sealed in `ci_runs::landable`), as the text the sequence and the landing use.
+pub fn landable_of(
+    root: &Path,
+    (server, repo, token): (&str, &str, &str),
+    workflow: &str,
+    sha: &str,
+    accepted: &[Accepted],
+    changed: &[String],
+) -> Result<FullRun, String> {
+    let tree = |a: &Accepted| tree_of(root, a);
+    let check = FlakyCheck {
+        accepted,
+        changed,
+        tree: &tree,
+    };
+    let l = crate::ci_runs::landable::landable(server, repo, token, workflow, sha, &|t| check.check(t))?;
+    Ok(FullRun {
+        run: l.run,
+        summary: l.summary(),
+        lines: l.lines.clone(),
+    })
+}
+
 /// What `train land` asks CI about the head.
 pub struct RealCi {
     /// The worktree.
@@ -182,6 +239,10 @@ pub struct RealCi {
     pub repo: String,
     /// The API token.
     pub token: String,
+    /// What `--accept-flaky` named.
+    pub accepted: Vec<Accepted>,
+    /// The files the train changes against main.
+    pub changed: Vec<String>,
 }
 
 impl super::land::Ci for RealCi {
@@ -189,8 +250,24 @@ impl super::land::Ci for RealCi {
         runs::full_verdict(&self.server, &self.repo, &self.token, workflow, sha)
     }
 
-    fn reaches(&mut self, app: &str, main: &str, head: &str) -> Result<bool, String> {
-        reach_of(&self.root, app, main, head).map(|r| r.reached)
+    fn landable(&mut self, workflow: &str, sha: &str) -> Result<FullRun, String> {
+        landable_of(
+            &self.root,
+            (&self.server, &self.repo, &self.token),
+            workflow,
+            sha,
+            &self.accepted,
+            &self.changed,
+        )
+    }
+
+    fn projects(&mut self, from: &str, to: &str) -> Result<std::collections::BTreeSet<String>, String> {
+        let plan = crate::queue::real::run_planner(&self.root, from, to)?;
+        Ok(crate::queue::real::projects_of_plan(&plan))
+    }
+
+    fn release_runs(&mut self, workflow: &str, branch: &str) -> Result<Vec<(u64, String)>, String> {
+        runs::release_runs(&self.server, &self.repo, &self.token, workflow, branch)
     }
 }
 

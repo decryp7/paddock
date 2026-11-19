@@ -29,6 +29,7 @@ struct Table {
     ancestor: bool,
     reach: BTreeMap<String, Result<Reach, String>>,
     reach_asked: Vec<(String, String)>,
+    landables: BTreeMap<String, Result<FullRun, String>>,
 }
 
 impl Table {
@@ -54,6 +55,7 @@ impl Table {
             ancestor: true,
             reach: BTreeMap::new(),
             reach_asked: Vec::new(),
+            landables: BTreeMap::new(),
         }
     }
     fn result(mut self, wf: &str, r: RunResult) -> Table {
@@ -113,6 +115,12 @@ impl Ports for Table {
             reason: "no full run".into(),
         })
     }
+    fn landable(&mut self, workflow: &str, _: &str) -> Result<FullRun, String> {
+        self.landables
+            .get(workflow)
+            .cloned()
+            .unwrap_or(Err("no landable in the table".into()))
+    }
     fn triage(&mut self, run: u64) -> Result<Value, String> {
         self.triaged.push(run);
         self.triage
@@ -138,7 +146,7 @@ fn plan(workflow: FixWorkflow, round: Round) -> Plan {
         sha: SHA.into(),
         workflow,
         round,
-        accepted: vec![Accepted::parse("e2e/a11y.e2e.ts:6:7").unwrap()],
+        accepted: vec![Accepted::parse("apps/debrief/app/e2e/a11y.e2e.ts:6:7").unwrap()],
         reuse: BTreeMap::new(),
         max: Duration::from_secs(14 * 3600),
     }
@@ -523,4 +531,86 @@ fn the_round_and_workflow_arguments_are_parsed_strictly() {
     assert!(FixWorkflow::parse("dyno.yml").is_err());
     assert_eq!(app_of("dyno-release.yml"), "dyno");
     assert_eq!(app_of("shell-demo-release.yml"), "shell-demo");
+}
+
+fn landable_full() -> FullRun {
+    FullRun {
+        run: 9002,
+        summary: "full run 9002 with 1 accepted FLAKY, 0 already failing on main".into(),
+        lines: vec!["accepted FLAKY (e2e): a test".into()],
+    }
+}
+
+/// ER-12: a full run that is red only by accepted FLAKY tests is accepted through the train-only `Landable`, every row logged.
+#[test]
+fn a_full_run_that_is_red_only_by_accepted_flaky_tests_is_accepted_and_logged() {
+    let mut t = Table::new();
+    t.after.insert(
+        "ci.yml".into(),
+        Verdict::Red {
+            run: Some(9002),
+            reason: "failure".into(),
+        },
+    );
+    t.landables.insert("ci.yml".into(), Ok(landable_full()));
+    let (r, log) = go(&dispatch_plan(), &mut t);
+    let done = r.unwrap();
+    assert!(done.steps.contains(&("ci.yml".to_string(), Source::Landable(9002))));
+    assert!(
+        log.contains("landing on a full run 9002 with 1 accepted FLAKY") && log.contains("accepted FLAKY (e2e): a test"),
+        "{log}"
+    );
+    // and one that is not landable stops
+    let mut t = Table::new();
+    t.after.insert(
+        "ci.yml".into(),
+        Verdict::Red {
+            run: Some(9002),
+            reason: "failure".into(),
+        },
+    );
+    t.landables.insert("ci.yml".into(), Err("a NEW failure".into()));
+    let stop = go(&dispatch_plan(), &mut t).0.unwrap_err();
+    assert!(stop.cause.contains("not landable: a NEW failure"), "{stop:?}");
+}
+
+#[test]
+fn a_red_full_run_that_already_exists_and_is_landable_is_used_without_a_dispatch() {
+    let mut t = Table::new();
+    t.verdict_now.insert(
+        "ci.yml".into(),
+        Verdict::Red {
+            run: Some(8999),
+            reason: "failure".into(),
+        },
+    );
+    t.landables.insert("ci.yml".into(), Ok(landable_full()));
+    let done = go(&dispatch_plan(), &mut t).0.unwrap();
+    assert!(done.steps.contains(&("ci.yml".to_string(), Source::Landable(9002))));
+    assert_eq!(t.workflows().iter().filter(|w| **w == "ci.yml").count(), 1, "only the fix round");
+}
+
+#[test]
+fn a_since_run_or_passed_run_on_another_ref_is_refused() {
+    let mut t = Table::new();
+    t.runs.get_mut(&8300).unwrap().git_ref = "refs/heads/main".into();
+    assert!(
+        go(&dispatch_plan(), &mut t)
+            .0
+            .unwrap_err()
+            .cause
+            .contains("not on this train's ref")
+    );
+    assert!(t.dispatched.is_empty());
+    let mut t = Table::new();
+    let mut f = facts("debrief.yml", SHA, RunResult::Success);
+    f.git_ref = "refs/heads/other".into();
+    t.runs.insert(8307, f);
+    assert!(
+        go(&plan(FixWorkflow::Debrief, Round::Passed(8307)), &mut t)
+            .0
+            .unwrap_err()
+            .cause
+            .contains("not on this train's ref")
+    );
 }

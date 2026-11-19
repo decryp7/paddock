@@ -2739,3 +2739,21 @@ fn the_planner_runs_cargo_only_in_the_checkout_of_main_never_in_the_merge_clone(
     }
     assert!(!sentinel.exists(), "cargo never ran a pull request's code");
 }
+
+/// The planner is bounded: a planner that hangs is ended at its limit with a cause, never waited for (ER-32).
+#[cfg(unix)]
+#[test]
+fn a_planner_that_hangs_is_ended_at_its_limit() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("planner");
+    std::fs::write(&p, "#!/bin/sh\nsleep 60\n").unwrap();
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let started = std::time::Instant::now();
+    let err = real::run_planner_command(paddock_proc::command(&p), std::time::Duration::from_secs(1), "aaa", "bbb").unwrap_err();
+    assert!(err.contains("did not finish within 1s on aaa..bbb"), "{err}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(30),
+        "it was ended, not waited for"
+    );
+}

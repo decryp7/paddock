@@ -34,6 +34,9 @@ pub enum TrainCommand {
     Land(LandArgs),
     /// After a train landed: the bounded, never-blocking disk clean of the landing step (`train land` runs it itself).
     Landed(crate::disk::landing::LandedArgs),
+    /// Whether this process holds the train-CI reservation (the proof `train release` makes): exit 0 when it does. Run it as
+    /// `scripts/train-ci-hold.sh <label> -- ./dev train hold-check`.
+    HoldCheck,
 }
 
 /// Arguments of `train release`.
@@ -71,6 +74,10 @@ pub struct ReleaseArgs {
 pub struct LandArgs {
     /// The train branch, for example `train/2026-11-19-16`; its pushed head must be checked out in this worktree.
     branch: String,
+    /// A flaky test the full run may be red by, as `apps/<app>/app/<spec>:<line>[:<col>]` (repeat): the same ER-12 check as
+    /// `train release`. Without any, only a green full run (by `ci verdict`) lands.
+    #[arg(long = "accept-flaky", value_name = "LOCATION")]
+    accept_flaky: Vec<String>,
 }
 
 /// Runs a `train` command.
@@ -79,6 +86,7 @@ pub fn command(c: TrainCommand) -> Result<Report, CliError> {
         TrainCommand::Release(a) => release(&a),
         TrainCommand::Land(a) => land_cmd(&a),
         TrainCommand::Landed(a) => run_landed(&a),
+        TrainCommand::HoldCheck => hold_check(),
     }
 }
 
@@ -142,20 +150,12 @@ fn release(a: &ReleaseArgs) -> Result<Report, CliError> {
         ));
     }
     plan.sha = local;
-    // ER-12, enforced: an accepted flaky test is one this train did not touch.
+    // ER-12, enforced: an accepted flaky test is one this train did not touch (nor the source it drives).
+    let mut changed = Vec::new();
     if !plan.accepted.is_empty() {
         git.fetch().map_err(CliError::failure)?;
-        let changed = git.changed("origin/main...HEAD").map_err(CliError::failure)?;
-        let touched = accept::touched(&plan.accepted, &changed);
-        if !touched.is_empty() {
-            return Err(CliError::new(
-                Exit::Findings,
-                format!(
-                    "::error::train release: --accept-flaky is refused, the train touches what it accepts: {}. Next step: fix the test in its owner's branch (a flaky test the change touches blocks the landing, ER-12), or drop that --accept-flaky.",
-                    touched.join("; ")
-                ),
-            ));
-        }
+        changed = git.changed("origin/main...HEAD").map_err(CliError::failure)?;
+        refuse_touched(&plan.accepted, &changed, &root, "train release")?;
     }
     // The hold: run only while holding the train-CI reservation, proven; else run again under it (a hard deadline around the child).
     let mut hold = hold::ShellHold {
@@ -178,6 +178,8 @@ fn release(a: &ReleaseArgs) -> Result<Report, CliError> {
         repo: a.repo.clone(),
         token,
         clock: crate::wait::SystemClock::new(),
+        accepted: plan.accepted.clone(),
+        changed,
     };
     let mut log = std::io::stderr();
     match sequence::release(&plan, &mut ports, &mut log) {
@@ -190,6 +192,9 @@ fn release(a: &ReleaseArgs) -> Result<Report, CliError> {
                     sequence::Source::Judged(r) => format!("{wf}: run {r} judged: only accepted flaky tests failed"),
                     sequence::Source::Reused(r) => format!("{wf}: reused green run {r}"),
                     sequence::Source::Verdict(r) => format!("{wf}: full green run {r} by `ci verdict`"),
+                    sequence::Source::Landable(r) => {
+                        format!("{wf}: full run {r}, red only by accepted flaky tests and failures already on main")
+                    }
                 })
                 .collect();
             let steps: Vec<_> = done
@@ -212,6 +217,39 @@ fn release(a: &ReleaseArgs) -> Result<Report, CliError> {
     }
 }
 
+/// ER-12: refuses an `--accept-flaky` the train touches (or whose feature cannot be resolved: fail closed).
+fn refuse_touched(accepted: &[verdict::Accepted], changed: &[String], root: &std::path::Path, who: &str) -> Result<(), CliError> {
+    let tree = |a: &verdict::Accepted| real::tree_of(root, a);
+    match accept::touched(accepted, changed, &tree) {
+        Ok(t) if t.is_empty() => Ok(()),
+        Ok(t) => Err(CliError::new(
+            Exit::Findings,
+            format!(
+                "::error::{who}: --accept-flaky is refused, the train touches what it accepts: {}. Next step: fix the test in its owner's branch (a flaky test the change touches blocks the landing, ER-12), or drop that --accept-flaky.",
+                t.join("; ")
+            ),
+        )),
+        Err(why) => Err(CliError::new(
+            Exit::Findings,
+            format!("::error::{who}: --accept-flaky is refused: {why}."),
+        )),
+    }
+}
+
+/// `train hold-check`: the proof of the hold, as a command (exit 0 when this process holds the train-CI reservation).
+fn hold_check() -> Result<Report, CliError> {
+    let root = crate::gates::command::repo_root(None)?;
+    match hold::proof(&root, &hold::HoldEnv::ambient()) {
+        Ok(()) => Ok(Report::new(json!({"held": true}), "This process holds the train-CI reservation.")),
+        Err(why) => Err(CliError::new(
+            Exit::Findings,
+            format!(
+                "::error::train hold-check: the train-CI hold is not proven ({why}). Next step: run it as `scripts/train-ci-hold.sh <label> -- ./dev train hold-check`."
+            ),
+        )),
+    }
+}
+
 /// The disk clean after a landing (`disk::landing`): it never blocks, an error or the limit is a warning.
 fn run_landed(a: &crate::disk::landing::LandedArgs) -> Result<Report, CliError> {
     crate::disk::landing::landed(a, &|k| std::env::var(k).ok(), &mut |l| eprintln!("{l}"), &|| {
@@ -225,27 +263,42 @@ const CLEAN_GRACE: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn land_cmd(a: &LandArgs) -> Result<Report, CliError> {
     land::check_branch(&a.branch).map_err(|e| CliError::usage(e).with_hint("Run `./dev train land --help`."))?;
+    let accepted = a
+        .accept_flaky
+        .iter()
+        .map(|l| verdict::Accepted::parse(l))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| CliError::usage(e).with_hint("Run `./dev train land --help`."))?;
     let token = crate::ci_runs::token()
         .map_err(|e| e.with_hint("The landing asks the shared verdict reader, which needs a token that can read Actions."))?;
     let root = crate::gates::command::repo_root(None)?;
     let mut git = real::GitCli { root: &root };
+    let mut changed = Vec::new();
+    if !accepted.is_empty() {
+        git.fetch().map_err(CliError::failure)?;
+        changed = git.changed("origin/main...HEAD").map_err(CliError::failure)?;
+        refuse_touched(&accepted, &changed, &root, "train land")?;
+    }
     let mut ci = real::RealCi {
         root: root.clone(),
         server: SERVER.to_string(),
         repo: "decryp7/paddock".to_string(),
         token,
+        accepted,
+        changed,
     };
     let landed = land::land(&a.branch, &mut git, &mut ci, &mut std::io::stderr())
         .map_err(|stop| CliError::new(Exit::Findings, stop.annotation().replace("train release", "train land")))?;
     // The landing is verified; the disk clean that follows can only warn (it never blocks or fails the landing).
     let clean_text = landing_clean(&a.branch);
     Ok(match landed {
-        land::Landed::FastForwarded { from, to } => Report::new(
-            json!({"landed": true, "from": from, "to": to}),
+        land::Landed::FastForwarded { from, to, notes } => Report::new(
+            json!({"landed": true, "from": from, "to": to, "notes": notes}),
             format!(
-                "Landed: main is now {} (was {}); verified with ls-remote.\n{clean_text}",
+                "Landed: main is now {} (was {}); verified with ls-remote.\n{}\n{clean_text}",
                 &to[..9],
-                &from[..9]
+                &from[..9],
+                notes.join("\n")
             ),
         ),
         land::Landed::AlreadyOnMain(sha) => Report::new(
@@ -311,7 +364,7 @@ mod tests {
     #[test]
     fn good_arguments_make_a_plan_and_every_bad_one_is_refused_before_anything_runs() {
         let plan = plan_of(&args(&[
-            "accept=e2e/a11y.e2e.ts:6:7",
+            "accept=apps/debrief/app/e2e/a11y.e2e.ts:6:7",
             "reuse=dyno-release.yml=8302",
             "since=passed:8307",
         ]))

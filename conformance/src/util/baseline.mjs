@@ -104,7 +104,7 @@ export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = de
     // number of entries in silently (a new apps/<app>/app/eslint-suppressions.json with count 5, the second time this class was found).
     if (/does not exist|exists on disk, but not in|not in/.test(String(e.stderr ?? e.message))) {
       const { fresh, moved } = reconcile(current, [], keyOf, looseKeyOf);
-      return { base, added: fresh, moved };
+      return { base, added: fresh, moved, absent: true };
     }
     return { kind: 'unreadable', reason: `the baseline at ${base.slice(0, 9)} cannot be read` };
   }

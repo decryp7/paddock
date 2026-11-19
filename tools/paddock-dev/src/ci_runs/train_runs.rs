@@ -86,6 +86,29 @@ pub fn newest_runs(server: &str, repo: &str, token: &str) -> Result<Vec<RunInfo>
     Ok(Client::new(&mut http, server, repo, token).runs_page(1)?.runs)
 }
 
+/// The successful runs of `workflow` on `branch` (the newest 200 runs of the branch, newest first): run id and the commit tested.
+pub fn release_runs(server: &str, repo: &str, token: &str, workflow: &str, branch: &str) -> Result<Vec<(u64, String)>, String> {
+    let mut http = CurlHttp;
+    let mut client = Client::new(&mut http, server, repo, token);
+    let want_ref = format!("refs/heads/{branch}");
+    let mut out = Vec::new();
+    for page in 1..=4 {
+        let p = client.runs_page_where(page, &format!("branch={branch}"))?;
+        let n = p.runs.len();
+        for r in &p.runs {
+            let f = RunFacts::of(r);
+            if f.workflow == workflow && f.git_ref == want_ref && f.result == RunResult::Success {
+                out.push((r.id, f.head_sha));
+            }
+        }
+        if n < 50 {
+            break;
+        }
+    }
+    out.sort_by_key(|(id, _)| std::cmp::Reverse(*id));
+    Ok(out)
+}
+
 /// `ci triage <run>` as the JSON `ci triage --json` prints, with `ok: true` (it worked, or this returns the error).
 pub fn triage_doc(server: &str, repo: &str, token: &str, run: u64) -> Result<Value, String> {
     let mut http = CurlHttp;

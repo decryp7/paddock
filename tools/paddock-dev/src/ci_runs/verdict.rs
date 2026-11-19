@@ -164,7 +164,7 @@ pub fn decide(
 }
 
 /// The failed jobs of the earlier attempts of a run (1 up to `run_attempt - 1`).
-fn read_earlier(client: &mut Client, run: &RunInfo) -> Earlier {
+pub(super) fn read_earlier(client: &mut Client, run: &RunInfo) -> Earlier {
     for n in 1..run.run_attempt {
         match client.attempt_jobs(run.id, Some(n)) {
             Ok(Some(jobs)) => {

@@ -4,10 +4,23 @@
 //! it against the slot status and the owner's `who` file; a variable without a live holder is refused. The hold has no in-process
 //! library (the holder is a detached process the shell scripts own), so a command that does not hold it runs itself again under
 //! `train-ci-hold.sh` and ends with the child's exit code.
+//!
+//! **Inherited-held semantics** (as in `scripts/vm-lock.sh`): `PADDOCK_VM_LOCK_HELD` is an exported variable, so every process the
+//! holder starts inherits it, and any of them proves the hold for as long as the holder lives: the check confirms the named pid
+//! still has its start time, the slot status shows that owner folder holding, and the owner's `who` file names that pid. A copy of the
+//! variable in a shell that outlived the holder, or one made by hand, fails (the pid or the slot no longer matches). A process
+//! that is not a descendant but has the variable (a `nohup` from the sequence) is counted as held while the holder lives; that is
+//! the scripts' own meaning, and the hold ends when the holder does, so such a process cannot hold anything for longer.
+//!
+//! A held child that is ended (the hard deadline, Ctrl-C, SIGTERM) is ended as a tree, which skips the script's exit trap; the hold
+//! is then released explicitly (`release_dead`): an acquire of the same lock takes a dead holder over and releases it at once, so a
+//! member run that waits on the reservation (`reservation::wait_real`) never waits on a holder that is gone.
 
-use paddock_proc::{Limits, Outcome, Sink, command, run_bounded, run_waited};
+use paddock_proc::{Limits, Outcome, Sink, command, run_bounded, run_waited_cancellable};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 /// The exit code of the hold when another train's sequence holds it (`scripts/vm-lock.sh`: EX_TEMPFAIL).
@@ -70,6 +83,8 @@ pub struct HoldEnv {
     pub vm_root: Option<String>,
     /// `PADDOCK_TRAIN_CI_LOCK_ROOT`.
     pub train_root: Option<String>,
+    /// The reservation folder the family derives (`./dev places --get lock-root`, its sibling `train-ci`): the one the lock must be.
+    pub expected_root: Option<PathBuf>,
 }
 
 impl HoldEnv {
@@ -80,6 +95,7 @@ impl HoldEnv {
             held: get("PADDOCK_VM_LOCK_HELD"),
             vm_root: get("PADDOCK_VM_LOCK_ROOT"),
             train_root: get("PADDOCK_TRAIN_CI_LOCK_ROOT"),
+            expected_root: crate::ci_runs::reservation::lock_root(),
         }
     }
 }
@@ -94,6 +110,18 @@ pub fn proof(repo: &Path, env: &HoldEnv) -> Result<(), String> {
     };
     if vm != train {
         return Err(format!("the lock held is {vm}, not the train-CI reservation {train}"));
+    }
+    // The lock is the family's reservation folder, as `./dev places` derives it (an explicit PADDOCK_TRAIN_CI_LOCK_ROOT is the
+    // same value the hold script exported, so it is compared with the derivation all the same; an underivable one is refused).
+    match &env.expected_root {
+        Some(expected) if expected == Path::new(train) => {}
+        Some(expected) => {
+            return Err(format!(
+                "the lock root is {train}, not the reservation folder {} that ./dev places derives",
+                expected.display()
+            ));
+        }
+        None => return Err("the reservation folder cannot be derived (./dev places --get lock-root)".into()),
     }
     let mut cmd = command("bash");
     cmd.arg(repo.join("scripts/vm-lock-run.sh")).arg("--check");
@@ -138,21 +166,54 @@ impl Hold for ShellHold {
             .arg(exe)
             .args(&self.args);
         cmd.env(REEXEC_VAR, "1");
-        match run_waited(cmd, self.max + GRACE, Sink::Inherit) {
-            Ok(Outcome::Exited(st)) => st.code().unwrap_or(1),
-            Ok(_) => {
+        // Ctrl-C and SIGTERM end the child (as a tree) and the hold is released, instead of leaving a sequence running unattended.
+        let stop = Arc::new(AtomicBool::new(false));
+        crate::pre_push::stop_on_signals(&stop);
+        let result = run_waited_cancellable(cmd, self.max + GRACE, Sink::Inherit, &stop);
+        let code = match result {
+            Ok((Outcome::Exited(st), _)) => st.code().unwrap_or(1),
+            Ok((_, cancelled)) => {
+                let why = if cancelled {
+                    "it was interrupted (Ctrl-C or SIGTERM)".to_string()
+                } else {
+                    format!("its hard deadline passed ({} s, --max plus a grace)", (self.max + GRACE).as_secs())
+                };
                 eprintln!(
-                    "::error::train release: the held command was ended at its hard deadline ({} s, --max plus a grace). Next step: read its log above, then run it again with the runs that are green given as --since-run passed:<run> or --reuse.",
-                    (self.max + GRACE).as_secs()
+                    "::error::train release: the held command was ended: {why}. Next step: read its log above, then run it again with the runs that are green given as --since-run passed:<run> or --reuse."
                 );
-                124
+                if cancelled { 130 } else { 124 }
             }
             Err(e) => {
                 eprintln!(
                     "::error::train release: the hold could not be started: {e}. Next step: check scripts/train-ci-hold.sh and the lock folder (./dev places)."
                 );
-                1
+                return 1;
             }
+        };
+        if code == 124 || code == 130 {
+            self.release_dead();
+        }
+        code
+    }
+}
+
+impl ShellHold {
+    /// Releases the reservation of a held child that was ended as a tree (its exit trap did not run): acquiring the same lock
+    /// takes a dead holder over, and the command it runs (`true`) ends at once and releases it. A lock that a live sequence holds
+    /// is not ours: the acquire is refused (exit 75) and nothing is changed.
+    fn release_dead(&self) {
+        let mut cmd = command("bash");
+        cmd.arg(self.repo.join("scripts/train-ci-hold.sh"))
+            .arg("train-release-cleanup")
+            .arg("--")
+            .arg("true");
+        match run_bounded(cmd, Limits::new(Duration::from_secs(300))) {
+            Ok(out) if out.success() => eprintln!("train release: the hold of the ended command was released"),
+            Ok(out) => eprintln!(
+                "::warning::train release: the hold of the ended command could not be released ({}); `scripts/train-ci-hold.sh --status` names the holder",
+                out.stderr_text().lines().last().unwrap_or("no message").trim()
+            ),
+            Err(e) => eprintln!("::warning::train release: the hold of the ended command could not be released: {e}"),
         }
     }
 }
@@ -234,6 +295,7 @@ mod tests {
             held: held.map(String::from),
             vm_root: vm.map(String::from),
             train_root: train.map(String::from),
+            expected_root: Some(PathBuf::from(&root)),
         };
         let bogus = "999999\tMon Jan 1 00:00:00 2001\t/nonexistent/owner";
         let why = proof(&repo(), &env(Some(bogus), Some(&root), Some(&root))).unwrap_err();
@@ -253,5 +315,23 @@ mod tests {
                 .unwrap_err()
                 .contains("not the train-CI reservation")
         );
+    }
+
+    /// The lock must be the family's reservation folder, and one that cannot be derived is refused.
+    #[test]
+    fn a_lock_elsewhere_than_the_reservation_folder_is_refused() {
+        let bogus = "999999\tMon Jan 1 00:00:00 2001\t/nonexistent/owner";
+        let env = |expected: Option<&str>| HoldEnv {
+            held: Some(bogus.into()),
+            vm_root: Some("/locks/a".into()),
+            train_root: Some("/locks/a".into()),
+            expected_root: expected.map(PathBuf::from),
+        };
+        assert!(
+            proof(&repo(), &env(Some("/locks/train-ci")))
+                .unwrap_err()
+                .contains("not the reservation folder /locks/train-ci")
+        );
+        assert!(proof(&repo(), &env(None)).unwrap_err().contains("cannot be derived"));
     }
 }

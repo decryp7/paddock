@@ -384,17 +384,35 @@ pub fn planner_command(me: &Path, trusted: &Path, main: &str, head: &str, parent
     c
 }
 
-/// The planner as a child of this tool in `trusted` (a checkout of main), without the queue's token.
+/// The longest the planner runs: a ceiling (ER-12), not a tuned limit. The planner reads `cargo metadata` of every workspace; this
+/// only keeps a hung one from holding a landing or a sequence for ever (ER-32).
+pub const PLANNER_LIMIT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// The planner as a child of this tool in `trusted` (a checkout of main), without the queue's token, ended at [`PLANNER_LIMIT`].
 pub fn run_planner(trusted: &Path, main: &str, head: &str) -> Result<serde_json::Value, String> {
     let me = crate::tool_cache::self_exe().map_err(|e| format!("cannot find this program: {e}"))?;
     let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
-    let mut c = planner_command(&me, trusted, main, head, &parent);
-    let out = c.output().map_err(|e| format!("cannot start the planner: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "the planner failed on {main}..{head}: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
+    let c = planner_command(&me, trusted, main, head, &parent);
+    run_planner_command(c, PLANNER_LIMIT, main, head)
+}
+
+/// Runs a planner command to its end or `limit`, and reads its JSON.
+pub fn run_planner_command(
+    c: std::process::Command,
+    limit: std::time::Duration,
+    main: &str,
+    head: &str,
+) -> Result<serde_json::Value, String> {
+    let out = paddock_proc::run_bounded(c, paddock_proc::Limits::new(limit)).map_err(|e| format!("cannot start the planner: {e}"))?;
+    match out.outcome {
+        paddock_proc::Outcome::Exited(st) if st.success() => {}
+        paddock_proc::Outcome::TimedOut => {
+            return Err(format!(
+                "the planner did not finish within {} on {main}..{head}",
+                crate::wait::fmt_duration(limit)
+            ));
+        }
+        _ => return Err(format!("the planner failed on {main}..{head}: {}", out.stderr_text().trim())),
     }
     serde_json::from_slice(&out.stdout).map_err(|e| format!("the planner's answer is not JSON: {e}"))
 }
