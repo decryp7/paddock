@@ -31,6 +31,7 @@ test('production build loads under the Tauri CSP without violations', async ({ p
   await page.getByRole('button', { name: 'Profile editor' }).click();
   await expect(page.getByRole('button', { name: 'Save & apply' })).toBeVisible();
 
+  // conformance: e2e-ready — the CSP violations the page recorded so far, not a layout or content read
   const violations = await page.evaluate(() => (window as unknown as { __cspViolations: string[] }).__cspViolations);
   expect([...problems, ...violations.map((v) => `violation: ${v}`)]).toEqual([]);
 });

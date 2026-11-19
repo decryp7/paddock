@@ -4,7 +4,8 @@ import { openQuery } from './analysis-support';
 import { ensureInspector, gridRows, openApp, openView } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
-import { menuItem, openMenu } from './menu-support';
+import { anchoredMenu, menuItem, openMenu } from './menu-support';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // Pop-out windows in the browser build: `window.open` popups of the same app, synced over a BroadcastChannel (the
 // same port interface as the Tauri events between real OS windows).
@@ -16,8 +17,9 @@ const groupOf = (page: Page, name: string) => page.locator('.dv-groupview').filt
 async function popOut(page: Page, context: BrowserContext, name: string): Promise<Page> {
   const opened = context.waitForEvent('page');
   await tab(page, name).click();
-  await groupOf(page, name).getByRole('button', { name: 'Panel menu', exact: true }).click();
-  await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Pop out to window', exact: true }).click();
+  const button = groupOf(page, name).getByRole('button', { name: 'Panel menu', exact: true });
+  await button.click();
+  await (await anchoredMenu(page, button, 'Actions')).getByRole('menuitem', { name: 'Pop out to window', exact: true }).click();
   const popup = await opened;
   await expect(popup.locator('debrief-popout-shell')).toBeVisible();
   await expect(popup.getByRole('heading', { level: 1, name })).toBeVisible();
@@ -64,6 +66,8 @@ test.describe('pop-out windows', () => {
     await closed;
     await expect(tab(page, 'Inspector')).toBeVisible();
     // Back on the right of the timeline and the document beside it, as before.
+    // Visible is not placed: read the box once two reads agree (the ready-signal audit, 2026-11-19).
+    await expectNotMoving(page.locator('debrief-inspector'));
     const inspector = (await page.locator('debrief-inspector').boundingBox())!;
     const documents = (await groupOf(page, 'Registry').boundingBox())!;
     expect(inspector.x).toBeGreaterThanOrEqual(documents.x + documents.width - 2);
@@ -124,6 +128,8 @@ test.describe('pop-out windows', () => {
     const popup = await popOut(page, context, 'Inspector');
     await expect(popup.locator('debrief-inspector')).toBeVisible();
     // The left edge guide of the host's dock, in screen coordinates (the browser adapter maps them back).
+    // Visible is not placed: read the box once two reads agree (the ready-signal audit, 2026-11-19).
+    await expectNotMoving(page.locator('.debrief-dock-mount'));
     const dock = (await page.locator('.debrief-dock-mount').boundingBox())!;
     const origin = await page.evaluate(() => ({ x: screenX + Math.max(0, (outerWidth - innerWidth) / 2), y: screenY + Math.max(0, outerHeight - innerHeight) }));
     const at = { x: origin.x + dock.x + 26, y: origin.y + dock.y + dock.height / 2 };

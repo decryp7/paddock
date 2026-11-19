@@ -7,6 +7,7 @@ import { runCommand } from './analysis-support';
 import { gridRows, openApp } from './app';
 import { settleAnimations, settleDockLayout } from './axe';
 import { openAppWith } from './mock-url';
+import { anchoredMenu } from './menu-support';
 
 /**
  * Shell baseline (Paddock X50, plan package W0): screenshots of the shell and workbench layer taken BEFORE any
@@ -165,8 +166,9 @@ async function openThemedApp(page: Page, scheme: Scheme, size: Size, search = ''
 
 /** Switches perspective from the activity bar's switcher. */
 async function perspective(page: Page, name: string): Promise<void> {
-  await page.locator('debrief-activity-bar [data-activity-id=perspectives]').click();
-  const menu = page.getByRole('menu', { name: 'Perspectives' });
+  const switcher = page.locator('debrief-activity-bar [data-activity-id=perspectives]');
+  await switcher.click();
+  const menu = await anchoredMenu(page, switcher, 'Perspectives');
   await menu.getByRole('menuitemcheckbox', { name }).click();
   await expect(menu).toHaveCount(0);
   await expect(page.locator('debrief-activity-bar [data-activity-id=perspectives]')).toBeVisible();
@@ -266,7 +268,7 @@ for (const scheme of SCHEMES) {
         await openThemedApp(page, scheme, DESKTOP);
         const group = page.locator('.dv-groupview').filter({ has: page.getByRole('tab', { name: 'Timeline', exact: true }) });
         await group.getByRole('button', { name: 'Panel menu', exact: true }).click();
-        await expect(page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Pop out to window', exact: true })).toBeVisible();
+        await expect((await anchoredMenu(page, group.getByRole('button', { name: 'Panel menu', exact: true }), 'Actions')).getByRole('menuitem', { name: 'Pop out to window', exact: true })).toBeVisible();
         await shot(page, 'panel-menu', scheme);
       });
     });
@@ -276,7 +278,7 @@ for (const scheme of SCHEMES) {
       const group = page.locator('.dv-groupview').filter({ has: page.getByRole('tab', { name: 'Timeline', exact: true }) });
       const opened = context.waitForEvent('page');
       await group.getByRole('button', { name: 'Panel menu', exact: true }).click();
-      await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Pop out to window', exact: true }).click();
+      await (await anchoredMenu(page, group.getByRole('button', { name: 'Panel menu', exact: true }), 'Actions')).getByRole('menuitem', { name: 'Pop out to window', exact: true }).click();
       const popup = await opened;
       await popup.setViewportSize({ width: 900, height: 600 });
       await popup.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });

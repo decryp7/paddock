@@ -1,7 +1,7 @@
 import { expect, test } from './test';
 import { expectNoSeriousViolations } from './axe';
 import { ask, openAiApp, openChat, runCommand, waitAnswered } from './ai-support';
-import { openMenu } from './menu-support';
+import { anchoredMenu, openMenu } from './menu-support';
 import { gridRows, hideInspectorFlyout } from './app';
 import { openAppWith } from './mock-url';
 
@@ -40,7 +40,7 @@ test.describe('AI chat', () => {
     // Keyboard reachable: Enter on the button opens the menu with its first item focused.
     await context.focus();
     await page.keyboard.press('Enter');
-    const menu = page.getByRole('menu', { name: 'Context sent with your question' });
+    const menu = await anchoredMenu(page, context, 'Context sent with your question');
     await expect(menu.getByRole('menuitemradio', { name: /^Selected events \(1\)/ })).toHaveAttribute('aria-checked', 'true');
     await expect(menu).toContainText('Nothing leaves this computer.');
     await expectNoSeriousViolations(page, testInfo, 'ai-context-menu', '[role=menu]');

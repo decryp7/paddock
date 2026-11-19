@@ -29,3 +29,11 @@ test('menuGap is Infinity for a menu that covers its trigger or touches none of 
   assert.equal(menuGap(null, { x: 0, y: 0, width: 1, height: 1 }), null);
   assert.equal(menuGap({ x: 0, y: 0, width: 1, height: 1 }, null), null);
 });
+
+test('menuGap to a point (a context menu at the pointer): the distance from the point to the nearest corner of the menu', () => {
+  const at = { x: 500, y: 300, width: 0, height: 0 };
+  assert.equal(menuGap({ x: 500, y: 300, width: 240, height: 200 }, at), 0, 'its top-left at the point');
+  assert.equal(menuGap({ x: 260, y: 100, width: 240, height: 200 }, at), 0, 'flipped up and left (near the window edges)');
+  assert.equal(menuGap({ x: 502, y: 302, width: 240, height: 200 }, at), 2, "CDK's context-menu offset");
+  assert.equal(menuGap({ x: 0, y: 0, width: 240, height: 200 }, at), 260, 'not yet positioned: at the top-left of the window');
+});

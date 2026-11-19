@@ -1,6 +1,7 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { gridRows, openApp } from './app';
+import { anchoredMenu, clickPoint, contextMenu, menuNamed } from './menu-support';
 
 // The app should feel like a desktop app: no browser context menu on its chrome, no reload, page zoom or other
 // browser keys. The guard only prevents the browser's default, so Debrief's own menus and shortcuts keep working.
@@ -36,10 +37,9 @@ test.describe('native feel', () => {
     await page.locator('debrief-status-bar').click({ button: 'right' });
     await expect.poll(() => prevented(page, 'contextmenu')).toEqual([true]);
     // Debrief's own menu on a dock tab.
-    await page.getByRole('tab', { name: 'Events', exact: true }).click({ button: 'right' });
-    await expect(page.getByRole('menu')).toBeVisible();
+    await contextMenu(page, page.getByRole('tab', { name: 'Events', exact: true }));
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('menu')).toHaveCount(0);
+    await expect(menuNamed(page)).toHaveCount(0);
     // A text field keeps the native menu (cut, copy, paste).
     await page.getByRole('combobox').or(page.getByRole('textbox')).first().click({ button: 'right' });
     await expect.poll(async () => (await prevented(page, 'contextmenu')).at(-1)).toBe(false);
@@ -77,9 +77,10 @@ test.describe('native feel', () => {
     await message.dblclick({ position: { x: 12, y: 6 } });
     await expect.poll(() => page.evaluate(() => window.getSelection()?.toString().trim() ?? '')).not.toBe('');
     await watch(page, ['contextmenu']);
+    const at = await clickPoint(message, { x: 12, y: 6 });
     await message.click({ button: 'right', position: { x: 12, y: 6 } });
     await expect.poll(() => prevented(page, 'contextmenu')).toEqual([true]);
-    const menu = page.getByRole('menu');
+    const menu = await anchoredMenu(page, at);
     await expect(menu.getByRole('menuitem', { name: 'Copy', exact: true })).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);

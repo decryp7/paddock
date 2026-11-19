@@ -12,6 +12,7 @@ module.exports = {
   'no-raw-style-values': require('./no-raw-style-values.cjs'),
   'e2e-pinned-clock': require('./e2e-pinned-clock.cjs'),
   'e2e-ready-reads': require('./e2e-ready-reads.cjs'),
+  'e2e-transient-wait': require('./e2e-transient-wait.cjs'),
   ...templateRules,
   ...dialogRules,
 };

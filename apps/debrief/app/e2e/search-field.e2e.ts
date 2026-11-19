@@ -3,6 +3,8 @@ import type { Page } from '@playwright/test';
 import { gridTotal, initialTotal, openApp, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
+import { heldToast } from './toast-support';
+import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 // The filter bar's ONE search field: plain words search the messages live; text with query structure is a query that
 // runs with Enter or Ctrl/Cmd+Enter. The mock backend classifies like the engine (operator, pipe, exists(), known field).
@@ -110,6 +112,8 @@ test.describe('search field', () => {
   test('keeps a usable text area: the inline buttons and the partial-match note do not squeeze it out', async ({ page }) => {
     await field(page).fill('imeout');
     await expect(page.getByTestId('partial-note')).toBeVisible();
+    // Visible is not placed: read the box once two reads agree (the ready-signal audit, 2026-11-19).
+    await expectNotMoving(field(page));
     expect((await field(page).boundingBox())!.width).toBeGreaterThan(100);
   });
 
@@ -138,7 +142,7 @@ test.describe('search field', () => {
 
     await expect(page.getByTestId('query-save')).toBeEnabled();
     await page.getByTestId('query-save').click();
-    await expect(page.locator('[data-toast]').filter({ hasText: /Saved as "/ })).toBeVisible();
+    await heldToast(page, /Saved as "/);
   });
 
   test('Save is disabled while the field is empty', async ({ page }) => {

@@ -3,12 +3,14 @@ import { APP_LOAD_TIMEOUT, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
 import { hotspots } from './profiling-support';
+import { heldToast, pressInToast, toastNamed } from './toast-support';
 
 // The Captures view is the landing of the Profiling perspective; opening a performance capture switches there once
 // (the toast offers Undo), and not again for the next capture.
 
 // A workspace notice (the status toast with one action), not a Notifications entry.
-const toast = (page: import('@playwright/test').Page) => page.locator('[data-toast]').filter({ hasText: 'Switched to the Profiling perspective' });
+const SWITCHED = 'Switched to the Profiling perspective';
+const toast = (page: import('@playwright/test').Page) => toastNamed(page, SWITCHED);
 
 test.describe('profiling perspective', () => {
   test.beforeEach(async ({ page }) => {
@@ -33,11 +35,10 @@ test.describe('profiling perspective', () => {
     await chooseMenu(page, 'File', 'Open performance capture…');
     await expect(hotspots(page).locator('tbody tr[aria-rowindex]').first()).toBeVisible({ timeout: APP_LOAD_TIMEOUT });
     await expect(page.locator('debrief-timeline-panel')).toHaveCount(0);
-    const notice = toast(page);
-    await expect(notice).toBeVisible();
+    const notice = await heldToast(page, SWITCHED);
     await expect(notice.getByTestId('notification-action-notice')).toHaveText('Undo');
     await expectNoSeriousViolations(page, test.info(), 'profiling-switch-toast', '[data-toast]');
-    await notice.getByTestId('notification-action-notice').click();
+    await pressInToast(page, notice, notice.getByTestId('notification-action-notice'));
     await expect(page.locator('debrief-timeline-panel')).toBeVisible();
     await expect(page.getByRole('grid', { name: 'Events' })).toBeVisible();
 

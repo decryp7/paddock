@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import { gridRows, openApp } from './app';
 import { runCommand } from './analysis-support';
 import { expectNoSeriousViolations } from './axe';
+import { contextMenu } from './menu-support';
 
 test.describe('grid multi-select', () => {
   test.beforeEach(async ({ page }) => openApp(page));
@@ -18,9 +19,9 @@ test.describe('grid multi-select', () => {
     await expect(selected).toHaveCount(3);
     await expectNoSeriousViolations(page, testInfo, 'grid-multi-select');
 
-    await rows.nth(1).click({ button: 'right' });
+    const menu = await contextMenu(page, rows.nth(1));
     await expect(selected).toHaveCount(3);
-    await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Infer pattern from lines…' }).click();
+    await menu.getByRole('menuitem', { name: 'Infer pattern from lines…' }).click();
     const dialog = page.getByRole('dialog', { name: 'Infer pattern from lines' });
     const lines = dialog.getByRole('list', { name: 'Which lines match' }).getByRole('listitem');
     await expect(lines).toHaveCount(3);

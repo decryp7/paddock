@@ -1,6 +1,7 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { openApp } from './app';
+import { toastNamed } from './toast-support';
 
 /** The mock engine's service health, driven from the page (the browser build; the real engine is covered in Rust). */
 async function fail(page: Page, service: string, message: string, repair = 'restart', state = 'down'): Promise<void> {
@@ -21,7 +22,7 @@ test.describe('service health', () => {
     const chip = page.getByTestId('service-health-chip');
     await expect(chip).toHaveCount(1);
     await expect(chip).toContainText('Log store: stopped');
-    await expect(page.getByTestId('notification')).toHaveCount(0);
+    await expect(toastNamed(page)).toHaveCount(0);
     await expect(page.locator('[data-testid=notification][data-cause="workspace.error"]')).toHaveCount(0);
     await chip.click();
     const details = page.getByTestId('service-health-details');

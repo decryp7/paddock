@@ -45,6 +45,11 @@ type Box = { x: number; y: number; width: number; height: number };
  */
 export function menuGap(panel: Box | null, anchor: Box | null): number | null {
   if (!panel || !anchor) return null;
+  // A point (a context menu opened at the pointer): the menu has a corner there (its top-left, or another one when flipped at a window edge).
+  if (anchor.width === 0 && anchor.height === 0) {
+    const corners = [panel.x, panel.x + panel.width].flatMap((x) => [panel.y, panel.y + panel.height].map((y) => Math.max(Math.abs(x - anchor.x), Math.abs(y - anchor.y))));
+    return Math.min(...corners);
+  }
   const overlapX = Math.min(panel.x + panel.width, anchor.x + anchor.width) - Math.max(panel.x, anchor.x);
   const overlapY = Math.min(panel.y + panel.height, anchor.y + anchor.height) - Math.max(panel.y, anchor.y);
   if (overlapX > 0 && overlapY > 0) return Number.POSITIVE_INFINITY;
@@ -55,14 +60,16 @@ export function menuGap(panel: Box | null, anchor: Box | null): number | null {
 }
 
 /**
- * Waits until a menu sits against its trigger (`menuGap` within `tolerance` px): below or above a menu-bar item, beside a submenu item. The menu is
+ * Waits until a menu sits against its trigger (`menuGap` within `tolerance` px): below or above a menu-bar item, beside a submenu item, or with a
+ * corner at the point a context menu was opened at (`{ x, y }`, page coordinates). The menu is
  * visible, and stays still, at the top-left of the window until the overlay is positioned, which waits for the app's next render (Debrief's File
  * menu sat there for about 500 ms during the first load in WebKit, debrief.yml run 8297); a click aimed there lands on another item once the menu
  * moves. Fails with the last gap.
  */
-export async function expectMenuAnchoredTo(panel: Locator, anchor: Locator, tolerance = 2): Promise<void> {
+export async function expectMenuAnchoredTo(panel: Locator, anchor: Locator | { x: number; y: number }, tolerance = 2): Promise<void> {
+  const anchorBox = async () => ('x' in anchor ? { x: anchor.x, y: anchor.y, width: 0, height: 0 } : await anchor.boundingBox());
   await expect
-    .poll(async () => menuGap(await panel.boundingBox(), await anchor.boundingBox()) ?? Number.POSITIVE_INFINITY, {
+    .poll(async () => menuGap(await panel.boundingBox(), await anchorBox()) ?? Number.POSITIVE_INFINITY, {
       message: `the menu sits against its trigger: no edge of it within ${tolerance} px of the trigger's facing edge (or it covers the trigger, or one is not drawn)`,
     })
     .toBeLessThanOrEqual(tolerance);

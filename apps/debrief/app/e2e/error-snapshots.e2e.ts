@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { CAPTURE_TIMEOUT, openApp, openView } from './app';
 import { openAppWith } from './mock-url';
+import { heldToast } from './toast-support';
 
 // Error snapshots: the window is rendered to an image inside the webview (html-to-image), so this runs
 // against the real capture code in every project. The production build is served with the Tauri CSP,
@@ -89,8 +90,8 @@ test('an uncaught error saves a snapshot, shows the toast and the notice, and th
   // reports the result.
   await view.getByRole('button', { name: 'Export diagnostics…' }).click();
   await expect(view.getByRole('status')).toContainText('Exporting 1 snapshot');
-  const exported = page.getByTestId('notification').filter({ hasText: 'Finished: Export diagnostics to' });
-  await expect(exported).toContainText('files zipped.', { timeout: 15_000 });
+  const exported = await heldToast(page, 'Finished: Export diagnostics to', { timeout: 15_000 });
+  await expect(exported).toContainText('files zipped.');
 
   await view.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(view.locator('[data-testid=snapshot-card]')).toHaveCount(0);
