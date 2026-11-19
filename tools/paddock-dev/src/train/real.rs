@@ -1,3 +1,4 @@
+// ci-runs-reader: train release: finds the run it dispatched and waits for its end; a red round is judged by ci triage, never by its conclusion alone
 //! The real ports of `train release` and `train land`: Gitea through the shared client, the disk check, the triage and `git`.
 //! Nothing here decides anything; the tests of the logic use tables (`sequence`, `land`), never Gitea or a repository (ER-14).
 

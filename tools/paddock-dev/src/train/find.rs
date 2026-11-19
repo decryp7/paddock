@@ -1,3 +1,4 @@
+// ci-runs-reader: train release: finds the run it dispatched and waits for its end; a red round is judged by ci triage, never by its conclusion alone
 //! Finds the run a dispatch started. Gitea's dispatch answers with no run id, so the run is the newest run of that workflow on
 //! the train's ref and commit that is newer than the newest one seen before the dispatch.
 

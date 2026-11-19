@@ -1,3 +1,4 @@
+// ci-runs-reader: train release: finds the run it dispatched and waits for its end; a red round is judged by ci triage, never by its conclusion alone
 //! The release sequence of a train (the port of the integrator's `seq-release.sh`): an optional failed-only fix round of
 //! `ci.yml` or `debrief.yml`, judged by [`super::verdict`]; after a `ci.yml` round `debrief.yml` with bundles; then the release
 //! workflows. It stops at the first run that is not green, and says why in one [`Stop`].
