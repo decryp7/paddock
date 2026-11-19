@@ -551,7 +551,13 @@ mod tests {
     }
 
     /// A connected agent and sampler for the alert tests, with the store's alerts table refusing inserts.
-    fn refused_alerts_rig() -> (Arc<Shared>, Sampler, Arc<crate::agent::Pending>, paddock_testkit::PrivateTemp) {
+    fn refused_alerts_rig() -> (
+        Arc<Shared>,
+        Sampler,
+        Arc<crate::agent::Pending>,
+        std::sync::mpsc::Receiver<Message>,
+        paddock_testkit::PrivateTemp,
+    ) {
         let tmp = paddock_testkit::private_tempdir().unwrap();
         let fake = Fake::new();
         let (shared, sensors, processes) = Shared::build(
@@ -562,7 +568,6 @@ mod tests {
         )
         .unwrap();
         let (tx, rx) = std::sync::mpsc::sync_channel(64);
-        std::mem::forget(rx);
         let pending = Arc::new(crate::agent::Pending::default());
         lock(&shared.subs).push(crate::agent::Sub {
             id: 1,
@@ -576,7 +581,7 @@ mod tests {
         lock(&shared.core)
             .store
             .exec_for_test("CREATE TRIGGER no_alert BEFORE INSERT ON alerts BEGIN SELECT RAISE(ABORT, 'refused'); END;");
-        (shared, Sampler::new(sensors, processes), pending, tmp)
+        (shared, Sampler::new(sensors, processes), pending, rx, tmp)
     }
 
     fn full_disk(t: Timestamp) -> SystemSample {
@@ -618,7 +623,7 @@ mod tests {
     /// alerts table refusing for 20 ticks the alarm is raised once and repeats at most MAX_RECORD_TRIES times.
     #[test]
     fn a_refused_alert_still_raises_its_alarm_and_repeats_it_at_most_its_tries() {
-        let (shared, mut sampler, pending, _tmp) = refused_alerts_rig();
+        let (shared, mut sampler, pending, _rx, _tmp) = refused_alerts_rig();
         let mut kinds = Vec::new();
         let mut alerts = 0;
         for i in 0..20 {
@@ -650,7 +655,7 @@ mod tests {
     #[test]
     fn after_a_refusal_the_alert_comes_back_at_the_end_of_its_cooldown_and_not_before() {
         use dyno_core::alarms::ChangeKind::{Raised, Repeated, Returned};
-        let (shared, mut sampler, pending, _tmp) = refused_alerts_rig();
+        let (shared, mut sampler, pending, _rx, _tmp) = refused_alerts_rig();
         let start = HOUR + 1;
         for i in 0..20 {
             let t = Timestamp(start + i * 1_000);
