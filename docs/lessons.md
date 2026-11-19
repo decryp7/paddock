@@ -489,6 +489,13 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   The tool now reads `Effective cache mode` from `--show-adv-stats`, restarts a read-only server of its own cache once, and turns the
   wrapper off with the server's log path in the warning if it stays read-only. The server always logs its errors to a file in its run folder
   and never idles out; S3 without keys fails at once instead of waiting about 75 s in the metadata lookup.
+- **Fast checks before long jobs (2026-11-20, user).** A train's ci.yml took about 2 hours and its end-to-end, WebKit and bundle jobs
+  ran although a unit test had already failed: train 15's run 8327 had six failures, all unit or integration tests on Linux and Windows.
+  ci.yml and debrief.yml are now staged: the long jobs `need` a `stage1` gate job over the fast ones (AGENTS.md, "Staged CI"). The
+  trap in a stage gate is the green run that never ran stage 2 (a skipped job reads as passed): the `stages` job prints a verdict
+  line, and `./dev ci verdict` counts a staged run as full only with it (ER-33). Failing fast inside stage 1 was not done: cancelling
+  the sibling jobs of a failure hides the other failures of the same round and costs another round (ER-10); the stage gate already
+  saves the long jobs.
 
 ## Linux VM guests (Paddock C21, 2026-10-25)
 - Linux guests: `tart exec` (like `ssh` without a PAM login) has no logind session, so there is no `systemd --user`

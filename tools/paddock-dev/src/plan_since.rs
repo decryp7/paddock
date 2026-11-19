@@ -413,18 +413,29 @@ fn app_leg_of(key: &str, name: &str, templates: &[(String, String)]) -> Leg {
     Leg {
         os: matrix.get("os").cloned(),
         shard: matrix.get("shard").cloned(),
-        ..Leg::default()
+        // ci.yml's `app-e2e` job names its leg `<app> e2e (<os>, <e2e_leg>)`: a skipped leg reruns alone.
+        app: matrix.get("app").cloned(),
+        e2e_leg: matrix.get("e2e_leg").cloned(),
     }
 }
 
 fn leg_of(key: &str, name: &str) -> Leg {
     static OS_LEG: LazyLock<Regex> = LazyLock::new(|| re(r"^[a-z-]+ \(([a-z0-9]+-[a-z0-9.]+)\)$"));
     static APP_LEG: LazyLock<Regex> = LazyLock::new(|| re(r"^app ([a-z0-9-]+) \(([a-z0-9]+-[a-z0-9.]+)(?:, ([a-z0-9-]+))?\)$"));
+    // Stage 2's end-to-end legs of the apps: `dyno e2e (ubuntu-latest, e2e-1)` (ci.yml `app-e2e`).
+    static APP_E2E_LEG: LazyLock<Regex> =
+        LazyLock::new(|| re(r"^([a-z0-9-]+) e2e \(([a-z0-9]+-[a-z0-9.]+), ([a-z0-9-]+)\)$"));
     match key {
         "crate" | "paddock-dev" => Leg {
             os: OS_LEG.captures(name).map(|m| m[1].to_string()),
             ..Leg::default()
         },
+        "app-e2e" => APP_E2E_LEG.captures(name).map_or_else(Leg::default, |m| Leg {
+            os: Some(m[2].to_string()),
+            app: Some(m[1].to_string()),
+            e2e_leg: Some(m[3].to_string()),
+            shard: None,
+        }),
         "app" => APP_LEG.captures(name).map_or_else(Leg::default, |m| Leg {
             os: Some(m[2].to_string()),
             app: Some(m[1].to_string()),
@@ -764,6 +775,8 @@ impl SincePlan {
     pub fn needs_webkit(&self) -> bool {
         self.reruns.iter().any(|r| match r.key.as_deref() {
             Some("e2e-webkit") => true,
+            Some("app-e2e") => r.leg.e2e_leg.as_deref().is_none_or(|e| e == "e2e-webkit"),
+            // A run from before the stages: its app job held the end-to-end legs too.
             Some("app") => r.leg.e2e_leg.as_deref().is_none_or(|e| e == "e2e-webkit"),
             _ => false,
         })
@@ -827,7 +840,15 @@ impl SincePlan {
     /// legs are taken from it, a narrowed one with its filter and only its tests (`tests_only`). Only for a ci.yml run without
     /// [`SincePlan::everything`]. The warnings (a failed leg that today's matrix no longer has) go to `warn`.
     pub fn ci_outputs(&self, legs: &[Value], warn: &mut dyn FnMut(String)) -> Vec<(String, String)> {
-        let keys: BTreeSet<&str> = self.reruns.iter().filter_map(|r| r.key.as_deref()).collect();
+        // An end-to-end leg of a run from before the stages was a leg of the `app` job; today it is the `app-e2e` job's.
+        let keys: BTreeSet<&str> = self
+            .reruns
+            .iter()
+            .filter_map(|r| match r.key.as_deref() {
+                Some("app") if r.leg.e2e_leg.as_deref().is_some_and(|e| !e.is_empty()) => Some("app-e2e"),
+                k => k,
+            })
+            .collect();
         // One boolean output per project of the job table (`paddock-dev` is `paddock_dev`); `apps` is the legs below.
         let mut projects: Vec<&str> = Vec::new();
         for (_, ps) in CI_JOBS {
@@ -845,7 +866,7 @@ impl SincePlan {
             })
             .collect();
         let mut app_legs: Vec<Value> = Vec::new();
-        for r in self.reruns.iter().filter(|r| r.key.as_deref() == Some("app")) {
+        for r in self.reruns.iter().filter(|r| matches!(r.key.as_deref(), Some("app" | "app-e2e"))) {
             let matches = |l: &Value| {
                 let is = |field: &str, want: &Option<String>| want.as_ref().is_none_or(|w| l[field].as_str() == Some(w.as_str()));
                 is("app", &r.leg.app) && is("os", &r.leg.os) && is("e2e_leg", &r.leg.e2e_leg)
@@ -900,9 +921,8 @@ impl SincePlan {
                 .collect();
             serde_json::to_string(&legs).unwrap_or_default()
         };
+        out.extend(crate::plan_ci::app_leg_outputs(&app_legs));
         out.extend([
-            ("apps".into(), serde_json::to_string(&app_legs).unwrap_or_default()),
-            ("any_app".into(), (!app_legs.is_empty()).to_string()),
             // The commit lint, when it reruns, lints what came after the failed run.
             ("base".into(), self.head.clone()),
             ("rerun_jobs".into(), serde_json::to_string(&keys).unwrap_or_default()),
@@ -1525,6 +1545,102 @@ mod tests {
         );
         let ui = v["jobs"].as_array().unwrap().iter().find(|j| j["id"] == 33261).unwrap();
         assert_eq!(ui["scope"], "job");
+    }
+
+    /// The stages of ci.yml, as the planner reads them: the stage-2 jobs `need` the `stage1` gate (conformance/ci/stage-gate.mjs).
+    const STAGED_CI_YML: &str = "name: ci\non:\n  push:\njobs:\n  plan:\n    name: plan (affected projects)\n  crate:\n    name: crate (${{ matrix.os }})\n    needs: [plan]\n  stage1:\n    name: stage 1 gate (fast checks)\n    needs: [plan, crate]\n  e2e:\n    name: reference apps (shard ${{ matrix.shard }}/2)\n    needs: [plan, stage1]\n  app-e2e:\n    name: ${{ matrix.app }} e2e (${{ matrix.os }}, ${{ matrix.e2e_leg }})\n    needs: [plan, stage1]\n  stages:\n    name: stages (stage 2 ran after stage 1)\n    needs: [plan, stage1, e2e, app-e2e]\n";
+
+    fn run_job(id: u64, name: &str, conclusion: &str) -> RunJob {
+        RunJob {
+            id,
+            name: name.into(),
+            conclusion: conclusion.into(),
+            failed_steps: vec![],
+        }
+    }
+
+    #[test]
+    fn a_failed_stage_1_reruns_the_stage_2_jobs_it_skipped_and_a_failed_stage_2_job_reruns_alone() {
+        let templates = name_templates(STAGED_CI_YML);
+        let needs = job_needs(STAGED_CI_YML);
+        let mut logs = |_: u64| Err("no log".to_string());
+        // Stage 1 failed in `crate (windows-latest)`: the gate failed, the stage-2 jobs were skipped, the final job failed.
+        let jobs = vec![
+            run_job(1, "plan (affected projects)", "success"),
+            run_job(2, "crate (windows-latest)", "failure"),
+            run_job(3, "stage 1 gate (fast checks)", "failure"),
+            run_job(4, "reference apps (shard 1/2)", "skipped"),
+            run_job(5, "reference apps (shard 2/2)", "skipped"),
+            run_job(6, "dyno e2e (ubuntu-latest, e2e-1)", "skipped"),
+            run_job(7, "stages (stage 2 ran after stage 1)", "failure"),
+        ];
+        let mut plan = SincePlan::new(&json!({"id": 9, "path": "ci.yml@refs/heads/train/x", "head_sha": "h"}), &jobs, &templates, &mut logs);
+        assert_eq!(plan.everything, None, "the gate jobs are jobs of this ci.yml");
+        plan.add_skipped_dependents(&jobs, &templates, &needs);
+        let keys: BTreeSet<&str> = plan.reruns.iter().filter_map(|r| r.key.as_deref()).collect();
+        assert_eq!(
+            keys,
+            BTreeSet::from(["crate", "stage1", "stages", "e2e", "app-e2e"]),
+            "the stage-2 jobs the failed gate skipped rerun with it: {keys:?}"
+        );
+        let all = vec![leg("dyno", "ubuntu-latest", ""), leg("dyno", "ubuntu-latest", "e2e-1"), leg("dyno", "ubuntu-latest", "e2e-2")];
+        let out: BTreeMap<String, String> = plan.ci_outputs(&all, &mut |_| {}).into_iter().collect();
+        assert_eq!(out["rerun_jobs"], r#"["app-e2e","crate","e2e","stage1","stages"]"#);
+        assert_eq!(out["any_app"], "false", "no stage-1 app leg failed");
+        assert_eq!(out["any_app_e2e"], "true");
+        let e2e: Vec<Value> = serde_json::from_str(&out["apps_e2e"]).unwrap();
+        assert_eq!(e2e.len(), 1, "only the skipped leg, not dyno's other end-to-end leg: {e2e:?}");
+        assert_eq!(e2e[0]["e2e_leg"], "e2e-1");
+        // Stage 1 passed and one end-to-end leg failed: only it reruns, and no skipped job is added.
+        let jobs = vec![
+            run_job(1, "plan (affected projects)", "success"),
+            run_job(2, "crate (windows-latest)", "success"),
+            run_job(3, "stage 1 gate (fast checks)", "success"),
+            run_job(4, "reference apps (shard 1/2)", "success"),
+            run_job(6, "dyno e2e (ubuntu-latest, e2e-2)", "failure"),
+            run_job(7, "stages (stage 2 ran after stage 1)", "failure"),
+        ];
+        let mut plan = SincePlan::new(&json!({"id": 9, "path": "ci.yml@refs/heads/train/x", "head_sha": "h"}), &jobs, &templates, &mut logs);
+        plan.add_skipped_dependents(&jobs, &templates, &needs);
+        let leg_of_failed = plan.reruns.iter().find(|r| r.key.as_deref() == Some("app-e2e")).map(|r| r.leg.clone()).unwrap();
+        assert_eq!(
+            leg_of_failed,
+            Leg {
+                os: Some("ubuntu-latest".into()),
+                app: Some("dyno".into()),
+                e2e_leg: Some("e2e-2".into()),
+                shard: None
+            }
+        );
+        assert!(!plan.needs_webkit());
+        let out: BTreeMap<String, String> = plan.ci_outputs(&all, &mut |_| {}).into_iter().collect();
+        let e2e: Vec<Value> = serde_json::from_str(&out["apps_e2e"]).unwrap();
+        assert_eq!(e2e.len(), 1);
+        assert_eq!(e2e[0]["e2e_leg"], "e2e-2");
+        // A failed WebKit leg asks for the WebKit legs.
+        let webkit = vec![run_job(6, "dyno e2e (ubuntu-latest, e2e-webkit)", "failure")];
+        assert!(SincePlan::new(&json!({"id": 9, "path": "ci.yml@refs/heads/train/x", "head_sha": "h"}), &webkit, &templates, &mut logs).needs_webkit());
+    }
+
+    #[test]
+    fn an_end_to_end_leg_of_a_run_from_before_the_stages_reruns_as_the_app_e2e_job() {
+        // The old `app` job held every leg: its end-to-end leg's key is `app`, and the rerun must reach the `app-e2e` job.
+        let mut r = rerun(
+            "app",
+            Leg {
+                os: Some("ubuntu-latest".into()),
+                app: Some("dyno".into()),
+                e2e_leg: Some("e2e-1".into()),
+                shard: None,
+            },
+        );
+        r.scope = Scope::Job("x".into());
+        let plan = plan_of(vec![r]);
+        let all = vec![leg("dyno", "ubuntu-latest", ""), leg("dyno", "ubuntu-latest", "e2e-1")];
+        let out: BTreeMap<String, String> = plan.ci_outputs(&all, &mut |_| {}).into_iter().collect();
+        assert_eq!(out["rerun_jobs"], r#"["app-e2e"]"#);
+        assert_eq!(out["any_app"], "false");
+        assert_eq!(out["any_app_e2e"], "true");
     }
 
     const DEBRIEF_JOBS: &str = include_str!("../tests/since-run/debrief-run-jobs.json");

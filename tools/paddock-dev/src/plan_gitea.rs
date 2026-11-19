@@ -37,6 +37,10 @@ pub const CI_JOBS: &[(&str, &[&str])] = &[
     ("audit", &["paddock-dev"]),
     ("train-gates", &["tools"]),
     ("app", &["apps"]),
+    ("app-e2e", &["apps"]),
+    // The stage gates (conformance/ci/stage-gate.mjs): a change to them changes what every stage-2 job waits for.
+    ("stage1", &["everything"]),
+    ("stages", &["everything"]),
     ("paddock-dev", &["paddock-dev"]),
 ];
 

@@ -81,6 +81,17 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   only, or by adding a single declared line.
 - **Shared code (rules 39, 42, 43).** A shared change and its adoption by the apps land in one change; there is no
   publish-and-consume step. A breaking change to a shared crate or package updates every app in the same change.
+- **Staged CI (ci.yml and debrief.yml).** A run has two stages. Stage 1, the fast checks (fmt, clippy, lockfiles, conformance, the gate
+  register, commit lint and the affected unit and integration tests on Linux, Windows and macOS: ci.yml's `crate`, `paddock-dev`,
+  `tools`, `ui`, `app` jobs and the rest, debrief.yml's Rust, plugin SDK, licence and frontend jobs), ends in the `stage1` gate job.
+  Stage 2, the long jobs (ci.yml's `e2e`, `e2e-webkit` and `app-e2e`, the apps' end-to-end legs; debrief.yml's `e2e`, `bundle` and
+  `tauri-smoke`), `needs: stage1` and starts only when it passed, so a failed unit test ends a run in minutes, not after the end-to-end
+  jobs. The planner's affected selection holds in both stages (`apps` are the stage-1 legs, `apps_e2e` the stage-2 legs). The last job,
+  `stages`, prints `stage verdict: ...` (`conformance/ci/stage-gate.mjs`); `./dev ci verdict` counts a staged run as full only when
+  that line says stage 2 ran to its end, so a run whose stage 2 never ran is never green (ER-33). A job of stage 1 does not cancel its
+  sibling jobs when it fails: the whole stage finishes, so one round shows every stage-1 failure (ER-10). A fix round (`since_run`)
+  reruns the failed jobs and then the stage-2 jobs the failure had skipped. A new job is placed in a stage by its `needs:` (stage 2
+  names `stage1`) and, if it is fast, is added to the `stage1` job's `needs:` (a test holds both lists to the workflow files).
 - **Workflows are named after their app** (ADR 0014's last amendment): an app with gates on several OS (Debrief, Dyno,
   Pitcrew, Pitwall, Spotter) has `.gitea/workflows/<app>.yml`, its whole CI and its release from an `<app>-v*` tag, whose
   plan job asks `./dev plan --ci --app <app>`; extra jobs are `<app>-<what>.yml` (Debrief's fuzz, bench,

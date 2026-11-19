@@ -8,6 +8,11 @@
 //!   rerun of failures and the mode is full. A push to main needs it too: a push whose plan said `run=false` tested nothing. The earlier scope line (`plan mode: full=`) is not enough: a schedule-skipped run
 //!   or a `since_run` dispatch logs `full=true` and ends green having tested nothing or less. A base dispatch or a pull request
 //!   tests less and never counts, so it can neither clear a red full run nor stand in for one.
+//! - A staged run (its plan job logs [`STAGED_LINE`]: ci.yml and debrief.yml, stage 1 then stage 2) that finished green counts only
+//!   when its `stages` job logged `stage verdict: stage1=passed stage2=complete` ([`STAGE_LINE`], printed by
+//!   `conformance/ci/stage-gate.mjs final`): a green run whose stage 2 did not run, or whose job or line is missing, tested less
+//!   than a full run and is partial, with that reason. A staged run that did not finish green stays what it is (red, or still
+//!   going): its failed stage-1 job is the reason, and an older green run of the same commit does not cover it.
 //! - Gitea's in-place "rerun failed jobs" keeps the run id: a deciding run with `run_attempt > 1` reads its earlier attempts,
 //!   and any failed job there is red (an unreadable attempt is not measured).
 //! - The newest full run decides (a green old run does not cover a newer red one).
@@ -22,6 +27,60 @@ use paddock_cli::outcome::{
     CheckId, Evidence, Finding, LiveRepo, Outcome, Reason, RunId, Sha, Subject, ToolVersion, TreeId, UnixSeconds, measure,
 };
 use paddock_cli::{Exit, Report};
+
+/// The line a staged workflow's plan job prints (`plan layout: staged`): the run has a stage 2, so its `stages` job decides.
+pub const STAGED_LINE: &str = "plan layout: staged";
+
+/// The line the `stages` job prints (`stage verdict: stage1=<passed|failed> stage2=<complete|not-run|failed>`).
+pub const STAGE_LINE: &str = "stage verdict: ";
+
+/// What the `stages` job's log says about the two stages.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Stages {
+    /// Stage 1 passed and stage 2 ran to its end.
+    Complete,
+    /// Anything else: the line as printed (`stage1=failed stage2=not-run`).
+    Incomplete(String),
+}
+
+/// Whether a plan log says the run is staged ([`STAGED_LINE`], at the start of a line).
+pub fn is_staged(plan_log: &str) -> bool {
+    plan_log.lines().map(crate::log_text::plain).any(|l| l.trim() == STAGED_LINE)
+}
+
+/// The stage verdict of a `stages` job's log: the FIRST [`STAGE_LINE`]; `None` when there is none.
+pub fn read_stages(log: &str) -> Option<Stages> {
+    let v = log
+        .lines()
+        .map(crate::log_text::plain)
+        .find_map(|l| l.trim().strip_prefix(STAGE_LINE).map(|v| v.trim().to_string()))?;
+    Some(if v == "stage1=passed stage2=complete" {
+        Stages::Complete
+    } else {
+        Stages::Incomplete(v)
+    })
+}
+
+/// Whether a finished run succeeded (the conclusion, or the status on older servers, as [`decide`] reads it).
+fn finished_green(r: &RunInfo) -> bool {
+    (if r.conclusion.is_empty() { r.status.as_str() } else { r.conclusion.as_str() }) == "success"
+}
+
+/// What a finished-green staged run's `stages` job decides (ER-33: a stage that did not run is never a pass).
+fn stages_mode(client: &mut Client, jobs: &[super::client::TimedJob], run: &RunInfo) -> Mode {
+    let Some(stages) = jobs.iter().find(|j| j.name == "stages" || j.name.starts_with("stages ")) else {
+        return Mode::Partial("a staged run with no stages job".into());
+    };
+    match client.log(stages.id) {
+        Ok(Some(log)) => match read_stages(&log) {
+            Some(Stages::Complete) => Mode::Full,
+            Some(Stages::Incomplete(what)) => Mode::Partial(format!("stage 2 not run to its end ({what}) though run {} is green", run.id)),
+            None => Mode::Partial(format!("its stages job logged no \"{STAGE_LINE}\" line: stage 2 is not verified")),
+        },
+        Ok(None) => Mode::Unknown("the stages job has no log".into()),
+        Err(e) => Mode::Unknown(format!("the stages job's log could not be read: {e}")),
+    }
+}
 
 /// What the check found.
 #[derive(Debug, Clone, PartialEq)]
@@ -191,6 +250,9 @@ fn read_mode(client: &mut Client, run: &RunInfo) -> Mode {
     };
     match client.log(plan.id) {
         Ok(Some(log)) => match read_complete(&log) {
+            // A staged run that finished green is full only with its stages job's line; one that failed or still runs is judged by
+            // its own conclusion (a failed stage 1 is red, not skippable).
+            Some(Ok(true)) if is_staged(&log) && run.finished() && finished_green(run) => stages_mode(client, &jobs, run),
             Some(Ok(true)) => Mode::Full,
             Some(Ok(false)) => Mode::Partial("its plan job logged complete=false".into()),
             Some(Err(e)) => Mode::Unknown(e),
@@ -686,5 +748,101 @@ mod tests {
         assert!(matches!(Outcome::from_wire(&green, &other, true), Outcome::NotMeasured(_)));
         assert!(matches!(Outcome::from_wire(&green, &asked, false), Outcome::NotMeasured(_)));
         assert!(matches!(Outcome::from_wire(&green, &asked, true), Outcome::KnownCommit(_)));
+    }
+
+    // ---- staged runs (stage 1 then stage 2): ER-33, a stage that did not run is never a pass ----
+
+    const STAGED_PLAN: &str = "plan verdict: complete=true\nplan layout: staged\n";
+
+    /// A staged run 5 (push to main) whose jobs are the plan (job 50), a stage-1 job and, when `stages` is `Some`, the stages job
+    /// (job 55) with its log (`None` inside: unreadable).
+    fn staged(conclusion: &str, stages: Option<Option<&str>>) -> Fake {
+        let mut f = server(vec![main_push(5, conclusion)], &[(5, 50, Some(STAGED_PLAN))]);
+        let mut jobs = vec![
+            json!({"id": 50, "name": "plan (affected projects)", "conclusion": "success"}),
+            json!({"id": 51, "name": "stage 1 gate (fast checks)", "conclusion": "success"}),
+        ];
+        if let Some(log) = stages {
+            jobs.push(json!({"id": 55, "name": "stages (stage 2 ran after stage 1)", "conclusion": "success"}));
+            if let Some(l) = log {
+                f.log(55, l);
+            }
+        }
+        f.json(
+            &format!("{API}/runs/5/jobs?limit=50&page=1"),
+            json!({"total_count": jobs.len(), "jobs": jobs}),
+        );
+        f
+    }
+
+    #[test]
+    fn a_green_staged_run_is_full_only_with_the_stages_line_complete() {
+        let v = ask(&mut staged("success", Some(Some("stage verdict: stage1=passed stage2=complete\n"))));
+        assert_eq!(v, Verdict::Green { run: 5 });
+    }
+
+    /// The positive control: the same green run with each way stage 2 can be missing is not full, and says why.
+    #[test]
+    fn a_green_staged_run_whose_stage_2_did_not_run_is_partial_and_names_why() {
+        let not_run = "stage verdict: stage1=failed stage2=not-run\n::error::stage 1 did not pass\n";
+        for (what, mut f, want) in [
+            ("stage 2 not run", staged("success", Some(Some(not_run))), "stage2=not-run"),
+            ("a failed stage 2", staged("success", Some(Some("stage verdict: stage1=passed stage2=failed\n"))), "stage2=failed"),
+            ("no stages line", staged("success", Some(Some("something else\n"))), "logged no"),
+            ("no stages job", staged("success", None), "no stages job"),
+        ] {
+            let v = ask(&mut f);
+            assert_eq!(code(&v), 5, "{what}: {v:?}");
+            assert!(
+                matches!(&v, Verdict::Red { run: None, reason } if reason.contains("5 (") && reason.contains(want)),
+                "{what}: {v:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_staged_run_whose_stages_log_cannot_be_read_is_not_measured() {
+        assert_eq!(code(&ask(&mut staged("success", Some(None)))), 6);
+    }
+
+    #[test]
+    fn a_staged_run_that_failed_in_stage_1_is_red_and_an_older_green_run_does_not_cover_it() {
+        // The failed run's own conclusion decides (stage 2 never ran, which is why it failed): Red with the run, not a skipped partial.
+        let not_run = "stage verdict: stage1=failed stage2=not-run\n";
+        let v = ask(&mut staged("failure", Some(Some(not_run))));
+        assert!(matches!(v, Verdict::Red { run: Some(5), .. }), "{v:?}");
+        let mut f = server(
+            vec![main_push(4, "success"), main_push(5, "failure")],
+            &[(4, 40, Some("plan verdict: complete=true\n")), (5, 50, Some(STAGED_PLAN))],
+        );
+        let v = ask(&mut f);
+        assert!(matches!(v, Verdict::Red { run: Some(5), .. }), "{v:?}");
+    }
+
+    #[test]
+    fn a_run_from_before_the_stages_keeps_its_verdict() {
+        // No `plan layout: staged` line: no stages job is asked for.
+        assert_eq!(ask(&mut server(vec![main_push(5, "success")], &[])), Verdict::Green { run: 5 });
+    }
+
+    /// The reader and the gate script agree on the line: run the script as CI does and read what it printed.
+    #[test]
+    fn the_stage_gate_script_prints_what_the_reader_reads() {
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/ci/stage-gate.mjs");
+        let run = |needs: &str| {
+            let out = std::process::Command::new("node")
+                .arg(&script)
+                .arg("final")
+                .env("NEEDS", needs)
+                .output()
+                .expect("node runs the stage gate");
+            String::from_utf8_lossy(&out.stdout).to_string()
+        };
+        let ok = run(r#"{"stage1":{"result":"success"},"e2e":{"result":"skipped"}}"#);
+        assert_eq!(read_stages(&ok), Some(Stages::Complete), "{ok}");
+        let cut = run(r#"{"stage1":{"result":"failure"},"e2e":{"result":"skipped"}}"#);
+        assert!(matches!(read_stages(&cut), Some(Stages::Incomplete(w)) if w == "stage1=failed stage2=not-run"), "{cut}");
+        assert!(is_staged("2026-11-20T00:00:00Z plan layout: staged\n"));
+        assert!(!is_staged("a plan layout: staged mention\n"));
     }
 }

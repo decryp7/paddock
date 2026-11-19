@@ -9,6 +9,11 @@
 # Publishing is not here: a v* tag runs publish.yml (gates, then the cargo and npm registries and the Gitea release); this
 # workflow ends with the publish dry run, so a tag never meets a packaging problem first.
 #
+# Two stages (docs/train-checklist.md, "Staged CI"): stage 1 is the fast checks (formatting, lints, conformance, the gates and the
+# unit and integration tests on every OS; the `stage1` gate job needs them all); stage 2 is the long jobs (the end-to-end tests in
+# Chromium and WebKit, the apps' end-to-end legs) and needs `stage1` to have passed. The last job, `stages`, prints the line
+# `stage verdict: ...` that `./dev ci verdict` reads: a run whose stage 2 did not run is never a full green run (ER-33).
+#
 # Runner labels: ubuntu-latest (jobs in the shared paddock-ci image, ci-image/), windows-latest and macos-latest (host runners, tools used as
 # installed), as in Debrief and Pitwall.
 
@@ -84,6 +89,9 @@ jobs:
       paddock_dev: ${{ steps.plan.outputs.paddock_dev }}
       apps: ${{ steps.plan.outputs.apps }}
       any_app: ${{ steps.plan.outputs.any_app }}
+      # The apps' end-to-end legs (stage 2); `apps` holds the other legs (stage 1).
+      apps_e2e: ${{ steps.plan.outputs.apps_e2e }}
+      any_app_e2e: ${{ steps.plan.outputs.any_app_e2e }}
       base: ${{ steps.plan.outputs.base }}
       # A rerun of a run's failures (the since_run input): the jobs that rerun (empty otherwise; each job's `if` reads an empty
       # list as its own name, so a normal run gates on the projects alone). The crate and paddock-dev legs: in a rerun of their
@@ -139,6 +147,8 @@ jobs:
           complete=false
           if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
           echo "plan verdict: complete=$complete"
+          # A staged run counts as full only with the `stages` job's line (tools/paddock-dev ci_runs/verdict.rs, STAGED_LINE).
+          echo "plan layout: staged"
 
   # C102 (ADR 0072): every listen site of the Rust sources is in docs/ipc-endpoints.toml with an ending test or a reason, and the
   # ratchet of connection endings is well formed. Always runs (./dev builds paddock-dev from source here, about a minute; the scan itself takes about 3 s): a listener added anywhere must not
@@ -258,8 +268,8 @@ jobs:
   # The apps compile from source (tsconfig paths), so a shard needs no library build.
   e2e:
     name: reference apps (shard ${{ matrix.shard }}/2)
-    needs: [plan]
-    if: ${{ needs.plan.outputs.ui == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e"]'), 'e2e') }}
+    needs: [plan, stage1]
+    if: ${{ needs.stage1.result == 'success' && needs.plan.outputs.ui == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e"]'), 'e2e') }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
@@ -307,8 +317,8 @@ jobs:
   # (Playwright's own WebKit build), for pushes to main, v* tags and nightly.yml only. Branch runs stay Chromium-only (rule 3).
   e2e-webkit:
     name: reference apps in WebKit (macOS)
-    needs: [plan]
-    if: ${{ needs.plan.outputs.ui == 'true' && (inputs.webkit == true || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e-webkit"]'), 'e2e-webkit') }}
+    needs: [plan, stage1]
+    if: ${{ needs.stage1.result == 'success' && needs.plan.outputs.ui == 'true' && (inputs.webkit == true || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e-webkit"]'), 'e2e-webkit') }}
     runs-on: macos-latest
     env:
       # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
@@ -1373,6 +1383,96 @@ jobs:
         with:
           mode: release
 
+  # Stage 2: the apps' end-to-end legs (paddock.ci.json `e2e`, `e2eShards`, `e2eWebkit`), one leg per shard and one for WebKit, on Linux
+  # (the paddock-ci image) only, after the stage-1 gate: the `app` job above runs every other leg. The plan splits the legs
+  # (`apps` and `apps_e2e`, tools/paddock-dev plan_ci.rs); the steps are the Linux steps of `app`.
+  app-e2e:
+    name: ${{ matrix.app }} e2e (${{ matrix.os }}, ${{ matrix.e2e_leg }})
+    needs: [plan, stage1]
+    if: ${{ needs.stage1.result == 'success' && needs.plan.outputs.any_app_e2e == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["app-e2e"]'), 'app-e2e') }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.apps_e2e) }}
+    env:
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.gitea/actions/build-jobs
+
+      - uses: ./.gitea/actions/job-isolation
+
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          components: clippy rustfmt
+
+      # The pinned Chrome for Testing of the image (rule 7); the container runs as root, where Chrome refuses its sandbox.
+      - name: The tests' browser
+        if: matrix.test_browser_prefix != ''
+        shell: bash
+        env:
+          PREFIX: ${{ matrix.test_browser_prefix }}
+          NO_SANDBOX: ${{ matrix.test_browser_no_sandbox }}
+        run: |
+          if [ -z "${CHROMIUM_TEST_PATH:-}" ]; then echo "::error::no Chrome for Testing (CHROMIUM_TEST_PATH is empty)"; exit 1; fi
+          {
+            echo "${PREFIX}_TEST_BROWSER=$CHROMIUM_TEST_PATH"
+            echo "${PREFIX}_REQUIRE_TEST_BROWSER=1"
+            if [ "$NO_SANDBOX" = true ]; then echo "${PREFIX}_TEST_BROWSER_NO_SANDBOX=1"; fi
+          } >> "$GITHUB_ENV"
+
+      - uses: ./.gitea/actions/node-caches
+        with:
+          angular-dir: ${{ matrix.angular_dir || 'ui' }}
+          name: app-${{ matrix.app }}-${{ matrix.e2e_leg }}
+
+      - name: Install
+        run: npm ci
+
+      - uses: ./.gitea/actions/app-gates
+        with:
+          app: ${{ matrix.app }}
+          cargo: ${{ matrix.cargo }}
+          nextest-config: ${{ matrix.nextest_config }}
+          prepare: ${{ matrix.prepare }}
+          checks: ${{ matrix.checks }}
+          rust-checks: ${{ matrix.rust_checks }}
+          host-rust-checks: ${{ matrix.host_rust_checks }}
+          ui-checks: ${{ matrix.ui_checks }}
+          rust: ${{ matrix.rust }}
+          ui: ${{ matrix.ui }}
+          last-packages: ${{ matrix.last_packages }}
+          windows-clippy: ${{ matrix.windows_clippy }}
+          notices: ${{ matrix.notices }}
+          filter: ${{ matrix.filter }}
+          tests-only: ${{ matrix.tests_only }}
+          display: ${{ matrix.display }}
+          e2e-checks: ${{ matrix.e2e_checks }}
+          e2e-shard: ${{ matrix.e2e_shard }}
+
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        if: failure() && matrix.e2e_artifacts != ''
+        with:
+          name: ${{ matrix.app }}-${{ matrix.e2e_leg }}-results-${{ strategy.job-index }}
+          path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/${{ matrix.e2e_artifacts }}
+          if-no-files-found: ignore
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
+
   # The developer and CI tool (ADR 0022): its own Cargo workspace and lockfile, tested on every OS it runs on. Linux runs in the
   # paddock-ci image (git, Node for the golden test's live oracle, nextest); Windows and macOS run on the host.
   paddock-dev:
@@ -1507,3 +1607,41 @@ jobs:
         if: always()
         with:
           mode: release
+
+  # The stage-1 gate: every fast job passed (a job the plan left out counts as passed). Stage 2 (e2e, e2e-webkit, app-e2e) needs it, so a
+  # failed unit test ends the run before the long jobs start. It runs after a failure too (`always()`), and fails then, so the
+  # run is red and a rerun of its failures (since_run) runs the stage-2 jobs it skipped (plan_since.rs add_skipped_dependents).
+  stage1:
+    name: stage 1 gate (fast checks)
+    needs: [plan, ipc-endpoints, ui, conformance, gitleaks, c99, tools, tools-macos, wiki, heavy, icons, eslint-preset, crates, crate, commits, audit, train-gates, app, paddock-dev]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: conformance
+      - name: Stage 1 result
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: node conformance/ci/stage-gate.mjs stage1
+
+  # The last job: the line `./dev ci verdict` reads. A run is full only when stage 1 passed and stage 2 ran to its end.
+  stages:
+    name: stages (stage 2 ran after stage 1)
+    needs: [plan, stage1, e2e, e2e-webkit, app-e2e]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: conformance
+      - name: Stage verdict
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: node conformance/ci/stage-gate.mjs final

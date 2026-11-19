@@ -299,10 +299,27 @@ pub fn is_ci_yml(path: &str) -> bool {
 
 // --------------------------------------------------------------------------------------------------------------- outputs
 
+/// Whether an app leg is an end-to-end leg (`e2e-1`, `e2e-webkit`): a stage-2 job of ci.yml (`app-e2e`); the other legs are stage 1
+/// (`app`). The one place that says which is which: the plan's outputs and the rerun of a failed run both split through it.
+pub fn is_e2e_leg(leg: &Value) -> bool {
+    leg["e2e_leg"].as_str().is_some_and(|l| !l.is_empty())
+}
+
+/// The `apps`, `any_app`, `apps_e2e` and `any_app_e2e` outputs of a list of legs: the stage-1 legs and the stage-2 end-to-end legs.
+pub fn app_leg_outputs(legs: &[Value]) -> Vec<(String, String)> {
+    let (e2e, rest): (Vec<Value>, Vec<Value>) = legs.iter().cloned().partition(is_e2e_leg);
+    vec![
+        ("apps".into(), serde_json::to_string(&rest).unwrap_or_default()),
+        ("any_app".into(), (!rest.is_empty()).to_string()),
+        ("apps_e2e".into(), serde_json::to_string(&e2e).unwrap_or_default()),
+        ("any_app_e2e".into(), (!e2e.is_empty()).to_string()),
+    ]
+}
+
 /// The ci.yml job outputs of a plan (the plan job declares and wires exactly these names), as `(name, value)` lines.
 pub fn ci_outputs(plan: &Value, legs: &[Value], base: Option<&str>) -> Vec<(String, String)> {
     let b = |k: &str| plan[k].as_bool().unwrap_or(false).to_string();
-    vec![
+    let mut out = vec![
         ("crates".into(), b("crates")),
         ("ui".into(), b("ui")),
         ("eslint".into(), b("eslint")),
@@ -311,11 +328,11 @@ pub fn ci_outputs(plan: &Value, legs: &[Value], base: Option<&str>) -> Vec<(Stri
         ("tools".into(), b("tools")),
         ("icons".into(), b("icons")),
         ("paddock_dev".into(), b("paddockDev")),
-        ("apps".into(), serde_json::to_string(legs).unwrap_or_default()),
-        ("any_app".into(), (!legs.is_empty()).to_string()),
         // The commit lint's range start (empty: no base, only the head commit is linted).
         ("base".into(), base.unwrap_or("").to_string()),
-    ]
+    ];
+    out.extend(app_leg_outputs(legs));
+    out
 }
 
 /// A short Markdown summary of a plan for the job summary.
@@ -1150,6 +1167,11 @@ mod tests {
             ("true", "false", "true", "true", "abc")
         );
         assert!(get("apps").starts_with(r#"[{"app":"x","os":"ubuntu-latest""#));
+        // The end-to-end legs are the stage-2 matrix: not in `apps`, all in `apps_e2e`.
+        assert!(!get("apps").contains("e2e-"), "{}", get("apps"));
+        assert!(get("apps_e2e").contains("e2e-webkit") && get("apps_e2e").contains("e2e-1"), "{}", get("apps_e2e"));
+        assert_eq!(get("any_app_e2e"), "true");
+        assert_eq!(app_leg_outputs(&legs[..2])[3], ("any_app_e2e".to_string(), "false".to_string()));
         assert_eq!(
             ci_outputs(&json!({}), &[], None).iter().find(|(n, _)| n == "any_app").unwrap().1,
             "false"

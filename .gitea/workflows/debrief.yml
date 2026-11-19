@@ -15,6 +15,11 @@
 # fixed checkout path (stable-workspace) into a kept build folder set as cargo configuration (the build-folder action),
 # never CARGO_TARGET_DIR, which sccache hashes; npm's and Angular's caches are kept (node-caches).
 #
+# Two stages (docs/train-checklist.md, "Staged CI"): stage 1 is the fast checks (Rust lint and tests on Linux and macOS, the plugin
+# SDK, licences and commits, the frontend build, lint and unit tests; the `stage1` job gates them); stage 2 is the long jobs (the
+# end-to-end tests, the installers and the real-app smoke tests) and starts only when stage 1 passed. The last job, `stages`,
+# prints the line `./dev ci verdict` reads: a run whose stage 2 did not run is never a full green run (ER-33).
+#
 # Runner labels: ubuntu-latest (jobs in the paddock-ci image), windows-latest and macos-latest (host runners).
 # Releases need a repository secret RELEASE_TOKEN (a Gitea access token with write:repository scope) and the family's
 # updater key (PADDOCK_TAURI_SIGNING_PRIVATE_KEY, _PASSWORD and PADDOCK_TAURI_UPDATER_PUBKEY).
@@ -160,6 +165,8 @@ jobs:
           complete=false
           if [ "$run" = true ] && [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
           echo "plan verdict: complete=$complete"
+          # A staged run counts as full only with the `stages` job's line (tools/paddock-dev ci_runs/verdict.rs, STAGED_LINE).
+          echo "plan layout: staged"
 
       # ADR 0060 3.2: the lint-adoption ratchet of Debrief (docs/gates.toml [[ratchet]] C13) must be empty before the release it names
       # (debrief-v1.2.0) or a later one is tagged. A tag run refuses at once, before anything is built. Only the ratchets of this
@@ -620,8 +627,8 @@ jobs:
   # Chromium only; full runs (main, tags, nightly, `bundles: true`) in Chromium and WebKit (Paddock rule 3).
   e2e:
     name: end-to-end (shard ${{ matrix.shard }}/4)
-    needs: [plan]
-    if: needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e"]'), 'e2e')
+    needs: [plan, stage1]
+    if: needs.stage1.result == 'success' && needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e"]'), 'e2e')
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
@@ -678,8 +685,8 @@ jobs:
     # After the bundle and the macOS Rust tests: the macOS leg's start-up benchmark is a timing gate and must not share the
     # runner with this run's heavy builds (debrief.yml 8007 measured 1.8x its budgets beside the LTO bundle job). A failed
     # bundle or test leg does not skip the smoke (!cancelled); a failed rust-lint still does.
-    needs: [plan, rust-lint, bundle, rust-test-macos]
-    if: ${{ !cancelled() && needs.rust-lint.result == 'success' && needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["tauri-smoke"]'), 'tauri-smoke') }}
+    needs: [plan, stage1, rust-lint, bundle, rust-test-macos]
+    if: ${{ !cancelled() && needs.stage1.result == 'success' && needs.rust-lint.result == 'success' && needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["tauri-smoke"]'), 'tauri-smoke') }}
     strategy:
       fail-fast: false
       matrix:
@@ -956,8 +963,8 @@ jobs:
   # for branch or pull request runs. They are the slowest jobs and the Windows leg runs on a developer PC.
   bundle:
     name: bundle (${{ matrix.os }})
-    needs: [plan, rust-lint]
-    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["bundle"]'), 'bundle')
+    needs: [plan, stage1, rust-lint]
+    if: needs.stage1.result == 'success' && needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["bundle"]'), 'bundle')
     strategy:
       fail-fast: false
       matrix:
@@ -1364,3 +1371,47 @@ jobs:
         with:
           path: .nightly-green
           key: debrief-nightly-green-${{ github.sha }}
+
+  # The stage-1 gate: every fast job passed (a job the plan left out counts as passed). Stage 2 (e2e, bundle, tauri-smoke) needs it, so
+  # a failed Rust or frontend test ends the run before the long jobs start. It runs after a failure too (`always()`) and fails then,
+  # so the run is red and a rerun of its failures (since_run) also runs the stage-2 jobs it skipped (plan_since.rs).
+  stage1:
+    name: stage 1 gate (fast checks)
+    needs: [plan, rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, keychain]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: conformance
+      - name: Stage 1 result
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: node conformance/ci/stage-gate.mjs stage1
+
+  # The last job: the line `./dev ci verdict` reads. A run is full only when stage 1 passed and stage 2 ran to its end.
+  stages:
+    name: stages (stage 2 ran after stage 1)
+    needs: [plan, stage1, e2e, bundle, tauri-smoke]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: conformance
+      - name: Stage verdict
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: node conformance/ci/stage-gate.mjs final
