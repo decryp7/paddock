@@ -274,7 +274,8 @@ pub fn classify_owner(id: &HelperUser, name: Option<&str>, first_person: u32) ->
     match id {
         HelperUser::Uid(0) => RawOwner::System,
         HelperUser::Uid(uid) => {
-            if *uid < first_person || *uid == 65_534 {
+            // 65534 is `nobody` on Linux, 4294967294 (-2) on macOS: never a person, never a home to redact.
+            if *uid < first_person || *uid == 65_534 || *uid == 4_294_967_294 {
                 service("system service")
             } else {
                 RawOwner::Account {
@@ -287,7 +288,14 @@ pub fn classify_owner(id: &HelperUser, name: Option<&str>, first_person: u32) ->
             "S-1-5-18" => RawOwner::System,
             "S-1-5-19" => RawOwner::Service("LOCAL SERVICE".into(), Some(id.clone())),
             "S-1-5-20" => RawOwner::Service("NETWORK SERVICE".into(), Some(id.clone())),
-            s if s.starts_with("S-1-5-80-") || s.starts_with("S-1-5-90-") || s.starts_with("S-1-5-96-") => service("system service"),
+            // Service SIDs (80), IIS AppPool identities (82), Hyper-V virtual machines (83), window managers (90), font drivers
+            // (96): accounts with no profile, never a person.
+            s if ["S-1-5-80-", "S-1-5-82-", "S-1-5-83-", "S-1-5-90-", "S-1-5-96-"]
+                .iter()
+                .any(|p| s.starts_with(p)) =>
+            {
+                service("system service")
+            }
             _ => RawOwner::Account {
                 id: id.clone(),
                 name: name.map(str::to_string),
@@ -404,6 +412,26 @@ pub fn build_page(sweep: &Sweep, caller: &HelperUser, scope: Visibility, query: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Third review: the accounts that never have a home to redact are services, not people (Windows IIS AppPool and Hyper-V
+    /// virtual machine SIDs, macOS `nobody`), so they never make the helper read the account list again.
+    #[test]
+    fn homeless_account_kinds_are_services() {
+        for sid in ["S-1-5-82-1-2-3-4-5", "S-1-5-83-1-2-3-4-5"] {
+            assert!(
+                matches!(classify_owner(&HelperUser::Sid(sid.into()), None, 1_000), RawOwner::Service(..)),
+                "{sid}"
+            );
+        }
+        assert!(matches!(
+            classify_owner(&HelperUser::Uid(4_294_967_294), Some("nobody"), 500),
+            RawOwner::Service(..)
+        ));
+        assert!(matches!(
+            classify_owner(&HelperUser::Uid(501), Some("ana"), 500),
+            RawOwner::Account { .. }
+        ));
+    }
 
     /// Review P2-6: two callers paging at once each read the pages of their own first page's sweep, not the other's newer one.
     #[test]

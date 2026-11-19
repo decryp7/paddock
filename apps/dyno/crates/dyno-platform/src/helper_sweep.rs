@@ -24,6 +24,9 @@ const MAX_HOMES: usize = 4_096;
 /// own processes are always redacted for others; on macOS a change of the account database's folder also ends the cache. What
 /// this bounds is the rare rest: a path in the home of an account that has no process of its own yet, made within this time.
 pub const HOMES_TTL: Duration = Duration::from_secs(60);
+/// How long an owner still missing after a fresh read is not looked for again: a safety net for kinds `classify_owner` does not
+/// know, short so an account in its first-logon race is looked for again within seconds, not after the whole TTL.
+pub const NO_HOME_TTL: Duration = Duration::from_secs(5);
 /// The local account database of macOS (one plist per account): its modification time changes when an account is added or
 /// removed. The helper runs as root and can read it; when it cannot, [`HOMES_TTL`] alone bounds the cache.
 const DSLOCAL_USERS: &str = "/var/db/dslocal/nodes/Default/users";
@@ -122,9 +125,9 @@ struct CachedHomes {
     at: Instant,
     db_modified: Option<SystemTime>,
     homes: Vec<(HelperUser, String)>,
-    /// Owners this list was read again for and still does not name (a Hyper-V or IIS AppPool account, `nobody`): they have
-    /// no home to redact, so they do not make it be read again for as long as it is kept.
-    no_home: Vec<HelperUser>,
+    /// Owners this list was read again for and still did not name, with when: a safety net for kinds `classify_owner` does not
+    /// know (the known homeless kinds are services there), so they do not force a read on every sweep, for [`NO_HOME_TTL`] only.
+    no_home: Vec<(HelperUser, Instant)>,
 }
 
 impl SystemSweeper {
@@ -182,7 +185,11 @@ impl SystemSweeper {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .as_ref()
-                .is_some_and(|c| c.no_home.contains(o))
+                .is_some_and(|c| {
+                    c.no_home
+                        .iter()
+                        .any(|(u, at)| u == o && now.saturating_duration_since(*at) < NO_HOME_TTL)
+                })
         };
         let missing: Vec<&HelperUser> = owners
             .iter()
@@ -202,7 +209,8 @@ impl SystemSweeper {
         if !still.is_empty() {
             log::info!(owners = still.len(); "Helper: process owners with no home in the account list; not read again for them");
             if let Some(c) = self.homes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut() {
-                c.no_home.extend(still);
+                c.no_home.retain(|(u, _)| !still.contains(u));
+                c.no_home.extend(still.into_iter().map(|u| (u, now)));
                 c.no_home.truncate(MAX_HOMES);
             }
         }
@@ -495,6 +503,11 @@ mod tests {
         assert_starts(2, || mac.homes_for(&[&ghost], start + Duration::from_secs(3))).unwrap();
         assert_starts(at_most_or_none(0, "the owner is known to have no home in this list"), || {
             mac.homes_for(&[&ghost], start + Duration::from_secs(4))
+        })
+        .unwrap();
+        // Only for NO_HOME_TTL, a safety net: an account in its first-logon race is looked for again soon (third review).
+        assert_starts(2, || {
+            mac.homes_for(&[&ghost], start + Duration::from_secs(3) + NO_HOME_TTL + Duration::from_millis(1))
         })
         .unwrap();
     }
