@@ -16,7 +16,7 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 ![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=3af1d14e)
 
 
-> **Status: 1.1.0 released, 1.1.1 in progress.** Dyno is a monitor: live and history, processes and why it is slow,
+> **Status: 1.2.0.** Dyno is a monitor: live and history, processes and why it is slow,
 > alarms, issues, a disk map, counters, extras, benchmarks and the command line, plus opt-in keep awake, Wake-on-LAN, scheduled wakes, sleep, hibernate (Windows and Linux) or shut-down after idle or at a set time, and the administrator helper (an optional, off-by-default AI access page also lets a local MCP client read these values and, only if you allow each one, wake a saved computer or keep this one awake for up to 12 hours). Taming, cleanup and tuning are dropped, not postponed
 > ([ADR 0021](docs/adr/0021-monitoring-only.md)). [docs/features.md](docs/features.md) says exactly what is real and
 > [docs/roadmap.md](docs/roadmap.md) lists what is left.
@@ -104,7 +104,7 @@ Taken against the mock backend (`docs/screenshots`, dark and light for every scr
 
 ## Quick start
 
-Dyno 1.0.0 is released on the repository's releases page, and 1.1.0 is in progress. You can also build it yourself ([Building from source](#building-from-source)) or take the CI artifacts of a `dyno-v*` tag or the nightly run.
+Dyno 1.2.0 is released on the repository's releases page. You can also build it yourself ([Building from source](#building-from-source)) or take the CI artifacts of a `dyno-v*` tag or the nightly run.
 
 ### Windows
 
@@ -141,7 +141,7 @@ status-notifier host (GNOME: the AppIndicator extension). Details: [docs/linux.m
 | Platform adapters | macOS and Linux: sensors, details, locks, startup, facts, user activity (macOS tested on a real Mac, Linux in a container with `scripts/linux-verify.sh`). Windows: sensors and user activity; details, locks, startup and facts are not wired yet. |
 | App | Dashboard, processes, why slow, alarms, issues, reports, counters, extras, benchmarks, network, settings, tray, native feel against the real agent through the shell. |
 | Privileges | Everything runs with your own rights; unreadable figures say why and other users' processes are one "Other users" row. 1.1.0 adds the optional administrator helper (ADR 0027); "start as administrator at login" comes later. |
-| Installers | CI builds NSIS, `.dmg`, `.deb` and AppImage on `dyno-v*` tags, nightly and manual runs. 1.0.0 is published; 1.1.0 is in progress. |
+| Installers | CI builds NSIS, `.dmg`, `.deb` and AppImage on `dyno-v*` tags, nightly and manual runs. 1.2.0 is published. |
 
 ## Roadmap
 
