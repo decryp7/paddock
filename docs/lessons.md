@@ -2821,3 +2821,13 @@ is in the DOM but not positioned or not lasting).
   moment the animation wait returned (7605 ms), so the Inspector's content may have started a fade after the wait; the screencast shows
   no Inspector on screen at all. Not reproduced yet. Next: run the spec with the trace on under load and read the Inspector's animations
   (`document.getAnimations()`) when axe starts; wait for the Inspector to show the clicked record before settling.
+
+## Fix item: Debrief WebKit ai-chat "regex proposal as a highlight rule" saw the marker dialog still open (2026-11-19, local)
+`AI chat › a regex proposal is applied as a highlight rule through the marker dialog` (apps/debrief/app/e2e/ai-chat.e2e.ts:77)
+failed once in 170 local WebKit runs (ai-chat, ux-home and jobs at 10 repeats, 4 workers, retries off, on train 14 bfa9f914d): after
+the rule was filled in and applied, `getByRole('dialog', { name: 'Highlight lines' })` still counted 1 for the whole 5 s. The
+machine was at 17% CPU idle and the base was not measured on it, so this is a finding only (ER-9), not a CI result; train 14 does
+not touch this test or the marker-dialog path (fix/debrief-webkit-flakes changes only `:130` and a mock switch whose default stays
+12 characters). Not blocking, by the coordinator's reading of ER-12's feature-level scope (2026-11-19). Next: reproduce under load
+with a failing run first, then wait for the dialog's close to finish before the count. **Class: an e2e read before the page settled
+(the ready-read class); covered by the ready audit the user approved.**
