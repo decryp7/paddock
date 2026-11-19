@@ -358,12 +358,17 @@ export class DockLayout {
     };
   }
 
-  /** The verdict for the Explorer (see `DockService.explorerVerdict`). */
-  explorerVerdict(api: DockviewApi, open: boolean, explorerWidth: number): 'hide' | 'show' | 'keep' {
+  /**
+   * The verdict for the Explorer (see `DockService.explorerVerdict`). The room is the dock's container as laid out now plus what the Explorer takes
+   * now (`drawnWidth`), the same sum before and after the render that draws or removes it; dockview's own size can still be the last one it laid
+   * out, so it is only the fallback for a dock without a container (tests).
+   */
+  explorerVerdict(api: DockviewApi, open: boolean, drawnWidth: number): 'hide' | 'show' | 'keep' {
     if (!(api.width > 0 && api.height > 0)) return 'keep';
     const box = this.ctx.container?.getBoundingClientRect();
     if (box && (box.width <= 0 || box.height <= 0)) return 'keep';
-    const viewport = { width: api.width + (open ? explorerWidth : 0), height: api.height };
+    const dock = box ?? { width: api.width, height: api.height };
+    const viewport = { width: dock.width + drawnWidth, height: dock.height };
     const explorer: OpenView = { id: EXPLORER_ID, layout: EXPLORER_LAYOUT, group: EXPLORER_ID };
     const views = this.openViews(api, [explorer]);
     if (open) return planLayout(viewport, views, this.hints()).hidden.some((h) => h.id === EXPLORER_ID) ? 'hide' : 'keep';
