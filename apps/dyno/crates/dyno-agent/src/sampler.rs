@@ -227,31 +227,30 @@ impl Sampler {
             before.touch_alarms();
         }
         for a in new_alerts {
-            // One savepoint per alert, its own rows first: a refused alert changes no alarm (Dyno ADR 0008, "Store writers").
-            let stored = {
-                let (store, alarms) = (&core.store, &mut core.alarms);
-                store.atomic(|| {
-                    store.put_alert(&a)?;
-                    store.put_event(&TimelineEvent {
-                        at: a.at,
-                        kind: TimelineEventKind::Alert,
-                        label: a.title.clone(),
-                    })?;
-                    Ok(alarms.alert(store, &a))
+            // Two writers per alert (rule 85; Dyno ADR 0008, "Store writers"). The alarm is the user's main signal: its change is
+            // its own savepoint (inside `alert`), stored and announced even when the alert's own rows cannot be stored.
+            let changes = core.alarms.alert(&core.store, &a);
+            for c in &changes {
+                let _ = core.recorder.on_alarm(&core.store, c, t);
+            }
+            news.push(News::Alarms(changes));
+            // The alert's rows, the second savepoint: all or none for this alert.
+            let stored = core.store.atomic(|| {
+                core.store.put_alert(&a)?;
+                core.store.put_event(&TimelineEvent {
+                    at: a.at,
+                    kind: TimelineEventKind::Alert,
+                    label: a.title.clone(),
                 })
-            };
+            });
             match stored {
-                Ok(changes) => {
-                    for c in &changes {
-                        let _ = core.recorder.on_alarm(&core.store, c, t);
-                    }
+                Ok(()) => {
                     core.alerts.stored(&a.id);
-                    news.push(News::Alarms(changes));
                     news.push(News::Alert(a));
                 }
                 Err(e) => {
-                    // Undone alone (rule 85): its rows are rolled back and it is not announced; its cooldown is taken back
-                    // for a few tries, then kept.
+                    // Undone alone: its rows are rolled back and it is not announced; its cooldown is taken back for a few
+                    // tries (each repeats the alarm), then kept.
                     if core.alerts.unfire(&a.id, crate::rollup::MAX_RECORD_TRIES) {
                         log::error!("dyno-agent: an alert could not be stored: {e}; it can fire again at the next tick");
                     } else {
@@ -375,7 +374,7 @@ fn push_live(shared: &Shared, live: &LiveUpdate) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dyno_core::time::HOUR;
+    use dyno_core::time::{HOUR, MINUTE};
     use dyno_platform::fake::{process, quiet_sample, Fake};
 
     fn always_on() -> dyno_core::alarms::custom::CustomAlertRule {
@@ -551,10 +550,8 @@ mod tests {
         );
     }
 
-    /// Fifth review P2-2: a refused alert changes no alarm (its rows go first, in one savepoint with its alarm change), and after
-    /// MAX_RECORD_TRIES it keeps its cooldown instead of being tried at every tick.
-    #[test]
-    fn a_refused_alert_changes_no_alarm_and_stops_after_its_tries() {
+    /// A connected agent and sampler for the alert tests, with the store's alerts table refusing inserts.
+    fn refused_alerts_rig() -> (Arc<Shared>, Sampler, Arc<crate::agent::Pending>, paddock_testkit::PrivateTemp) {
         let tmp = paddock_testkit::private_tempdir().unwrap();
         let fake = Fake::new();
         let (shared, sensors, processes) = Shared::build(
@@ -564,7 +561,8 @@ mod tests {
             Box::new(|_| Ok(())),
         )
         .unwrap();
-        let (tx, _rx) = std::sync::mpsc::sync_channel(64);
+        let (tx, rx) = std::sync::mpsc::sync_channel(64);
+        std::mem::forget(rx);
         let pending = Arc::new(crate::agent::Pending::default());
         lock(&shared.subs).push(crate::agent::Sub {
             id: 1,
@@ -575,52 +573,114 @@ mod tests {
             jobs: Default::default(),
             pending: pending.clone(),
         });
-        let mut sampler = Sampler::new(sensors, processes);
-        let overhead = Overhead {
-            agent_cpu: 0.0,
-            agent_memory: 0,
-            sampling_interval_ms: 2_000,
-            process_interval_ms: 10_000,
-        };
-        let full = |t: Timestamp| {
-            let mut s = quiet_sample(t);
-            s.disks.push(dyno_core::metrics::DiskSample {
-                id: "d".into(),
-                name: "Disk".into(),
-                mount: "/".into(),
-                total: 100,
-                free: 1,
-                removable: false,
-            });
-            s
-        };
-        let drained = |pending: &crate::agent::Pending| {
-            let (mut alarms, mut alerts) = (0, 0);
-            pending.drain(&mut |m| {
-                alarms += usize::from(matches!(m, Message::Alarm(_)));
-                alerts += usize::from(matches!(m, Message::Alert(_)));
-                true
-            });
-            (alarms, alerts)
-        };
         lock(&shared.core)
             .store
             .exec_for_test("CREATE TRIGGER no_alert BEFORE INSERT ON alerts BEGIN SELECT RAISE(ABORT, 'refused'); END;");
-        // Inside the alarm engine's 30 s tick: the first tick runs it at once, the next 19 ticks do not.
+        (shared, Sampler::new(sensors, processes), pending, tmp)
+    }
+
+    fn full_disk(t: Timestamp) -> SystemSample {
+        let mut s = quiet_sample(t);
+        s.disks.push(dyno_core::metrics::DiskSample {
+            id: "d".into(),
+            name: "Disk".into(),
+            mount: "/".into(),
+            total: 100,
+            free: 1,
+            removable: false,
+        });
+        s
+    }
+
+    const OVERHEAD: Overhead = Overhead {
+        agent_cpu: 0.0,
+        agent_memory: 0,
+        sampling_interval_ms: 2_000,
+        process_interval_ms: 10_000,
+    };
+
+    /// The alarm change kinds and alert messages waiting for the app.
+    fn drained(pending: &crate::agent::Pending) -> (Vec<dyno_core::alarms::ChangeKind>, usize) {
+        let (mut alarms, mut alerts) = (Vec::new(), 0);
+        pending.drain(&mut |m| {
+            match m {
+                Message::Alarm(c) => alarms.push(c.kind),
+                Message::Alert(_) => alerts += 1,
+                _ => {}
+            }
+            true
+        });
+        (alarms, alerts)
+    }
+
+    /// Sixth review (rule 85): the alarm is the user's main signal, so a broken alerts table must not silence it. The alarm
+    /// change is its own savepoint, stored and announced; the alert's rows are a second one, tried under the cap. With the
+    /// alerts table refusing for 20 ticks the alarm is raised once and repeats at most MAX_RECORD_TRIES times.
+    #[test]
+    fn a_refused_alert_still_raises_its_alarm_and_repeats_it_at_most_its_tries() {
+        let (shared, mut sampler, pending, _tmp) = refused_alerts_rig();
+        let mut kinds = Vec::new();
+        let mut alerts = 0;
         for i in 0..20 {
             let t = Timestamp(HOUR + 1 + i * 1_000);
-            sampler.record(&shared, &full(t), None, overhead, t);
+            sampler.record(&shared, &full_disk(t), None, OVERHEAD, t);
+            let (k, a) = drained(&pending);
+            kinds.extend(k);
+            alerts += a;
         }
-        let events = lock(&shared.core).store.alarm_events(None, 500).unwrap().len();
-        assert_eq!((drained(&pending), events), ((0, 0), 0), "a refused alert raised no alarm");
-        lock(&shared.core).store.exec_for_test("DROP TRIGGER no_alert;");
-        let t = Timestamp(HOUR + 21_000);
-        sampler.record(&shared, &full(t), None, overhead, t);
+        use dyno_core::alarms::ChangeKind::{Raised, Repeated};
+        assert_eq!(kinds.iter().filter(|k| **k == Raised).count(), 1, "{kinds:?}");
+        let repeats = kinds.iter().filter(|k| **k == Repeated).count();
+        assert!(repeats <= crate::rollup::MAX_RECORD_TRIES as usize, "{kinds:?}");
+        assert_eq!(alerts, 0, "an alert that was not stored is not announced");
+        let core = lock(&shared.core);
+        assert_eq!(core.store.alarms(10).unwrap().len(), 1, "the alarm is stored");
         assert_eq!(
-            drained(&pending),
-            (0, 0),
-            "after its tries the alert keeps its cooldown, not tried at every tick"
+            core.store.alarm_events(None, 500).unwrap().len(),
+            1 + repeats,
+            "each announced change is stored"
         );
+    }
+
+    /// Sixth review, the cap's positive control (it never silences an alert): the alerts table refuses for 20 ticks, then
+    /// works again with the disk still full; ticking every 10 minutes for 7 hours raises the alarm exactly once and announces
+    /// and stores the alert exactly once, at the end of the 6 h cooldown, and nothing before it. The alarm's own lifecycle
+    /// goes on meanwhile: it returns once after each raise (30 minutes later, as its condition is not seen again during the
+    /// cooldown), and never again at every tick (the engine fix of the same round).
+    #[test]
+    fn after_a_refusal_the_alert_comes_back_at_the_end_of_its_cooldown_and_not_before() {
+        use dyno_core::alarms::ChangeKind::{Raised, Repeated, Returned};
+        let (shared, mut sampler, pending, _tmp) = refused_alerts_rig();
+        let start = HOUR + 1;
+        for i in 0..20 {
+            let t = Timestamp(start + i * 1_000);
+            sampler.record(&shared, &full_disk(t), None, OVERHEAD, t);
+        }
+        let _ = drained(&pending);
+        lock(&shared.core).store.exec_for_test("DROP TRIGGER no_alert;");
+        let lifted = start + 20_000;
+        let (mut raises, mut returns) = (Vec::new(), Vec::new());
+        for i in 1..=42 {
+            let t = Timestamp(lifted + i * 10 * MINUTE);
+            sampler.record(&shared, &full_disk(t), None, OVERHEAD, t);
+            let (alarms, alerts) = drained(&pending);
+            let since = t.since(Timestamp(start));
+            let raised = alarms.iter().filter(|k| matches!(k, Raised | Repeated)).count();
+            if raised > 0 || alerts > 0 {
+                raises.push((since, raised, alerts));
+            }
+            returns.extend(alarms.iter().filter(|k| **k == Returned).map(|_| since));
+        }
+        let stored = lock(&shared.core).store.alerts(100).unwrap().len();
+        assert_eq!(raises.len(), 1, "one moment only: {raises:?}");
+        let (at, alarms, alerts) = raises[0];
+        assert_eq!((alarms, alerts, stored), (1, 1, 1), "{raises:?}");
+        assert!(
+            (6 * HOUR..6 * HOUR + 10 * MINUTE + 20_000).contains(&at),
+            "at the 6 h cooldown: {at} ms"
+        );
+        assert_eq!(returns.len(), 2, "it returns once after each raise, not at every tick: {returns:?}");
+        assert!(returns[0] < at && returns[1] > at, "{returns:?}");
     }
 
     /// Fourth review P1: a writer that keeps failing (every alert row refused) costs only its own rows: 60 ticks still store
