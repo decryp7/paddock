@@ -392,7 +392,7 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
     let clash_note = if clash.is_quiet() {
         String::new()
     } else {
-        format!("\n{}", clash.lines(&format!("the base of {}", req.branch.unwrap_or("this worktree"))).join("\n"))
+        format!("\n{}", clash.lines(&format!("the base of {}", req.branch.unwrap_or("this worktree")), None).join("\n"))
     };
     Ok(Report::new(
         json!({"path": k, "branch": req.branch, "head": head, "owner": req.owner, "locked": true, "note": note,

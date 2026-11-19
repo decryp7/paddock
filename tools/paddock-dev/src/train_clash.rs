@@ -9,7 +9,12 @@
 //!
 //! An open train is an `origin/train/*` branch that `origin/main` does not contain yet. Its change is `git diff <against>...<train>`
 //! (what the train did since it left the line of `against`), so a train stacked on the target is judged by what it added beyond
-//! the target and a train that is already part of `against` has no change. One `diff --name-only` per open train, and one `log`
+//! the target and a train that is already part of `against` has no change.
+//!
+//! **Blocking in `merge check`, once green (ER-41).** While [`ENFORCED`] is false the overlaps are warnings. After the change that
+//! flips it (it records the first green real run's id at [`ENFORCED`]), an overlap in a merge commit is refused (exit 5) until the
+//! merge message has `Train-clash: <path>: <other train>: <how the two designs fit>` for that path and train. The branch cut
+//! (`worktree add`) and a branch checked before it is merged only ever warn. One `diff --name-only` per open train, and one `log`
 //! per train that overlaps; nothing is read when no changed path is a shared integration point.
 use crate::gates::tree::glob_regex;
 use crate::generators::registry::{PATH as GENERATORS, Registry};
@@ -32,6 +37,14 @@ pub const SHARED: &[&str] = &[
     "crates/*/src/lib.rs",
     "docs/rules.md",
 ];
+
+/// Whether an overlap with no `Train-clash:` trailer in the merge message is refused. The user asked for this on 2026-11-20; per
+/// ER-41 it stays false until its first green run on a real train, and the change that flips it records that run's id here:
+/// `first green run: <not yet recorded>`.
+pub const ENFORCED: bool = false;
+
+/// The trailer that answers one overlap.
+pub const TRAILER: &str = "Train-clash";
 
 /// Never a clash: lockfiles and changelogs. (The files a generator writes are excluded through `docs/generators.toml`.)
 pub const EXCLUDED: &[&str] = &["**/Cargo.lock", "**/package-lock.json", "**/*.lock", "**/CHANGELOG*"];
@@ -64,6 +77,21 @@ impl GitText for crate::merge_check::git::Git<'_> {
     }
 }
 
+/// What judges an overlap: the merge message that may answer it, and whether an unanswered one is refused.
+#[derive(Debug, Clone, Copy)]
+pub struct Judge<'m> {
+    /// The merge commit's message.
+    pub message: &'m str,
+    /// Whether an overlap the message does not answer is an error (see [`ENFORCED`]).
+    pub enforced: bool,
+}
+
+impl Judge<'_> {
+    fn message_answers(&self, c: &Clash) -> bool {
+        crate::merge_check::trailers::reason(self.message, TRAILER, &format!("{}: {}", c.path, c.train)).is_some()
+    }
+}
+
 /// One shared path that this change and another open train both changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Clash {
@@ -87,8 +115,23 @@ pub struct Outcome {
 }
 
 impl Outcome {
-    /// The `::warning::` lines (one per overlap), the not-measured and notice lines.
-    pub fn lines(&self, mine: &str) -> Vec<String> {
+    /// Whether `merge check` refuses the merge: enforcing, and an overlap the message does not answer.
+    pub fn refused(&self, judge: &Judge) -> bool {
+        judge.enforced && !self.unanswered(judge.message).is_empty()
+    }
+
+    /// The overlaps that the merge message does not answer with `Train-clash: <path>: <train>: <how it fits>` (a reason is needed).
+    pub fn unanswered(&self, message: &str) -> Vec<&Clash> {
+        self.clashes
+            .iter()
+            .filter(|c| crate::merge_check::trailers::reason(message, TRAILER, &format!("{}: {}", c.path, c.train)).is_none())
+            .collect()
+    }
+
+    /// The lines to print: for each overlap a `::warning::` (an answered one is a `::notice::`; one the message must answer and does
+    /// not, when `judge` enforces, an `::error::`), then the not-measured and notice lines. `judge` is `None` where nothing is
+    /// judged (the branch cut, a branch before its merge).
+    pub fn lines(&self, mine: &str, judge: Option<&Judge>) -> Vec<String> {
         let mut out: Vec<String> = self
             .clashes
             .iter()
@@ -98,11 +141,24 @@ impl Outcome {
                 } else {
                     format!(" (its commits: {})", c.commits.join("; "))
                 };
-                format!(
-                    "::warning::train clash (report-only): {path} is a shared integration point that {mine} changes and that {train} changes too{by}. Next step: read {train}'s change to {path} before merging (`git log origin/main..origin/{train} -- {path}`); record how the two designs fit in the merge message. This warning never blocks.",
-                    path = c.path,
-                    train = c.train,
-                )
+                let (path, train) = (&c.path, &c.train);
+                let need = format!("`{TRAILER}: {path}: {train}: <how the two designs fit>`");
+                let read = format!(
+                    "read {train}'s change to {path} before merging (`git log origin/main..origin/{train} -- {path}`); record how the two designs fit in the merge message"
+                );
+                let what = format!("{path} is a shared integration point that {mine} changes and that {train} changes too{by}");
+                match judge {
+                    Some(j) if j.message_answers(c) => format!("::notice::train clash answered: {what}; the merge message records how they fit."),
+                    Some(j) if j.enforced => {
+                        format!("::error::train clash: {what}. Next step: {read} as {need}, then check the merge again.")
+                    }
+                    Some(_) => format!(
+                        "::warning::train clash (report-only): {what}. Next step: {read} as {need}; once enforced, the merge is refused without it."
+                    ),
+                    None => format!(
+                        "::warning::train clash (report-only): {what}. Next step: {read}; the trailer is {need}. This warning never blocks."
+                    ),
+                }
             })
             .collect();
         out.extend(self.notices.iter().map(|n| format!("::notice::train clash check: {n}")));
@@ -147,20 +203,29 @@ impl Shared {
         match git.text(&["show", &format!("{rev}:{KNOWN_COPIES}")]) {
             Ok(text) => match known_copy_paths(&text) {
                 Ok(paths) => shared.extend(paths.iter().map(|g| glob_regex(g))),
-                Err(why) => notices.push(format!("{KNOWN_COPIES} could not be read ({why}); the mechanisms' paths were not counted.")),
+                Err(why) => notices.push(format!(
+                    "{KNOWN_COPIES} could not be read ({why}); the mechanisms' paths were not counted."
+                )),
             },
-            Err(why) => notices.push(format!("{KNOWN_COPIES} could not be read ({why}); the mechanisms' paths were not counted.")),
+            Err(why) => notices.push(format!(
+                "{KNOWN_COPIES} could not be read ({why}); the mechanisms' paths were not counted."
+            )),
         }
         let generated = match git.text(&["show", &format!("{rev}:{GENERATORS}")]) {
             Ok(text) => match Registry::parse(&text) {
                 Ok(r) => Some(r),
                 Err(errs) => {
-                    notices.push(format!("{GENERATORS} is invalid ({}); generated files were not excluded.", errs.join("; ")));
+                    notices.push(format!(
+                        "{GENERATORS} is invalid ({}); generated files were not excluded.",
+                        errs.join("; ")
+                    ));
                     None
                 }
             },
             Err(why) => {
-                notices.push(format!("{GENERATORS} could not be read ({why}); generated files were not excluded."));
+                notices.push(format!(
+                    "{GENERATORS} could not be read ({why}); generated files were not excluded."
+                ));
                 None
             }
         };
@@ -187,9 +252,21 @@ pub fn known_copy_paths(text: &str) -> Result<Vec<String>, String> {
             out.extend(list.iter().filter_map(|p| p.as_str().map(str::to_string)));
         }
     };
-    for m in doc.get("mechanism").and_then(toml::Value::as_array).into_iter().flatten().filter_map(toml::Value::as_table) {
+    for m in doc
+        .get("mechanism")
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(toml::Value::as_table)
+    {
         paths_of(m, &mut out);
-        for c in m.get("copy").and_then(toml::Value::as_array).into_iter().flatten().filter_map(toml::Value::as_table) {
+        for c in m
+            .get("copy")
+            .and_then(toml::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(toml::Value::as_table)
+        {
             paths_of(c, &mut out);
         }
     }
@@ -198,7 +275,12 @@ pub fn known_copy_paths(text: &str) -> Result<Vec<String>, String> {
 
 /// The open trains: `(train/<name>, tip)` of every `origin/train/*` branch that `origin/main` does not contain.
 fn open_trains(git: &dyn GitText) -> Result<Vec<(String, String)>, String> {
-    let out = git.text(&["for-each-ref", &format!("--no-merged={MAIN}"), "--format=%(refname:lstrip=3) %(objectname)", TRAINS])?;
+    let out = git.text(&[
+        "for-each-ref",
+        &format!("--no-merged={MAIN}"),
+        "--format=%(refname:lstrip=3) %(objectname)",
+        TRAINS,
+    ])?;
     Ok(out
         .lines()
         .filter_map(|l| l.split_once(' '))
@@ -215,7 +297,16 @@ fn changed(git: &dyn GitText, a: &str, b: &str) -> Result<Vec<String>, String> {
 /// The commits of `train` beyond `against` that touched any of `paths`, per path (short id and subject, newest first).
 fn commits_touching(git: &dyn GitText, against: &str, train: &str, paths: &[String]) -> Result<BTreeMap<String, Vec<String>>, String> {
     let range = format!("{against}..origin/{train}");
-    let mut args = vec!["-c", "core.quotepath=off", "log", "--no-merges", "--name-only", "--format=%x01%h %s", &range, "--"];
+    let mut args = vec![
+        "-c",
+        "core.quotepath=off",
+        "log",
+        "--no-merges",
+        "--name-only",
+        "--format=%x01%h %s",
+        &range,
+        "--",
+    ];
     args.extend(paths.iter().map(String::as_str));
     let out = git.text(&args)?;
     let mut by_path: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -262,7 +353,9 @@ pub fn check(git: &dyn GitText, mine: &[String], against: &str, rev: &str) -> Ou
             continue;
         }
         let commits = commits_touching(git, against, &train, &both).unwrap_or_else(|why| {
-            outcome.notices.push(format!("{train}'s commits could not be listed ({why}); the warning names the paths only."));
+            outcome.notices.push(format!(
+                "{train}'s commits could not be listed ({why}); the warning names the paths only."
+            ));
             BTreeMap::new()
         });
         for path in both {
@@ -272,7 +365,11 @@ pub fn check(git: &dyn GitText, mine: &[String], against: &str, rev: &str) -> Ou
             if more > 0 {
                 shown.push(format!("and {more} more"));
             }
-            outcome.clashes.push(Clash { path, train: train.clone(), commits: shown });
+            outcome.clashes.push(Clash {
+                path,
+                train: train.clone(),
+                commits: shown,
+            });
         }
     }
     outcome.clashes.sort_by(|a, b| (&a.path, &a.train).cmp(&(&b.path, &b.train)));
@@ -315,7 +412,9 @@ mod tests {
 
     impl Scratch {
         fn new() -> Scratch {
-            let s = Scratch { dir: tempfile::tempdir().unwrap() };
+            let s = Scratch {
+                dir: tempfile::tempdir().unwrap(),
+            };
             s.git(&["init", "-q", "-b", "main"]);
             s.git(&["commit", "-q", "--allow-empty", "-m", "chore: empty start"]);
             s
@@ -371,14 +470,22 @@ mod tests {
             "t",
             &main,
             "feat(eslint): make e2e-ready-reads blocking",
-            &[("eslint/src/rule.js", "blocking\n"), ("Cargo.lock", "a\n"), ("apps/x/src/a.rs", "a\n")],
+            &[
+                ("eslint/src/rule.js", "blocking\n"),
+                ("Cargo.lock", "a\n"),
+                ("apps/x/src/a.rs", "a\n"),
+            ],
         );
         s.remote("train/a", &train);
         let member = s.branch(
             "m",
             &main,
             "feat(eslint): report e2e-ready-reads",
-            &[("eslint/src/rule.js", "report-only\n"), ("Cargo.lock", "b\n"), ("apps/x/src/a.rs", "b\n")],
+            &[
+                ("eslint/src/rule.js", "report-only\n"),
+                ("Cargo.lock", "b\n"),
+                ("apps/x/src/a.rs", "b\n"),
+            ],
         );
         (s, main, member)
     }
@@ -395,9 +502,13 @@ mod tests {
         // The lockfile and the source file are changed by both and are not shared integration points.
         assert_eq!(paths(&o), [("eslint/src/rule.js".to_string(), "train/a".to_string())]);
         assert_eq!(o.clashes[0].commits.len(), 1);
-        assert!(o.clashes[0].commits[0].contains("make e2e-ready-reads blocking"), "{:?}", o.clashes[0].commits);
+        assert!(
+            o.clashes[0].commits[0].contains("make e2e-ready-reads blocking"),
+            "{:?}",
+            o.clashes[0].commits
+        );
         // The scratch repository has no registers: the two notices say so (nothing is silently skipped).
-        let all = o.lines("feat/m");
+        let all = o.lines("feat/m", None);
         assert_eq!(all.iter().filter(|l| l.starts_with("::notice::")).count(), 2, "{all:?}");
         let lines: Vec<String> = all.into_iter().filter(|l| l.starts_with("::warning::")).collect();
         assert_eq!(lines.len(), 1);
@@ -473,7 +584,7 @@ mod tests {
         s.remote("train/b", &b);
         let o = for_branch_cut(&s.reader(), &b);
         assert_eq!(paths(&o), [("docs/rules.md".to_string(), "train/a".to_string())]);
-        assert!(o.lines("the base").concat().contains("rule 90 in train a"));
+        assert!(o.lines("the base", None).concat().contains("rule 90 in train a"));
         // A base that is main itself carries nothing over main: nothing to compare.
         assert!(for_branch_cut(&s.reader(), "origin/main").is_quiet());
     }
@@ -487,7 +598,13 @@ mod tests {
             "main",
             "HEAD",
             "chore: start",
-            &[("docs/known-copies.toml", register), ("docs/generators.toml", generators), ("crates/c/src/a.rs", "0\n"), ("apps/x/src/copy.rs", "0\n"), ("docs/list.md", "0\n")],
+            &[
+                ("docs/known-copies.toml", register),
+                ("docs/generators.toml", generators),
+                ("crates/c/src/a.rs", "0\n"),
+                ("apps/x/src/copy.rs", "0\n"),
+                ("docs/list.md", "0\n"),
+            ],
         );
         s.remote("main", &main);
         let files = |t: &'static str| [("crates/c/src/a.rs", t), ("apps/x/src/copy.rs", t), ("docs/list.md", t)];
@@ -497,7 +614,10 @@ mod tests {
         let o = for_merge(&s.reader(), &main, &m);
         assert_eq!(
             paths(&o),
-            [("apps/x/src/copy.rs".to_string(), "train/a".to_string()), ("crates/c/src/a.rs".to_string(), "train/a".to_string())]
+            [
+                ("apps/x/src/copy.rs".to_string(), "train/a".to_string()),
+                ("crates/c/src/a.rs".to_string(), "train/a".to_string())
+            ]
         );
     }
 
@@ -511,7 +631,7 @@ mod tests {
         let bad = for_branch_cut(&s.reader(), &tip);
         assert!(bad.not_measured.is_some(), "{bad:?}");
         assert_eq!(bad.json()["outcome"], "not measured");
-        assert!(bad.lines("x").concat().contains("NOT MEASURED"));
+        assert!(bad.lines("x", None).concat().contains("NOT MEASURED"));
     }
 
     #[test]
@@ -536,5 +656,84 @@ mod tests {
             assert!(glob_regex(glob).is_match(sample), "{glob} vs {sample}");
         }
         assert!(!glob_regex("crates/*/src/lib.rs").is_match("crates/paddock-ipc/src/other.rs"));
+    }
+
+    fn one_overlap() -> Outcome {
+        let (s, main, member) = history();
+        let o = for_merge(&s.reader(), &main, &member);
+        assert_eq!(o.clashes.len(), 1);
+        o
+    }
+
+    fn errors(lines: &[String]) -> usize {
+        lines.iter().filter(|l| l.starts_with("::error::")).count()
+    }
+
+    #[test]
+    fn enforced_an_overlap_without_the_trailer_is_refused_with_the_line_to_add() {
+        let o = one_overlap();
+        let message = "Merge feat/m into train\n\nHunks-dropped: x: y\n";
+        assert_eq!(o.unanswered(message).len(), 1);
+        assert!(o.refused(&Judge { message, enforced: true }));
+        let lines = o.lines("feat/m", Some(&Judge { message, enforced: true }));
+        assert_eq!(errors(&lines), 1, "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("Train-clash: eslint/src/rule.js: train/a: <how the two designs fit>")),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn enforced_an_overlap_with_the_trailer_and_a_reason_is_accepted() {
+        let o = one_overlap();
+        let message = "Merge feat/m\n\nTrain-clash: eslint/src/rule.js: train/a: mine stays report-only behind the flag train/a adds\n";
+        assert!(o.unanswered(message).is_empty());
+        assert!(!o.refused(&Judge { message, enforced: true }));
+        let lines = o.lines("feat/m", Some(&Judge { message, enforced: true }));
+        assert_eq!(errors(&lines), 0, "{lines:?}");
+        assert!(lines.iter().any(|l| l.starts_with("::notice::train clash answered")), "{lines:?}");
+        // A trailer with no reason is no answer.
+        let bare = "Train-clash: eslint/src/rule.js: train/a: \n";
+        assert_eq!(o.unanswered(bare).len(), 1);
+    }
+
+    #[test]
+    fn enforced_a_trailer_that_names_another_path_or_train_is_refused() {
+        let o = one_overlap();
+        for message in [
+            "Train-clash: eslint/src/other.js: train/a: fits\n",
+            "Train-clash: eslint/src/rule.js: train/b: fits\n",
+            "Train-clash: eslint/src/: train/a: fits\n",
+        ] {
+            assert_eq!(o.unanswered(message).len(), 1, "{message}");
+            assert!(o.refused(&Judge { message, enforced: true }), "{message}");
+            assert_eq!(errors(&o.lines("m", Some(&Judge { message, enforced: true }))), 1, "{message}");
+        }
+    }
+
+    #[test]
+    fn report_only_and_the_branch_cut_never_produce_an_error() {
+        let o = one_overlap();
+        let judged = o.lines(
+            "m",
+            Some(&Judge {
+                message: "no trailer",
+                enforced: false,
+            }),
+        );
+        assert_eq!(errors(&judged), 0);
+        assert!(!o.refused(&Judge {
+            message: "no trailer",
+            enforced: false
+        }));
+        assert!(
+            judged.iter().any(|l| l.starts_with("::warning::") && l.contains("once enforced")),
+            "{judged:?}"
+        );
+        let cut = o.lines("m", None);
+        assert_eq!(errors(&cut), 0);
+        assert!(cut.iter().any(|l| l.contains("never blocks")), "{cut:?}");
     }
 }

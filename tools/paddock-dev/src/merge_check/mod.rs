@@ -50,7 +50,7 @@ mod reverted_base;
 mod stale_base;
 pub mod sync_member;
 mod testnames;
-mod trailers;
+pub(crate) mod trailers;
 mod whole_file;
 
 use git::{AutoMerge, Git, short};
@@ -589,16 +589,23 @@ fn check(req: &Request) -> Result<Checked, CliError> {
                     }),
                 );
             }
-            // Report-only (ER-41): a shared integration point that the member changes and another open train changes too.
+            // A shared integration point that the member changes and another open train changes too: report-only until
+            // `train_clash::ENFORCED` (ER-41), then refused until the merge message gives `Train-clash: <path>: <train>: <how it fits>`.
+            // Only a merge commit has a message to read: a branch checked before the merge is told what the message needs.
             if let [train, member] = merge.parents.as_slice() {
                 let clash = crate::train_clash::for_merge(&git, train, member);
                 if !clash.is_quiet() {
+                    let judge = merge.commit.is_some().then(|| crate::train_clash::Judge {
+                        message: merge.message.as_str(),
+                        enforced: crate::train_clash::ENFORCED,
+                    });
+                    let refused = judge.as_ref().is_some_and(|j| clash.refused(j));
                     steps.push(
                         "train-clash",
                         Some(generator_step::Step {
-                            text: clash.lines(&merge.member_name),
+                            text: clash.lines(&merge.member_name, judge.as_ref()),
                             data: clash.json(),
-                            exit: Exit::Ok,
+                            exit: if refused { Exit::Findings } else { Exit::Ok },
                         }),
                     );
                 }
