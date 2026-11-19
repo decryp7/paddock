@@ -100,18 +100,37 @@ pub struct Alerts {
     counter: u64,
     /// The alerts of the latest tick: their id, condition key and the cooldown mark the key had before ([`Alerts::unfire`]).
     latest: Vec<(String, String, Option<Timestamp>)>,
+    /// Times in a row each condition's alert was taken back (not stored).
+    unfired: HashMap<String, u32>,
 }
 
 impl Alerts {
     /// Takes back the alert `id` of the latest tick, which was not stored: its condition's cooldown is as it was before it fired,
-    /// so the next tick can fire it again (Dyno ADR 0008, "Store writers").
-    pub fn unfire(&mut self, id: &str) {
-        if let Some(i) = self.latest.iter().position(|(a, _, _)| a == id) {
-            let (_, key, previous) = self.latest.remove(i);
-            match previous {
-                Some(at) => self.fired.insert(key, at),
-                None => self.fired.remove(&key),
-            };
+    /// so the next tick can fire it again (Dyno ADR 0008, "Store writers"), at most `max_tries` times in a row for one
+    /// condition. After that its cooldown is kept, so a store that keeps refusing it is not asked at every tick. Returns
+    /// whether it was taken back.
+    pub fn unfire(&mut self, id: &str, max_tries: u32) -> bool {
+        let Some(i) = self.latest.iter().position(|(a, _, _)| a == id) else {
+            return false;
+        };
+        let (_, key, previous) = self.latest.remove(i);
+        let tries = self.unfired.entry(key.clone()).or_insert(0);
+        *tries += 1;
+        if *tries >= max_tries {
+            self.unfired.remove(&key);
+            return false;
+        }
+        match previous {
+            Some(at) => self.fired.insert(key, at),
+            None => self.fired.remove(&key),
+        };
+        true
+    }
+
+    /// The alert `id` of the latest tick was stored: its condition starts its count of tries again.
+    pub fn stored(&mut self, id: &str) {
+        if let Some((_, key, _)) = self.latest.iter().find(|(a, _, _)| a == id) {
+            self.unfired.remove(key);
         }
     }
 

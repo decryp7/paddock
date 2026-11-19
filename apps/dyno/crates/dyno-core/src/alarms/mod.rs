@@ -379,6 +379,11 @@ impl AlarmEngine {
         e
     }
 
+    /// Gives new alarms ids above `id` (the highest id the history still names, so an id is never given twice: rule 53).
+    pub fn reserve_ids_through(&mut self, id: u64) {
+        self.next_id = self.next_id.max(id.saturating_add(1));
+    }
+
     /// The settings.
     pub fn config(&self) -> AlarmConfig {
         self.config

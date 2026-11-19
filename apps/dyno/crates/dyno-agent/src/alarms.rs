@@ -46,8 +46,15 @@ impl AlarmCentre {
                 log::error!("dyno-agent: could not drop the mutes of a removed check: {e}");
             }
         }
+        let mut engine = AlarmEngine::restore(config, zone, alarms, muted);
+        // Past every id the history names, also those of pruned alarms whose change log stays (rule 53).
+        match store.highest_alarm_id() {
+            Ok(Some(id)) => engine.reserve_ids_through(id),
+            Ok(None) => {}
+            Err(e) => log::error!("dyno-agent: the highest alarm id could not be read ({e}); new ids follow the loaded alarms"),
+        }
         AlarmCentre {
-            engine: AlarmEngine::restore(config, zone, alarms, muted),
+            engine,
             last_tick: Timestamp(0),
         }
     }
@@ -225,6 +232,23 @@ mod tests {
         assert_eq!(c.engine.muted_rules(), ["alert:lowDisk"]);
         assert_eq!(s.alarms(10).unwrap().len(), 1);
         assert_eq!(s.muted_rules().unwrap(), ["alert:lowDisk"]);
+    }
+
+    /// Fifth review P2-1 (rule 53): an alarm id is never given again, also after the newest alarm was pruned (its change log
+    /// stays) and the alarms were read back, at a restart or after a change that was not stored.
+    #[test]
+    fn an_alarm_id_is_never_given_again_after_a_prune() {
+        let s = Store::memory().unwrap();
+        let mut c = AlarmCentre::load(&s, AlarmConfig::default(), dyno_core::time::FixedZone::shared(0));
+        assert_eq!(c.apply(&s, raise("alert:a"))[0].alarm.id, 1);
+        assert_eq!(c.apply(&s, raise("alert:b"))[0].alarm.id, 2);
+        // A prune drops the alarm row and keeps its change log.
+        s.delete_alarm(2).unwrap();
+        c.reload(&s);
+        assert_eq!(c.apply(&s, raise("alert:c"))[0].alarm.id, 3, "reload");
+        s.delete_alarm(3).unwrap();
+        let mut restarted = AlarmCentre::load(&s, AlarmConfig::default(), dyno_core::time::FixedZone::shared(0));
+        assert_eq!(restarted.apply(&s, raise("alert:d"))[0].alarm.id, 4, "restart");
     }
 
     /// Fourth review: inside a batch, a change whose write fails is undone in the centre too, and the batch's other writes
