@@ -192,6 +192,22 @@ describe('MockAiBackend', () => {
     ).toBe('engine');
   });
 
+  it('streams an answer in pieces of `chunkChars` (12 by default): ?mockAiChunkChars= sends it in one piece (debrief.yml run 8300)', async () => {
+    expect(mockAiOptionsFromSearch('?mockAiChunkChars=100000').chunkChars).toBe(100000);
+    expect(mockAiOptionsFromSearch('?mockAiChunkChars=0').chunkChars).toBeUndefined();
+    expect(mockAiOptionsFromSearch('?mockAiChunkChars=x').chunkChars).toBeUndefined();
+    const deltas = async (b: MockAiBackend) => {
+      const events = chatOf(b);
+      const { id } = await b.chatNew();
+      return (await turn(b, events, 'what crashed?', id)).filter((e) => e.type === 'delta');
+    };
+    const small = await deltas(new MockAiBackend({ stepMs: 0 }));
+    const whole = await deltas(new MockAiBackend({ stepMs: 0, chunkChars: 100_000 }));
+    expect(small.length).toBeGreaterThan(10);
+    expect(whole).toHaveLength(1);
+    expect(whole.map((e) => (e as { text: string }).text).join('')).toBe(small.map((e) => (e as { text: string }).text).join(''));
+  });
+
   it('cancels while streaming and refuses a second turn', async () => {
     const b = new MockAiBackend({ stepMs: 5 });
     const events = chatOf(b);

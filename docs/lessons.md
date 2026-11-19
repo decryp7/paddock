@@ -2813,3 +2813,25 @@ not change its state` on 'Show Home after opening files'. It had failed 1 of 145
 touch; recorded here and not blocking, by the user's feature-level reading of ER-12 (2026-11-19). Next: reproduce in WebKit first;
 suspect the checkbox's state being written back by a settings round trip that lands after the click. **Class: an e2e action on an
 element whose state the app still changes (the ready-read class).**
+## Debrief: ai-chat.e2e.ts:130 red on both tries in debrief.yml run 8300; two more WebKit FLAKYs (train 14, 2026-11-19)
+- **ai-chat.e2e.ts:130 "a long conversation scrolls in its list only".** `waitAnswered` (ready.ts `expectStreamDone`, 5 s) saw the third
+  answer still streaming. Trace: answers took 3.2 s and 2.4 s from the turn to `aria-busy="false"`, the third more than 5.5 s. Causes listed:
+  (1) the `mockJobsHold=ai` hold of jobs.e2e.ts (624910cb0) outlived its test: refuted, jobs.e2e.ts ran after ai-chat in that shard (tests 286
+  and 27), every test has a fresh page and the hold lives in the page, and ai-chat after jobs in one WebKit worker passed with and without
+  624910cb0 (12 of 12 each); (2) a dock or Explorer re-plan loop from the same member: refuted, no `ui.layout` and no grid resize lines after
+  the first question; (3) the stream's cost on a loaded runner: the shard ran 1.7 to 1.9 times slower than in 8297 (ai-chat:101 21.9 s
+  against 11.0 s, :116 19.9 s against 11.8 s) and this test already took 22.0 s in 8297, about 3.3 s per answer against a 5 s wait.
+  **Fix:** the test needs six answers, not their streaming: `?mockAiChunkChars=100000` (new mock switch, unit-tested: one delta instead of
+  one per 12 characters) sends each answer in one piece. Locally (WebKit, 4 workers) the test went from 4.7-5.4 s to 3.9-5.0 s; 20 of 20
+  green at 4 workers, load 26-30. Streaming keeps its own tests (:12, :116).
+- **Fix item, fixed: ux-home.e2e.ts:73 "can be turned off for later imports" (shard 4/4, 1 of 145).** `uncheck` failed with "Clicking
+  the checkbox did not change its state": the screencast shows the health check's findings arriving while the click was made, which pushed
+  the checkbox about 90 px down, so the click landed on a health card. The spec now waits for the summary (Refresh enabled), the first
+  finding and a still checkbox (`expectNotMoving`) before pressing. The product moves a control as content arrives above it (the ADR 0061
+  class: controls that do not move); left as is.
+- **Fix item, open: a11y.e2e.ts:6 "main screen has no serious accessibility violations (dark)" (shard 3/4, 1 of 145).** axe saw
+  `--faint` text in the Inspector at 4.36-4.38:1 (#797d86 on #15161a, #787d85 on #151619) where the calm dark tokens give #8d929c on
+  #141518/#17181b: values that fit the Inspector drawn at about 85% opacity over `--bg-0`, i.e. mid-fade. The selection was logged at the
+  moment the animation wait returned (7605 ms), so the Inspector's content may have started a fade after the wait; the screencast shows
+  no Inspector on screen at all. Not reproduced yet. Next: run the spec with the trace on under load and read the Inspector's animations
+  (`document.getAnimations()`) when axe starts; wait for the Inspector to show the clicked record before settling.
