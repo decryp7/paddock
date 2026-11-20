@@ -41,6 +41,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { crc32, inflateRawSync } from 'node:zlib';
 import { isMain } from '../src/util/is-main.mjs';
+import { isTagRun } from '../src/util/is-tag-run.mjs';
 
 /** linuxdeploy's release in tauri-apps/binary-releases (tauri-bundler's LINUXDEPLOY_COMMIT_HASH, linuxdeploy.rs:209). */
 export const LINUXDEPLOY = '07333c6';
@@ -153,7 +154,7 @@ export function defaultCache(env = process.env, platform = process.platform) {
 }
 
 /** Whether this is a tag run (nothing kept is read there: ADR 0085 §4 item 1 and D9). */
-const onTag = (env) => (env.GITHUB_REF ?? '').startsWith('refs/tags/');
+const onTag = isTagRun;
 
 /** `<cargo target_directory>/.tauri` for the Cargo project in `srcTauri`, asked the way tauri-cli asks (cwd = src-tauri). */
 export function toolsDir(srcTauri, run = spawnSync) {

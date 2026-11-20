@@ -5,6 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isTagRun } from '../../../../../conformance/src/util/is-tag-run.mjs';
 import { cargoTargetDir } from '../../../../../conformance/src/sidecar/sidecar.mjs';
 
 // [binary name, package]: the CLI's binary is `dyno`, its package `dyno-cli`. The helper (ADR 0027) ships next to the agent on every
@@ -30,9 +31,12 @@ export function context({ dev = false, env = process.env, root = resolve(here, '
   };
 }
 
-/** Builds the named sidecars (all when `names` is omitted) and copies each to binaries/<name>-<triple>[.exe], except those in `keep`. */
-export function buildSidecars(ctx, { names = SIDECARS.map(([n]) => n), keep = [] } = {}) {
-  const chosen = SIDECARS.filter(([n]) => names.includes(n));
+/**
+ * Builds every sidecar in one cargo call (the hook and the signing step both do, so feature unification, and so the helper's bytes, are
+ * the same) and copies each to binaries/<name>-<triple>[.exe], except those in `keep`.
+ */
+export function buildSidecars(ctx, { keep = [] } = {}) {
+  const chosen = SIDECARS;
   const args = ['build', ...chosen.flatMap(([, pkg]) => ['-p', pkg]), '--profile', ctx.profile];
   if (ctx.triple !== ctx.host) args.push('--target', ctx.triple);
   ctx.exec('cargo', args, { cwd: ctx.root, stdio: 'inherit' });
@@ -47,10 +51,8 @@ export function buildSidecars(ctx, { names = SIDECARS.map(([n]) => n), keep = []
   }
 }
 
-/** A release is a tag run, as check-bundle.sh reads it. */
-export function isRelease(env = process.env) {
-  return /^refs\/tags\//.test(`${env.GITHUB_REF ?? ''}${env.GITEA_REF ?? ''}`) || `${env.GITHUB_REF_TYPE ?? ''}${env.GITEA_REF_TYPE ?? ''}` === 'tag';
-}
+/** A release is a tag run (defined once, in conformance/src/util/is-tag-run.mjs; check-bundle.sh asks the same module). */
+export const isRelease = isTagRun;
 
 export const sha256 = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
 

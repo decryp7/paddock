@@ -7,7 +7,7 @@
 # folder is the build-folder action's ($PADDOCK_BUILD_FOLDER), else cargo's $CARGO_TARGET_DIR, else target/.
 # With TAURI_SIGNING_PRIVATE_KEY and TAURI_UPDATER_PUBKEY set the updater artifacts are signed (the keys are stripped of
 # whitespace first); without them (forks, pull requests, secrets not set yet) the build still succeeds, unsigned and without
-# update support. The key reaches `tauri build` only, never `npm ci` or --prepare; in CI the real key only on a tag, and a run
+# update support. The key reaches `tauri build` and the --pre-sign `sign` process only, never `npm ci`, --prepare or the hook; in CI the real key only on a tag, and a run
 # that is not a tag signs with a throw-away key made in the job (updater-key.sh; ADR 0085 D7, rule 78). An NSIS or AppImage
 # build uses the pinned bundler tools in <build folder>/.tauri (tauri-tools.mjs, useLocalToolsDir; ADR 0085 WP-9). The app's
 # beforeBuildCommand runs before `tauri build`, without the key (before-build.mjs), and tauri build gets a configuration that

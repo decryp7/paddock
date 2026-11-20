@@ -1,13 +1,14 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2034 # updater_key_signing and updater_pubkey are read by the script that sources this.
-# The Tauri updater key reaches `tauri build` only, and the real key only on a tag run (ADR 0085 D7, WP-4; rule 78). Sourced
+# The Tauri updater key reaches `tauri build` and the pre-sign `sign` process (tauri-bundle.sh --pre-sign; Dyno's macOS helper) only, and the real key only on a tag run (ADR 0085 D7, WP-4; rule 78). Sourced
 # (never run) by tauri-bundle.sh and by debrief.yml's bundle step, before `npm ci`:
 #
 #   source conformance/ci/updater-key.sh
 #   updater_key_take                     move the key, its password and the public key out of the environment
 #   (cd "$root" && npm ci)               install and prepare scripts are branch code: they never see the key
 #   updater_key_throwaway "$app_dir"     a CI run that is not a tag: a key pair made in this job (`tauri signer generate`)
-#   updater_key_exec npx tauri build ... the one command that gets the key, in its environment (never in its arguments)
+#   updater_key_exec npx tauri build ... a command that gets the key, in its environment (never in its arguments); the other is
+#                                        `updater_key_exec node <pre-sign script> sign`, the helper signing step of tauri-bundle.sh
 #
 # updater_key_take strips whitespace (strip-keys.mjs: Gitea secrets often end in a newline), keeps the values in
 # updater_key, updater_key_password and updater_pubkey (not exported) and unsets TAURI_SIGNING_PRIVATE_KEY,
@@ -27,7 +28,8 @@
 
 updater_key_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-updater_key_on_tag() { case "${GITHUB_REF:-}" in refs/tags/*) return 0 ;; *) return 1 ;; esac; }
+# "A tag run" is defined once, in is-tag-run.mjs (exit 0 on a tag run).
+updater_key_on_tag() { node "$updater_key_here/../src/util/is-tag-run.mjs"; }
 
 updater_key_take() {
   local stripped

@@ -260,6 +260,28 @@ test('tauri-bundle: on a tag the key reaches tauri build only, in its environmen
   assert.doesNotMatch(r.stdout + r.stderr, /SECRETKEY|SECRETPW/, 'never printed');
 });
 
+// Dyno's macOS helper is signed by `--pre-sign <script>` (ADR 0085 amendment item 9): its `sign` half and `tauri build` get the key, and nothing
+// else does (npm ci, --prepare, the app's beforeBuildCommand, the script's `build` half). A stub `uname` says Darwin, since the step is macOS-only.
+for (const [label, extra, key] of [['on a tag', { ...TAG, TAURI_SIGNING_PRIVATE_KEY: 'SECRETKEY' }, 'SECRETKEY'], ['on a dispatch', { GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/main' }, 'THROWAWAY-SK']]) {
+  test(`tauri-bundle --pre-sign ${label}: only the script's sign half and tauri build see the key`, () => {
+    const root = signedRepo();
+    const seen = '[key=${TAURI_SIGNING_PRIVATE_KEY:-unset}]';
+    writeFileSync(join(root, 'bin/npm'), `#!/bin/bash\necho "npm $* ${seen}" >> "$BIN_LOG"\n`);
+    writeFileSync(join(root, 'bin/uname'), '#!/bin/bash\necho Darwin\n');
+    chmodSync(join(root, 'bin/uname'), 0o755);
+    writeFileSync(join(root, 'app/src-tauri/tauri.conf.json'), JSON.stringify({ version: '1.2.3', build: { beforeBuildCommand: `echo "hook ${seen}" >> "$BIN_LOG"` } }));
+    writeFileSync(join(root, 'presign.mjs'), "import { appendFileSync } from 'node:fs';\nappendFileSync(process.env.BIN_LOG, `presign-${process.argv[2]} [key=${process.env.TAURI_SIGNING_PRIVATE_KEY ?? 'unset'}]\\n`);\n");
+    const r = bundle(root, ['deb', '--prepare', `echo "prepare ${seen}" >> "$BIN_LOG"`, '--pre-sign', join(root, 'presign.mjs')], { ...extra, TAURI_UPDATER_PUBKEY: PUB });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const log = logOf(root).split('\n').filter((l) => l !== '' && !l.startsWith('npx-args') && !l.startsWith('env-args'));
+    const at = (prefix) => log.find((l) => l.startsWith(prefix));
+    for (const unkeyed of ['npm ci', 'prepare', 'presign-build', 'hook']) assert.match(at(unkeyed), /\[key=unset\]$/, `${unkeyed} sees no key: ${log.join(' | ')}`);
+    assert.equal(at('presign-sign'), `presign-sign [key=${key}]`);
+    assert.match(at('npx-env'), new RegExp(`^npx-env key=${key}\\|`));
+    assert.deepEqual(log.map((l) => l.split(' ')[0]), ['npm', 'prepare', 'presign-build', 'presign-sign', 'hook', 'npx-env'], 'the order: install, prepare, build half, sign half, hook, tauri build');
+  });
+}
+
 test('tauri-bundle: a CI run that is not a tag refuses a real key, and signs with a throw-away key with no password in argv', () => {
   const leaked = signedRepo();
   const r = bundle(leaked, ['deb'], { GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/fix/x', TAURI_SIGNING_PRIVATE_KEY: 'SECRETKEY', TAURI_UPDATER_PUBKEY: PUB });
