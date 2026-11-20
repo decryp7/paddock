@@ -174,7 +174,10 @@ pub fn class_default(os: &str, what: Setting) -> &'static str {
         // compile in ci.yml 9.4 -> 17.6 job-min): docs/benchmarks.md, "CI job cost, step by step".
         ("Linux", Setting::Share) => "6",
         ("Windows", Setting::Share) => "3",
-        ("macOS", Setting::Threads) | ("Windows", Setting::Threads) => "8",
+        // macOS measured 8 (the tests mostly wait). Windows has no measured number: it takes the job's core share (16 / 3 = 5),
+        // because 3 jobs x 8 threads plus a 5-job build oversubscribed the 16 vCPUs and git-heavy tests ran 2-8 times slower
+        // (runs 8335 against 8359).
+        ("macOS", Setting::Threads) => "8",
         ("macOS", Setting::Share) => "3",
         ("macOS", Setting::Cores) => "2",
         ("macOS", Setting::Ram) => "32768",

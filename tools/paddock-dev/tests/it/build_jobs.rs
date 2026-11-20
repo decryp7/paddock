@@ -185,7 +185,7 @@ fn the_class_values_are_the_documented_ones() {
     let mac = same(&s, None, &host("macOS", "14", "65536"), true);
     assert_eq!(mac.env_file, "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\n");
     let win = same(&s, None, &host("Windows", "16", "32768"), true);
-    assert_eq!(win.env_file, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=8\n");
+    assert_eq!(win.env_file, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\n");
     assert!(
         win.stdout
             .contains("::notice::build-jobs assumes the Windows runner's capacity is 3"),

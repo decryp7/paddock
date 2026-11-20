@@ -60,7 +60,7 @@ fn the_shared_mac_gets_a_third_of_its_cores_and_eight_test_threads() {
 #[test]
 fn windows_gets_three_jobs_per_host_and_says_it_assumed_the_capacity() {
     let r = build_jobs(&host("Windows", "16", "32768"), None, true);
-    assert_eq!(r.env_file, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=8\n");
+    assert_eq!(r.env_file, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\n");
     assert!(
         r.stdout
             .starts_with("::notice::build-jobs assumes the Windows runner's capacity is 3"),

@@ -2010,18 +2010,18 @@ test('build-jobs gives Linux d-gtr9\'s layout (6 jobs on 30 cores) and names a h
 
 test('build-jobs gives Windows 3 jobs per host from its class, which a runner env still overrides', () => {
   // The Windows runner (a Proxmox VM) runs capacity 3; the repo declares that, not the runner's runner.envs.
-  // 16 cores, 32 GB: min((16 - 0) / 3 = 5, (32768 - 2048) / (3 x 1536) = 6) = 5 build jobs; tests: the Windows class's 8 threads.
+  // 16 cores, 32 GB: min((16 - 0) / 3 = 5, (32768 - 2048) / (3 x 1536) = 6) = 5 build jobs; tests: 5 test threads (the core share: 3 jobs x 8 threads oversubscribed the 16 cores, 8335 vs 8359).
   const big = { RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '16', PADDOCK_CI_RAM_MB: '32768' };
   const r = buildJobs(big);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(jobsOf(r), '5');
-  assert.equal(threadsOf(r), '8');
+  assert.equal(threadsOf(r), '5');
   assert.match(r.stdout, /::notice::.*Windows runner's capacity is 3/);
   assert.match(r.stderr, /CARGO_BUILD_JOBS=5 \(\(16 cores - 0 kept\) \/ 3 jobs per host.*the Windows class default/);
   // 8 cores, 16 GB: min(8 / 3 = 2, (16316 - 2048) / 4608 = 3) = 2.
   const small = buildJobs({ ...WINDOWS });
   assert.equal(jobsOf(small), '2');
-  assert.equal(threadsOf(small), '8');
+  assert.equal(threadsOf(small), '2');
   // The runner's own number still wins.
   assert.equal(jobsOf(buildJobs({ ...big, PADDOCK_CI_JOBS_PER_HOST: '2' })), '8');
   assert.match(buildJobs({ ...big, PADDOCK_CI_JOBS_PER_HOST: '2' }).stderr, /runner's PADDOCK_CI_JOBS_PER_HOST/);
