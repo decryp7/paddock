@@ -1,9 +1,9 @@
+import type { ItemResult } from '@decryp7/paddock-ui/ipc';
 import { TestBed } from '@angular/core/testing';
 import type { PitwallBackend } from '../../core/backend';
 import { provideCountingBackend, expectBackendCalls } from '@decryp7/paddock-ui/ipc/testing';
 import { BACKEND } from '../../core/backend';
 import { MockBackend, type MockOptions } from '../../core/mock-backend';
-import { APP_COMMANDS } from '../../generated/app-commands';
 import { Toasts } from '../../core/toasts';
 import { ModelsStore } from './models.store';
 
@@ -167,8 +167,8 @@ describe('ModelsStore', () => {
     expect(toasts.toasts().at(-1)?.message).toMatch(/^Freed /);
   });
 
-  /** A list too large for one call goes in chunks that each fit the command's request limit, in order, and the results agree. */
-  it('cleans up a very long list in chunks, each under the call limit', async () => {
+  /** P2-3: the store makes one call whatever the list; splitting it to fit the request limit is the backend's (tauri-backend.spec.ts). */
+  it('cleans up a very long list with one backend call and reports the freed size', async () => {
     const mock = new MockBackend();
     const base = (await mock.localModels())[1]!;
     const many = Array.from({ length: 1300 }, (_, i) => ({ ...base, id: `model-${i}`.padEnd(200, 'x') }));
@@ -183,11 +183,7 @@ describe('ModelsStore', () => {
     const { store, toasts } = setup(mock);
     await store.load();
     await store.cleanUnused();
-    expect(sent.length).toBeGreaterThan(1);
-    for (const ids of sent) {
-      expect(new TextEncoder().encode(JSON.stringify({ ids })).length).toBeLessThan(APP_COMMANDS.delete_models.limit);
-    }
-    expect(sent.flat()).toEqual(many.map((m) => m.id));
+    expect(sent).toEqual([many.map((m) => m.id)]);
     expect(toasts.toasts().at(-1)?.message).toMatch(/^Freed /);
   });
 
@@ -202,9 +198,34 @@ describe('ModelsStore', () => {
     const last = toasts.toasts().at(-1);
     expect(last?.tone).toBe('bad');
     expect(last?.message).toContain('Deleted 1 of 2 models');
-    expect(last?.message).toContain('qwen3.5-9b-q4_k_m: Unload the model before deleting it.');
+    expect(last?.message).toContain('qwen3.5-9b-q4_k_m (busy: Unload the model before deleting it.)');
     expect(store.library().some((m) => m.id === 'qwen3.5-2b-q8_0')).toBe(false);
     expect(store.library().some((m) => m.id === 'qwen3.5-9b-q4_k_m')).toBe(true);
+  });
+
+  /** P3-6: every failed id is shown with the code it really failed with; nothing is made up. */
+  it('lists every model a clean-up could not delete, each with its own code', async () => {
+    const mock = new MockBackend();
+    const disk = await mock.diskUsage();
+    const ids = ['qwen3.5-2b-q8_0', 'bge-reranker-v2-m3-q8_0', 'gemma-4-12b-it-q4_k_m', 'qwen3.5-9b-q4_k_m'];
+    vi.spyOn(mock, 'diskUsage').mockResolvedValue({ ...disk, unused: ids });
+    const outcome: Record<string, ItemResult<null>> = {
+      'qwen3.5-2b-q8_0': { ok: null },
+      'bge-reranker-v2-m3-q8_0': { err: { code: 'busy', message: 'In use.', retryable: true } },
+      'gemma-4-12b-it-q4_k_m': { err: { code: 'io', message: 'The disk is full.', retryable: true } },
+      'qwen3.5-9b-q4_k_m': { err: { code: 'notFound', message: 'Already gone.', retryable: false } },
+    };
+    vi.spyOn(mock, 'deleteModels').mockImplementation(async (asked) => asked.map((id) => outcome[id]!));
+    const { store, toasts } = setup(mock);
+    await store.load();
+    await store.cleanUnused();
+    const last = toasts.toasts().at(-1);
+    expect(last?.tone).toBe('bad');
+    expect(last?.message).toContain('Deleted 1 of 4 models');
+    expect(last?.message).toContain('bge-reranker-v2-m3-q8_0 (busy: In use.)');
+    expect(last?.message).toContain('gemma-4-12b-it-q4_k_m (io: The disk is full.)');
+    expect(last?.message).toContain('qwen3.5-9b-q4_k_m (notFound: Already gone.)');
+    expect(last?.message).not.toContain('conflict');
   });
 
   it('reloads after a clean-up that failed part-way', async () => {
