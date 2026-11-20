@@ -32,7 +32,7 @@ function run(root, args, env = {}) {
   const summary = join(root, 'summary');
   writeFileSync(outputs, '');
   const r = spawnSync('bash', [SCRIPT, ...args], {
-    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), PADDOCK_REPO: root, RUNNER_OS: 'Linux', RUNNER_ARCH: 'X64', GITHUB_OUTPUT: outputs, GITHUB_STEP_SUMMARY: summary, ...env },
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), PADDOCK_REPO: root, PADDOCK_DEV_TOKEN: 'read-token', RUNNER_OS: 'Linux', RUNNER_ARCH: 'X64', GITHUB_OUTPUT: outputs, GITHUB_STEP_SUMMARY: summary, ...env },
     encoding: 'utf8',
   });
   const out = Object.fromEntries(readFileSync(outputs, 'utf8').split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
@@ -49,7 +49,22 @@ test('the key is the launcher hash, the OS, the architecture and the salt, with 
   assert.equal(r.out.key, `dev-tool-v1-Linux-X64-${HASH}`);
   assert.equal(r.out.path, join(root, 'home', '.paddock-dev', 'bin', HASH));
   assert.equal(run(root, ['key'], { PADDOCK_DEV_TOOL_CACHE_VERSION: '2' }).out.key, `dev-tool-v2-Linux-X64-${HASH}`, 'the salt retires every saved binary');
-  assert.equal(run(root, ['key'], { PADDOCK_DEV_DOWNLOAD: '0' }).out.path, join(root, 'home', '.paddock-dev', 'bin-source', HASH), 'a run that never downloads keeps its tools apart');
+});
+
+test('a job that builds from source never touches the cache: a download-saved binary is never restored into bin-source (ADR 0022 section 3.3)', () => {
+  const root = fixture();
+  const noDownload = { PADDOCK_DEV_DOWNLOAD: '0' };
+  for (const [why, env] of [['DOWNLOAD=0', noDownload], ['FRESH=1', { PADDOCK_DEV_FRESH: '1' }], ['no read token', { PADDOCK_DEV_TOKEN: '' }]]) {
+    const r = run(root, ['key'], env);
+    assert.equal(r.out.usable, 'false', why);
+    assert.equal(r.out.key, undefined, `${why}: no key, so nothing is restored or saved`);
+  }
+  // Positive control: the same checkout with a token and downloads on does get a key.
+  assert.equal(run(root, ['key']).out.usable, 'true');
+  // One definition, asked by setup-rust's compile-cache step too.
+  assert.equal(run(root, ['no-download'], noDownload).status, 0);
+  assert.equal(run(root, ['no-download'], { PADDOCK_DEV_TOKEN: '' }).status, 0, 'no token is the same as DOWNLOAD=0');
+  assert.notEqual(run(root, ['no-download']).status, 0, 'a token and downloads on: the tool may be downloaded');
 });
 
 test('a checkout with uncommitted tool inputs is not cached: usable is false, never a made-up key', () => {

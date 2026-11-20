@@ -364,6 +364,96 @@ fn a_container_job_without_a_slot_takes_a_lane_and_two_jobs_never_share_one() {
     assert!(second.env.contains(&format!("SCCACHE_DIR={mount}/sccache-s2\n")), "{}", second.env);
 }
 
+/// `dir` and every folder below it were last changed `days` days ago.
+fn age_folders(dir: &Path, days: u64) {
+    let t = std::time::SystemTime::now() - std::time::Duration::from_secs(days * 86_400);
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        if e.file_type().unwrap().is_dir() {
+            age_folders(&e.path(), days);
+        }
+    }
+    std::fs::File::open(dir).unwrap().set_modified(t).unwrap();
+}
+
+#[test]
+fn a_lane_removes_what_older_jobs_left_at_the_mount_root_and_never_the_lanes_or_a_young_folder() {
+    // ADR 0111: the mount's root held sccache's cache, paddock-dev/, npm/ and angular/. Once a lane is held they go, but only when
+    // idle for a day (an older-style job still running keeps them young), and never lanes/ or sccache-*.
+    let r = Runner::new(Some(Fail::Never));
+    let mount = r.root.join("mount");
+    let put = |rel: &str| {
+        let p = mount.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, b"x").unwrap();
+    };
+    for rel in [
+        "paddock-dev/bin/h/tool",
+        "npm/_cacache/x",
+        "a/b/c/entry",
+        "angular/e2e/y",
+        "sccache-s3/a/b/c/entry",
+        "lanes/s3.lock",
+        "unrelated/file",
+    ] {
+        put(rel);
+    }
+    for old in ["paddock-dev", "npm", "a", "sccache-s3", "lanes", "unrelated"] {
+        age_folders(&mount.join(old), 3);
+    }
+    // angular/ is young: a job of the old design is using it right now.
+    let mount_text = mount.display().to_string();
+    let extra = [
+        ("RUNNER_OS", "Linux"),
+        ("PADDOCK_SCCACHE_MOUNT", mount_text.as_str()),
+        ("PADDOCK_CI_SLOT", ""),
+        ("PADDOCK_CI_SLOTS", "4"),
+    ];
+    let rs = r.rust(&LOCAL, &extra);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    for gone in ["paddock-dev", "npm", "a"] {
+        assert!(!mount.join(gone).exists(), "{gone} was left by an older job and idle: {}", rs.out);
+    }
+    assert!(
+        mount.join("angular/e2e/y").exists(),
+        "a young folder stays: an older job may be using it"
+    );
+    for kept in ["sccache-s3/a/b/c/entry", "unrelated/file"] {
+        assert!(mount.join(kept).exists(), "{kept} is not in the list of what is removed");
+    }
+    assert!(mount.join("lanes").is_dir(), "the slot locks stay");
+    assert!(
+        rs.out.contains("removed what older jobs left at the root") && rs.out.contains("paddock-dev"),
+        "logged: {}",
+        rs.out
+    );
+}
+
+#[test]
+fn a_lane_that_cannot_be_taken_is_in_the_summary_as_well_as_the_notice() {
+    let r = Runner::new(Some(Fail::Never));
+    let mount = r.root.join("mount");
+    std::fs::create_dir_all(&mount).unwrap();
+    // The lanes folder is a file: no slot can be made there.
+    std::fs::write(mount.join("lanes"), b"not a folder").unwrap();
+    let mount_text = mount.display().to_string();
+    let summary = r.root.join("summary");
+    let summary_text = summary.display().to_string();
+    let extra = [
+        ("RUNNER_OS", "Linux"),
+        ("PADDOCK_SCCACHE_MOUNT", mount_text.as_str()),
+        ("PADDOCK_CI_SLOT", ""),
+        ("GITHUB_STEP_SUMMARY", summary_text.as_str()),
+    ];
+    let rs = r.rust(&LOCAL, &extra);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    assert!(rs.out.contains("::notice::no lane of"), "{}", rs.out);
+    assert!(
+        std::fs::read_to_string(&summary).unwrap().contains("sccache lane: NOT taken"),
+        "the summary says it too"
+    );
+    assert!(rs.env.contains("/temp/sccache\n"), "{}", rs.env);
+}
+
 #[test]
 fn redis_is_used_when_asked_for_or_when_auto_has_an_endpoint() {
     let r = Runner::new(Some(Fail::Never));

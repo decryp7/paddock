@@ -155,7 +155,7 @@ runs:
         TAURI_LINUX_DEPS: ${{ inputs.tauri-linux-deps }}
       run: |
         # Without the read credential ./dev builds itself from source and never takes a binary from the store (ADR 0022 section 3.3).
-        if [ -z "${PADDOCK_DEV_TOKEN-}${GITHUB_TOKEN-}" ]; then export PADDOCK_DEV_DOWNLOAD=0; fi
+        if bash "${{ github.action_path }}/../../../conformance/ci/dev-tool-cache.sh" no-download; then export PADDOCK_DEV_DOWNLOAD=0; fi
         # The tool job-isolation pinned for this job, else the wrapper (one tool per job, never a second fetch).
         if [ -n "${PADDOCK_DEV:-}" ]; then
           "$PADDOCK_DEV" ci setup-rust --sccache-backend "$BACKEND" --sccache-redis-db "$REDIS_DB" --tauri-linux-deps "$TAURI_LINUX_DEPS"
@@ -245,9 +245,22 @@ runs:
             LANES="${PADDOCK_CI_SLOTS:-${PADDOCK_CI_JOBS_PER_HOST:-6}}"
             LANE="${PADDOCK_CI_SLOT:-}"
             if [ -d "$MOUNT" ] && [ -w "$MOUNT" ] && [ -z "$LANE" ] && [ -n "${RUNNER_TEMP:-}" ]; then
-              # The lane the Rust command takes: the same slot holder, in the mount's lanes/ folder.
-              LANE="$(bash "${{ github.action_path }}/../../../dev" ci slot acquire --max "$LANES" --owner "$RUNNER_TEMP" --root "$MOUNT/lanes" 2>/dev/null | awk 'NR == 1 { print $1 }')" || LANE=""
-              if [ -n "$LANE" ]; then echo "PADDOCK_CI_SLOT=$LANE" >> "$GITHUB_ENV"; echo "sccache: this job holds lane $LANE of $LANES on $MOUNT"; fi
+              # The lane the Rust command takes: the same slot holder, in the mount's lanes/ folder. Only the tool this job already has
+              # (PADDOCK_DEV, pinned by job-isolation): this path never builds ./dev, and a failure is said, never hidden.
+              LANE_ERR="$(mktemp)"
+              if [ -n "${PADDOCK_DEV:-}" ] && [ -x "$PADDOCK_DEV" ]; then
+                LANE="$("$PADDOCK_DEV" ci slot acquire --max "$LANES" --owner "$RUNNER_TEMP" --root "$MOUNT/lanes" 2>"$LANE_ERR" | awk 'NR == 1 { print $1 }')" || LANE=""
+              else
+                echo "no ./dev binary is pinned for this job (PADDOCK_DEV), and this path never builds one" > "$LANE_ERR"
+              fi
+              if [ -n "$LANE" ]; then
+                echo "PADDOCK_CI_SLOT=$LANE" >> "$GITHUB_ENV" || { echo "::error::could not record the lane $LANE in GITHUB_ENV"; exit 1; }
+                echo "sccache: this job holds lane $LANE of $LANES on $MOUNT"
+              else
+                echo "::warning::no lane of $MOUNT was taken: $(tr '\n' ' ' < "$LANE_ERR"). The compile cache lives and dies with the job."
+                echo "- sccache lane: NOT taken ($(tr '\n' ' ' < "$LANE_ERR")); job-private folder" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+              fi
+              rm -f "$LANE_ERR"
             fi
             if [ -d "$MOUNT" ] && [ -w "$MOUNT" ] && [ -n "$LANE" ]; then
               DIR="$MOUNT/sccache-$LANE"

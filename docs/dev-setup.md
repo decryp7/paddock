@@ -133,6 +133,12 @@ before; they do not share the agents' server (user decision 2026-11-17, after a 
 `CARGO_INCREMENTAL=0`, which sccache hashes, so a shared folder would hit about 4%, and one server for two kinds of user is one more
 thing that can stop a runner). The agents share one server and one cache folder among themselves.
 
+**CI's Actions cache.** The CI runners use their built-in `cache.s3` against RustFS (the same server as above): bucket `ci-actions-cache`
+with a 7-day expiry for `actions/cache` (the `./dev` binary, npm, Angular, the nightly marker), and bucket `sccache-paddock` with a 30-day
+expiry for sccache. The Windows runner has no zstd, so its cache entries are not shared across operating systems (a Windows key never
+hits a Linux or macOS entry). No folder is shared between concurrent lanes (ADR 0111): each Linux lane has its own
+`<mount>/sccache-<lane>`, and everything kept between jobs goes through a keyed cache.
+
 **Linker on Linux.** On a Linux development machine use mold (`sudo apt install mold`), in `~/.cargo/config.toml`:
 
 ```toml

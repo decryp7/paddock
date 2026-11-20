@@ -1253,7 +1253,7 @@ test('the node-caches action keys npm by OS, Node and the lockfile and Angular b
   assert.match(action, /key: npm-v1-\$\{\{ runner\.os \}\}-\$\{\{ runner\.arch \}\}-node-\$\{\{ steps\.node\.outputs\.version \}\}-\$\{\{ hashFiles\('package-lock\.json'\) \}\}\n\s+restore-keys:/, 'npm may fall back to an older cache');
   const ng = (/id: angular-cache[\s\S]*?(?=\n    - name:)/.exec(action)?.[0] ?? '').replace(/^\s*#.*$/gm, '');
   assert.match(ng, /hashFiles\('package-lock\.json'\)[\s\S]*hashFiles\(format\('\{0\}\/projects\/\*\*'/, 'the Angular key holds the lockfile and the sources');
-  assert.doesNotMatch(ng, /restore-keys/, 'an Angular cache of other sources is never restored');
+  assert.match(ng, /restore-keys: \|\n\s+ng-v1-[^\n]*hashFiles\('package-lock\.json'\) \}\}-(?:\n|$)/, 'the Angular cache is content-addressed: an entry of the same lockfile may be restored partly, one of another lockfile never');
   assert.doesNotMatch(action.replace(/^(\s*#.*|description:.*)$/gm, ''), /\/sccache/, 'no use of the shared mount');
   assert.match(action, /Cache summary[\s\S]*GITHUB_STEP_SUMMARY/, 'key and hit or miss in the job summary');
 });

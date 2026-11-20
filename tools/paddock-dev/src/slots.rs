@@ -361,6 +361,14 @@ pub fn hold(a: &HoldArgs) -> Result<Report, CliError> {
         &mut std::io::stdout(),
     )
     .map_err(failure)?;
+    if let Some((id, paddock_slots::HoldEnd::LockLost)) = end {
+        // Loud, in the holder's own error: the job's compile-cache lane (or host slot) is no longer exclusive.
+        return Err(CliError::failure(format!(
+            "The lock file of slot {id} in {} was deleted or replaced while this job held it, so the slot no longer keeps other jobs out.",
+            a.root.display()
+        ))
+        .with_hint("Something deleted files under the slot folder (an old job's sccache cleanup of the shared mount?); remove old-style jobs from the runner and re-run the job."));
+    }
     Ok(Report::new(json!({"ended": end.map(|(id, why)| format!("{id} {why:?}"))}), ""))
 }
 

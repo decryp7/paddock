@@ -1059,6 +1059,39 @@ fn on_a_ci_runner_the_tool_never_lives_on_the_kept_mount_and_an_explicit_home_st
 
 #[cfg(unix)]
 #[test]
+fn a_cache_hit_costs_two_starts_the_probe_and_the_command() {
+    // ER-20: a process count is a measured budget a test guards. The probe is `self hash` alone (no `--version` first), then the
+    // command itself: two starts for a hit.
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let env = [("RUSTC", rustc.clone())];
+    let (hash, _) = f.both(&env);
+    let home = scratch.path().join("home");
+    let log = scratch.path().join("starts.log");
+    write_tool(
+        &home.join("bin").join(&hash).join("paddock-dev-test-host"),
+        &StandIn::new(Path::new(""), "cached")
+            .answers(
+                Actions::new()
+                    .stdout_with("cached ran {args}")
+                    .appends_with(&log.display().to_string(), "{args}\n"),
+            )
+            .when_args(
+                &["self"],
+                Actions::new()
+                    .stdout(&format!("embedded {hash}"))
+                    .appends_with(&log.display().to_string(), "{args}\n"),
+            ),
+    );
+    let (code, out, err) = run_wrapper(&f, &home, &env);
+    assert_eq!((code, out.trim()), (0, "cached ran hello"), "{err}");
+    let starts: Vec<String> = std::fs::read_to_string(&log).unwrap().lines().map(str::to_string).collect();
+    assert_eq!(starts, ["self hash", "hello"], "one probe start and one command start");
+}
+
+#[cfg(unix)]
+#[test]
 fn a_restored_binary_that_is_not_for_this_hash_is_rebuilt_and_one_for_it_is_used() {
     // The dev-tool cache restores a binary under the key of this hash; it may hold other bytes (a flipped byte, a tool of another
     // hash under a stale key). The wrapper runs it only when it runs and says it was built for this hash (ER-33).

@@ -164,12 +164,11 @@ tool="$root/tools/paddock-dev"
 }
 inputs=$(grep -v '^[[:space:]]*#' "$tool/inputs.txt" | grep -v '^[[:space:]]*$' | tr '\n' ' ')
 
-# runs <file>: an executable that answers --version with some text (an empty or truncated file is not a tool; sh would run an
-# empty file as an empty script and call that success).
-runs() { [ -x "$1" ] && v=$("$1" --version 2>/dev/null) && [ -n "$v" ]; }
-# is_for_hash <file>: it runs and was built for this wrapper hash (`self hash` prints the hash embedded at build time). A binary that
-# a cache restored under a key but that holds other bytes (a flipped byte, a tool of another hash) is rebuilt, never run (ER-33).
-is_for_hash() { runs "$1" && "$1" self hash 2>/dev/null | grep -q "^embedded $hash\$"; }
+# is_for_hash <file>: it is an executable that was built for this wrapper hash: `self hash` prints the hash embedded at build time. One
+# start is the whole probe (a second `--version` start cost a process per call, ER-20): an empty or truncated file prints nothing, so it
+# is not a tool (sh would run an empty file as an empty script and call that success), and a binary that a cache restored under a key
+# but that holds other bytes (a flipped byte, a tool of another hash) is rebuilt, never run (ER-33).
+is_for_hash() { [ -x "$1" ] && "$1" self hash 2>/dev/null | grep -q "^embedded $hash\$"; }
 
 # No folder is shared between concurrent CI jobs (ADR 0111): on a CI runner the tool and its build folder live in the job's own home
 # (~/.paddock-dev in a Linux container, which dies with the job), never on the runner's kept /sccache mount, where sccache's LRU
@@ -613,7 +612,7 @@ if [ -n "$stale" ] || [ ! -x "$cache/$name" ]; then
     if ! mv -f "$tmp" "$cache/$name"; then
       # Windows cannot replace a tool that another job is running: the same hash, so that tool is as good as ours.
       rm -f "$tmp"
-      if runs "$cache/$name" && "$cache/$name" self hash 2>/dev/null | grep -q "^embedded $hash\$"; then
+      if is_for_hash "$cache/$name"; then
         echo "dev: another run published paddock-dev $hash first; using it." >&2
       else
         echo "::error::./dev could not publish paddock-dev $hash into $cache. Close programs that use it or delete the folder, then run ./dev again." >&2

@@ -41,6 +41,44 @@ const RELEASES: &str = "https://github.com/mozilla/sccache/releases/download";
 /// overrides it): 6 lanes get 10 GB each, the share Mac and Windows slots have. Before ADR 0111 the whole `/sccache` mount was
 /// one 20 GB cache. Not measured against d-gtr9's disk: that needs a run there.
 pub const LINUX_SCCACHE_GB: u64 = 60;
+/// The folder of lane `lane` on the kept `mount`: the one place that names it (`<mount>/sccache-<lane>`). Never the mount itself.
+/// Another tier of the compile cache that needs a folder of its own beside it (a local tier of an S3 cache) derives its folder from
+/// this one (`<mount>/sccache-<lane>-s3`), so no two writers ever share a folder.
+pub fn lane_sccache_dir(mount: &str, lane: &str) -> String {
+    format!("{mount}/sccache-{lane}")
+}
+
+/// The children of the kept mount that older jobs used and this design does not: `paddock-dev/` (the tool), `npm/`, `angular/` and
+/// sccache's own hex folders `0`..`f` (its cache used to be the mount's root). Never `lanes/` (the slot locks) or `sccache-*`.
+pub fn legacy_mount_entries() -> Vec<String> {
+    let mut v: Vec<String> = ["paddock-dev", "npm", "angular"].iter().map(|s| (*s).to_string()).collect();
+    v.extend("0123456789abcdef".chars().map(|c| c.to_string()));
+    v
+}
+
+/// How long a legacy folder must have been untouched (all folders below it, to a bounded depth) before it is removed: an older-style
+/// job still running on this host keeps using them and touches them.
+const LEGACY_IDLE: Duration = Duration::from_secs(24 * 3600);
+
+/// The newest modification time of `dir` and of the folders below it, to `depth` levels and at most `budget` folders.
+fn newest_folder_mtime(dir: &Path, depth: u32, budget: &mut u32) -> std::time::SystemTime {
+    let mut newest = std::fs::symlink_metadata(dir)
+        .and_then(|m| m.modified())
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+    if depth == 0 || *budget == 0 {
+        return newest;
+    }
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            if e.file_type().is_ok_and(|t| t.is_dir()) {
+                *budget = budget.saturating_sub(1);
+                newest = newest.max(newest_folder_mtime(&e.path(), depth - 1, budget));
+            }
+        }
+    }
+    newest
+}
+
 /// The server port in a Linux container (one job per host there); a host job takes its slot's from ports.txt.
 const CONTAINER_PORT: &str = "4227";
 /// What an sccache child gets from the job's environment besides the base list (paddock_proc::KEPT_ENV): its own settings,
@@ -592,10 +630,13 @@ impl Step<'_> {
                 let slots = self.lane_count();
                 match self.lane(&mount, slots) {
                     Ok(lane) => (
-                        format!("{mount}/sccache-{lane}"),
+                        lane_sccache_dir(&mount, &lane),
                         slot_cache_size_or(self.get("PADDOCK_CI_SCCACHE_GB"), slots, LINUX_SCCACHE_GB),
                     ),
-                    Err(why) => own(self, &format!("no lane of {mount} could be taken ({why})")),
+                    Err(why) => {
+                        self.summary_line(&format!("- sccache lane: NOT taken ({why}); job-private folder"));
+                        own(self, &format!("no lane of {mount} could be taken ({why})"))
+                    }
                 }
             } else {
                 own(self, "no /sccache mount in this container")
@@ -616,6 +657,48 @@ impl Step<'_> {
         }
         let dir = if self.os() == "Windows" { home::native(&dir) } else { dir };
         Ok((dir, size))
+    }
+
+    /// One line for the job summary (`$GITHUB_STEP_SUMMARY`), where a notice alone would scroll away; a missing file is not an error.
+    fn summary_line(&mut self, text: &str) {
+        if self.get("GITHUB_STEP_SUMMARY").is_some() {
+            let _ = self.append("GITHUB_STEP_SUMMARY", &[text.to_string()]);
+        }
+    }
+
+    /// Removes what older-style jobs left at the mount's root (see [`legacy_mount_entries`]), once a lane is held, and says what it
+    /// removed. Only a folder untouched for [`LEGACY_IDLE`] goes (a job of the old design still running keeps its folders young), and
+    /// never `lanes/` or `sccache-*`, which are not in the list. A refusal or failure is a warning: the cache must slow a build
+    /// down, never fail it.
+    fn clean_legacy_mount(&mut self, mount: &str) {
+        let root = Path::new(mount);
+        let home_dir = self.path_var("HOME").map(PathBuf::from);
+        let mut removed = Vec::new();
+        for name in legacy_mount_entries() {
+            let path = root.join(&name);
+            if !std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir()) {
+                continue;
+            }
+            let mut budget = 20_000;
+            let newest = newest_folder_mtime(&path, 4, &mut budget);
+            if newest.elapsed().is_ok_and(|age| age < LEGACY_IDLE) {
+                continue;
+            }
+            match crate::safe_remove::remove_in_mount(root, &path, home_dir.as_deref()) {
+                Ok(true) => removed.push(name),
+                Ok(false) => {}
+                Err(e) => self.say(format!(
+                    "::warning::sccache: could not remove the old {} ({e}); it stays.",
+                    path.display()
+                )),
+            }
+        }
+        if !removed.is_empty() {
+            self.say(format!(
+                "sccache: removed what older jobs left at the root of {mount} (idle for a day or more): {}",
+                removed.join(", ")
+            ));
+        }
     }
 
     /// How many lanes a Linux host has: `PADDOCK_CI_SLOTS`, else the runner's jobs per host, else the class's layout (6 on d-gtr9).
@@ -650,8 +733,11 @@ impl Step<'_> {
             .as_str()
             .map(str::to_string)
             .ok_or("the slot tool named no slot")?;
-        let _ = self.append("GITHUB_ENV", &[format!("PADDOCK_CI_SLOT={slot}")]);
+        // A failed write is not dropped: the later steps would not know the lane, so this job does not use it.
+        self.append("GITHUB_ENV", &[format!("PADDOCK_CI_SLOT={slot}")])
+            .map_err(|_| format!("the lane {slot} could not be recorded in GITHUB_ENV (the error is above)"))?;
         self.say(format!("sccache: this job holds lane {slot} of {slots} on {mount}"));
+        self.clean_legacy_mount(mount);
         Ok(slot)
     }
 

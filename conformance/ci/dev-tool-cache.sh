@@ -2,6 +2,7 @@
 # The dev-tool cache steps of the setup-rust action (.gitea/actions/setup-rust; ADR 0111): the ./dev tool binary of a Linux job through
 # the Actions cache instead of a folder shared between lanes.
 #
+#   dev-tool-cache.sh no-download         exit 0 when this job builds ./dev from source and never downloads it (no cache then)
 #   dev-tool-cache.sh key                 the cache key and path of this checkout's tool (outputs: usable, hash, key, path)
 #   dev-tool-cache.sh verify <hit>        runs the tool (./dev rebuilds a binary that does not run or is not for its hash), checks that
 #                                         it reports the expected hash, and says what happened (outputs: state hit|miss|rejected, save)
@@ -19,15 +20,24 @@ dev=(bash "$repo/dev")
 
 out() { echo "$1=$2" >> "${GITHUB_OUTPUT:-/dev/null}"; echo "dev-tool-cache: $1=$2"; }
 
-# The folder the launcher keeps this hash in: <home>/<bin|bin-source>/<hash> (the same rule as ./dev).
+# The one definition of "this job builds ./dev from source and never downloads it" (ADR 0022 section 3.3): PADDOCK_DEV_DOWNLOAD=0 (a
+# release or tag job), or no read token (the job could not download anyway). setup-rust's compile-cache step asks this same command, so
+# the two never disagree. Such a job keeps its tool in bin-source, which a downloaded binary must never reach: the cache is skipped
+# for it, because a binary saved by a download job under the same key would be restored there and run as if built from source.
+cmd_no_download() { [ "${PADDOCK_DEV_DOWNLOAD:-}" = 0 ] || [ -z "${PADDOCK_DEV_TOKEN-}${GITHUB_TOKEN-}" ]; }
+
+# The folder the launcher keeps this hash in for a job that may download: <home>/bin/<hash>.
 cache_path() {
-  local home="${PADDOCK_DEV_HOME:-${HOME:?HOME is not set}/.paddock-dev}" root=bin
-  [ "${PADDOCK_DEV_DOWNLOAD:-}" = 0 ] && root=bin-source
-  printf '%s\n' "$home/$root/$1"
+  printf '%s\n' "${PADDOCK_DEV_HOME:-${HOME:?HOME is not set}/.paddock-dev}/bin/$1"
 }
 
 cmd_key() {
   local lines hash state
+  if cmd_no_download || [ "${PADDOCK_DEV_FRESH:-}" = 1 ]; then
+    echo "::notice::dev-tool-cache: this job builds ./dev from source (PADDOCK_DEV_DOWNLOAD=0, no read token or PADDOCK_DEV_FRESH=1), so no cached binary is restored or saved: a binary downloaded by another job must never run as source-built (ADR 0022 section 3.3). Not measured."
+    out usable false
+    return 0
+  fi
   if ! lines="$("${dev[@]}" --wrapper-hash 2>/dev/null)" || [ "$(printf '%s\n' "$lines" | wc -l)" -lt 3 ]; then
     echo "::warning::dev-tool-cache: ./dev --wrapper-hash gave no hash (no Rust compiler yet?), so the tool is not cached by key. Next step: run the setup-rust action before this one."
     out usable false
@@ -91,6 +101,7 @@ cmd_summary() {
 
 case "${1:-}" in
   key) cmd_key ;;
+  no-download) cmd_no_download ;;
   verify) shift; cmd_verify "$@" ;;
   summary) shift; cmd_summary "$@" ;;
   *) echo "usage: dev-tool-cache.sh key | verify <hit> | summary <state> <saved> <verified>" >&2; exit 2 ;;
