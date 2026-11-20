@@ -728,7 +728,7 @@ impl Step<'_> {
                             ..real.clone()
                         };
                         guard_port = Some(guard.port);
-                        let guard_env = vec![
+                        let guard_env = [
                             ("PADDOCK_S3_GUARD_PORT".to_string(), guard.port.to_string()),
                             ("PADDOCK_S3_GUARD_LOG".to_string(), guard.log),
                         ];
