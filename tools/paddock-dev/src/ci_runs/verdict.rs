@@ -857,7 +857,7 @@ mod tests {
     fn the_stage_gate_script_prints_what_the_reader_reads() {
         let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/ci/stage-gate.mjs");
         let run = |needs: &str| {
-            let out = std::process::Command::new("node")
+            let out = paddock_testkit::TestCommand::new("node")
                 .arg(&script)
                 .arg("final")
                 .env("NEEDS", needs)
