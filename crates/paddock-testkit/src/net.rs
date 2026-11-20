@@ -12,6 +12,7 @@
 //! port) or tests its error mapping with a constructed `ErrorKind::ConnectionRefused`; an end-to-end refusal test through
 //! `refusing()` runs on Linux only.
 
+pub use crate::broken_server::{BrokenServer, Mode, broken_server};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
