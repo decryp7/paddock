@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { settledLayout } from './settled-layout.ts';
 
 /**
@@ -76,13 +76,52 @@ export async function expectWired(control: Locator, attribute = 'aria-expanded',
   await expect(control, `the control is wired (${attribute} is set by the update pass)`).toHaveAttribute(attribute, value);
 }
 
+/** What a stream has shown so far: its text length and element count. A change between two reads means something new arrived. */
+export interface StreamProgress {
+  readonly chars: number;
+  readonly elements: number;
+}
+
+/** Did anything arrive between two reads of a stream (pure)? */
+export function streamGrew(before: StreamProgress, after: StreamProgress): boolean {
+  return before.chars !== after.chars || before.elements !== after.elements;
+}
+
+async function readStreamProgress(stream: Locator): Promise<StreamProgress> {
+  return stream.evaluate((el) => ({ chars: el.textContent?.length ?? 0, elements: el.getElementsByTagName('*').length }));
+}
+
 /**
  * Waits until a stream has finished: its container's `aria-busy` is "false" (the standard ARIA pattern for a live region being updated; Debrief's
  * chat log sets it while the turn runs). Precondition: the stream has started, so a turn is already drawn (the caller waited for it, as
  * Debrief's `ask` does): before that `aria-busy` is "false" too, and this would pass at once.
+ *
+ * The bound is on a stall, not on the whole stream: each wait lasts the expect timeout (or `timeout`), and the next one starts only when something
+ * new arrived during it (text or elements). A stream's length is the app's script times the runner's speed: Debrief's 20-piece answer, 150 ms
+ * apart, took 3.4 s on an idle Mac and outlasted one 5 s wait on a loaded Linux runner while still streaming (debrief.yml run 8377 job 42784,
+ * docs/lessons.md). A stream that stays busy with nothing arriving for one wait fails, naming what it shows; the test's own timeout bounds the
+ * rest. Each wait past the first is recorded as a `stream-wait` annotation, so a report shows how far past one wait a stream ran.
  */
-export async function expectStreamDone(stream: Locator): Promise<void> {
-  await expect(stream, 'the stream has finished (aria-busy is "false")').toHaveAttribute('aria-busy', 'false');
+export async function expectStreamDone(stream: Locator, options: { timeout?: number } = {}): Promise<void> {
+  const started = Date.now();
+  let seen = await readStreamProgress(stream);
+  for (let waits = 1; ; waits++) {
+    try {
+      await expect(stream, 'the stream has finished (aria-busy is "false")').toHaveAttribute('aria-busy', 'false', options);
+      if (waits > 1) test.info().annotations.push({ type: 'stream-wait', description: `done after ${waits} waits, ${Date.now() - started} ms` });
+      return;
+    } catch (error) {
+      const now = await readStreamProgress(stream).catch(() => seen);
+      if (!(error instanceof Error) || !streamGrew(seen, now)) {
+        if (error instanceof Error) {
+          error.message += `\n\nThe stream is stuck: nothing new arrived during wait ${waits} (${Date.now() - started} ms in all; it shows ${now.chars} characters in ${now.elements} elements).`;
+        }
+        throw error;
+      }
+      test.info().annotations.push({ type: 'stream-wait', description: `wait ${waits} ended with the stream still arriving: ${seen.chars} to ${now.chars} characters` });
+      seen = now;
+    }
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { menuGap, overlayOffset } from './ready.ts';
+import { menuGap, overlayOffset, streamGrew } from './ready.ts';
 
 test('overlayOffset is the larger of the left-edge offset and the width difference', () => {
   assert.equal(overlayOffset({ x: 536, width: 212 }, { x: 536, width: 212 }), 0);
@@ -30,3 +30,9 @@ test('menuGap is Infinity for a menu that covers its trigger or touches none of 
   assert.equal(menuGap({ x: 0, y: 0, width: 1, height: 1 }, null), null);
 });
 
+
+test('streamGrew is true when text or elements arrived between two reads, false when nothing changed', () => {
+  assert.equal(streamGrew({ chars: 10, elements: 2 }, { chars: 22, elements: 2 }), true, 'a piece of text');
+  assert.equal(streamGrew({ chars: 10, elements: 2 }, { chars: 10, elements: 3 }), true, 'a tool chip with no text yet');
+  assert.equal(streamGrew({ chars: 10, elements: 2 }, { chars: 10, elements: 2 }), false, 'stuck');
+});
