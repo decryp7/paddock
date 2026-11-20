@@ -318,6 +318,128 @@ Differences the parity found are listed in the test's normalisation with their r
 exit status of a failed phase, a trailing space). The guardian's root path (setpriv, chown) is tested only through a fake machine;
 the shell side of its parity needs bash 4.4 or newer (macOS ships 3.2), so it runs on the Linux legs.
 
+## 8c. WP-11: the release-path lane (implementation plan, written 2026-11-20 before the build)
+
+Scope: release, tag and rule 54 runs use the Rust `./dev` tools and the shell fallbacks of WP-0 to WP-5 go away. The user
+said "Start now" on 2026-11-20 (the plan's "after the tags" precondition is waived by that; the branch does not join the Dyno
+train `train/2026-11-19-17`, it lands in its own later train, and no tag is pushed or requested). Base: `origin/main`
+(`e0fd0f511`). `perf/ci-linux-job-share` (`49bc0733c`) changes the Linux share in both `build-jobs` copies; this lane deletes
+the shell copy, so that branch's shell edit is dropped when it is merged (its Rust edit stays); I merge it after it is pushed
+and do not copy it.
+
+### The fallbacks and their callers (measured on `e0fd0f511`)
+
+| # | Fallback (taken on a tag, `PADDOCK_DEV_DOWNLOAD=0`, `PADDOCK_CI_KIT=shell`, no tool, no rustc) | Callers |
+|---|---|---|
+| F1 | `conformance/ci/kit.sh` `kit_choice` and its shell branches: `isolation` (job-isolation.sh), `build-jobs` (build-jobs.sh), `build-env` (build-env.mjs), `host *` (host/*.sh, build-folder.sh, kept-clone.sh, guardian-as-user.sh, tools/prune-*.sh, tools/host-cleanup.sh) | the actions `job-isolation`, `build-jobs`, `build-env`, `kept-clone`, `node-caches`, `stable-workspace`, `build-folder`, `prune-build-folder`, `host-tools`, `sccache-stats`, `host-cleanup`, `setup-rust`; every workflow that uses them (17 workflow files set `PADDOCK_CI_KIT` or call `kit.sh`) |
+| F2 | `.gitea/actions/setup-rust/action.yml`: the `Implementation` step and the shell steps `Install sccache`, `sccache`, `Linux dependencies for Tauri` (about 110 lines), and the `kit=shell` gating | 21 jobs in 6 workflows; every release job |
+| F3 | The scripts behind F1: `job-isolation.sh`, `job-tmpdir.sh`, `ci-home.sh`, `build-jobs.sh`, `build-env.mjs`, `host/*.sh`, `build-folder.sh`, `kept-clone.sh`, `bounded.sh`, `guardian-as-user.sh`, `tools/prune-ci-build-folder.sh`, `tools/prune-build-folders.sh`, `tools/host-cleanup.sh`; `safe-rm.sh` (the shell copy of the safe-remove guard) | the shim only, plus `job-tmpdir.sh` (its `boot-volume.sh` is sourced by `paddock_testkit` and Dyno's `check-bundle.sh`; it stays, its Rust twin is `ci boot-volume`) |
+| F4 | `PADDOCK_DEV_DOWNLOAD` tag rules in 13 workflows and the conformance tests that pin them (`ci-actions.test.mjs`, `ci-action-env.test.mjs`): they stay as the rule that the tool is built, never downloaded, but stop meaning "use the shell" | every release and tag workflow |
+| F5 | Release-kit scripts without a Rust twin: `conformance/release/*` (`macos-verify-bundle.sh` and Debrief's copy, `windows-crt-imports.mjs`, `check-per-machine-installer.mjs`, `latest-json.mjs`, `publish.mjs`, `strip-keys.mjs`, `updater-key-check.mjs`), `conformance/ci/{tauri-bundle.sh,updater-key.sh,tauri-tools.mjs,tag-node-caches.sh,first-release-notes.sh,release-notes.mjs,release-verdict.mjs,check-tag.mjs,request-tag.mjs,plan.mjs,dev-tool-publish.sh}`, `scripts/{publish.mjs,stage-paddock-setup.mjs,demo-release.mjs,demo/*}` | `app-release.yml`, the five app release callers, the two demo releases, `publish.yml`, `tag.yml`, `dev-tool.yml`, `debrief.yml`'s release jobs, the actions `tauri-bundle`, `publish-release`, `strip-signing-keys`, `macos-verify`, `release-verdict`, `keychain`, `sidecar-self-test`, `plan` |
+| F6 | App release scripts: Dyno `check-bundle.sh`, `check-release-notes.mjs`, `check-pe-subsystem.mjs`; Pitwall `stage-vc-redist.mjs`; four `sidecar.mjs`; Pacenotes and Sighter `release/publish.mjs`; Debrief `macos-verify-bundle.sh` | the app release workflows |
+| F7 | The register entries kept until now: `ci-setup-rust`, `ci-kit-shell`, `ci-host-steps`, `ci-build-env`, `ci-job-isolation`, the `safe-rm` copy (`docs/known-copies.toml`) | check C58 (planned) |
+
+### How `./dev` is built on a release or tag run (ADR 0085 and `release_isolation`)
+
+The fallback exists for one reason: `./dev` needs `rustc`, and `build-jobs` and `job-isolation` ran before the toolchain was
+there. That order is already solved off the release path: the toolchain is installed by the wrapper's own shell
+(`./dev --install-toolchain`, pinned by `rust-toolchain.toml`, ER-26), then `./dev` builds itself, then everything is `./dev ci`.
+Release mode (ADR 0085 section 4 item 3, amendment decision 4) keeps that order and changes only where things live:
+
+1. `actions/checkout` of the tagged commit; Git bash on Windows.
+2. Toolchain: `./dev --install-toolchain` (shell, bootstrap by design, section 5). It is downloaded and verified by rustup, the
+   one thing ADR 0085 section 1 lists as allowed besides the tagged commit and the lock files.
+3. `./dev` is built from the tagged tree's sources with `PADDOCK_DEV_DOWNLOAD=0` (the wrapper's `bin-source` root, which no
+   download writes), `--locked`, the compiler-wrapper variables unset (already done by `dev_env`), into a new
+   `release-<GITHUB_RUN_ID>-<job>` folder: under the CI home's `tools` on the hosts (outside the job folder, because the slot
+   holder is the tool and a program inside the job folder keeps Windows from deleting it, `slots.rs check_program_outside_owner`),
+   and inside the container's job folder on Linux, never on the `/sccache` mount. The wrapper gets one new input,
+   `PADDOCK_RELEASE_MODE=1` (set by the release workflows on a tag and on a rule 54 or rule 25 dispatch), which sets
+   `PADDOCK_DEV_HOME`, `PADDOCK_DEV_TARGET_DIR` and a private `CARGO_HOME` for this one build to that folder, removes it first if it
+   exists, and never reads a folder another run made. A cold build of the tool from an empty `CARGO_HOME` is the cost; I measure it
+   on the three OS (the plan's wrapper numbers are warm) and record it in `docs/benchmarks.md`.
+4. `./dev ci release-isolation setup --dev-tool <that folder>` (it records the tool's identity and makes the clone, build,
+   `CARGO_HOME`, npm, `node_modules` and Tauri folders new), then `ci build-jobs` and `ci isolation acquire`; the actions `record`
+   what they choose (`setup-rust`: `sccache off`, `build-folder`: `target`, `kept-clone`: `workspace`, `node-caches`: `npm`).
+   `ci release-isolation verify` runs before the release job's uploads and is a `needs` of the `release` job (ADR 0085 section 4,
+   step order; the ER-33 positive control is the planted-leak fixture already in `release_isolation::fixture`, run once on the
+   real runners).
+5. In release mode `setup-rust` starts no sccache (it records `sccache off`), so the shell `Install sccache` and `sccache` steps
+   have nothing left to do and go; the Linux Tauri libraries come from `./dev ci setup-rust --tauri-linux-deps` (already Rust).
+
+What changes in the kit: `kit_choice` loses the `tag`, `PADDOCK_DEV_DOWNLOAD=0`, `PADDOCK_CI_KIT=shell` and "no toolchain"
+branches. A missing tool, rustc or toolchain on a release run is one `::error::` with the next step and exit 1 (ER-27, ER-33: not
+measured never passes), never a quiet switch to another implementation. The "another repository using these actions" branch
+(no `tools/paddock-dev` in the checkout) goes too (decision below). `kit.sh` shrinks to `portable` (the GNU/BSD probe the
+remaining scripts use) and a thin `dev` caller, or goes when no caller remains.
+
+### What is removed
+
+F1 and F2 whole; F3's scripts and the shell halves of `kit.sh`; the `shell` outputs, `PADDOCK_CI_KIT`, `PADDOCK_TOOLCHAIN_FAILED`
+and the shell path of `job_setup`; the ISOLATION_CMD overlap of `conformance/test/job-isolation.test.mjs` (its cases move to
+`ci_isolation.rs`); the register entries of F7; the shell oracle halves of `host_steps.rs`, `build_jobs.rs` and `setup_rust.rs`
+(their goldens stay, regenerated with the generators, ER-40). F5 and F6 are ported to `./dev ci release ...` commands (typed
+`ToolCall` wrappers per section 6) or, where a script is a pure check, to `./dev check`; the shell and `.mjs` files are deleted in
+the same change as their caller. Debrief's copy of macOS verify is deleted and the shared one ported once (rule 55). Kept, with a
+reason: the `dev` wrapper, `tools/bootstrap.sh`, `ci-image/*.sh` (section 5), `boot-volume.sh` (sourced before any tool), the `.ps1`
+first-logon files, and `dev-tool-publish.sh` until `dev-tool.yml` has had its own run (it publishes the binary the rest download).
+
+### Tests (each replacement starts with a failing test, ER-11)
+
+- `kit_choice`: a table test per removed branch (a tag run, `PADDOCK_DEV_DOWNLOAD=0`, no toolchain, no tool) that today returns
+  `shell` and must now run `dev` or fail with the one `::error::`; red first against the current `kit.sh`.
+- `setup_rust.rs`, `build_jobs.rs`, `host_steps.rs`: the release-env case of each (tag ref, download off) runs the Rust command
+  and is compared with the goldens the shell oracle produced; the oracle is deleted last, after the goldens are regenerated.
+- Wrapper: `wrapper.rs` cases for `PADDOCK_RELEASE_MODE=1` (folder name, removed first, no `bin/` read, no kept `CARGO_HOME`, no
+  compiler wrapper, refuses a folder it did not make) with a positive control that plants a kept binary and shows the build ignores
+  it (ER-33).
+- Conformance: `ci-actions.test.mjs` changes from "setup-rust uses ./dev only off the release path" to "never takes a shell
+  implementation; a tag or release job runs release-isolation setup first and verify before upload"; a mutation (remove the setup
+  step, plant a leak) makes it red.
+- Each ported release script: a golden of its output on the old script's fixtures first (the old script is the oracle until the
+  port is shown equal, section 7), then the script is deleted; its `node --test` file is pointed at the Rust command for the overlap.
+- Before each push: rustfmt, clippy host and xwin, nextest for the touched modules, `./dev gen check`, `./dev gates check`,
+  `conformance tests`, `conformance paddock`, commit-lint.
+
+### Rule 54: the installer build
+
+When the code is complete I dispatch `dyno-release.yml` and `app-release.yml` on the branch through
+`./dev ci dispatch ... --ref feat/ci-release-path-rust --max <duration>` with gates on and the bundle built, once per branch head
+and never a tag; then the Pitwall, Pitcrew, Spotter and Debrief callers and the two demo releases, one at a time, only while no
+train run holds the runner class (ER-1, ER-24; trials yield to trains). The dispatches sign with the throw-away key, so ADR 0085's
+WP-4 (key only on tags) stays outside this lane. The release dry run proves F1, F2, F5 and F6 together; one `ci.yml` trial run per
+head covers the non-release jobs.
+
+### Risks
+
+1. **Scope against the plan's 8 days.** F5 and F6 are about 2,900 source lines to port with parity tests, and the ADR 0085 wiring
+   adds about 2 days (its WP-1a and WP-3 are 6 days for the first app alone). I wire the existing `release-isolation` command in and
+   leave ADR 0085's WP-4 (key handling), WP-5 (image digests), WP-9 (pinned AppImage and NSIS tools), WP-6, WP-7 and WP-8 out: they
+   gate the next tag, not this lane.
+2. **Cold build of `./dev` per release leg** (no kept caches): not measured; the number goes to `docs/benchmarks.md`, and no limit is
+   raised on a guess (ER-12).
+3. **Shared runners and load** (the Mac's 15-minute load was 46 at the time of writing): heavy steps through `./dev heavy`,
+   `CARGO_BUILD_JOBS=2`, one trial per head, release dispatches only when the runner class is free.
+4. **Bootstrap before the tool exists** needs the CI home on the hosts (`ci-home.sh` today, `ci_isolation/home.rs` in Rust). The
+   wrapper must find `tools/` without either: I port that one rule into the wrapper's release branch with a test that the wrapper
+   and `home.rs` agree, or keep `ci-home.sh` as the bootstrap (decision below).
+5. **The env contract of 13 workflows** pins `PADDOCK_DEV_DOWNLOAD` by regular expression; changing what the value means touches all
+   those tests in the same commit.
+6. **Merge with `perf/ci-linux-job-share`**: a conflict in `build_jobs.rs` and `build-jobs.sh`, a file this lane deletes.
+
+### Estimate
+
+| Part | Days |
+|---|---:|
+| A. Kit and `setup-rust` fallbacks removed, wrapper release mode, `release-isolation` wired, register and tests | 2.5 |
+| B. Release kit and release CI scripts ported (F5), with goldens | 3.5 |
+| C. Publish scripts, demo scripts, app release scripts, inline shell (rest of F5, F6) | 2 |
+| D. Rule 54 dispatches (five apps, two demos), the CI trial, the review round | 1.5 |
+| **Total** | **9.5** (7.5 to 12) |
+
+That is 1.5 days above the plan's 8 (6 to 10.5) because the ADR 0085 wiring was not priced into the WP-11 row. 9.5 against 8 is
+19 percent, inside the 20 percent budget growth of ER-37; the coordinator is told.
+
 ## 9. Common practice, and the cheaper option (ER-37)
 
 Read on 2026-11-12 unless marked.
