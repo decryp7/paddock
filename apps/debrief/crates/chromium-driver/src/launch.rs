@@ -253,6 +253,26 @@ fn unique_dir(base: &Path) -> std::io::Result<PathBuf> {
     Ok(tempfile::Builder::new().prefix("chromium-driver-").tempdir_in(base)?.keep())
 }
 
+/// The browser's own temp folder, inside its profile and emptied at each start: Chromium on macOS takes its temp folder from
+/// [`MAC_TEMP_ENV`], so it never reads the user's temp folder. Chrome reads through its temp folder when it quits, and with a
+/// full user temp folder (900,000 entries) that read outlasted the close grace and the browser was killed (Spotter's copy,
+/// CI 8334, 8341, 8346).
+pub const BROWSER_TEMP: &str = "browser-temp";
+
+/// Chromium's own temp-folder override on macOS (`base::GetTempDir` reads it before `NSTemporaryDirectory`, which ignores
+/// `TMPDIR`; base/files/file_util_apple.mm, read 2026-11-20). Other systems ignore it.
+pub const MAC_TEMP_ENV: &str = "MAC_CHROMIUM_TMPDIR";
+
+/// Makes [`BROWSER_TEMP`] inside `profile`, empty, and returns it.
+fn browser_temp(profile: &Path) -> std::io::Result<PathBuf> {
+    let t = profile.join(BROWSER_TEMP);
+    if t.exists() {
+        std::fs::remove_dir_all(&t)?;
+    }
+    std::fs::create_dir_all(&t)?;
+    Ok(t)
+}
+
 impl Chromium {
     pub fn launch(exe: &Browser, opts: &LaunchOptions) -> Result<Chromium> {
         Self::launch_with(exe, opts, Sandbox::from_environment())
@@ -274,8 +294,16 @@ impl Chromium {
                 log::warn!("The browser frame colour could not be written: {e}");
             }
         }
+        let temp = match browser_temp(&dir) {
+            Ok(t) => t,
+            Err(e) => {
+                cleanup(&dir, throwaway);
+                return Err(Error::Launch(format!("the browser's temp folder could not be created: {e}")));
+            }
+        };
         // The one constructor, as paddock-chromium launches it: counted for budget tests.
         let mut cmd = paddock_proc::command(&exe.path);
+        cmd.env(MAC_TEMP_ENV, &temp);
         cmd.args(command_line(exe.flavor, &dir, opts, sandbox))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -418,6 +446,9 @@ impl Chromium {
         while !exited && Instant::now() < end {
             std::thread::sleep(Duration::from_millis(25));
             exited = !self.proc().is_running();
+        }
+        if !exited {
+            log::warn!("The browser did not quit within {grace:?} after Browser.close and is ended");
         }
         // Whatever is left of the process tree (helpers, or the browser itself when it ignored the request) ends now.
         self.proc().kill();
@@ -630,6 +661,42 @@ mod tests {
             profile: Profile::Throwaway(base.join("profiles")),
             ..LaunchOptions::default()
         }
+    }
+
+    /// The browser's own temp folder is a fresh folder inside its profile (`MAC_CHROMIUM_TMPDIR`), never the user's temp
+    /// folder: Chrome reads through that folder when it quits, and with 900,000 leftover entries in it the quit outlasted the
+    /// close grace and the browser was killed (Spotter's copy, CI 8334, 8341, 8346).
+    #[cfg(unix)]
+    #[test]
+    fn the_browser_gets_a_fresh_temp_folder_inside_its_profile() {
+        let base = tempfile::tempdir().unwrap();
+        let seen = base.path().join("seen.txt");
+        let exe = Browser {
+            flavor: crate::discover::Flavor::Chromium,
+            path: paddock_testkit::StandIn::new(base.path(), "temp-chrome")
+                .when_args(
+                    &[],
+                    paddock_testkit::Actions::new()
+                        .writes_with("{env:MAC_CHROMIUM_TMPDIR|/nonexistent}/written", "x")
+                        .writes_with(
+                            &seen.to_string_lossy(),
+                            "{env:MAC_CHROMIUM_TMPDIR|unset}\n{flag:--user-data-dir=}\n",
+                        )
+                        .exit(1),
+                )
+                .install()
+                .unwrap()
+                .program()
+                .to_path_buf(),
+        };
+        let e = Chromium::launch(&exe, &opts_in(base.path())).err().unwrap().to_string();
+        let seen = std::fs::read_to_string(&seen)
+            .unwrap_or_else(|_| panic!("the stand-in did not get to write its record (no temp folder?): {e}"));
+        assert!(!e.contains("nonexistent"), "the temp folder did not exist: {e}");
+        let mut lines = seen.lines();
+        let (temp, profile) = (lines.next().unwrap_or(""), lines.next().unwrap_or(""));
+        assert!(!profile.is_empty(), "{seen:?}");
+        assert_eq!(Path::new(temp), Path::new(profile).join(BROWSER_TEMP), "{seen:?}");
     }
 
     /// A throwaway profile lives below the folder the caller names (its own cache folder), never in the shared temp folder.

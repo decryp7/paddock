@@ -234,6 +234,25 @@ pub fn warm_up(exe: &Browser) -> Result<Duration> {
     paddock_proc::warm_up(&exe.path, &["--version"]).map_err(Error::Launch)
 }
 
+/// The browser's own temp folder, inside its profile: Chromium on macOS takes its temp folder from [`MAC_TEMP_ENV`], so it
+/// never reads the user's temp folder. Chrome reads through its temp folder when it quits, and with a full user temp folder
+/// (900,000 entries) that read outlasted [`CLOSE_GRACE`] and the browser was killed (CI 8334, 8341, 8346).
+pub const BROWSER_TEMP: &str = "browser-temp";
+
+/// Chromium's own temp-folder override on macOS (`base::GetTempDir` reads it before `NSTemporaryDirectory`, which ignores
+/// `TMPDIR`; base/files/file_util_apple.mm, read 2026-11-20). Other systems ignore it.
+pub const MAC_TEMP_ENV: &str = "MAC_CHROMIUM_TMPDIR";
+
+/// Makes [`BROWSER_TEMP`] inside `profile`, empty, and returns it.
+fn browser_temp(profile: &Path) -> std::io::Result<PathBuf> {
+    let t = profile.join(BROWSER_TEMP);
+    if t.exists() {
+        std::fs::remove_dir_all(&t)?;
+    }
+    std::fs::create_dir_all(&t)?;
+    Ok(t)
+}
+
 /// How long a browser gets to quit by itself after `Browser.close` before it is killed.
 pub const CLOSE_GRACE: Duration = Duration::from_secs(5);
 
@@ -285,8 +304,16 @@ impl Chromium {
         check_display(opts.mode, cfg!(target_os = "linux"), |k| std::env::var(k).ok())?;
         let dir = unique_dir(&opts.profile_base);
         std::fs::create_dir_all(&dir).map_err(|e| Error::Launch(format!("the profile folder could not be created: {e}")))?;
+        let temp = match browser_temp(&dir) {
+            Ok(t) => t,
+            Err(e) => {
+                cleanup(&dir);
+                return Err(Error::Launch(format!("the browser's temp folder could not be created: {e}")));
+            }
+        };
         // The one constructor, as paddock-chromium launches it: counted for budget tests.
         let mut cmd = paddock_proc::command(&exe.path);
+        cmd.env(MAC_TEMP_ENV, &temp);
         let stderr = std::fs::File::create(dir.join(STDERR_FILE)).map_or_else(|_| std::process::Stdio::null(), std::process::Stdio::from);
         cmd.args(args(&dir, opts.mode, exe.flavor, &opts.extra_args))
             .stdin(std::process::Stdio::null())
@@ -599,6 +626,53 @@ mod tests {
             e.contains("exited right after it started") && e.contains("without --no-sandbox"),
             "{e}"
         );
+    }
+
+    /// The browser's own temp folder is a fresh folder inside its profile, named through Chromium's macOS override
+    /// (`MAC_CHROMIUM_TMPDIR`), never the user's temp folder: Chrome reads through that folder when it shuts down, and with
+    /// 900,000 leftover entries in it the quit took over [`CLOSE_GRACE`] and the browser was killed (CI 8334, 8341, 8346).
+    #[test]
+    fn the_browser_gets_a_fresh_temp_folder_inside_its_profile() {
+        let base = tempfile::tempdir().unwrap();
+        let seen = base.path().join("seen.txt");
+        let exe_path = paddock_testkit::StandIn::new(base.path(), "temp-chrome")
+            .when_args(
+                &[],
+                paddock_testkit::Actions::new()
+                    .writes_with("{env:MAC_CHROMIUM_TMPDIR|/nonexistent}/written", "x")
+                    .writes_with(
+                        &seen.to_string_lossy(),
+                        "{env:MAC_CHROMIUM_TMPDIR|unset}\n{flag:--user-data-dir=}\n",
+                    )
+                    .exit(1),
+            )
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
+        let exe = Browser {
+            flavor: crate::discover::Flavor::Chromium,
+            path: exe_path,
+        };
+        let e = Chromium::launch(&exe, &headless(base.path())).err().unwrap().to_string();
+        let seen = std::fs::read_to_string(&seen)
+            .unwrap_or_else(|_| panic!("the stand-in did not get to write its record (no temp folder?): {e}"));
+        let mut lines = seen.lines();
+        let (temp, profile) = (lines.next().unwrap_or(""), lines.next().unwrap_or(""));
+        assert!(!profile.is_empty(), "{seen:?}");
+        assert_eq!(Path::new(temp), Path::new(profile).join(BROWSER_TEMP), "{seen:?}");
+        // The folder existed when the browser started: the stand-in could write into it.
+        assert!(!e.contains("nonexistent") && !e.contains("No such file"), "{e}");
+    }
+
+    /// A kept temp folder from an earlier start is emptied, so the browser never reads leftovers.
+    #[test]
+    fn the_browser_temp_folder_starts_empty() {
+        let base = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(base.path().join(BROWSER_TEMP).join("old")).unwrap();
+        let t = browser_temp(base.path()).unwrap();
+        assert_eq!(t, base.path().join(BROWSER_TEMP));
+        assert_eq!(std::fs::read_dir(&t).unwrap().count(), 0);
     }
 
     /// A Chromium build starts without its testing field trials, branded Chrome and Edge get no switch; the caller's
