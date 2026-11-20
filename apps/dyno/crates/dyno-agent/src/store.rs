@@ -121,7 +121,7 @@ impl Savepoint<'_> {
     fn undo(&mut self) {
         self.done = true;
         if let Err(e) = self.conn.execute_batch("ROLLBACK TO dyno_whole; RELEASE dyno_whole") {
-            log::error!("dyno-agent: a failed write could not be undone: {e}");
+            log::error!("dyno-agent: a failed write could not be rolled back: {e}");
         }
     }
 }
