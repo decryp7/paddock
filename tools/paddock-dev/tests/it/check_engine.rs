@@ -49,8 +49,14 @@ fn run_host(args: &[&str], scratch: &Path) -> Ran {
 }
 
 /// A run as recorded data, with the scratch folder and the tree's root named `<scratch>` and `<root>` (no machine in a recording, ER-46).
+/// The files the run was handed are `<scratch>/<name>` on every OS: the host prints them as the OS writes them (`\` on Windows), and the
+/// recordings were made on macOS (CI run 8346, windows-latest).
 fn ran_json(r: &Ran, scratch: &Path, root: &str) -> Value {
     let scrub = |t: &str| {
+        let mut t = t.to_string();
+        for name in ["out.json", "summary.md"] {
+            t = t.replace(scratch.join(name).to_str().unwrap(), &format!("<scratch>/{name}"));
+        }
         let t = t.replace(scratch.to_str().unwrap(), "<scratch>");
         if root.is_empty() { t } else { t.replace(root, "<root>") }
     };
