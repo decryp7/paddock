@@ -1573,7 +1573,7 @@ mod tests {
         assert_eq!(code(ErrorKind::Other), Item::Io);
         let e = delete_error(&Error::new(ErrorKind::PermissionDenied, "x"));
         assert!(!e.retryable, "no rights is not retried by itself");
-        assert!(delete_error(&Error::new(ErrorKind::Other, "x")).retryable);
+        assert!(delete_error(&Error::other("x")).retryable);
         assert_eq!(e.field.as_deref(), Some("ids"));
     }
 
