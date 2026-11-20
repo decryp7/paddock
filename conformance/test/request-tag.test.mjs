@@ -1,6 +1,6 @@
 // The tag request (.gitea/workflows/tag.yml, conformance/ci/request-tag.mjs): the checks, and the workflow's structure.
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -70,27 +70,42 @@ test('the verdict is read from the last line, so tool chatter before it does not
  * verdict, so the CLI's own call was never run (broken since 3f876f2af, 2026-11-12).
  */
 function cliCiRow(devScript) {
-  const cwd = mkdtempSync(join(tmpdir(), 'request-tag-cli-'));
+  const base = mkdtempSync(join(tmpdir(), 'request-tag-cli-'));
+  const cwd = join(base, 'root');
+  const decoys = join(base, 'path');
   try {
-    writeFileSync(join(cwd, 'dev'), `#!/bin/sh\n${devScript}\n`);
-    chmodSync(join(cwd, 'dev'), 0o755);
+    for (const [dir, script] of [
+      [cwd, devScript],
+      // A `dev` on PATH that answers red: the check must never reach it (run 8384 looked `dev` up on PATH).
+      [decoys, `echo '${JSON.stringify({ verdict: 'red', detail: 'decoy dev on PATH' })}'; exit 5`],
+    ]) {
+      mkdirSync(dir);
+      writeFileSync(join(dir, 'dev'), `#!/bin/sh\n${script}\n`);
+      chmodSync(join(dir, 'dev'), 0o755);
+    }
     const out = spawnSync(
       process.execPath,
       [join(PADDOCK, 'conformance/ci/request-tag.mjs'), '--tag', 'dyno-v1.2.0', '--sha', SHA, '--api', 'http://127.0.0.1:9/api/v1', '--repo', 'o/r', '--root', '.'],
-      { cwd, encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '' } },
+      {
+        cwd,
+        encoding: 'utf8',
+        // The checker's git calls stay in the temp folder: no repository above it is ever read, and no `ls-remote origin` goes out
+        // (ER-14, ER-45).
+        env: { ...process.env, GITHUB_STEP_SUMMARY: '', GIT_CEILING_DIRECTORIES: base, PATH: `${decoys}:${process.env.PATH}` },
+      },
     );
     const row = out.stdout.split('\n').find((l) => l.startsWith('| CI is green on exactly this commit |'));
     assert.ok(row, `the summary has the CI row: ${out.stdout}${out.stderr}`);
     return row;
   } finally {
-    rmSync(cwd, { recursive: true, force: true });
+    rmSync(base, { recursive: true, force: true });
   }
 }
 
 test('the CLI with --root . runs the ./dev of that folder, not a dev on PATH (run 8384)', { skip: process.platform === 'win32' && 'a POSIX shell stand-in' }, () => {
   const green = cliCiRow(`echo '${JSON.stringify({ verdict: 'green', run: 8372 })}'`);
   assert.match(green, /\| pass \| ci\.yml full run 8372 \|/);
-  assert.doesNotMatch(green, /ENOENT/);
+  assert.doesNotMatch(green, /ENOENT|decoy/);
   // The positive control (ER-33): the same call, the stand-in says not measured, and the row fails with its words.
   const notMeasured = cliCiRow(`echo '${JSON.stringify({ verdict: 'not_measured', detail: 'stand-in: not measured' })}'; exit 6`);
   assert.match(notMeasured, /\| FAIL \| stand-in: not measured; then request the tag \|/);

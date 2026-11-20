@@ -106,7 +106,8 @@ export function findSidecars(dir, names, list = (d) => readdirSync(d)) {
   return names.map((name) => {
     const hit = files.find((f) => f === name || f === `${name}.exe` || (f.startsWith(`${name}-`) && /^[a-z0-9_]+-[a-z0-9_]+-[a-z0-9_-]+(\.exe)?$/.test(f.slice(name.length + 1))));
     if (!hit) throw new Error(`no sidecar ${name} in ${dir}`);
-    return join(dir, hit);
+    // A full path: `join('.', hit)` is a bare name, which spawnSync would look up on PATH (the class of tag.yml run 8384).
+    return resolve(dir, hit);
   });
 }
 
