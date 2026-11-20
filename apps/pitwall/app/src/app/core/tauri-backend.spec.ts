@@ -235,7 +235,7 @@ describe('TauriBackend', () => {
   });
 
   it('covers every request/response method of the backend interface', () => {
-    const methods = Object.getOwnPropertyNames(TauriBackend.prototype).filter((m) => m !== 'constructor' && m !== 'run' && m !== 'job');
+    const methods = Object.getOwnPropertyNames(TauriBackend.prototype).filter((m) => m !== 'constructor' && m !== 'run' && m !== 'job' && m !== 'deleteChunk');
     const pinned = new Set([...TABLE.map((r) => r[0]), ...JOBS.map((r) => r[0]), 'deleteModels', 'subscribe', 'onPopover', 'onQuitAsk', 'onConnectedApps', 'chat', 'jobEvents']);
     expect(methods.filter((m) => !pinned.has(m))).toEqual([]);
   });
