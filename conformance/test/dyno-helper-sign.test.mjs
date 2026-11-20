@@ -70,26 +70,29 @@ function tree({ real = false } = {}) {
   for (const f of ['sidecar.mjs', 'sidecar-lib.mjs', 'sign-helper.mjs']) cpSync(join(SCRIPTS, f), join(tauri, 'scripts', f));
   mkdirSync(join(dir, 'conformance', 'src', 'sidecar'), { recursive: true });
   cpSync(join(REPO, 'conformance', 'src', 'sidecar', 'sidecar.mjs'), join(dir, 'conformance', 'src', 'sidecar', 'sidecar.mjs'));
+  mkdirSync(join(dir, 'conformance', 'src', 'util'), { recursive: true });
+  for (const f of ['is-main.mjs', 'is-tag-run.mjs']) cpSync(join(REPO, 'conformance', 'src', 'util', f), join(dir, 'conformance', 'src', 'util', f));
   writeFileSync(join(tauri, 'tauri.conf.json'), JSON.stringify({ version: '9.9.9' }));
   symlinkSync(NODE_MODULES, join(app, 'app', 'node_modules'));
   mkdirSync(join(app, 'target', 'dist'), { recursive: true });
   for (const n of ['dyno-agent', 'dyno', 'dyno-bench', 'dyno-bench-gpu', 'dyno-helper']) writeFileSync(join(app, 'target', 'dist', n), `built ${n}\n`);
   const bin = join(dir, 'bin');
   mkdirSync(bin);
-  exe(join(bin, 'rustc'), `#!/bin/sh\necho "host: ${TRIPLE}"\n`);
-  exe(join(bin, 'cargo'), '#!/bin/sh\n[ "$1" = metadata ] && exit 1\nexit 0\n'); // no build; no metadata, so the target folder is <apps/dyno>/target
+  exe(join(bin, 'rustc'), `#!/bin/sh\necho "rustc key=\${TAURI_SIGNING_PRIVATE_KEY:-unset}" >> "$STUB_LOG"\necho "host: ${TRIPLE}"\n`);
+  exe(join(bin, 'cargo'), '#!/bin/sh\n[ "$1" = metadata ] && exit 1\necho "cargo $* key=${TAURI_SIGNING_PRIVATE_KEY:-unset}" >> "$STUB_LOG"\nexit 0\n'); // no build; no metadata, so the target folder is <apps/dyno>/target
   exe(join(bin, 'codesign'), '#!/bin/sh\nfor last; do :; done\nprintf "SEALED" >> "$last"\n'); // changes the bytes, as a seal does
   if (!real) exe(join(bin, 'npx'), NPX_STAND_IN);
   return { dir, app, tauri, binaries: join(tauri, 'binaries'), bin, scripts: join(tauri, 'scripts') };
 }
 
 function env(t, extra = {}) {
-  const e = { ...process.env, PATH: `${t.bin}${delimiter}${process.env.PATH}`, TAURI_ENV_TARGET_TRIPLE: TRIPLE, ...extra };
+  const e = { ...process.env, PATH: `${t.bin}${delimiter}${process.env.PATH}`, STUB_LOG: join(t.dir, 'stubs.log'), TAURI_ENV_TARGET_TRIPLE: TRIPLE, ...extra };
   for (const k of ['TAURI_SIGNING_PRIVATE_KEY', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD', 'GITHUB_REF', 'GITEA_REF', 'GITHUB_REF_TYPE', 'GITEA_REF_TYPE']) if (!(k in extra)) delete e[k];
   return e;
 }
 const TAG = { GITHUB_REF: 'refs/tags/dyno-v9.9.9' };
 const run = (t, script, args, extra) => spawnSync(process.execPath, [join(t.scripts, script), ...args], { cwd: t.app, env: env(t, extra), encoding: 'utf8' });
+const stubs = (t) => (existsSync(join(t.dir, 'stubs.log')) ? readFileSync(join(t.dir, 'stubs.log'), 'utf8').trim().split('\n') : []);
 const out = (r) => `${r.stdout}${r.stderr}`;
 
 for (const real of [false, true]) {
@@ -107,6 +110,12 @@ for (const real of [false, true]) {
   assert.deepEqual(Object.keys(verifySignature(parsePublicKey(pub), sig, readFileSync(helper))), ['ok', 'id'], 'verifies against the throw-away public key');
   assert.match(Buffer.from(sig, 'base64').toString(), /dyno-helper-9\.9\.9-aarch64-apple-darwin/, 'signed under dyno-helper-<version>-<triple>');
   assert.equal(readFileSync(join(t.binaries, 'dyno-helper.sha256'), 'utf8'), `${sha(helper)}\n`);
+  // One cargo call with every sidecar, as the hook makes it (the same feature unification, the same helper bytes); no child but the signer saw the key.
+  const log = stubs(t);
+  const cargo = log.filter((l) => l.startsWith('cargo '));
+  assert.equal(cargo.length, 1, log.join('\n'));
+  assert.match(cargo[0], /^cargo build -p dyno-agent -p dyno-cli -p dyno-bench -p dyno-bench-gpu -p dyno-helper --profile dist key=unset$/);
+  assert.deepEqual(log.filter((l) => l.startsWith('rustc ')), ['rustc key=unset', 'rustc key=unset'], 'rustc -vV ran in build and in sign, without the key');
 });
 }
 
@@ -131,6 +140,9 @@ test('the hook (sidecar.mjs) on a tag, with no key: passes on the helper the ste
   const before = readFileSync(helper);
   const hook = run(t, 'sidecar.mjs', [], TAG); // the hook's environment holds no key
   assert.equal(hook.status, 0, out(hook));
+  const cargo = stubs(t).filter((l) => l.startsWith('cargo '));
+  assert.equal(cargo.length, 2, 'the signing step and the hook each call cargo once');
+  assert.equal(cargo[0], cargo[1], 'the hook\'s build is the signing step\'s call (a no-op on a warm target folder)');
   assert.deepEqual(readFileSync(helper), before, 'the hook did not replace the signed helper with the built one');
   assert.notEqual(readFileSync(helper, 'utf8'), 'built dyno-helper\n');
   assert.ok(readFileSync(join(t.binaries, 'dyno-helper.minisig')).length > 0);

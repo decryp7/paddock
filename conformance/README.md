@@ -247,8 +247,8 @@ fails a tag run). A test ties the pins to the lockfile's `@tauri-apps/cli`. `tau
 
 The updater key (ADR 0085 D7, rule 78): `ci/updater-key.sh` is sourced by `tauri-bundle.sh` and Debrief's bundle step; it moves
 the key out of the environment before `npm ci` and any prepare command, refuses a private key on a CI run that is not a tag
-and a tag without one, makes a throw-away key pair on other CI runs, and hands a key to `tauri build` only, by `export` and
-`exec` (`updater_key_exec`), never on a command line. `ci/before-build.mjs` runs the app's `beforeBuildCommand` before `tauri
+and a tag without one, makes a throw-away key pair on other CI runs, and hands a key to `tauri build` and to the pre-sign `sign` process (`tauri-bundle.sh --pre-sign`: Dyno's macOS helper) only, by
+`export` and `exec` (`updater_key_exec`), never on a command line. `ci/before-build.mjs` runs the app's `beforeBuildCommand` before `tauri
 build`, without the key, and `tauri build` gets it emptied. `release/updater-key-check.mjs --pubkey <key> --dir <folder>`
 verifies every `.sig` against the one public key the build carries. `ci/tag-node-caches.sh [<angular dir>]` gives a tag run a
 new npm cache and removes a kept Angular cache link, in place of the node-caches action.

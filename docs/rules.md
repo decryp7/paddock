@@ -449,7 +449,7 @@ changes here, every app's copy is updated in the same change.
 78. **A tag run reads no state that a non-tag run can write.** It builds from folders it creates, without a compile cache,
     with signing keys only after the install step, and with bundler tools fetched from pinned URLs and SHA-256 values; a
     check fails it otherwise. The real updater key reaches a step only on the app's release tag (`refs/tags/<app>-v`), and
-    inside it `tauri build` only, in its environment, never in a command line, `npm ci`, a prepare command or the app's
+    inside it `tauri build` and the pre-sign `sign` process (Dyno's macOS helper) only, in their environment, never in a command line, `npm ci`, a prepare command or the app's
     `beforeBuildCommand`; a dispatch, nightly or branch run signs with a throw-away key made in the job, and a tag never
     does. Enforced today, and nothing more:
     (a) `conformance/ci/updater-key.sh`: in CI it fails a private key on a run that is not a tag, and a tag that has the

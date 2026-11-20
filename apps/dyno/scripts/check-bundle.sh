@@ -112,8 +112,8 @@ case "$(uname -s)" in
       # A release (a tag) or a build made with the updater key is meant to be installed by users: an unsigned helper there is a broken
       # release, so it fails. Pull-request and dev builds have no key and only warn.
       release=0
-      case "${GITHUB_REF:-}${GITEA_REF:-}" in refs/tags/*) release=1 ;; esac
-      [[ "${GITHUB_REF_TYPE:-}${GITEA_REF_TYPE:-}" == tag ]] && release=1
+      # "A tag run" is defined once, in conformance/src/util/is-tag-run.mjs.
+      if node "$(dirname "$0")/../../../conformance/src/util/is-tag-run.mjs"; then release=1; fi
       if (( release )) || [[ -n "${TAURI_UPDATER_PUBKEY:-}" ]]; then
         err "the bundled dyno-helper is not signed (the signing step (sign-helper.mjs, --pre-sign) left no signature, release=$release, updater key set=$([[ -n "${TAURI_UPDATER_PUBKEY:-}" ]] && echo yes || echo no)): turning the helper on would be refused. Next step: check that the release job passes pre-sign and the signing key reaches tauri-bundle.sh, and rebuild"
       else
