@@ -1,7 +1,7 @@
 import { splitInstance } from './events-grid';
 import { ManualClock } from '../../testing/manual-clock';
 import { TestBed } from '@angular/core/testing';
-import { all, buttonByText, el, provideTinyBackend, settle, testLogger, text, tinyBackend } from '../../testing/helpers';
+import { all, buttonByText, el, provideTinyBackend, settle, settleUntil, testLogger, text, tinyBackend } from '../../testing/helpers';
 import { Page, PageRequest, RecordView } from '../core/api.types';
 import { DebriefBackend } from '../core/backend';
 import { MockBackend } from '../core/mock/mock-backend';
@@ -335,12 +335,14 @@ describe('EventsGrid', () => {
     fixture.detectChanges();
     // The new query's first page is not here yet: no count rather than the old one.
     expect(store.matchTotal()).toBeNull();
-    await settle(fixture);
+    // The search text reaches the query after its debounce (TEXT_DEBOUNCE_MS), so wait for the conditions, never for a number of turns
+    // (rule 49): a slow run let the debounce elapse between the steps and read the count of the query then in view (CI run 8347).
+    await settleUntil(fixture, () => expect(store.query().text).toBe('no event says this'));
+    await settleUntil(fixture, () => expect(store.matchTotal()).not.toBeNull());
     expect(el(fixture, '.total').textContent).toBe(String(store.matchTotal()));
     store.toggleLevel('Error');
     store.setTextInput('');
-    await settle(fixture);
-    expect(store.matchTotal()).toBe(11);
+    await settleUntil(fixture, () => expect(store.matchTotal()).toBe(11));
     // With the grid closed nothing keeps the count current, so the status bar hides it.
     fixture.destroy();
     expect(store.matchTotal()).toBeNull();

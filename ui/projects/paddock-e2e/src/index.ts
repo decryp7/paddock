@@ -91,3 +91,4 @@ export { pinnedClockTest, pinnedInstant, newPinnedContext, reportTimerErrors, PI
 export { settledLayout, layoutSettled, type LayoutReading, type SettledLayoutOptions } from './settled-layout.ts';
 export { expectListFiltered, expectMenuAnchoredTo, expectOverlayAlignedWith, expectWired, expectStreamDone, expectDockPlanned, expectNotMoving, menuGap, overlayOffset } from './ready.ts';
 export { pauseLive, resumeLive, withLivePaused, clickWithLivePaused } from './live-page.ts';
+export { clickThatClosesItsPage, untilItsPageCloses } from './close-click.ts';

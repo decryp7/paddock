@@ -28,6 +28,8 @@ pub enum Mode {
     PrintEnv,
     /// Print a line, then exit with code 3.
     Exit3,
+    /// Write `CHILD:complaint` to stderr and exit with code 1 at once, reading nothing (a `git cat-file` outside a repository).
+    Complain,
     /// Ignore SIGTERM, print `ready`, sleep (Unix).
     IgnoreTerm,
     /// Print `ready`, sleep; exits cleanly on SIGTERM (the default action).
@@ -57,6 +59,7 @@ impl Mode {
             Mode::Endless => "endless",
             Mode::PrintEnv => "print_env",
             Mode::Exit3 => "exit3",
+            Mode::Complain => "complain",
             Mode::IgnoreTerm => "ignore_term",
             Mode::Polite => "polite",
             Mode::Answer => "answer",
@@ -134,6 +137,10 @@ fn helper_main() {
         "exit3" => {
             say("bye");
             std::process::exit(3);
+        }
+        "complain" => {
+            eprintln!("CHILD:complaint");
+            std::process::exit(1);
         }
         "ignore_term" => {
             #[cfg(unix)]

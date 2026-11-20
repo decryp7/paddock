@@ -11,7 +11,7 @@
 //! A run that finds no e2e spec at all (`apps/<app>/app/e2e/*.ts`, `ui/e2e/*.ts`) did not look at anything: one not-measured error, never a pass (ER-33).
 //!
 //! **Report-only (warnings) until its first green CI run that includes it (ER-41); it turns blocking then (mode `Gate`, `--strict C139`),
-//! with that run id recorded here, in `C139-e2e-ready-directives.mjs` and in docs/gates.toml.** Recorded: not yet (train 15's integrator fills it in).
+//! with that run id recorded here, in `C139-e2e-ready-directives.mjs` and in docs/gates.toml.** Recorded: ci.yml run 8335 (train 15, 2026-11-20).
 //! The lint rule itself is an error already: it had its report-only phase, and the real tree is at 0 sites outside the suppressions files.
 //! Rust host; `conformance/src/checks/C139-e2e-ready-directives.mjs` is the port and `tests/it/check_c139.rs` compares them.
 

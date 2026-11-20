@@ -1349,8 +1349,12 @@ fn one_container_run_covers_every_touched_workspace_and_a_failing_one_fails_the_
     }
     let script = g.args.last().unwrap();
     let mut cmd = paddock_proc::command("sh");
+    // The script is the container's: `/target/...` is a Linux path there. Git bash on Windows would turn the value of
+    // `CARGO_TARGET_DIR` into `C:/Program Files/Git/target/...` for the native stand-in (MSYS converts the environment of a
+    // native program; run 8327), so the variable is left as it is, as the container leaves it.
     cmd.args(["-c", script])
         .current_dir(dir.path())
+        .env("MSYS2_ENV_CONV_EXCL", "CARGO_TARGET_DIR")
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
     let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(30))).unwrap();
     let calls = std::fs::read_to_string(&log).unwrap();

@@ -201,7 +201,11 @@ fn the_process_environment_is_readable() {
 fn a_placeholder_never_looks_newer_than_the_build_script_run_that_made_it() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("binaries").join("svc-x");
-    let before = std::time::SystemTime::now();
+    // "Now" as the file system stamps files: Linux takes a file's time from its coarse clock, which can lag `SystemTime::now` by up to
+    // a tick, so a file written right after reading `now` there carries an earlier time (CI run 8346, Linux, every try).
+    let mark = dir.path().join("mark");
+    std::fs::write(&mark, b"").unwrap();
+    let before = std::fs::metadata(&mark).unwrap().modified().unwrap();
     assert_eq!(
         create_placeholders(std::slice::from_ref(&file))
             .unwrap()

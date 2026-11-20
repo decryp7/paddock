@@ -3160,3 +3160,35 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   member (same symptom in run 8212, before the train). **Fix:** `openTray` waits until the popover's finite animations have finished,
   and the test compares unrounded heights. Class: a layout read during an entry animation (the "two reads agree" rule does not catch a
   box that moves while its rounded size stays).
+
+## A click that closes its own window: Debrief's popout.e2e.ts:62 Dock back (2026-11-20, train 16)
+- **Failure:** `locator.click: Target page, context or browser has been closed` at popout.e2e.ts:65, the click on the pop-out's own
+  "Dock back into the main window" button (debrief.yml run 8338 job 42172, Chromium, FLAKY: passed on its retry; 1 of 151 runs). The
+  call log stops at "performing click action": the click had been delivered. Dock back asks the host (BroadcastChannel) and the host
+  closes the pop-out (`win.close()` in popout-backend.ts), so the window can go away while Playwright is still finishing the click.
+- **Causes weighed:** (1) the window closed for another reason before the click: refuted by the call log (actionability passed, the
+  action was being performed) and by the retry docking normally; (2) a slow host: no, the close is the expected effect of the click;
+  (3) Playwright treating every such close as an error: refuted, a click after which the host closes the window passes 80 of 80
+  (synchronous, deferred, mousedown, pointerdown, BroadcastChannel; local probes in Playwright's pinned Chromium 1248). The race is
+  only the close landing inside Playwright's own completion of the click, which cannot be scheduled from outside.
+- **Reproduction (deterministic):** the kit's selftest `close-click.spec.ts` holds the click open on a disabled button and closes the
+  window from its host meanwhile: a plain click rejects with the same error every time (red with the old click-then-wait-for-close),
+  green with the fix; 20 repeats at 4 workers in Chromium and in WebKit.
+- **Fix:** `@decryp7/paddock-e2e` `untilItsPageCloses(page, step)` and `clickThatClosesItsPage(locator)`: a step that closes its own page
+  counts as done when the page closed; a step that fails while the page stays open, or that leaves it open, still fails. The spec's own
+  next assertion (the panel is back in the host) checks that the step did its job. Both such steps in popout.e2e.ts use it (Dock back,
+  and the dispatched pointer-up that docks a dragged pop-out). **Rule:** a test step whose action ends the page it acts on goes through
+  `untilItsPageCloses`, never a plain `await` on that page.
+
+## Fix items from train 16's full run (ci.yml 8346, debrief.yml 8347), not this train's features (2026-11-20)
+- **debrief-plugin-host `elevated_output::standard_error_is_forwarded_cut_and_capped`** (debrief.yml run 8347, job 42279, "rust tests";
+  FLAKY: try 1 failed after 40.064 s at `tests/it/elevated_output.rs:189` with the collected messages empty, try 2 passed in 0.107 s;
+  history 2 of 151 runs). The test waits with `eventually(...)` for the plugin's forwarded standard error ("m1 line 2", "m1 long ...")
+  to reach the log; the first try saw nothing for its whole wait. Train 16 changes nothing in debrief-plugin-host (ER-12: not this
+  train's feature). Next: a failing reproduction first (the forwarding path under a held log writer or a slow plugin start), then the
+  cause, never a longer wait.
+- **spotter-render `real_browser closing_quits_the_browser_by_itself_before_any_kill`** (ci.yml run 8346, job 42302, macOS; failed,
+  flake history 8 of 138 runs). Spotter untouched by train 16. Next: a reproduction first, as above.
+- **ui gallery `open()` waits a fixed 600 ms** (`ui/e2e/gallery.spec.ts`: "Let the chart draw ... and fonts settle"). Train 16 fixed the
+  one test that failed on it (the path box, which now waits for its fitted text; ci.yml 8346 job 42258); every other test that reads a
+  measured or animated value after `open()` still leans on that wait. Next: wait on each test's own condition and drop the fixed wait.

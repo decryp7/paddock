@@ -1291,7 +1291,7 @@ approved = "coordinator"
 
 [[report_only]]
 id = "C139"
-reason = "ER-41: report-only until its first green CI run that includes it, recorded by run id here and in C139-e2e-ready-directives.mjs and c139.rs (train 15's integrator fills it in). It checks that the exceptions to paddock/e2e-ready-reads, the eslint-suppressions.json of each app and the ui (ESLint bulk suppressions), only shrink against the merge base, through the shared baseline reader, and that a run reads at least one e2e spec. The lint rule itself is an error (it had its report-only phase; the real tree is at 0 sites outside the suppressions files), and the e2e lint block sets noInlineConfig, so no inline comment can switch it off. The six existing entries (Debrief 3, Dyno 3) were approved by the user on 2026-11-18."
+reason = "ER-41: report-only until its first green CI run that includes it, recorded by run id here and in C139-e2e-ready-directives.mjs and c139.rs: ci.yml run 8335 (train 15, 2026-11-20). It checks that the exceptions to paddock/e2e-ready-reads, the eslint-suppressions.json of each app and the ui (ESLint bulk suppressions), only shrink against the merge base, through the shared baseline reader, and that a run reads at least one e2e spec. The lint rule itself is an error (it had its report-only phase; the real tree is at 0 sites outside the suppressions files), and the e2e lint block sets noInlineConfig, so no inline comment can switch it off. The six existing entries (Debrief 3, Dyno 3) were approved by the user on 2026-11-18."
 owner = "ER-21 class: a read on 'it is in the DOM' (feat/e2e-ready-gating)"
 since = 2026-11-18
 review_by = 2026-12-18
