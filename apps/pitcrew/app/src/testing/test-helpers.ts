@@ -52,6 +52,26 @@ export async function settle(fixture: ComponentFixture<unknown>, rounds = 4): Pr
   fixture.detectChanges();
 }
 
+/**
+ * Runs settle rounds until `ready` holds, then stops (rule 49: wait on the condition, not on a count of turns). Bounded: after
+ * `maxRounds` it throws with `what`, so a view that never gets there fails instead of passing on whatever was drawn.
+ */
+export async function settleUntil(
+  fixture: ComponentFixture<unknown>,
+  ready: () => boolean,
+  what: string,
+  maxRounds = 20,
+): Promise<void> {
+  for (let i = 0; i < maxRounds; i++) {
+    fixture.detectChanges();
+    if (ready()) return;
+    await fixture.whenStable();
+    await flush();
+  }
+  fixture.detectChanges();
+  if (!ready()) throw new Error(`the view did not get to "${what}" within ${maxRounds} settle rounds`);
+}
+
 /** The trimmed text of an element. */
 export function text(el: Element | null | undefined): string {
   return (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
