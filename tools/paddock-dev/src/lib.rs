@@ -57,6 +57,7 @@ pub mod ci_isolation;
 pub mod ci_run;
 pub mod ci_runs;
 pub mod ci_rust_pin;
+pub mod ci_s3_guard;
 pub mod ci_setup_rust;
 pub mod ci_tool;
 mod cli;

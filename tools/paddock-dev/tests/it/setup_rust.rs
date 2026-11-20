@@ -204,7 +204,7 @@ fn write_shim(path: &Path, calls: &Path, fail: Fail) {
             .appends_with(&calls.with_file_name("tokens").display().to_string(), "tok={env:PADDOCK_DEV_TOKEN}\n")
             .appends_with(
                 &calls.display().to_string(),
-                "{args} port={env:SCCACHE_SERVER_PORT} io={env:SCCACHE_IGNORE_SERVER_IO_ERROR} dir={env:SCCACHE_DIR} size={env:SCCACHE_CACHE_SIZE} redis={env:SCCACHE_REDIS_ENDPOINT} db={env:SCCACHE_REDIS_DB} chain={env:SCCACHE_MULTILEVEL_CHAIN} bucket={env:SCCACHE_BUCKET} idle={env:SCCACHE_IDLE_TIMEOUT} meta={env:AWS_EC2_METADATA_DISABLED} key={env:AWS_ACCESS_KEY_ID} secret={env:AWS_SECRET_ACCESS_KEY} errlog={env:SCCACHE_ERROR_LOG}\n",
+                "{args} port={env:SCCACHE_SERVER_PORT} io={env:SCCACHE_IGNORE_SERVER_IO_ERROR} dir={env:SCCACHE_DIR} size={env:SCCACHE_CACHE_SIZE} redis={env:SCCACHE_REDIS_ENDPOINT} db={env:SCCACHE_REDIS_DB} chain={env:SCCACHE_MULTILEVEL_CHAIN} bucket={env:SCCACHE_BUCKET} idle={env:SCCACHE_IDLE_TIMEOUT} meta={env:AWS_EC2_METADATA_DISABLED} key={env:AWS_ACCESS_KEY_ID} secret={env:AWS_SECRET_ACCESS_KEY} errlog={env:SCCACHE_ERROR_LOG} endpoint={env:SCCACHE_ENDPOINT} ssl={env:SCCACHE_S3_USE_SSL}\n",
             )
     };
     let mut shim = StandIn::new(path.parent().unwrap(), path.file_name().unwrap().to_str().unwrap())
@@ -635,18 +635,57 @@ fn the_s3_chain_and_keys_reach_the_servers_start_and_nothing_a_later_step_sees()
     health_curl(&r, 0);
     let rs = r.rust(&S3_INPUT, &S3_ENV);
     assert_eq!(rs.code, 0, "{}", rs.out);
-    let start = rs.calls.lines().find(|l| l.starts_with("--start-server")).expect("the server is started");
-    for want in ["chain=disk,s3", "bucket=sccache-paddock", "idle=0", "meta=true", "key=test-key-id", "secret=test-secret", "errlog="] {
+    let start = rs
+        .calls
+        .lines()
+        .find(|l| l.starts_with("--start-server"))
+        .expect("the server is started");
+    for want in [
+        "chain=disk,s3",
+        "bucket=sccache-paddock",
+        "idle=0",
+        "meta=true",
+        "key=test-key-id",
+        "secret=test-secret",
+        "errlog=",
+    ] {
         assert!(start.contains(want), "the server's start lacks `{want}`: {start}");
     }
-    assert!(!start.ends_with("errlog="), "the server writes its errors to the job's temp folder: {start}");
-    for gone in ["MULTILEVEL", "SCCACHE_BUCKET", "SCCACHE_ENDPOINT", "AWS_ACCESS", "AWS_SECRET", "test-secret", "test-key-id"] {
+    assert!(
+        !start.ends_with("errlog="),
+        "the server writes its errors to the job's temp folder: {start}"
+    );
+    for gone in [
+        "MULTILEVEL",
+        "SCCACHE_BUCKET",
+        "SCCACHE_ENDPOINT",
+        "AWS_ACCESS",
+        "AWS_SECRET",
+        "test-secret",
+        "test-key-id",
+    ] {
         assert!(!rs.env.contains(gone), "$GITHUB_ENV holds `{gone}`:\n{}", rs.env);
     }
-    for want in ["SCCACHE_IDLE_TIMEOUT=0\n", "AWS_EC2_METADATA_DISABLED=true\n", "SCCACHE_DIR=", "SCCACHE_ERROR_LOG="] {
+    for want in [
+        "SCCACHE_IDLE_TIMEOUT=0\n",
+        "AWS_EC2_METADATA_DISABLED=true\n",
+        "SCCACHE_DIR=",
+        "SCCACHE_ERROR_LOG=",
+    ] {
         assert!(rs.env.contains(want), "$GITHUB_ENV lacks `{want}`:\n{}", rs.env);
     }
-    assert!(rs.calls.contains("curl ") && rs.calls.contains("/minio/health/live"), "the health check is an HTTP request: {}", rs.calls);
+    assert!(
+        rs.calls.contains("curl ") && rs.calls.contains("/minio/health/live"),
+        "the health check is an HTTP request: {}",
+        rs.calls
+    );
+    // sccache talks to the timeout guard on 127.0.0.1, never to the store itself (user decision 2026-11-20).
+    assert!(
+        start.contains("endpoint=127.0.0.1:") && !start.contains("192.0.2.10") && start.contains("ssl=false"),
+        "{start}"
+    );
+    let port = guard_port(&rs.env);
+    stop_guard(port);
     assert!(!rs.out.contains("test-secret") && !rs.out.contains("test-key-id"), "{}", rs.out);
 }
 
@@ -658,7 +697,97 @@ fn a_store_that_fails_its_health_check_leaves_the_job_on_its_local_disk() {
     let rs = r.rust(&S3_INPUT, &S3_ENV);
     assert_eq!(rs.code, 0, "{}", rs.out);
     assert!(rs.out.contains("::warning::sccache: the S3 health check"), "{}", rs.out);
-    let start = rs.calls.lines().find(|l| l.starts_with("--start-server")).expect("the server is started");
+    let start = rs
+        .calls
+        .lines()
+        .find(|l| l.starts_with("--start-server"))
+        .expect("the server is started");
     assert!(start.contains("chain= ") && start.contains("key= "), "no chain and no key: {start}");
-    assert!(rs.env.contains("RUSTC_WRAPPER=sccache\n") && !rs.env.contains("MULTILEVEL"), "{}", rs.env);
+    assert!(
+        rs.env.contains("RUSTC_WRAPPER=sccache\n") && !rs.env.contains("MULTILEVEL"),
+        "{}",
+        rs.env
+    );
+}
+
+/// The port of the timeout guard that setup-rust started, from `$GITHUB_ENV`.
+fn guard_port(env: &str) -> u16 {
+    env.lines()
+        .find_map(|l| l.strip_prefix("PADDOCK_S3_GUARD_PORT="))
+        .unwrap_or_else(|| panic!("the job env names the guard's port:\n{env}"))
+        .parse()
+        .unwrap()
+}
+
+/// What `ci sccache-stats` sends: the guard ends.
+fn stop_guard(port: u16) {
+    use std::io::Write;
+    let mut c = std::net::TcpStream::connect(("127.0.0.1", port)).expect("the guard listens");
+    c.write_all(b"PADDOCK-STALL-GUARD-STOP\n").unwrap();
+}
+
+/// The guard setup-rust starts outlives the step, forwards nothing a later step could see a key in, and the job's log and env name it.
+#[test]
+fn the_s3_guard_is_started_for_the_job_and_named_in_its_env() {
+    let r = Runner::new(Some(Fail::Never));
+    health_curl(&r, 0);
+    let rs = r.rust(&S3_INPUT, &S3_ENV);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    assert!(rs.env.contains("PADDOCK_S3_GUARD_LOG="), "{}", rs.env);
+    assert!(rs.out.contains("through the timeout guard on 127.0.0.1:"), "{}", rs.out);
+    let port = guard_port(&rs.env);
+    // It is alive after the step ended: a connection is accepted (and then ends the guard).
+    stop_guard(port);
+}
+
+/// A store behind TLS cannot be guarded (the stream is opaque and the certificate would not match 127.0.0.1): the job stays on its disk.
+#[test]
+fn an_https_store_is_not_used_because_the_guard_cannot_sit_in_front_of_it() {
+    let r = Runner::new(Some(Fail::Never));
+    health_curl(&r, 0);
+    let https = [
+        ("PADDOCK_SCCACHE_S3_BUCKET", "sccache-paddock"),
+        ("PADDOCK_SCCACHE_S3_ENDPOINT", "https://192.0.2.10:15000"),
+        ("PADDOCK_SCCACHE_S3_ACCESS_KEY_ID", "test-key-id"),
+        ("PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY", "test-secret"),
+    ];
+    let rs = r.rust(&S3_INPUT, &https);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    assert!(
+        rs.out.contains("::warning::sccache: the timeout guard") && rs.out.contains("https"),
+        "{}",
+        rs.out
+    );
+    assert!(
+        !rs.env.contains("PADDOCK_S3_GUARD_PORT") && !rs.env.contains("MULTILEVEL"),
+        "{}",
+        rs.env
+    );
+}
+
+/// `ci s3-guard serve` by itself: one `PORT <n>` line, forwards, and ends on the stop request.
+#[test]
+#[allow(clippy::disallowed_methods)]
+fn the_guard_command_announces_its_port_and_ends_on_the_stop_request() {
+    use std::io::BufRead;
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("guard.log");
+    let mut child = crate::dev_bin::command()
+        .args(["ci", "s3-guard", "serve", "--upstream", "127.0.0.1:9", "--log"])
+        .arg(&log)
+        .current_dir(repo())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    std::io::BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+    let port: u16 = line
+        .trim()
+        .strip_prefix("PORT ")
+        .expect("the first line is PORT <n>")
+        .parse()
+        .unwrap();
+    stop_guard(port);
+    let status = child.wait().unwrap();
+    assert!(status.success(), "{status:?}");
 }

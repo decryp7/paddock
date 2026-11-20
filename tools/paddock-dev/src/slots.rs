@@ -255,7 +255,7 @@ pub fn acquire(a: &AcquireArgs) -> Result<Report, CliError> {
 
 /// What the holder said first: `Some(line)` (empty when it ended without saying anything), or `None` when it said nothing within
 /// `limit`. The read happens on its own thread, which ends when the holder is stopped (its pipe closes).
-fn first_line(child: &mut std::process::Child, limit: Duration) -> Option<String> {
+pub(crate) fn first_line(child: &mut std::process::Child, limit: Duration) -> Option<String> {
     let out = child.stdout.take()?;
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
