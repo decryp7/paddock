@@ -1004,3 +1004,11 @@ code change first). The ADRs carry dated amendment lines: family ADR
 0019 (limits), 0031 (stall judge) and 0060 (C13 ratchet), and Debrief ADR 0064 (streaming import, IP1) and 0065 (bounded replies).
 **ER-37 section missing** (cut review, P2): ADRs 0065, 0066 and 0067 name no comparable software; a short section for each is
 a follow-up when the user decides Tier B.
+
+### 10.8 Added 2026-11-20 (user; family ADR 0110)
+
+| # | Package | Role | Depends | Days | Failing test first |
+|---|---|---|---|---|---|
+| C6 | PerfMon touches only the sets Debrief made: the template marks every set it creates (keyword or `Description` prefix, whichever `logman` reads back on the CI Windows runner, measured and recorded); `install` refuses to replace a same-named set without the marker, and Delete refuses the same way, with "This set was not made by Debrief. Choose another collector name, or delete it in Performance Monitor first." Shipped since debrief-v1.0.0 (`perfmon_control.rs:133-140`, `logman delete -n <name>` on any existing set) | implementer | - | 0.5 | In `perfmon_tools.rs` tests: install against a `FakeRunner` where `logman query <name>` reports a set without the marker returns an error and the fake records no `logman delete` (if `query` does not show the marker, the reader and the fake use `logman export -n <name> -xml`; the assertion is unchanged) |
+
+The total above grows by 0.5 raw day (well inside the 20 % line, ER-37).

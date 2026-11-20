@@ -3,6 +3,7 @@
 - Status: Accepted (2026-10-29), by the user, after independent review (rounds 1–2). The owner decided the four open
   points on 2026-10-29 ("Decided by the user" at the end); the reviews are answered in "Reviews: what changed".
 - Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep WP-1 (core model, reduced), WP-2 (protocol), WP-7 (Actions cache projection), WP-9 (UI reduced to variables and the cache setting), WP-10 (docs); deferred WP-3 (presets), WP-5 (measure and clean jobs), WP-6 (shared crates), WP-8 (Windows impersonation, Credential Manager) and the `[defaults.storage_io]` Settings UI.
+- Amended 2026-11-20 (user; family ADR 0110): WP-7 is replaced by WP-7R (the runner `config.yaml` becomes a raw YAML editor only; no form, no multi-runner projection of `cache.external_server`). See the amendment note under "Work packages".
 - Date: 2026-10-29
 - Amends: ADR 0004 (the environment, secret, clean and reachability requests are authorised from the caller's identity,
   not by the pipe's ACL alone), ADR 0005 (environment secrets are created, stored and read by the **service**), ADR 0009
@@ -590,6 +591,14 @@ the integrating agent; other packages add declared lines only. UI files follow t
 | WP-10 | Docs and images: features, user guide, roadmap (Phase 3 item closed, the Windows correction), architecture, ADR 0016's text, CHANGELOG, screenshots with an independent review (rule 22) | `docs/{features,user-guide,roadmap,architecture}.md`, `docs/adr/0016-*.md`, `CHANGELOG.md`, `docs/screenshots/**` | implementer + reviewer | 1 d |
 
 Order: WP-1 → WP-2 → (WP-3, WP-4, WP-6, WP-8 in parallel) → WP-5, WP-7 → WP-9 → WP-10.
+
+**Amendment 2026-11-20 (user; family ADR [0110](../../../../docs/adr/0110-adapters-to-config-another-program-owns-preserve-what-they-do-not-model.md)).** The table above is kept as written; WP-7 is withdrawn and replaced by:
+
+| WP | What | Files owned | Role | Est. |
+|---|---|---|---|---|
+| WP-7R | The runner `config.yaml` as a raw YAML editor only: the settings form and `RunnerSettings` removed; the shared paddock-ui editor extracted from Debrief's `profile/toml-editor.ts` (document port, line numbers, findings pinned to lines) with YAML, used by Debrief's profile editor and Pitcrew; hints and warnings from `runner_schema.rs` in Rust (an unknown key never refuses a save); `cache.external_secret`, `cache.s3.access_key` and `cache.s3.secret_key` masked with a reveal toggle and never saved as the mask; comments, order and unknown keys kept through `runner_files.rs`. First failing test: a save after an unrelated edit keeps `cache.external_server` and the secret byte for byte and never writes the mask | `ui/projects/paddock-ui` (the editor), `app/src/app/features/runners/config-panel.*`, `pitcrew-core/src/{runner_settings,runner_schema}.rs`, Debrief's `profile/toml-editor.ts` (adoption) | designer pass + implementer | 2.5-3.5 d |
+
+Section 6's "Apply to runners…" projection goes with WP-7: the cache server is set in each runner's `config.yaml` through WP-7R. WP-9's cache setting (`cache-server-panel`) only fed that projection; it is dropped with it unless the user says otherwise.
 
 ## Tests (each written first and seen failing)
 

@@ -1,6 +1,7 @@
 # 11. Editing a runner's configuration from Pitcrew
 
 - Status: accepted (2026-10-22)
+- Amended 2026-11-20 (user; family ADR [0110](../../../../docs/adr/0110-adapters-to-config-another-program-owns-preserve-what-they-do-not-model.md)): the form is superseded; the Configuration tab becomes a raw YAML editor only, with masked secrets and schema hints that never refuse unknown keys (Pitcrew ADR 0022 WP-7R). The patcher, backups and atomic replace of this ADR stay.
 - Related: ADR 0001 (architecture), ADR 0004 (IPC), ADR 0009 (runner environment); code:
   `pitcrew_core::{yaml_patch, runner_settings, runner_schema, runner_config, text_diff}`,
   `pitcrew_service::{runner_files, supervisor::config_requests}`, `app/src/app/features/runners/` (Configuration tab)

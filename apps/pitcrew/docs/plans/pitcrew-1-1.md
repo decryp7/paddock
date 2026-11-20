@@ -36,6 +36,7 @@
 | **Features rows, report-only** | `apps/pitcrew/features.toml` as Pitwall has it (ADR 0052 §1.4, C85); owed entries allowed, never a tag block | open | 0.5 |
 | **Move onto the shell** | Pitcrew's UI on the shared shell and its long jobs on `paddock-jobs` (ADR 0052 §"Before the Pitcrew 1.1 tag" named this as the reason for its gate) | open; not sized here | not sized |
 | **Host environment** | Environment page, shared folders, variables, ports, secrets, PATH additions, per-runner effective environment, the Actions cache server (ADR 0022; trimmed by 12-14 days on 2026-11-11) | accepted, planned | about 13-15 (guess) |
+| **Runner config editor (ADR 0110)** | The runner `config.yaml` as a raw YAML editor only on a shared paddock-ui editor (extracted from Debrief's TOML editor), masked secrets, schema hints that never refuse unknown keys; the form is removed. Replaces Pitcrew ADR 0022 WP-7 (2 days, inside the host-environment row), decided 2026-11-20 | decided, open | 2.5-3.5 (net +0.5-1.5) |
 | **Auto-scale** | Pool, queue watching, quiet hours (roadmap; no ADR text on main) | planned | 8-12 (guess) |
 | **Headless modes** | LaunchDaemon, systemd system unit, one SCM service per runner under a virtual account | planned | 5-8 (guess) |
 | **Runners** | Forgejo's runner, GitHub's self-hosted runner, per-runner `env` for interactive Windows runners (roadmap Phase 3) | planned | not sized |
