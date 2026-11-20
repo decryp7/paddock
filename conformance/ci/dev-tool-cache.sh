@@ -36,6 +36,7 @@ cmd_key() {
   if cmd_no_download || [ "${PADDOCK_DEV_FRESH:-}" = 1 ]; then
     echo "::notice::dev-tool-cache: this job builds ./dev from source (PADDOCK_DEV_DOWNLOAD=0, no read token or PADDOCK_DEV_FRESH=1), so no cached binary is restored or saved: a binary downloaded by another job must never run as source-built (ADR 0022 section 3.3). Not measured."
     out usable false
+    echo "- dev-tool cache: not used (this job builds ./dev from source: PADDOCK_DEV_DOWNLOAD=0, or no read token in this step's environment, or PADDOCK_DEV_FRESH=1)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
     return 0
   fi
   if ! lines="$("${dev[@]}" --wrapper-hash 2>/dev/null)" || [ "$(printf '%s\n' "$lines" | wc -l)" -lt 3 ]; then

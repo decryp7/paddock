@@ -357,6 +357,11 @@ fn a_container_job_without_a_slot_takes_a_lane_and_two_jobs_never_share_one() {
         "the lane is kept for the job's later steps: {}",
         first.env
     );
+    assert!(
+        first.env.contains(&format!("PADDOCK_CI_LANE_ROOT={mount}/lanes\n")) && first.env.contains("PADDOCK_CI_LANE_LOCK="),
+        "the end-of-job check needs the lane's root and the lock file's identity: {}",
+        first.env
+    );
     // A second job: its own temp folder, the first job's still there (its holder keeps s1).
     let other = Runner::new(Some(Fail::Never));
     let second = other.rust(&LOCAL, &extra);

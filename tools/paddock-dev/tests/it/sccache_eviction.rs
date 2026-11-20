@@ -16,8 +16,7 @@ use std::path::{Path, PathBuf};
 const RLIB: &str = "paddock-dev/rustc-x/release/libfoldhash.rlib";
 
 /// A port for sccache's server, derived from this process and a counter (the server binds it itself; nothing here binds and drops a
-/// listener to read its port). A port that is taken makes `--start-server` fail, which `Cache::start` asserts, so a collision turns
-/// the test red and never lets it pass on another server.
+/// listener to read its port). `Cache::start` checks that the server answering on it is this test's own, and tries another port if not.
 fn free_port() -> u16 {
     static NEXT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -43,23 +42,35 @@ impl Cache {
         c
     }
 
+    /// Starts the server on a port of its own and checks that the server answering there is this one: its "Cache location" must be
+    /// `cache_dir`. A port some other sccache already serves answers with another folder, and is skipped without stopping that
+    /// server (it is not ours); after five tries the test fails rather than run on a server it does not own.
     fn start(cache_dir: &Path, work: &Path) -> Cache {
-        let c = Cache {
-            cache_dir: cache_dir.to_path_buf(),
-            port: free_port(),
-            work: work.to_path_buf(),
-        };
-        let out = c
-            .command("sccache")
-            .arg("--start-server")
-            .output()
-            .expect("sccache is on PATH (the CI image has it): not measured otherwise");
-        assert!(
-            out.status.success(),
-            "sccache did not start: {}",
-            String::from_utf8_lossy(&out.stderr)
+        for _ in 0..5 {
+            let c = Cache {
+                cache_dir: cache_dir.to_path_buf(),
+                port: free_port(),
+                work: work.to_path_buf(),
+            };
+            let started = c
+                .command("sccache")
+                .arg("--start-server")
+                .output()
+                .expect("sccache is on PATH (the CI image has it): not measured otherwise");
+            let stats = c.command("sccache").arg("--show-stats").output().unwrap();
+            let ours = String::from_utf8_lossy(&stats.stdout)
+                .lines()
+                .any(|l| l.starts_with("Cache location") && l.contains(&cache_dir.display().to_string()));
+            if started.status.success() && ours {
+                return c;
+            }
+            // Not ours (a taken port, or a server of another folder): forget it without stopping anything.
+            std::mem::forget(c);
+        }
+        panic!(
+            "no port in five tries served this test's own sccache server (a Cache location other than {})",
+            cache_dir.display()
         );
-        c
     }
 
     /// One cacheable compile: a miss that inserts an entry and so makes the cache fill its cap.

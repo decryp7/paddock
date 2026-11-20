@@ -59,6 +59,7 @@ test('a job that builds from source never touches the cache: a download-saved bi
     assert.equal(r.out.usable, 'false', why);
     assert.equal(r.out.key, undefined, `${why}: no key, so nothing is restored or saved`);
   }
+  assert.match(run(root, ['key'], { PADDOCK_DEV_TOKEN: '' }).sum, /dev-tool cache: not used \(this job builds \.\/dev from source/, 'the job summary says why the cache was not used');
   // Positive control: the same checkout with a token and downloads on does get a key.
   assert.equal(run(root, ['key']).out.usable, 'true');
   // One definition, asked by setup-rust's compile-cache step too.

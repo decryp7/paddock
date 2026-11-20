@@ -29,7 +29,7 @@
 use clap::Args;
 use paddock_cli::{CliError, Report};
 use paddock_env::winpath;
-use paddock_slots::{Announcement, FsLocks, SlotError, SlotId, release as release_slot, slot_states, with_idle};
+use paddock_slots::{Announcement, FsLocks, SlotError, SlotId, SlotLocks, release as release_slot, slot_states, with_idle};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -92,6 +92,20 @@ impl AcquireArgs {
             acquire_grace_ms: DEFAULT_GRACE_MS,
         }
     }
+}
+
+/// `check`'s arguments.
+#[derive(Args)]
+pub struct CheckArgs {
+    /// The slot this job holds (`s1`...).
+    #[arg(long)]
+    slot: String,
+    /// The CI home that holds `slots/`.
+    #[arg(long)]
+    root: PathBuf,
+    /// The lock file's identity `acquire` reported (`lock` with --json: device:inode): the file must still be that one.
+    #[arg(long)]
+    lock: Option<String>,
 }
 
 /// `release`'s arguments.
@@ -325,7 +339,13 @@ pub fn acquire_with(a: &AcquireArgs, exe: &Path) -> Result<Report, CliError> {
             // The holder lives on by itself; reap nothing, wait for nothing.
             drop(child);
             Ok(Report::new(
-                json!({"slot": id.to_string(), "token": token, "max": a.max, "holder_pid": holder_pid(&a.root, id)}),
+                json!({
+                    "slot": id.to_string(),
+                    "token": token,
+                    "max": a.max,
+                    "holder_pid": holder_pid(&a.root, id),
+                    "lock": lock_identity(&FsLocks::new(&a.root).lock_file(id)),
+                }),
                 format!("{id} {token}"),
             ))
         }
@@ -362,7 +382,9 @@ pub fn hold(a: &HoldArgs) -> Result<Report, CliError> {
     )
     .map_err(failure)?;
     if let Some((id, paddock_slots::HoldEnd::LockLost)) = end {
-        // Loud, in the holder's own error: the job's compile-cache lane (or host slot) is no longer exclusive.
+        // The holder's pipes are cleared, so its error reaches nobody: the reason is also written next to the lock for `check`.
+        let reason = format!("the lock file was deleted or replaced while it was held (at {})", a.root.display());
+        let _ = std::fs::write(locks.lock_file(id).with_extension("lost"), &reason);
         return Err(CliError::failure(format!(
             "The lock file of slot {id} in {} was deleted or replaced while this job held it, so the slot no longer keeps other jobs out.",
             a.root.display()
@@ -370,6 +392,54 @@ pub fn hold(a: &HoldArgs) -> Result<Report, CliError> {
         .with_hint("Something deleted files under the slot folder (an old job's sccache cleanup of the shared mount?); remove old-style jobs from the runner and re-run the job."));
     }
     Ok(Report::new(json!({"ended": end.map(|(id, why)| format!("{id} {why:?}"))}), ""))
+}
+
+/// The identity of a lock file as text: `device:inode` on Unix (what the holder compares), else `present`. `None`: it is not there.
+pub fn lock_identity(path: &Path) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(format!("{}:{}", meta.dev(), meta.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        Some("present".to_string())
+    }
+}
+
+/// `dev ci slot check`: this job still holds its slot. The holder is detached with its pipes cleared, so a lost lock reaches the job
+/// only here (the sccache-stats step at the job's end): the holder's own `sN.lost` (why it let go), the lock file gone or another
+/// file than the one `acquire` reported, or nobody holding the slot any more. Each is a failure naming the slot, the cause and the next
+/// step.
+pub fn check(a: &CheckArgs) -> Result<Report, CliError> {
+    let id: SlotId = a.slot.parse().map_err(failure)?;
+    let locks = FsLocks::new(&a.root);
+    let lost = locks.lock_file(id).with_extension("lost");
+    let next = "The slot's folders may have been shared with another job meanwhile: treat this job's cache results as unverified, \
+        and remove old-style jobs (the ones that used the root of the shared mount) from the runner.";
+    if let Ok(why) = std::fs::read_to_string(&lost) {
+        return Err(CliError::failure(format!("Slot {id} was lost during this job: the holder said \"{}\".", why.trim())).with_hint(next));
+    }
+    let Some(now) = lock_identity(&locks.lock_file(id)) else {
+        return Err(CliError::failure(format!("The lock file of slot {id} in {} is gone.", a.root.display())).with_hint(next));
+    };
+    if let Some(want) = &a.lock
+        && *want != now
+    {
+        return Err(CliError::failure(format!(
+            "The lock file of slot {id} is not the one this job locked (it was {want}, it is {now}): it was deleted and made again."
+        ))
+        .with_hint(next));
+    }
+    if !locks.is_held(id).map_err(failure)? {
+        return Err(CliError::failure(format!("Nobody holds slot {id} any more: its holder ended before the job did.")).with_hint(next));
+    }
+    Ok(Report::new(
+        json!({"slot": id.to_string(), "held": true, "lock": now}),
+        format!("{id} held"),
+    ))
 }
 
 /// `dev ci slot release`.

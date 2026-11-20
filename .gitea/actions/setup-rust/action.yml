@@ -254,7 +254,8 @@ runs:
                 echo "no ./dev binary is pinned for this job (PADDOCK_DEV), and this path never builds one" > "$LANE_ERR"
               fi
               if [ -n "$LANE" ]; then
-                echo "PADDOCK_CI_SLOT=$LANE" >> "$GITHUB_ENV" || { echo "::error::could not record the lane $LANE in GITHUB_ENV"; exit 1; }
+                # The slot, and what the end-of-job check (`dev ci slot check`, in sccache-stats) needs: the lanes folder and the lock file's identity.
+                { echo "PADDOCK_CI_SLOT=$LANE"; echo "PADDOCK_CI_LANE_ROOT=$MOUNT/lanes"; echo "PADDOCK_CI_LANE_LOCK=$(stat -c '%d:%i' "$MOUNT/lanes/slots/$LANE.lock" 2>/dev/null || true)"; } >> "$GITHUB_ENV" || { echo "::error::could not record the lane $LANE in GITHUB_ENV"; exit 1; }
                 echo "sccache: this job holds lane $LANE of $LANES on $MOUNT"
               else
                 echo "::warning::no lane of $MOUNT was taken: $(tr '\n' ' ' < "$LANE_ERR"). The compile cache lives and dies with the job."

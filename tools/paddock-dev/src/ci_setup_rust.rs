@@ -734,7 +734,11 @@ impl Step<'_> {
             .map(str::to_string)
             .ok_or("the slot tool named no slot")?;
         // A failed write is not dropped: the later steps would not know the lane, so this job does not use it.
-        self.append("GITHUB_ENV", &[format!("PADDOCK_CI_SLOT={slot}")])
+        let mut env_lines = vec![format!("PADDOCK_CI_SLOT={slot}"), format!("PADDOCK_CI_LANE_ROOT={mount}/lanes")];
+        if let Some(lock) = report.json()["lock"].as_str() {
+            env_lines.push(format!("PADDOCK_CI_LANE_LOCK={lock}"));
+        }
+        self.append("GITHUB_ENV", &env_lines)
             .map_err(|_| format!("the lane {slot} could not be recorded in GITHUB_ENV (the error is above)"))?;
         self.say(format!("sccache: this job holds lane {slot} of {slots} on {mount}"));
         self.clean_legacy_mount(mount);

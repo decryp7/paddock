@@ -1,8 +1,23 @@
 name: sccache-stats
-description: "Prints sccache --show-stats (hit rate) in the job log; use it as the last step with `if: always()`. Does nothing when sccache is absent."
+description: "Prints sccache --show-stats (hit rate) in the job log; use it as the last step with `if: always()`. Does nothing when sccache is absent. On Linux it also checks that this job still held its compile-cache lane to the end (`dev ci slot check`: the same holder, the same lock file) and says so with an ::error:: and a summary line when it did not (ADR 0111)."
 runs:
   using: composite
   steps:
     - name: sccache statistics
       shell: bash
       run: bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" host sccache-stats || echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
+    - name: Compile-cache lane still held
+      if: runner.os == 'Linux' && always()
+      shell: bash
+      run: |
+        # The slot holder is detached with its pipes cleared, so a lost lane reaches the job only here. It never fails the job: the
+        # build is what it is, but its cache results are unverified.
+        if [ -n "${PADDOCK_CI_LANE_ROOT:-}" ] && [ -n "${PADDOCK_CI_SLOT:-}" ]; then
+          if [ -n "${PADDOCK_DEV:-}" ] && [ -x "$PADDOCK_DEV" ]; then DEVCMD=("$PADDOCK_DEV"); else DEVCMD=(bash "${{ github.action_path }}/../../../dev"); fi
+          if out="$("${DEVCMD[@]}" ci slot check --slot "$PADDOCK_CI_SLOT" --root "$PADDOCK_CI_LANE_ROOT" ${PADDOCK_CI_LANE_LOCK:+--lock "$PADDOCK_CI_LANE_LOCK"} 2>&1)"; then
+            echo "- sccache lane $PADDOCK_CI_SLOT: held to the end" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          else
+            echo "::error::sccache lane $PADDOCK_CI_SLOT was not held to the end of this job: $(printf '%s' "$out" | tr '\n' ' ')"
+            echo "- sccache lane $PADDOCK_CI_SLOT: LOST ($(printf '%s' "$out" | tr '\n' ' '))" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          fi
+        fi

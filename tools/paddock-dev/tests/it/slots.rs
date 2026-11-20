@@ -518,3 +518,60 @@ fn a_holder_lets_go_at_its_lifetime_cap_while_the_job_folder_still_exists() {
     wait_until_free(&root, 1);
     assert!(job.exists(), "the job folder was never removed");
 }
+
+fn check(root: &Path, slot: &str, lock: Option<&str>) -> (i32, Value, String) {
+    let mut args = vec!["ci", "slot", "check", "--slot", slot, "--root", root.to_str().unwrap()];
+    if let Some(l) = lock {
+        args.extend(["--lock", l]);
+    }
+    dev(&args)
+}
+
+#[cfg(unix)]
+#[test]
+fn the_end_of_job_check_reports_a_lane_whose_lock_file_was_deleted_mid_job() {
+    // ADR 0111: an old job's sccache cleanup can delete a held lock file. The holder is detached with its pipes cleared, so only this
+    // check (the sccache-stats step) can tell the job. Control: a held slot with its own lock file passes.
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let (code, v, err) = acquire(&root, &job, "2");
+    assert_eq!(code, 0, "{v} {err}");
+    let lock = v["lock"].as_str().expect("acquire reports the lock file's identity").to_string();
+    let (code, v, err) = check(&root, "s1", Some(&lock));
+    assert_eq!(code, 0, "an intact lane passes: {v} {err}");
+    let lock_file = root.join("slots/s1.lock");
+    std::fs::remove_file(&lock_file).unwrap();
+    // The holder notices at its next look and says why, in a file the check reads.
+    let lost = root.join("slots/s1.lost");
+    assert!(
+        paddock_testkit::poll_until_within(Duration::from_secs(60), || lost.exists()),
+        "the holder never wrote its reason"
+    );
+    let (code, _, err) = check(&root, "s1", Some(&lock));
+    assert_ne!(code, 0, "{err}");
+    assert!(
+        err.contains("Slot s1 was lost during this job") && err.contains("deleted or replaced"),
+        "{err}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn the_end_of_job_check_reports_a_replaced_lock_file_and_a_holder_that_is_gone() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let (_, v, _) = acquire(&root, &job, "2");
+    let lock = v["lock"].as_str().unwrap().to_string();
+    // Not the file this job locked (the identity differs): said, with both identities.
+    let (code, _, err) = check(&root, "s1", Some("1:1"));
+    assert_ne!(code, 0);
+    assert!(err.contains("is not the one this job locked") && err.contains(&lock), "{err}");
+    // The job folder goes: the holder ends and the slot is free, so nobody holds it.
+    std::fs::remove_dir(&job).unwrap();
+    wait_until_free(&root, 1);
+    let (code, _, err) = check(&root, "s1", None);
+    assert_ne!(code, 0);
+    assert!(err.contains("Nobody holds slot s1"), "{err}");
+}
