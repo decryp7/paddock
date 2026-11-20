@@ -3192,6 +3192,11 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **ui gallery `open()` waits a fixed 600 ms** (`ui/e2e/gallery.spec.ts`: "Let the chart draw ... and fonts settle"). Train 16 fixed the
   one test that failed on it (the path box, which now waits for its fitted text; ci.yml 8346 job 42258); every other test that reads a
   measured or animated value after `open()` still leans on that wait. Next: wait on each test's own condition and drop the fixed wait.
+- **paddock-dev `queue::tests::a_batch_is_at_most_six`** (ci.yml run 8359, job 42403, windows-latest; FLAKY: try 1 timed out at
+  60 s, try 2 passed in 50.1 s; 19.2 s in run 8335, job 42150). The same run's git-heavy `ci_runs::trial` tests went from 6 to 9 s to
+  43 to 60 s while the whole job went from 603 s to 753 s: three jobs shared the Windows runner with 8 test threads each on 16 cores
+  (the ER-48 job share, fixed on its own branch in Train A). Next: confirm the test is back near 19 s once the Windows share lands; if
+  not, a failing reproduction first (its git starts on Windows), never a longer limit.
 
 ## Chrome took over 5 s to quit: it reads the user's temp folder, which leaked test folders had filled (Spotter, 2026-11-20, train 16)
 - **Failure:** spotter-render `real_browser::closing_quits_the_browser_by_itself_before_any_kill` red on both tries in ci.yml runs
