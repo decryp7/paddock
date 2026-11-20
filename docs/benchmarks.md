@@ -2298,3 +2298,51 @@ save more, on each OS? And did the user's Defender process exclusions for git ch
   | before (the first version) | `rustc-wrapper`, no `sccache` name | 112 s | 0 (no C compile went through sccache) | 311 / 164 |
 
 - **Result:** the shim gives 270 C/C++ hits (libsqlite3-sys, zstd-sys, ring and the like) where the first version gave none, and the run took 95 s against 112 s. **Not measured:** a repeat (one run per row, so the 17 s difference is inside this machine's noise at that load; the hit counts are not), and a Linux or Windows host. A `cargo xwin` build is as uncached for C as before; ring's C is a few seconds.
+
+## Windows runner: git-heavy paddock-dev tests 2 to 8 times slower when three jobs test at once (2026-11-20, fix/windows-trial-tests-slow)
+
+- **Question:** in ci.yml run 8359 (train/2026-11-19-17, 9ec43be3c) the paddock-dev (windows-latest) job timed out on
+  `ci_runs::trial::tests::a_branch_sent_back_for_a_conflict_loses_its_earlier_trial_ref` and
+  `prune_deletes_the_trial_refs_of_gone_and_landed_branches_and_keeps_live_ones` (60 s, both tries). In main's run 8335 (e0fd0f511) the
+  same tests took 6 to 17 s. Did the train add git starts to these tests, or is the cause somewhere else?
+- **Method 1, git starts per test:** the unit-test binary of paddock-dev built at both commits on the Mac, each test run alone
+  (`--exact`, one thread), with a `git` shim first on `PATH` that logs every call. Positive control: the log of the conflict test holds the
+  product's own `for-each-ref`, `merge-tree` and `commit-tree` calls (5 lines), not only the fixture's.
+
+  | Test | e0fd0f511 (main) | 9ec43be3c (train) |
+  |---|---:|---:|
+  | `trial::a_branch_sent_back_for_a_conflict_loses_its_earlier_trial_ref` | 50 | 49 |
+  | `trial::prune_deletes_the_trial_refs_of_gone_and_landed_branches_and_keeps_live_ones` | 78 | 78 |
+  | `trial::a_clean_branch_is_merged_onto_the_open_train_and_pushed_to_its_trial_ref` | 38 | 39 |
+  | `trial::with_no_open_train_the_target_is_main` | 33 | 33 |
+  | `members::the_members_are_the_first_parent_merges_oldest_first_with_their_own_diff_and_files` | 26 | 26 |
+  | `queue::a_batch_is_at_most_six` | 76 | 76 |
+
+  The difference of one is a `merge-base` call in `trial::open_train`. It loops over the train refs, and their order varies when two
+  commits share a timestamp. The two commits do not differ in what they run: `ci_runs/trial.rs` has no diff between them, and `queue/real.rs`
+  differs by one comment line.
+- **Method 2, per-test durations from the two job logs** (jobs 42150 and 42403, same host, both at `NEXTEST_TEST_THREADS=8`):
+  - At 05:27 to 05:31 UTC every test that runs git was slower: trial 6.5 to 7.2 times, `ci_runs::members` 4.5 to 7.2,
+    `queue::tests` 2.5 to 4.7, `pre_push::tests` 2 to 8, `places` 17. Tests that start no program were 0.7 to 1.1 times as long.
+  - From 05:31:25 the ratios were about 1.0 again.
+  - The whole job took 753 s against 603 s, so its total hid the slow window.
+- **Timeline of the host (decryp7ology-dev, 16 cores; `ci_build_jobs.rs` class defaults for Windows: 3 jobs per host and 8 test threads
+  per job, not divided by the share):**
+  - Run 8359:
+    - The paddock-dev unit tests ran from 05:26:55.
+    - At the same time "crate (windows)" ran its 4773-test nextest run (05:23:13 to 05:30:00; 407 s against 323 s in 8335).
+    - Dyno's job ran nextest until 05:25:36, then its `hostRustChecks` cargo build until 05:31:58.
+    - That is about 24 test threads plus a 5-job build on 16 cores.
+  - Run 8335: the crate job had ended at 22:38, before paddock-dev started (22:43:43). Only Dyno's nextest run (22:45:32 to 22:46:57)
+    overlapped, and the trial tests took 6 to 9 s.
+- **Result:** the train did not add git starts. The slowdown follows the overlap with another job's full test run on the same Windows
+  host: each git start is slow when 24 test threads share 16 cores (a git start already costs 33 to 44 ms there with nothing else running,
+  see the host probes above). Ruled out:
+  - **More git starts per test:** the counts above.
+  - **A change in the tested code:** no diff.
+  - **The Proxmox backup window:** it starts about 16:52 UTC, and this was 05:27 UTC.
+  - **Load across the whole job:** the pure tests were not slower.
+- **Not measured:**
+  - The same tests on the Windows runner with nothing else on it, at this train head. The trial would need the runner to itself.
+  - Which of the overlapping jobs contributed how much.
+  - The fix (the Windows test threads divided by the jobs per host) is owned by perf/ci-linux-job-share and is measured there.
