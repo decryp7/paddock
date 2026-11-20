@@ -19,6 +19,7 @@
 //! A [`Probe`] answers one question per poll; [`wait_for`] owns the clock, the interval, the limit and the log. Both the probe's
 //! inputs (files, processes, HTTP) and the [`Clock`] are traits, so the tests run with fakes and a fake clock and never sleep.
 
+use crate::health::{Health, wait_held};
 use clap::{ArgGroup, Args};
 use paddock_cli::{CliError, Report};
 use paddock_proc::{Presence, ProcessId};
@@ -91,6 +92,10 @@ pub trait Probe {
     fn poll(&mut self) -> Result<Poll, String>;
     /// What to try when the limit passes, for the `::error::` line.
     fn next_step(&self) -> String;
+    /// Lines the probe wants in the log (a service went down or came back): [`wait_for`] writes them after each look.
+    fn take_notes(&mut self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// How a wait ended.
@@ -139,7 +144,11 @@ pub fn wait_for(probe: &mut dyn Probe, clock: &mut dyn Clock, max: Duration, int
     let mut errors = 0u32;
     let mut next_report = REPORT_EVERY;
     loop {
-        match probe.poll() {
+        let looked = probe.poll();
+        for note in probe.take_notes() {
+            let _ = writeln!(log, "wait: {note}");
+        }
+        match looked {
             Ok(Poll::Done(detail)) => {
                 let elapsed = clock.elapsed();
                 let _ = writeln!(log, "wait: done after {}: {detail}", fmt_duration(elapsed));
@@ -642,6 +651,8 @@ pub struct Env<'a> {
     pub look: &'a dyn Fn(u32) -> Presence,
     /// Where the one-waiter-per-target locks are (`None`: outside a repository, no lock is taken).
     pub locks: Option<crate::wait_lock::Locks<'a>>,
+    /// The services a `--ci-run` wait holds for while they are down ([`crate::health`]); `None`: no health check.
+    pub health: Option<Health<'a>>,
 }
 
 /// Runs the command against the real machine.
@@ -649,6 +660,9 @@ pub fn command(args: &WaitArgs) -> Result<Report, CliError> {
     let var = |k: &str| std::env::var(k).ok();
     let presence = |id: ProcessId| id.presence();
     let mut http = CurlHttp;
+    let mut reach = crate::health::CurlReach;
+    let vars: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
+    let services = wait_services(&args.server, &vars);
     let env = Env {
         var: &var,
         files: &DiskFiles,
@@ -657,8 +671,15 @@ pub fn command(args: &WaitArgs) -> Result<Report, CliError> {
         process: &ProcessId::of,
         look: &paddock_proc::presence,
         locks: real_locks(&presence),
+        health: args.ci_run.map(|_| Health::new(services, &mut reach)),
     };
     run_with(args, env, &mut SystemClock::new(), &mut std::io::stderr())
+}
+
+/// The services a `--ci-run` wait holds on: Gitea only. Reading a run's state needs nothing else, so RustFS being down must not
+/// hold a wait (or turn a run that already failed into "RustFS is down" at `--max`).
+pub(crate) fn wait_services(server: &str, env: &std::collections::HashMap<String, String>) -> Vec<crate::health::Service> {
+    crate::health::services(server, env, false).0
 }
 
 /// The canonical absolute form of a path that may not exist yet, so one file has one name whatever folder it is asked from.
@@ -745,6 +766,7 @@ pub fn run_with(args: &WaitArgs, env: Env<'_>, clock: &mut dyn Clock, log: &mut 
         Some(Ok(l)) => Some(l),
         None => None,
     };
+    let mut health = env.health;
     let kind;
     let outcome = if let Some(name) = &args.plock {
         kind = "plock";
@@ -758,7 +780,7 @@ pub fn run_with(args: &WaitArgs, env: Env<'_>, clock: &mut dyn Clock, log: &mut 
             args.include_past,
         )
         .map_err(CliError::failure)?;
-        run_probe(&mut probe, clock, max, interval, log)
+        run_probe(&mut probe, &mut health, clock, max, interval, log)
     } else if let Some(pid) = args.pid {
         kind = "pid";
         let Some(id) = (env.process)(pid) else {
@@ -777,7 +799,7 @@ pub fn run_with(args: &WaitArgs, env: Env<'_>, clock: &mut dyn Clock, log: &mut 
             ));
         };
         let mut probe = PidProbe::new(id, env.alive);
-        run_probe(&mut probe, clock, max, interval, log)
+        run_probe(&mut probe, &mut health, clock, max, interval, log)
     } else if let Some(path) = &args.file {
         kind = "file";
         let text = args.line.as_deref().unwrap_or_default();
@@ -790,14 +812,14 @@ pub fn run_with(args: &WaitArgs, env: Env<'_>, clock: &mut dyn Clock, log: &mut 
             args.include_past,
         )
         .map_err(CliError::failure)?;
-        run_probe(&mut probe, clock, max, interval, log)
+        run_probe(&mut probe, &mut health, clock, max, interval, log)
     } else if let Some(run) = args.ci_run {
         kind = "ci-run";
         let token = (env.var)("GITEA_TOKEN")
             .filter(|t| !t.trim().is_empty())
             .ok_or_else(|| usage("GITEA_TOKEN is not set; --ci-run needs it to ask the Gitea API (run `source ~/.zshenv`).".into()))?;
         let mut probe = CiRunProbe::new(env.http, &args.server, &args.repo, run, token.trim().to_string());
-        run_probe(&mut probe, clock, max, interval, log)
+        run_probe(&mut probe, &mut health, clock, max, interval, log)
     } else {
         return Err(usage(
             "say what to wait for: --plock, --pid, --file with --line, or --ci-run.".into(),
@@ -806,9 +828,18 @@ pub fn run_with(args: &WaitArgs, env: Env<'_>, clock: &mut dyn Clock, log: &mut 
     finish(kind, outcome, log)
 }
 
-fn run_probe(probe: &mut dyn Probe, clock: &mut dyn Clock, max: Duration, interval: Duration, log: &mut dyn Write) -> (Outcome, String) {
-    let next = probe.next_step();
-    (wait_for(probe, clock, max, interval, log), next)
+fn run_probe(
+    probe: &mut dyn Probe,
+    health: &mut Option<Health<'_>>,
+    clock: &mut dyn Clock,
+    max: Duration,
+    interval: Duration,
+    log: &mut dyn Write,
+) -> (Outcome, String) {
+    let outcome = wait_held(probe, health.as_mut(), clock, max, interval, log);
+    // A service that is down at the end names its own next step; otherwise the probe's.
+    let next = health.as_ref().and_then(Health::next_step).unwrap_or_else(|| probe.next_step());
+    (outcome, next)
 }
 
 fn finish(kind: &str, (outcome, next): (Outcome, String), log: &mut dyn Write) -> Result<Report, CliError> {
@@ -1166,11 +1197,150 @@ mod tests {
             process: &process,
             look,
             locks: None,
+            health: None,
         };
         let mut clock = FakeClock::default();
         let mut log = Vec::new();
         let r = run_with(a, env, &mut clock, &mut log);
         (r, String::from_utf8(log).unwrap())
+    }
+
+    /// `run_looking` for a `--ci-run` wait with the health gate over `reach` (both services of the test environment).
+    fn run_held(a: &WaitArgs, http: &mut FakeHttp, reach: &mut crate::health::tests::Scripted) -> (Result<Report, CliError>, String) {
+        let var = |k: &str| (k == "GITEA_TOKEN").then(|| "tok".to_string());
+        let process = |_: u32| None;
+        let files = FakeFiles::default();
+        let env = Env {
+            var: &var,
+            files: &files,
+            http,
+            alive: Box::new(|_| Presence::Running),
+            process: &process,
+            look: &|_| Presence::Running,
+            locks: None,
+            health: Some(Health::new(crate::health::tests::both(), reach)),
+        };
+        let mut clock = FakeClock::default();
+        let mut log = Vec::new();
+        let r = run_with(a, env, &mut clock, &mut log);
+        (r, String::from_utf8(log).unwrap())
+    }
+
+    fn finished() -> FakeHttp {
+        FakeHttp {
+            answers: vec![Ok(json!({"status": "completed", "conclusion": "success"}))],
+            urls: vec![],
+        }
+    }
+
+    #[test]
+    fn a_ci_run_wait_holds_while_gitea_is_down_then_goes_on_when_it_answers() {
+        use crate::health::Reach;
+        let mut reach = crate::health::tests::Scripted::new().script(
+            "api/v1/version",
+            vec![
+                Reach::Answered(502),
+                Reach::Answered(502),
+                Reach::Down("connection refused".into()),
+                Reach::Answered(200),
+            ],
+        );
+        let mut http = finished();
+        let (r, log) = run_held(&args(&["--ci-run", "5", "--max", "10m"]), &mut http, &mut reach);
+        assert!(r.is_ok(), "{log}");
+        assert_eq!(http.urls.len(), 1, "the run is asked about only after Gitea answered: {log}");
+        assert_eq!(
+            log.matches("holding until it answers").count(),
+            1,
+            "one line per state change: {log}"
+        );
+        assert!(log.contains("Gitea answers again"), "{log}");
+    }
+
+    #[test]
+    fn a_hold_that_reaches_max_ends_with_an_error_naming_the_service_and_the_next_step() {
+        use crate::health::Reach;
+        // Positive control first: without the gate, the same outage (the run list answers 502) ends the wait as "broken" after five
+        // failed looks, not as a hold, so the hold below is the gate's doing.
+        let files = FakeFiles::default();
+        let mut broken = FakeHttp {
+            answers: vec![Err("HTTP 502".into())],
+            urls: vec![],
+        };
+        let (r, _) = run(
+            &args(&["--ci-run", "5", "--max", "10m"]),
+            &files,
+            &mut broken,
+            &[("GITEA_TOKEN", "tok")],
+        );
+        assert!(r.unwrap_err().message.contains("HTTP 502"));
+        assert_eq!(broken.urls.len(), 5);
+
+        let mut reach = crate::health::tests::Scripted::new().script("api/v1/version", vec![Reach::Answered(502)]);
+        let mut http = FakeHttp {
+            answers: vec![Err("HTTP 502".into())],
+            urls: vec![],
+        };
+        let (r, log) = run_held(&args(&["--ci-run", "5", "--max", "2m"]), &mut http, &mut reach);
+        let e = r.unwrap_err();
+        assert!(http.urls.is_empty(), "never asked the run list while down");
+        for text in [&e.message, &log] {
+            assert!(
+                text.contains("::error::wait: gave up after 2m") && text.contains("Gitea") && text.contains("HTTP 502"),
+                "{text}"
+            );
+        }
+        assert!(
+            log.contains("Next: Gitea runs on the NAS") && log.contains("then run the command again"),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn a_run_that_already_failed_is_reported_at_once_whatever_rustfs_does() {
+        use crate::health::Reach;
+        // The wait's own service list (Gitea only), with RustFS down in the scripted look and configured in the environment.
+        let env: std::collections::HashMap<String, String> = [
+            ("PADDOCK_SCCACHE_BACKEND", "s3"),
+            ("PADDOCK_SCCACHE_S3_BUCKET", "bucket-x"),
+            ("PADDOCK_SCCACHE_S3_ENDPOINT", "10.9.9.9:1234"),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        let failed = || FakeHttp {
+            answers: vec![Ok(json!({"status": "completed", "conclusion": "failure"}))],
+            urls: vec![],
+        };
+        let run_with_services = |services: Vec<crate::health::Service>| {
+            let mut reach = crate::health::tests::Scripted::new().script("bucket-x", vec![Reach::Down("connection refused".into())]);
+            let mut http = failed();
+            let var = |k: &str| (k == "GITEA_TOKEN").then(|| "tok".to_string());
+            let process = |_: u32| None;
+            let files = FakeFiles::default();
+            let env = Env {
+                var: &var,
+                files: &files,
+                http: &mut http,
+                alive: Box::new(|_| Presence::Running),
+                process: &process,
+                look: &|_| Presence::Running,
+                locks: None,
+                health: Some(Health::new(services, &mut reach)),
+            };
+            let mut log = Vec::new();
+            let r = run_with(&args(&["--ci-run", "5", "--max", "2m"]), env, &mut FakeClock::default(), &mut log);
+            (r, String::from_utf8(log).unwrap())
+        };
+        let (r, log) = run_with_services(wait_services("https://g", &env));
+        let e = r.unwrap_err();
+        assert!(
+            e.message.contains("run 5 finished: failure") && !log.contains("RustFS") && !log.contains("gave up"),
+            "{log}"
+        );
+        // Positive control: had RustFS been in the list, the same failed run would have been held to --max and named RustFS.
+        let (r, log) = run_with_services(crate::health::services("https://g", &env, true).0);
+        assert!(r.unwrap_err().message.contains("RustFS"), "{log}");
     }
 
     #[test]
@@ -1303,6 +1473,7 @@ mod tests {
                 process: &process,
                 look: &|_| Presence::Running,
                 locks,
+                health: None,
             };
             let mut log = Vec::new();
             let r = run_with(&a, env, &mut FakeClock::default(), &mut log);
@@ -1371,6 +1542,7 @@ mod tests {
                     me: ProcessId::new(5, StartTime::from_micros(9)),
                     presence: &running,
                 }),
+                health: None,
             };
             run_with(&a, env, &mut FakeClock::default(), &mut Vec::new())
         };

@@ -4,6 +4,24 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-dev`, `heavy`, `paddock-env`: a health gate for Gitea, and no tool prompts (user decision 2026-11-20)
+- `./dev ci dispatch`, `./dev wait --ci-run` and the queue and member-gate dispatch look at Gitea (`GET /api/v1/version`) and hold while it
+  is down: any answer below 500 is up (a 401 or 403 included), a refused connection, a timeout or a 5xx is down. They hold on Gitea
+  only, since reading a run or sending a dispatch needs nothing else; `health::services(.., rustfs: true)` adds RustFS (a GET of its
+  bucket URL from `PADDOCK_SCCACHE_S3_*`) for a command that compiles through the shared cache. An address that can never work (a
+  malformed URL, a host that does not resolve: a wrong `--server`) is an error at the first look, not a hold; it is held for only after
+  the service has answered once. One log line per change of state; the hold counts against the command's `--max` and ends with one
+  `::error::` naming the service and the next step.
+- A push of the train tools (`ci dispatch --trial`) is not sent while Gitea is down, held for at most that command's `--max`
+  (`GitTrain::push_hold`); the queue and the member gate set no bound and try again on their next turn. These tools authenticate with an
+  askpass program and `GIT_TERMINAL_PROMPT=0`, so they never touched a git login; the erased login of 2026-11-20 was a hand-typed push
+  through the keychain helper, which the repository's helper (reads `GITEA_TOKEN`, ignores erase) now prevents. The hold only keeps a
+  push from failing with an unreadable 502.
+- New `paddock_env::command::no_prompts`: standard input is `/dev/null` and `RUSTUP_AUTO_INSTALL=0` (a named policy, ER-47). `heavy`
+  applies it to its command (`HEAVY_STDIN=inherit` opts in), and so do `./dev ci run` lines and the generators' programs.
+- New hook `.claude/hooks/no-local-installs.sh`: an agent's `cargo llvm-cov`, `rustup component add`, `rustup toolchain install`, `rustup target add`, `rustup update`, `rustup default <ver>` and `cargo install cargo-llvm-cov` are
+  refused with the next step (CI's llvm-cov gate measures coverage; the user installs toolchains).
+
 ### `@decryp7/paddock-e2e`: `untilItsPageCloses` and `clickThatClosesItsPage`, for a step that closes its own window
 - A test step whose action ends the page it acts on (a pop-out's Dock back, the pointer-up that docks a dragged pop-out) counts as done
   when that page closed: Playwright can reject such a step with "Target page, context or browser has been closed" when the window goes
