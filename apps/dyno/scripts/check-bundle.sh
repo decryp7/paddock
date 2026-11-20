@@ -100,7 +100,7 @@ case "$(uname -s)" in
     ident="$(codesign -dv "$app/Contents/MacOS/dyno-helper" 2>&1 | sed -n 's/^Identifier=//p')"
     [[ "$ident" == net.decryptology.dyno.helper ]] || err "dyno-helper has the code-signing identifier '${ident:-none}', not net.decryptology.dyno.helper (ADR 0027)"
     # Security review F2: the helper in the bundle must be the bytes the release signed (the elevated install verifies them with the
-    # family key and refuses anything else). sidecar.mjs wrote the hash it signed; an unsigned build (no key) has none and says so.
+    # family key and refuses anything else). sign-helper.mjs (the release's own signing step) wrote the hash it signed; an unsigned build (no key) has none and says so.
     signed_hash="$(cat "$(dirname "$0")/../app/src-tauri/binaries/dyno-helper.sha256" 2>/dev/null || true)"
     sig_file="$app/Contents/Resources/dyno-helper.minisig"
     if [[ -n "$signed_hash" ]]; then
@@ -115,7 +115,7 @@ case "$(uname -s)" in
       case "${GITHUB_REF:-}${GITEA_REF:-}" in refs/tags/*) release=1 ;; esac
       [[ "${GITHUB_REF_TYPE:-}${GITEA_REF_TYPE:-}" == tag ]] && release=1
       if (( release )) || [[ -n "${TAURI_UPDATER_PUBKEY:-}" ]]; then
-        err "the bundled dyno-helper is not signed (TAURI_SIGNING_PRIVATE_KEY was not available to sidecar.mjs, release=$release, updater key set=$([[ -n "${TAURI_UPDATER_PUBKEY:-}" ]] && echo yes || echo no)): turning the helper on would be refused. Next step: give the release job the signing key and rebuild"
+        err "the bundled dyno-helper is not signed (the signing step (sign-helper.mjs, --pre-sign) left no signature, release=$release, updater key set=$([[ -n "${TAURI_UPDATER_PUBKEY:-}" ]] && echo yes || echo no)): turning the helper on would be refused. Next step: check that the release job passes pre-sign and the signing key reaches tauri-bundle.sh, and rebuild"
       else
         echo "::warning::the bundled dyno-helper is not signed (no signing key in this build): turning the helper on will be refused"
       fi

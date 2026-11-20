@@ -239,6 +239,8 @@ jobs:
       notes-extra: "**Existing installs:** download this version once by hand. Dyno now updates from the Paddock releases, which a copy installed before this version does not look at."
       # Dyno's UI imports the shared library from ui/dist, which the app build (Tauri's beforeBuildCommand) needs.
       prepare: npm run build -w ui
+      # The macOS helper is built, sealed and signed in tauri-bundle.sh's own step with the key; the app's beforeBuildCommand never sees it.
+      pre-sign: apps/dyno/app/src-tauri/scripts/sign-helper.mjs
       cliff-config: apps/dyno/cliff.toml
       # Since 1.1.0 every Dyno release's notes are the CHANGELOG section of its version (as in dyno-release.yml).
       first-release-changelog: apps/dyno/CHANGELOG.md

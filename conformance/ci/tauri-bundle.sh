@@ -18,12 +18,14 @@ bundles="${1:?bundles, e.g. deb,appimage}"
 app_dir="app"
 root=""
 prepare=""
+pre_sign=""
 shift
 while [ $# -gt 0 ]; do
   case "$1" in
     --app-dir) app_dir="${2:?--app-dir needs a value}"; shift 2 ;;
     --root) root="${2:?--root needs a value}"; shift 2 ;;
     --prepare) prepare="${2:?--prepare needs a command}"; shift 2 ;;
+    --pre-sign) pre_sign="${2:?--pre-sign needs a script}"; shift 2 ;;
     *) echo "::error::unknown option $1"; exit 2 ;;
   esac
 done
@@ -65,6 +67,15 @@ updater_key_take
 if [ -n "$prepare" ]; then (cd "$root" && bash -euo pipefail -c "$prepare"); fi
 # A CI run that is not a tag: sign with a key pair made in this job, so the signing and latest.json path is still exercised.
 updater_key_throwaway "$app_dir"
+# --pre-sign <script>: on macOS, an artifact the installers carry that must be signed with the key before the bundle (Dyno's helper,
+# whose bytes Tauri copies into the .app). The step is its own: `node <script> build` runs without the key (it builds branch code),
+# `node <script> sign` gets it in its environment only (updater_key_exec), under the condition `tauri build` gets it (a tag: the real
+# key; otherwise the job's throw-away key). The app's beforeBuildCommand then never signs and never needs the key (ADR 0085
+# amendment 0085-2026-11-12, item 11).
+if [ -n "$pre_sign" ] && [ "$(uname -s)" = Darwin ]; then
+  node "$pre_sign" build
+  updater_key_exec node "$pre_sign" sign
+fi
 # An NSIS or AppImage build needs tools Tauri would fetch from GitHub: they go into <build folder>/.tauri (useLocalToolsDir),
 # emptied and filled with the pinned, verified copies, so Tauri downloads none of them (ADR 0085 WP-9; a failure prints its
 # ::error::). After the build, check compares the folder with the pins (a tag fails on anything unpinned).
