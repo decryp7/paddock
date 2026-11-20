@@ -241,7 +241,7 @@ fn writer_loop(c: &Connection, rx: &Receiver<Job>, limits: &Limiter, pending: &P
                     Scope::Kind(k) => c.execute("DELETE FROM entries WHERE kind=?1", params![k.name()]),
                     Scope::App(a) => c.execute("DELETE FROM entries WHERE app=?1", params![a]),
                     Scope::Model(m) => c.execute("DELETE FROM entries WHERE model=?1", params![m]),
-                    Scope::Models(ms) => ms.iter().map(|m| c.execute("DELETE FROM entries WHERE model=?1", params![m])).sum(),
+                    Scope::Models(ms) => delete_models(c, ms),
                     Scope::Preset(p) => c.execute("DELETE FROM entries WHERE preset=?1", params![p]),
                 };
                 lock(pending).retain(|(k, _), (_, meta, _)| !scope.covers(*k, meta));
@@ -264,6 +264,19 @@ fn writer_loop(c: &Connection, rx: &Receiver<Job>, limits: &Limiter, pending: &P
             }
         }
     }
+}
+
+/// Deletes every entry of `models` in one transaction: one `model IN (...)` statement per chunk of models, one commit.
+fn delete_models(c: &Connection, models: &[String]) -> rusqlite::Result<usize> {
+    let mut n = 0;
+    in_tx(c, |c| {
+        for chunk in models.chunks(IN_CHUNK) {
+            let sql = format!("DELETE FROM entries WHERE model IN ({})", placeholders(chunk.len(), 1));
+            n += c.execute(&sql, rusqlite::params_from_iter(chunk))?;
+        }
+        Ok(())
+    })?;
+    Ok(n)
 }
 
 /// Deletes the entries a reader found expired, only while they are still the rows it saw (same `created`): a value stored

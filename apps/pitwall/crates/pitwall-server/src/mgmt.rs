@@ -151,11 +151,13 @@ async fn delete_ids(st: &Arc<AppState>, ids: Vec<ModelId>) -> R<Vec<paddock_comm
     let state = st.clone();
     let done = tokio::task::spawn_blocking(move || {
         let results = state.library.delete_many(&owned);
-        for (id, r) in owned.iter().zip(&results) {
-            if r.is_ok() {
-                state.invalidate_model(id);
-            }
-        }
+        let gone: Vec<ModelId> = owned
+            .iter()
+            .zip(&results)
+            .filter(|(_, r)| r.is_ok())
+            .map(|(id, _)| id.clone())
+            .collect();
+        state.invalidate_models(&gone);
         results
     })
     .await

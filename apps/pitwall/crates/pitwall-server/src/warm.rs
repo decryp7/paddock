@@ -58,18 +58,27 @@ fn list(dir: &Path) -> std::io::Result<std::fs::ReadDir> {
     std::fs::read_dir(dir)
 }
 
-/// Deletes the files whose names start with any of `prefixes`: the bulk form of [`drop_prefix`].
+/// Deletes the files whose names start with any of `prefixes`, in one listing of `dir`: the bulk form of [`drop_prefix`]
+/// (ADR 0108, PW-1). Returns how many went.
 pub fn drop_prefixes(dir: &Path, prefixes: &[String]) -> u64 {
-    prefixes.iter().map(|p| drop_prefix(dir, p, None)).sum()
+    if prefixes.is_empty() {
+        return 0;
+    }
+    drop_matching(dir, |name| prefixes.iter().any(|p| name.starts_with(p.as_str())))
 }
 
 /// Deletes the files whose names start with `prefix` except `keep`; returns how many went.
 pub fn drop_prefix(dir: &Path, prefix: &str, keep: Option<&str>) -> u64 {
+    drop_matching(dir, |name| name.starts_with(prefix) && Some(name) != keep)
+}
+
+/// Deletes the files of `dir` whose names `doomed` accepts, from one listing.
+fn drop_matching(dir: &Path, doomed: impl Fn(&str) -> bool) -> u64 {
     let Ok(rd) = list(dir) else { return 0 };
     let mut n = 0;
     for e in rd.filter_map(Result::ok) {
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with(prefix) && Some(name.as_str()) != keep && std::fs::remove_file(e.path()).is_ok() {
+        if doomed(&name) && std::fs::remove_file(e.path()).is_ok() {
             n += 1;
         }
     }
