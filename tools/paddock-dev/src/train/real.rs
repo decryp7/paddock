@@ -4,12 +4,12 @@
 use super::accept::{FlakyCheck, Tree};
 use super::land::Git;
 use super::sequence::{Ports, Reach, RunEnd};
-use crate::plan_only::Kind;
 use super::verdict::Accepted;
 use crate::ci_runs::dispatch;
 use crate::ci_runs::landable::Landable;
 use crate::ci_runs::train_runs::{self as runs, RunFacts};
 use crate::ci_runs::verdict::Verdict;
+use crate::plan_only::Kind;
 use crate::wait::{CiRunProbe, Clock, CurlHttp, Outcome, SystemClock, fmt_duration, wait_for};
 use paddock_proc::{Limits, Outcome as ProcOutcome, run_bounded};
 use serde_json::Value;

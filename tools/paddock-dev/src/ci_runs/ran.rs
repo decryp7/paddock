@@ -96,8 +96,14 @@ mod tests {
     #[test]
     fn the_json_carries_the_total_and_every_job() {
         let v = json(&[
-            JobRan { job: "a".into(), tests_run: 2 },
-            JobRan { job: "b".into(), tests_run: 0 },
+            JobRan {
+                job: "a".into(),
+                tests_run: 2,
+            },
+            JobRan {
+                job: "b".into(),
+                tests_run: 0,
+            },
         ]);
         assert_eq!(v["total"], 2);
         assert_eq!(v["jobs"][1]["job"], "b");

@@ -57,7 +57,9 @@ fn wiring_violations(file: &str, doc: &Node) -> Vec<String> {
         .chain(PLAYWRIGHT_STEPS.iter().copied());
     for (wf, job, steps) in listed.filter(|t| t.0 == file) {
         let Some(j) = jobs.get(job) else {
-            out.push(format!("{file}: job {job} is listed as taking a test list but is not in the workflow"));
+            out.push(format!(
+                "{file}: job {job} is listed as taking a test list but is not in the workflow"
+            ));
             continue;
         };
         let Some(job_steps) = j.get("steps") else {
@@ -71,10 +73,14 @@ fn wiring_violations(file: &str, doc: &Node) -> Vec<String> {
             }
             // A step is named by `name:`, or is a `uses:` step whose display name is "Run <action path>".
             let found = job_steps.items().iter().find(|s| {
-                s.get_text("name") == Some(step) || s.get_text("uses").is_some_and(|u| step.strip_prefix("Run ").is_some_and(|a| a == u))
+                s.get_text("name") == Some(step)
+                    || s.get_text("uses")
+                        .is_some_and(|u| step.strip_prefix("Run ").is_some_and(|a| a == u))
             });
             match found {
-                None => out.push(format!("{file}: job {job} has no step named {step:?}, which the plan narrows to named tests")),
+                None => out.push(format!(
+                    "{file}: job {job} has no step named {step:?}, which the plan narrows to named tests"
+                )),
                 Some(s) => {
                     let text = text_of(s);
                     if !WIRING.iter().any(|w| text.contains(w)) {
@@ -94,7 +100,12 @@ fn wiring_violations(file: &str, doc: &Node) -> Vec<String> {
 fn unwired_test_jobs(file: &str, doc: &Node) -> Vec<String> {
     let runner = Regex::new(r"nextest|vitest|ng test|playwright test|ci run \S+ (?:tests|specs|e2e|scripts)\b|app-gates").unwrap();
     let listed = |job: &str| {
-        TEST_STEPS.iter().map(|t| (t.0, t.1)).chain(VITEST_STEPS.iter().map(|t| (t.0, t.1))).chain(PLAYWRIGHT_STEPS.iter().map(|t| (t.0, t.1))).any(|(w, j)| w == file && j == job)
+        TEST_STEPS
+            .iter()
+            .map(|t| (t.0, t.1))
+            .chain(VITEST_STEPS.iter().map(|t| (t.0, t.1)))
+            .chain(PLAYWRIGHT_STEPS.iter().map(|t| (t.0, t.1)))
+            .any(|(w, j)| w == file && j == job)
     };
     doc.get("jobs")
         .expect("a workflow has jobs")
@@ -117,10 +128,20 @@ fn every_job_the_plan_narrows_hands_the_test_list_to_its_runner() {
 fn both_workflows_declare_the_only_tests_input_next_to_since_run_and_the_plan_step_reads_it() {
     for file in ["ci.yml", "debrief.yml"] {
         let doc = workflow(file);
-        let inputs = doc.get("on").and_then(|o| o.get("workflow_dispatch")).and_then(|d| d.get("inputs")).expect("dispatch inputs");
-        assert!(inputs.get("since_run").is_some() && inputs.get("only_tests").is_some(), "{file}: only_tests is declared with since_run");
+        let inputs = doc
+            .get("on")
+            .and_then(|o| o.get("workflow_dispatch"))
+            .and_then(|d| d.get("inputs"))
+            .expect("dispatch inputs");
+        assert!(
+            inputs.get("since_run").is_some() && inputs.get("only_tests").is_some(),
+            "{file}: only_tests is declared with since_run"
+        );
         let plan = doc.get("jobs").and_then(|j| j.get("plan")).map(text_of).expect("a plan job");
-        assert!(plan.contains("PLAN_ONLY_TESTS") && plan.contains("github.event.inputs.only_tests"), "{file}: the plan step does not pass only_tests");
+        assert!(
+            plan.contains("PLAN_ONLY_TESTS") && plan.contains("github.event.inputs.only_tests"),
+            "{file}: the plan step does not pass only_tests"
+        );
     }
 }
 
@@ -128,12 +149,20 @@ fn both_workflows_declare_the_only_tests_input_next_to_since_run_and_the_plan_st
 #[test]
 fn removing_the_wiring_is_seen() {
     let good = "jobs:\n  crate:\n    steps:\n      - name: Tests (workspace, every feature)\n        run: cargo nextest run -E \"$FILTER\"\n        env:\n          FILTER: ${{ matrix.filter }}\n";
-    assert!(wiring_violations("ci.yml", &yaml::parse(good).unwrap()).iter().all(|v| !v.contains("step \"Tests (workspace")));
+    assert!(
+        wiring_violations("ci.yml", &yaml::parse(good).unwrap())
+            .iter()
+            .all(|v| !v.contains("step \"Tests (workspace"))
+    );
     let bare = good.replace("-E \"$FILTER\"", "").replace("FILTER: ${{ matrix.filter }}", "X: 1");
     let v = wiring_violations("ci.yml", &yaml::parse(&bare).unwrap());
     assert!(v.iter().any(|v| v.contains("does not read the test list")), "{v:?}");
     let gone = "jobs:\n  other:\n    steps:\n      - run: echo\n";
-    assert!(wiring_violations("ci.yml", &yaml::parse(gone).unwrap()).iter().any(|v| v.contains("job crate is listed")));
+    assert!(
+        wiring_violations("ci.yml", &yaml::parse(gone).unwrap())
+            .iter()
+            .any(|v| v.contains("job crate is listed"))
+    );
 }
 
 /// Report-only (ER-41): the test jobs that rerun whole. The count is printed; the test fails only when the accessor sees none at all
@@ -148,7 +177,10 @@ fn report_the_test_jobs_that_cannot_run_named_tests_yet() {
             eprintln!("::warning::{file}: test job {j} takes no only_tests list yet: it reruns whole in rung 2 of the fix ladder");
         }
     }
-    assert!(all > 0, "the reader found no unwired test job in ci.yml and debrief.yml: it no longer sees test jobs");
+    assert!(
+        all > 0,
+        "the reader found no unwired test job in ci.yml and debrief.yml: it no longer sees test jobs"
+    );
     let synthetic = "jobs:\n  t:\n    steps:\n      - run: ./dev ci run conformance tests\n";
     assert_eq!(unwired_test_jobs("ci.yml", &yaml::parse(synthetic).unwrap()), ["t"]);
 }

@@ -1064,7 +1064,12 @@ pub fn since_run(
                 files.len(),
                 files.join(" ")
             )),
-            Scope::Playwright(tests) => log(&format!("{}: {} named Playwright test(s) rerun: {}", r.name, tests.len(), tests.join(" "))),
+            Scope::Playwright(tests) => log(&format!(
+                "{}: {} named Playwright test(s) rerun: {}",
+                r.name,
+                tests.len(),
+                tests.join(" ")
+            )),
         }
     }
     Ok(plan)

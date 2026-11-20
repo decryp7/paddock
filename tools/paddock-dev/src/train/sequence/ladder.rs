@@ -15,9 +15,9 @@
 //! skipped with its reason, and the next rung starts: skipping is not a pass and appears as such in the report.
 
 use super::{Seq, Stop, short};
+use crate::ci_runs::verdict::{RunResult, Verdict};
 use crate::plan_only::{Kind, MAX_IDS, OnlyTests, id_kind};
 use crate::train::verdict::verdict;
-use crate::ci_runs::verdict::{RunResult, Verdict};
 use crate::wait::fmt_duration;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -154,10 +154,23 @@ pub fn check_ran(only: &OnlyTests, doc: &Value) -> Result<Vec<String>, String> {
     };
     for (job, ids) in only.jobs() {
         match count_of(job) {
-            None => return Err(format!("job {job:?} is not in the run: its {} named test(s) did not run", ids.len())),
-            Some(0) => return Err(format!("job {job:?} ran no test: its filter for {} named test(s) matched nothing", ids.len())),
+            None => {
+                return Err(format!(
+                    "job {job:?} is not in the run: its {} named test(s) did not run",
+                    ids.len()
+                ));
+            }
+            Some(0) => {
+                return Err(format!(
+                    "job {job:?} ran no test: its filter for {} named test(s) matched nothing",
+                    ids.len()
+                ));
+            }
             Some(n) if (n as usize) < ids.len() => {
-                return Err(format!("job {job:?} ran {n} test(s) but {} were named: some did not run", ids.len()));
+                return Err(format!(
+                    "job {job:?} ran {n} test(s) but {} were named: some did not run",
+                    ids.len()
+                ));
             }
             Some(_) => {}
         }
@@ -232,7 +245,9 @@ impl Seq<'_> {
             let _ = writeln!(self.log, "train: rung 1: left to rung 2: {l}");
         }
         if picked.tests.is_empty() {
-            return Ok(Tests::Skipped(format!("run {since} has no named failing test that a job can run alone")));
+            return Ok(Tests::Skipped(format!(
+                "run {since} has no named failing test that a job can run alone"
+            )));
         }
         let only = OnlyTests::new(picked.tests);
         if only.count() > MAX_IDS {
@@ -278,10 +293,7 @@ impl Seq<'_> {
             RunResult::Success => {}
             RunResult::Failure => {
                 if let Err(reasons) = verdict(&doc, wf, &self.plan.accepted) {
-                    return Err(Stop::new(
-                        format!("rung 1 run {run} is red: {}", reasons.join("; ")),
-                        again,
-                    ));
+                    return Err(Stop::new(format!("rung 1 run {run} is red: {}", reasons.join("; ")), again));
                 }
                 let _ = writeln!(self.log, "train: rung 1: run {run}: only accepted FLAKY tests failed");
             }
@@ -296,7 +308,9 @@ impl Seq<'_> {
             Err(why) => {
                 return Err(Stop::new(
                     format!("rung 1 run {run} is NOT MEASURED: {why}"),
-                    format!("read the run's plan job log (the only_tests input is honoured by ./dev plan --ci); a green run of no test is not green. {again}"),
+                    format!(
+                        "read the run's plan job log (the only_tests input is honoured by ./dev plan --ci); a green run of no test is not green. {again}"
+                    ),
                 ));
             }
         }
@@ -341,7 +355,12 @@ impl Seq<'_> {
         let mut all: Vec<(&str, &str)> = inputs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         all.push(self.plan.workflow.input());
         let t0 = self.ports.elapsed();
-        let _ = writeln!(self.log, "train: rung 3 ({}): {wf} on {} with {inputs:?}", Rung::Stage1.name(), short(&sha));
+        let _ = writeln!(
+            self.log,
+            "train: rung 3 ({}): {wf} on {} with {inputs:?}",
+            Rung::Stage1.name(),
+            short(&sha)
+        );
         let (run, end) = self.dispatch_and_wait(wf, &all, None)?;
         if let super::RunEnd::Unfinished(why) = end {
             return Err(super::unfinished(wf, run, &why));
@@ -361,7 +380,10 @@ impl Seq<'_> {
             && counted == run
         {
             return Err(Stop::new(
-                format!("the shared reader counts the stage 1 run {run} of {wf} as a full green run of {}", short(&sha)),
+                format!(
+                    "the shared reader counts the stage 1 run {run} of {wf} as a full green run of {}",
+                    short(&sha)
+                ),
                 "fix the plan job so that a stage 1 run never prints `plan verdict: complete=true` (plan_since::COMPLETE_LINE); no rung but 4 lets a train land",
             ));
         }

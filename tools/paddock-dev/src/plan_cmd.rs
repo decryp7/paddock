@@ -309,7 +309,11 @@ fn read_since_run(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64) ->
     if let Some(text) = env("PLAN_ONLY_TESTS").filter(|t| !t.trim().is_empty()) {
         let only = crate::plan_only::OnlyTests::parse(&text)?;
         plan.apply_only_tests(&only)?;
-        eprintln!("only_tests: {} test(s) in {} job(s), every other job is skipped", only.count(), only.jobs().len());
+        eprintln!(
+            "only_tests: {} test(s) in {} job(s), every other job is skipped",
+            only.count(),
+            only.jobs().len()
+        );
     }
     Ok(plan)
 }

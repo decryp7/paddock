@@ -7,10 +7,10 @@
 //! the whole sequence by `--max`, one run by [`RUN_CAP`] (ER-32). Each step logs its phase and how long it took (ER-27).
 
 use super::verdict::{Accepted, verdict};
-use crate::plan_only::Kind;
 use crate::ci_runs::landable::Landable;
 use crate::ci_runs::train_runs::RunFacts;
 use crate::ci_runs::verdict::{RunResult, Verdict};
+use crate::plan_only::Kind;
 use crate::wait::fmt_duration;
 use serde_json::Value;
 use std::collections::BTreeMap;

@@ -82,9 +82,7 @@ impl OnlyTests {
     /// has a shape of one runner, and the whole input names at most [`MAX_IDS`].
     pub fn parse(text: &str) -> Result<OnlyTests, String> {
         let v: Value = serde_json::from_str(text).map_err(|e| format!("only_tests is not JSON: {e}"))?;
-        let obj = v
-            .as_object()
-            .ok_or("only_tests is not a JSON object of job name to test ids")?;
+        let obj = v.as_object().ok_or("only_tests is not a JSON object of job name to test ids")?;
         let mut jobs = BTreeMap::new();
         let mut total = 0;
         for (job, ids) in obj {

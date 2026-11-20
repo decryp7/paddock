@@ -92,7 +92,11 @@ fn nextest_vitest_and_playwright_jobs_are_narrowed_to_their_named_tests_and_the_
     ]);
     p.apply_only_tests(&o).unwrap();
     let names: Vec<&str> = p.reruns.iter().map(|r| r.name.as_str()).collect();
-    assert_eq!(names, ["rust tests", "frontend", "end-to-end (shard 2/4)"], "the macOS job is not named: it does not rerun");
+    assert_eq!(
+        names,
+        ["rust tests", "frontend", "end-to-end (shard 2/4)"],
+        "the macOS job is not named: it does not rerun"
+    );
     let out: BTreeMap<String, String> = p.app_outputs().into_iter().collect();
     assert!(out["rust_test_filter"].contains("test(=per_machine::tests::every_adopting_app_is_in_sync)"));
     assert_eq!(out["frontend_include"], "src/app/x.component.spec.ts");
@@ -106,31 +110,41 @@ fn a_name_that_cannot_be_honoured_is_an_error_and_changes_nothing() {
     let base = || {
         plan(
             "ci.yml",
-            vec![rerun(1, "crate (ubuntu-latest)", "crate", None), rerun(2, "conformance", "conformance", None)],
+            vec![
+                rerun(1, "crate (ubuntu-latest)", "crate", None),
+                rerun(2, "conformance", "conformance", None),
+            ],
         )
     };
     // A job that did not fail in the run.
     let mut p = base();
-    assert!(p
-        .apply_only_tests(&only(&[("crate (macos-latest)", &[NEXTEST_ID])]))
-        .unwrap_err()
-        .contains("did not fail"));
+    assert!(
+        p.apply_only_tests(&only(&[("crate (macos-latest)", &[NEXTEST_ID])]))
+            .unwrap_err()
+            .contains("did not fail")
+    );
     // A job whose runner takes no test list: it reruns whole, in the next rung.
-    assert!(p
-        .apply_only_tests(&only(&[("conformance", &[NEXTEST_ID])]))
-        .unwrap_err()
-        .contains("takes a test list"));
+    assert!(
+        p.apply_only_tests(&only(&[("conformance", &[NEXTEST_ID])]))
+            .unwrap_err()
+            .contains("takes a test list")
+    );
     // The wrong runner's id.
-    assert!(p
-        .apply_only_tests(&only(&[("crate (ubuntu-latest)", &["src/x.spec.ts"])]))
-        .unwrap_err()
-        .contains("is not a Nextest test id"));
+    assert!(
+        p.apply_only_tests(&only(&[("crate (ubuntu-latest)", &["src/x.spec.ts"])]))
+            .unwrap_err()
+            .contains("is not a Nextest test id")
+    );
     assert_eq!(p.reruns.len(), 2, "an error changes nothing");
     assert!(matches!(p.reruns[0].scope, Scope::Job(_)));
     // A plan that already reruns everything cannot be narrowed.
     let mut e = base();
     e.everything = Some("the plan job failed".into());
-    assert!(e.apply_only_tests(&only(&[("crate (ubuntu-latest)", &[NEXTEST_ID])])).unwrap_err().contains("reruns everything"));
+    assert!(
+        e.apply_only_tests(&only(&[("crate (ubuntu-latest)", &[NEXTEST_ID])]))
+            .unwrap_err()
+            .contains("reruns everything")
+    );
 }
 
 #[test]
