@@ -796,7 +796,11 @@ fn a_container_jobs_s3_tier_is_a_sibling_of_its_lane_folder_and_never_shared_bet
     let mut tiers = Vec::new();
     for lane in ["s4", "s5"] {
         let mut env: Vec<(&str, &str)> = S3_ENV.to_vec();
-        env.extend([("RUNNER_OS", "Linux"), ("PADDOCK_SCCACHE_MOUNT", mount.as_str()), ("PADDOCK_CI_SLOT", lane)]);
+        env.extend([
+            ("RUNNER_OS", "Linux"),
+            ("PADDOCK_SCCACHE_MOUNT", mount.as_str()),
+            ("PADDOCK_CI_SLOT", lane),
+        ]);
         let rs = r.rust(&S3_INPUT, &env);
         assert_eq!(rs.code, 0, "{}", rs.out);
         let dir = rs

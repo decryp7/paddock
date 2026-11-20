@@ -992,7 +992,11 @@ impl Step<'_> {
                 "check the disk of the runner.",
             )));
         }
-        let (dir, tier) = if self.os() == "Windows" { (home::native(&dir), home::native(&tier)) } else { (dir, tier) };
+        let (dir, tier) = if self.os() == "Windows" {
+            (home::native(&dir), home::native(&tier))
+        } else {
+            (dir, tier)
+        };
         Ok((dir, size, tier))
     }
 
