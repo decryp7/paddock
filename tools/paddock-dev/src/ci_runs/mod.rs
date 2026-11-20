@@ -580,7 +580,7 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     let mut http = CurlHttp;
     let mut clock = dispatch::system_clock();
     let mut reach = crate::health::CurlReach;
-    let mut health = crate::health::Health::new(crate::health::real_services(&a.server, "dispatch"), &mut reach);
+    let mut health = crate::health::Health::new(crate::health::real_services(&a.server, "dispatch", false), &mut reach);
     let result = dispatch::run(
         &mut http,
         &dispatch::Target {
@@ -612,7 +612,7 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
             ),
         )),
         Ok(dispatch::Dispatched::ServiceDown { last }) => Err(CliError::failure(format!("not dispatched: {last}."))
-            .with_hint("Wait until Gitea and RustFS answer (the ::error:: line above names the one that is down), then dispatch again.")),
+            .with_hint("Wait until Gitea answers (the ::error:: line above names it), then dispatch again.")),
         Ok(dispatch::Dispatched::StillBusy { last }) => Err(CliError::failure(format!("not dispatched: the runner stayed busy ({last})."))
             .with_hint("Wait for that run with `./dev wait --ci-run <id> --max <duration>`, then dispatch again.")),
         Err(e) => {
@@ -635,7 +635,9 @@ fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(crate::qu
         eprintln!("::error::trial: {why}");
         CliError::failure(why).with_hint("Check the branch name, GITEA_TOKEN's write scope and the network.")
     };
-    let g = GitTrain::open(&url, &scratch, Some(token.to_string()), true, false).map_err(fail)?;
+    let mut g = GitTrain::open(&url, &scratch, Some(token.to_string()), true, false).map_err(fail)?;
+    // The trial's push holds while Gitea is down for at most this command's own --max (already validated by parse_request).
+    g.push_hold = crate::wait::parse_duration(&a.max).ok();
     let check = |root: &std::path::Path, head: &str| {
         crate::merge_check::command(&crate::merge_check::Request {
             root: Some(root.to_path_buf()),

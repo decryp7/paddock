@@ -661,7 +661,8 @@ pub fn command(args: &WaitArgs) -> Result<Report, CliError> {
     let presence = |id: ProcessId| id.presence();
     let mut http = CurlHttp;
     let mut reach = crate::health::CurlReach;
-    let services = crate::health::real_services(&args.server, "wait");
+    let vars: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
+    let services = wait_services(&args.server, &vars);
     let env = Env {
         var: &var,
         files: &DiskFiles,
@@ -673,6 +674,12 @@ pub fn command(args: &WaitArgs) -> Result<Report, CliError> {
         health: args.ci_run.map(|_| Health::new(services, &mut reach)),
     };
     run_with(args, env, &mut SystemClock::new(), &mut std::io::stderr())
+}
+
+/// The services a `--ci-run` wait holds on: Gitea only. Reading a run's state needs nothing else, so RustFS being down must not
+/// hold a wait (or turn a run that already failed into "RustFS is down" at `--max`).
+pub(crate) fn wait_services(server: &str, env: &std::collections::HashMap<String, String>) -> Vec<crate::health::Service> {
+    crate::health::services(server, env, false).0
 }
 
 /// The canonical absolute form of a path that may not exist yet, so one file has one name whatever folder it is asked from.
@@ -1287,6 +1294,53 @@ mod tests {
             log.contains("Next: Gitea runs on the NAS") && log.contains("then run the command again"),
             "{log}"
         );
+    }
+
+    #[test]
+    fn a_run_that_already_failed_is_reported_at_once_whatever_rustfs_does() {
+        use crate::health::Reach;
+        // The wait's own service list (Gitea only), with RustFS down in the scripted look and configured in the environment.
+        let env: std::collections::HashMap<String, String> = [
+            ("PADDOCK_SCCACHE_BACKEND", "s3"),
+            ("PADDOCK_SCCACHE_S3_BUCKET", "bucket-x"),
+            ("PADDOCK_SCCACHE_S3_ENDPOINT", "10.9.9.9:1234"),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        let failed = || FakeHttp {
+            answers: vec![Ok(json!({"status": "completed", "conclusion": "failure"}))],
+            urls: vec![],
+        };
+        let run_with_services = |services: Vec<crate::health::Service>| {
+            let mut reach = crate::health::tests::Scripted::new().script("bucket-x", vec![Reach::Down("connection refused".into())]);
+            let mut http = failed();
+            let var = |k: &str| (k == "GITEA_TOKEN").then(|| "tok".to_string());
+            let process = |_: u32| None;
+            let files = FakeFiles::default();
+            let env = Env {
+                var: &var,
+                files: &files,
+                http: &mut http,
+                alive: Box::new(|_| Presence::Running),
+                process: &process,
+                look: &|_| Presence::Running,
+                locks: None,
+                health: Some(Health::new(services, &mut reach)),
+            };
+            let mut log = Vec::new();
+            let r = run_with(&args(&["--ci-run", "5", "--max", "2m"]), env, &mut FakeClock::default(), &mut log);
+            (r, String::from_utf8(log).unwrap())
+        };
+        let (r, log) = run_with_services(wait_services("https://g", &env));
+        let e = r.unwrap_err();
+        assert!(
+            e.message.contains("run 5 finished: failure") && !log.contains("RustFS") && !log.contains("gave up"),
+            "{log}"
+        );
+        // Positive control: had RustFS been in the list, the same failed run would have been held to --max and named RustFS.
+        let (r, log) = run_with_services(crate::health::services("https://g", &env, true).0);
+        assert!(r.unwrap_err().message.contains("RustFS"), "{log}");
     }
 
     #[test]

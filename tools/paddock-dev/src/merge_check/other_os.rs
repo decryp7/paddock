@@ -449,6 +449,7 @@ impl Gitea {
             merge_check: crate::merge_check::command,
             planner: crate::queue::real::run_planner,
             timeout: crate::queue::real::GIT_TIMEOUT,
+            push_hold: None,
         }
     }
 
@@ -499,7 +500,7 @@ impl Runs for Gitea {
             token: &self.token,
         };
         let mut reach = crate::health::CurlReach;
-        let mut health = crate::health::Health::new(crate::health::real_services(&self.server, "dispatch"), &mut reach);
+        let mut health = crate::health::Health::new(crate::health::real_services(&self.server, "dispatch", false), &mut reach);
         // A service that stays down is a busy answer: the caller tries again on its next turn, nothing was sent.
         match dispatch::run(
             &mut self.http,

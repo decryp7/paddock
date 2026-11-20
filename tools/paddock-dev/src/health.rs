@@ -7,8 +7,12 @@
 //!
 //! - **Gitea** answers `GET <server>/api/v1/version`.
 //! - **RustFS** answers on its S3 endpoint: an unauthenticated GET of the bucket URL. The endpoint, bucket and TLS setting are the
-//!   sccache settings (`PADDOCK_SCCACHE_S3_*`, [`crate::local_sccache::backend`]), never typed here; with no S3 backend configured
-//!   there is no RustFS to watch and only Gitea is checked.
+//!   sccache settings (`PADDOCK_SCCACHE_S3_*`, [`crate::local_sccache::backend`]), never typed here. A command holds on a service
+//!   only when it needs it: the dispatch, the wait on a run and the pushes read or write Gitea only, so none of them watches
+//!   RustFS (a command that compiles through the cache would ask for it with [`services`]'s `rustfs` flag).
+//!
+//! **An address that can never work** (a malformed URL, a name that does not resolve: a wrong `--server`) is an error at the first
+//! look, not a hold; it is held for only after the service has answered once.
 //!
 //! **Up** means any HTTP answer below 500 (a 403 from the bucket is a live server that wants a key); **down** is a connection
 //! error, a timeout or a 5xx. A [`Held`] probe wraps the probe of a wait: while a service is down it does not poll the inner
@@ -26,8 +30,11 @@ use std::time::Duration;
 pub enum Reach {
     /// The server answered with this HTTP status.
     Answered(u16),
-    /// No answer: a connection error or a timeout, with the cause.
+    /// No answer: a refused connection or a timeout, with the cause. A service that answered before is held for.
     Down(String),
+    /// The address cannot be used at all: a malformed URL or a name that does not resolve (a wrong `--server`). Held for only after
+    /// the service has answered once; at the first look it is an error at once, since no wait will ever change it.
+    Invalid(String),
 }
 
 impl Reach {
@@ -36,7 +43,7 @@ impl Reach {
         match self {
             Reach::Answered(code) if *code < 500 => None,
             Reach::Answered(code) => Some(format!("HTTP {code}")),
-            Reach::Down(why) => Some(why.clone()),
+            Reach::Down(why) | Reach::Invalid(why) => Some(why.clone()),
         }
     }
 }
@@ -77,20 +84,39 @@ impl Reacher for CurlReach {
         match paddock_proc::run_bounded(cmd, limits) {
             Err(e) => Reach::Down(format!("cannot run curl: {e}")),
             Ok(out) => {
-                let code = out.stdout_text().trim().parse::<u16>().unwrap_or(0);
-                if out.success() && code != 0 {
-                    Reach::Answered(code)
-                } else {
-                    let why = out.stderr_text();
-                    let why = why.trim();
-                    Reach::Down(if why.is_empty() {
-                        "no answer".to_string()
-                    } else {
-                        why.lines().next().unwrap_or("no answer").to_string()
-                    })
-                }
+                let http = out.stdout_text().trim().parse::<u16>().unwrap_or(0);
+                classify(out.success(), exit_code(&out), http, &out.stderr_text())
             }
         }
+    }
+}
+
+fn exit_code(out: &paddock_proc::Output) -> Option<i32> {
+    match out.outcome {
+        paddock_proc::Outcome::Exited(s) => s.code(),
+        _ => None,
+    }
+}
+
+/// curl's own exit codes for an address that can never work: 1 unsupported protocol, 3 malformed URL, 5 and 6 a proxy or host that
+/// does not resolve.
+const INVALID_CURL_EXITS: [i32; 4] = [1, 3, 5, 6];
+
+/// What a finished curl means: its HTTP status when it got one, else why there was none.
+pub(crate) fn classify(success: bool, exit: Option<i32>, http: u16, stderr: &str) -> Reach {
+    if success && http != 0 {
+        return Reach::Answered(http);
+    }
+    let why = stderr
+        .trim()
+        .lines()
+        .next()
+        .filter(|l| !l.is_empty())
+        .unwrap_or("no answer")
+        .to_string();
+    match exit {
+        Some(c) if INVALID_CURL_EXITS.contains(&c) => Reach::Invalid(why),
+        _ => Reach::Down(why),
     }
 }
 
@@ -105,16 +131,18 @@ pub struct Service {
     pub next: &'static str,
 }
 
-/// The services to watch: Gitea at `server`, and RustFS when the environment configures the S3 sccache backend
-/// (`PADDOCK_SCCACHE_BACKEND=s3`, [`crate::local_sccache::backend`]). The second value is a note when the S3 settings are wrong.
-pub fn services(server: &str, env: &HashMap<String, String>) -> (Vec<Service>, Option<String>) {
+/// The services a command needs: Gitea at `server`, and, only when `rustfs` (a command that compiles through the shared cache) and
+/// the environment configures the S3 sccache backend (`PADDOCK_SCCACHE_BACKEND=s3`, [`crate::local_sccache::backend`]), RustFS. A
+/// command that only reads Gitea (a dispatch, a wait on a run) never holds on RustFS: it does not need it. The second value is a
+/// note when the S3 settings are wrong.
+pub fn services(server: &str, env: &HashMap<String, String>, rustfs: bool) -> (Vec<Service>, Option<String>) {
     let mut list = vec![Service {
         name: "Gitea",
         url: format!("{}/api/v1/version", server.trim_end_matches('/')),
         next: "Gitea runs on the NAS: check that the NAS is up and that the Gitea container answers (`curl -sI <url>`)",
     }];
     let mut note = None;
-    if env.get("PADDOCK_SCCACHE_BACKEND").map(|v| v.trim()) == Some("s3") {
+    if rustfs && env.get("PADDOCK_SCCACHE_BACKEND").map(|v| v.trim()) == Some("s3") {
         match crate::local_sccache::backend(env) {
             Ok(crate::local_sccache::Backend::S3(s)) => list.push(Service {
                 name: "RustFS",
@@ -128,10 +156,11 @@ pub fn services(server: &str, env: &HashMap<String, String>) -> (Vec<Service>, O
     (list, note)
 }
 
-/// [`services`] for the real process: the environment as it is, a wrong S3 setting printed as a warning naming `who`.
-pub fn real_services(server: &str, who: &str) -> Vec<Service> {
+/// [`services`] for the real process: the environment as it is, a wrong S3 setting (asked for only with `rustfs`) printed as a warning
+/// naming `who`.
+pub fn real_services(server: &str, who: &str, rustfs: bool) -> Vec<Service> {
     let env: HashMap<String, String> = crate::process_env::vars().collect();
-    let (list, note) = services(server, &env);
+    let (list, note) = services(server, &env, rustfs);
     if let Some(note) = note {
         eprintln!("::warning::{who}: {note}");
     }
@@ -144,39 +173,74 @@ pub struct Health<'a> {
     reach: &'a mut dyn Reacher,
     /// Per service: why it was down at the last look (`None` up); `None` overall before the first look.
     last: Option<Vec<Option<String>>>,
+    /// Per service: whether it has answered (any HTTP status) at least once.
+    answered: Vec<bool>,
+}
+
+/// What one look at every service found.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Look {
+    /// The services that are down now (name, URL, cause).
+    pub down: Vec<String>,
+    /// One line per service that changed state since the last look.
+    pub notes: Vec<String>,
+    /// An address that can never work (a malformed URL, a name that does not resolve) at a service that never answered: no hold
+    /// will help, so the wait ends at once with this text.
+    pub fatal: Option<String>,
 }
 
 impl<'a> Health<'a> {
     /// Watches `services`, looking through `reach`.
     pub fn new(services: Vec<Service>, reach: &'a mut dyn Reacher) -> Health<'a> {
+        let answered = vec![false; services.len()];
         Health {
             services,
             reach,
             last: None,
+            answered,
         }
     }
 
-    /// Looks at every service once. Returns the services that are down now (name, URL, cause) and one line for each service that
-    /// changed state since the last look (the first look says nothing about a service that is up).
-    pub fn check(&mut self) -> (Vec<String>, Vec<String>) {
-        let now: Vec<Option<String>> = self.services.iter().map(|s| self.reach.reach(&s.url).why_down()).collect();
-        let mut notes = Vec::new();
+    /// Looks at every service once.
+    pub fn check(&mut self) -> Look {
+        let seen: Vec<Reach> = self.services.iter().map(|s| self.reach.reach(&s.url)).collect();
+        let mut look = Look::default();
+        for (i, r) in seen.iter().enumerate() {
+            if matches!(r, Reach::Answered(_)) {
+                self.answered[i] = true;
+            }
+            if let (Reach::Invalid(why), false) = (r, self.answered[i]) {
+                let s = &self.services[i];
+                look.fatal = Some(format!(
+                    "{} cannot be reached at {}: {why}. Check the address (a wrong --server, a typo in the host); waiting will not help",
+                    s.name, s.url
+                ));
+            }
+        }
+        let now: Vec<Option<String>> = seen.iter().map(Reach::why_down).collect();
         for (i, s) in self.services.iter().enumerate() {
             let before = self.last.as_ref().map(|l| l[i].is_some());
             match (&now[i], before) {
-                (Some(why), None | Some(false)) => notes.push(format!("{} is down ({why}) at {}; holding until it answers", s.name, s.url)),
-                (None, Some(true)) => notes.push(format!("{} answers again", s.name)),
+                (Some(why), None | Some(false)) => look
+                    .notes
+                    .push(format!("{} is down ({why}) at {}; holding until it answers", s.name, s.url)),
+                (None, Some(true)) => look.notes.push(format!("{} answers again", s.name)),
                 _ => {}
             }
         }
-        let down = self
+        look.down = self
             .services
             .iter()
             .zip(&now)
             .filter_map(|(s, w)| w.as_ref().map(|w| format!("{} ({}) is down: {w}", s.name, s.url)))
             .collect();
         self.last = Some(now);
-        (down, notes)
+        look
+    }
+
+    /// The names of the watched services: `Gitea`, or `Gitea or RustFS`.
+    pub fn names(&self) -> String {
+        self.services.iter().map(|s| s.name).collect::<Vec<_>>().join(" or ")
     }
 
     /// What is down as of the last look (empty when everything answered or nothing was looked at).
@@ -223,15 +287,18 @@ impl<'a, 'b> Held<'a, 'b> {
 
 impl Probe for Held<'_, '_> {
     fn describe(&self) -> String {
-        format!("{} (holding while Gitea or RustFS is down)", self.inner.describe())
+        format!("{} (holding while {} is down)", self.inner.describe(), self.health.names())
     }
     fn poll(&mut self) -> Result<Poll, String> {
-        let (down, notes) = self.health.check();
-        self.notes.extend(notes);
-        if down.is_empty() {
+        let look = self.health.check();
+        self.notes.extend(look.notes);
+        if let Some(fatal) = look.fatal {
+            return Ok(Poll::Failed(fatal));
+        }
+        if look.down.is_empty() {
             self.inner.poll()
         } else {
-            Ok(Poll::Pending(format!("{}; holding", down.join("; "))))
+            Ok(Poll::Pending(format!("{}; holding", look.down.join("; "))))
         }
     }
     fn next_step(&self) -> String {
@@ -272,9 +339,10 @@ pub fn server_of(url: &str) -> Option<String> {
 /// How often [`hold_gitea`] looks while Gitea is down.
 pub const PUSH_HOLD_INTERVAL: Duration = Duration::from_secs(10);
 
-/// Holds until Gitea at `server` answers, at most `max` (the caller's own bound), before a push: a push into an outage gets a 502 or
-/// a 401 that a credential helper may take for a wrong password. `Ok(waited)` once it answers (zero when it did at once); `Err` is
-/// the `::error::` text when it stayed down for `max`. One line per change of state goes to `log`.
+/// Holds until Gitea at `server` answers, at most `max` (the caller's own `--max`, never a bound of this module), before a push, so
+/// the push is not sent into an outage and fails with a 502 nobody can read. `Ok(waited)` once it answers (zero when it did at
+/// once); `Err` is the `::error::` text when it stayed down for `max` or its address can never work. One line per change of state
+/// goes to `log`.
 pub fn hold_gitea(
     server: &str,
     reach: &mut dyn Reacher,
@@ -282,7 +350,7 @@ pub fn hold_gitea(
     max: Duration,
     log: &mut dyn Write,
 ) -> Result<Duration, String> {
-    let (list, _) = services(server, &HashMap::new());
+    let (list, _) = services(server, &HashMap::new(), false);
     let mut health = Health::new(list, reach);
     match wait_held(
         &mut Ready("Gitea to answer"),
@@ -293,6 +361,7 @@ pub fn hold_gitea(
         log,
     ) {
         Outcome::Done { elapsed, .. } => Ok(elapsed),
+        Outcome::Failed { detail, .. } => Err(format!("::error::push not sent: {detail}.")),
         _ => Err(format!(
             "::error::push held: {} for the whole bound ({}). Next: {}.",
             health.down_now().join("; "),

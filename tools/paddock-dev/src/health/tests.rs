@@ -45,7 +45,7 @@ pub(crate) fn both() -> Vec<Service> {
     .iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
     .collect();
-    services("https://gitea.invalid", &env).0
+    services("https://gitea.invalid", &env, true).0
 }
 
 #[derive(Default)]
@@ -110,13 +110,13 @@ fn the_services_come_from_the_environment_and_nothing_is_typed_here() {
     .iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
     .collect();
-    assert_eq!(services("https://g/", &tls).0[1].url, "https://h:1/b");
+    assert_eq!(services("https://g/", &tls, true).0[1].url, "https://h:1/b");
     // No S3 backend: only Gitea, and no note (a local cache has no service).
-    let (only, note) = services("https://g", &HashMap::new());
+    let (only, note) = services("https://g", &HashMap::new(), true);
     assert_eq!((only.len(), note), (1, None));
     // A wrong S3 setting is named, and Gitea is still watched.
     let bad: HashMap<String, String> = [("PADDOCK_SCCACHE_BACKEND".to_string(), "s3".to_string())].into();
-    let (only, note) = services("https://g", &bad);
+    let (only, note) = services("https://g", &bad, true);
     assert_eq!(only.len(), 1);
     assert!(note.unwrap().contains("PADDOCK_SCCACHE_S3_BUCKET"));
 }
@@ -127,17 +127,16 @@ fn one_line_per_change_of_state_and_a_403_counts_as_up() {
         .script("api/v1/version", vec![down(502), down(502), down(502), down(200)])
         .script("bucket-x", vec![down(403)]);
     let mut h = Health::new(both(), &mut reach);
-    let (d1, n1) = h.check();
+    let Look { down: d1, notes: n1, .. } = h.check();
     assert_eq!(d1.len(), 1, "{d1:?}");
     assert!(d1[0].contains("Gitea") && d1[0].contains("HTTP 502"), "{d1:?}");
     assert!(n1.len() == 1 && n1[0].contains("Gitea is down"), "{n1:?}");
     assert!(!n1[0].contains("RustFS"), "the 403 bucket is up: {n1:?}");
     // Still down: no new line.
-    let (_, n2) = h.check();
-    let (_, n3) = h.check();
+    let (n2, n3) = (h.check().notes, h.check().notes);
     assert!(n2.is_empty() && n3.is_empty(), "{n2:?} {n3:?}");
     // Back up: one line.
-    let (d4, n4) = h.check();
+    let Look { down: d4, notes: n4, .. } = h.check();
     assert!(d4.is_empty());
     assert_eq!(n4, vec!["Gitea answers again".to_string()]);
 }
@@ -339,7 +338,7 @@ fn a_push_of_the_train_tools_is_never_sent_while_gitea_answers_502() {
     let (url, served) = stub(vec![502]);
     let dir = tempfile::tempdir().unwrap();
     let mut g = GitTrain::for_clone(dir.path().to_path_buf(), &format!("{url}/o/r.git"));
-    g.timeout = Duration::from_secs(1);
+    g.push_hold = Some(Duration::from_secs(1));
     let e = g
         .run_git(Child::Authed, &["push", "--quiet", "origin", "HEAD:refs/heads/x"])
         .unwrap_err();
@@ -348,10 +347,125 @@ fn a_push_of_the_train_tools_is_never_sent_while_gitea_answers_502() {
         "{e}"
     );
     assert!(served.load(std::sync::atomic::Ordering::SeqCst) >= 1);
+    // Without a bound from the caller (the queue and member gate try again on their own turn) the push is not held at all.
+    g.push_hold = None;
+    let e = g.run_git(Child::Authed, &["push", "--quiet", "origin", "HEAD:refs/heads/x"]);
+    assert!(!matches!(&e, Err(m) if m.contains("push held")), "{e:?}");
+    // The push never asks for a password: a prompt in an outage could not be answered.
+    let envs: Vec<_> = g
+        .command(None, Child::Authed)
+        .get_envs()
+        .map(|(k, v)| (k.to_owned(), v.map(|v| v.to_owned())))
+        .collect();
+    assert!(
+        envs.iter()
+            .any(|(k, v)| k == "GIT_TERMINAL_PROMPT" && v.as_deref() == Some(std::ffi::OsStr::new("0"))),
+        "{envs:?}"
+    );
     // Positive control: Gitea answers (404 for the version path is still an answer), so the push goes on to git, which fails for
     // its own reason (this folder is no repository), and the hold says nothing.
     let (url, _) = stub(vec![404]);
-    let g = GitTrain::for_clone(dir.path().to_path_buf(), &format!("{url}/o/r.git"));
+    let mut g = GitTrain::for_clone(dir.path().to_path_buf(), &format!("{url}/o/r.git"));
+    g.push_hold = Some(Duration::from_secs(1));
     let e = g.run_git(Child::Authed, &["push", "--quiet", "origin", "HEAD:refs/heads/x"]);
     assert!(!matches!(&e, Err(m) if m.contains("push held")), "{e:?}");
+}
+
+#[test]
+fn a_command_that_needs_only_gitea_never_watches_rustfs() {
+    let env: HashMap<String, String> = [
+        ("PADDOCK_SCCACHE_BACKEND", "s3"),
+        ("PADDOCK_SCCACHE_S3_BUCKET", "bucket-x"),
+        ("PADDOCK_SCCACHE_S3_ENDPOINT", "10.9.9.9:1234"),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let list = services("https://g", &env, false).0;
+    assert_eq!(list.iter().map(|s| s.name).collect::<Vec<_>>(), ["Gitea"]);
+    // The wait on a run is such a command. Positive control: the same environment with RustFS asked for has it.
+    assert_eq!(crate::wait::wait_services("https://g", &env).len(), 1);
+    assert_eq!(services("https://g", &env, true).0.len(), 2);
+    // And a wrong S3 setting is no concern of a command that does not use S3: no note.
+    let bad: HashMap<String, String> = [("PADDOCK_SCCACHE_BACKEND".to_string(), "s3".to_string())].into();
+    assert_eq!(services("https://g", &bad, false).1, None);
+}
+
+#[test]
+fn curl_exits_for_a_bad_address_are_invalid_and_the_others_are_down() {
+    assert_eq!(classify(true, Some(0), 403, ""), Reach::Answered(403));
+    for exit in [3, 6, 5, 1] {
+        assert!(
+            matches!(classify(false, Some(exit), 0, "curl: (6) Could not resolve host: x\nmore"), Reach::Invalid(w) if w.starts_with("curl: (6)")),
+            "{exit}"
+        );
+    }
+    for exit in [7, 28, 52, 56] {
+        assert!(
+            matches!(classify(false, Some(exit), 0, "curl: (7) Failed to connect"), Reach::Down(_)),
+            "{exit}"
+        );
+    }
+    assert!(matches!(classify(false, None, 0, ""), Reach::Down(w) if w == "no answer"));
+}
+
+#[test]
+fn the_real_look_calls_a_malformed_url_invalid() {
+    assert!(matches!(CurlReach.reach("http://"), Reach::Invalid(_)));
+}
+
+#[test]
+fn a_bad_address_at_the_first_look_ends_the_wait_at_once_and_is_held_for_only_after_an_answer() {
+    let bad = || Reach::Invalid("curl: (6) Could not resolve host: gitea.invalid".into());
+    // First look: fatal, no hold, no sleep.
+    let mut reach = Scripted::new().script("api/v1/version", vec![bad()]);
+    let mut h = Health::new(both(), &mut reach);
+    let (mut clock, mut log, mut inner) = (FakeClock::default(), Vec::new(), Inner(0));
+    let o = wait_held(
+        &mut inner,
+        Some(&mut h),
+        &mut clock,
+        Duration::from_secs(600),
+        Duration::from_secs(15),
+        &mut log,
+    );
+    match o {
+        Outcome::Failed { detail, elapsed } => {
+            assert!(elapsed.is_zero() && clock.0.is_zero(), "no hold: {elapsed:?}");
+            assert!(
+                detail.contains("Gitea") && detail.contains("gitea.invalid") && detail.contains("waiting will not help"),
+                "{detail}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(inner.0, 0);
+    // After an answer, the same failure is an outage (a resolver that hiccups mid-wait): held, not fatal.
+    let mut reach = Scripted::new().script("api/v1/version", vec![Reach::Answered(200), bad(), bad(), Reach::Answered(200)]);
+    let mut h = Health::new(both(), &mut reach);
+    assert_eq!(h.check().down.len(), 0);
+    let l = h.check();
+    assert!(l.fatal.is_none() && l.down.len() == 1, "{l:?}");
+    // A refused connection or a 5xx at the first look is held for, not fatal.
+    let mut reach = Scripted::new().script("api/v1/version", vec![Reach::Down("refused".into())]);
+    let mut h = Health::new(both(), &mut reach);
+    let l = h.check();
+    assert!(l.fatal.is_none() && l.down.len() == 1, "{l:?}");
+}
+
+#[test]
+fn a_push_hold_with_a_bad_address_is_not_sent_and_says_so() {
+    let mut reach = Scripted::new().script("api/v1/version", vec![Reach::Invalid("could not resolve host".into())]);
+    let e = hold_gitea(
+        "https://typo.invalid",
+        &mut reach,
+        &mut FakeClock::default(),
+        Duration::from_secs(60),
+        &mut Vec::new(),
+    )
+    .unwrap_err();
+    assert!(
+        e.starts_with("::error::push not sent:") && e.contains("waiting will not help"),
+        "{e}"
+    );
 }

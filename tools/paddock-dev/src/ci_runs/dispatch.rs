@@ -309,7 +309,7 @@ pub enum Dispatched {
         /// The run that held it at the end.
         last: String,
     },
-    /// Gitea or RustFS stayed down for `--max` ([`crate::health`]); nothing was dispatched.
+    /// Gitea stayed down for `--max` ([`crate::health`]); nothing was dispatched.
     ServiceDown {
         /// What was down at the end, with the cause.
         last: String,
@@ -340,19 +340,22 @@ pub fn run(
     let Target { server, repo, token } = *target;
     let wanted = classes_of(&req.workflow, read)?;
     let mut waited = Duration::ZERO;
-    // Hold while Gitea or RustFS is down: before anything is read or sent, and again inside each wait below. The hold shares the
+    // Hold while Gitea is down: before anything is read or sent, and again inside each wait below. The hold shares the
     // clock, so it counts against the same `--max`.
     if health.is_some() {
         let held = wait_held(
-            &mut Ready("Gitea and RustFS to answer"),
+            &mut Ready("the CI server to answer"),
             health.as_deref_mut(),
             clock,
             req.max,
             req.interval,
             log,
         );
-        if let Outcome::TimedOut { .. } = held {
-            return Ok(service_down(&req.workflow, health.as_deref(), req.max, log));
+        match held {
+            Outcome::TimedOut { .. } => return Ok(service_down(&req.workflow, health.as_deref(), req.max, log)),
+            // An address that can never work (a wrong --server): no hold will help.
+            Outcome::Failed { detail, .. } => return Err(detail),
+            _ => {}
         }
     }
     if wanted.is_empty() {
@@ -900,6 +903,21 @@ mod tests {
         let mut http = Script::new(vec![runs(&[(7960, "mac.yml", "in_progress")])]);
         let (r, log, _) = go_held(&mut http, "mac.yml", "2m", &mut reach);
         assert!(matches!(r, Ok(Dispatched::ServiceDown { .. })), "{r:?}\n{log}");
+        assert!(http.posts.is_empty());
+    }
+
+    #[test]
+    fn a_dispatch_to_an_address_that_cannot_resolve_fails_at_once_instead_of_holding() {
+        use crate::health::Reach;
+        let mut reach = crate::health::tests::Scripted::new().script(
+            "api/v1/version",
+            vec![Reach::Invalid("curl: (6) Could not resolve host: typo.invalid".into())],
+        );
+        let mut http = Script::new(vec![runs(&[])]);
+        let (r, _, t) = go_held(&mut http, "linux.yml", "10m", &mut reach);
+        let e = r.unwrap_err();
+        assert!(e.contains("Gitea") && e.contains("typo.invalid") && e.contains("--server"), "{e}");
+        assert_eq!(t, Duration::ZERO, "no hold");
         assert!(http.posts.is_empty());
     }
 

@@ -190,6 +190,9 @@ pub struct GitTrain {
     pub planner: PlannerFn,
     /// The longest one git command may run: new, not raised (the calls had no bound); it only ends a hang.
     pub timeout: Duration,
+    /// How long a push waits while Gitea is down ([`crate::health::hold_gitea`]): the calling command's own `--max`. `None` (the queue,
+    /// the member gate: they try again on their next turn) sends the push at once, as before.
+    pub push_hold: Option<Duration>,
 }
 
 /// [`GitTrain::timeout`] by default: a clone or fetch of this repository over the network takes seconds to a few minutes.
@@ -211,6 +214,7 @@ impl GitTrain {
             merge_check: crate::merge_check::command,
             planner: run_planner,
             timeout: GIT_TIMEOUT,
+            push_hold: None,
         };
         if !g.root.join(".git").exists() {
             let kind = if authed_fetch { Child::Authed } else { Child::Local };
@@ -241,6 +245,7 @@ impl GitTrain {
             merge_check: crate::merge_check::command,
             planner: run_planner,
             timeout: GIT_TIMEOUT,
+            push_hold: None,
         }
     }
 
@@ -300,14 +305,14 @@ impl GitTrain {
         Ok(())
     }
 
-    /// Before a push to an http(s) server: holds (at most [`GitTrain::timeout`], this command's own bound) while Gitea answers 5xx or
-    /// not at all, so a push is never sent into an outage (a 401 during one must not reach a credential helper). Nothing to hold
-    /// for a `file` clone. The error is the `::error::` text.
+    /// Before a push to an http(s) server, when the caller gave a bound ([`GitTrain::push_hold`], its own `--max`): holds while Gitea
+    /// answers 5xx or not at all, so a push is never sent into an outage and fails with a 502 nobody can read. Nothing to hold for
+    /// a `file` clone or without a bound. The error is the `::error::` text.
     fn hold_for_gitea(&self, reach: &mut dyn crate::health::Reacher, clock: &mut dyn crate::wait::Clock) -> Result<(), String> {
-        let Some(server) = crate::health::server_of(&self.url) else {
+        let (Some(max), Some(server)) = (self.push_hold, crate::health::server_of(&self.url)) else {
             return Ok(());
         };
-        crate::health::hold_gitea(&server, reach, clock, self.timeout, &mut std::io::stderr()).map(|_| ())
+        crate::health::hold_gitea(&server, reach, clock, max, &mut std::io::stderr()).map(|_| ())
     }
 
     fn run_in(&self, dir: Option<&Path>, kind: Child, args: &[&str]) -> Result<(bool, String), String> {
@@ -851,7 +856,7 @@ impl Ci for GiteaCi<'_> {
             token: &self.token,
         };
         let mut reach = crate::health::CurlReach;
-        let mut health = crate::health::Health::new(crate::health::real_services(&self.server, "dispatch"), &mut reach);
+        let mut health = crate::health::Health::new(crate::health::real_services(&self.server, "dispatch", false), &mut reach);
         // A service that stays down is a busy answer: the caller tries again on its next turn, nothing was sent.
         match dispatch::run(
             self.http,
