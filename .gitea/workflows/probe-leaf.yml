@@ -1,4 +1,4 @@
-# Part of the throwaway probe (probe-outer.yml): the leaf, a matrix fed by an input, with the job-level container expression ci.yml uses.
+# Part of the throwaway probe (probe-outer.yml): the leaf, a matrix fed by an input, (Linux only, so no host isolation is needed).
 name: probe-leaf
 on:
   workflow_call:
@@ -13,7 +13,8 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.legs) }}
-    runs-on: ${{ matrix.os }}
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - run: echo "probe leaf ${{ matrix.n }} on ${{ matrix.os }}; github.job=${{ github.job }}"

@@ -321,6 +321,22 @@ since = 2026-11-08
 review_by = 2026-12-27
 approved = "coordinator"
 
+[[not_gated]]
+id = "workflow:probe-mid.yml"
+reason = "a throwaway probe of nested reusable workflows (branch ci/probe-nesting, never merged), dispatched by hand once"
+owner = "ci/probe-nesting"
+since = 2026-11-20
+review_by = 2026-11-27
+approved = "coordinator"
+
+[[not_gated]]
+id = "workflow:probe-leaf.yml"
+reason = "a throwaway probe of nested reusable workflows (branch ci/probe-nesting, never merged), dispatched by hand once"
+owner = "ci/probe-nesting"
+since = 2026-11-20
+review_by = 2026-11-27
+approved = "coordinator"
+
 [[level]]
 id = "apps/debrief/scripts/ci/macos-smoke.test.mjs"
 level = "main"

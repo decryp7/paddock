@@ -4,6 +4,7 @@
 #   2. a matrix fed by an input: `fromJSON(inputs.legs)` in the leaf;
 #   3. `needs.<call job>.result` and `needs: [<call job>]` on a call job;
 #   and the job names the API reports for nested jobs (read afterwards with ./dev; the report job also prints them).
+# ci-runs-reader: the probe prints the job names of its own run, to record how nested jobs are named; it judges nothing.
 name: probe-outer
 on:
   workflow_dispatch:
