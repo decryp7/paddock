@@ -197,10 +197,11 @@ fn placeholders(n: usize, from: usize) -> String {
 }
 
 /// Runs `f` in one transaction: one commit for everything it did.
-fn in_tx(c: &Connection, f: impl FnOnce(&Connection) -> rusqlite::Result<()>) -> rusqlite::Result<()> {
+fn in_tx<T>(c: &Connection, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> rusqlite::Result<T> {
     let tx = c.unchecked_transaction()?;
-    f(&tx)?;
-    tx.commit()
+    let out = f(&tx)?;
+    tx.commit()?;
+    Ok(out)
 }
 
 fn writer_loop(c: &Connection, rx: &Receiver<Job>, limits: &Limiter, pending: &Pending, err: &Mutex<Option<String>>) {
@@ -220,19 +221,21 @@ fn writer_loop(c: &Connection, rx: &Receiver<Job>, limits: &Limiter, pending: &P
                     }
                 }
             }
-            Job::TouchMany(kind, keys, now) => record(
-                err,
-                in_tx(c, |c| {
-                    let mut q = c.prepare_cached("UPDATE entries SET used=?3, hits=hits+1 WHERE kind=?1 AND key=?2")?;
-                    for key in &keys {
-                        q.execute(params![kind.name(), key.as_slice(), now as i64])?;
-                    }
-                    Ok(())
-                }),
-            ),
+            Job::TouchMany(kind, keys, now) => record(err, in_tx(c, |c| touch_many(c, kind, &keys, now))),
             Job::DeleteMany(kind, keys) => {
-                sizes.remove(&kind);
-                record(err, in_tx(c, |c| delete_expired(c, kind, &keys)));
+                let r = in_tx(c, |c| delete_expired(c, kind, &keys));
+                match &r {
+                    // The rows that went are subtracted from the running figure; it is only forgotten when the delete failed.
+                    Ok(freed) => {
+                        if let Some(total) = sizes.get_mut(&kind) {
+                            *total -= freed;
+                        }
+                    }
+                    Err(_) => {
+                        sizes.remove(&kind);
+                    }
+                }
+                record(err, r.map(|_| ()));
             }
             Job::Clear(scope, reply) => {
                 sizes.clear();
@@ -279,14 +282,35 @@ fn delete_models(c: &Connection, models: &[String]) -> rusqlite::Result<usize> {
     Ok(n)
 }
 
-/// Deletes the entries a reader found expired, only while they are still the rows it saw (same `created`): a value stored
-/// again after the read is fresh and stays.
-fn delete_expired(c: &Connection, kind: Kind, seen: &[(Key, i64)]) -> rusqlite::Result<()> {
-    let mut q = c.prepare_cached("DELETE FROM entries WHERE kind=?1 AND key=?2 AND created=?3")?;
-    for (key, created) in seen {
-        q.execute(params![kind.name(), key.as_slice(), created])?;
+/// Counts one hit and the use time on every key of `keys` (distinct): one `key IN (...)` update per chunk, in the caller's
+/// transaction (ADR 0108, PW-2).
+fn touch_many(c: &Connection, kind: Kind, keys: &[Key], now: Millis) -> rusqlite::Result<()> {
+    let (kn, used) = (kind.name(), now as i64);
+    for chunk in keys.chunks(IN_CHUNK) {
+        let sql = format!(
+            "UPDATE entries SET used=?2, hits=hits+1 WHERE kind=?1 AND key IN ({})",
+            placeholders(chunk.len(), 3)
+        );
+        let args = [&kn as &dyn rusqlite::ToSql, &used]
+            .into_iter()
+            .chain(chunk.iter().map(|k| k as &dyn rusqlite::ToSql));
+        c.execute(&sql, rusqlite::params_from_iter(args))?;
     }
     Ok(())
+}
+
+/// Deletes the entries a reader found expired, only while they are still the rows it saw (same `created`): a value stored
+/// again after the read is fresh and stays. Returns the bytes that went, for the running size.
+fn delete_expired(c: &Connection, kind: Kind, seen: &[(Key, i64)]) -> rusqlite::Result<i64> {
+    let mut q = c.prepare_cached("DELETE FROM entries WHERE kind=?1 AND key=?2 AND created=?3 RETURNING size")?;
+    let mut freed = 0;
+    for (key, created) in seen {
+        let mut rows = q.query(params![kind.name(), key.as_slice(), created])?;
+        while let Some(r) = rows.next()? {
+            freed += r.get::<_, i64>(0)?;
+        }
+    }
+    Ok(freed)
 }
 
 /// What `kind` holds, in bytes: the running figure, read from the table once.
@@ -744,7 +768,7 @@ mod tests {
         let (s, spy) = open_spied(d.path(), 100);
         s.put_many(Kind::Response, batch(1, 3, 20), 10);
         s.flush();
-        let sums = spy.statements("sum(size)");
+        let sums = spy.statements("SELECT coalesce(sum(size)");
         assert!(
             sums >= 1,
             "the spy sees the sum the open made (else the 0 below proves nothing), got {sums}"
@@ -761,7 +785,11 @@ mod tests {
             5,
             "no entry was evicted for bytes that were already gone"
         );
-        assert_eq!(spy.statements("sum(size)") - sums, 0, "the table was not summed again");
+        assert_eq!(
+            spy.statements("SELECT coalesce(sum(size)") - sums,
+            0,
+            "the table was not summed again"
+        );
         assert!(s.last_error().is_none());
     }
 
@@ -852,7 +880,8 @@ mod tests {
         s.put_many(Kind::Response, batch(2, 1, 4), 900);
         s.flush();
         let c = Connection::open(d.path().join("cache.sqlite")).unwrap();
-        in_tx(&c, |c| delete_expired(c, Kind::Response, &[([1; 32], 10), ([2; 32], 10)])).unwrap();
+        let freed = in_tx(&c, |c| delete_expired(c, Kind::Response, &[([1; 32], 10), ([2; 32], 10)])).unwrap();
+        assert_eq!(freed, 4, "only the row that went is counted: the stale one of 4 bytes");
         let left: Vec<Vec<u8>> = c
             .prepare("SELECT key FROM entries WHERE kind='response' ORDER BY key")
             .unwrap()

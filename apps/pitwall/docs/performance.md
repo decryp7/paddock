@@ -33,7 +33,7 @@ Quoted by [ADR 0108](../../../docs/adr/0108-bulk-apis-one-call-for-many-items.md
 scans and cache calls, read by the budget tests themselves (SQLite's own trace and commit hook, the library's scan counter, the
 cache's call counter); they do not depend on the machine or its load, so there is no timing here.
 
-- **Commit:** base `5740e7ea3~1` (before WP-3) against `5740e7ea3` and the review fixes on `fix/pitwall-bulk-wp3-review`.
+- **Commit:** base `5740e7ea3~1` (before WP-3) against `5740e7ea3` and the review fixes on `fix/pitwall-bulk-wp3-review` (the rows below the first seven are the second review round's).
 - **Machine:** the Mac mini M4 Pro (arm64, macOS 27.2). Counts only; no timing was taken.
 - **Load:** not relevant to counts.
 - **Build:** debug.
@@ -51,6 +51,10 @@ cache's call counter); they do not depend on the machine or its load, so there i
   | Embeddings request of N inputs, cache reads and writes | N and N | 1 and 1 | `== 1` each (`an_embeddings_request_reads_and_writes_the_disk_cache_once`, N = 6) |
   | Embeddings request, all hits | N reads | 1 read, 0 writes | `== (1, 0)` |
   | `delete_models` of 4 ids, scans of the models folder | 4 | 1 | `== 1` (`delete_models_scans_once_and_answers_one_result_per_id`) |
+  | Clearing the cached entries of 8 deleted models, commits | 8 | 1 | `== 1` (`clearing_many_models_is_one_commit`; control `the_spy_sees_one_commit_per_single_model_clear` shows 8) |
+  | `delete_models` of 5 models, listings of the keep-warm folder | 5 | 1 | `== 1` (`delete_models_lists_the_keep_warm_folder_once`; control `single_invalidations_list_the_folder_once_each` shows 4 for 4) |
+  | 40 hit counts, `UPDATE` statements | 40 | 1 | `== 1` (`a_batch_of_hit_counts_is_one_update_statement`) |
+  | Expired entries deleted, then a store: `SUM(size)` over the table | 1 | 0 | `== 0` (`deleting_expired_entries_adjusts_the_running_size`, floor `>= 1` at open) |
 
 - **Notes:** the "before" statement and commit counts for 60 stores and reads are the author's figures from the WP-3 commit message
   (`5740e7ea3`), measured by the same spy on the per-key code; the per-request and per-delete "before" counts follow from the old

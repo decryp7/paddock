@@ -178,6 +178,7 @@ async fn delete_ids(st: &Arc<AppState>, ids: Vec<ModelId>) -> R<Vec<paddock_comm
 /// `delete_models`: a bad id fails alone (`invalid`), the others go through [`delete_ids`].
 async fn delete_models(st: &Arc<AppState>, a: &Value) -> R<Value> {
     use paddock_commands::{CommandError as ItemError, ItemResult};
+    let started = std::time::Instant::now();
     let raw: Vec<String> = arg(a, "ids")?;
     mgmt::check_bulk(raw.len(), "ids")?;
     let mut out: Vec<Option<ItemResult<()>>> = vec![None; raw.len()];
@@ -194,10 +195,35 @@ async fn delete_models(st: &Arc<AppState>, a: &Value) -> R<Value> {
     for (i, r) in slots.into_iter().zip(delete_ids(st, ids).await?) {
         out[i] = Some(r);
     }
-    ok(out
+    let out: Vec<ItemResult<()>> = out
         .into_iter()
         .map(|r| r.unwrap_or_else(|| ItemResult::Err(ItemError::internal("no result"))))
-        .collect::<Vec<_>>())
+        .collect();
+    log_deleted(&raw, &out, started.elapsed());
+    ok(out)
+}
+
+/// The log of one `delete_models` call (ER-27): one info line with the counts and the duration, one warn line per failed id with its
+/// code. An id that is not a model id is counted and named by its place only: it is the caller's text.
+fn log_deleted(raw: &[String], out: &[paddock_commands::ItemResult<()>], took: std::time::Duration) {
+    use paddock_commands::{ErrorCode, ItemResult};
+    let failed = out.iter().filter(|r| !r.is_ok()).count();
+    log::info!(
+        target: "pitwall_server",
+        "delete_models: requested {}, deleted {}, failed {failed}, {} ms",
+        raw.len(),
+        out.len() - failed,
+        took.as_millis()
+    );
+    for (i, r) in out.iter().enumerate() {
+        if let ItemResult::Err(e) = r {
+            if e.code == ErrorCode::Invalid {
+                log::warn!(target: "pitwall_server", "delete_models: item {i} is not a model id ({})", e.code.as_str());
+            } else if let Some(id) = raw.get(i) {
+                log::warn!(target: "pitwall_server", "delete_models: {id} was not deleted ({})", e.code.as_str());
+            }
+        }
+    }
 }
 
 /// `delete_model`: the bulk path with one id; its failure is the command's error, in the code the item carried.
@@ -210,7 +236,8 @@ async fn delete_model(st: &Arc<AppState>, id: ModelId) -> R<Value> {
     }
 }
 
-/// The error of the single `delete_model` for one item's failure.
+/// The error of the single `delete_model` for one item's failure: the code the item carried (P3-5), `internal` only for a code
+/// with no better home.
 fn single_delete_error(e: paddock_commands::CommandError) -> CommandError {
     use paddock_commands::ErrorCode as Item;
     err(
@@ -218,6 +245,9 @@ fn single_delete_error(e: paddock_commands::CommandError) -> CommandError {
             Item::NotFound => mgmt::ErrorCode::NotFound,
             Item::Busy => mgmt::ErrorCode::Busy,
             Item::Denied => mgmt::ErrorCode::Forbidden,
+            Item::Invalid => mgmt::ErrorCode::BadRequest,
+            // A file that could not be removed now (in use, locked): the state does not allow it yet, try again.
+            Item::Io => mgmt::ErrorCode::Conflict,
             _ => mgmt::ErrorCode::Internal,
         },
         e.message,

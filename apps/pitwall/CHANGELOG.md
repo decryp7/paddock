@@ -58,7 +58,9 @@ arrive in the app as usual.
 
 - Models: "Clean unused" deletes the models in one call that reads the library once, however many there are, and says which
   ones it could not delete. A model that a request is using is no longer deleted: it is answered "in use" and stays loaded and
-  on disk. A model is also not loaded again while its files are being deleted.
+  on disk. A model is also not loaded again while its files are being deleted. When some models cannot be deleted, the message
+  names each one with the reason. Removing several models clears their cached answers and saved prompt prefixes once, not once
+  per model.
 - The embeddings cache stores a request's vectors in one write and reads them with one lookup per request (it was one
   write and one read per input), and keeps its size as a running figure instead of summing the table on every store.
 
