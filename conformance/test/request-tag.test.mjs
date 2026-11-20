@@ -1,7 +1,9 @@
 // The tag request (.gitea/workflows/tag.yml, conformance/ci/request-tag.mjs): the checks, and the workflow's structure.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { checkNotSkipCi, checkVerdict, checkVersion, gateWorkflow, parseTag, runChecks, summary } from '../ci/request-tag.mjs';
 import { PADDOCK } from './helpers.mjs';
@@ -59,6 +61,39 @@ test('the verdict of ./dev: only exit 0 with a green verdict passes; 5, 6 and si
 test('the verdict is read from the last line, so tool chatter before it does not matter', () => {
   const out = `building...\n${JSON.stringify({ verdict: 'green', run: 3 })}\n`;
   assert.equal(checkVerdict({ status: 0, stdout: out, stderr: '' }), 3);
+});
+
+/**
+ * The checker as tag.yml runs it: the script itself, from the trusted checkout as the working folder, with `--root .`. A stand-in
+ * `dev` there answers `ci verdict`; the row "CI is green on exactly this commit" is what it said. Run 8384 (2026-11-20) refused
+ * dyno-v1.2.0 because `join('.', 'dev')` is `dev`, which spawnSync looked up on PATH (ENOENT): every unit test above injects the
+ * verdict, so the CLI's own call was never run (broken since 3f876f2af, 2026-11-12).
+ */
+function cliCiRow(devScript) {
+  const cwd = mkdtempSync(join(tmpdir(), 'request-tag-cli-'));
+  try {
+    writeFileSync(join(cwd, 'dev'), `#!/bin/sh\n${devScript}\n`);
+    chmodSync(join(cwd, 'dev'), 0o755);
+    const out = spawnSync(
+      process.execPath,
+      [join(PADDOCK, 'conformance/ci/request-tag.mjs'), '--tag', 'dyno-v1.2.0', '--sha', SHA, '--api', 'http://127.0.0.1:9/api/v1', '--repo', 'o/r', '--root', '.'],
+      { cwd, encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '' } },
+    );
+    const row = out.stdout.split('\n').find((l) => l.startsWith('| CI is green on exactly this commit |'));
+    assert.ok(row, `the summary has the CI row: ${out.stdout}${out.stderr}`);
+    return row;
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}
+
+test('the CLI with --root . runs the ./dev of that folder, not a dev on PATH (run 8384)', { skip: process.platform === 'win32' && 'a POSIX shell stand-in' }, () => {
+  const green = cliCiRow(`echo '${JSON.stringify({ verdict: 'green', run: 8372 })}'`);
+  assert.match(green, /\| pass \| ci\.yml full run 8372 \|/);
+  assert.doesNotMatch(green, /ENOENT/);
+  // The positive control (ER-33): the same call, the stand-in says not measured, and the row fails with its words.
+  const notMeasured = cliCiRow(`echo '${JSON.stringify({ verdict: 'not_measured', detail: 'stand-in: not measured' })}'; exit 6`);
+  assert.match(notMeasured, /\| FAIL \| stand-in: not measured; then request the tag \|/);
 });
 
 function world(over = {}) {
