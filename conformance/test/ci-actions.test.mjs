@@ -12,14 +12,12 @@ import { executableIn, platformId } from '../ci/install-test-browser.mjs';
 import { isMain } from '../src/util/is-main.mjs';
 import { parseSteps } from '../src/util/workflows.mjs';
 import { conjuncts, expr, job as workflowJob, loadAction, loadWorkflow, needsOf, stepsOf } from './lib/workflow.mjs';
-import { PADDOCK } from './helpers.mjs';
+import { ciText, PADDOCK } from './helpers.mjs';
 
 const ACTIONS = join(PADDOCK, '.gitea', 'actions');
 const WORKFLOWS = join(PADDOCK, '.gitea', 'workflows');
 const names = readdirSync(ACTIONS, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
 const read = (p) => readFileSync(p, 'utf8');
-/** The per-operating-system jobs of one ci.yml family (crate, app, paddock-dev): conformance/ci/stages.json. */
-const OS_JOBS = (family) => ['linux', 'windows', 'macos'].map((o) => `${family}-${o}`);
 
 /** Declared input names of an action.yml / a workflow_call block: keys at the first indent under `inputs:`. */
 function declaredInputs(text) {
@@ -156,7 +154,7 @@ test('setup-rust declares the sccache backend inputs: local disk by default, Red
   assert.match(text, /REDIS_ENDPOINT: \$\{\{ inputs\.sccache-redis-endpoint \}\}/);
   assert.match(text, /sccache-backend must be auto, redis or local/);
   assert.match(text, /sccache-backend is redis but sccache-redis-endpoint is empty/);
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = ciText();
   assert.doesNotMatch(ci, /sccache-redis|SCCACHE_REDIS|sccache-backend/, 'Paddock CI no longer uses the shared Redis backend');
 });
 
@@ -471,7 +469,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
   assert.match(stats, /sccache --show-stats/);
   assert.match(stats, /command -v sccache/);
   assert.match(read(join(ACTIONS, 'sccache-stats', 'action.yml')), /kit\.sh" host sccache-stats/, 'through the kit shim (Rust, or this script on the release path)');
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = ciText();
   // The jobs that build Rust, by name (a new job that builds Rust joins this list; a count would hide which one).
   const jobsUsing = (action) => {
     const found = [];
@@ -483,7 +481,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
     }
     return found;
   };
-  const rustJobs = ['ipc-endpoints', 'ui', 'e2e', 'conformance', 'tools', 'wiki', 'heavy', 'icons', 'eslint-preset', 'crates', ...OS_JOBS('crate'), 'audit', 'train-gates', ...OS_JOBS('app'), 'app-e2e', ...OS_JOBS('paddock-dev')]; // audit: ./dev audit compare; conformance: ./dev gates check (C100, ADR 0060)
+  const rustJobs = ['ipc-endpoints', 'ui', 'e2e', 'conformance', 'tools', 'wiki', 'heavy', 'icons', 'eslint-preset', 'crates', 'audit', 'train-gates', 'crate', 'paddock-dev', 'app']; // audit: ./dev audit compare; conformance: ./dev gates check (C100, ADR 0060)
   assert.deepEqual(jobsUsing('setup-rust'), rustJobs, 'setup-rust in every job that builds Rust');
   assert.deepEqual(jobsUsing('sccache-stats'), rustJobs, 'stats after each');
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');
@@ -644,7 +642,7 @@ test('every job that builds Rust on a host sets its build folder with the build-
       assert.equal(ignored.status, 0, `${ws[1]}/.cargo/ci.toml is git-ignored`);
     }
   }
-  for (const want of [...OS_JOBS('crate').map((j) => `ci.yml:${j}`), ...OS_JOBS('app').map((j) => `ci.yml:${j}`), 'app-release.yml:bundle', 'debrief.yml:rust-test-macos', 'debrief.yml:tauri-smoke', 'debrief.yml:bundle']) {
+  for (const want of ['ci-crate.yml:crate', 'ci-app.yml:app', 'app-release.yml:bundle', 'debrief.yml:rust-test-macos', 'debrief.yml:tauri-smoke', 'debrief.yml:bundle']) {
     assert.ok(uses.includes(want), `${want} sets its build folder with the action (found: ${uses.join(', ')})`);
   }
   const copies = spawnSync('git', ['ls-files', 'apps/*/scripts/ci/build-folder.sh'], { cwd: PADDOCK, encoding: 'utf8' });
@@ -884,9 +882,10 @@ test('stable-workspace leaves Linux containers alone and never fails a job it ca
 });
 
 test('CI moves the checkout to a stable path on the host runners only, after Git bash is on PATH on Windows', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
-  const jobs = parseJobs(ci).filter((j) => j.text.includes('uses: ./.gitea/actions/kept-clone'));
-  assert.deepEqual(jobs.map((j) => j.id), [...OS_JOBS('crate'), ...OS_JOBS('app'), ...OS_JOBS('paddock-dev')], 'the crate job, the apps\' host legs and the developer tool, one job per OS each');
+  const jobs = ['ci.yml', 'ci-crate.yml', 'ci-paddock-dev.yml', 'ci-app.yml']
+    .flatMap((f) => parseJobs(read(join(WORKFLOWS, f))))
+    .filter((j) => j.text.includes('uses: ./.gitea/actions/kept-clone'));
+  assert.deepEqual(jobs.map((j) => j.id), ['crate', 'paddock-dev', 'app'], 'the crate job, the developer tool and the apps\' host legs: the reusable workflows ci.yml calls once per OS');
   for (const job of jobs) {
     const at = job.text.indexOf('uses: ./.gitea/actions/kept-clone');
     assert.match(job.text.slice(at, at + 160), /\n\s+if: runner\.os != 'Linux'/, `${job.id}: host runners only; on Windows \`shell: bash\` before Git bash is on PATH resolves to WSL`);
@@ -897,16 +896,16 @@ test('CI moves the checkout to a stable path on the host runners only, after Git
 });
 
 test('the test browser of a host job lives in a kept folder of its job slot, outside the checkout that stable-workspace moves', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = ciText();
   const dirs = [...ci.matchAll(/PADDOCK_TEST_BROWSER_DIR=(\S+)/g)].map((m) => m[1]);
-  assert.equal(dirs.length, 6, 'the crate job\'s and the app leg\'s own (per app), one copy per OS');
+  assert.equal(dirs.length, 2, 'the crate job\'s and the app leg\'s own (per app)');
   for (const d of dirs) assert.equal(d, '$dir"', 'the folder job-isolation.sh gives');
-  assert.equal([...ci.matchAll(/dir="\$\(bash conformance\/ci\/kit\.sh isolation path browser (paddock|"\$APP")\)"/g)].length, 6, 'the kept folder `browser` of the job slot');
+  assert.equal([...ci.matchAll(/dir="\$\(bash conformance\/ci\/kit\.sh isolation path browser (paddock|"\$APP")\)"/g)].length, 2, 'the kept folder `browser` of the job slot');
   assert.ok(ci.indexOf('PADDOCK_TEST_BROWSER_DIR') < ci.indexOf('uses: ./.gitea/actions/install-test-browser'), 'the folder is chosen before the browser is installed');
 });
 
 test('the WebKit job runs on the Mac runner for pushes to main and v* tags only, and runs the three WebKit projects', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = ciText();
   const on = ci.match(/^on:\n((?:[ \t]+.*\n|\n)+)/m)?.[1] ?? '';
   assert.match(on, /push:\n\s+branches: \[main\]\n\s+tags: \["v\*"\]/, 'a push is only main or a v* tag');
   const job = ci.match(/^  e2e-webkit:\n((?:    .*\n|\n)+)/m)?.[1] ?? '';
@@ -1103,10 +1102,10 @@ test('app-gates tests last-packages apart on Linux only, and a host leg leaves t
   assert.match(gates, /if \[ "\$RUNNER_OS" = Linux \] && \[ \$\{#last\[@\]\} -gt 0 \]; then step \$\{wrap\[@\]\+"\$\{wrap\[@\]\}"\} cargo nextest run \$\{last\[@\]\+"\$\{last\[@\]\}"\}/, 'Linux runs them after the rest');
   assert.match(gates, /step cargo clippy --workspace \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\}/, 'clippy: excluded on a host only');
   assert.match(gates, /step cargo test --workspace \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\} --doc/, 'doc tests: excluded on a host only');
-  assert.match(read(join(WORKFLOWS, 'ci.yml')), /rust-checks: \$\{\{ matrix\.rust_checks \}\}/, 'ci.yml hands rustChecks to app-gates');
-  assert.match(read(join(WORKFLOWS, 'ci.yml')), /host-rust-checks: \$\{\{ matrix\.host_rust_checks \}\}/, 'ci.yml hands hostRustChecks to app-gates');
-  assert.match(read(join(WORKFLOWS, 'ci.yml')), /notices: \$\{\{ matrix\.notices \}\}/, 'ci.yml hands the notices check to app-gates');
-  assert.match(read(join(WORKFLOWS, 'ci.yml')), /last-packages: \$\{\{ matrix\.last_packages \}\}/, 'ci.yml hands the contract field to app-gates');
+  assert.match(ciText(), /rust-checks: \$\{\{ matrix\.rust_checks \}\}/, 'ci.yml hands rustChecks to app-gates');
+  assert.match(ciText(), /host-rust-checks: \$\{\{ matrix\.host_rust_checks \}\}/, 'ci.yml hands hostRustChecks to app-gates');
+  assert.match(ciText(), /notices: \$\{\{ matrix\.notices \}\}/, 'ci.yml hands the notices check to app-gates');
+  assert.match(ciText(), /last-packages: \$\{\{ matrix\.last_packages \}\}/, 'ci.yml hands the contract field to app-gates');
 });
 
 test('app-gates reports every failed check: the steps after a failed check still run', () => {
@@ -1171,7 +1170,7 @@ test("Spotter's real-browser tests use the image's Chrome for Testing on Linux: 
   assert.deepEqual(contract.testBrowser, { envPrefix: 'SPOTTER', catalogue: 'apps/spotter/crates/spotter-render/src/chromium-manifest.toml', noSandboxOnLinux: true }, 'the leg installs Spotter\'s pin on the hosts and points SPOTTER_TEST_BROWSER at it');
   assert.ok(existsSync(join(PADDOCK, contract.testBrowser.catalogue)));
   assert.equal(contract.display, true, 'the renderer\'s window is a real off-screen one: a virtual display on Linux');
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = ciText();
   assert.match(ci, /echo "\$\{PREFIX\}_TEST_BROWSER=\$CHROMIUM_TEST_PATH"/, 'the tests launch the pinned build');
   assert.match(ci, /echo "\$\{PREFIX\}_REQUIRE_TEST_BROWSER=1"/, 'a missing browser fails the run');
   assert.match(ci, /kit\.sh isolation path browser "\$APP"/, 'a kept host folder of the app and the job slot (two jobs may run on a host at once)');
@@ -1202,7 +1201,7 @@ test('the real-browser tests of the crates and of Debrief take turns under nexte
 });
 
 test("a kit app's end-to-end legs and failure report: ci.yml forwards the shard, the webkit input and uploads the report from the stable workspace", () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = ciText();
   assert.match(ci, /e2e-checks: \$\{\{ matrix\.e2e_checks \}\}\n\s+e2e-shard: \$\{\{ matrix\.e2e_shard \}\}\n\s+e2e-leg: \$\{\{ matrix\.e2e_leg \}\}/);
   // A WebKit leg (one shard or several) runs the WebKit list: the phase comes from the leg's name, not from having a shard.
   assert.match(read(join(ACTIONS, 'app-gates', 'action.yml')), /E2E_PHASE: \$\{\{ startsWith\(inputs\.e2e-leg, 'e2e-webkit'\) && 'e2eWebkit' \|\| 'e2e' \}\}/);
@@ -1215,7 +1214,7 @@ test("a kit app's end-to-end legs and failure report: ci.yml forwards the shard,
 });
 
 test('a manual ci.yml run can ask for WebKit (workflow_dispatch input), compared as a boolean or a string, and the release dispatch asks for it', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = ciText();
   const dispatch = /^  workflow_dispatch:\n((?:    .*\n|\n)+)/m.exec(ci)?.[1] ?? '';
   assert.match(dispatch, /^      webkit:\n(?:        .*\n)*?        type: boolean\n        default: false/m, 'workflow_dispatch has a webkit input');
   assert.match(ci, /PLAN_WEBKIT: \$\{\{ \(inputs\.webkit == true \|\| inputs\.webkit == 'true'\) && '1' \|\| '' \}\}/, 'the plan job turns the input into the WebKit leg');
@@ -1397,7 +1396,7 @@ test('Debrief\'s heavy DuckDB store suites run at most two at a time, in the ove
 });
 
 test('ci.yml runs the icon tests and `install.mjs --check` in an icons job that the plan feeds', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = ciText();
   assert.match(ci, /icons: \$\{\{ steps\.plan\.outputs\.icons \}\}/, 'the plan job exports the icons output');
   const at = ci.indexOf('\n  icons:\n');
   assert.ok(at > 0, 'ci.yml has an icons job');
@@ -1441,7 +1440,7 @@ test("app-release runs an app's own bundle check on Linux and macOS, after the i
 });
 
 test('every host job that keeps a build folder caps it at the end, with the shared prune action, in its own folder only', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = read(join(WORKFLOWS, 'ci-app.yml'));
   const rel = read(join(WORKFLOWS, 'app-release.yml'));
   assert.match(ci, /- uses: \.\/\.gitea\/actions\/prune-build-folder\n\s+if: always\(\) && runner\.os != 'Linux'\n\n/, "ci.yml's app job prunes on the hosts, even after a failure");
   assert.ok(ci.indexOf('actions/prune-build-folder') > ci.indexOf('actions/host-cleanup'), 'after the clean-up of the job');
@@ -1478,7 +1477,7 @@ function runtimeTempPrefixes(app) {
 }
 
 test("a kit app's host-cleanup temp sweep is <app>-it- and is a prefix of no temp folder its product creates at run time", () => {
-  assert.match(read(join(WORKFLOWS, 'ci.yml')), /uses: \.\/\.gitea\/actions\/host-cleanup\n(?:.*\n)*?\s+temp-prefix: \$\{\{ matrix\.app \}\}-it-\n/, 'ci.yml sweeps <app>-it-');
+  assert.match(ciText(), /uses: \.\/\.gitea\/actions\/host-cleanup\n(?:.*\n)*?\s+temp-prefix: \$\{\{ matrix\.app \}\}-it-\n/, 'ci.yml sweeps <app>-it-');
   assert.match(read(join(WORKFLOWS, 'app-release.yml')), /actions\/host-cleanup\n(?:.*\n)*?\s+temp-prefix: \$\{\{ inputs\.app-id \}\}-it-\n/, 'app-release.yml sweeps <app>-it-');
   const dyno = runtimeTempPrefixes('dyno').map(([, p]) => p);
   assert.ok(dyno.includes('dyno-bench-'), `the scan finds Dyno's own scratch folders (${dyno})`);
@@ -2241,7 +2240,7 @@ test('every workflow step that runs the ui Playwright config provides every port
 });
 
 test('the plan job guard keeps CI green under the documented C100 rollback (--warn) and fails when the line is gone', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = ciText();
   const at = ci.indexOf('- name: C100 stays wired');
   assert.ok(at > 0, 'the guard step exists');
   const block = /run: \|\n((?: {10}.*\n|\n)+)/.exec(ci.slice(at))[1].replace(/^ {10}/gm, '');
@@ -2301,11 +2300,11 @@ test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWN
   }
   assert.ok(checked >= 5, `found the release jobs (${checked})`);
   let tagJobs = 0;
-  for (const job of jobsOf('ci.yml').filter((j) => j.text.includes('\n      PADDOCK_DEV_TOKEN:'))) {
+  for (const job of ['ci.yml', 'ci-crate.yml', 'ci-paddock-dev.yml', 'ci-app.yml'].flatMap(jobsOf).filter((j) => j.text.includes('\n      PADDOCK_DEV_TOKEN:'))) {
     assert.match(job.text, /PADDOCK_DEV_DOWNLOAD: \$\{\{ \(inputs\.release == true \|\| startsWith\(github\.ref, 'refs\/tags\/'\)\) && '0' \|\| '' \}\}/, `ci.yml:${job.id}: a run for a tag builds the tool from source`);
     tagJobs += 1;
   }
-  assert.equal(tagJobs, 18, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the four that take a host slot, the apps\' stage-2 end-to-end legs (app-e2e), ipc-endpoints, conformance, tools-macos, and wiki, heavy, crates and audit (setup-rust runs ./dev); ui, e2e, tools, icons and eslint-preset (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
+  assert.equal(tagJobs, 11, 'the jobs of ci.yml and of the reusable workflows it calls (ci-crate.yml, ci-paddock-dev.yml, ci-app.yml) that read the prebuilt tool with the credential at job level: the three that take a host slot (the reusable ones), ipc-endpoints, conformance, tools-macos, wiki, heavy, crates and audit (setup-rust runs ./dev); ui, e2e, tools, icons and eslint-preset (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
 });
 
 test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store is written only by main)', () => {

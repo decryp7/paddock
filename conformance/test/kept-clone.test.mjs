@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { parseSteps } from '../src/util/workflows.mjs';
-import { PADDOCK } from './helpers.mjs';
+import { ciText, PADDOCK } from './helpers.mjs';
 
 const read = (p) => readFileSync(p, 'utf8');
 const SCRIPT = join(PADDOCK, 'conformance', 'ci', 'kept-clone.sh');
@@ -481,11 +481,11 @@ test('checkout profiles: nothing outside the excluded paths mentions one, unless
 });
 
 test('checkout profiles: ci.yml\'s host jobs use the kept clone with a declared profile, and its bootstrap checkout is the declared one', () => {
-  const ci = read(CI);
+  const ci = ciText();
   const profiles = new Set(declared().filter((d) => d.kind === 'exclude').map((d) => d.parts[0]));
   const boot = declared().filter((d) => d.kind === 'bootstrap').map((d) => d.parts[0]);
-  // One job per operating system each (ci.yml crate, app and paddock-dev; conformance/ci/stages.json).
-  const jobs = ['crate', 'app', 'paddock-dev'].flatMap((f) => ['linux', 'windows', 'macos'].map((o) => `${f}-${o}`));
+  // Reusable workflows ci.yml calls once per operating system (ci-crate.yml, ci-app.yml, ci-paddock-dev.yml): their jobs.
+  const jobs = ['crate', 'app', 'paddock-dev'];
   for (const id of jobs) {
     const text = jobBlock(ci, id);
     const steps = parseSteps(text);

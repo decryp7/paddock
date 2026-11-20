@@ -85,10 +85,16 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   system (ci.yml: `stage1-linux`, `stage1-windows`, `stage1-macos`; debrief.yml: linux and macos) over that OS's fast jobs, and
   **`conformance/ci/stages.json` is the one table** of which job is in which gate, which is stage 2 (long: ci.yml's `e2e`,
   `e2e-webkit`, `app-e2e`; debrief.yml's `e2e`, `bundle`, `tauri-smoke`) and which is `parallel` (fast jobs in no gate: `train-gates`;
-  it runs at the same time and stays required). ci.yml's `crate`, `paddock-dev` and `app` are one job per OS each (`crate-linux`,
-  `crate-windows`, `crate-macos`, ...): the plan step splits their leg lists by OS (`crate_legs_<os>`, `paddock_dev_legs_<os>`,
-  `apps_<os>`) and an empty list skips that OS's job, so every OS's unit legs are in that OS's gate. The three copies of a job are
-  identical but for their id, name, condition and matrix source; a test fails when they drift, so change all three the same way. A
+  it runs at the same time and stays required). ci.yml's `crate`, `paddock-dev` and `app` are **one call per OS each** of a reusable
+  workflow (`.gitea/workflows/ci-crate.yml`, `ci-paddock-dev.yml`, `ci-app.yml`: `workflow_call` with the inputs `legs` and `release` and the
+  secret `BUILD_INPUTS_TOKEN`; `crate-linux`, `crate-windows`, `crate-macos`, ... are a few lines of `uses:` + `with: legs:`), so the
+  steps exist once and every OS's unit legs are in that OS's gate; `app-e2e` calls `ci-app.yml` too, with the end-to-end legs. The plan step
+  splits the leg lists by OS (`crate_legs_<os>`, `paddock_dev_legs_<os>`, `apps_<os>`) and an empty list skips that OS's call. Gitea
+  (probed in run 8368, 2026-11-20) lists a nested job under its own `name:` with no caller prefix (`crate (windows-latest)`) next to its
+  call job (`crate-windows`, no steps), so the since-run planner reads the callee's `name:` template (`CI_CALLEES` in plan_since.rs) and
+  its OS to map a failed nested job to `crate-windows`, and drops the call job's entry; the affected planner already maps a reusable
+  workflow to its callers, so a change to `ci-crate.yml` marks the projects of the `crate-*` call jobs (`crates`), and C100's model
+  binds the callee's `legs` input from the caller's `with:` (`<apps_windows>` names the plan output). A
   stage-2 job waits only for the gate of its own OS, so a failed unit test ends that OS's run in minutes, no OS waits for another, and a
   green run is not slower than before. The planner's affected selection holds in both stages (`apps` are the stage-1 legs, `apps_e2e`
   the stage-2 legs), and the plan's `stage2_jobs` output lists the stage-2 jobs a run expects. The last job, `stages`, prints

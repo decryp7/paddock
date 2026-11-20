@@ -301,6 +301,27 @@ fn errors(log: &str) -> Vec<String> {
         .collect()
 }
 
+/// ci.yml's reusable workflows (one call per OS each): the job each runs for a family (`crate`, `paddock-dev`, `app`), whose `name:` is
+/// what the Actions API lists for the nested job (`crate (windows-latest)`). The call jobs in ci.yml (`crate-windows`) have no name of
+/// their own, so a failed nested job is told by its family template and its OS ([`per_os_key`]).
+pub const CI_CALLEES: &[(&str, &str)] = &[
+    ("crate", "ci-crate.yml"),
+    ("paddock-dev", "ci-paddock-dev.yml"),
+    ("app", "ci-app.yml"),
+];
+
+/// The `name:` templates of [`CI_CALLEES`], keyed by family; a callee `workflow_text` cannot read adds none.
+pub fn ci_callee_templates(workflow_text: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
+    CI_CALLEES
+        .iter()
+        .filter_map(|(family, file)| {
+            let text = workflow_text(file)?;
+            let (_, name) = name_templates(&text).into_iter().next()?;
+            Some((family.to_string(), name))
+        })
+        .collect()
+}
+
 /// The job keys of a workflow and their `name:` templates, to tell a job by its display name when its log has no `Job:` line.
 pub fn name_templates(workflow: &str) -> Vec<(String, String)> {
     static NAME: LazyLock<Regex> = LazyLock::new(|| re(r"(?m)^ {4}name: *(.+?)\s*$"));
@@ -657,6 +678,10 @@ impl SincePlan {
             let text = log(j.id);
             reruns.push(classify(j, text.as_deref().map_err(String::as_str), &workflow, templates));
         }
+        // A failed nested job (`crate (windows-latest)`) is listed with its call job (`crate-windows`, no log, no leg): the nested job
+        // says which legs fail, so the call job's entry only stays when no nested job of its key failed (it never started).
+        let keys_with_leg: BTreeSet<String> = reruns.iter().filter(|r| r.leg.os.is_some()).filter_map(|r| r.key.clone()).collect();
+        reruns.retain(|r| r.leg.os.is_some() || r.key.as_ref().is_none_or(|k| !keys_with_leg.contains(k)));
         let everything = if let Some(r) = reruns.iter().find(|r| r.key.as_deref() == Some("plan")) {
             Some(format!("the plan job failed ({}): nothing after it ran", r.name))
         } else if ci {
@@ -1057,7 +1082,10 @@ pub fn since_run(
     let path = run["path"].as_str().unwrap_or("");
     let file = path.split('@').next().unwrap_or("");
     let text = workflow_text(file);
-    let templates = text.as_deref().map(name_templates).unwrap_or_default();
+    let mut templates = text.as_deref().map(name_templates).unwrap_or_default();
+    if file == "ci.yml" {
+        templates.extend(ci_callee_templates(workflow_text));
+    }
     let failed = jobs.iter().filter(|j| j.failed()).count();
     log(&format!("run {id} ({path}): {} jobs, {failed} failed", jobs.len()));
     let started = std::time::Instant::now();
@@ -1750,6 +1778,55 @@ mod tests {
         ] {
             assert_eq!(per_os_key(key, name), want, "{key} {name}");
         }
+    }
+
+    /// A failed nested job of a reusable workflow ci.yml calls (`crate (windows-latest)`) is told by its callee's `name:` template and its OS;
+    /// the call job (`crate-windows`, no log, no leg) listed with it is dropped, so the rerun names the failed legs only.
+    #[test]
+    fn a_failed_nested_job_is_told_by_its_callee_template_and_its_call_job_entry_is_dropped() {
+        let ci = "name: ci\non:\n  push:\njobs:\n  plan:\n    name: plan\n  crate-linux:\n    uses: ./.gitea/workflows/ci-crate.yml\n  crate-windows:\n    uses: ./.gitea/workflows/ci-crate.yml\n";
+        let callee = "name: ci-crate\non:\n  workflow_call:\njobs:\n  crate:\n    name: crate (${{ matrix.os }})\n";
+        let mut templates = name_templates(ci);
+        templates.extend(ci_callee_templates(&|f| (f == "ci-crate.yml").then(|| callee.to_string())));
+        assert!(
+            templates.contains(&("crate".to_string(), "crate (${{ matrix.os }})".to_string())),
+            "{templates:?}"
+        );
+        let jobs = vec![
+            run_job(1, "plan", "success"),
+            run_job(2, "crate-linux", "success"),
+            run_job(3, "crate-windows", "failure"),
+            run_job(4, "crate (windows-latest)", "failure"),
+        ];
+        let mut logs = |_: u64| Err("no log".to_string());
+        let plan = SincePlan::new(
+            &json!({"id": 9, "path": "ci.yml@refs/heads/train/x", "head_sha": "h"}),
+            &jobs,
+            &templates,
+            &mut logs,
+        );
+        assert_eq!(plan.everything, None, "both failed jobs are jobs of this ci.yml");
+        let keys: Vec<(&str, Option<&str>)> = plan
+            .reruns
+            .iter()
+            .map(|r| (r.key.as_deref().unwrap(), r.leg.os.as_deref()))
+            .collect();
+        assert_eq!(keys, [("crate-windows", Some("windows-latest"))], "{keys:?}");
+        // The call job alone failed (its nested job never started): it stays, and its family reruns whole.
+        let jobs = vec![run_job(1, "plan", "success"), run_job(3, "crate-windows", "failure")];
+        let plan = SincePlan::new(
+            &json!({"id": 9, "path": "ci.yml@refs/heads/train/x", "head_sha": "h"}),
+            &jobs,
+            &templates,
+            &mut logs,
+        );
+        assert_eq!(plan.reruns.len(), 1);
+        let out: BTreeMap<String, String> = plan.ci_outputs(&[], &mut |_| {}).into_iter().collect();
+        assert_eq!(out["rerun_jobs"], r#"["crate-windows"]"#);
+        assert!(
+            !out.contains_key("crate_legs"),
+            "a leg that cannot be told: the plan step writes every OS"
+        );
     }
 
     const DEBRIEF_JOBS: &str = include_str!("../tests/since-run/debrief-run-jobs.json");

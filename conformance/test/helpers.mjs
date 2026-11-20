@@ -140,3 +140,7 @@ export function pe({ imports = [], delay = [], plus = true, delayAttributes = 1 
   sec.copy(b, raw);
   return b;
 }
+
+/** ci.yml and the reusable workflows it calls once per operating system (the crate, paddock-dev and app jobs live there), as one text. */
+export const CI_FILES = ['ci.yml', 'ci-crate.yml', 'ci-paddock-dev.yml', 'ci-app.yml'];
+export const ciText = () => CI_FILES.map((f) => readFileSync(join(PADDOCK, '.gitea', 'workflows', f), 'utf8')).join('\n');

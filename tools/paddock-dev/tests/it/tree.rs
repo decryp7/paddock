@@ -879,16 +879,26 @@ fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
     let webkit = &wf.jobs.iter().find(|(k, _)| k == "e2e-webkit").unwrap().1;
     assert!(webkit.contains("|| contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')"));
     // The matrices read their legs from the plan step, which writes every OS when it plans no rerun of them.
-    // One job per OS each: its legs are the OS's part of the list (the plan step splits it with jq).
-    for (family, output) in [("crate", "crate_legs"), ("paddock-dev", "paddock_dev_legs")] {
+    // One call of a reusable workflow per OS each: the legs are the OS's part of the list (the plan step splits it with jq), and the
+    // called workflow's matrix reads them from its `legs` input.
+    for (family, output, callee) in [
+        ("crate", "crate_legs", "ci-crate.yml"),
+        ("paddock-dev", "paddock_dev_legs", "ci-paddock-dev.yml"),
+    ] {
         for os in ["linux", "windows", "macos"] {
             let job = format!("{family}-{os}");
             let text = &wf.jobs.iter().find(|(k, _)| *k == job).unwrap().1;
             assert!(
-                text.contains(&format!("include: ${{{{ fromJSON(needs.plan.outputs.{output}_{os}) }}}}")),
+                text.contains(&format!("legs: ${{{{ needs.plan.outputs.{output}_{os} }}}}")),
                 "{job}"
             );
+            assert!(text.contains(&format!("uses: ./.gitea/workflows/{callee}")), "{job} calls {callee}");
         }
+        let called = std::fs::read_to_string(root().join(".gitea/workflows").join(callee)).unwrap();
+        assert!(
+            called.contains("include: ${{ fromJSON(inputs.legs) }}"),
+            "{callee} reads its legs input"
+        );
     }
     let plan = &wf.jobs.iter().find(|(k, _)| k == "plan").unwrap().1;
     assert!(plan.contains("crate_legs=$PLAN_OS_LEGS") && plan.contains("paddock_dev_legs=$PLAN_OS_LEGS"));
@@ -903,7 +913,11 @@ fn ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
         .unwrap()
         .replace("\r\n", "\n");
     let leg = legs(&plan_of(&[], true), MatrixOpts::default()).remove(0);
-    let job = &ci[ci.find("\n  app-linux:\n").unwrap()..];
+    // The steps are the reusable workflow's (ci.yml calls it once per OS and once for the end-to-end legs).
+    let ci = std::fs::read_to_string(root().join(".gitea/workflows/ci-app.yml"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let job = &ci[ci.find("\n  app:\n").unwrap()..];
     for key in leg.as_object().unwrap().keys().filter(|k| *k != "dir") {
         let re = regex::Regex::new(&format!(r"\$\{{\{{ matrix\.{key}( \|\| '[^']*')? \}}\}}")).unwrap();
         assert!(re.is_match(job), "ci.yml passes matrix.{key}");
@@ -921,7 +935,7 @@ fn ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
     ] {
         assert!(gates.contains(&format!("\n  {input}:\n")), "{input}");
     }
-    assert!(job.contains("include: ${{ fromJSON(needs.plan.outputs.apps_linux) }}"));
+    assert!(job.contains("include: ${{ fromJSON(inputs.legs) }}"));
     // A since-run leg narrowed to its failed tests adds `tests_only` (plan_since.rs), which app-gates must take.
     if gates.contains("\n  tests-only:\n") {
         assert!(

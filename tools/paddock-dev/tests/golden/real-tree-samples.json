@@ -448,14 +448,14 @@
    ".gitea/workflows/ci.yml"
   ],
   "plan": {
-   "all": true,
+   "all": false,
    "crates": true,
-   "ui": true,
-   "eslint": true,
+   "ui": false,
+   "eslint": false,
    "conformance": true,
-   "c99": true,
-   "tools": true,
-   "icons": true,
+   "c99": false,
+   "tools": false,
+   "icons": false,
    "paddockDev": true,
    "docs": false,
    "apps": [

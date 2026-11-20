@@ -1,0 +1,201 @@
+# Rust crates' tests, one call per operating system (ci.yml crate-linux, crate-windows, crate-macos): fmt is in the `crates` job; this one builds and tests crates/ on one OS and lints Windows from the host legs. The caller passes that OS's legs (the plan's crate_legs_<os>), the matrix of this one job.
+# A reusable workflow (ADR 0014 amendment, 2026-11-20): called once per operating system from ci.yml, so the steps exist once.
+name: ci-crate
+
+on:
+  workflow_call:
+    inputs:
+      legs:
+        description: "The matrix legs, a JSON list (the plan's output for this OS)"
+        type: string
+        required: true
+      release:
+        description: "A release workflow's gates: ./dev never downloads its tool"
+        type: boolean
+        default: false
+    secrets:
+      BUILD_INPUTS_TOKEN:
+        required: false
+
+# The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
+env:
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
+
+jobs:
+  crate:
+    name: crate (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every OS; a rerun of a run's failures (since_run) only the failed legs, each with the filter of its failed tests.
+        include: ${{ fromJSON(inputs.legs) }}
+    runs-on: ${{ matrix.os }}
+    # Linux runs in the paddock-ci image (Rust, Tauri's libraries, Node, Playwright, Chrome for Testing, cargo-nextest baked in); Windows and
+    # macOS run on the host.
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
+    defaults:
+      run:
+        working-directory: crates
+        shell: bash
+    env:
+      # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+      # Read credential for ./dev's prebuilt download (ADR 0022 R0b), only in the jobs that run ./dev (job-isolation).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      CARGO_TERM_COLOR: always
+      # Root in the Linux container: Chromium needs the opt-in to start without its sandbox (ignored when not root).
+      PADDOCK_BROWSER_NO_SANDBOX: "1"
+    steps:
+      # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)
+      # as a partial clone; the kept-clone step below brings the slot's own clone to this commit (conformance/ci/checkout-profiles.txt).
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+        if: runner.os == 'Linux'
+
+      - uses: actions/checkout@v4
+        if: runner.os != 'Linux'
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .cargo
+            .gitea
+            conformance
+            scripts
+            tools
+            crates
+          filter: blob:none
+
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it).
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        working-directory: .
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
+
+      # A slot of the host (job isolation; after Git bash on Windows): the job's kept folders end in its slot and its temp
+      # folders are the runner's per-job folder, so concurrent jobs on one host never share either.
+      - uses: ./.gitea/actions/job-isolation
+
+      # The test browser outside the checkout, the slot's kept folder (the installer stamps the
+      # pinned version in it).
+      - name: Test browser folder (macOS, Windows)
+        if: runner.os != 'Linux'
+        working-directory: .
+        run: |
+          dir="$(bash conformance/ci/kit.sh isolation path browser paddock)"
+          if command -v cygpath >/dev/null; then dir="$(cygpath -w "$dir")"; fi
+          echo "PADDOCK_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
+
+      # Host runners check out into a per-job hashed folder; sccache keys a compile on its folder, so the workspace crates miss
+      # on every run. Build from the same physical path every time: PADDOCK_WORKSPACE, the steps' working-directory, is the slot's
+      # kept clone at this commit (kept-clone: a fetch of what changed, a clean tree, no screenshots; macOS: the work folder is
+      # a link to it; Windows, where act keeps the work folder open: the work folder stays the bootstrap, so every read of the
+      # tree goes through PADDOCK_WORKSPACE). On Windows the step comes after the one that puts Git's bash on PATH (before it,
+      # `shell: bash` finds WSL's bash.exe).
+      - uses: ./.gitea/actions/kept-clone
+        if: runner.os != 'Linux'
+        with:
+          name: paddock-checkout-${{ runner.os }}
+          profile: lean
+
+      # A build folder that outlives the job on the hosts (the work folder does not: it is hashed per job), crates/target in
+      # the container, as cargo configuration (crates/.cargo/ci.toml, included by crates/.cargo/config.toml), never
+      # CARGO_TARGET_DIR: sccache puts every CARGO_* variable into its cache key (the shared build-folder action).
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
+          name: paddock-${{ github.job }}
+
+      # Toolchain and sccache on every OS: sccache's local disk cache (host runners: the job slot's kept folder sccache-s<n>,
+      # containers: the /sccache mount).
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          components: clippy
+
+      - name: Toolchain present
+        run: |
+          rustc --version && cargo --version
+          cargo clippy --version || { echo "::error::clippy is missing on this runner (rustup component add clippy)"; exit 1; }
+
+      # The pinned cargo-nextest: the image's on Linux, a copy in the hosts' shared kept folder tools (downloaded once
+      # per version); the step fails when the runner has another version.
+      - uses: ./.gitea/actions/host-tools
+
+      # Whole-workspace steps: one build per feature set instead of one per crate (each `-p X --all-features` resolved its own
+      # features and rebuilt the shared dependencies). Every step runs even after another failed; nextest and clippy name
+      # the crate of every failure. scripts/publish.test.mjs and conformance C37 fail when a workspace member is left out.
+      # A leg with a filter (a rerun of failed tests) runs only the test steps below: its other steps passed in the earlier run.
+      - name: Clippy (workspace, every feature)
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      # The build chromium.toml pins, on the host runners (the Linux image has it): checked against its SHA-256 and kept in a
+      # folder that outlives the job, so it is downloaded once per pin. Sets CHROMIUM_TEST_PATH.
+      - name: Chrome for Testing (macOS, Windows)
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os != 'Linux' }}
+        uses: ./.gitea/actions/install-test-browser
+        with:
+          catalogue: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates/paddock-chromium/src/chromium.toml
+          env-prefix: PADDOCK
+          dir: ${{ env.PADDOCK_TEST_BROWSER_DIR }}
+
+      # Every crate's tests with every feature, so the `tauri` adapters are built and tested too (the dialogs and panels on the
+      # mock runtime, paddock-chromium against its fake browser and against Chrome for Testing: CHROMIUM_TEST_PATH, never an
+      # installed browser, rule 7; a missing browser fails instead of skipping). On Linux the coverage job (crates) runs
+      # exactly this run under llvm-cov, so this leg does not run it twice.
+      - name: Tests (workspace, every feature)
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os != 'Linux' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
+        env:
+          PADDOCK_REQUIRE_TEST_BROWSER: "1"
+          # Chrome's verbose log of each real-browser test on Windows, kept below when the job fails (ADR 0030: why the
+          # network service went away is only in there).
+          PADDOCK_TEST_BROWSER_LOG: ${{ runner.os == 'Windows' && format('{0}/chrome-logs', runner.temp) || '' }}
+          FILTER: ${{ matrix.filter }}
+        run: |
+          filter=()
+          if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn); fi
+          cargo nextest run --workspace --all-features --profile ci ${filter[@]+"${filter[@]}"}
+
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        if: failure() && runner.os == 'Windows'
+        with:
+          name: chrome-logs-${{ runner.os }}
+          path: ${{ runner.temp }}/chrome-logs
+          if-no-files-found: ignore
+
+      # The crates whose code changes with an optional feature off (cfg(not(feature)) paths, a default feature that can be
+      # turned off) also run without it. Cargo unifies features across the packages of one run, so a crate that another
+      # selected crate depends on with a feature on gets its own run: paddock-shell turns on paddock-diag's, paddock-download's
+      # and paddock-updater's `tauri`, and paddock-updater turns on paddock-download's default `http`.
+      - name: Tests with the optional features off
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
+        run: |
+          cargo nextest run -p paddock-shell -p paddock-secrets -p paddock-siblings --profile ci
+          cargo nextest run -p paddock-diag -p paddock-updater --profile ci
+          cargo nextest run -p paddock-download --no-default-features --profile ci
+          # paddock-repo-graph's git and cargo adapters sit behind features that only paddock-dev (its own workspace) turns on;
+          # its default build, without them, is the one Pacenotes uses.
+          cargo nextest run -p paddock-repo-graph --profile ci
+
+      # nextest (and so the coverage job) does not run doc tests.
+      - name: Doc tests (workspace, every feature)
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
+        run: cargo test --workspace --all-features --doc
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release

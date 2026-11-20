@@ -1715,6 +1715,33 @@ mod tests {
         );
     }
 
+    /// A reusable workflow that ci.yml calls (once per OS) marks the projects of the call jobs, not everything: ci-crate.yml reaches `crates` only.
+    #[test]
+    fn a_reusable_workflow_ci_yml_calls_marks_only_the_projects_of_its_call_jobs() {
+        let ci = ci_text("node a", "node b").replace(
+            "  crates:\n",
+            "  crate-linux:\n    uses: ./.gitea/workflows/ci-crate.yml\n  crate-windows:\n    uses: ./.gitea/workflows/ci-crate.yml\n  crates:\n",
+        );
+        let callee = "name: ci-crate\non:\n  workflow_call:\njobs:\n  crate:\n    steps:\n      - run: cargo test\n";
+        let g = fixed(
+            &base_tree(),
+            &[(CI_FILE, ci), (".gitea/workflows/ci-crate.yml", callee.to_string())],
+            None,
+        );
+        let r = gitea_plan(&[".gitea/workflows/ci-crate.yml"], &g);
+        assert_eq!(
+            (
+                r["all"].clone(),
+                r["crates"].clone(),
+                r["ui"].clone(),
+                r["conformance"].clone(),
+                r["apps"].clone()
+            ),
+            (json!(false), json!(true), json!(false), json!(true), json!([])),
+            "{r}"
+        );
+    }
+
     #[test]
     fn an_action_marks_only_the_jobs_and_app_workflows_that_use_it() {
         let g = fixed(&base_tree(), &[], None);

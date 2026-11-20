@@ -197,51 +197,58 @@ test('ci.yml: the plan job logs the staged layout the verdict reader keys on, an
   const plan = workflowJob(wf, 'plan');
   const run = plan.steps.map((s) => s.run ?? '').join('\n');
   assert.match(run, /^\s*echo "plan layout: staged"$/m);
-  assert.match(String(workflowJob(wf, 'app-linux').strategy.matrix.include), /plan\.outputs\.apps_linux/);
-  assert.match(String(workflowJob(wf, 'app-e2e').strategy.matrix.include), /plan\.outputs\.apps_e2e/);
+  assert.match(String(workflowJob(wf, 'app-linux').with.legs), /plan\.outputs\.apps_linux/);
+  assert.match(String(workflowJob(wf, 'app-e2e').with.legs), /plan\.outputs\.apps_e2e/);
 });
 
-// ---- ci.yml's crate, paddock-dev and app jobs: one job per operating system (user decision 2026-11-20) ----
+// ---- ci.yml's crate, paddock-dev and app jobs: one call of a reusable workflow per operating system (user decisions 2026-11-20) ----
 
 const OSES = [['linux', 'ubuntu-latest'], ['windows', 'windows-latest'], ['macos', 'macos-latest']];
-const FAMILIES = { crate: 'crate_legs', 'paddock-dev': 'paddock_dev_legs', app: 'apps' };
+const FAMILIES = { crate: ['ci-crate.yml', 'crate_legs'], 'paddock-dev': ['ci-paddock-dev.yml', 'paddock_dev_legs'], app: ['ci-app.yml', 'apps'] };
 
-test('ci.yml: each of crate, paddock-dev and app is one job per OS, in the table once, in its own OS gate, and skipped when the plan has no leg for that OS', () => {
+test('ci.yml: each of crate, paddock-dev and app is one call per OS of one reusable workflow, in the table once, in its own OS gate, skipped when the plan has no leg for that OS', () => {
   const wf = loadWorkflow('ci.yml');
   const gates = TABLE['ci.yml'].gates;
   assert.deepEqual(Object.keys(gates).sort(), ['stage1-linux', 'stage1-macos', 'stage1-windows'], 'a gate per OS');
-  for (const [family, output] of Object.entries(FAMILIES)) {
+  for (const [family, [callee, output]] of Object.entries(FAMILIES)) {
     assert.equal(wf.jobs[family], undefined, `the matrix job ${family} is gone (a job cannot need one matrix leg)`);
-    for (const [short, os] of OSES) {
+    for (const [short] of OSES) {
       const id = `${family}-${short}`;
       const j = workflowJob(wf, id);
       assert.ok(gates[`stage1-${short}`].includes(id), `${id} is in the table's stage1-${short}`);
-      assert.match(String(j.name), new RegExp(`\\(${os}\\)$`), `${id}'s name shows its OS: a static name keeps the planner's name-to-job mapping unambiguous`);
-      assert.match(String(j.strategy.matrix.include), new RegExp(`fromJSON\\(needs\\.plan\\.outputs\\.${output}_${short}\\)`), `${id} reads only its OS's legs`);
+      assert.equal(j.uses, `./.gitea/workflows/${callee}`, `${id} calls ${callee}: the steps exist once`);
+      assert.match(String(j.with.legs), new RegExp(`needs\\.plan\\.outputs\\.${output}_${short}\\b`), `${id} passes only its OS's legs`);
+      assert.match(String(j.secrets.BUILD_INPUTS_TOKEN), /secrets\.BUILD_INPUTS_TOKEN/, `${id} passes the read credential`);
       assert.match(String(j.if), new RegExp(`needs\\.plan\\.outputs\\.[a-z_]+_${short} != '\\[\\]'`), `${id} is skipped when the plan has no leg for its OS`);
       assert.match(String(j.if), new RegExp(`'\\["${id}"\\]'\\), '${id}'\\)`), `${id} asks rerun_jobs for itself`);
       assert.ok(String(wf.jobs.plan.outputs[`${output}_${short}`]).includes(`steps.plan.outputs.${output}_${short}`), `the plan publishes ${output}_${short}`);
     }
   }
+  assert.equal(workflowJob(wf, 'app-e2e').uses, './.gitea/workflows/ci-app.yml', 'the end-to-end legs are a call of the same reusable workflow');
   const plan = workflowJob(wf, 'plan').steps.map((s) => s.run ?? '').join('\n');
-  for (const o of Object.values(FAMILIES)) assert.match(plan, new RegExp(`\\b${o}\\b`), `the plan step splits ${o} by OS`);
+  for (const [, o] of Object.values(FAMILIES)) assert.match(plan, new RegExp(`\\b${o}\\b`), `the plan step splits ${o} by OS`);
   assert.match(plan, /select\(\.os == \$os\)/);
 });
 
-test('ci.yml: the three copies of a per-OS job are identical but for their id, name, condition and matrix source (no drift)', () => {
-  const text = readFileSync(join(here, '..', '..', '.gitea', 'workflows', 'ci.yml'), 'utf8');
-  const block = (id) => {
-    const m = new RegExp(`^  ${id}:\\n([\\s\\S]*?)(?=^  [a-z0-9-]+:\\n|^  #|(?![\\s\\S]))`, 'm').exec(text);
-    assert.ok(m, `job ${id}`);
-    return m[1]
-      .split('\n')
-      .filter((l) => !/^    (name|if):/.test(l) && !/^        include: /.test(l))
-      .join('\n')
-      .trimEnd();
-  };
-  for (const family of Object.keys(FAMILIES)) {
-    const [first, ...rest] = OSES.map(([s]) => block(`${family}-${s}`));
-    assert.ok(first.length > 500, `${family}: a real job body was compared`);
-    for (const other of rest) assert.equal(other, first, `${family}: the per-OS copies drifted apart. Fix: change all three the same way`);
-  }
+for (const [family, [callee]] of Object.entries(FAMILIES)) {
+  test(`${callee}: a reusable workflow with one job ${family}, a matrix fed by its legs input, the credential as a declared secret, and the kit variable`, () => {
+    const wf = loadWorkflow(callee);
+    assert.deepEqual(Object.keys(wf.jobs), [family], 'one job: the id is the family, so github.job names the build folder as before');
+    const j = workflowJob(wf, family);
+    assert.match(String(j.strategy.matrix.include), /fromJSON\(inputs\.legs\)/);
+    assert.ok(wf.on.workflow_call.inputs.legs && wf.on.workflow_call.inputs.release, 'the inputs legs and release');
+    assert.ok(wf.on.workflow_call.secrets.BUILD_INPUTS_TOKEN, 'the secret is declared');
+    assert.match(String(wf.env.PADDOCK_CI_KIT), /vars\.PADDOCK_CI_KIT/);
+    assert.equal(needsOf(j).length, 0, 'a called workflow reads no needs: its caller decides whether it runs');
+    for (const s of j.steps ?? []) assert.doesNotMatch(JSON.stringify(s), /needs\.plan/, 'no step reads the caller\'s plan');
+  });
+}
+
+test('ci.yml: the plan job logs the staged layout the verdict reader keys on, and the app legs are split per OS, with the end-to-end legs a matrix of their own', () => {
+  const wf = loadWorkflow('ci.yml');
+  const plan = workflowJob(wf, 'plan');
+  const run = plan.steps.map((s) => s.run ?? '').join('\n');
+  assert.match(run, /^\s*echo "plan layout: staged"$/m);
+  assert.match(String(workflowJob(wf, 'app-linux').with.legs), /plan\.outputs\.apps_linux/);
+  assert.match(String(workflowJob(wf, 'app-e2e').with.legs), /plan\.outputs\.apps_e2e/);
 });

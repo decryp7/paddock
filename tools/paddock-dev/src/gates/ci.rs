@@ -161,6 +161,8 @@ struct Matrix {
     app_legs_e2e: bool,
     /// `apps_<os>`: the stage-1 legs of one operating system (`apps_linux`), the legs of `app_legs` that run on it.
     app_os: Option<&'static str>,
+    /// `fromJSON(inputs.legs)`: a reusable workflow's matrix, the legs its caller passed (a plan output named in the `legs` input).
+    legs_input: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -238,12 +240,38 @@ fn is_per_os_legs(out: &str) -> bool {
         .any(|b| ["linux", "windows", "macos"].iter().any(|os| out == format!("{b}_{os}")))
 }
 
+/// The matrix a reusable workflow gets from the `legs` input its caller bound: the name of the plan output (`<apps_windows>`,
+/// `<apps_e2e>`, `<crate_legs_linux>`, `<paddock_dev_legs_macos>`), read the way the caller's own per-OS matrices are. An input the model
+/// cannot read leaves the matrix unresolved (the check then says so instead of passing).
+fn legs_matrix(declared: &Matrix, legs: Option<&Val>) -> Matrix {
+    let mut m = declared.clone();
+    m.legs_input = false;
+    let Some(Val::Str(s)) = legs else {
+        m.include.push(BTreeMap::from([("__unresolved".to_string(), "true".to_string())]));
+        return m;
+    };
+    let name = s.trim_start_matches('<').trim_end_matches('>');
+    let from = |base: &str| os_of_output(&format!("fromJSON(needs.plan.outputs.{name})"), base);
+    if name == "apps_e2e" {
+        m.app_legs_e2e = true;
+    } else if let Some(os) = from("apps") {
+        m.app_legs = true;
+        m.app_os = Some(os);
+    } else if let Some(os) = from("crate_legs").or_else(|| from("paddock_dev_legs")) {
+        m.axes.push(("os".to_string(), vec![os.to_string()]));
+    } else {
+        m.include.push(BTreeMap::from([("__unresolved".to_string(), "true".to_string())]));
+    }
+    m
+}
+
 fn parse_matrix(n: &Node) -> Matrix {
     let mut m = Matrix::default();
     for (k, v) in n.entries() {
         match k.as_str() {
             "include" => match v.text() {
                 Some(t) if t.contains("fromJSON(needs.plan.outputs.apps)") => m.app_legs = true,
+                Some(t) if t.contains("fromJSON(inputs.legs)") => m.legs_input = true,
                 Some(t) if t.contains("fromJSON(needs.plan.outputs.apps_e2e)") => m.app_legs_e2e = true,
                 // One job per OS (`apps_linux`, `apps_windows`, `apps_macos`): the stage-1 legs that run on that OS.
                 Some(t) if os_of_output(t, "apps").is_some() => {
@@ -684,7 +712,7 @@ impl Lookup for Scope<'_> {
                     (Some(_), Some("outputs"), Some("rerun_jobs")) => Val::Null,
                     // The legs of one OS (`crate_legs_windows`, `apps_linux`, ...): the plan step splits the leg lists by OS and an OS with no leg
                     // skips its job. On a run the model decides ("a branch run") every OS has legs, as the full list is the default.
-                    (Some(_), Some("outputs"), Some(out)) if is_per_os_legs(out) => Val::Str("[legs]".into()),
+                    (Some(_), Some("outputs"), Some(out)) if is_per_os_legs(out) || out == "apps_e2e" => Val::Str(format!("<{out}>")),
                     (Some(_), Some("outputs"), Some(out))
                         if !out.ends_with("_shards") && crate::plan_since::app_output_names().iter().any(|o| o == out) =>
                     {
@@ -873,7 +901,7 @@ impl Walker<'_> {
             return;
         }
         // The matrix: every combination, or one empty one.
-        let combos = self.combos(job, ctx);
+        let combos = self.combos(job, ctx, inputs);
         for combo in combos {
             let mut acc = outer.clone();
             let matrix_ref = combo.as_ref();
@@ -969,8 +997,16 @@ impl Walker<'_> {
         }
     }
 
-    fn combos(&mut self, job: &Job, ctx: &Context) -> Vec<Option<BTreeMap<String, String>>> {
-        let Some(m) = &job.matrix else { return vec![None] };
+    fn combos(&mut self, job: &Job, ctx: &Context, inputs: &BTreeMap<String, Val>) -> Vec<Option<BTreeMap<String, String>>> {
+        let Some(declared) = &job.matrix else { return vec![None] };
+        // A reusable workflow's matrix (`fromJSON(inputs.legs)`) is the legs its caller named in the `legs` input.
+        let resolved;
+        let m = if declared.legs_input {
+            resolved = legs_matrix(declared, inputs.get("legs"));
+            &resolved
+        } else {
+            declared
+        };
         let mut out: Vec<BTreeMap<String, String>> = Vec::new();
         if !m.axes.is_empty() {
             let mut acc: Vec<BTreeMap<String, String>> = vec![BTreeMap::new()];
@@ -1590,6 +1626,35 @@ jobs:
         ]));
         assert!(m.actions.contains_key(".gitea/actions/licences"));
         assert_eq!(only(&m, "cargo deny").levels, BTreeMap::from([(Level::Branch, Status::Gated)]));
+    }
+
+    /// A reusable workflow's matrix is the legs its caller passed: `app-windows` calls ci-app.yml with the Windows legs, which run no
+    /// Linux-only `checks`; `app-linux` passes the Linux legs, which do.
+    #[test]
+    fn a_called_workflows_matrix_is_the_legs_its_caller_named() {
+        let plan = "  plan:\n    runs-on: ubuntu-latest\n    outputs:\n      any_app: ${{ steps.plan.outputs.any_app }}\n      apps_linux: ${{ steps.plan.outputs.apps_linux }}\n      apps_windows: ${{ steps.plan.outputs.apps_windows }}\n    steps:\n      - id: plan\n        run: node scripts/affected.mjs --ci\n";
+        let ci = |call: &str, legs: &str| {
+            format!(
+                "on:\n  pull_request:\njobs:\n  {call}:\n    needs: [plan]\n    if: ${{{{ needs.plan.outputs.any_app == 'true' }}}}\n    uses: ./.gitea/workflows/ci-app.yml\n    with:\n      legs: ${{{{ needs.plan.outputs.{legs} }}}}\n{plan}"
+            )
+        };
+        let callee = "on:\n  workflow_call:\n    inputs:\n      legs:\n        type: string\njobs:\n  app:\n    runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n        include: ${{ fromJSON(inputs.legs) }}\n    steps:\n      - uses: ./.gitea/actions/app-gates\n        with:\n          app: ${{ matrix.app }}\n          checks: ${{ matrix.checks }}\n";
+        let gates = "inputs:\n  app:\n    required: true\n  checks:\n    default: ''\nruns:\n  using: composite\n  steps:\n    - name: Checks\n      if: inputs.checks != ''\n      shell: bash\n      env:\n        COMMANDS: ${{ inputs.checks }}\n      run: bash -c \"$COMMANDS\"\n";
+        let contract = r#"{"cargo": ".", "os": ["ubuntu-latest", "windows-latest"], "checks": ["node a.mjs"]}"#;
+        let build_for = |call: &str, legs: &str| {
+            build(&sources(&[
+                (".gitea/workflows/ci.yml", ci(call, legs).as_str()),
+                (".gitea/workflows/ci-app.yml", callee),
+                (".gitea/actions/app-gates/action.yml", gates),
+                ("apps/dyno/paddock.ci.json", contract),
+            ]))
+        };
+        let linux = build_for("app-linux", "apps_linux");
+        let l = only(&linux, "a.mjs");
+        assert_eq!((l.app.as_deref(), l.os.as_deref()), (Some("dyno"), Some("ubuntu-latest")));
+        // The Windows call runs the Windows legs, which carry no `checks`: the line is not reached through it.
+        let windows = build_for("app-windows", "apps_windows");
+        assert!(windows.lines.iter().all(|l| !l.text.contains("a.mjs")), "{:?}", windows.lines);
     }
 
     #[test]
