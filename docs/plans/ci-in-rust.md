@@ -425,44 +425,6 @@ head covers the non-release jobs.
    those tests in the same commit.
 6. **Merge with `perf/ci-linux-job-share`**: a conflict in `build_jobs.rs` and `build-jobs.sh`, a file this lane deletes.
 
-### WP-4b: sign the updater artifacts in a separate step (user decision, 2026-11-20; part E)
-
-**What the official docs say** (read 2026-11-20): the updater page (<https://v2.tauri.app/plugin/updater/>) describes signing only as
-part of `tauri build`: `TAURI_SIGNING_PRIVATE_KEY` (a path or the key's content) and the optional
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` in the build's environment, and `bundle.createUpdaterArtifacts` (`true`, or `"v1Compatible"`) to
-produce the updater files and their signatures. It documents no separate signing step. The CLI reference
-(<https://v2.tauri.app/reference/cli/>) documents `tauri signer sign [OPTIONS] <FILE>`: the key from `-k/--private-key` or
-`TAURI_SIGNING_PRIVATE_KEY`, from `-f/--private-key-path` or `TAURI_SIGNING_PRIVATE_KEY_PATH`, the password from `-p/--password` or
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, and `--app-version <v>`, which stores the version in the signature's trusted comment (updaters
-with `requireSignedVersion` reject a manifest whose version differs); `tauri build` sets it itself, and a hand signing must pass it.
-The reference does not say where the `.sig` is written or named, nor how conflicting key sources resolve: both are measured here
-(a test signs a file and reads the folder), not assumed (ER-33).
-
-**What the repository does today** (`conformance/ci/tauri-bundle.sh`, on `origin/main`): the key is taken out of the environment
-before `npm ci` and `--prepare` and given to the one `tauri build` command only (`updater_key_exec`); a run that is not a tag signs with
-a throw-away key made in the job (`updater-key.sh`). So the D7 core of WP-4 is mostly there for `app-release.yml` and the shared bundle
-action; what is left is that the real key still reaches `tauri build`'s build scripts and proc macros on a tag.
-
-**Design.** The build runs with `createUpdaterArtifacts: true` and the job's throw-away key on every run, so Tauri itself makes the
-update files in the right shape (the NSIS installer, the AppImage and the macOS `.app.tar.gz`; reimplementing the archive would copy
-its format). The configuration carries the real public key (`plugins.updater.pubkey`). After the build, on a tag only, a new step
-`./dev ci release sign-updater` (Rust, a `ToolCall` wrapper of `tauri signer sign`, the key only in that child's environment as
-`TAURI_SIGNING_PRIVATE_KEY` and its password, never on a command line, masked in the logs) signs each updater artifact with the real
-key and `--app-version <the tag's version>` and replaces its `.sig`; then the existing `updater-key-check` (ported in part B) verifies
-every `.sig` against the real public key. A dispatch keeps the throw-away key end to end, so the path is still exercised. The real
-key therefore never meets a build script, a proc macro, `npm ci` or `prepare`.
-
-**Open questions that a test answers first (ER-11, ER-33):** whether `tauri build` refuses a configuration whose `pubkey` does not
-belong to the signing key (it must not, or the design needs the real public key and a matching throw-away pair is impossible: then
-the fallback is `createUpdaterArtifacts: false` and the step also creates the macOS archive); whether `tauri signer sign` leaves the
-`.sig` beside the file under the name `latest-json.mjs` reads; and that the signature verifies with the updater's own check
-(`updater-key-check`). The first test plants a throw-away-signed artifact and shows the check goes red (the positive control), then
-the sign step makes it green.
-
-**Estimate.** 1.5 days (1 to 2.5): the command and its tests 1, the macOS and Windows legs on the real runners 0.5. It depends on
-part B's `tauri-bundle` and `updater-key-check` ports (it changes the same step), so it runs after B's commands are committed, with
-WP-4 and WP-9.
-
 ### Split and estimate (user decision, 2026-11-20: A now; B, C and E in parallel agents once A's interfaces are committed)
 
 | Part | Content | Days | Needs from A | After A |
@@ -470,14 +432,14 @@ WP-4 and WP-9.
 | A | Kit and `setup-rust` fallbacks removed, wrapper release mode (`PADDOCK_RELEASE_MODE=1`, `release-<run id>-<job>` folder, CI-home lookup in the wrapper with its agreement test against `ci_isolation/home.rs`), `release-isolation` wired in (setup, record, verify, the `needs`), register and tests | 2.5 | owns `kit.sh`, `setup-rust`, the wrapper and the kit actions under `.gitea/actions/` | first |
 | B | Release kit and release CI scripts ported (first half of F5: `conformance/release/*`, `tauri-bundle`, `updater-key`, `tauri-tools`, release notes, verdict, check-tag, `plan.mjs`) as `./dev ci release ...` commands with goldens | 3.5 | the `ToolCall` wrappers (exist); release mode's environment (`PADDOCK_RELEASE_MODE`, `PADDOCK_RELEASE_LEDGER`) and the `record` call each action makes; no shell path of `kit.sh` left to keep | parallel |
 | C | Publish scripts, demo scripts, app release scripts and the inline shell (rest of F5, F6); Debrief's macOS verify copy is deleted once | 2 | the same as B, plus B's ported `macos-verify` command for the Debrief copy | parallel with B; the Debrief copy waits for B |
-| E | ADR 0085 packages: WP-4 (signing key only on tags, throw-away key on dispatch, never in `npm ci`; the Dyno caller's part is done in the Dyno train and merged in when it lands, so E covers the other callers and the rest) and WP-4b (sign in a separate step after the build, below), WP-5 (release images by digest, `ci-image.yml` digest rule, conformance check), WP-9 (AppImage and NSIS tools from pinned URLs and SHA-256 into `<build folder>/.tauri/`, `useLocalToolsDir`), WP-6 (release runner without the mount; needs a host action by the user), WP-7 (research note), WP-8 (rule, lesson, ADR 0022 amendment) | 6.5 (5.5 to 8.5) | release mode and the ledger's `tauri-tools` kind from A; WP-4 and WP-9 edit `tauri-bundle` and `app-release.yml`, which B ports | WP-5, 6, 7, 8 in parallel; WP-4 and WP-9 after B's `tauri-bundle` command is committed |
+| E | The rest of ADR 0085 (re-checked 2026-11-20 against `docs/adr/amendments/0085-2026-11-12-wp4-wp9.md`): **WP-4 and WP-9 are already on main** (the signing secrets are gated to the app's own tag in `app-release.yml` and `debrief.yml`, stripped before `npm ci`, prepare and beforeBuildCommand by `updater-key.sh`, guarded by `conformance/test/updater-key-tags.test.mjs`; the tools are pinned under `<build folder>/.tauri`), so nothing of them is rebuilt and the Dyno caller's change is not this lane's. Left: WP-5 (release images by digest, `ci-image.yml` prints the digest, a conformance check against `main`'s last image run), WP-6 (release runner without the mount: the label change and the mount-absent probe; the host action is the user's), WP-7 (research note on a release identity for the hosts and on Gitea secret scoping by ref), WP-8 (the lesson and the ADR 0022 amendment that make `PADDOCK_DEV_FRESH`'s claim true for tags; rule 78 exists), and the wiring of `release-isolation verify --tauri-pins` to the manifest `.tauri.sha256` (the amendment's note that WP-3 passes that file). Signing is the standard Tauri way, at bundle time, on tag builds, with the one family key already in Gitea secrets (user, 2026-11-20): no separate after-build signing step is built | 2 (1.5 to 3) | release mode and the ledger's `tauri-tools` kind from A | WP-5, 6, 7, 8 in parallel after A; the `--tauri-pins` wiring with A's verify step |
 | D | Rule 54 dispatches (five apps, two demos), the CI trial, the review round | 2 | all of the above, on the merged branch | last |
-| | **Total** | **16.5** (13 to 20.5) | | |
+| | **Total** | **12** (9.5 to 15) | | |
 
 Parts B, C and E work in their own worktrees on branches from A's head and are merged into `feat/ci-release-path-rust`, which
 stays one branch for one train. B and C do not edit the same files (`conformance/release` and `conformance/ci` against `scripts`
-and `apps/*/scripts`), and E's edits to `app-release.yml` come after B's. Against the plan's 8 days the lane is 8.5 days larger:
-1.5 for the ADR 0085 wiring that the WP-11 row did not price, 5 for the ADR 0085 packages and 1.5 for WP-4b. The user accepted the growth on
+and `apps/*/scripts`), and E's edits to `app-release.yml` come after B's (E touches little there now). Against the plan's 8 days the lane is 4 days larger:
+1.5 for the ADR 0085 wiring that the WP-11 row did not price and 2 for the remaining ADR 0085 packages (WP-4 and WP-9 were found already built), 0.5 for the review. The user accepted the growth on
 2026-11-20 (ER-37).
 
 ## 9. Common practice, and the cheaper option (ER-37)
