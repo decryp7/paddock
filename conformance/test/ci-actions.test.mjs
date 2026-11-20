@@ -18,6 +18,8 @@ const ACTIONS = join(PADDOCK, '.gitea', 'actions');
 const WORKFLOWS = join(PADDOCK, '.gitea', 'workflows');
 const names = readdirSync(ACTIONS, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
 const read = (p) => readFileSync(p, 'utf8');
+/** The per-operating-system jobs of one ci.yml family (crate, app, paddock-dev): conformance/ci/stages.json. */
+const OS_JOBS = (family) => ['linux', 'windows', 'macos'].map((o) => `${family}-${o}`);
 
 /** Declared input names of an action.yml / a workflow_call block: keys at the first indent under `inputs:`. */
 function declaredInputs(text) {
@@ -481,7 +483,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
     }
     return found;
   };
-  const rustJobs = ['ipc-endpoints', 'ui', 'e2e', 'conformance', 'tools', 'wiki', 'heavy', 'icons', 'eslint-preset', 'crates', 'crate', 'audit', 'train-gates', 'app', 'app-e2e', 'paddock-dev']; // audit: ./dev audit compare; conformance: ./dev gates check (C100, ADR 0060)
+  const rustJobs = ['ipc-endpoints', 'ui', 'e2e', 'conformance', 'tools', 'wiki', 'heavy', 'icons', 'eslint-preset', 'crates', ...OS_JOBS('crate'), 'audit', 'train-gates', ...OS_JOBS('app'), 'app-e2e', ...OS_JOBS('paddock-dev')]; // audit: ./dev audit compare; conformance: ./dev gates check (C100, ADR 0060)
   assert.deepEqual(jobsUsing('setup-rust'), rustJobs, 'setup-rust in every job that builds Rust');
   assert.deepEqual(jobsUsing('sccache-stats'), rustJobs, 'stats after each');
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');
@@ -642,7 +644,7 @@ test('every job that builds Rust on a host sets its build folder with the build-
       assert.equal(ignored.status, 0, `${ws[1]}/.cargo/ci.toml is git-ignored`);
     }
   }
-  for (const want of ['ci.yml:crate', 'ci.yml:app', 'app-release.yml:bundle', 'debrief.yml:rust-test-macos', 'debrief.yml:tauri-smoke', 'debrief.yml:bundle']) {
+  for (const want of [...OS_JOBS('crate').map((j) => `ci.yml:${j}`), ...OS_JOBS('app').map((j) => `ci.yml:${j}`), 'app-release.yml:bundle', 'debrief.yml:rust-test-macos', 'debrief.yml:tauri-smoke', 'debrief.yml:bundle']) {
     assert.ok(uses.includes(want), `${want} sets its build folder with the action (found: ${uses.join(', ')})`);
   }
   const copies = spawnSync('git', ['ls-files', 'apps/*/scripts/ci/build-folder.sh'], { cwd: PADDOCK, encoding: 'utf8' });
@@ -884,7 +886,7 @@ test('stable-workspace leaves Linux containers alone and never fails a job it ca
 test('CI moves the checkout to a stable path on the host runners only, after Git bash is on PATH on Windows', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   const jobs = parseJobs(ci).filter((j) => j.text.includes('uses: ./.gitea/actions/kept-clone'));
-  assert.deepEqual(jobs.map((j) => j.id), ['crate', 'app', 'paddock-dev'], 'the crate job, the apps\' host legs and the developer tool');
+  assert.deepEqual(jobs.map((j) => j.id), [...OS_JOBS('crate'), ...OS_JOBS('app'), ...OS_JOBS('paddock-dev')], 'the crate job, the apps\' host legs and the developer tool, one job per OS each');
   for (const job of jobs) {
     const at = job.text.indexOf('uses: ./.gitea/actions/kept-clone');
     assert.match(job.text.slice(at, at + 160), /\n\s+if: runner\.os != 'Linux'/, `${job.id}: host runners only; on Windows \`shell: bash\` before Git bash is on PATH resolves to WSL`);
@@ -897,9 +899,9 @@ test('CI moves the checkout to a stable path on the host runners only, after Git
 test('the test browser of a host job lives in a kept folder of its job slot, outside the checkout that stable-workspace moves', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   const dirs = [...ci.matchAll(/PADDOCK_TEST_BROWSER_DIR=(\S+)/g)].map((m) => m[1]);
-  assert.equal(dirs.length, 2, 'the crate job\'s and the app leg\'s own (per app)');
+  assert.equal(dirs.length, 6, 'the crate job\'s and the app leg\'s own (per app), one copy per OS');
   for (const d of dirs) assert.equal(d, '$dir"', 'the folder job-isolation.sh gives');
-  assert.equal([...ci.matchAll(/dir="\$\(bash conformance\/ci\/kit\.sh isolation path browser (paddock|"\$APP")\)"/g)].length, 2, 'the kept folder `browser` of the job slot');
+  assert.equal([...ci.matchAll(/dir="\$\(bash conformance\/ci\/kit\.sh isolation path browser (paddock|"\$APP")\)"/g)].length, 6, 'the kept folder `browser` of the job slot');
   assert.ok(ci.indexOf('PADDOCK_TEST_BROWSER_DIR') < ci.indexOf('uses: ./.gitea/actions/install-test-browser'), 'the folder is chosen before the browser is installed');
 });
 
@@ -2303,7 +2305,7 @@ test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWN
     assert.match(job.text, /PADDOCK_DEV_DOWNLOAD: \$\{\{ \(inputs\.release == true \|\| startsWith\(github\.ref, 'refs\/tags\/'\)\) && '0' \|\| '' \}\}/, `ci.yml:${job.id}: a run for a tag builds the tool from source`);
     tagJobs += 1;
   }
-  assert.equal(tagJobs, 12, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the four that take a host slot, the apps\' stage-2 end-to-end legs (app-e2e), ipc-endpoints, conformance, tools-macos, and wiki, heavy, crates and audit (setup-rust runs ./dev); ui, e2e, tools, icons and eslint-preset (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
+  assert.equal(tagJobs, 18, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the four that take a host slot, the apps\' stage-2 end-to-end legs (app-e2e), ipc-endpoints, conformance, tools-macos, and wiki, heavy, crates and audit (setup-rust runs ./dev); ui, e2e, tools, icons and eslint-preset (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
 });
 
 test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store is written only by main)', () => {

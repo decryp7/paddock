@@ -192,11 +192,56 @@ for (const file of ['ci.yml', 'debrief.yml']) {
   });
 }
 
-test('ci.yml: the plan job logs the staged layout the verdict reader keys on, and the app legs are split in two matrices', () => {
+test('ci.yml: the plan job logs the staged layout the verdict reader keys on, and the app legs are split per OS, with the end-to-end legs a matrix of their own', () => {
   const wf = loadWorkflow('ci.yml');
   const plan = workflowJob(wf, 'plan');
   const run = plan.steps.map((s) => s.run ?? '').join('\n');
   assert.match(run, /^\s*echo "plan layout: staged"$/m);
-  assert.match(String(workflowJob(wf, 'app').strategy.matrix.include), /plan\.outputs\.apps\b(?!_)/);
+  assert.match(String(workflowJob(wf, 'app-linux').strategy.matrix.include), /plan\.outputs\.apps_linux/);
   assert.match(String(workflowJob(wf, 'app-e2e').strategy.matrix.include), /plan\.outputs\.apps_e2e/);
+});
+
+// ---- ci.yml's crate, paddock-dev and app jobs: one job per operating system (user decision 2026-11-20) ----
+
+const OSES = [['linux', 'ubuntu-latest'], ['windows', 'windows-latest'], ['macos', 'macos-latest']];
+const FAMILIES = { crate: 'crate_legs', 'paddock-dev': 'paddock_dev_legs', app: 'apps' };
+
+test('ci.yml: each of crate, paddock-dev and app is one job per OS, in the table once, in its own OS gate, and skipped when the plan has no leg for that OS', () => {
+  const wf = loadWorkflow('ci.yml');
+  const gates = TABLE['ci.yml'].gates;
+  assert.deepEqual(Object.keys(gates).sort(), ['stage1-linux', 'stage1-macos', 'stage1-windows'], 'a gate per OS');
+  for (const [family, output] of Object.entries(FAMILIES)) {
+    assert.equal(wf.jobs[family], undefined, `the matrix job ${family} is gone (a job cannot need one matrix leg)`);
+    for (const [short, os] of OSES) {
+      const id = `${family}-${short}`;
+      const j = workflowJob(wf, id);
+      assert.ok(gates[`stage1-${short}`].includes(id), `${id} is in the table's stage1-${short}`);
+      assert.match(String(j.name), new RegExp(`\\(${os}\\)$`), `${id}'s name shows its OS: a static name keeps the planner's name-to-job mapping unambiguous`);
+      assert.match(String(j.strategy.matrix.include), new RegExp(`fromJSON\\(needs\\.plan\\.outputs\\.${output}_${short}\\)`), `${id} reads only its OS's legs`);
+      assert.match(String(j.if), new RegExp(`needs\\.plan\\.outputs\\.[a-z_]+_${short} != '\\[\\]'`), `${id} is skipped when the plan has no leg for its OS`);
+      assert.match(String(j.if), new RegExp(`'\\["${id}"\\]'\\), '${id}'\\)`), `${id} asks rerun_jobs for itself`);
+      assert.ok(String(wf.jobs.plan.outputs[`${output}_${short}`]).includes(`steps.plan.outputs.${output}_${short}`), `the plan publishes ${output}_${short}`);
+    }
+  }
+  const plan = workflowJob(wf, 'plan').steps.map((s) => s.run ?? '').join('\n');
+  for (const o of Object.values(FAMILIES)) assert.match(plan, new RegExp(`\\b${o}\\b`), `the plan step splits ${o} by OS`);
+  assert.match(plan, /select\(\.os == \$os\)/);
+});
+
+test('ci.yml: the three copies of a per-OS job are identical but for their id, name, condition and matrix source (no drift)', () => {
+  const text = readFileSync(join(here, '..', '..', '.gitea', 'workflows', 'ci.yml'), 'utf8');
+  const block = (id) => {
+    const m = new RegExp(`^  ${id}:\\n([\\s\\S]*?)(?=^  [a-z0-9-]+:\\n|^  #|(?![\\s\\S]))`, 'm').exec(text);
+    assert.ok(m, `job ${id}`);
+    return m[1]
+      .split('\n')
+      .filter((l) => !/^    (name|if):/.test(l) && !/^        include: /.test(l))
+      .join('\n')
+      .trimEnd();
+  };
+  for (const family of Object.keys(FAMILIES)) {
+    const [first, ...rest] = OSES.map(([s]) => block(`${family}-${s}`));
+    assert.ok(first.length > 500, `${family}: a real job body was compared`);
+    for (const other of rest) assert.equal(other, first, `${family}: the per-OS copies drifted apart. Fix: change all three the same way`);
+  }
 });

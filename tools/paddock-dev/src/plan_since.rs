@@ -43,9 +43,15 @@ fn re(pattern: &str) -> Regex {
 /// failed); the narrowed rerun skips it. A failed `No temp folders left behind` check is not listed: the leaked folder may be
 /// any test's, not only a failed one's, so the whole job reruns (run 7961 failed both steps and reruns whole).
 pub const TEST_STEPS: &[(&str, &str, &[&str], bool)] = &[
-    ("ci.yml", "crate", &["Tests (workspace, every feature)"], false),
-    ("ci.yml", "paddock-dev", &["Tests"], false),
-    ("ci.yml", "app", &["Run ./.gitea/actions/app-gates"], true),
+    ("ci.yml", "crate-linux", &["Tests (workspace, every feature)"], false),
+    ("ci.yml", "crate-windows", &["Tests (workspace, every feature)"], false),
+    ("ci.yml", "crate-macos", &["Tests (workspace, every feature)"], false),
+    ("ci.yml", "paddock-dev-linux", &["Tests"], false),
+    ("ci.yml", "paddock-dev-windows", &["Tests"], false),
+    ("ci.yml", "paddock-dev-macos", &["Tests"], false),
+    ("ci.yml", "app-linux", &["Run ./.gitea/actions/app-gates"], true),
+    ("ci.yml", "app-windows", &["Run ./.gitea/actions/app-gates"], true),
+    ("ci.yml", "app-macos", &["Run ./.gitea/actions/app-gates"], true),
     ("debrief.yml", "rust-test", &["Tests (workspace)", "Memory budget"], false),
     ("debrief.yml", "rust-test-macos", &["Tests (workspace)"], false),
 ];
@@ -425,7 +431,7 @@ fn leg_of(key: &str, name: &str) -> Leg {
     // Stage 2's end-to-end legs of the apps: `dyno e2e (ubuntu-latest, e2e-1)` (ci.yml `app-e2e`).
     static APP_E2E_LEG: LazyLock<Regex> = LazyLock::new(|| re(r"^([a-z0-9-]+) e2e \(([a-z0-9]+-[a-z0-9.]+), ([a-z0-9-]+)\)$"));
     match key {
-        "crate" | "paddock-dev" => Leg {
+        k if k.starts_with("crate-") || k.starts_with("paddock-dev-") => Leg {
             os: OS_LEG.captures(name).map(|m| m[1].to_string()),
             ..Leg::default()
         },
@@ -435,7 +441,7 @@ fn leg_of(key: &str, name: &str) -> Leg {
             e2e_leg: Some(m[3].to_string()),
             shard: None,
         }),
-        "app" => APP_LEG.captures(name).map_or_else(Leg::default, |m| Leg {
+        "app-linux" | "app-windows" | "app-macos" => APP_LEG.captures(name).map_or_else(Leg::default, |m| Leg {
             os: Some(m[2].to_string()),
             app: Some(m[1].to_string()),
             e2e_leg: Some(m.get(3).map_or("", |x| x.as_str()).to_string()),
@@ -528,6 +534,9 @@ pub struct Rerun {
 /// `name:` lines.
 pub fn classify(job: &RunJob, log: Result<&str, &str>, workflow: &str, templates: &[(String, String)]) -> Rerun {
     let key = log.ok().and_then(job_key).or_else(|| key_by_name(&job.name, templates));
+    // A run from before ci.yml's crate, paddock-dev and app jobs were split per OS names the old key in its log's `Job:` line: the
+    // OS is in the job's display name (`crate (windows-latest)`), and the rerun goes to that OS's job today.
+    let key = key.map(|k| if workflow == "ci.yml" { per_os_key(&k, &job.name) } else { k });
     let leg = match key.as_deref() {
         Some(k) if workflow == "ci.yml" => leg_of(k, &job.name),
         Some(k) => app_leg_of(k, &job.name, templates),
@@ -542,6 +551,19 @@ pub fn classify(job: &RunJob, log: Result<&str, &str>, workflow: &str, templates
         leg,
         scope,
         vitest,
+    }
+}
+
+/// The per-OS job key (`crate-windows`) of an old key (`crate`) and a display name that shows its OS; any other key unchanged.
+fn per_os_key(key: &str, name: &str) -> String {
+    static OS: LazyLock<Regex> = LazyLock::new(|| re(r"\((ubuntu|windows|macos)-latest"));
+    if !matches!(key, "crate" | "paddock-dev" | "app") {
+        return key.to_string();
+    }
+    match OS.captures(name).map(|m| m[1].to_string()).as_deref() {
+        Some("ubuntu") => format!("{key}-linux"),
+        Some(os) => format!("{key}-{os}"),
+        None => key.to_string(),
     }
 }
 
@@ -776,7 +798,7 @@ impl SincePlan {
             Some("e2e-webkit") => true,
             Some("app-e2e") => r.leg.e2e_leg.as_deref().is_none_or(|e| e.starts_with("e2e-webkit")),
             // A run from before the stages: its app job held the end-to-end legs too.
-            Some("app") => r.leg.e2e_leg.as_deref().is_none_or(|e| e.starts_with("e2e-webkit")),
+            Some("app-linux" | "app-windows" | "app-macos") => r.leg.e2e_leg.as_deref().is_none_or(|e| e.starts_with("e2e-webkit")),
             _ => false,
         })
     }
@@ -844,7 +866,9 @@ impl SincePlan {
             .reruns
             .iter()
             .filter_map(|r| match r.key.as_deref() {
-                Some("app") if r.leg.e2e_leg.as_deref().is_some_and(|e| !e.is_empty()) => Some("app-e2e"),
+                Some("app-linux" | "app-windows" | "app-macos") if r.leg.e2e_leg.as_deref().is_some_and(|e| !e.is_empty()) => {
+                    Some("app-e2e")
+                }
                 k => k,
             })
             .collect();
@@ -865,7 +889,11 @@ impl SincePlan {
             })
             .collect();
         let mut app_legs: Vec<Value> = Vec::new();
-        for r in self.reruns.iter().filter(|r| matches!(r.key.as_deref(), Some("app" | "app-e2e"))) {
+        for r in self
+            .reruns
+            .iter()
+            .filter(|r| matches!(r.key.as_deref(), Some("app-linux" | "app-windows" | "app-macos" | "app-e2e")))
+        {
             let matches = |l: &Value| {
                 let is = |field: &str, want: &Option<String>| want.as_ref().is_none_or(|w| l[field].as_str() == Some(w.as_str()));
                 is("app", &r.leg.app) && is("os", &r.leg.os) && is("e2e_leg", &r.leg.e2e_leg)
@@ -904,7 +932,9 @@ impl SincePlan {
             }
         }
         let os_legs = |key: &str| -> String {
-            let runs: Vec<&Rerun> = self.reruns.iter().filter(|r| r.key.as_deref() == Some(key)).collect();
+            // One job per OS (`crate-linux`, `crate-windows`, ...): the family's legs are the legs of all its jobs.
+            let family = |k: &str| k == key || k.strip_prefix(key).is_some_and(|r| matches!(r, "-linux" | "-windows" | "-macos"));
+            let runs: Vec<&Rerun> = self.reruns.iter().filter(|r| r.key.as_deref().is_some_and(family)).collect();
             if runs.is_empty() || runs.iter().any(|r| r.leg.os.is_none()) {
                 return String::new(); // not rerun, or a leg that cannot be told: the plan step writes every leg, whole
             }
@@ -1204,7 +1234,11 @@ mod tests {
             vec!["src/app/analysis/outliers-view.spec.ts", "src/app/watched/watched-folders.spec.ts"]
         );
         assert!(vitest_failed_files(CRATE_MACOS).is_empty());
-        assert_eq!(job_key(CRATE_MACOS).as_deref(), Some("crate"));
+        assert_eq!(
+            job_key(CRATE_MACOS).as_deref(),
+            Some("crate"),
+            "the old log names the old key; classify maps it to the OS job"
+        );
         assert_eq!(job_key(APP_DYNO).as_deref(), Some("app"));
         assert_eq!(job_key("no header"), None);
     }
@@ -1225,7 +1259,7 @@ mod tests {
     #[test]
     fn a_job_failed_only_in_its_test_step_reruns_its_failed_tests_and_any_other_failure_the_whole_job() {
         let mac = classify(&job(33271), Ok(CRATE_MACOS), "ci.yml", &templates());
-        assert_eq!(mac.key.as_deref(), Some("crate"));
+        assert_eq!(mac.key.as_deref(), Some("crate-macos"));
         assert_eq!(mac.leg.os.as_deref(), Some("macos-latest"));
         assert_eq!(
             mac.scope,
@@ -1262,7 +1296,11 @@ mod tests {
         assert_eq!(ui.key.as_deref(), Some("ui"));
         assert_eq!(ui.scope, Scope::Job("job ui has no step that takes a test filter".into()));
         let lost = classify(&job(33271), Err("HTTP 404"), "ci.yml", &templates());
-        assert_eq!(lost.key.as_deref(), Some("crate"), "the name tells the job when the log is missing");
+        assert_eq!(
+            lost.key.as_deref(),
+            Some("crate-macos"),
+            "the name tells the job when the log is missing"
+        );
         assert_eq!(lost.scope, Scope::Job("its log could not be read (HTTP 404)".into()));
         assert!(matches!(
             classify(&job(33271), Ok(CRATE_MACOS), "debrief.yml", &templates()).scope,
@@ -1343,7 +1381,10 @@ mod tests {
         assert_eq!(out["paddock_dev"], "false");
         assert_eq!(out["base"], "f1d7e0791f250c88dacd318f7caebf1dcf066cdf");
         // A failed end-to-end leg of this run (from before the stages: a leg of the `app` job) reruns as the `app-e2e` job.
-        assert_eq!(out["rerun_jobs"], r#"["app","app-e2e","conformance","crate","crates","e2e","ui"]"#);
+        assert_eq!(
+            out["rerun_jobs"],
+            r#"["app-e2e","app-linux","app-macos","app-windows","conformance","crate-macos","crate-windows","crates","e2e","ui"]"#
+        );
         assert!(!out.contains_key("paddock_dev_legs"), "not rerun: the plan step writes every leg");
         let crate_legs: Value = serde_json::from_str(&out["crate_legs"]).unwrap();
         assert_eq!(crate_legs.as_array().unwrap().len(), 2);
@@ -1427,12 +1468,12 @@ mod tests {
             shard: None,
         };
         assert!(plan_of(vec![rerun("e2e-webkit", Leg::default())]).needs_webkit());
-        assert!(plan_of(vec![rerun("app", app(Some("e2e-webkit")))]).needs_webkit());
+        assert!(plan_of(vec![rerun("app-linux", app(Some("e2e-webkit")))]).needs_webkit());
         assert!(
-            plan_of(vec![rerun("app", Leg::default())]).needs_webkit(),
+            plan_of(vec![rerun("app-linux", Leg::default())]).needs_webkit(),
             "an unknown leg may be the WebKit one"
         );
-        assert!(!plan_of(vec![rerun("app", app(Some(""))), rerun("e2e", Leg::default())]).needs_webkit());
+        assert!(!plan_of(vec![rerun("app-linux", app(Some(""))), rerun("e2e", Leg::default())]).needs_webkit());
     }
 
     #[test]
@@ -1484,7 +1525,7 @@ mod tests {
             reruns: vec![Rerun {
                 id: 1,
                 name: "app dyno (freebsd-latest)".into(),
-                key: Some("app".into()),
+                key: Some("app-linux".into()),
                 leg: Leg {
                     os: Some("freebsd-latest".into()),
                     app: Some("dyno".into()),
@@ -1586,7 +1627,7 @@ mod tests {
         let keys: BTreeSet<&str> = plan.reruns.iter().filter_map(|r| r.key.as_deref()).collect();
         assert_eq!(
             keys,
-            BTreeSet::from(["crate", "stage1-linux", "stages", "e2e", "app-e2e"]),
+            BTreeSet::from(["crate-windows", "stage1-linux", "stages", "e2e", "app-e2e"]),
             "the stage-2 jobs the failed gate skipped rerun with it: {keys:?}"
         );
         let all = vec![
@@ -1595,7 +1636,7 @@ mod tests {
             leg("dyno", "ubuntu-latest", "e2e-2"),
         ];
         let out: BTreeMap<String, String> = plan.ci_outputs(&all, &mut |_| {}).into_iter().collect();
-        assert_eq!(out["rerun_jobs"], r#"["app-e2e","crate","e2e","stage1-linux","stages"]"#);
+        assert_eq!(out["rerun_jobs"], r#"["app-e2e","crate-windows","e2e","stage1-linux","stages"]"#);
         assert_eq!(out["any_app"], "false", "no stage-1 app leg failed");
         assert_eq!(out["any_app_e2e"], "true");
         let e2e: Vec<Value> = serde_json::from_str(&out["apps_e2e"]).unwrap();
@@ -1654,7 +1695,7 @@ mod tests {
     fn an_end_to_end_leg_of_a_run_from_before_the_stages_reruns_as_the_app_e2e_job() {
         // The old `app` job held every leg: its end-to-end leg's key is `app`, and the rerun must reach the `app-e2e` job.
         let mut r = rerun(
-            "app",
+            "app-linux",
             Leg {
                 os: Some("ubuntu-latest".into()),
                 app: Some("dyno".into()),
@@ -1669,6 +1710,46 @@ mod tests {
         assert_eq!(out["rerun_jobs"], r#"["app-e2e"]"#);
         assert_eq!(out["any_app"], "false");
         assert_eq!(out["any_app_e2e"], "true");
+    }
+
+    #[test]
+    fn a_rerun_of_one_os_job_writes_only_its_legs_and_an_old_job_key_goes_to_its_os() {
+        // crate-windows failed: its leg is the whole crate_legs list, only that job reruns, and no other OS's job is named.
+        let win = Leg {
+            os: Some("windows-latest".into()),
+            ..Leg::default()
+        };
+        let out: BTreeMap<String, String> = plan_of(vec![rerun("crate-windows", win.clone())])
+            .ci_outputs(&[], &mut |_| {})
+            .into_iter()
+            .collect();
+        assert_eq!(out["rerun_jobs"], r#"["crate-windows"]"#);
+        assert_eq!(out["crate_legs"], r#"[{"os":"windows-latest","filter":""}]"#);
+        assert!(
+            !out.contains_key("paddock_dev_legs"),
+            "paddock-dev did not rerun: the plan step writes every OS"
+        );
+        // The legs of two OS jobs of one family are one list (the plan step splits it by OS).
+        let mac = Leg {
+            os: Some("macos-latest".into()),
+            ..Leg::default()
+        };
+        let out: BTreeMap<String, String> = plan_of(vec![rerun("crate-windows", win), rerun("crate-macos", mac)])
+            .ci_outputs(&[], &mut |_| {})
+            .into_iter()
+            .collect();
+        let legs: Vec<Value> = serde_json::from_str(&out["crate_legs"]).unwrap();
+        assert_eq!(legs.len(), 2);
+        // A run from before the split names the old key in its log: the job's display name tells the OS.
+        for (key, name, want) in [
+            ("crate", "crate (windows-latest)", "crate-windows"),
+            ("paddock-dev", "paddock-dev (ubuntu-latest)", "paddock-dev-linux"),
+            ("app", "app dyno (macos-latest)", "app-macos"),
+            ("tools", "tools and shared scripts", "tools"),
+            ("crate", "crate", "crate"),
+        ] {
+            assert_eq!(per_os_key(key, name), want, "{key} {name}");
+        }
     }
 
     const DEBRIEF_JOBS: &str = include_str!("../tests/since-run/debrief-run-jobs.json");

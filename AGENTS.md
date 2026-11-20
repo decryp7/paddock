@@ -82,16 +82,19 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - **Shared code (rules 39, 42, 43).** A shared change and its adoption by the apps land in one change; there is no
   publish-and-consume step. A breaking change to a shared crate or package updates every app in the same change.
 - **Staged CI (ci.yml and debrief.yml).** A run has two stages. Stage 1 is the fast checks; there is one gate job per operating
-  system (`stage1-linux`, `stage1-macos`) over that OS's fast jobs, and **`conformance/ci/stages.json` is the one table** of which job is
-  in which gate, which is stage 2 (long: ci.yml's `e2e`, `e2e-webkit`, `app-e2e`; debrief.yml's `e2e`, `bundle`, `tauri-smoke`) and
-  which is `parallel` (fast jobs in no gate: the matrix jobs that span several OSes, `crate`, `paddock-dev` and `app` in ci.yml, and
-  `train-gates`; they run at the same time and stay required). A stage-2 job waits only for the gate of its own OS, so a failed unit
-  test ends that OS's run in minutes, no OS waits for another, and a green run is not slower than before. A matrix job that spans
-  OSes can join a per-OS gate only when it is split per OS (open item). The planner's affected selection holds in both stages (`apps`
-  are the stage-1 legs, `apps_e2e` the stage-2 legs), and the plan's `stage2_jobs` output lists the stage-2 jobs a run expects. The
-  last job, `stages`, prints `stage verdict: ...` (`conformance/ci/stage-gate.mjs`); `./dev ci verdict` counts a staged run as full
-  only when it says `stage1=passed stage2=complete`: every gate passed and every expected stage-2 job succeeded (a skipped one is not a
-  pass), so a run whose stage 2 never ran is never green (ER-33). A new gate is report-only first (ER-41): while docs/gates.toml has
+  system (ci.yml: `stage1-linux`, `stage1-windows`, `stage1-macos`; debrief.yml: linux and macos) over that OS's fast jobs, and
+  **`conformance/ci/stages.json` is the one table** of which job is in which gate, which is stage 2 (long: ci.yml's `e2e`,
+  `e2e-webkit`, `app-e2e`; debrief.yml's `e2e`, `bundle`, `tauri-smoke`) and which is `parallel` (fast jobs in no gate: `train-gates`;
+  it runs at the same time and stays required). ci.yml's `crate`, `paddock-dev` and `app` are one job per OS each (`crate-linux`,
+  `crate-windows`, `crate-macos`, ...): the plan step splits their leg lists by OS (`crate_legs_<os>`, `paddock_dev_legs_<os>`,
+  `apps_<os>`) and an empty list skips that OS's job, so every OS's unit legs are in that OS's gate. The three copies of a job are
+  identical but for their id, name, condition and matrix source; a test fails when they drift, so change all three the same way. A
+  stage-2 job waits only for the gate of its own OS, so a failed unit test ends that OS's run in minutes, no OS waits for another, and a
+  green run is not slower than before. The planner's affected selection holds in both stages (`apps` are the stage-1 legs, `apps_e2e`
+  the stage-2 legs), and the plan's `stage2_jobs` output lists the stage-2 jobs a run expects. The last job, `stages`, prints
+  `stage verdict: ...` (`conformance/ci/stage-gate.mjs`); `./dev ci verdict` counts a staged run as full only when it says
+  `stage1=passed stage2=complete`: every gate passed and every expected stage-2 job succeeded (a skipped one is not a pass), so a run
+  whose stage 2 never ran is never green (ER-33). A new gate is report-only first (ER-41): while docs/gates.toml has
   `[[report_only]] id = "gate:<workflow>/<gate>"` a failed fast job only warns and the verdict says `stage1=failed(report-only)`; the
   step that records the gate's first green run removes the entry. Stage 1 does not cancel its sibling jobs when one fails: the whole
   stage finishes, so one round shows every stage-1 failure (ER-10). A fix round (`since_run`) reruns the failed jobs and then the

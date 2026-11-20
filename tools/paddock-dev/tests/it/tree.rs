@@ -777,7 +777,8 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
         assert_eq!(name, step, "output {name} reads steps.plan.outputs.{step}");
         // The expected stage-2 jobs are written by the plan step's own shell, after `./dev plan` (conformance/test/stage-gate.test.mjs
         // holds both workflows to it), not by the planner.
-        if step == "stage2_jobs" {
+        // The legs split by OS (`crate_legs_linux`, `apps_windows`, ...) are written by the same shell with jq.
+        if step == "stage2_jobs" || ["_linux", "_windows", "_macos"].iter().any(|s| step.ends_with(s)) {
             continue;
         }
         assert!(
@@ -878,12 +879,16 @@ fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
     let webkit = &wf.jobs.iter().find(|(k, _)| k == "e2e-webkit").unwrap().1;
     assert!(webkit.contains("|| contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')"));
     // The matrices read their legs from the plan step, which writes every OS when it plans no rerun of them.
-    for (job, output) in [("crate", "crate_legs"), ("paddock-dev", "paddock_dev_legs")] {
-        let text = &wf.jobs.iter().find(|(k, _)| k == job).unwrap().1;
-        assert!(
-            text.contains(&format!("include: ${{{{ fromJSON(needs.plan.outputs.{output}) }}}}")),
-            "{job}"
-        );
+    // One job per OS each: its legs are the OS's part of the list (the plan step splits it with jq).
+    for (family, output) in [("crate", "crate_legs"), ("paddock-dev", "paddock_dev_legs")] {
+        for os in ["linux", "windows", "macos"] {
+            let job = format!("{family}-{os}");
+            let text = &wf.jobs.iter().find(|(k, _)| *k == job).unwrap().1;
+            assert!(
+                text.contains(&format!("include: ${{{{ fromJSON(needs.plan.outputs.{output}_{os}) }}}}")),
+                "{job}"
+            );
+        }
     }
     let plan = &wf.jobs.iter().find(|(k, _)| k == "plan").unwrap().1;
     assert!(plan.contains("crate_legs=$PLAN_OS_LEGS") && plan.contains("paddock_dev_legs=$PLAN_OS_LEGS"));
@@ -898,7 +903,7 @@ fn ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
         .unwrap()
         .replace("\r\n", "\n");
     let leg = legs(&plan_of(&[], true), MatrixOpts::default()).remove(0);
-    let job = &ci[ci.find("\n  app:\n").unwrap()..];
+    let job = &ci[ci.find("\n  app-linux:\n").unwrap()..];
     for key in leg.as_object().unwrap().keys().filter(|k| *k != "dir") {
         let re = regex::Regex::new(&format!(r"\$\{{\{{ matrix\.{key}( \|\| '[^']*')? \}}\}}")).unwrap();
         assert!(re.is_match(job), "ci.yml passes matrix.{key}");
@@ -916,7 +921,7 @@ fn ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
     ] {
         assert!(gates.contains(&format!("\n  {input}:\n")), "{input}");
     }
-    assert!(job.contains("include: ${{ fromJSON(needs.plan.outputs.apps) }}"));
+    assert!(job.contains("include: ${{ fromJSON(needs.plan.outputs.apps_linux) }}"));
     // A since-run leg narrowed to its failed tests adds `tests_only` (plan_since.rs), which app-gates must take.
     if gates.contains("\n  tests-only:\n") {
         assert!(

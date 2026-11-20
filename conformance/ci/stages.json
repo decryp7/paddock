@@ -1,26 +1,77 @@
 {
-  "$comment": "The stages of the staged workflows (docs/train-checklist.md, \"Staged CI\"): one table that the gate jobs, the final `stages` job and their tests read. `gates` maps each gate job to the fast jobs it waits for (besides `plan`); `stage2` maps each long job to the gates it needs (a stage-2 job waits only for the gates of its own OS); `parallel` are fast jobs in no gate: they run at the same time, stay required (a failed one fails the run) and no stage-2 job waits for them. Matrix jobs that span several OSes (ci.yml crate, paddock-dev, app) cannot be in a per-OS gate until they are split per OS; they are `parallel`. A new job goes in exactly one place here; conformance/test/stage-gate.test.mjs holds the workflow files to this table.",
+  "$comment": "The stages of the staged workflows (docs/train-checklist.md, \"Staged CI\"): one table that the gate jobs, the final `stages` job and their tests read. `gates` maps each gate job to the fast jobs it waits for (besides `plan`); `stage2` maps each long job to the gates it needs (a stage-2 job waits only for the gates of its own OS); `parallel` are fast jobs in no gate: they run at the same time, stay required (a failed one fails the run) and no stage-2 job waits for them. ci.yml's crate, paddock-dev and app jobs are split per OS (crate-linux, crate-windows, crate-macos, ...), so each OS's unit legs are in that OS's gate; the plan step splits their leg lists by OS and an empty list skips that OS's job. A new job goes in exactly one place here; conformance/test/stage-gate.test.mjs holds the workflow files to this table.",
   "ci.yml": {
     "gates": {
-      "stage1-linux": ["ipc-endpoints", "ui", "conformance", "gitleaks", "c99", "tools", "wiki", "heavy", "icons", "eslint-preset", "crates", "commits", "audit"],
-      "stage1-macos": ["tools-macos"]
+      "stage1-linux": [
+        "ipc-endpoints",
+        "ui",
+        "conformance",
+        "gitleaks",
+        "c99",
+        "tools",
+        "wiki",
+        "heavy",
+        "icons",
+        "eslint-preset",
+        "crates",
+        "commits",
+        "audit",
+        "crate-linux",
+        "paddock-dev-linux",
+        "app-linux"
+      ],
+      "stage1-windows": [
+        "crate-windows",
+        "paddock-dev-windows",
+        "app-windows"
+      ],
+      "stage1-macos": [
+        "tools-macos",
+        "crate-macos",
+        "paddock-dev-macos",
+        "app-macos"
+      ]
     },
     "stage2": {
-      "e2e": ["stage1-linux"],
-      "e2e-webkit": ["stage1-macos"],
-      "app-e2e": ["stage1-linux"]
+      "e2e": [
+        "stage1-linux"
+      ],
+      "e2e-webkit": [
+        "stage1-macos"
+      ],
+      "app-e2e": [
+        "stage1-linux"
+      ]
     },
-    "parallel": ["crate", "paddock-dev", "app", "train-gates"]
+    "parallel": [
+      "train-gates"
+    ]
   },
   "debrief.yml": {
     "gates": {
-      "stage1-linux": ["rust-lint", "rust-test", "plugin-sdk", "licences", "frontend", "keychain"],
-      "stage1-macos": ["rust-test-macos"]
+      "stage1-linux": [
+        "rust-lint",
+        "rust-test",
+        "plugin-sdk",
+        "licences",
+        "frontend",
+        "keychain"
+      ],
+      "stage1-macos": [
+        "rust-test-macos"
+      ]
     },
     "stage2": {
-      "e2e": ["stage1-linux"],
-      "bundle": ["stage1-linux"],
-      "tauri-smoke": ["stage1-linux", "stage1-macos"]
+      "e2e": [
+        "stage1-linux"
+      ],
+      "bundle": [
+        "stage1-linux"
+      ],
+      "tauri-smoke": [
+        "stage1-linux",
+        "stage1-macos"
+      ]
     },
     "parallel": []
   }

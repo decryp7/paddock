@@ -159,6 +159,8 @@ struct Matrix {
     app_legs: bool,
     /// `include: ${{ fromJSON(needs.plan.outputs.apps_e2e) }}`: stage 2's end-to-end legs of the apps (the other legs are `app_legs`).
     app_legs_e2e: bool,
+    /// `apps_<os>`: the stage-1 legs of one operating system (`apps_linux`), the legs of `app_legs` that run on it.
+    app_os: Option<&'static str>,
 }
 
 #[derive(Debug, Clone)]
@@ -220,6 +222,22 @@ fn list_of_text(n: Option<&Node>) -> Vec<String> {
     .unwrap_or_default()
 }
 
+/// The runner label of a per-OS plan output used as a matrix source: `fromJSON(needs.plan.outputs.apps_windows)` with base `apps`
+/// gives `windows-latest`; `None` for any other text.
+fn os_of_output(text: &str, base: &str) -> Option<&'static str> {
+    [("linux", "ubuntu-latest"), ("windows", "windows-latest"), ("macos", "macos-latest")]
+        .into_iter()
+        .find(|(short, _)| text.contains(&format!("fromJSON(needs.plan.outputs.{base}_{short})")))
+        .map(|(_, os)| os)
+}
+
+/// A plan output that is one OS's part of a leg list (`crate_legs_linux`, `paddock_dev_legs_windows`, `apps_macos`).
+fn is_per_os_legs(out: &str) -> bool {
+    ["crate_legs", "paddock_dev_legs", "apps"]
+        .iter()
+        .any(|b| ["linux", "windows", "macos"].iter().any(|os| out == format!("{b}_{os}")))
+}
+
 fn parse_matrix(n: &Node) -> Matrix {
     let mut m = Matrix::default();
     for (k, v) in n.entries() {
@@ -227,6 +245,11 @@ fn parse_matrix(n: &Node) -> Matrix {
             "include" => match v.text() {
                 Some(t) if t.contains("fromJSON(needs.plan.outputs.apps)") => m.app_legs = true,
                 Some(t) if t.contains("fromJSON(needs.plan.outputs.apps_e2e)") => m.app_legs_e2e = true,
+                // One job per OS (`apps_linux`, `apps_windows`, `apps_macos`): the stage-1 legs that run on that OS.
+                Some(t) if os_of_output(t, "apps").is_some() => {
+                    m.app_legs = true;
+                    m.app_os = os_of_output(t, "apps");
+                }
                 // A sharded job of an app workflow (debrief.yml's `include: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}`, one of
                 // the outputs plan_since::app_output_names lists): every shard unless a rerun of failures names some, and each
                 // shard runs the same steps, so the model runs one.
@@ -247,6 +270,17 @@ fn parse_matrix(n: &Node) -> Matrix {
                         "os".to_string(),
                         ["ubuntu-latest", "windows-latest", "macos-latest"].map(String::from).to_vec(),
                     ));
+                }
+                // The same legs, one job per OS (`crate_legs_windows`): only that OS.
+                Some(t)
+                    if os_of_output(t, "crate_legs")
+                        .or_else(|| os_of_output(t, "paddock_dev_legs"))
+                        .is_some() =>
+                {
+                    let os = os_of_output(t, "crate_legs")
+                        .or_else(|| os_of_output(t, "paddock_dev_legs"))
+                        .unwrap_or("");
+                    m.axes.push(("os".to_string(), vec![os.to_string()]));
                 }
                 Some(_) => m.include.push(BTreeMap::from([("__unresolved".to_string(), "true".to_string())])),
                 None => m.include.extend(v.items().iter().map(|i| {
@@ -648,6 +682,9 @@ impl Lookup for Scope<'_> {
                     // same for an app workflow's narrowing outputs of such a rerun (debrief.yml's `rust_test_filter`,
                     // `frontend_include`; plan_since::SincePlan::app_outputs): empty, so every step runs whole.
                     (Some(_), Some("outputs"), Some("rerun_jobs")) => Val::Null,
+                    // The legs of one OS (`crate_legs_windows`, `apps_linux`, ...): the plan step splits the leg lists by OS and an OS with no leg
+                    // skips its job. On a run the model decides ("a branch run") every OS has legs, as the full list is the default.
+                    (Some(_), Some("outputs"), Some(out)) if is_per_os_legs(out) => Val::Str("[legs]".into()),
                     (Some(_), Some("outputs"), Some(out))
                         if !out.ends_with("_shards") && crate::plan_since::app_output_names().iter().any(|o| o == out) =>
                     {
@@ -957,10 +994,10 @@ impl Walker<'_> {
             for (name, c) in self.contracts {
                 match app_legs(name, c, webkit) {
                     // The plan splits the legs the way plan_ci::is_e2e_leg does: `app` runs the others, `app-e2e` these.
-                    Ok(legs) => out.extend(
-                        legs.into_iter()
-                            .filter(|l| l.get("e2e_leg").is_some_and(|e| !e.is_empty()) == m.app_legs_e2e),
-                    ),
+                    Ok(legs) => out.extend(legs.into_iter().filter(|l| {
+                        l.get("e2e_leg").is_some_and(|e| !e.is_empty()) == m.app_legs_e2e
+                            && m.app_os.is_none_or(|os| l.get("os").map(String::as_str) == Some(os))
+                    })),
                     Err(e) => self.problems.push((format!("apps/{name}/paddock.ci.json"), e)),
                 }
             }

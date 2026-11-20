@@ -32,17 +32,24 @@ pub const CI_JOBS: &[(&str, &[&str])] = &[
     ("icons", &["icons"]),
     ("eslint-preset", &["eslint"]),
     ("crates", &["crates"]),
-    ("crate", &["crates"]),
+    ("crate-linux", &["crates"]),
+    ("crate-windows", &["crates"]),
+    ("crate-macos", &["crates"]),
     ("commits", &["tools"]),
     ("audit", &["paddock-dev"]),
     ("train-gates", &["tools"]),
-    ("app", &["apps"]),
+    ("app-linux", &["apps"]),
+    ("app-windows", &["apps"]),
+    ("app-macos", &["apps"]),
     ("app-e2e", &["apps"]),
     // The stage gates (conformance/ci/stage-gate.mjs, one per OS; conformance/ci/stages.json): a change to them changes what a stage-2 job waits for.
     ("stage1-linux", &["everything"]),
+    ("stage1-windows", &["everything"]),
     ("stage1-macos", &["everything"]),
     ("stages", &["everything"]),
-    ("paddock-dev", &["paddock-dev"]),
+    ("paddock-dev-linux", &["paddock-dev"]),
+    ("paddock-dev-windows", &["paddock-dev"]),
+    ("paddock-dev-macos", &["paddock-dev"]),
 ];
 
 fn ci_job(name: &str) -> Option<&'static [&'static str]> {

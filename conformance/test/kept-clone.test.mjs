@@ -484,7 +484,8 @@ test('checkout profiles: ci.yml\'s host jobs use the kept clone with a declared 
   const ci = read(CI);
   const profiles = new Set(declared().filter((d) => d.kind === 'exclude').map((d) => d.parts[0]));
   const boot = declared().filter((d) => d.kind === 'bootstrap').map((d) => d.parts[0]);
-  const jobs = ['crate', 'app', 'paddock-dev'];
+  // One job per operating system each (ci.yml crate, app and paddock-dev; conformance/ci/stages.json).
+  const jobs = ['crate', 'app', 'paddock-dev'].flatMap((f) => ['linux', 'windows', 'macos'].map((o) => `${f}-${o}`));
   for (const id of jobs) {
     const text = jobBlock(ci, id);
     const steps = parseSteps(text);

@@ -1551,7 +1551,7 @@ mod tests {
 
     fn ci_text(conf: &str, app: &str) -> String {
         format!(
-            "name: ci\non:\n  push:\njobs:\n  plan:\n    steps:\n      - uses: ./.gitea/actions/plan-only\n  ui:\n    steps:\n      - uses: ./.gitea/actions/node-caches\n  conformance: # the checks\n    steps:\n      - run: {conf}\n  app:\n    steps:\n      - run: {app}\n      - uses: ./.gitea/actions/app-gates\n  crates:\n    steps:\n      - uses: ./.gitea/actions/build-folder\n      - uses: ./.gitea/actions/install-test-browser\n"
+            "name: ci\non:\n  push:\njobs:\n  plan:\n    steps:\n      - uses: ./.gitea/actions/plan-only\n  ui:\n    steps:\n      - uses: ./.gitea/actions/node-caches\n  conformance: # the checks\n    steps:\n      - run: {conf}\n  app-linux:\n    steps:\n      - run: {app}\n      - uses: ./.gitea/actions/app-gates\n  crates:\n    steps:\n      - uses: ./.gitea/actions/build-folder\n      - uses: ./.gitea/actions/install-test-browser\n"
         )
     }
 
