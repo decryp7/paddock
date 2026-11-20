@@ -1,12 +1,13 @@
 // Dyno's macOS helper is signed by the release's own step, not by Tauri's beforeBuildCommand (ADR 0085 amendment 0085-2026-11-12 item 11 strips the
 // updater key before npm, prepare and that hook; dyno-release.yml run 8395 failed on the tag because the hook, which signed only with the key, found none).
 // A dispatched run is release=0, so CI cannot exercise the tag path before the real tag: these tests run it, on the scripts the macOS tag job runs, with a
-// throw-away key made by the Tauri CLI in a temp folder (no real key anywhere). Needs the Tauri CLI of the npm workspace (`npm ci` at the root; a checkout
-// without it names PADDOCK_TEST_NODE_MODULES, a node_modules folder that has it).
+// throw-away key made in a temp folder (no real key anywhere). `npx tauri signer sign` is a stand-in that writes a minisign signature in Tauri's format
+// (prehashed Ed25519, as updater-key-check.mjs reads it, which the fixture test beside it checks against real Tauri output); where the npm workspace's
+// real Tauri CLI is installed (`npm ci` at the root, or PADDOCK_TEST_NODE_MODULES) the first test runs again with the real CLI and a key it generated.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -22,17 +23,46 @@ const TRIPLE = 'aarch64-apple-darwin';
 const sha = (f) => createHash('sha256').update(readFileSync(f)).digest('hex');
 const exe = (p, body) => { writeFileSync(p, body); chmodSync(p, 0o755); };
 
-/** A throw-away key pair from the Tauri CLI: { key, pub } as the secrets hold them (single-line base64). */
-function throwawayKey(dir) {
-  assert.ok(existsSync(TAURI), `the Tauri CLI is missing (${TAURI}): run npm ci at the repository root or set PADDOCK_TEST_NODE_MODULES`);
+const REAL_TAURI = existsSync(TAURI);
+
+/** A throw-away key pair from the real Tauri CLI: { key, pub } as the secrets hold them (single-line base64). */
+function realKey(dir) {
   const r = spawnSync(TAURI, ['signer', 'generate', '--ci', '--force', '--write-keys', join(dir, 'k.key')], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   const one = (f) => readFileSync(f, 'utf8').replace(/\s+/g, '');
   return { key: one(join(dir, 'k.key')), pub: one(join(dir, 'k.key.pub')) };
 }
 
+const KEY_ID = Buffer.from('0102030405060708', 'hex');
+/** A throw-away Ed25519 pair for the stand-in signer: the key is its PKCS#8 DER in base64, the public key a minisign public key file in base64. */
+function standInKey() {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const raw = publicKey.export({ format: 'der', type: 'spki' }).subarray(-32);
+  const pubFile = `untrusted comment: minisign public key\n${Buffer.concat([Buffer.from('Ed'), KEY_ID, raw]).toString('base64')}\n`;
+  return { key: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'), pub: Buffer.from(pubFile).toString('base64') };
+}
+
+// `npx tauri signer sign <file>` as Tauri's does it: writes <file>.sig, the base64 of a minisign signature file (ED: the BLAKE2b-512 of the file
+// signed, then the trusted comment, which carries the file's name, signed with the signature).
+const NPX_STAND_IN = `#!/usr/bin/env node
+const { createHash, createPrivateKey, sign } = require('node:crypto');
+const { readFileSync, writeFileSync } = require('node:fs');
+const { basename } = require('node:path');
+const [tauri, signer, cmd, file] = process.argv.slice(2);
+if (tauri !== 'tauri' || signer !== 'signer' || cmd !== 'sign' || !file) { console.error('stand-in npx: only "tauri signer sign <file>"'); process.exit(2); }
+const key = process.env.TAURI_SIGNING_PRIVATE_KEY;
+if (!key) { console.error('stand-in npx: no TAURI_SIGNING_PRIVATE_KEY in the environment'); process.exit(1); }
+const priv = createPrivateKey({ key: Buffer.from(key, 'base64'), format: 'der', type: 'pkcs8' });
+const sig = sign(null, createHash('blake2b512').update(readFileSync(file)).digest(), priv);
+const trusted = 'timestamp:0\\tfile:' + basename(file);
+const global = sign(null, Buffer.concat([sig, Buffer.from(trusted)]), priv);
+const body = Buffer.concat([Buffer.from('ED'), Buffer.from('${KEY_ID.toString('hex')}', 'hex'), sig]).toString('base64');
+const text = 'untrusted comment: signature from tauri secret key\\n' + body + '\\ntrusted comment: ' + trusted + '\\n' + global.toString('base64') + '\\n';
+writeFileSync(file + '.sig', Buffer.from(text).toString('base64'));
+`;
+
 /** apps/dyno as the scripts see it (copied scripts, a fake built target folder) and stand-ins for cargo, rustc and codesign. */
-function tree() {
+function tree({ real = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'dyno-helper-sign-test-'));
   const app = join(dir, 'apps', 'dyno');
   const tauri = join(app, 'app', 'src-tauri');
@@ -49,6 +79,7 @@ function tree() {
   exe(join(bin, 'rustc'), `#!/bin/sh\necho "host: ${TRIPLE}"\n`);
   exe(join(bin, 'cargo'), '#!/bin/sh\n[ "$1" = metadata ] && exit 1\nexit 0\n'); // no build; no metadata, so the target folder is <apps/dyno>/target
   exe(join(bin, 'codesign'), '#!/bin/sh\nfor last; do :; done\nprintf "SEALED" >> "$last"\n'); // changes the bytes, as a seal does
+  if (!real) exe(join(bin, 'npx'), NPX_STAND_IN);
   return { dir, app, tauri, binaries: join(tauri, 'binaries'), bin, scripts: join(tauri, 'scripts') };
 }
 
@@ -61,9 +92,10 @@ const TAG = { GITHUB_REF: 'refs/tags/dyno-v9.9.9' };
 const run = (t, script, args, extra) => spawnSync(process.execPath, [join(t.scripts, script), ...args], { cwd: t.app, env: env(t, extra), encoding: 'utf8' });
 const out = (r) => `${r.stdout}${r.stderr}`;
 
-test('the signing step on a tag with a key: a non-empty signature that verifies against the key, and the hash of the signed bytes', () => {
-  const t = tree();
-  const { key, pub } = throwawayKey(t.dir);
+for (const real of [false, true]) {
+  test(`the signing step on a tag with a key (${real ? 'the real Tauri CLI' : 'stand-in signer'}): a non-empty signature that verifies against the key, and the hash of the signed bytes`, { skip: real && !REAL_TAURI && `no Tauri CLI at ${TAURI}: not measured here, CI's npm ci has it` }, () => {
+  const t = tree({ real });
+  const { key, pub } = real ? realKey(t.dir) : standInKey();
   const built = run(t, 'sign-helper.mjs', ['build'], TAG); // no key in this part's environment
   assert.equal(built.status, 0, out(built));
   const helper = join(t.binaries, `dyno-helper-${TRIPLE}`);
@@ -76,6 +108,7 @@ test('the signing step on a tag with a key: a non-empty signature that verifies 
   assert.match(Buffer.from(sig, 'base64').toString(), /dyno-helper-9\.9\.9-aarch64-apple-darwin/, 'signed under dyno-helper-<version>-<triple>');
   assert.equal(readFileSync(join(t.binaries, 'dyno-helper.sha256'), 'utf8'), `${sha(helper)}\n`);
 });
+}
 
 test('the signing step on a tag without the key fails with an ::error::; off a tag it leaves empty files and a warning', () => {
   const t = tree();
@@ -91,7 +124,7 @@ test('the signing step on a tag without the key fails with an ::error::; off a t
 
 test('the hook (sidecar.mjs) on a tag, with no key: passes on the helper the step signed and keeps its bytes', () => {
   const t = tree();
-  const { key } = throwawayKey(t.dir);
+  const { key } = standInKey();
   assert.equal(run(t, 'sign-helper.mjs', ['build'], TAG).status, 0);
   assert.equal(run(t, 'sign-helper.mjs', ['sign'], { ...TAG, TAURI_SIGNING_PRIVATE_KEY: key }).status, 0);
   const helper = join(t.binaries, `dyno-helper-${TRIPLE}`);
@@ -110,7 +143,7 @@ test('the hook on a tag without the signing step fails with an ::error:: naming 
   assert.equal(hook.status, 1);
   assert.match(out(hook), /::error::the macOS dyno-helper has no signature on a tag run: the signing step \(sign-helper\.mjs, run by tauri-bundle\.sh as --pre-sign\)/);
   // A stale signature of another file does not count: the hash must be that of the helper's bytes.
-  const { key } = throwawayKey(t.dir);
+  const { key } = standInKey();
   assert.equal(run(t, 'sign-helper.mjs', ['build'], TAG).status, 0);
   assert.equal(run(t, 'sign-helper.mjs', ['sign'], { ...TAG, TAURI_SIGNING_PRIVATE_KEY: key }).status, 0);
   writeFileSync(join(t.binaries, `dyno-helper-${TRIPLE}`), 'another build');
@@ -128,7 +161,7 @@ test('the hook off a tag without the step keeps today\'s behaviour: empty signat
 
 test('the hook never signs: with the key in its environment it still does not call the Tauri signer', () => {
   const t = tree();
-  const { key } = throwawayKey(t.dir);
+  const { key } = standInKey();
   const hook = run(t, 'sidecar.mjs', [], { GITHUB_REF: 'refs/heads/x', TAURI_SIGNING_PRIVATE_KEY: key });
   assert.equal(hook.status, 0, out(hook));
   assert.equal(readFileSync(join(t.binaries, 'dyno-helper.minisig'), 'utf8'), '', 'signing belongs to sign-helper.mjs');
