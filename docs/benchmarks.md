@@ -2140,3 +2140,41 @@ save more, on each OS? And did the user's Defender process exclusions for git ch
 
   The slow tests were fixture-bound (116 of the remerge test's 188 git starts were its own fixture): the reader cut the merge check's
   part, the split cut each test to one case (docs/lessons.md, "One test per fixture case").
+
+## Cheapest tests: selection, WebKit, duplicates (2026-11-20, docs/cheapest-tests-research)
+
+Quoted by [research/2026-11-20-cheapest-tests.md](research/2026-11-20-cheapest-tests.md). Read-only: CI job logs already on the
+server and the planner run over committed diffs; nothing built, run or dispatched. Raw data and scripts:
+`/Volumes/vault-dev/dev-targets/scratch/cheapest-tests/` (`bin/pairs.py`, `bin/top20.py`, `bin/select2.py`, `members-base.txt`,
+`plans/`).
+
+- **Member branch rounds, priced** (114 distinct members merged into trains 13 to 16, 2026-11-14 to 11-20; each member's diff
+  against its merge base with the train; `node scripts/affected.mjs <base> <sha>` on origin/main e0fd0f511's graph; each plan
+  priced with full round 8335/8338's per-job seconds in branch mode, Chromium only, all OS, using the plan's halves): diff size
+  median 9 files, p90 61; **11,778 job-min, mean 103, median 90 a member**.
+  - e2e of apps marked though the change touches no file the e2e reads (path rule in `select2.py`): **1,187 job-min, 10.1%**, 23
+    members; app Rust halves the same way: **1,426, 12.1%**. Cause: `scripts/affected.mjs` lines 679 to 682 (conformance code
+    marks every app whose checks run paddock-conformance, no half named) and the npm edge to the conformance package.
+  - Spec-only app changes, changed specs only: 21 job-min, 0.2% (1 member). Members whose e2e was reached by the app's own source:
+    12, their e2e 228 job-min, 1.9%. Nextest execution narrowed to the changed crates' closure in `crates`: 57 job-min, 0.5%.
+  - Limits: one round's job times (8335/8338, 3 lanes), no queueing; the "reads nothing" rule is an estimate of the planner
+    change; Pacenotes and Sighter legs unpriced (no data in those runs).
+- **Debrief WebKit against Chromium, per test** (692 pairs per run, same spec, line and title; `pairs.py`):
+
+  | Run | WebKit test-s | Chromium test-s | Ratio | Median per-test ratio (p10 to p90) | Fit |
+  |---|---:|---:|---:|---|---|
+  | 8338 (train 15, e0fd0f511) | 5,086 | 2,443 | 2.08 | 1.94 (1.25 to 3.05) | 0.32 s + 1.99 x |
+  | 8328 (train 15, 6199bc29b) | 5,022 | 1,968 | 2.55 | 2.42 (1.61 to 3.54) | 0.54 s + 2.36 x |
+  | 8316 (main, 9cbd77a63) | 5,370 | 2,898 | 1.85 | 1.69 (1.01 to 2.75) | 0.00 s + 1.85 x |
+
+  Fastest tenth of tests (by Chromium): Chromium median 0.43 to 1.0 s, WebKit 0.72 to 0.93 s. Shard overlap differed between the
+  runs (8328: WebKit shards ran together after Chromium's; 8316: all four overlapped). Other suites, 8335: Dyno 1,606 / 1,229
+  test-s (1.31x), Pitwall 422 / 249 (1.69x), Spotter 43 / 32 (1.36x). The slowest 20 WebKit tests (mean over the runs) are in
+  the note's 2.2 and `top20-webkit.txt`; they are 10.2% of WebKit seconds; the top 10 files 33%, the top 20 files 45% of 146.
+- **WebKit device scale** (read from code): Playwright 1.64.1 `Desktop Safari` has `deviceScaleFactor: 2`; Debrief (1440 x 900),
+  Dyno and Spotter (1280 x 800) and Pitwall (1440 x 900) use it with only the viewport overridden; `ui/playwright.config.ts` sets
+  1. Debrief WebKit paints 5.18 million device pixels a frame against Chromium's 1.30 million. Effect on time: **not measured**.
+- **Duplicate e2e** (a reader's classification of 149 Debrief and 26 Dyno spec files that ran, timings from 8338 and 8335): Debrief
+  704 cases, 360 A / 108 B / 236 C, about 225 movable (about 913 Chromium s, 1,767 WebKit s); Dyno 442 cases, 302 / 10 / 130,
+  about 75 movable (83 / 136 s). Line-by-line check of 13 files: about 21 Debrief and 29 Dyno cases with a matching component test.
+  Component specs: Debrief 472 files (332 TestBed), Dyno 167 (84).
