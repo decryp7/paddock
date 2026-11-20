@@ -1,4 +1,3 @@
-// ci-runs-reader: the only_tests input: the failed tests a rung of the train's fix ladder names, and the plan that honours them
 //! The `only_tests` workflow input (`train release`'s rung 1, the failed tests only): a JSON object from a job's display name to the
 //! ids of the tests to run in it, read by the plan job together with `since_run` and turned into the same outputs a narrowed rerun
 //! writes ([`crate::plan_since::SincePlan`]): a nextest filterset, a vitest file list or Playwright `file:line` locations. A job the

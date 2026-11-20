@@ -1,4 +1,3 @@
-// ci-runs-reader: ci triage --ran: how many tests each job of a run ran
 //! How many tests each job of a finished run ran, read from its log (`ci triage <run> --ran`): the evidence the train's fix ladder
 //! needs that a run it dispatched with `only_tests` ran the named tests and not nothing (ER-33). A run that is green because its
 //! filter matched no test (nextest's `--no-tests=warn`) looks exactly like a green run of the tests; only the count tells them apart.

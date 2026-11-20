@@ -282,6 +282,14 @@ export function conclusionReaders(root, dirs = DECISION_DIRS, home = DECISION_HO
 const READERS_LIST = 'conformance/ci/run-conclusion-readers.json';
 
 /**
+ * ER-41 (amended 2026-11-20): a new check starts report-only and blocks only in the step that records its first green run on the real
+ * tree. Until then every finding of this check (a new reader, a stale entry, growth of the list, its creation) is a warning. The step
+ * that makes it blocking sets this to that run's id, here, and `blockingNow` turns the warnings into failures.
+ */
+export const BLOCKING_SINCE_RUN = null;
+const blockingNow = (extra = {}) => extra.blocking ?? BLOCKING_SINCE_RUN !== null;
+
+/**
  * The shrink-only rule of the list (ER-46) against the merge base with the target ref (`targetRef`: PADDOCK_BASE_REF, else
  * origin/main), through the shared baseline reader. An entry not in the base list throws. A list that does not exist at the base is
  * its own creation, which is growth that needs the user's yes: it throws unless the list records that approval (`approved`: who,
@@ -291,6 +299,11 @@ const READERS_LIST = 'conformance/ci/run-conclusion-readers.json';
 export function listGrowth(listed, extra = {}) {
   const warn = extra.warn ?? console.warn;
   const approved = extra.approved;
+  // Report-only until the first green run is recorded (ER-41): a finding is said, not thrown.
+  const fail = (message) => {
+    if (blockingNow(extra)) throw new Error(message);
+    warn(`report-only (ER-41, BLOCKING_SINCE_RUN is unset): ${message}`);
+  };
   const g = baselineGrowth({ root: PADDOCK, path: READERS_LIST, current: listed, keyOf: (f) => f, entriesOf: (j) => j.files, ...extra });
   if (g.reason) {
     if (extra.ci ?? isCi()) throw new Error(`${READERS_LIST}: not measured, the target ref is not usable: ${g.reason}`);
@@ -299,11 +312,12 @@ export function listGrowth(listed, extra = {}) {
     const ok = approved?.by && /^\d{4}-\d{2}-\d{2}$/.test(approved.date ?? '') && Array.isArray(approved.files);
     const extraEntries = ok ? listed.filter((f) => !approved.files.includes(f)) : listed;
     if (extraEntries.length) {
-      throw new Error(`${READERS_LIST} is a new list and its creation is growth that needs the user's approval (ER-46): ${ok ? 'not approved' : 'no approval is recorded'}: ${extraEntries.slice(0, 5).join('; ')}. Record it as "approved": {by, date, files} only after the user said yes.`);
+      fail(`${READERS_LIST} is a new list and its creation is growth that needs the user's approval (ER-46): ${ok ? 'not approved' : 'no approval is recorded'}: ${extraEntries.slice(0, 5).join('; ')}. Record it as "approved": {by, date, files} only after the user said yes.`);
+      return g;
     }
     warn(`${READERS_LIST}: the creation of this list was approved by ${approved.by} on ${approved.date} (${listed.length} entries); it is not asked again once it is on ${'the target branch'}`);
   } else if (g.added.length) {
-    throw new Error(`${READERS_LIST} grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base (${g.added.slice(0, 5).join('; ')}). It may only shrink.`);
+    fail(`${READERS_LIST} grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base (${g.added.slice(0, 5).join('; ')}). It may only shrink.`);
   }
   return g;
 }
@@ -311,9 +325,12 @@ export function listGrowth(listed, extra = {}) {
 test('a pass decision from a run conclusion lives only in ci_runs/verdict.rs, besides the listed old readers, which only shrink', () => {
   const listed = JSON.parse(readFileSync(join(PADDOCK, READERS_LIST), 'utf8')).files;
   const found = conclusionReaders(PADDOCK);
-  assert.deepEqual(
+  const check = (actual, message) => {
+    if (blockingNow()) assert.deepEqual(actual, [], message);
+    else if (actual.length) console.warn(`report-only (ER-41, BLOCKING_SINCE_RUN is unset): ${message}: ${actual.join('; ')}`);
+  };
+  check(
     found.filter((f) => !listed.includes(f)),
-    [],
     'a new reader of a run conclusion: ask `ci_runs::verdict::run_result` (one run) or `ci_runs::verdict::verdict` (is there a full green run); the list in conformance/ci/run-conclusion-readers.json never grows',
   );
   assert.deepEqual(
@@ -337,17 +354,23 @@ const gitBase = (base) => (args) => {
 
 test('the shrink-only check sees an added entry, a new list and a target it cannot read (positive control)', () => {
   const base = JSON.stringify({ files: ['a.rs', 'b.rs'] });
-  assert.doesNotThrow(() => listGrowth(['a.rs'], { git: gitBase(base) }), 'shrinking is fine');
-  assert.throws(() => listGrowth(['a.rs', 'c.rs'], { git: gitBase(base) }), /grew.*c\.rs/, 'an added entry is growth');
+  assert.doesNotThrow(() => listGrowth(['a.rs'], { git: gitBase(base), blocking: true }), 'shrinking is fine');
+  assert.throws(() => listGrowth(['a.rs', 'c.rs'], { git: gitBase(base), blocking: true }), /grew.*c\.rs/, 'an added entry is growth');
   // A creation: refused without a recorded approval, refused for an entry the approval does not name, allowed when it covers them.
   const approval = { by: 'the user', date: '2026-11-20', files: ['a.rs', 'b.rs'] };
-  assert.throws(() => listGrowth(['a.rs', 'b.rs'], { git: gitBase(null) }), /no approval is recorded/, 'a new list with no approval fails');
-  assert.throws(() => listGrowth(['a.rs', 'c.rs'], { git: gitBase(null), approved: approval }), /not approved: c\.rs/, 'an entry the approval does not name fails');
-  assert.throws(() => listGrowth(['a.rs'], { git: gitBase(null), approved: { ...approval, date: 'soon' } }), /no approval is recorded/, 'an approval needs its date');
+  assert.throws(() => listGrowth(['a.rs', 'b.rs'], { git: gitBase(null), blocking: true }), /no approval is recorded/, 'a new list with no approval fails');
+  assert.throws(() => listGrowth(['a.rs', 'c.rs'], { git: gitBase(null), approved: approval, blocking: true }), /not approved: c\.rs/, 'an entry the approval does not name fails');
+  assert.throws(() => listGrowth(['a.rs'], { git: gitBase(null), approved: { ...approval, date: 'soon' }, blocking: true }), /no approval is recorded/, 'an approval needs its date');
   const said = [];
   const created = listGrowth(['a.rs', 'b.rs'], { git: gitBase(null), approved: approval, warn: (m) => said.push(m) });
   assert.equal(created.absent, true);
   assert.match(said[0], /approved by the user on 2026-11-20/);
+  // Report-only (the default until the first green run is recorded): the same findings are said, not thrown.
+  const spoken = [];
+  assert.doesNotThrow(() => listGrowth(['a.rs', 'c.rs'], { git: gitBase(base), warn: (m) => spoken.push(m) }));
+  assert.doesNotThrow(() => listGrowth(['a.rs'], { git: gitBase(null), warn: (m) => spoken.push(m) }));
+  assert.equal(spoken.filter((m) => m.includes('report-only')).length, 2, 'both findings were reported');
+  assert.equal(BLOCKING_SINCE_RUN, null, 'no first green run is recorded yet: the check is report-only');
   const noGit = () => {
     throw new Error('not a git repository');
   };
