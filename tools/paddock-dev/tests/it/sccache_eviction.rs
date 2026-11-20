@@ -7,6 +7,7 @@
 //! It needs `sccache` and `rustc` on PATH: the CI image has both. Without them the test fails with a message that says what is
 //! missing (never a silent pass, ER-33); the control below is its positive control: the same file beside the cache folder, not in
 //! it, survives, so the test can tell eviction from a file that was never there.
+// windows-twin: none: waived until 2026-12-31; the behaviour is sccache's own LRU, the same on every OS, and the risk was the shared Linux mount; the Windows runner keeps one folder per slot already (a Windows twin needs a cmd-safe rustc stand-in)
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -16,7 +17,10 @@ use std::path::{Path, PathBuf};
 /// A cargo build folder's rlib of 3 MiB, three times the cap.
 const RLIB: &str = "paddock-dev/rustc-x/release/deps/libfoldhash.rlib";
 
+/// A port sccache's server may bind: it cannot be handed a bound listener, and a port taken in between makes `--start-server` fail,
+/// which `Cache::start` asserts, so the test turns red and never passes on another server.
 fn free_port() -> u16 {
+    // conformance: freed-port — see the doc comment: a collision fails `Cache::start`, it never lets the test pass
     std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
 }
 

@@ -418,6 +418,8 @@ fn node_caches(os: &'static str, angular: &'static str, extra: Vec<(&'static str
         ("RUNNER_OS", os.to_string()),
         ("PADDOCK_CI_SLOT", "s1".into()),
         ("GITHUB_WORKSPACE", "<ROOT>/ws".into()),
+        ("RUNNER_TEMP", "<ROOT>/tmp".into()),
+        // The runner's old shared mount: it exists in one case and is never written (ADR 0111).
         ("PADDOCK_CI_MOUNT", "<ROOT>/no-mount".into()),
     ];
     env.extend(extra);
@@ -455,22 +457,25 @@ fn node_caches_keeps_npm_and_the_angular_cache_in_the_slots_folders_on_a_host() 
 }
 
 #[test]
-fn node_caches_uses_a_containers_mount_and_says_so_without_one() {
-    let notice = same(&with_stale_angular, &node_caches("Linux", "ui", vec![]));
-    assert!(
-        notice.stdout.starts_with("::notice::no /sccache mount in this container"),
-        "{notice:?}"
-    );
-    let with_mount = same(
+fn node_caches_in_a_container_are_the_jobs_own_folders_and_the_mount_is_never_written() {
+    let seen = same(
         &|fx| {
             with_stale_angular(fx);
             std::fs::create_dir_all(fx.p("no-mount")).unwrap();
         },
         &node_caches("Linux", "ui", vec![]),
     );
+    assert!(seen.github_env.contains("npm_config_cache=<ROOT>/tmp/node-caches/npm"), "{seen:?}");
     assert!(
-        with_mount.github_env.contains("npm_config_cache=<ROOT>/no-mount/npm"),
-        "{with_mount:?}"
+        seen.tree
+            .contains(&"l ws/ui/.angular/cache -> <ROOT>/tmp/node-caches/angular".to_string()),
+        "{:?}",
+        seen.tree
+    );
+    assert!(
+        !seen.tree.iter().any(|l| l.contains("no-mount/")),
+        "nothing below the mount: {:?}",
+        seen.tree
     );
 }
 

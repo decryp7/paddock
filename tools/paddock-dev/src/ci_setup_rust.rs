@@ -12,8 +12,8 @@
 //!    `PATH` is exactly that version. A failed download is a warning (the job builds without the cache); a checksum mismatch
 //!    fails the step.
 //! 2. **Configure** it: the backend (`local`, `auto` or `redis`), the server port (4227 in a Linux container, else the job
-//!    slot's own port), the local folder and size (the `/sccache` mount in a container, else the slot's kept folder with the
-//!    host's budget divided between the slots), a fresh server for this job, and `RUSTC_WRAPPER=sccache` with the settings in
+//!    slot's own port), the local folder and size (the slot's kept folder on a host; in a container the job's lane folder
+//!    `<mount>/sccache-<lane>`, never the mount itself: ADR 0111; the host's budget divided between the slots or lanes), a fresh server for this job, and `RUSTC_WRAPPER=sccache` with the settings in
 //!    `$GITHUB_ENV`. A server that does not start leaves the wrapper unset: the cache may slow a build, never fail it.
 //! 3. **Tauri libraries** (`--tauri-linux-deps true`, Linux only): `apt-get update` and `apt-get install` of the libraries.
 //!

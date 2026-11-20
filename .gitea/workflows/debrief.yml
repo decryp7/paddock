@@ -11,7 +11,7 @@
 #
 # Speed (Paddock lessons, "Test and build speed"): Linux jobs run in the paddock-ci image (Rust, nextest, Tauri's libraries,
 # Node, Playwright's browsers, Chrome for Testing and libduckdb baked in); every Rust job compiles through sccache on local
-# disk (setup-rust: the runner's /sccache mount in a container, the job slot's sccache-s<n> on a host); host runners build from a
+# disk (setup-rust: the job's lane or slot folder sccache-<slot>, below the /sccache mount in a container); host runners build from a
 # fixed checkout path (stable-workspace) into a kept build folder set as cargo configuration (the build-folder action),
 # never CARGO_TARGET_DIR, which sccache hashes; npm's and Angular's caches are kept (node-caches).
 #
@@ -100,7 +100,7 @@ jobs:
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
       # Exact-key lookup only: nothing is downloaded. The marker is saved by the nightly-mark job after a fully green run.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: green
         if: github.event_name == 'schedule'
         with:
@@ -490,7 +490,7 @@ jobs:
       # cargo about reads every crate's licence from its sources and cargo deny clones the advisory database: without a
       # cache both download everything on every run. The image's CARGO_HOME is /usr/local/cargo. Saved on every run (a
       # new key each time), so the advisory database stays fresh.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             /usr/local/cargo/registry/index
@@ -512,7 +512,7 @@ jobs:
           node scripts/ci/check-icons.mjs
           cd ../.. && scripts/notices.sh debrief --check
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         if: always()
         with:
           path: |
@@ -538,7 +538,7 @@ jobs:
       # and the leak check never touch a folder other runs use. The socket folder goes with the job's last step.
       - uses: ./.gitea/actions/job-tmpdir
 
-      # npm's download cache and the Angular build cache kept on the runner's /sccache mount (Node is the image's).
+      # npm's download cache and the Angular build cache kept through actions/cache in a container (Node is the image's).
       - uses: ./.gitea/actions/node-caches
         with:
           angular-dir: apps/debrief/app
@@ -782,7 +782,7 @@ jobs:
           fi
           node --version
 
-      # npm's and Angular's caches (the /sccache mount on Linux, the CI home's kept folders on macOS). Windows reuses a whole
+      # npm's and Angular's caches (actions/cache on Linux, the CI home's kept folders on macOS). Windows reuses a whole
       # node_modules instead (below).
       - uses: ./.gitea/actions/node-caches
         if: runner.os != 'Windows'
@@ -1360,7 +1360,7 @@ jobs:
           mkdir -p .nightly-green
           echo "${{ github.sha }}" > .nightly-green/sha
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .nightly-green
           key: debrief-nightly-green-${{ github.sha }}

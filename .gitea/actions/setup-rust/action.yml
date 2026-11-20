@@ -88,6 +88,51 @@ runs:
       shell: bash
       run: |
         if [ -z "${CARGO_BUILD_JOBS:-}" ]; then bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" build-jobs; else echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"; fi
+    # ./dev's own binary through the Actions cache (the runners' RustFS S3), Linux only (ADR 0111): keyed by the launcher's input hash,
+    # the OS, the architecture and a cache-version salt (no restore-keys); a restored binary is verified for its hash and rebuilt when it
+    # is not; only a build that passed that check is saved; the job summary says hit or miss and whether the save is there. The logic is
+    # conformance/ci/dev-tool-cache.sh (tested by conformance/test/dev-tool-cache.test.mjs); Mac and Windows hosts keep their own slot's folder.
+    - name: Key of the tool
+      id: key
+      if: runner.os == 'Linux'
+      shell: bash
+      run: bash "${{ github.action_path }}/../../../conformance/ci/dev-tool-cache.sh" key
+    - name: Restore the tool
+      id: restore
+      if: runner.os == 'Linux' && steps.key.outputs.usable == 'true'
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ${{ steps.key.outputs.path }}
+        key: ${{ steps.key.outputs.key }}
+    - name: Verify the tool, build it on a miss
+      id: verify
+      if: runner.os == 'Linux' && steps.key.outputs.usable == 'true'
+      shell: bash
+      run: bash "${{ github.action_path }}/../../../conformance/ci/dev-tool-cache.sh" verify "${{ steps.restore.outputs.cache-hit }}"
+    - name: Save the verified tool
+      id: save
+      if: runner.os == 'Linux' && steps.key.outputs.usable == 'true' && steps.verify.outputs.save == 'true'
+      continue-on-error: true
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ${{ steps.key.outputs.path }}
+        key: ${{ steps.key.outputs.key }}
+    - name: Confirm the save
+      id: confirm
+      if: runner.os == 'Linux' && steps.key.outputs.usable == 'true' && steps.verify.outputs.save == 'true'
+      continue-on-error: true
+      # A failed save is only a warning in the save step; looking the key up again is the proof it is there.
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ${{ steps.key.outputs.path }}
+        key: ${{ steps.key.outputs.key }}
+        lookup-only: true
+    - name: Cache summary
+      if: always() && runner.os == 'Linux' && steps.key.outputs.usable == 'true'
+      shell: bash
+      env:
+        KEY: ${{ steps.key.outputs.key }}
+      run: bash "${{ github.action_path }}/../../../conformance/ci/dev-tool-cache.sh" summary "${{ steps.verify.outputs.state || 'not run' }}" "${{ steps.verify.outputs.save }}" "${{ steps.confirm.outputs.cache-hit }}"
     # Everything after the toolchain is `./dev ci setup-rust` (tools/paddock-dev/src/ci_setup_rust.rs). The two steps above stay
     # here: ./dev needs rustc to hash and build itself, and the job's later ./dev calls must see the same compiler.
     # Until the release-path lane (docs/plans/ci-in-rust.md, step 5), a run that never downloads ./dev (a release or rule 54

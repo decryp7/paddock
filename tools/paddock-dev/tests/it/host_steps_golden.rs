@@ -64,20 +64,17 @@ fn forward(p: &Path) -> String {
 }
 
 #[test]
-fn a_linux_container_leaves_the_workspace_and_a_missing_mount_is_a_notice() {
+fn a_linux_container_leaves_the_workspace_and_keeps_its_node_caches_in_the_jobs_temp_folder() {
     let (_d, root) = scratch();
     let linux = [("RUNNER_OS", "Linux".to_string()), ("GITHUB_WORKSPACE", forward(&root))];
     let r = dev(&root, &["stable-workspace", "--name", "x"], &linux);
     assert_eq!((r.code, r.stdout.as_str()), (0, ""));
     let mut vars = linux.to_vec();
-    vars.push(("PADDOCK_CI_MOUNT", forward(&root.join("no-mount"))));
-    let r = dev(&root, &["node-caches", "--angular-dir", "ui", "--name", "e2e-1"], &vars);
-    assert_eq!(r.code, 0);
-    assert_eq!(
-        r.stdout,
-        "::notice::no /sccache mount in this container; the npm and Angular caches live and die with the job.\n"
-    );
-    assert_eq!(r.github_env, "", "nothing is exported without the mount");
+    vars.push(("RUNNER_TEMP", forward(&root.join("temp"))));
+    let r = dev(&root, &["node-caches", "--name", "e2e-1"], &vars);
+    assert_eq!(r.code, 0, "{}", r.stdout);
+    assert_eq!(r.stdout, format!("node-caches: npm {}/temp/node-caches/npm\n", forward(&root)));
+    assert_eq!(r.github_env, format!("npm_config_cache={}/temp/node-caches/npm\n", forward(&root)));
 }
 
 #[test]

@@ -1,7 +1,8 @@
 //! `dev ci node-caches`: npm's download cache and the Angular build cache kept between runs (the port of the `node-caches`
-//! action). On a host runner they live in the CI home's kept folders (job-isolation: `npm` shared per slot, `angular/<name>-<slot>`
-//! per job slot); in a Linux container on the runner's `/sccache` mount (`npm/` and `angular/<name>`), and a container without the
-//! mount keeps both in the job (a `::notice::` says so).
+//! action). On a host runner they live in the CI home's kept folders (job-isolation: `npm-<slot>` and `angular/<name>-<slot>`, the
+//! job slot's own). In a Linux container they are the job's own folders under `$RUNNER_TEMP/node-caches` (`npm/` and
+//! `angular/`), and the action fills and keeps them through `actions/cache` (keyed by Node, the lockfile and the app sources):
+//! no folder of the runner's shared `/sccache` mount is written (ADR 0111).
 //!
 //! `npm_config_cache` goes to `$GITHUB_ENV` (a native path on Windows). The Angular cache folder of the workspace
 //! (`<workspace>/<angular-dir>/.angular/cache`, turned on in CI by `angular.json`'s `cli.cache.environment: all`) becomes a link
@@ -51,14 +52,20 @@ pub fn run_with(env: &HashMap<String, String>, windows: bool, args: &Args, links
     let want_angular = !args.angular_dir.is_empty();
     let (npm_cache, ng_cache): (String, String);
     if os == "Linux" {
-        let mount = PathBuf::from(step.var("PADDOCK_CI_MOUNT").unwrap_or("/sccache"));
-        let npm = mount.join("npm");
-        if !mount.is_dir() || std::fs::create_dir_all(&npm).is_err() {
-            step.say("::notice::no /sccache mount in this container; the npm and Angular caches live and die with the job.");
-            return 0;
+        let Some(temp) = step.var("RUNNER_TEMP").map(PathBuf::from) else {
+            return step.fail("RUNNER_TEMP is not set.", "run this step in a runner job.");
+        };
+        let base = temp.join("node-caches");
+        let npm = base.join("npm");
+        if let Err(e) = std::fs::create_dir_all(&npm) {
+            return step.fail(
+                format!("cannot create {}: {e}.", npm.display()),
+                "check the free space of the job's temp folder.",
+            );
         }
         npm_cache = npm.display().to_string();
-        ng_cache = mount.join("angular").join(&folder).display().to_string();
+        // One per job already (the folder is the job's own), so the action names it without the job's name.
+        ng_cache = base.join("angular").display().to_string();
     } else {
         // The host's kept folders (job-isolation): npm's cache and the Angular cache are the job slot's own.
         npm_cache = match step.isolation(&["path", "npm"]) {
@@ -222,23 +229,27 @@ mod tests {
     }
 
     #[test]
-    fn a_container_uses_the_mount_and_one_without_says_so() {
+    fn a_container_keeps_both_caches_in_the_jobs_own_temp_folder_never_on_the_mount() {
         let (d, mut env) = setup();
         env.insert("RUNNER_OS".into(), "Linux".into());
-        let links = RecordingLinks::default();
-        let (code, out) = go(&env, false, "ui", &links);
-        assert_eq!(code, 0);
-        assert!(out.starts_with("::notice::no /sccache mount in this container"), "{out}");
-        assert!(!d.path().join("github-env").exists(), "nothing exported without the mount");
+        env.insert("RUNNER_TEMP".into(), d.path().join("temp").display().to_string());
+        // The runner's old mount exists and is writable: it is not used (ADR 0111).
         let mount = d.path().join("no-mount");
         std::fs::create_dir(&mount).unwrap();
+        let links = RecordingLinks::default();
         let (code, out) = go(&env, false, "ui", &links);
         assert_eq!(code, 0, "{out}");
+        let base = d.path().join("temp").join("node-caches");
         assert_eq!(
             std::fs::read_to_string(d.path().join("github-env")).unwrap(),
-            format!("npm_config_cache={}\n", mount.join("npm").display())
+            format!("npm_config_cache={}\n", base.join("npm").display())
         );
-        assert_eq!(links.made.lock().unwrap()[0].0, under(&mount, "angular/e2e_1"));
+        assert_eq!(links.made.lock().unwrap()[0].0, under(&base, "angular"));
+        assert_eq!(std::fs::read_dir(&mount).unwrap().count(), 0, "nothing is written to the mount");
+        env.remove("RUNNER_TEMP");
+        let (code, out) = go(&env, false, "ui", &links);
+        assert_eq!(code, 1);
+        assert!(out.contains("::error::node-caches: RUNNER_TEMP is not set"), "{out}");
     }
 
     #[test]

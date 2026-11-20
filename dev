@@ -174,7 +174,7 @@ is_for_hash() { runs "$1" && "$1" self hash 2>/dev/null | grep -q "^embedded $ha
 # No folder is shared between concurrent CI jobs (ADR 0111): on a CI runner the tool and its build folder live in the job's own home
 # (~/.paddock-dev in a Linux container, which dies with the job), never on the runner's kept /sccache mount, where sccache's LRU
 # evicted cargo's rlibs (run 8373) and another lane's build could replace the binary a job was running (ER-26's cousin, run 8027).
-# What is kept between jobs is the restored `dev-tool` cache (.gitea/actions/dev-tool-cache), keyed by this hash. An explicit
+# What is kept between jobs is the restored dev-tool cache (setup-rust's steps), keyed by this hash. An explicit
 # PADDOCK_DEV_HOME or PADDOCK_DEV_TARGET_DIR wins.
 home="${PADDOCK_DEV_HOME:-${HOME:-/nonexistent}/.paddock-dev}"
 # A run that never downloads (PADDOCK_DEV_DOWNLOAD=0: release and tag jobs) keeps its tools in its own folder, bin-source, which the
