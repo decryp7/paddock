@@ -5,7 +5,7 @@
 - Date: 2026-11-20
 - Related: ER-21 / rule 40 (a recurring class gets a redesign); ER-22 / rule 42 (share first: the editor is extracted, not
   copied); ER-37 / rule 76 (common practice and cost); ER-44 (the complete fix lands in the same round); ER-11 (failing test
-  first); engineering-rules PRINCIPLES, "Contracts" (the line this ADR adds, same day); Pitcrew ADR
+  first); engineering-rules PRINCIPLES, "Contracts", "State another program owns" (commit 00d9279, same day); Pitcrew ADR
   [0011](../../apps/pitcrew/docs/adr/0011-runner-config-editing.md) (runner config editing) and
   [0022](../../apps/pitcrew/docs/adr/0022-host-environment-and-shared-folders.md) WP-7 (replaced, see its amendment line).
 - Number: 0110. On 2026-11-20 the highest ADR on any `origin` branch was 0109 (`origin/docs/os-only-failures-research`; 0104 is
