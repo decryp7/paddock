@@ -996,6 +996,10 @@ export function chooseBase({ event, ref, inputBase, baseRef, mainRef = 'refs/hea
 /**
  * Whether the one verdict reader (`./dev ci verdict --workflow ci.yml --sha <sha>`: exit 0 is a full green run of that commit, 5 red or
  * partial, 6 not measured) says a run is green. Not measured is a warning and not green, never a pass.
+ *
+ * per-item: one `./dev ci verdict` call per candidate run, because the reader judges one commit at a time and `chooseBase` stops at the
+ * first green candidate (the newest runs come first, so it is usually the first or second). This is the PLAN_PLANNER=node fallback,
+ * deleted with the script (ADR 0022 R4); the Rust planner makes no such calls.
  */
 export function verdictGreen(env, warn, run = execFileSync) {
   return (r) => {

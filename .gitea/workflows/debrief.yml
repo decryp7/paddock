@@ -678,8 +678,9 @@ jobs:
             # `<project>=<file>:<line>` for each named test: each runs in the project it failed in (`=<file>:<line>`: no project).
             echo "::notice::Playwright runs only the named tests: $E2E_TESTS"
             rc=0
+            set -f # the ids are `project=file:line` words: no globbing
             for p in $(printf '%s\n' $E2E_TESTS | cut -d= -f1 | sort -u); do
-              locs=$(printf '%s\n' $E2E_TESTS | grep "^$p=" | cut -d= -f2-)
+              locs=$(printf '%s\n' $E2E_TESTS | awk -F= -v p="$p" '$1 == p { print substr($0, length(p) + 2) }')
               proj=()
               if [ -n "$p" ]; then proj=("--project=$p"); fi
               npx playwright test ${proj[@]+"${proj[@]}"} $locs || rc=1

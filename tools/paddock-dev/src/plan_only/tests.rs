@@ -51,6 +51,11 @@ fn ids_are_told_by_their_shape() {
         Some("=e2e/a.e2e.ts:3")
     );
     assert_eq!(id_kind("(the job failed outside any test)"), None);
+    // The project of a Playwright id is a plain name: one with a space or a shell character is not an id of the runner (it would end
+    // up in a `--project=` argument).
+    assert_eq!(id_kind("[web kit] › e2e/a.e2e.ts:6:7 › t"), None);
+    assert_eq!(id_kind("[we$bkit] › e2e/a.e2e.ts:6:7 › t"), None);
+    assert_eq!(playwright_location("[we;bkit] › e2e/a.e2e.ts:6:7 › t"), None);
     assert_eq!(id_kind("one"), None);
 }
 

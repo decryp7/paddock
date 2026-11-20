@@ -36,7 +36,7 @@ fn re(pattern: &str) -> Regex {
     Regex::new(pattern).expect("a valid pattern")
 }
 
-static PW_ID: LazyLock<Regex> = LazyLock::new(|| re(r"^(?:\[([^\]]+)\] › )?([A-Za-z0-9_./-]+):(\d+):\d+ › \S"));
+static PW_ID: LazyLock<Regex> = LazyLock::new(|| re(r"^(?:\[([A-Za-z0-9_.-]+)\] › )?([A-Za-z0-9_./-]+):(\d+):\d+ › \S"));
 static SPEC_ID: LazyLock<Regex> = LazyLock::new(|| re(r"^[A-Za-z0-9_./-]+\.(?:spec|test)\.[cm]?[jt]sx?$"));
 
 /// The kind of runner an id's shape says, `None` for a shape no runner of ours prints.
