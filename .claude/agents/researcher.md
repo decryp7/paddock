@@ -19,3 +19,5 @@ Before you commit a design document (ADR, plan, research note):
 Work in your own git worktree; never write into a main checkout. Keep heavy work light on the machine (the brief's semaphore or CARGO_BUILD_JOBS=2, one heavy job at a time). Commit notes and ADRs only on the branch the brief names, without Co-Authored-By or AI attribution. Finish with a short summary, the branch, and any decisions the user must make.
 
 Wait with `./dev wait`; never `pgrep -f` on a string your own command contains.
+
+Use the connected tools first (ER-50): Serena for code (main checkout, read-only; say which tree you read), the CI API and verdict reader for CI state, Grafana for host load. If one is missing or stale, say so and fall back.

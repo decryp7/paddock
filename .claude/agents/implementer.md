@@ -17,3 +17,5 @@ Before you hand back work for review, run the repository-wide gates as well as t
 Wait with `./dev wait`; never `pgrep -f` on a string your own command contains.
 
 One independent review, then fix and land; a second review round only for security code or a P1 finding (user, 2026-11-11).
+
+Use the connected tools first (ER-50): Serena for code (main checkout, read-only; say which tree you read), the CI API and verdict reader for CI state, Grafana for host load. If one is missing or stale, say so and fall back.
