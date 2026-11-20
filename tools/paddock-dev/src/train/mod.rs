@@ -327,13 +327,9 @@ fn land_cmd(a: &LandArgs) -> Result<Report, CliError> {
         ),
         land::Landed::AlreadyOnMain(sha) => Report::new(
             json!({"landed": false, "already": true, "main": sha}),
-            format!("main already is {}; nothing was pushed.", &sha[..9]),
-        )),
-        Err(stop) => Err(CliError::new(
-            Exit::Findings,
-            stop.annotation().replace("train release", "train land"),
-        )),
-    }
+            format!("main already is {}; nothing was pushed.\n{clean_text}", &sha[..9]),
+        ),
+    })
 }
 
 /// The clean of `train landed`, in a thread with a hard deadline (its own `--max` plus [`CLEAN_GRACE`]); the text for the report.
