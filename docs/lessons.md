@@ -3086,3 +3086,10 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   member (same symptom in run 8212, before the train). **Fix:** `openTray` waits until the popover's finite animations have finished,
   and the test compares unrounded heights. Class: a layout read during an entry animation (the "two reads agree" rule does not catch a
   box that moves while its rounded size stays).
+
+## `./dev` builds from tracked files only: a new source file gave "cannot find module" (2026-11-20)
+- **Symptom:** after adding `src/ci_host_sample.rs` and declaring it in `lib.rs`, `./dev` failed to build with E0433 "cannot find module
+  or crate" and the hint to add `mod ci_host_sample`, although `lib.rs` already had it. The real cause was the missing `use` in `cli.rs`;
+  the hint names `lib.rs` and reads as if the declaration were missing. A direct `cargo check` in `tools/paddock-dev` (build folder as
+  `--config build.target-dir='...'`) shows the error at once. Separately, the tool's input hash covers tracked files, so an untracked new
+  source file is not part of what `./dev` hashes: `git add -N <file>` (intent to add) makes it count.
