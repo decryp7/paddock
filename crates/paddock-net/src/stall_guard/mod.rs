@@ -15,7 +15,8 @@
 //! - **Not covered:** a stall in the middle of a response body is closed after a stall but does not open the breaker (the guard
 //!   cannot tell it from a keep-alive pause without reading HTTP). Plain TCP only: a TLS stream is opaque to the guard.
 //! - **Stop:** a connection whose first bytes are [`STOP_MAGIC`] ends the guard ([`stop`]); it also ends after
-//!   [`Limits::idle_exit`] without a connection. At most [`MAX_CONNECTIONS`] connections are served at once.
+//!   [`Limits::idle_exit`] (6 h, twice the longest job) without a connection: the job's end stops it, this is the net for a job that
+//!   never got there. At most [`MAX_CONNECTIONS`] connections are served at once.
 //!
 //! The rules are pure (`rules.rs`: [`Limits`], [`Breaker`], [`Watch`], every time passed in) and the sockets and threads are a thin
 //! adapter ([`Guard`]). Tests break a server on purpose with `paddock_testkit::net::broken_server` (accept and never answer, drip,

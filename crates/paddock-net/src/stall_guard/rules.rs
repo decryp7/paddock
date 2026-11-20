@@ -18,7 +18,8 @@ pub struct Limits {
     pub cooldown: Duration,
     /// The longest a connect to the store may take.
     pub connect: Duration,
-    /// The guard ends after this long without a connection.
+    /// The guard ends after this long without a connection: the net for a guard no job end stopped, never a limit a running job can
+    /// reach (see [`Limits::default`]).
     pub idle_exit: Duration,
 }
 
@@ -31,7 +32,10 @@ impl Default for Limits {
             stall: Duration::from_secs(10),
             cooldown: Duration::from_secs(60),
             connect: Duration::from_secs(3),
-            idle_exit: Duration::from_secs(900),
+            // Twice the longest job (3 h). Was 15 minutes: too short, measured in ci.yml run 8363 (docs/benchmarks.md): one job's guard
+            // ended between two compiles and the rest of that job lost its S3 hits. The guard is stopped at the end of its job
+            // (`ci sccache-stats`, `ci isolation release` as the net); this only ends one that no job end ever reached.
+            idle_exit: Duration::from_secs(6 * 3600),
         }
     }
 }
@@ -198,16 +202,19 @@ mod tests {
     }
 
     #[test]
-    fn the_default_limits_are_the_documented_ones() {
+    fn the_default_limits_are_the_documented_ones_and_the_guard_outlives_a_job() {
         let l = Limits::default();
         assert_eq!(
-            (
-                l.stall.as_secs(),
-                l.cooldown.as_secs(),
-                l.connect.as_secs(),
-                l.idle_exit.as_secs()
-            ),
-            (10, 60, 3, 900)
+            (l.stall.as_secs(), l.cooldown.as_secs(), l.connect.as_secs()),
+            (10, 60, 3)
+        );
+        // The guard lives as long as its job: it is stopped at the job's end, and this limit is only the net for a job that never got
+        // there. 15 minutes was measured too short (ci.yml run 8363: one job's guard ended between two compiles and the rest of the
+        // job lost its S3 hits); it must be far above the longest job (3 h), so a job's own compile gaps never reach it.
+        assert!(
+            l.idle_exit >= Duration::from_secs(2 * 3 * 3600),
+            "{:?}",
+            l.idle_exit
         );
     }
 }

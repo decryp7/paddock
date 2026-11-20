@@ -240,7 +240,17 @@ fn a_quiet_connection_is_closed_without_opening_the_breaker() {
         .expect("a read timeout");
     c.write_all(REQUEST).expect("sends");
     let mut b = [0u8; 256];
-    assert!(c.read(&mut b).expect("answered") > 0);
+    // The store writes the header and the body separately, so they may arrive in two reads: read until the body is complete.
+    let mut got = Vec::new();
+    while !got.ends_with(b"hello") {
+        let n = c.read(&mut b).expect("answered");
+        assert!(
+            n > 0,
+            "the connection ended before the answer was complete: {:?}",
+            String::from_utf8_lossy(&got)
+        );
+        got.extend_from_slice(&b[..n]);
+    }
     assert_eq!(c.read(&mut b).unwrap_or(0), 0, "closed after the stall");
     assert!(
         logged(&log, "was quiet"),

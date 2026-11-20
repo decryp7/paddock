@@ -3229,3 +3229,9 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   120 other folders there (`paddock-isolation-*`, `paddock-tauri-tools-*`, `paddock-sccache-*`, `paddock-rustup-*`,
   `paddock-job-tmpdir-*` and more). The planned redesign is a shared per-run scratch root for tests, plus a report-only conformance
   check with a positive control (ER-21, ER-41).
+
+## cargo-llvm-cov asks to install into ~/.rustup and waits on stdin (sccache work, 2026-11-20)
+
+- **What happened:** a local `cargo llvm-cov nextest -p paddock-net` stopped at "I will run `rustup component add llvm-tools-preview` ... Proceed? [Y/n]" and sat there for 4 hours, because a background run has no stdin to answer it. Answering yes would have installed a component into the user's `~/.rustup` (ER-14, ER-45).
+- **Rule of thumb:** never run `cargo llvm-cov` locally. Coverage is measured by CI's llvm-cov gate (`./dev ci run crates coverage`, `scripts/coverage-gate.mjs`), whose image has the component. A shared crate's coverage is "not measured" in a branch report and read from the first CI run.
+- **Recurring class:** a tool that starts an installer or a prompt when a probe runs (ER-45; earlier instance: rustup 1.28.1 installing a missing pinned toolchain, run 8060). Any local tool step that can prompt gets stdin from /dev/null so it ends with an error instead of waiting.
