@@ -1,0 +1,183 @@
+# Trial: proves the Actions cache (RustFS S3 backend) works on the Linux, Windows and macOS runners.
+# Manual only, never part of a train. actions/cache/{save,restore} are pinned to the digest of tag v4.3.0.
+name: trial-actions-cache
+
+on:
+  workflow_dispatch:
+
+env:
+  CACHE_DIR: trial-cache
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
+
+jobs:
+  save:
+    name: save (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux, os: ubuntu-latest }
+          - { name: windows, os: windows-latest }
+          - { name: macos, os: macos-latest }
+    defaults:
+      run:
+        shell: bash
+    env:
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+      - uses: ./.gitea/actions/build-jobs
+      # A slot of the host (job isolation): the job's temp folder is its own; does nothing in the Linux container.
+      - uses: ./.gitea/actions/job-isolation
+      - name: Write 2 MiB of random data and its sha256
+        run: |
+          set -euo pipefail
+          mkdir -p "$CACHE_DIR"
+          head -c 2097152 /dev/urandom > "$CACHE_DIR/data.bin"
+          sha256sum "$CACHE_DIR/data.bin" | cut -d' ' -f1 > "$CACHE_DIR/sha256.txt"
+          echo "${{ matrix.name }}" > "$CACHE_DIR/os.txt"
+          echo "T0=$(date +%s)" >> "$GITHUB_ENV"
+          echo "runner=${{ runner.name }} sha256=$(cat "$CACHE_DIR/sha256.txt")"
+      - name: Save the cache
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: trial-cache
+          key: trial-s3-${{ matrix.name }}-${{ github.run_id }}
+      - name: Summary
+        run: |
+          secs=$(( $(date +%s) - T0 ))
+          {
+            echo "### save (${{ matrix.name }})"
+            echo "- runner: ${{ runner.name }}"
+            echo "- key: trial-s3-${{ matrix.name }}-${{ github.run_id }}"
+            echo "- save step took about ${secs}s"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
+
+  restore:
+    name: restore (${{ matrix.name }})
+    needs: save
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux, os: ubuntu-latest, next: windows }
+          - { name: windows, os: windows-latest, next: macos }
+          - { name: macos, os: macos-latest, next: linux }
+    defaults:
+      run:
+        shell: bash
+    env:
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+      - uses: ./.gitea/actions/build-jobs
+      # A slot of the host (job isolation): the job's temp folder is its own; does nothing in the Linux container.
+      - uses: ./.gitea/actions/job-isolation
+
+      - name: (a) clear and start timer
+        run: |
+          rm -rf "${CACHE_DIR:?}"
+          echo "T0=$(date +%s)" >> "$GITHUB_ENV"
+      - name: (a) restore own key exactly
+        id: a
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: trial-cache
+          key: trial-s3-${{ matrix.name }}-${{ github.run_id }}
+      - name: (a) check
+        run: |
+          set -u
+          secs=$(( $(date +%s) - T0 ))
+          [ "${{ steps.a.outputs.cache-hit }}" = "true" ] || { echo "::error::(a) exact restore of trial-s3-${{ matrix.name }}-${{ github.run_id }}: expected cache-hit=true, got '${{ steps.a.outputs.cache-hit }}'"; exit 1; }
+          [ "$(cat $CACHE_DIR/os.txt)" = "${{ matrix.name }}" ] || { echo "::error::(a) expected os.txt=${{ matrix.name }}, got '$(cat $CACHE_DIR/os.txt)'"; exit 1; }
+          [ "$(sha256sum $CACHE_DIR/data.bin | cut -d' ' -f1)" = "$(cat $CACHE_DIR/sha256.txt)" ] || { echo "::error::(a) sha256 of restored data.bin differs from the saved sha256.txt"; exit 1; }
+          echo "- (a) exact own key: PASS, ~${secs}s, sha256 $(cat $CACHE_DIR/sha256.txt | cut -c1-12)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: (b) clear and start timer
+        run: |
+          rm -rf "${CACHE_DIR:?}"
+          echo "T0=$(date +%s)" >> "$GITHUB_ENV"
+      - name: (b) restore through restore-keys prefix
+        id: b
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: trial-cache
+          key: trial-s3-${{ matrix.name }}-nomatch-${{ github.run_id }}
+          restore-keys: |
+            trial-s3-${{ matrix.name }}-
+      - name: (b) check
+        run: |
+          set -u
+          secs=$(( $(date +%s) - T0 ))
+          matched="${{ steps.b.outputs.cache-matched-key }}"
+          case "$matched" in trial-s3-${{ matrix.name }}-*) ;; *) echo "::error::(b) restore-keys trial-s3-${{ matrix.name }}-: expected a matched key with that prefix, got '$matched'"; exit 1;; esac
+          [ "${{ steps.b.outputs.cache-hit }}" != "true" ] || { echo "::error::(b) expected cache-hit=false (partial match), got true"; exit 1; }
+          [ "$(cat $CACHE_DIR/os.txt)" = "${{ matrix.name }}" ] || { echo "::error::(b) expected os.txt=${{ matrix.name }}, got '$(cat $CACHE_DIR/os.txt)'"; exit 1; }
+          [ "$(sha256sum $CACHE_DIR/data.bin | cut -d' ' -f1)" = "$(cat $CACHE_DIR/sha256.txt)" ] || { echo "::error::(b) sha256 mismatch after prefix restore"; exit 1; }
+          echo "- (b) restore-keys prefix: PASS, ~${secs}s, matched $matched" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: (c) clear and start timer
+        run: |
+          rm -rf "${CACHE_DIR:?}"
+          echo "T0=$(date +%s)" >> "$GITHUB_ENV"
+      - name: (c) restore the next OS's key (shared across runners)
+        id: c
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: trial-cache
+          key: trial-s3-${{ matrix.next }}-${{ github.run_id }}
+      - name: (c) check
+        run: |
+          set -u
+          secs=$(( $(date +%s) - T0 ))
+          [ "${{ steps.c.outputs.cache-hit }}" = "true" ] || { echo "::error::(c) cross-runner restore of trial-s3-${{ matrix.next }}-${{ github.run_id }}: expected cache-hit=true, got '${{ steps.c.outputs.cache-hit }}'"; exit 1; }
+          [ "$(cat $CACHE_DIR/os.txt)" = "${{ matrix.next }}" ] || { echo "::error::(c) expected os.txt=${{ matrix.next }}, got '$(cat $CACHE_DIR/os.txt)'"; exit 1; }
+          [ "$(sha256sum $CACHE_DIR/data.bin | cut -d' ' -f1)" = "$(cat $CACHE_DIR/sha256.txt)" ] || { echo "::error::(c) sha256 mismatch for the cache saved on ${{ matrix.next }}"; exit 1; }
+          echo "- (c) cross-runner (${{ matrix.next }}'s key): PASS, ~${secs}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: (d) clear
+        run: rm -rf "${CACHE_DIR:?}"
+      - name: (d) restore a key that does not exist
+        id: d
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: trial-cache
+          key: trial-s3-missing-${{ matrix.name }}-${{ github.run_id }}
+      - name: (d) check
+        run: |
+          [ "${{ steps.d.outputs.cache-hit }}" != "true" ] || { echo "::error::(d) missing key: expected cache-hit=false, got true"; exit 1; }
+          [ ! -e "$CACHE_DIR/data.bin" ] || { echo "::error::(d) missing key: expected no files restored"; exit 1; }
+          echo "- (d) missing key: PASS (cache-hit='${{ steps.d.outputs.cache-hit }}', no error)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summary header
+        if: always()
+        run: |
+          echo "runner ${{ runner.name }} (${{ matrix.name }})" >> "$GITHUB_STEP_SUMMARY"
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
