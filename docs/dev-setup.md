@@ -252,6 +252,33 @@ author or by `./dev brief` (not on main yet): that call belongs there. The Rust 
   for scripts. The limits are flags (`--start-below`, `--hold-above`, `--min-free-gib`, `--ci-hold`, `--disk <path>`, `--no-ci`).
   It decides nothing by itself: it does not start or stop agents, and `heavy.sh` still caps the heavy steps.
 
+## Sampling the CI host
+
+`./dev ci host-sample` records the Linux CI host's CPU idle, iowait, load and memory every 10 s and ends with a verdict, "headroom
+for N more lanes: yes / no / not measured". It exists for one decision: whether the Linux runner's `runner.capacity` (3, declared in
+`conformance/ci/runner-slots.json`) can go to 6. It is report only (ER-41); the owner of the runner raises `runner.capacity`
+themselves, this tool never does. It reads only `/proc/stat`, `/proc/loadavg` and `/proc/meminfo`, runs on Linux only (elsewhere
+one `::error::` line says so) and writes only its `--out` file and `$GITHUB_STEP_SUMMARY`.
+
+Run it during one full train CI round, on the Linux runner, started when the train is dispatched:
+
+1. Dispatch the `host-sample` workflow (`.gitea/workflows/host-sample.yml`) with `run_id` set to the train run's API id (the id
+   `./dev ci dispatch` and `./dev wait --ci-run` print) and `max` a little longer than the round (default 3h). It ends when the
+   run ends. It holds one Linux lane while it samples, so do it when the train can spare the lane; never dispatch it while a
+   release train owns the runners (ER-24).
+2. Read the job summary (the same text is on standard output) and download the `host-sample` artifact: one JSON line per tick
+   (`ts` in Unix seconds, `cpu_idle_pct`, `iowait_pct`, `load1`, `load5`, `load15`, `mem_avail_mb`, `mem_total_mb`, `swap_used_mb`).
+   Check the first line's `mem_total_mb`: it must be the host's (about 128 GB), not the container's limit.
+
+By hand on the runner: `./dev ci host-sample --out sample.jsonl --max 3h [--until-run <id>] [--lanes 3] [--target-lanes 6]`
+(`--until-run` reads `GITEA_TOKEN`).
+
+How to read the verdict. It assumes the current lanes were busy for most of the sample (it cannot see that, so sample a full
+round) and scales the busiest the host got by `target / lanes`. `not measured`: fewer than 30 ticks, never a pass. `no`: the
+projected CPU busy (p95) is above 90%, iowait (p95) above 20%, memory in use above 90% of the total, or swap in use at any
+tick above 5% of the memory. `yes`: none of those. The exact rule is in the doc comment of `tools/paddock-dev/src/ci_host_sample.rs`.
+One round of one train is one sample: a `yes` is evidence, not a guarantee, and a `no` names the part that failed.
+
 ## Things that cost time when forgotten
 
 - Don't run macOS tests under `nice`: it is SIP-protected and strips `DYLD_*` variables, so libraries are not found.

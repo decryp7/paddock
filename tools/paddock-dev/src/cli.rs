@@ -1,7 +1,7 @@
 use crate::{
-    audit, brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, disk, gates,
-    generators, golden_cmd, heavy_cmd, hook, input_hash, ipc_endpoints, load, local_sccache, locks, merge_check, places, plan, plan_cmd,
-    pr, pre_push, queue, release_isolation, slots, wait, worktree,
+    audit, brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_host_sample, ci_isolation, ci_run, ci_runs,
+    ci_setup_rust, disk, gates, generators, golden_cmd, heavy_cmd, hook, input_hash, ipc_endpoints, load, local_sccache, locks,
+    merge_check, places, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -332,6 +332,9 @@ enum CiCommand {
     /// lines after it, each logged with its duration and exit; the port of conformance/ci/run-commands.sh for every project (an app
     /// under apps/, or crates, ui, conformance, tools, icons, eslint). `--list` prints the lines and runs nothing.
     Run(ci_run::RunArgs),
+    /// Samples the Linux host's CPU idle, iowait, load and memory into a JSON-lines file and says whether the runner has headroom for
+    /// more job lanes (report only; Linux only). Messages on standard output, one `::error::` line on failure.
+    HostSample(ci_host_sample::HostSampleArgs),
     #[command(flatten)]
     Host(ci_host::HostStep),
     /// Release mode (ADR 0085): a tag build reads nothing kept. `setup` makes the job's folders, `record` is the only
@@ -584,6 +587,13 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         return ci_build_env::run(a, out, err);
     }
     if let Command::Ci {
+        command: CiCommand::HostSample(a),
+    } = &cli.command
+    {
+        // A CI step's contract: plain lines, one `::error::` line on failure, no report.
+        return ci_host_sample::run(a, out, err);
+    }
+    if let Command::Ci {
         command: CiCommand::Run(a),
     } = &cli.command
     {
@@ -665,6 +675,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::BuildEnv(_),
         } => Err(CliError::failure("`ci build-env` was dispatched through the report path.")),
+        Command::Ci {
+            command: CiCommand::HostSample(_),
+        } => Err(CliError::failure("`ci host-sample` was dispatched through the report path.")),
         Command::Ci {
             command: CiCommand::Run(_),
         } => Err(CliError::failure("`ci run` was dispatched through the report path.")),

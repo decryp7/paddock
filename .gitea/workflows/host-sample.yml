@@ -1,0 +1,85 @@
+# Samples the Linux CI host (CPU idle, iowait, load, memory) every 10 s while a train's CI round runs, and says whether the runner
+# has headroom for more job lanes: `./dev ci host-sample` (tools/paddock-dev/src/ci_host_sample.rs, which states the verdict rule).
+# Built for one decision, raising the Linux runner's `runner.capacity` (conformance/ci/runner-slots.json); the owner of the runner
+# changes the capacity, this workflow only measures. How to run it and read the answer: docs/dev-setup.md, "Sampling the CI host".
+#
+# REPORT ONLY (ER-41): manual dispatch, no schedule and no push trigger, and no other workflow needs it. Nothing gates on it.
+#
+# It occupies one Linux lane while it samples (`runs-on: ubuntu-latest` takes a runner slot like any job), so a sample over a
+# full round of a train takes that lane from the train's own jobs: sample on a quiet day, or dispatch it with the run id of the
+# train's run so it ends with that run (`run_id`), never with a long `max` and no run id.
+#
+# What it sees: /proc/stat, /proc/loadavg and /proc/meminfo of the job's container. Without lxcfs those show the HOST's values,
+# which is what the question needs. Whether d-gtr9 runs its job containers with lxcfs: not verified (ci-image/Dockerfile does not
+# mention it and the runner's container options are not in this repository). Evidence for the host's values: run 7211 logged
+# 16 cores and 127,941 MB inside a job container (docs/benchmarks.md, "CI build parallelism on Linux"), read through nproc and
+# /proc/meminfo; /proc/stat and /proc/loadavg are not verified. Read the first tick's `mem_total_mb` to check it.
+#
+# Dispatch (by a person; the trains own the runners, ER-24):
+#   POST /api/v1/repos/decryp7/paddock/actions/workflows/host-sample.yml/dispatches
+#   with {"ref":"main","inputs":{"run_id":"<the train run's API id>","max":"3h"}}
+
+name: host-sample
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Stop when this Gitea Actions run has finished (its API id, as ./dev ci dispatch and ./dev wait --ci-run print it). Empty: sample until max."
+        type: string
+        required: false
+        default: ""
+      max:
+        description: "The longest to sample, for example 3h (at most 24h)."
+        type: string
+        required: false
+        default: "3h"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: host-sample
+  cancel-in-progress: false
+
+jobs:
+  sample:
+    name: sample (report only)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    env:
+      RUN_ID: ${{ inputs.run_id }}
+      MAX: ${{ inputs.max }}
+      PADDOCK_DEV_DOWNLOAD: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Inputs are plain text in the environment, never spliced into the script.
+      - name: Sample
+        shell: bash
+        env:
+          GITEA_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          args=(--out "$RUNNER_TEMP/host-sample.jsonl" --max "$MAX")
+          if [ -n "$RUN_ID" ]; then
+            if ! [[ "$RUN_ID" =~ ^[0-9]+$ ]]; then
+              echo "::error::host-sample: run_id '$RUN_ID' is not a number. Dispatch again with the run's API id, or leave it empty."
+              exit 1
+            fi
+            args+=(--until-run "$RUN_ID" --server "${{ github.server_url }}" --repo "${{ github.repository }}")
+          fi
+          ./dev ci host-sample "${args[@]}"
+
+      - name: Keep the samples
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        with:
+          name: host-sample
+          path: ${{ runner.temp }}/host-sample.jsonl
+          if-no-files-found: warn
+          retention-days: 14

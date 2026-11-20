@@ -46,6 +46,9 @@ nightly and debrief cannot be capped by `max-parallel` (many unrelated jobs); on
 limit them. Gitea counts runner slots per caller, so `max-parallel` inside the reusable `app-fuzz.yml` does not cap
 five separate callers: nightly chains them with `needs:` instead.
 
+**Manual only: host-sample.** `host-sample.yml` has no schedule: it is dispatched by hand to sample the Linux host across a train's
+CI round and holds one Linux slot while it runs (docs/dev-setup.md, "Sampling the CI host"). It is report only.
+
 ## Dependency audits
 
 External advisories turned main and every train red with no code change twice in 12 hours (RUSTSEC-2026-0543 on chrono, run 8214;
