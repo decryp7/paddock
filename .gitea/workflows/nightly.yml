@@ -529,6 +529,13 @@ jobs:
       # The notices checks never install their tool (a missing one is NOT MEASURED), so the job does, at the pinned version.
       - name: cargo-about
         run: cargo install cargo-about --version 0.9.2 --locked --features cli
+      # The lockfile checks of `gen check` run `cargo metadata --locked --offline` (docs/generators.toml, cost fast): the registry must be fetched
+      # first, or they report not measured. One fetch per workspace, from its own lockfile.
+      - name: Fetch every workspace's dependencies
+        run: |
+          for lock in $(git ls-files '*Cargo.lock'); do
+            (cd "$(dirname "$lock")" && cargo fetch --locked) || { echo "::error::cargo fetch --locked failed in $(dirname "$lock"), so its lockfile check cannot run offline. Next step: run it there to see why"; exit 1; }
+          done
       - name: ./dev gen check --all
         run: ./dev gen check --all
 

@@ -39,7 +39,7 @@ version = 1
 [[generator]]
 id = "cargo-lock-crates"
 what = "crates/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
-check = ["sh", "-c", "cargo metadata --locked --offline --format-version 1 >/dev/null"]
+check = ["sh", "-c", "out=$(cargo metadata --locked --offline --format-version 1 2>&1 >/dev/null) || { printf '%s\\n' \"$out\"; case \"$out\" in *offline*|*'no matching package'*|*'failed to download'*) echo \"::error::the registry is not fetched, so --offline cannot read the lockfile: run cargo fetch --locked in $(pwd) once (nightly.yml does before its gen check), then ask again. Not measured, not a pass.\" ;; esac; exit 1; }"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
 cwd = "crates"
 paths = ["crates/Cargo.toml", "crates/**/Cargo.toml", "crates/Cargo.lock"]
@@ -50,7 +50,7 @@ drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock 
 [[generator]]
 id = "cargo-lock-tools-paddock-dev"
 what = "tools/paddock-dev/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
-check = ["sh", "-c", "cargo metadata --locked --offline --format-version 1 >/dev/null"]
+check = ["sh", "-c", "out=$(cargo metadata --locked --offline --format-version 1 2>&1 >/dev/null) || { printf '%s\\n' \"$out\"; case \"$out\" in *offline*|*'no matching package'*|*'failed to download'*) echo \"::error::the registry is not fetched, so --offline cannot read the lockfile: run cargo fetch --locked in $(pwd) once (nightly.yml does before its gen check), then ask again. Not measured, not a pass.\" ;; esac; exit 1; }"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
 cwd = "tools/paddock-dev"
 paths = ["tools/paddock-dev/Cargo.toml", "tools/paddock-dev/Cargo.lock", "crates/*/Cargo.toml"]
@@ -61,7 +61,7 @@ drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock 
 [[generator]]
 id = "cargo-lock-tools-heavy"
 what = "tools/heavy/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
-check = ["sh", "-c", "cargo metadata --locked --offline --format-version 1 >/dev/null"]
+check = ["sh", "-c", "out=$(cargo metadata --locked --offline --format-version 1 2>&1 >/dev/null) || { printf '%s\\n' \"$out\"; case \"$out\" in *offline*|*'no matching package'*|*'failed to download'*) echo \"::error::the registry is not fetched, so --offline cannot read the lockfile: run cargo fetch --locked in $(pwd) once (nightly.yml does before its gen check), then ask again. Not measured, not a pass.\" ;; esac; exit 1; }"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
 cwd = "tools/heavy"
 paths = ["tools/heavy/Cargo.toml", "tools/heavy/**/Cargo.toml", "tools/heavy/Cargo.lock", "crates/*/Cargo.toml"]
@@ -72,7 +72,7 @@ drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock 
 [[generator]]
 id = "cargo-lock-tools-wiki"
 what = "tools/wiki/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
-check = ["sh", "-c", "cargo metadata --locked --offline --format-version 1 >/dev/null"]
+check = ["sh", "-c", "out=$(cargo metadata --locked --offline --format-version 1 2>&1 >/dev/null) || { printf '%s\\n' \"$out\"; case \"$out\" in *offline*|*'no matching package'*|*'failed to download'*) echo \"::error::the registry is not fetched, so --offline cannot read the lockfile: run cargo fetch --locked in $(pwd) once (nightly.yml does before its gen check), then ask again. Not measured, not a pass.\" ;; esac; exit 1; }"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
 cwd = "tools/wiki"
 paths = ["tools/wiki/Cargo.toml", "tools/wiki/Cargo.lock", "crates/*/Cargo.toml"]
@@ -83,7 +83,7 @@ drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock 
 [[generator]]
 id = "cargo-lock-debrief"
 what = "apps/debrief/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
-check = ["sh", "-c", "cargo metadata --locked --offline --format-version 1 >/dev/null"]
+check = ["sh", "-c", "out=$(cargo metadata --locked --offline --format-version 1 2>&1 >/dev/null) || { printf '%s\\n' \"$out\"; case \"$out\" in *offline*|*'no matching package'*|*'failed to download'*) echo \"::error::the registry is not fetched, so --offline cannot read the lockfile: run cargo fetch --locked in $(pwd) once (nightly.yml does before its gen check), then ask again. Not measured, not a pass.\" ;; esac; exit 1; }"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
 cwd = "apps/debrief"
 paths = ["apps/debrief/Cargo.toml", "apps/debrief/**/Cargo.toml", "apps/debrief/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
@@ -94,7 +94,7 @@ drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock 
 [[generator]]
 id = "cargo-lock-dyno"
 what = "apps/dyno/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
-check = ["sh", "-c", "cargo metadata --locked --offline --format-version 1 >/dev/null"]
+check = ["sh", "-c", "out=$(cargo metadata --locked --offline --format-version 1 2>&1 >/dev/null) || { printf '%s\\n' \"$out\"; case \"$out\" in *offline*|*'no matching package'*|*'failed to download'*) echo \"::error::the registry is not fetched, so --offline cannot read the lockfile: run cargo fetch --locked in $(pwd) once (nightly.yml does before its gen check), then ask again. Not measured, not a pass.\" ;; esac; exit 1; }"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
 cwd = "apps/dyno"
 paths = ["apps/dyno/Cargo.toml", "apps/dyno/**/Cargo.toml", "apps/dyno/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
@@ -105,7 +105,7 @@ drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock 
 [[generator]]
 id = "cargo-lock-pitcrew"
 what = "apps/pitcrew/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
-check = ["sh", "-c", "cargo metadata --locked --offline --format-version 1 >/dev/null"]
+check = ["sh", "-c", "out=$(cargo metadata --locked --offline --format-version 1 2>&1 >/dev/null) || { printf '%s\\n' \"$out\"; case \"$out\" in *offline*|*'no matching package'*|*'failed to download'*) echo \"::error::the registry is not fetched, so --offline cannot read the lockfile: run cargo fetch --locked in $(pwd) once (nightly.yml does before its gen check), then ask again. Not measured, not a pass.\" ;; esac; exit 1; }"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
 cwd = "apps/pitcrew"
 paths = ["apps/pitcrew/Cargo.toml", "apps/pitcrew/**/Cargo.toml", "apps/pitcrew/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
@@ -116,7 +116,7 @@ drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock 
 [[generator]]
 id = "cargo-lock-pitwall"
 what = "apps/pitwall/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
-check = ["sh", "-c", "cargo metadata --locked --offline --format-version 1 >/dev/null"]
+check = ["sh", "-c", "out=$(cargo metadata --locked --offline --format-version 1 2>&1 >/dev/null) || { printf '%s\\n' \"$out\"; case \"$out\" in *offline*|*'no matching package'*|*'failed to download'*) echo \"::error::the registry is not fetched, so --offline cannot read the lockfile: run cargo fetch --locked in $(pwd) once (nightly.yml does before its gen check), then ask again. Not measured, not a pass.\" ;; esac; exit 1; }"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
 cwd = "apps/pitwall"
 paths = ["apps/pitwall/Cargo.toml", "apps/pitwall/**/Cargo.toml", "apps/pitwall/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
@@ -127,7 +127,7 @@ drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock 
 [[generator]]
 id = "cargo-lock-spotter"
 what = "apps/spotter/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
-check = ["sh", "-c", "cargo metadata --locked --offline --format-version 1 >/dev/null"]
+check = ["sh", "-c", "out=$(cargo metadata --locked --offline --format-version 1 2>&1 >/dev/null) || { printf '%s\\n' \"$out\"; case \"$out\" in *offline*|*'no matching package'*|*'failed to download'*) echo \"::error::the registry is not fetched, so --offline cannot read the lockfile: run cargo fetch --locked in $(pwd) once (nightly.yml does before its gen check), then ask again. Not measured, not a pass.\" ;; esac; exit 1; }"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
 cwd = "apps/spotter"
 paths = ["apps/spotter/Cargo.toml", "apps/spotter/**/Cargo.toml", "apps/spotter/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
@@ -138,7 +138,7 @@ drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock 
 [[generator]]
 id = "cargo-lock-shell-demo"
 what = "apps/shell-demo/src-tauri/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
-check = ["sh", "-c", "cargo metadata --locked --offline --format-version 1 >/dev/null"]
+check = ["sh", "-c", "out=$(cargo metadata --locked --offline --format-version 1 2>&1 >/dev/null) || { printf '%s\\n' \"$out\"; case \"$out\" in *offline*|*'no matching package'*|*'failed to download'*) echo \"::error::the registry is not fetched, so --offline cannot read the lockfile: run cargo fetch --locked in $(pwd) once (nightly.yml does before its gen check), then ask again. Not measured, not a pass.\" ;; esac; exit 1; }"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
 cwd = "apps/shell-demo/src-tauri"
 paths = ["apps/shell-demo/src-tauri/Cargo.toml", "apps/shell-demo/src-tauri/**/Cargo.toml", "apps/shell-demo/src-tauri/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
@@ -149,7 +149,7 @@ drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock 
 [[generator]]
 id = "cargo-lock-workbench-demo"
 what = "apps/workbench-demo/src-tauri/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
-check = ["sh", "-c", "cargo metadata --locked --offline --format-version 1 >/dev/null"]
+check = ["sh", "-c", "out=$(cargo metadata --locked --offline --format-version 1 2>&1 >/dev/null) || { printf '%s\\n' \"$out\"; case \"$out\" in *offline*|*'no matching package'*|*'failed to download'*) echo \"::error::the registry is not fetched, so --offline cannot read the lockfile: run cargo fetch --locked in $(pwd) once (nightly.yml does before its gen check), then ask again. Not measured, not a pass.\" ;; esac; exit 1; }"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
 cwd = "apps/workbench-demo/src-tauri"
 paths = ["apps/workbench-demo/src-tauri/Cargo.toml", "apps/workbench-demo/src-tauri/**/Cargo.toml", "apps/workbench-demo/src-tauri/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]

@@ -1549,7 +1549,7 @@ mod tests {
     }
 
     /// The stages of ci.yml, as the planner reads them: the stage-2 jobs `need` the `stage1` gate (conformance/ci/stage-gate.mjs).
-    const STAGED_CI_YML: &str = "name: ci\non:\n  push:\njobs:\n  plan:\n    name: plan (affected projects)\n  crate:\n    name: crate (${{ matrix.os }})\n    needs: [plan]\n  stage1:\n    name: stage 1 gate (fast checks)\n    needs: [plan, crate]\n  e2e:\n    name: reference apps (shard ${{ matrix.shard }}/2)\n    needs: [plan, stage1]\n  app-e2e:\n    name: ${{ matrix.app }} e2e (${{ matrix.os }}, ${{ matrix.e2e_leg }})\n    needs: [plan, stage1]\n  stages:\n    name: stages (stage 2 ran after stage 1)\n    needs: [plan, stage1, e2e, app-e2e]\n";
+    const STAGED_CI_YML: &str = "name: ci\non:\n  push:\njobs:\n  plan:\n    name: plan (affected projects)\n  crate:\n    name: crate (${{ matrix.os }})\n    needs: [plan]\n  stage1-linux:\n    name: stage 1 gate, linux (fast checks)\n    needs: [plan, crate]\n  e2e:\n    name: reference apps (shard ${{ matrix.shard }}/2)\n    needs: [plan, stage1-linux]\n  app-e2e:\n    name: ${{ matrix.app }} e2e (${{ matrix.os }}, ${{ matrix.e2e_leg }})\n    needs: [plan, stage1-linux]\n  stages:\n    name: stages (stage 2 ran after stage 1)\n    needs: [plan, stage1-linux, e2e, app-e2e]\n";
 
     fn run_job(id: u64, name: &str, conclusion: &str) -> RunJob {
         RunJob {
@@ -1569,7 +1569,7 @@ mod tests {
         let jobs = vec![
             run_job(1, "plan (affected projects)", "success"),
             run_job(2, "crate (windows-latest)", "failure"),
-            run_job(3, "stage 1 gate (fast checks)", "failure"),
+            run_job(3, "stage 1 gate, linux (fast checks)", "failure"),
             run_job(4, "reference apps (shard 1/2)", "skipped"),
             run_job(5, "reference apps (shard 2/2)", "skipped"),
             run_job(6, "dyno e2e (ubuntu-latest, e2e-1)", "skipped"),
@@ -1586,7 +1586,7 @@ mod tests {
         let keys: BTreeSet<&str> = plan.reruns.iter().filter_map(|r| r.key.as_deref()).collect();
         assert_eq!(
             keys,
-            BTreeSet::from(["crate", "stage1", "stages", "e2e", "app-e2e"]),
+            BTreeSet::from(["crate", "stage1-linux", "stages", "e2e", "app-e2e"]),
             "the stage-2 jobs the failed gate skipped rerun with it: {keys:?}"
         );
         let all = vec![
@@ -1595,7 +1595,7 @@ mod tests {
             leg("dyno", "ubuntu-latest", "e2e-2"),
         ];
         let out: BTreeMap<String, String> = plan.ci_outputs(&all, &mut |_| {}).into_iter().collect();
-        assert_eq!(out["rerun_jobs"], r#"["app-e2e","crate","e2e","stage1","stages"]"#);
+        assert_eq!(out["rerun_jobs"], r#"["app-e2e","crate","e2e","stage1-linux","stages"]"#);
         assert_eq!(out["any_app"], "false", "no stage-1 app leg failed");
         assert_eq!(out["any_app_e2e"], "true");
         let e2e: Vec<Value> = serde_json::from_str(&out["apps_e2e"]).unwrap();
@@ -1605,7 +1605,7 @@ mod tests {
         let jobs = vec![
             run_job(1, "plan (affected projects)", "success"),
             run_job(2, "crate (windows-latest)", "success"),
-            run_job(3, "stage 1 gate (fast checks)", "success"),
+            run_job(3, "stage 1 gate, linux (fast checks)", "success"),
             run_job(4, "reference apps (shard 1/2)", "success"),
             run_job(6, "dyno e2e (ubuntu-latest, e2e-2)", "failure"),
             run_job(7, "stages (stage 2 ran after stage 1)", "failure"),

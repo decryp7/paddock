@@ -10,8 +10,10 @@
 # workflow ends with the publish dry run, so a tag never meets a packaging problem first.
 #
 # Two stages (docs/train-checklist.md, "Staged CI"): stage 1 is the fast checks (formatting, lints, conformance, the gates and the
-# unit and integration tests on every OS; the `stage1` gate job needs them all); stage 2 is the long jobs (the end-to-end tests in
-# Chromium and WebKit, the apps' end-to-end legs) and needs `stage1` to have passed. The last job, `stages`, prints the line
+# unit and integration tests); there is one gate job per operating system (`stage1-linux`, `stage1-macos`) over that OS's fast jobs;
+# stage 2 is the long jobs (the end-to-end tests in Chromium and WebKit, the apps' end-to-end legs), and each waits only for the gate of
+# its own OS. conformance/ci/stages.json is the table of which job is where. Fast jobs in no gate (the matrix jobs that span several OSes,
+# train-gates) run at the same time and stay required. The last job, `stages`, prints the line
 # `stage verdict: ...` that `./dev ci verdict` reads: a run whose stage 2 did not run is never a full green run (ER-33).
 #
 # Runner labels: ubuntu-latest (jobs in the shared paddock-ci image, ci-image/), windows-latest and macos-latest (host runners, tools used as
@@ -95,6 +97,8 @@ jobs:
       any_app: ${{ steps.plan.outputs.any_app }}
       # The apps' end-to-end legs (stage 2); `apps` holds the other legs (stage 1).
       apps_e2e: ${{ steps.plan.outputs.apps_e2e }}
+      # The stage-2 jobs this run expects to succeed (a JSON list): the `stages` job requires each; a skipped one is not a pass (ER-33).
+      stage2_jobs: ${{ steps.plan.outputs.stage2_jobs }}
       any_app_e2e: ${{ steps.plan.outputs.any_app_e2e }}
       base: ${{ steps.plan.outputs.base }}
       # A rerun of a run's failures (the since_run input): the jobs that rerun (empty otherwise; each job's `if` reads an empty
@@ -136,8 +140,10 @@ jobs:
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
           # The rerun reads the earlier run's jobs and logs through the API (tools/paddock-dev/src/plan_since.rs).
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
-          # `fast`: only stage 1 runs, so the run is never complete.
+          # `fast`: only stage 1 runs, so the run is never complete. Anything but empty, all or fast fails the plan.
           PLAN_STAGE: ${{ github.event.inputs.stage }}
+          # The WebKit job's own condition (its `if` repeats this), for the expected stage-2 list below.
+          PLAN_WEBKIT_RUN: ${{ inputs.webkit == true || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) }}
           # The crate and paddock-dev legs when the plan names none of its own (every run but a rerun of their failures).
           PLAN_OS_LEGS: '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]'
           # The scope of this run (tests everything its plan can reach, not a diff from a base or a rerun of failures): a push to
@@ -146,6 +152,7 @@ jobs:
           PLAN_MODE_FULL: ${{ github.event_name == 'push' || inputs.app != '' || (github.event_name == 'workflow_dispatch' && github.event.inputs.base == '' && github.event.inputs.since_run == '') }}
         run: |
           echo "plan mode: full=$PLAN_MODE_FULL"
+          case "$PLAN_STAGE" in ''|all|fast) ;; *) echo "::error::the stage input is '$PLAN_STAGE': use stage=fast, stage=all or leave it empty."; exit 1 ;; esac
           ./dev plan --ci
           grep -q '^crate_legs=' "$GITHUB_OUTPUT" || echo "crate_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
@@ -153,6 +160,14 @@ jobs:
           complete=false
           if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_STAGE" != fast ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
           echo "plan verdict: complete=$complete"
+          # The stage-2 jobs this run expects (none in a rerun of failures: it is never complete). The job names are conformance/ci/stages.json's.
+          out() { grep "^$1=" "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-; }
+          expect=()
+          if [ -z "$PLAN_SINCE_RUN" ]; then
+            if [ "$(out ui)" = true ]; then expect+=(e2e); [ "$PLAN_WEBKIT_RUN" = true ] && expect+=(e2e-webkit); fi
+            [ "$(out any_app_e2e)" = true ] && expect+=(app-e2e)
+          fi
+          echo "stage2_jobs=$(printf '%s\n' ${expect[@]+"${expect[@]}"} | jq -R . | jq -sc 'map(select(length>0))')" >> "$GITHUB_OUTPUT"
           # A staged run counts as full only with the `stages` job's line (tools/paddock-dev ci_runs/verdict.rs, STAGED_LINE).
           echo "plan layout: staged"
 
@@ -274,8 +289,8 @@ jobs:
   # The apps compile from source (tsconfig paths), so a shard needs no library build.
   e2e:
     name: reference apps (shard ${{ matrix.shard }}/2)
-    needs: [plan, stage1]
-    if: ${{ github.event.inputs.stage != 'fast' && needs.stage1.result == 'success' && needs.plan.outputs.ui == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e"]'), 'e2e') }}
+    needs: [plan, stage1-linux]
+    if: ${{ github.event.inputs.stage != 'fast' && needs.stage1-linux.result == 'success' && needs.plan.outputs.ui == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e"]'), 'e2e') }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
@@ -323,8 +338,8 @@ jobs:
   # (Playwright's own WebKit build), for pushes to main, v* tags and nightly.yml only. Branch runs stay Chromium-only (rule 3).
   e2e-webkit:
     name: reference apps in WebKit (macOS)
-    needs: [plan, stage1]
-    if: ${{ github.event.inputs.stage != 'fast' && needs.stage1.result == 'success' && needs.plan.outputs.ui == 'true' && (inputs.webkit == true || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e-webkit"]'), 'e2e-webkit') }}
+    needs: [plan, stage1-macos]
+    if: ${{ github.event.inputs.stage != 'fast' && needs.stage1-macos.result == 'success' && needs.plan.outputs.ui == 'true' && (inputs.webkit == true || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e-webkit"]'), 'e2e-webkit') }}
     runs-on: macos-latest
     env:
       # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
@@ -1391,12 +1406,12 @@ jobs:
           mode: release
 
   # Stage 2: the apps' end-to-end legs (paddock.ci.json `e2e`, `e2eShards`, `e2eWebkit`), one leg per shard and one for WebKit, on Linux
-  # (the paddock-ci image) only, after the stage-1 gate: the `app` job above runs every other leg. The plan splits the legs
+  # (the paddock-ci image) only, after the Linux stage-1 gate: the `app` job above runs every other leg. The plan splits the legs
   # (`apps` and `apps_e2e`, tools/paddock-dev plan_ci.rs); the steps are the Linux steps of `app`.
   app-e2e:
     name: ${{ matrix.app }} e2e (${{ matrix.os }}, ${{ matrix.e2e_leg }})
-    needs: [plan, stage1]
-    if: ${{ github.event.inputs.stage != 'fast' && needs.stage1.result == 'success' && needs.plan.outputs.any_app_e2e == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["app-e2e"]'), 'app-e2e') }}
+    needs: [plan, stage1-linux]
+    if: ${{ github.event.inputs.stage != 'fast' && needs.stage1-linux.result == 'success' && needs.plan.outputs.any_app_e2e == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["app-e2e"]'), 'app-e2e') }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
@@ -1616,33 +1631,62 @@ jobs:
         with:
           mode: release
 
-  # The stage-1 gate: every fast job passed (a job the plan left out counts as passed). Stage 2 (e2e, e2e-webkit, app-e2e) needs it, so a
-  # failed unit test ends the run before the long jobs start. It runs after a failure too (`always()`), and fails then, so the
-  # run is red and a rerun of its failures (since_run) runs the stage-2 jobs it skipped (plan_since.rs add_skipped_dependents).
-  stage1:
-    name: stage 1 gate (fast checks)
-    needs: [plan, ipc-endpoints, ui, conformance, gitleaks, c99, tools, tools-macos, wiki, heavy, icons, eslint-preset, crates, crate, commits, audit, train-gates, app, paddock-dev]
-    if: ${{ always() }}
+  # The stage gates, one per operating system (conformance/ci/stages.json is the table): each waits for its OS's fast jobs, and a stage-2 job
+  # waits only for the gates of its own OS. Report-only while docs/gates.toml has `[[report_only]] gate:ci.yml/<gate>` (ER-41).
+  stage1-linux:
+    name: stage 1 gate, linux (fast checks)
+    needs: [plan, ipc-endpoints, ui, conformance, gitleaks, c99, tools, wiki, heavy, icons, eslint-preset, crates, commits, audit]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
+    outputs:
+      result: ${{ steps.gate.outputs.result }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          sparse-checkout: conformance
-      - name: Stage 1 result
+          sparse-checkout: |
+            conformance
+            docs/gates.toml
+      - name: Gate result
+        id: gate
         env:
           NEEDS: ${{ toJSON(needs) }}
-          # Report-only until the first recorded green run (ER-41); then set the repository variable to 1.
-          ENFORCE: ${{ vars.PADDOCK_STAGE_GATE_ENFORCE }}
+          WORKFLOW: ci.yml
+          GATE: stage1-linux
         run: node conformance/ci/stage-gate.mjs stage1
 
-  # The last job: the line `./dev ci verdict` reads. A run is full only when stage 1 passed and stage 2 ran to its end.
+  stage1-macos:
+    name: stage 1 gate, macos (fast checks)
+    needs: [plan, tools-macos]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    outputs:
+      result: ${{ steps.gate.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            conformance
+            docs/gates.toml
+      - name: Gate result
+        id: gate
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          WORKFLOW: ci.yml
+          GATE: stage1-macos
+        run: node conformance/ci/stage-gate.mjs stage1
+
+  # The last job: the line `./dev ci verdict` reads. A run is full only when every gate passed and every stage-2 job the plan expects
+  # (its `stage2_jobs` output) succeeded; a skipped one is not a pass.
   stages:
     name: stages (stage 2 ran after stage 1)
-    needs: [plan, stage1, e2e, e2e-webkit, app-e2e]
-    if: ${{ always() }}
+    needs: [plan, stage1-linux, stage1-macos, e2e, e2e-webkit, app-e2e]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
@@ -1655,4 +1699,5 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
           STAGE: ${{ github.event.inputs.stage }}
+          EXPECTED: ${{ needs.plan.outputs.stage2_jobs }}
         run: node conformance/ci/stage-gate.mjs final

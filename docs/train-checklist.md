@@ -20,10 +20,11 @@ locked worktree, never in the main checkout (rule 2).
    cells before it joins a train; a VM or Mac number is `not measured` (ADR 0107 D5, ER-9).
 5. **One CI run per train round**, through `./dev ci dispatch` (the run is queued at once and its first job waits while an older run holds a shared runner). Tests run
    once per train, not once per member (ER-8).
-   The run is staged (AGENTS.md, "Staged CI"): stage 1 (the fast checks and the unit and integration tests on every OS) finishes first;
-   the end-to-end, WebKit, installer and smoke jobs of stage 2 start only if it passed. A red stage 1 is the whole answer of that round: fix
-   it by the failed tests (ER-10), and the next run reaches stage 2. `./dev ci verdict` reads a green run whose `stages` job did not
-   log `stage verdict: stage1=passed stage2=complete` as not full; do not land on such a run.
+   The run is staged (AGENTS.md, "Staged CI"): each OS's fast jobs finish first and gate that OS's long jobs (end-to-end, WebKit,
+   installers, smoke tests), so a red fast job stops only its own OS's stage 2 and a green round is not slower than before. Fix a red
+   stage 1 by the failed tests (ER-10); the next run reaches stage 2. `./dev ci verdict` reads a run whose `stages` job did not log
+   `stage verdict: stage1=passed stage2=complete` (a failed gate, a skipped expected stage-2 job, `stage1=failed(report-only)`) as not
+   full: do not land on such a run.
 6. **A red train run.** `./dev ci triage <run> --members <train-base>` lists the members, each with the projects its own change
    reaches, and for every new failure the members that reach it. Take out every suspect, or fix the cause in its owner's
    branch, then fix round by failed tests only (ER-10). A failure that also fails on main is nobody's.

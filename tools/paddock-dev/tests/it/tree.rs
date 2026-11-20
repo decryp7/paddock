@@ -775,6 +775,11 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
         .collect();
     for (name, step) in &declared {
         assert_eq!(name, step, "output {name} reads steps.plan.outputs.{step}");
+        // The expected stage-2 jobs are written by the plan step's own shell, after `./dev plan` (conformance/test/stage-gate.test.mjs
+        // holds both workflows to it), not by the planner.
+        if step == "stage2_jobs" {
+            continue;
+        }
         assert!(
             written.contains(step) || since_written.contains(step),
             "dev plan --ci writes {step}"
@@ -855,12 +860,12 @@ fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
             "ci.yml job {key} is not in plan_gitea::CI_JOBS (and tests/golden/ci-jobs.json)"
         );
         // The stage gates (conformance/ci/stage-gate.mjs) run after every failure and in every rerun: they judge, they test nothing.
-        if key == "plan" || matches!(key.as_str(), "stage1" | "stages") {
+        if key == "plan" || (key.starts_with("stage1-") || key == "stages") {
             continue;
         }
         let gate = format!("contains(fromJSON(needs.plan.outputs.rerun_jobs || '[\"{key}\"]'), '{key}')");
         assert!(
-            text.contains("needs: [plan]") || text.contains("needs: [plan, stage1]"),
+            text.contains("needs: [plan]") || text.contains("needs: [plan, stage1-linux]") || text.contains("needs: [plan, stage1-macos]"),
             "job {key} needs the plan (and, in stage 2, the stage-1 gate)"
         );
         let cond = text
@@ -936,7 +941,7 @@ fn debrief_yml_takes_a_rerun_of_its_failures() {
     let app = APP_WORKFLOWS.iter().find(|a| a.file == "debrief.yml").unwrap();
     for (key, body) in &wf.jobs {
         assert!(templates.iter().any(|(k, _)| k == key), "{key} has a name");
-        if key == "plan" || matches!(key.as_str(), "stage1" | "stages") || app.never_manual.contains(&key.as_str()) {
+        if key == "plan" || (key.starts_with("stage1-") || key == "stages") || app.never_manual.contains(&key.as_str()) {
             continue;
         }
         let gate = format!("contains(fromJSON(needs.plan.outputs.rerun_jobs || '[\"{key}\"]'), '{key}')");

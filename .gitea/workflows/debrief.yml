@@ -15,9 +15,10 @@
 # fixed checkout path (stable-workspace) into a kept build folder set as cargo configuration (the build-folder action),
 # never CARGO_TARGET_DIR, which sccache hashes; npm's and Angular's caches are kept (node-caches).
 #
-# Two stages (docs/train-checklist.md, "Staged CI"): stage 1 is the fast checks (Rust lint and tests on Linux and macOS, the plugin
-# SDK, licences and commits, the frontend build, lint and unit tests; the `stage1` job gates them); stage 2 is the long jobs (the
-# end-to-end tests, the installers and the real-app smoke tests) and starts only when stage 1 passed. The last job, `stages`,
+# Two stages (docs/train-checklist.md, "Staged CI"): stage 1 is the fast checks (Rust lint and tests, the plugin SDK, licences and
+# commits, the frontend build, lint and unit tests), with one gate job per operating system (`stage1-linux`, `stage1-macos`;
+# conformance/ci/stages.json is the table); stage 2 is the long jobs (the end-to-end tests, the installers and the real-app smoke
+# tests), and each waits for the gate of its own OS (the smoke tests for both). The last job, `stages`,
 # prints the line `./dev ci verdict` reads: a run whose stage 2 did not run is never a full green run (ER-33).
 #
 # Runner labels: ubuntu-latest (jobs in the paddock-ci image), windows-latest and macos-latest (host runners).
@@ -94,6 +95,8 @@ jobs:
       rust_test_macos_filter: ${{ steps.plan.outputs.rust_test_macos_filter }}
       frontend_include: ${{ steps.plan.outputs.frontend_include }}
       e2e_shards: ${{ steps.plan.outputs.e2e_shards }}
+      # The stage-2 jobs this run expects to succeed (a JSON list): the `stages` job requires each; a skipped one is not a pass (ER-33).
+      stage2_jobs: ${{ steps.plan.outputs.stage2_jobs }}
       full: ${{ github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/debrief-v') || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && (inputs.bundles == true || github.event.inputs.bundles == 'true')) }}
     env:
       PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
@@ -139,7 +142,7 @@ jobs:
           # The rerun reads the earlier run's jobs and logs through the API; PLAN_FULL says whether this rerun is full.
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
           PLAN_FULL: ${{ github.event.inputs.bundles }}
-          # `fast`: only stage 1 runs, so the run is never complete.
+          # `fast`: only stage 1 runs, so the run is never complete. Anything but empty, all or fast fails the plan.
           PLAN_STAGE: ${{ github.event.inputs.stage }}
           # The `full` output's expression, copied (tools/paddock-dev/tests/it/tree.rs keeps them equal): the mode line below lets a
           # later rerun of this run's failures tell whether it was full (plan_since::read_full). It is the scope only; `plan verdict:`
@@ -147,6 +150,7 @@ jobs:
           PLAN_MODE_FULL: ${{ github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/debrief-v') || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && (inputs.bundles == true || github.event.inputs.bundles == 'true')) }}
         run: |
           echo "plan mode: full=$PLAN_MODE_FULL"
+          case "$PLAN_STAGE" in ''|all|fast) ;; *) echo "::error::the stage input is '$PLAN_STAGE': use stage=fast, stage=all or leave it empty."; exit 1 ;; esac
           run=$(./dev plan --ci --app debrief)
           if [ "$EVENT" = schedule ] && [ "$GREEN" = true ]; then
             run=false
@@ -175,6 +179,14 @@ jobs:
           complete=false
           if [ "$run" = true ] && [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_STAGE" != fast ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
           echo "plan verdict: complete=$complete"
+          # The stage-2 jobs this run expects (none in a rerun of failures: it is never complete): the shards, and on a full run the installers
+          # and the real-app smoke tests. The job names are conformance/ci/stages.json's.
+          expect=()
+          if [ "$run" = true ] && [ -z "$PLAN_SINCE_RUN" ]; then
+            expect+=(e2e)
+            if [ "$PLAN_MODE_FULL" = true ]; then expect+=(bundle tauri-smoke); fi
+          fi
+          echo "stage2_jobs=$(printf '%s\n' ${expect[@]+"${expect[@]}"} | jq -R . | jq -sc 'map(select(length>0))')" >> "$GITHUB_OUTPUT"
           # A staged run counts as full only with the `stages` job's line (tools/paddock-dev ci_runs/verdict.rs, STAGED_LINE).
           echo "plan layout: staged"
 
@@ -637,8 +649,8 @@ jobs:
   # Chromium only; full runs (main, tags, nightly, `bundles: true`) in Chromium and WebKit (Paddock rule 3).
   e2e:
     name: end-to-end (shard ${{ matrix.shard }})
-    needs: [plan, stage1]
-    if: github.event.inputs.stage != 'fast' && needs.stage1.result == 'success' && needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e"]'), 'e2e')
+    needs: [plan, stage1-linux]
+    if: github.event.inputs.stage != 'fast' && needs.stage1-linux.result == 'success' && needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e"]'), 'e2e')
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
@@ -704,8 +716,8 @@ jobs:
     # After the bundle and the macOS Rust tests: the macOS leg's start-up benchmark is a timing gate and must not share the
     # runner with this run's heavy builds (debrief.yml 8007 measured 1.8x its budgets beside the LTO bundle job). A failed
     # bundle or test leg does not skip the smoke (!cancelled); a failed rust-lint still does.
-    needs: [plan, stage1, rust-lint, bundle, rust-test-macos]
-    if: ${{ !cancelled() && github.event.inputs.stage != 'fast' && needs.stage1.result == 'success' && needs.rust-lint.result == 'success' && needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["tauri-smoke"]'), 'tauri-smoke') }}
+    needs: [plan, stage1-linux, stage1-macos, rust-lint, bundle, rust-test-macos]
+    if: ${{ !cancelled() && github.event.inputs.stage != 'fast' && needs.stage1-linux.result == 'success' && needs.stage1-macos.result == 'success' && needs.rust-lint.result == 'success' && needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["tauri-smoke"]'), 'tauri-smoke') }}
     strategy:
       fail-fast: false
       matrix:
@@ -982,8 +994,8 @@ jobs:
   # for branch or pull request runs. They are the slowest jobs and the Windows leg runs on a developer PC.
   bundle:
     name: bundle (${{ matrix.os }})
-    needs: [plan, stage1, rust-lint]
-    if: github.event.inputs.stage != 'fast' && needs.stage1.result == 'success' && needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["bundle"]'), 'bundle')
+    needs: [plan, stage1-linux, rust-lint]
+    if: github.event.inputs.stage != 'fast' && needs.stage1-linux.result == 'success' && needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["bundle"]'), 'bundle')
     strategy:
       fail-fast: false
       matrix:
@@ -1391,42 +1403,65 @@ jobs:
           path: .nightly-green
           key: debrief-nightly-green-${{ github.sha }}
 
-  # The stage-1 gate: every fast job passed (a job the plan left out counts as passed). Stage 2 (e2e, bundle, tauri-smoke) needs it, so
-  # a failed Rust or frontend test ends the run before the long jobs start. It runs after a failure too (`always()`) and fails then,
-  # so the run is red and a rerun of its failures (since_run) also runs the stage-2 jobs it skipped (plan_since.rs).
-  stage1:
-    name: stage 1 gate (fast checks)
-    needs: [plan, rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, keychain]
-    if: ${{ always() }}
+  # The stage gates, one per operating system (conformance/ci/stages.json is the table): each waits for its OS's fast jobs, and a stage-2 job
+  # waits only for the gates of its own OS. Report-only while docs/gates.toml has `[[report_only]] gate:debrief.yml/<gate>` (ER-41).
+  stage1-linux:
+    name: stage 1 gate, linux (fast checks)
+    needs: [plan, rust-lint, rust-test, plugin-sdk, licences, frontend, keychain]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
-    defaults:
-      run:
-        working-directory: .
+    outputs:
+      result: ${{ steps.gate.outputs.result }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          sparse-checkout: conformance
-      - name: Stage 1 result
+          sparse-checkout: |
+            conformance
+            docs/gates.toml
+      - name: Gate result
+        id: gate
         env:
           NEEDS: ${{ toJSON(needs) }}
-          # Report-only until the first recorded green run (ER-41); then set the repository variable to 1.
-          ENFORCE: ${{ vars.PADDOCK_STAGE_GATE_ENFORCE }}
+          WORKFLOW: debrief.yml
+          GATE: stage1-linux
         run: node conformance/ci/stage-gate.mjs stage1
 
-  # The last job: the line `./dev ci verdict` reads. A run is full only when stage 1 passed and stage 2 ran to its end.
-  stages:
-    name: stages (stage 2 ran after stage 1)
-    needs: [plan, stage1, e2e, bundle, tauri-smoke]
-    if: ${{ always() }}
+  stage1-macos:
+    name: stage 1 gate, macos (fast checks)
+    needs: [plan, rust-test-macos]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
-    defaults:
-      run:
-        working-directory: .
+    outputs:
+      result: ${{ steps.gate.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            conformance
+            docs/gates.toml
+      - name: Gate result
+        id: gate
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          WORKFLOW: debrief.yml
+          GATE: stage1-macos
+        run: node conformance/ci/stage-gate.mjs stage1
+
+  # The last job: the line `./dev ci verdict` reads. A run is full only when every gate passed and every stage-2 job the plan expects
+  # (its `stage2_jobs` output) succeeded; a skipped one is not a pass.
+  stages:
+    name: stages (stage 2 ran after stage 1)
+    needs: [plan, stage1-linux, stage1-macos, e2e, bundle, tauri-smoke]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1436,4 +1471,5 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
           STAGE: ${{ github.event.inputs.stage }}
+          EXPECTED: ${{ needs.plan.outputs.stage2_jobs }}
         run: node conformance/ci/stage-gate.mjs final

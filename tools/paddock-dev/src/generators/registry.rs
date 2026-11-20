@@ -333,6 +333,63 @@ fn strings_of(t: &toml::Table, key: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// The lockfile checks run `cargo metadata --locked --offline`: with the registry not fetched cargo says so, and the check must print the
+    /// `cargo fetch --locked` hint and fail (so the run says not measured, never a pass); another failure (a stale lockfile) gets no hint.
+    #[cfg(unix)]
+    #[test]
+    fn every_lockfile_check_names_the_fetch_when_cargo_cannot_read_the_registry_offline() {
+        use std::os::unix::fs::PermissionsExt;
+        let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/generators.toml")).unwrap();
+        let reg = Registry::parse(&text).unwrap();
+        let locks: Vec<&Generator> = reg.generators.iter().filter(|g| g.id.starts_with("cargo-lock-")).collect();
+        assert!(
+            locks.len() >= 5,
+            "a positive control: the lockfile entries are found ({})",
+            locks.len()
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let stub = |message: &str| {
+            let f = dir.path().join("cargo");
+            std::fs::write(&f, format!("#!/bin/sh\necho '{message}' >&2\nexit 101\n")).unwrap();
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        let path = format!("{}:{}", dir.path().display(), std::env::var("PATH").unwrap_or_default());
+        for g in locks {
+            assert!(
+                g.check.contains(&"--offline".to_string()) || g.check.iter().any(|a| a.contains("--offline")),
+                "{}: offline",
+                g.id
+            );
+            let run = |message: &str| {
+                stub(message);
+                let (prog, args) = g.check.split_first().unwrap();
+                let out = paddock_testkit::TestCommand::new(prog)
+                    .args(args)
+                    .env("PATH", &path)
+                    .output()
+                    .unwrap();
+                (
+                    out.status.success(),
+                    format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
+                )
+            };
+            let (ok, text) = run(
+                "error: no matching package named `serde` found\nlocation searched: registry\nattempting to make an HTTP request, but --offline was specified",
+            );
+            assert!(
+                !ok && text.contains("cargo fetch --locked"),
+                "{}: the offline failure names the fetch: {text}",
+                g.id
+            );
+            let (ok, text) = run("error: the lock file needs to be updated but --locked was passed");
+            assert!(
+                !ok && !text.contains("cargo fetch --locked") && text.contains("needs to be updated"),
+                "{}: a stale lockfile is not the registry: {text}",
+                g.id
+            );
+        }
+    }
+
     const GOOD: &str = r#"
 version = 1
 [[generator]]

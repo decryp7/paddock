@@ -62,7 +62,10 @@
  "app-e2e": [
   "apps"
  ],
- "stage1": [
+ "stage1-linux": [
+  "everything"
+ ],
+ "stage1-macos": [
   "everything"
  ],
  "stages": [

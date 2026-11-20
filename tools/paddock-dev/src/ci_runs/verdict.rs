@@ -861,13 +861,14 @@ mod tests {
                 .arg(&script)
                 .arg("final")
                 .env("NEEDS", needs)
+                .env("EXPECTED", r#"["e2e"]"#)
                 .output()
                 .expect("node runs the stage gate");
             String::from_utf8_lossy(&out.stdout).to_string()
         };
-        let ok = run(r#"{"stage1":{"result":"success"},"e2e":{"result":"skipped"}}"#);
+        let ok = run(r#"{"stage1-linux":{"result":"success","outputs":{"result":"passed"}},"e2e":{"result":"success"}}"#);
         assert_eq!(read_stages(&ok), Some(Stages::Complete), "{ok}");
-        let cut = run(r#"{"stage1":{"result":"failure"},"e2e":{"result":"skipped"}}"#);
+        let cut = run(r#"{"stage1-linux":{"result":"failure"},"e2e":{"result":"skipped"}}"#);
         assert!(
             matches!(read_stages(&cut), Some(Stages::Incomplete(w)) if w == "stage1=failed stage2=not-run"),
             "{cut}"

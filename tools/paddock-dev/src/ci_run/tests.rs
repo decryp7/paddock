@@ -301,7 +301,7 @@ fn rows_of(src: &crate::gates::ci::Sources) -> std::collections::BTreeSet<String
         };
         if jobs.contains(&l.job.as_str()) {
             out.insert(row("job", &l.job));
-        } else if l.job == "app" && l.origin.is_some() {
+        } else if matches!(l.job.as_str(), "app" | "app-e2e") && l.origin.is_some() {
             out.insert(row("app", &l.app.clone().unwrap_or_default()));
         }
     }

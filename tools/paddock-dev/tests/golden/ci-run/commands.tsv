@@ -9,6 +9,7 @@
 app	dyno	macos-latest	apps/dyno	cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper
 app	dyno	ubuntu-latest		node conformance/bin/paddock-conformance.mjs --app dyno --root apps/dyno --only C13 --paddock .
 app	dyno	ubuntu-latest		npm run build -w ui
+app	dyno	ubuntu-latest		npm run build:e2e -w ui
 app	dyno	ubuntu-latest	apps/dyno	cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper
 app	dyno	ubuntu-latest	apps/dyno	cargo fetch --locked --target aarch64-apple-darwin
 app	dyno	ubuntu-latest	apps/dyno	cargo fetch --locked --target x86_64-apple-darwin
@@ -24,6 +25,11 @@ app	dyno	ubuntu-latest	apps/dyno	node --test scripts/check-shipped.test.mjs
 app	dyno	ubuntu-latest	apps/dyno	node --test scripts/check-wording.test.mjs
 app	dyno	ubuntu-latest	apps/dyno	node scripts/check-capabilities.mjs
 app	dyno	ubuntu-latest	apps/dyno	node scripts/check-release-notes.mjs
+app	dyno	ubuntu-latest	apps/dyno/app	PW_PORT=$((4359 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=1/2
+app	dyno	ubuntu-latest	apps/dyno/app	PW_PORT=$((4359 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=2/2
+app	dyno	ubuntu-latest	apps/dyno/app	PW_PORT=$((4362 + E2E_INDEX)) npx playwright test --project=webkit --workers=1 --fully-parallel --shard=1/3
+app	dyno	ubuntu-latest	apps/dyno/app	PW_PORT=$((4362 + E2E_INDEX)) npx playwright test --project=webkit --workers=1 --fully-parallel --shard=2/3
+app	dyno	ubuntu-latest	apps/dyno/app	PW_PORT=$((4362 + E2E_INDEX)) npx playwright test --project=webkit --workers=1 --fully-parallel --shard=3/3
 app	dyno	ubuntu-latest	apps/dyno/app	TZ=Pacific/Auckland npx ng test --watch=false
 app	dyno	ubuntu-latest	apps/dyno/app	node ../../../conformance/ci/check-index.mjs dist/dyno-app/browser/index.html
 app	dyno	ubuntu-latest	apps/dyno/app	node ../../../scripts/npm-audit.mjs
@@ -42,11 +48,15 @@ app	pitcrew	ubuntu-latest	apps/pitcrew/app	npx ng test --watch=false --coverage
 app	pitwall	ubuntu-latest		git fetch --no-tags --depth=1 origin '+refs/tags/pitwall-v*:refs/tags/pitwall-v*'
 app	pitwall	ubuntu-latest		node conformance/bin/paddock-conformance.mjs --app pitwall --root apps/pitwall --only C13,C85 --paddock .
 app	pitwall	ubuntu-latest		npm run build -w ui
+app	pitwall	ubuntu-latest		npm run build:e2e -w ui
 app	pitwall	ubuntu-latest	apps/pitwall	TZ=Pacific/Auckland cargo nextest run -p pitwall-core -p pitwall-server --profile ci
 app	pitwall	ubuntu-latest	apps/pitwall	bash scripts/ci/privacy-check.sh
 app	pitwall	ubuntu-latest	apps/pitwall	cargo llvm-cov nextest -p pitwall-core --profile ci --summary-only --fail-under-lines 99
 app	pitwall	ubuntu-latest	apps/pitwall	node --test scripts/ci/*.test.mjs docs/diagrams/src/*.test.mjs
 app	pitwall	ubuntu-latest	apps/pitwall	node scripts/ci/check-icons.mjs
+app	pitwall	ubuntu-latest	apps/pitwall/app	PW_E2E_PREBUILT=1 PW_E2E_PORT=$((4390 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=1/2
+app	pitwall	ubuntu-latest	apps/pitwall/app	PW_E2E_PREBUILT=1 PW_E2E_PORT=$((4390 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=2/2
+app	pitwall	ubuntu-latest	apps/pitwall/app	PW_E2E_PREBUILT=1 PW_E2E_PORT=4393 npx playwright test --project=webkit --workers=1
 app	pitwall	ubuntu-latest	apps/pitwall/app	node ../../../scripts/npm-audit.mjs
 app	pitwall	ubuntu-latest	apps/pitwall/app	node ../scripts/ci/ui-coverage-guard.mjs --min 80 --dir coverage
 app	pitwall	ubuntu-latest	apps/pitwall/app	npm run check:index
@@ -62,6 +72,9 @@ app	spotter	ubuntu-latest		node conformance/bin/paddock-conformance.mjs --app sp
 app	spotter	ubuntu-latest		npm run build -w ui
 app	spotter	ubuntu-latest	apps/spotter	node --test scripts/pin-chromium.test.mjs scripts/install-test-browser.test.mjs scripts/style-guard.test.mjs scripts/ci/check-icons.test.mjs
 app	spotter	ubuntu-latest	apps/spotter	node scripts/ci/check-icons.mjs
+app	spotter	ubuntu-latest	apps/spotter/app	PW_PORT=$((4369 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=1/2
+app	spotter	ubuntu-latest	apps/spotter/app	PW_PORT=$((4369 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=2/2
+app	spotter	ubuntu-latest	apps/spotter/app	PW_PORT=4372 npx playwright test --project=webkit --workers=1
 app	spotter	ubuntu-latest	apps/spotter/app	node ../../../scripts/npm-audit.mjs
 app	spotter	ubuntu-latest	apps/spotter/app	npm run lint
 app	spotter	ubuntu-latest	apps/spotter/app	npm run lint:report

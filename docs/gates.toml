@@ -160,6 +160,38 @@ review_by = 2026-12-27
 approved = "coordinator"
 
 [[report_only]]
+id = "gate:ci.yml/stage1-linux"
+reason = "ER-41: the stage-1 gate of ci.yml for one operating system (conformance/ci/stages.json) starts report-only: a failed fast job only warns and the run's verdict says stage1=failed(report-only), so the run is red but stage 2 still runs. It blocks after its first green run on the real tree, recorded by run id here: the step that records it removes this entry (conformance/ci/stage-gate.mjs reads the mode from this register). The first recorded run is also its positive control: one deliberately failing fast job that is not the last job of its gate, to show Gitea aggregates `needs` results of a matrix."
+owner = "ci/staged-fast-then-long"
+since = 2026-11-20
+review_by = 2026-12-04
+approved = "coordinator"
+
+[[report_only]]
+id = "gate:ci.yml/stage1-macos"
+reason = "ER-41: the stage-1 gate of ci.yml for one operating system (conformance/ci/stages.json) starts report-only: a failed fast job only warns and the run's verdict says stage1=failed(report-only), so the run is red but stage 2 still runs. It blocks after its first green run on the real tree, recorded by run id here: the step that records it removes this entry (conformance/ci/stage-gate.mjs reads the mode from this register). The first recorded run is also its positive control: one deliberately failing fast job that is not the last job of its gate, to show Gitea aggregates `needs` results of a matrix."
+owner = "ci/staged-fast-then-long"
+since = 2026-11-20
+review_by = 2026-12-04
+approved = "coordinator"
+
+[[report_only]]
+id = "gate:debrief.yml/stage1-linux"
+reason = "ER-41: the stage-1 gate of debrief.yml for one operating system (conformance/ci/stages.json) starts report-only: a failed fast job only warns and the run's verdict says stage1=failed(report-only), so the run is red but stage 2 still runs. It blocks after its first green run on the real tree, recorded by run id here: the step that records it removes this entry (conformance/ci/stage-gate.mjs reads the mode from this register). The first recorded run is also its positive control: one deliberately failing fast job that is not the last job of its gate, to show Gitea aggregates `needs` results of a matrix."
+owner = "ci/staged-fast-then-long"
+since = 2026-11-20
+review_by = 2026-12-04
+approved = "coordinator"
+
+[[report_only]]
+id = "gate:debrief.yml/stage1-macos"
+reason = "ER-41: the stage-1 gate of debrief.yml for one operating system (conformance/ci/stages.json) starts report-only: a failed fast job only warns and the run's verdict says stage1=failed(report-only), so the run is red but stage 2 still runs. It blocks after its first green run on the real tree, recorded by run id here: the step that records it removes this entry (conformance/ci/stage-gate.mjs reads the mode from this register). The first recorded run is also its positive control: one deliberately failing fast job that is not the last job of its gate, to show Gitea aggregates `needs` results of a matrix."
+owner = "ci/staged-fast-then-long"
+since = 2026-11-20
+review_by = 2026-12-04
+approved = "coordinator"
+
+[[report_only]]
 id = "C122"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY in tools/paddock-dev/src/check/c122.rs and the mode to gate. Rules A and B start with no sites on the tree (all 63 migrated onto paddock_testkit::path in the same change, ADR 0099 WP-3b); rule C only ever warns"
 owner = "ADR 0099"

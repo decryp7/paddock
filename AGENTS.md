@@ -81,17 +81,23 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   only, or by adding a single declared line.
 - **Shared code (rules 39, 42, 43).** A shared change and its adoption by the apps land in one change; there is no
   publish-and-consume step. A breaking change to a shared crate or package updates every app in the same change.
-- **Staged CI (ci.yml and debrief.yml).** A run has two stages. Stage 1, the fast checks (fmt, clippy, lockfiles, conformance, the gate
-  register, commit lint and the affected unit and integration tests on Linux, Windows and macOS: ci.yml's `crate`, `paddock-dev`,
-  `tools`, `ui`, `app` jobs and the rest, debrief.yml's Rust, plugin SDK, licence and frontend jobs), ends in the `stage1` gate job.
-  Stage 2, the long jobs (ci.yml's `e2e`, `e2e-webkit` and `app-e2e`, the apps' end-to-end legs; debrief.yml's `e2e`, `bundle` and
-  `tauri-smoke`), `needs: stage1` and starts only when it passed, so a failed unit test ends a run in minutes, not after the end-to-end
-  jobs. The planner's affected selection holds in both stages (`apps` are the stage-1 legs, `apps_e2e` the stage-2 legs). The last job,
-  `stages`, prints `stage verdict: ...` (`conformance/ci/stage-gate.mjs`); `./dev ci verdict` counts a staged run as full only when
-  that line says stage 2 ran to its end, so a run whose stage 2 never ran is never green (ER-33). A job of stage 1 does not cancel its
-  sibling jobs when it fails: the whole stage finishes, so one round shows every stage-1 failure (ER-10). A fix round (`since_run`)
-  reruns the failed jobs and then the stage-2 jobs the failure had skipped. A new job is placed in a stage by its `needs:` (stage 2
-  names `stage1`) and, if it is fast, is added to the `stage1` job's `needs:` (a test holds both lists to the workflow files).
+- **Staged CI (ci.yml and debrief.yml).** A run has two stages. Stage 1 is the fast checks; there is one gate job per operating
+  system (`stage1-linux`, `stage1-macos`) over that OS's fast jobs, and **`conformance/ci/stages.json` is the one table** of which job is
+  in which gate, which is stage 2 (long: ci.yml's `e2e`, `e2e-webkit`, `app-e2e`; debrief.yml's `e2e`, `bundle`, `tauri-smoke`) and
+  which is `parallel` (fast jobs in no gate: the matrix jobs that span several OSes, `crate`, `paddock-dev` and `app` in ci.yml, and
+  `train-gates`; they run at the same time and stay required). A stage-2 job waits only for the gate of its own OS, so a failed unit
+  test ends that OS's run in minutes, no OS waits for another, and a green run is not slower than before. A matrix job that spans
+  OSes can join a per-OS gate only when it is split per OS (open item). The planner's affected selection holds in both stages (`apps`
+  are the stage-1 legs, `apps_e2e` the stage-2 legs), and the plan's `stage2_jobs` output lists the stage-2 jobs a run expects. The
+  last job, `stages`, prints `stage verdict: ...` (`conformance/ci/stage-gate.mjs`); `./dev ci verdict` counts a staged run as full
+  only when it says `stage1=passed stage2=complete`: every gate passed and every expected stage-2 job succeeded (a skipped one is not a
+  pass), so a run whose stage 2 never ran is never green (ER-33). A new gate is report-only first (ER-41): while docs/gates.toml has
+  `[[report_only]] id = "gate:<workflow>/<gate>"` a failed fast job only warns and the verdict says `stage1=failed(report-only)`; the
+  step that records the gate's first green run removes the entry. Stage 1 does not cancel its sibling jobs when one fails: the whole
+  stage finishes, so one round shows every stage-1 failure (ER-10). A fix round (`since_run`) reruns the failed jobs and then the
+  stage-2 jobs the failure had skipped. A manual dispatch with `stage=fast` runs only stage 1 (the fix ladder's third rung): `stages`
+  reports `stage2=not-run` and the run is never a full green run; any other value of `stage` fails the plan. A new job goes in
+  exactly one place of the table (a test holds the workflow files to it).
 - **Workflows are named after their app** (ADR 0014's last amendment): an app with gates on several OS (Debrief, Dyno,
   Pitcrew, Pitwall, Spotter) has `.gitea/workflows/<app>.yml`, its whole CI and its release from an `<app>-v*` tag, whose
   plan job asks `./dev plan --ci --app <app>`; extra jobs are `<app>-<what>.yml` (Debrief's fuzz, bench,

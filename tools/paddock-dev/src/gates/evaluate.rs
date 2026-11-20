@@ -125,6 +125,35 @@ const REGISTER: &str = "docs/gates.toml";
 /// `review_by` limit as a check, so the flip to blocking is enforced by the date (ER-41).
 const STEP_PREFIX: &str = "step:";
 
+/// A `[[report_only]]` id that names a stage gate of a staged workflow rather than a check: `gate:<workflow>/<job>`
+/// (`gate:ci.yml/stage1-linux`). The gate job (conformance/ci/stage-gate.mjs) reads its mode from this register: while the entry
+/// exists it only warns; the step that records the gate's first green run removes it (ER-41). It has the same `review_by` limit
+/// as a check.
+const GATE_PREFIX: &str = "gate:";
+
+/// What is wrong with a `gate:<workflow>/<job>` entry: the workflow or the job is gone.
+fn gate_entry_problem(id: &str, src: &Sources) -> Option<(String, &'static str)> {
+    let Some((workflow, job)) = id.strip_prefix(GATE_PREFIX).and_then(|r| r.split_once('/')) else {
+        return Some((
+            format!("[[report_only]] {id} is not `gate:<workflow>/<job>`"),
+            "Write the id as gate:<workflow>/<job>, for example gate:ci.yml/stage1-linux.",
+        ));
+    };
+    let has_job = src
+        .workflows
+        .get(&format!(".gitea/workflows/{workflow}"))
+        .and_then(|text| crate::plan_gitea::workflow_jobs(text))
+        .is_some_and(|w| w.jobs.iter().any(|(k, _)| k == job));
+    if has_job {
+        None
+    } else {
+        Some((
+            format!("[[report_only]] {id} is stale: the workflow has no such job"),
+            "Remove the entry (the gate job is gone).",
+        ))
+    }
+}
+
 /// What is wrong with a `step:<project>/<phase>` entry, with the next step: the step is gone, or it already blocks.
 fn step_entry_problem(id: &str, src: &Sources, model: &ci::CiModel) -> Option<(String, &'static str)> {
     let Some((project, phase)) = id.strip_prefix(STEP_PREFIX).and_then(|r| r.split_once('/')) else {
@@ -614,10 +643,9 @@ pub fn evaluate(input: &Input) -> Outcome {
         ("report_only", &reg.report_only),
         ("level", &reg.level),
     ] {
-        for e in list
-            .iter()
-            .filter(|e| !ids.contains(&e.id) && !(kind == "report_only" && e.id.starts_with(STEP_PREFIX)))
-        {
+        for e in list.iter().filter(|e| {
+            !ids.contains(&e.id) && !(kind == "report_only" && (e.id.starts_with(STEP_PREFIX) || e.id.starts_with(GATE_PREFIX)))
+        }) {
             finding(
                 &mut out,
                 Some(REGISTER),
@@ -642,6 +670,11 @@ pub fn evaluate(input: &Input) -> Outcome {
     }
     for e in reg.report_only.iter().filter(|e| e.id.starts_with(STEP_PREFIX)) {
         if let Some((message, fix)) = step_entry_problem(&e.id, input.sources, &model) {
+            finding(&mut out, Some(REGISTER), None, &e.id, message, fix);
+        }
+    }
+    for e in reg.report_only.iter().filter(|e| e.id.starts_with(GATE_PREFIX)) {
+        if let Some((message, fix)) = gate_entry_problem(&e.id, input.sources) {
             finding(&mut out, Some(REGISTER), None, &e.id, message, fix);
         }
     }
@@ -930,6 +963,31 @@ mod tests {
         let bad = step_register("2026-12-06").replace("step:tools/hooks", "step:tools");
         let m = messages(&run_step(&bad, STEP_CI, Some(STEP_CONTRACT)));
         assert!(m.iter().any(|x| x.contains("is not `step:<project>/<phase>`")), "{m:?}");
+    }
+
+    /// `[[report_only]] gate:<workflow>/<job>` registers a stage gate (conformance/ci/stage-gate.mjs reads it): a real gate job is no
+    /// finding, a missing job is a stale entry, a malformed id is named, and the review date is enforced like a check's.
+    #[test]
+    fn a_stage_gate_entry_is_valid_while_the_gate_job_exists() {
+        let ci = "on:\n  pull_request:\njobs:\n  stage1-linux:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n";
+        let reg = |id: &str, review_by: &str| {
+            format!(
+                "{REG_HEAD}\n[[report_only]]\nid = \"{id}\"\nreason = \"x\"\nowner = \"o\"\nsince = 2026-11-08\nreview_by = {review_by}\napproved = \"coordinator\"\n"
+            )
+        };
+        let about = |o: &Outcome, what: &str| messages(o).into_iter().filter(|m| m.contains(what)).collect::<Vec<_>>();
+        assert!(about(&run_step(&reg("gate:ci.yml/stage1-linux", "2026-12-06"), ci, None), "gate:ci.yml").is_empty());
+        let m = about(&run_step(&reg("gate:ci.yml/stage1-gone", "2026-12-06"), ci, None), "gate:ci.yml");
+        assert!(m.iter().any(|x| x.contains("is stale: the workflow has no such job")), "{m:?}");
+        let m = about(
+            &run_step(&reg("gate:nope.yml/stage1-linux", "2026-12-06"), ci, None),
+            "gate:nope.yml",
+        );
+        assert!(m.iter().any(|x| x.contains("is stale: the workflow has no such job")), "{m:?}");
+        let m = about(&run_step(&reg("gate:ci.yml", "2026-12-06"), ci, None), "gate:ci.yml");
+        assert!(m.iter().any(|x| x.contains("is not `gate:<workflow>/<job>`")), "{m:?}");
+        let m = about(&run_step(&reg("gate:ci.yml/stage1-linux", "2026-11-09"), ci, None), "gate:ci.yml");
+        assert!(m.iter().any(|x| x.contains("review_by 2026-11-09 has passed")), "{m:?}");
     }
 
     #[test]
