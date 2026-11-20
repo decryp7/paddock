@@ -2,7 +2,7 @@
 
 Date: 2026-10-24. This is option 0 of [2026-10-ci-speed.md](2026-10-ci-speed.md): real numbers from the Gitea Actions
 API for Debrief, Paddock, Pitcrew, Pitwall, Spotter and Dyno, replacing the estimates in that note. The tables are
-produced by [scripts/ci-timings.mjs](../../scripts/ci-timings.mjs) (node, no dependencies, read-only API); re-run it with
+produced by `scripts/ci-timings.mjs` (retired 2026-11-18; `./dev ci timings` is the reader now) (node, no dependencies, read-only API); re-run it with
 `node scripts/ci-timings.mjs --out docs/research/2026-10-ci-timings.md` and only the region between the two marker
 comments is replaced, so this text survives.
 
