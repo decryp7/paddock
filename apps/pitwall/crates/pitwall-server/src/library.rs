@@ -186,7 +186,9 @@ pub struct Library {
     dirs: Dirs,
     egress: Egress,
     downloads: Arc<Mutex<Downloads>>,
-    /// How many full scans of the models folder this library has made (the budget tests' seam: a bulk call scans once).
+    /// How many full scans of the models folder this library has made (the budget tests' seam: a bulk call scans once). Test
+    /// builds only (`test-support`).
+    #[cfg(any(test, feature = "test-support"))]
     scans: Arc<std::sync::atomic::AtomicUsize>,
 }
 
@@ -208,17 +210,20 @@ impl Library {
             dirs,
             egress,
             downloads: Arc::new(Mutex::new(Downloads::default())),
+            #[cfg(any(test, feature = "test-support"))]
             scans: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 
     /// Models on disk. Every call opens and parses every model header: bulk work calls it once.
     pub fn local(&self) -> Vec<LocalFile> {
+        #[cfg(any(test, feature = "test-support"))]
         self.scans.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         scan(&self.dirs.models())
     }
 
-    /// How many scans of the models folder this library has made so far.
+    /// How many scans of the models folder this library has made so far (test builds only).
+    #[cfg(any(test, feature = "test-support"))]
     pub fn scans(&self) -> usize {
         self.scans.load(std::sync::atomic::Ordering::Relaxed)
     }

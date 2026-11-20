@@ -25,11 +25,13 @@ pub struct Caches {
     disk_error: Option<String>,
     settings: Mutex<CacheSettings>,
     last_sweep: AtomicU64,
+    #[cfg(any(test, feature = "test-support"))]
     calls: StoreCallCounts,
 }
 
 /// How many calls the embeddings cache has taken from the request path, by direction (the budget tests' seam, ADR 0108: a
-/// request of N inputs is one read and one write, never N of each).
+/// request of N inputs is one read and one write, never N of each). Test builds only (`test-support`).
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Default)]
 struct StoreCallCounts {
     reads: AtomicU64,
@@ -37,6 +39,7 @@ struct StoreCallCounts {
 }
 
 /// A reading of [`Caches::store_calls`].
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StoreCalls {
     /// Calls that read embeddings (one per call, however many keys it asked for).
@@ -59,11 +62,13 @@ impl Caches {
             disk_error,
             settings: Mutex::new(settings.clone()),
             last_sweep: AtomicU64::new(now),
+            #[cfg(any(test, feature = "test-support"))]
             calls: StoreCallCounts::default(),
         }
     }
 
-    /// The embedding reads and writes asked of the cache so far.
+    /// The embedding reads and writes asked of the cache so far (test builds only).
+    #[cfg(any(test, feature = "test-support"))]
     pub fn store_calls(&self) -> StoreCalls {
         StoreCalls {
             reads: self.calls.reads.load(Ordering::SeqCst),
@@ -126,12 +131,14 @@ impl Caches {
 
     /// A stored embedding.
     pub fn vector(&self, key: &Key, now: Millis) -> Option<Vec<f32>> {
+        #[cfg(any(test, feature = "test-support"))]
         self.calls.reads.fetch_add(1, Ordering::SeqCst);
         cache::decode_vector(&self.store(Kind::Embedding).get(Kind::Embedding, key, now)?)
     }
 
     /// The stored embeddings of `keys`, one entry per key in order: one store call for all of them (ADR 0108, PW-2).
     pub fn vectors(&self, keys: &[Key], now: Millis) -> Vec<Option<Vec<f32>>> {
+        #[cfg(any(test, feature = "test-support"))]
         self.calls.reads.fetch_add(1, Ordering::SeqCst);
         self.store(Kind::Embedding)
             .get_many(Kind::Embedding, keys, now)
@@ -142,6 +149,7 @@ impl Caches {
 
     /// Stores many embeddings with one `meta`: one store call, one write for the whole batch (ADR 0108, PW-2).
     pub fn store_vectors(&self, items: &[(Key, Vec<f32>)], meta: &Meta, now: Millis) {
+        #[cfg(any(test, feature = "test-support"))]
         self.calls.writes.fetch_add(1, Ordering::SeqCst);
         let items = items.iter().map(|(k, v)| (*k, cache::encode_vector(v), meta.clone())).collect();
         self.store(Kind::Embedding).put_many(Kind::Embedding, items, now);
@@ -149,6 +157,7 @@ impl Caches {
 
     /// Stores an embedding.
     pub fn store_vector(&self, key: Key, v: &[f32], meta: Meta, now: Millis) {
+        #[cfg(any(test, feature = "test-support"))]
         self.calls.writes.fetch_add(1, Ordering::SeqCst);
         self.store(Kind::Embedding)
             .put(Kind::Embedding, key, cache::encode_vector(v), meta, now);
