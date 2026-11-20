@@ -639,11 +639,11 @@ mod tests {
             .when_args(
                 &[],
                 paddock_testkit::Actions::new()
+                    .writes_with("{env:MAC_CHROMIUM_TMPDIR|/nonexistent}/written", "x")
                     .writes_with(
                         &seen.to_string_lossy(),
                         "{env:MAC_CHROMIUM_TMPDIR|unset}\n{flag:--user-data-dir=}\n",
                     )
-                    .writes_with("{env:MAC_CHROMIUM_TMPDIR|/nonexistent}/written", "x")
                     .exit(1),
             )
             .install()
@@ -655,7 +655,8 @@ mod tests {
             path: exe_path,
         };
         let e = Chromium::launch(&exe, &headless(base.path())).err().unwrap().to_string();
-        let seen = std::fs::read_to_string(&seen).unwrap_or_else(|_| panic!("the stand-in did not run: {e}"));
+        let seen = std::fs::read_to_string(&seen)
+            .unwrap_or_else(|_| panic!("the stand-in did not get to write its record (no temp folder?): {e}"));
         let mut lines = seen.lines();
         let (temp, profile) = (lines.next().unwrap_or(""), lines.next().unwrap_or(""));
         assert!(!profile.is_empty(), "{seen:?}");

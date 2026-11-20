@@ -3179,3 +3179,29 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   next assertion (the panel is back in the host) checks that the step did its job. Both such steps in popout.e2e.ts use it (Dock back,
   and the dispatched pointer-up that docks a dragged pop-out). **Rule:** a test step whose action ends the page it acts on goes through
   `untilItsPageCloses`, never a plain `await` on that page.
+
+## Chrome took over 5 s to quit: it reads the user's temp folder, which leaked test folders had filled (Spotter, 2026-11-20, train 16)
+- **Failure:** spotter-render `real_browser::closing_quits_the_browser_by_itself_before_any_kill` red on both tries in ci.yml runs
+  8334, 8341 and 8346 (app spotter, macos-latest): "needed a kill: 5.55 s", the whole `CLOSE_GRACE` after `Browser.close`. It had
+  passed in 0.4 to 1.5 s in every run back to 7957 and got slower as the days went on.
+- **First hypotheses and what refuted them:** paddock-proc's Session change ee3aeb503 (spotter-render does not use `Session`; the same
+  commit e0fd0f511 passed in 8335 and failed in 8341); a new Chrome for Testing (unchanged 156.0.8078.47 since 2026-11-09); a slow
+  `Browser.close` reply (5.55 s = under 0.6 s of reply plus the 5 s wait); CPU starvation (the stuck browser was waiting on disk
+  reads, not runnable).
+- **Root cause:** when Chrome quits on macOS, a thread-pool task reads through its temp folder. Chromium takes that folder from
+  `MAC_CHROMIUM_TMPDIR`, or else from `NSTemporaryDirectory`, which ignores `TMPDIR` (base/files/file_util_apple.mm). That is the
+  user's `/private/var/folders/.../T`, shared by local gates and the three CI runners (one user). It held 903,000 entries, 730,000 of
+  them `x9-fixture-*` folders that conformance's `makeApp` made with mkdtemp and never removed. Under I/O load the read outlasted the
+  grace. Evidence: `sample` of a stuck browser showed one ThreadPoolForegroundWorker in readdir/`__getdirentries64` plus fnmatch for 802
+  of 806 samples, and lsof showed the T folder open. With 4 workers: unset, 55 of 80 closes took over 5 s; `TMPDIR` set to a small
+  folder, 16 of 16 (not honoured); `MAC_CHROMIUM_TMPDIR` set to a small folder, 0 of 32.
+- **Fix:** every browser launch (spotter-render, and under rule 55 the canonical paddock-chromium and Debrief's chromium-driver)
+  makes an empty `browser-temp` inside its profile and passes it as `MAC_CHROMIUM_TMPDIR`. `makeApp` uses one folder per process and
+  removes it at exit. A close that needs the kill now logs a warning (canonical, Debrief).
+- **Why the logs did not show it:** the close path logged nothing, and the test said only "needed a kill". The cause took a stack sample.
+- **Class: tests leave folders in the system temp folder (recorded for the foundation queue, not fixed here).** The repo has 147
+  `tmpdir()` sites in 97 JS/TS files, 60 `std::env::temp_dir()` sites and 24 `paddock_testkit::tempdir` sites in Rust (the 2,005
+  `tempfile::tempdir` sites remove their folder on drop and leak only when a test is killed). One conformance run still leaves about
+  120 other folders there (`paddock-isolation-*`, `paddock-tauri-tools-*`, `paddock-sccache-*`, `paddock-rustup-*`,
+  `paddock-job-tmpdir-*` and more). The planned redesign is a shared per-run scratch root for tests, plus a report-only conformance
+  check with a positive control (ER-21, ER-41).

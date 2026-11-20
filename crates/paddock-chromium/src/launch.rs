@@ -48,6 +48,26 @@ pub fn warm_up(exe: &Browser) -> Result<Duration> {
     paddock_proc::warm_up(&exe.path, &["--version"]).map_err(Error::Launch)
 }
 
+/// The browser's own temp folder, inside its profile and emptied at each start: Chromium on macOS takes its temp folder from
+/// [`MAC_TEMP_ENV`], so it never reads the user's temp folder. Chrome reads through its temp folder when it quits, and with a
+/// full user temp folder (900,000 entries) that read outlasted [`CLOSE_GRACE`] and the browser was killed (Spotter's copy,
+/// CI 8334, 8341, 8346).
+pub const BROWSER_TEMP: &str = "browser-temp";
+
+/// Chromium's own temp-folder override on macOS (`base::GetTempDir` reads it before `NSTemporaryDirectory`, which ignores
+/// `TMPDIR`; base/files/file_util_apple.mm, read 2026-11-20). Other systems ignore it.
+pub const MAC_TEMP_ENV: &str = "MAC_CHROMIUM_TMPDIR";
+
+/// Makes [`BROWSER_TEMP`] inside `profile`, empty, and returns it.
+fn browser_temp(profile: &Path) -> std::io::Result<PathBuf> {
+    let t = profile.join(BROWSER_TEMP);
+    if t.exists() {
+        std::fs::remove_dir_all(&t)?;
+    }
+    std::fs::create_dir_all(&t)?;
+    Ok(t)
+}
+
 /// The close grace for a profile kind: [`CLOSE_GRACE`] for a throwaway one, [`CLOSE_GRACE_KEPT`] for a kept one.
 pub fn close_grace_for(profile: &Profile) -> Duration {
     match profile {
@@ -627,9 +647,19 @@ impl Chromium {
         {
             log::warn!("The browser frame colour could not be written: {e}");
         }
+        let temp = match browser_temp(&dir) {
+            Ok(t) => t,
+            Err(e) => {
+                cleanup(&dir, throwaway);
+                return Err(Error::Launch(format!(
+                    "the browser's temp folder could not be created: {e}"
+                )));
+            }
+        };
         let stderr = std::fs::File::create(dir.join(STDERR_FILE))
             .map_or_else(|_| std::process::Stdio::null(), std::process::Stdio::from);
         let mut cmd = paddock_proc::command(&exe.path);
+        cmd.env(MAC_TEMP_ENV, &temp);
         cmd.args(command_line(exe.flavor, &dir, opts, sandbox))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -928,6 +958,12 @@ impl Chromium {
                 std::thread::sleep(Duration::from_millis(25));
                 exited = !self.proc().is_running();
             }
+        }
+        if !exited {
+            log::warn!(
+                "The browser did not quit within {grace:?} after Browser.close (answered: {:?}) and is ended",
+                self.close_answered
+            );
         }
         self.proc().kill();
         if self.throwaway {
