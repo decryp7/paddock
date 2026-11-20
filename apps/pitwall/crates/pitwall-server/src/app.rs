@@ -259,6 +259,14 @@ impl AppState {
         crate::warm::drop_prefix(&self.dirs.slots(), &crate::warm::model_prefix(id.as_str()), None);
     }
 
+    /// Several models were removed: their cached answers and saved prompt prefixes go now, in one cache clear and one listing of
+    /// the prefix folder (ADR 0108, PW-1). `invalidate_model` is this for one.
+    pub fn invalidate_models(&self, ids: &[ModelId]) {
+        for id in ids {
+            self.invalidate_model(id);
+        }
+    }
+
     /// The engine build that serves models changed: everything computed by the old one goes now.
     pub fn invalidate_engine(&self) {
         self.caches.clear(&pitwall_core::cache::Scope::All);

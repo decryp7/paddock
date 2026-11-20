@@ -82,3 +82,47 @@ async fn a_repeated_id_in_one_call_answers_not_found_the_second_time() {
     assert_eq!(r.json()[0], json!({"ok": null}));
     assert_eq!(r.json()[1]["err"]["code"], "notFound");
 }
+
+/// PW-1 (ADR 0108, P2-2): deleting N models costs the caches one clear and the keep-warm folder one listing, not N of each. The
+/// slots folder is listed once for the whole call, and every deleted model's saved prefix is gone.
+#[tokio::test]
+async fn delete_models_lists_the_keep_warm_folder_once() {
+    let h = harness(false).await;
+    let m = h.st.dirs.models().join("o/many");
+    std::fs::create_dir_all(&m).unwrap();
+    let names: Vec<String> = (0..5).map(|i| format!("many{i}-q4_k_m")).collect();
+    for n in &names {
+        std::fs::write(m.join(format!("{n}.gguf")), crate::common::gguf("llama")).unwrap();
+    }
+    let slots = h.st.dirs.slots();
+    std::fs::create_dir_all(&slots).unwrap();
+    for n in &names {
+        std::fs::write(slots.join(pitwall_server::warm::file_name(n, "fast", "fp", "p")), b"x").unwrap();
+    }
+    std::fs::write(slots.join(pitwall_server::warm::file_name(TINY, "fast", "fp", "p")), b"x").unwrap();
+    let before = pitwall_server::warm::listings(&slots);
+    let r = h.rpc("delete_models", json!({"ids": names})).await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert!(r.json().as_array().unwrap().iter().all(|i| i == &json!({"ok": null})), "{}", r.body);
+    assert_eq!(pitwall_server::warm::listings(&slots) - before, 1, "one listing for 5 models");
+    assert_eq!(pitwall_server::warm::usage(&slots).0, 1, "only the kept model's prefix is left");
+}
+
+/// The positive control (ER-33) of the test above: the single-model call lists once per model, so the counter sees a loop.
+#[tokio::test]
+async fn single_invalidations_list_the_folder_once_each() {
+    let h = harness(false).await;
+    let st = &h.st;
+    let ids: Vec<_> = (0..4)
+        .map(|i| pitwall_core::ids::ModelId::parse(&format!("c{i}-q4_k_m")).unwrap())
+        .collect();
+    let slots = st.dirs.slots();
+    let before = pitwall_server::warm::listings(&slots);
+    for id in &ids {
+        st.invalidate_model(id);
+    }
+    assert_eq!(pitwall_server::warm::listings(&slots) - before, 4);
+    let before = pitwall_server::warm::listings(&slots);
+    st.invalidate_models(&ids);
+    assert_eq!(pitwall_server::warm::listings(&slots) - before, 1, "the bulk form lists once");
+}

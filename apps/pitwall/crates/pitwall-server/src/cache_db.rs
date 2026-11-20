@@ -241,6 +241,7 @@ fn writer_loop(c: &Connection, rx: &Receiver<Job>, limits: &Limiter, pending: &P
                     Scope::Kind(k) => c.execute("DELETE FROM entries WHERE kind=?1", params![k.name()]),
                     Scope::App(a) => c.execute("DELETE FROM entries WHERE app=?1", params![a]),
                     Scope::Model(m) => c.execute("DELETE FROM entries WHERE model=?1", params![m]),
+                    Scope::Models(ms) => ms.iter().map(|m| c.execute("DELETE FROM entries WHERE model=?1", params![m])).sum(),
                     Scope::Preset(p) => c.execute("DELETE FROM entries WHERE preset=?1", params![p]),
                 };
                 lock(pending).retain(|(k, _), (_, meta, _)| !scope.covers(*k, meta));
@@ -949,6 +950,53 @@ mod tests {
         s.put(Kind::Response, [5; 32], vec![1], meta("x", "m"), 0);
         s.clear(&Scope::All);
         assert!(s.get(Kind::Response, &[5; 32], 1).is_none());
+    }
+
+    /// PW-1 (ADR 0108, P2-2): clearing the entries of N models is one commit, however large N is; the positive control below shows
+    /// the counter sees one commit per single-model clear.
+    #[test]
+    fn clearing_many_models_is_one_commit() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, spy) = open_spied(d.path(), 1_000_000);
+        for i in 0..8u8 {
+            s.put(Kind::Embedding, [i; 32], vec![i; 4], meta("app", &format!("m{i}")), 1);
+        }
+        s.put(Kind::Embedding, [100; 32], vec![1; 4], meta("app", "keep"), 1);
+        s.flush();
+        let commits = spy.commits();
+        let models: Vec<String> = (0..8).map(|i| format!("m{i}")).collect();
+        assert_eq!(s.clear(&Scope::Models(models)), 8);
+        assert_eq!(spy.commits() - commits, 1, "one commit for 8 models");
+        assert_eq!(s.stats(Kind::Embedding).entries, 1, "the other model's entry stays");
+    }
+
+    /// The positive control (ER-33) of the test above.
+    #[test]
+    fn the_spy_sees_one_commit_per_single_model_clear() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, spy) = open_spied(d.path(), 1_000_000);
+        for i in 0..8u8 {
+            s.put(Kind::Embedding, [i; 32], vec![i; 4], meta("app", &format!("m{i}")), 1);
+        }
+        s.flush();
+        let commits = spy.commits();
+        for i in 0..8 {
+            s.clear(&Scope::Model(format!("m{i}")));
+        }
+        assert_eq!(spy.commits() - commits, 8);
+    }
+
+    /// Pending (not yet written) stores of the models are cleared too.
+    #[test]
+    fn clearing_many_models_drops_what_is_still_pending() {
+        let d = tempfile::tempdir().unwrap();
+        let s = open(d.path(), 10_000);
+        s.put(Kind::Response, [1; 32], vec![1], meta("a", "m1"), 0);
+        s.put(Kind::Response, [2; 32], vec![1], meta("a", "m2"), 0);
+        s.put(Kind::Response, [3; 32], vec![1], meta("a", "m3"), 0);
+        s.clear(&Scope::Models(vec!["m1".into(), "m2".into()]));
+        assert!(s.get(Kind::Response, &[1; 32], 1).is_none() && s.get(Kind::Response, &[2; 32], 1).is_none());
+        assert!(s.get(Kind::Response, &[3; 32], 1).is_some());
     }
 
     #[test]

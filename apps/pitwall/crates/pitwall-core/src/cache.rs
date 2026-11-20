@@ -189,6 +189,8 @@ pub enum Scope {
     App(String),
     /// Entries of one model.
     Model(String),
+    /// Entries of any of several models: one clear for a batch of removed models (ADR 0108, PW-1).
+    Models(Vec<String>),
     /// Entries of requests that named one preset.
     Preset(String),
 }
@@ -201,6 +203,7 @@ impl Scope {
             Scope::Kind(k) => *k == kind,
             Scope::App(a) => &meta.app == a,
             Scope::Model(m) => &meta.model == m,
+            Scope::Models(ms) => ms.contains(&meta.model),
             Scope::Preset(p) => &meta.preset == p,
         }
     }
