@@ -1278,3 +1278,11 @@ owner = "ER-21 class: a read on 'it is in the DOM' (feat/e2e-ready-gating)"
 since = 2026-11-18
 review_by = 2026-12-18
 approved = "user"
+
+[[report_only]]
+id = "run-conclusion-readers"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in the commit that removes this row; removing the row makes conformance/test/ci-verdict-reader.test.mjs fail on a new reader of a run's conclusion, a stale entry and growth of conformance/ci/run-conclusion-readers.json (which only shrinks, ER-46)"
+owner = "ER-15 (one reader of a run's pass or fail): feat/train-release-command"
+since = 2026-11-20
+review_by = 2026-12-18
+approved = "user"

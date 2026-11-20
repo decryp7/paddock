@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { describe, test } from 'node:test';
 import { lint, messagesInRange } from '../conformance/src/commit-lint.mjs';
-import { C100_INPUTS, guardSet, adoptsPerMachine, affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, commitLintRange, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+import { C100_INPUTS, guardSet, adoptsPerMachine, affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, verdictGreen, ciOutputs, commitLintRange, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 /**
  * A paddock.ci.json process pattern as host-cleanup runs it: {tmp}, {build} and {slot} filled in by the real
@@ -736,6 +736,8 @@ describe('chooseBase', () => {
   const contains = (sha) => sha !== 'elsewhere';
   const mergeBase = (b) => (b === 'main' ? 'mb123' : null);
   const run_ = (over) => ({ id: 1, conclusion: 'success', event: 'push', head_branch: 'main', path: 'ci.yml@refs/heads/main', head_sha: 'green1', ...over });
+  // The one verdict reader (`./dev ci verdict`): a run is green when it says so, never by the run's own conclusion.
+  const isGreen = (r) => r.head_sha.startsWith('green');
 
   test('a pull request diffs from its merge base', () => {
     assert.equal(chooseBase({ event: 'pull_request', baseRef: 'main', contains, mergeBase }).base, 'mb123');
@@ -751,13 +753,36 @@ describe('chooseBase', () => {
       run_({ head_sha: 'green1', id: 7 }),
       run_({ head_sha: 'green0' }),
     ];
-    const r = chooseBase({ event: 'push', ref: 'refs/heads/main', runs, contains, mergeBase });
+    const r = chooseBase({ event: 'push', ref: 'refs/heads/main', runs, contains, mergeBase, isGreen });
     assert.equal(r.base, 'green1');
     assert.match(r.reason, /run 7/);
   });
 
+  test('a run that ended success but is not green by the verdict reader is never the base (a rerun of failures ends success too)', () => {
+    const rerun = run_({ head_sha: 'rerun-only', conclusion: 'success', id: 9 });
+    assert.equal(chooseBase({ event: 'push', ref: 'refs/heads/main', runs: [rerun], contains, mergeBase, isGreen }).base, null);
+    // Without a reader the conclusion is not trusted either: nothing is green.
+    assert.equal(chooseBase({ event: 'push', ref: 'refs/heads/main', runs: [run_()], contains, mergeBase }).base, null);
+  });
+
+  test('the verdict reader is asked per run: exit 0 is green, 5 is red, anything else is a warning and not green (positive control)', () => {
+    const said = [];
+    const asked = [];
+    const mk = (status) => (cmd, args) => {
+      asked.push([cmd, ...args]);
+      if (status !== 0) throw Object.assign(new Error('exit'), { status });
+    };
+    const r = { head_sha: 'abcdef0123456789' };
+    assert.equal(verdictGreen({ PLAN_TOKEN: 't' }, (m) => said.push(m), mk(0))(r), true);
+    assert.deepEqual(asked[0], ['./dev', 'ci', 'verdict', '--workflow', 'ci.yml', '--sha', 'abcdef0123456789']);
+    assert.equal(verdictGreen({}, (m) => said.push(m), mk(5))(r), false);
+    assert.equal(said.length, 0, 'red is an answer, not a warning');
+    assert.equal(verdictGreen({}, (m) => said.push(m), mk(6))(r), false);
+    assert.match(said[0], /could not judge abcdef0123/);
+  });
+
   test('a push to main with no green run, or unreadable runs, tests everything', () => {
-    assert.equal(chooseBase({ event: 'push', ref: 'refs/heads/main', runs: [run_({ conclusion: 'failure' })], contains, mergeBase }).base, null);
+    assert.equal(chooseBase({ event: 'push', ref: 'refs/heads/main', runs: [run_({ head_sha: 'red', conclusion: 'failure' })], contains, mergeBase, isGreen }).base, null);
     assert.equal(chooseBase({ event: 'push', ref: 'refs/heads/main', runs: null, contains, mergeBase }).base, null);
   });
 

@@ -299,17 +299,25 @@ mod tests {
         Ok(())
     }
 
-    /// The positive control: one accepted flaky test (and one already failing on main) is landable, and says so.
+    /// The positive control: one accepted flaky test is landable, and says so.
     #[test]
-    fn one_accepted_flaky_test_and_an_old_failure_on_main_are_landable() {
-        let d = doc(vec![
-            row("e2e", Some(A11Y), false, "flaky"),
-            row("e2e", Some(OLD), false, "already-failing"),
-        ]);
+    fn one_accepted_flaky_test_is_landable() {
+        let d = doc(vec![row("e2e", Some(A11Y), false, "flaky")]);
         let l = judge(&d, 8400, SHA, "debrief.yml", &yes).unwrap();
-        assert_eq!((l.run, l.flaky, l.already_failing), (8400, 1, 1));
-        assert_eq!(l.lines.len(), 2);
-        assert_eq!(l.summary(), "full run 8400 with 1 accepted FLAKY, 1 already failing on main");
+        assert_eq!((l.run, l.flaky), (8400, 1));
+        assert_eq!(l.lines.len(), 1);
+        assert_eq!(l.summary(), "full run 8400 with 1 accepted FLAKY");
+    }
+
+    /// User rule 2026-11-20 (common practice): a test that fails both tries blocks the landing, also when it fails on main too.
+    #[test]
+    fn a_test_that_fails_on_main_too_still_blocks_the_landing() {
+        let flaky = || row("e2e", Some(A11Y), false, "flaky");
+        let old = row("e2e", Some(OLD), false, "already-failing");
+        let why = refused(&doc(vec![flaky(), old]), &yes);
+        assert!(why.contains("fails on main too") && why.contains("blocks"), "{why}");
+        // Alone, too: nothing but an old failure is not landable.
+        assert!(judge(&doc(vec![row("e2e", Some(OLD), false, "already-failing")]), 8400, SHA, "debrief.yml", &yes).is_err());
     }
 
     fn refused(d: &Value, ok: &dyn Fn(&str, &str) -> Result<(), String>) -> String {
@@ -365,15 +373,6 @@ mod tests {
         d["ok"] = json!(false);
         assert!(refused(&d, &yes).contains("did not succeed"));
         assert!(refused(&doc(vec![]), &yes).contains("no failing rows"));
-    }
-
-    #[test]
-    fn an_old_failure_needs_a_main_baseline() {
-        let mut d = doc(vec![row("e2e", Some(OLD), false, "already-failing")]);
-        d["baseline"]["main"] = json!(false);
-        assert!(refused(&d, &yes).contains("not on a main run"));
-        d.as_object_mut().unwrap().remove("baseline");
-        assert!(refused(&d, &yes).contains("not on a main run"));
     }
 
     fn info(sha: &str, conclusion: &str, attempt: u64) -> RunInfo {

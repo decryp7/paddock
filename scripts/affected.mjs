@@ -977,7 +977,7 @@ export function onlyApp(plan, app) {
  * read for a push to main); `contains(sha)` says whether HEAD contains a commit; `mergeBase(ref)` gives a pull request's.
  * Returns { base, reason }.
  */
-export function chooseBase({ event, ref, inputBase, baseRef, mainRef = 'refs/heads/main', runs = null, contains, mergeBase }) {
+export function chooseBase({ event, ref, inputBase, baseRef, mainRef = 'refs/heads/main', runs = null, isGreen = () => false, contains, mergeBase }) {
   if (event === 'pull_request' || event === 'pull_request_target') {
     const b = mergeBase(baseRef);
     return b ? { base: b, reason: `merge base with ${baseRef}` } : { base: null, reason: `no merge base with ${baseRef}: everything` };
@@ -985,10 +985,33 @@ export function chooseBase({ event, ref, inputBase, baseRef, mainRef = 'refs/hea
   if (event === 'workflow_dispatch') return inputBase ? { base: inputBase, reason: `the base input ${inputBase}` } : { base: null, reason: 'a manual run without a base: everything' };
   if (event === 'push' && ref === mainRef) {
     if (!runs) return { base: null, reason: 'the CI runs could not be read: everything' };
-    const green = runs.find((r) => r.conclusion === 'success' && r.event === 'push' && r.head_branch === 'main' && /^ci\.ya?ml@/.test(r.path ?? 'ci.yml@') && contains(r.head_sha));
+    // A run is green only by the one verdict reader (`./dev ci verdict`, ER-15): a run's own conclusion `success` also covers a rerun of
+    // failures and a skipped run. `isGreen` is that reader; without one no run is green.
+    const green = runs.find((r) => r.event === 'push' && r.head_branch === 'main' && /^ci\.ya?ml@/.test(r.path ?? 'ci.yml@') && contains(r.head_sha) && isGreen(r));
     return green ? { base: green.head_sha, reason: `the last green ci run on main (${green.head_sha.slice(0, 10)}, run ${green.id})` } : { base: null, reason: 'no green ci run on main that HEAD contains: everything' };
   }
   return { base: null, reason: `${event} ${ref}: everything` };
+}
+
+/**
+ * Whether the one verdict reader (`./dev ci verdict --workflow ci.yml --sha <sha>`: exit 0 is a full green run of that commit, 5 red or
+ * partial, 6 not measured) says a run is green. Not measured is a warning and not green, never a pass.
+ */
+export function verdictGreen(env, warn, run = execFileSync) {
+  return (r) => {
+    try {
+      run('./dev', ['ci', 'verdict', '--workflow', 'ci.yml', '--sha', r.head_sha], {
+        cwd: ROOT,
+        stdio: 'ignore',
+        env: { ...env, GITEA_TOKEN: env.PLAN_TOKEN ?? env.GITEA_TOKEN },
+        timeout: 120_000,
+      });
+      return true;
+    } catch (e) {
+      if (e.status !== 5) warn(`::warning::./dev ci verdict could not judge ${r.head_sha.slice(0, 10)} (${e.status ?? e.message}); it is not taken as green`);
+      return false;
+    }
+  };
 }
 
 /** The newest ci.yml runs on main (Gitea API), or null with a warning when they cannot be read. */
@@ -1004,7 +1027,7 @@ async function ciRuns(env, warn) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const runs = (await res.json()).workflow_runs ?? [];
       out.push(...runs);
-      if (runs.length < 50 || out.some((r) => r.conclusion === 'success' && /^ci\.ya?ml@/.test(r.path ?? ''))) break;
+      if (runs.length < 50) break;
     }
     return out;
   } catch (e) {
@@ -1178,7 +1201,7 @@ async function ci(env, { app = null } = {}) {
   const event = env.GITHUB_EVENT_NAME;
   const ref = env.GITHUB_REF;
   const runs = event === 'push' && ref === 'refs/heads/main' ? await ciRuns(env, log) : null;
-  const { base, reason } = chooseBase({ event, ref, inputBase: env.PLAN_BASE, baseRef: env.GITHUB_BASE_REF, runs, contains, mergeBase });
+  const { base, reason } = chooseBase({ event, ref, inputBase: env.PLAN_BASE, baseRef: env.GITHUB_BASE_REF, runs, isGreen: verdictGreen(env, log), contains, mergeBase });
   const planned = planFor({ base: env.PLAN_APP ? null : base, all: env.PLAN_APP ? true : !base, explain: true });
   const { graph } = planned;
   if (env.PLAN_APP && !graph.apps.has(env.PLAN_APP)) throw new Error(`unknown app ${env.PLAN_APP} (no apps/${env.PLAN_APP}/paddock.ci.json)`);
