@@ -592,7 +592,19 @@ mod tests {
         t + Duration::from_secs(10)
     }
 
+    /// Sets a folder's modification time. Windows needs write-attributes access and backup semantics to open a folder for
+    /// that (as the filetime crate does); a read-only open there is "Access is denied" (ci.yml 8359, dyno windows-latest).
     fn set_mtime(p: &std::path::Path, t: SystemTime) {
-        std::fs::File::open(p).unwrap().set_modified(t).unwrap();
+        let mut open = std::fs::OpenOptions::new();
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+            open.access_mode(FILE_WRITE_ATTRIBUTES).custom_flags(FILE_FLAG_BACKUP_SEMANTICS);
+        }
+        #[cfg(not(windows))]
+        open.read(true);
+        open.open(p).unwrap().set_modified(t).unwrap();
     }
 }

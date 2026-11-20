@@ -9,10 +9,10 @@ iso="$here/../kit.sh"
 . "$here/../safe-rm.sh"
 folder=$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9._-' '_')
 if [ "$RUNNER_OS" = Linux ]; then
-  mount="${PADDOCK_CI_MOUNT:-/sccache}"
-  if [ -d "$mount" ] && [ -w "$mount" ]; then base="$mount"
-  else echo "::notice::no /sccache mount in this container; the npm and Angular caches live and die with the job."; exit 0; fi
-  npm_cache="$base/npm"; ng_cache="$base/angular/$folder"
+  # The job's own folders (ADR 0111): the action fills and keeps them through actions/cache; the runner's shared /sccache mount is
+  # never written.
+  base="${RUNNER_TEMP:?RUNNER_TEMP is not set}/node-caches"
+  npm_cache="$base/npm"; ng_cache="$base/angular"
   mkdir -p "$npm_cache"
 else
   # The host's kept folders (job-isolation): npm's cache and the Angular cache are the job slot's own.

@@ -93,7 +93,7 @@ jobs:
           sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       # One key per shard: each shard builds the same targets, so its fuzz/target is all it needs.
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
@@ -106,7 +106,7 @@ jobs:
       # The corpus grows with every night: restored from the newest earlier one for the same fuzz dir and lock file and saved
       # under a key of its own (a cache is never overwritten under the same key). libFuzzer writes the inputs it finds to the
       # FIRST folder it is given, so `corpus/<target>` comes first on the command line; `work/<target>` is only extra input.
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ inputs.fuzz-dir }}/corpus
           key: fuzz-corpus-shard${{ matrix.shard }}-${{ inputs.fuzz-dir }}-${{ hashFiles(format('{0}/Cargo.lock', inputs.fuzz-dir)) }}-${{ github.run_id }}

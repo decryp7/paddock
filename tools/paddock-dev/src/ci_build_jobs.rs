@@ -17,8 +17,8 @@
 //! 1. `PADDOCK_CI_BUILD_JOBS` (a runner's `runner.envs`), a whole number >= 1: used as it is, divided by the split.
 //! 2. Otherwise the smaller of the cores share, `(cores - PADDOCK_CI_RESERVED_CORES) / PADDOCK_CI_JOBS_PER_HOST`, and the memory
 //!    share, `(RAM - PADDOCK_CI_RESERVED_RAM_MB) / (PADDOCK_CI_JOBS_PER_HOST x PADDOCK_CI_RUSTC_MB)`, divided by the split, at
-//!    least 1. Without the `runner.envs` the runner class's known layout decides ([`class_default`]); Linux keeps cargo's
-//!    default until its share is measured (docs/benchmarks.md, Gaps).
+//!    least 1. Without the `runner.envs` the runner class's known layout decides ([`class_default`]); Linux is d-gtr9's layout (6 jobs
+//!    on 30 cores, [`layout_cores`]; a different core count is a warning).
 //! 3. NEXTEST_TEST_THREADS: the runner's `PADDOCK_CI_TEST_THREADS`, else the class's measured number, else the job's core share.
 //!
 //! The host's cores come from `nproc`, then `sysctl -n hw.ncpu`, then `NUMBER_OF_PROCESSORS`, then `getconf` (as the script
@@ -156,7 +156,7 @@ pub fn is_amount(s: &str) -> bool {
 /// 2026-11-09 for Windows and the shared Mac; docs/benchmarks.md, "CI share on the shared Mac").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Setting {
-    /// Jobs the host runs at once (`-`: the class keeps cargo's default, Linux).
+    /// Jobs the host runs at once (the runner's capacity).
     Share,
     /// Cores kept for other work.
     Cores,
@@ -169,9 +169,17 @@ pub enum Setting {
 /// The class default of a setting as the script's text: a number, or `-` for "not set for this class".
 pub fn class_default(os: &str, what: Setting) -> &'static str {
     match (os, what) {
-        ("Linux", Setting::Share) => "-",
+        // d-gtr9: a Proxmox LXC raised to 30 CPUs and 64 GiB on 2026-11-20, runner capacity 6. With no share each of the 6 jobs
+        // used all 30 cores and the Linux jobs ran 1.2 to 1.7 times slower than at 3 lanes (runs 8335 against 8346; Linux
+        // compile in ci.yml 9.4 -> 17.6 job-min): docs/benchmarks.md, "CI job cost, step by step".
+        ("Linux", Setting::Share) => "6",
         ("Windows", Setting::Share) => "3",
-        ("macOS", Setting::Threads) | ("Windows", Setting::Threads) => "8",
+        // macOS measured 8 (the tests mostly wait). Windows has no measured number: it takes the job's core share (16 / 3 = 5),
+        // because 3 jobs x 8 threads plus a 5-job build oversubscribed the 16 vCPUs and git-heavy tests ran 2-8 times slower
+        // (runs 8335 against 8359).
+        // ER-48 exception, measured: 3 jobs x 8 threads on 12 usable cores. The tests mostly wait; 4 threads made a dyno run 2.3
+        // times longer than 14 and 8 matched 14 (2026-11-09, docs/benchmarks.md, "CI share on the shared Mac").
+        ("macOS", Setting::Threads) => "8",
         ("macOS", Setting::Share) => "3",
         ("macOS", Setting::Cores) => "2",
         ("macOS", Setting::Ram) => "32768",
@@ -179,6 +187,17 @@ pub fn class_default(os: &str, what: Setting) -> &'static str {
         (_, Setting::Share) => "1",
         (_, Setting::Cores) => "0",
         (_, Setting::Ram) => "2048",
+    }
+}
+
+/// The cores a class's layout was written for (the `Share` is that host's runner capacity); `None` where the layout names none.
+/// A host that reports another count is named in a warning: the layout needs the runner's new capacity.
+pub fn layout_cores(os: &str) -> Option<i64> {
+    match os {
+        "Linux" => Some(30),
+        "Windows" => Some(16),
+        "macOS" => Some(14),
+        _ => None,
     }
 }
 
@@ -348,23 +367,6 @@ fn decide(step: &mut Step<'_>, host: &dyn Host, split_text: &str) -> Result<(), 
         }
         format!("the {shown} class default of {share} jobs per host")
     };
-    if share == "-" {
-        // Linux keeps cargo's default (every core per job) until its share is measured. A split job (cargo mutants) still
-        // divides the cores between its builds.
-        if split > 1 && is_count(&n) {
-            let jobs = (number(&n) / split).max(1);
-            return step.put(
-                "CARGO_BUILD_JOBS",
-                &jobs.to_string(),
-                &format!("{n} cores / {split} builds at once; otherwise the runner class keeps cargo's default"),
-            );
-        }
-        step.say(&format!(
-            "CARGO_BUILD_JOBS stays unset: cargo uses all {} cores, as before (this runner class's share is not measured yet)",
-            or_unknown(&n, "its")
-        ));
-        return Ok(());
-    }
     if !is_count(&share) {
         return Err(step.fail(
             &format!("PADDOCK_CI_JOBS_PER_HOST must be a whole number >= 1, not '{share}'"),
@@ -399,6 +401,14 @@ fn decide(step: &mut Step<'_>, host: &dyn Host, split_text: &str) -> Result<(), 
         return Ok(());
     }
     let (cores, reserved_n, share_n) = (number(&n), number(&reserved), number(&share));
+    if var(env, "PADDOCK_CI_JOBS_PER_HOST").is_none()
+        && let Some(documented) = layout_cores(&os)
+        && documented != cores
+    {
+        step.print(&format!(
+            "::warning::build-jobs: the {os} layout documents {documented} cores, this host has {cores}; the share follows the real cores, but update the {os} layout in ci_build_jobs.rs and .gitea/actions/README.md to the runner's new capacity"
+        ));
+    }
     if reserved_n >= cores {
         step.print(&format!(
             "::warning::PADDOCK_CI_RESERVED_CORES ({reserved}) keeps all of this host's {n} cores; the job gets 1 build job"
@@ -484,12 +494,111 @@ mod tests {
     }
 
     #[test]
-    fn linux_keeps_cargos_default_unless_the_job_splits() {
-        let (_, out, err) = go("1", &Fixed("16", "131072"), &[("RUNNER_OS", "Linux")]);
-        assert_eq!(out, "");
-        assert!(err.contains("CARGO_BUILD_JOBS stays unset: cargo uses all 16 cores"), "{err}");
-        let (_, out, _) = go("4", &Fixed("16", "131072"), &[("RUNNER_OS", "Linux")]);
-        assert_eq!(out, "CARGO_BUILD_JOBS=4\n");
+    fn linux_gets_a_sixth_of_d_gtr9s_thirty_cores() {
+        // 2026-11-20: 30 CPUs, 64 GiB, runner capacity 6 (docs/benchmarks.md, "CI job cost, step by step").
+        let (code, out, err) = go("1", &Fixed("30", "65536"), &[("RUNNER_OS", "Linux")]);
+        assert_eq!(code, 0);
+        assert_eq!(out, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\n");
+        assert!(err.contains("(30 cores - 0 kept) / 6 jobs per host"), "{err}");
+        assert!(!out.contains("::warning::"), "the layout's cores matched: {out}");
+        // A split job divides the share between its builds.
+        let (_, out, _) = go("2", &Fixed("30", "65536"), &[("RUNNER_OS", "Linux")]);
+        assert_eq!(out, "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\n");
+    }
+
+    #[test]
+    fn linux_memory_bounds_the_share() {
+        // 8 GiB: (8192 - 2048) / (6 x 1536) = 0 by RAM, so 1 build job; the tests keep the core share of 5.
+        let (_, out, err) = go("1", &Fixed("30", "8192"), &[("RUNNER_OS", "Linux")]);
+        assert_eq!(out, "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=5\n");
+        assert!(err.contains("MB per rustc"), "{err}");
+    }
+
+    #[test]
+    fn linux_names_a_core_count_that_differs_from_the_layout() {
+        let (code, out, _) = go("1", &Fixed("16", "65536"), &[("RUNNER_OS", "Linux")]);
+        assert_eq!(code, 0);
+        assert!(
+            out.starts_with("::warning::build-jobs: the Linux layout documents 30 cores, this host has 16")
+                && out.contains("update the Linux layout in ci_build_jobs.rs and .gitea/actions/README.md to the runner's new capacity"),
+            "{out}"
+        );
+        assert!(
+            out.contains("CARGO_BUILD_JOBS=2\n"),
+            "the share still follows the real cores: {out}"
+        );
+        // Positive control: a runner that states its own layout is not second-guessed, and other classes have no documented cores.
+        let (_, out, _) = go(
+            "1",
+            &Fixed("16", "65536"),
+            &[("RUNNER_OS", "Linux"), ("PADDOCK_CI_JOBS_PER_HOST", "4")],
+        );
+        assert!(!out.contains("::warning::"), "{out}");
+        // One positive control per class: Windows documents 16, macOS 14.
+        let (_, out, _) = go("1", &Fixed("8", "16316"), &[("RUNNER_OS", "Windows")]);
+        assert!(
+            out.contains("::warning::build-jobs: the Windows layout documents 16 cores, this host has 8;"),
+            "{out}"
+        );
+        let (_, out, _) = go("1", &Fixed("8", "16316"), &[("RUNNER_OS", "macOS")]);
+        assert!(
+            out.contains("::warning::build-jobs: the macOS layout documents 14 cores, this host has 8;"),
+            "{out}"
+        );
+        let (_, out, _) = go("1", &Fixed("16", "32768"), &[("RUNNER_OS", "Windows")]);
+        assert!(!out.contains("layout documents"), "{out}");
+        let (_, out, _) = go("1", &Fixed("9", "8192"), &[("RUNNER_OS", "FreeBSD")]);
+        assert!(
+            !out.contains("layout documents"),
+            "a class with no layout is not second-guessed: {out}"
+        );
+    }
+
+    /// ER-48: the jobs a host runs at once, each with its build jobs and test threads, must fit the cores they share.
+    fn oversubscribed(share: i64, per_job: i64, usable_cores: i64) -> bool {
+        share * per_job > usable_cores
+    }
+
+    fn value(out: &str, name: &str) -> i64 {
+        out.lines()
+            .find_map(|l| l.strip_prefix(&format!("{name}=")))
+            .unwrap_or_else(|| panic!("{name} missing in {out}"))
+            .parse()
+            .unwrap()
+    }
+
+    #[test]
+    fn no_class_layout_oversubscribes_its_cores() {
+        // (class, cores, RAM MB) of the runner hosts: d-gtr9, decryp7ology-dev, the shared Mac (docs/benchmarks.md).
+        for (os, cores, ram) in [("Linux", "30", "65536"), ("Windows", "16", "32768"), ("macOS", "14", "65536")] {
+            let share: i64 = class_default(os, Setting::Share).parse().unwrap();
+            let kept: i64 = class_default(os, Setting::Cores).parse().unwrap();
+            let cores_n: i64 = cores.parse().unwrap();
+            let (_, out, _) = go("1", &Fixed(cores, ram), &[("RUNNER_OS", os)]);
+            let (jobs, threads) = (value(&out, "CARGO_BUILD_JOBS"), value(&out, "NEXTEST_TEST_THREADS"));
+            assert!(
+                !oversubscribed(share, jobs, cores_n - kept),
+                "{os}: {share} jobs x {jobs} build jobs on {cores} cores"
+            );
+            // macOS is a recorded, measured exception: 8 test threads in each of 3 jobs on 12 usable cores, because its tests
+            // mostly wait (2026-11-09, docs/benchmarks.md, "CI share on the shared Mac": 4 threads made a dyno run 2.3 times
+            // longer, 8 matched 14).
+            if os == "macOS" {
+                assert_eq!(threads, 8, "the recorded exception changed: update the measurement note");
+            } else {
+                assert!(
+                    !oversubscribed(share, threads, cores_n - kept),
+                    "{os}: {share} jobs x {threads} test threads on {cores} cores"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_invariant_catches_the_layout_that_slowed_windows() {
+        // Positive control: Windows before 2026-11-20 ran 3 jobs x 8 threads on 16 cores (runs 8335 against 8359).
+        assert!(oversubscribed(3, 8, 16));
+        assert!(!oversubscribed(3, 5, 16));
     }
 
     #[test]

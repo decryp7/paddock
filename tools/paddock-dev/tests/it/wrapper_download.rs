@@ -296,15 +296,7 @@ fn locally_nothing_is_downloaded_unless_asked_and_in_ci_it_is_by_default() {
     // In CI the job token is the read credential when no PADDOCK_DEV_TOKEN is set.
     let s = setup();
     let server = Server::start(s.published(&body, &sha));
-    let mount = s.scratch.path().join("missing");
-    let (code, out, err) = s.run(
-        &server,
-        &[
-            ("GITHUB_ACTIONS", "true"),
-            ("GITHUB_TOKEN", "job-token"),
-            ("PADDOCK_CI_MOUNT", mount.to_str().unwrap()),
-        ],
-    );
+    let (code, out, err) = s.run(&server, &[("GITHUB_ACTIONS", "true"), ("GITHUB_TOKEN", "job-token")]);
     assert_eq!((code, out.trim()), (0, "downloaded-binary"), "{err}");
     assert!(
         server

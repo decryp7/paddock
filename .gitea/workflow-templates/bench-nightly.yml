@@ -42,7 +42,7 @@ jobs:
       - uses: decryp7/paddock/.gitea/actions/setup-rust@v0.3.0
 
       # Last green night's results, for the regression check. Exact key per night, newest restored by prefix.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: bench/previous
           key: bench-previous-${{ github.run_id }}
@@ -65,7 +65,7 @@ jobs:
       # Saved only after the budgets held, so a bad night never becomes the baseline.
       - name: Keep these results as the baseline
         run: mkdir -p bench/previous && cp "bench/${APP_ID}.results.json" bench/previous/
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: bench/previous
           key: bench-previous-${{ github.run_id }}

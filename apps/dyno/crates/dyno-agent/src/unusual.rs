@@ -110,7 +110,7 @@ impl UnusualCentre {
             during();
             if let Err(e) = core.store.apply_baseline(&outcome.changes) {
                 // Not stored, so not kept or announced (Dyno ADR 0008, "Store writers"): the next look sees the same programs again.
-                log::error!("dyno-agent: could not store the program baseline: {e}; this look is undone");
+                log::error!("dyno-agent: could not store the program baseline: {e}; this look is dropped");
                 st.baseline = baseline_before;
                 return;
             }

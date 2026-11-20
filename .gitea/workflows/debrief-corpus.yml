@@ -49,7 +49,7 @@ jobs:
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
       # Exact-key lookup only: nothing is downloaded. The marker is saved by the nightly-mark job after a fully green run.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: green
         if: github.event_name == 'schedule'
         with:
@@ -92,10 +92,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; Linux keeps cargo's default).
+      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; each runner class's layout is in ci_build_jobs.rs: Linux 6 jobs on 30 cores).
       - uses: ./.gitea/actions/build-jobs
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
@@ -105,7 +105,7 @@ jobs:
           key: corpus-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
           restore-keys: corpus-${{ runner.os }}-
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: apps/debrief/.corpus-cache
           key: evtx-attack-samples-4ceed2f4706daf601c212a8f91c113dd85349a2c
@@ -132,7 +132,7 @@ jobs:
           mkdir -p .nightly-green
           echo "${{ github.sha }}" > .nightly-green/sha
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .nightly-green
           key: debrief-corpus-nightly-green-${{ github.sha }}

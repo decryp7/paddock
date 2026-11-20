@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.2.0] - 2026-11-20
+## [1.2.0] - 2026-11-21
 
 **The Dyno app and its agent must be the same version.** Dyno 1.2.0 talks a new protocol (version 8) between the app and the agent. At the next start an older app or agent is replaced, never read wrongly. The administrator helper of 1.1.0 keeps working; Settings offers the newer one.
 

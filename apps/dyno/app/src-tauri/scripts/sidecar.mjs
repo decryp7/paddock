@@ -1,65 +1,23 @@
 // Builds dyno-agent, the dyno command (crate dyno-cli) and the benchmark runner dyno-bench (ADR 0030) and puts them where Tauri's `externalBin` expects them:
 // app/src-tauri/binaries/<name>-<target triple>[.exe]. Run by `beforeBuildCommand` / `beforeDevCommand`
 // (tauri.conf.json); `--dev` builds the debug profile. Honours CARGO_TARGET_DIR, a build.target-dir in the cargo configuration (CI's .cargo/ci.toml) and TAURI_ENV_TARGET_TRIPLE.
-import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { createHash } from 'node:crypto';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { cargoTargetDir } from '../../../../../conformance/src/sidecar/sidecar.mjs';
+//
+// This hook never signs and never needs the updater key (ADR 0085 amendment 0085-2026-11-12, item 11: the key is stripped before npm and
+// this hook). On macOS the release's own step (sign-helper.mjs, run by tauri-bundle.sh as --pre-sign) built, sealed and signed the helper
+// first: this script keeps those bytes. Without them it leaves empty signature files, and on a tag it fails naming that step.
+import { buildSidecars, context, helperSigned, isRelease, writeUnsigned } from './sidecar-lib.mjs';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const dev = process.argv.includes('--dev');
-const host = /host: (\S+)/.exec(execFileSync('rustc', ['-vV'], { encoding: 'utf8' }))?.[1];
-const triple = process.env.TAURI_ENV_TARGET_TRIPLE || host;
-if (!triple) throw new Error('cannot tell the target triple (rustc -vV)');
-const profile = dev ? 'dev' : 'dist';
-// [binary name, package]: the CLI's binary is `dyno`, its package `dyno-cli`. The helper (ADR 0027) ships next to the agent on every
-// OS: the program the one OS prompt runs to install it (macOS, Windows), `/usr/bin/dyno-helper` in the .deb; the AppImage never uses it.
-const sidecars = [['dyno-agent', 'dyno-agent'], ['dyno', 'dyno-cli'], ['dyno-bench', 'dyno-bench'], ['dyno-bench-gpu', 'dyno-bench-gpu'], ['dyno-helper', 'dyno-helper']];
-const args = ['build', ...sidecars.flatMap(([, pkg]) => ['-p', pkg]), '--profile', profile];
-if (triple !== host) args.push('--target', triple);
-execFileSync('cargo', args, { cwd: root, stdio: 'inherit' });
-const targetDir = cargoTargetDir(root);
-const exe = triple.includes('windows') ? '.exe' : '';
-for (const [name] of sidecars) {
-  const built = join(targetDir, ...(triple !== host ? [triple] : []), dev ? 'debug' : 'dist', `${name}${exe}`);
-  const out = join(root, 'app', 'src-tauri', 'binaries', `${name}-${triple}${exe}`);
-  mkdirSync(dirname(out), { recursive: true });
-  copyFileSync(built, out);
-  console.log(`sidecar: ${out}`);
-}
-
-// Security review F2 (ADR 0027 amendment): on macOS the helper that the one password prompt copies into /Library as root sits in a
-// user-owned bundle, so the release signs its final bytes with the family update key. Tauri re-signs every sidecar ad hoc
-// (tauri-bundler macos/app.rs: `codesign --force -s <identity>` on every sidecar copy, plus `--options runtime` only with the hardened
-// runtime, which tauri-bundle.sh turns on only with a real Apple identity), so the helper is sealed here the same way first. Measured
-// 2026-11-04: an ad-hoc `codesign --force -s -` of an already ad-hoc signed dyno-helper under another file name leaves the bytes
-// identical (the identifier comes from the embedded Info.plist), so Tauri ships the bytes signed here. With a Developer ID the
-// bytes would change: check-bundle.sh then fails loudly, and that release signs after the bundle instead.
-// The signature goes to binaries/dyno-helper.minisig (bundled into Contents/Resources by tauri.macos.conf.json) and the hash it
-// covers to binaries/dyno-helper.sha256, which scripts/check-bundle.sh compares with the helper inside the built .app (a mismatch
-// fails the release instead of shipping a helper the install would refuse). Without the signing key (forks, pull requests, dev)
-// the signature file is empty: the elevated install then refuses with "no signature file", it never installs unchecked.
-if (triple.includes('apple-darwin')) {
-  const helper = join(root, 'app', 'src-tauri', 'binaries', `dyno-helper-${triple}`);
-  const sig = join(root, 'app', 'src-tauri', 'binaries', 'dyno-helper.minisig');
-  const hashFile = join(root, 'app', 'src-tauri', 'binaries', 'dyno-helper.sha256');
-  if (process.env.TAURI_SIGNING_PRIVATE_KEY) {
-    execFileSync('codesign', ['--force', '-s', '-', helper], { stdio: 'inherit' });
-    // The signature's trusted comment carries the signed file's name, so the helper is signed under `dyno-helper-<version>-<triple>`:
-    // the elevated install requires exactly its own version and architecture, and no older family-signed helper passes.
-    const version = JSON.parse(readFileSync(join(root, 'app', 'src-tauri', 'tauri.conf.json'), 'utf8')).version;
-    const named = join(mkdtempSync(join(tmpdir(), 'dyno-helper-sign-')), `dyno-helper-${version}-${triple}`);
-    copyFileSync(helper, named);
-    execFileSync('npx', ['tauri', 'signer', 'sign', named], { cwd: join(root, 'app'), stdio: 'inherit' });
-    copyFileSync(`${named}.sig`, sig);
-    writeFileSync(hashFile, createHash('sha256').update(readFileSync(helper)).digest('hex') + '\n');
-    console.log(`helper signature: ${sig} covers sha256 ${readFileSync(hashFile, 'utf8').trim()}`);
+const ctx = context({ dev: process.argv.includes('--dev') });
+const prebuilt = ctx.apple && helperSigned(ctx);
+buildSidecars(ctx, { keep: prebuilt ? ['dyno-helper'] : [] });
+if (ctx.apple) {
+  if (prebuilt) {
+    console.log(`sidecar: kept the helper signed by sign-helper.mjs (${ctx.helper})`);
+  } else if (isRelease(ctx.env)) {
+    console.log('::error::the macOS dyno-helper has no signature on a tag run: the signing step (sign-helper.mjs, run by tauri-bundle.sh as --pre-sign) did not leave a signed helper. Next step: check that the release job passes `pre-sign` and that TAURI_SIGNING_PRIVATE_KEY reached it.');
+    process.exit(1);
   } else {
-    writeFileSync(sig, '');
-    writeFileSync(hashFile, '');
-    console.log('::warning::no TAURI_SIGNING_PRIVATE_KEY: the bundled helper carries no signature, its install will be refused');
+    writeUnsigned(ctx);
+    console.log('::warning::no signed helper from sign-helper.mjs: the bundled helper carries no signature, its install will be refused');
   }
 }

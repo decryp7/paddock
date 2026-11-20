@@ -179,8 +179,10 @@ test('the sccache step uses the local disk: the runner home on a host, /sccache 
   assert.match(linux, /^SCCACHE_DIR=.*paddock-nomount\/sccache$/m, 'no mount: a folder of the container');
   const mount = mkdtempSync(join(tmpdir(), 'paddock-mount-'));
   const mounted = runSccacheStep({ RUNNER_OS: 'Linux', RUNNER_TEMP: nomount, PADDOCK_SCCACHE_MOUNT: mount });
-  assert.match(mounted, new RegExp(`^SCCACHE_DIR=${mount.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'), 'a writable mount is used');
-  assert.match(mounted, /^SCCACHE_CACHE_SIZE=20G$/m);
+  const escaped = mount.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  assert.match(mounted, new RegExp(`^SCCACHE_DIR=${escaped}/sccache-s1$`, 'm'), 'a writable mount gives the job its lane folder (ADR 0111)');
+  assert.doesNotMatch(mounted, new RegExp(`^SCCACHE_DIR=${escaped}$`, 'm'), 'never the mount itself: sccache evicts any file below its folder');
+  assert.match(mounted, /^SCCACHE_CACHE_SIZE=10G$/m, 'the 60 GB budget divided between the 6 lanes');
   const redis = runSccacheStep({ BACKEND: 'auto', REDIS_ENDPOINT: 'redis://h:6379', REDIS_DB: '' });
   assert.match(redis, /^SCCACHE_REDIS_ENDPOINT=redis:\/\/h:6379$/m);
   assert.match(redis, /^SCCACHE_REDIS_DB=5$/m);
@@ -1228,7 +1230,7 @@ function runNodeCaches(os, env = {}) {
   mkdirSync(join(root, 'ws', 'ui', '.angular', 'cache'), { recursive: true });
   writeFileSync(join(root, 'ws', 'ui', '.angular', 'cache', 'stale'), '');
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(PADDOCK, 'conformance', 'ci', 'host', 'node-caches.sh')], {
-    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, PADDOCK_CI_SLOT: 's1', GITHUB_WORKSPACE: join(root, 'ws'), GITHUB_ENV: join(root, 'github-env'), ANGULAR_DIR: 'ui', NAME: 'e2e-1', PADDOCK_CI_MOUNT: join(root, 'no-mount'), ...env },
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, PADDOCK_CI_SLOT: 's1', GITHUB_WORKSPACE: join(root, 'ws'), GITHUB_ENV: join(root, 'github-env'), ANGULAR_DIR: 'ui', NAME: 'e2e-1', RUNNER_TEMP: join(root, 'temp'), PADDOCK_CI_MOUNT: join(root, 'no-mount'), ...env },
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr + r.stdout);
@@ -1236,19 +1238,29 @@ function runNodeCaches(os, env = {}) {
   return { root, stdout: r.stdout, written };
 }
 
-test('node-caches keeps the npm and Angular caches on the host or the container mount, never failing a job', () => {
+test('node-caches keeps the caches in the host slot\'s folders, or in a container\'s own job folders, and never writes the shared mount', () => {
   const host = runNodeCaches('macOS');
   const kept = join(host.root, 'home', '.paddock-ci');
   assert.match(host.written, new RegExp(`^npm_config_cache=${kept}/npm-s1$`, 'm'));
   assert.equal(realpathSync(join(host.root, 'ws', 'ui', '.angular', 'cache')), join(kept, 'angular', 'e2e-1-s1'), 'one Angular cache per job, shard and job slot');
+  // A container: the runner's old mount exists and is writable, and is not used (ADR 0111); actions/cache fills the job's own folders.
   const mount = join(host.root, 'mount');
   mkdirSync(mount);
   const linux = runNodeCaches('Linux', { PADDOCK_CI_MOUNT: mount });
-  assert.match(linux.written, /^npm_config_cache=.*\/mount\/npm$/m);
-  const bare = runNodeCaches('Linux');
-  assert.equal(bare.written, '');
-  assert.match(bare.stdout, /::notice::no \/sccache mount/);
+  assert.match(linux.written, new RegExp(`^npm_config_cache=${linux.root}/temp/node-caches/npm$`, 'm'));
+  assert.equal(realpathSync(join(linux.root, 'ws', 'ui', '.angular', 'cache')), join(linux.root, 'temp', 'node-caches', 'angular'));
+  assert.deepEqual(readdirSync(mount), [], 'nothing is written to the shared mount');
   assert.match(read(join(PADDOCK, 'ui', 'angular.json')), /"cache": \{ "enabled": true, "environment": "all" \}/, 'Angular keeps its cache in CI too');
+});
+
+test('the node-caches action keys npm by OS, Node and the lockfile and Angular by the lockfile and the sources, each cache pinned and summarised', () => {
+  const action = read(join(ACTIONS, 'node-caches', 'action.yml'));
+  assert.match(action, /key: npm-v1-\$\{\{ runner\.os \}\}-\$\{\{ runner\.arch \}\}-node-\$\{\{ steps\.node\.outputs\.version \}\}-\$\{\{ hashFiles\('package-lock\.json'\) \}\}\n\s+restore-keys:/, 'npm may fall back to an older cache');
+  const ng = (/id: angular-cache[\s\S]*?(?=\n    - name:)/.exec(action)?.[0] ?? '').replace(/^\s*#.*$/gm, '');
+  assert.match(ng, /hashFiles\('package-lock\.json'\)[\s\S]*hashFiles\(format\('\{0\}\/projects\/\*\*'/, 'the Angular key holds the lockfile and the sources');
+  assert.match(ng, /restore-keys: \|\n\s+ng-v1-[^\n]*hashFiles\('package-lock\.json'\) \}\}-(?:\n|$)/, 'the Angular cache is content-addressed: an entry of the same lockfile may be restored partly, one of another lockfile never');
+  assert.doesNotMatch(action.replace(/^(\s*#.*|description:.*)$/gm, ''), /\/sccache/, 'no use of the shared mount');
+  assert.match(action, /Cache summary[\s\S]*GITHUB_STEP_SUMMARY/, 'key and hit or miss in the job summary');
 });
 
 // Debrief's workflow (.gitea/workflows/debrief.yml) on the same speed rules as ci.yml (Paddock lessons, "Test and build speed").
@@ -1982,7 +1994,7 @@ const jobsOf = (r) => /^CARGO_BUILD_JOBS=(\d+)$/m.exec(r.stdout)?.[1];
 // The hosts of 2026-10-30 (the RAM a host reports is a little under its nominal size).
 const MAC = { RUNNER_OS: 'macOS', PADDOCK_CI_CORES: '14', PADDOCK_CI_RAM_MB: '65536' };
 const WINDOWS = { RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '8', PADDOCK_CI_RAM_MB: '16316' };
-const LINUX = { RUNNER_OS: 'Linux', PADDOCK_CI_CORES: '32', PADDOCK_CI_RAM_MB: '131072' };
+const LINUX = { RUNNER_OS: 'Linux', PADDOCK_CI_CORES: '30', PADDOCK_CI_RAM_MB: '65536' };
 
 test('build-jobs gives each runner class its share of the host, never the agents\' cap of two', () => {
   // The Mac runs three jobs (d7-mac-mini, -2, -3) and keeps 2 of its 14 cores for the agents and the system: 4 each.
@@ -1991,35 +2003,42 @@ test('build-jobs gives each runner class its share of the host, never the agents
   // Windows, which runs two jobs at once, gets its share once the runner says so.
   assert.equal(jobsOf(buildJobs({ ...WINDOWS, PADDOCK_CI_JOBS_PER_HOST: '2' })), '4');
   // A runner's own settings win: the jobs its host runs at once, or an exact number.
-  assert.equal(jobsOf(buildJobs({ ...LINUX, PADDOCK_CI_JOBS_PER_HOST: '4' })), '8');
+  assert.equal(jobsOf(buildJobs({ ...LINUX, PADDOCK_CI_JOBS_PER_HOST: '4' })), '7');
   assert.equal(jobsOf(buildJobs({ ...LINUX, PADDOCK_CI_BUILD_JOBS: '12' })), '12');
   assert.equal(jobsOf(buildJobs({ ...WINDOWS, PADDOCK_CI_CORES: '2', PADDOCK_CI_JOBS_PER_HOST: '4' })), '1', 'never below one');
 });
 
-test('build-jobs leaves Linux on cargo\'s default until its share is measured, and names the cores in the log', () => {
-  for (const [host, cores] of [[LINUX, 32]]) {
-    const r = buildJobs(host);
-    assert.equal(r.status, 0);
-    assert.equal(jobsOf(r), undefined, host.RUNNER_OS);
-    assert.match(r.stderr, new RegExp(`${cores} cores`));
-    assert.match(r.stderr, /stays unset/);
-  }
+test('build-jobs gives Linux d-gtr9\'s layout (6 jobs on 30 cores) and names a host with other cores', () => {
+  // d-gtr9 since 2026-11-20: 30 CPUs, 64 GiB, runner capacity 6: min(30 / 6, (65536 - 2048) / (6 x 1536)) = 5, 5 test threads
+  // (docs/benchmarks.md, "CI job cost, step by step": without a share the jobs ran 1.2 to 1.7 times slower).
+  const r = buildJobs(LINUX);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(jobsOf(r), '5');
+  assert.equal(threadsOf(r), '5');
+  assert.match(r.stderr, /30 cores/);
+  assert.doesNotMatch(r.stdout, /::warning::/);
+  // Positive control: another core count is a warning that names both and the next step, never a silent fallback.
+  const other = buildJobs({ ...LINUX, PADDOCK_CI_CORES: '16' });
+  assert.match(other.stdout, /::warning::build-jobs: the Linux layout documents 30 cores, this host has 16;.*update the Linux layout/);
+  assert.equal(jobsOf(other), '2');
+  // A runner that states its own share is not second-guessed.
+  assert.doesNotMatch(buildJobs({ ...LINUX, PADDOCK_CI_CORES: '16', PADDOCK_CI_JOBS_PER_HOST: '4' }).stdout, /::warning::/);
 });
 
 test('build-jobs gives Windows 3 jobs per host from its class, which a runner env still overrides', () => {
   // The Windows runner (a Proxmox VM) runs capacity 3; the repo declares that, not the runner's runner.envs.
-  // 16 cores, 32 GB: min((16 - 0) / 3 = 5, (32768 - 2048) / (3 x 1536) = 6) = 5 build jobs; tests: the Windows class's 8 threads.
+  // 16 cores, 32 GB: min((16 - 0) / 3 = 5, (32768 - 2048) / (3 x 1536) = 6) = 5 build jobs; tests: 5 test threads (the core share: 3 jobs x 8 threads oversubscribed the 16 cores, 8335 vs 8359).
   const big = { RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '16', PADDOCK_CI_RAM_MB: '32768' };
   const r = buildJobs(big);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(jobsOf(r), '5');
-  assert.equal(threadsOf(r), '8');
+  assert.equal(threadsOf(r), '5');
   assert.match(r.stdout, /::notice::.*Windows runner's capacity is 3/);
   assert.match(r.stderr, /CARGO_BUILD_JOBS=5 \(\(16 cores - 0 kept\) \/ 3 jobs per host.*the Windows class default/);
   // 8 cores, 16 GB: min(8 / 3 = 2, (16316 - 2048) / 4608 = 3) = 2.
   const small = buildJobs({ ...WINDOWS });
   assert.equal(jobsOf(small), '2');
-  assert.equal(threadsOf(small), '8');
+  assert.equal(threadsOf(small), '2');
   // The runner's own number still wins.
   assert.equal(jobsOf(buildJobs({ ...big, PADDOCK_CI_JOBS_PER_HOST: '2' })), '8');
   assert.match(buildJobs({ ...big, PADDOCK_CI_JOBS_PER_HOST: '2' }).stderr, /runner's PADDOCK_CI_JOBS_PER_HOST/);
@@ -2038,7 +2057,7 @@ test('build-jobs caps the share by memory: (RAM - kept) / (jobs per host x MB pe
 });
 
 test('build-jobs splits the share between the builds a job runs at once (cargo mutants --jobs N)', () => {
-  assert.equal(jobsOf(buildJobs(LINUX, ['2'])), '16');
+  assert.equal(jobsOf(buildJobs(LINUX, ['2'])), '2');
   assert.equal(jobsOf(buildJobs(MAC, ['2'])), '2');
   assert.equal(jobsOf(buildJobs({ ...LINUX, PADDOCK_CI_BUILD_JOBS: '12' }, ['3'])), '4');
   assert.equal(jobsOf(buildJobs(MAC, ['8'])), '1');
@@ -2115,8 +2134,8 @@ test('build-jobs gives nextest the class\'s measured test threads on the shared 
   assert.equal(threadsOf(buildJobs({ ...LINUX, PADDOCK_CI_BUILD_JOBS: '12', PADDOCK_CI_TEST_THREADS: '6' })), '6');
   assert.equal(threadsOf(buildJobs({ ...MAC, PADDOCK_CI_TEST_THREADS: '6' })), '6');
   assert.notEqual(buildJobs({ ...MAC, PADDOCK_CI_TEST_THREADS: '0' }).status, 0);
-  // Where the runner class keeps cargo's default, nextest keeps the profile's too.
-  assert.equal(threadsOf(buildJobs(LINUX)), undefined, 'Linux');
+  // Linux: the job's core share (no measured number for the class).
+  assert.equal(threadsOf(buildJobs(LINUX)), '5', 'Linux');
   const dir = mkdtempSync(join(tmpdir(), 'build-jobs-'));
   const envFile = join(dir, 'env');
   writeFileSync(envFile, '');
@@ -2458,4 +2477,43 @@ test('a workflow that runs runner-wait runs it in a first job that every macOS o
     }
   }
   assert.ok(users.includes('ci.yml') && users.includes('debrief.yml') && users.includes('dyno-release.yml'), `the train workflows wait in their first job: ${users}`);
+});
+
+/** The workflow, action and template files under .gitea, each with its text. */
+function giteaYaml() {
+  const out = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.ya?ml$/.test(e.name)) out.push([relative(PADDOCK, p), read(p)]);
+    }
+  };
+  walk(join(PADDOCK, '.gitea'));
+  return out;
+}
+
+// ER-26: a floating `@v4` follows whatever the tag points at; the digest is what was verified (v4.3.0, 2026-11-20).
+const CACHE_USE = /^\s*(?:-\s+)?uses:\s*actions\/cache(?:\/restore|\/save)?@(\S+)(.*)$/gm;
+test('every actions/cache use under .gitea is pinned to the verified digest, with its version in a comment', () => {
+  let uses = 0;
+  for (const [file, text] of giteaYaml()) {
+    for (const m of text.matchAll(CACHE_USE)) {
+      uses++;
+      assert.equal(m[1], '0057852bfaa89a56745cba8c7296529d2fc39830', `${file}: actions/cache is pinned to the v4.3.0 digest, not '${m[1]}'`);
+      assert.match(m[2], /#\s*v4\.3\.0\s*$/, `${file}: the version is in a comment`);
+    }
+  }
+  assert.ok(uses >= 25, `the pattern saw ${uses} uses: a pattern that sees none passes on nothing (ER-12)`);
+  // Positive control: the pattern does see a floating tag.
+  assert.equal([...'      - uses: actions/cache/save@v4\n'.matchAll(CACHE_USE)][0][1], 'v4');
+});
+
+test('no setup action or workflow uses the shared /sccache mount as a writable folder of its own, except the lanes setup-rust makes below it', () => {
+  const offenders = [];
+  for (const [file, text] of giteaYaml()) {
+    const code = text.split('\n').filter((l) => !/^\s*(#|description:)/.test(l)).join('\n');
+    if (/["'\s=]\/sccache(?!-)[\w/.-]*/.test(code) && file !== '.gitea/actions/setup-rust/action.yml') offenders.push(file);
+  }
+  assert.deepEqual(offenders, [], 'ADR 0111: shared state goes through a keyed cache or an artifact');
 });

@@ -106,7 +106,10 @@ impl Runner {
         .collect();
         for (k, v) in extra {
             env.retain(|(key, _)| key != k);
-            env.push((k.to_string(), v.to_string()));
+            // An empty value removes the variable (a job that holds no slot yet).
+            if !v.is_empty() {
+                env.push((k.to_string(), v.to_string()));
+            }
         }
         env
     }
@@ -286,14 +289,42 @@ fn a_host_slot_gets_its_own_folder_port_and_share_of_the_budget() {
 }
 
 #[test]
-fn a_container_uses_the_mount_or_a_folder_that_dies_with_it() {
+fn a_container_lane_gets_its_own_folder_on_the_mount_never_the_mount_itself() {
     let r = Runner::new(Some(Fail::Never));
     let mount = r.root.join("mount");
     std::fs::create_dir_all(&mount).unwrap();
     let mount = mount.display().to_string();
-    let (_, rs) = same(&r, &LOCAL, &[("RUNNER_OS", "Linux"), ("PADDOCK_SCCACHE_MOUNT", &mount)], true);
+    // Both implementations, the lane an earlier step took: its folder, its share of the budget (60 GB over 6 lanes).
+    let (_, rs) = same(
+        &r,
+        &LOCAL,
+        &[("RUNNER_OS", "Linux"), ("PADDOCK_SCCACHE_MOUNT", &mount), ("PADDOCK_CI_SLOT", "s3")],
+        true,
+    );
     assert!(
-        rs.env.contains(&format!("SCCACHE_DIR={mount}\n")) && rs.env.contains("SCCACHE_CACHE_SIZE=20G\n"),
+        rs.env.contains(&format!("SCCACHE_DIR={mount}/sccache-s3\n")) && rs.env.contains("SCCACHE_CACHE_SIZE=10G\n"),
+        "{}",
+        rs.env
+    );
+    assert!(
+        !rs.env.contains(&format!("SCCACHE_DIR={mount}\n")),
+        "never the mount root: {}",
+        rs.env
+    );
+    // Another host layout: 3 lanes share the same budget, 20 GB each.
+    let (_, rs) = same(
+        &r,
+        &LOCAL,
+        &[
+            ("RUNNER_OS", "Linux"),
+            ("PADDOCK_SCCACHE_MOUNT", &mount),
+            ("PADDOCK_CI_SLOT", "s2"),
+            ("PADDOCK_CI_SLOTS", "3"),
+        ],
+        true,
+    );
+    assert!(
+        rs.env.contains("/sccache-s2\n") && rs.env.contains("SCCACHE_CACHE_SIZE=20G\n"),
         "{}",
         rs.env
     );
@@ -301,6 +332,131 @@ fn a_container_uses_the_mount_or_a_folder_that_dies_with_it() {
     let (_, rs) = same(&r, &LOCAL, &[("RUNNER_OS", "Linux"), ("PADDOCK_SCCACHE_MOUNT", &absent)], true);
     assert!(rs.env.contains("/temp/sccache\n"), "{}", rs.env);
     assert!(rs.out.contains("::notice::no /sccache mount in this container"), "{}", rs.out);
+}
+
+#[test]
+fn a_container_job_without_a_slot_takes_a_lane_and_two_jobs_never_share_one() {
+    // The Rust command only: it takes the lane itself with the slot holder (the shell asks ./dev for the same), records it in
+    // $GITHUB_ENV, and a second job at the same time gets another lane and so another folder (ER-33: a second job that got the
+    // same folder is what this test would show red).
+    let r = Runner::new(Some(Fail::Never));
+    let mount = r.root.join("mount");
+    std::fs::create_dir_all(&mount).unwrap();
+    let mount = mount.display().to_string();
+    let extra = [
+        ("RUNNER_OS", "Linux"),
+        ("PADDOCK_SCCACHE_MOUNT", mount.as_str()),
+        ("PADDOCK_CI_SLOTS", "2"),
+        ("PADDOCK_CI_SLOT", ""),
+    ];
+    let first = r.rust(&LOCAL, &extra);
+    assert_eq!(first.code, 0, "{}", first.out);
+    assert!(first.env.contains(&format!("SCCACHE_DIR={mount}/sccache-s1\n")), "{}", first.env);
+    assert!(
+        first.env.contains("PADDOCK_CI_SLOT=s1\n"),
+        "the lane is kept for the job's later steps: {}",
+        first.env
+    );
+    assert!(
+        first.env.contains(&format!("PADDOCK_CI_LANE_ROOT={mount}/lanes\n")) && first.env.contains("PADDOCK_CI_LANE_LOCK="),
+        "the end-of-job check needs the lane's root and the lock file's identity: {}",
+        first.env
+    );
+    // A second job: its own temp folder, the first job's still there (its holder keeps s1).
+    let other = Runner::new(Some(Fail::Never));
+    let second = other.rust(&LOCAL, &extra);
+    assert_eq!(second.code, 0, "{}", second.out);
+    assert!(second.env.contains(&format!("SCCACHE_DIR={mount}/sccache-s2\n")), "{}", second.env);
+}
+
+/// `dir` and every folder below it were last changed `days` days ago.
+fn age_folders(dir: &Path, days: u64) {
+    let t = std::time::SystemTime::now() - std::time::Duration::from_secs(days * 86_400);
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        if e.file_type().unwrap().is_dir() {
+            age_folders(&e.path(), days);
+        }
+    }
+    std::fs::File::open(dir).unwrap().set_modified(t).unwrap();
+}
+
+#[test]
+fn a_lane_removes_what_older_jobs_left_at_the_mount_root_and_never_the_lanes_or_a_young_folder() {
+    // ADR 0111: the mount's root held sccache's cache, paddock-dev/, npm/ and angular/. Once a lane is held they go, but only when
+    // idle for a day (an older-style job still running keeps them young), and never lanes/ or sccache-*.
+    let r = Runner::new(Some(Fail::Never));
+    let mount = r.root.join("mount");
+    let put = |rel: &str| {
+        let p = mount.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, b"x").unwrap();
+    };
+    for rel in [
+        "paddock-dev/bin/h/tool",
+        "npm/_cacache/x",
+        "a/b/c/entry",
+        "angular/e2e/y",
+        "sccache-s3/a/b/c/entry",
+        "lanes/s3.lock",
+        "unrelated/file",
+    ] {
+        put(rel);
+    }
+    for old in ["paddock-dev", "npm", "a", "sccache-s3", "lanes", "unrelated"] {
+        age_folders(&mount.join(old), 3);
+    }
+    // angular/ is young: a job of the old design is using it right now.
+    let mount_text = mount.display().to_string();
+    let extra = [
+        ("RUNNER_OS", "Linux"),
+        ("PADDOCK_SCCACHE_MOUNT", mount_text.as_str()),
+        ("PADDOCK_CI_SLOT", ""),
+        ("PADDOCK_CI_SLOTS", "4"),
+    ];
+    let rs = r.rust(&LOCAL, &extra);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    for gone in ["paddock-dev", "npm", "a"] {
+        assert!(!mount.join(gone).exists(), "{gone} was left by an older job and idle: {}", rs.out);
+    }
+    assert!(
+        mount.join("angular/e2e/y").exists(),
+        "a young folder stays: an older job may be using it"
+    );
+    for kept in ["sccache-s3/a/b/c/entry", "unrelated/file"] {
+        assert!(mount.join(kept).exists(), "{kept} is not in the list of what is removed");
+    }
+    assert!(mount.join("lanes").is_dir(), "the slot locks stay");
+    assert!(
+        rs.out.contains("removed what older jobs left at the root") && rs.out.contains("paddock-dev"),
+        "logged: {}",
+        rs.out
+    );
+}
+
+#[test]
+fn a_lane_that_cannot_be_taken_is_in_the_summary_as_well_as_the_notice() {
+    let r = Runner::new(Some(Fail::Never));
+    let mount = r.root.join("mount");
+    std::fs::create_dir_all(&mount).unwrap();
+    // The lanes folder is a file: no slot can be made there.
+    std::fs::write(mount.join("lanes"), b"not a folder").unwrap();
+    let mount_text = mount.display().to_string();
+    let summary = r.root.join("summary");
+    let summary_text = summary.display().to_string();
+    let extra = [
+        ("RUNNER_OS", "Linux"),
+        ("PADDOCK_SCCACHE_MOUNT", mount_text.as_str()),
+        ("PADDOCK_CI_SLOT", ""),
+        ("GITHUB_STEP_SUMMARY", summary_text.as_str()),
+    ];
+    let rs = r.rust(&LOCAL, &extra);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    assert!(rs.out.contains("::notice::no lane of"), "{}", rs.out);
+    assert!(
+        std::fs::read_to_string(&summary).unwrap().contains("sccache lane: NOT taken"),
+        "the summary says it too"
+    );
+    assert!(rs.env.contains("/temp/sccache\n"), "{}", rs.env);
 }
 
 #[test]
@@ -627,6 +783,41 @@ fn health_curl(r: &Runner, status: i32) {
         .unwrap();
 }
 
+/// ADR 0111: no writable folder is shared between concurrent lanes. The S3 level's local disk is a sibling of the lane's folder
+/// (`<mount>/sccache-<lane>-s3`, named by `lane_sccache_dir`), never inside it (sccache's LRU evicts any file below its folder) and
+/// never the same folder for two lanes (`/sccache/s3` was shared by all 6 lanes).
+#[test]
+fn a_container_jobs_s3_tier_is_a_sibling_of_its_lane_folder_and_never_shared_between_lanes() {
+    let r = Runner::new(Some(Fail::Never));
+    health_curl(&r, 0);
+    let mount = r.root.join("mount");
+    std::fs::create_dir_all(&mount).unwrap();
+    let mount = mount.display().to_string();
+    let mut tiers = Vec::new();
+    for lane in ["s4", "s5"] {
+        let mut env: Vec<(&str, &str)> = S3_ENV.to_vec();
+        env.extend([("RUNNER_OS", "Linux"), ("PADDOCK_SCCACHE_MOUNT", mount.as_str()), ("PADDOCK_CI_SLOT", lane)]);
+        let rs = r.rust(&S3_INPUT, &env);
+        assert_eq!(rs.code, 0, "{}", rs.out);
+        let dir = rs
+            .env
+            .lines()
+            .find_map(|l| l.strip_prefix("SCCACHE_DIR="))
+            .expect("SCCACHE_DIR in the job env")
+            .to_string();
+        let lane_dir = paddock_dev::ci_setup_rust::lane_sccache_dir(&mount, lane);
+        assert_eq!(dir, format!("{lane_dir}-s3"), "{}", rs.env);
+        assert!(
+            !dir.starts_with(&format!("{lane_dir}/")) && dir != mount && !dir.starts_with(&format!("{mount}/s3")),
+            "the S3 tier is inside the LRU-evicted lane folder or shared: {dir}"
+        );
+        assert!(Path::new(&dir).is_dir(), "{dir} was made");
+        stop_guard(guard_port(&rs.env));
+        tiers.push(dir);
+    }
+    assert_ne!(tiers[0], tiers[1], "two lanes must not share a writable folder");
+}
+
 /// The chain, the bucket and the keys are the server's alone. A server a later rustc starts (ours ended) gets `$GITHUB_ENV`, which
 /// holds the local disk only: with the chain and no keys it failed the build after 10 s (review of 534918839, exit 2 in 2 of 2 runs).
 #[test]
@@ -686,16 +877,16 @@ fn the_s3_chain_and_keys_reach_the_servers_start_and_nothing_a_later_step_sees()
     );
     // The S3 level's local disk is a folder of its own: what S3 backfills never reaches the plain folder a release build reads.
     assert!(
-        start.contains("dir=") && start.contains("/s3 "),
-        "the server's L0 is the s3 folder: {start}"
+        start.contains("dir=") && start.contains("-s3 "),
+        "the server's L0 is the sibling s3 folder: {start}"
     );
     assert!(
-        rs.env.lines().any(|l| l.starts_with("SCCACHE_DIR=") && l.ends_with("/s3")),
+        rs.env.lines().any(|l| l.starts_with("SCCACHE_DIR=") && l.ends_with("-s3")),
         "a server a later rustc starts uses it too: {}",
         rs.env
     );
     assert!(
-        !rs.env.lines().any(|l| l.starts_with("SCCACHE_DIR=") && !l.ends_with("/s3")),
+        !rs.env.lines().any(|l| l.starts_with("SCCACHE_DIR=") && !l.ends_with("-s3")),
         "no plain folder in the job env: {}",
         rs.env
     );
@@ -718,7 +909,7 @@ fn a_tag_run_with_a_key_stays_on_the_plain_local_disk() {
         "{}",
         rs.out
     );
-    assert!(!rs.env.contains("PADDOCK_S3_GUARD_PORT") && !rs.env.contains("/s3\n"), "{}", rs.env);
+    assert!(!rs.env.contains("PADDOCK_S3_GUARD_PORT") && !rs.env.contains("-s3\n"), "{}", rs.env);
     let start = rs
         .calls
         .lines()

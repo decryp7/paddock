@@ -3203,6 +3203,20 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **ui gallery `open()` waits a fixed 600 ms** (`ui/e2e/gallery.spec.ts`: "Let the chart draw ... and fonts settle"). Train 16 fixed the
   one test that failed on it (the path box, which now waits for its fitted text; ci.yml 8346 job 42258); every other test that reads a
   measured or animated value after `open()` still leans on that wait. Next: wait on each test's own condition and drop the fixed wait.
+- **paddock-dev `queue::tests::a_batch_is_at_most_six`** (ci.yml run 8359, job 42403, windows-latest; FLAKY: try 1 timed out at
+  60 s, try 2 passed in 50.1 s; 19.2 s in run 8335, job 42150). The same run's git-heavy `ci_runs::trial` tests went from 6 to 9 s to
+  43 to 60 s while the whole job went from 603 s to 753 s: three jobs shared the Windows runner with 8 test threads each on 16 cores
+  (the ER-48 job share, fixed on its own branch in Train A). Next: confirm the test is back near 19 s once the Windows share lands; if
+  not, a failing reproduction first (its git starts on Windows), never a longer limit.
+- **./dev's kept paddock-dev build folder under /sccache is read while another lane prunes or writes it** (debrief.yml run 8373,
+  job 42677, "licences, notices + commits", d-gtr9; `error[E0463]: can't find crate for 'foldhash'` while ./dev built paddock-dev
+  in `/sccache/paddock-dev/rustc-0ef1bc386059`; the same commit built it everywhere else, and the retry 8377 did not hit it). Same
+  class as the faithful stand-ins taking the real build-folder lock. Next: one owner per kept build folder (a lock held for the
+  build and the prune), a failing reproduction first.
+- **debrief webkit `e2e/a11y.e2e.ts:6` main screen has no serious accessibility violations (dark)** (debrief.yml run 8373, job
+  shard 3/4; FLAKY, history 2 of 150). Train A does not touch the feature. Next: a failing reproduction first.
+- **debrief webkit `e2e/ux-shortcuts-editor.e2e.ts:21` shortcut editor rebinds a command ...** (debrief.yml run 8373, shard 4/4;
+  FLAKY, history 1 of 150). Train A does not touch the feature. Next: a failing reproduction first.
 
 ## Chrome took over 5 s to quit: it reads the user's temp folder, which leaked test folders had filled (Spotter, 2026-11-20, train 16)
 - **Failure:** spotter-render `real_browser::closing_quits_the_browser_by_itself_before_any_kill` red on both tries in ci.yml runs
@@ -3235,3 +3249,36 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **What happened:** a local `cargo llvm-cov nextest -p paddock-net` stopped at "I will run `rustup component add llvm-tools-preview` ... Proceed? [Y/n]" and sat there for 4 hours, because a background run has no stdin to answer it. Answering yes would have installed a component into the user's `~/.rustup` (ER-14, ER-45).
 - **Rule of thumb:** never run `cargo llvm-cov` locally. Coverage is measured by CI's llvm-cov gate (`./dev ci run crates coverage`, `scripts/coverage-gate.mjs`), whose image has the component. A shared crate's coverage is "not measured" in a branch report and read from the first CI run.
 - **Recurring class:** a tool that starts an installer or a prompt when a probe runs (ER-45; earlier instance: rustup 1.28.1 installing a missing pinned toolchain, run 8060). Any local tool step that can prompt gets stdin from /dev/null so it ends with an error instead of waiting.
+## A streamed answer that was still arriving failed its wait: the wait bounded the whole stream, not a stall (Debrief, 2026-11-20, train A)
+- **Failure:** Debrief WebKit `ai-chat.e2e.ts:116` "the conversation is busy from the moment its turn is drawn until the answer is
+  done" red on both tries in debrief.yml run 8377 job 42784 (shard 3/4, Linux), at `expectStreamDone` (paddock-e2e `ready.ts:85`):
+  `aria-busy` stayed "true" for the 5 s expect timeout. It had 0 failures in 535 runs and passed on the same commit in 8373.
+- **First hypotheses and what refuted them:** a stuck turn (a lost `done` event): the trace's snapshot right after the failed wait
+  shows `aria-busy="false"` and the whole answer, and its screencast shows the answer still arriving near the end of the wait (at
+  "System.Ou" with Stop shown, then complete); the paddock-proc change d68f912aa and the ER-48 job share cd867ef09: `apps/debrief`,
+  `ui` and `package-lock.json` are byte-identical at 9ec43be3c and 5cd9602da, and the e2e page runs the TypeScript mock with no
+  process; order dependence in the shard: the retry ran in a new worker and failed the same way, finishing just after its wait.
+- **Root cause:** `expectStreamDone` was one `toHaveAttribute('aria-busy', 'false')`, so the whole stream had to finish inside one
+  expect timeout. The spec streams 20 pieces 150 ms apart: 3.4 s from busy to done on an idle Mac (8 of 8 probes, 4 WebKit workers),
+  about 4.8 to 5.4 s on the loaded runner, past the 5 s wait while still arriving. This breaks ADR 0103's rule that a step is bounded
+  on progress, not total time.
+- **Fix:** `expectStreamDone` waits one expect timeout at a time and goes on while something new arrived (text or elements). It fails
+  only after a wait in which nothing arrived, saying so, and records each extra wait as a `stream-wait` annotation. A paddock-e2e
+  self-test streams for 6.5 s (it fails the old helper with the reported error) and has two stalled streams as positive controls.
+- **Why the logs did not show it:** the call log printed `…` for the log's content, so "slow" and "stuck" looked the same. Telling
+  them apart took the trace. The new failure message names the stall and what the stream showed; a slow stream leaves annotations.
+- **Class: an end-to-end wait bounds a streamed result by one expect timeout.** Earlier: debrief.yml run 8300, where six streamed
+  answers ran past the wait (64f8165ae, fixed for that spec only by sending answers in one piece). It is fixed for every caller of
+  `waitAnswered` here.
+
+## A folder shared between concurrent CI lanes (2026-11-21, ADR 0111)
+
+- **Run 8373 (debrief.yml, job 42677): E0463 "can't find crate for `foldhash`".** Linux CI had set `SCCACHE_DIR` to the whole `/sccache`
+  mount, where `./dev` kept its build folder. sccache's local cache is one LRU over every file below its folder, so an insert that took
+  it over `SCCACHE_CACHE_SIZE` deleted cargo's rlibs. Six lanes also meant six sccache servers on one folder, which sccache documents
+  as unsupported. Reproduction: `tools/paddock-dev/tests/it/sccache_eviction.rs` (the file survives beside the cache folder, not in it).
+- **Fix:** a lane folder per job (`<mount>/sccache-<lane>`, the slot holder the hosts use), `./dev` in the job's own home with its binary
+  kept through `actions/cache` and verified for its hash, npm and Angular through `actions/cache`, every `actions/cache` use pinned to a digest.
+- **Class: concurrent jobs write one folder.** Earlier: run 8027 (E0514, one build folder for two compilers), the heavy binary vanishing
+  (2026-11-14), the Windows running-tool replace (`dev`, the `mv -f` fallback). The rule is drafted in ADR 0111: no writable folder is
+  shared between concurrent CI lanes; shared state goes through a keyed cache or an artifact.

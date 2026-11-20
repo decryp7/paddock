@@ -166,6 +166,7 @@ fn every_runner_class_gets_the_shells_share() {
         ("macOS", "8", "16384"),
         ("Windows", "16", "32768"),
         ("Windows", "8", "16384"),
+        ("Linux", "30", "65536"),
         ("Linux", "16", "131072"),
         ("Linux", "2", "4096"),
         ("", "4", "8192"),
@@ -184,17 +185,29 @@ fn the_class_values_are_the_documented_ones() {
     let mac = same(&s, None, &host("macOS", "14", "65536"), true);
     assert_eq!(mac.env_file, "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\n");
     let win = same(&s, None, &host("Windows", "16", "32768"), true);
-    assert_eq!(win.env_file, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=8\n");
+    assert_eq!(win.env_file, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\n");
     assert!(
         win.stdout
             .contains("::notice::build-jobs assumes the Windows runner's capacity is 3"),
         "{}",
         win.stdout
     );
-    let linux = same(&s, None, &host("Linux", "16", "131072"), true);
-    assert_eq!(linux.env_file, "", "Linux keeps cargo's default");
-    let split = same(&s, Some("4"), &host("Linux", "16", "131072"), true);
-    assert_eq!(split.env_file, "CARGO_BUILD_JOBS=4\n");
+    // d-gtr9 since 2026-11-20: 30 CPUs, 64 GiB, capacity 6 (docs/benchmarks.md, "CI job cost, step by step").
+    let linux = same(&s, None, &host("Linux", "30", "65536"), true);
+    assert_eq!(linux.env_file, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\n");
+    assert!(!linux.stdout.contains("::warning::"), "{}", linux.stdout);
+    let split = same(&s, Some("2"), &host("Linux", "30", "65536"), true);
+    assert_eq!(split.env_file, "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\n");
+    // Another core count is named, never taken silently (and the share still follows the real cores).
+    let other = same(&s, None, &host("Linux", "16", "131072"), true);
+    assert_eq!(other.env_file, "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\n");
+    assert!(
+        other
+            .stdout
+            .contains("::warning::build-jobs: the Linux layout documents 30 cores, this host has 16"),
+        "{}",
+        other.stdout
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { MockBackend } from '../../core/mock-backend';
-import { appProviders, makeMock, settle, text } from '../../../testing/test-helpers';
+import { appProviders, makeMock, settleUntil, text } from '../../../testing/test-helpers';
 import { ActivityPage, LOW_UPTIME_PERMILLE, withJobsAxis } from './activity-page';
 import { trendBars } from './trend-bars';
 
@@ -13,8 +13,18 @@ describe('ActivityPage', () => {
     mock = makeMock();
     TestBed.configureTestingModule({ providers: appProviders(mock) });
     const f = TestBed.createComponent(ActivityPage);
-    await settle(f, 8);
-    return { f, el: f.nativeElement as HTMLElement };
+    const el = f.nativeElement as HTMLElement;
+    // Until the mock's jobs and runners are drawn (rule 49), not a fixed count of turns: eight full rounds re-drew the charts each
+    // time and took the first test past its 5 s limit on a loaded runner (ci.yml 8359: 7.1 s).
+    await settleUntil(
+      f,
+      () =>
+        el.querySelectorAll('[aria-labelledby="recent-title"] tbody tr').length > 0 &&
+        el.querySelectorAll('table.runners tbody tr').length > 0 &&
+        el.querySelectorAll('table.runners pc-trend-bars').length > 0,
+      'recent jobs and runners drawn',
+    );
+    return { f, el };
   }
 
   it('lists the recent jobs with the server\'s result when a token is known', async () => {

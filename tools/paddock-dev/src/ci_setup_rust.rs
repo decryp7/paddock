@@ -12,8 +12,8 @@
 //!    `PATH` is exactly that version. A failed download is a warning (the job builds without the cache); a checksum mismatch
 //!    fails the step.
 //! 2. **Configure** it: the backend (`local`, `auto` or `redis`), the server port (4227 in a Linux container, else the job
-//!    slot's own port), the local folder and size (the `/sccache` mount in a container, else the slot's kept folder with the
-//!    host's budget divided between the slots), a fresh server for this job, and `RUSTC_WRAPPER=sccache` with the settings in
+//!    slot's own port), the local folder and size (the slot's kept folder on a host; in a container the job's lane folder
+//!    `<mount>/sccache-<lane>`, never the mount itself: ADR 0111; the host's budget divided between the slots or lanes), a fresh server for this job, and `RUSTC_WRAPPER=sccache` with the settings in
 //!    `$GITHUB_ENV`. A server that does not start leaves the wrapper unset: the cache may slow a build, never fail it.
 //! 3. **Tauri libraries** (`--tauri-linux-deps true`, Linux only): `apt-get update` and `apt-get install` of the libraries.
 //!
@@ -38,6 +38,48 @@ use std::time::{Duration, Instant};
 /// (`ci-image/Dockerfile`, checked by scripts/ci-image.test.mjs).
 pub const SCCACHE_VERSION: &str = "0.19.0";
 const RELEASES: &str = "https://github.com/mozilla/sccache/releases/download";
+/// The compile-cache budget of a Linux host in GB, divided between its lanes like the other classes' (`PADDOCK_CI_SCCACHE_GB`
+/// overrides it): 6 lanes get 10 GB each, the share Mac and Windows slots have. Before ADR 0111 the whole `/sccache` mount was
+/// one 20 GB cache. Not measured against d-gtr9's disk: that needs a run there.
+pub const LINUX_SCCACHE_GB: u64 = 60;
+/// The folder of lane `lane` on the kept `mount`: the one place that names it (`<mount>/sccache-<lane>`). Never the mount itself.
+/// Another tier of the compile cache that needs a folder of its own beside it (a local tier of an S3 cache) derives its folder from
+/// this one (`<mount>/sccache-<lane>-s3`), so no two writers ever share a folder.
+pub fn lane_sccache_dir(mount: &str, lane: &str) -> String {
+    format!("{mount}/sccache-{lane}")
+}
+
+/// The children of the kept mount that older jobs used and this design does not: `paddock-dev/` (the tool), `npm/`, `angular/` and
+/// sccache's own hex folders `0`..`f` (its cache used to be the mount's root). Never `lanes/` (the slot locks) or `sccache-*`.
+pub fn legacy_mount_entries() -> Vec<String> {
+    let mut v: Vec<String> = ["paddock-dev", "npm", "angular"].iter().map(|s| (*s).to_string()).collect();
+    v.extend("0123456789abcdef".chars().map(|c| c.to_string()));
+    v
+}
+
+/// How long a legacy folder must have been untouched (all folders below it, to a bounded depth) before it is removed: an older-style
+/// job still running on this host keeps using them and touches them.
+const LEGACY_IDLE: Duration = Duration::from_secs(24 * 3600);
+
+/// The newest modification time of `dir` and of the folders below it, to `depth` levels and at most `budget` folders.
+fn newest_folder_mtime(dir: &Path, depth: u32, budget: &mut u32) -> std::time::SystemTime {
+    let mut newest = std::fs::symlink_metadata(dir)
+        .and_then(|m| m.modified())
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+    if depth == 0 || *budget == 0 {
+        return newest;
+    }
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            if e.file_type().is_ok_and(|t| t.is_dir()) {
+                *budget = budget.saturating_sub(1);
+                newest = newest.max(newest_folder_mtime(&e.path(), depth - 1, budget));
+            }
+        }
+    }
+    newest
+}
+
 /// The server port in a Linux container (one job per host there); a host job takes its slot's from ports.txt.
 const CONTAINER_PORT: &str = "4227";
 /// What an sccache child gets from the job's environment besides the base list (paddock_proc::KEPT_ENV): its own settings,
@@ -169,9 +211,21 @@ pub struct S3Off {
     pub why: String,
 }
 
-/// The folder inside a slot's (or the mount's) sccache folder that is the S3 level's local disk. Jobs without the S3 level and
-/// release builds use the folder around it and never see what S3 backfilled.
-pub const S3_L0_FOLDER: &str = "s3";
+/// The suffix of the S3 level's local disk: a SIBLING of the job's plain sccache folder (`<folder>-s3`), never a folder inside it
+/// (sccache's LRU evicts any file below its folder) and never one a second lane can reach (ADR 0111). Jobs without the S3 level and
+/// release builds use the plain folder and never see what S3 backfilled.
+const S3_TIER_SUFFIX: &str = "-s3";
+
+/// The S3 level's local disk of lane `lane` on the kept `mount` (`<mount>/sccache-<lane>-s3`), derived from [`lane_sccache_dir`], the
+/// one function that names lane folders.
+pub fn lane_s3_dir(mount: &str, lane: &str) -> String {
+    s3_tier_of(&lane_sccache_dir(mount, lane))
+}
+
+/// The S3 tier beside any job-private sccache folder.
+fn s3_tier_of(plain: &str) -> String {
+    format!("{plain}{S3_TIER_SUFFIX}")
+}
 
 /// The longest the timeout guard may take to report its port.
 const GUARD_START: Duration = Duration::from_secs(5);
@@ -328,10 +382,15 @@ pub fn choose_backend(backend: &str, endpoint: &str, db: &str) -> Result<Backend
 /// A host slot's share of the host's sccache budget: `total_gb` (`PADDOCK_CI_SCCACHE_GB`; 40 when unset or not digits)
 /// divided by the slots, at least 2 GB.
 pub fn slot_cache_size(total_gb: Option<&str>, slots: u64) -> String {
+    slot_cache_size_or(total_gb, slots, 40)
+}
+
+/// [`slot_cache_size`] with the class's own default budget (Linux: [`LINUX_SCCACHE_GB`]).
+pub fn slot_cache_size_or(total_gb: Option<&str>, slots: u64, default_gb: u64) -> String {
     let total = total_gb
         .filter(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit()))
         .and_then(|t| t.parse::<u64>().ok())
-        .unwrap_or(40);
+        .unwrap_or(default_gb);
     let per = (total / slots.max(1)).max(2);
     format!("{per}G")
 }
@@ -699,16 +758,17 @@ impl Step<'_> {
                 self.say(format!("sccache: shared backend {} db {db}", shown_endpoint(endpoint)));
             }
             Backend::Local => {
-                let (dir, size) = self.local_cache()?;
+                let (dir, size, _) = self.local_cache()?;
                 settings.push(("SCCACHE_DIR".into(), dir.clone()));
                 settings.push(("SCCACHE_CACHE_SIZE".into(), size));
                 self.say(format!("sccache: local disk {dir}"));
             }
             Backend::S3 => {
-                let (plain_dir, size) = self.local_cache()?;
-                // The S3 level's local disk is a folder of its own inside the slot's: entries backfilled from S3 never reach the
-                // plain folder that release builds and jobs without S3 read (review of 534918839, P2: cache poisoning).
-                let dir = Path::new(&plain_dir).join(S3_L0_FOLDER).display().to_string();
+                let (plain_dir, size, tier) = self.local_cache()?;
+                // The S3 level's local disk is a sibling folder of the job's own: entries backfilled from S3 never reach the
+                // plain folder that release builds and jobs without S3 read (review of 534918839, P2: cache poisoning), and no
+                // other lane can reach it (ADR 0111).
+                let dir = tier;
                 if let Err(e) = std::fs::create_dir_all(&dir) {
                     return Err(self.fail(error_line(
                         &format!("cannot make the sccache folder {dir}: {e}."),
@@ -885,17 +945,36 @@ impl Step<'_> {
         }
     }
 
-    /// The local disk cache: a host slot's kept folder with its share of the budget, else the container's mount (or a folder
-    /// that dies with the container, with a notice).
-    fn local_cache(&mut self) -> Result<(String, String), i32> {
-        let (dir, size) = if self.os() == "Linux" {
+    /// The local disk cache: a job slot's own folder with its share of the budget, on every OS (ADR 0111). On Linux the slot is
+    /// a lane of the host's kept mount: the folder is `<mount>/sccache-<lane>`, never the mount itself, because sccache's LRU
+    /// evicts any file below its folder, whoever put it there, and two sccache servers on one folder race ("The local storage only
+    /// supports a single sccache server at a time", sccache docs/Local.md). A container without the mount keeps the cache in the
+    /// job (with a notice), never in a folder another job can see.
+    fn local_cache(&mut self) -> Result<(String, String, String), i32> {
+        let (dir, size, tier) = if self.os() == "Linux" {
             let mount = self.path_var("PADDOCK_SCCACHE_MOUNT").unwrap_or_else(|| "/sccache".to_string());
+            let own = |s: &mut Self, why: &str| {
+                let temp = s.path_var("RUNNER_TEMP").unwrap_or_else(|| "/tmp".to_string());
+                s.say(format!("::notice::{why}; the compile cache lives and dies with the job."));
+                let plain = format!("{temp}/sccache");
+                let tier = s3_tier_of(&plain);
+                (plain, "20G".to_string(), tier)
+            };
             if Path::new(&mount).is_dir() && dir_writable(Path::new(&mount)) {
-                (mount, "20G".to_string())
+                let slots = self.lane_count();
+                match self.lane(&mount, slots) {
+                    Ok(lane) => (
+                        lane_sccache_dir(&mount, &lane),
+                        slot_cache_size_or(self.get("PADDOCK_CI_SCCACHE_GB"), slots, LINUX_SCCACHE_GB),
+                        lane_s3_dir(&mount, &lane),
+                    ),
+                    Err(why) => {
+                        self.summary_line(&format!("- sccache lane: NOT taken ({why}); job-private folder"));
+                        own(self, &format!("no lane of {mount} could be taken ({why})"))
+                    }
+                }
             } else {
-                let temp = self.path_var("RUNNER_TEMP").unwrap_or_else(|| "/tmp".to_string());
-                self.say("::notice::no /sccache mount in this container; the compile cache lives and dies with the job.");
-                (format!("{temp}/sccache"), "20G".to_string())
+                own(self, "no /sccache mount in this container")
             }
         } else {
             // sccache's local storage "only supports a single sccache server at a time" (docs/Local.md): one folder per slot.
@@ -903,7 +982,9 @@ impl Step<'_> {
             let slots = self.isolation(&["slots"])?;
             let slots: u64 = slots.parse().unwrap_or(1);
             let size = slot_cache_size(self.get("PADDOCK_CI_SCCACHE_GB"), slots);
-            (paddock_env::winpath::from_git_bash(&dir, home::os_of(self.ctx.windows)), size)
+            let dir = paddock_env::winpath::from_git_bash(&dir, home::os_of(self.ctx.windows));
+            let tier = s3_tier_of(&dir);
+            (dir, size, tier)
         };
         if let Err(e) = std::fs::create_dir_all(&dir) {
             return Err(self.fail(error_line(
@@ -911,8 +992,94 @@ impl Step<'_> {
                 "check the disk of the runner.",
             )));
         }
-        let dir = if self.os() == "Windows" { home::native(&dir) } else { dir };
-        Ok((dir, size))
+        let (dir, tier) = if self.os() == "Windows" { (home::native(&dir), home::native(&tier)) } else { (dir, tier) };
+        Ok((dir, size, tier))
+    }
+
+    /// One line for the job summary (`$GITHUB_STEP_SUMMARY`), where a notice alone would scroll away; a missing file is not an error.
+    fn summary_line(&mut self, text: &str) {
+        if self.get("GITHUB_STEP_SUMMARY").is_some() {
+            let _ = self.append("GITHUB_STEP_SUMMARY", &[text.to_string()]);
+        }
+    }
+
+    /// Removes what older-style jobs left at the mount's root (see [`legacy_mount_entries`]), once a lane is held, and says what it
+    /// removed. Only a folder untouched for [`LEGACY_IDLE`] goes (a job of the old design still running keeps its folders young), and
+    /// never `lanes/` or `sccache-*`, which are not in the list. A refusal or failure is a warning: the cache must slow a build
+    /// down, never fail it.
+    fn clean_legacy_mount(&mut self, mount: &str) {
+        let root = Path::new(mount);
+        let home_dir = self.path_var("HOME").map(PathBuf::from);
+        let mut removed = Vec::new();
+        for name in legacy_mount_entries() {
+            let path = root.join(&name);
+            if !std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir()) {
+                continue;
+            }
+            let mut budget = 20_000;
+            let newest = newest_folder_mtime(&path, 4, &mut budget);
+            if newest.elapsed().is_ok_and(|age| age < LEGACY_IDLE) {
+                continue;
+            }
+            match crate::safe_remove::remove_in_mount(root, &path, home_dir.as_deref()) {
+                Ok(true) => removed.push(name),
+                Ok(false) => {}
+                Err(e) => self.say(format!(
+                    "::warning::sccache: could not remove the old {} ({e}); it stays.",
+                    path.display()
+                )),
+            }
+        }
+        if !removed.is_empty() {
+            self.say(format!(
+                "sccache: removed what older jobs left at the root of {mount} (idle for a day or more): {}",
+                removed.join(", ")
+            ));
+        }
+    }
+
+    /// How many lanes a Linux host has: `PADDOCK_CI_SLOTS`, else the runner's jobs per host, else the class's layout (6 on d-gtr9).
+    fn lane_count(&self) -> u64 {
+        let n = |k: &str| {
+            self.get(k)
+                .filter(|v| crate::ci_build_jobs::is_count(v))
+                .and_then(|v| v.parse::<u64>().ok())
+        };
+        n("PADDOCK_CI_SLOTS").or_else(|| n("PADDOCK_CI_JOBS_PER_HOST")).unwrap_or_else(|| {
+            crate::ci_build_jobs::class_default("Linux", crate::ci_build_jobs::Setting::Share)
+                .parse()
+                .unwrap_or(1)
+        })
+    }
+
+    /// The job's lane on a Linux host: the slot an earlier step took (`PADDOCK_CI_SLOT`), else one taken now from the mount's
+    /// `lanes/` folder with the same slot holder the host runners use (`dev ci slot`), and recorded in `$GITHUB_ENV` so every later
+    /// step of the job keeps it. The holder lives until the job's folder (`RUNNER_TEMP`) is gone.
+    fn lane(&mut self, mount: &str, slots: u64) -> Result<String, String> {
+        if let Some(s) = self.get("PADDOCK_CI_SLOT").filter(|s| home::valid_slot(s)) {
+            return Ok(s.to_string());
+        }
+        let owner = self.path_var("RUNNER_TEMP").ok_or("RUNNER_TEMP is not set")?;
+        let args = crate::slots::AcquireArgs::new(
+            u32::try_from(slots).unwrap_or(1),
+            PathBuf::from(&owner),
+            Path::new(mount).join("lanes"),
+        );
+        let report = crate::slots::acquire(&args).map_err(|e| format!("{e}"))?;
+        let slot = report.json()["slot"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or("the slot tool named no slot")?;
+        // A failed write is not dropped: the later steps would not know the lane, so this job does not use it.
+        let mut env_lines = vec![format!("PADDOCK_CI_SLOT={slot}"), format!("PADDOCK_CI_LANE_ROOT={mount}/lanes")];
+        if let Some(lock) = report.json()["lock"].as_str() {
+            env_lines.push(format!("PADDOCK_CI_LANE_LOCK={lock}"));
+        }
+        self.append("GITHUB_ENV", &env_lines)
+            .map_err(|_| format!("the lane {slot} could not be recorded in GITHUB_ENV (the error is above)"))?;
+        self.say(format!("sccache: this job holds lane {slot} of {slots} on {mount}"));
+        self.clean_legacy_mount(mount);
+        Ok(slot)
     }
 
     // ---- 3. Tauri libraries ------------------------------------------------------------------------------------------

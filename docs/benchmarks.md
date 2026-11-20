@@ -1010,11 +1010,11 @@ These are ordered by impact.
      core share ran 2.3 times longer. The 1.5 GB per rustc that `PADDOCK_CI_RUSTC_MB` assumes is still an estimate. The
      earlier numbers (8 cores, 16,316 MB, run 7209: Debrief's Windows bundle 18.6 min with 4 against 14.5 min with 8,
      run 7195, different commits and caches) are not evidence.
-   - CI build parallelism on Linux: `conformance/ci/build-jobs.sh` leaves `CARGO_BUILD_JOBS` unset on the Linux runner
-     (cargo uses every core in each of up to four concurrent containers, as before 2026-10-30) and logs the host's cores:
-     16 cores and 127,941 MB in a container on d-gtr9 (run 7211, job 23231).
-     Its share (cores / 4 or cores / 2, `PADDOCK_CI_JOBS_PER_HOST` in d-gtr9's `runner.envs`) waits for one A/B of Gitea
-     job durations of the Rust jobs (crate, crates, app legs, Debrief's rust tests), the same commits with and without it.
+   - CI build parallelism on Linux (updated 2026-11-20): the 2026-10-30 note here (build-jobs left `CARGO_BUILD_JOBS` unset, cargo
+     using every core in each of up to four containers, 16 cores and 127,941 MB on d-gtr9, run 7211, job 23231) is superseded.
+     d-gtr9 now has 30 CPUs and 64 GiB with runner capacity 6, and the class layout is in the repo (6 jobs per host: 30 / 6 = 5 build
+     jobs and 5 test threads), because with no share each of the 6 jobs used all 30 cores and ran 1.2 to 1.7 times slower than
+     at 3 lanes (runs 8335 against 8346); see "CI job cost, step by step" (on docs/ci-job-cost-research until it lands).
    - CI build parallelism: a clean, CI-shaped Dyno build (`cargo test --no-run --workspace --exclude dyno-app`, no sccache,
      no incremental) with `CARGO_BUILD_JOBS=4` (the Mac leg's share) against 13 (cores − 1). Tried on 2026-10-30; the
      5-minute load never fell below 10 in an hour, so nothing was recorded (`conformance/ci/build-jobs.sh` keeps 4 on the
@@ -2336,3 +2336,97 @@ save more, on each OS? And did the user's Defender process exclusions for git ch
 - **Result:** the dispatch input switched the S3 level on in every job (`sccache: local disk .../s3, then S3 bucket ... (through the timeout guard on 127.0.0.1:<port>)` on all 15 jobs that compile or start the server); all three classes reached RustFS, wrote to it (5,240 writes, 0 failures) and read from it (385 L1 hits, 208 of them on macOS in the `paddock-dev` job, whose crates the earlier trials had stored). The guard cut **no** request: its logs held 185 lines `was quiet for 10 s and is closed` (idle keep-alive connections, routine) and no `did not answer`. One guard ended by its 15-minute idle limit in a job whose compiles were more than 15 minutes apart; from then on that job used its local disk alone (a connect to the guard is refused, which sccache's `l0` policy ignores). That is the measured cause for the change of the idle limit to 6 hours (`Limits::default`); the job's own end stops the guard. The hit rate of a first run is low by construction (macOS 31%, Linux 15%, Windows 0.6%); the second run of the same head is the measurement of the shared cache, and was not made (one run per head).
 - **Not measured:** a second run's hit rate, the time saved on a full ci.yml run, and a store that hangs on the real runners (none did).
 
+## CI job cost, step by step (2026-11-20, docs/ci-job-cost-research)
+
+Quoted by [docs/research/2026-11-20-ci-job-cost.md](research/2026-11-20-ci-job-cost.md).
+
+- **Method.** Gitea API job and step times and the job logs of runs 8335 (`ci.yml`) and 8338 (`debrief.yml`) on e0fd0f511 at
+  3 Linux lanes, WebKit on, and 8346 (`ci.yml`, WebKit off, 6 failed jobs) and 8347 (`debrief.yml`, Chromium only, 2 failed
+  jobs) on 0c44bc3a3 at 6 lanes.
+  Each job's log was cut at its `::group::` markers and each segment classified by step name; cargo compile is the sum of
+  cargo's `Finished ... in` lines, nextest its `Summary` lines, Playwright its `N passed (T)` line and, per test, the list
+  reporter's lines (3,817 tests). sccache: each job's last `--show-stats`. Limits: 8335 and 8346 are different commits;
+  segment classes follow step names; per-job CPU was not sampled (**not measured**).
+- **One round, 3 lanes (8335 + 8338), job-min:**
+
+  | | Linux (46 jobs) | macOS (11) | Windows (8) |
+  |---|---:|---:|---:|
+  | Total | 250.5 | 56.2 | 81.7 |
+  | Plan job's runner wait | 14.3 | 0 | 0 |
+  | `./dev` source builds | 4.3 | 1.2 | 3.0 |
+  | Container start | 1.7 | 0 | 0 |
+  | Checkout | 9.8 | 3.3 | 4.5 |
+  | OS setup | 2.9 | 2.5 | 8.6 |
+  | npm ci, node caches | 6.3 | 1.9 | 2.7 |
+  | `npm run build -w ui` | 4.9 | 0 | 0 |
+  | App builds | 12.4 | 8.6 | 21.6 |
+  | cargo steps | 25.6 | 21.8 | 38.1 |
+  | Playwright | 140.3 | 12.4 | 1.1 |
+  | Teardown | 3.7 | 0.2 | 1.1 |
+  | Other | 13.8 | 4.2 | 0.9 |
+  | cargo compile (`Finished` lines) | 28.1 | 16.1 | 36.2 |
+  | nextest execution | 5.3 | 12.6 | 19.0 |
+
+- **Repeats per round:** `./dev` built 7 times in 8338 (510 s) and 11 times in 8346 (1,219 s, 743 s of it on Windows; 28 to
+  327 s each); 0 in 8335, whose commit is `main`'s (downloaded). The Windows `app dyno` job of 8346 built it twice (75 s, then
+  169 s in the `hostRustChecks` step, in the kept clone's `tools/paddock-dev/target`). Checkouts 53 (17.6 job-min, all OS).
+  `npm run build -w ui` 18 times, 285 s (13 to 24 s each; 10 times, 221 s, in 8346). `npm ci` 33 times, 5 to 9 s each.
+  Angular e2e app builds 12, 124 s.
+- **3 against 6 lanes, the same jobs (8335 against 8346), seconds:** `app dyno (e2e-1)` 726 → 1,023; `(e2e-2)` 669 → 807;
+  `reference apps (2/2)` 391 → 580; `app dyno` 360 → 523 (compile 128 → 265); `app pitwall` 218 → 343 (compile 107 → 180);
+  `crate (ubuntu)` 102 → 163 (compile 46 → 104); `app shell-demo` 97 → 140; `app pitwall (e2e-2)` 93 → 156. Linux compile
+  in `ci.yml`: 9.4 → 17.6 job-min. 8346 ran up to 5 Linux jobs at once; 8347's Linux jobs waited for it, and its plan job
+  held a Linux lane for 1,861 s in `runner-wait` (8335's: 794 s; 8338's: 64 s). 8347 was a branch-mode plan (Chromium only,
+  no bundles or smoke tests): `debrief.yml`'s Linux Rust jobs 0.89 to 1.23 times 8338's; `./dev` built 5 times, 453 s. Every Linux job
+  logged `CARGO_BUILD_JOBS stays unset: cargo uses all 30 cores`.
+- **sccache:** Linux 94 to 100% hits, 1,000 to 2,000 requests per Rust job (empty target folder). macOS and Windows (per-slot
+  local caches, kept target folders): 0 to 37% hits where anything compiled: Windows `app dyno` 204 misses, 447 s compile;
+  macOS `app dyno` 59 misses, 145 s; `bundle` and `real-app smoke` 41 misses on each.
+- **Playwright per suite (8335 + 8338), tests / test-s / median:** Debrief WebKit 692 / 5,086 / 6.4 s; Debrief Chromium 704
+  / 2,470 / 3.1 s; Dyno WebKit 442 / 1,606 / 1.7 s; Dyno Chromium 442 / 1,229 / 0.92 s; reference apps Chromium 527 / 852;
+  reference apps WebKit (macOS) 458 / 703; Pitwall WebKit 245 / 422 / 1.3 s, Chromium 245 / 249 / 0.82 s; Spotter 62 / 75.
+  10th percentile per test (the app-start floor): 0.55 s (Dyno Chromium) to 0.99 s (Debrief WebKit).
+- **Slowest specs, test-s per round:** Dyno `page-layout.spec.ts` 671 (WebKit) + 529 (194 tests each); Debrief
+  `live-tail-follow.e2e.ts` 513 (WebKit, 34 tests) + 170; Dyno `layout.spec.ts` 254 + 197; Debrief `dock-vs` 171, `live-tail`
+  155, `popout` 128 (WebKit); Pitwall `layout.e2e.ts` 148 + 114; Dyno `row-actions.spec.ts` 146 + 142; Debrief
+  `main-layout` 110, `analysis-views` 106; Dyno `axe.spec.ts` 94 + 76.
+- **Slowest 30 tests (s, suite, engine, test):**
+
+  | s | Suite | Engine | Test |
+  |---:|---|---|---|
+  | 72.0 | Debrief | webkit | `e2e/dock-panels.e2e.ts:33` |
+  | 66.0 | reference apps (macOS) | shell-demo-webkit | `e2e/shell-demo.spec.ts:669` |
+  | 66.0 | Dyno | webkit | `e2e/axe.spec.ts:59` |
+  | 53.6 | Dyno | chromium | `e2e/axe.spec.ts:59` |
+  | 44.8 | Dyno | webkit | `e2e/dialogs.spec.ts:15` |
+  | 43.9 | reference apps | shell-demo | `e2e/shell-demo.spec.ts:669` |
+  | 41.2 | reference apps (macOS) | shell-demo-webkit | `e2e/shell-demo-size.spec.ts:21` |
+  | 39.7 | Dyno | chromium | `e2e/row-actions.spec.ts:87` |
+  | 39.7 | Dyno | webkit | `e2e/row-actions.spec.ts:100` |
+  | 39.6 | Dyno | webkit | `e2e/row-actions.spec.ts:87` |
+  | 38.4 | Dyno | chromium | `e2e/row-actions.spec.ts:100` |
+  | 37.6 | Debrief | webkit | `e2e/activity-errors.e2e.ts:31` |
+  | 32.8 | Debrief | webkit | `e2e/jobs.e2e.ts:110` |
+  | 32.6 | Debrief | webkit | `e2e/activity.e2e.ts:54` |
+  | 31.8 | Dyno | chromium | `e2e/dialogs.spec.ts:15` |
+  | 31.6 | reference apps (macOS) | shell-demo-webkit | `e2e/shell-demo-a11y.spec.ts:13` |
+  | 31.1 | reference apps | shell-demo | `e2e/shell-demo-size.spec.ts:21` |
+  | 29.6 | Debrief | webkit | `e2e/live-tail.e2e.ts:139` |
+  | 29.1 | Dyno | webkit | `e2e/layout.spec.ts:211` |
+  | 28.9 | Dyno | webkit | `e2e/layout.spec.ts:167` |
+  | 28.5 | Debrief | webkit | `e2e/markers-highlight.e2e.ts:26` |
+  | 28.2 | Dyno | webkit | `e2e/axe.spec.ts:62` |
+  | 28.2 | Debrief | chromium | `e2e/dock-panels.e2e.ts:33` |
+  | 27.9 | Dyno | webkit | `e2e/layout.spec.ts:140` |
+  | 27.5 | Dyno | webkit | `e2e/layout.spec.ts:140` |
+  | 27.5 | Dyno | webkit | `e2e/layout.spec.ts:167` |
+  | 27.5 | Dyno | webkit | `e2e/layout.spec.ts:211` |
+  | 27.0 | Dyno | webkit | `e2e/layout.spec.ts:167` |
+  | 27.0 | Dyno | webkit | `e2e/layout.spec.ts:211` |
+  | 26.8 | Dyno | webkit | `e2e/dialogs.spec.ts:22` |
+
+- **Rust:** `crate (windows)` doc tests 198 s (8335) and 125 s (8346) for about 30 doctests in 58 crates; the 37 crates
+  without one took 48 s and 32 s of it. Linux: 21 s. paddock-dev suite, test-seconds (deduplicated): Windows 4,334 (8335)
+  and 3,878 (8346), macOS 2,545 and 1,680, Linux 814 (8346); `merge_check` 1,089 / 303 / 53, `golden` 643 / 189, `queue`
+  637 / 388 / 58; queue tests 7.3 s median on Windows.
+- **Fixed waits:** `waitForTimeout` 10 in Debrief's specs, 3 in Dyno's, 5 in `ui/e2e`, 0 in Pitwall's.

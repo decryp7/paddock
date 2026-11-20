@@ -97,6 +97,8 @@ pub fn child_pass() -> Vec<&'static str> {
         "PADDOCK_TEST_UID",
         "PADDOCK_PROC_*",
         "PADDOCK_CI_*",
+        // A built stand-in the job names (ER-47: the tests keep it); otherwise the step builds one, see `run_with`.
+        "PADDOCK_STAND_IN_BIN",
     ];
     crate::pre_push::exec::PASS
         .iter()
@@ -114,6 +116,23 @@ pub fn exe_of(build_output: &str, krate: &str) -> Option<String> {
     ))
     .ok()?;
     re.captures_iter(build_output).last().map(|c| c[1].to_string())
+}
+
+/// The test kit's stand-in program and the variable that names a built one (`paddock_testkit::stand_in::{STAND_IN_BIN,
+/// STAND_IN_ENV}`; the kit is only a dev-dependency here, so a test holds these equal to the kit's).
+pub const STAND_IN_BIN: &str = "paddock-stand-in";
+/// See [`STAND_IN_BIN`].
+pub const STAND_IN_ENV: &str = "PADDOCK_STAND_IN_BIN";
+
+/// The stand-in's path in the output of `cargo build --message-format=json`: the `executable` of the `compiler-artifact` line whose
+/// target is [`STAND_IN_BIN`].
+pub fn stand_in_of(build_output: &str) -> Option<String> {
+    build_output.lines().find_map(|l| {
+        let v: serde_json::Value = serde_json::from_str(l.trim()).ok()?;
+        (v["reason"] == "compiler-artifact" && v["target"]["name"] == STAND_IN_BIN)
+            .then(|| v["executable"].as_str().map(str::to_string))
+            .flatten()
+    })
 }
 
 fn seconds(env: &HashMap<String, String>, key: &str, default: u64) -> Duration {
@@ -263,6 +282,47 @@ pub fn run_with(machine: &dyn Machine, env: &HashMap<String, String>, out: &mut 
         );
     };
 
+    // The tests' fake programs are the test kit's stand-in. Unnamed, the kit compiles it into the build folder of the test program,
+    // which the user the tests drop to cannot write (ci.yml 8359: "cannot make a build folder in /target/debug: Permission denied").
+    // So it is built here, before the drop, and named to the tests; a stand-in the job names is used as it is.
+    let stand_in = match step.var(STAND_IN_ENV).filter(|v| !v.is_empty()) {
+        Some(named) => named.to_string(),
+        None => {
+            let stand_in_log = private.0.join("stand-in.log");
+            let build = ToolCall::new("cargo")
+                .args(["build", "-p", "paddock-testkit", "--bin", STAND_IN_BIN, "--message-format=json"])
+                .pass(child_pass())
+                .timeout(seconds(env, "PADDOCK_GUARDIAN_BUILD_TIMEOUT", 600))
+                .output(Output::File(stand_in_log.clone()));
+            let mut log = Vec::new();
+            let ran = machine.run(&build, &mut log);
+            flush(&mut step, &mut log);
+            match ran {
+                Ok(r) if r.success => match stand_in_of(&r.stderr) {
+                    Some(p) => p,
+                    None => {
+                        return step.fail(
+                            format!("cargo built no {STAND_IN_BIN}; see {}.", stand_in_log.display()),
+                            "check that paddock-testkit still has its paddock-stand-in binary.",
+                        );
+                    }
+                },
+                Ok(r) => {
+                    return step.fail(
+                        format!("cargo build of {STAND_IN_BIN} failed ({}); see {}.", r.how, stand_in_log.display()),
+                        "fix the build first.",
+                    );
+                }
+                Err(e) => {
+                    return step.fail(
+                        format!("cargo could not be started: {e}"),
+                        "check that cargo is on PATH in the image.",
+                    );
+                }
+            }
+        }
+    };
+
     if euid == 0
         && let Err(e) = machine.chown(&private.0, uid)
     {
@@ -284,6 +344,7 @@ pub fn run_with(machine: &dyn Machine, env: &HashMap<String, String>, out: &mut 
             format!("TMPDIR={}", private.0.display()),
             format!("HOME={}", private.0.display()),
             format!("PADDOCK_PROC_GUARDIAN_LOG={}", guardian_log.display()),
+            format!("{STAND_IN_ENV}={stand_in}"),
             bin.clone(),
             filter.to_string(),
         ]);
@@ -346,6 +407,9 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    /// What `cargo build --message-format=json` of the stand-in prints (one artifact line, cut to the fields the step reads).
+    const STAND_IN_BUILD: &str = "   Compiling paddock-testkit v0.1.0\n{\"reason\":\"compiler-artifact\",\"target\":{\"name\":\"paddock-stand-in\",\"kind\":[\"bin\"]},\"executable\":\"/target/debug/paddock-stand-in\"}\n{\"reason\":\"build-finished\",\"success\":true}\n";
+
     // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
     const BUILD: &str = "   Compiling paddock-proc v0.1.0\n  Executable unittests src/lib.rs (target/debug/deps/paddock_proc-0123abcd)\n  Executable tests/it/main.rs (target/debug/deps/it-ff)\n  Executable unittests src/lib.rs (target/debug/deps/paddock_chromium-9f8e7d)\n";
 
@@ -389,7 +453,13 @@ mod tests {
                 success: !failed,
                 how: if failed { "exit 101".into() } else { "exit 0".into() },
                 stdout: String::new(),
-                stderr: if cargo { self.build_text.to_string() } else { String::new() },
+                stderr: if call.display().starts_with("cargo build ") {
+                    STAND_IN_BUILD.to_string()
+                } else if cargo {
+                    self.build_text.to_string()
+                } else {
+                    String::new()
+                },
             })
         }
         fn chown(&self, path: &Path, uid: u32) -> Result<(), String> {
@@ -442,6 +512,7 @@ mod tests {
             "PADDOCK_BROWSER_NO_SANDBOX",
             "PADDOCK_TEST_UID",
             "PADDOCK_PROC_GUARDIAN_LOG",
+            "PADDOCK_STAND_IN_BIN",
         ];
         let secrets = ["GITHUB_TOKEN", "PADDOCK_DEV_TOKEN", "BUILD_INPUTS_TOKEN", "ACTIONS_RUNTIME_TOKEN"];
         let parent: HashMap<String, String> = wanted
@@ -492,7 +563,13 @@ mod tests {
             started[0].starts_with("cargo test --no-run --all-features -p paddock-proc -p paddock-chromium"),
             "{started:?}"
         );
-        for (i, filter) in [(1, "guardian::"), (2, "launch::tests::a_browser_whose_owner_is_killed")] {
+        // ci.yml 8359: as uid 65534 the test kit could not compile its stand-in into root's build folder. It is built here, as
+        // root, before the tests drop to the user, and named to them.
+        assert!(
+            started[1].starts_with("cargo build -p paddock-testkit --bin paddock-stand-in --message-format=json"),
+            "{started:?}"
+        );
+        for (i, filter) in [(2, "guardian::"), (3, "launch::tests::a_browser_whose_owner_is_killed")] {
             assert!(
                 started[i].starts_with("setpriv --reuid=4242 --regid=4242 --clear-groups --no-new-privs -- env TMPDIR="),
                 "{}",
@@ -500,6 +577,11 @@ mod tests {
             );
             assert!(
                 started[i].contains("PADDOCK_PROC_GUARDIAN_LOG=") && started[i].ends_with(filter),
+                "{}",
+                started[i]
+            );
+            assert!(
+                started[i].contains(" PADDOCK_STAND_IN_BIN=/target/debug/paddock-stand-in "),
                 "{}",
                 started[i]
             );
@@ -518,11 +600,40 @@ mod tests {
         let (code, out, _) = go(&f, &[("PADDOCK_TEST_UID", "4242")]);
         assert_eq!(code, 0, "{out}");
         let started = f.started.lock().unwrap().clone();
-        assert!(started[1].starts_with("env TMPDIR="), "no setpriv: {}", started[1]);
+        assert!(started[2].starts_with("env TMPDIR="), "no setpriv: {}", started[2]);
         assert!(out.contains("Running as uid 501: env "), "{out}");
         assert!(f.chowned.lock().unwrap().is_empty());
         let (_, out, _) = go(&Fake::new(0), &[]);
         assert!(out.contains("Running as uid 65534: setpriv --reuid=65534"), "{out}");
+    }
+
+    #[test]
+    fn a_stand_in_the_job_names_is_kept_and_no_other_is_built() {
+        let f = Fake::new(0);
+        let (code, out, _) = go(&f, &[("PADDOCK_STAND_IN_BIN", "/opt/kit/paddock-stand-in")]);
+        assert_eq!(code, 0, "{out}");
+        let started = f.started.lock().unwrap().clone();
+        assert!(!started.iter().any(|c| c.starts_with("cargo build ")), "{started:?}");
+        assert!(
+            started[1..]
+                .iter()
+                .all(|c| c.contains(" PADDOCK_STAND_IN_BIN=/opt/kit/paddock-stand-in ")),
+            "{started:?}"
+        );
+    }
+
+    #[test]
+    fn the_stand_in_names_are_the_test_kits() {
+        assert_eq!(STAND_IN_BIN, paddock_testkit::stand_in::STAND_IN_BIN);
+        assert_eq!(STAND_IN_ENV, paddock_testkit::stand_in::STAND_IN_ENV);
+    }
+
+    #[test]
+    fn the_stand_in_is_the_executable_of_its_artifact_line() {
+        assert_eq!(stand_in_of(STAND_IN_BUILD), Some("/target/debug/paddock-stand-in".to_string()));
+        assert_eq!(stand_in_of("   Compiling only\n"), None);
+        let other = "{\"reason\":\"compiler-artifact\",\"target\":{\"name\":\"paddock-testkit\"},\"executable\":null}\n";
+        assert_eq!(stand_in_of(other), None);
     }
 
     #[test]

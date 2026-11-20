@@ -179,18 +179,27 @@ pub(crate) fn group_exists(group: u32) -> bool {
 /// What `/proc/<pid>/stat` says of a process: its group (field 5), whether it runs, and whether it is a zombie that still
 /// has running threads (field 20, `num_threads`, above 1: the leader's zombie state hides them) and so counts as running.
 /// Fields are read after the last `)`, since the name (field 2) may hold spaces and parentheses.
+///
+/// The group is `None` for a process the kernel is releasing: dead (Z or X) with a group of -1. Linux writes -1 for the group
+/// and the session (and 0 for the parent and the threads) once it can no longer lock the process's signal handlers
+/// (`do_task_stat`, fs/proc/array.c); such a process is in no group and runs nothing. Any other line that does not parse,
+/// a negative group on a live state included, is `None`: unknown (ADR 0081).
 #[cfg(any(target_os = "linux", all(test, unix)))]
-pub(crate) fn parse_group_and_running(stat: &[u8]) -> Option<(u32, bool)> {
+pub(crate) fn parse_group_and_running(stat: &[u8]) -> Option<(Option<u32>, bool)> {
     // Bytes, not text: the name (field 2) can be any bytes, and only the tail after its closing `)` is ASCII.
     let rest = stat.get(stat.iter().rposition(|&b| b == b')')? + 1..)?;
     let rest = std::str::from_utf8(rest).ok()?;
     let f: Vec<&str> = rest.split_whitespace().collect();
     // After the name: state (3), ppid (4), pgrp (5), ... num_threads (20) are f[0], f[1], f[2], ... f[17].
     let state = *f.first()?;
-    let group: u32 = f.get(2)?.parse().ok()?;
-    let threads: u32 = f.get(17)?.parse().ok()?;
     let zombie = matches!(state, "Z" | "X" | "x");
-    Some((group, !zombie || threads > 1))
+    let group: i64 = f.get(2)?.parse().ok()?;
+    let threads: u32 = f.get(17)?.parse().ok()?;
+    if group < 0 {
+        // Released: in no group, and nothing of it runs. A live state with no group is not a known state.
+        return zombie.then_some((None, false));
+    }
+    Some((Some(u32::try_from(group).ok()?), !zombie || threads > 1))
 }
 
 /// Whether a process under `proc_root` is in `group` and runs. `None` when nothing is known: `proc_root` cannot be listed
@@ -212,7 +221,7 @@ pub(crate) fn group_runs_in_proc(proc_root: &std::path::Path, group: u32) -> Opt
         seen = true;
         match std::fs::read(e.path().join("stat")) {
             Ok(bytes) => match parse_group_and_running(&bytes) {
-                Some((g, r)) => runs |= g == group && r,
+                Some((g, r)) => runs |= g == Some(group) && r,
                 None => runs = true,
             },
             Err(err)
@@ -1247,28 +1256,63 @@ mod tests {
     fn a_stat_line_gives_its_group_and_whether_it_runs() {
         assert_eq!(
             parse_group_and_running(stat("sh", "S", 7, 1).as_bytes()),
-            Some((7, true))
+            Some((Some(7), true))
         );
         assert_eq!(
             parse_group_and_running(stat("sh", "Z", 7, 1).as_bytes()),
-            Some((7, false))
+            Some((Some(7), false))
         );
         assert_eq!(
             parse_group_and_running(stat("sh", "X", 7, 1).as_bytes()),
-            Some((7, false))
+            Some((Some(7), false))
         );
         // A zombie leader whose other threads still run is running.
         assert_eq!(
             parse_group_and_running(stat("sh", "Z", 7, 3).as_bytes()),
-            Some((7, true))
+            Some((Some(7), true))
         );
         // A name with spaces and parentheses does not shift the fields.
         assert_eq!(
             parse_group_and_running(stat("a) S (b c", "S", 9, 1).as_bytes()),
-            Some((9, true))
+            Some((Some(9), true))
         );
         assert_eq!(parse_group_and_running(b"42 (sh) S 1"), None);
         assert_eq!(parse_group_and_running(b"garbage"), None);
+    }
+
+    /// A process the kernel is releasing (state X or Z, its signal handlers already detached) writes its group and session as
+    /// -1, its parent as 0 and no threads (`do_task_stat` in fs/proc/array.c keeps the defaults when it cannot lock them). Such a
+    /// process is in no group and runs nothing; it is not a stat of unknown meaning. Run 8366 failed
+    /// `a_group_of_zombies_has_no_member_that_runs` because an unrelated process ended while `/proc` was read: this line, seen
+    /// in the CI image, made the zombie's group read as running.
+    #[test]
+    fn a_process_being_released_is_in_no_group_and_does_not_make_one_run() {
+        let released = b"12501 (true) X 0 -1 -1 0 -1 4227084 130 0 0 0 0 0 0 0 20 0 0 0 50025098 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 17 2 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
+        assert_eq!(parse_group_and_running(released), Some((None, false)));
+        let released_zombie = b"12838 (true) Z 0 -1 -1 0 -1 4227084 130 0 0 0 0 0 0 0 20 0 0 0 50025100 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 17 3 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
+        assert_eq!(
+            parse_group_and_running(released_zombie),
+            Some((None, false))
+        );
+        // A negative group on a process that is not dead is not a released process: unknown, so it counts as running.
+        assert_eq!(
+            parse_group_and_running(b"42 (sh) S 0 -1 -1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 5 0 0"),
+            None
+        );
+
+        let root = tempfile::tempdir().unwrap();
+        let put = |pid: &str, text: &[u8]| {
+            let d = root.path().join(pid);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("stat"), text).unwrap();
+        };
+        put("10", stat("sh", "Z", 7, 1).as_bytes());
+        put("12501", released);
+        assert_eq!(
+            group_runs_in_proc(root.path(), 7),
+            Some(false),
+            "a zombie is not a member that runs, and a process being released is in no group"
+        );
     }
 
     #[test]

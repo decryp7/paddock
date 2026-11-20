@@ -1005,7 +1005,7 @@ jobs:
           name: paddock-${{ github.job }}
 
       # Toolchain and sccache on every OS: sccache's local disk cache (host runners: the job slot's kept folder sccache-s<n>,
-      # containers: the /sccache mount).
+      # containers: the lane's own folder sccache-<lane> on the /sccache mount, never the mount itself; ADR 0111).
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy
