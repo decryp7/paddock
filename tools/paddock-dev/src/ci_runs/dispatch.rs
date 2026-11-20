@@ -145,6 +145,10 @@ struct BusyProbe<'a, 'b> {
     /// The waiting run's train ([`train_identity`]): runs of the same train (same `train/*` branch and head commit) are one
     /// reservation and never hold each other up; every other run still does. `None`: not a train run.
     own_train: Option<(String, String)>,
+    /// The workflow file this probe waits for: another run of the same workflow at the same head is a duplicate, not a sibling.
+    own_workflow: String,
+    /// The same-train runs the last look ignored (ER-27: the log says whom this run shares the reservation with).
+    joined: Vec<String>,
 }
 
 /// How many pages of 50 runs are read at most for the unfinished ones (the newest first).
@@ -177,11 +181,12 @@ impl BusyProbe<'_, '_> {
         let runs = self.unfinished()?;
         let older_than = self.older_than;
         let own_train = self.own_train.clone();
-        for run in runs
-            .iter()
-            .filter(|r| older_than.is_none_or(|own| r.id < own))
-            .filter(|r| own_train.is_none() || train_identity(r) != own_train)
-        {
+        self.joined.clear();
+        for run in runs.iter().filter(|r| older_than.is_none_or(|own| r.id < own)) {
+            if own_train.is_some() && train_identity(run) == own_train && run.workflow() != self.own_workflow {
+                self.joined.push(format!("{} ({})", run.id, run.workflow()));
+                continue;
+            }
             if let Some(why) = self.job_clash(run)? {
                 return Ok(Some(why));
             }
@@ -243,9 +248,18 @@ impl Probe for BusyProbe<'_, '_> {
         format!("the {} runner to be free of other runs", names.join(" and "))
     }
     fn poll(&mut self) -> Result<Poll, String> {
-        Ok(match self.busy()? {
-            None => Poll::Done("no other run is on the same runner".into()),
-            Some(why) => Poll::Pending(why),
+        let busy = self.busy()?;
+        let joint = if self.joined.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "; joint reservation: not waiting for run(s) {} of the same train",
+                self.joined.join(", ")
+            )
+        };
+        Ok(match busy {
+            None => Poll::Done(format!("no other run is on the same runner{joint}")),
+            Some(why) => Poll::Pending(format!("{why}{joint}")),
         })
     }
     fn next_step(&self) -> String {
@@ -409,6 +423,13 @@ pub fn run(
             );
             return send(http, target, req, waited, log);
         }
+        // A train's workflow does not wait for its own train's other workflows: its identity is the ref's head commit (read
+        // from the branch; unreadable: strict, it waits for every run as any other dispatch does).
+        let own_train = if is_train(&req.git_ref) {
+            branch_identity(http, target, &req.git_ref)
+        } else {
+            None
+        };
         let mut client = Client::new(http, server, repo, token);
         client.backoff_ms = 0;
         let mut probe = BusyProbe {
@@ -416,7 +437,9 @@ pub fn run(
             read,
             wanted,
             older_than: None,
-            own_train: None,
+            own_train,
+            own_workflow: req.workflow.clone(),
+            joined: Vec::new(),
         };
         match wait_held(&mut probe, health.as_deref_mut(), clock, req.max, req.interval, log) {
             Outcome::Done { elapsed, .. } => waited = elapsed,
@@ -515,15 +538,7 @@ impl WaitersProbe<'_, '_> {
     fn waiting(&mut self) -> Result<Vec<u64>, String> {
         let page = self.client.runs_page_where(1, "event=workflow_dispatch")?;
         let mut ids = Vec::new();
-        // One reservation per train: the workflows of one train (same branch and head commit) count once, because the later
-        // ones pass runner-wait at once while no other train holds the runner (the first of a train is its leader).
-        let mut trains = BTreeSet::new();
         for r in page.runs.iter().filter(|r| !r.finished() && is_train(r.git_ref())) {
-            if let Some(t) = train_identity(r)
-                && !trains.insert(t)
-            {
-                continue;
-            }
             let Some(name) = waiter_job_name(r.workflow(), self.read) else {
                 continue;
             };
@@ -574,12 +589,26 @@ pub const RUNNER_WAIT_ACTION: &str = "./.gitea/actions/runner-wait";
 /// is never taken for a sibling: unknown waits).
 pub fn train_identity(r: &RunInfo) -> Option<(String, String)> {
     let git_ref = r.git_ref();
-    (r.event == "workflow_dispatch" && is_train(git_ref) && !r.head_sha.is_empty()).then(|| {
-        (
-            git_ref.strip_prefix("refs/heads/").unwrap_or(git_ref).to_string(),
-            r.head_sha.clone(),
-        )
-    })
+    let branch = git_ref.strip_prefix("refs/heads/").unwrap_or(git_ref);
+    // The record's own branch must agree with the workflow path's ref; a disagreement is not a train run we can name.
+    let agrees = r.head_branch.is_empty() || r.head_branch == branch;
+    (r.event == "workflow_dispatch" && is_train(git_ref) && !r.head_sha.is_empty() && agrees)
+        .then(|| (branch.to_string(), r.head_sha.clone()))
+}
+
+/// The identity a dispatch of `git_ref` will have: the branch and its head commit, from `GET .../branches/<branch>`. `None`
+/// when it cannot be read (the dispatch then waits for every run, as before).
+fn branch_identity(http: &mut dyn Http, target: &Target<'_>, git_ref: &str) -> Option<(String, String)> {
+    let branch = git_ref.strip_prefix("refs/heads/").unwrap_or(git_ref);
+    let url = format!(
+        "{}/api/v1/repos/{}/branches/{}",
+        target.server.trim_end_matches('/'),
+        target.repo,
+        branch
+    );
+    let v = http.get_json(&url, target.token).ok()?;
+    let sha = v["commit"]["id"].as_str().filter(|s| !s.is_empty())?;
+    Some((branch.to_string(), sha.to_string()))
 }
 
 /// Whether a ref is a train's (`train/...`, also spelled `refs/heads/train/...`).
@@ -686,6 +715,8 @@ pub fn runner_wait(
         wanted,
         older_than: Some(own),
         own_train: own_train.clone(),
+        own_workflow: workflow.to_string(),
+        joined: Vec::new(),
     };
     Ok(match wait_for(&mut probe, clock, max, interval, log) {
         Outcome::Done { elapsed, .. } => {
@@ -738,6 +769,8 @@ mod tests {
         own_errors: usize,
         /// The head commit of the own run (`GET .../runs/<id>`); empty: none given.
         own_sha: String,
+        /// The head commit `GET .../branches/<branch>` answers; empty: 404.
+        branch_sha: String,
         /// `GET .../runs/<id>/jobs`: the job lists in order per run (the last one repeats).
         jobs: Vec<(u64, VecDeque<Value>)>,
     }
@@ -751,6 +784,7 @@ mod tests {
                 own: Vec::new(),
                 own_errors: 0,
                 own_sha: String::new(),
+                branch_sha: String::new(),
                 jobs: Vec::new(),
             }
         }
@@ -779,6 +813,13 @@ mod tests {
                 return Ok(
                     json!({"id": id, "path": path, "status": "in_progress", "event": "workflow_dispatch", "head_sha": self.own_sha}),
                 );
+            }
+            if url.contains("/branches/") {
+                return if self.branch_sha.is_empty() {
+                    Err("HTTP 404".into())
+                } else {
+                    Ok(json!({"commit": {"id": self.branch_sha}}))
+                };
             }
             assert!(url.contains("/actions/runs?"), "{url}");
             self.gets += 1;
@@ -1310,34 +1351,94 @@ mod tests {
     }
 
     #[test]
-    fn the_workflows_of_one_train_count_as_one_waiter_when_dispatching_the_next() {
-        // Three Linux slots, cap 2: ci.yml and debrief.yml of one train sit in runner-wait; dispatching its release
-        // workflow must not wait for them, but another train's waiters still count.
+    fn a_foreign_holder_keeps_the_waiter_cap_at_slots_less_one_whatever_the_trains_of_the_waiters() {
+        // 3 Linux slots, cap 2. Waiters of one train must not fill the slots while a foreign run holds the Mac (the deadlock
+        // the cap prevents, ER-43): each waiting run counts, siblings included.
         let wait_step = || json!({"name": "Run ./.gitea/actions/runner-wait", "started_at": "2026-11-15T10:00:00Z"});
         let plan = vec![
             json!({"jobs": [{"id": 1, "name": "plan", "labels": ["ubuntu-latest"], "status": "in_progress", "steps": [wait_step()]}]}),
         ];
-        let mk = |list: Value| {
-            let mut http = Script::new(vec![list]);
-            http.jobs = [8131u64, 8130, 8129].iter().map(|id| (*id, plan.clone().into())).collect();
-            http
-        };
-        let same = runs_full(&[
+        let mut http = Script::new(vec![runs_full(&[
             (8131, "waits.yml", "refs/heads/train/t", "workflow_dispatch", "aaa"),
             (8130, "waits.yml", "refs/heads/train/t", "workflow_dispatch", "aaa"),
-        ]);
-        let (r, log) = go_ref(&mut mk(same), "waits.yml", "train/t");
-        assert_eq!(r.unwrap(), Dispatched::Yes { waited: Duration::ZERO }, "{log}");
-        // Positive control: the same two runs from two different trains fill the cap.
-        let two = runs_full(&[
-            (8131, "waits.yml", "refs/heads/train/t", "workflow_dispatch", "aaa"),
-            (8130, "waits.yml", "refs/heads/train/u", "workflow_dispatch", "aaa"),
-        ]);
-        let mut http = mk(two);
+        ])]);
+        http.jobs = [8131u64, 8130].iter().map(|id| (*id, plan.clone().into())).collect();
         let (r, log) = go_ref(&mut http, "waits.yml", "train/t");
         assert!(matches!(r.unwrap(), Dispatched::StillBusy { .. }), "{log}");
         assert!(log.contains("train runs [8131, 8130] are waiting"), "{log}");
         assert!(http.posts.is_empty());
+    }
+
+    #[test]
+    fn a_duplicate_dispatch_of_the_same_workflow_at_the_same_head_is_not_a_sibling() {
+        let mut http = joint_world("refs/heads/train/t", "workflow_dispatch", "aaa");
+        http.own = vec![(8373, "mac.yml@refs/heads/train/t".into())];
+        let (r, log, _) = wait_here(&mut http, 8373, "1m");
+        assert!(
+            matches!(&r, Ok(RunnerWait::StillBusy { last }) if last.contains("run 8372")),
+            "{r:?}\n{log}"
+        );
+    }
+
+    #[test]
+    fn the_ignored_siblings_are_named_in_the_log() {
+        let mut http = joint_world("refs/heads/train/t", "workflow_dispatch", "aaa");
+        let (_, log, _) = wait_here(&mut http, 8373, "1m");
+        assert!(
+            log.contains("joint reservation: not waiting for run(s) 8372 (mac.yml) of the same train"),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn a_record_whose_branch_disagrees_with_its_workflow_path_is_not_a_train_run() {
+        let mut r = RunInfo {
+            id: 1,
+            path: "mac.yml@refs/heads/train/t".into(),
+            event: "workflow_dispatch".into(),
+            status: "in_progress".into(),
+            conclusion: String::new(),
+            head_sha: "aaa".into(),
+            head_branch: "train/t".into(),
+            created_at: String::new(),
+            run_attempt: 1,
+        };
+        assert_eq!(train_identity(&r), Some(("train/t".into(), "aaa".into())));
+        r.head_branch = "train/other".into();
+        assert_eq!(train_identity(&r), None);
+    }
+
+    /// A train's workflow that does not wait for itself does not wait for its own train's other workflows, and still waits
+    /// for a foreign one.
+    #[test]
+    fn a_train_dispatch_does_not_wait_for_its_own_trains_other_workflows_but_does_for_a_foreign_one() {
+        let jobs_mac = || vec![jobs(&[("rust (macos)", "macos-latest", "in_progress")])];
+        let mut http = Script::new(vec![runs_full(&[(
+            8372,
+            "mac2.yml",
+            "refs/heads/train/t",
+            "workflow_dispatch",
+            "aaa",
+        )])]);
+        http.branch_sha = "aaa".into();
+        http.jobs = vec![(8372, jobs_mac().into())];
+        let (r, log) = go_ref(&mut http, "mac.yml", "train/t");
+        assert_eq!(r.unwrap(), Dispatched::Yes { waited: Duration::ZERO }, "{log}");
+        // Controls: another head, another train, an unreadable branch: all wait.
+        for (sibling_ref, branch_sha) in [
+            ("refs/heads/train/t", "bbb"),
+            ("refs/heads/train/u", "aaa"),
+            ("refs/heads/train/t", ""),
+        ] {
+            let mut http = Script::new(vec![runs_full(&[(8372, "mac2.yml", sibling_ref, "workflow_dispatch", "aaa")])]);
+            http.branch_sha = branch_sha.into();
+            http.jobs = vec![(8372, jobs_mac().into())];
+            let (r, log) = go_ref(&mut http, "mac.yml", "train/t");
+            assert!(
+                matches!(r.unwrap(), Dispatched::StillBusy { .. }),
+                "{sibling_ref} {branch_sha}: {log}"
+            );
+        }
     }
 
     #[test]
