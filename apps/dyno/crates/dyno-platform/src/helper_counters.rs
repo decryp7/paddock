@@ -185,11 +185,16 @@ pub fn parse_msacpi(text: &str) -> Vec<ThermalZone> {
         .collect()
 }
 
+/// What one `powermetrics` run gave: the CPU power domains and the fans.
+type PowerReading = Result<(Vec<EnergyDomain>, Vec<FanSpeed>), PlatformError>;
+
 /// The real reader of this system.
 pub struct SystemCounters {
     host: HelperHost,
     sys: std::path::PathBuf,
     runner: Box<dyn ToolRunner>,
+    /// Set once `powermetrics` refused the `smc` sampler (Apple silicon): later queries ask for `cpu_power` alone at once.
+    no_smc: std::sync::atomic::AtomicBool,
 }
 
 impl SystemCounters {
@@ -199,6 +204,7 @@ impl SystemCounters {
             host,
             sys: "/sys".into(),
             runner,
+            no_smc: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -209,35 +215,40 @@ impl SystemCounters {
     }
 
     /// `powermetrics` with the samplers this Mac has: Intel Macs offer `smc` (fans), Apple silicon does not ("unrecognized
-    /// sampler"), so the call is repeated with `cpu_power` alone.
-    fn powermetrics(&self) -> Result<(Vec<EnergyDomain>, Vec<FanSpeed>), PlatformError> {
+    /// sampler"), so the call is repeated with `cpu_power` alone, and later calls ask for `cpu_power` alone at once.
+    fn powermetrics(&self) -> PowerReading {
+        use std::sync::atomic::Ordering;
         let run = |samplers: &str| {
             let args = ["--samplers", samplers, "-n", "1", "-i", "200"].map(String::from);
             self.runner.run(POWERMETRICS, &args, TIMEOUT)
         };
-        let text = match run("cpu_power,smc") {
-            Err(PlatformError::Failed(m)) if m.contains("unrecognized sampler") => run("cpu_power")?,
-            other => other?,
+        let text = if self.no_smc.load(Ordering::Relaxed) {
+            run("cpu_power")?
+        } else {
+            match run("cpu_power,smc") {
+                Err(PlatformError::Failed(m)) if m.contains("unrecognized sampler") => {
+                    log::info!("powermetrics has no smc sampler here (Apple silicon); later reads ask for cpu_power alone");
+                    self.no_smc.store(true, Ordering::Relaxed);
+                    run("cpu_power")?
+                }
+                other => other?,
+            }
         };
         Ok(parse_powermetrics(&text))
     }
-}
 
-fn nothing(what: &str) -> PlatformError {
-    PlatformError::Unsupported(format!("This computer does not report {what} to software."))
-}
-
-impl CounterReader for SystemCounters {
-    fn read(&self, id: CounterId) -> Result<CounterValue, PlatformError> {
+    /// One reading. `powermetrics` is the shared run of a macOS query, read at most once by [`CounterReader::read_many`].
+    fn read_one(&self, id: CounterId, powermetrics: &mut Option<PowerReading>) -> Result<CounterValue, PlatformError> {
+        let mut shared = || powermetrics.get_or_insert_with(|| self.powermetrics()).clone();
         match (self.host, id) {
             (HelperHost::Linux, CounterId::Thermal) => Ok(CounterValue::Thermal(linux_thermal(&self.sys))),
             (HelperHost::Linux, CounterId::Fans) => Ok(CounterValue::Fans(linux_fans(&self.sys))),
             (HelperHost::Linux, CounterId::CpuEnergy) => linux_rapl(&self.sys).map(CounterValue::CpuEnergy),
-            (HelperHost::Macos, CounterId::CpuEnergy) => match self.powermetrics()?.0 {
+            (HelperHost::Macos, CounterId::CpuEnergy) => match shared()?.0 {
                 e if e.is_empty() => Err(nothing("CPU power (powermetrics listed none, as in a virtual machine)")),
                 e => Ok(CounterValue::CpuEnergy(e)),
             },
-            (HelperHost::Macos, CounterId::Fans) => match self.powermetrics()?.1 {
+            (HelperHost::Macos, CounterId::Fans) => match shared()?.1 {
                 f if f.is_empty() => Err(nothing("fan speeds (Apple silicon Macs have no smc sampler)")),
                 f => Ok(CounterValue::Fans(f)),
             },
@@ -261,6 +272,19 @@ impl CounterReader for SystemCounters {
             (HelperHost::Windows, CounterId::Fans) => Err(nothing("fan speeds")),
             (HelperHost::Windows, CounterId::CpuEnergy) => Err(nothing("CPU energy")),
         }
+    }
+}
+
+fn nothing(what: &str) -> PlatformError {
+    PlatformError::Unsupported(format!("This computer does not report {what} to software."))
+}
+
+impl CounterReader for SystemCounters {
+    /// One `powermetrics` run serves every macOS reading of the query (ADR 0108 DY-1); the others are file reads or one tool
+    /// run each, and a query names each id once.
+    fn read_many(&self, ids: &[CounterId]) -> Vec<Result<CounterValue, PlatformError>> {
+        let mut powermetrics = None;
+        ids.iter().map(|id| self.read_one(*id, &mut powermetrics)).collect()
     }
 }
 
@@ -453,5 +477,40 @@ mod tests {
         assert!(matches!(vm.read(CounterId::Thermal), Err(PlatformError::Unsupported(m)) if m.contains("thermal zones")));
         let empty = SystemCounters::new(HelperHost::Windows, Box::new(Scripted("")));
         assert!(empty.read(CounterId::Thermal).is_err());
+    }
+
+    /// DY-1 (ADR 0108, guard D): the agent asks for all three counters every 30 s; one query is one `powermetrics` run, and
+    /// on Apple silicon the refused `smc` sampler is tried once, not on every query.
+    #[test]
+    fn one_counters_query_starts_powermetrics_once_and_remembers_the_samplers_that_work() {
+        use crate::runner::Counted;
+        use dyno_core::helper_counters::answer;
+        use dyno_core::helper_requests::{CounterQuery, RequestClass};
+        use paddock_proc::starts::assert_starts;
+        let q = CounterQuery {
+            ids: vec![CounterId::Thermal, CounterId::Fans, CounterId::CpuEnergy],
+            class: RequestClass::User,
+        };
+        let intel = SystemCounters::new(HelperHost::Macos, Box::new(Counted(Scripted("CPU Power: 10 mW\nFan: 900 rpm\n"))));
+        let a = assert_starts(1, || answer(&intel, &q));
+        assert!(matches!(&a[0].value, CounterValue::Unavailable(m) if m.contains("thermal pressure")));
+        assert!(matches!(&a[1].value, CounterValue::Fans(f) if f[0].rpm == 900));
+        assert!(matches!(&a[2].value, CounterValue::CpuEnergy(e) if e[0].milliwatts == Some(10)));
+        let silicon = SystemCounters::new(HelperHost::Macos, Box::new(Counted(FirstRefuses)));
+        // The first query learns that `smc` is refused: the refused run and the `cpu_power` run.
+        let a = assert_starts(2, || answer(&silicon, &q));
+        assert!(matches!(&a[1].value, CounterValue::Unavailable(m) if m.contains("Apple silicon")));
+        assert!(matches!(&a[2].value, CounterValue::CpuEnergy(e) if e[0].milliwatts == Some(700)));
+        let again = assert_starts(1, || answer(&silicon, &q));
+        assert_eq!(again, a, "the remembered sampler set gives the same answer");
+        // A query without a powermetrics reading starts nothing.
+        let thermal_only = CounterQuery {
+            ids: vec![CounterId::Thermal],
+            class: RequestClass::User,
+        };
+        assert_starts(
+            paddock_proc::starts::at_most_or_none(0, "macOS answers Thermal without a tool"),
+            || answer(&intel, &thermal_only),
+        );
     }
 }

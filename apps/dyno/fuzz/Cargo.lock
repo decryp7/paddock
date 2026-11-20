@@ -695,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-agent"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dyno-core",
  "dyno-helper-service",
@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-core"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "paddock-bench",
  "paddock-jobs",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-helper-service"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dyno-core",
  "log",
@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-platform"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dns-lookup",
  "dyno-core",
@@ -789,7 +789,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-plugin-api"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "paddock-ipc",
  "serde",
@@ -797,7 +797,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-plugin-host"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dyno-plugin-api",
  "log",

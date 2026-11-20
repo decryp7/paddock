@@ -1,13 +1,26 @@
 // Fixture helpers: apps are built as real folders in a temp dir, good and bad variants side by side.
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import { runChecks } from '../src/runner.mjs';
 
-/** Writes `files` ({ path: string | Buffer }) into a new temp folder and returns it. */
+let fixtures;
+
+/** One folder per test process for every makeApp folder, removed when the process exits: the folders used to stay in the
+ *  system temp folder for good (730,000 of them), and Chrome reads through that folder when it quits (CI 8334, 8341, 8346). */
+function fixtureRoot() {
+  if (!fixtures) {
+    fixtures = mkdtempSync(join(tmpdir(), 'x9-fixture-'));
+    const root = fixtures;
+    process.on('exit', () => rmSync(root, { recursive: true, force: true }));
+  }
+  return fixtures;
+}
+
+/** Writes `files` ({ path: string | Buffer }) into a new temp folder and returns it; it is removed when the process exits. */
 export function makeApp(files) {
-  const root = mkdtempSync(join(tmpdir(), 'x9-fixture-'));
+  const root = mkdtempSync(join(fixtureRoot(), 'app-'));
   for (const [p, content] of Object.entries(files)) {
     mkdirSync(dirname(join(root, p)), { recursive: true });
     writeFileSync(join(root, p), content);

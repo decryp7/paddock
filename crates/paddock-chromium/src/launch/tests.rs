@@ -1579,3 +1579,60 @@ fn warm_up_starts_nothing_off_macos() {
     };
     assert_eq!(warm_up(&missing).unwrap(), Duration::ZERO);
 }
+
+/// Launches a stand-in that records the browser's temp folder (`MAC_CHROMIUM_TMPDIR`) and its profile, writes into that temp
+/// folder (so it must exist) and exits; returns (temp, profile) as the stand-in saw them.
+fn temp_folder_seen(o: &LaunchOptions, d: &Path) -> (String, String) {
+    let seen = d.join("seen.txt");
+    let exe = Browser::chromium(
+        paddock_testkit::StandIn::new(d, "temp-chrome")
+            .when_args(
+                &[],
+                paddock_testkit::Actions::new()
+                    .writes_with("{env:MAC_CHROMIUM_TMPDIR|/nonexistent}/written", "x")
+                    .writes_with(
+                        &seen.to_string_lossy(),
+                        "{env:MAC_CHROMIUM_TMPDIR|unset}\n{flag:--user-data-dir=}\n",
+                    )
+                    .exit(1),
+            )
+            .install()
+            .unwrap()
+            .program(),
+    );
+    let e = Chromium::launch_with(&exe, o, Sandbox::On)
+        .err()
+        .unwrap()
+        .to_string();
+    let seen = std::fs::read_to_string(&seen).unwrap_or_else(|_| {
+        panic!("the stand-in did not get to write its record (no temp folder?): {e}")
+    });
+    assert!(
+        !e.contains("nonexistent"),
+        "the temp folder did not exist: {e}"
+    );
+    let mut lines = seen.lines().map(str::to_string);
+    (
+        lines.next().unwrap_or_default(),
+        lines.next().unwrap_or_default(),
+    )
+}
+
+/// The browser's own temp folder is a fresh folder inside its profile (`MAC_CHROMIUM_TMPDIR`), never the user's temp
+/// folder: Chrome reads through that folder when it quits, and with 900,000 leftover entries in it the quit outlasted the
+/// close grace and the browser was killed (Spotter's copy, CI 8334, 8341, 8346).
+#[test]
+fn the_browser_gets_a_fresh_temp_folder_inside_its_profile() {
+    let d = tempfile::tempdir().unwrap();
+    let (temp, profile) = temp_folder_seen(&opts(&d.path().join("p")), d.path());
+    assert!(!profile.is_empty());
+    assert_eq!(Path::new(&temp), Path::new(&profile).join(BROWSER_TEMP));
+    // A kept profile gets the same folder, emptied at each start.
+    let kept = d.path().join("kept");
+    std::fs::create_dir_all(kept.join(BROWSER_TEMP).join("old")).unwrap();
+    let mut o = opts(&d.path().join("p"));
+    o.profile = Profile::Persistent(kept.clone());
+    let (temp, _) = temp_folder_seen(&o, d.path());
+    assert_eq!(Path::new(&temp), kept.join(BROWSER_TEMP));
+    assert!(!kept.join(BROWSER_TEMP).join("old").exists());
+}

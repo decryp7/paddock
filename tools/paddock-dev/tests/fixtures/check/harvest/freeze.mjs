@@ -2,10 +2,12 @@ import { statSync, readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSy
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { redactSecrets } from './redact.mjs';
 const [repo, old, list, out] = process.argv.slice(2);
 const files = JSON.parse(readFileSync(list, 'utf8')).filter((f) => existsSync(join(repo, f)) && statSync(join(repo, f)).isFile());
 const kept = [];
-for (const f of files) { const b = readFileSync(join(repo, f)); if (b.includes(0)) continue; kept.push([f, b.toString('utf8')]); }
+// Token-shaped test strings never enter the frozen tree (redact.mjs: same length, so no answer moves).
+for (const f of files) { const b = readFileSync(join(repo, f)); if (b.includes(0)) continue; kept.push([f, redactSecrets(b.toString('utf8')).text]); }
 const dir = mkdtempSync(join(tmpdir(), 'frozen-'));
 for (const [p, t] of kept) { mkdirSync(dirname(join(dir, p)), { recursive: true }); writeFileSync(join(dir, p), t); }
 const { runChecks } = await import(pathToFileURL(join(old, 'conformance/src/runner.mjs')).href);

@@ -67,6 +67,39 @@ describe('SettingsPage', () => {
     expect(saveButton()).toBeUndefined();
     expect(TestBed.inject(Notifier).recent().at(-1)?.text).toBe('Settings saved');
   });
+  it('a save refused as stale keeps the unsaved edit on the reloaded settings and the bar stays', async () => {
+    const { f, mock, el, saveButton, store } = await make();
+    const before = store.settings()!;
+    toggle(el, 'Start Dyno at login').click();
+    f.detectChanges();
+    // Another change lands after this window read the settings.
+    await mock.upsertAlertRule({ id: 'r1', name: 'R1', metric: 'cpuTotal', op: 'above', limit: 90, forSecs: 0, severity: 'warning', enabled: true } as never);
+    saveButton()!.click();
+    await vi.waitFor(() => expect(store.settings()!.revision).toBeGreaterThan(before.revision));
+    await settle(f);
+    expect(store.settings()!.customAlerts?.map((r) => r.id)).toContain('r1');
+    expect(toggle(el, 'Start Dyno at login').getAttribute('aria-checked')).toBe(String(!before.launchAtLogin));
+    expect(saveButton()).toBeDefined();
+    saveButton()!.click();
+    await vi.waitFor(() => expect(store.settings()!.launchAtLogin).toBe(!before.launchAtLogin));
+    await settle(f);
+    expect(saveButton()).toBeUndefined();
+  });
+  it('a save refused as stale keeps another window\'s change inside a field this draft also changed', async () => {
+    const { f, mock, saveButton, store } = await make();
+    const before = structuredClone(store.settings()!);
+    (f.componentInstance as unknown as { setSampling(p: object): void }).setSampling({ intervalMs: before.sampling.intervalMs + 1000 });
+    f.detectChanges();
+    // Another window changes the process interval, in the same `sampling` field, and saves first.
+    await mock.saveSettings({ ...before, sampling: { ...before.sampling, processIntervalMs: before.sampling.processIntervalMs + 1000 } });
+    saveButton()!.click();
+    await vi.waitFor(() => expect(store.settings()!.revision).toBeGreaterThan(before.revision));
+    await settle(f);
+    expect(saveButton()).toBeDefined();
+    saveButton()!.click();
+    await vi.waitFor(() => expect(store.settings()!.sampling.intervalMs).toBe(before.sampling.intervalMs + 1000));
+    expect(store.settings()!.sampling.processIntervalMs).toBe(before.sampling.processIntervalMs + 1000);
+  });
   it('Discard restores the saved values', async () => {
     const { f, mock, el, saveButton, discardButton, store } = await make();
     const spy = vi.spyOn(mock, 'saveSettings');

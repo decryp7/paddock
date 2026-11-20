@@ -248,8 +248,8 @@ pub fn install(shared: &Arc<crate::agent::Shared>, ctx: &JobContext, tool: ToolK
             pin.version.clone(),
         );
         let status = downloader.run(ctx, &pin, &shared.dirs.tool_staging(), &own)?;
-        // The SSD wear reader looks again now instead of at its next slow cycle (hours away).
-        crate::hardware::slow_cycle(shared);
+        // The SSD wear reader looks again now instead of at its next slow cycle (hours away), through the one re-read guard.
+        crate::hardware::request_reread(shared, Duration::ZERO);
         return Ok(status);
     }
     if !shared.helper.status().state.usable() {

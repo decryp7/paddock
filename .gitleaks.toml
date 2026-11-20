@@ -285,6 +285,17 @@ regexes = [
   '''^sk_live_abcdefghijklmnopqrstuvwx$''',
 ]
 
+# TEMPORARY (user, 2026-11-20). Delete by: once commit 8b7d05e58 is on main, the history scan (commits on top of origin/main) no longer
+# reaches it; the next train removes this entry. The tree copy is already redacted (tests/fixtures/check/harvest/redact.mjs).
+[[allowlists]]
+description = "heavy's invented masker-test tokens, copied by the frozen-tree fixture; remove after 8b7d05e58 is on main (ER-46)"
+condition = "AND"
+targetRules = ["gitlab-pat"]
+paths = ['''^tools/paddock-dev/tests/fixtures/check/real-tree\.json$''']
+regexes = [
+  '''^glpat-abcdefghijklmnopqrst$''',
+]
+
 [[allowlists]]
 description = "the word key or token in a name (a keybinding, storage key or key id), not a secret"
 condition = "AND"

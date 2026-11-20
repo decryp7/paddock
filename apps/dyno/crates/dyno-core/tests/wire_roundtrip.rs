@@ -574,7 +574,10 @@ fn request_samples() -> Vec<Request> {
         Request::WeeklyReport { weeks_ago: 2 },
         Request::Alerts { limit: 5 },
         Request::Settings,
-        Request::SaveSettings { settings: Box::default() },
+        Request::SaveSettings {
+            settings: Box::default(),
+            base_revision: None,
+        },
         Request::Plugins,
         Request::Shutdown,
         Request::Inventory,

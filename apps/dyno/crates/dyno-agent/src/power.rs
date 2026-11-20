@@ -48,6 +48,8 @@ pub struct PowerCentre {
     signals: Arc<dyn IdleSignals>,
     idle: Mutex<IdleMachine>,
     skew_ms: std::sync::atomic::AtomicI64,
+    /// Generations of the views pushed to the apps (Dyno ADR 0034).
+    views: dyno_core::newer::Generation,
     pending: Mutex<VecDeque<PowerEvent>>,
     wake: (Mutex<bool>, Condvar),
     /// Runs once right after the idle machine took a due timed action (tests only: holds that thread there).
@@ -95,6 +97,7 @@ impl PowerCentre {
             signals,
             idle: Mutex::new(IdleMachine::new()),
             skew_ms: std::sync::atomic::AtomicI64::new(0),
+            views: dyno_core::newer::Generation::new(),
             pending: Mutex::new(VecDeque::new()),
             wake: (Mutex::new(false), Condvar::new()),
             #[cfg(test)]
@@ -104,20 +107,29 @@ impl PowerCentre {
 
     /// The power view now.
     pub fn view(&self) -> PowerView {
-        let (awake, keep_awake) = {
-            let inner = locked(&self.inner);
-            let keep_awake = match &inner.unavailable {
-                Some(reason) => Capability::CantTell { reason: reason.clone() },
-                None => Capability::Known,
-            };
-            (inner.machine.view(), keep_awake)
+        self.view_stamped().1
+    }
+
+    /// The power view now, with the generation taken in the same hold of both machines' locks (Dyno ADR 0034): every change of either machine
+    /// is made under its lock, so a view with a higher generation is never older than one with a lower one, and `broadcast_power`'s slot
+    /// refuses the older one whichever thread pushes last. Lock order: inner, then idle.
+    pub fn view_stamped(&self) -> (u64, PowerView) {
+        let inner = locked(&self.inner);
+        let idle_machine = locked(&self.idle);
+        let generation = self.views.next();
+        let keep_awake = match &inner.unavailable {
+            Some(reason) => Capability::CantTell { reason: reason.clone() },
+            None => Capability::Known,
         };
-        let idle = locked(&self.idle).view();
+        let awake = inner.machine.view();
+        let idle = idle_machine.view();
+        drop(idle_machine);
+        drop(inner);
         let cap = |a: IdleAction| match self.actions.can(a) {
             Reading::Available(()) => Capability::Known,
             Reading::Unavailable(reason) => Capability::CantTell { reason },
         };
-        PowerView {
+        let view = PowerView {
             awake,
             idle,
             caps: PowerCaps {
@@ -126,7 +138,8 @@ impl PowerCentre {
                 hibernate: cap(IdleAction::Hibernate),
                 shut_down: cap(IdleAction::ShutDown),
             },
-        }
+        };
+        (generation, view)
     }
 
     /// Cuts the power thread's wait short.
@@ -179,14 +192,21 @@ impl PowerCentre {
     /// Feeds one event to the machine, runs the effects it asks for and what they lead to, pushes the view when it changed, and
     /// returns it.
     fn apply(&self, shared: &Shared, event: Event, at: Timestamp) -> PowerView {
+        self.apply_with(shared, event, at, &|| {})
+    }
+
+    /// [`apply`](Self::apply) with `between` run after the view was read (and stamped) and before it is pushed: the moment another
+    /// request can change the state and push a newer view (tests do it there).
+    fn apply_with(&self, shared: &Shared, event: Event, at: Timestamp, between: &dyn Fn()) -> PowerView {
         let before = self.view();
         {
             let mut inner = locked(&self.inner);
             self.run(&mut inner, event, at);
         }
-        let after = self.view();
+        let (generation, after) = self.view_stamped();
+        between();
         if before != after {
-            shared.broadcast_power(&after);
+            shared.broadcast_power(generation, &after);
         }
         after
     }
@@ -405,9 +425,9 @@ impl PowerCentre {
                 }
             }
         }
-        let after = self.view();
+        let (generation, after) = self.view_stamped();
         if before != after {
-            shared.broadcast_power(&after);
+            shared.broadcast_power(generation, &after);
         }
     }
 
@@ -449,8 +469,8 @@ impl PowerCentre {
             accepted.is_some()
         };
         if accepted {
-            let v = self.view();
-            shared.broadcast_power(&v);
+            let (generation, v) = self.view_stamped();
+            shared.broadcast_power(generation, &v);
         }
         let inputs = self.idle_inputs(shared);
         self.idle_apply(shared, IdleEvent::Tick(Box::new(inputs)), at);
@@ -530,6 +550,7 @@ fn read_inputs(shared: &Shared, watching: Option<dyno_core::process::ProcessRef>
         disk_bytes_per_s: sample.map(|s| s.disk_io.read_bps + s.disk_io.write_bps),
         programs: (!processes.is_empty()).then(|| processes.iter().map(|p| p.name.clone()).collect()),
         process_alive: watching.and_then(|w| alive(processes, w)),
+        watched: watching,
     }
 }
 
@@ -609,6 +630,48 @@ mod tests {
 
     /// A guard against a hung run, never the expected wait.
     const HANG_GUARD: Duration = Duration::from_secs(30);
+
+    /// Dyno ADR 0034: a hold starts and its view is read and stamped; before it is pushed, the hold is stopped and that (newer) view is
+    /// pushed. The older view then arrives last and must be refused: the app ends with "not held", the state the agent ended in.
+    #[test]
+    fn a_power_view_read_before_a_newer_change_is_not_pushed_over_it() {
+        use dyno_core::power::awake::{AwakeScope, AwakeSpec, AwakeUntil, AwakeView};
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let fake = dyno_platform::fake::Fake::new();
+        let (shared, _, _) = Shared::build(
+            crate::paths::Dirs::at(tmp.path().join("data")),
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+        )
+        .unwrap();
+        let pending = Arc::new(crate::agent::Pending::default());
+        let (tx, _rx) = std::sync::mpsc::sync_channel(1);
+        lock(&shared.subs).push(crate::agent::Sub {
+            id: 1,
+            detail: Arc::new(std::sync::atomic::AtomicU8::new(1)),
+            tx,
+            scans: Default::default(),
+            volumes: Default::default(),
+            jobs: Default::default(),
+            pending: pending.clone(),
+        });
+        let spec = AwakeSpec {
+            scope: AwakeScope::System,
+            until: AwakeUntil::Indefinite,
+        };
+        let at = now();
+        let centre = &shared.power;
+        let started = centre.apply_with(&shared, Event::Start { spec, ends: None }, at, &|| {
+            drop(centre.apply(&shared, Event::Stop, at))
+        });
+        assert!(
+            matches!(started.awake, AwakeView::Holding { .. }),
+            "the start's own caller got the view it read"
+        );
+        let told = pending.power.take().expect("the app was told");
+        assert_eq!(told.awake, AwakeView::Off, "the app ends in the state the agent ended in");
+    }
 
     /// The agent's own power thread and a caller of [`PowerCentre::idle_tick`] (the tests) both run the timed rule. Whoever
     /// starts the countdown must have noted the entry as run before anyone can read the settings: otherwise the other caller

@@ -68,32 +68,48 @@ pub struct CounterAnswer {
     pub value: CounterValue,
 }
 
-/// The helper's reader of one counter kind. A failure is reported per id, never for the whole request.
+/// The helper's reader of the counters (rule 85, bulk APIs): one call reads every id asked for, so a reader whose readings
+/// share a tool run (macOS `powermetrics` gives fans and CPU power together) runs it once per query (ADR 0108 DY-1). A failure
+/// is reported per id, never for the whole request.
 pub trait CounterReader: Send + Sync {
-    /// Reads `id` now.
-    fn read(&self, id: CounterId) -> Result<CounterValue, PlatformError>;
+    /// Reads every id of `ids` now: one outcome per id, in the order asked.
+    fn read_many(&self, ids: &[CounterId]) -> Vec<Result<CounterValue, PlatformError>>;
+
+    /// Reads `id` now (a thin wrapper over [`CounterReader::read_many`]).
+    fn read(&self, id: CounterId) -> Result<CounterValue, PlatformError> {
+        self.read_many(&[id])
+            .pop()
+            .unwrap_or_else(|| Err(PlatformError::Failed("The reader answered nothing for this reading.".into())))
+    }
 }
 
 /// What a system without these readings says.
 pub struct NoCounters;
 
 impl CounterReader for NoCounters {
-    fn read(&self, _: CounterId) -> Result<CounterValue, PlatformError> {
-        Err(PlatformError::Unsupported(
-            "This system's sensors are not read through the helper.".into(),
-        ))
+    fn read_many(&self, ids: &[CounterId]) -> Vec<Result<CounterValue, PlatformError>> {
+        ids.iter()
+            .map(|_| {
+                Err(PlatformError::Unsupported(
+                    "This system's sensors are not read through the helper.".into(),
+                ))
+            })
+            .collect()
     }
 }
 
-/// Answers `query`: each id once, a failed one as `Unavailable` with the error's words.
+/// Answers `query` with one [`CounterReader::read_many`] call: each id once, a failed one as `Unavailable` with the error's
+/// words. A reader that answers fewer outcomes than ids asked has the missing ones reported as unavailable, never a panic.
 pub fn answer(reader: &dyn CounterReader, query: &CounterQuery) -> Vec<CounterAnswer> {
+    let mut outcomes = reader.read_many(&query.ids).into_iter();
     query
         .ids
         .iter()
         .map(|id| {
-            let value = match reader.read(*id) {
-                Ok(v) => bounded(v),
-                Err(e) => CounterValue::Unavailable(e.to_string().chars().take(200).collect()),
+            let value = match outcomes.next() {
+                Some(Ok(v)) => bounded(v),
+                Some(Err(e)) => CounterValue::Unavailable(e.to_string().chars().take(200).collect()),
+                None => CounterValue::Unavailable("The reader answered nothing for this reading.".into()),
             };
             CounterAnswer { id: *id, value }
         })
@@ -142,7 +158,12 @@ mod tests {
 
     struct Scripted;
     impl CounterReader for Scripted {
-        fn read(&self, id: CounterId) -> Result<CounterValue, PlatformError> {
+        fn read_many(&self, ids: &[CounterId]) -> Vec<Result<CounterValue, PlatformError>> {
+            ids.iter().map(|id| Scripted::one(*id)).collect()
+        }
+    }
+    impl Scripted {
+        fn one(id: CounterId) -> Result<CounterValue, PlatformError> {
             match id {
                 CounterId::Thermal => Ok(CounterValue::Thermal(
                     (0..100)

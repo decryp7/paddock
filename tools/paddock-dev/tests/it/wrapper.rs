@@ -1066,7 +1066,7 @@ fn run_overlapping(rustcs: &[&str], expected: usize, shared_target: bool) -> (te
     std::fs::create_dir_all(&barrier).unwrap();
     install_cargo(&f.cargo_home.path().join("shims"), true, |c| building(c, barrier_cargo()));
     let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
-    let children: Vec<_> = rustcs
+    let mut children: Vec<_> = rustcs
         .iter()
         .enumerate()
         .map(|(i, rustc)| {
@@ -1090,13 +1090,23 @@ fn run_overlapping(rustcs: &[&str], expected: usize, shared_target: bool) -> (te
             cmd.output_child()
         })
         .collect();
-    assert!(
-        paddock_testkit::poll_until_within(std::time::Duration::from_secs(60), || std::fs::read_dir(&barrier).unwrap().count()
-            >= expected),
-        "the builds never overlapped"
-    );
+    // A wrapper that ends before its build is inside `cargo` can never reach the barrier: stop waiting at once and show what it
+    // said (run 8327 waited out the test's timeout with nothing to show: a stand-in cargo had failed its install and exited 70).
+    let mut ended_early = false;
+    let overlapped = paddock_testkit::poll_until_within(std::time::Duration::from_secs(60), || {
+        ended_early = children.iter_mut().any(|c| matches!(c.try_wait(), Ok(Some(_))));
+        ended_early || std::fs::read_dir(&barrier).unwrap().count() >= expected
+    });
     std::fs::write(barrier.join("go"), "").unwrap();
-    let outs = children.into_iter().map(|c| c.wait_with_output().unwrap()).collect();
+    let outs: Vec<std::process::Output> = children.into_iter().map(|c| c.wait_with_output().unwrap()).collect();
+    let said = || {
+        outs.iter()
+            .map(|o| format!("exit {:?}: {}", o.status.code(), String::from_utf8_lossy(&o.stderr)))
+            .collect::<Vec<_>>()
+            .join("\n---\n")
+    };
+    assert!(!ended_early, "a wrapper ended before the builds overlapped:\n{}", said());
+    assert!(overlapped, "the builds never overlapped in 60 s:\n{}", said());
     (scratch, outs, f)
 }
 

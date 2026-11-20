@@ -185,10 +185,15 @@ jobs:
       # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): a tag or release run builds the tool from source.
       # The read credential is set on the ./dev steps only.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+      # scripts/npm-audit.test.mjs measures its allow list's growth against this (ER-46), as conformance does: the dispatch's
+      # `base`, else origin/main; a base it cannot read fails the test as not measured (run 8327: a shallow checkout had none).
+      PADDOCK_BASE_REF: ${{ inputs.base || 'origin/main' }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # The base of the allow list growth test (PADDOCK_BASE_REF) and its merge base.
+          fetch-depth: 0
 
       # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
       - env:
@@ -474,10 +479,15 @@ jobs:
       # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): a tag or release run builds the tool from source.
       # The read credential is set on the ./dev steps only.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+      # scripts/npm-audit.test.mjs measures its allow list's growth against this (ER-46), as conformance does: the dispatch's
+      # `base`, else origin/main; a base it cannot read fails the test as not measured (run 8327: a shallow checkout had none).
+      PADDOCK_BASE_REF: ${{ inputs.base || 'origin/main' }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # The base of the allow list growth test (PADDOCK_BASE_REF) and its merge base.
+          fetch-depth: 0
 
       # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
       - env:

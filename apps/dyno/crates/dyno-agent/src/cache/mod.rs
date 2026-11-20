@@ -275,10 +275,19 @@ impl Cache {
     /// Queues a save. Never blocks: the older save of the same target (or the oldest when the queue is full) is told it was
     /// superseded.
     pub fn save(&self, job: SaveJob) {
+        self.save_with(job, &|| {});
+    }
+
+    /// [`save`](Self::save) with `between` run after the setting was read and before the job is queued: the moment the user can
+    /// switch saving off (tests do it there). The writer reads the setting again when it pops the job, so the order of that read
+    /// against `ForgetAll` is the queue's, and a late save answers `Disabled` and writes nothing.
+    #[doc(hidden)]
+    pub fn save_with(&self, job: SaveJob, between: &dyn Fn()) {
         if !lock(&self.inner.settings).enabled {
             (job.done)(SaveOutcome::Disabled);
             return;
         }
+        between();
         for old in self.inner.queue.push_save(job) {
             log::info!(Scan = old.scan; "Pending disk map save superseded");
             (old.done)(SaveOutcome::Superseded);
@@ -314,7 +323,14 @@ impl Cache {
 
     /// Stores a small "last known" document (the counter catalog, the software list).
     pub fn put_view(&self, key: &str, format: u32, data: String) {
+        self.put_view_with(key, format, data, &|| {});
+    }
+
+    /// [`put_view`](Self::put_view) with `between` run after the setting was read and before the document is queued (tests).
+    #[doc(hidden)]
+    pub fn put_view_with(&self, key: &str, format: u32, data: String, between: &dyn Fn()) {
         if lock(&self.inner.settings).enabled {
+            between();
             self.inner.queue.push(Cmd::View {
                 key: key.into(),
                 format,
@@ -365,6 +381,11 @@ struct Writer {
 }
 
 impl Writer {
+    /// Whether saving is on now: read when the writer pops a save or a view, so the queue orders the read against a `ForgetAll`.
+    fn enabled(&self) -> bool {
+        self.settings.upgrade().is_none_or(|i| lock(&i.settings).enabled)
+    }
+
     fn limits(&self) -> CacheLimits {
         let max = self
             .settings
@@ -427,7 +448,9 @@ impl Writer {
                     }
                 }
                 Cmd::View { key, format, data } => {
-                    if let Some(d) = &self.db {
+                    if !self.enabled() {
+                        log::info!(Key = key.as_str(); "Saved view dropped: saving is off");
+                    } else if let Some(d) = &self.db {
                         if let Err(e) = d.put_view(&key, format, self.clock.wall_ms(), &data) {
                             log::warn!(Cause = e.to_string(); "A saved view could not be written");
                         }
@@ -441,6 +464,11 @@ impl Writer {
     }
 
     fn save(&mut self, job: SaveJob) {
+        if !self.enabled() {
+            log::info!(Scan = job.scan; "Disk map save dropped: saving is off");
+            (job.done)(SaveOutcome::Disabled);
+            return;
+        }
         let started = Instant::now();
         let limits = self.limits();
         let now = self.clock.wall_ms();
@@ -584,6 +612,39 @@ mod tests {
         assert!(c.list().is_empty());
         c.save(job("folder:/b", "2", tx));
         assert_eq!(rx.recv().unwrap().1, SaveOutcome::Disabled);
+    }
+
+    /// Dyno ADR 0034: saving is switched off after `save` read the setting and before the job was queued; the writer pops the job after
+    /// the `ForgetAll` and must not write a row the user just asked to be gone.
+    #[test]
+    fn a_save_queued_after_the_setting_went_off_writes_nothing_and_says_disabled() {
+        let d = paddock_testkit::private_tempdir().unwrap();
+        let c = start(d.path(), Arc::new(FakeClock::new(1)));
+        let (tx, rx) = channel();
+        c.save_with(job("folder:/a", "1", tx), &|| {
+            c.set_settings(CacheSettings {
+                enabled: false,
+                ..CacheSettings::default()
+            })
+        });
+        c.flush();
+        assert_eq!(rx.recv().unwrap().1, SaveOutcome::Disabled);
+        assert!(c.list().is_empty(), "no row on disk");
+    }
+
+    /// The same for a saved view (the counter catalog, the software list).
+    #[test]
+    fn a_view_queued_after_the_setting_went_off_is_not_written() {
+        let d = paddock_testkit::private_tempdir().unwrap();
+        let c = start(d.path(), Arc::new(FakeClock::new(1)));
+        c.put_view_with("catalog", 1, "x".into(), &|| {
+            c.set_settings(CacheSettings {
+                enabled: false,
+                ..CacheSettings::default()
+            })
+        });
+        c.flush();
+        assert!(c.view("catalog").is_none());
     }
 
     #[test]

@@ -655,8 +655,18 @@ impl Fixture {
                 }
             }
             Leak::NpmMissing => {
-                fs::remove_file(self.node_prefix.join("bin").join(if cfg!(windows) { "npm.cmd" } else { "npm" })).expect("remove npm");
-                path_without(&mut self.env, &["npm", "npm.cmd"]);
+                // Whatever `write_npm` installed: the testkit's stand-in (`npm`, `npm.exe` on Windows) or a script (`npm.cmd`).
+                let bin = self.node_prefix.join("bin");
+                let npm: Vec<PathBuf> = ["npm", "npm.exe", "npm.cmd"]
+                    .iter()
+                    .map(|n| bin.join(n))
+                    .filter(|p| p.is_file())
+                    .collect();
+                assert!(!npm.is_empty(), "no npm under {} to take away", bin.display());
+                for p in npm {
+                    fs::remove_file(&p).expect("remove npm");
+                }
+                path_without(&mut self.env, &["npm", "npm.exe", "npm.cmd"]);
             }
             Leak::GitMissing => {
                 let empty = self.root.join("empty-path");

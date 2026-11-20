@@ -105,7 +105,8 @@ test('the command: a report file that cannot be read is exit 6 with an ::error::
 
 // ER-46: the list grows only with the user's approval. The comparison is the conformance kit's own `baselineGrowth` (the one C53, C115
 // and the allow lists use), against the merge base and not origin/main's tip. Growth is a new id, a later review day or a changed
-// approval day, so renewing an exception is growth too. A base that cannot be read is not measured, never an empty list.
+// approval day, so renewing an exception is growth too. A base that cannot be read is not measured, never an empty list. The base is
+// the kit's one reader of PADDOCK_BASE_REF (`targetRef`): a train's CI sets it to the train's base, else origin/main.
 const keyOf = (e) => `${e.id}\u0000${e.approved}\u0000${e.reviewBy}`;
 const ALLOW_PATH = 'scripts/npm-audit-allow.json';
 function growth(currentText, git) {
@@ -116,7 +117,6 @@ function growth(currentText, git) {
     keyOf,
     entriesOf: (json) => parseAllow(JSON.stringify(json)),
     git,
-    baseRef: 'origin/main',
   });
 }
 const listText = (...es) => JSON.stringify({ allow: es });

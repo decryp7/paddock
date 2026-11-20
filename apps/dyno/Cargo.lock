@@ -1255,7 +1255,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "dyno-agent"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dyno-core",
  "dyno-helper",
@@ -1296,7 +1296,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-app"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dyno-agent",
  "dyno-core",
@@ -1357,7 +1357,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-bench"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dyno-core",
  "libc",
@@ -1372,7 +1372,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-bench-gpu"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dyno-bench",
  "dyno-core",
@@ -1386,7 +1386,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-cli"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dyno-agent",
  "dyno-core",
@@ -1403,7 +1403,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-core"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "objc2",
  "objc2-app-kit",
@@ -1426,7 +1426,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-helper"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dyno-core",
  "dyno-helper-service",
@@ -1447,7 +1447,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-helper-service"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dyno-core",
  "log",
@@ -1461,7 +1461,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-platform"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dns-lookup",
  "dyno-core",
@@ -1489,7 +1489,7 @@ dependencies = [
 
 [[package]]
 name = "dyno-plugin-api"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "paddock-ipc",
  "postcard",
@@ -1498,14 +1498,14 @@ dependencies = [
 
 [[package]]
 name = "dyno-plugin-example"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dyno-plugin-api",
 ]
 
 [[package]]
 name = "dyno-plugin-host"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dyno-plugin-api",
  "log",

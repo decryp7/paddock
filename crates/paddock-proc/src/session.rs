@@ -34,14 +34,44 @@ pub(crate) const QUEUED_CHUNKS: usize = 16;
 /// The most one read of the child's pipe takes.
 const CHUNK: usize = 64 * 1024;
 
-/// What the pipe-reading thread did, for the tests: chunks queued now and at most, and whether it found the queue full.
+/// What the pipe-reading thread did, for the tests: chunks sent and taken, the most queued at once, and whether it found the
+/// queue full. Two running totals, never one shared count: the channel hands a chunk to the caller before the thread can count
+/// it, so a caller may take a chunk the thread has not counted yet (run 8327: a single count went below zero, overflowed, and its
+/// panic closed the channel under the caller).
 #[cfg(test)]
 #[derive(Default)]
 pub(crate) struct QueueProbe {
-    pub(crate) queued: std::sync::atomic::AtomicUsize,
+    sent: std::sync::atomic::AtomicUsize,
+    taken: std::sync::atomic::AtomicUsize,
     pub(crate) peak: std::sync::atomic::AtomicUsize,
     pub(crate) blocked: std::sync::atomic::AtomicBool,
 }
+
+#[cfg(test)]
+impl QueueProbe {
+    /// The reading thread queued a chunk. The peak is exact while the caller does not read (the cap test); while it reads, a
+    /// chunk it has taken but not yet counted is still counted as queued, so the peak may be one over.
+    fn sent(&self) {
+        use std::sync::atomic::Ordering::SeqCst;
+        let sent = self.sent.fetch_add(1, SeqCst) + 1;
+        let now = sent.saturating_sub(self.taken.load(SeqCst));
+        self.peak.fetch_max(now, SeqCst);
+    }
+
+    /// The caller took a chunk.
+    fn taken(&self) {
+        self.taken.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Chunks counted as sent and not yet as taken.
+    fn queued(&self) -> usize {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.sent
+            .load(SeqCst)
+            .saturating_sub(self.taken.load(SeqCst))
+    }
+}
+
 /// How long [`Session::finish`] waits for the child to end on its own once its input is closed, before it ends the tree.
 pub const FINISH_GRACE: Duration = Duration::from_secs(2);
 
@@ -84,7 +114,7 @@ pub enum SessionError {
         /// The last of its error output.
         stderr: String,
     },
-    /// The child closed its output (it ended) before the answer was complete.
+    /// The child ended (it closed its output, or its input before a request was written) before the answer was complete.
     Closed {
         /// The program's file name.
         program: String,
@@ -98,7 +128,7 @@ pub enum SessionError {
         /// The size asked for or reached.
         bytes: usize,
     },
-    /// Writing the request failed (the child closed its input).
+    /// Writing the request failed for another reason than the child's end (that is [`SessionError::Closed`]).
     Write(String, std::io::Error),
 }
 
@@ -157,6 +187,8 @@ pub struct Session {
     buf: Vec<u8>,
     eof: bool,
     stderr: Arc<Mutex<Vec<u8>>>,
+    /// Disconnected once the thread that reads the child's error output has read it to the end.
+    stderr_read: Receiver<()>,
     limits: SessionLimits,
     ended: bool,
     #[cfg(test)]
@@ -222,20 +254,19 @@ impl Session {
                                 break;
                             }
                             #[cfg(test)]
-                            {
-                                use std::sync::atomic::Ordering::SeqCst;
-                                let now = probe.queued.fetch_add(1, SeqCst) + 1;
-                                probe.peak.fetch_max(now, SeqCst);
-                            }
+                            probe.sent();
                         }
                     }
                 }
             });
         }
         let stderr = Arc::new(Mutex::new(Vec::new()));
+        let (stderr_end, stderr_read) = mpsc::channel::<()>();
         if let Some(mut err) = child.stderr.take() {
             let kept = stderr.clone();
             std::thread::spawn(move || {
+                // Dropped when the thread ends: the caller's `stderr_read` then reads Disconnected.
+                let _end = stderr_end;
                 let mut chunk = [0u8; 4096];
                 while let Ok(n) = err.read(&mut chunk) {
                     if n == 0 {
@@ -257,6 +288,7 @@ impl Session {
             buf: Vec::new(),
             eof: false,
             stderr,
+            stderr_read,
             limits,
             ended: false,
             #[cfg(test)]
@@ -273,7 +305,7 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// When the child closed its input.
+    /// [`SessionError::Closed`] with its last words when the child has ended; [`SessionError::Write`] when the write fails otherwise.
     pub fn send(&mut self, request: &[u8]) -> Result<(), SessionError> {
         let Some(input) = self.stdin.as_mut() else {
             return Err(SessionError::Write(
@@ -281,10 +313,27 @@ impl Session {
                 std::io::Error::other("the input is closed"),
             ));
         };
-        input
-            .write_all(request)
-            .and_then(|()| input.flush())
-            .map_err(|e| SessionError::Write(self.name.clone(), e))
+        match input.write_all(request).and_then(|()| input.flush()) {
+            Ok(()) => Ok(()),
+            // The child closed its input because it ended (run 8329: git outside a repository ends before the first request):
+            // that is `Closed` with what it said, as a read would have found, never a bare "Broken pipe".
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Err(SessionError::Closed {
+                program: self.name.clone(),
+                stderr: self.last_words(),
+            }),
+            Err(e) => Err(SessionError::Write(self.name.clone(), e)),
+        }
+    }
+
+    /// Ends the child (it has closed its input or output) and returns all of its error output: the thread that reads it is given
+    /// up to the read timeout to reach the end, so a message the child wrote just before it ended is not lost to the race.
+    fn last_words(&mut self) -> String {
+        self.end();
+        // silent: Disconnected is the thread's end; Timeout means a process outside the tree still holds the pipe, and the
+        // words read so far are what there is
+        #[allow(clippy::let_underscore_must_use)]
+        let _ = self.stderr_read.recv_timeout(self.limits.read_timeout);
+        self.stderr_tail()
     }
 
     /// Waits until `ready(buf)` says how many buffered bytes make the answer, or the deadline passes.
@@ -309,7 +358,7 @@ impl Session {
             if self.eof {
                 return Err(SessionError::Closed {
                     program: self.name.clone(),
-                    stderr: self.stderr_tail(),
+                    stderr: self.last_words(),
                 });
             }
             match self
@@ -318,9 +367,7 @@ impl Session {
             {
                 Ok(c) => {
                     #[cfg(test)]
-                    self.probe
-                        .queued
-                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    self.probe.taken();
                     self.buf.extend_from_slice(&c);
                 }
                 Err(RecvTimeoutError::Disconnected) => self.eof = true,
@@ -454,6 +501,34 @@ mod tests {
         drop(s);
     }
 
+    /// The caller can take a chunk before the reading thread has counted it (the channel hands it over first): the count must
+    /// survive that order. Run 8327 (Linux and Windows): the thread's count overflowed, it panicked, its end of the channel
+    /// closed, and the caller read `Closed` with an empty stderr in the middle of an answer.
+    #[test]
+    fn the_queue_count_survives_the_caller_taking_a_chunk_before_the_thread_counts_it() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let probe = QueueProbe::default();
+        let counted = std::panic::catch_unwind(|| {
+            probe.taken();
+            probe.sent();
+        });
+        assert!(
+            counted.is_ok(),
+            "the count panicked when the caller took the chunk first"
+        );
+        assert_eq!(
+            probe.queued(),
+            0,
+            "one chunk sent and taken leaves none queued"
+        );
+        probe.sent();
+        assert!(
+            probe.peak.load(SeqCst) <= 1,
+            "peak {}",
+            probe.peak.load(SeqCst)
+        );
+    }
+
     #[test]
     fn many_requests_go_to_one_process_and_it_ends_when_its_input_closes() {
         let mut s = Session::start(child(Mode::Answer), limits()).unwrap();
@@ -470,6 +545,41 @@ mod tests {
         assert!(
             s.finish(),
             "the child ends by itself once its input is closed"
+        );
+    }
+
+    /// A request to a child that has already ended is `Closed` with its last words, never a bare write error (run 8329:
+    /// `git cat-file` in a folder that is no repository ended before the request was written, and the read said "Broken pipe"
+    /// instead of git's "not a git repository").
+    #[test]
+    fn a_request_to_a_child_that_has_ended_is_closed_with_its_words() {
+        let mut s = Session::start(child(Mode::Complain), limits()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !matches!(s.child.try_wait(), Ok(Some(_))) {
+            assert!(Instant::now() < deadline, "the child did not end in 60 s");
+            std::thread::yield_now();
+        }
+        let e = s.send(b"HEAD\n").unwrap_err();
+        assert!(
+            matches!(&e, SessionError::Closed { stderr, .. } if stderr.contains("CHILD:complaint")),
+            "{e:?}"
+        );
+    }
+
+    /// A child that ends before it answers is `Closed` with all it said: its error output is read to the end first.
+    #[test]
+    fn a_child_that_ends_before_it_answers_says_why() {
+        let mut s = Session::start(child(Mode::Complain), limits()).unwrap();
+        // libtest's banner may come first on the child's stdout.
+        let e = loop {
+            match s.read_line() {
+                Ok(_) => continue,
+                Err(e) => break e,
+            }
+        };
+        assert!(
+            matches!(&e, SessionError::Closed { stderr, .. } if stderr.contains("CHILD:complaint")),
+            "{e:?}"
         );
     }
 

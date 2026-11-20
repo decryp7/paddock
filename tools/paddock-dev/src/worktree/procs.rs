@@ -11,12 +11,15 @@ use std::path::{Path, PathBuf};
 /// (train 16: the slot test, `a_download_that_does_not_match_its_pin...`). A test that needs the real scan says so by name
 /// ([`real_process_folders`]) with a reasoned exemption comment; the audit `no_source_file_calls_the_real_process_scan_in_a_test`
 /// checks that.
+/// Only where a scan exists (Linux, macOS): elsewhere the platform's own answer stays, which on Windows is the immediate "not
+/// implemented on this OS" refusal that `disk clean` and its Windows test rely on (an empty list there would read as "no folder in use";
+/// CI run 8346, windows-latest).
 pub fn process_folders() -> Result<Vec<PathBuf>, String> {
-    #[cfg(test)]
+    #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
     {
         Ok(Vec::new())
     }
-    #[cfg(not(test))]
+    #[cfg(not(all(test, any(target_os = "linux", target_os = "macos"))))]
     {
         imp::process_folders()
     }

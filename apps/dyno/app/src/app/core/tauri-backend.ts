@@ -587,7 +587,8 @@ export class TauriBackend implements DynoBackend {
   }
 
   saveSettings(settings: Settings): Promise<Settings> {
-    return this.request({ saveSettings: { settings } });
+    // The copy carries the revision it was read at; the agent refuses the save as stale when the settings moved on.
+    return this.request({ saveSettings: { settings, baseRevision: settings.revision } });
   }
 
   upsertAlertRule(rule: CustomAlertRule): Promise<Settings> {

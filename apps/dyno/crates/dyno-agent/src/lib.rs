@@ -52,6 +52,9 @@ pub mod sampler;
 pub mod server;
 pub mod service;
 pub mod store;
+#[cfg(test)]
+mod store_contract;
+pub mod tick_state;
 pub mod tool_download;
 pub mod tool_own_copy;
 pub mod tool_pins;

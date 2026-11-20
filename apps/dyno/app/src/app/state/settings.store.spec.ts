@@ -44,6 +44,74 @@ describe('SettingsStore', () => {
     expect(store.saving()).toBe(false);
     expect(notifier.recent().at(-1)?.text).toBe('Settings saved');
   });
+  it('a save taken before another change is refused as stale: the store reloads and says so, and nothing is lost', async () => {
+    const { store, mock, notifier } = setup();
+    await store.load();
+    const s0 = structuredClone(store.settings()!);
+    // Another window (or the alert-rule editor) changes the settings after this window read them.
+    await mock.upsertAlertRule({ id: 'r1', name: 'R1', metric: 'cpuTotal', op: 'above', limit: 90, forSecs: 0, severity: 'warning', enabled: true } as never);
+    const loads = vi.spyOn(mock, 'settings');
+    const changed = structuredClone(s0);
+    changed.sampling.intervalMs = 2000;
+    expect(await store.save(changed)).toBe(false);
+    expect(loads).toHaveBeenCalled();
+    expect(store.settings()?.customAlerts?.map((r) => r.id)).toContain('r1');
+    expect(store.settings()?.sampling.intervalMs).not.toBe(2000);
+    expect(store.saving()).toBe(false);
+    const last = notifier.recent().at(-1);
+    expect(last?.text).toMatch(/changed.*reloaded/i);
+    expect(last?.tone).toBe('warn');
+    // The reloaded copy saves.
+    changed.revision = store.settings()!.revision;
+    expect(await store.save(changed)).toBe(true);
+    expect(store.settings()?.sampling.intervalMs).toBe(2000);
+    expect(store.settings()?.customAlerts?.map((r) => r.id)).toContain('r1');
+  });
+  it('two quick saves from one window do not refuse each other as another window', async () => {
+    const { store, mock } = setup();
+    await store.load();
+    const first = structuredClone(store.settings()!);
+    first.sampling.intervalMs = 2000;
+    const second = structuredClone(first);
+    second.launchAtLogin = !second.launchAtLogin;
+    const both = await Promise.all([store.save(first, null), store.save(second, null)]);
+    expect(both).toEqual([true, true]);
+    expect(store.settings()?.launchAtLogin).toBe(second.launchAtLogin);
+    expect((await mock.settings()).revision).toBe(first.revision + 2);
+  });
+  it('two quick saves taken from the same base that change different fields keep both changes', async () => {
+    const { store } = setup();
+    await store.load();
+    const base = store.settings()!;
+    const first = structuredClone(base);
+    first.sampling.intervalMs = 2000;
+    const second = structuredClone(base);
+    second.launchAtLogin = !second.launchAtLogin;
+    expect(await Promise.all([store.save(first, null), store.save(second, null)])).toEqual([true, true]);
+    expect(store.settings()?.sampling.intervalMs).toBe(2000);
+    expect(store.settings()?.launchAtLogin).toBe(second.launchAtLogin);
+  });
+  it('the stale notice only says what the store did: it reloaded', async () => {
+    const { store, mock, notifier } = setup();
+    await store.load();
+    const s0 = structuredClone(store.settings()!);
+    await mock.upsertAlertRule({ id: 'r1', name: 'R1', metric: 'cpuTotal', op: 'above', limit: 90, forSecs: 0, severity: 'warning', enabled: true } as never);
+    expect(await store.save(s0)).toBe(false);
+    expect(notifier.recent().at(-1)?.text).toBe('The settings changed in another window and were reloaded. Try again.');
+  });
+  it('a stale refusal keeps what the window tried to save for the page to carry over', async () => {
+    const { store, mock } = setup();
+    await store.load();
+    const s0 = structuredClone(store.settings()!);
+    await mock.upsertAlertRule({ id: 'r1', name: 'R1', metric: 'cpuTotal', op: 'above', limit: 90, forSecs: 0, severity: 'warning', enabled: true } as never);
+    const attempted = structuredClone(s0);
+    attempted.launchAtLogin = !attempted.launchAtLogin;
+    expect(await store.save(attempted)).toBe(false);
+    expect(store.stale()?.attempted).toEqual(attempted);
+    expect(store.stale()?.base?.revision).toBe(s0.revision);
+    store.clearStale();
+    expect(store.stale()).toBeNull();
+  });
   it('save without a message stays quiet', async () => {
     const { store, mock, notifier } = setup();
     expect(await store.save(structuredClone(await mock.settings()), null)).toBe(true);

@@ -405,7 +405,14 @@ fn a_new_program_after_learning_is_listed_with_reasons_and_can_be_protected_igno
         panic!("settings")
     };
     s.unusual.learning_days = 0;
-    ask(&peer, Request::SaveSettings { settings: s }).unwrap();
+    ask(
+        &peer,
+        Request::SaveSettings {
+            settings: s,
+            base_revision: None,
+        },
+    )
+    .unwrap();
     wait_until("the first process table", || shared_has_process(&h, "calm"));
     let shared = h.shared();
     shared.unusual.look(&shared);
@@ -473,7 +480,14 @@ fn a_fresh_install_learns_silently_for_the_configured_period() {
         panic!("settings")
     };
     s.unusual.enabled = false;
-    ask(&peer, Request::SaveSettings { settings: s }).unwrap();
+    ask(
+        &peer,
+        Request::SaveSettings {
+            settings: s,
+            base_revision: None,
+        },
+    )
+    .unwrap();
     let mut more = process(301, "another", 1.0);
     more.exe = Some(temp_exe("another"));
     h.fake.add_process(more);

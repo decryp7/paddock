@@ -137,6 +137,9 @@ struct Inner {
     os: HelperHost,
     readers: Readers,
     helper_sources: Mutex<HelperSources>,
+    /// Whether there are sources only the helper reads: set when they are made and by [`FirewallCentre::bind_helper`], so
+    /// [`Inner::epoch`] never waits for `helper_sources`, which a running read holds for its whole length (Dyno ADR 0034).
+    has_helper_sources: std::sync::atomic::AtomicBool,
     /// The helper the sources over the seam ask; [`FirewallCentre::bind_helper`] replaces the "no helper" one it starts with.
     helper_port: Mutex<Arc<dyn HelperPort>>,
     state: Mutex<State>,
@@ -153,7 +156,7 @@ pub struct FirewallCentre {
 impl Inner {
     /// The helper's epoch (it moves when the helper is turned on or off, repaired or updated, or readiness flips).
     fn epoch(&self) -> u64 {
-        if self.helper_sources.lock().unwrap_or_else(PoisonError::into_inner).is_empty() {
+        if !self.has_helper_sources.load(std::sync::atomic::Ordering::SeqCst) {
             return 0;
         }
         let port = self.helper_port.lock().unwrap_or_else(PoisonError::into_inner).clone();
@@ -231,6 +234,9 @@ impl FirewallCentre {
             .map(|(s, _)| *s)
             .collect();
         *self.inner.helper_sources.lock().unwrap_or_else(PoisonError::into_inner) = helper_sources_over(&sources, &port);
+        self.inner
+            .has_helper_sources
+            .store(!sources.is_empty(), std::sync::atomic::Ordering::SeqCst);
         *self.inner.helper_port.lock().unwrap_or_else(PoisonError::into_inner) = port;
         self.inner.state.lock().unwrap_or_else(PoisonError::into_inner).last = None;
     }
@@ -242,6 +248,7 @@ impl FirewallCentre {
             inner: Arc::new(Inner {
                 os,
                 readers,
+                has_helper_sources: std::sync::atomic::AtomicBool::new(!helper_sources.is_empty()),
                 helper_sources: Mutex::new(helper_sources_over(&helper_sources, &off)),
                 helper_port: Mutex::new(off),
                 state: Mutex::new(State::default()),
@@ -306,6 +313,10 @@ impl FirewallCentre {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// How long a test waits before it calls a run hung (a guard, never the expected wait).
+    const HANG_GUARD: Duration = Duration::from_secs(60);
+
     use crate::helper_first::testkit::{centre, Mode, Net};
     use crate::helper_first::CentrePort;
     use crate::helper_link::TransportError;
@@ -448,6 +459,25 @@ mod tests {
         clock.advance(Duration::from_secs(6));
         let v = c.view().unwrap();
         assert_eq!((&v.sources[0].via, v.sources[0].rules.len()), (&ReadVia::Helper, 3));
+    }
+
+    /// Dyno ADR 0034 (P2-7): a read holds the helper sources for its whole length; a second `view()` must still answer inside its wait
+    /// (`Busy`), not wait for that read to end before it asks the helper's epoch.
+    #[test]
+    fn a_view_asked_while_a_read_holds_the_helper_sources_still_answers_within_its_bound() {
+        let c = FirewallCentre::with_wait(HelperHost::Linux, vec![], vec![RuleSource::Nftables], Duration::from_millis(100));
+        let held = c.inner.helper_sources.lock().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                let _ = tx.send(c.view());
+            });
+            // A guard, never the expected wait: a view that waits for the held lock does not answer at all.
+            let answered = rx.recv_timeout(HANG_GUARD);
+            drop(held);
+            let e = answered.expect("view() answered within its bound").unwrap_err();
+            assert_eq!(e.code, ErrorCode::Busy);
+        });
     }
 
     #[test]

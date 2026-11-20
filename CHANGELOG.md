@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-e2e`: `untilItsPageCloses` and `clickThatClosesItsPage`, for a step that closes its own window
+- A test step whose action ends the page it acts on (a pop-out's Dock back, the pointer-up that docks a dragged pop-out) counts as done
+  when that page closed: Playwright can reject such a step with "Target page, context or browser has been closed" when the window goes
+  away while it is still finishing the step (Debrief's popout.e2e.ts:62, run 8338). A step that fails while the page stays open, or
+  that leaves it open, still fails. Debrief's pop-out specs use it; a selftest (`selftest/close-click.spec.ts`) reproduces the race.
+
 ### CI's S3 compile cache: `paddock_net::stall_guard`, a localhost proxy that cuts a request the store does not answer, and `paddock_testkit::net::broken_server`
 - New `paddock_net::stall_guard` (std only, no TLS stack): `Guard` forwards the bytes of every connection to a store and closes one
   that has had no byte for `Limits::stall`; a cut with the request unanswered, or a failed connect, opens a breaker so new connections
