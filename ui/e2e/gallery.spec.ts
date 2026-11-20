@@ -258,13 +258,12 @@ test.describe('UI basics review fixes (regressions)', () => {
 
   test('a long Windows path in a 240 px box keeps its name whole in front of its last words and never drops the root colon (review 2, N-P2-4; screenshot review P2-3)', async ({ page }) => {
     await open(page, 'dark', 'debrief');
-    const shown = await page.locator('[data-testid="path-win-240"] .pd-shown').textContent();
-    expect(shown).toContain('Service.');
-    expect(shown).toContain('2026-10-24.log');
-    // The root is never dropped: the folders collapse first, then the start of the name, with the ellipsis flush against "C:\".
-    expect(shown).toMatch(/^C:\\…/);
-    // The tail starts at a word, never mid-word ("…uilder.Service" reads like a rendering bug): it begins after a . - _ or space of the name.
-    expect(shown).toBe('C:\\…Service.2026-10-24.log');
+    // The value is fitted once the box has been measured (a ResizeObserver) and shows whole until then, so wait for the fitted text: a
+    // one-shot read before the first measurement saw the whole path (CI run 8346, under load).
+    const shown = page.locator('[data-testid="path-win-240"] .pd-shown');
+    // The root is never dropped: the folders collapse first, then the start of the name, with the ellipsis flush against "C:\". The tail
+    // starts at a word, never mid-word ("…uilder.Service" reads like a rendering bug): it begins after a . - _ or space of the name.
+    await expect(shown).toHaveText('C:\\…Service.2026-10-24.log');
   });
 
   test('the four path samples sit on one line: their text is centred on the same height (re-review P2)', async ({ page }) => {
