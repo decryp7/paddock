@@ -149,6 +149,11 @@ struct BusyProbe<'a, 'b> {
     own_workflow: String,
     /// The same-train runs the last look ignored (ER-27: the log says whom this run shares the reservation with).
     joined: Vec<String>,
+    /// A dispatch of this train branch: its head commit is read again on every look and right before sending (rule 53: an
+    /// identity read earlier is verified before it is acted on), so a train that moved is not mistaken for its old head.
+    train_branch: Option<String>,
+    /// Why the dispatch waits for every run instead of sharing its train's reservation (the branch head could not be read).
+    strict_why: Option<String>,
 }
 
 /// How many pages of 50 runs are read at most for the unfinished ones (the newest first).
@@ -174,6 +179,33 @@ impl BusyProbe<'_, '_> {
             }
         }
         Ok(out)
+    }
+
+    /// Reads the branch head again (dispatch of a train branch only) and sets the train identity from it; unreadable: none
+    /// (strict: every run counts) and the reason is kept for the log.
+    fn refresh_identity(&mut self) {
+        let Some(branch) = self.train_branch.clone() else { return };
+        match self.client.branch_head(&branch) {
+            Ok(Some(sha)) => {
+                self.own_train = Some((branch, sha));
+                self.strict_why = None;
+            }
+            Ok(None) => {
+                self.own_train = None;
+                self.strict_why = Some(format!("branch {branch} not found (HTTP 404)"));
+            }
+            Err(e) => {
+                self.own_train = None;
+                self.strict_why = Some(format!("branch {branch} unreadable: {e}"));
+            }
+        }
+    }
+
+    /// Whether the train identity changed since the last look: read right before the dispatch is sent.
+    fn head_moved(&mut self) -> bool {
+        let before = self.own_train.clone();
+        self.refresh_identity();
+        before != self.own_train
     }
 
     /// The unfinished runs that share a class, as text, or `None` when there are none.
@@ -248,8 +280,9 @@ impl Probe for BusyProbe<'_, '_> {
         format!("the {} runner to be free of other runs", names.join(" and "))
     }
     fn poll(&mut self) -> Result<Poll, String> {
+        self.refresh_identity();
         let busy = self.busy()?;
-        let joint = if self.joined.is_empty() {
+        let mut joint = if self.joined.is_empty() {
             String::new()
         } else {
             format!(
@@ -257,6 +290,9 @@ impl Probe for BusyProbe<'_, '_> {
                 self.joined.join(", ")
             )
         };
+        if let Some(why) = &self.strict_why {
+            joint.push_str(&format!("; waiting for every run, as the train's head commit is unknown ({why})"));
+        }
         Ok(match busy {
             None => Poll::Done(format!("no other run is on the same runner{joint}")),
             Some(why) => Poll::Pending(format!("{why}{joint}")),
@@ -423,13 +459,9 @@ pub fn run(
             );
             return send(http, target, req, waited, log);
         }
-        // A train's workflow does not wait for its own train's other workflows: its identity is the ref's head commit (read
-        // from the branch; unreadable: strict, it waits for every run as any other dispatch does).
-        let own_train = if is_train(&req.git_ref) {
-            branch_identity(http, target, &req.git_ref)
-        } else {
-            None
-        };
+        // A train's workflow does not wait for its own train's other workflows: its identity is the ref's head commit, read
+        // from the branch on every look and again right before sending (unreadable: strict, it waits for every run).
+        let train_branch = is_train(&req.git_ref).then(|| req.git_ref.strip_prefix("refs/heads/").unwrap_or(&req.git_ref).to_string());
         let mut client = Client::new(http, server, repo, token);
         client.backoff_ms = 0;
         let mut probe = BusyProbe {
@@ -437,27 +469,47 @@ pub fn run(
             read,
             wanted,
             older_than: None,
-            own_train,
+            own_train: None,
             own_workflow: req.workflow.clone(),
             joined: Vec::new(),
+            train_branch,
+            strict_why: None,
         };
-        match wait_held(&mut probe, health.as_deref_mut(), clock, req.max, req.interval, log) {
-            Outcome::Done { elapsed, .. } => waited = elapsed,
-            Outcome::TimedOut { .. } if health.as_deref().is_some_and(|h| !h.down_now().is_empty()) => {
-                return Ok(service_down(&req.workflow, health.as_deref(), req.max, log));
+        let mut rounds = 0;
+        loop {
+            match wait_held(&mut probe, health.as_deref_mut(), clock, req.max, req.interval, log) {
+                Outcome::Done { elapsed, .. } => waited = elapsed,
+                Outcome::TimedOut { .. } if health.as_deref().is_some_and(|h| !h.down_now().is_empty()) => {
+                    return Ok(service_down(&req.workflow, health.as_deref(), req.max, log));
+                }
+                Outcome::TimedOut { last, max } => {
+                    let _ = writeln!(
+                        log,
+                        "::error::dispatch: not dispatching {}: still busy after {} (--max); {last}. Next: {}.",
+                        req.workflow,
+                        fmt_duration(max),
+                        probe.next_step()
+                    );
+                    return Ok(Dispatched::StillBusy { last });
+                }
+                Outcome::Broken { error, .. } => return Err(format!("the run list could not be read: {error}")),
+                Outcome::Failed { detail, .. } => return Err(detail),
             }
-            Outcome::TimedOut { last, max } => {
-                let _ = writeln!(
-                    log,
-                    "::error::dispatch: not dispatching {}: still busy after {} (--max); {last}. Next: {}.",
-                    req.workflow,
-                    fmt_duration(max),
-                    probe.next_step()
-                );
-                return Ok(Dispatched::StillBusy { last });
+            if !probe.head_moved() {
+                break;
             }
-            Outcome::Broken { error, .. } => return Err(format!("the run list could not be read: {error}")),
-            Outcome::Failed { detail, .. } => return Err(detail),
+            rounds += 1;
+            if rounds >= 5 {
+                return Err(format!(
+                    "the head of {} moved five times while {} waited: dispatch again when the train has settled",
+                    req.git_ref, req.workflow
+                ));
+            }
+            let _ = writeln!(
+                log,
+                "dispatch: the head of {} moved while waiting; looking again with the new head",
+                req.git_ref
+            );
         }
     }
     send(http, target, req, waited, log)
@@ -596,21 +648,6 @@ pub fn train_identity(r: &RunInfo) -> Option<(String, String)> {
         .then(|| (branch.to_string(), r.head_sha.clone()))
 }
 
-/// The identity a dispatch of `git_ref` will have: the branch and its head commit, from `GET .../branches/<branch>`. `None`
-/// when it cannot be read (the dispatch then waits for every run, as before).
-fn branch_identity(http: &mut dyn Http, target: &Target<'_>, git_ref: &str) -> Option<(String, String)> {
-    let branch = git_ref.strip_prefix("refs/heads/").unwrap_or(git_ref);
-    let url = format!(
-        "{}/api/v1/repos/{}/branches/{}",
-        target.server.trim_end_matches('/'),
-        target.repo,
-        branch
-    );
-    let v = http.get_json(&url, target.token).ok()?;
-    let sha = v["commit"]["id"].as_str().filter(|s| !s.is_empty())?;
-    Some((branch.to_string(), sha.to_string()))
-}
-
 /// Whether a ref is a train's (`train/...`, also spelled `refs/heads/train/...`).
 pub fn is_train(git_ref: &str) -> bool {
     git_ref.strip_prefix("refs/heads/").unwrap_or(git_ref).starts_with("train/")
@@ -717,6 +754,8 @@ pub fn runner_wait(
         own_train: own_train.clone(),
         own_workflow: workflow.to_string(),
         joined: Vec::new(),
+        train_branch: None,
+        strict_why: None,
     };
     Ok(match wait_for(&mut probe, clock, max, interval, log) {
         Outcome::Done { elapsed, .. } => {
@@ -771,6 +810,8 @@ mod tests {
         own_sha: String,
         /// The head commit `GET .../branches/<branch>` answers; empty: 404.
         branch_sha: String,
+        /// Heads in order for `GET .../branches/<branch>` (the last repeats); used before `branch_sha`.
+        branch_seq: VecDeque<String>,
         /// `GET .../runs/<id>/jobs`: the job lists in order per run (the last one repeats).
         jobs: Vec<(u64, VecDeque<Value>)>,
     }
@@ -785,6 +826,7 @@ mod tests {
                 own_errors: 0,
                 own_sha: String::new(),
                 branch_sha: String::new(),
+                branch_seq: VecDeque::new(),
                 jobs: Vec::new(),
             }
         }
@@ -815,6 +857,11 @@ mod tests {
                 );
             }
             if url.contains("/branches/") {
+                if self.branch_seq.len() > 1 {
+                    self.branch_sha = self.branch_seq.pop_front().unwrap();
+                } else if let Some(last) = self.branch_seq.front() {
+                    self.branch_sha = last.clone();
+                }
                 return if self.branch_sha.is_empty() {
                     Err("HTTP 404".into())
                 } else {
@@ -1386,6 +1433,59 @@ mod tests {
         let (_, log, _) = wait_here(&mut http, 8373, "1m");
         assert!(
             log.contains("joint reservation: not waiting for run(s) 8372 (mac.yml) of the same train"),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn a_train_that_moves_while_the_dispatch_waits_makes_it_wait_for_the_old_heads_runs() {
+        // The head is aaa at the first look (the sibling of aaa is ignored, nothing to wait for), bbb right before sending: the
+        // old head's run 8372 is now foreign and holds the Mac until it ends; the dispatch waits for it, then starts bbb.
+        let mut http = Script::new(vec![
+            runs_full(&[(8372, "mac2.yml", "refs/heads/train/t", "workflow_dispatch", "aaa")]),
+            runs_full(&[(8372, "mac2.yml", "refs/heads/train/t", "workflow_dispatch", "aaa")]),
+            runs(&[(8372, "mac2.yml", "completed")]),
+        ]);
+        http.branch_seq = ["aaa", "bbb"].iter().map(|s| s.to_string()).collect();
+        http.jobs = vec![(8372, vec![jobs(&[("rust (macos)", "macos-latest", "in_progress")])].into())];
+        let (r, log) = go_ref(&mut http, "mac.yml", "train/t");
+        assert_eq!(
+            r.unwrap(),
+            Dispatched::Yes {
+                waited: Duration::from_secs(15)
+            },
+            "{log}"
+        );
+        assert!(log.contains("moved while waiting"), "{log}");
+        assert_eq!(http.posts.len(), 1);
+        // Control: a head that stays aaa dispatches at once, so the move is what made it wait.
+        let mut http = Script::new(vec![runs_full(&[(
+            8372,
+            "mac2.yml",
+            "refs/heads/train/t",
+            "workflow_dispatch",
+            "aaa",
+        )])]);
+        http.branch_sha = "aaa".into();
+        http.jobs = vec![(8372, vec![jobs(&[("rust (macos)", "macos-latest", "in_progress")])].into())];
+        let (r, log) = go_ref(&mut http, "mac.yml", "train/t");
+        assert_eq!(r.unwrap(), Dispatched::Yes { waited: Duration::ZERO }, "{log}");
+    }
+
+    #[test]
+    fn an_unreadable_branch_is_logged_with_its_cause_and_the_dispatch_stays_strict() {
+        let mut http = Script::new(vec![runs_full(&[(
+            8372,
+            "mac2.yml",
+            "refs/heads/train/t",
+            "workflow_dispatch",
+            "aaa",
+        )])]);
+        http.jobs = vec![(8372, vec![jobs(&[("rust (macos)", "macos-latest", "in_progress")])].into())];
+        let (r, log) = go_ref(&mut http, "mac.yml", "train/t");
+        assert!(matches!(r.unwrap(), Dispatched::StillBusy { .. }), "{log}");
+        assert!(
+            log.contains("head commit is unknown (branch train/t not found (HTTP 404))"),
             "{log}"
         );
     }
