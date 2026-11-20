@@ -153,13 +153,23 @@ fn after_the_cooldown_the_store_is_tried_again() {
     let store = broken_server(Mode::BlackHole);
     let (port, _log, g) = start(store.addr().to_string(), short());
     let _ = ask(port, REQUEST, 1, Duration::from_secs(10));
-    std::thread::sleep(Duration::from_millis(700));
+    // Each try is refused at once while the breaker is open; the first one that reaches the store is the end of the cooldown.
     let before = store.accepted();
-    let r = ask(port, REQUEST, 1, Duration::from_secs(10));
+    let mut last = None;
     assert!(
-        store.accepted() > before,
+        paddock_testkit::wait::retry_within(
+            Duration::from_secs(10),
+            Duration::from_millis(50),
+            || {
+                let r = ask(port, REQUEST, 1, Duration::from_secs(10));
+                let reached = store.accepted() > before;
+                last = Some(r);
+                reached
+            }
+        ),
         "the store got a new connection after the cooldown"
     );
+    let r = last.expect("one try ran");
     assert!(
         r.closed && r.took >= Duration::from_millis(250),
         "and it was cut after a stall again: {:?}",

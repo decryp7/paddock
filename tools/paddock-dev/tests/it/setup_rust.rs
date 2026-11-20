@@ -684,9 +684,47 @@ fn the_s3_chain_and_keys_reach_the_servers_start_and_nothing_a_later_step_sees()
         start.contains("endpoint=127.0.0.1:") && !start.contains("192.0.2.10") && start.contains("ssl=false"),
         "{start}"
     );
+    // The S3 level's local disk is a folder of its own: what S3 backfills never reaches the plain folder a release build reads.
+    assert!(
+        start.contains("dir=") && start.contains("/s3 "),
+        "the server's L0 is the s3 folder: {start}"
+    );
+    assert!(
+        rs.env.lines().any(|l| l.starts_with("SCCACHE_DIR=") && l.ends_with("/s3")),
+        "a server a later rustc starts uses it too: {}",
+        rs.env
+    );
+    assert!(
+        !rs.env.lines().any(|l| l.starts_with("SCCACHE_DIR=") && !l.ends_with("/s3")),
+        "no plain folder in the job env: {}",
+        rs.env
+    );
     let port = guard_port(&rs.env);
     stop_guard(port);
     assert!(!rs.out.contains("test-secret") && !rs.out.contains("test-key-id"), "{}", rs.out);
+}
+
+/// A release or tag run holds no key in practice; with one it still stays on the plain local disk and never starts the S3 level.
+#[test]
+fn a_tag_run_with_a_key_stays_on_the_plain_local_disk() {
+    let r = Runner::new(Some(Fail::Never));
+    health_curl(&r, 0);
+    let mut env = S3_ENV.to_vec();
+    env.push(("GITHUB_REF", "refs/tags/dyno-v1.2.0"));
+    let rs = r.rust(&S3_INPUT, &env);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    assert!(
+        rs.out.contains("a release or tag build never reads the shared S3 cache"),
+        "{}",
+        rs.out
+    );
+    assert!(!rs.env.contains("PADDOCK_S3_GUARD_PORT") && !rs.env.contains("/s3\n"), "{}", rs.env);
+    let start = rs
+        .calls
+        .lines()
+        .find(|l| l.starts_with("--start-server"))
+        .expect("the server is started");
+    assert!(start.contains("chain= ") && start.contains("key= "), "no chain and no key: {start}");
 }
 
 /// A store whose health check fails is not used: the job warns and runs on its local disk (never fails the build).

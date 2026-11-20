@@ -82,8 +82,8 @@ app	workbench-demo	ubuntu-latest		node scripts/demo-release.mjs workbench-demo i
 app	workbench-demo	ubuntu-latest		node scripts/demo-release.mjs workbench-demo notes "$RUNNER_TEMP/notes.md"
 app	workbench-demo	ubuntu-latest		node scripts/demo-release.mjs workbench-demo version
 app	workbench-demo	ubuntu-latest		npm run workbench-demo:build -w ui
-job	conformance			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
-job	conformance			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}')"
+job	conformance			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	conformance			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}')"
 job	conformance			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
 job	conformance			*[!0-9]*) TOTAL=40
 job	conformance			./dev conformance --app paddock --root . --only $RUST_ONLY
@@ -129,12 +129,12 @@ job	conformance			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	conformance			bash "conformance/ci/kit.sh" build-jobs
 job	conformance			bash "conformance/ci/kit.sh" host sccache-stats
 job	conformance			bash "dev" ci setup-rust --help >/dev/null
-job	conformance			bash "dev" ci setup-rust --sccache-backend "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	conformance			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	conformance			cargo --version
 job	conformance			cargo nextest run --manifest-path tools/paddock-dev/Cargo.toml --profile ci --no-tests=fail -E 'test(/^contracts::/) | test(/^audit::tests::(every_shared_|the_rust_reader_and_the_script_agree|the_families_real_list)/)'
 job	conformance			case "$RUNNER_OS-$(uname -m)" in
 job	conformance			case "$TOTAL" in ''
-job	conformance			case "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" in auto
+job	conformance			case "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" in auto
 job	conformance			chmod +x "$DEST/$BIN.part.$$"
 job	conformance			continue
 job	conformance			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
@@ -208,8 +208,8 @@ job	conformance			unzip -q "$dl/$NAME.$EXT" -d "$dl"
 job	conformance			{
 job	conformance			} >> "$GITHUB_ENV"
 job	conformance		conformance	npm test
-job	crates			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
-job	crates			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}')"
+job	crates			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	crates			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}')"
 job	crates			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
 job	crates			*[!0-9]*) TOTAL=40
 job	crates			BACKEND=local
@@ -253,11 +253,11 @@ job	crates			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	crates			bash "conformance/ci/kit.sh" build-jobs
 job	crates			bash "conformance/ci/kit.sh" host sccache-stats
 job	crates			bash "dev" ci setup-rust --help >/dev/null
-job	crates			bash "dev" ci setup-rust --sccache-backend "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	crates			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	crates			cargo --version
 job	crates			case "$RUNNER_OS-$(uname -m)" in
 job	crates			case "$TOTAL" in ''
-job	crates			case "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" in auto
+job	crates			case "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" in auto
 job	crates			chmod +x "$DEST/$BIN.part.$$"
 job	crates			continue
 job	crates			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
@@ -337,8 +337,8 @@ job	crates		crates	cargo hakari verify
 job	crates		crates	cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-files/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src|paddock-health/src/tauri|paddock-siblings/src|paddock-power/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-setup/src/(main\.rs|native/.*)$|paddock-chromium/src/fake\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/testing/.*\.rs$|paddock-dialogs/src/probe\.rs$|paddock-plugin-test/src/bin/(fixture|fixture_v1|misbehaving)\.rs$|paddock-plugin-api/src/entry\.rs$|paddock-plugin-test/src/process\.rs$|cargo-paddock-plugin/src/main\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$|paddock-service/src/privileged/trust_real/windows\.rs$' --lcov --output-path lcov.info
 job	crates		crates	cargo machete $(ls -d paddock-*/ | grep -v '^paddock-workspace-hack/$'
 job	crates		crates	node ../scripts/coverage-gate.mjs lcov.info 90
-job	e2e			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
-job	e2e			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}')"
+job	e2e			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	e2e			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}')"
 job	e2e			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
 job	e2e			*[!0-9]*) TOTAL=40
 job	e2e			BACKEND=local
@@ -384,11 +384,11 @@ job	e2e			bash "conformance/ci/kit.sh" host node-caches "ui" "e2e-1"
 job	e2e			bash "conformance/ci/kit.sh" host node-caches "ui" "e2e-2"
 job	e2e			bash "conformance/ci/kit.sh" host sccache-stats
 job	e2e			bash "dev" ci setup-rust --help >/dev/null
-job	e2e			bash "dev" ci setup-rust --sccache-backend "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	e2e			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	e2e			cargo --version
 job	e2e			case "$RUNNER_OS-$(uname -m)" in
 job	e2e			case "$TOTAL" in ''
-job	e2e			case "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" in auto
+job	e2e			case "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" in auto
 job	e2e			chmod +x "$DEST/$BIN.part.$$"
 job	e2e			continue
 job	e2e			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
@@ -464,8 +464,8 @@ job	e2e		ui	npx playwright test --shard=1/2
 job	e2e		ui	npx playwright test --shard=2/2
 job	e2e		ui	npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=chromium --shard=1/2
 job	e2e		ui	npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=chromium --shard=2/2
-job	eslint-preset			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
-job	eslint-preset			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}')"
+job	eslint-preset			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	eslint-preset			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}')"
 job	eslint-preset			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
 job	eslint-preset			*[!0-9]*) TOTAL=40
 job	eslint-preset			BACKEND=local
@@ -510,11 +510,11 @@ job	eslint-preset			bash "conformance/ci/kit.sh" build-jobs
 job	eslint-preset			bash "conformance/ci/kit.sh" host node-caches "" "${{ github.job }}"
 job	eslint-preset			bash "conformance/ci/kit.sh" host sccache-stats
 job	eslint-preset			bash "dev" ci setup-rust --help >/dev/null
-job	eslint-preset			bash "dev" ci setup-rust --sccache-backend "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	eslint-preset			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	eslint-preset			cargo --version
 job	eslint-preset			case "$RUNNER_OS-$(uname -m)" in
 job	eslint-preset			case "$TOTAL" in ''
-job	eslint-preset			case "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" in auto
+job	eslint-preset			case "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" in auto
 job	eslint-preset			chmod +x "$DEST/$BIN.part.$$"
 job	eslint-preset			continue
 job	eslint-preset			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
@@ -587,8 +587,8 @@ job	eslint-preset			unzip -q "$dl/$NAME.$EXT" -d "$dl"
 job	eslint-preset			{
 job	eslint-preset			} >> "$GITHUB_ENV"
 job	eslint-preset		eslint	npm test
-job	icons			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
-job	icons			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}')"
+job	icons			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	icons			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}')"
 job	icons			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
 job	icons			*[!0-9]*) TOTAL=40
 job	icons			BACKEND=local
@@ -633,11 +633,11 @@ job	icons			bash "conformance/ci/kit.sh" build-jobs
 job	icons			bash "conformance/ci/kit.sh" host node-caches "ui" "${{ github.job }}"
 job	icons			bash "conformance/ci/kit.sh" host sccache-stats
 job	icons			bash "dev" ci setup-rust --help >/dev/null
-job	icons			bash "dev" ci setup-rust --sccache-backend "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	icons			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	icons			cargo --version
 job	icons			case "$RUNNER_OS-$(uname -m)" in
 job	icons			case "$TOTAL" in ''
-job	icons			case "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" in auto
+job	icons			case "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" in auto
 job	icons			chmod +x "$DEST/$BIN.part.$$"
 job	icons			continue
 job	icons			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
@@ -711,8 +711,8 @@ job	icons			unzip -q "$dl/$NAME.$EXT" -d "$dl"
 job	icons			{
 job	icons			} >> "$GITHUB_ENV"
 job	icons		icons	npm test
-job	tools			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
-job	tools			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}')"
+job	tools			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	tools			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}')"
 job	tools			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
 job	tools			*[!0-9]*) TOTAL=40
 job	tools			BACKEND=local
@@ -756,13 +756,13 @@ job	tools			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	tools			bash "conformance/ci/kit.sh" build-jobs
 job	tools			bash "conformance/ci/kit.sh" host sccache-stats
 job	tools			bash "dev" ci setup-rust --help >/dev/null
-job	tools			bash "dev" ci setup-rust --sccache-backend "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	tools			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	tools			bash .claude/hooks/run-tests.sh
 job	tools			bash ci-image/fetch-verified.sh "https://github.com/jgraph/drawio-desktop/releases/download/v${v}/drawio-amd64-${v}.deb" "$sum" "$RUNNER_TEMP/drawio.deb"
 job	tools			cargo --version
 job	tools			case "$RUNNER_OS-$(uname -m)" in
 job	tools			case "$TOTAL" in ''
-job	tools			case "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" in auto
+job	tools			case "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" in auto
 job	tools			chmod +x "$DEST/$BIN.part.$$"
 job	tools			continue
 job	tools			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
@@ -844,8 +844,8 @@ job	tools			unzip -q "$dl/$NAME.$EXT" -d "$dl"
 job	tools			v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile | head -n 1
 job	tools			{
 job	tools			} >> "$GITHUB_ENV"
-job	ui			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
-job	ui			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}')"
+job	ui			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	ui			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}')"
 job	ui			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
 job	ui			*[!0-9]*) TOTAL=40
 job	ui			BACKEND=local
@@ -890,11 +890,11 @@ job	ui			bash "conformance/ci/kit.sh" build-jobs
 job	ui			bash "conformance/ci/kit.sh" host node-caches "ui" "${{ github.job }}"
 job	ui			bash "conformance/ci/kit.sh" host sccache-stats
 job	ui			bash "dev" ci setup-rust --help >/dev/null
-job	ui			bash "dev" ci setup-rust --sccache-backend "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	ui			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	ui			cargo --version
 job	ui			case "$RUNNER_OS-$(uname -m)" in
 job	ui			case "$TOTAL" in ''
-job	ui			case "${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" in auto
+job	ui			case "${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}" in auto
 job	ui			chmod +x "$DEST/$BIN.part.$$"
 job	ui			continue
 job	ui			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"

@@ -18,7 +18,11 @@ on:
       - tools/paddock-dev/**
       - crates/Cargo.toml
       - crates/paddock-cli/**
+      - crates/paddock-download/**
       - crates/paddock-env/**
+      - crates/paddock-jobs/**
+      - crates/paddock-limits/**
+      - crates/paddock-net/**
       - crates/paddock-proc/**
       - crates/paddock-git/**
       - crates/paddock-repo-graph/**

@@ -14,8 +14,8 @@ inputs:
     description: "Install the Linux libraries Tauri needs (webkit2gtk, gtk, rsvg, appindicator); ignored on other systems."
     default: "false"
   sccache-backend:
-    description: "local (default: sccache's disk cache, the job slot's kept folder sccache-s<n> on a host runner, /sccache in a container when that mount exists), auto (Redis when an endpoint is set, else local), redis (the endpoint is required) or s3 (the local disk first, the shared RustFS store behind it; the local disk alone when S3 cannot be used). The default is the Gitea variable PADDOCK_CI_SCCACHE_BACKEND, local when unset (docs/research/2026-11-19-sccache.md section 8)."
-    default: ${{ vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}
+    description: "local (default: sccache's disk cache, the job slot's kept folder sccache-s<n> on a host runner, /sccache in a container when that mount exists), auto (Redis when an endpoint is set, else local), redis (the endpoint is required) or s3 (the local disk first, the shared RustFS store behind it; the local disk alone when S3 cannot be used). The default is the dispatch input `sccache_backend` of ci.yml (one run), else the Gitea variable PADDOCK_CI_SCCACHE_BACKEND, local when both are unset (docs/research/2026-11-19-sccache.md section 8)."
+    default: ${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}
   sccache-redis-endpoint:
     description: "Shared sccache backend, e.g. redis://172.16.1.188:6379 (no path: sccache ignores it). Used on every OS; empty means sccache's local disk."
     default: ${{ vars.SCCACHE_REDIS_ENDPOINT }}

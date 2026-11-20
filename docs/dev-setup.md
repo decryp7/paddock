@@ -164,12 +164,14 @@ shared backend on 2026-10-28 and again on 2026-11-17 (CI keeps its per-slot cach
   2026-11-19; trial numbers in docs/benchmarks.md, "CI's sccache on RustFS"). Settings, all in Gitea (Settings, Actions): the
   variables `PADDOCK_SCCACHE_S3_ENDPOINT` (`http://172.16.1.220:15000`) and `PADDOCK_SCCACHE_S3_BUCKET` (`sccache-paddock`), the
   secrets `PADDOCK_SCCACHE_S3_ACCESS_KEY_ID` and `PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY` (one key for every runner class, scoped to
-  `sccache-paddock/paddock-ci/*`), and the variable `PADDOCK_CI_SCCACHE_BACKEND=s3` to switch it on (delete it to switch off: every
+  `sccache-paddock/paddock-ci/*`), and the variable `PADDOCK_CI_SCCACHE_BACKEND=s3` to switch it on for every run, or the dispatch input `sccache_backend=s3` of ci.yml for one run (delete the variable to switch off: every
   job is back on its local disk at the next run). The key reaches only the `setup-rust` step (each use passes it; conformance C141
   checks that, and that the gates job and the release workflows hold none); the sccache server gets the chain and the key, every
   later step only the local disk. A job falls back to its local disk, with a `::warning::`, when the store's HTTP health check
   (`/minio/health/live`, 5 s at most) fails, and a failed S3 write never fails a build. A store that hangs in the middle of a job
-  can slow that job: accepted (user, 2026-11-20). The store's size is the store's job: before a release check
+  is cut by the **timeout guard** (`paddock_net::stall_guard`, a localhost proxy `setup-rust` starts in front of the store: a request with no
+  byte for 10 s fails, then new connections are refused for 60 s, so sccache uses its local disk; the job log shows what it cut).
+  The store must be an `http://` endpoint for that. The store's size is the store's job: before a release check
   `rc bucket lifecycle rule list <alias>/sccache-paddock` shows the 14-day expiry rule, as sccache never evicts from S3.
 - `setup-rust` uses the sccache already on the runner, else installs a pinned release (checksum-verified, in the runner's tool
   cache) for Linux x86_64/aarch64, macOS aarch64 and Windows x86_64. Bump the version and the four SHA-256 values together.
