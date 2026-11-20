@@ -54,18 +54,28 @@ pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
         ));
     }
     // The S3 timeout guard (setup-rust starts it when the S3 level is on): what it cut, then its stop.
-    if let Some(log) = step.var("PADDOCK_S3_GUARD_LOG")
-        && let Ok(text) = std::fs::read_to_string(log)
+    if let Some(log) = step.var("PADDOCK_S3_GUARD_LOG").map(str::to_string)
+        && let Ok(text) = std::fs::read_to_string(&log)
         && !text.trim().is_empty()
     {
-        let lines: Vec<&str> = text.trim_end().lines().collect();
-        let from = lines.len().saturating_sub(ERROR_LOG_LINES);
-        step.say(format!(
-            "::warning::the S3 timeout guard cut or refused requests ({} lines, {log}); the last {}:\n{}",
-            lines.len(),
-            lines.len() - from,
-            lines[from..].join("\n")
-        ));
+        // An idle keep-alive connection closed after the stall is routine (trial run 8363: 185 of them, no request cut): counted in a
+        // notice. A cut request or a refused connection is what a person must see: a warning with the last lines.
+        let (quiet, cuts): (Vec<&str>, Vec<&str>) = text.trim_end().lines().partition(|l| l.contains("was quiet for"));
+        if !quiet.is_empty() {
+            step.say(format!(
+                "::notice::the S3 timeout guard closed {} idle connection(s), as designed; no request was cut",
+                quiet.len()
+            ));
+        }
+        if !cuts.is_empty() {
+            let from = cuts.len().saturating_sub(ERROR_LOG_LINES);
+            step.say(format!(
+                "::warning::the S3 timeout guard cut or refused requests ({} lines, {log}); the last {}:\n{}",
+                cuts.len(),
+                cuts.len() - from,
+                cuts[from..].join("\n")
+            ));
+        }
     }
     // The guard and the server that holds the S3 secret end here (ci_s3_guard::stop_job_cache; `ci isolation release` is the net).
     crate::ci_s3_guard::stop_job_cache(env, step.out);
@@ -205,6 +215,15 @@ mod tests {
         let mut got = Vec::new();
         std::io::Read::read_to_end(&mut c, &mut got).unwrap();
         assert_eq!(got, paddock_net::stall_guard::STOP_MAGIC, "the guard gets the stop request");
+        // Only idle connections closed: a notice with the count, never a warning.
+        std::fs::write(&log, "s3-guard: a connection to h:1 was quiet for 10 s and is closed\ns3-guard: a connection to h:1 was quiet for 10 s and is closed\n").unwrap();
+        let (_, out, _) = go(d.path(), &[("PADDOCK_S3_GUARD_PORT", &port), ("PADDOCK_S3_GUARD_LOG", &log_s)]);
+        assert!(out.contains("::notice::the S3 timeout guard closed 2 idle connection(s)"), "{out}");
+        assert!(
+            !out.contains("::warning::the S3 timeout guard"),
+            "routine closes are not a warning: {out}"
+        );
+        let _ = guard.accept();
         // No guard variables: nothing is sent and nothing is said.
         let (_, out, _) = go(d.path(), &[]);
         assert!(!out.contains("timeout guard"), "{out}");
