@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { buildSidecars, findSidecars, hostTriple, main, parseSidecarSpec, planSidecars, profileDir, selfTestSidecars } from '../src/sidecar/sidecar.mjs';
 
@@ -95,6 +95,13 @@ test('build with the real file operations: cargo is the only thing faked', () =>
   const written = buildSidecars({ root, out, sidecars: [parseSidecarSpec('svc')], target: 'x86_64-unknown-linux-gnu', host: 'x86_64-unknown-linux-gnu', ops: { run: () => undefined, log: () => undefined } });
   assert.ok(existsSync(written[0]));
   assert.ok(statSync(written[0]).mode & 0o100, 'executable');
+});
+
+test('findSidecars names each binary by a full path, so a relative folder never turns into a PATH lookup', () => {
+  // `join('.', 'svc')` is `svc`, which spawnSync looks up on PATH (the class of tag.yml run 8384); the path is absolute instead.
+  const [svc] = findSidecars('.', ['svc'], () => ['svc']);
+  assert.ok(isAbsolute(svc), svc);
+  assert.equal(svc, resolve('svc'));
 });
 
 test('findSidecars matches the bare name and the triple-suffixed one, and names what is missing', () => {
