@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-e2e`: `untilItsPageCloses` and `clickThatClosesItsPage`, for a step that closes its own window
+- A test step whose action ends the page it acts on (a pop-out's Dock back, the pointer-up that docks a dragged pop-out) counts as done
+  when that page closed: Playwright can reject such a step with "Target page, context or browser has been closed" when the window goes
+  away while it is still finishing the step (Debrief's popout.e2e.ts:62, run 8338). A step that fails while the page stays open, or
+  that leaves it open, still fails. Debrief's pop-out specs use it; a selftest (`selftest/close-click.spec.ts`) reproduces the race.
+
 ### `@decryp7/paddock-conformance`: C39, C53, C119-C125 and C129-C131 left the package (pair P3, ADR 0022 amendment 2026-11-19)
 - Breaking: these 12 checks have no JavaScript module any more, so `paddock-conformance --only C39` (and the others) is an `unknown
   check` error that points to `./dev conformance --only <ids>`. The Rust host runs them (`conformance.rust` of

@@ -3160,3 +3160,22 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   member (same symptom in run 8212, before the train). **Fix:** `openTray` waits until the popover's finite animations have finished,
   and the test compares unrounded heights. Class: a layout read during an entry animation (the "two reads agree" rule does not catch a
   box that moves while its rounded size stays).
+
+## A click that closes its own window: Debrief's popout.e2e.ts:62 Dock back (2026-11-20, train 16)
+- **Failure:** `locator.click: Target page, context or browser has been closed` at popout.e2e.ts:65, the click on the pop-out's own
+  "Dock back into the main window" button (debrief.yml run 8338 job 42172, Chromium, FLAKY: passed on its retry; 1 of 151 runs). The
+  call log stops at "performing click action": the click had been delivered. Dock back asks the host (BroadcastChannel) and the host
+  closes the pop-out (`win.close()` in popout-backend.ts), so the window can go away while Playwright is still finishing the click.
+- **Causes weighed:** (1) the window closed for another reason before the click: refuted by the call log (actionability passed, the
+  action was being performed) and by the retry docking normally; (2) a slow host: no, the close is the expected effect of the click;
+  (3) Playwright treating every such close as an error: refuted, a click after which the host closes the window passes 80 of 80
+  (synchronous, deferred, mousedown, pointerdown, BroadcastChannel; local probes in Playwright's pinned Chromium 1248). The race is
+  only the close landing inside Playwright's own completion of the click, which cannot be scheduled from outside.
+- **Reproduction (deterministic):** the kit's selftest `close-click.spec.ts` holds the click open on a disabled button and closes the
+  window from its host meanwhile: a plain click rejects with the same error every time (red with the old click-then-wait-for-close),
+  green with the fix; 20 repeats at 4 workers in Chromium and in WebKit.
+- **Fix:** `@decryp7/paddock-e2e` `untilItsPageCloses(page, step)` and `clickThatClosesItsPage(locator)`: a step that closes its own page
+  counts as done when the page closed; a step that fails while the page stays open, or that leaves it open, still fails. The spec's own
+  next assertion (the panel is back in the host) checks that the step did its job. Both such steps in popout.e2e.ts use it (Dock back,
+  and the dispatched pointer-up that docks a dragged pop-out). **Rule:** a test step whose action ends the page it acts on goes through
+  `untilItsPageCloses`, never a plain `await` on that page.
