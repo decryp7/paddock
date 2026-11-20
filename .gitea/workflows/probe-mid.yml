@@ -1,0 +1,13 @@
+# Part of the throwaway probe (probe-outer.yml): a called workflow that calls another one.
+name: probe-mid
+on:
+  workflow_call:
+    inputs:
+      legs:
+        type: string
+        required: true
+jobs:
+  inner:
+    uses: ./.gitea/workflows/probe-leaf.yml
+    with:
+      legs: ${{ inputs.legs }}

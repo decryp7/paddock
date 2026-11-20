@@ -1,0 +1,47 @@
+# THROWAWAY PROBE (ci/probe-nesting, never merged): does our Gitea support what splitting ci.yml's matrix jobs into reusable workflows needs?
+#   1. depth-2 nesting: this workflow (top) -> probe-mid.yml (called) -> probe-leaf.yml (called inside a called workflow), the shape of
+#      nightly.yml -> ci.yml -> ci-crate.yml;
+#   2. a matrix fed by an input: `fromJSON(inputs.legs)` in the leaf;
+#   3. `needs.<call job>.result` and `needs: [<call job>]` on a call job;
+#   and the job names the API reports for nested jobs (read afterwards with ./dev; the report job also prints them).
+name: probe-outer
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    outputs:
+      legs: ${{ steps.p.outputs.legs }}
+    steps:
+      - id: p
+        run: echo 'legs=[{"os":"ubuntu-latest","n":"one"},{"os":"ubuntu-latest","n":"two"}]' >> "$GITHUB_OUTPUT"
+  mid:
+    needs: [plan]
+    uses: ./.gitea/workflows/probe-mid.yml
+    with:
+      legs: ${{ needs.plan.outputs.legs }}
+  # A job that needs the call job and reads its result (the stage gates do exactly this).
+  report:
+    needs: [plan, mid]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    steps:
+      - name: What the call job reported
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          TOKEN: ${{ github.token }}
+          RUN: ${{ github.run_id }}
+          API: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "probe: needs.mid.result=${{ needs.mid.result }}"
+          echo "$NEEDS"
+          echo "probe: job names of this run as the API lists them:"
+          curl -s -H "Authorization: token $TOKEN" "$API/repos/$REPO/actions/runs/$RUN/jobs?limit=50" | jq -r '.jobs[] | "probe-job: \(.name) | \(.status) \(.conclusion)"' || true
