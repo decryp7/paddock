@@ -8,7 +8,9 @@
 //! is an error, never a quiet rerun of the whole job: a rung that claims to run named tests and runs others is not measured
 //! (ER-33).
 
-use crate::plan_since::{FailedTest, PLAIN_SPEC, PLAYWRIGHT_STEPS, Scope, SincePlan, TEST_STEPS, VITEST_STEPS, filterset};
+use crate::plan_since::{
+    FailedTest, PLAIN_SPEC, PLAYWRIGHT_STEPS, Scope, SincePlan, TEST_STEPS, VITEST_STEPS, filterset, filterset_fallbacks,
+};
 use regex::Regex;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -34,7 +36,7 @@ fn re(pattern: &str) -> Regex {
     Regex::new(pattern).expect("a valid pattern")
 }
 
-static PW_ID: LazyLock<Regex> = LazyLock::new(|| re(r"^(?:\[[^\]]+\] › )?([A-Za-z0-9_./-]+):(\d+):\d+ › \S"));
+static PW_ID: LazyLock<Regex> = LazyLock::new(|| re(r"^(?:\[([^\]]+)\] › )?([A-Za-z0-9_./-]+):(\d+):\d+ › \S"));
 static SPEC_ID: LazyLock<Regex> = LazyLock::new(|| re(r"^[A-Za-z0-9_./-]+\.(?:spec|test)\.[cm]?[jt]sx?$"));
 
 /// The kind of runner an id's shape says, `None` for a shape no runner of ours prints.
@@ -66,9 +68,13 @@ pub fn job_kind(workflow: &str, job_key: &str) -> Option<Kind> {
     }
 }
 
-/// The location Playwright takes for a test id: `file:line` (the column and the title are not part of a location).
+/// What the workflow passes Playwright for a test id: `<project>=<file>:<line>` (`=<file>:<line>` for a run with no project). The
+/// project is part of it because a test that failed in one project is run in that project (`--project=<p> <file>:<line>`), not in
+/// every project of the config; the column and the title are not part of a location.
 pub fn playwright_location(id: &str) -> Option<String> {
-    PW_ID.captures(id).map(|m| format!("{}:{}", &m[1], &m[2]))
+    PW_ID
+        .captures(id)
+        .map(|m| format!("{}={}:{}", m.get(1).map_or("", |p| p.as_str()), &m[2], &m[3]))
 }
 
 /// The tests to run, by job display name.
@@ -144,8 +150,9 @@ impl OnlyTests {
 impl SincePlan {
     /// Narrows this rerun to the named tests: each named job's scope becomes exactly its ids, every other job does not rerun.
     /// An error (and no change) for a job that did not fail in the run, one with no known workflow job, one whose runner takes no
-    /// test list, an id of another runner's shape, or a plan that already reruns everything.
-    pub fn apply_only_tests(&mut self, only: &OnlyTests) -> Result<(), String> {
+    /// test list, an id of another runner's shape, or a plan that already reruns everything. The warnings name what ran wider than
+    /// asked (a test binary a filterset can only select whole).
+    pub fn apply_only_tests(&mut self, only: &OnlyTests) -> Result<Vec<String>, String> {
         if let Some(why) = &self.everything {
             return Err(format!(
                 "only_tests cannot narrow the rerun of run {}: it reruns everything ({why})",
@@ -153,6 +160,7 @@ impl SincePlan {
             ));
         }
         let mut scopes: Vec<(u64, Scope)> = Vec::new();
+        let mut warnings: Vec<String> = Vec::new();
         for (name, ids) in only.jobs() {
             let r = self
                 .reruns
@@ -180,6 +188,11 @@ impl SincePlan {
                         .collect();
                     let filter = filterset(&tests)
                         .ok_or_else(|| format!("only_tests: a test binary of {name:?} cannot be written in a filterset"))?;
+                    for b in filterset_fallbacks(&tests) {
+                        warnings.push(format!(
+                            "only_tests: {name:?}: a test of binary {b} has a name a filterset cannot write plainly: the whole binary reruns, more tests than named"
+                        ));
+                    }
                     Scope::Tests { filter, tests }
                 }
                 Kind::Vitest => {
@@ -203,7 +216,62 @@ impl SincePlan {
             }
         }
         self.reruns.retain(|r| only.jobs().contains_key(&r.name));
+        Ok(warnings)
+    }
+
+    /// Narrows this rerun to the named jobs, each whole (rung 2 of the fix ladder: the jobs rung 1 did not cover): every other job does
+    /// not rerun. An error (and no change) for a name that did not fail in the run or a plan that already reruns everything.
+    pub fn apply_only_jobs(&mut self, only: &OnlyJobs) -> Result<(), String> {
+        if let Some(why) = &self.everything {
+            return Err(format!(
+                "only_jobs cannot narrow the rerun of run {}: it reruns everything ({why})",
+                self.run
+            ));
+        }
+        if let Some(name) = only.names().iter().find(|n| !self.reruns.iter().any(|r| &&r.name == n)) {
+            return Err(format!("only_jobs names the job {name:?}, which did not fail in run {}", self.run));
+        }
+        self.reruns.retain(|r| only.names().contains(&r.name));
         Ok(())
+    }
+}
+
+/// The jobs to rerun whole, by display name (the `only_jobs` input: a JSON list).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OnlyJobs {
+    names: Vec<String>,
+}
+
+impl OnlyJobs {
+    /// Reads the input: a non-empty JSON list of job names, each once, at most [`MAX_IDS`].
+    pub fn parse(text: &str) -> Result<OnlyJobs, String> {
+        let v: Value = serde_json::from_str(text).map_err(|e| format!("only_jobs is not JSON: {e}"))?;
+        let list = v.as_array().ok_or("only_jobs is not a JSON list of job names")?;
+        let mut names = BTreeSet::new();
+        for n in list {
+            let n = n
+                .as_str()
+                .filter(|n| !n.is_empty())
+                .ok_or("only_jobs has a name that is not text")?;
+            names.insert(n.to_string());
+        }
+        if names.is_empty() {
+            return Err("only_jobs names no job: an empty list would run nothing".into());
+        }
+        if names.len() > MAX_IDS {
+            return Err(format!(
+                "only_jobs names {} jobs, more than the {MAX_IDS} one input carries",
+                names.len()
+            ));
+        }
+        Ok(OnlyJobs {
+            names: names.into_iter().collect(),
+        })
+    }
+
+    /// The job names, sorted.
+    pub fn names(&self) -> &[String] {
+        &self.names
     }
 }
 

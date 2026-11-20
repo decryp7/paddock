@@ -6,9 +6,10 @@
 //!   attempts (a rerun keeps the run id) hold no failed job, and
 //! * that run's triage document: the same run and commit, `ok`, `skipped_jobs` 0, counts that add up to the rows.
 //!
-//! It passes only when every row is a named test, never a job, and is either a FLAKY test the caller accepts (the ER-12 check is the
-//! caller's `flaky_ok`) or ALREADY FAILING ON MAIN (the baseline is a main run). A NEW, UNKNOWN or FAILED row, a job row, a skipped
-//! job, another run or commit refuses it.
+//! It passes only when every row is a named test, never a job, and is a FLAKY test the caller accepts (the ER-12 check is the
+//! caller's `flaky_ok`). A NEW, UNKNOWN or FAILED row, a job row, a skipped job, another run or commit refuses it, and so does a
+//! test that is ALREADY FAILING ON MAIN: a test that fails both tries blocks the landing, whoever broke it first (user rule
+//! 2026-11-20, common practice; ER-12's allowance is for a FLAKY test that passed on its retry).
 
 use super::client::{Client, RunInfo, TimedJob};
 use super::verdict::{Earlier, RunResult, Verdict, read_earlier, run_result, verdict};
@@ -23,8 +24,6 @@ pub struct Landable {
     pub run: u64,
     /// How many failing rows were accepted FLAKY tests.
     pub flaky: usize,
-    /// How many were already failing on main.
-    pub already_failing: usize,
     /// One line per accepted row, for the log.
     pub lines: Vec<String>,
     _seal: Seal,
@@ -37,22 +36,18 @@ struct Seal;
 impl Landable {
     /// A value for the tests of the callers (sequence, landing): the real one only comes from [`judge`].
     #[cfg(test)]
-    pub fn for_test(run: u64, flaky: usize, already_failing: usize, lines: &[&str]) -> Landable {
+    pub fn for_test(run: u64, flaky: usize, lines: &[&str]) -> Landable {
         Landable {
             run,
             flaky,
-            already_failing,
             lines: lines.iter().map(|l| l.to_string()).collect(),
             _seal: Seal,
         }
     }
 
-    /// "landed on a full run with N accepted FLAKY, M already failing on main".
+    /// "full run N with M accepted FLAKY".
     pub fn summary(&self) -> String {
-        format!(
-            "full run {} with {} accepted FLAKY, {} already failing on main",
-            self.run, self.flaky, self.already_failing
-        )
+        format!("full run {} with {} accepted FLAKY", self.run, self.flaky)
     }
 }
 
@@ -235,8 +230,7 @@ pub fn judge(
     if counted != rows.len() as u64 {
         why.push(format!("counts add up to {counted}, not to the {} row(s)", rows.len()));
     }
-    let baseline_main = doc.pointer("/baseline/main") == Some(&Value::Bool(true));
-    let (mut flaky, mut already, mut lines) = (0, 0, Vec::new());
+    let (mut flaky, mut lines) = (0, Vec::new());
     for row in rows {
         let status = row.get("status").and_then(Value::as_str).unwrap_or("");
         let job = row.get("job").and_then(Value::as_str).unwrap_or("?");
@@ -255,11 +249,9 @@ pub fn judge(
                 }
                 Err(e) => why.push(format!("FLAKY and not acceptable ({cut}): {e}")),
             },
-            "already-failing" if baseline_main => {
-                already += 1;
-                lines.push(format!("ALREADY FAILING ON MAIN ({job}): {cut}"));
-            }
-            "already-failing" => why.push(format!("already failing, but not on a main run ({cut})")),
+            "already-failing" => why.push(format!(
+                "fails on main too ({job}): {cut}: a test that fails both tries blocks the landing, whoever broke it first"
+            )),
             other => why.push(format!("{}: {cut}", if other.is_empty() { "unreadable" } else { other })),
         }
     }
@@ -267,7 +259,6 @@ pub fn judge(
         Ok(Landable {
             run,
             flaky,
-            already_failing: already,
             lines,
             _seal: Seal,
         })
@@ -317,7 +308,16 @@ mod tests {
         let why = refused(&doc(vec![flaky(), old]), &yes);
         assert!(why.contains("fails on main too") && why.contains("blocks"), "{why}");
         // Alone, too: nothing but an old failure is not landable.
-        assert!(judge(&doc(vec![row("e2e", Some(OLD), false, "already-failing")]), 8400, SHA, "debrief.yml", &yes).is_err());
+        assert!(
+            judge(
+                &doc(vec![row("e2e", Some(OLD), false, "already-failing")]),
+                8400,
+                SHA,
+                "debrief.yml",
+                &yes
+            )
+            .is_err()
+        );
     }
 
     fn refused(d: &Value, ok: &dyn Fn(&str, &str) -> Result<(), String>) -> String {

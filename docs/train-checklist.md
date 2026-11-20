@@ -40,22 +40,24 @@ locked worktree, never in the main checkout (rule 2).
    alone (nextest `-E`, vitest files, Playwright `file:line`) go to the workflow's `only_tests` input (a JSON object from a job's display name
    to its test ids, with `since_run`); jobs not named do not run. Its run is read with `ci triage <run> --ran`: a named job that ran fewer
    tests than it was given ids, or none, is **NOT MEASURED** and stops the ladder (a green run of an empty filter is not green). A red rung 1
-   stops with the next step: fix, push through the gate, run again with the same `--since-run` and `--test-round n+1` (at most
-   `--max-test-rounds`, default 3; past it, or with 0, the ladder starts at rung 2). Rung 2, their whole jobs: the `since_run` round above.
+   stops with the next step: fix, push through the gate, run again with the same `--since-run` (the round is counted from the server: the runs of the train ref newer than the red run; at most
+   `--max-test-rounds`, default 3; past it, or with 0, the ladder starts at rung 2). Rung 2, their whole jobs: the `since_run` round above, but only the jobs rung 1 did not cover (the `only_jobs` input: a JSON list of job display names, with `since_run`); when rung 1 covered every failing job rung 2 is skipped, and its test jobs must show tests that ran (NOT MEASURED otherwise).
    Rung 3, stage 1 on every OS (the fast checks and unit tests): only when the workflow declares the stage input
    (`ladder::STAGE_INPUT`, the layout of `ci/staged-fast-then-long`), else a logged note and rung 4; the shared reader must not count a stage 1
-   run as a full one, or the sequence stops. Rung 4, the full run on the exact head, below. **Only rung 4 lets a train land**: the report
+   run as a full one, or the sequence stops. For `ci.yml` rung 4 is dispatched alongside rung 3 and cancelled (Gitea's cancel endpoint; a failed cancel is a warning) when rung 3 goes red. Rung 4, the full run on the exact head, below. **Only rung 4 lets a train land**: the report
    lists each rung (green with its run, or not run with the reason; a rung that had nothing to run is skipped, never a pass).
    Then the full `ci.yml` and `debrief.yml` (no `since_run`, ER-10) are dispatched unless `ci verdict` already has a green full run of the head,
    and each must be green by **`ci verdict`**, the one reader, or red only by what a train may land on (the sealed `Landable` of `ci_runs::landable`:
    the newest complete full run of the exact head, finished `failure` with clean earlier attempts, whose triage is the same run and head with
-   `skipped_jobs` 0 and counts that add up, and whose every row is a named test that is an accepted, untouched FLAKY or ALREADY FAILING ON MAIN; a
-   NEW, UNKNOWN or job row refuses; every accepted row is logged); then the release workflows, each ending `success` (a cancel or any other end
+   `skipped_jobs` 0 and counts that add up, and whose every row is an accepted, untouched FLAKY test; a
+   NEW, UNKNOWN, FAILED, ALREADY FAILING ON MAIN or job row refuses (a test that fails both tries blocks, whoever broke it first: user rule 2026-11-20); every accepted row is logged); then the release workflows, each ending `success` (a cancel or any other end
    stops). `--reuse` is accepted only for a green run on this train ref whose commit is an ancestor of the head and whose app the planner
    does not reach from that commit to the head (the diff is logged). Every wait ends at `--max` (one run at 6 h) and a stop is one `::error::`.
    Then `./dev train land <train-branch> [--accept-flaky ...]`: it refuses unless `ci verdict` is green for the exact head, or the full run is
    landable as above (`ci.yml`, and `debrief.yml` when the plan from main reaches Debrief), and unless every release workflow whose app the plan
    reaches has a green run on this train covering the head (rule 54: on the head, or on an earlier train commit with the app not reached
-   since); it reports "landed on a full run with N accepted FLAKY, M already failing on main", fast-forwards `main` (no force, no rebase; refused when `origin/main` is not an ancestor), verifies with
+   since); it reports "landed on a full run with N accepted FLAKY", fast-forwards `main` (no force, no rebase; refused when `origin/main` is not an ancestor), verifies with
    `ls-remote`, then runs the bounded, never-blocking disk clean `./dev train landed` (also callable alone). These commands replace the scratch
    scripts of train 14 (`seq-lib.sh`, `seq-release.sh`, `seq-full.sh`, `triage-verdict.py`, `land-*.sh`). Land only after the full green run on the final tree (rule 50 (b)); delete the `trial/*` refs of landed branches with `./dev ci trial-prune` (a trial that is sent back or not dispatched already deletes its own ref).
+
+**Carried branches.** `feat/train-fix-ladder` carries `feat/train-release-command` and `feat/disk-clean-at-landing` (the train commands and the landing clean-up its `train/mod.rs` calls) and the retirement of `scripts/ci-timings.mjs` (pair P5): none of them may join a train on its own; this branch is their one way in.

@@ -51,11 +51,8 @@ pub struct ReleaseArgs {
     /// The workflow of the fix round.
     #[arg(long, value_name = "ci.yml|debrief.yml")]
     workflow: String,
-    /// Which round of the fix ladder's first rung (the failed tests only) this run is: 1 on a red run, one more after each fix push
-    /// (run it again with the same `--since-run` and the next number). Past `--max-test-rounds` the ladder starts at rung 2.
-    #[arg(long, value_name = "N", default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
-    test_round: u32,
-    /// The most rounds of the first rung (the failed tests only); 0 turns the rung off.
+    /// The most rounds of the fix ladder's first rung (the failed tests only); 0 turns the rung off. The round is counted from the
+    /// server (the runs of the train ref newer than the red run), never from an argument; past the bound the ladder starts at rung 2.
     #[arg(long, value_name = "N", default_value_t = 3)]
     max_test_rounds: u32,
     /// A flaky test that may remain in a red fix round, as `file:line:col` or `file:line` (repeat). Only FLAKY tests (passed on a
@@ -133,7 +130,6 @@ fn plan_of(a: &ReleaseArgs) -> Result<sequence::Plan, String> {
         reuse: parse_reuse(&a.reuse)?,
         max,
         ladder: sequence::Ladder {
-            round: a.test_round,
             max_rounds: a.max_test_rounds,
         },
     };
@@ -191,6 +187,7 @@ fn release(a: &ReleaseArgs) -> Result<Report, CliError> {
         clock: crate::wait::SystemClock::new(),
         accepted: plan.accepted.clone(),
         changed,
+        templates: Default::default(),
     };
     let mut log = std::io::stderr();
     match sequence::release(&plan, &mut ports, &mut log) {
@@ -204,7 +201,7 @@ fn release(a: &ReleaseArgs) -> Result<Report, CliError> {
                     sequence::Source::Reused(r) => format!("{wf}: reused green run {r}"),
                     sequence::Source::Verdict(r) => format!("{wf}: full green run {r} by `ci verdict`"),
                     sequence::Source::Landable(r) => {
-                        format!("{wf}: full run {r}, red only by accepted flaky tests and failures already on main")
+                        format!("{wf}: full run {r}, red only by accepted flaky tests")
                     }
                     sequence::Source::TestsOnly(r) => format!("{wf}: rung 1, the failed tests only: run {r} green (not a full run)"),
                     sequence::Source::Stage1(r) => format!("{wf}: rung 3, stage 1: run {r} green (not a full run)"),
@@ -367,7 +364,6 @@ mod tests {
             workflow: "ci.yml".into(),
             accept_flaky: vec![],
             reuse: vec![],
-            test_round: 1,
             max_test_rounds: 3,
             max: "14h".into(),
             repo: "decryp7/paddock".into(),

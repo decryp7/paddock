@@ -756,7 +756,7 @@ pub fn triage(a: &TriageArgs) -> Result<Report, CliError> {
     })?;
     let (mut text, mut data, mut exit) = (report.text(), report.json(), report.exit());
     if a.ran {
-        match ran::collect(&mut client, a.run, &mut |l| eprintln!("{l}")) {
+        match ran::collect(&mut client, a.run, None, &mut |l| eprintln!("{l}")) {
             Ok(counts) => {
                 text.push_str(&format!(
                     "tests run: {} in {} job(s)\n",

@@ -43,6 +43,10 @@ on:
         description: "With since_run: run only these tests of that run's failed jobs, as JSON from a job's display name to its test ids (the rows of ./dev ci triage <run> --json): nextest `<binary> <test>`, a vitest spec file, a Playwright `[project] > file:line:col > title`. Jobs not named do not run (./dev train release, rung 1: the failed tests only; tools/paddock-dev/src/plan_only). Without since_run the run is refused."
         required: false
         default: ""
+      only_jobs:
+        description: "With since_run: rerun only these jobs of that run's failed jobs, each whole, as a JSON list of job display names (./dev train release, rung 2: the jobs rung 1 did not cover; tools/paddock-dev/src/plan_only). Jobs not named do not run. Not with only_tests. Without since_run the run is refused."
+        required: false
+        default: ""
 
 env:
   # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
@@ -135,6 +139,7 @@ jobs:
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
           # With since_run: only the tests this names (JSON), in the jobs it names (plan_only.rs); refused without since_run.
           PLAN_ONLY_TESTS: ${{ github.event.inputs.only_tests }}
+          PLAN_ONLY_JOBS: ${{ github.event.inputs.only_jobs }}
           PLAN_FULL: ${{ github.event.inputs.bundles }}
           # The `full` output's expression, copied (tools/paddock-dev/tests/it/tree.rs keeps them equal): the mode line below lets a
           # later rerun of this run's failures tell whether it was full (plan_since::read_full). It is the scope only; `plan verdict:`
@@ -670,8 +675,16 @@ jobs:
           E2E_TESTS: ${{ matrix.tests }}
         run: |
           if [ -n "$E2E_TESTS" ]; then
+            # `<project>=<file>:<line>` for each named test: each runs in the project it failed in (`=<file>:<line>`: no project).
             echo "::notice::Playwright runs only the named tests: $E2E_TESTS"
-            npx playwright test $E2E_TESTS ${{ needs.plan.outputs.full != 'true' && '--project=chromium' || '' }}
+            rc=0
+            for p in $(printf '%s\n' $E2E_TESTS | cut -d= -f1 | sort -u); do
+              locs=$(printf '%s\n' $E2E_TESTS | grep "^$p=" | cut -d= -f2-)
+              proj=()
+              if [ -n "$p" ]; then proj=("--project=$p"); fi
+              npx playwright test ${proj[@]+"${proj[@]}"} $locs || rc=1
+            done
+            exit $rc
           else
             npx playwright test --shard=${{ matrix.shard }}/4 ${{ needs.plan.outputs.full != 'true' && '--project=chromium' || '' }}
           fi

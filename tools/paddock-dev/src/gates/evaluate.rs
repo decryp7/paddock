@@ -125,6 +125,12 @@ const REGISTER: &str = "docs/gates.toml";
 /// `review_by` limit as a check, so the flip to blocking is enforced by the date (ER-41).
 const STEP_PREFIX: &str = "step:";
 
+/// A `[[report_only]]` id that names a conformance test file rather than a check: `test:<tracked path>`, for example
+/// `test:conformance/test/ci-verdict-reader.test.mjs`. The file reads its own status from the register (ER-41: its row is removed in
+/// the step that records its first green run) and carries the same `review_by` limit as a check. The entry is stale when the file is
+/// no longer tracked.
+const TEST_PREFIX: &str = "test:";
+
 /// What is wrong with a `step:<project>/<phase>` entry, with the next step: the step is gone, or it already blocks.
 fn step_entry_problem(id: &str, src: &Sources, model: &ci::CiModel) -> Option<(String, &'static str)> {
     let Some((project, phase)) = id.strip_prefix(STEP_PREFIX).and_then(|r| r.split_once('/')) else {
@@ -614,10 +620,9 @@ pub fn evaluate(input: &Input) -> Outcome {
         ("report_only", &reg.report_only),
         ("level", &reg.level),
     ] {
-        for e in list
-            .iter()
-            .filter(|e| !ids.contains(&e.id) && !(kind == "report_only" && e.id.starts_with(STEP_PREFIX)))
-        {
+        for e in list.iter().filter(|e| {
+            !ids.contains(&e.id) && !(kind == "report_only" && (e.id.starts_with(STEP_PREFIX) || e.id.starts_with(TEST_PREFIX)))
+        }) {
             finding(
                 &mut out,
                 Some(REGISTER),
@@ -637,6 +642,19 @@ pub fn evaluate(input: &Input) -> Outcome {
                 &p.id,
                 format!("[[planned]] {} is stale: the check exists now", p.id),
                 "Remove the entry.",
+            );
+        }
+    }
+    for e in reg.report_only.iter().filter(|e| e.id.starts_with(TEST_PREFIX)) {
+        let path = &e.id[TEST_PREFIX.len()..];
+        if path.is_empty() || !input.tree.files().iter().any(|f| f == path) {
+            finding(
+                &mut out,
+                Some(REGISTER),
+                None,
+                &e.id,
+                format!("[[report_only]] {} names a test file that is not tracked", e.id),
+                "Remove the entry (the test file is gone), or write the id as test:<repo path of the file>.",
             );
         }
     }
@@ -930,6 +948,26 @@ mod tests {
         let bad = step_register("2026-12-06").replace("step:tools/hooks", "step:tools");
         let m = messages(&run_step(&bad, STEP_CI, Some(STEP_CONTRACT)));
         assert!(m.iter().any(|x| x.contains("is not `step:<project>/<phase>`")), "{m:?}");
+    }
+
+    #[test]
+    fn a_report_only_test_file_is_registered_by_test_id_and_must_exist() {
+        let reg = |id: &str| {
+            format!(
+                "{REG_HEAD}\n[[report_only]]\nid = \"{id}\"\nreason = \"x\"\nowner = \"o\"\nsince = 2026-11-08\nreview_by = 2026-12-06\napproved = \"coordinator\"\n"
+            )
+        };
+        let about = |o: &Outcome, id: &str| messages(o).into_iter().filter(|m| m.contains(id)).collect::<Vec<_>>();
+        // a tracked test file: registered, no finding about the entry
+        let id = "test:conformance/test/x.test.mjs";
+        let o = run(Some(&reg(id)), &[("conformance/test/x.test.mjs", "")], &[]);
+        assert!(about(&o, id).is_empty(), "{:?}", about(&o, id));
+        // the file is gone: the entry is stale (the positive control)
+        let m = about(&run(Some(&reg(id)), &[], &[]), id);
+        assert!(m.iter().any(|x| x.contains("names a test file that is not tracked")), "{m:?}");
+        // a malformed id, and a review_by that passed, are findings like any other entry's
+        let m = about(&run(Some(&reg("test:")), &[], &[]), "test:");
+        assert!(m.iter().any(|x| x.contains("names a test file")), "{m:?}");
     }
 
     #[test]

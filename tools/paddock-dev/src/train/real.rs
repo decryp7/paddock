@@ -39,6 +39,8 @@ pub struct RealPorts {
     pub accepted: Vec<Accepted>,
     /// The files the train changes against main.
     pub changed: Vec<String>,
+    /// The `name:` templates of each workflow at the head, read once (`job_kind`).
+    pub templates: std::collections::BTreeMap<String, Vec<(String, String)>>,
 }
 
 impl Ports for RealPorts {
@@ -124,13 +126,28 @@ impl Ports for RealPorts {
         runs::triage_doc(&self.server, &self.repo, &self.token, run)
     }
 
-    fn triage_ran(&mut self, run: u64) -> Result<Value, String> {
-        runs::triage_ran_doc(&self.server, &self.repo, &self.token, run)
+    fn triage_ran(&mut self, run: u64, only: Option<&[String]>) -> Result<Value, String> {
+        runs::triage_ran_doc(&self.server, &self.repo, &self.token, run, only)
+    }
+
+    fn cancel_run(&mut self, run: u64) -> Result<(), String> {
+        runs::cancel_run(&self.server, &self.repo, &self.token, run)
+    }
+
+    fn runs_after(&mut self, workflow: &str, since: u64) -> Result<Vec<String>, String> {
+        runs::runs_after(&self.server, &self.repo, &self.token, workflow, &self.branch, since)
     }
 
     fn job_kind(&mut self, workflow: &str, job: &str) -> Option<Kind> {
-        let text = self.workflow_at_head(workflow).ok()?;
-        let key = crate::plan_since::key_by_name(job, &crate::plan_since::name_templates(&text))?;
+        // The workflow is read once per sequence and workflow (a `git show` each time was one process per job name).
+        if !self.templates.contains_key(workflow) {
+            let t = self
+                .workflow_at_head(workflow)
+                .map(|t| crate::plan_since::name_templates(&t))
+                .unwrap_or_default();
+            self.templates.insert(workflow.to_string(), t);
+        }
+        let key = crate::plan_since::key_by_name(job, &self.templates[workflow])?;
         crate::plan_only::job_kind(workflow, &key)
     }
 

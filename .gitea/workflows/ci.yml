@@ -36,6 +36,10 @@ on:
         description: "With since_run: run only these tests of that run's failed jobs, as JSON from a job's display name to its test ids (the rows of ./dev ci triage <run> --json): nextest `<binary> <test>`, a vitest spec file, a Playwright `[project] > file:line:col > title`. Jobs not named do not run (./dev train release, rung 1: the failed tests only; tools/paddock-dev/src/plan_only). Without since_run the run is refused."
         required: false
         default: ""
+      only_jobs:
+        description: "With since_run: rerun only these jobs of that run's failed jobs, each whole, as a JSON list of job display names (./dev train release, rung 2: the jobs rung 1 did not cover; tools/paddock-dev/src/plan_only). Jobs not named do not run. Not with only_tests. Without since_run the run is refused."
+        required: false
+        default: ""
   # nightly.yml: everything, with WebKit.
   workflow_call:
     inputs:
@@ -136,6 +140,7 @@ jobs:
           PLAN_PLANNER: ${{ vars.PLAN_PLANNER }}
           # With since_run: only the tests this names (JSON), in the jobs it names (plan_only.rs); refused without since_run.
           PLAN_ONLY_TESTS: ${{ github.event.inputs.only_tests }}
+          PLAN_ONLY_JOBS: ${{ github.event.inputs.only_jobs }}
           # The crate and paddock-dev legs when the plan names none of its own (every run but a rerun of their failures).
           PLAN_OS_LEGS: '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]'
           # The scope of this run (tests everything its plan can reach, not a diff from a base or a rerun of failures): a push to

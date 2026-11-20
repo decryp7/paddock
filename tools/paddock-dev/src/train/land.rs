@@ -315,7 +315,7 @@ mod tests {
         Verdict::Red { run, reason: "red".into() }
     }
     fn full() -> Landable {
-        Landable::for_test(5, 1, 0, &["accepted FLAKY (e2e): a test"])
+        Landable::for_test(5, 1, &["accepted FLAKY (e2e): a test"])
     }
     impl Ci for FakeCi {
         fn verdict(&mut self, workflow: &str, _: &str) -> Verdict {
@@ -392,9 +392,7 @@ mod tests {
         let got = land("train/x", &mut f, &mut ci, &mut log).unwrap();
         let Landed::FastForwarded { notes, .. } = got else { panic!() };
         assert!(
-            notes
-                .iter()
-                .any(|n| n.contains("landed on a full run 5 with 1 accepted FLAKY, 0 already failing on main")),
+            notes.iter().any(|n| n.contains("landed on a full run 5 with 1 accepted FLAKY")),
             "{notes:?}"
         );
         assert!(String::from_utf8(log).unwrap().contains("accepted FLAKY (e2e): a test"));

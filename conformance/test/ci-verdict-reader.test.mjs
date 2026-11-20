@@ -284,11 +284,11 @@ const READERS_LIST = 'conformance/ci/run-conclusion-readers.json';
 
 /**
  * ER-41 (amended 2026-11-20): a new check starts report-only and blocks only in the step that records its first green run on the real
- * tree. Its status is the row `[[report_only]] id = "run-conclusion-readers"` of docs/gates.toml, read through the one accessor
+ * tree. Its status is the row `[[report_only]] id = "test:conformance/test/ci-verdict-reader.test.mjs"` of docs/gates.toml, read through the one accessor
  * (`gates-register.mjs`): while the row is there every finding of this check (a new reader, a stale entry, growth of the list, its
  * creation) is a warning; the step that records the first green run removes the row, and the findings fail.
  */
-export const REGISTER_ID = 'run-conclusion-readers';
+export const REGISTER_ID = 'test:conformance/test/ci-verdict-reader.test.mjs';
 const REGISTER = 'docs/gates.toml';
 const blockingNow = (extra = {}) => extra.blocking ?? !isReportOnly(readFileSync(join(PADDOCK, REGISTER), 'utf8'), REGISTER_ID);
 
@@ -305,7 +305,7 @@ export function listGrowth(listed, extra = {}) {
   // Report-only until the first green run is recorded (ER-41): a finding is said, not thrown.
   const fail = (message) => {
     if (blockingNow(extra)) throw new Error(message);
-    warn(`report-only (ER-41, docs/gates.toml lists run-conclusion-readers): ${message}`);
+    warn(`report-only (ER-41, docs/gates.toml lists this test): ${message}`);
   };
   const g = baselineGrowth({ root: PADDOCK, path: READERS_LIST, current: listed, keyOf: (f) => f, entriesOf: (j) => j.files, ...extra });
   if (g.reason) {
@@ -330,7 +330,7 @@ test('a pass decision from a run conclusion lives only in ci_runs/verdict.rs, be
   const found = conclusionReaders(PADDOCK);
   const check = (actual, message) => {
     if (blockingNow()) assert.deepEqual(actual, [], message);
-    else if (actual.length) console.warn(`report-only (ER-41, docs/gates.toml lists run-conclusion-readers): ${message}: ${actual.join('; ')}`);
+    else if (actual.length) console.warn(`report-only (ER-41, docs/gates.toml lists this test): ${message}: ${actual.join('; ')}`);
   };
   check(
     found.filter((f) => !listed.includes(f)),
@@ -374,7 +374,7 @@ test('the shrink-only check sees an added entry, a new list and a target it cann
   assert.doesNotThrow(() => listGrowth(['a.rs'], { git: gitBase(null), warn: (m) => spoken.push(m) }));
   assert.equal(spoken.filter((m) => m.includes('report-only')).length, 2, 'both findings were reported');
   // The status comes from the register's row, not from a constant: with the row the check reports, without it the check blocks.
-  const row = '[[report_only]]\nid = "run-conclusion-readers"\nsince = 2026-11-20\n';
+  const row = '[[report_only]]\nid = "test:conformance/test/ci-verdict-reader.test.mjs"\nsince = 2026-11-20\n';
   assert.equal(isReportOnly(row, REGISTER_ID), true);
   assert.equal(isReportOnly('[[report_only]]\nid = "C122"\n', REGISTER_ID), false);
   assert.equal(isReportOnly(readFileSync(join(PADDOCK, REGISTER), 'utf8'), REGISTER_ID), true, 'the register records the report-only start');

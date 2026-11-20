@@ -45,14 +45,20 @@ pub struct JobRan {
     pub tests_run: usize,
 }
 
-/// The count of every job that ran (a job that never ran, or only calls a reusable workflow, has no log and is not listed). `Err`
-/// when a log cannot be read: a count that is missing is never read as 0.
-pub fn collect(client: &mut Client, run: u64, log: &mut dyn FnMut(&str)) -> Result<Vec<JobRan>, String> {
+/// The count of every job that ran, or only of the jobs `only` names (a job that never ran, or only calls a reusable workflow, has no
+/// log and is not listed). `Err` when a log cannot be read: a count that is missing is never read as 0.
+pub fn collect(client: &mut Client, run: u64, only: Option<&[String]>, log: &mut dyn FnMut(&str)) -> Result<Vec<JobRan>, String> {
     let jobs = client
         .timed_jobs(run)?
         .ok_or_else(|| format!("the server has no job list for run {run}"))?;
     let mut out = Vec::new();
-    for j in jobs.iter().filter(|j| !j.is_caller() && !j.never_ran()) {
+    for j in jobs
+        .iter()
+        .filter(|j| !j.is_caller() && !j.never_ran())
+        .filter(|j| only.is_none_or(|names| names.contains(&j.name)))
+    {
+        // per-item: a log is one request per job and the server has no bulk log read; a rung names few jobs (the ones it ran), and
+        // only the stage 1 count reads them all.
         log(&format!("run {run} job {} \"{}\": counting the tests it ran", j.id, j.name));
         let text = client
             .log(j.id)?

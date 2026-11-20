@@ -163,12 +163,18 @@ pub trait Ports {
     fn is_ancestor(&mut self, ancestor: &str, of: &str) -> Result<bool, String>;
     /// What the planner says `from_sha..train head` reaches, for `app`.
     fn reach(&mut self, app: &str, from_sha: &str) -> Result<Reach, String>;
-    /// `ci triage <run> --json --ran`: the triage document with the count of the tests every job ran (`ran`). `Err` when it could
+    /// `ci triage <run> --json --ran`: the triage document with the count of the tests the jobs ran (`ran`; only the jobs `only` names when it is given). `Err` when it could
     /// not be made, or the counts could not be read: a missing count is never a zero.
-    fn triage_ran(&mut self, run: u64) -> Result<Value, String>;
+    fn triage_ran(&mut self, run: u64, only: Option<&[String]>) -> Result<Value, String>;
     /// What kind of test list the job of this display name takes in `workflow` at the train head (`None`: it takes none, or the
     /// workflow cannot tell the job).
     fn job_kind(&mut self, workflow: &str, job: &str) -> Option<Kind>;
+    /// Cancels a run the sequence dispatched (rung 4 alongside a rung 3 that went red). `Err` is a warning, never a stop: the run
+    /// only wastes runner time.
+    fn cancel_run(&mut self, run: u64) -> Result<(), String>;
+    /// The commits of the runs of `workflow` on the train ref newer than run `since` (one entry per run, newest first): the rounds
+    /// of rung 1 that already ran, read from the server instead of trusted from an argument.
+    fn runs_after(&mut self, workflow: &str, since: u64) -> Result<Vec<String>, String>;
     /// The inputs that select stage 1 of `workflow` at the train head, or `None` when it has no staged layout. `Err` when the
     /// workflow cannot be read.
     fn stage1(&mut self, workflow: &str) -> Result<Option<Vec<(String, String)>>, String>;
@@ -212,7 +218,7 @@ pub enum Source {
     Reused(u64),
     /// The shared reader already had a full green run of the head (not dispatched again).
     Verdict(u64),
-    /// A full run that is red only by accepted FLAKY tests and failures already on main (the train-only `Landable`).
+    /// A full run that is red only by accepted FLAKY tests (the train-only `Landable`).
     Landable(u64),
     /// Rung 1: a run of only the failed tests, green, with their counts shown. Never a reason to land.
     TestsOnly(u64),
@@ -255,6 +261,8 @@ struct Seq<'a> {
     log: &'a mut dyn Write,
     steps: Vec<(String, Source)>,
     rungs: Vec<(Rung, RungOutcome)>,
+    /// The jobs the red run of `--since-run` failed in (display names): the jobs rung 2 reruns when rung 1 did not narrow them.
+    since_jobs: Vec<String>,
 }
 
 /// Runs the sequence; stops at the first run that is not green.
@@ -266,10 +274,14 @@ pub fn release(plan: &Plan, ports: &mut dyn Ports, log: &mut dyn Write) -> Resul
         log,
         steps: Vec::new(),
         rungs: Vec::new(),
+        since_jobs: Vec::new(),
     };
-    s.ladder()?;
-    // Rung 4. ER-10: nothing lands without the full green run on the final tree, decided by the shared reader (`ci verdict`).
-    s.full("ci.yml", &[("webkit", "true")])?;
+    let first_full_done = s.ladder()?;
+    // Rung 4. ER-10: nothing lands without the full green run on the final tree, decided by the shared reader (`ci verdict`). When
+    // rung 3 went alongside it, the first full run is already judged.
+    if !first_full_done {
+        s.full("ci.yml", &[("webkit", "true")])?;
+    }
     s.full("debrief.yml", &[("bundles", "true")])?;
     for (wf, inputs) in RELEASE_WORKFLOWS {
         match plan.reuse.get(wf) {
@@ -300,6 +312,13 @@ impl Seq<'_> {
 
     /// Dispatches a workflow and waits for it; the run id and how it ended.
     fn dispatch_and_wait(&mut self, wf: &str, inputs: &[(&str, &str)], extra: Option<u64>) -> Result<(u64, RunEnd), Stop> {
+        let (run, t0) = self.dispatch_only(wf, inputs, extra)?;
+        let end = self.wait_dispatched(wf, run, t0);
+        Ok((run, end))
+    }
+
+    /// Dispatches a workflow without waiting; the run id and when it was dispatched (the sequence's clock).
+    fn dispatch_only(&mut self, wf: &str, inputs: &[(&str, &str)], extra: Option<u64>) -> Result<(u64, Duration), Stop> {
         let left = self.remaining();
         if left.is_zero() {
             return Err(Stop::new(
@@ -329,6 +348,11 @@ impl Seq<'_> {
             "train: {wf}: run {run} dispatched on {} (inputs {all:?})",
             short(&self.plan.sha)
         );
+        Ok((run, t0))
+    }
+
+    /// Waits for a dispatched run (at most the run cap and the time left); logs how it ended and after how long.
+    fn wait_dispatched(&mut self, wf: &str, run: u64, t0: Duration) -> RunEnd {
         let cap = self.remaining().min(RUN_CAP);
         let end = self.ports.wait_run(run, cap);
         let _ = writeln!(
@@ -337,7 +361,7 @@ impl Seq<'_> {
             end,
             fmt_duration(self.ports.elapsed().saturating_sub(t0))
         );
-        Ok((run, end))
+        end
     }
 
     /// The full run of `wf` on the head, if it is acceptable now: green by the shared reader, or red only by what the train may
@@ -394,6 +418,11 @@ impl Seq<'_> {
             return Ok(());
         }
         let (run, end) = self.dispatch_and_wait(wf, inputs, None)?;
+        self.accept_dispatched_full(wf, run, end)
+    }
+
+    /// Judges a full run this sequence dispatched, once it ended (green by the reader, or the sealed `Landable`).
+    fn accept_dispatched_full(&mut self, wf: &str, run: u64, end: RunEnd) -> Result<(), Stop> {
         if let RunEnd::Unfinished(why) = end {
             return Err(unfinished(wf, run, &why));
         }
@@ -546,17 +575,24 @@ impl Seq<'_> {
     }
 
     /// Rung 2, the fix round: green, or red with only accepted flaky tests.
-    fn fix_round(&mut self) -> Result<(), Stop> {
+    fn fix_round(&mut self, only_jobs: Option<&[String]>) -> Result<(), Stop> {
         let wf = self.plan.workflow.file();
         let run = match self.plan.round {
             Round::Dispatch(since) => {
                 self.since_facts(since)?;
-                let (run, end) = self.dispatch_and_wait(wf, &[self.plan.workflow.input()], Some(since))?;
+                // Rung 2 reruns only the jobs rung 1 did not run green (`only_jobs`), else every failed job of the red run.
+                let jobs_text = only_jobs.map(|j| serde_json::to_string(j).unwrap_or_default());
+                let mut inputs = vec![self.plan.workflow.input()];
+                if let Some(t) = &jobs_text {
+                    inputs.push(("only_jobs", t.as_str()));
+                }
+                let (run, end) = self.dispatch_and_wait(wf, &inputs, Some(since))?;
                 if let RunEnd::Unfinished(why) = end {
                     return Err(unfinished(wf, run, &why));
                 }
                 match self.result_of(run)? {
                     RunResult::Success => {
+                        self.rung2_ran(run, only_jobs)?;
                         self.steps.push((wf.to_string(), Source::Ran(run)));
                         return Ok(());
                     }
@@ -610,7 +646,11 @@ impl Seq<'_> {
                 }
             }
         };
-        self.judge(wf, run)
+        self.judge(wf, run)?;
+        if matches!(self.plan.round, Round::Dispatch(_)) {
+            self.rung2_ran(run, only_jobs)?;
+        }
+        Ok(())
     }
 
     /// The verdict of a red run, from its triage (only [`verdict`] can pass it).

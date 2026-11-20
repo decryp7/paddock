@@ -241,6 +241,22 @@ pub fn filterset(tests: &[FailedTest]) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(" | "))
 }
 
+/// The test binaries whose tests `filterset` selects as a whole binary, because a name of theirs has characters a filterset would have
+/// to escape: more tests run than failed, so the plan says so (ER-27) instead of widening quietly.
+pub fn filterset_fallbacks(tests: &[FailedTest]) -> Vec<String> {
+    let mut by_binary: BTreeMap<&str, bool> = BTreeMap::new();
+    for t in tests {
+        let plain = PLAIN_TEST.is_match(&t.test);
+        let e = by_binary.entry(&t.binary).or_insert(true);
+        *e = *e && plain;
+    }
+    by_binary
+        .into_iter()
+        .filter(|(_, plain)| !plain)
+        .map(|(b, _)| b.to_string())
+        .collect()
+}
+
 static VITEST_FAIL: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*FAIL\s+(?:\S+\s+)??(\S+\.(?:spec|test)\.[cm]?[jt]sx?)(?:\s|$)"));
 
 /// The spec files vitest lists under `Failed Tests` (` FAIL  <project> <file> > suite > test`), in order, once each.
@@ -1057,7 +1073,15 @@ pub fn since_run(
     for r in &plan.reruns {
         match &r.scope {
             Scope::Job(why) => log(&format!("{}: the whole job reruns: {why}", r.name)),
-            Scope::Tests { tests, filter } => log(&format!("{}: {} failed test(s) rerun: {filter}", r.name, tests.len())),
+            Scope::Tests { tests, filter } => {
+                log(&format!("{}: {} failed test(s) rerun: {filter}", r.name, tests.len()));
+                for b in filterset_fallbacks(tests) {
+                    log(&format!(
+                        "::warning::{}: a test of binary {b} has a name a filterset cannot write plainly: the whole binary reruns, more tests than failed",
+                        r.name
+                    ));
+                }
+            }
             Scope::Specs(files) => log(&format!(
                 "{}: {} failed spec file(s) rerun: {}",
                 r.name,

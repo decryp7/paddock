@@ -109,6 +109,40 @@ pub fn release_runs(server: &str, repo: &str, token: &str, workflow: &str, branc
     Ok(out)
 }
 
+/// The commits of the runs of `workflow` on `branch` newer than run `after` (the newest 200 runs of the branch, newest first), one
+/// entry per run: the rounds of a fix ladder that already ran, read from the server.
+pub fn runs_after(server: &str, repo: &str, token: &str, workflow: &str, branch: &str, after: u64) -> Result<Vec<String>, String> {
+    let mut http = CurlHttp;
+    let mut client = Client::new(&mut http, server, repo, token);
+    let want_ref = format!("refs/heads/{branch}");
+    let mut out = Vec::new();
+    for page in 1..=4 {
+        let p = client.runs_page_where(page, &format!("branch={branch}"))?;
+        let n = p.runs.len();
+        out.extend(
+            p.runs
+                .iter()
+                .filter(|r| r.id > after && r.workflow() == workflow && r.git_ref() == want_ref)
+                .map(|r| r.head_sha.clone()),
+        );
+        if n < 50 {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// Cancels run `run` (`POST .../actions/runs/<run>/cancel`: the server's swagger lists it). The token travels in a header only; an
+/// error is a text without it.
+pub fn cancel_run(server: &str, repo: &str, token: &str, run: u64) -> Result<(), String> {
+    use crate::wait::Http as _;
+    let url = format!("{}/api/v1/repos/{repo}/actions/runs/{run}/cancel", server.trim_end_matches('/'));
+    CurlHttp
+        .send_json("POST", &url, token, None)
+        .map(|_| ())
+        .map_err(|e| format!("POST {url}: {e}"))
+}
+
 /// `ci triage <run>` as the JSON `ci triage --json` prints, with `ok: true` (it worked, or this returns the error).
 pub fn triage_doc(server: &str, repo: &str, token: &str, run: u64) -> Result<Value, String> {
     let mut http = CurlHttp;
@@ -130,11 +164,11 @@ pub fn triage_doc(server: &str, repo: &str, token: &str, run: u64) -> Result<Val
 
 /// `ci triage <run> --json --ran`: the triage document with the count of the tests every job ran (`ran`), or why they could not be
 /// counted (then the document has no `ran`, never a zero).
-pub fn triage_ran_doc(server: &str, repo: &str, token: &str, run: u64) -> Result<Value, String> {
+pub fn triage_ran_doc(server: &str, repo: &str, token: &str, run: u64, only: Option<&[String]>) -> Result<Value, String> {
     let mut doc = triage_doc(server, repo, token, run)?;
     let mut http = CurlHttp;
     let mut client = Client::new(&mut http, server, repo, token);
-    let counts = super::ran::collect(&mut client, run, &mut |l| eprintln!("{l}"))?;
+    let counts = super::ran::collect(&mut client, run, only, &mut |l| eprintln!("{l}"))?;
     doc["ran"] = super::ran::json(&counts);
     Ok(doc)
 }
