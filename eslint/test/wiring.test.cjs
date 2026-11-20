@@ -358,21 +358,29 @@ for (const dir of targets) {
 }
 
 // The report step (ER-41, P1-4 of the WP-0 review): every app and the ui has `npm run lint:report`, which runs bin/lint-report.cjs (it sets
-// PADDOCK_BULK_LINT=warn and writes the job summary), and CI runs it. Read through the accessors that own the data (ER-42): an app's
-// contract through the planner's `readApps` (scripts/affected.mjs), the ui's phase through the gate executor (`./dev ci run ui lint
-// --list`), and Debrief's own workflow through the workflow reader's `parseSteps` (conformance/src/util/workflows.mjs).
+// PADDOCK_BULK_LINT=warn and writes the job summary), and CI runs it. Read through the accessors that own the data (ER-42): a phase's
+// commands through the gate executor (`./dev ci run <project> <phase> --list`, which replaced the retired planner's `readApps`), and
+// Debrief's own workflow through the workflow reader's `parseSteps` (conformance/src/util/workflows.mjs).
+/** Whether the gate executor lists `npm run lint:report` among the commands of `project`'s `phase`; a phase it cannot list has none. */
+function phaseRunsReport(project, phase) {
+  const r = spawnSync(join(REPO, 'dev'), ['ci', 'run', project, phase, '--list'], { cwd: REPO, encoding: 'utf8' });
+  if (r.status !== 0) return { ok: false, stderr: r.stderr };
+  return { ok: true, listed: r.stdout.split('\n').some((l) => l.replace(/^\[[^\]]*\]\s*/, '').trim() === 'npm run lint:report') };
+}
 async function ciRunsReport(dir) {
   const name = dir.slice(REPO.length + 1);
   if (name === 'ui') {
-    const r = spawnSync(join(REPO, 'dev'), ['ci', 'run', 'ui', 'lint', '--list'], { cwd: REPO, encoding: 'utf8' });
-    assert.equal(r.status, 0, `./dev ci run ui lint --list failed: ${r.stderr}`);
-    return r.stdout.split('\n').some((l) => l.replace(/^\[[^\]]*\]\s*/, '').trim() === 'npm run lint:report');
+    const r = phaseRunsReport('ui', 'lint');
+    assert.ok(r.ok, `./dev ci run ui lint --list failed: ${r.stderr}`);
+    return r.listed;
   }
   const app = name.split('/')[1];
-  const { readApps } = await import(join(REPO, 'scripts', 'affected.mjs'));
-  const contract = readApps([`apps/${app}/paddock.ci.json`], REPO).get(app);
-  assert.ok(contract, `${name}: no apps/${app}/paddock.ci.json`);
-  if (Object.values(contract).filter(Array.isArray).flat().includes('npm run lint:report')) return true;
+  const file = join(REPO, 'apps', app, 'paddock.ci.json');
+  assert.ok(existsSync(file), `${name}: no apps/${app}/paddock.ci.json`);
+  // The phase names are the contract's command lists; the executor reads each one (a list that is no phase, such as `os`, is not listed).
+  const contract = JSON.parse(readFileSync(file, 'utf8'));
+  const phases = Object.keys(contract).filter((k) => Array.isArray(contract[k]));
+  if (phases.some((phase) => phaseRunsReport(app, phase).listed)) return true;
   if (!contract.workflow) return false;
   const { parseSteps } = await import(join(REPO, 'conformance', 'src', 'util', 'workflows.mjs'));
   const workflow = join(REPO, '.gitea', 'workflows', contract.workflow.replace(/^.*\//, ''));
