@@ -300,9 +300,22 @@ impl GitTrain {
         Ok(())
     }
 
+    /// Before a push to an http(s) server: holds (at most [`GitTrain::timeout`], this command's own bound) while Gitea answers 5xx or
+    /// not at all, so a push is never sent into an outage (a 401 during one must not reach a credential helper). Nothing to hold
+    /// for a `file` clone. The error is the `::error::` text.
+    fn hold_for_gitea(&self, reach: &mut dyn crate::health::Reacher, clock: &mut dyn crate::wait::Clock) -> Result<(), String> {
+        let Some(server) = crate::health::server_of(&self.url) else {
+            return Ok(());
+        };
+        crate::health::hold_gitea(&server, reach, clock, self.timeout, &mut std::io::stderr()).map(|_| ())
+    }
+
     fn run_in(&self, dir: Option<&Path>, kind: Child, args: &[&str]) -> Result<(bool, String), String> {
         if kind == Child::Authed {
             self.ensure_askpass()?;
+            if args.first() == Some(&"push") {
+                self.hold_for_gitea(&mut crate::health::CurlReach, &mut crate::wait::SystemClock::new())?;
+            }
         }
         let mut cmd = self.command(dir, kind);
         cmd.args(args);
@@ -837,9 +850,20 @@ impl Ci for GiteaCi<'_> {
             repo: &self.repo,
             token: &self.token,
         };
-        match dispatch::run(self.http, &target, &req, &read, &mut clock, &mut std::io::stderr())? {
+        let mut reach = crate::health::CurlReach;
+        let mut health = crate::health::Health::new(crate::health::real_services(&self.server, "dispatch"), &mut reach);
+        // A service that stays down is a busy answer: the caller tries again on its next turn, nothing was sent.
+        match dispatch::run(
+            self.http,
+            &target,
+            &req,
+            &read,
+            &mut clock,
+            &mut std::io::stderr(),
+            Some(&mut health),
+        )? {
             dispatch::Dispatched::Yes { .. } => Ok(Sent::Yes),
-            dispatch::Dispatched::StillBusy { last } => Ok(Sent::Busy(last)),
+            dispatch::Dispatched::StillBusy { last } | dispatch::Dispatched::ServiceDown { last } => Ok(Sent::Busy(last)),
         }
     }
 

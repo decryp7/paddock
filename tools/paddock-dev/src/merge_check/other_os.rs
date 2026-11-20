@@ -498,9 +498,20 @@ impl Runs for Gitea {
             repo: &self.repo,
             token: &self.token,
         };
-        match dispatch::run(&mut self.http, &target, &req, &read, &mut clock, &mut std::io::stderr())? {
+        let mut reach = crate::health::CurlReach;
+        let mut health = crate::health::Health::new(crate::health::real_services(&self.server, "dispatch"), &mut reach);
+        // A service that stays down is a busy answer: the caller tries again on its next turn, nothing was sent.
+        match dispatch::run(
+            &mut self.http,
+            &target,
+            &req,
+            &read,
+            &mut clock,
+            &mut std::io::stderr(),
+            Some(&mut health),
+        )? {
             dispatch::Dispatched::Yes { .. } => Ok(Sent::Yes),
-            dispatch::Dispatched::StillBusy { last } => Ok(Sent::Busy(last)),
+            dispatch::Dispatched::StillBusy { last } | dispatch::Dispatched::ServiceDown { last } => Ok(Sent::Busy(last)),
         }
     }
 

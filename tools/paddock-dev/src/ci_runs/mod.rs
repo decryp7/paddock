@@ -579,6 +579,8 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     }
     let mut http = CurlHttp;
     let mut clock = dispatch::system_clock();
+    let mut reach = crate::health::CurlReach;
+    let mut health = crate::health::Health::new(crate::health::real_services(&a.server, "dispatch"), &mut reach);
     let result = dispatch::run(
         &mut http,
         &dispatch::Target {
@@ -590,6 +592,7 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         &read,
         &mut clock,
         &mut std::io::stderr(),
+        Some(&mut health),
     );
     // A trial that was not dispatched leaves no `trial/<branch>` behind (best effort; `ci trial-prune` catches the rest).
     if let Some((g, trial_ref)) = &trial
@@ -608,6 +611,8 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
                 crate::wait::fmt_duration(waited)
             ),
         )),
+        Ok(dispatch::Dispatched::ServiceDown { last }) => Err(CliError::failure(format!("not dispatched: {last}."))
+            .with_hint("Wait until Gitea and RustFS answer (the ::error:: line above names the one that is down), then dispatch again.")),
         Ok(dispatch::Dispatched::StillBusy { last }) => Err(CliError::failure(format!("not dispatched: the runner stayed busy ({last})."))
             .with_hint("Wait for that run with `./dev wait --ci-run <id> --max <duration>`, then dispatch again.")),
         Err(e) => {

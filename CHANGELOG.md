@@ -4,6 +4,17 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-dev`, `heavy`, `paddock-env`: a health gate for Gitea and RustFS, and no tool prompts (user decision 2026-11-20)
+- `./dev ci dispatch` and `./dev wait --ci-run` look at Gitea (`GET /api/v1/version`) and, when the S3 sccache backend is set, RustFS (a
+  GET of its bucket URL from `PADDOCK_SCCACHE_S3_*`) and hold while either is down: any answer below 500 is up (a 403 included), a
+  refused connection, a timeout or a 5xx is down. One log line per change of state; the hold counts against the command's `--max` and
+  ends with one `::error::` naming the service and the next step. The train tools (queue, trial, member gate) hold before a push to an
+  http(s) origin the same way. The queue and the member gate dispatch through the same gate.
+- New `paddock_env::command::no_prompts`: standard input is `/dev/null` and `RUSTUP_AUTO_INSTALL=0` (a named policy, ER-47). `heavy`
+  applies it to its command (`HEAVY_STDIN=inherit` opts in), and so do `./dev ci run` lines and the generators' programs.
+- New hook `.claude/hooks/no-local-installs.sh`: an agent's `cargo llvm-cov`, `rustup component add`, `rustup toolchain install` and
+  `rustup target add` are refused with the next step (CI's llvm-cov gate measures coverage; the user installs toolchains).
+
 ### `@decryp7/paddock-e2e`: `untilItsPageCloses` and `clickThatClosesItsPage`, for a step that closes its own window
 - A test step whose action ends the page it acts on (a pop-out's Dock back, the pointer-up that docks a dragged pop-out) counts as done
   when that page closed: Playwright can reject such a step with "Target page, context or browser has been closed" when the window goes

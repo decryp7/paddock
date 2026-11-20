@@ -22,6 +22,7 @@
 //! (the oldest goes first), so there is no deadlock. Any other dispatch waits here as before.
 
 use super::client::{Client, RunInfo};
+use crate::health::{Health, Ready, wait_held};
 use crate::wait::{Clock, Http, MAX_LIMIT, MIN_INTERVAL, Outcome, Poll, Probe, SystemClock, fmt_duration, parse_duration, wait_for};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -308,6 +309,11 @@ pub enum Dispatched {
         /// The run that held it at the end.
         last: String,
     },
+    /// Gitea or RustFS stayed down for `--max` ([`crate::health`]); nothing was dispatched.
+    ServiceDown {
+        /// What was down at the end, with the cause.
+        last: String,
+    },
 }
 
 /// The Gitea repository and the token to ask it with.
@@ -329,10 +335,26 @@ pub fn run(
     read: ReadWorkflow<'_>,
     clock: &mut dyn Clock,
     log: &mut dyn Write,
+    mut health: Option<&mut Health<'_>>,
 ) -> Result<Dispatched, String> {
     let Target { server, repo, token } = *target;
     let wanted = classes_of(&req.workflow, read)?;
     let mut waited = Duration::ZERO;
+    // Hold while Gitea or RustFS is down: before anything is read or sent, and again inside each wait below. The hold shares the
+    // clock, so it counts against the same `--max`.
+    if health.is_some() {
+        let held = wait_held(
+            &mut Ready("Gitea and RustFS to answer"),
+            health.as_deref_mut(),
+            clock,
+            req.max,
+            req.interval,
+            log,
+        );
+        if let Outcome::TimedOut { .. } = held {
+            return Ok(service_down(&req.workflow, health.as_deref(), req.max, log));
+        }
+    }
     if wanted.is_empty() {
         let _ = writeln!(
             log,
@@ -350,8 +372,11 @@ pub fn run(
                 read,
                 cap: req.train_waiters,
             };
-            let waited = match wait_for(&mut probe, clock, req.max, req.interval, log) {
+            let waited = match wait_held(&mut probe, health.as_deref_mut(), clock, req.max, req.interval, log) {
                 Outcome::Done { elapsed, .. } => elapsed,
+                Outcome::TimedOut { .. } if health.as_deref().is_some_and(|h| !h.down_now().is_empty()) => {
+                    return Ok(service_down(&req.workflow, health.as_deref(), req.max, log));
+                }
                 Outcome::TimedOut { last, max } => {
                     let _ = writeln!(
                         log,
@@ -381,8 +406,11 @@ pub fn run(
             wanted,
             older_than: None,
         };
-        match wait_for(&mut probe, clock, req.max, req.interval, log) {
+        match wait_held(&mut probe, health.as_deref_mut(), clock, req.max, req.interval, log) {
             Outcome::Done { elapsed, .. } => waited = elapsed,
+            Outcome::TimedOut { .. } if health.as_deref().is_some_and(|h| !h.down_now().is_empty()) => {
+                return Ok(service_down(&req.workflow, health.as_deref(), req.max, log));
+            }
             Outcome::TimedOut { last, max } => {
                 let _ = writeln!(
                     log,
@@ -398,6 +426,18 @@ pub fn run(
         }
     }
     send(http, target, req, waited, log)
+}
+
+/// The `::error::` of a dispatch that held for `--max` while a service was down, and its outcome.
+fn service_down(workflow: &str, health: Option<&Health<'_>>, max: Duration, log: &mut dyn Write) -> Dispatched {
+    let last = health.map(|h| h.down_now().join("; ")).unwrap_or_default();
+    let next = health.and_then(Health::next_step).unwrap_or_else(|| "run the command again".into());
+    let _ = writeln!(
+        log,
+        "::error::dispatch: not dispatching {workflow}: {last} for the whole --max ({}). Next: {next}.",
+        fmt_duration(max)
+    );
+    Dispatched::ServiceDown { last }
 }
 
 /// Sends the dispatch.
@@ -777,8 +817,90 @@ mod tests {
             &files,
             &mut clock,
             &mut log,
+            None,
         );
         (r, String::from_utf8(log).unwrap(), clock.0)
+    }
+
+    fn go_held(
+        http: &mut Script,
+        wf: &str,
+        max: &str,
+        reach: &mut crate::health::tests::Scripted,
+    ) -> (Result<Dispatched, String>, String, Duration) {
+        let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
+        let mut health = Health::new(crate::health::tests::both(), reach);
+        let r = run(
+            http,
+            &Target {
+                server: SERVER,
+                repo: REPO,
+                token: "secret-token",
+            },
+            &request(wf, max),
+            &files,
+            &mut clock,
+            &mut log,
+            Some(&mut health),
+        );
+        (r, String::from_utf8(log).unwrap(), clock.0)
+    }
+
+    #[test]
+    fn a_dispatch_holds_while_gitea_or_rustfs_is_down_and_sends_nothing_until_both_answer() {
+        use crate::health::Reach;
+        // Linux only: no runner wait, so the hold is the only wait. Gitea answers 502 twice, RustFS refuses once, then both are up.
+        let mut reach = crate::health::tests::Scripted::new()
+            .script(
+                "api/v1/version",
+                vec![Reach::Answered(502), Reach::Answered(502), Reach::Answered(200)],
+            )
+            .script("bucket-x", vec![Reach::Down("connection refused".into()), Reach::Answered(403)]);
+        let mut http = Script::new(vec![runs(&[])]);
+        let (r, log, t) = go_held(&mut http, "linux.yml", "10m", &mut reach);
+        assert_eq!(r.unwrap(), Dispatched::Yes { waited: Duration::ZERO }, "{log}");
+        assert_eq!(http.posts.len(), 1);
+        assert_eq!(t, Duration::from_secs(30), "held for two intervals: {log}");
+        assert!(log.contains("Gitea is down") && log.contains("RustFS is down"), "{log}");
+        assert!(log.contains("Gitea answers again") && log.contains("RustFS answers again"), "{log}");
+        // The 403 of the bucket is an answer: RustFS came back at the 403, not later.
+        assert!(!log.contains("RustFS is down (HTTP 403)"), "{log}");
+    }
+
+    #[test]
+    fn a_dispatch_that_holds_for_the_whole_max_ends_with_the_named_error_and_sends_nothing() {
+        use crate::health::Reach;
+        let mut reach = crate::health::tests::Scripted::new().script("api/v1/version", vec![Reach::Answered(502)]);
+        let mut http = Script::new(vec![runs(&[])]);
+        let (r, log, _) = go_held(&mut http, "linux.yml", "1m", &mut reach);
+        let Ok(Dispatched::ServiceDown { last }) = r else {
+            panic!("{r:?}\n{log}")
+        };
+        assert!(last.contains("Gitea") && last.contains("HTTP 502"), "{last}");
+        assert!(http.posts.is_empty() && http.gets == 0, "nothing was sent or read: {log}");
+        assert!(
+            log.contains("::error::dispatch: not dispatching linux.yml") && log.contains("Next: Gitea runs on the NAS"),
+            "{log}"
+        );
+        // Positive control: the same dispatch with no health gate goes out at once, so the gate is what held it.
+        let mut http = Script::new(vec![runs(&[])]);
+        let (r, _, _) = go(&mut http, "linux.yml", "1m");
+        assert!(matches!(r.unwrap(), Dispatched::Yes { .. }));
+        assert_eq!(http.posts.len(), 1);
+    }
+
+    #[test]
+    fn a_service_that_goes_down_while_the_runner_is_busy_holds_the_busy_wait_too() {
+        use crate::health::Reach;
+        // Mac busy (run 7960 in progress), and Gitea is down for the whole --max: the end is the service's error, not "busy".
+        let mut reach = crate::health::tests::Scripted::new().script(
+            "api/v1/version",
+            vec![Reach::Answered(200), Reach::Answered(200), Reach::Answered(503)],
+        );
+        let mut http = Script::new(vec![runs(&[(7960, "mac.yml", "in_progress")])]);
+        let (r, log, _) = go_held(&mut http, "mac.yml", "2m", &mut reach);
+        assert!(matches!(r, Ok(Dispatched::ServiceDown { .. })), "{r:?}\n{log}");
+        assert!(http.posts.is_empty());
     }
 
     #[test]
@@ -822,6 +944,7 @@ mod tests {
             &files,
             &mut clock,
             &mut log,
+            None,
         );
         (r, String::from_utf8(log).unwrap())
     }
@@ -912,6 +1035,7 @@ mod tests {
             &files,
             &mut clock,
             &mut log,
+            None,
         );
         let log = String::from_utf8(log).unwrap();
         assert_eq!(
@@ -943,6 +1067,7 @@ mod tests {
             &files,
             &mut clock,
             &mut log,
+            None,
         );
         assert!(matches!(r.unwrap(), Dispatched::StillBusy { .. }));
         let log = String::from_utf8(log).unwrap();

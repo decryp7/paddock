@@ -43,6 +43,8 @@ pub struct Config {
     pub verbose: bool,
     /// Keep the tail of the command's stderr for the failure report (stderr then is a pipe).
     pub stderr_tail: bool,
+    /// The command inherits heavy's standard input (`HEAVY_STDIN=inherit`, an explicit opt-in); by default it reads `/dev/null`.
+    pub stdin_inherit: bool,
     /// Allow a build folder inside the home folder (ER-14 override).
     pub allow_home_target: bool,
     /// How long to wait for the command's stderr pipe to close after the command exited (a background process may hold it).
@@ -137,6 +139,7 @@ impl Config {
             log_file: first(get, &["HEAVY_LOG_FILE"]).map(PathBuf::from),
             verbose: flag("HEAVY_VERBOSE"),
             stderr_tail: get("HEAVY_STDERR_TAIL").is_none_or(|v| v != "0"),
+            stdin_inherit: get("HEAVY_STDIN").is_some_and(|v| v == "inherit"),
             allow_home_target: flag("HEAVY_ALLOW_HOME_TARGET"),
             drain: Duration::from_millis(secs(get, &["HEAVY_DRAIN_MS"], 500.0, 0.0, &mut w) as u64),
         };
@@ -158,6 +161,13 @@ mod tests {
     fn cfg(pairs: &[(&str, &str)]) -> (Config, Warnings) {
         let m: std::collections::HashMap<String, String> = pairs.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect();
         Config::from_env(&|k| m.get(k).cloned(), false)
+    }
+
+    #[test]
+    fn stdin_inherit_is_an_explicit_opt_in() {
+        assert!(!cfg(&[]).0.stdin_inherit);
+        assert!(!cfg(&[("HEAVY_STDIN", "1")]).0.stdin_inherit);
+        assert!(cfg(&[("HEAVY_STDIN", "inherit")]).0.stdin_inherit);
     }
 
     #[test]

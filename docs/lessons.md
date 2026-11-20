@@ -3254,3 +3254,15 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **Class: an end-to-end wait bounds a streamed result by one expect timeout.** Earlier: debrief.yml run 8300, where six streamed
   answers ran past the wait (64f8165ae, fixed for that spec only by sending answers in one piece). It is fixed for every caller of
   `waitAnswered` here.
+
+## A NAS restart and a tool prompt each held work for hours: the tools now hold on a down service and never wait on stdin (2026-11-20)
+- **Failure:** a NAS restart took Gitea (HTTP 502) and RustFS down in the middle of a release: a push got a 401 that erased the git
+  login and a cache trial failed with nothing to say why. Separately `cargo llvm-cov` waited 4 h on "install llvm-tools? [Y/n]", and
+  rustup auto-installed a pinned toolchain in run 8060.
+- **Cause:** nothing asked whether the servers answered before a dispatch, a wait or a push, and a child started by a check inherited the
+  caller's standard input and rustup's default.
+- **Fix:** `paddock-dev`'s health gate (`health.rs`) holds `ci dispatch`, `wait --ci-run` and the train tools' pushes while Gitea or
+  RustFS is down, bounded by the command's `--max`; `paddock_env::command::no_prompts` closes standard input and pins
+  `RUSTUP_AUTO_INSTALL=0` for `heavy`, `ci run` lines and the generators; `.claude/hooks/no-local-installs.sh` refuses an agent's
+  `cargo llvm-cov` and rustup installs. Each has a test that fails without it.
+- **Class: a tool that waits on something it cannot see.** Earlier: run 8060 (rustup auto-install), `pgrep -f` loops (ER-32).
