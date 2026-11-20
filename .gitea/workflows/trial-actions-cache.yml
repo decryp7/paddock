@@ -53,6 +53,13 @@ jobs:
         with:
           path: trial-cache
           key: trial-s3-${{ matrix.name }}-${{ github.run_id }}
+      # (c) needs the cross-OS archive format (enableCrossOsArchive): its own key, so (a) and (b) keep the default format.
+      - name: Save the cross-OS cache
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: trial-cache
+          key: trial-s3-x-${{ matrix.name }}-${{ github.run_id }}
+          enableCrossOsArchive: true
       - name: Summary
         run: |
           secs=$(( $(date +%s) - T0 ))
@@ -118,10 +125,12 @@ jobs:
           echo "- (a) exact own key: PASS, ~${secs}s, sha256 $(cat $CACHE_DIR/sha256.txt | cut -c1-12)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: (b) clear and start timer
+        if: always()
         run: |
           rm -rf "${CACHE_DIR:?}"
           echo "T0=$(date +%s)" >> "$GITHUB_ENV"
       - name: (b) restore through restore-keys prefix
+        if: always()
         id: b
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
@@ -130,6 +139,7 @@ jobs:
           restore-keys: |
             trial-s3-${{ matrix.name }}-
       - name: (b) check
+        if: always()
         run: |
           set -u
           secs=$(( $(date +%s) - T0 ))
@@ -141,33 +151,40 @@ jobs:
           echo "- (b) restore-keys prefix: PASS, ~${secs}s, matched $matched" >> "$GITHUB_STEP_SUMMARY"
 
       - name: (c) clear and start timer
+        if: always()
         run: |
           rm -rf "${CACHE_DIR:?}"
           echo "T0=$(date +%s)" >> "$GITHUB_ENV"
       - name: (c) restore the next OS's key (shared across runners)
+        if: always()
         id: c
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: trial-cache
-          key: trial-s3-${{ matrix.next }}-${{ github.run_id }}
+          key: trial-s3-x-${{ matrix.next }}-${{ github.run_id }}
+          enableCrossOsArchive: true
       - name: (c) check
+        if: always()
         run: |
           set -u
           secs=$(( $(date +%s) - T0 ))
-          [ "${{ steps.c.outputs.cache-hit }}" = "true" ] || { echo "::error::(c) cross-runner restore of trial-s3-${{ matrix.next }}-${{ github.run_id }}: expected cache-hit=true, got '${{ steps.c.outputs.cache-hit }}'"; exit 1; }
+          [ "${{ steps.c.outputs.cache-hit }}" = "true" ] || { echo "::error::(c) cross-runner restore of trial-s3-x-${{ matrix.next }}-${{ github.run_id }}: expected cache-hit=true, got '${{ steps.c.outputs.cache-hit }}'"; exit 1; }
           [ "$(cat $CACHE_DIR/os.txt)" = "${{ matrix.next }}" ] || { echo "::error::(c) expected os.txt=${{ matrix.next }}, got '$(cat $CACHE_DIR/os.txt)'"; exit 1; }
           [ "$(sha256sum $CACHE_DIR/data.bin | cut -d' ' -f1)" = "$(cat $CACHE_DIR/sha256.txt)" ] || { echo "::error::(c) sha256 mismatch for the cache saved on ${{ matrix.next }}"; exit 1; }
           echo "- (c) cross-runner (${{ matrix.next }}'s key): PASS, ~${secs}s" >> "$GITHUB_STEP_SUMMARY"
 
       - name: (d) clear
+        if: always()
         run: rm -rf "${CACHE_DIR:?}"
       - name: (d) restore a key that does not exist
+        if: always()
         id: d
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: trial-cache
           key: trial-s3-missing-${{ matrix.name }}-${{ github.run_id }}
       - name: (d) check
+        if: always()
         run: |
           [ "${{ steps.d.outputs.cache-hit }}" != "true" ] || { echo "::error::(d) missing key: expected cache-hit=false, got true"; exit 1; }
           [ ! -e "$CACHE_DIR/data.bin" ] || { echo "::error::(d) missing key: expected no files restored"; exit 1; }
