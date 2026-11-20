@@ -534,6 +534,53 @@ mod tests {
         assert!(!out.contains("layout documents"), "{out}");
     }
 
+    /// ER-48: the jobs a host runs at once, each with its build jobs and test threads, must fit the cores they share.
+    fn oversubscribed(share: i64, per_job: i64, usable_cores: i64) -> bool {
+        share * per_job > usable_cores
+    }
+
+    fn value(out: &str, name: &str) -> i64 {
+        out.lines()
+            .find_map(|l| l.strip_prefix(&format!("{name}=")))
+            .unwrap_or_else(|| panic!("{name} missing in {out}"))
+            .parse()
+            .unwrap()
+    }
+
+    #[test]
+    fn no_class_layout_oversubscribes_its_cores() {
+        // (class, cores, RAM MB) of the runner hosts: d-gtr9, decryp7ology-dev, the shared Mac (docs/benchmarks.md).
+        for (os, cores, ram) in [("Linux", "30", "65536"), ("Windows", "16", "32768"), ("macOS", "14", "65536")] {
+            let share: i64 = class_default(os, Setting::Share).parse().unwrap();
+            let kept: i64 = class_default(os, Setting::Cores).parse().unwrap();
+            let cores_n: i64 = cores.parse().unwrap();
+            let (_, out, _) = go("1", &Fixed(cores, ram), &[("RUNNER_OS", os)]);
+            let (jobs, threads) = (value(&out, "CARGO_BUILD_JOBS"), value(&out, "NEXTEST_TEST_THREADS"));
+            assert!(
+                !oversubscribed(share, jobs, cores_n - kept),
+                "{os}: {share} jobs x {jobs} build jobs on {cores} cores"
+            );
+            // macOS is a recorded, measured exception: 8 test threads in each of 3 jobs on 12 usable cores, because its tests
+            // mostly wait (2026-11-09, docs/benchmarks.md, "CI share on the shared Mac": 4 threads made a dyno run 2.3 times
+            // longer, 8 matched 14).
+            if os == "macOS" {
+                assert_eq!(threads, 8, "the recorded exception changed: update the measurement note");
+            } else {
+                assert!(
+                    !oversubscribed(share, threads, cores_n - kept),
+                    "{os}: {share} jobs x {threads} test threads on {cores} cores"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_invariant_catches_the_layout_that_slowed_windows() {
+        // Positive control: Windows before 2026-11-20 ran 3 jobs x 8 threads on 16 cores (runs 8335 against 8359).
+        assert!(oversubscribed(3, 8, 16));
+        assert!(!oversubscribed(3, 5, 16));
+    }
+
     #[test]
     fn a_failure_is_one_error_line_with_a_next_step() {
         let (code, out, _) = go("0", &Fixed("4", "8192"), &[]);
