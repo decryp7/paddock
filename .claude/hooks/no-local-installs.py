@@ -18,15 +18,30 @@ INSTALL = {("component", "add"), ("toolchain", "install"), ("toolchain", "add"),
 CARGO_VALUE_OPTS = {"--config", "-C", "-Z", "--manifest-path", "--color", "--target-dir", "--explain"}
 
 
+# Options of a wrapper that take a value as the next word (`-u X`); `--opt=value` and numbers are skipped anyway.
+WRAPPER_VALUE_OPTS = {
+    "env": {"-u", "-C", "-S", "--unset", "--chdir", "--split-string"},
+    "timeout": {"-s", "-k", "--signal", "--kill-after"},
+    "nice": {"-n", "--adjustment"},
+    "xargs": {"-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a"},
+    "time": {"-o", "-f", "--output", "--format"},
+    "sudo": {"-u", "-g", "-C", "-h", "-p", "-r", "-t", "-U"},
+}
+
+
 def program_index(argv):
     """Index of the program a command really starts: past wrappers and their options, or past the first `--` after one."""
     i = 0
+    # The scanner drops the keyword `time` and leaves its options in front: `time -o f cargo llvm-cov` reads as `-o f cargo llvm-cov`.
+    while i < len(argv) and argv[i].startswith("-"):
+        i += 2 if argv[i] in WRAPPER_VALUE_OPTS["time"] else 1
     while i < len(argv) and os.path.basename(argv[i]) in WRAPPERS:
         if "--" in argv[i + 1:]:
             return argv.index("--", i + 1) + 1
+        valued = WRAPPER_VALUE_OPTS.get(os.path.basename(argv[i]), set())
         i += 1
         while i < len(argv) and (argv[i].startswith("-") or "=" in argv[i] or argv[i].isdigit()):
-            i += 1
+            i += 2 if argv[i] in valued else 1
     return i
 
 

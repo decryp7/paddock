@@ -212,7 +212,7 @@ impl<'a> Health<'a> {
             if let (Reach::Invalid(why), false) = (r, self.answered[i]) {
                 let s = &self.services[i];
                 look.fatal = Some(format!(
-                    "{} cannot be reached at {}: {why}. Check the address (a wrong --server, a typo in the host); waiting will not help",
+                    "{} cannot be reached at {}: {why}. Check the address (a wrong --server, a typo in the host) or whether the DNS server (the NAS) is down; waiting will not help",
                     s.name, s.url
                 ));
             }
