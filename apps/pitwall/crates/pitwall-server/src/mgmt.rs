@@ -202,20 +202,26 @@ async fn delete_models(st: &Arc<AppState>, a: &Value) -> R<Value> {
 
 /// `delete_model`: the bulk path with one id; its failure is the command's error, in the code the item carried.
 async fn delete_model(st: &Arc<AppState>, id: ModelId) -> R<Value> {
-    use paddock_commands::{ErrorCode as Item, ItemResult};
+    use paddock_commands::ItemResult;
     match delete_ids(st, vec![id]).await?.pop() {
         Some(ItemResult::Ok(())) => ok(()),
-        Some(ItemResult::Err(e)) => Err(err(
-            match e.code {
-                Item::NotFound => mgmt::ErrorCode::NotFound,
-                Item::Busy => mgmt::ErrorCode::Busy,
-                Item::Denied => mgmt::ErrorCode::Forbidden,
-                _ => mgmt::ErrorCode::Internal,
-            },
-            e.message,
-        )),
+        Some(ItemResult::Err(e)) => Err(single_delete_error(e)),
         None => Err(err(mgmt::ErrorCode::Internal, "no result")),
     }
+}
+
+/// The error of the single `delete_model` for one item's failure.
+fn single_delete_error(e: paddock_commands::CommandError) -> CommandError {
+    use paddock_commands::ErrorCode as Item;
+    err(
+        match e.code {
+            Item::NotFound => mgmt::ErrorCode::NotFound,
+            Item::Busy => mgmt::ErrorCode::Busy,
+            Item::Denied => mgmt::ErrorCode::Forbidden,
+            _ => mgmt::ErrorCode::Internal,
+        },
+        e.message,
+    )
 }
 
 fn model(a: &Value, name: &str) -> R<ModelId> {
@@ -1523,5 +1529,39 @@ mod tests {
             "{}",
             blocked.message
         );
+    }
+
+    /// A delete's I/O failure, by kind: missing is `notFound`, no rights is `denied`, anything else `io` (retryable). A locked
+    /// file on Windows (the model in use by another program) is one of the last two; Windows-only, so not measured here.
+    #[test]
+    fn a_delete_failure_keeps_what_the_io_error_says() {
+        use paddock_commands::ErrorCode as Item;
+        use std::io::{Error, ErrorKind};
+        let code = |k| delete_error(&Error::new(k, "x")).code;
+        assert_eq!(code(ErrorKind::NotFound), Item::NotFound);
+        assert_eq!(code(ErrorKind::PermissionDenied), Item::Denied);
+        assert_eq!(code(ErrorKind::Other), Item::Io);
+        let e = delete_error(&Error::new(ErrorKind::PermissionDenied, "x"));
+        assert!(!e.retryable, "no rights is not retried by itself");
+        assert!(delete_error(&Error::new(ErrorKind::Other, "x")).retryable);
+        assert_eq!(e.field.as_deref(), Some("ids"));
+    }
+
+    /// P3-5: the single delete says what the item said (`io` stays retryable-shaped, `invalid` stays a bad request) instead of a
+    /// bug (`internal`); only a code with no better home is `internal`.
+    #[test]
+    fn the_single_delete_keeps_the_item_code() {
+        use paddock_commands::CommandError as Item;
+        let code = |e: Item| single_delete_error(e).code;
+        assert_eq!(code(Item::not_found("x")), ErrorCode::NotFound);
+        assert_eq!(code(Item::busy("x")), ErrorCode::Busy);
+        assert_eq!(code(Item::denied("x")), ErrorCode::Forbidden);
+        assert_eq!(code(Item::invalid("x")), ErrorCode::BadRequest);
+        assert_eq!(
+            code(Item::io("x")),
+            ErrorCode::Conflict,
+            "a file that could not be removed now: try again"
+        );
+        assert_eq!(code(Item::internal("x")), ErrorCode::Internal);
     }
 }

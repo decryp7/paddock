@@ -715,6 +715,56 @@ mod tests {
         assert_eq!(s.stats(Kind::Embedding).hits, 40);
     }
 
+    /// P3-7: the hit counts of N reads are one `UPDATE ... key IN (...)` statement, not N.
+    #[test]
+    fn a_batch_of_hit_counts_is_one_update_statement() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, spy) = open_spied(d.path(), 1_000_000);
+        s.put_many(Kind::Embedding, batch(1, 40, 8), 5);
+        s.flush();
+        let before = spy.statements("UPDATE entries SET used");
+        let keys: Vec<Key> = (1..=40u8).map(|i| [i; 32]).collect();
+        assert_eq!(s.get_many(Kind::Embedding, &keys, 6).iter().flatten().count(), 40);
+        s.flush();
+        assert_eq!(
+            spy.statements("UPDATE entries SET used") - before,
+            1,
+            "one update for 40 hit counts"
+        );
+        assert_eq!(s.stats(Kind::Embedding).hits, 40, "every key counted once");
+        s.get_many(Kind::Embedding, &keys[..3], 7);
+        s.flush();
+        assert_eq!(s.stats(Kind::Embedding).hits, 43);
+    }
+
+    /// P3-8: deleting expired entries adjusts the running size by what went; the table is not summed again for the next store.
+    #[test]
+    fn deleting_expired_entries_adjusts_the_running_size() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, spy) = open_spied(d.path(), 100);
+        s.put_many(Kind::Response, batch(1, 3, 20), 10);
+        s.flush();
+        let sums = spy.statements("sum(size)");
+        assert!(
+            sums >= 1,
+            "the spy sees the sum the open made (else the 0 below proves nothing), got {sums}"
+        );
+        let got = s.get_many(Kind::Response, &[[1; 32], [2; 32], [3; 32]], 5000);
+        assert!(got.iter().all(Option::is_none), "created at 10, ttl 1000");
+        s.flush();
+        assert_eq!(s.stats(Kind::Response).entries, 0);
+        // 60 bytes went, so 100 more fit within the cap of 100 with nothing evicted: the figure is 100, not 160.
+        s.put_many(Kind::Response, batch(10, 5, 20), 5001);
+        s.flush();
+        assert_eq!(
+            s.stats(Kind::Response).entries,
+            5,
+            "no entry was evicted for bytes that were already gone"
+        );
+        assert_eq!(spy.statements("sum(size)") - sums, 0, "the table was not summed again");
+        assert!(s.last_error().is_none());
+    }
+
     #[test]
     fn a_batch_over_the_chunk_size_reads_in_chunks_and_keeps_order() {
         let d = tempfile::tempdir().unwrap();
