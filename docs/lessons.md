@@ -3179,3 +3179,16 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   next assertion (the panel is back in the host) checks that the step did its job. Both such steps in popout.e2e.ts use it (Dock back,
   and the dispatched pointer-up that docks a dragged pop-out). **Rule:** a test step whose action ends the page it acts on goes through
   `untilItsPageCloses`, never a plain `await` on that page.
+
+## Fix items from train 16's full run (ci.yml 8346, debrief.yml 8347), not this train's features (2026-11-20)
+- **debrief-plugin-host `elevated_output::standard_error_is_forwarded_cut_and_capped`** (debrief.yml run 8347, job 42279, "rust tests";
+  FLAKY: try 1 failed after 40.064 s at `tests/it/elevated_output.rs:189` with the collected messages empty, try 2 passed in 0.107 s;
+  history 2 of 151 runs). The test waits with `eventually(...)` for the plugin's forwarded standard error ("m1 line 2", "m1 long ...")
+  to reach the log; the first try saw nothing for its whole wait. Train 16 changes nothing in debrief-plugin-host (ER-12: not this
+  train's feature). Next: a failing reproduction first (the forwarding path under a held log writer or a slow plugin start), then the
+  cause, never a longer wait.
+- **spotter-render `real_browser closing_quits_the_browser_by_itself_before_any_kill`** (ci.yml run 8346, job 42302, macOS; failed,
+  flake history 8 of 138 runs). Spotter untouched by train 16. Next: a reproduction first, as above.
+- **ui gallery `open()` waits a fixed 600 ms** (`ui/e2e/gallery.spec.ts`: "Let the chart draw ... and fonts settle"). Train 16 fixed the
+  one test that failed on it (the path box, which now waits for its fitted text; ci.yml 8346 job 42258); every other test that reads a
+  measured or animated value after `open()` still leans on that wait. Next: wait on each test's own condition and drop the fixed wait.
