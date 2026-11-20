@@ -306,7 +306,11 @@ fn a_container_lane_gets_its_own_folder_on_the_mount_never_the_mount_itself() {
         "{}",
         rs.env
     );
-    assert!(!rs.env.contains(&format!("SCCACHE_DIR={mount}\n")), "never the mount root: {}", rs.env);
+    assert!(
+        !rs.env.contains(&format!("SCCACHE_DIR={mount}\n")),
+        "never the mount root: {}",
+        rs.env
+    );
     // Another host layout: 3 lanes share the same budget, 20 GB each.
     let (_, rs) = same(
         &r,
@@ -319,7 +323,11 @@ fn a_container_lane_gets_its_own_folder_on_the_mount_never_the_mount_itself() {
         ],
         true,
     );
-    assert!(rs.env.contains("/sccache-s2\n") && rs.env.contains("SCCACHE_CACHE_SIZE=20G\n"), "{}", rs.env);
+    assert!(
+        rs.env.contains("/sccache-s2\n") && rs.env.contains("SCCACHE_CACHE_SIZE=20G\n"),
+        "{}",
+        rs.env
+    );
     let absent = r.root.join("absent").display().to_string();
     let (_, rs) = same(&r, &LOCAL, &[("RUNNER_OS", "Linux"), ("PADDOCK_SCCACHE_MOUNT", &absent)], true);
     assert!(rs.env.contains("/temp/sccache\n"), "{}", rs.env);
@@ -344,7 +352,11 @@ fn a_container_job_without_a_slot_takes_a_lane_and_two_jobs_never_share_one() {
     let first = r.rust(&LOCAL, &extra);
     assert_eq!(first.code, 0, "{}", first.out);
     assert!(first.env.contains(&format!("SCCACHE_DIR={mount}/sccache-s1\n")), "{}", first.env);
-    assert!(first.env.contains("PADDOCK_CI_SLOT=s1\n"), "the lane is kept for the job's later steps: {}", first.env);
+    assert!(
+        first.env.contains("PADDOCK_CI_SLOT=s1\n"),
+        "the lane is kept for the job's later steps: {}",
+        first.env
+    );
     // A second job: its own temp folder, the first job's still there (its holder keeps s1).
     let other = Runner::new(Some(Fail::Never));
     let second = other.rust(&LOCAL, &extra);

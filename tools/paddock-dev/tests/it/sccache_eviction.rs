@@ -49,7 +49,11 @@ impl Cache {
             .arg("--start-server")
             .output()
             .expect("sccache is on PATH (the CI image has it): not measured otherwise");
-        assert!(out.status.success(), "sccache did not start: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "sccache did not start: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         c
     }
 
@@ -61,7 +65,13 @@ impl Cache {
         let source = self.work.join("x.rs");
         let out = self
             .command("sccache")
-            .args(["rustc", "--crate-type=lib", "--crate-name=x", "--edition=2021", "--emit=dep-info,link"])
+            .args([
+                "rustc",
+                "--crate-type=lib",
+                "--crate-name=x",
+                "--edition=2021",
+                "--emit=dep-info,link",
+            ])
             .arg(out_dir)
             .arg(source)
             .output()
@@ -70,7 +80,9 @@ impl Cache {
         let stats = self.command("sccache").arg("--show-stats").output().unwrap();
         let stats = String::from_utf8_lossy(&stats.stdout);
         assert!(
-            stats.lines().any(|l| l.starts_with("Cache misses ") && !l.trim_end().ends_with(" 0")),
+            stats
+                .lines()
+                .any(|l| l.starts_with("Cache misses ") && !l.trim_end().ends_with(" 0")),
             "the compile was not cached, so the test saw no insert: {stats}"
         );
     }
@@ -110,5 +122,8 @@ fn control_the_same_file_beside_the_sccache_folder_survives() {
     let cache = Cache::start(&mount.join("sccache-s1"), &scratch.path().join("work"));
     cache.compile_one_crate();
     assert!(mount.join(RLIB).exists(), "a file outside sccache's folder is never its to evict");
-    assert!(std::fs::read_dir(mount.join("sccache-s1")).unwrap().next().is_some(), "the cache itself holds the entry");
+    assert!(
+        std::fs::read_dir(mount.join("sccache-s1")).unwrap().next().is_some(),
+        "the cache itself holds the entry"
+    );
 }

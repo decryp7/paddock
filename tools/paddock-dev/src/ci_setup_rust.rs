@@ -620,10 +620,16 @@ impl Step<'_> {
 
     /// How many lanes a Linux host has: `PADDOCK_CI_SLOTS`, else the runner's jobs per host, else the class's layout (6 on d-gtr9).
     fn lane_count(&self) -> u64 {
-        let n = |k: &str| self.get(k).filter(|v| crate::ci_build_jobs::is_count(v)).and_then(|v| v.parse::<u64>().ok());
-        n("PADDOCK_CI_SLOTS")
-            .or_else(|| n("PADDOCK_CI_JOBS_PER_HOST"))
-            .unwrap_or_else(|| crate::ci_build_jobs::class_default("Linux", crate::ci_build_jobs::Setting::Share).parse().unwrap_or(1))
+        let n = |k: &str| {
+            self.get(k)
+                .filter(|v| crate::ci_build_jobs::is_count(v))
+                .and_then(|v| v.parse::<u64>().ok())
+        };
+        n("PADDOCK_CI_SLOTS").or_else(|| n("PADDOCK_CI_JOBS_PER_HOST")).unwrap_or_else(|| {
+            crate::ci_build_jobs::class_default("Linux", crate::ci_build_jobs::Setting::Share)
+                .parse()
+                .unwrap_or(1)
+        })
     }
 
     /// The job's lane on a Linux host: the slot an earlier step took (`PADDOCK_CI_SLOT`), else one taken now from the mount's
@@ -640,7 +646,10 @@ impl Step<'_> {
             Path::new(mount).join("lanes"),
         );
         let report = crate::slots::acquire(&args).map_err(|e| format!("{e}"))?;
-        let slot = report.json()["slot"].as_str().map(str::to_string).ok_or("the slot tool named no slot")?;
+        let slot = report.json()["slot"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or("the slot tool named no slot")?;
         let _ = self.append("GITHUB_ENV", &[format!("PADDOCK_CI_SLOT={slot}")]);
         self.say(format!("sccache: this job holds lane {slot} of {slots} on {mount}"));
         Ok(slot)

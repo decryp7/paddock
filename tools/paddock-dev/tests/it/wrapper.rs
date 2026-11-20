@@ -508,7 +508,7 @@ fn a_cached_binary_that_does_not_run_is_replaced_and_a_good_one_is_used_as_it_is
     paddock_testkit::exe::write_program(&cached, "").unwrap();
     let (code, out, err) = run_wrapper(&f, &home, &env);
     assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
-    assert!(err.contains("does not run; rebuilding"), "{err}");
+    assert!(err.contains("does not run or is not for hash"), "{err}");
     // The rebuilt copy is cached and answers --version, so the next run uses it without building.
     std::fs::remove_dir_all(f.cargo_home.path().join("target")).unwrap();
     let (code, out, err) = run_wrapper(&f, &home, &env);
@@ -548,11 +548,18 @@ fn where_cygpath_exists_the_build_folder_reaches_cargo_in_its_windows_form() {
 /// A cached tool that answers `--version` and otherwise says it ran (what an old cached binary would do).
 #[cfg(unix)]
 fn cached_tool(path: &Path) {
+    cached_tool_for(path, "some-hash");
+}
+
+/// The same, built for `hash` (`self hash` says so, as the real tool does): the wrapper runs it only under that hash.
+#[cfg(unix)]
+fn cached_tool_for(path: &Path, hash: &str) {
     write_tool(
         path,
         &StandIn::new(Path::new(""), "cached")
             .answers(Actions::new().stdout_with("cached ran {args}"))
-            .when_args(&["--version"], Actions::new().stdout("0")),
+            .when_args(&["--version"], Actions::new().stdout("0"))
+            .when_args(&["self"], Actions::new().stdout(&format!("embedded {hash}"))),
     );
 }
 
@@ -567,7 +574,7 @@ fn an_inherited_git_dir_or_work_tree_does_not_move_the_wrapper_to_another_reposi
     let env = [("RUSTC", rustc.clone())];
     let (hash, _) = f.both(&env);
     let home = scratch.path().join("home");
-    cached_tool(&home.join("bin").join(&hash).join("paddock-dev-test-host"));
+    cached_tool_for(&home.join("bin").join(&hash).join("paddock-dev-test-host"), &hash);
     // Another repository, named by the variables a hook would have set.
     let other = scratch.path().join("other");
     std::fs::create_dir_all(&other).unwrap();
@@ -1003,7 +1010,10 @@ fn a_trace_of_the_wrapper_never_prints_what_a_config_holds() {
 
 #[cfg(unix)]
 #[test]
-fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_home_still_wins() {
+fn on_a_ci_runner_the_tool_never_lives_on_the_kept_mount_and_an_explicit_home_still_wins() {
+    // ADR 0111: no folder is shared between concurrent CI lanes. The tool and its build folder were on the runner's /sccache mount
+    // (sccache's LRU evicted cargo's rlibs there, run 8373; another lane's build could replace the binary in use). They are in the
+    // job's own home now, and the mount is not touched.
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
     let mount = scratch.path().join("mount");
@@ -1023,26 +1033,60 @@ fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_hom
             .env("RUSTC", &rustc)
             .env("GITHUB_ACTIONS", "true")
             .env("PADDOCK_DEV_PACKAGES", "http://127.0.0.1:9/generic")
+            // The variable of the wrapper before ADR 0111: it names a mount that exists and is writable, and is now ignored.
             .env("PADDOCK_CI_MOUNT", &mount);
         cmd.envs(extra.iter().map(|(k, v)| (*k, *v)));
         let out = cmd.output().unwrap();
         (out.status.code().unwrap(), String::from_utf8_lossy(&out.stdout).trim().to_string())
     };
     assert_eq!(run(&[]), (0, "built-by-shim".to_string()));
-    let cached = mount.join("paddock-dev/bin").join(&hash).join("paddock-dev-test-host");
-    assert!(cached.exists(), "the tool is kept on the mount: {cached:?}");
-    assert!(
-        !mount.join(format!("paddock-dev/target-{hash}")).exists(),
-        "the build folder (about 465 MB per hash) goes once the verified tool is published"
+    let cached = scratch
+        .path()
+        .join("home/.paddock-dev/bin")
+        .join(&hash)
+        .join("paddock-dev-test-host");
+    assert!(cached.exists(), "the tool is in the job's own home: {cached:?}");
+    assert_eq!(
+        std::fs::read_dir(&mount).unwrap().count(),
+        0,
+        "nothing is written to the kept mount"
     );
-    assert!(!scratch.path().join("home/.paddock-dev").exists(), "nothing in the runner's home");
-    // The next run finds it without building.
-    assert_eq!(run(&[]), (0, "built-by-shim".to_string()));
-    assert!(!mount.join(format!("paddock-dev/target-{hash}")).exists(), "no second build");
     // An explicit home is used as given.
     let own = scratch.path().join("own");
     assert_eq!(run(&[("PADDOCK_DEV_HOME", own.as_path())]).0, 0);
     assert!(own.join("bin").join(&hash).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_restored_binary_that_is_not_for_this_hash_is_rebuilt_and_one_for_it_is_used() {
+    // The dev-tool cache restores a binary under the key of this hash; it may hold other bytes (a flipped byte, a tool of another
+    // hash under a stale key). The wrapper runs it only when it runs and says it was built for this hash (ER-33).
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let env = [("RUSTC", rustc.clone())];
+    let (hash, _) = f.both(&env);
+    let home = scratch.path().join("home");
+    let cached = home.join("bin").join(&hash).join("paddock-dev-test-host");
+    // 1. runs, but was built for another hash.
+    cached_tool_for(&cached, "0000000000000000000000000000000000000000");
+    let (code, out, err) = run_wrapper(&f, &home, &env);
+    assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
+    assert!(err.contains("is not for hash"), "{err}");
+    // 2. a byte flipped in a good copy: it no longer runs.
+    std::fs::remove_dir_all(f.cargo_home.path().join("target")).unwrap();
+    let mut bytes = std::fs::read(&cached).unwrap();
+    // The first byte (the file's magic): a flip inside the program's data may leave a copy that still runs, which `self hash` covers.
+    bytes[0] ^= 0xff;
+    std::fs::write(&cached, &bytes).unwrap();
+    let (code, out, err) = run_wrapper(&f, &home, &env);
+    assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
+    assert!(err.contains("rebuilding"), "{err}");
+    // 3. positive control: a copy for this hash is run as it is, with no build.
+    cached_tool_for(&cached, &hash);
+    let (code, out, err) = run_wrapper(&f, &home, &env);
+    assert_eq!((code, out.trim()), (0, "cached ran hello"), "{err}");
 }
 
 /// A stand-in `cargo` that writes its binary, announces itself with a file of its own in `$BARRIER`, and returns only once the test
@@ -1081,7 +1125,7 @@ fn run_overlapping(rustcs: &[&str], expected: usize, shared_target: bool) -> (te
                 .env("RUSTC", rustc)
                 .env("GITHUB_ACTIONS", "true")
                 .env("PADDOCK_DEV_PACKAGES", "http://127.0.0.1:9/generic")
-                .env("PADDOCK_CI_MOUNT", &mount)
+                .env("PADDOCK_DEV_HOME", mount.join("paddock-dev"))
                 .env("BARRIER", &barrier);
             // A host runner's fixed build folder (conformance/ci/job-isolation.sh sets PADDOCK_DEV_TARGET_DIR for every job).
             if shared_target {
