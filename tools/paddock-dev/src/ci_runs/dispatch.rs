@@ -519,10 +519,10 @@ impl WaitersProbe<'_, '_> {
         // ones pass runner-wait at once while no other train holds the runner (the first of a train is its leader).
         let mut trains = BTreeSet::new();
         for r in page.runs.iter().filter(|r| !r.finished() && is_train(r.git_ref())) {
-            if let Some(t) = train_identity(r) {
-                if !trains.insert(t) {
-                    continue;
-                }
+            if let Some(t) = train_identity(r)
+                && !trains.insert(t)
+            {
+                continue;
             }
             let Some(name) = waiter_job_name(r.workflow(), self.read) else {
                 continue;
@@ -574,8 +574,12 @@ pub const RUNNER_WAIT_ACTION: &str = "./.gitea/actions/runner-wait";
 /// is never taken for a sibling: unknown waits).
 pub fn train_identity(r: &RunInfo) -> Option<(String, String)> {
     let git_ref = r.git_ref();
-    (r.event == "workflow_dispatch" && is_train(git_ref) && !r.head_sha.is_empty())
-        .then(|| (git_ref.strip_prefix("refs/heads/").unwrap_or(git_ref).to_string(), r.head_sha.clone()))
+    (r.event == "workflow_dispatch" && is_train(git_ref) && !r.head_sha.is_empty()).then(|| {
+        (
+            git_ref.strip_prefix("refs/heads/").unwrap_or(git_ref).to_string(),
+            r.head_sha.clone(),
+        )
+    })
 }
 
 /// Whether a ref is a train's (`train/...`, also spelled `refs/heads/train/...`).
@@ -772,7 +776,9 @@ mod tests {
                     return Err("curl: (28) timed out".into());
                 }
                 let path = &self.own.iter().find(|(r, _)| *r == id).expect("the run").1;
-                return Ok(json!({"id": id, "path": path, "status": "in_progress", "event": "workflow_dispatch", "head_sha": self.own_sha}));
+                return Ok(
+                    json!({"id": id, "path": path, "status": "in_progress", "event": "workflow_dispatch", "head_sha": self.own_sha}),
+                );
             }
             assert!(url.contains("/actions/runs?"), "{url}");
             self.gets += 1;
@@ -1244,7 +1250,10 @@ mod tests {
         http.own_sha = "aaa".into();
         http.jobs = vec![
             (8372, vec![jobs(&[("rust (macos)", "macos-latest", "in_progress")])].into()),
-            (8373, vec![jobs(&[("plan", "ubuntu-latest", "in_progress"), ("t", "macos-latest", "waiting")])].into()),
+            (
+                8373,
+                vec![jobs(&[("plan", "ubuntu-latest", "in_progress"), ("t", "macos-latest", "waiting")])].into(),
+            ),
         ];
         http
     }
@@ -1264,7 +1273,12 @@ mod tests {
         for (r#ref, event, sha, what) in [
             ("refs/heads/train/other", "workflow_dispatch", "aaa", "another train"),
             ("refs/heads/trial/train/t", "workflow_dispatch", "aaa", "a trial of the same commit"),
-            ("refs/heads/train/t", "workflow_dispatch", "bbb", "the same branch at another commit"),
+            (
+                "refs/heads/train/t",
+                "workflow_dispatch",
+                "bbb",
+                "the same branch at another commit",
+            ),
             ("refs/heads/train/t", "push", "aaa", "a push run, not a dispatched train run"),
         ] {
             let mut http = joint_world(r#ref, event, sha);
@@ -1282,7 +1296,13 @@ mod tests {
         let (r, log, _) = wait_here(&mut http, 8373, "1m");
         assert!(matches!(r, Ok(RunnerWait::StillBusy { .. })), "{log}");
         // A dispatch of main (a trial or member check is not a train) waits for the running train run, even at its commit.
-        let mut http = Script::new(vec![runs_full(&[(8372, "mac.yml", "refs/heads/train/t", "workflow_dispatch", "aaa")])]);
+        let mut http = Script::new(vec![runs_full(&[(
+            8372,
+            "mac.yml",
+            "refs/heads/train/t",
+            "workflow_dispatch",
+            "aaa",
+        )])]);
         http.jobs = vec![(8372, vec![jobs(&[("rust (macos)", "macos-latest", "in_progress")])].into())];
         let (r, log, _) = go(&mut http, "mac.yml", "1m");
         assert!(matches!(r, Ok(Dispatched::StillBusy { .. })), "{log}");
@@ -1294,7 +1314,9 @@ mod tests {
         // Three Linux slots, cap 2: ci.yml and debrief.yml of one train sit in runner-wait; dispatching its release
         // workflow must not wait for them, but another train's waiters still count.
         let wait_step = || json!({"name": "Run ./.gitea/actions/runner-wait", "started_at": "2026-11-15T10:00:00Z"});
-        let plan = vec![json!({"jobs": [{"id": 1, "name": "plan", "labels": ["ubuntu-latest"], "status": "in_progress", "steps": [wait_step()]}]})];
+        let plan = vec![
+            json!({"jobs": [{"id": 1, "name": "plan", "labels": ["ubuntu-latest"], "status": "in_progress", "steps": [wait_step()]}]}),
+        ];
         let mk = |list: Value| {
             let mut http = Script::new(vec![list]);
             http.jobs = [8131u64, 8130, 8129].iter().map(|id| (*id, plan.clone().into())).collect();
