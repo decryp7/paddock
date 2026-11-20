@@ -52,7 +52,8 @@ fn ids_are_told_by_their_shape() {
 #[test]
 fn the_input_round_trips_and_every_bad_input_is_refused() {
     let o = only(&[("crate (ubuntu-latest)", &[NEXTEST_ID, NEXTEST_ID])]);
-    assert_eq!(OnlyTests::parse(&o.encode()).unwrap().count(), 2, "the encoding keeps what it was given");
+    assert_eq!(OnlyTests::parse(&o.encode()).unwrap(), o, "the encoding round trips");
+    assert_eq!(o.count(), 1, "an id given twice is one test");
     // The parse de-duplicates.
     let p = OnlyTests::parse(r#"{"j":["a b","a b"]}"#).unwrap();
     assert_eq!(p.count(), 1);

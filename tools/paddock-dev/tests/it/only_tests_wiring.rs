@@ -69,7 +69,10 @@ fn wiring_violations(file: &str, doc: &Node) -> Vec<String> {
             if *step == "Memory budget" {
                 continue;
             }
-            let found = job_steps.items().iter().find(|s| s.get_text("name") == Some(step));
+            // A step is named by `name:`, or is a `uses:` step whose display name is "Run <action path>".
+            let found = job_steps.items().iter().find(|s| {
+                s.get_text("name") == Some(step) || s.get_text("uses").is_some_and(|u| step.strip_prefix("Run ").is_some_and(|a| a == u))
+            });
             match found {
                 None => out.push(format!("{file}: job {job} has no step named {step:?}, which the plan narrows to named tests")),
                 Some(s) => {

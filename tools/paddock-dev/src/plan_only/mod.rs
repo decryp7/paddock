@@ -120,7 +120,11 @@ impl OnlyTests {
     }
 
     /// The input of these ids by job (the ladder's side); [`OnlyTests::parse`] checks it again on the workflow's side.
-    pub fn new(jobs: BTreeMap<String, Vec<String>>) -> OnlyTests {
+    pub fn new(mut jobs: BTreeMap<String, Vec<String>>) -> OnlyTests {
+        for ids in jobs.values_mut() {
+            ids.sort();
+            ids.dedup();
+        }
         OnlyTests { jobs }
     }
 
