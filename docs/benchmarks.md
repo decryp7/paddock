@@ -1010,11 +1010,11 @@ These are ordered by impact.
      core share ran 2.3 times longer. The 1.5 GB per rustc that `PADDOCK_CI_RUSTC_MB` assumes is still an estimate. The
      earlier numbers (8 cores, 16,316 MB, run 7209: Debrief's Windows bundle 18.6 min with 4 against 14.5 min with 8,
      run 7195, different commits and caches) are not evidence.
-   - CI build parallelism on Linux: `conformance/ci/build-jobs.sh` leaves `CARGO_BUILD_JOBS` unset on the Linux runner
-     (cargo uses every core in each of up to four concurrent containers, as before 2026-10-30) and logs the host's cores:
-     16 cores and 127,941 MB in a container on d-gtr9 (run 7211, job 23231).
-     Its share (cores / 4 or cores / 2, `PADDOCK_CI_JOBS_PER_HOST` in d-gtr9's `runner.envs`) waits for one A/B of Gitea
-     job durations of the Rust jobs (crate, crates, app legs, Debrief's rust tests), the same commits with and without it.
+   - CI build parallelism on Linux (updated 2026-11-20): the 2026-10-30 note here (build-jobs left `CARGO_BUILD_JOBS` unset, cargo
+     using every core in each of up to four containers, 16 cores and 127,941 MB on d-gtr9, run 7211, job 23231) is superseded.
+     d-gtr9 now has 30 CPUs and 64 GiB with runner capacity 6, and the class layout is in the repo (6 jobs per host: 30 / 6 = 5 build
+     jobs and 5 test threads), because with no share each of the 6 jobs used all 30 cores and ran 1.2 to 1.7 times slower than
+     at 3 lanes (runs 8335 against 8346); see "CI job cost, step by step" (on docs/ci-job-cost-research until it lands).
    - CI build parallelism: a clean, CI-shaped Dyno build (`cargo test --no-run --workspace --exclude dyno-app`, no sccache,
      no incremental) with `CARGO_BUILD_JOBS=4` (the Mac leg's share) against 13 (cores − 1). Tried on 2026-10-30; the
      5-minute load never fell below 10 in an hour, so nothing was recorded (`conformance/ci/build-jobs.sh` keeps 4 on the

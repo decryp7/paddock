@@ -111,7 +111,13 @@ setting() {
 class_default() { # <share|cores|ram>
   case "${RUNNER_OS:-}:$1" in
     Linux:share) echo 6 ;;
+    Linux:doc_cores) echo 30 ;;
+    Windows:doc_cores) echo 16 ;;
+    macOS:doc_cores) echo 14 ;;
+    *:doc_cores) echo - ;;
     Windows:share) echo 3 ;;
+    # ER-48 exception, measured: 3 jobs x 8 threads on 12 usable cores. The tests mostly wait; 4 threads made a dyno run 2.3 times
+    # longer than 14 and 8 matched 14 (2026-11-09, docs/benchmarks.md, "CI share on the shared Mac").
     macOS:threads) echo 8 ;;
     macOS:share) echo 3 ;;
     macOS:cores) echo 2 ;;
@@ -182,11 +188,12 @@ if ! is_count "$n"; then
   echo "::warning::could not count this host's cores; CARGO_BUILD_JOBS stays unset (cargo uses every core it sees)"
   exit 0
 fi
+doc_cores=$(class_default doc_cores)
+if [ -z "${PADDOCK_CI_JOBS_PER_HOST:-}" ] && [ "$doc_cores" != - ] && [ "$n" -ne "$doc_cores" ]; then
+  echo "::warning::build-jobs: the ${RUNNER_OS} layout documents $doc_cores cores, this host has $n; the share follows the real cores, but update the ${RUNNER_OS} layout in ci_build_jobs.rs and .gitea/actions/README.md to the runner's new capacity"
+fi
 if [ "$reserved" -ge "$n" ]; then
   echo "::warning::PADDOCK_CI_RESERVED_CORES ($reserved) keeps all of this host's $n cores; the job gets 1 build job"
-fi
-if [ -z "${PADDOCK_CI_JOBS_PER_HOST:-}" ] && [ "${RUNNER_OS:-}" = Linux ] && [ "$n" -ne 30 ]; then
-  echo "::warning::build-jobs: the Linux layout documents 30 cores, this host has $n; the share follows the real cores, but update the Linux layout in ci_build_jobs.rs and .gitea/actions/README.md to the runner's new capacity"
 fi
 jobs=$(((n - reserved) / share))
 why="($n cores - $reserved kept) / $share jobs per host; $share_src"

@@ -177,6 +177,8 @@ pub fn class_default(os: &str, what: Setting) -> &'static str {
         // macOS measured 8 (the tests mostly wait). Windows has no measured number: it takes the job's core share (16 / 3 = 5),
         // because 3 jobs x 8 threads plus a 5-job build oversubscribed the 16 vCPUs and git-heavy tests ran 2-8 times slower
         // (runs 8335 against 8359).
+        // ER-48 exception, measured: 3 jobs x 8 threads on 12 usable cores. The tests mostly wait; 4 threads made a dyno run 2.3
+        // times longer than 14 and 8 matched 14 (2026-11-09, docs/benchmarks.md, "CI share on the shared Mac").
         ("macOS", Setting::Threads) => "8",
         ("macOS", Setting::Share) => "3",
         ("macOS", Setting::Cores) => "2",
@@ -193,6 +195,8 @@ pub fn class_default(os: &str, what: Setting) -> &'static str {
 pub fn layout_cores(os: &str) -> Option<i64> {
     match os {
         "Linux" => Some(30),
+        "Windows" => Some(16),
+        "macOS" => Some(14),
         _ => None,
     }
 }
@@ -530,8 +534,24 @@ mod tests {
             &[("RUNNER_OS", "Linux"), ("PADDOCK_CI_JOBS_PER_HOST", "4")],
         );
         assert!(!out.contains("::warning::"), "{out}");
-        let (_, out, _) = go("1", &Fixed("16", "65536"), &[("RUNNER_OS", "Windows")]);
+        // One positive control per class: Windows documents 16, macOS 14.
+        let (_, out, _) = go("1", &Fixed("8", "16316"), &[("RUNNER_OS", "Windows")]);
+        assert!(
+            out.contains("::warning::build-jobs: the Windows layout documents 16 cores, this host has 8;"),
+            "{out}"
+        );
+        let (_, out, _) = go("1", &Fixed("8", "16316"), &[("RUNNER_OS", "macOS")]);
+        assert!(
+            out.contains("::warning::build-jobs: the macOS layout documents 14 cores, this host has 8;"),
+            "{out}"
+        );
+        let (_, out, _) = go("1", &Fixed("16", "32768"), &[("RUNNER_OS", "Windows")]);
         assert!(!out.contains("layout documents"), "{out}");
+        let (_, out, _) = go("1", &Fixed("9", "8192"), &[("RUNNER_OS", "FreeBSD")]);
+        assert!(
+            !out.contains("layout documents"),
+            "a class with no layout is not second-guessed: {out}"
+        );
     }
 
     /// ER-48: the jobs a host runs at once, each with its build jobs and test threads, must fit the cores they share.
