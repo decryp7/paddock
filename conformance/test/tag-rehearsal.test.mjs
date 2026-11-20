@@ -223,7 +223,7 @@ test('tag-rehearsal.yml: one app at a time (chained, ER-24), after the guard; a 
   const guard = job(rehearsal, 'guard');
   assert.ok(stepsOf(guard).some((s) => s.uses === './.gitea/actions/schedule-skip' && s.with.workflow === 'tag-rehearsal.yml'));
   const verdict = job(rehearsal, 'verdict');
-  assert.equal(expr(verdict.if), 'always()');
+  assert.match(expr(verdict.if), /^always\(\)/);
   assert.match(stepsOf(verdict)[0].run, /::error::tag rehearsal: failed step\(s\)/);
   assert.match(stepsOf(verdict)[0].run, /not measured, so not a pass/);
 });
@@ -249,7 +249,6 @@ test('app-release.yml: the rehearsal never reaches the publish job, which a test
   // the signing secrets are only ever given to the build on the app's release tag, never because of the rehearsal
   const bundleSteps = JSON.stringify(stepsOf(job(appRelease, 'bundle')));
   assert.doesNotMatch(bundleSteps, /secrets\.TAURI_SIGNING_PRIVATE_KEY[^}]*rehearsal|rehearsal[^}]*secrets\.TAURI_SIGNING_PRIVATE_KEY/);
-  assert.equal(appRelease.env.PADDOCK_TAG_REHEARSAL, "${{ inputs.rehearsal && '1' || '' }}");
   assert.match(stepsOf(job(appRelease, 'bundle')).find((s) => s.name === 'Rehearsal guard').run, /refs\/tags\/\*\) echo "::error::tag rehearsal: this run is a real tag/);
 });
 
@@ -264,4 +263,52 @@ test('publish-release: refuses PADDOCK_TAG_REHEARSAL=1 before reading anything o
   assert.equal(on.status, 1);
   assert.match(on.stdout, /::error::publish-release was reached in a tag rehearsal/);
   assert.equal(spawnSync('bash', ['-c', line], { env: { PATH: process.env.PATH }, encoding: 'utf8' }).status, 0);
+});
+
+test('rehearsal guard: fails at once with an ::error:: when rehearsal is requested and PADDOCK_TAG_REHEARSAL is not 1; the rehearsal env uses == true', () => {
+  const step = stepsOf(job(appRelease, 'bundle')).find((s) => s.name === 'Rehearsal guard');
+  assert.equal(expr(step.if), 'inputs.rehearsal == true');
+  const run = (env) => spawnSync('bash', ['-c', step.run], { env: { PATH: process.env.PATH, ...env }, encoding: 'utf8' });
+  for (const bad of [{}, { PADDOCK_TAG_REHEARSAL: '' }, { PADDOCK_TAG_REHEARSAL: '0' }]) {
+    const r = run({ GITHUB_REF: 'refs/heads/main', ...bad });
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, /::error::tag rehearsal: rehearsal was requested but PADDOCK_TAG_REHEARSAL is/);
+  }
+  assert.equal(run({ GITHUB_REF: 'refs/heads/main', PADDOCK_TAG_REHEARSAL: '1' }).status, 0, 'positive control');
+  assert.equal(run({ GITHUB_REF: 'refs/tags/x-v1.0.0', PADDOCK_TAG_REHEARSAL: '1' }).status, 1, 'a real tag is still refused');
+  assert.equal(appRelease.env.PADDOCK_TAG_REHEARSAL, "${{ inputs.rehearsal == true && '1' || '' }}");
+  assert.doesNotMatch(JSON.stringify(appRelease), /inputs\.rehearsal(?! (==|!=) true)/);
+});
+
+test('verdict: a skipped night skips the job (never green); cancelled, failed and not-run are named on their own lines', () => {
+  const v = job(rehearsal, 'verdict');
+  assert.equal(expr(v.if), "always() && needs.guard.outputs.skip != 'true'");
+  const script = stepsOf(v)[0].run;
+  const needsOf_ = (o) => Object.fromEntries(Object.entries(o).map(([k, r]) => [k, { result: r, outputs: {} }]));
+  const dir = mkdtempSync(join(tmpdir(), 'rehearsal-verdict-'));
+  const run = (o) => {
+    const sum = join(dir, 'summary.md');
+    writeFileSync(sum, '');
+    return spawnSync('bash', ['-c', script], { cwd: dir, env: { PATH: process.env.PATH, NEEDS: JSON.stringify(needsOf_(o)), GITHUB_STEP_SUMMARY: sum }, encoding: 'utf8' });
+  };
+  const ok = { guard: 'success', 'tag-checks': 'success', 'rehearse-dyno': 'success' };
+  assert.equal(run(ok).status, 0, 'positive control: all green is green');
+  const failed = run({ ...ok, 'rehearse-dyno': 'failure' });
+  assert.equal(failed.status, 1);
+  assert.match(failed.stdout, /::error::tag rehearsal: failed step\(s\): rehearse-dyno\./);
+  assert.doesNotMatch(failed.stdout, /cancelled/);
+  const cancelled = run({ ...ok, 'rehearse-dyno': 'cancelled' });
+  assert.equal(cancelled.status, 1);
+  assert.match(cancelled.stdout, /::error::tag rehearsal: cancelled, not measured: rehearse-dyno\./);
+  assert.doesNotMatch(cancelled.stdout, /failed step/);
+  const skipped = run({ ...ok, 'tag-checks': 'skipped' });
+  assert.equal(skipped.status, 1);
+  assert.match(skipped.stdout, /not run: tag-checks \(skipped\)/);
+});
+
+test('kit.sh: a tag rehearsal takes the shell kit as a tag does', () => {
+  const choice = (env) => { const r = spawnSync('sh', [join(CI, 'kit.sh'), 'which'], { env: { PATH: process.env.PATH, ...env }, encoding: 'utf8' }); return `${r.stdout} ${r.stderr}`.trim(); };
+  assert.match(choice({ PADDOCK_TAG_REHEARSAL: '1', GITHUB_REF: 'refs/heads/main' }), /kit: shell \(a tag rehearsal\)/);
+  assert.doesNotMatch(choice({ GITHUB_REF: 'refs/heads/main' }), /tag rehearsal/);
+  assert.match(choice({ GITHUB_REF: 'refs/tags/x-v1.0.0' }), /kit: shell \(a tag run\)/);
 });

@@ -56,7 +56,7 @@ release=1, fresh caches, C99) and `rehearse-release` (release notes and latest.j
 `app-release.yml` caller (Dyno, Pitcrew, Pitwall, Spotter) run one after the other. The named differences from a real tag are listed in
 the workflow's header; Debrief has tag checks only (no rehearsal caller yet). The 09:03 slot follows nightly and debrief. Report-only:
 nothing waits on it. Its schedule is **disabled in Gitea** like the other schedule-only workflows (scheduled-ci-paused) and is enabled
-only after its first green dispatched run, whose id goes in the table row above, and after Dyno 1.2.0 ships.
+only after its first green run, whose id goes in the table row above and which must be a dispatched run that really ran (a night skipped for a train skips the verdict job: it is neutral, never green, and never the recorded run), its measured duration fits the slot (ER-24: the chain holds no runner reservation between apps; only the start yields to a train), and Dyno 1.2.0 has shipped.
 
 ## Dependency audits
 

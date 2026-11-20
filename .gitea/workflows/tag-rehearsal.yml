@@ -12,7 +12,9 @@
 #                caches, the tag-name and CHANGELOG checks, C99, the installers' verdict), signed with a THROW-AWAY key made in the job
 #                (tauri signer generate); then `rehearse-release`: release notes and latest.json made as a release makes them, and read back.
 # What it never does: push a tag, create a release, publish an asset, read RELEASE_BOT_TOKEN or RELEASE_TOKEN, or see the real updater
-# key. The callers below pass NO `secrets:`; updater-key.sh fails the build when any private key reaches a rehearsal; the publish
+# key. The protection is the ref gate: the guard job runs on main only, app-release.yml's guard step refuses refs/tags/* and a missing
+# PADDOCK_TAG_REHEARSAL=1, and updater-key.sh fails the build when any private key reaches a rehearsal. The callers below also name no
+# `secrets:`, a convention and not a boundary (any writer can edit a workflow on their own ref); the publish
 # job (`release`) is skipped by `!inputs.rehearsal`, and the publish-release action refuses PADDOCK_TAG_REHEARSAL=1. A rehearsal on a
 # real tag fails closed (is-tag-run.mjs exits 4; app-release.yml's guard step refuses refs/tags/*; the guard job runs on main only).
 #
@@ -33,6 +35,9 @@
 # apps run one after the other (their jobs chain), each on its three OS jobs, in the 09:03 UTC+8 slot after nightly and debrief
 # (docs/ci-schedules.md). The schedule is DISABLED in Gitea like the other schedule-only workflows until Dyno 1.2.0 ships (memory
 # note scheduled-ci-paused: PUT /api/v1/repos/<owner>/<repo>/actions/workflows/tag-rehearsal.yml/disable, enable after the Dyno tag).
+# Gate for enabling it (ER-24): a dispatched run that really ran (no train skip) has been timed, its duration is in docs/ci-schedules.md and
+# fits the 09:03 slot before the next scheduled workflow, and the Mac and Windows runners are measured free then. The chain between apps
+# holds no reservation of the runner; only the start yields to a train (schedule-skip).
 
 name: tag-rehearsal
 
@@ -269,7 +274,8 @@ jobs:
   verdict:
     name: rehearsal verdict
     needs: [guard, tag-checks, rehearse-dyno, rehearse-pitcrew, rehearse-pitwall, rehearse-spotter]
-    if: ${{ always() }}
+    # A skipped night (a train in CI) skips this job: neutral, never green (ER-33); the run is not a measurement.
+    if: ${{ always() && needs.guard.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
@@ -282,12 +288,13 @@ jobs:
           printf '%s' "$NEEDS" > needs.json
           node -e '
             const needs = JSON.parse(require("fs").readFileSync("needs.json", "utf8"));
-            const bad = Object.entries(needs).filter(([, n]) => n.result === "failure" || n.result === "cancelled");
-            const skipped = needs.guard.outputs.skip === "true";
+            const named = (r) => Object.entries(needs).filter(([, n]) => n.result === r).map(([k]) => k);
+            const failed = named("failure"), cancelled = named("cancelled");
+            const notRun = Object.entries(needs).filter(([k, n]) => k !== "guard" && !["success", "failure", "cancelled"].includes(n.result)).map(([k, n]) => `${k} (${n.result})`);
             const lines = Object.entries(needs).map(([k, n]) => `| ${k} | ${n.result} |`);
-            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, ["## Tag rehearsal (nothing was tagged, released or published)", skipped ? "A train is in CI: the rehearsal was skipped, not measured." : "", "", "| Job | Result |", "| --- | --- |", ...lines, ""].join("\n"));
-            if (skipped) { console.log("::notice::tag rehearsal: skipped (a train is in CI); not measured, not green"); process.exit(0); }
-            if (bad.length) { console.log(`::error::tag rehearsal: failed step(s): ${bad.map(([k, n]) => `${k} (${n.result})`).join(", ")}. A real tag would fail the same way. Next step: open the named job and read its ::error:: line.`); process.exit(1); }
-            const notRun = Object.entries(needs).filter(([k, n]) => k !== "guard" && n.result !== "success");
-            if (notRun.length) { console.log(`::error::tag rehearsal: not run: ${notRun.map(([k, n]) => `${k} (${n.result})`).join(", ")}: not measured, so not a pass.`); process.exit(1); }
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, ["## Tag rehearsal (nothing was tagged, released or published)", "", "| Job | Result |", "| --- | --- |", ...lines, ""].join("\n"));
+            if (failed.length) console.log(`::error::tag rehearsal: failed step(s): ${failed.join(", ")}. A real tag would fail the same way. Next step: open the named job and read its ::error:: line.`);
+            if (cancelled.length) console.log(`::error::tag rehearsal: cancelled, not measured: ${cancelled.join(", ")}. A cancelled job proves nothing; run the rehearsal again.`);
+            if (notRun.length) console.log(`::error::tag rehearsal: not run: ${notRun.join(", ")}: not measured, so not a pass.`);
+            if (failed.length || cancelled.length || notRun.length) process.exit(1);
           '
