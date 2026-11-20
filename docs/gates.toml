@@ -1296,3 +1296,19 @@ owner = "ER-21 class: a read on 'it is in the DOM' (feat/e2e-ready-gating)"
 since = 2026-11-18
 review_by = 2026-12-18
 approved = "user"
+
+[[report_only]]
+id = "C143"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C143-spawn-joined-path.mjs, then flip SEVERITY to error and the mode to gate. First count 2026-11-20: 0 findings on train/2026-11-19-17 (3d776b605), no allow list"
+owner = "ER-21 class: a spawned program that is a relative join and so is looked up on PATH (tag.yml checker, fixed in 774eea41c; feat/conformance-spawn-stream-checks)"
+since = 2026-11-20
+review_by = 2026-12-20
+approved = "user"
+
+[[report_only]]
+id = "C144"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C144-bare-stream-wait.mjs, then flip SEVERITY to error and the mode to gate. First count 2026-11-20: 22 sites in 14 files on train/2026-11-19-17 (3d776b605), mostly page-settle waits that are not streams; each gets `// conformance: stream-wait` with a reason, or expectStreamDone, in its owner change"
+owner = "ER-21 class: a whole streamed answer bounded by one expect timeout (debrief.yml runs 8300 and 8377, ADR 0103; feat/conformance-spawn-stream-checks)"
+since = 2026-11-20
+review_by = 2026-12-20
+approved = "user"

@@ -107,6 +107,8 @@ The check index (generated from each module's id, title, scope, mode and needs):
 | C138 | Scrollers our code positions make no scroll moves of their own | both | report-only | all |
 | C139 | the exceptions to paddock/e2e-ready-reads (eslint-suppressions.json) only shrink | root | report-only | all |
 | C140 | Every per-item opt-out of the bulk-call lint is counted in a list that only shrinks | root | report-only | all |
+| C143 | A spawned program is never a join with a relative first part | root | report-only | all |
+| C144 | An e2e spec waits for a stream to finish only through expectStreamDone | root | report-only | all |
 <!-- checks:end -->
 
 Notes per check (written by hand; the index above is the complete list):
