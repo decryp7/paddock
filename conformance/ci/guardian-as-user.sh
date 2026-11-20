@@ -50,12 +50,25 @@ chromium_bin="$(exe_of paddock_chromium)"
 
 private="$(mktemp -d)"
 trap 'rm -rf "$private" "$build_log"' EXIT
+# The tests' fake programs are the test kit's stand-in. Unnamed, the kit compiles it into the build folder of the test program,
+# which the user the tests drop to cannot write (ci.yml 8359). So it is built here, before the drop, and named to the tests; a
+# stand-in the job names (PADDOCK_STAND_IN_BIN) is used as it is.
+stand_in="${PADDOCK_STAND_IN_BIN:-}"
+if [ -z "$stand_in" ]; then
+  stand_in_log="$private/stand-in.log"
+  code=0
+  cargo build -p paddock-testkit --bin paddock-stand-in --message-format=json >"$stand_in_log" 2>&1 || code=$?
+  [ "$code" = 0 ] || fail "cargo build of paddock-stand-in failed (exit $code); see $stand_in_log; fix the build first"
+  # The executable of cargo's compiler-artifact line for the paddock-stand-in target.
+  stand_in="$(grep '"reason":"compiler-artifact"' "$stand_in_log" | grep '"name":"paddock-stand-in"' | sed -n 's/.*"executable":"\([^"]*\)".*/\1/p' | tail -n 1)"
+  [ -n "$stand_in" ] || fail "cargo built no paddock-stand-in; see $stand_in_log; check that paddock-testkit still has its paddock-stand-in binary"
+fi
 [ "${#as_user[@]}" -eq 0 ] || chown "$uid:$uid" "$private"
 chmod 700 "$private"
 
 run() {
   local bin="$1" filter="$2" started=$SECONDS code=0
-  local cmd=("${as_user[@]}" env "TMPDIR=$private" "HOME=$private" "PADDOCK_PROC_GUARDIAN_LOG=$private/guardian.log" "$bin" "$filter")
+  local cmd=("${as_user[@]}" env "TMPDIR=$private" "HOME=$private" "PADDOCK_PROC_GUARDIAN_LOG=$private/guardian.log" "PADDOCK_STAND_IN_BIN=$stand_in" "$bin" "$filter")
   echo "Running as uid $uid: ${cmd[*]}"
   "${cmd[@]}" || code=$?
   local took=$((SECONDS - started))

@@ -1850,15 +1850,29 @@ fn boot_volume_says_which_volume_a_folder_is_on_and_where_the_boot_volumes_temp_
 /// the paddock-proc test binary exits with; a failing one leaves the guardian's log, as the real tests do.
 fn guardian_machine(fx: &Fx, proc_exit: i32) {
     std::fs::create_dir_all(fx.p("tmp")).unwrap();
-    fx.shim("cargo", |a| {
-        a.stdout("   Compiling paddock-proc v0.1.0")
-            // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-            .stderr("  Executable unittests src/lib.rs (target/debug/deps/paddock_proc-0123abcd)")
-            // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-            .stderr("  Executable tests/it/main.rs (target/debug/deps/it-ff)")
-            // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-            .stderr("  Executable unittests src/lib.rs (target/debug/deps/paddock_chromium-9f8e7d)")
-    });
+    // `cargo build` of the test kit's stand-in (the step builds it before it drops to the test user, ci.yml 8359) answers with
+    // cargo's artifact line; every other cargo call is the unit-test build. Both are recorded in `calls`, as `shim` does.
+    let calls = || Actions::new().appends_with(&fx.p("calls").display().to_string(), "{name} {args} token={env:GITHUB_TOKEN}\n");
+    let stand_in = fx.p("crates/target/debug/paddock-stand-in").display().to_string();
+    fx.stand_in("bin/cargo")
+        .when_args(
+            &["build"],
+            calls().stdout(&format!(
+                "{{\"reason\":\"compiler-artifact\",\"target\":{{\"name\":\"paddock-stand-in\"}},\"executable\":\"{stand_in}\"}}"
+            )),
+        )
+        .answers(
+            calls()
+                .stdout("   Compiling paddock-proc v0.1.0")
+                // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
+                .stderr("  Executable unittests src/lib.rs (target/debug/deps/paddock_proc-0123abcd)")
+                // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
+                .stderr("  Executable tests/it/main.rs (target/debug/deps/it-ff)")
+                // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
+                .stderr("  Executable unittests src/lib.rs (target/debug/deps/paddock_chromium-9f8e7d)"),
+        )
+        .install()
+        .unwrap();
     let proc = Actions::new().stdout_with("proc tests: {args}");
     let proc = if proc_exit == 0 {
         proc
