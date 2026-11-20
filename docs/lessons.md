@@ -3197,6 +3197,15 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   43 to 60 s while the whole job went from 603 s to 753 s: three jobs shared the Windows runner with 8 test threads each on 16 cores
   (the ER-48 job share, fixed on its own branch in Train A). Next: confirm the test is back near 19 s once the Windows share lands; if
   not, a failing reproduction first (its git starts on Windows), never a longer limit.
+- **./dev's kept paddock-dev build folder under /sccache is read while another lane prunes or writes it** (debrief.yml run 8373,
+  job 42677, "licences, notices + commits", d-gtr9; `error[E0463]: can't find crate for 'foldhash'` while ./dev built paddock-dev
+  in `/sccache/paddock-dev/rustc-0ef1bc386059`; the same commit built it everywhere else, and the retry 8377 did not hit it). Same
+  class as the faithful stand-ins taking the real build-folder lock. Next: one owner per kept build folder (a lock held for the
+  build and the prune), a failing reproduction first.
+- **debrief webkit `e2e/a11y.e2e.ts:6` main screen has no serious accessibility violations (dark)** (debrief.yml run 8373, job
+  shard 3/4; FLAKY, history 2 of 150). Train A does not touch the feature. Next: a failing reproduction first.
+- **debrief webkit `e2e/ux-shortcuts-editor.e2e.ts:21` shortcut editor rebinds a command ...** (debrief.yml run 8373, shard 4/4;
+  FLAKY, history 1 of 150). Train A does not touch the feature. Next: a failing reproduction first.
 
 ## Chrome took over 5 s to quit: it reads the user's temp folder, which leaked test folders had filled (Spotter, 2026-11-20, train 16)
 - **Failure:** spotter-render `real_browser::closing_quits_the_browser_by_itself_before_any_kill` red on both tries in ci.yml runs
