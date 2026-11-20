@@ -63,7 +63,11 @@ pub fn read_stages(log: &str) -> Option<Stages> {
 
 /// Whether a finished run succeeded (the conclusion, or the status on older servers, as [`decide`] reads it).
 fn finished_green(r: &RunInfo) -> bool {
-    (if r.conclusion.is_empty() { r.status.as_str() } else { r.conclusion.as_str() }) == "success"
+    (if r.conclusion.is_empty() {
+        r.status.as_str()
+    } else {
+        r.conclusion.as_str()
+    }) == "success"
 }
 
 /// What a finished-green staged run's `stages` job decides (ER-33: a stage that did not run is never a pass).
@@ -787,7 +791,11 @@ mod tests {
         let not_run = "stage verdict: stage1=failed stage2=not-run\n::error::stage 1 did not pass\n";
         for (what, mut f, want) in [
             ("stage 2 not run", staged("success", Some(Some(not_run))), "stage2=not-run"),
-            ("a failed stage 2", staged("success", Some(Some("stage verdict: stage1=passed stage2=failed\n"))), "stage2=failed"),
+            (
+                "a failed stage 2",
+                staged("success", Some(Some("stage verdict: stage1=passed stage2=failed\n"))),
+                "stage2=failed",
+            ),
             ("no stages line", staged("success", Some(Some("something else\n"))), "logged no"),
             ("no stages job", staged("success", None), "no stages job"),
         ] {
@@ -807,7 +815,10 @@ mod tests {
         // The stages line alone (an older plan log that said complete=true).
         let v = ask(&mut staged("success", Some(Some(fast))));
         assert_eq!(code(&v), 5, "{v:?}");
-        assert!(matches!(&v, Verdict::Red { run: None, reason } if reason.contains("stage1=passed stage2=not-run")), "{v:?}");
+        assert!(
+            matches!(&v, Verdict::Red { run: None, reason } if reason.contains("stage1=passed stage2=not-run")),
+            "{v:?}"
+        );
         // The plan's own line: complete=false under stage=fast.
         let mut f = server(
             vec![dispatch(9, "success")],
@@ -857,7 +868,10 @@ mod tests {
         let ok = run(r#"{"stage1":{"result":"success"},"e2e":{"result":"skipped"}}"#);
         assert_eq!(read_stages(&ok), Some(Stages::Complete), "{ok}");
         let cut = run(r#"{"stage1":{"result":"failure"},"e2e":{"result":"skipped"}}"#);
-        assert!(matches!(read_stages(&cut), Some(Stages::Incomplete(w)) if w == "stage1=failed stage2=not-run"), "{cut}");
+        assert!(
+            matches!(read_stages(&cut), Some(Stages::Incomplete(w)) if w == "stage1=failed stage2=not-run"),
+            "{cut}"
+        );
         assert!(is_staged("2026-11-20T00:00:00Z plan layout: staged\n"));
         assert!(!is_staged("a plan layout: staged mention\n"));
     }

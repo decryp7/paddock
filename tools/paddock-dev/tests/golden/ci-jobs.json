@@ -59,6 +59,15 @@
  "app": [
   "apps"
  ],
+ "app-e2e": [
+  "apps"
+ ],
+ "stage1": [
+  "everything"
+ ],
+ "stages": [
+  "everything"
+ ],
  "paddock-dev": [
   "paddock-dev"
  ]

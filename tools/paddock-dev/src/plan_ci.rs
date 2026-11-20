@@ -1197,7 +1197,11 @@ mod tests {
         assert!(get("apps").starts_with(r#"[{"app":"x","os":"ubuntu-latest""#));
         // The end-to-end legs are the stage-2 matrix: not in `apps`, all in `apps_e2e`.
         assert!(!get("apps").contains("e2e-"), "{}", get("apps"));
-        assert!(get("apps_e2e").contains("e2e-webkit") && get("apps_e2e").contains("e2e-1"), "{}", get("apps_e2e"));
+        assert!(
+            get("apps_e2e").contains("e2e-webkit") && get("apps_e2e").contains("e2e-1"),
+            "{}",
+            get("apps_e2e")
+        );
         assert_eq!(get("any_app_e2e"), "true");
         assert_eq!(app_leg_outputs(&legs[..2])[3], ("any_app_e2e".to_string(), "false".to_string()));
         assert_eq!(

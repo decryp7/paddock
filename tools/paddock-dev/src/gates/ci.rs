@@ -157,6 +157,8 @@ struct Matrix {
     include: Vec<BTreeMap<String, String>>,
     /// `include: ${{ fromJSON(needs.plan.outputs.apps) }}`: the app matrix of ci.yml (§2.2).
     app_legs: bool,
+    /// `include: ${{ fromJSON(needs.plan.outputs.apps_e2e) }}`: stage 2's end-to-end legs of the apps (the other legs are `app_legs`).
+    app_legs_e2e: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -224,6 +226,7 @@ fn parse_matrix(n: &Node) -> Matrix {
         match k.as_str() {
             "include" => match v.text() {
                 Some(t) if t.contains("fromJSON(needs.plan.outputs.apps)") => m.app_legs = true,
+                Some(t) if t.contains("fromJSON(needs.plan.outputs.apps_e2e)") => m.app_legs_e2e = true,
                 // A sharded job of an app workflow (debrief.yml's `include: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}`, one of
                 // the outputs plan_since::app_output_names lists): every shard unless a rerun of failures names some, and each
                 // shard runs the same steps, so the model runs one.
@@ -949,11 +952,15 @@ impl Walker<'_> {
             out.extend(acc);
         }
         out.extend(m.include.iter().cloned());
-        if m.app_legs {
+        if m.app_legs || m.app_legs_e2e {
             let webkit = ctx.level != Level::Branch;
             for (name, c) in self.contracts {
                 match app_legs(name, c, webkit) {
-                    Ok(legs) => out.extend(legs),
+                    // The plan splits the legs the way plan_ci::is_e2e_leg does: `app` runs the others, `app-e2e` these.
+                    Ok(legs) => out.extend(
+                        legs.into_iter()
+                            .filter(|l| l.get("e2e_leg").is_some_and(|e| !e.is_empty()) == m.app_legs_e2e),
+                    ),
                     Err(e) => self.problems.push((format!("apps/{name}/paddock.ci.json"), e)),
                 }
             }

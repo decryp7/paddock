@@ -423,8 +423,7 @@ fn leg_of(key: &str, name: &str) -> Leg {
     static OS_LEG: LazyLock<Regex> = LazyLock::new(|| re(r"^[a-z-]+ \(([a-z0-9]+-[a-z0-9.]+)\)$"));
     static APP_LEG: LazyLock<Regex> = LazyLock::new(|| re(r"^app ([a-z0-9-]+) \(([a-z0-9]+-[a-z0-9.]+)(?:, ([a-z0-9-]+))?\)$"));
     // Stage 2's end-to-end legs of the apps: `dyno e2e (ubuntu-latest, e2e-1)` (ci.yml `app-e2e`).
-    static APP_E2E_LEG: LazyLock<Regex> =
-        LazyLock::new(|| re(r"^([a-z0-9-]+) e2e \(([a-z0-9]+-[a-z0-9.]+), ([a-z0-9-]+)\)$"));
+    static APP_E2E_LEG: LazyLock<Regex> = LazyLock::new(|| re(r"^([a-z0-9-]+) e2e \(([a-z0-9]+-[a-z0-9.]+), ([a-z0-9-]+)\)$"));
     match key {
         "crate" | "paddock-dev" => Leg {
             os: OS_LEG.captures(name).map(|m| m[1].to_string()),
@@ -1343,7 +1342,8 @@ mod tests {
         assert_eq!(out["icons"], "false");
         assert_eq!(out["paddock_dev"], "false");
         assert_eq!(out["base"], "f1d7e0791f250c88dacd318f7caebf1dcf066cdf");
-        assert_eq!(out["rerun_jobs"], r#"["app","conformance","crate","crates","e2e","ui"]"#);
+        // A failed end-to-end leg of this run (from before the stages: a leg of the `app` job) reruns as the `app-e2e` job.
+        assert_eq!(out["rerun_jobs"], r#"["app","app-e2e","conformance","crate","crates","e2e","ui"]"#);
         assert!(!out.contains_key("paddock_dev_legs"), "not rerun: the plan step writes every leg");
         let crate_legs: Value = serde_json::from_str(&out["crate_legs"]).unwrap();
         assert_eq!(crate_legs.as_array().unwrap().len(), 2);
@@ -1354,28 +1354,29 @@ mod tests {
             json!({"os": "windows-latest", "filter": ""}),
             "the Windows leg reruns whole"
         );
-        let apps: Vec<Value> = serde_json::from_str(&out["apps"]).unwrap();
+        let mut apps: Vec<Value> = serde_json::from_str(&out["apps"]).unwrap();
+        apps.extend(serde_json::from_str::<Vec<Value>>(&out["apps_e2e"]).unwrap());
         let names: Vec<(String, String)> = apps
             .iter()
             .map(|l| (l["app"].as_str().unwrap().to_string(), l["os"].as_str().unwrap().to_string()))
             .collect();
         let pair = |a: &str, o: &str| (a.to_string(), o.to_string());
-        assert_eq!(
-            names,
-            [
-                pair("dyno", "macos-latest"),
-                pair("dyno", "windows-latest"),
-                pair("pitwall", "windows-latest"),
-                pair("dyno", "ubuntu-latest"),
-                pair("pitcrew", "ubuntu-latest"),
-                pair("pitwall", "ubuntu-latest"),
-                pair("pitwall", "ubuntu-latest"),
-                pair("pitwall", "ubuntu-latest"),
-                pair("spotter", "ubuntu-latest"),
-            ],
-            "the failed legs only: not dyno's passed end-to-end leg, not spotter's"
-        );
-        assert_eq!(apps[6]["e2e_leg"], "e2e-2");
+        let mut names = names;
+        names.sort();
+        let mut want = [
+            pair("dyno", "macos-latest"),
+            pair("dyno", "windows-latest"),
+            pair("pitwall", "windows-latest"),
+            pair("dyno", "ubuntu-latest"),
+            pair("pitcrew", "ubuntu-latest"),
+            pair("pitwall", "ubuntu-latest"),
+            pair("pitwall", "ubuntu-latest"),
+            pair("pitwall", "ubuntu-latest"),
+            pair("spotter", "ubuntu-latest"),
+        ];
+        want.sort();
+        assert_eq!(names, want, "the failed legs only: not dyno's passed end-to-end leg, not spotter's");
+        assert!(apps.iter().any(|l| l["e2e_leg"] == "e2e-2"));
         // The narrowed macOS leg runs only its tests; the Windows leg (its log is not in the fixture) runs whole.
         assert_eq!(apps[0]["tests_only"], "true");
         assert_eq!(apps[0]["checks"], "");
@@ -1574,7 +1575,12 @@ mod tests {
             run_job(6, "dyno e2e (ubuntu-latest, e2e-1)", "skipped"),
             run_job(7, "stages (stage 2 ran after stage 1)", "failure"),
         ];
-        let mut plan = SincePlan::new(&json!({"id": 9, "path": "ci.yml@refs/heads/train/x", "head_sha": "h"}), &jobs, &templates, &mut logs);
+        let mut plan = SincePlan::new(
+            &json!({"id": 9, "path": "ci.yml@refs/heads/train/x", "head_sha": "h"}),
+            &jobs,
+            &templates,
+            &mut logs,
+        );
         assert_eq!(plan.everything, None, "the gate jobs are jobs of this ci.yml");
         plan.add_skipped_dependents(&jobs, &templates, &needs);
         let keys: BTreeSet<&str> = plan.reruns.iter().filter_map(|r| r.key.as_deref()).collect();
@@ -1583,7 +1589,11 @@ mod tests {
             BTreeSet::from(["crate", "stage1", "stages", "e2e", "app-e2e"]),
             "the stage-2 jobs the failed gate skipped rerun with it: {keys:?}"
         );
-        let all = vec![leg("dyno", "ubuntu-latest", ""), leg("dyno", "ubuntu-latest", "e2e-1"), leg("dyno", "ubuntu-latest", "e2e-2")];
+        let all = vec![
+            leg("dyno", "ubuntu-latest", ""),
+            leg("dyno", "ubuntu-latest", "e2e-1"),
+            leg("dyno", "ubuntu-latest", "e2e-2"),
+        ];
         let out: BTreeMap<String, String> = plan.ci_outputs(&all, &mut |_| {}).into_iter().collect();
         assert_eq!(out["rerun_jobs"], r#"["app-e2e","crate","e2e","stage1","stages"]"#);
         assert_eq!(out["any_app"], "false", "no stage-1 app leg failed");
@@ -1600,9 +1610,19 @@ mod tests {
             run_job(6, "dyno e2e (ubuntu-latest, e2e-2)", "failure"),
             run_job(7, "stages (stage 2 ran after stage 1)", "failure"),
         ];
-        let mut plan = SincePlan::new(&json!({"id": 9, "path": "ci.yml@refs/heads/train/x", "head_sha": "h"}), &jobs, &templates, &mut logs);
+        let mut plan = SincePlan::new(
+            &json!({"id": 9, "path": "ci.yml@refs/heads/train/x", "head_sha": "h"}),
+            &jobs,
+            &templates,
+            &mut logs,
+        );
         plan.add_skipped_dependents(&jobs, &templates, &needs);
-        let leg_of_failed = plan.reruns.iter().find(|r| r.key.as_deref() == Some("app-e2e")).map(|r| r.leg.clone()).unwrap();
+        let leg_of_failed = plan
+            .reruns
+            .iter()
+            .find(|r| r.key.as_deref() == Some("app-e2e"))
+            .map(|r| r.leg.clone())
+            .unwrap();
         assert_eq!(
             leg_of_failed,
             Leg {
@@ -1619,7 +1639,15 @@ mod tests {
         assert_eq!(e2e[0]["e2e_leg"], "e2e-2");
         // A failed WebKit leg asks for the WebKit legs.
         let webkit = vec![run_job(6, "dyno e2e (ubuntu-latest, e2e-webkit)", "failure")];
-        assert!(SincePlan::new(&json!({"id": 9, "path": "ci.yml@refs/heads/train/x", "head_sha": "h"}), &webkit, &templates, &mut logs).needs_webkit());
+        assert!(
+            SincePlan::new(
+                &json!({"id": 9, "path": "ci.yml@refs/heads/train/x", "head_sha": "h"}),
+                &webkit,
+                &templates,
+                &mut logs
+            )
+            .needs_webkit()
+        );
     }
 
     #[test]

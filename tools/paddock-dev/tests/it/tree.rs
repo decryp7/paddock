@@ -854,11 +854,15 @@ fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
             paddock_dev::plan_gitea::CI_JOBS.iter().any(|(j, _)| j == key),
             "ci.yml job {key} is not in plan_gitea::CI_JOBS (and tests/golden/ci-jobs.json)"
         );
-        if key == "plan" {
+        // The stage gates (conformance/ci/stage-gate.mjs) run after every failure and in every rerun: they judge, they test nothing.
+        if key == "plan" || matches!(key.as_str(), "stage1" | "stages") {
             continue;
         }
         let gate = format!("contains(fromJSON(needs.plan.outputs.rerun_jobs || '[\"{key}\"]'), '{key}')");
-        assert!(text.contains("needs: [plan]"), "job {key} needs the plan");
+        assert!(
+            text.contains("needs: [plan]") || text.contains("needs: [plan, stage1]"),
+            "job {key} needs the plan (and, in stage 2, the stage-1 gate)"
+        );
         let cond = text
             .lines()
             .find(|l| l.starts_with("    if: "))
@@ -932,7 +936,7 @@ fn debrief_yml_takes_a_rerun_of_its_failures() {
     let app = APP_WORKFLOWS.iter().find(|a| a.file == "debrief.yml").unwrap();
     for (key, body) in &wf.jobs {
         assert!(templates.iter().any(|(k, _)| k == key), "{key} has a name");
-        if key == "plan" || app.never_manual.contains(&key.as_str()) {
+        if key == "plan" || matches!(key.as_str(), "stage1" | "stages") || app.never_manual.contains(&key.as_str()) {
             continue;
         }
         let gate = format!("contains(fromJSON(needs.plan.outputs.rerun_jobs || '[\"{key}\"]'), '{key}')");

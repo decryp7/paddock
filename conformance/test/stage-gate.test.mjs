@@ -17,11 +17,20 @@ test('stage 1 passes when every job passed or was left out by the plan', () => {
 
 test('stage 1 fails on a failed job and on a cancelled one, and names them', () => {
   for (const bad of ['failure', 'cancelled']) {
-    const r = stage1(ctx({ plan: 'success', crate: bad, ui: 'success' }));
+    const r = stage1(ctx({ plan: 'success', crate: bad, ui: 'success' }), true);
     assert.equal(r.ok, false);
     assert.match(r.lines[0], new RegExp(`::error::stage 1 failed: crate \\(${bad}\\)`));
     assert.match(r.lines[0], /Stage 2 .* does not run/);
   }
+});
+
+test('report-only (ER-41): without ENFORCE a failed stage 1 only warns; with it, the CLI blocks', () => {
+  const needs = JSON.stringify(ctx({ plan: 'success', ui: 'failure' }));
+  const cli = (enforce) => spawnSync('node', [script, 'stage1'], { encoding: 'utf8', env: { ...process.env, NEEDS: needs, ENFORCE: enforce } });
+  const soft = cli('');
+  assert.equal(soft.status, 0);
+  assert.match(soft.stdout, /::warning::stage 1 failed: ui \(failure\)\. Report-only/);
+  assert.equal(cli('1').status, 1);
 });
 
 test('a job with no result is not a pass (positive control: the check can see a missing result)', () => {
@@ -79,7 +88,7 @@ test('the CLI exit codes: 0 passed, 1 failed, and the line is printed on stdout'
   const pass = run('final', JSON.stringify(ctx({ stage1: 'success', e2e: 'success' })));
   assert.equal(pass.status, 0);
   assert.match(pass.stdout, /^stage verdict: stage1=passed stage2=complete$/m);
-  const fail = run('stage1', JSON.stringify(ctx({ plan: 'success', ui: 'failure' })));
+  const fail = spawnSync('node', [script, 'stage1'], { encoding: 'utf8', env: { ...process.env, ENFORCE: '1', NEEDS: JSON.stringify(ctx({ plan: 'success', ui: 'failure' })) } });
   assert.equal(fail.status, 1);
   assert.match(fail.stdout, /::error::stage 1 failed: ui \(failure\)/);
 });

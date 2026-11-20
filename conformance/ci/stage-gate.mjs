@@ -3,7 +3,7 @@
 // installers and the real-app smoke tests). Stage 2 starts only when the `stage1` gate job passed. Two modes, both fed the job's
 // `needs` context as JSON (`NEEDS: ${{ toJSON(needs) }}`):
 //
-//   node conformance/ci/stage-gate.mjs stage1   every stage-1 job (the gate's `needs`): fails when one failed or was cancelled.
+//   node conformance/ci/stage-gate.mjs stage1   (report-only until ENFORCE=1, ER-41) every stage-1 job (the gate's `needs`): fails when one failed or was cancelled.
 //                                               A skipped job is one the plan left out; it passes.
 //   node conformance/ci/stage-gate.mjs final    the last job (`needs`: plan, stage1 and every stage-2 job): prints the line
 //                                               `stage verdict: stage1=<passed|failed> stage2=<complete|not-run|failed>` that
@@ -42,9 +42,16 @@ export function parseNeeds(text) {
 }
 
 /** Stage 1: pass only when no job failed or was cancelled. */
-export function stage1(needs) {
+export function stage1(needs, enforce = true) {
   const bad = notPassed(needs);
   const ran = Object.values(needs).filter((n) => n.result === 'success').length;
+  if (bad.length && !enforce) {
+    // ER-41: a new gate starts report-only. The failed job already makes the run red; the gate only does not hold stage 2 back yet.
+    return {
+      ok: true,
+      lines: [`::warning::stage 1 failed: ${bad.join(', ')}. Report-only: stage 2 still runs. Set the repository variable PADDOCK_STAGE_GATE_ENFORCE=1 after the first recorded green run to make this gate block.`],
+    };
+  }
   if (bad.length) {
     return {
       ok: false,
@@ -89,7 +96,7 @@ if (isMain(import.meta.url)) {
   try {
     if (mode !== 'stage1' && mode !== 'final') throw new Error(`usage: stage-gate.mjs stage1|final (got ${mode ?? 'nothing'})`);
     const needs = parseNeeds(process.env.NEEDS);
-    const r = mode === 'stage1' ? stage1(needs) : final(needs, process.env.STAGE ?? '');
+    const r = mode === 'stage1' ? stage1(needs, process.env.ENFORCE === '1') : final(needs, process.env.STAGE ?? '');
     for (const l of r.lines) console.log(l);
     process.exit(r.ok ? 0 : 1);
   } catch (e) {

@@ -1412,6 +1412,8 @@ jobs:
       - name: Stage 1 result
         env:
           NEEDS: ${{ toJSON(needs) }}
+          # Report-only until the first recorded green run (ER-41); then set the repository variable to 1.
+          ENFORCE: ${{ vars.PADDOCK_STAGE_GATE_ENFORCE }}
         run: node conformance/ci/stage-gate.mjs stage1
 
   # The last job: the line `./dev ci verdict` reads. A run is full only when stage 1 passed and stage 2 ran to its end.
