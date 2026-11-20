@@ -212,7 +212,7 @@ Apply these deliberately. They are not decoration:
 - Research official sources before choosing libraries or relying on another program's behaviour, and record what you
   found and when in the ADR or doc comment. Prefer well-maintained, permissively licensed dependencies.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they are available instead of
-  reading whole files; it saves context and cost (rule 86, ER-50). Serena indexes the main checkout only, which the
+  reading whole files; it saves context and cost (rule 88, ER-50). Serena indexes the main checkout only, which the
   coordinator fast-forwards after every landing; worktree agents use it for read-only lookups of main and their normal
   tools for their own worktree's files.
 - Delegate mechanical or well-specified work (refactors with a precise spec, test scaffolding, docs) to cheaper models.
