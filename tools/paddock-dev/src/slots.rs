@@ -78,6 +78,22 @@ pub struct AcquireArgs {
     acquire_grace_ms: u64,
 }
 
+impl AcquireArgs {
+    /// The arguments with the production defaults: a caller inside this tool (a Linux job's compile-cache lane) takes a slot in
+    /// `root` for the life of the job folder `owner`, with no command line.
+    pub fn new(max: u32, owner: PathBuf, root: PathBuf) -> AcquireArgs {
+        AcquireArgs {
+            max,
+            owner,
+            root,
+            poll_ms: DEFAULT_POLL_MS,
+            max_hold_secs: DEFAULT_MAX_HOLD_SECS,
+            holder_timeout_secs: DEFAULT_FIRST_LINE_SECS,
+            acquire_grace_ms: DEFAULT_GRACE_MS,
+        }
+    }
+}
+
 /// `release`'s arguments.
 #[derive(Args)]
 pub struct ReleaseArgs {

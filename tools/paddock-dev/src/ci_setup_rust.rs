@@ -37,6 +37,10 @@ use std::time::{Duration, Instant};
 /// (`ci-image/Dockerfile`, checked by scripts/ci-image.test.mjs).
 pub const SCCACHE_VERSION: &str = "0.19.0";
 const RELEASES: &str = "https://github.com/mozilla/sccache/releases/download";
+/// The compile-cache budget of a Linux host in GB, divided between its lanes like the other classes' (`PADDOCK_CI_SCCACHE_GB`
+/// overrides it): 6 lanes get 10 GB each, the share Mac and Windows slots have. Before ADR 0111 the whole `/sccache` mount was
+/// one 20 GB cache. Not measured against d-gtr9's disk: that needs a run there.
+pub const LINUX_SCCACHE_GB: u64 = 60;
 /// The server port in a Linux container (one job per host there); a host job takes its slot's from ports.txt.
 const CONTAINER_PORT: &str = "4227";
 /// What an sccache child gets from the job's environment besides the base list (paddock_proc::KEPT_ENV): its own settings,
@@ -146,10 +150,15 @@ pub fn choose_backend(backend: &str, endpoint: &str, db: &str) -> Result<Backend
 /// A host slot's share of the host's sccache budget: `total_gb` (`PADDOCK_CI_SCCACHE_GB`; 40 when unset or not digits)
 /// divided by the slots, at least 2 GB.
 pub fn slot_cache_size(total_gb: Option<&str>, slots: u64) -> String {
+    slot_cache_size_or(total_gb, slots, 40)
+}
+
+/// [`slot_cache_size`] with the class's own default budget (Linux: [`LINUX_SCCACHE_GB`]).
+pub fn slot_cache_size_or(total_gb: Option<&str>, slots: u64, default_gb: u64) -> String {
     let total = total_gb
         .filter(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit()))
         .and_then(|t| t.parse::<u64>().ok())
-        .unwrap_or(40);
+        .unwrap_or(default_gb);
     let per = (total / slots.max(1)).max(2);
     format!("{per}G")
 }
@@ -566,17 +575,30 @@ impl Step<'_> {
         self.append("GITHUB_ENV", &env_lines(&port, &settings, windows))
     }
 
-    /// The local disk cache: a host slot's kept folder with its share of the budget, else the container's mount (or a folder
-    /// that dies with the container, with a notice).
+    /// The local disk cache: a job slot's own folder with its share of the budget, on every OS (ADR 0111). On Linux the slot is
+    /// a lane of the host's kept mount: the folder is `<mount>/sccache-<lane>`, never the mount itself, because sccache's LRU
+    /// evicts any file below its folder, whoever put it there, and two sccache servers on one folder race ("The local storage only
+    /// supports a single sccache server at a time", sccache docs/Local.md). A container without the mount keeps the cache in the
+    /// job (with a notice), never in a folder another job can see.
     fn local_cache(&mut self) -> Result<(String, String), i32> {
         let (dir, size) = if self.os() == "Linux" {
             let mount = self.path_var("PADDOCK_SCCACHE_MOUNT").unwrap_or_else(|| "/sccache".to_string());
-            if Path::new(&mount).is_dir() && dir_writable(Path::new(&mount)) {
-                (mount, "20G".to_string())
-            } else {
-                let temp = self.path_var("RUNNER_TEMP").unwrap_or_else(|| "/tmp".to_string());
-                self.say("::notice::no /sccache mount in this container; the compile cache lives and dies with the job.");
+            let own = |s: &mut Self, why: &str| {
+                let temp = s.path_var("RUNNER_TEMP").unwrap_or_else(|| "/tmp".to_string());
+                s.say(format!("::notice::{why}; the compile cache lives and dies with the job."));
                 (format!("{temp}/sccache"), "20G".to_string())
+            };
+            if Path::new(&mount).is_dir() && dir_writable(Path::new(&mount)) {
+                let slots = self.lane_count();
+                match self.lane(&mount, slots) {
+                    Ok(lane) => (
+                        format!("{mount}/sccache-{lane}"),
+                        slot_cache_size_or(self.get("PADDOCK_CI_SCCACHE_GB"), slots, LINUX_SCCACHE_GB),
+                    ),
+                    Err(why) => own(self, &format!("no lane of {mount} could be taken ({why})")),
+                }
+            } else {
+                own(self, "no /sccache mount in this container")
             }
         } else {
             // sccache's local storage "only supports a single sccache server at a time" (docs/Local.md): one folder per slot.
@@ -594,6 +616,34 @@ impl Step<'_> {
         }
         let dir = if self.os() == "Windows" { home::native(&dir) } else { dir };
         Ok((dir, size))
+    }
+
+    /// How many lanes a Linux host has: `PADDOCK_CI_SLOTS`, else the runner's jobs per host, else the class's layout (6 on d-gtr9).
+    fn lane_count(&self) -> u64 {
+        let n = |k: &str| self.get(k).filter(|v| crate::ci_build_jobs::is_count(v)).and_then(|v| v.parse::<u64>().ok());
+        n("PADDOCK_CI_SLOTS")
+            .or_else(|| n("PADDOCK_CI_JOBS_PER_HOST"))
+            .unwrap_or_else(|| crate::ci_build_jobs::class_default("Linux", crate::ci_build_jobs::Setting::Share).parse().unwrap_or(1))
+    }
+
+    /// The job's lane on a Linux host: the slot an earlier step took (`PADDOCK_CI_SLOT`), else one taken now from the mount's
+    /// `lanes/` folder with the same slot holder the host runners use (`dev ci slot`), and recorded in `$GITHUB_ENV` so every later
+    /// step of the job keeps it. The holder lives until the job's folder (`RUNNER_TEMP`) is gone.
+    fn lane(&mut self, mount: &str, slots: u64) -> Result<String, String> {
+        if let Some(s) = self.get("PADDOCK_CI_SLOT").filter(|s| home::valid_slot(s)) {
+            return Ok(s.to_string());
+        }
+        let owner = self.path_var("RUNNER_TEMP").ok_or("RUNNER_TEMP is not set")?;
+        let args = crate::slots::AcquireArgs::new(
+            u32::try_from(slots).unwrap_or(1),
+            PathBuf::from(&owner),
+            Path::new(mount).join("lanes"),
+        );
+        let report = crate::slots::acquire(&args).map_err(|e| format!("{e}"))?;
+        let slot = report.json()["slot"].as_str().map(str::to_string).ok_or("the slot tool named no slot")?;
+        let _ = self.append("GITHUB_ENV", &[format!("PADDOCK_CI_SLOT={slot}")]);
+        self.say(format!("sccache: this job holds lane {slot} of {slots} on {mount}"));
+        Ok(slot)
     }
 
     // ---- 3. Tauri libraries ------------------------------------------------------------------------------------------

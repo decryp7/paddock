@@ -190,12 +190,28 @@ runs:
           SETTINGS+=("SCCACHE_REDIS_ENDPOINT=$REDIS_ENDPOINT" "SCCACHE_REDIS_DB=${REDIS_DB:-5}")
           echo "sccache: shared backend $REDIS_ENDPOINT db ${REDIS_DB:-5}"
         else
-          # Local disk. A host runner keeps it in the job slot's kept folder, so it outlives the job; a container uses the /sccache
-          # mount the runner provides, or a folder that dies with the container (with a notice: every job then starts cold).
+          # Local disk, one folder per job slot on every OS (ADR 0111; the Rust twin is tools/paddock-dev/src/ci_setup_rust.rs). sccache's
+          # LRU evicts any file below its folder and its local storage "only supports a single sccache server at a time" (docs/Local.md),
+          # so a Linux lane never gets the mount itself: its folder is <mount>/sccache-<lane>. A host runner's slot folder outlives
+          # the job; a container without the mount keeps the cache in the job (with a notice: every job then starts cold).
           SIZE=20G
           if [ "$RUNNER_OS" = Linux ]; then
             MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"  # overridable so the step's test does not depend on the runner's real mount
-            if [ -d "$MOUNT" ] && [ -w "$MOUNT" ]; then DIR="$MOUNT"
+            LANES="${PADDOCK_CI_SLOTS:-${PADDOCK_CI_JOBS_PER_HOST:-6}}"
+            LANE="${PADDOCK_CI_SLOT:-}"
+            if [ -d "$MOUNT" ] && [ -w "$MOUNT" ] && [ -z "$LANE" ] && [ -n "${RUNNER_TEMP:-}" ]; then
+              # The lane the Rust command takes: the same slot holder, in the mount's lanes/ folder.
+              LANE="$(bash "${{ github.action_path }}/../../../dev" ci slot acquire --max "$LANES" --owner "$RUNNER_TEMP" --root "$MOUNT/lanes" 2>/dev/null | awk 'NR == 1 { print $1 }')" || LANE=""
+              if [ -n "$LANE" ]; then echo "PADDOCK_CI_SLOT=$LANE" >> "$GITHUB_ENV"; echo "sccache: this job holds lane $LANE of $LANES on $MOUNT"; fi
+            fi
+            if [ -d "$MOUNT" ] && [ -w "$MOUNT" ] && [ -n "$LANE" ]; then
+              DIR="$MOUNT/sccache-$LANE"
+              TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
+              case "$TOTAL" in '' | *[!0-9]*) TOTAL=60 ;; esac
+              PER=$((TOTAL / LANES)); if [ "$PER" -lt 2 ]; then PER=2; fi
+              SIZE="${PER}G"
+            elif [ -d "$MOUNT" ] && [ -w "$MOUNT" ]; then
+              DIR="${RUNNER_TEMP:-/tmp}/sccache"; echo "::notice::no lane of $MOUNT could be taken; the compile cache lives and dies with the job."
             else DIR="${RUNNER_TEMP:-/tmp}/sccache"; echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."; fi
           else
             # The job slot's own cache: sccache's local storage "only supports a single sccache server at a time" (docs/Local.md),

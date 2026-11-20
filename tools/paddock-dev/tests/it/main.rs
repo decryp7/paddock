@@ -47,6 +47,7 @@ mod pre_push;
 mod recorded;
 mod release_isolation;
 mod safe_remove_lint;
+mod sccache_eviction;
 mod setup_rust;
 mod slots;
 mod sparse;

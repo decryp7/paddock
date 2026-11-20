@@ -106,7 +106,10 @@ impl Runner {
         .collect();
         for (k, v) in extra {
             env.retain(|(key, _)| key != k);
-            env.push((k.to_string(), v.to_string()));
+            // An empty value removes the variable (a job that holds no slot yet).
+            if !v.is_empty() {
+                env.push((k.to_string(), v.to_string()));
+            }
         }
         env
     }
@@ -286,21 +289,67 @@ fn a_host_slot_gets_its_own_folder_port_and_share_of_the_budget() {
 }
 
 #[test]
-fn a_container_uses_the_mount_or_a_folder_that_dies_with_it() {
+fn a_container_lane_gets_its_own_folder_on_the_mount_never_the_mount_itself() {
     let r = Runner::new(Some(Fail::Never));
     let mount = r.root.join("mount");
     std::fs::create_dir_all(&mount).unwrap();
     let mount = mount.display().to_string();
-    let (_, rs) = same(&r, &LOCAL, &[("RUNNER_OS", "Linux"), ("PADDOCK_SCCACHE_MOUNT", &mount)], true);
+    // Both implementations, the lane an earlier step took: its folder, its share of the budget (60 GB over 6 lanes).
+    let (_, rs) = same(
+        &r,
+        &LOCAL,
+        &[("RUNNER_OS", "Linux"), ("PADDOCK_SCCACHE_MOUNT", &mount), ("PADDOCK_CI_SLOT", "s3")],
+        true,
+    );
     assert!(
-        rs.env.contains(&format!("SCCACHE_DIR={mount}\n")) && rs.env.contains("SCCACHE_CACHE_SIZE=20G\n"),
+        rs.env.contains(&format!("SCCACHE_DIR={mount}/sccache-s3\n")) && rs.env.contains("SCCACHE_CACHE_SIZE=10G\n"),
         "{}",
         rs.env
     );
+    assert!(!rs.env.contains(&format!("SCCACHE_DIR={mount}\n")), "never the mount root: {}", rs.env);
+    // Another host layout: 3 lanes share the same budget, 20 GB each.
+    let (_, rs) = same(
+        &r,
+        &LOCAL,
+        &[
+            ("RUNNER_OS", "Linux"),
+            ("PADDOCK_SCCACHE_MOUNT", &mount),
+            ("PADDOCK_CI_SLOT", "s2"),
+            ("PADDOCK_CI_SLOTS", "3"),
+        ],
+        true,
+    );
+    assert!(rs.env.contains("/sccache-s2\n") && rs.env.contains("SCCACHE_CACHE_SIZE=20G\n"), "{}", rs.env);
     let absent = r.root.join("absent").display().to_string();
     let (_, rs) = same(&r, &LOCAL, &[("RUNNER_OS", "Linux"), ("PADDOCK_SCCACHE_MOUNT", &absent)], true);
     assert!(rs.env.contains("/temp/sccache\n"), "{}", rs.env);
     assert!(rs.out.contains("::notice::no /sccache mount in this container"), "{}", rs.out);
+}
+
+#[test]
+fn a_container_job_without_a_slot_takes_a_lane_and_two_jobs_never_share_one() {
+    // The Rust command only: it takes the lane itself with the slot holder (the shell asks ./dev for the same), records it in
+    // $GITHUB_ENV, and a second job at the same time gets another lane and so another folder (ER-33: a second job that got the
+    // same folder is what this test would show red).
+    let r = Runner::new(Some(Fail::Never));
+    let mount = r.root.join("mount");
+    std::fs::create_dir_all(&mount).unwrap();
+    let mount = mount.display().to_string();
+    let extra = [
+        ("RUNNER_OS", "Linux"),
+        ("PADDOCK_SCCACHE_MOUNT", mount.as_str()),
+        ("PADDOCK_CI_SLOTS", "2"),
+        ("PADDOCK_CI_SLOT", ""),
+    ];
+    let first = r.rust(&LOCAL, &extra);
+    assert_eq!(first.code, 0, "{}", first.out);
+    assert!(first.env.contains(&format!("SCCACHE_DIR={mount}/sccache-s1\n")), "{}", first.env);
+    assert!(first.env.contains("PADDOCK_CI_SLOT=s1\n"), "the lane is kept for the job's later steps: {}", first.env);
+    // A second job: its own temp folder, the first job's still there (its holder keeps s1).
+    let other = Runner::new(Some(Fail::Never));
+    let second = other.rust(&LOCAL, &extra);
+    assert_eq!(second.code, 0, "{}", second.out);
+    assert!(second.env.contains(&format!("SCCACHE_DIR={mount}/sccache-s2\n")), "{}", second.env);
 }
 
 #[test]
