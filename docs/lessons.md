@@ -3223,3 +3223,25 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   120 other folders there (`paddock-isolation-*`, `paddock-tauri-tools-*`, `paddock-sccache-*`, `paddock-rustup-*`,
   `paddock-job-tmpdir-*` and more). The planned redesign is a shared per-run scratch root for tests, plus a report-only conformance
   check with a positive control (ER-21, ER-41).
+
+## A streamed answer that was still arriving failed its wait: the wait bounded the whole stream, not a stall (Debrief, 2026-11-20, train A)
+- **Failure:** Debrief WebKit `ai-chat.e2e.ts:116` "the conversation is busy from the moment its turn is drawn until the answer is
+  done" red on both tries in debrief.yml run 8377 job 42784 (shard 3/4, Linux), at `expectStreamDone` (paddock-e2e `ready.ts:85`):
+  `aria-busy` stayed "true" for the 5 s expect timeout. It had 0 failures in 535 runs and passed on the same commit in 8373.
+- **First hypotheses and what refuted them:** a stuck turn (a lost `done` event): the trace's snapshot right after the failed wait
+  shows `aria-busy="false"` and the whole answer, and its screencast shows the answer still arriving near the end of the wait (at
+  "System.Ou" with Stop shown, then complete); the paddock-proc change d68f912aa and the ER-48 job share cd867ef09: `apps/debrief`,
+  `ui` and `package-lock.json` are byte-identical at 9ec43be3c and 5cd9602da, and the e2e page runs the TypeScript mock with no
+  process; order dependence in the shard: the retry ran in a new worker and failed the same way, finishing just after its wait.
+- **Root cause:** `expectStreamDone` was one `toHaveAttribute('aria-busy', 'false')`, so the whole stream had to finish inside one
+  expect timeout. The spec streams 20 pieces 150 ms apart: 3.4 s from busy to done on an idle Mac (8 of 8 probes, 4 WebKit workers),
+  about 4.8 to 5.4 s on the loaded runner, past the 5 s wait while still arriving. This breaks ADR 0103's rule that a step is bounded
+  on progress, not total time.
+- **Fix:** `expectStreamDone` waits one expect timeout at a time and goes on while something new arrived (text or elements). It fails
+  only after a wait in which nothing arrived, saying so, and records each extra wait as a `stream-wait` annotation. A paddock-e2e
+  self-test streams for 6.5 s (it fails the old helper with the reported error) and has two stalled streams as positive controls.
+- **Why the logs did not show it:** the call log printed `…` for the log's content, so "slow" and "stuck" looked the same. Telling
+  them apart took the trace. The new failure message names the stall and what the stream showed; a slow stream leaves annotations.
+- **Class: an end-to-end wait bounds a streamed result by one expect timeout.** Earlier: debrief.yml run 8300, where six streamed
+  answers ran past the wait (64f8165ae, fixed for that spec only by sending answers in one piece). It is fixed for every caller of
+  `waitAnswered` here.
