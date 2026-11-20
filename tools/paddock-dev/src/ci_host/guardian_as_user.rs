@@ -407,10 +407,10 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
     /// What `cargo build --message-format=json` of the stand-in prints (one artifact line, cut to the fields the step reads).
     const STAND_IN_BUILD: &str = "   Compiling paddock-testkit v0.1.0\n{\"reason\":\"compiler-artifact\",\"target\":{\"name\":\"paddock-stand-in\",\"kind\":[\"bin\"]},\"executable\":\"/target/debug/paddock-stand-in\"}\n{\"reason\":\"build-finished\",\"success\":true}\n";
 
+    // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
     const BUILD: &str = "   Compiling paddock-proc v0.1.0\n  Executable unittests src/lib.rs (target/debug/deps/paddock_proc-0123abcd)\n  Executable tests/it/main.rs (target/debug/deps/it-ff)\n  Executable unittests src/lib.rs (target/debug/deps/paddock_chromium-9f8e7d)\n";
 
     /// A scripted machine: who runs it, what the programs say, what was started.
