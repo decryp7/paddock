@@ -906,9 +906,6 @@ fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
 
 #[test]
 fn ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
-    let ci = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml"))
-        .unwrap()
-        .replace("\r\n", "\n");
     let gates = std::fs::read_to_string(root().join(".gitea/actions/app-gates/action.yml"))
         .unwrap()
         .replace("\r\n", "\n");
