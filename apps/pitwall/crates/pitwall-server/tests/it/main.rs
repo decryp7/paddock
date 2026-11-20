@@ -6,6 +6,7 @@ mod bulk;
 mod caching;
 mod cancel;
 mod common;
+mod delete_race;
 mod discovery;
 mod e2e;
 mod engine_pins;
