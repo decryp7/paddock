@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { buildEnv } from '../ci/build-env.mjs';
 import { checkPin, defaultGrant, executableIn, grantCommand, install, parseArgs, parseRustPin, platformId, urlFor } from '../ci/install-test-browser.mjs';
 import { decide, tagFor } from '../ci/plan.mjs';
+import { isTagRun } from '../src/util/is-tag-run.mjs';
 import { firstLaunch, releaseNotes } from '../ci/release-notes.mjs';
 import { makeApp, PADDOCK, pe } from './helpers.mjs';
 
@@ -280,6 +282,39 @@ for (const [label, extra, key] of [['on a tag', { ...TAG, TAURI_SIGNING_PRIVATE_
     assert.match(at('npx-env'), new RegExp(`^npx-env key=${key}\\|`));
     assert.deepEqual(log.map((l) => l.split(' ')[0]), ['npm', 'prepare', 'presign-build', 'presign-sign', 'hook', 'npx-env'], 'the order: install, prepare, build half, sign half, hook, tauri build');
   });
+}
+
+// "A tag run" is defined once (is-tag-run.mjs). Its shell callers fail closed: any status but 0 (a tag) and 3 (not a tag) stops the step, so a crash
+// can never read as "not a tag" and skip the guard that a tag has a private key (or make a throw-away key on a tag).
+test('is-tag-run: the ref, or either ref type on its own; both ref types set is not "tagtag"; the CLI says 0 for a tag and 3 for none', () => {
+  assert.equal(isTagRun({ GITHUB_REF: 'refs/tags/dyno-v1.0.0' }), true);
+  assert.equal(isTagRun({ GITEA_REF: 'refs/tags/dyno-v1.0.0' }), true);
+  assert.equal(isTagRun({ GITHUB_REF_TYPE: 'tag' }), true);
+  assert.equal(isTagRun({ GITEA_REF_TYPE: 'tag' }), true);
+  assert.equal(isTagRun({ GITHUB_REF_TYPE: 'tag', GITEA_REF_TYPE: 'tag' }), true, 'both set: each is checked, not their join "tagtag"');
+  assert.equal(isTagRun({ GITHUB_REF_TYPE: 'branch', GITEA_REF_TYPE: 'tag' }), true);
+  assert.equal(isTagRun({ GITHUB_REF_TYPE: 'branch', GITEA_REF_TYPE: 'branch', GITHUB_REF: 'refs/heads/main' }), false);
+  assert.equal(isTagRun({}), false);
+  const cli = (env) => spawnSync(process.execPath, [join(CI, '..', 'src', 'util', 'is-tag-run.mjs')], { env, encoding: 'utf8' }).status;
+  assert.equal(cli({ GITHUB_REF: 'refs/tags/x-v1' }), 0);
+  assert.equal(cli({ GITHUB_REF: 'refs/heads/main' }), 3);
+});
+
+for (const [label, stub] of [['exits 1', 'process.exit(1);'], ['throws', "throw new Error('boom');"], ['is a syntax error', 'this is not javascript']]) {
+  for (const [where, env] of [['a tag', { ...TAG, TAURI_SIGNING_PRIVATE_KEY: 'SECRETKEY', TAURI_UPDATER_PUBKEY: PUB }], ['a non-tag run', { GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/main', TAURI_UPDATER_PUBKEY: PUB }]]) {
+    test(`tauri-bundle: an is-tag-run.mjs that ${label} fails the step on ${where} before anything runs`, () => {
+      const root = signedRepo();
+      const ci = join(mkdtempSync(join(tmpdir(), 'paddock-bundle-ci-')), 'conformance');
+      for (const d of ['ci', 'release', 'src/util']) cpSync(join(CI, '..', d), join(ci, d), { recursive: true });
+      writeFileSync(join(ci, 'src/util/is-tag-run.mjs'), `${stub}\n`);
+      const r = spawnSync('bash', [join(ci, 'ci', 'tauri-bundle.sh'), 'deb'], {
+        cwd: root, encoding: 'utf8', env: { PATH: `${join(root, 'bin')}:${dirname(process.execPath)}:/usr/bin:/bin`, CARGO_TARGET_DIR: join(root, 'target'), BIN_LOG: join(root, 'calls.log'), ...env },
+      });
+      assert.notEqual(r.status, 0, r.stdout + r.stderr);
+      assert.match(r.stdout, /::error::is-tag-run\.mjs exited [1-9]\d* \(0 is a tag, 3 is not\)/);
+      assert.equal(existsSync(join(root, 'calls.log')), false, 'nothing ran: no npm ci, no throw-away key, no build');
+    });
+  }
 }
 
 test('tauri-bundle: a CI run that is not a tag refuses a real key, and signs with a throw-away key with no password in argv', () => {
