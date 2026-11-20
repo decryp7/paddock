@@ -3086,3 +3086,49 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   member (same symptom in run 8212, before the train). **Fix:** `openTray` waits until the popover's finite animations have finished,
   and the test compares unrounded heights. Class: a layout read during an entry animation (the "two reads agree" rule does not catch a
   box that moves while its rounded size stays).
+
+## Fix item: scheduled runs red before the seven schedules were disabled (2026-11-20)
+On 2026-11-20 the user disabled seven scheduled workflows in the Gitea UI (canary, debrief-bench, debrief-corpus, debrief-fuzz,
+debrief-mutants, nightly, service-smoke; the re-enable is in [ci-schedules.md](ci-schedules.md#seven-schedules-disabled-in-the-gitea-ui-2026-11-20))
+to free the runners for the Dyno 1.2.0 release. Four of them were red in their last runs. Logs saved under
+`/Volumes/vault-dev/dev-targets/scratch/review-fix-items/` (`job-<id>.log`); run links are
+`https://dev.decryptology.net/decryp7/paddock/actions/runs/<run>` (a job: `/jobs/<id>`); no cause below was reproduced or fixed here.
+- **debrief-fuzz run 8324, job 41839 (fuzz shard 6/6): two parsers panic on arithmetic overflow. DEBRIEF 1.2 RELEASE BLOCKER (parsers never
+  panic, PRINCIPLES).** Target `fuzz_dump_minidump`: `thread '<unnamed>' panicked at .../apps/debrief/crates/debrief-plugin-dumps/src/source.rs:288:35:
+  attempt to add with overflow`, the expression `at + (lo - start)` in the `read_exact(src, at + (lo - start), hi - lo, "stack memory")` call
+  (log line 2662; reproducer `fuzz/artifacts/fuzz_dump_minidump/crash-ee156ec3...`, in the `crashes-fuzz_dump_minidump` artifact). Target
+  `fuzz_dump_umdh`: `panicked at /rustc/21b707e3.../library/core/src/iter/traits/accum.rs:206:1: attempt to add with overflow` (log line 17448).
+  That frame is `Iterator::sum` in the standard library, so the crate is the caller's; a candidate in the dumps plugin is
+  `apps/debrief/crates/debrief-plugin-dumps/src/synth.rs:285` (`.map(|(_, n)| n).sum()` over `u32`), not confirmed (reproducer
+  `crash-c81923a4...`; read its backtrace with `RUST_BACKTRACE=1` first). The job ends with `::error::Crashed: fuzz_dump_minidump
+  fuzz_dump_umdh` (line 110039). Fix with a failing reproduction first (ER-11) from each artifact, then checked or saturating
+  arithmetic with a typed error, and both inputs added to the corpus. Not a flake.
+- **debrief-bench run 8320, job 41819 (store benchmarks, 10M events): `crates/debrief-store-worker/tests/it/worker.rs:367` budget test FAILED.**
+  `worker::imports_and_queries_within_the_budgets` panicked on `assert!(idle <= QUERY_BUDGET_MB, "idle: {idle} MB")` with `idle: 324 MB`
+  against the Linux budget of 320 MB (`QUERY_BUDGET_MB`, worker.rs:38; 585,800 events; peak RSS importing 683 MB, indexing 515 MB, querying
+  407 MB). A 4 MB overrun, a measured budget miss, not a crash. Per ER-12 the budget is not raised without a named, measured cause: find
+  what grew idle RSS (compare with the last green scheduled run) first.
+- **debrief-corpus run 8322, job 41828 (real-world EVTX corpus): link failure.** `rust-lld: error: unable to find library -lduckdb` /
+  `collect2: error: ld returned 1 exit status`, linking after `Compiling debrief-plugins v0.1.0` (log lines 895-896). Not yet diagnosed;
+  first check whether this job's step puts the fetched libduckdb on the linker path (the `fetch-libduckdb.sh` environment).
+- **canary (spotter) run 8321, job 41826: `npm ci` of the spotter app failed with `ERESOLVE`.** `@angular/compiler@22.2.7` (from
+  `@angular/core@22.2.7` and the root project's `^22.2.0`) against `peer @angular/compiler@"22.3.0"` from `@angular/localize@22.3.0`,
+  which the candidate `@decryp7/paddock-ui-0.3.0.tgz` requires; `##[error]Process completed with exit code 1.` (log lines 1198-1230). Fix by
+  aligning the Angular pins or the canary's install, with a check that fails first.
+
+Flakes recorded as non-blocking on 2026-11-20 (ER-12: a flake in a feature the change does not touch does not block; each is fixed with a
+failing reproduction first):
+- **spotter-render `real_browser` `closing_quits_the_browser_by_itself_before_any_kill` (crates/spotter-render/tests/real_browser.rs:409), 8 of 138 runs.**
+  ci.yml run 8346, job 42302 (`app spotter (macos-latest)`): `needed a kill: 5.555686083s`. Note: in that run it failed on **both** tries
+  (TRY 1 FAIL 5.95 s, TRY 2 FAIL 6.15 s, log lines 1198 and 1218), and a test that fails both tries always blocks (ER-12); it was
+  recorded as non-blocking on the coordinator's judgement that the change did not reach spotter-render, so the "flake" label rests on the
+  8 of 138 history, not on this run. Next: reproduce with the quit timing logged (ER-27) and rule out a slow macOS runner (ER-28 list).
+- **debrief-plugin-host `elevated_output::standard_error_is_forwarded_cut_and_capped` (crates/debrief-plugin-host/tests/it/elevated_output.rs:189), 2 of 151 runs.**
+  debrief.yml run 8347, job 42279 (rust tests): TRY 1 FAIL at 40.064 s (first `SLOW` over 30 s; the assertion saw an empty `[]`), TRY 2 PASS
+  at 0.107 s, reported FLKY-FL (log lines 6272, 6556, 6571, 6811). A 40 s first try against 0.1 s on the retry points at a stall, not slow
+  work; reproduce under load and find where the forwarded stderr was lost before changing anything.
+- **popout.e2e.ts:62 "Dock back returns the panel to where it was" (Debrief e2e shard 2/4, Chromium), debrief.yml run 8338, job 42172 (train 15 landing):**
+  failed once, passed on retry #1 (log lines 833 and 835). **Fixed, pending landing:** `40acfdf5a` (`untilItsPageCloses`, "a step that closes
+  its own window counts as done when it closed") is on `train/2026-11-19-16`, not yet on main. Close this item when that train lands.
+
+Recurring: scheduled-only defects with no earlier gate on the branch (fuzz overflow, bench budget, corpus link, canary resolve); earlier instance of the class: ER-41 (checks on every change that could bring in their class).

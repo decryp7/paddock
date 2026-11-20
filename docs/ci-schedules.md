@@ -78,3 +78,20 @@ shared crate's manifest under `crates/`), measured from the same base as the res
 decides the arguments and the printed line). A push that skips them prints `advisories skipped` and names the nightly audit that covers
 them. A run with a file list the caller gave (`--files`) is not measured from the base, so it runs them (not measured never passes, ADR 0089). Reason: an outside advisory (lettre 0.11.23,
 2026-11-18) turned every push of every branch red, also those that touch no dependency.
+
+## Seven schedules disabled in the Gitea UI (2026-11-20)
+The user disabled canary, debrief-bench, debrief-corpus, debrief-fuzz, debrief-mutants, nightly and service-smoke in the Gitea
+UI on 2026-11-20 to free the runners for the Dyno 1.2.0 release. The workflow files are unchanged; only the Actions state of
+each workflow is off, so nothing here shows it except this entry. Several were red when they were disabled; the fix items
+are in docs/lessons.md ("Fix item: scheduled runs red before the seven schedules were disabled (2026-11-20)").
+
+- **Who re-enables:** the coordinator, after `dyno-v1.2.0` is tagged and its release run is complete. Re-enable nothing
+  earlier (ER-1, ER-24: the release goes first).
+- **Except service-smoke:** branch `chore/retire-local-vms` deletes it (the local VMs are retired, 2026-11-20), so it is
+  not re-enabled; remove its row from the table above when that branch lands.
+- **How to check:** the Gitea API `GET /api/v1/repos/decryp7/paddock/actions/workflows` lists each workflow with its
+  `state` (`active` or `disabled_manually`); the six that come back must read `active` again, and the next scheduled run
+  of each must start (a disabled workflow starts none, and writes no green marker, so the nightly mark stays unmeasured
+  meanwhile, never green: ADR 0093).
+- **Before re-enabling debrief-fuzz, debrief-bench and debrief-corpus,** their open fix items must be fixed or waived by the
+  user: the fuzz panics block Debrief 1.2.
