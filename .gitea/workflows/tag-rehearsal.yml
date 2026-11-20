@@ -1,0 +1,293 @@
+# The tag rehearsal (user, 2026-11-20; train B): the release path of a tag, run every day on main's head and by hand, with no tag, no
+# release and nothing published. Two release-path failures showed only on a real tag: run 8384 (tag.yml's checker spawned a bare `dev`,
+# ENOENT) and run 8395 (Dyno's macOS helper unsigned: signing ran in the key-stripped hook). A dispatched release run is release=0, so it
+# never ran the tag-only paths.
+#
+# What it runs, exactly as a tag does:
+#   tag checks   conformance/ci/request-tag.mjs --dry-run true for each app at main's head, with its current version's tag, then the tag
+#                gates (`./dev gates ratchet --release-tag`, `./dev check ipc-endpoints --tag`) on a git-archive of that commit, the same
+#                commands as tag.yml. The verdict reader (`./dev ci verdict`) is asked about main's head: no full green run there is RED.
+#   release path each app's installers through app-release.yml with `rehearsal: true`: PADDOCK_TAG_REHEARSAL=1 makes is-tag-run.mjs answer
+#                "tag" for every release-path decision (the pre-sign step, the signing of the bundle, check-bundle.sh's release=1, fresh
+#                caches, the tag-name and CHANGELOG checks, C99, the installers' verdict), signed with a THROW-AWAY key made in the job
+#                (tauri signer generate); then `rehearse-release`: release notes and latest.json made as a release makes them, and read back.
+# What it never does: push a tag, create a release, publish an asset, read RELEASE_BOT_TOKEN or RELEASE_TOKEN, or see the real updater
+# key. The callers below pass NO `secrets:`; updater-key.sh fails the build when any private key reaches a rehearsal; the publish
+# job (`release`) is skipped by `!inputs.rehearsal`, and the publish-release action refuses PADDOCK_TAG_REHEARSAL=1. A rehearsal on a
+# real tag fails closed (is-tag-run.mjs exits 4; app-release.yml's guard step refuses refs/tags/*; the guard job runs on main only).
+#
+# Named differences from a real tag run (anything else is a bug here):
+#   1. The tag name is made from the current version (<app>-v<version> of tauri.conf.json), which may exist already: the request's
+#      "tag does not exist" check reports "skipped (dry run)".
+#   2. The throw-away updater key (and its public key) replaces the real pair; Windows' per-machine installer check does not compare
+#      paddock-setup.exe's key fingerprint (PADDOCK_EXPECT_UPDATE_KEY is empty), as in a dispatched run.
+#   3. The release's gates (ci.yml legs) are not re-run: the verdict reader says whether CI was green on this commit, as tag.yml does.
+#   4. rehearse-release stands in for `release`: the same notes and latest.json, with a base URL on rehearsal.invalid, no publish.mjs.
+#   5. Apps without an app-release.yml caller are not rehearsed here: Debrief (its bundle step in debrief.yml honours the same switch
+#      but has no rehearsal caller yet; its tag checks ARE run), and the demos and `heavy` (manual releases, no updater key).
+# Report-only (ER-41): nothing waits on it: it is no job of a train, of ci.yml or of any tag gate, so a red run blocks no landing and no tag.
+# docs/gates.toml cannot list a workflow as report_only (its ids are checks and `step:<project>/<phase>`); its first green run is recorded
+# in docs/ci-schedules.md ("Tag rehearsal") by run id, and the schedule is enabled only after that run.
+#
+# Runner use (ER-24): a scheduled run ends early while a train is in CI (schedule-skip, never twice in a row, never past 36 h); the four
+# apps run one after the other (their jobs chain), each on its three OS jobs, in the 09:03 UTC+8 slot after nightly and debrief
+# (docs/ci-schedules.md). The schedule is DISABLED in Gitea like the other schedule-only workflows until Dyno 1.2.0 ships (memory
+# note scheduled-ci-paused: PUT /api/v1/repos/<owner>/<repo>/actions/workflows/tag-rehearsal.yml/disable, enable after the Dyno tag).
+
+name: tag-rehearsal
+
+on:
+  schedule:
+    - cron: "3 1 * * *" # 09:03 UTC+8
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
+
+jobs:
+  # A scheduled run ends early while a train is in CI; a manual run always runs. Only main: a rehearsal never runs from a tag or another ref.
+  guard:
+    name: guard (main, no train in CI?)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    outputs:
+      skip: ${{ steps.train.outputs.skip }}
+    steps:
+      - name: Main only
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::tag rehearsal: this run is on $GITHUB_REF; a rehearsal runs from main only (never a tag). Next step: dispatch tag-rehearsal.yml with ref main."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - id: train
+        uses: ./.gitea/actions/schedule-skip
+        with:
+          workflow: tag-rehearsal.yml
+          dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
+
+  # The checks of tag.yml, in dry-run mode, for every app's current version, at main's head.
+  tag-checks:
+    name: tag checks (dry run)
+    needs: [guard]
+    if: ${{ !cancelled() && needs.guard.result == 'success' && needs.guard.outputs.skip != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    env:
+      SHA: ${{ github.sha }}
+      PADDOCK_DEV_DOWNLOAD: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checks and tag gates, per app
+        shell: bash
+        env:
+          GITEA_TOKEN: ${{ github.token }}
+        run: |
+          failed=()
+          for app in dyno pitcrew pitwall spotter debrief; do
+            conf="apps/$app/app/src-tauri/tauri.conf.json"
+            version="$(git show "$SHA:$conf" | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version')" || { echo "::error::tag rehearsal: $app: $conf could not be read at $SHA"; failed+=("$app"); continue; }
+            tag="$app-v$version"
+            echo "::group::$tag (dry run)"
+            if ! node conformance/ci/request-tag.mjs --tag "$tag" --sha "$SHA" --root . --dry-run true \
+                --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}"; then
+              echo "::error::tag rehearsal: step 'tag checks' failed for $tag at $SHA (the request-tag checks above name the failed one). Next step: fix that cause; a real request of this tag would be refused the same way."
+              failed+=("$app: checks")
+            fi
+            target="$RUNNER_TEMP/target-$app"
+            rm -rf "$target"
+            mkdir -p "$target"
+            git -c core.hooksPath=/dev/null archive "$SHA" | tar -x -C "$target"
+            git -c core.hooksPath=/dev/null -C "$target" init -q
+            git -c core.hooksPath=/dev/null -C "$target" fetch -q "$GITHUB_WORKSPACE" "$SHA:refs/remotes/origin/main"
+            if ! ./dev gates ratchet --root "$target" --release-tag "$tag" || ! ./dev check ipc-endpoints --root "$target" --tag "$tag"; then
+              echo "::error::tag rehearsal: step 'tag gates' failed for $tag. Next step: the lines above name the ratchet entry or endpoint; a real tag run would be blocked by it."
+              failed+=("$app: gates")
+            fi
+            echo "::endgroup::"
+          done
+          if [ "${#failed[@]}" -ne 0 ]; then
+            echo "::error::tag rehearsal: tag checks failed: ${failed[*]}"
+            exit 1
+          fi
+
+  # Dyno's release path as a tag runs it, with a throw-away key and nothing published. The `with:` block is the `release` job's of
+  # dyno-release.yml (a test compares them); NO secrets are passed, so the real updater key and RELEASE_TOKEN do not reach the run.
+  rehearse-dyno:
+    name: rehearse Dyno release
+    needs: [guard, tag-checks]
+    if: ${{ !cancelled() && needs.guard.result == 'success' && needs.guard.outputs.skip != 'true' }}
+    uses: ./.gitea/workflows/app-release.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      app-id: dyno
+      app-name: Dyno
+      app-dir: apps/dyno/app
+      cargo-dir: apps/dyno
+      tag-prefix: dyno-
+      latest-tag: dyno-latest
+      notes-extra: "**Existing installs:** download this version once by hand. Dyno now updates from the Paddock releases, which a copy installed before this version does not look at."
+      # Dyno's UI imports the shared library from ui/dist, which the app build (Tauri's beforeBuildCommand) needs.
+      prepare: npm run build -w ui
+      # The macOS helper is built, sealed and signed in tauri-bundle.sh's own step with the key; the app's beforeBuildCommand never sees it.
+      pre-sign: apps/dyno/app/src-tauri/scripts/sign-helper.mjs
+      cliff-config: apps/dyno/cliff.toml
+      # The first release had no earlier dyno-v* tag, and crates/** and ui/** reach back through the whole monorepo: its notes were
+      # the CHANGELOG's [1.0.0] section. Since 1.1.0 every release's notes are the CHANGELOG section of its version (the history
+      # behind a release is landing commits, which git-cliff cannot tell apart); notes-from-changelog keeps that after the first tag.
+      first-release-changelog: apps/dyno/CHANGELOG.md
+      notes-from-changelog: true
+      cliff-paths: |
+        apps/dyno/**
+        crates/**
+        ui/**
+      # Every sidecar (bundle.externalBin) is started from the built macOS app with --version, which exits 0 (the old
+      # macos-verify-bundle.sh ran the same); dyno-agent and the dyno command have no --self-test.
+      sidecars: |
+        dyno-agent:--version
+        dyno:--version
+        dyno-bench:--version
+        dyno-bench-gpu:--version
+        dyno-helper:--version
+      # Run paths of the packaged binaries, and the executables a package must carry, on Linux and macOS; on macOS the agent
+      # also measures once from the built app (read-only).
+      bundle-check: apps/dyno/scripts/check-bundle.sh
+      # dyno-agent.exe is a GUI-subsystem program (the login entry starts it without a command prompt window); the dyno command is a console one.
+      windows-bundle-check: node apps/dyno/scripts/check-pe-subsystem.mjs --dir
+      windows-pre-bundle: node scripts/stage-paddock-setup.mjs --app dyno
+      windows-installer-check: node conformance/release/check-per-machine-installer.mjs --conf apps/dyno/app/src-tauri/tauri.conf.json --dir
+      setup-node: false
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+      rehearsal: true
+
+  # Pitcrew's release path as a tag runs it, with a throw-away key and nothing published. The `with:` block is the `release` job's of
+  # pitcrew-release.yml (a test compares them); NO secrets are passed, so the real updater key and RELEASE_TOKEN do not reach the run.
+  rehearse-pitcrew:
+    name: rehearse Pitcrew release
+    needs: [guard, rehearse-dyno]
+    if: ${{ !cancelled() && needs.guard.result == 'success' && needs.guard.outputs.skip != 'true' }}
+    uses: ./.gitea/workflows/app-release.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      app-id: pitcrew
+      app-name: Pitcrew
+      app-dir: apps/pitcrew/app
+      cargo-dir: apps/pitcrew
+      tag-prefix: pitcrew-
+      latest-tag: pitcrew-latest
+      notes-extra: "**Existing installs:** download this version once by hand. Pitcrew now updates from the Paddock releases, which a copy installed before this version does not look at."
+      cliff-config: apps/pitcrew/cliff.toml
+      cliff-paths: |
+        apps/pitcrew/**
+        crates/**
+        ui/**
+      # --version: Pitcrew's service has no --self-test; its --version loads every library and exits 0.
+      sidecars: pitcrew-service:--version
+      setup-node: false
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+      rehearsal: true
+
+  # Pitwall's release path as a tag runs it, with a throw-away key and nothing published. The `with:` block is the `release` job's of
+  # pitwall-release.yml (a test compares them); NO secrets are passed, so the real updater key and RELEASE_TOKEN do not reach the run.
+  rehearse-pitwall:
+    name: rehearse Pitwall release
+    needs: [guard, rehearse-pitcrew]
+    if: ${{ !cancelled() && needs.guard.result == 'success' && needs.guard.outputs.skip != 'true' }}
+    uses: ./.gitea/workflows/app-release.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      app-id: pitwall
+      app-name: Pitwall
+      app-dir: apps/pitwall/app
+      cargo-dir: apps/pitwall
+      tag-prefix: pitwall-
+      latest-tag: pitwall-latest
+      notes-extra: "**Existing installs:** download this version once by hand. Pitwall now updates from the Paddock releases, which a copy installed before this version does not look at."
+      cliff-config: apps/pitwall/cliff.toml
+      cliff-paths: |
+        apps/pitwall/**
+        crates/**
+        ui/**
+      # --version: pitwall-server has no --self-test; its --version starts the binary from the built app and exits 0 (the old
+      # macos-verify-bundle.sh ran the same).
+      sidecars: pitwall-server:--version
+      # A per-machine app (ADR 0053): the installer embeds paddock-setup.exe, built with this app's identity and update key before the
+      # bundle, and the installer built is read as an artifact (administrator level, paddock-setup.exe inside, the include's version).
+      windows-pre-bundle: node scripts/stage-paddock-setup.mjs --app pitwall && node apps/pitwall/scripts/ci/stage-vc-redist.mjs
+      windows-installer-check: node conformance/release/check-per-machine-installer.mjs --conf apps/pitwall/app/src-tauri/tauri.conf.json --must-contain vc_redist.x64.exe --dir
+      setup-node: false
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+      rehearsal: true
+
+  # Spotter's release path as a tag runs it, with a throw-away key and nothing published. The `with:` block is the `release` job's of
+  # spotter-release.yml (a test compares them); NO secrets are passed, so the real updater key and RELEASE_TOKEN do not reach the run.
+  rehearse-spotter:
+    name: rehearse Spotter release
+    needs: [guard, rehearse-pitwall]
+    if: ${{ !cancelled() && needs.guard.result == 'success' && needs.guard.outputs.skip != 'true' }}
+    uses: ./.gitea/workflows/app-release.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      app-id: spotter
+      app-name: Spotter
+      app-dir: apps/spotter/app
+      cargo-dir: apps/spotter
+      tag-prefix: spotter-
+      latest-tag: spotter-latest
+      notes-extra: "**Existing installs:** download this version once by hand. Spotter now updates from the Paddock releases, which a copy installed before this version does not look at."
+      # Spotter's UI imports the shared library from ui/dist, which the app build needs.
+      prepare: npm run build -w ui
+      cliff-config: apps/spotter/cliff.toml
+      cliff-paths: |
+        apps/spotter/**
+        crates/**
+        ui/**
+      # Spotter bundles no sidecar (no bundle.externalBin), so the macOS verify has none to start; the seal, the hardened-runtime
+      # and TeamIdentifier checks on the .app and the DMG still run. A sidecar added later is read from tauri.conf.json.
+      setup-node: false
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+      rehearsal: true
+
+  # Red with the failed step named when any rehearsal step failed; a skipped (train) run is reported as skipped, never green.
+  verdict:
+    name: rehearsal verdict
+    needs: [guard, tag-checks, rehearse-dyno, rehearse-pitcrew, rehearse-pitwall, rehearse-spotter]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    steps:
+      - name: Verdict
+        shell: bash
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          printf '%s' "$NEEDS" > needs.json
+          node -e '
+            const needs = JSON.parse(require("fs").readFileSync("needs.json", "utf8"));
+            const bad = Object.entries(needs).filter(([, n]) => n.result === "failure" || n.result === "cancelled");
+            const skipped = needs.guard.outputs.skip === "true";
+            const lines = Object.entries(needs).map(([k, n]) => `| ${k} | ${n.result} |`);
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, ["## Tag rehearsal (nothing was tagged, released or published)", skipped ? "A train is in CI: the rehearsal was skipped, not measured." : "", "", "| Job | Result |", "| --- | --- |", ...lines, ""].join("\n"));
+            if (skipped) { console.log("::notice::tag rehearsal: skipped (a train is in CI); not measured, not green"); process.exit(0); }
+            if (bad.length) { console.log(`::error::tag rehearsal: failed step(s): ${bad.map(([k, n]) => `${k} (${n.result})`).join(", ")}. A real tag would fail the same way. Next step: open the named job and read its ::error:: line.`); process.exit(1); }
+            const notRun = Object.entries(needs).filter(([k, n]) => k !== "guard" && n.result !== "success");
+            if (notRun.length) { console.log(`::error::tag rehearsal: not run: ${notRun.map(([k, n]) => `${k} (${n.result})`).join(", ")}: not measured, so not a pass.`); process.exit(1); }
+          '

@@ -41,6 +41,8 @@ runs:
       run: |
         set -euo pipefail
         P="${{ github.action_path }}/../../../conformance"
+        # The tag rehearsal never publishes (tag-rehearsal.yml): refused before anything is read or sent.
+        [ "${PADDOCK_TAG_REHEARSAL:-}" != 1 ] || { echo "::error::publish-release was reached in a tag rehearsal (PADDOCK_TAG_REHEARSAL=1): nothing is published from a rehearsal. Next step: the rehearsal's release job is rehearse-release; fix the workflow that called this action."; exit 1; }
         tag="${{ github.ref_name }}"
         [[ "${{ github.ref }}" == "refs/tags/${PREFIX}v"* ]] || { echo "::error::releases are published from a ${PREFIX}v* tag only (rule 9)"; exit 1; }
         version="${tag#"$PREFIX"}"
