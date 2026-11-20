@@ -668,15 +668,12 @@ jobs:
           # The only_tests input narrows a failed shard to the `file:line` locations of its named tests (the plan job writes them into
           # the leg as `tests`): those run, without --shard (the shard split is of the whole set, not of the named tests).
           E2E_TESTS: ${{ matrix.tests }}
-          E2E_FULL: ${{ needs.plan.outputs.full }}
         run: |
-          project=()
-          if [ "$E2E_FULL" != true ]; then project=(--project=chromium); fi
           if [ -n "$E2E_TESTS" ]; then
             echo "::notice::Playwright runs only the named tests: $E2E_TESTS"
-            npx playwright test $E2E_TESTS ${project[@]+"${project[@]}"}
+            npx playwright test $E2E_TESTS ${{ needs.plan.outputs.full != 'true' && '--project=chromium' || '' }}
           else
-            npx playwright test --shard=${{ matrix.shard }}/4 ${project[@]+"${project[@]}"}
+            npx playwright test --shard=${{ matrix.shard }}/4 ${{ needs.plan.outputs.full != 'true' && '--project=chromium' || '' }}
           fi
 
       - name: Upload Playwright report
