@@ -306,11 +306,17 @@ mod tests {
                 .map(|p| SignatureInfo::Signed(format!("Signer of {}", p.display())))
                 .collect::<Vec<_>>()
         );
-        let again = assert_starts(at_most_or_none(0, "every file is cached"), || probe.signatures(&refs));
-        assert_eq!(again, got);
-        // A changed file is checked again; the others still come from the cache.
-        std::fs::write(&exes[1], b"a new version").unwrap();
-        assert_starts(1, || probe.signatures(&refs));
+        if cfg!(unix) {
+            let again = assert_starts(at_most_or_none(0, "every file is cached"), || probe.signatures(&refs));
+            assert_eq!(again, got);
+            // A changed file is checked again; the others still come from the cache.
+            std::fs::write(&exes[1], b"a new version").unwrap();
+            assert_starts(1, || probe.signatures(&refs));
+        } else {
+            // A file's identity is read on Unix only (`key_of`), so elsewhere nothing is cached: each look is one run again.
+            let again = assert_starts(1, || probe.signatures(&refs));
+            assert_eq!(again, got);
+        }
     }
 
     #[test]
@@ -324,7 +330,7 @@ mod tests {
         assert_eq!(got.len(), 5);
         assert!(matches!(&got[0], SignatureInfo::Signed(_)));
         assert_eq!(got[1], SignatureInfo::Unsigned);
-        assert!(matches!(&got[2], SignatureInfo::Signed(s) if s.ends_with("/c")));
+        assert_eq!(got[2], SignatureInfo::Signed(format!("Signer of {}", exes[2].display())));
         assert_eq!(got[4], got[0], "a file named twice is checked once");
     }
 
@@ -349,7 +355,10 @@ mod tests {
     #[test]
     fn files_that_cannot_be_keyed_are_checked_but_never_cached() {
         let probe = CachedSignatures::new(Box::new(CodesignLookup::new(Box::new(Scripted(codesign)))));
-        let gone = Path::new("/no/such/dyno-program");
+        // A full path to a file that does not exist (a full path on every OS: `/no/such` is not one on Windows).
+        let dir = paddock_testkit::private_tempdir().unwrap();
+        let gone_path = dir.path().join("dyno-program");
+        let gone = gone_path.as_path();
         assert_starts(1, || probe.signatures(&[gone]));
         assert_starts(1, || probe.signatures(&[gone]));
         assert!(probe.signatures(&[]).is_empty());
