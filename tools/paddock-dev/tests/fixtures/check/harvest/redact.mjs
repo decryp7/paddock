@@ -8,7 +8,7 @@
 //                                                  how many values it replaced; the recorded answer is left alone, since no
 //                                                  line or column moves (the Rust parity test, live_*_frozen, holds it to that)
 import { readFileSync, writeFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { isMain } from '../../../../../../conformance/src/util/is-main.mjs';
 
 // The token shapes the secret scan looks for in this repository's fixtures (gitleaks' rules of the same names).
 const SHAPES = [
@@ -32,7 +32,7 @@ export function redactSecrets(text) {
   return { text: out, count };
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isMain(import.meta.url)) {
   const [file] = process.argv.slice(2);
   if (!file) {
     console.error('usage: node redact.mjs <real-tree.json>');
