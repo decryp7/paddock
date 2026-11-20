@@ -30,7 +30,7 @@ report() {
   if [ "$(uname)" = "Darwin" ]; then check "Xcode Command Line Tools" "xcode-select -p"; fi
   echo "Environment:"
   if [ -n "${SCCACHE_DIR:-}" ]; then echo "  ok       SCCACHE_DIR=$SCCACHE_DIR"; else echo "  not set  SCCACHE_DIR (the cache then lands on the system disk)"; fi
-  if [ "${RUSTC_WRAPPER:-}" = "sccache" ]; then echo "  ok       RUSTC_WRAPPER=sccache"; else echo "  not set  RUSTC_WRAPPER=sccache"; fi
+  if [ "$(basename "${RUSTC_WRAPPER:-}")" = "sccache" ] && [ "$(basename "$(dirname "$RUSTC_WRAPPER")")" != "shim" ]; then echo "  wrong    RUSTC_WRAPPER=$RUSTC_WRAPPER (cc-rs wraps clang-cl in it and sccache cannot probe it: unset it; \`eval \"\$(./dev sccache env)\"\` sets the shim)"; fi
   if [ -n "${CARGO_BUILD_JOBS:-}" ]; then echo "  ok       CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS"; else echo "  not set  CARGO_BUILD_JOBS"; fi
 }
 
@@ -52,11 +52,10 @@ if $install && [ "${#missing[@]}" -gt 0 ]; then
   report
 fi
 
-if [ "${RUSTC_WRAPPER:-}" != "sccache" ] || [ -z "${CARGO_BUILD_JOBS:-}" ]; then
+if [ -z "${CARGO_BUILD_JOBS:-}" ]; then
   cat <<'EOF'
 
 Add to your shell profile (~/.zshenv on macOS), between builds:
-  export RUSTC_WRAPPER=sccache
   export SCCACHE_DIR=<dev-targets>/sccache   # the folder next to the worktrees; docs/dev-setup.md, "Where things live"
   export SCCACHE_CACHE_SIZE=60G
   export CARGO_BUILD_JOBS=2

@@ -15,7 +15,7 @@ const dir = mkdtempSync(join(tmpdir(), 'paddock-eslint-e2e-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
 
 /** Lints `files` ({ path: text }) with the e2e block over the TypeScript parser (and `extra` config blocks); returns "path:line rule". */
-async function lint(files, extra = [], ready = undefined) {
+async function lint(files, extra = [], ready = undefined, transient = 'warn') {
   for (const [p, text] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, p)), { recursive: true });
     writeFileSync(join(dir, p), text);
@@ -23,7 +23,7 @@ async function lint(files, extra = [], ready = undefined) {
   const eslint = new ESLint({
     cwd: dir,
     overrideConfigFile: true,
-    overrideConfig: defineConfig({ files: ['**/*.ts'], languageOptions: { parser: tseslint.parser } }, ...extra, ...e2ePinnedClock({ ready })),
+    overrideConfig: defineConfig({ files: ['**/*.ts'], languageOptions: { parser: tseslint.parser } }, ...extra, ...e2ePinnedClock({ ready, transient })),
   });
   const results = await eslint.lintFiles(Object.keys(files));
   lintResults = results;
@@ -213,4 +213,37 @@ test('e2e-ready-reads: evaluate and evaluateAll are reads only when their result
     ].join('\n'),
   });
   assert.deepEqual(readLines(found, 'e2e/eval.spec.ts'), [10, 12, 14], found.join(' | '));
+});
+
+const MENU = 'paddock/e2e-transient-wait';
+const menuLines = (found, file) => found.filter((m) => m.startsWith(`${file}:`) && m.endsWith(MENU)).map((m) => Number(m.split(' ')[0].split(':')[1]));
+
+test('e2e-transient-wait: a spec that finds a menu or a toast itself is reported; the helper file of that kind may (runs 8297, 8300)', async () => {
+  const found = await lint({
+    'e2e/menus.spec.ts': [
+      "import { expect, test } from './test';",
+      "test('a', async ({ page }) => {",
+      "  await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem').first().click();",
+      "  const m = page.getByRole('menu');",
+      "  const ok = page.getByRole('menubar');",
+      "  const item = page.getByRole('menuitem', { name: 'Copy' });",
+      "  await page.getByTestId('notification').filter({ hasText: 'Done' }).click();",
+      "  const n = page.getByTestId('notification-action-primary');",
+      "  const c = page.locator('[data-testid=notification][data-cause=\"x\"]');",
+      "  const m = page.locator('[role=menu] [role=menuitem]');",
+      "  const d = page.locator('[data-testid=notification-details]');",
+      '});',
+      '',
+    ].join('\n'),
+    'e2e/menu-support.ts': "export const menuNamed = (page) => page.getByRole('menu');\nexport const t = (page) => page.getByTestId('notification');\n",
+    'e2e/toast-support.ts': "export const toastNamed = (page) => page.getByTestId('notification');\n",
+  });
+  assert.deepEqual(menuLines(found, 'e2e/menus.spec.ts'), [3, 4, 7, 9, 10], found.join(' | '));
+  assert.deepEqual(menuLines(found, 'e2e/menu-support.ts'), [2], found.join(' | '));
+  assert.deepEqual(menuLines(found, 'e2e/toast-support.ts'), [], found.join(' | '));
+});
+
+test('e2e-transient-wait is off by default (report-only, ER-41)', async () => {
+  const found = await lint({ 'e2e/menu-off.spec.ts': "test('a', async ({ page }) => {\n  page.getByRole('menu');\n});\n" }, [], null, null);
+  assert.deepEqual(menuLines(found, 'e2e/menu-off.spec.ts'), []);
 });

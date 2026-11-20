@@ -1,0 +1,146 @@
+{
+ "app": "fixture",
+ "checks": [
+  "C130"
+ ],
+ "findings": [
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "a/tests/crlf.rs",
+   "line": 1,
+   "message": "a test plants a shell script as a fixture program: it cannot run on Windows and does not say what the real program prints",
+   "fix": "Install the testkit's stand-in instead: `paddock_testkit::StandIn::new(dir, \"name\").stdout(..).exit(..).records_args().install()?` (it runs on Windows and records its calls). A fixture that has to be a script carries `// conformance: stand-in — <why>`; an existing site is listed in conformance/c130-allow.json until it is converted."
+  },
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "tools/t/src/a.rs",
+   "line": 4,
+   "message": "a test plants a shell script as a fixture program: it cannot run on Windows and does not say what the real program prints",
+   "fix": "Install the testkit's stand-in instead: `paddock_testkit::StandIn::new(dir, \"name\").stdout(..).exit(..).records_args().install()?` (it runs on Windows and records its calls). A fixture that has to be a script carries `// conformance: stand-in — <why>`; an existing site is listed in conformance/c130-allow.json until it is converted."
+  },
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "tools/t/src/b.rs",
+   "line": 3,
+   "message": "a test plants a shell script as a fixture program: it cannot run on Windows and does not say what the real program prints",
+   "fix": "Install the testkit's stand-in instead: `paddock_testkit::StandIn::new(dir, \"name\").stdout(..).exit(..).records_args().install()?` (it runs on Windows and records its calls). A fixture that has to be a script carries `// conformance: stand-in — <why>`; an existing site is listed in conformance/c130-allow.json until it is converted."
+  },
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "tools/t/src/c.rs",
+   "line": 3,
+   "message": "a test plants a shell script as a fixture program: it cannot run on Windows and does not say what the real program prints",
+   "fix": "Install the testkit's stand-in instead: `paddock_testkit::StandIn::new(dir, \"name\").stdout(..).exit(..).records_args().install()?` (it runs on Windows and records its calls). A fixture that has to be a script carries `// conformance: stand-in — <why>`; an existing site is listed in conformance/c130-allow.json until it is converted."
+  },
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "tools/t/src/d_test.rs",
+   "line": 5,
+   "message": "a stand-in waiver beyond the count of its allow entry",
+   "fix": "Waivers are counted, so none is free: list it in conformance/c130-allow.json (path, site `conformance: stand-in`, a reason and the file's count), which the user approves, or convert the fixture to `StandIn`."
+  },
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "tools/t/src/d_test.rs",
+   "line": 7,
+   "message": "a test plants a shell script as a fixture program: it cannot run on Windows and does not say what the real program prints",
+   "fix": "Install the testkit's stand-in instead: `paddock_testkit::StandIn::new(dir, \"name\").stdout(..).exit(..).records_args().install()?` (it runs on Windows and records its calls). A fixture that has to be a script carries `// conformance: stand-in — <why>`; an existing site is listed in conformance/c130-allow.json until it is converted."
+  },
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "tools/t/src/e_test.rs",
+   "line": 1,
+   "message": "a test plants a shell script as a fixture program: it cannot run on Windows and does not say what the real program prints",
+   "fix": "Install the testkit's stand-in instead: `paddock_testkit::StandIn::new(dir, \"name\").stdout(..).exit(..).records_args().install()?` (it runs on Windows and records its calls). A fixture that has to be a script carries `// conformance: stand-in — <why>`; an existing site is listed in conformance/c130-allow.json until it is converted."
+  },
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "tools/t/src/e_test.rs",
+   "line": 2,
+   "message": "a stand-in waiver the allow list does not name",
+   "fix": "Waivers are counted, so none is free: list it in conformance/c130-allow.json (path, site `conformance: stand-in`, a reason and the file's count), which the user approves, or convert the fixture to `StandIn`."
+  },
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "tools/t/src/e_test.rs",
+   "line": 3,
+   "message": "a stand-in waiver the allow list does not name",
+   "fix": "Waivers are counted, so none is free: list it in conformance/c130-allow.json (path, site `conformance: stand-in`, a reason and the file's count), which the user approves, or convert the fixture to `StandIn`."
+  },
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "tools/t/src/fake.rs",
+   "line": 2,
+   "message": "a test plants a shell script as a fixture program: it cannot run on Windows and does not say what the real program prints",
+   "fix": "Install the testkit's stand-in instead: `paddock_testkit::StandIn::new(dir, \"name\").stdout(..).exit(..).records_args().install()?` (it runs on Windows and records its calls). A fixture that has to be a script carries `// conformance: stand-in — <why>`; an existing site is listed in conformance/c130-allow.json until it is converted."
+  },
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "tools/t/src/tests.rs",
+   "line": 1,
+   "message": "a test plants a shell script as a fixture program: it cannot run on Windows and does not say what the real program prints",
+   "fix": "Install the testkit's stand-in instead: `paddock_testkit::StandIn::new(dir, \"name\").stdout(..).exit(..).records_args().install()?` (it runs on Windows and records its calls). A fixture that has to be a script carries `// conformance: stand-in — <why>`; an existing site is listed in conformance/c130-allow.json until it is converted."
+  },
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "tools/t/src/tests.rs",
+   "line": 2,
+   "message": "a test plants a shell script as a fixture program: it cannot run on Windows and does not say what the real program prints",
+   "fix": "Install the testkit's stand-in instead: `paddock_testkit::StandIn::new(dir, \"name\").stdout(..).exit(..).records_args().install()?` (it runs on Windows and records its calls). A fixture that has to be a script carries `// conformance: stand-in — <why>`; an existing site is listed in conformance/c130-allow.json until it is converted."
+  },
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "tools/t/tests/it/bad.rs",
+   "line": 2,
+   "message": "a test plants a shell script as a fixture program: it cannot run on Windows and does not say what the real program prints",
+   "fix": "Install the testkit's stand-in instead: `paddock_testkit::StandIn::new(dir, \"name\").stdout(..).exit(..).records_args().install()?` (it runs on Windows and records its calls). A fixture that has to be a script carries `// conformance: stand-in — <why>`; an existing site is listed in conformance/c130-allow.json until it is converted."
+  },
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "tools/t/tests/it/ok.rs",
+   "line": 3,
+   "message": "writes another shell fixture beyond the count of its allow entry",
+   "fix": "Install the testkit's stand-in instead (`paddock_testkit::StandIn`), or raise the entry's `count` in conformance/c130-allow.json only for a site that has to stay a script."
+  },
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "conformance/c130-allow.json",
+   "line": 1,
+   "message": "stale allow entry (tools/t/tests/it/gone.rs: #!/bin/sh) matches no site",
+   "fix": "Remove it from conformance/c130-allow.json."
+  }
+ ],
+ "waived": [],
+ "errors": 0,
+ "warnings": 15
+}

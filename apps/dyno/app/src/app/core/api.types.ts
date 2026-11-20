@@ -883,6 +883,8 @@ export interface Settings {
   maintenance: MaintenanceSettings;
   /** Power: keep awake (ADR 0032). */
   power: PowerSettings;
+  /** Counts the changes made through saveSettings and the alert-rule requests; a save carrying an older one is refused as `stale`. */
+  revision: number;
 }
 
 export interface PluginInfo {

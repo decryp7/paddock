@@ -19,13 +19,17 @@
 #      Without the runner.envs, the runner class's known layout (verified 2026-10-30 from Gitea's job list: the most jobs
 #      one runner ran at once over the last 100 runs):
 #                 jobs/host  cores kept  RAM kept
-#        Linux    -          -           -        d-gtr9, capacity 4, 16 cores, 128 GB, containers without a CPU limit.
-#                                                 Left unset, as before (cargo: every core, per job), until a measured
-#                                                 A/B of job durations decides the share (docs/benchmarks.md, Gaps).
+#        Linux    6          0           2 GB     d-gtr9, a Proxmox LXC raised to 30 CPUs and 64 GiB on 2026-11-20, runner
+#                                                 capacity 6, containers without a CPU limit: 30 / 6 = 5 build jobs and 5
+#                                                 test threads. Cause and measurement: with no share each of the 6 jobs
+#                                                 used all 30 cores and the Linux jobs ran 1.2 to 1.7 times slower than at
+#                                                 3 lanes (runs 8335 against 8346; Linux compile in ci.yml 9.4 -> 17.6
+#                                                 job-min; docs/benchmarks.md, "CI job cost, step by step"). The 6 and the
+#                                                 30 must match the runner (a host with other cores gets a ::warning::).
 #        Windows  3          0           2 GB     decryp7ology-dev, a Proxmox VM resized to 16 vCPU and 32 GB, runner
 #                                                 capacity 3 (2026-11-09): 16 / 3 = 5 build jobs by cores, (32768 - 2048)
-#                                                 / (3 x 1536) = 6 by RAM, so 5, and 8 test threads (measured
-#                                                 on macOS, not yet on Windows: docs/benchmarks.md, Gaps). The 3 must match the runner's `capacity` until the ADR 0074
+#                                                 / (3 x 1536) = 6 by RAM, so 5, and 5 test threads (the core
+#                                                 share, not 3 x 8: that oversubscribed the 16 vCPUs, runs 8335 vs 8359). The 3 must match the runner's `capacity` until the ADR 0074
 #                                                 host inventory replaces this table; the runner's runner.envs need no
 #                                                 repo setting, and PADDOCK_CI_JOBS_PER_HOST still overrides it. On the
 #                                                 old 8-core, 16 GB host: 2 build jobs and 2 test threads.
@@ -41,10 +45,9 @@
 #
 # NEXTEST_TEST_THREADS, written with CARGO_BUILD_JOBS and divided by <split>: a runner's PADDOCK_CI_TEST_THREADS
 # (runner.envs), else the class's measured number (macOS 8: the tests mostly wait, so the 4 cores of the share made a dyno
-# run 2.3 times longer than 14 threads, and 8 matched 14; Windows 8 is taken from it, its A/B is open; docs/benchmarks.md, "CI share on the shared Mac"), else the job's
+# run 2.3 times longer than 14 threads, and 8 matched 14; Windows has no measured number and takes the job's core share (3 jobs x 8 threads oversubscribed its 16 vCPUs, runs 8335 against 8359); docs/benchmarks.md, "CI share on the shared Mac"), else the job's
 # core share ((cores - kept) / jobs per host, not capped by RAM: that ceiling is per rustc; PADDOCK_CI_BUILD_JOBS stands in
 # for it). Left unset where CARGO_BUILD_JOBS is (nextest then runs the profile's num-cpus).
-#      A Linux runner that sets PADDOCK_CI_JOBS_PER_HOST gets the formula (0 cores and 2 GB kept unless set).
 #
 # Cores: nproc (Linux and Git Bash; honours the container's cpuset), else sysctl hw.ncpu (macOS), else NUMBER_OF_PROCESSORS,
 # else getconf. RAM: the cgroup's memory.max when it is a number, else /proc/meminfo (Linux and Git Bash), else sysctl
@@ -99,7 +102,7 @@ ram_mb() {
   echo ""
 }
 
-# <variable> <class default>: the runner's value, else the default; "-" means the class leaves CARGO_BUILD_JOBS unset.
+# <variable> <class default>: the runner's value, else the default.
 setting() {
   local v
   eval "v=\${$1:-}"
@@ -107,10 +110,15 @@ setting() {
 }
 class_default() { # <share|cores|ram>
   case "${RUNNER_OS:-}:$1" in
-    Linux:share) echo - ;;
+    Linux:share) echo 6 ;;
+    Linux:doc_cores) echo 30 ;;
+    Windows:doc_cores) echo 16 ;;
+    macOS:doc_cores) echo 14 ;;
+    *:doc_cores) echo - ;;
     Windows:share) echo 3 ;;
+    # ER-48 exception, measured: 3 jobs x 8 threads on 12 usable cores. The tests mostly wait; 4 threads made a dyno run 2.3 times
+    # longer than 14 and 8 matched 14 (2026-11-09, docs/benchmarks.md, "CI share on the shared Mac").
     macOS:threads) echo 8 ;;
-    Windows:threads) echo 8 ;;
     macOS:share) echo 3 ;;
     macOS:cores) echo 2 ;;
     macOS:ram) echo 32768 ;;
@@ -167,18 +175,6 @@ else
   share_src="the ${RUNNER_OS:-unknown} class default of $share jobs per host"
   [ "${RUNNER_OS:-}" != Windows ] || echo "::notice::build-jobs assumes the Windows runner's capacity is $share (the class default); set PADDOCK_CI_JOBS_PER_HOST or fix build-jobs.sh if it differs"
 fi
-if [ "$share" = - ]; then
-  # Linux keeps cargo's default (every core per job) until its share is measured. A split job (cargo mutants)
-  # still divides the cores between its builds.
-  if [ "$split" -gt 1 ] && is_count "$n"; then
-    jobs=$((n / split))
-    [ "$jobs" -ge 1 ] || jobs=1
-    emit "$jobs" "$n cores / $split builds at once; otherwise the runner class keeps cargo's default"
-  else
-    say "CARGO_BUILD_JOBS stays unset: cargo uses all ${n:-its} cores, as before (this runner class's share is not measured yet)"
-  fi
-  exit 0
-fi
 is_count "$share" || fail "PADDOCK_CI_JOBS_PER_HOST must be a whole number >= 1, not '$share'"
 reserved=$(setting PADDOCK_CI_RESERVED_CORES "$(class_default cores)")
 is_amount "$reserved" || fail "PADDOCK_CI_RESERVED_CORES must be a whole number >= 0 without leading zeros, not '$reserved'"
@@ -191,6 +187,10 @@ if ! is_count "$n"; then
   # Unknown cores: leave cargo's own default and say so; never fail a build over this.
   echo "::warning::could not count this host's cores; CARGO_BUILD_JOBS stays unset (cargo uses every core it sees)"
   exit 0
+fi
+doc_cores=$(class_default doc_cores)
+if [ -z "${PADDOCK_CI_JOBS_PER_HOST:-}" ] && [ "$doc_cores" != - ] && [ "$n" -ne "$doc_cores" ]; then
+  echo "::warning::build-jobs: the ${RUNNER_OS} layout documents $doc_cores cores, this host has $n; the share follows the real cores, but update the ${RUNNER_OS} layout in ci_build_jobs.rs and .gitea/actions/README.md to the runner's new capacity"
 fi
 if [ "$reserved" -ge "$n" ]; then
   echo "::warning::PADDOCK_CI_RESERVED_CORES ($reserved) keeps all of this host's $n cores; the job gets 1 build job"

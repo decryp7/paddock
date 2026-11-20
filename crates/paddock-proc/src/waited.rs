@@ -31,10 +31,23 @@ pub fn run_waited(cmd: Command, timeout: Duration, sink: Sink) -> Result<Outcome
 /// [`run_waited`] that also ends the tree, by identity, when `cancel` is set (a person's Ctrl+C, a total time budget of the
 /// caller): the outcome is then [`Outcome::TimedOut`] and the second value is `true`. The flag is looked at every 100 ms.
 pub fn run_waited_cancellable(
+    cmd: Command,
+    timeout: Duration,
+    sink: Sink,
+    cancel: &AtomicBool,
+) -> Result<(Outcome, bool), RunError> {
+    run_waited_noting(cmd, timeout, sink, cancel, &|_| {})
+}
+
+/// [`run_waited_cancellable`] that tells `note` who the program is as soon as it has started: its identity (pid and start time,
+/// `None` when the start time could not be read), taken before the child can be reaped. A watcher of the run (a hang detector)
+/// reads the tree's CPU time through it and ends the tree through [`crate::kill_tree`], never by a bare pid (rule 53).
+pub fn run_waited_noting(
     mut cmd: Command,
     timeout: Duration,
     sink: Sink,
     cancel: &AtomicBool,
+    note: &dyn Fn(Option<ProcessId>),
 ) -> Result<(Outcome, bool), RunError> {
     let name = program_name(&cmd);
     cmd.stdin(Stdio::null());
@@ -53,6 +66,7 @@ pub fn run_waited_cancellable(
     })?;
     // Taken before the waiter can reap the child, so a timeout ends this tree and never a successor of its pid.
     let root = ProcessId::of(child.id());
+    note(root);
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         // silent: the receiver is gone once the run has ended, and nothing waits for the event then
@@ -127,6 +141,29 @@ mod waited_tests {
             Sink::Inherit,
         );
         assert!(matches!(missing, Err(RunError::NotFound(_))), "{missing:?}");
+    }
+
+    /// The run tells its watcher who the program is as soon as it starts: the identity a watcher reads CPU time from and ends the tree
+    /// through (rule 53). A run that is not noted by anyone behaves as before.
+    #[test]
+    fn a_noting_run_tells_the_identity_of_its_program_while_it_runs() {
+        let noted = std::sync::Mutex::new(None);
+        let mut cmd = command("sh");
+        cmd.args(["-c", "exit 0"]);
+        let note = |id: Option<ProcessId>| *noted.lock().unwrap() = id;
+        let (outcome, cancelled) = run_waited_noting(
+            cmd,
+            Duration::from_secs(30),
+            Sink::Inherit,
+            &AtomicBool::new(false),
+            &note,
+        )
+        .unwrap();
+        assert!(matches!(outcome, Outcome::Exited(s) if s.success()) && !cancelled);
+        assert!(
+            noted.lock().unwrap().is_some(),
+            "the identity was handed to the note"
+        );
     }
 
     #[test]

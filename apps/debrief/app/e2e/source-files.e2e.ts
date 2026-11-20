@@ -1,14 +1,13 @@
 import { expect, test } from './test';
 import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
-import { chooseMenu, menuItem } from './menu-support';
+import { anchoredMenu, chooseMenu, contextMenu, menuItem } from './menu-support';
 
 test.describe('source files and colours', () => {
   test.beforeEach(async ({ page }) => openApp(page));
 
   test('a row menu opens the event file at its line or shows it in its folder', async ({ page }, testInfo) => {
-    await gridRows(page).first().click({ button: 'right' });
-    const menu = page.getByRole('menu', { name: 'Actions' });
+    const menu = await contextMenu(page, gridRows(page).first());
     await expect(menuItem(menu, 'Open file')).toBeEnabled();
     await expect(menuItem(menu, /^Open at line \d+$/)).toBeEnabled();
     await expect(menuItem(menu, 'Show in folder')).toBeEnabled();
@@ -24,7 +23,7 @@ test.describe('source files and colours', () => {
     await expect(row.locator('debrief-source-swatch')).toHaveAttribute('title', /^File: /);
     await row.hover();
     await row.getByRole('button', { name: /^Actions for / }).click();
-    const menu = page.getByRole('menu', { name: 'Actions' });
+    const menu = await anchoredMenu(page, row.getByRole('button', { name: /^Actions for / }), 'Actions');
     await expect(menuItem(menu, 'Show in folder')).toBeVisible();
     await expect(menuItem(menu, 'Open file')).toBeVisible();
     await page.keyboard.press('Escape');

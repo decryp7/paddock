@@ -249,7 +249,14 @@ fn turning_the_feature_off_refuses_starts_and_ends_a_hold() {
         panic!()
     };
     s.power.keep_awake.enabled = false;
-    ask(&c, Request::SaveSettings { settings: s }).unwrap();
+    ask(
+        &c,
+        Request::SaveSettings {
+            settings: s,
+            base_revision: None,
+        },
+    )
+    .unwrap();
     assert_eq!(h.os.live(), 0);
     assert!(matches!(power(ask(&c, Request::PowerState).unwrap()).awake, AwakeView::Off));
     let e = ask(&c, Request::PowerKeepAwake { spec: indefinite() }).unwrap_err();
@@ -358,7 +365,14 @@ fn the_energy_report_starts_with_the_agents_own_start_and_prices_only_the_number
     };
     s.power.energy.watts_on = Some(60.0);
     s.power.energy.tariff_per_kwh = Some(0.3);
-    ask(&c, Request::SaveSettings { settings: s }).unwrap();
+    ask(
+        &c,
+        Request::SaveSettings {
+            settings: s,
+            base_revision: None,
+        },
+    )
+    .unwrap();
     let priced = energy(&c, 1);
     assert_eq!(priced.source, dyno_core::power::energy::EnergySource::Estimated);
     assert!(priced.totals.kwh.is_some() && priced.totals.cost.is_some() && priced.totals.co2_kg.is_none());
@@ -372,7 +386,14 @@ fn nothing_is_noted_when_the_energy_log_is_off() {
         panic!()
     };
     s.power.energy.enabled = false;
-    ask(&c, Request::SaveSettings { settings: s }).unwrap();
+    ask(
+        &c,
+        Request::SaveSettings {
+            settings: s,
+            base_revision: None,
+        },
+    )
+    .unwrap();
     let r = energy(&c, 1);
     assert!(!r.enabled);
     // An OS event while it is off adds nothing; the report asks the store, so a note would show as "tracking since".
@@ -424,7 +445,14 @@ impl Harness {
         s.power.idle.after_secs = 60;
         s.power.idle.countdown_secs = 30;
         f(&mut s.power.idle);
-        ask(&c, Request::SaveSettings { settings: s }).unwrap();
+        ask(
+            &c,
+            Request::SaveSettings {
+                settings: s,
+                base_revision: None,
+            },
+        )
+        .unwrap();
         self.wait_sampled();
     }
 }
@@ -570,7 +598,14 @@ fn a_timed_action_warns_then_asks_once_and_a_once_entry_is_done() {
         last_day: None,
         done: false,
     }];
-    ask(&c, Request::SaveSettings { settings: s }).unwrap();
+    ask(
+        &c,
+        Request::SaveSettings {
+            settings: s,
+            base_revision: None,
+        },
+    )
+    .unwrap();
     h.fake.with(|s| s.idle_secs = Some(1));
     let IdleView::Countdown { action, cause, .. } = h.tick(1_000) else {
         panic!("no countdown")
@@ -594,7 +629,14 @@ fn a_timed_action_warns_then_asks_once_and_a_once_entry_is_done() {
     let mut stale = (*after).clone();
     stale.power.timed.entries[0].done = false;
     stale.power.timed.entries[0].last_day = None;
-    ask(&c, Request::SaveSettings { settings: Box::new(stale) }).unwrap();
+    ask(
+        &c,
+        Request::SaveSettings {
+            settings: Box::new(stale),
+            base_revision: None,
+        },
+    )
+    .unwrap();
     let Reply::Settings(kept) = ask(&c, Request::Settings).unwrap() else {
         panic!()
     };
@@ -619,7 +661,14 @@ fn snoozing_a_timed_countdown_delays_the_action_and_a_once_entry_still_runs() {
         last_day: None,
         done: false,
     }];
-    ask(&c, Request::SaveSettings { settings: s }).unwrap();
+    ask(
+        &c,
+        Request::SaveSettings {
+            settings: s,
+            base_revision: None,
+        },
+    )
+    .unwrap();
     h.fake.with(|s| s.idle_secs = Some(1));
     assert!(matches!(h.tick(1_000), IdleView::Countdown { cause: Cause::Timed, .. }));
     let v = power(ask(&c, Request::PowerIdleSnooze { minutes: 30 }).unwrap());
@@ -666,7 +715,14 @@ fn cancelling_a_snoozed_timed_action_ends_it_for_today() {
         last_day: None,
         done: false,
     }];
-    ask(&c, Request::SaveSettings { settings: s }).unwrap();
+    ask(
+        &c,
+        Request::SaveSettings {
+            settings: s,
+            base_revision: None,
+        },
+    )
+    .unwrap();
     h.fake.with(|s| s.idle_secs = Some(1));
     assert!(matches!(h.tick(1_000), IdleView::Countdown { .. }));
     ask(&c, Request::PowerIdleSnooze { minutes: 5 }).unwrap();
@@ -690,7 +746,14 @@ fn invalid_timed_settings_are_refused_with_what_to_fix() {
         last_day: None,
         done: false,
     }];
-    let e = ask(&c, Request::SaveSettings { settings: s }).unwrap_err();
+    let e = ask(
+        &c,
+        Request::SaveSettings {
+            settings: s,
+            base_revision: None,
+        },
+    )
+    .unwrap_err();
     assert!(e.contains("00:00"), "{e}");
 }
 
@@ -714,7 +777,14 @@ fn the_idle_view_never_reports_a_rule_that_is_switched_off_even_while_timed_acti
         last_day: None,
         done: true,
     }];
-    ask(&c, Request::SaveSettings { settings: s }).unwrap();
+    ask(
+        &c,
+        Request::SaveSettings {
+            settings: s,
+            base_revision: None,
+        },
+    )
+    .unwrap();
     h.fake.with(|s| s.idle_secs = Some(100_000));
     h.signals.set(|r| r.audio = dyno_core::metrics::Reading::Available(true));
     for ms in [1_000, 120_000] {

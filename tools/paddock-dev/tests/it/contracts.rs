@@ -639,3 +639,56 @@ fn no_workflow_runs_on_a_pull_request() {
         "these workflows run on pull requests, which the ledger opens for every branch: {found:?}"
     );
 }
+
+/// Pair P3 (ADR 0022 amendment 2026-11-19): the checks only the Rust host has run in the `paddock` phase of conformance's contract
+/// through `./dev conformance`, and that phase is the conformance job's: a retired side takes its trigger with it (the JS runner ran them
+/// on every plan), so each input a check reads, every file of its control tree, must mark the conformance job in the plan. The plan has
+/// the job in every plan ("conformance always runs", user 2026-11-12); this test says so for these inputs and fails when that rule is
+/// narrowed without them.
+#[test]
+fn the_checks_the_rust_host_runs_in_ci_are_in_the_plan_for_every_input_they_read() {
+    let root = root();
+    let lines = paddock_dev::ci_run::contract::phase_lines(
+        &paddock_dev::ci_run::contract::load(&root, "conformance").unwrap(),
+        "conformance",
+        "paddock",
+    )
+    .unwrap();
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("./dev conformance ") && l.contains("$PADDOCK_CONFORMANCE_RUST_ARGS")),
+        "the paddock phase runs the Rust host: {lines:?}"
+    );
+    let args = paddock_dev::ci_run::contract::conformance_rust_args_at(&root).unwrap();
+    let ids: Vec<&str> = args[args.iter().position(|a| a == "--only").unwrap() + 1].split(',').collect();
+    assert!(ids.len() >= 12, "the 12 checks of pair P3: {ids:?}");
+    // An empty graph: no `cargo metadata` (this test runs in the conformance job), and the conformance job does not depend on it.
+    let graph = paddock_dev::plan::RepoGraph {
+        cargo: paddock_repo_graph::Graph::new(),
+        npm: paddock_repo_graph::Graph::new(),
+        apps: BTreeSet::new(),
+        configs: Default::default(),
+    };
+    let registry = paddock_dev::check::registry();
+    let mut inputs = BTreeSet::new();
+    for id in &ids {
+        let check = registry
+            .iter()
+            .find(|c| c.id() == *id)
+            .unwrap_or_else(|| panic!("{id} is in `conformance.rust` and not in the Rust registry"));
+        inputs.extend(check.control().files.iter().map(|(p, _)| (*p).to_string()));
+    }
+    assert!(inputs.len() >= 20, "the controls name the inputs the checks read: {inputs:?}");
+    for path in &inputs {
+        let opts = paddock_dev::plan::Options {
+            explain: true,
+            ..Default::default()
+        };
+        let plan = paddock_dev::plan::affected(std::slice::from_ref(path), &graph, &opts).unwrap();
+        assert_eq!(
+            plan["conformance"], true,
+            "a change to {path} (read by a check of the Rust host) must run the conformance job"
+        );
+    }
+}

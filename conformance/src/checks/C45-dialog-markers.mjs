@@ -6,7 +6,7 @@
 // tests (`tests/`, `tests.rs`), benches, and every `#[cfg(test)]` item (a module or a single `use`; code after it still counts).
 import { error } from '../finding.mjs';
 import { withoutTestItems } from '../util/rust-test-items.mjs';
-import { maskRust } from './C39-freed-port.mjs';
+import { maskRust } from '../util/mask-rust.mjs';
 
 const CALL = /\b__(?:command|prefix)\s*\(/g;
 const HOME = 'crates/paddock-commands/';

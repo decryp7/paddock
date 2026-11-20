@@ -15,7 +15,7 @@
 //! A justified case carries `conformance: test-env — <why>` on the line or above. JavaScript tests are not judged. Report-only for now
 //! (ER-41).
 //!
-//! The port of `conformance/src/checks/C123-test-process-builder.mjs`, finding for finding (`tests/it/check_c123.rs` compares them).
+//! The JavaScript check (`conformance/src/checks/C123-*.mjs`) was the original; it was retired with pair P3 (ADR 0022 amendment 2026-11-19) and the Rust host is the only one. The answers it gave are recorded in `tests/fixtures/check/recorded` and `units` and ``tests/it/check_c123.rs`` holds the check to them.
 
 use super::finding::Finding;
 use super::jsre::rx;

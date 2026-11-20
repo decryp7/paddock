@@ -68,6 +68,15 @@ test('C104 named mechanisms: a missing ./dev command, hook, script or C-number i
   assert.deepEqual(await findingsOf('C104', ok, { options: nogit }), []);
 });
 
+test('C104 knows the checks only the Rust host has: an id in conformance.rust exists, one in no list does not (pair P3)', async () => {
+  const files = { ...base, 'AGENTS.md': 'The `./dev conformance` runs C39 and C77.\n', 'tools/paddock-dev/src/cli.rs': 'enum Command {\n    Conformance(x),\n}\n', 'conformance/src/checks/C99-x.mjs': '//\n' };
+  const withList = makeApp({ ...files, 'conformance/paddock.ci.json': JSON.stringify({ conformance: { rust: ['C39'] } }) });
+  const f = await findingsOf('C104', withList, { options: nogit });
+  assert.deepEqual(f.map((x) => x.message.match(/`([^`]+)` is named/)?.[1]), ['C77'], 'C39 is in conformance.rust; C77 is in no list');
+  const without = makeApp(files);
+  assert.deepEqual((await findingsOf('C104', without, { options: nogit })).map((x) => x.message.match(/`([^`]+)` is named/)?.[1]), ['C39', 'C77'], 'the control: without the list C39 is missing');
+});
+
 test('C104 named mechanisms: baselined misses pass, an entry the merge base lacks is an error', async () => {
   const files = { ...base, 'AGENTS.md': 'Use `scripts/gone.sh`.\n', 'conformance/baselines/C104.json': JSON.stringify({ mentions: [{ file: 'AGENTS.md', target: 'scripts/gone.sh' }] }) };
   const at = (j) => ({ options: { git: (a) => (a[0] === 'show' ? JSON.stringify(j) : 'x') } });

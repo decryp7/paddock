@@ -51,7 +51,7 @@ pub fn handle(link: &AgentLink, shell: &Shell, window: &str, request: Request) -
         std::time::Instant::now(),
     );
     let saved_keys = match (&action, &request) {
-        (Some(_), Request::SaveSettings { settings }) => {
+        (Some(_), Request::SaveSettings { settings, .. }) => {
             crate::breadcrumb::settings_saved(serde_json::to_value(settings).unwrap_or_default())
         }
         _ => Vec::new(),

@@ -17,6 +17,12 @@ async function openTray(page: Page, scenario: 'demo' | 'empty' | 'worst' | 'down
     await expect(popup.locator('[aria-busy="true"]')).toHaveCount(0);
   }
   await page.evaluate(async () => document.fonts.ready);
+  // The popover slides in (`pd-tray-in`, a translateY): a box read during it sits at a fractional offset, and its height carries the
+  // transform's float error (80.50000762939453 for 80.5, Linux WebKit, run 8315). Wait until the entry animation has ended (an ended
+  // one is no longer listed; endless ones, the skeleton shimmer, are inside the widgets, not on the popover).
+  await popup.evaluate(async (el) => {
+    await Promise.all(el.getAnimations().filter((a) => a.effect?.getComputedTiming().endTime !== Infinity).map((a) => a.finished));
+  });
   return popup;
 }
 
@@ -114,8 +120,9 @@ test.describe('the tray popup', () => {
     const heights = async (scenario: 'demo' | 'loading') => {
       const popup = await openTray(page, scenario);
       await expect(popup.locator('section.pd-w')).toHaveCount(4);
-      const read = () => popup.locator('section.pd-w').evaluateAll((s) => s.map((e) => [e.querySelector('.pd-w-title')?.textContent?.trim(), Math.round(e.getBoundingClientRect().height)]));
-      // A layout read counts only when two reads agree (ER-12): Linux WebKit read Activity 1 px short once, mid-layout (run 8212).
+      // The heights as laid out, not rounded: Activity is 80.5 px tall, so rounding turned a 1e-5 px difference into 1 px (runs 8212, 8315).
+      const read = () => popup.locator('section.pd-w').evaluateAll((s) => s.map((e) => [e.querySelector('.pd-w-title')?.textContent?.trim(), e.getBoundingClientRect().height]));
+      // A layout read counts only when two reads agree (ER-12).
       let last = await read();
       await expect
         .poll(async () => {

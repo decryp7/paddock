@@ -1,8 +1,8 @@
-//! C130 (Rust tests install the testkit stand-in, not a `#!/bin/sh` fixture): the Rust host against its JavaScript port, on a fixture
+//! C130 (Rust tests install the testkit stand-in, not a `#!/bin/sh` fixture): the Rust host against the answers the JavaScript check gave (recorded in `tests/fixtures/check/recorded`; the JS module is retired, pair P3), on a fixture
 //! tree and on this working tree. The check's own test file: C130 does not read it (its `IMPLEMENTATION`), so the invented lines below
 //! need no allow entry.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{has_node, node, repo_root, skip};
+use super::check::repo_root;
 use paddock_dev::check::{RunOptions, registry, run_checks};
 use serde_json::{Value, json};
 use std::path::Path;
@@ -35,6 +35,8 @@ fn c130_tree() -> tempfile::TempDir {
             "tools/t/src/e_test.rs",
             "let a = \"#!/bin/sh\\n\"; // conformance: stand-in \u{2014} ab\r\nlet b = \"#!/bin/sh\\n\"; // conformance: stand-in \u{2014} \u{1F600}a\r\nlet c = \"#!/bin/sh\\n\"; // conformance: stand-in \u{2014} \u{1F600}\r\n".to_string(),
         ),
+        // A test-support file outside tests/ and with no cfg(test): it writes programs, so its shebang is a fixture.
+        ("tools/t/src/fake.rs", "fn install(p: &Path) {\n    paddock_testkit::exe::write_program(p, \"#!/bin/sh\\nexit 0\\n\").unwrap();\n}\n".to_string()),
         ("tools/t/tests/fixtures/f.rs", SH.to_string()),
         ("tools/t/tests/it/script.sh", "#!/bin/sh\necho hi\n".to_string()),
         ("a/tests/crlf.rs", "let a = \"#!/bin/sh\\n\";\r\nlet b = 1;\r\n".to_string()),
@@ -46,14 +48,6 @@ fn c130_tree() -> tempfile::TempDir {
     }
     d
 }
-
-const JS_RUN_C130: &str = r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C130'], options: {} });
-process.stdout.write(JSON.stringify(r));
-"#;
 
 fn c130_options(root: &Path, app: &str) -> RunOptions {
     RunOptions {
@@ -85,6 +79,7 @@ fn c130_flags_the_shapes_it_names_and_only_as_warnings() {
             ("tools/t/src/e_test.rs".to_string(), 1),
             ("tools/t/src/e_test.rs".to_string(), 2),
             ("tools/t/src/e_test.rs".to_string(), 3),
+            ("tools/t/src/fake.rs".to_string(), 2),
             ("tools/t/src/tests.rs".to_string(), 1),
             ("tools/t/src/tests.rs".to_string(), 2),
             ("tools/t/tests/it/bad.rs".to_string(), 2),
@@ -95,7 +90,7 @@ fn c130_flags_the_shapes_it_names_and_only_as_warnings() {
     );
     assert!(r.findings.iter().any(|f| f.message.contains("beyond the count of its allow entry")));
     assert_eq!(r.errors(), 0, "report-only until its first green run (ER-41)");
-    assert_eq!(r.warnings(), 14);
+    assert_eq!(r.warnings(), 15);
     assert!(
         r.findings.iter().any(|f| f.file == "tools/t/src/d_test.rs"
             && f.line == 5
@@ -126,22 +121,14 @@ fn c130_without_its_allow_list_cannot_look() {
 }
 
 #[test]
-fn live_c130_findings_equal_the_js_port_on_a_fixture_tree_and_on_this_tree() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn live_c130_findings_equal_the_recorded_js_answers_on_a_fixture_tree_and_on_this_tree() {
     let tree = c130_tree();
-    for (root, app) in [(tree.path().to_path_buf(), "fixture"), (repo_root(), "paddock")] {
-        let js: Value = serde_json::from_str(&node(
-            JS_RUN_C130,
-            &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", app.into())],
-        ))
-        .unwrap();
-        let r = run_checks(&c130_options(&root, app), &registry()).unwrap();
-        let (got, want) = (shared_part(&r.json()), shared_part(&js));
-        assert_eq!(got["findings"], want["findings"], "C130 on {app}");
-        assert_eq!(got, want, "C130 on {app}");
-    }
+    let r = run_checks(&c130_options(tree.path(), "fixture"), &registry()).unwrap();
+    let got = shared_part(&r.json());
+    assert_eq!(got, crate::recorded::expect("c130-fixture", &got), "C130 on the fixture tree");
+    let root = repo_root();
+    let r = run_checks(&c130_options(&root, "paddock"), &registry()).unwrap();
+    crate::recorded::assert_live_tree_sound("c130", &r.json());
 }
 
 /// The check's own files are not read: their invented lines need no allow entry; another test file still is.
@@ -254,23 +241,16 @@ fn growth_is_not_measured_on_a_fixture_folder_and_a_missing_base_is_said() {
 }
 
 #[test]
-fn growth_findings_equal_the_js_host_in_a_git_repository() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn growth_findings_equal_the_recorded_js_answers_in_a_git_repository() {
     let extra = ",{\"path\":\"tools/t/tests/it/ok.rs\",\"site\":\"#!/bin/bash\",\"reason\":\"baseline: planted before StandIn\"}";
     for (name, repo) in [
         ("raised", growth_repo(&allow_of(2, ""), &allow_of(3, ""))),
         ("added", growth_repo(&allow_of(3, ""), &allow_of(3, extra))),
         ("same", growth_repo(&allow_of(3, ""), &allow_of(3, ""))),
     ] {
-        let js: Value = serde_json::from_str(&node(
-            JS_RUN_C130,
-            &[("RT5_ROOT", repo.path().display().to_string()), ("RT5_APP", "fixture".into())],
-        ))
-        .unwrap();
         let r = run_checks(&c130_options(repo.path(), "fixture"), &registry()).unwrap();
-        let (got, want) = (shared_part(&r.json()), shared_part(&js));
+        let got = crate::recorded::scrub(shared_part(&r.json()));
+        let want = crate::recorded::expect(&format!("c130-growth-{name}"), &got);
         assert_eq!(got["findings"], want["findings"], "{name}");
         assert_eq!(got, want, "{name}");
     }
@@ -327,23 +307,14 @@ fn the_trains_own_entries_are_not_growth_of_a_member_measured_against_the_train(
     let msgs = grew_against(own.path(), "origin/train");
     assert_eq!(msgs.len(), 1, "the member's own raise counts");
     assert!(msgs[0].starts_with("the allow list grew: 1 entry is"), "{msgs:?}");
-    // The JavaScript host agrees on the same repositories with the same ref.
-    if has_node() {
-        for (name, repo) in [("clean", &repo), ("own", &own)] {
-            let js: Value = serde_json::from_str(&node(
-                JS_RUN_C130,
-                &[
-                    ("RT5_ROOT", repo.path().display().to_string()),
-                    ("RT5_APP", "fixture".into()),
-                    ("PADDOCK_BASE_REF", "origin/train".into()),
-                ],
-            ))
-            .unwrap();
-            let mut o = c130_options(repo.path(), "fixture");
-            o.base_ref = Some("origin/train".into());
-            let r = run_checks(&o, &registry()).unwrap();
-            assert_eq!(shared_part(&r.json())["findings"], shared_part(&js)["findings"], "{name}");
-        }
+    // The recorded answers of the JavaScript host on the same repositories with the same ref.
+    for (name, repo) in [("clean", &repo), ("own", &own)] {
+        let mut o = c130_options(repo.path(), "fixture");
+        o.base_ref = Some("origin/train".into());
+        let r = run_checks(&o, &registry()).unwrap();
+        let got = crate::recorded::scrub(shared_part(&r.json()));
+        let want = crate::recorded::expect(&format!("c130-train-{name}"), &got);
+        assert_eq!(got["findings"], want["findings"], "{name}");
     }
 }
 

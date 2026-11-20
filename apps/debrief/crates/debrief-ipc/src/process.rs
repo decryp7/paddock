@@ -738,14 +738,19 @@ mod tests {
         assert_eq!(super::unix_nice(&s), 19);
     }
 
-    /// Starts the fake worker `body` (a shell script) and takes the identity of the grandchild whose pid it wrote, as soon as
+    /// Starts the fake worker that `actions` (given the file the grandchild's pid goes to) describes and takes the identity of the grandchild whose pid it wrote, as soon as
     /// the record is complete (`Ended` when the grandchild was already gone, never the process that got its pid next).
     #[cfg(unix)]
-    fn start_fake_worker(d: &std::path::Path, body: &str) -> (super::ChildProcess, paddock_testkit_start::Recorded) {
+    fn start_fake_worker(
+        d: &std::path::Path,
+        actions: fn(&std::path::Path) -> paddock_testkit::Actions,
+    ) -> (super::ChildProcess, paddock_testkit_start::Recorded) {
         let pid_file = d.join("grandchild.pid");
-        let script = d.join("worker.sh");
-        paddock_testkit::exe::write_program(&script, body.replace("PIDFILE", &pid_file.display().to_string())).unwrap();
-        let child = super::ChildProcess::spawn(&super::SpawnSpec::new(&script, "fake worker")).unwrap();
+        let worker = paddock_testkit::StandIn::new(d, "worker")
+            .answers(actions(&pid_file))
+            .install()
+            .unwrap();
+        let child = super::ChildProcess::spawn(&super::SpawnSpec::new(worker.program(), "fake worker")).unwrap();
         let grandchild = paddock_testkit_start::recorded::read_pid_file(&pid_file, "the fake worker's child");
         (child, grandchild)
     }
@@ -768,7 +773,13 @@ mod tests {
 
     /// A fake worker that starts a grandchild, ignores its lifeline and SIGTERM, and stays.
     #[cfg(unix)]
-    const STAYING_WORKER: &str = "#!/bin/sh\ntrap '' TERM\nsleep 60 &\necho $! > 'PIDFILE'\nwhile :; do sleep 1; done\n";
+    fn staying_worker(pid_file: &std::path::Path) -> paddock_testkit::Actions {
+        use paddock_testkit::{Actions, Spawn};
+        Actions::new()
+            .ignores_term()
+            .spawns(&Spawn::new("sleep").args(["60"]).pid_file(pid_file))
+            .sleeps(std::time::Duration::from_secs(120))
+    }
 
     /// A child killed after its grace period takes what it started with it (a worker's own child, which on
     /// macOS has no parent-death signal and whose exit hook never runs under SIGKILL).
@@ -776,7 +787,7 @@ mod tests {
     #[test]
     fn a_child_killed_after_its_grace_takes_its_own_children_with_it() {
         let d = tempfile::tempdir().unwrap();
-        let (child, grandchild) = start_fake_worker(d.path(), STAYING_WORKER);
+        let (child, grandchild) = start_fake_worker(d.path(), staying_worker);
         child.kill();
         assert_grandchild_ends(grandchild);
     }
@@ -787,7 +798,7 @@ mod tests {
     #[test]
     fn a_child_without_an_identity_still_has_its_group_ended() {
         let d = tempfile::tempdir().unwrap();
-        let (child, grandchild) = start_fake_worker(d.path(), STAYING_WORKER);
+        let (child, grandchild) = start_fake_worker(d.path(), staying_worker);
         if let Some(super::OsChild::Std(_, id)) = super::lock(&child.child).as_mut() {
             *id = None;
         }
@@ -800,7 +811,9 @@ mod tests {
     #[test]
     fn a_leader_that_exited_by_itself_leaves_no_grandchild_after_the_kill() {
         let d = tempfile::tempdir().unwrap();
-        let (child, grandchild) = start_fake_worker(d.path(), "#!/bin/sh\nsleep 60 &\necho $! > 'PIDFILE'\nexit 0\n");
+        let (child, grandchild) = start_fake_worker(d.path(), |pid_file| {
+            paddock_testkit::Actions::new().spawns(&paddock_testkit::Spawn::new("sleep").args(["60"]).pid_file(pid_file))
+        });
         child.kill();
         assert_grandchild_ends(grandchild);
     }

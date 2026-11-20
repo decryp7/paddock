@@ -563,6 +563,19 @@ describe('dialogs in the page (browser build)', () => {
     expect(await ref.closed).toEqual({ kind: 'answered', value: 'yes' });
   });
 
+  it('keeps a required choice open on an Escape that comes before its view is there (main run 8315)', async () => {
+    const { service, root, settle } = await setup();
+    const ref = service.open(CHOICE);
+    // The same task as the open: the host has not rendered the dialog yet, so its frame cannot judge the dismissal.
+    expect(root.querySelector('[data-dialog="t.choice"]')).toBeNull();
+    key('Escape');
+    ref.dismiss();
+    await settle();
+    expect(root.querySelector('[data-dialog="t.choice"]'), 'a required choice was dismissed before its frame existed').not.toBeNull();
+    root.querySelector<HTMLElement>('[data-testid=dialog-action-ok]')!.click();
+    expect(await ref.closed).toEqual({ kind: 'answered', value: 'yes' });
+  });
+
   it('runs the Enter target from a field and traps the focus in a modal', async () => {
     const { service, root, settle } = await setup();
     const ref = service.open(DECISION);

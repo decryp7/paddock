@@ -16,7 +16,7 @@
 // ER-41: report-only (warnings) until its first green run on the real tree, recorded in docs/gates.toml.
 import { warn } from '../finding.mjs';
 import { onlyTestItems } from '../util/rust-test-items.mjs';
-import { maskRust } from './C39-freed-port.mjs';
+import { maskRust } from '../util/mask-rust.mjs';
 
 const WAIVER = /conformance:\s*recorded-pid\s*[—–-]+\s*\S.{2,}/;
 const SKIP_PATH = /(?:^|\/)(?:target|vendor)\/|(?:^|\/)fixtures?\/|^crates\/paddock-testkit-start\/src\/recorded\.rs$|^crates\/paddock-proc\/src\/identity\.rs$/;

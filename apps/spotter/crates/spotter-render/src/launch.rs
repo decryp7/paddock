@@ -234,6 +234,25 @@ pub fn warm_up(exe: &Browser) -> Result<Duration> {
     paddock_proc::warm_up(&exe.path, &["--version"]).map_err(Error::Launch)
 }
 
+/// The browser's own temp folder, inside its profile: Chromium on macOS takes its temp folder from [`MAC_TEMP_ENV`], so it
+/// never reads the user's temp folder. Chrome reads through its temp folder when it quits, and with a full user temp folder
+/// (900,000 entries) that read outlasted [`CLOSE_GRACE`] and the browser was killed (CI 8334, 8341, 8346).
+pub const BROWSER_TEMP: &str = "browser-temp";
+
+/// Chromium's own temp-folder override on macOS (`base::GetTempDir` reads it before `NSTemporaryDirectory`, which ignores
+/// `TMPDIR`; base/files/file_util_apple.mm, read 2026-11-20). Other systems ignore it.
+pub const MAC_TEMP_ENV: &str = "MAC_CHROMIUM_TMPDIR";
+
+/// Makes [`BROWSER_TEMP`] inside `profile`, empty, and returns it.
+fn browser_temp(profile: &Path) -> std::io::Result<PathBuf> {
+    let t = profile.join(BROWSER_TEMP);
+    if t.exists() {
+        std::fs::remove_dir_all(&t)?;
+    }
+    std::fs::create_dir_all(&t)?;
+    Ok(t)
+}
+
 /// How long a browser gets to quit by itself after `Browser.close` before it is killed.
 pub const CLOSE_GRACE: Duration = Duration::from_secs(5);
 
@@ -285,8 +304,16 @@ impl Chromium {
         check_display(opts.mode, cfg!(target_os = "linux"), |k| std::env::var(k).ok())?;
         let dir = unique_dir(&opts.profile_base);
         std::fs::create_dir_all(&dir).map_err(|e| Error::Launch(format!("the profile folder could not be created: {e}")))?;
+        let temp = match browser_temp(&dir) {
+            Ok(t) => t,
+            Err(e) => {
+                cleanup(&dir);
+                return Err(Error::Launch(format!("the browser's temp folder could not be created: {e}")));
+            }
+        };
         // The one constructor, as paddock-chromium launches it: counted for budget tests.
         let mut cmd = paddock_proc::command(&exe.path);
+        cmd.env(MAC_TEMP_ENV, &temp);
         let stderr = std::fs::File::create(dir.join(STDERR_FILE)).map_or_else(|_| std::process::Stdio::null(), std::process::Stdio::from);
         cmd.args(args(&dir, opts.mode, exe.flavor, &opts.extra_args))
             .stdin(std::process::Stdio::null())
@@ -583,12 +610,13 @@ mod tests {
     #[test]
     fn a_failed_start_reports_the_browsers_stderr() {
         let base = tempfile::tempdir().unwrap();
-        let exe_path = base.path().join("fake-chrome.sh");
-        paddock_testkit::exe::write_program(
-            &exe_path,
-            "#!/bin/sh\necho 'Running as root without --no-sandbox is not supported' >&2\nexit 1\n",
-        )
-        .unwrap();
+        let exe_path = paddock_testkit::StandIn::new(base.path(), "fake-chrome")
+            .stderr("Running as root without --no-sandbox is not supported")
+            .exit(1)
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         let exe = Browser {
             flavor: crate::discover::Flavor::Chromium,
             path: exe_path,
@@ -598,6 +626,53 @@ mod tests {
             e.contains("exited right after it started") && e.contains("without --no-sandbox"),
             "{e}"
         );
+    }
+
+    /// The browser's own temp folder is a fresh folder inside its profile, named through Chromium's macOS override
+    /// (`MAC_CHROMIUM_TMPDIR`), never the user's temp folder: Chrome reads through that folder when it shuts down, and with
+    /// 900,000 leftover entries in it the quit took over [`CLOSE_GRACE`] and the browser was killed (CI 8334, 8341, 8346).
+    #[test]
+    fn the_browser_gets_a_fresh_temp_folder_inside_its_profile() {
+        let base = tempfile::tempdir().unwrap();
+        let seen = base.path().join("seen.txt");
+        let exe_path = paddock_testkit::StandIn::new(base.path(), "temp-chrome")
+            .when_args(
+                &[],
+                paddock_testkit::Actions::new()
+                    .writes_with("{env:MAC_CHROMIUM_TMPDIR|/nonexistent}/written", "x")
+                    .writes_with(
+                        &seen.to_string_lossy(),
+                        "{env:MAC_CHROMIUM_TMPDIR|unset}\n{flag:--user-data-dir=}\n",
+                    )
+                    .exit(1),
+            )
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
+        let exe = Browser {
+            flavor: crate::discover::Flavor::Chromium,
+            path: exe_path,
+        };
+        let e = Chromium::launch(&exe, &headless(base.path())).err().unwrap().to_string();
+        let seen = std::fs::read_to_string(&seen)
+            .unwrap_or_else(|_| panic!("the stand-in did not get to write its record (no temp folder?): {e}"));
+        let mut lines = seen.lines();
+        let (temp, profile) = (lines.next().unwrap_or(""), lines.next().unwrap_or(""));
+        assert!(!profile.is_empty(), "{seen:?}");
+        assert_eq!(Path::new(temp), Path::new(profile).join(BROWSER_TEMP), "{seen:?}");
+        // The folder existed when the browser started: the stand-in could write into it.
+        assert!(!e.contains("nonexistent") && !e.contains("No such file"), "{e}");
+    }
+
+    /// A kept temp folder from an earlier start is emptied, so the browser never reads leftovers.
+    #[test]
+    fn the_browser_temp_folder_starts_empty() {
+        let base = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(base.path().join(BROWSER_TEMP).join("old")).unwrap();
+        let t = browser_temp(base.path()).unwrap();
+        assert_eq!(t, base.path().join(BROWSER_TEMP));
+        assert_eq!(std::fs::read_dir(&t).unwrap().count(), 0);
     }
 
     /// A Chromium build starts without its testing field trials, branded Chrome and Edge get no switch; the caller's
@@ -717,20 +792,24 @@ mod tests {
     #[cfg(unix)]
     fn never_ready_is_ended(look_late: bool) {
         let base = tempfile::tempdir().unwrap();
-        let exe_path = base.path().join("silent-chrome.sh");
-        paddock_testkit::exe::write_program(
-            &exe_path,
-            "#!/bin/sh\necho 'still warming up' >&2\necho $$ > \"$(dirname \"$0\")/pid\"\nexec sleep 300\n",
-        )
-        .unwrap();
+        let exe_path = paddock_testkit::StandIn::new(base.path(), "silent-chrome")
+            .answers(
+                paddock_testkit::Actions::new()
+                    .stderr("still warming up")
+                    .writes_with("{dir}/pid", "{pid}\n")
+                    .sleeps(Duration::from_secs(120)),
+            )
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         let exe = Browser {
             flavor: crate::discover::Flavor::Chromium,
             path: exe_path,
         };
         let mut o = headless(base.path());
         o.start_limit = Duration::from_secs(3);
-        // `exec sleep` drops the profile folder from the command line, so the process is found by the pid the script wrote, and
-        // its identity (pid and start time) is read the moment that file appears: after the failed start it is gone, and a bare
+        // The process is found by the pid the stand-in wrote, and its identity (pid and start time) is read the moment that file appears: after the failed start it is gone, and a bare
         // pid of an ended process reads the same as a failed look (rule 53).
         // A pid that names an ended process is `Ended`, not "not yet"; a holder that started after the file was written is
         // not the stand-in (rule 53).
@@ -768,8 +847,13 @@ mod tests {
     #[test]
     fn a_browser_that_exits_ends_the_wait_with_its_status_not_at_the_guard() {
         let base = tempfile::tempdir().unwrap();
-        let exe_path = base.path().join("dying-chrome.sh");
-        paddock_testkit::exe::write_program(&exe_path, "#!/bin/sh\necho 'out of memory' >&2\nexit 3\n").unwrap();
+        let exe_path = paddock_testkit::StandIn::new(base.path(), "dying-chrome")
+            .stderr("out of memory")
+            .exit(3)
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         let exe = Browser {
             flavor: crate::discover::Flavor::Chromium,
             path: exe_path,
@@ -799,11 +883,11 @@ mod tests {
         exited_browser_leaves_no_helper("1");
     }
 
-    /// A stand-in that cannot make its `go` FIFO (a file is in the way) exits 4 before it starts its helper: the test reports
+    /// A stand-in that cannot make its `go` FIFO (a file is in the way) fails (the stand-in reports it on stderr) before it starts its helper: the test reports
     /// the launch's own error at once, not a wait for a pid file that will never come.
     #[cfg(unix)]
     #[test]
-    #[should_panic(expected = "exit status: 4")]
+    #[should_panic(expected = "cannot make the named pipe")]
     fn a_stand_in_that_cannot_make_its_fifo_reports_the_launch_error() {
         exited_browser_leaves_no_helper_with("0", |dir| std::fs::write(dir.join("go"), "in the way").unwrap());
     }
@@ -827,15 +911,30 @@ mod tests {
 
         let base = tempfile::tempdir().unwrap();
         prepare(base.path());
-        let exe_path = base.path().join("leaving-chrome.sh");
-        paddock_testkit::exe::write_program(
-            &exe_path,
-            format!(
-                "#!/bin/sh\nd=\"$(dirname \"$0\")\"\nmkfifo \"$d/go\" || exit 4\n\
-                 sh -c 'sleep {helper_delay}; echo $$ > \"$1.tmp\" && mv \"$1.tmp\" \"$1\"; exec sleep 300' helper \"$d/helper\" >/dev/null 2>&1 &\n\
-                 read go < \"$d/go\"\nexit 3\n"
-            ),
-        ).unwrap();
+        use paddock_testkit::{Actions, Spawn};
+        // The helper: sleeps its delay, then writes its own pid (temp file plus rename) and runs on.
+        let delay = Duration::from_secs_f64(helper_delay.parse().expect("a number of seconds"));
+        paddock_testkit::StandIn::new(base.path(), "helper")
+            .answers(
+                Actions::new()
+                    .sleeps(delay)
+                    .writes_atomically("{dir}/helper", "{pid}\n")
+                    .sleeps(Duration::from_secs(120)),
+            )
+            .install()
+            .unwrap();
+        let exe_path = paddock_testkit::StandIn::new(base.path(), "leaving-chrome")
+            .answers(
+                Actions::new()
+                    .makes_fifo("{dir}/go")
+                    .spawns(&Spawn::new("helper"))
+                    .reads_file("{dir}/go")
+                    .exit(3),
+            )
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         let exe = Browser {
             flavor: crate::discover::Flavor::Chromium,
             path: exe_path,
@@ -905,9 +1004,14 @@ mod tests {
     #[test]
     fn warm_up_waits_for_a_slow_first_run_without_a_budget() {
         let base = tempfile::tempdir().unwrap();
-        let exe_path = base.path().join("slow-chrome.sh");
         // conformance: hang-guard — the stand-in's own delay is 2 s; nothing in `warm_up` is a clock
-        paddock_testkit::exe::write_program(&exe_path, "#!/bin/sh\nsleep 2\necho 'Fake Chrome 1.0'\n").unwrap();
+        let exe_path = paddock_testkit::StandIn::new(base.path(), "slow-chrome")
+            .sleeps(Duration::from_secs(2))
+            .stdout("Fake Chrome 1.0")
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         let exe = Browser {
             flavor: crate::discover::Flavor::Chromium,
             path: exe_path,
@@ -921,8 +1025,13 @@ mod tests {
     #[test]
     fn warm_up_failures_name_the_status_and_the_output() {
         let base = tempfile::tempdir().unwrap();
-        let exe_path = base.path().join("broken-chrome.sh");
-        paddock_testkit::exe::write_program(&exe_path, "#!/bin/sh\necho 'bundle damaged' >&2\nexit 5\n").unwrap();
+        let exe_path = paddock_testkit::StandIn::new(base.path(), "broken-chrome")
+            .stderr("bundle damaged")
+            .exit(5)
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
         let broken = Browser {
             flavor: crate::discover::Flavor::Chromium,
             path: exe_path,

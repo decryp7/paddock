@@ -11,12 +11,12 @@ mod facts;
 mod gpu;
 mod hwmon;
 mod locks;
-mod packages;
+pub(crate) mod packages;
 pub mod paths;
 mod sensors;
 mod startup;
 mod sys;
-mod tools;
+pub(crate) mod tools;
 pub mod traffic;
 
 use crate::processes::SysinfoProcesses;
@@ -39,11 +39,11 @@ pub fn platform(secrets_dir: &std::path::Path) -> Platform {
             paths.clone(),
             tools.clone(),
         )))),
-        processes: Box::new(SysinfoProcesses::new(Box::new(details::LinuxDetails::new(
-            paths.clone(),
-            details::LinuxDetails::default_autostart_dirs(),
-            tools.clone(),
-        )))),
+        processes: Box::new(SysinfoProcesses::new(Box::new(
+            details::LinuxDetails::new(paths.clone(), details::LinuxDetails::default_autostart_dirs(), tools.clone())
+                .with_signatures(crate::signatures::system()),
+        ))),
+        signatures: crate::signatures::system(),
         locks: Box::new(locks::LinuxLocks::new(paths.clone(), LOCK_SCAN_BUDGET)),
         startup: Box::new(startup::LinuxStartup::for_this_user(tools.clone())),
         facts: Box::new(facts::LinuxFacts::new(paths, facts::FactPaths::host(), tools.clone())),

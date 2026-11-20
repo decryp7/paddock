@@ -15,13 +15,18 @@
 //!
 //! One table at the end: what ran, what was skipped and why, what could not be measured (ER-33: never a pass), and for each
 //! failure one line with its cause and the next step. Exit 0 all passed, accepted or skipped; 5 something failed; 6 only "not
-//! measured" (a gate that could not run, was cut off by the 15-minute budget or by a timeout blocks the push); 7 a check is broken
+//! measured" (a gate that could not run, was ended by its watchdog as stuck, or cut off by the row cap or by a timeout blocks the push); 7 a check is broken
 //! (beats 5 and 6); 130 the person stopped it (a second Ctrl+C stops at once). The gates the table does not run but CI does are
 //! listed under it ([`gates::NOT_RUN`]). One named override exists so nobody reaches for `LEFTHOOK=0`:
 //! `PADDOCK_ACCEPT_NOT_MEASURED=<full row ids>` (or `--accept-not-measured`) lets those not-measured rows pass the push; it is
 //! announced at the top of every run it is set in, shown in the table and logged next to the gate logs.
 
 pub mod budget;
+pub mod history;
+pub mod progress;
+pub mod stacks;
+pub mod stall;
+pub mod watchdog;
 
 /// How many earlier runs' log folders are kept beside the current one.
 const KEEP_RUN_LOGS: usize = 20;
@@ -65,7 +70,7 @@ pub struct PrePushArgs {
     /// The remote being pushed to (git's first pre-push argument; the hook passes it): the only remote evidence and bases are read from.
     #[arg(long)]
     pub remote: Option<String>,
-    /// Only the gates whose row starts with one of these words (for example `fmt,clippy`); the hook always runs them all.
+    /// Only the gates named by these selectors, each a whole row name (`doctest crates`) or a row's first word (`fmt,clippy`); the hook always runs them all. A selector that matches no row is an error that lists the valid row names.
     #[arg(long, value_delimiter = ',')]
     pub only: Vec<String>,
     /// Print the gates and their commands; run nothing.
@@ -437,6 +442,9 @@ fn command_in(
             root.clone()
         }
     };
+    // A value of PADDOCK_GATE_WATCHDOG that is not one of the choices is an error before anything runs (a typo must not read as report-only).
+    let watchdog_mode = stall::Mode::from_env(env.get("PADDOCK_GATE_WATCHDOG").map(String::as_str))
+        .map_err(|why| CliError::usage(why).with_hint("Set it to `enforce` or `report`, or unset it."))?;
     let real = RealExec {
         root: work.clone(),
         env: env.clone(),
@@ -453,6 +461,13 @@ fn command_in(
         live_slot: Default::default(),
         priority: pushes.iter().any(|p| budget::is_landing_ref(&p.remote_ref)),
         wrapper,
+        watchdog: Arc::new(stall::StallWatchdog::new(
+            watchdog_mode,
+            stall::GAP,
+            Some(Arc::new(history::History::new(state.join("step-history.jsonl")))),
+        )),
+        row_cap: exec::ROW_CAP,
+        state: state.clone(),
     };
     let queue = queue_max(&env);
     let history = GitHistory::new(&work, GIT_TIMEOUT);
@@ -486,15 +501,7 @@ fn command_in(
     facts.member_gate = args.member_gate;
     facts.kept_targets = kept_targets;
     let mut planned = gates::plan_gates(&plan, &change, &facts);
-    if !args.only.is_empty() {
-        planned.retain(|p| {
-            let id = match p {
-                gates::Planned::Run(g) => &g.id,
-                gates::Planned::Skip { id, .. } | gates::Planned::NotMeasured { id, .. } | gates::Planned::Broken { id, .. } => id,
-            };
-            args.only.iter().any(|w| id.split(' ').next() == Some(w.as_str()))
-        });
-    }
+    planned = select_rows(planned, &args.only)?;
     notes.extend(
         planned
             .iter()
@@ -517,7 +524,7 @@ fn command_in(
         notes.push("no heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
-        "{overridden}pre-push: base {} ({}), {} commit(s) beyond it; {} changed file(s); {} gate(s) at a time (1-minute load {}); budget {} min of run time (time queued for the heavy slot behind other agents is reported apart and bounded on its own: {} min for the whole push; {}); logs in {}\n{}",
+        "{overridden}pre-push: base {} ({}), {} commit(s) beyond it; {} changed file(s); {} gate(s) at a time (1-minute load {}); run budget {} min (after it no new row starts; a started row is not cut by it) and a cap of {} min per row, stacks logged before a step is ended; watchdog: {} (time queued for the heavy slot behind other agents is reported apart and bounded on its own: {} min for the whole push; {}); logs in {}\n{}",
         base,
         base_why,
         commit_count(&root, &base, pushed.first().map_or("HEAD", String::as_str)),
@@ -525,6 +532,8 @@ fn command_in(
         n,
         load.map_or("unknown".to_string(), |l| format!("{l:.1}")),
         BUDGET.as_secs() / 60,
+        exec::ROW_CAP.as_secs() / 60,
+        real.watchdog.name(),
         queue.as_secs() / 60,
         if real.priority {
             "priority lane: this push lands on a train, main or a release tag"
@@ -1113,6 +1122,46 @@ pub fn accept_not_measured(rows: &mut [(String, Row)], accept: &[String], state:
     }
 }
 
+/// The row name of a planned gate.
+fn row_id(p: &gates::Planned) -> &str {
+    match p {
+        gates::Planned::Run(g) => &g.id,
+        gates::Planned::Skip { id, .. } | gates::Planned::NotMeasured { id, .. } | gates::Planned::Broken { id, .. } => id,
+    }
+}
+
+/// `--only`: keep the rows the selectors name (a whole row name such as `clippy crates`, or its first word without a trailing comma).
+/// No selector keeps every row. A selector that names no row is an error, whichever others do: it lists every such selector and the valid
+/// row names, so a typo never turns into a smaller run that reads as "passed, safe to push" (ER-33).
+fn select_rows(planned: Vec<gates::Planned>, only: &[String]) -> Result<Vec<gates::Planned>, CliError> {
+    if only.is_empty() {
+        return Ok(planned);
+    }
+    let names = |p: &gates::Planned| {
+        let id = row_id(p);
+        (id.to_string(), exec::first_word(id).trim_end_matches(',').to_string())
+    };
+    let hit = |w: &String, p: &gates::Planned| {
+        let (full, first) = names(p);
+        *w == full || *w == first
+    };
+    let unmatched: Vec<&String> = only.iter().filter(|w| !planned.iter().any(|p| hit(w, p))).collect();
+    if !unmatched.is_empty() {
+        let mut valid: Vec<&str> = planned.iter().map(row_id).collect();
+        valid.sort_unstable();
+        valid.dedup();
+        return Err(CliError::usage(format!(
+            "--only names no gate row for: {}. Nothing is run for a selector that matches nothing.",
+            unmatched.iter().map(|w| format!("{w:?}")).collect::<Vec<_>>().join(", ")
+        ))
+        .with_hint(format!(
+            "Valid row names: {}. A selector is a whole row name or its first word.",
+            valid.join("; ")
+        )));
+    }
+    Ok(planned.into_iter().filter(|p| only.iter().any(|w| hit(w, p))).collect())
+}
+
 fn dry_run(planned: &[gates::Planned]) -> Report {
     let mut text = String::new();
     let mut data = Vec::new();
@@ -1154,6 +1203,7 @@ pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collectio
     let mut text = format!("{head}\n");
     let (mut ok, mut fail, mut skip, mut unmeasured, mut broken, mut accepted) = (0, 0, 0, 0, 0, 0);
     let mut data = Vec::new();
+    let mut ended: Vec<String> = Vec::new();
     let (mut unmeasured_ids, mut failed_ids): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
     for (id, v) in rows {
         let reason = v.reason();
@@ -1207,8 +1257,18 @@ pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collectio
             row["run_secs"] = json!(t.ran);
             row["queued_secs"] = json!(t.queued);
         }
+        if let Some(g) = &v.ended_by {
+            row["ended_by"] = json!(g);
+            ended.push(format!("{id}: {g}"));
+        }
         data.push(row);
     }
+    // Which guard ended a step, in the summary (ER-27): a row that is not measured because its step was stopped says by what.
+    text.push_str(&if ended.is_empty() {
+        "guards: no step was ended by the watchdog or the row cap\n".to_string()
+    } else {
+        format!("guards: {} step(s) ended by a guard: {}\n", ended.len(), ended.join("; "))
+    });
     text.push_str("CI also runs, and this gate does not:\n");
     for (what, why) in gates::NOT_RUN {
         text.push_str(&format!("  - {what}: {why}\n"));

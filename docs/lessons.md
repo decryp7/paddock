@@ -2919,6 +2919,21 @@ headless software renderer) is not measured; the per-tick work (what re-renders)
 **Class: a test runs a moving source it does not need while it reads** (earlier: the events-grid fix item, 2026-11-17, and the
 live-tail toast clicks, 2026-11-12, above).
 
+## Retiring the JavaScript twins of 12 checks: an oracle test cannot outlive the oracle (pair P3, 2026-11-19)
+
+Every Rust check test that compared with `conformance/src/checks/C*.mjs` ran the live JS host, so deleting the modules would have
+deleted the proof with them. Order that worked: (1) give each comparison a case name and record the JS answer through the one bless of
+`golden.rs` (`tests/it/recorded.rs`, files in `tests/fixtures/check/recorded`), (2) harvest every input the 12 JS test files gave their
+functions and `runChecks` (a loader hook wrapped them; 310 cases in `tests/fixtures/check/units`) and record the JS answer for each as
+a one-file tree, (3) only then delete. Harvesting found nothing the Rust host answered differently except wording (a JSON parser's
+error text, the regenerate command, "check broken" against "not measured" for a run that looks at nothing). Three things a recorded
+answer must not hold: a run's timestamp (`at`), a commit in a message (`merge base 8a41...`) and a stale disk name that C125 would then
+find in the recording itself. A whole-tree answer is not recorded at all (the first version was a ceiling per check and file, and it failed for an unrelated new shell script, review P1-1): the live tree is held only to what holds whatever it contains (it ran, its control passed, it looked at something, no error), and the comparison with the JS answers is made on a frozen copy of files (`tests/fixtures/check/real-tree.json`).
+Also: `maskRust` and 14 other imports lived in the deleted C39 module; check what else imports a module before deleting it. The trigger
+needed no new rule (the conformance job is in every plan), but a test now says so for every input these checks read.
+**Class: a retired side takes its trigger, its helper exports or its oracle with it** (earlier: the P1 planner retirement, 2026-11-18, where
+`CONTRACT_INPUT` had to be added for the tests the script's own tests had covered).
+
 ## Fix item: drop the `golden::` nextest waiver once the real legs are measured (2026-11-19)
 
 The `golden::` waiver in `tools/paddock-dev/.config/nextest.toml` (4 x 60 s) was made for the node runs of `scripts/affected.mjs`, which are
@@ -2932,3 +2947,310 @@ tools/paddock-dev/Cargo.toml --profile ci --no-tests=fail -E 'test(/^contracts::
 paddock-ci, `tools/linux-container.sh --ci-image`, 4 CPUs, 2 jobs, a new empty build volume, host load 27): cold 71 s, warm 1 s (the 12
 tests run in 1.2 s). Under the limits set for the choice (30 s warm, 3 min cold), so the step stays a nextest step. Not measured: a
 real amd64 CI runner; read the step's timing from the next train run and revisit if the cold time passes 3 min.
+## A slow-to-start stand-in git met the phase limit: the mark now bounds every call of a hung-phase test (2026-11-19)
+`ci_host::kept_clone::tests::a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase` failed once at a 1-minute load of
+about 31 (integrator-train16, m2-nextest.log): the stand-in git recorded no call, because the git's own 1 s limit, counted from its
+spawn, ended it before it ran. Fourth sighting of "work before the hang point of a hung-phase test meets its limit under load"
+(fe1bd861d, e0fdd0286, 2026-11-15 above). The failing line (integrator-train16 `m2-nextest.log`, line 463, after `FAIL [2.040s]`): `assertion left == right failed: the abandoned phase started no git after it was abandoned; left: []; right: ["-c core.hooksPath=.../bin/no-hooks fetch first"]`, at 2.040 s: the 1 s limit plus the 1 s bound, with the stand-in's one call never recorded. Causes listed: (1) the test's own setup calls: none, the first call is the hang; (2) the
+phase bound (limit + 1 s from phase start, as no mark was set in that unit test): ruled out as the first cause, the git is ended
+by its own limit first; (3) the git's limit counts from spawn and the stand-in's start-up under load exceeds it: confirmed by a
+deterministic stand-in that sleeps 1.5 s (past the 1 s limit) before it writes its mark: red on the old code ("did not finish within
+20 s", the git "timed out after 1 s", no mark), green on the new. The 2026-11-15 fix had moved the phase's limit to the mark but
+left a git command's own limit on its spawn and said so (ADR 0103); with `Held::end_all` it could be closed. The review of the fix found a fifth test of the class, `a_phase_abandoned_at_its_bound_leaves_no_program_of_its_own_running` (no mark; a 2.5 s start delay turned it red); it is now on the mark (`hang_flow`) with a 2.5 s slow-start control (red with the mark taken out, 42 s). **Fix (the class):**
+with a clock mark a git in a phase has the general limit and the phase's bound, counted from the mark, ends it; the unit test, the new
+test and `stable_workspace`'s hung-git test (which had the same shape, its `run_with` now takes an optional `ClockMark`; red before:
+no pid file after 40 s) use the one mechanism, `phase::bounded_marked`; the parity normaliser treats `signal 9` like `timed out`.
+**Measured:** natural rate on the old code 0 of 200 runs (28 processes x 1 thread, 40 CPU burners, load 33), so the injected delay is
+the proof, as the failure is rare; the heavy run was stopped at the coordinator's request (ER-24). Capped runs after the fix (coordinator's cap: 4 processes x 1 thread, no burners,
+ambient load 35 to 40 from other agents): 200 runs of the 4 kept_clone unit tests plus stable_workspace's hung-git test, 1,000 test
+executions, 0 failed. **The class is now checked, not reviewed for (ER-21):** `phase::tests::no_source_file_times_a_phase_test_from_its_start_without_a_clock_mark_or_a_reason` fails on any test in a file that uses `ci_host::phase` that calls `.phase(`, `bounded*` or `run_with(` without a `ClockMark` (or `hang_flow`/`hang_env`) or a `// conformance: no-clock-mark - <reason>` line (two exemptions, both fakes with no program); its positive control is `the_audit_of_unmarked_phase_tests_sees_one_and_accepts_a_mark_or_a_reason`. The 20 s general limit is one constant, `phase::HUNG_TEST_GENERAL_LIMIT`. **Rule:** a timed hung-phase test counts every limit it asserts from the stand-in's mark, setup calls included, and proves it
+with a stand-in that is slow before its hang. **Class: work before the hang point of a hung-phase test meeting its limit under load
+(fourth sighting; ADR 0103, second amendment).**
+## Fix item: `./dev ci dispatch --trial --onto` and `--json` (2026-11-18, Windows slowdown trials 8251 to 8257)
+- **`--onto` with a branch pushed after the trial clone was made** ("trial: git rev-parse failed: fatal: Needed a single revision").
+  Already fixed on train 14 in ae662f1e9 (`trial::prepare` fetches an `origin/<branch>` target; test
+  `onto_a_branch_that_is_neither_main_nor_a_train_fetches_it`); the failure came from a `./dev` built from main's tree, which lacks
+  it. Still open: `--onto <sha>` of a commit no fetched ref holds fails with the same bare git message. Next: name the ref to fetch, or
+  say "fetch a branch that holds it" in the error.
+- **`dispatch --json` returns no run id** (`{"ok":true,"dispatched":true,"waitedMs":535}`): Gitea's dispatch endpoint answers with no
+  body, so a script cannot tell its run from another agent's. A script that took the newest run took another agent's ci.yml trial
+  (8256) as its own. Next: read the run list just before and after the dispatch (`client.rs` `runs_page`), return the new run whose
+  `path` is `<workflow>@refs/heads/<ref>` and whose head is the dispatched commit, as `runId`; the dispatch tests' `Script` fake
+  answers both lists. More than an hour with the fake's ordering, so not done in that series.
+**Class: a tool's answer that a caller has to guess around (ER-27).**
+
+## Fix item: the notices generator says STALE, not NOT MEASURED, in a worktree without the root `npm ci` (2026-11-18)
+`./dev merge check HEAD` on perf/git-heavy-tests-2 (the merge of fix/lettre-0.11.24) reported `notices-debrief`, `notices-dyno` and
+`notices-pitwall` STALE. The worktree had only conformance's npm packages (`./dev worktree add` installs those), so
+`scripts/notices.sh` found no licence texts for the npm production packages: a regenerated Dyno file had 242 distinct licence texts
+against the committed 288. After a root `npm ci --ignore-scripts` all three checks were current. Next: the generator's check (and
+`scripts/notices.sh --check`) reports NOT MEASURED, naming `npm ci` as the next step, when `node_modules` lacks a package the
+lockfile lists, instead of comparing an incomplete file. **Class: a check that compares output its missing input made (not
+measured read as a finding; ADR 0089).**
+
+## One test per fixture case, not a loop of cases inside one test (2026-11-19, train 14 run 8271)
+`merge_check::the_remerge_subject_is_read_in_any_case_and_in_the_train_slash_spelling` built four fixture repositories and ran four
+merge checks in one test, and `generated_files_are_skipped_by_every_detector` five. On the Windows runner under the suite's 8 test
+threads they took 44 to 64 s against nextest's 60 s slow-timeout (ci.yml 8271 timed out on the first try; windows-host-probe 8277 on
+train 14 and 8280 with the batched git reader: still 44.4 s FLAKY and 49.3 s). The batched reader did not move them: 116 of the remerge
+test's 188 git starts were its own fixture. Split into one test per case with the same assertions (perf/merge-check-batched-reads
+381137e33), the cases took 12.0 to 19.2 s each and nothing in merge_check went over 27.3 s (8281). **Rule:** a test that repeats an
+expensive fixture for several inputs is one test per input (a shared helper, one `#[test]` each), so a test's time is one case's and
+nextest spreads the cases; never raise the timeout for it (ER-12). **Class: one per-item cost summed into one bound** (the same class
+as ADR 0108's one git start per item, here inside a test).
+
+## A fixed total run budget cuts started rows that are healthy (2026-11-19, feat/gate-budget-per-workspace)
+
+The push gate's 15-minute total ended rows that had started: 87 steps in five days, median 33 s of run, because earlier rows had used
+the total (docs/research/2026-11-19-gate-hang-detection.md). A cold build costs minutes, a warm one seconds, and a total over all rows
+scales with the workspace count. Do not replace one fixed number by another: the total now only stops new rows from starting, a
+started row has its own generous cap (60 min) with the process list and stacks written before the kill, and a stall judgement on the
+row's own progress follows. Recurring: a wall-clock bound judges liveness (ADR 0031's class; CI run 7096, the 2026-11-12 slot-acquire
+wait, ER-12).
+
+## A FLAKY test blocks only when the change touches its feature (train 14, runs 8297 and 8300, 2026-11-19)
+
+Debrief train 14 was held by rare WebKit flakes (1 in 145 runs) in the accessibility check and the home dashboard. The train changed
+other Debrief source, so the plan reached both tests through the app package, but it touched neither feature. **Rule:** a FLAKY test
+blocks a landing only when the change touches the test itself or the source it exercises (its feature or module: the files it drives,
+not just any file in the same app package or crate); every other FLAKY is recorded with its log as a fix item for the next train or batch
+(ER-12, user, 2026-11-19; rule 50 (k) and the train sequence (4) in `docs/rules.md`). **Open:** `./dev ci triage --members` still blames a
+flaky failure on every member whose plan reaches its project (`tools/paddock-dev/src/queue/blame.rs:34-50`); that is a separate code change.
+
+## Three gate-tool defects: an empty selection that passed, a wrapper that broke every Windows C compile, a build step that invalidated its own check (2026-11-19)
+
+- `./dev check --pre-push --only "doctest crates"` matched no row (the selector is a row's first word) and printed "0 passed, safe to push". A selection that keeps no row is now a usage error naming the selector and listing the row names (ER-33). `gen check --only` and `check run --only` already refused unknown ids; conformance's `--only` too.
+- `RUSTC_WRAPPER=<sccache>` (from `./dev sccache env`) made cc-rs wrap `clang-cl`, and sccache 0.19 cannot probe it, so every `cargo xwin` lint of ring failed (seen with `./dev heavy -- cargo xwin clippy -p paddock-net`). cc-rs 1.8 to 1.11 has no per-target switch and cargo gives build scripts `RUSTC_WRAPPER` whatever sets it. The fix is one place, common practice: the variable names a shim called `sccache` (so native C stays cached) that runs `clang-cl`, `cl` and `--target=...-windows-msvc` compilers directly and everything else through the real sccache. A first version used a differently named wrapper and lost all C caching; review found it. Verified for real with the same command, which passed; the lockfile range of cc is tested.
+- `ts-dyno-shell` warned that its build step "does not build what it runs". Cause (measured, not guessed): `paddock-build` creates the sidecar placeholders during the build script's run and lists them in `rerun-if-changed`, so cargo saw them as newer than the run and rebuilt `dyno-app` once on the next call. Placeholders now get the oldest mtime (best effort, with a `cargo:warning` when it fails); the registry entry was right. A tool that copies a real sidecar over a placeholder with its old time (`cp -p`, `tar` x) will not make cargo rerun the build script: touch the file. The warning also names the first crates that compiled.
+
+Recurring: a check or run that cannot see its subject reads as a pass (ER-33; also lessons of 2026-11-17 on C137 and `expectIdle`).
+## Debrief: four WebKit e2e tests failed once each in debrief.yml run 8297 (train 14, 2026-11-19)
+Each failed on its first try and passed on its retry; none had failed in the 281 earlier Debrief runs of 30 days (`./dev ci flakes`).
+Flows read from the failing attempts' traces and screencasts (playwright-report-3 and -4 of run 8297).
+- **narrow-window.e2e.ts:94, Ctrl+B at 900 px: the Explorer opened and closed again (a product race).** The trace shows one
+  `User view.toggleSidebar via shortcut`, the grid resized twice within 600 ms (opened, then closed) and no second toggle. Causes listed:
+  (1) the key was lost: refuted, the activity line and the first resize; (2) the start-up decision of train 14 (`decideAtStart`) closed it:
+  refuted, it runs once after the first data and its effect is destroyed; (3) a key repeat toggled twice: refuted, one activity line;
+  (4) a re-plan that was due from the service's own close ran after Ctrl+B set the open flag and before the render drew the Explorer, and
+  the verdict added the Explorer's preferred width (300 px) to a dock that had not given it up: confirmed by a test that is red on the old
+  code. The plan saw 1100 px for 800, said "keep", `evaluate` took that as "opened by hand while it fits" (`keptByUser` false), and the
+  next re-plan closed it. The same error happened when dockview had not yet followed its container (its last size plus the drawn width).
+  **Fix:** the verdict is asked with the room the Explorer takes now (`drawnWidth`, 0 before it is drawn) and the dock's container as laid
+  out now, a sum that is the same before and after the render; `NarrowWindow` logs each decision (`ui.layout`). Not caused by train 14:
+  the inference in `evaluate` and the 300 px fallback are on main (84b22df4e); the window is the 150 ms re-plan debounce after the close.
+- **jobs.e2e.ts:62, the toast's View: the toast had timed out.** "Explanation ready" was posted when the explain job ended (2.4 s, before
+  the export dialog had closed); the test then spent about 6.5 s on the export, the Jobs pane and its axe check, saw the toast, ran a
+  second axe check, and the toast left 8 s after it came (TOAST_MS, as designed; VS Code also times out info toasts and holds them under
+  the pointer). Refuted: the export result replaced it (the export still ran), the stack dropped it (two toasts). **Fix (spec):**
+  `mockJobsHold=ai` holds the answer until both jobs were seen; the test hovers the toast (which holds its time) and clicks with the
+  clock paused. Positive control: the old spec with 8.5 s of page time before the toast fails as in CI; the new one passes.
+- **profiling-native.e2e.ts:6 and :29, File > Open performance capture ran nothing.** In both workers the File menu was drawn at the
+  window's top-left for about 500 ms during the first load (CDK positions an overlay after Angular's next render), the click aimed at its
+  item there, the menu moved under File and no command ran (no activity line). **Fix:** `openMenu`/`openMenuPath` wait for the menu to sit
+  against its trigger (`expectMenuAnchoredTo`, a new kind in `ui/projects/paddock-e2e/src/ready.ts`, with `menuGap` tested on the run's boxes);
+  positive control: a menu held at the top-left fails the wait.
+**Why the logs did not show it:** the Explorer's service logged nothing (now it does); the toast and the menu were visible only in the
+screencast. **Class:** the narrow-window race is the third "layout decision from a stale measurement" (dockview's last size: the
+`watchResize` settle loop, train 14's same-frame fix, this one); the other two are the ready-read class (a spec acting on a control that
+is in the DOM but not positioned or not lasting).
+
+## The dock's room has one reader; menus are found through one helper; why the File menu sat at the top-left (Debrief, 2026-11-19)
+Follow-ups of run 8297 that the user approved.
+- **One reader of the dock's room.** `DockLayout.room(api)` is the dock's container as laid out now (null without a box); `plan`, grow-back
+  (`growBackIds`, `restorable`) and the Explorer verdict read it, and a test makes dockview's `width`/`height` throw a record on every read
+  (red before: ten reads in one plan, verdict and grow-back). `needsFit` compares the plan with the groups' own sizes and reads no room.
+  With the plan reading the container, `watchResize` no longer waits up to 20 x 50 ms for dockview to agree (the settle loop of
+  `RESIZE_SETTLE_TRIES`): it lays dockview out at the container (`followContainer`) and re-plans after the 150 ms debounce, and
+  `fitToWindow` does the same first. Third instance of the class "a layout decision from dockview's last size" (the settle loop,
+  f253014fa's same-frame fix, run 8297's Explorer race), so the class is closed by construction rather than by another wait.
+- **Menus and toasts through one helper each.** All 59 `getByRole('menu')` sites of Debrief's specs moved onto `menu-support.ts`
+  (`anchoredMenu`, `contextMenu`, `panelMenuButton`, `menuNamed` for closed or text checks), and all 29 toast sites onto `toast-support.ts`
+  (`heldToast`, `pressInToast`, `runningToast`, `toastNamed`). The ESLint rule `paddock/e2e-transient-wait` reports a spec that finds a menu
+  or a toast itself (by role, test id or a `locator()` selector); report-only (ER-41, `PADDOCK_E2E_TRANSIENT_LINT=warn`, reported in
+  Debrief's lint job): 88 findings on the old specs (59 menus + 29 toasts), 0 after.
+- **Why the menu waited (measured, not guessed).** Every Debrief spec runs on Playwright's installed clock (`pinnedClockTest`), which fakes
+  `setTimeout` and `requestAnimationFrame`. Angular's zoneless scheduler renders in whichever of the two fires first
+  (`scheduleCallbackWithRafRace`, @angular/core 22.2.3), and CDK positions an overlay in `afterNextRender` (`OverlayRef.attach`). With the real
+  clock the rAF branch runs in the browser's rendering step, before paint, so the menu is placed before its first frame: sampled at the
+  start of every frame, 0 of 6 WebKit opens and 6 of 6 Chromium opens showed one frame (the sampler's rAF runs before Angular's in the same
+  frame, so that frame is read before CDK positions the menu, not necessarily painted). With the clock installed the fake rAF fires from
+  the clock's own timer, outside the rendering step: up to 5 frames (41 ms) on Chromium locally, and in run 8297, under CI load, about
+  500 ms. A CPU profile of the window (Chromium, the browser build) showed the mock backend's queries (`mock-backend.ts`, `mock-engine.ts`)
+  and the clock's `_runTo` on the main thread, not a stall in Angular. **Users:** no jump to fix in the app; the menu is in place before
+  it is painted. Hiding an overlay until it is positioned (opacity 0) would not help the specs either (Playwright counts opacity 0 as
+  visible), so no product change; the specs wait for the place instead.
+**Class:** the ready-read class (a spec acts on an element that is in the DOM but not yet placed); amplifier: the installed clock moves
+the app's render out of the browser's frame.
+
+## Fix item: live-tail-follow.e2e.ts:298 "a wheel at once after Follow on is not pulled back" (Debrief, 2026-11-19)
+Failed once in a full local WebKit run of fix/debrief-webkit-flakes (689 passed; `onNewest` was true after `runFor(1_500)`); passed 40 of 40
+right after (20 runs x 4 workers, WebKit, load 43); `ci flakes` lists it flaky on Chromium on 2026-11-19. The spec touches no menu,
+toast or Explorer code of that branch. A local failure, not a CI result, so ER-12 does not apply yet (it judges CI runs); the Chromium flake
+in CI is the CI evidence. Next: reproduce with the trace on
+(`--trace on`, WebKit, under load) and read the grid's `Scroll written` lines around the wheel and the Follow request before fixing.
+
+## Debrief: ai-chat.e2e.ts:130 red on both tries in debrief.yml run 8300; two more WebKit FLAKYs (train 14, 2026-11-19)
+- **ai-chat.e2e.ts:130 "a long conversation scrolls in its list only".** `waitAnswered` (ready.ts `expectStreamDone`, 5 s) saw the third
+  answer still streaming. Trace: answers took 3.2 s and 2.4 s from the turn to `aria-busy="false"`, the third more than 5.5 s. Causes listed:
+  (1) the `mockJobsHold=ai` hold of jobs.e2e.ts (624910cb0) outlived its test: refuted, jobs.e2e.ts ran after ai-chat in that shard (tests 286
+  and 27), every test has a fresh page and the hold lives in the page, and ai-chat after jobs in one WebKit worker passed with and without
+  624910cb0 (12 of 12 each); (2) a dock or Explorer re-plan loop from the same member: refuted, no `ui.layout` and no grid resize lines after
+  the first question; (3) the stream's cost on a loaded runner: the shard ran 1.7 to 1.9 times slower than in 8297 (ai-chat:101 21.9 s
+  against 11.0 s, :116 19.9 s against 11.8 s) and this test already took 22.0 s in 8297, about 3.3 s per answer against a 5 s wait.
+  **Fix:** the test needs six answers, not their streaming: `?mockAiChunkChars=100000` (new mock switch, unit-tested: one delta instead of
+  one per 12 characters) sends each answer in one piece. Locally (WebKit, 4 workers) the test went from 4.7-5.4 s to 3.9-5.0 s; 20 of 20
+  green at 4 workers, load 26-30. Streaming keeps its own tests (:12, :116).
+- **Fix item, fixed: ux-home.e2e.ts:73 "can be turned off for later imports" (shard 4/4, 1 of 145).** `uncheck` failed with "Clicking
+  the checkbox did not change its state": the screencast shows the health check's findings arriving while the click was made, which pushed
+  the checkbox about 90 px down, so the click landed on a health card. The spec now waits for the summary (Refresh enabled), the first
+  finding and a still checkbox (`expectNotMoving`) before pressing. The product moves a control as content arrives above it (the ADR 0061
+  class: controls that do not move); left as is.
+- **Fix item, open: a11y.e2e.ts:6 "main screen has no serious accessibility violations (dark)" (shard 3/4, 1 of 145).** axe saw
+  `--faint` text in the Inspector at 4.36-4.38:1 (#797d86 on #15161a, #787d85 on #151619) where the calm dark tokens give #8d929c on
+  #141518/#17181b: values that fit the Inspector drawn at about 85% opacity over `--bg-0`, i.e. mid-fade. The selection was logged at the
+  moment the animation wait returned (7605 ms), so the Inspector's content may have started a fade after the wait; the screencast shows
+  no Inspector on screen at all. Not reproduced yet. Next: run the spec with the trace on under load and read the Inspector's animations
+  (`document.getAnimations()`) when axe starts; wait for the Inspector to show the clicked record before settling.
+
+## Fix item: Debrief WebKit ai-chat "regex proposal as a highlight rule" saw the marker dialog still open (2026-11-19, local)
+`AI chat › a regex proposal is applied as a highlight rule through the marker dialog` (apps/debrief/app/e2e/ai-chat.e2e.ts:77)
+failed once in 170 local WebKit runs (ai-chat, ux-home and jobs at 10 repeats, 4 workers, retries off, on train 14 bfa9f914d): after
+the rule was filled in and applied, `getByRole('dialog', { name: 'Highlight lines' })` still counted 1 for the whole 5 s. The
+machine was at 17% CPU idle and the base was not measured on it, so this is a finding only (ER-9), not a CI result; train 14 does
+not touch this test or the marker-dialog path (fix/debrief-webkit-flakes changes only `:130` and a mock switch whose default stays
+12 characters). Not blocking, by the coordinator's reading of ER-12's feature-level scope (2026-11-19). Next: reproduce under load
+with a failing run first, then wait for the dialog's close to finish before the count. **Class: an e2e read before the page settled
+(the ready-read class); covered by the ready audit the user approved.**
+- **windowing.e2e.ts:93 "background work lists running tasks and stops one", red on both tries in run 8301 (shard 4/4, 2 of 144 before).**
+  The click on the status bar's Background work chip came 40 ms after the status bar showed "events"; the screencast shows the problems badge
+  arriving to the chip's right right after, which moved the chip about 55 px left, and the popover never opened (no listitems). Not train 14:
+  TestCommand, the jobs hold and the AI chunk switch do not reach the status bar or `?mock-tasks`. The audit branch had not touched this spec.
+  **Fix:** the click is made with the clock paused (`clickWithTimePaused`, the status-bar case its doc names); the product fix is ADR 0061
+  extended to the status bar (approved 2026-11-15).
+
+## The ready-signal audit's sweep: 10 WebKit passes of the whole Debrief suite, 6,899 of 6,900 (2026-11-19)
+Ten passes of the full Debrief e2e suite in WebKit at 4 workers (pass 1 on fc18530b9, passes 2-10 with ab099989b's windowing fix; load from
+11 to 34 at the starts), cut from 20 to 10 so landings go first (ER-24): 6,899 of 6,900 green. Pass 1 of an earlier start had found one
+defect of the audit's own helper (holding a "running in Jobs" toast its result replaces), fixed before these ten.
+**Fix item, open: live-tail-follow.e2e.ts:240 "scrollbar drag during a reveal (real input) leaves the view where the user put it" (pass 10,
+load 31).** The grid logged `User took over {Input: scrollbar, Pinned: true}` at the press and no scroll at all during the drag (no `Scroll
+origin` from the user; the drag's moves took 13 ms), so `expectLeftNewest` ended with "taken over, the view never left" and, by design, sent
+nothing again. This is the open measurement recorded above (headless WebKit under load: a take-over with no scroll; a scrollbar press can
+miss the thumb), not a view pulled back after a delivered gesture; the deterministic ownership rows of the same spec (dispatched input)
+passed in all ten passes. Next: when a take-over came with no scroll event, read the thumb's position at the press (it can move while the
+reveal grows the total, `Total grew outside a round` 7 ms after the press here) before deciding whether a resend is safe.
+
+## Main run 8315: a required choice dismissed before its frame existed; a tray height read during the entry slide (2026-11-19)
+- **shell-demo.spec.ts:696 (reference apps shard 2/2): "How should the demo greet you?" not found after Escape.** The test opens
+  `sd.choose-style` (a required choice) and presses Escape at once. `InPageDialogBackend` pushes the dialog on its stack synchronously,
+  but the frame that applies the required-choice rule only exists after the host renders it (`ngAfterViewInit` sets `requestDismiss`).
+  Until then `ref.dismiss()` was a plain dismissal, so an Escape in that window closed a dialog that must be answered. Chromium runs
+  input before timers, so a loaded runner widens the window. Causes listed: (1) the pre-view dismissal: confirmed, the shell-demo page
+  with the main thread slowed 20x (CDP CPU throttling) and Escape right after the open fails 17 of 20 with the CI message, 20 of 20
+  green with the fix; (2) the lazy content chunk stalled over 5 s on the dev server (the run 7854 class): refuted by (1), the same
+  slowed page shows the dialog in time once the dismissal is refused; (3) the click did not open it: refuted by the same runs. Not
+  caused by a train-14 member: the code dates from 2026-10-31; local unthrottled runs are 40 of 40 green before the fix. **Fix:** before
+  its view exists a dialog follows the frame's loading rule (a required choice ignores a dismissal); unit test in `ui.spec.ts`.
+- **tray.e2e.ts:112 (Pitwall e2e-webkit, Linux): Activity 80 while loading against 81 ready.** Activity is 80.5 px tall (its `.big`
+  line box is 22.5 px). The popover slides in (`pd-tray-in`, translateY 4 px); a read during the slide sits at a fractional offset and
+  carries the transform's float error (80.49999237 or 80.50000763), and `Math.round` turned that into 1 px. Run 8212's fix (two reads
+  agree) did not hold: both reads agreed on rounded values while the popover still moved (y from 49.0 to 53.0 over the reads). Measured
+  in the arm64 CI image (Linux WebKit, 4 workers): raw heights read before the fix 3 of 20 red; with the wait for the entry animation's
+  end, 60 of 60 green at load 17-35; the whole file 19 of 19 there and 38 of 38 on macOS (both engines). Not caused by a train-14
+  member (same symptom in run 8212, before the train). **Fix:** `openTray` waits until the popover's finite animations have finished,
+  and the test compares unrounded heights. Class: a layout read during an entry animation (the "two reads agree" rule does not catch a
+  box that moves while its rounded size stays).
+
+## A click that closes its own window: Debrief's popout.e2e.ts:62 Dock back (2026-11-20, train 16)
+- **Failure:** `locator.click: Target page, context or browser has been closed` at popout.e2e.ts:65, the click on the pop-out's own
+  "Dock back into the main window" button (debrief.yml run 8338 job 42172, Chromium, FLAKY: passed on its retry; 1 of 151 runs). The
+  call log stops at "performing click action": the click had been delivered. Dock back asks the host (BroadcastChannel) and the host
+  closes the pop-out (`win.close()` in popout-backend.ts), so the window can go away while Playwright is still finishing the click.
+- **Causes weighed:** (1) the window closed for another reason before the click: refuted by the call log (actionability passed, the
+  action was being performed) and by the retry docking normally; (2) a slow host: no, the close is the expected effect of the click;
+  (3) Playwright treating every such close as an error: refuted, a click after which the host closes the window passes 80 of 80
+  (synchronous, deferred, mousedown, pointerdown, BroadcastChannel; local probes in Playwright's pinned Chromium 1248). The race is
+  only the close landing inside Playwright's own completion of the click, which cannot be scheduled from outside.
+- **Reproduction (deterministic):** the kit's selftest `close-click.spec.ts` holds the click open on a disabled button and closes the
+  window from its host meanwhile: a plain click rejects with the same error every time (red with the old click-then-wait-for-close),
+  green with the fix; 20 repeats at 4 workers in Chromium and in WebKit.
+- **Fix:** `@decryp7/paddock-e2e` `untilItsPageCloses(page, step)` and `clickThatClosesItsPage(locator)`: a step that closes its own page
+  counts as done when the page closed; a step that fails while the page stays open, or that leaves it open, still fails. The spec's own
+  next assertion (the panel is back in the host) checks that the step did its job. Both such steps in popout.e2e.ts use it (Dock back,
+  and the dispatched pointer-up that docks a dragged pop-out). **Rule:** a test step whose action ends the page it acts on goes through
+  `untilItsPageCloses`, never a plain `await` on that page.
+
+## Fix items from train 16's full run (ci.yml 8346, debrief.yml 8347), not this train's features (2026-11-20)
+- **debrief-plugin-host `elevated_output::standard_error_is_forwarded_cut_and_capped`** (debrief.yml run 8347, job 42279, "rust tests";
+  FLAKY: try 1 failed after 40.064 s at `tests/it/elevated_output.rs:189` with the collected messages empty, try 2 passed in 0.107 s;
+  history 2 of 151 runs). The test waits with `eventually(...)` for the plugin's forwarded standard error ("m1 line 2", "m1 long ...")
+  to reach the log; the first try saw nothing for its whole wait. Train 16 changes nothing in debrief-plugin-host (ER-12: not this
+  train's feature). Next: a failing reproduction first (the forwarding path under a held log writer or a slow plugin start), then the
+  cause, never a longer wait.
+- **spotter-render `real_browser closing_quits_the_browser_by_itself_before_any_kill`** (ci.yml run 8346, job 42302, macOS; failed,
+  flake history 8 of 138 runs). Spotter untouched by train 16. Next: a reproduction first, as above.
+- **ui gallery `open()` waits a fixed 600 ms** (`ui/e2e/gallery.spec.ts`: "Let the chart draw ... and fonts settle"). Train 16 fixed the
+  one test that failed on it (the path box, which now waits for its fitted text; ci.yml 8346 job 42258); every other test that reads a
+  measured or animated value after `open()` still leans on that wait. Next: wait on each test's own condition and drop the fixed wait.
+- **paddock-dev `queue::tests::a_batch_is_at_most_six`** (ci.yml run 8359, job 42403, windows-latest; FLAKY: try 1 timed out at
+  60 s, try 2 passed in 50.1 s; 19.2 s in run 8335, job 42150). The same run's git-heavy `ci_runs::trial` tests went from 6 to 9 s to
+  43 to 60 s while the whole job went from 603 s to 753 s: three jobs shared the Windows runner with 8 test threads each on 16 cores
+  (the ER-48 job share, fixed on its own branch in Train A). Next: confirm the test is back near 19 s once the Windows share lands; if
+  not, a failing reproduction first (its git starts on Windows), never a longer limit.
+- **./dev's kept paddock-dev build folder under /sccache is read while another lane prunes or writes it** (debrief.yml run 8373,
+  job 42677, "licences, notices + commits", d-gtr9; `error[E0463]: can't find crate for 'foldhash'` while ./dev built paddock-dev
+  in `/sccache/paddock-dev/rustc-0ef1bc386059`; the same commit built it everywhere else, and the retry 8377 did not hit it). Same
+  class as the faithful stand-ins taking the real build-folder lock. Next: one owner per kept build folder (a lock held for the
+  build and the prune), a failing reproduction first.
+- **debrief webkit `e2e/a11y.e2e.ts:6` main screen has no serious accessibility violations (dark)** (debrief.yml run 8373, job
+  shard 3/4; FLAKY, history 2 of 150). Train A does not touch the feature. Next: a failing reproduction first.
+- **debrief webkit `e2e/ux-shortcuts-editor.e2e.ts:21` shortcut editor rebinds a command ...** (debrief.yml run 8373, shard 4/4;
+  FLAKY, history 1 of 150). Train A does not touch the feature. Next: a failing reproduction first.
+
+## Chrome took over 5 s to quit: it reads the user's temp folder, which leaked test folders had filled (Spotter, 2026-11-20, train 16)
+- **Failure:** spotter-render `real_browser::closing_quits_the_browser_by_itself_before_any_kill` red on both tries in ci.yml runs
+  8334, 8341 and 8346 (app spotter, macos-latest): "needed a kill: 5.55 s", the whole `CLOSE_GRACE` after `Browser.close`. It had
+  passed in 0.4 to 1.5 s in every run back to 7957 and got slower as the days went on.
+- **First hypotheses and what refuted them:** paddock-proc's Session change ee3aeb503 (spotter-render does not use `Session`; the same
+  commit e0fd0f511 passed in 8335 and failed in 8341); a new Chrome for Testing (unchanged 156.0.8078.47 since 2026-11-09); a slow
+  `Browser.close` reply (5.55 s = under 0.6 s of reply plus the 5 s wait); CPU starvation (the stuck browser was waiting on disk
+  reads, not runnable).
+- **Root cause:** when Chrome quits on macOS, a thread-pool task reads through its temp folder. Chromium takes that folder from
+  `MAC_CHROMIUM_TMPDIR`, or else from `NSTemporaryDirectory`, which ignores `TMPDIR` (base/files/file_util_apple.mm). That is the
+  user's `/private/var/folders/.../T`, shared by local gates and the three CI runners (one user). It held 903,000 entries, 730,000 of
+  them `x9-fixture-*` folders that conformance's `makeApp` made with mkdtemp and never removed. Under I/O load the read outlasted the
+  grace. Evidence: `sample` of a stuck browser showed one ThreadPoolForegroundWorker in readdir/`__getdirentries64` plus fnmatch for 802
+  of 806 samples, and lsof showed the T folder open. With 4 workers: unset, 55 of 80 closes took over 5 s; `TMPDIR` set to a small
+  folder, 16 of 16 (not honoured); `MAC_CHROMIUM_TMPDIR` set to a small folder, 0 of 32.
+- **Fix:** every browser launch (spotter-render, and under rule 55 the canonical paddock-chromium and Debrief's chromium-driver)
+  makes an empty `browser-temp` inside its profile and passes it as `MAC_CHROMIUM_TMPDIR`. `makeApp` uses one folder per process and
+  removes it at exit. A close that needs the kill now logs a warning (canonical, Debrief).
+- **Why the logs did not show it:** the close path logged nothing, and the test said only "needed a kill". The cause took a stack sample.
+- **Class: tests leave folders in the system temp folder (recorded for the foundation queue, not fixed here).** The repo has 147
+  `tmpdir()` sites in 97 JS/TS files, 60 `std::env::temp_dir()` sites and 24 `paddock_testkit::tempdir` sites in Rust (the 2,005
+  `tempfile::tempdir` sites remove their folder on drop and leak only when a test is killed). One conformance run still leaves about
+  120 other folders there (`paddock-isolation-*`, `paddock-tauri-tools-*`, `paddock-sccache-*`, `paddock-rustup-*`,
+  `paddock-job-tmpdir-*` and more). The planned redesign is a shared per-run scratch root for tests, plus a report-only conformance
+  check with a positive control (ER-21, ER-41).
+
+## A streamed answer that was still arriving failed its wait: the wait bounded the whole stream, not a stall (Debrief, 2026-11-20, train A)
+- **Failure:** Debrief WebKit `ai-chat.e2e.ts:116` "the conversation is busy from the moment its turn is drawn until the answer is
+  done" red on both tries in debrief.yml run 8377 job 42784 (shard 3/4, Linux), at `expectStreamDone` (paddock-e2e `ready.ts:85`):
+  `aria-busy` stayed "true" for the 5 s expect timeout. It had 0 failures in 535 runs and passed on the same commit in 8373.
+- **First hypotheses and what refuted them:** a stuck turn (a lost `done` event): the trace's snapshot right after the failed wait
+  shows `aria-busy="false"` and the whole answer, and its screencast shows the answer still arriving near the end of the wait (at
+  "System.Ou" with Stop shown, then complete); the paddock-proc change d68f912aa and the ER-48 job share cd867ef09: `apps/debrief`,
+  `ui` and `package-lock.json` are byte-identical at 9ec43be3c and 5cd9602da, and the e2e page runs the TypeScript mock with no
+  process; order dependence in the shard: the retry ran in a new worker and failed the same way, finishing just after its wait.
+- **Root cause:** `expectStreamDone` was one `toHaveAttribute('aria-busy', 'false')`, so the whole stream had to finish inside one
+  expect timeout. The spec streams 20 pieces 150 ms apart: 3.4 s from busy to done on an idle Mac (8 of 8 probes, 4 WebKit workers),
+  about 4.8 to 5.4 s on the loaded runner, past the 5 s wait while still arriving. This breaks ADR 0103's rule that a step is bounded
+  on progress, not total time.
+- **Fix:** `expectStreamDone` waits one expect timeout at a time and goes on while something new arrived (text or elements). It fails
+  only after a wait in which nothing arrived, saying so, and records each extra wait as a `stream-wait` annotation. A paddock-e2e
+  self-test streams for 6.5 s (it fails the old helper with the reported error) and has two stalled streams as positive controls.
+- **Why the logs did not show it:** the call log printed `…` for the log's content, so "slow" and "stuck" looked the same. Telling
+  them apart took the trace. The new failure message names the stall and what the stream showed; a slow stream leaves annotations.
+- **Class: an end-to-end wait bounds a streamed result by one expect timeout.** Earlier: debrief.yml run 8300, where six streamed
+  answers ran past the wait (64f8165ae, fixed for that spec only by sending answers in one piece). It is fixed for every caller of
+  `waitAnswered` here.

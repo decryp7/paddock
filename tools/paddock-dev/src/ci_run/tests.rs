@@ -168,8 +168,8 @@ fn list_prints_the_lines_with_their_folders_and_runs_nothing() {
 #[test]
 fn the_conformance_field_becomes_the_argument_variable_of_every_line() {
     let c = serde_json::json!({
-        "conformance": {"app": "paddock", "root": ".", "only": ["C06", "C14"], "strict": ["C36"]},
-        "paddock": ["echo \"$PADDOCK_CONFORMANCE_ARGS\" > args"]
+        "conformance": {"app": "paddock", "root": ".", "only": ["C06", "C14", "C36"], "strict": ["C36"], "rust": ["C39"]},
+        "paddock": ["echo \"$PADDOCK_CONFORMANCE_ARGS\" > args", "echo \"$PADDOCK_CONFORMANCE_RUST_ARGS\" > rust-args"]
     })
     .to_string();
     let r = Repo::new("conformance", &c);
@@ -177,7 +177,12 @@ fn the_conformance_field_becomes_the_argument_variable_of_every_line() {
     assert_eq!(code, 0, "{log}");
     assert_eq!(
         std::fs::read_to_string(r.root().join("args")).unwrap().trim(),
-        "--app paddock --root . --only C06,C14 --strict C36"
+        "--app paddock --root . --only C06,C14,C36 --strict C36"
+    );
+    assert_eq!(
+        std::fs::read_to_string(r.root().join("rust-args")).unwrap().trim(),
+        "--app paddock --root . --only C39",
+        "the Rust host's list is its own variable"
     );
 }
 
@@ -260,6 +265,9 @@ fn rows_of(src: &crate::gates::ci::Sources) -> std::collections::BTreeSet<String
         .and_then(|i| args.get(i + 1))
         .expect("the conformance line has --only");
     let only = format!("--only {only}");
+    // The Rust host's list is hand-kept (conformance.rust; a test holds it to the registry): its value is `$RUST_ONLY` here too.
+    let rust_args = contract::conformance_rust_args(&contract).unwrap();
+    let rust_only = format!("--only {}", rust_args[rust_args.iter().position(|a| a == "--only").unwrap() + 1]);
     let jobs = [
         "ui",
         "e2e",
@@ -277,6 +285,12 @@ fn rows_of(src: &crate::gates::ci::Sources) -> std::collections::BTreeSet<String
                 format!("{}--only $ONLY{}", &l.text[..i], &l.text[i + only.len()..])
             }
             _ => l.text.clone(),
+        };
+        let text = match text.find(&rust_only) {
+            Some(i) if text[i + rust_only.len()..].is_empty() || text[i + rust_only.len()..].starts_with(' ') => {
+                format!("{}--only $RUST_ONLY{}", &text[..i], &text[i + rust_only.len()..])
+            }
+            _ => text,
         };
         let row = |kind: &str, who: &str| {
             format!(
@@ -521,8 +535,16 @@ fn the_conformance_list_has_one_copy_the_contract() {
 #[test]
 fn heavy_puts_every_line_through_the_machine_wide_slot_and_refuses_without_one() {
     let r = Repo::new("ui", &json(&["echo ran > out"]));
-    let wrap = r.root().join("wrap.sh");
-    paddock_testkit::exe::write_program(&wrap, "#!/bin/sh\necho slot >> slot-log\nexec \"$@\"\n").unwrap();
+    let slot_log = r.root().join("slot-log").display().to_string();
+    let wrap = paddock_testkit::StandIn::new(r.root(), "wrap")
+        .answers(
+            paddock_testkit::Actions::new()
+                .appends_with(&slot_log, "slot\n")
+                .execs(&paddock_testkit::Exec::call_arguments()),
+        )
+        .install()
+        .unwrap();
+    let wrap = wrap.program();
     let (code, log) = r.run("ui", "checks", |a| a.heavy = true, &[("PADDOCK_HEAVY", wrap.to_str().unwrap())]);
     assert_eq!(code, 0, "{log}");
     assert_eq!(

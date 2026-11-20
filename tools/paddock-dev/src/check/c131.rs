@@ -10,8 +10,7 @@
 //! **Report-only (warnings) until its first green run on the real tree (ER-41); it may not block before the shared allow-list reader has
 //! its merge-base growth guard (docs/gates.toml).**
 //!
-//! The JavaScript check `conformance/src/checks/C131-golden-machine.mjs` is the original; `tests/it/check_c131.rs` compares the two
-//! finding for finding. Patterns never use a look-around (the `regex` crate has none): the text around a site is matched as a character.
+//! The JavaScript check (`conformance/src/checks/C131-*.mjs`) was the original; it was retired with pair P3 (ADR 0022 amendment 2026-11-19) and the Rust host is the only one. The answers it gave are recorded in `tests/fixtures/check/recorded` and `units` and ``tests/it/check_c131.rs`` holds the check to them. Patterns never use a look-around (the `regex` crate has none): the text around a site is matched as a character.
 
 use super::allow_list::{self, Admit};
 use super::finding::Finding;
@@ -23,9 +22,7 @@ use std::sync::LazyLock;
 /// The allow file both hosts read.
 pub const ALLOW: &str = "conformance/c131-allow.json";
 /// The check's own files: they name the patterns.
-pub const IMPLEMENTATION: [&str; 5] = [
-    "conformance/src/checks/C131-golden-machine.mjs",
-    "conformance/test/c131-golden-machine.test.mjs",
+pub const IMPLEMENTATION: [&str; 3] = [
     "tools/paddock-dev/src/check/c131.rs",
     "tools/paddock-dev/tests/it/check_c131.rs",
     ALLOW,

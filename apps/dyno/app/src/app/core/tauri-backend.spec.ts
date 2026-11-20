@@ -2,7 +2,7 @@ import type { JobSpec } from './api.types';
 import { EVENTS, TauriBackend, type InvokeFn, type ListenFn } from './tauri-backend';
 
 const REF = { pid: 7, started: 1000 };
-const SETTINGS = { launchAtLogin: true } as never;
+const SETTINGS = { launchAtLogin: true, revision: 3 } as never;
 
 function fake() {
   const invoke = vi.fn().mockResolvedValue('ok');
@@ -70,7 +70,7 @@ describe('TauriBackend: request shapes', () => {
     ['jobResult', (b) => b.jobResult(4), { jobResult: { id: 4 } }],
     ['maintenance', (b) => b.maintenance(), 'maintenance'],
     ['settings', (b) => b.settings(), 'settings'],
-    ['saveSettings', (b) => b.saveSettings(SETTINGS), { saveSettings: { settings: SETTINGS } }],
+    ['saveSettings', (b) => b.saveSettings(SETTINGS), { saveSettings: { settings: SETTINGS, baseRevision: 3 } }],
     ['plugins', (b) => b.plugins(), 'plugins'],
     ['issues', (b) => b.issues({ days: 14 }), { issues: { query: { days: 14 } } }],
     ['unusual', (b) => b.unusual(), 'unusual'],

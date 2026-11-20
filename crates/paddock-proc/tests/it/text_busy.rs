@@ -6,24 +6,16 @@
 use paddock_env::text_busy::{is_text_busy, retries_for};
 use paddock_proc::{Limits, Supervised, run_bounded};
 use std::fs::OpenOptions;
-use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-/// A script of its own, and a write handle on it that is let go when the first retry has happened (or after the hang guard).
-fn held_script() -> (tempfile::TempDir, PathBuf, std::thread::JoinHandle<()>) {
+/// A copy of `echo` of its own (a program the kernel maps, not a script), and a write handle on it that is let go when the first retry has happened (or after the hang guard).
+fn held_program() -> (tempfile::TempDir, PathBuf, std::thread::JoinHandle<()>) {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("prog.sh");
-    let mut f = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o755)
-        .open(&path)
-        .unwrap();
-    f.write_all(b"#!/bin/sh\necho started\n").unwrap();
+    let path = dir.path().join("prog");
+    std::fs::copy("/bin/echo", &path).unwrap();
+    let f = OpenOptions::new().write(true).open(&path).unwrap();
     // The precondition (ER-33): while the handle is held, a plain start really fails with ETXTBSY.
     let raw = paddock_proc::command(&path).stdin(Stdio::null()).spawn();
     assert!(
@@ -44,12 +36,10 @@ fn held_script() -> (tempfile::TempDir, PathBuf, std::thread::JoinHandle<()>) {
 
 #[test]
 fn a_bounded_run_of_a_program_held_open_for_writing_starts_after_the_retry() {
-    let (_dir, path, releaser) = held_script();
-    let out = run_bounded(
-        paddock_proc::command(&path),
-        Limits::new(Duration::from_secs(30)),
-    )
-    .unwrap();
+    let (_dir, path, releaser) = held_program();
+    let mut cmd = paddock_proc::command(&path);
+    cmd.arg("started");
+    let out = run_bounded(cmd, Limits::new(Duration::from_secs(30))).unwrap();
     releaser.join().unwrap();
     assert!(out.success(), "{out:?}");
     assert_eq!(out.stdout_text().trim(), "started");
@@ -57,7 +47,7 @@ fn a_bounded_run_of_a_program_held_open_for_writing_starts_after_the_retry() {
 
 #[test]
 fn a_supervised_child_held_open_for_writing_starts_after_the_retry() {
-    let (_dir, path, releaser) = held_script();
+    let (_dir, path, releaser) = held_program();
     let mut child = Supervised::spawn(paddock_proc::command(&path)).unwrap();
     releaser.join().unwrap();
     child.wait();

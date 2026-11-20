@@ -4,7 +4,6 @@
 //! 865498235; C121 and C124 on train 12): the outcome is owned by the reader, and this test runs for each check that names an allow list,
 //! so a new user of the reader is covered without a new test.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{has_node, node, skip};
 use paddock_dev::check::{Check, RunOptions, registry, run_checks};
 use serde_json::{Value, json};
 use std::path::Path;
@@ -26,21 +25,6 @@ fn options(root: &Path, id: &str) -> RunOptions {
         ci: Some(false),
     }
 }
-
-const JS_RUN: &str = r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const r = await runChecks({ root: process.env.RT5_ROOT, app: 'fixture', only: [process.env.RT5_ONLY], options: {} });
-process.stdout.write(JSON.stringify(r));
-"#;
-
-const JS_USERS: &str = r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const { checks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/checks/index.mjs')).href);
-process.stdout.write(JSON.stringify(checks.filter((c) => c.allowList).map((c) => [c.id, c.allowList.file])));
-"#;
 
 /// The check's control tree, with its allow file replaced by `allow` (left out when `None`).
 fn tree(check: &dyn Check, file: &str, allow: Option<&str>) -> tempfile::TempDir {
@@ -68,13 +52,11 @@ fn shared(v: &Value) -> Value {
 }
 
 /// Both hosts over `root` for check `id`: the Rust report's shared part and the JavaScript one's (None without node).
-fn both(root: &Path, id: &str) -> (Value, Option<Value>) {
+fn both(case: &str, root: &Path, id: &str) -> (Value, Option<Value>) {
     let r = run_checks(&options(root, id), &registry()).unwrap();
-    let js = has_node().then(|| {
-        let out = node(JS_RUN, &[("RT5_ROOT", root.display().to_string()), ("RT5_ONLY", id.to_string())]);
-        shared(&serde_json::from_str::<Value>(&out).unwrap())
-    });
-    (shared(&r.json()), js)
+    let got = shared(&r.json());
+    let want = crate::recorded::expect(case, &got);
+    (got, Some(want))
 }
 
 fn file_and_outcome(v: &Value) -> Vec<(String, Option<String>)> {
@@ -107,13 +89,11 @@ fn twinned_differences(rust: &[(String, String)], js: &[(String, String)], rust_
 }
 
 #[test]
-fn the_checks_that_name_an_allow_list_are_the_same_on_both_hosts() {
+fn the_checks_that_name_an_allow_list_are_the_ones_the_js_host_recorded() {
     let rust: Vec<(String, String)> = users().iter().map(|(c, f)| (c.id().to_string(), f.to_string())).collect();
     assert!(rust.len() >= 3, "C121, C124 and C125 read an allow list: {rust:?}");
-    if !has_node() {
-        return skip("node is not installed");
-    }
-    let js: Vec<(String, String)> = serde_json::from_str(&node(JS_USERS, &[])).unwrap();
+    // The users the JS host had (recorded before it was retired): a Rust-only check that reads an allow list is a reviewed bless.
+    let js: Vec<(String, String)> = serde_json::from_value(crate::recorded::expect("allow-list-users", &json!(rust))).unwrap();
     // The twins are the checks the Rust registry has (the registry is the one accessor of that list, ER-42).
     let rust_ids: Vec<String> = registry().iter().map(|c| c.id().to_string()).collect();
     let diff = twinned_differences(&rust, &js, &rust_ids);
@@ -148,14 +128,17 @@ fn a_javascript_only_allow_list_is_not_asked_for_on_rust_but_a_twin_missing_one_
 #[test]
 fn a_broken_allow_file_is_one_check_broken_finding_and_nothing_else_on_both_hosts() {
     for (check, file) in users() {
-        for allow in [
+        for (k, allow) in [
             None,
             Some("nope"),
             Some("{}"),
             Some("{\"allow\": [{\"path\": \"a\"}], \"history\": []}"),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let t = tree(check.as_ref(), file, allow);
-            let (rust, js) = both(t.path(), check.id());
+            let (rust, js) = both(&format!("allow-broken-{}-{k}", check.id().to_lowercase()), t.path(), check.id());
             assert_eq!(
                 file_and_outcome(&rust),
                 [(file.to_string(), Some("check-broken".to_string()))],
@@ -192,7 +175,7 @@ fn an_unreadable_file_is_not_measured_at_that_file_on_both_hosts() {
             eprintln!("not measured: running as root, which reads a 000 file");
             return;
         }
-        let (rust, js) = both(t.path(), check.id());
+        let (rust, js) = both(&format!("allow-unreadable-{}", check.id().to_lowercase()), t.path(), check.id());
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
         let got = file_and_outcome(&rust);
         assert!(

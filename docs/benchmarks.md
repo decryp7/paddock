@@ -1010,11 +1010,11 @@ These are ordered by impact.
      core share ran 2.3 times longer. The 1.5 GB per rustc that `PADDOCK_CI_RUSTC_MB` assumes is still an estimate. The
      earlier numbers (8 cores, 16,316 MB, run 7209: Debrief's Windows bundle 18.6 min with 4 against 14.5 min with 8,
      run 7195, different commits and caches) are not evidence.
-   - CI build parallelism on Linux: `conformance/ci/build-jobs.sh` leaves `CARGO_BUILD_JOBS` unset on the Linux runner
-     (cargo uses every core in each of up to four concurrent containers, as before 2026-10-30) and logs the host's cores:
-     16 cores and 127,941 MB in a container on d-gtr9 (run 7211, job 23231).
-     Its share (cores / 4 or cores / 2, `PADDOCK_CI_JOBS_PER_HOST` in d-gtr9's `runner.envs`) waits for one A/B of Gitea
-     job durations of the Rust jobs (crate, crates, app legs, Debrief's rust tests), the same commits with and without it.
+   - CI build parallelism on Linux (updated 2026-11-20): the 2026-10-30 note here (build-jobs left `CARGO_BUILD_JOBS` unset, cargo
+     using every core in each of up to four containers, 16 cores and 127,941 MB on d-gtr9, run 7211, job 23231) is superseded.
+     d-gtr9 now has 30 CPUs and 64 GiB with runner capacity 6, and the class layout is in the repo (6 jobs per host: 30 / 6 = 5 build
+     jobs and 5 test threads), because with no share each of the 6 jobs used all 30 cores and ran 1.2 to 1.7 times slower than
+     at 3 lanes (runs 8335 against 8346); see "CI job cost, step by step" (on docs/ci-job-cost-research until it lands).
    - CI build parallelism: a clean, CI-shaped Dyno build (`cargo test --no-run --workspace --exclude dyno-app`, no sccache,
      no incremental) with `CARGO_BUILD_JOBS=4` (the Mac leg's share) against 13 (cores − 1). Tried on 2026-10-30; the
      5-minute load never fell below 10 in an hour, so nothing was recorded (`conformance/ci/build-jobs.sh` keeps 4 on the
@@ -2134,3 +2134,262 @@ Question: with the slot count following the load, how long does a queue of 4 cli
   neither changes these rows (the 15-minute load decided them).
 - **Cost to note:** the 15-minute load lags, so after a spike the count stays at 1 for up to a quarter of an hour; the 1-minute
   load had fallen to 7 while the 15-minute was still 44 (second `after` row's neighbours).
+
+## Batched git reads: per-call git against one cat-file process against gix, and the Defender exclusions (2026-11-18, perf/git-heavy-tests-2, ADR 0108 G1 and G2)
+
+Question: how much does one long-lived `git cat-file` process save over one git start per read, and does reading in process with gix
+save more, on each OS? And did the user's Defender process exclusions for git change the Windows runner's numbers?
+
+- **Machines:** the Windows CI runner (windows-latest, `windows-host-probe.yml` on `exp/windows-host-probe`, never merged, nothing else
+  on the runner); the Mac mini (load 8.5 to 10.7, an indication); the local Linux CI-image container (arm64, an indication, ER-9).
+- **Spike:** `tools/git-read-spike` on that branch (release build): a synthetic repository made by one `git fast-import` stream (2,000
+  or 12,000 files in 40 folders, 20 commits), then the same reads three ways, each 3 times in rotated order with the results compared:
+  every commit's tree listed recursively (`git ls-tree -r` per commit) plus 300 blobs (`git cat-file blob` per blob); the same through
+  one `git cat-file --batch` process with trees parsed in process (paddock-git's `Reader` does the same over `--batch-command`); the
+  same with gix 0.90 in process.
+
+| ms, median of 3 | Windows runner (8267) | Mac | Linux container |
+|---|---:|---:|---:|
+| 2,000 files: per call | 11,145 | 2,418 (1,806 min) | 159 |
+| 2,000 files: one cat-file | 428 | 508 (83 min) | 34 |
+| 2,000 files: gix | 9.4 | 14.2 | 8.0 |
+| 12,000 files: per call | 11,950 | 1,776 | 233 |
+| 12,000 files: one cat-file | 685 | 231 | 145 |
+| 12,000 files: gix | 39.4 | 28.8 | 29.8 |
+
+- **Host probe (`./dev ci host-probe`, medians, ms):** on the Windows runner an empty program (`cmd /d /c exit 0`) takes 28 to 45 ms to
+  start, `git --version` 32 to 42 ms, a one-commit repository (4 git starts) 229 to 325 ms, a 4 KiB file 1.0 to 1.6 ms. On the Mac:
+  1.7, 5.2, 37.0 and 0.2 ms. So on Windows the cost is the OS's process start itself, not git: git adds 3 to 8 ms to an empty start.
+- **Defender process exclusions for git (applied by the user on 2026-11-18, before run 8265; the "before" figures are runs 8251 to
+  8257 of the same day's morning and run 8263, whose timing relative to the change is not known):** git start 32 to 41 ms after
+  (8265) against 37 to 48 ms (8251 to 8257) and 33 to 42 ms (8263); a repository 238 to 306 ms against 220 to 346 and 239 to 325 ms;
+  empty start 28 to 39 ms against 30 to 45 ms (8263). merge_check serial, 84 tests on the same tree: 289.5 s (8265) against 353.5 s
+  (8263); 340.2 s on the fix tree (8255, morning). **No change in any host-probe phase beyond the run-to-run spread**; the one serial
+  merge_check run was 18% faster, which one run per side cannot separate from the spread. The fixtures' repositories and the test
+  programs were already in excluded folders (`C:\gitea-runner\work\<job>\tmp`, `C:\Users\<user>\.paddock-ci`).
+- **Not measured:** gix against a partial clone (`--filter=blob:none`, as the CI kept clones are): gix does not fetch a missing blob
+  from the promisor remote, git does.
+
+## The shared reader moved in: git starts per merge check, gix's build cost, and the windows-sys edges (2026-11-18, perf/git-heavy-tests-2, ADR 0108 G2 and TD-1, TD-3 to TD-6, TD-8, TD-10)
+
+- **Git starts of `./dev merge check`** (counted on the Mac with a logging `git` first on `PATH`, the starts whose parent is
+  paddock-dev): `merge_check::a_clean_merge_is_clean` 67 before the memo (a06109c92), 43 now; `a_hunk_with_most_of_its_lines_kept...`
+  151, 97 now. The rest are `diff -U0`, `log`, `merge-base`, `merge-tree` and `rev-parse` of ref names, which the reader does not
+  answer.
+- **`pr plan-status` (TD-10):** 61 references (20 on main, 10 off it, 30 short ids, one missing) cost at most 2 git starts (the
+  base's `rev-list`; short ids through the reader's git), against up to 3 per reference before (`repo_git_tests`).
+- **`GitHistory::file_at` (TD-1):** 121 reads of 60 files at two revisions start the reader 0 times (gix in process) plus one
+  `rev-parse` per revision (`file_at_for_many_files_starts_no_git_per_file`); before, one `git show` per read.
+- **Cold debug build, paddock-proc alone against paddock-git with gix, `CARGO_BUILD_JOBS=2`, no sccache:** Mac 44 s against 37 s at a
+  load of 32 to 80 (other agents' builds): **not measured** (the order and the load decided it). Windows runner: not measured yet.
+- **Windows runner, the whole paddock-dev suite at 8 test threads** (`windows-host-probe.yml`, nothing else on the runner; host probes
+  the same in all three: empty start 29 to 41 ms, git start 33 to 44 ms, a small repository 238 to 323 ms):
+
+  | | 8277: train 14 + memo | 8280: + the gix reader (f4b085304) | 8281: + one test per case (381137e33) |
+  |---|---:|---:|---:|
+  | `merge_check::the_remerge_subject_...` | 63.6 s timeout, then 45.2 s (FLAKY) | 60.0 s timeout, then 44.4 s (FLAKY) | 4 tests, 15.1 to 19.2 s |
+  | `merge_check::generated_files_are_skipped_...` | 45.1 s | 49.3 s | 5 tests, 12.0 to 14.9 s |
+  | `merge_check::a_clean_merge_is_clean` | 6.7 s | 3.9 s | 4.0 s |
+  | merge_check tests: n, median, max | 86, 8.8 s, 45.2 s | 86, 7.3 s, 49.3 s | 92, 8.8 s, 27.3 s |
+
+  The slow tests were fixture-bound (116 of the remerge test's 188 git starts were its own fixture): the reader cut the merge check's
+  part, the split cut each test to one case (docs/lessons.md, "One test per fixture case").
+
+## Push gate run time: what the old 15-minute budget cut, and the per-row cap (WP-1) (2026-11-19, feat/gate-budget-per-workspace)
+
+- **Question:** the push gate and the member gate had one fixed 15-minute run budget ([`pre_push::exec`]). A change that reaches every
+  Cargo workspace (a lockfile or workspace-hack change) cannot fit it, even one row at a time: a cold doctest build costs minutes per
+  workspace. Train 15's re-merge of train 14 left clippy for `tools/wiki` and the doctests of 10 workspaces "not measured". The brief counts
+  four such cases; only this one is recorded with its run, the earlier ones are not found in the logs or lessons (the research note, section 0).
+- **Source:** the push gate's own logs under `<git common dir>/paddock-pre-push/` of the main checkout, read on 2026-11-19:
+  `queue-times.log` (one line per push run, 2,042 runs: `heavy_steps`, `queued_s`, `ran_s`) and `logs/<run>/<row>.log` (the last
+  `heavy: <step> timing queued Q s, ran R s` line of each retained row, 56 rows). Machine: the shared Mac mini, other agents running.
+- **Result, runs:** the run time of a push (`ran_s`, summed over its heavy steps): 8 of 2,042 ended at the 900 s limit, 52 ran 600 s or
+  more, the mean is 38.5 s. The limit is the maximum seen (900.8 s), so the real time of the longest runs was never measured.
+- **Result, rows (run seconds, warm and cold mixed, retained logs only):**
+
+  | Row kind | Runs | Typical (warm) | Cold runs seen |
+  |---|---|---|---|
+  | `clippy <ws>` | 24 | 0.2 to 93.1 s (median about 4 s) | `apps/spotter` 258.4 s, `apps/pitwall` 256.0 s |
+  | `clippy-windows <ws>` | 6 | 4.9 to 78.1 s | `apps/dyno` 410.8 s, `apps/pitwall` 354.8 s |
+  | `doctest <ws>` | 5 | 1.1 to 32.3 s | `apps/debrief` 672.1 s, `apps/dyno` 227.1 s |
+  | `clippy-linux <ws>` | 17 | 2.6 to 125.3 s | (kept container volume; `--warm-linux`) |
+  | `conformance-tests` | 4 | 78.5 to 104.3 s | |
+  | `member-audits` | 3 | 57.0 to 157.8 s | |
+
+- **Reading:** a cold build costs 10 to 100 times a warm one and which one a run meets is not known in advance, so any total over the
+  rows, and any per-row figure scaled by workspace count, is a second fixed limit with the same failure. heavy's activity log (the
+  research note's section 0) shows the budget cut 87 steps in five days at a median of 33 s of run: they got what earlier rows had
+  left of the total.
+- **Decision (WP-1, option A of docs/research/2026-11-19-gate-hang-detection.md):** the 15-minute total (`BUDGET`) only stops new rows
+  from starting; a started row runs until it ends or reaches `ROW_CAP`, 60 min (GitLab's default job timeout; the slowest healthy row
+  known is a cold app doctest, 1122 s, so the cap is over three times it). The cap is enforced by the executor's monitor, which writes
+  the process list and a stack sample of the tree (`sample` on macOS, `eu-stack` on Linux when installed, the process list on
+  Windows) to `<row>.stacks.txt` beside the row's log before it ends the tree through `paddock_proc` (pid plus start time). The stall
+  judgement (WP-2) and history limits plug into the per-step watchdog (`pre_push/watchdog.rs`).
+
+## Push gate stall gap (WP-0) (2026-11-19, feat/gate-budget-per-workspace)
+
+- **Question:** the progress watchdog (docs/research/2026-11-19-gate-hang-detection.md, WP-2) calls a step stuck after a gap with no
+  finished unit. How long is the longest gap between two finished units that a healthy cold step shows, per workspace?
+- **Method:** the gate's own cargo commands (`cargo clippy --workspace --all-targets --locked`, `cargo test --doc --workspace --locked`, and
+  `cargo xwin clippy --target x86_64-pc-windows-msvc` for crates, apps/dyno and apps/pitwall; `--all-features` in `crates`), each with
+  `--message-format=json-render-diagnostics`, one step at a time through `heavy` with `CARGO_BUILD_JOBS=2`, in a fresh build folder
+  (`--config build.target-dir`, on the dev volume, removed afterwards), no sccache (`RUSTC_WRAPPER` unset: the worst case, every
+  compile is real). A wrapper stamped every output line with a monotonic clock and counted what the watchdog counts: `compiler-artifact`,
+  `build-script-executed`, and for doctests the `Doc-tests` and `test ... ok/FAILED` lines; the gap is the time between two counted
+  events, from the start to the first and from the last to the end included. `crates` was also run warm right after the cold run.
+- **Machine:** the shared Mac mini (arm64, 14 cores), other agents' pushes and trains running (15-minute load 8 to 10 at the end of the
+  run, 25 cold steps over about five hours), at the heavy slot count the load allowed. Not measured: a heavier load than this, a
+  second cold run of the same workspace (so run-to-run spread within a workspace is unknown), Windows and Linux hosts, the Linux
+  container row (output lines only; the container's CPU is not visible).
+- **Raw figures** (all runs, with the commands and the fields, in `docs/benchmarks/2026-11-19-gate-stall-gap-wp0.json`; the stamping script is
+  a 30-line wrapper that timestamps each output line):
+
+| Workspace | Step | Run | Seconds | Progress events | Longest gap, s (at s) | p99 gap, s |
+|---|---|---|---:|---:|---:|---:|
+| `apps/debrief` | clippy | cold | 375 | 1085 | 11.2 (331) | 3.5 |
+| `apps/debrief` | doctest | cold | 684 | 939 | 35.1 (533) | 8.1 |
+| `apps/dyno` | clippy | cold | 288 | 833 | 12.4 (5) | 3.9 |
+| `apps/dyno` | doctest | cold | 505 | 680 | 22.2 (480) | 8.9 |
+| `apps/dyno` | xwin | cold | 335 | 865 | 21.8 (118) | 4.5 |
+| `apps/pitcrew` | clippy | cold | 223 | 631 | 10.5 (133) | 3.3 |
+| `apps/pitcrew` | doctest | cold | 314 | 537 | 9.8 (146) | 5.9 |
+| `apps/pitwall` | clippy | cold | 250 | 691 | 10.5 (133) | 4.3 |
+| `apps/pitwall` | doctest | cold | 861 | 597 | 43.1 (261) | 15.8 |
+| `apps/pitwall` | xwin | cold | 278 | 699 | 14.2 (3) | 4.2 |
+| `apps/shell-demo/src-tauri` | clippy | cold | 93 | 604 | 5.1 (28) | 0.7 |
+| `apps/shell-demo/src-tauri` | doctest | cold | 124 | 512 | 8.9 (115) | 1.6 |
+| `apps/spotter` | clippy | cold | 260 | 669 | 13.0 (189) | 5.2 |
+| `apps/spotter` | doctest | cold | 363 | 584 | 12.2 (64) | 6.9 |
+| `apps/workbench-demo/src-tauri` | clippy | cold | 81 | 573 | 4.8 (30) | 0.6 |
+| `apps/workbench-demo/src-tauri` | doctest | cold | 141 | 484 | 8.7 (132) | 2.2 |
+| `crates` | clippy | cold | 112 | 857 | 1.1 (4) | 0.7 |
+| `crates` | clippy | warm | 1 | 857 | 1.0 (0) | 0.0 |
+| `crates` | doctest | cold | 199 | 746 | 7.9 (157) | 1.7 |
+| `crates` | doctest | warm | 28 | 746 | 4.2 (0) | 0.8 |
+| `crates` | xwin | cold | 122 | 871 | 1.7 (26) | 0.8 |
+| `crates` | xwin | warm | 2 | 871 | 1.5 (0) | 0.0 |
+| `tools/heavy` | clippy | cold | 27 | 193 | 1.1 (2) | 0.9 |
+| `tools/heavy` | doctest | cold | 40 | 178 | 3.1 (24) | 2.2 |
+| `tools/paddock-dev` | clippy | cold | 52 | 250 | 11.6 (3) | 1.2 |
+| `tools/paddock-dev` | doctest | cold | 79 | 232 | 11.9 (3) | 4.8 |
+| `tools/wiki` | clippy | cold | 27 | 197 | 1.2 (2) | 0.7 |
+| `tools/wiki` | doctest | cold | 36 | 182 | 4.1 (21) | 1.7 |
+
+- **Result:** the longest gap in any cold run is **43.1 s** (`cargo test --doc` of apps/pitwall, at 261 s of 861 s), then 35.1 s
+  (doctests of apps/debrief) and 22.2 s (doctests of apps/dyno); clippy's longest gap is 13.0 s (apps/spotter); the median of the
+  25 cold runs' longest gaps is 10.5 s, so the longest is 4.1 times the median. Warm runs replay every unit at once: 1.0 to 4.2 s.
+  Every step passed (exit 0).
+- **Set from it** (constants in `pre_push/stall.rs` and `pre_push/history.rs`, figures next to them): the fallback gap `GAP` is 5 min
+  (7 times the longest gap seen, replacing the 15 minutes that was only a guess); `K` stays 4 (the max-to-median ratio of 4.1);
+  `FLOOR` stays 120 s (2.8 times the longest gap). One cold run per workspace is a small sample: the watchdog stays report-only
+  (`PADDOCK_GATE_WATCHDOG=enforce` to kill) until a week of `step-history.jsonl` records of real pushes agrees (ER-12, ER-41).
+
+## The sccache shim named `sccache`: native C stays cached (2026-11-19, fix/gate-tooling-env-select)
+
+- **Question:** a wrapper with another file name (`rustc-wrapper`) kept cc-rs from wrapping `clang-cl`, but also from wrapping every native C compile. The shim named `sccache` (`local_sccache::shim_text`) keeps native C cached and sends only the Windows C compiles past sccache. What does that cost or save on a cold build?
+- **Method:** `cargo check --locked` of `apps/spotter/app/src-tauri` in a fresh build folder each time, `CARGO_BUILD_JOBS=2`, sccache 0.19.0 with the shared local cache (`--zero-stats` before each run), through `./dev heavy`, one run per row, macOS arm64, 1-minute load 9 to 12 from other agents. The first row filled the cache; the other two ran after it, so rustc hits are the same and only C differs. Script and logs: `<dev-targets>/gtf-bench/` (scratch; not kept).
+
+  | Row | `RUSTC_WRAPPER` | Wall time | C/C++ cache hits | Rust hits / misses |
+  | --- | --- | --- | --- | --- |
+  | warm-up (cache fill) | the shim | 116 s | 270 | 241 / 234 |
+  | after | the shim | 95 s | 270 | 311 / 164 |
+  | before (the first version) | `rustc-wrapper`, no `sccache` name | 112 s | 0 (no C compile went through sccache) | 311 / 164 |
+
+- **Result:** the shim gives 270 C/C++ hits (libsqlite3-sys, zstd-sys, ring and the like) where the first version gave none, and the run took 95 s against 112 s. **Not measured:** a repeat (one run per row, so the 17 s difference is inside this machine's noise at that load; the hit counts are not), and a Linux or Windows host. A `cargo xwin` build is as uncached for C as before; ring's C is a few seconds.
+
+## CI job cost, step by step (2026-11-20, docs/ci-job-cost-research)
+
+Quoted by [docs/research/2026-11-20-ci-job-cost.md](research/2026-11-20-ci-job-cost.md).
+
+- **Method.** Gitea API job and step times and the job logs of runs 8335 (`ci.yml`) and 8338 (`debrief.yml`) on e0fd0f511 at
+  3 Linux lanes, WebKit on, and 8346 (`ci.yml`, WebKit off, 6 failed jobs) and 8347 (`debrief.yml`, Chromium only, 2 failed
+  jobs) on 0c44bc3a3 at 6 lanes.
+  Each job's log was cut at its `::group::` markers and each segment classified by step name; cargo compile is the sum of
+  cargo's `Finished ... in` lines, nextest its `Summary` lines, Playwright its `N passed (T)` line and, per test, the list
+  reporter's lines (3,817 tests). sccache: each job's last `--show-stats`. Limits: 8335 and 8346 are different commits;
+  segment classes follow step names; per-job CPU was not sampled (**not measured**).
+- **One round, 3 lanes (8335 + 8338), job-min:**
+
+  | | Linux (46 jobs) | macOS (11) | Windows (8) |
+  |---|---:|---:|---:|
+  | Total | 250.5 | 56.2 | 81.7 |
+  | Plan job's runner wait | 14.3 | 0 | 0 |
+  | `./dev` source builds | 4.3 | 1.2 | 3.0 |
+  | Container start | 1.7 | 0 | 0 |
+  | Checkout | 9.8 | 3.3 | 4.5 |
+  | OS setup | 2.9 | 2.5 | 8.6 |
+  | npm ci, node caches | 6.3 | 1.9 | 2.7 |
+  | `npm run build -w ui` | 4.9 | 0 | 0 |
+  | App builds | 12.4 | 8.6 | 21.6 |
+  | cargo steps | 25.6 | 21.8 | 38.1 |
+  | Playwright | 140.3 | 12.4 | 1.1 |
+  | Teardown | 3.7 | 0.2 | 1.1 |
+  | Other | 13.8 | 4.2 | 0.9 |
+  | cargo compile (`Finished` lines) | 28.1 | 16.1 | 36.2 |
+  | nextest execution | 5.3 | 12.6 | 19.0 |
+
+- **Repeats per round:** `./dev` built 7 times in 8338 (510 s) and 11 times in 8346 (1,219 s, 743 s of it on Windows; 28 to
+  327 s each); 0 in 8335, whose commit is `main`'s (downloaded). The Windows `app dyno` job of 8346 built it twice (75 s, then
+  169 s in the `hostRustChecks` step, in the kept clone's `tools/paddock-dev/target`). Checkouts 53 (17.6 job-min, all OS).
+  `npm run build -w ui` 18 times, 285 s (13 to 24 s each; 10 times, 221 s, in 8346). `npm ci` 33 times, 5 to 9 s each.
+  Angular e2e app builds 12, 124 s.
+- **3 against 6 lanes, the same jobs (8335 against 8346), seconds:** `app dyno (e2e-1)` 726 → 1,023; `(e2e-2)` 669 → 807;
+  `reference apps (2/2)` 391 → 580; `app dyno` 360 → 523 (compile 128 → 265); `app pitwall` 218 → 343 (compile 107 → 180);
+  `crate (ubuntu)` 102 → 163 (compile 46 → 104); `app shell-demo` 97 → 140; `app pitwall (e2e-2)` 93 → 156. Linux compile
+  in `ci.yml`: 9.4 → 17.6 job-min. 8346 ran up to 5 Linux jobs at once; 8347's Linux jobs waited for it, and its plan job
+  held a Linux lane for 1,861 s in `runner-wait` (8335's: 794 s; 8338's: 64 s). 8347 was a branch-mode plan (Chromium only,
+  no bundles or smoke tests): `debrief.yml`'s Linux Rust jobs 0.89 to 1.23 times 8338's; `./dev` built 5 times, 453 s. Every Linux job
+  logged `CARGO_BUILD_JOBS stays unset: cargo uses all 30 cores`.
+- **sccache:** Linux 94 to 100% hits, 1,000 to 2,000 requests per Rust job (empty target folder). macOS and Windows (per-slot
+  local caches, kept target folders): 0 to 37% hits where anything compiled: Windows `app dyno` 204 misses, 447 s compile;
+  macOS `app dyno` 59 misses, 145 s; `bundle` and `real-app smoke` 41 misses on each.
+- **Playwright per suite (8335 + 8338), tests / test-s / median:** Debrief WebKit 692 / 5,086 / 6.4 s; Debrief Chromium 704
+  / 2,470 / 3.1 s; Dyno WebKit 442 / 1,606 / 1.7 s; Dyno Chromium 442 / 1,229 / 0.92 s; reference apps Chromium 527 / 852;
+  reference apps WebKit (macOS) 458 / 703; Pitwall WebKit 245 / 422 / 1.3 s, Chromium 245 / 249 / 0.82 s; Spotter 62 / 75.
+  10th percentile per test (the app-start floor): 0.55 s (Dyno Chromium) to 0.99 s (Debrief WebKit).
+- **Slowest specs, test-s per round:** Dyno `page-layout.spec.ts` 671 (WebKit) + 529 (194 tests each); Debrief
+  `live-tail-follow.e2e.ts` 513 (WebKit, 34 tests) + 170; Dyno `layout.spec.ts` 254 + 197; Debrief `dock-vs` 171, `live-tail`
+  155, `popout` 128 (WebKit); Pitwall `layout.e2e.ts` 148 + 114; Dyno `row-actions.spec.ts` 146 + 142; Debrief
+  `main-layout` 110, `analysis-views` 106; Dyno `axe.spec.ts` 94 + 76.
+- **Slowest 30 tests (s, suite, engine, test):**
+
+  | s | Suite | Engine | Test |
+  |---:|---|---|---|
+  | 72.0 | Debrief | webkit | `e2e/dock-panels.e2e.ts:33` |
+  | 66.0 | reference apps (macOS) | shell-demo-webkit | `e2e/shell-demo.spec.ts:669` |
+  | 66.0 | Dyno | webkit | `e2e/axe.spec.ts:59` |
+  | 53.6 | Dyno | chromium | `e2e/axe.spec.ts:59` |
+  | 44.8 | Dyno | webkit | `e2e/dialogs.spec.ts:15` |
+  | 43.9 | reference apps | shell-demo | `e2e/shell-demo.spec.ts:669` |
+  | 41.2 | reference apps (macOS) | shell-demo-webkit | `e2e/shell-demo-size.spec.ts:21` |
+  | 39.7 | Dyno | chromium | `e2e/row-actions.spec.ts:87` |
+  | 39.7 | Dyno | webkit | `e2e/row-actions.spec.ts:100` |
+  | 39.6 | Dyno | webkit | `e2e/row-actions.spec.ts:87` |
+  | 38.4 | Dyno | chromium | `e2e/row-actions.spec.ts:100` |
+  | 37.6 | Debrief | webkit | `e2e/activity-errors.e2e.ts:31` |
+  | 32.8 | Debrief | webkit | `e2e/jobs.e2e.ts:110` |
+  | 32.6 | Debrief | webkit | `e2e/activity.e2e.ts:54` |
+  | 31.8 | Dyno | chromium | `e2e/dialogs.spec.ts:15` |
+  | 31.6 | reference apps (macOS) | shell-demo-webkit | `e2e/shell-demo-a11y.spec.ts:13` |
+  | 31.1 | reference apps | shell-demo | `e2e/shell-demo-size.spec.ts:21` |
+  | 29.6 | Debrief | webkit | `e2e/live-tail.e2e.ts:139` |
+  | 29.1 | Dyno | webkit | `e2e/layout.spec.ts:211` |
+  | 28.9 | Dyno | webkit | `e2e/layout.spec.ts:167` |
+  | 28.5 | Debrief | webkit | `e2e/markers-highlight.e2e.ts:26` |
+  | 28.2 | Dyno | webkit | `e2e/axe.spec.ts:62` |
+  | 28.2 | Debrief | chromium | `e2e/dock-panels.e2e.ts:33` |
+  | 27.9 | Dyno | webkit | `e2e/layout.spec.ts:140` |
+  | 27.5 | Dyno | webkit | `e2e/layout.spec.ts:140` |
+  | 27.5 | Dyno | webkit | `e2e/layout.spec.ts:167` |
+  | 27.5 | Dyno | webkit | `e2e/layout.spec.ts:211` |
+  | 27.0 | Dyno | webkit | `e2e/layout.spec.ts:167` |
+  | 27.0 | Dyno | webkit | `e2e/layout.spec.ts:211` |
+  | 26.8 | Dyno | webkit | `e2e/dialogs.spec.ts:22` |
+
+- **Rust:** `crate (windows)` doc tests 198 s (8335) and 125 s (8346) for about 30 doctests in 58 crates; the 37 crates
+  without one took 48 s and 32 s of it. Linux: 21 s. paddock-dev suite, test-seconds (deduplicated): Windows 4,334 (8335)
+  and 3,878 (8346), macOS 2,545 and 1,680, Linux 814 (8346); `merge_check` 1,089 / 303 / 53, `golden` 643 / 189, `queue`
+  637 / 388 / 58; queue tests 7.3 s median on Windows.
+- **Fixed waits:** `waitForTimeout` 10 in Debrief's specs, 3 in Dyno's, 5 in `ui/e2e`, 0 in Pitwall's.

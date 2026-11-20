@@ -66,7 +66,7 @@ test.describe('welcome', () => {
     );
     expect(points.length).toBeGreaterThan(0);
     await closeWorkspace(page);
-    await expect(page.locator('debrief-welcome')).toBeVisible();
+    await expectNotMoving(page.locator('debrief-welcome'));
     // At every sash position the topmost element belongs to the welcome screen.
     await expectNotMoving(page.locator('debrief-welcome'), 'the welcome screen');
     const covered = await page.evaluate(

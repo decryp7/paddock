@@ -1,9 +1,8 @@
-//! C123 (a Rust test starts ./dev, cargo or node only through TestCommand): the Rust host against the JavaScript check, the oracle, on a
-//! tree of every shape the check knows and on this working tree. Node is required: a missing oracle fails the test (ER-33).
+//! C123 (a Rust test starts ./dev, cargo or node only through TestCommand): the Rust host against the answers the JavaScript check gave
+//! (recorded, `tests/fixtures/check/recorded`; the JS module is retired, pair P3) on a tree of every shape the check knows and on this tree.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_dev::check::{RunOptions, registry, run_checks};
-use paddock_testkit::TestCommand;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -11,26 +10,7 @@ fn repo() -> PathBuf {
     paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
 }
 
-const DRIVER: &str = r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const r = await runChecks({ root: process.env.C123_ROOT, app: 'paddock', only: ['C123'] });
-process.stdout.write(JSON.stringify({ findings: r.findings, errors: r.errors, warnings: r.warnings }));
-"#;
-
-fn js(root: &Path) -> Value {
-    let out = TestCommand::new("node")
-        .args(["--input-type=module", "-e", DRIVER])
-        .current_dir(repo())
-        .env("C123_ROOT", root)
-        .output()
-        .expect("node must be installed: the oracle cannot be skipped");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    serde_json::from_slice(&out.stdout).unwrap()
-}
-
-fn rust(root: &Path) -> Value {
+fn full(root: &Path) -> Value {
     let opts = RunOptions {
         root: root.to_path_buf(),
         config: paddock_dev::check::config::Config::bare("paddock"),
@@ -41,7 +21,11 @@ fn rust(root: &Path) -> Value {
         base_ref: None,
         ci: Some(false),
     };
-    let r = run_checks(&opts, &registry()).unwrap().json();
+    run_checks(&opts, &registry()).unwrap().json()
+}
+
+fn rust(root: &Path) -> Value {
+    let r = full(root);
     json!({"findings": r["findings"], "errors": r["errors"], "warnings": r["warnings"]})
 }
 
@@ -96,7 +80,8 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
             "fn t() {\n    // conformance: test-env \u{2014} a probe of the shell\n    Command::new(\"cargo\");\n}\nfn u() {\n    // conformance: test-env\n    Command::new(\"cargo\");\n}\n",
         ),
     ]);
-    let (a, b) = (js(d.path()), rust(d.path()));
+    let b = rust(d.path());
+    let a = crate::recorded::expect("c123-every-shape", &b);
     assert_eq!(a, b);
     assert_eq!(
         a["warnings"], 16,
@@ -107,12 +92,13 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
 #[test]
 fn a_tree_without_rust_tests_is_check_broken_in_both_never_a_pass() {
     let d = tree(&[("README.md", "x")]);
-    let (a, b) = (js(d.path()), rust(d.path()));
+    let b = rust(d.path());
+    let a = crate::recorded::expect("c123-no-rust-tests", &b);
     assert!(a["errors"].as_u64().unwrap() >= 1 && b["errors"].as_u64().unwrap() >= 1, "{a} {b}");
 }
 
 #[test]
-fn this_working_tree_gives_the_same_findings_in_both_hosts() {
+fn this_working_tree_run_is_sound() {
     let root = repo();
-    assert_eq!(js(&root)["findings"], rust(&root)["findings"]);
+    crate::recorded::assert_live_tree_sound("c123", &full(&root));
 }

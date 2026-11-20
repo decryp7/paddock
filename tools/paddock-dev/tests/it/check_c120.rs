@@ -1,6 +1,5 @@
-//! C120 (nothing guesses cargo's build-folder layout): the Rust host against the JavaScript check, the oracle, on the fixture cases of
-//! `tests/fixtures/layout-guess` (`a__b__c.rs.txt` is `a/b/c.rs`) and on this working tree. Node is required: a missing oracle fails the
-//! test (ER-33).
+//! C120 (nothing guesses cargo's build-folder layout): the Rust host against the answers the JavaScript check gave (recorded in `tests/fixtures/check/recorded`; the JS module is retired, pair P3), on the fixture cases of
+//! `tests/fixtures/layout-guess` (`a__b__c.rs.txt` is `a/b/c.rs`) and on this working tree.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_dev::check::{RunOptions, registry, run_checks};
@@ -11,26 +10,7 @@ fn repo() -> PathBuf {
     paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
 }
 
-const DRIVER: &str = r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const r = await runChecks({ root: process.env.C120_ROOT, app: 'paddock', only: ['C120'] });
-process.stdout.write(JSON.stringify({ findings: r.findings, waived: r.waived, errors: r.errors, warnings: r.warnings }));
-"#;
-
-fn js(root: &Path) -> Value {
-    let out = paddock_testkit::TestCommand::new("node")
-        .args(["--input-type=module", "-e", DRIVER])
-        .current_dir(repo())
-        .env("C120_ROOT", root)
-        .output()
-        .expect("node must be installed: the oracle cannot be skipped");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    serde_json::from_slice(&out.stdout).unwrap()
-}
-
-fn rust(root: &Path) -> Value {
+fn full(root: &Path) -> Value {
     let opts = RunOptions {
         root: root.to_path_buf(),
         config: paddock_dev::check::config::Config::bare("paddock"),
@@ -41,7 +21,11 @@ fn rust(root: &Path) -> Value {
         base_ref: None,
         ci: Some(false),
     };
-    let r = run_checks(&opts, &registry()).unwrap().json();
+    run_checks(&opts, &registry()).unwrap().json()
+}
+
+fn rust(root: &Path) -> Value {
+    let r = full(root);
     json!({"findings": r["findings"], "waived": r["waived"], "errors": r["errors"], "warnings": r["warnings"]})
 }
 
@@ -68,7 +52,8 @@ fn cases() -> tempfile::TempDir {
 #[test]
 fn every_shape_gives_the_same_findings_in_both_hosts() {
     let d = cases();
-    let (a, b) = (js(d.path()), rust(d.path()));
+    let b = rust(d.path());
+    let a = crate::recorded::expect("c120-every-shape", &b);
     assert_eq!(a, b);
     let at = |file: &str| -> Vec<u64> {
         a["findings"]
@@ -138,9 +123,9 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
 }
 
 #[test]
-fn this_working_tree_gives_the_same_findings_in_both_hosts() {
+fn this_working_tree_run_is_sound() {
     let root = repo();
-    assert_eq!(js(&root)["findings"], rust(&root)["findings"]);
+    crate::recorded::assert_live_tree_sound("c120", &full(&root));
     assert_eq!(rust(&root)["warnings"], 0, "every site carries a waiver with a reason, or is fixed");
     assert!(
         rust(&root)["waived"].as_array().unwrap().len() >= 20,

@@ -7,7 +7,7 @@
 // a listed link that works or is gone is a warning to remove, and an entry the baseline at the merge base lacks is an error.
 // Second part (named mechanisms): in RULES.md, docs/rules.md and AGENTS.md a backticked `./dev <cmd>` (the top-level commands of
 // tools/paddock-dev/src/cli.rs), `.claude/hooks/*` or `scripts/*` path, and a C-number (a check file under conformance/src/checks,
-// or C100 of the gate register) must exist, unless its own clause says "planned". One error per miss; today's misses sit in the
+// or C100 of the gate register, or an id in `conformance.rust` of conformance/paddock.ci.json) must exist, unless its own clause says "planned". One error per miss; today's misses sit in the
 // baseline's `mentions` list, shrink-only like `links`. `.claude/hooks/*` and `scripts/*` count when they exist in the checked root
 // or in the engineering-rules repository (RULES.md's own).
 // A root without docs/rules.md (an app folder) is not checked.
@@ -19,6 +19,7 @@ import { baselineGrowth, targetRef, unmeasuredFinding } from '../util/baseline.m
 
 export const BASELINE_PATH = 'conformance/baselines/C104.json';
 const EXTRA_CHECK_IDS = ['C100']; // lives in the gate register (ADR 0060), not in conformance/src/checks
+const CONTRACT = 'conformance/paddock.ci.json'; // `conformance.rust`: the checks that only the Rust host has (pair P3, ADR 0022 amendment 2026-11-19)
 
 /** Sentences of `text` as [{ text, start }] (offset of the first character): split at a full stop or semicolon before white space, and at blank lines. */
 export function sentences(text) {
@@ -136,8 +137,14 @@ export default {
     }
     const cli = ctx.read('tools/paddock-dev/src/cli.rs');
     const commands = devCommands(cli);
-    const checkIds = new Set([...EXTRA_CHECK_IDS, ...ctx.files().map((f) => /^conformance\/src\/checks\/(C\d+)-/.exec(f)?.[1]).filter(Boolean)]);
-    const haveChecks = checkIds.size > EXTRA_CHECK_IDS.length;
+    let rustIds = [];
+    try {
+      rustIds = (JSON.parse(ctx.read(CONTRACT) ?? '{}').conformance?.rust ?? []).filter((id) => /^C\d+$/.test(id));
+    } catch {
+      /* a contract that cannot be read names no Rust-only check; the contract's own readers say why */
+    }
+    const checkIds = new Set([...EXTRA_CHECK_IDS, ...rustIds, ...ctx.files().map((f) => /^conformance\/src\/checks\/(C\d+)-/.exec(f)?.[1]).filter(Boolean)]);
+    const haveChecks = checkIds.size > EXTRA_CHECK_IDS.length + rustIds.length;
     const rulesRead = existsSync(rulesMd) && safeRead(rulesMd) !== null;
     const rulesRepo = rulesRead ? dirname(rulesMd) : null;
     const present = (rel) => ctx.exists(rel) || (rulesRepo !== null && existsSync(join(rulesRepo, rel)));

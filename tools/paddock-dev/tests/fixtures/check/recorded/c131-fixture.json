@@ -1,0 +1,155 @@
+{
+ "app": "fixture",
+ "checks": [
+  "C131"
+ ],
+ "findings": [
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "x/f.snap",
+   "line": 1,
+   "message": "golden holds a machine-specific id `uid: 7`: it fails on a machine that differs",
+   "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+  },
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "x/tests/golden/a.json",
+   "line": 2,
+   "message": "golden holds a machine-specific id `uid\": 501`: it fails on a machine that differs",
+   "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+  },
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "x/tests/golden/a.json",
+   "line": 3,
+   "message": "golden holds a machine-specific id `gid\": 20`: it fails on a machine that differs",
+   "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+  },
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "x/tests/golden/b.json",
+   "line": 3,
+   "message": "golden holds a machine-specific home `/Users/ana` beyond the count of its allow entry: it fails on a machine that differs",
+   "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+  },
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "x/tests/golden/h.txt",
+   "line": 1,
+   "message": "golden holds a machine-specific id `uid=1`: it fails on a machine that differs",
+   "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+  },
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "x/tests/golden/h.txt",
+   "line": 3,
+   "message": "golden holds a machine-specific home `/home/b`: it fails on a machine that differs",
+   "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+  },
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "x/tests/golden/i.txt",
+   "line": 1,
+   "message": "golden holds a machine-specific id `uid😀😀😀😀=1`: it fails on a machine that differs",
+   "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+  },
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "x/tests/golden/i.txt",
+   "line": 2,
+   "message": "golden holds a machine-specific id `uſer_id=5`: it fails on a machine that differs",
+   "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+  },
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "x/tests/golden/i.txt",
+   "line": 3,
+   "message": "golden holds a machine-specific id `uid: 3`: it fails on a machine that differs",
+   "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+  },
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "y/tests/goldens/d.txt",
+   "line": 1,
+   "message": "golden holds a machine-specific id `uid=1000`: it fails on a machine that differs",
+   "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+  },
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "y/tests/goldens/d.txt",
+   "line": 1,
+   "message": "golden holds a machine-specific home `/home/runner`: it fails on a machine that differs",
+   "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+  },
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "y/tests/goldens/d.txt",
+   "line": 1,
+   "message": "golden holds a machine-specific temp `/var/folders/`: it fails on a machine that differs",
+   "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+  },
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "y/tests/goldens/d.txt",
+   "line": 2,
+   "message": "golden holds a machine-specific home `C:\\Users\\Bo`: it fails on a machine that differs",
+   "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+  },
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "y/tests/goldens/d.txt",
+   "line": 3,
+   "message": "golden holds a machine-specific temp `\\Temp\\`: it fails on a machine that differs",
+   "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+  },
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "z/e.golden",
+   "line": 1,
+   "message": "golden holds a machine-specific id `euid: 0`: it fails on a machine that differs",
+   "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
+  },
+  {
+   "check": "C131",
+   "severity": "warn",
+   "rule": 40,
+   "file": "conformance/c131-allow.json",
+   "line": 1,
+   "message": "stale allow entry (x/tests/golden/b.json: gone) matches no site",
+   "fix": "Remove it from conformance/c131-allow.json."
+  }
+ ],
+ "waived": [],
+ "errors": 0,
+ "warnings": 16
+}

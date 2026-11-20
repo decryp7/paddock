@@ -22,7 +22,7 @@
 // ER-41: report-only (warnings) until its first green run on the real tree, recorded in docs/gates.toml; then B and C may flip to
 // gate (SEVERITY); rule A never does (ADR 0103, D4). The kits themselves (crates/paddock-testkit*, scripts/test-kit.mjs) and the conformance fixtures are skipped.
 import { warn } from '../finding.mjs';
-import { maskRust } from './C39-freed-port.mjs';
+import { maskRust } from '../util/mask-rust.mjs';
 import { maskTs } from './C71-test-timing.mjs';
 
 export const SEVERITY = warn;

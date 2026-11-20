@@ -1,6 +1,7 @@
 import { expect, test } from './test';
 import { expectNoSeriousViolations } from './axe';
 import { openAiApp } from './ai-support';
+import { anchoredMenu } from './menu-support';
 
 /** Parsers view ▸ Generate with AI… (ADR 0032), with the scripted AI mock: the engine's verdict is shown. */
 test.describe('AI parser generation', () => {
@@ -11,7 +12,7 @@ test.describe('AI parser generation', () => {
     await page.keyboard.press('Enter');
     const parsers = page.locator('debrief-parsers-view');
     await parsers.getByRole('button', { name: 'Generate with AI…' }).click();
-    await page.getByRole('menu', { name: 'Generate a parser for a file of this window' }).getByRole('menuitem').first().click();
+    await (await anchoredMenu(page, parsers.getByRole('button', { name: 'Generate with AI…' }), 'Generate a parser for a file of this window')).getByRole('menuitem').first().click();
 
     const propose = page.getByRole('dialog', { name: 'Propose a parser' });
     await expect(propose).toContainText('The engine checks each draft on it');

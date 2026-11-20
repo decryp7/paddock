@@ -192,3 +192,66 @@ fn the_process_environment_is_readable() {
         1
     );
 }
+
+/// A placeholder is listed in `cargo:rerun-if-changed`. Cargo reruns a build script whose listed file is newer than the run's start,
+/// and a placeholder the script itself created during that run always is, so the next cargo call (the check after a build step in
+/// `./dev gen check`: Dyno's `ts-dyno-shell`) rebuilt the crate once for nothing. It is created with the oldest modification time:
+/// a sidecar that becomes real is written later and still counts as changed.
+#[test]
+fn a_placeholder_never_looks_newer_than_the_build_script_run_that_made_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("binaries").join("svc-x");
+    // "Now" as the file system stamps files: Linux takes a file's time from its coarse clock, which can lag `SystemTime::now` by up to
+    // a tick, so a file written right after reading `now` there carries an earlier time (CI run 8346, Linux, every try).
+    let mark = dir.path().join("mark");
+    std::fs::write(&mark, b"").unwrap();
+    let before = std::fs::metadata(&mark).unwrap().modified().unwrap();
+    assert_eq!(
+        create_placeholders(std::slice::from_ref(&file))
+            .unwrap()
+            .len(),
+        1
+    );
+    let modified = std::fs::metadata(&file).unwrap().modified().unwrap();
+    assert!(
+        modified < before,
+        "created at {modified:?}, after the run started at {before:?}"
+    );
+    // Positive control: a file written the ordinary way is newer than `before`, so the assertion above can see a difference.
+    let real = dir.path().join("real");
+    std::fs::write(&real, b"x").unwrap();
+    assert!(std::fs::metadata(&real).unwrap().modified().unwrap() >= before);
+}
+
+/// Setting the time is best effort: a stamp that fails leaves the placeholder in place and yields one `cargo:warning` line naming it.
+#[test]
+fn a_failing_time_stamp_keeps_the_placeholder_and_warns() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("binaries").join("svc-x");
+    let failing = |_: &std::path::Path| Err(std::io::Error::other("no way"));
+    let (created, notes) =
+        paddock_build::create_placeholders_noted(std::slice::from_ref(&file), &failing).unwrap();
+    assert_eq!(created, vec![file.clone()]);
+    assert_eq!(std::fs::read(&file).unwrap(), b"");
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(
+        notes[0].starts_with("cargo:warning=")
+            && notes[0].contains("svc-x")
+            && notes[0].contains("no way"),
+        "{notes:?}"
+    );
+    // Positive control: the real stamp gives no note.
+    let other = dir.path().join("binaries").join("svc-y");
+    let ok = |f: &std::path::Path| {
+        std::fs::File::options()
+            .write(true)
+            .open(f)?
+            .set_modified(std::time::UNIX_EPOCH)
+    };
+    assert!(
+        paddock_build::create_placeholders_noted(&[other], &ok)
+            .unwrap()
+            .1
+            .is_empty()
+    );
+}

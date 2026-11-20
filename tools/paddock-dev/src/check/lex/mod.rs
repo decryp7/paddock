@@ -3,8 +3,8 @@
 //! Two readers sit on them: `mask_rust` (code with comments and literal insides blanked: C30, C39, C53, C120) and the comment view
 //! (only the comments kept: the waiver reader). A hand-written scanner missed nested block comments, `cr"..."` strings, here-documents,
 //! `$'...'` and plain-scalar apostrophes (WP-10 batch 2 review), each one a marker read from where it is not a comment.
-//! The JavaScript host's hand lexers (`conformance/src/util/rust-lexer.mjs`, `shell-lexer.mjs`, `yaml-lexer.mjs`) are held to these by
-//! the parity tests (`tests/it/check_lex.rs`): this module is the oracle.
+//! The JavaScript hand lexers for shell and YAML were retired with their last JS user (pair P3); `tests/it/check_lex.rs` holds these
+//! to the language's answers. Only `mask-rust.mjs` is left in JavaScript, compared in `tests/it/check.rs`.
 
 pub mod rust;
 pub mod shell;

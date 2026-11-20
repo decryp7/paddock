@@ -1,6 +1,6 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
-import { gridRows, nextRender, openApp } from './app';
+import { clickWithTimePaused, gridRows, nextRender, openApp } from './app';
 import { chooseMenu, openMenu } from './menu-support';
 
 // Windows, the close prompt and background work against the browser build's mock windowing backend
@@ -96,7 +96,11 @@ test('background work lists running tasks and stops one', async ({ page }) => {
   await expect(statusBar(page)).toContainText('events');
   const button = statusBar(page).getByRole('button', { name: 'Background work' });
   await expect(button).toHaveText('3');
-  await button.click();
+  // The status bar is still filling in (the problems badge arrives after its scan, to the right of this chip, and moves it left): in
+  // debrief.yml run 8301 the click landed where the chip had been and the popover never opened, on both tries. Pressed with the clock
+  // paused, no timer can add an item beside it during the click (the helper's lesson, runs 8136 and 8004). The product fix, a status bar
+  // whose controls do not move when an item appears beside them, is ADR 0061 extended to the status bar (approved 2026-11-15).
+  await clickWithTimePaused(page, button);
   const popover = page.getByRole('dialog', { name: 'Background work running' });
   await expect(popover.getByRole('listitem')).toHaveCount(3);
   await expect(popover).toContainText('Live tail — main');

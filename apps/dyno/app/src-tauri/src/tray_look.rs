@@ -4,6 +4,7 @@
 //! returns the pictures and the item's fixed width; the mechanics around them (identity, one image set, sync) do not care.
 
 use crate::tray_model::{Glyph, ItemSpec, Picture};
+use dyno_core::alarms::AlarmState;
 use dyno_core::tray::text::TextRaster;
 use dyno_core::tray::NetDir;
 use dyno_core::tray::{menu_bar as mb, pixel as px};
@@ -176,15 +177,16 @@ impl AlertPolicy {
     }
 }
 
-/// The open alarms that name a metric, by alarm id: what decides the alert of an item whose metric a rule covers.
+/// The alarms that name a metric and whose condition holds now, by alarm id: what decides the alert of an item whose metric a rule
+/// covers. An alarm that cleared but is not acknowledged is not in it, though the alarm list still shows it.
 #[derive(Debug, Default)]
 pub struct OpenAlarms(std::collections::BTreeMap<u64, Metric>);
 
 impl OpenAlarms {
-    /// An alarm changed: `metric` is the metric it names (if any) and `open` whether it still needs attention. Returns the metrics
-    /// with at least one open alarm now, each once.
-    pub fn update(&mut self, id: u64, metric: Option<&Metric>, open: bool) -> Vec<Metric> {
-        match (metric, open) {
+    /// An alarm changed: `metric` is the metric it names (if any) and `state` where it is in its life. Returns the metrics with at
+    /// least one alarm whose condition holds now, each once.
+    pub fn update(&mut self, id: u64, metric: Option<&Metric>, state: AlarmState) -> Vec<Metric> {
+        match (metric, state.holds()) {
             (Some(m), true) => {
                 self.0.insert(id, m.clone());
             }
@@ -540,28 +542,51 @@ mod tests {
         assert_eq!(off.fallback_level(&Metric::CpuTotal), None);
     }
 
+    /// The user's rule (2026-11-19): a tray metric is alarmed only while its alarm's condition holds now. An alarm that has cleared but
+    /// is not acknowledged is still in the alarm list, and does not mark the tray.
+    #[test]
+    fn a_cleared_alarm_does_not_mark_the_tray_whether_or_not_it_was_acknowledged() {
+        let mut a = OpenAlarms::default();
+        let cpu = Metric::CpuTotal;
+        assert_eq!(a.update(1, Some(&cpu), AlarmState::Active), [Metric::CpuTotal], "active marks it");
+        assert_eq!(
+            a.update(1, Some(&cpu), AlarmState::Acknowledged),
+            [Metric::CpuTotal],
+            "acknowledged, still holding: marks it"
+        );
+        assert_eq!(
+            a.update(1, Some(&cpu), AlarmState::ClearedUnacknowledged),
+            Vec::<Metric>::new(),
+            "gone but not acknowledged: the list keeps it, the tray does not"
+        );
+        assert_eq!(a.update(1, Some(&cpu), AlarmState::Cleared), Vec::<Metric>::new());
+    }
+
     #[test]
     fn open_alarms_follow_raise_repeat_and_clear_and_list_each_metric_once() {
         let mut a = OpenAlarms::default();
-        assert_eq!(a.update(1, Some(&Metric::CpuTotal), true), [Metric::CpuTotal]);
+        assert_eq!(a.update(1, Some(&Metric::CpuTotal), AlarmState::Active), [Metric::CpuTotal]);
         assert_eq!(
-            a.update(2, Some(&Metric::CpuTotal), true),
+            a.update(2, Some(&Metric::CpuTotal), AlarmState::Active),
             [Metric::CpuTotal],
             "two alarms, one metric, listed once"
         );
-        assert_eq!(a.update(3, Some(&Metric::Memory), true), [Metric::CpuTotal, Metric::Memory]);
         assert_eq!(
-            a.update(1, Some(&Metric::CpuTotal), false),
+            a.update(3, Some(&Metric::Memory), AlarmState::Active),
+            [Metric::CpuTotal, Metric::Memory]
+        );
+        assert_eq!(
+            a.update(1, Some(&Metric::CpuTotal), AlarmState::Cleared),
             [Metric::CpuTotal, Metric::Memory],
             "one of two cleared"
         );
-        assert_eq!(a.update(2, Some(&Metric::CpuTotal), false), [Metric::Memory]);
+        assert_eq!(a.update(2, Some(&Metric::CpuTotal), AlarmState::Cleared), [Metric::Memory]);
         assert_eq!(
-            a.update(4, None, true),
+            a.update(4, None, AlarmState::Active),
             [Metric::Memory],
             "an alarm that names no metric is ignored"
         );
-        assert_eq!(a.update(3, Some(&Metric::Memory), false), Vec::<Metric>::new());
+        assert_eq!(a.update(3, Some(&Metric::Memory), AlarmState::Cleared), Vec::<Metric>::new());
     }
 
     #[test]

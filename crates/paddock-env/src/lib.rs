@@ -33,6 +33,7 @@ pub mod command;
 pub mod dev_override;
 mod dirs;
 mod error;
+pub mod file_identity;
 mod folder;
 pub mod home_guard;
 pub mod private;

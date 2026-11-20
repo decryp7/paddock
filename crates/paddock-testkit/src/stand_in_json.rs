@@ -306,14 +306,25 @@ impl Parser<'_> {
                         b'f' => out.push('\u{c}'),
                         b'u' => {
                             let mut n = self.hex4()?;
-                            if (0xD800..0xDC00).contains(&n)
-                                && self.b[self.at..].starts_with(b"\\u")
-                            {
+                            // A high surrogate needs a low one right after it; without one it is U+FFFD (never a panic), and
+                            // what followed it stands for itself.
+                            while (0xD800..0xDC00).contains(&n) {
+                                if !self.b[self.at..].starts_with(b"\\u") {
+                                    out.push('\u{fffd}');
+                                    break;
+                                }
                                 self.at += 2;
                                 let low = self.hex4()?;
-                                n = 0x10000 + ((n - 0xD800) << 10) + low.wrapping_sub(0xDC00);
+                                if (0xDC00..0xE000).contains(&low) {
+                                    n = 0x10000 + ((n - 0xD800) << 10) + (low - 0xDC00);
+                                    break;
+                                }
+                                out.push('\u{fffd}');
+                                n = low;
                             }
-                            out.push(char::from_u32(n).unwrap_or('\u{fffd}'));
+                            if !(0xD800..0xDC00).contains(&n) || n >= 0x10000 {
+                                out.push(char::from_u32(n).unwrap_or('\u{fffd}'));
+                            }
                         }
                         _ => return Err(self.err("unknown escape")),
                     }
@@ -336,6 +347,27 @@ mod tests {
             Value::Bool(true),
         ]);
         assert_eq!(parse(&v.to_json()), Ok(v));
+    }
+
+    #[test]
+    fn a_high_surrogate_without_a_low_one_is_a_replacement_character_and_never_a_panic() {
+        // The second escape is not a low surrogate: the first becomes U+FFFD and the second stands for itself.
+        assert_eq!(
+            parse(r#""\ud800\u0000""#).unwrap(),
+            Value::Str("\u{fffd}\u{0}".into())
+        );
+        assert_eq!(
+            parse(r#""\ud800\u0041""#).unwrap(),
+            Value::Str("\u{fffd}A".into())
+        );
+        assert_eq!(
+            parse(r#""\ud800\ud800\udc00""#).unwrap(),
+            Value::Str("\u{fffd}\u{10000}".into())
+        );
+        assert_eq!(
+            parse(r#""\ud800x""#).unwrap(),
+            Value::Str("\u{fffd}x".into())
+        );
     }
 
     #[test]

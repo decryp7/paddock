@@ -52,21 +52,11 @@ pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-
+    use paddock_testkit::{Actions, StandIn};
     use std::path::Path;
 
-    fn sccache(dir: &Path, body: &str) {
-        std::fs::create_dir_all(dir).unwrap();
-        let p = dir.join("sccache");
-        paddock_testkit::exe::write_program(
-            &p,
-            format!(
-                "#!/bin/sh\necho \"sccache $* port=${{SCCACHE_SERVER_PORT:-}} token=${{GITHUB_TOKEN:-}}\" >> '{}'\n{body}\n",
-                dir.join("calls").display()
-            ),
-        )
-        .unwrap();
-    }
+    /// What every fake `sccache` appends to `calls` for a call: the arguments and the two variables that must (not) arrive.
+    const CALL_LINE: &str = "sccache {args} port={env:SCCACHE_SERVER_PORT|} token={env:GITHUB_TOKEN|}\n";
 
     fn go(dir: &Path, vars: &[(&str, &str)]) -> (i32, String, String) {
         let mut env: HashMap<String, String> = [
@@ -87,7 +77,11 @@ mod tests {
     #[test]
     fn the_statistics_are_printed_and_only_the_jobs_own_server_is_stopped() {
         let d = crate::ci_host::canonical_tempdir();
-        sccache(d.path(), "echo 'Compile requests 10'");
+        let calls = d.path().join("calls").display().to_string();
+        StandIn::new(d.path(), "sccache")
+            .answers(Actions::new().appends_with(&calls, CALL_LINE).stdout("Compile requests 10"))
+            .install()
+            .unwrap();
         let (code, out, calls) = go(d.path(), &[("SCCACHE_SERVER_PORT", "4501")]);
         assert_eq!(code, 0);
         assert!(out.contains("Compile requests 10"), "{out}");
@@ -96,7 +90,11 @@ mod tests {
             "the token never reaches sccache"
         );
         let d = crate::ci_host::canonical_tempdir();
-        sccache(d.path(), "echo stats");
+        let calls = d.path().join("calls").display().to_string();
+        StandIn::new(d.path(), "sccache")
+            .answers(Actions::new().appends_with(&calls, CALL_LINE).stdout("stats"))
+            .install()
+            .unwrap();
         let (_, _, calls) = go(d.path(), &[]);
         assert_eq!(
             calls, "sccache --show-stats port= token=\n",
@@ -107,7 +105,11 @@ mod tests {
     #[test]
     fn an_unreachable_server_is_a_notice_and_a_missing_sccache_is_silence() {
         let d = crate::ci_host::canonical_tempdir();
-        sccache(d.path(), "exit 2");
+        let calls = d.path().join("calls").display().to_string();
+        StandIn::new(d.path(), "sccache")
+            .answers(Actions::new().appends_with(&calls, CALL_LINE).exit(2))
+            .install()
+            .unwrap();
         let (code, out, _) = go(d.path(), &[]);
         assert_eq!(code, 0);
         assert!(

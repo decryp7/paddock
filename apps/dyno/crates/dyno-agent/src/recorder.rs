@@ -24,6 +24,16 @@ impl Default for Recorder {
 }
 
 impl Recorder {
+    /// When the last automatic capture was taken: the part of the recorder a tick changes besides the store (its tick state).
+    pub fn auto_mark(&self) -> Option<Timestamp> {
+        self.last_auto
+    }
+
+    /// Puts [`Recorder::auto_mark`] back (a tick whose capture was not stored).
+    pub fn restore_auto_mark(&mut self, mark: Option<Timestamp>) {
+        self.last_auto = mark;
+    }
+
     /// An empty recorder.
     pub fn new() -> Recorder {
         Recorder {
@@ -73,12 +83,21 @@ impl Recorder {
         if !serious || !auto_capture_allowed(self.last_auto, now) {
             return None;
         }
+        let before = self.last_auto;
         self.last_auto = Some(now);
         let reason = CaptureReason::Alarm {
             alarm_id: change.alarm.id,
             title: change.alarm.title.chars().take(100).collect(),
         };
-        self.capture(store, reason, now).ok()
+        match self.capture(store, reason, now) {
+            Ok(info) => Some(info),
+            Err(e) => {
+                // Not stored, so not counted as taken (Dyno ADR 0008, "Store writers"): the next serious alarm may capture.
+                log::error!("dyno-agent: an automatic recorder capture could not be stored: {e}");
+                self.last_auto = before;
+                None
+            }
+        }
     }
 }
 
@@ -102,6 +121,24 @@ mod tests {
                 at: Timestamp(1),
             })
             .remove(0)
+    }
+
+    /// The store-writer contract (Dyno ADR 0008): an automatic capture that was not stored is not counted as taken.
+    #[test]
+    fn a_capture_that_was_not_stored_does_not_count_as_taken() {
+        let s = Store::memory().unwrap();
+        let mut r = Recorder::new();
+        for i in 0..5 {
+            r.record(&sample(Timestamp(i * 1_000)), &[]);
+        }
+        s.refuse_writes_for_test(true);
+        assert!(r.on_alarm(&s, &change(Severity::Critical, "a"), Timestamp(10_000)).is_none());
+        s.refuse_writes_for_test(false);
+        assert_eq!(r.auto_mark(), None, "not stored, not taken");
+        assert!(
+            r.on_alarm(&s, &change(Severity::Critical, "a"), Timestamp(11_000)).is_some(),
+            "the next serious alarm captures"
+        );
     }
 
     #[test]

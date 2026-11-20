@@ -1,0 +1,17 @@
+{
+ "findings": [
+  {
+   "check": "C123",
+   "severity": "error",
+   "rule": 3,
+   "file": "crates",
+   "line": 1,
+   "message": "check broken: no Rust test file was found to read",
+   "fix": "Run it with --root at the repository root.",
+   "unwaivable": true,
+   "outcome": "check-broken"
+  }
+ ],
+ "errors": 1,
+ "warnings": 0
+}

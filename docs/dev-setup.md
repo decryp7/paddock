@@ -64,13 +64,12 @@ update the shell profile's `SCCACHE_DIR` and `PADDOCK_DEV_HOME`, and change the 
 Put these in the shell profile (`~/.zshenv` on macOS):
 
 ```sh
-export RUSTC_WRAPPER=sccache        # shared compile cache; `sccache --show-stats` shows the hit rate
 export SCCACHE_DIR=<dev-targets>/sccache   # on the dev disk ("Where things live" below), not the system disk
 export SCCACHE_CACHE_SIZE=60G       # the default 10G is too small for several apps
 export CARGO_BUILD_JOBS=2           # per job; several run at once (Mac mini: about five heavy jobs at most)
 ```
 
-Change `RUSTC_WRAPPER` only between builds: it is part of Cargo's fingerprint, so changing it rebuilds the target folder.
+Do not export `RUSTC_WRAPPER` in the profile: `eval "$(./dev sccache env)"` sets it per shell (a shim, below), and a profile value of `sccache` makes `./dev` decline its own. The shared compile cache's hit rate is `sccache --show-stats`.
 
 **sccache.** One server per user serves every checkout and worktree; the cache lives on the big volume
 (`SCCACHE_DIR`: `<dev-targets>/sccache`, next to the per-worktree target folders; see "Where things live"). It caches
@@ -190,6 +189,13 @@ another database number. sccache's keys include the compiler and target, so one 
   `CARGO_ENCODED_RUSTFLAGS` replaces every configured flag, this one included: add `-C target-feature=+crt-static` to
   it when you set it for a Windows build. `node conformance/release/windows-crt-imports.mjs <exe-or-folder>` checks a
   build; cargo-xwin cross-builds pick the setting up as well.
+- **The sccache shim (ER-47).** cc-rs puts `RUSTC_WRAPPER` in front of the C compiler when its file name is `sccache`, cargo hands that
+  variable to every build script, and sccache 0.19 cannot probe `clang-cl` (it reads `/Users/...` as `/U` options), so every
+  `cargo xwin` lint that compiles C (ring) failed. cc-rs 1.8 to 1.11 has no switch for one target, so `./dev sccache env` (and the
+  gates, `./dev gen check`, heavy's build) set `RUSTC_WRAPPER` to `<tool cache>/tools/sccache/<version>/shim/sccache`, a shell
+  program named `sccache` that runs `clang-cl`/`cl` (or a compiler with `--target=...-windows-msvc`) directly and everything else
+  through the real sccache. Native C stays cached on macOS and Linux; only the cross C compiles are not. Written by `./dev sccache env`
+  only (a gate with no shim turns the wrapper off and says so). Policy: `local_sccache::shim_text`; measured: docs/benchmarks.md.
 
 ## Folders tools make (owner records)
 

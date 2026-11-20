@@ -26,6 +26,50 @@ pub fn parse_codesign(text: &str, success: bool) -> SignatureInfo {
     SignatureInfo::Unknown("codesign named no signer".into())
 }
 
+/// The answers of one `codesign -dv --verbose=2 <path>...` run over several files (ADR 0108 DY-5), in the order of `paths`, for
+/// the files it got to. codesign writes one block per signed file, each starting `Executable=`, and stops at the first file it
+/// cannot read, which it names as `<path>: <reason>` (for example "code object is not signed at all"). The caller asks again
+/// for the files after the last answer. A first file whose failure does not name it is answered from the whole text, so a run
+/// always answers at least one file.
+pub fn split_codesign(paths: &[String], text: &str, success: bool) -> Vec<SignatureInfo> {
+    let mut out: Vec<SignatureInfo> = Vec::new();
+    let mut block: Option<String> = None;
+    for line in text.lines() {
+        // The file this line would be about: the one whose block is open, else the next one.
+        let current = out.len();
+        let names = |i: usize| paths.get(i).is_some_and(|p| line.starts_with(&format!("{p}: ")));
+        if line.starts_with("Executable=") {
+            if let Some(b) = block.take() {
+                out.push(parse_codesign(&b, true));
+            }
+            if out.len() >= paths.len() {
+                return out;
+            }
+            block = Some(format!("{line}\n"));
+        } else if block.is_some() && names(current) {
+            // A failure about the file whose block is open: that file's answer (the failure, in its words), and the run's end.
+            out.push(parse_codesign(line, false));
+            return out;
+        } else if names(current + usize::from(block.is_some())) {
+            if let Some(b) = block.take() {
+                out.push(parse_codesign(&b, true));
+            }
+            out.push(parse_codesign(line, false));
+            return out;
+        } else if let Some(b) = block.as_mut() {
+            b.push_str(line);
+            b.push('\n');
+        }
+    }
+    if let Some(b) = block.take() {
+        out.push(parse_codesign(&b, true));
+    }
+    if out.is_empty() && !paths.is_empty() {
+        out.push(parse_codesign(text, success));
+    }
+    out
+}
+
 /// `lsappinfo front` output, e.g. `ASN:0x0-0x1d01d:` → the ASN.
 pub fn parse_lsappinfo_front(text: &str) -> Option<String> {
     let t = text.trim();
@@ -74,6 +118,36 @@ pub fn pressure_from_level(level: i32) -> Option<MemoryPressure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_codesign_run_over_several_files_is_split_per_file_and_stops_at_the_first_failure() {
+        let paths = ["/bin/ls", "/x/plain", "/bin/cat"].map(String::from);
+        let ls = "Executable=/bin/ls\nIdentifier=com.apple.ls\nAuthority=macOS Software Signing\nAuthority=Apple Root CA\n";
+        let text = format!("{ls}/x/plain: code object is not signed at all\n");
+        assert_eq!(
+            split_codesign(&paths, &text, false),
+            [SignatureInfo::Signed("macOS Software Signing".into()), SignatureInfo::Unsigned]
+        );
+        let cat = "Executable=/bin/cat\nAuthority=Developer ID Application: A\n";
+        assert_eq!(
+            split_codesign(&paths[2..], cat, true),
+            [SignatureInfo::Signed("Developer ID Application: A".into())]
+        );
+        // Every file signed: one answer each, in order; a symlink's block names the file it resolved to, which does not matter.
+        let two = format!("{ls}Executable=/usr/bin/cat\nSignature=adhoc\n");
+        let both = split_codesign(&["/bin/ls".into(), "/link/to/cat".into()], &two, true);
+        assert_eq!(both.len(), 2);
+        assert!(matches!(&both[1], SignatureInfo::Invalid(m) if m.contains("Ad-hoc")));
+        // A failure about the file whose block is open ends with that file, as a failure.
+        let bad = format!("{ls}/bin/ls: invalid signature (code or signature have been modified)\n");
+        assert!(matches!(&split_codesign(&paths, &bad, false)[..], [SignatureInfo::Invalid(m)] if m.contains("modified")));
+        // A first file whose failure does not name it is still answered, so the caller always moves on.
+        assert!(matches!(
+            &split_codesign(&paths, "codesign: internal error\n", false)[..],
+            [SignatureInfo::Invalid(_)]
+        ));
+        assert!(split_codesign(&[], "", true).is_empty());
+    }
 
     #[test]
     fn codesign_verdicts() {

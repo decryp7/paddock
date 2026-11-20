@@ -60,7 +60,7 @@ fn the_shared_mac_gets_a_third_of_its_cores_and_eight_test_threads() {
 #[test]
 fn windows_gets_three_jobs_per_host_and_says_it_assumed_the_capacity() {
     let r = build_jobs(&host("Windows", "16", "32768"), None, true);
-    assert_eq!(r.env_file, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=8\n");
+    assert_eq!(r.env_file, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\n");
     assert!(
         r.stdout
             .starts_with("::notice::build-jobs assumes the Windows runner's capacity is 3"),
@@ -84,17 +84,25 @@ fn memory_is_the_ceiling_when_it_is_smaller_than_the_cores() {
 }
 
 #[test]
-fn linux_keeps_cargos_default_unless_the_job_splits() {
-    let r = build_jobs(&host("Linux", "16", "131072"), None, true);
-    assert_eq!(r.env_file, "");
-    assert!(
-        r.stderr.contains("CARGO_BUILD_JOBS stays unset: cargo uses all 16 cores"),
-        "{}",
-        r.stderr
-    );
+fn linux_is_d_gtr9s_layout_of_six_jobs_on_thirty_cores() {
+    let r = build_jobs(&host("Linux", "30", "65536"), None, true);
+    assert_eq!(r.env_file, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\n");
+    assert!(r.stderr.contains("(30 cores - 0 kept) / 6 jobs per host"), "{}", r.stderr);
+    assert!(!r.stdout.contains("::warning::"), "{}", r.stdout);
     assert_eq!(
-        build_jobs(&host("Linux", "16", "131072"), Some("4"), true).env_file,
-        "CARGO_BUILD_JOBS=4\n"
+        build_jobs(&host("Linux", "30", "65536"), Some("2"), true).env_file,
+        "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\n"
+    );
+    // Another core count: the share follows it and the warning names both numbers and the next step.
+    let other = build_jobs(&host("Linux", "16", "131072"), None, true);
+    assert_eq!(other.env_file, "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\n");
+    assert!(
+        other
+            .stdout
+            .contains("::warning::build-jobs: the Linux layout documents 30 cores, this host has 16;")
+            && other.stdout.contains("update the Linux layout"),
+        "{}",
+        other.stdout
     );
 }
 

@@ -38,6 +38,7 @@ pub mod processes;
 pub mod readability;
 pub mod runner;
 pub mod sensors;
+pub mod signatures;
 pub mod smart_reader;
 pub mod smartctl_search;
 pub mod tool_install;
@@ -76,6 +77,8 @@ pub struct Platform {
     pub sensors: Box<dyn SystemSensors>,
     /// The process table.
     pub processes: Box<dyn ProcessSource>,
+    /// Who signed a program file, many files per call; shared, never behind the details lock (ADR 0108 DY-5).
+    pub signatures: std::sync::Arc<dyn dyno_core::ports::SignatureProbe>,
     /// "What is locking this file?"
     pub locks: Box<dyn FileLocks>,
     /// Startup entries.
@@ -114,6 +117,7 @@ impl Platform {
         let Platform {
             sensors,
             processes,
+            signatures,
             locks,
             startup,
             facts,
@@ -148,6 +152,7 @@ impl Platform {
         let mut list: Vec<(String, &'static str)> = vec![
             ("sensors".into(), sensors.adapter()),
             ("processes".into(), processes.adapter()),
+            ("signatures".into(), signatures.adapter()),
             ("locks".into(), locks.adapter()),
             ("startup".into(), startup.adapter()),
             ("facts".into(), facts.adapter()),

@@ -219,6 +219,7 @@ test('settings: switches keep their labels beside them, readable and clear of ba
     // Measure only once the clicked section has rendered (its heading shows), not the previous one.
     await expect(button).toHaveAttribute('aria-current', 'page');
     const name = button.locator('.name');
+    // conformance: e2e-ready — a button label, static once the section is drawn
     const title = ((await name.count()) ? await name.innerText() : await button.innerText()).trim();
     await expect(dialog.locator('section.content h3').first()).toHaveText(title);
     const problems = await dialog.evaluate((root) => {

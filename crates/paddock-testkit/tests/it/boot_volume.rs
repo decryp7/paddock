@@ -3,11 +3,11 @@
 //! `diskutil` and `getconf` are not run).
 #![cfg(unix)]
 
-use paddock_testkit::Scratch;
 use paddock_testkit::boot_volume::{
     RULE_BOUND, boot_volume_choice, boot_volume_decisions, boot_volume_temp, boot_volume_temp_with,
     rule_script,
 };
+use paddock_testkit::{Actions, Scratch, StandIn};
 use std::ffi::OsString;
 use std::os::unix::fs::symlink;
 use std::path::Path;
@@ -21,27 +21,32 @@ const EXTERNAL: &str = "EXTERNAL-VOLUME";
 fn fake_path(s: &Scratch, user_temp: Option<&Path>) -> OsString {
     let bin = s.path("bin");
     std::fs::create_dir_all(&bin).unwrap();
-    let tool = |name: &str, body: String| {
-        let p = bin.join(name);
-        paddock_testkit::exe::write_program(&p, format!("#!/bin/sh\n{body}")).unwrap();
+    let plist = |internal: bool| {
+        Actions::new()
+            .stdout("<plist><dict><key>Internal</key>")
+            .stdout(if internal { "<true/>" } else { "<false/>" })
+            .stdout("</dict></plist>")
     };
-    tool(
-        "df",
-        "echo 'Filesystem 512-blocks Used Available Capacity Mounted on'\necho \"/dev/fake 1 1 1 1% $2\"\n".into(),
-    );
-    tool(
-        "diskutil",
-        format!(
-            "case \"$3\" in *{EXTERNAL}*) v=false ;; *) v=true ;; esac\necho '<plist><dict><key>Internal</key>'\necho \"<$v/>\"\necho '</dict></plist>'\n"
-        ),
-    );
-    tool(
-        "getconf",
-        match user_temp {
-            Some(u) => format!("echo '{}{}'\n", u.display(), std::path::MAIN_SEPARATOR),
-            None => "exit 1\n".into(),
-        },
-    );
+    StandIn::new(&bin, "df")
+        .answers(
+            Actions::new()
+                .stdout("Filesystem 512-blocks Used Available Capacity Mounted on")
+                .stdout_with("/dev/fake 1 1 1 1% {arg:2}"),
+        )
+        .install()
+        .unwrap();
+    StandIn::new(&bin, "diskutil")
+        .answers(plist(true))
+        .when_arg_contains(EXTERNAL, plist(false))
+        .install()
+        .unwrap();
+    let getconf = StandIn::new(&bin, "getconf");
+    match user_temp {
+        Some(u) => getconf.stdout(&format!("{}{}", u.display(), std::path::MAIN_SEPARATOR)),
+        None => getconf.exit(1),
+    }
+    .install()
+    .unwrap();
     let mut path = OsString::from(bin.as_os_str());
     path.push(":/usr/bin:/bin");
     path

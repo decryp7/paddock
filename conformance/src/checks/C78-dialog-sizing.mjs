@@ -8,7 +8,7 @@
 //      `flex-grow`, in a file under a `dialogs/` folder of the app (a tool's file, named `*-tool.ts` or declaring `kind: 'tool'`, may).
 import { error } from '../finding.mjs';
 import { withoutTestItems } from '../util/rust-test-items.mjs';
-import { maskRust } from './C39-freed-port.mjs';
+import { maskRust } from '../util/mask-rust.mjs';
 
 const WINDOW_CALL = /\.\s*(set_size|set_min_size|set_max_size|set_position)\s*\(/g;
 const TS_CALL = /['"`](dialog_measure|dialog_ready)['"`]/g;

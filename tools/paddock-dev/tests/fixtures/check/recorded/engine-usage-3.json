@@ -1,0 +1,7 @@
+{
+ "code": 2,
+ "stdout": "",
+ "stderr": "paddock-conformance: unexpected argument: <scratch>/out.json\n",
+ "out": null,
+ "summary": null
+}

@@ -14,7 +14,7 @@
 // The token for the Actions API is read from GITEA_TOKEN by ./dev (the job's own read token; the bot's token is used only by the push job).
 import { appendFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { join } from 'node:path';
+import { resolve } from 'node:path';
 import { isMain } from '../src/util/is-main.mjs';
 import { checkTag } from './check-tag.mjs';
 
@@ -150,7 +150,8 @@ if (isMain(import.meta.url)) {
   const o = {};
   const argv = process.argv.slice(2);
   for (let i = 0; i < argv.length; i += 2) o[argv[i].replace(/^--/, '')] = argv[i + 1];
-  const root = o.root ?? '.';
+  // An absolute path: `join('.', 'dev')` is `dev`, which spawnSync looks up on PATH (run 8384 refused dyno-v1.2.0 with ENOENT).
+  const root = resolve(o.root ?? '.');
   const fail = (m) => {
     console.error(`::error::request-tag: ${m}`);
     process.exit(1);
@@ -168,7 +169,7 @@ if (isMain(import.meta.url)) {
   // The verdict is `./dev ci verdict` of the trusted checkout (cwd = root); the job's read token reaches it as GITEA_TOKEN.
   const server = o.api.replace(/\/+$/, '').replace(/\/api\/v1$/, '');
   const verdict = async (workflow, sha) =>
-    spawnSync(join(root, 'dev'), ['ci', 'verdict', '--json', '--workflow', workflow, '--sha', sha, '--repo', o.repo, '--server', server], {
+    spawnSync(resolve(root, 'dev'), ['ci', 'verdict', '--json', '--workflow', workflow, '--sha', sha, '--repo', o.repo, '--server', server], {
       cwd: root,
       encoding: 'utf8',
       maxBuffer: 16 << 20,

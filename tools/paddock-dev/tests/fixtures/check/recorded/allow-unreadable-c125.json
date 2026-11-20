@@ -1,0 +1,18 @@
+{
+ "findings": [
+  {
+   "check": "C125",
+   "severity": "error",
+   "rule": 40,
+   "file": "hooks/guard.py",
+   "line": 1,
+   "message": "not measured: hooks/guard.py could not be read, so a disk path in it cannot be seen",
+   "fix": "Make the file readable (permissions) and run the check again.",
+   "unwaivable": true,
+   "outcome": "not-measured"
+  }
+ ],
+ "errors": 1,
+ "warnings": 0,
+ "waived": []
+}

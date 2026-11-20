@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { expandFields, gridRows, openApp, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
+import { anchoredMenu, contextMenu } from './menu-support';
 
 /** Selects the first occurrence of `pattern` in the inspector message, like dragging over it. */
 async function selectInMessage(page: Page, pattern: string): Promise<void> {
@@ -34,9 +35,7 @@ test.describe('context actions from data', () => {
     await expect(total).toHaveText(/^\d[\d,]*$/);
     const before = parseCount(await total.innerText());
 
-    await gridRows(page).first().click({ button: 'right' });
-    const menu = page.getByRole('menu', { name: 'Actions' });
-    await expect(menu).toBeVisible();
+    const menu = await contextMenu(page, gridRows(page).first());
     await expect(menu.getByRole('menuitem').first()).toBeFocused();
     await expectNoSeriousViolations(page, testInfo, 'row-context-menu');
     await menu.getByRole('menuitem', { name: /Drop events like this/ }).click();
@@ -58,8 +57,7 @@ test.describe('context actions from data', () => {
     await row.click();
     await page.getByRole('grid', { name: 'Events' }).focus();
     await page.keyboard.press('Shift+F10');
-    const menu = page.getByRole('menu', { name: 'Actions' });
-    await expect(menu).toBeVisible();
+    const menu = await anchoredMenu(page, row, 'Actions');
     await page.keyboard.press('ArrowDown');
     await expect(menu.getByRole('menuitem').nth(1)).toBeFocused();
     await page.keyboard.press('Escape');

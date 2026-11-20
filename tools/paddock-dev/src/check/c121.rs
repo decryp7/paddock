@@ -23,8 +23,8 @@
 //!
 //! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet. First count (2026-11-13): 10 findings, all the parity fixtures of C121 itself; since 2026-11-15 its own files are not read ([`IMPLEMENTATION`]), so they need no entry.
 //!
-//! Rust first (the rule's own host); `conformance/src/checks/C121-declared-data.mjs` is the port and `tests/it/check_c121.rs` compares
-//! them finding for finding.
+//! Rust first (the rule's own host); the JavaScript port was retired with pair P3 (ADR 0022 amendment 2026-11-19) and
+//! `tests/it/check_c121.rs` holds the check to the answers it recorded.
 
 use super::allow_list::{self, Admit, Entry, Spec};
 use super::finding::Finding;
@@ -37,9 +37,7 @@ use std::sync::LazyLock;
 pub const ALLOW: &str = "conformance/c121-allow.json";
 
 /// The check's own files, as C120's: its sources and tests name the patterns (their invented lines are test data), and its allow list.
-pub const IMPLEMENTATION: [&str; 5] = [
-    "conformance/src/checks/C121-declared-data.mjs",
-    "conformance/test/c121-declared-data.test.mjs",
+pub const IMPLEMENTATION: [&str; 3] = [
     "tools/paddock-dev/src/check/c121.rs",
     "tools/paddock-dev/tests/it/check_c121.rs",
     ALLOW,

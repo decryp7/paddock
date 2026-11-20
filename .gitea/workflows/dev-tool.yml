@@ -20,6 +20,7 @@ on:
       - crates/paddock-cli/**
       - crates/paddock-env/**
       - crates/paddock-proc/**
+      - crates/paddock-git/**
       - crates/paddock-repo-graph/**
       - crates/paddock-slots/**
       - crates/paddock-workspace-hack/**

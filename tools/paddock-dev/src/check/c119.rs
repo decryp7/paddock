@@ -7,7 +7,7 @@
 //! `kit.sh` / `--ensure-toolchain` itself. A justified case carries `conformance: dev-before-toolchain — <why>` on the line or above.
 //! Report-only for now (ER-41).
 //!
-//! The port of `conformance/src/checks/C119-dev-before-toolchain.mjs`, finding for finding (`tests/it/check_c119.rs` compares them).
+//! The JavaScript check (`conformance/src/checks/C119-*.mjs`) was the original; it was retired with pair P3 (ADR 0022 amendment 2026-11-19) and the Rust host is the only one. The answers it gave are recorded in `tests/fixtures/check/recorded` and `units` and ``tests/it/check_c119.rs`` holds the check to them.
 
 use super::finding::Finding;
 use super::inline_waiver::{CommentView, InlineWaiver, Kind};

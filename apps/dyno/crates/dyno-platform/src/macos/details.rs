@@ -1,38 +1,37 @@
 //! macOS process details: nice value and background class, open files, sockets and mapped libraries from `libproc` and the kernel socket lists (never `lsof`, Dyno ADR 0026),
 //! and the code signature from `codesign`. Everything runs with a timeout; failures become unavailable fields.
 
-use crate::parse::mac_tools::parse_codesign;
 use crate::processes::DetailsProbe;
 use crate::unix_proc::get_nice;
+use dyno_core::ports::SignatureProbe;
 use dyno_core::process::{ListOrReason, Priority, ProcessDetails, ProcessRef, SignatureInfo};
 use std::path::Path;
-use std::time::Duration;
-
-const TOOL_TIMEOUT: Duration = Duration::from_secs(8);
+use std::sync::Arc;
 
 /// Details through macOS' own tools.
-pub struct MacDetails;
+pub struct MacDetails {
+    signatures: Arc<dyn SignatureProbe>,
+}
 
 impl MacDetails {
-    /// The probe.
+    /// The probe, with the system's signature check (whose cache the agent's look at new programs shares).
     pub fn new() -> Self {
-        MacDetails
+        MacDetails {
+            signatures: crate::signatures::system(),
+        }
+    }
+}
+
+impl MacDetails {
+    /// The probe answering signatures from `signatures`.
+    pub fn with_signatures(signatures: Arc<dyn SignatureProbe>) -> Self {
+        MacDetails { signatures }
     }
 }
 
 impl Default for MacDetails {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-fn signature(exe: &Path) -> SignatureInfo {
-    let mut cmd = crate::process::command("/usr/bin/codesign");
-    cmd.args(["-dv", "--verbose=2"]).arg(exe);
-    match crate::process::run_with_timeout(cmd, TOOL_TIMEOUT) {
-        // codesign writes its report to stderr.
-        Ok(out) => parse_codesign(&String::from_utf8_lossy(&out.stderr), out.status.success()),
-        Err(e) => SignatureInfo::Unknown(e.to_string()),
     }
 }
 
@@ -46,7 +45,13 @@ impl DetailsProbe for MacDetails {
         details.efficiency_mode = super::background::is_background(pid);
         details.affinity = None;
         details.signature = match exe {
-            Some(e) => signature(e),
+            // One answer was asked for; a probe that gives none is Unknown, never a panic under the details lock.
+            Some(e) => self
+                .signatures
+                .signatures(&[e])
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| SignatureInfo::Unknown("The signature check gave no answer for this file".into())),
             None => SignatureInfo::Unknown("The program file is not known".into()),
         };
         // Never `lsof`: it asks the kernel about every socket and pipe descriptor of the process, which can mark another
@@ -123,15 +128,32 @@ mod tests {
         drop(listener);
     }
 
+    /// Review P2-5: a signature probe that answers nothing gives Unknown, never a panic under the details lock.
+    #[test]
+    fn a_probe_that_answers_nothing_gives_unknown() {
+        struct Silent;
+        impl SignatureProbe for Silent {
+            fn signatures(&self, _: &[&Path]) -> Vec<SignatureInfo> {
+                Vec::new()
+            }
+        }
+        let mut src = SysinfoProcesses::new(Box::new(MacDetails::with_signatures(Arc::new(Silent))));
+        let me = std::process::id();
+        let mine = src.processes().into_iter().find(|p| p.pid == me).unwrap();
+        let d = src.details(mine.reference()).unwrap();
+        assert!(matches!(d.signature, SignatureInfo::Unknown(_)), "{:?}", d.signature);
+    }
+
     #[test]
     fn signatures_of_system_and_unsigned_files() {
+        let sig = |p: &Path| MacDetails::new().signatures.signatures(&[p]).remove(0);
         assert!(matches!(
-            signature(Path::new("/bin/ls")),
+            sig(Path::new("/bin/ls")),
             SignatureInfo::Signed(_) | SignatureInfo::Invalid(_)
         ));
         let dir = paddock_testkit::private_tempdir().unwrap();
         let f = dir.path().join("plain");
         std::fs::write(&f, b"not a program").unwrap();
-        assert!(!matches!(signature(&f), SignatureInfo::Signed(_)));
+        assert!(!matches!(sig(&f), SignatureInfo::Signed(_)));
     }
 }

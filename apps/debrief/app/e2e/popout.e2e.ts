@@ -4,8 +4,9 @@ import { openQuery } from './analysis-support';
 import { ensureInspector, gridRows, openApp, openView } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
-import { menuItem, openMenu } from './menu-support';
+import { anchoredMenu, menuItem, openMenu } from './menu-support';
 import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
+import { clickThatClosesItsPage, untilItsPageCloses } from '../../../../ui/projects/paddock-e2e/src/close-click.ts';
 
 // Pop-out windows in the browser build: `window.open` popups of the same app, synced over a BroadcastChannel (the
 // same port interface as the Tauri events between real OS windows).
@@ -17,8 +18,9 @@ const groupOf = (page: Page, name: string) => page.locator('.dv-groupview').filt
 async function popOut(page: Page, context: BrowserContext, name: string): Promise<Page> {
   const opened = context.waitForEvent('page');
   await tab(page, name).click();
-  await groupOf(page, name).getByRole('button', { name: 'Panel menu', exact: true }).click();
-  await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Pop out to window', exact: true }).click();
+  const button = groupOf(page, name).getByRole('button', { name: 'Panel menu', exact: true });
+  await button.click();
+  await (await anchoredMenu(page, button, 'Actions')).getByRole('menuitem', { name: 'Pop out to window', exact: true }).click();
   const popup = await opened;
   await expect(popup.locator('debrief-popout-shell')).toBeVisible();
   await expect(popup.getByRole('heading', { level: 1, name })).toBeVisible();
@@ -60,9 +62,8 @@ test.describe('pop-out windows', () => {
 
   test('Dock back returns the panel to where it was', async ({ page, context }) => {
     const popup = await popOut(page, context, 'Inspector');
-    const closed = popup.waitForEvent('close');
-    await popup.getByRole('button', { name: 'Dock back into the main window' }).click();
-    await closed;
+    // The click closes its own window (the host closes the pop-out): a plain click can reject when that happens mid-click (run 8338).
+    await clickThatClosesItsPage(popup.getByRole('button', { name: 'Dock back into the main window' }));
     await expect(tab(page, 'Inspector')).toBeVisible();
     // Back on the right of the timeline and the document beside it, as before.
     await expectNotMoving(page.locator('debrief-inspector'), 'the inspector');
@@ -137,9 +138,8 @@ test.describe('pop-out windows', () => {
     await handle.dispatchEvent('pointermove', { screenX: at.x, screenY: at.y, pointerId: 1 });
     await expect(page.locator('.debrief-guide-edges .debrief-guide-left.hot')).toBeVisible();
     await expect(page.locator('.debrief-guide-preview')).toBeVisible();
-    const closed = popup.waitForEvent('close');
-    await handle.dispatchEvent('pointerup', { pointerId: 1 });
-    await closed;
+    // Dropping on the guide docks it and the host closes the pop-out, so this step ends its own page (as Dock back does).
+    await untilItsPageCloses(popup, () => handle.dispatchEvent('pointerup', { pointerId: 1 }));
     await expect(tab(page, 'Inspector')).toBeVisible();
     await expect(page.locator('.debrief-drop-guides.on')).toHaveCount(0);
     const inspector = (await page.locator('debrief-inspector').boundingBox())!;

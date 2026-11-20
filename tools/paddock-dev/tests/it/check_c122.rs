@@ -1,7 +1,7 @@
-//! C122 (tests compare paths as paths, ADR 0099): the Rust host against the conformance host as the oracle, on a fixture tree and on
+//! C122 (tests compare paths as paths, ADR 0099): the Rust host against the answers the JavaScript check gave (recorded in `tests/fixtures/check/recorded`; the JS module is retired, pair P3), on a fixture tree and on
 //! this working tree, and the tree's own state (no rule A or B site is left; the check starts with an empty baseline).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{LIVE_STALL, has_node, node, node_ticking, repo_root, skip};
+use super::check::{LIVE_STALL, repo_root};
 use paddock_dev::check::tree::Tree;
 use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
 use serde_json::{Value, json};
@@ -46,14 +46,6 @@ fn shared_part(v: &Value) -> Value {
     json!({"app": v["app"], "checks": v["checks"], "findings": v["findings"], "waived": v["waived"], "errors": v["errors"], "warnings": v["warnings"]})
 }
 
-const JS_RUN: &str = r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C122'] });
-process.stdout.write(JSON.stringify(r));
-"#;
-
 fn fixture_tree() -> tempfile::TempDir {
     let d = tempfile::tempdir().unwrap();
     for (rel, text) in CASES {
@@ -86,34 +78,16 @@ fn the_fixture_tree_reports_the_sites_of_every_rule_and_only_in_test_code() {
 }
 
 #[test]
-fn live_fixture_findings_equal_the_js_host() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn live_fixture_findings_equal_the_recorded_js_answer() {
     let tree = fixture_tree();
-    let js: Value = serde_json::from_str(&node(
-        JS_RUN,
-        &[("RT5_ROOT", tree.path().display().to_string()), ("RT5_APP", "fixture".into())],
-    ))
-    .unwrap();
     let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
-    assert_eq!(shared_part(&r.json()), shared_part(&js));
+    let got = shared_part(&r.json());
+    assert_eq!(got, crate::recorded::expect("c122-fixture", &got));
 }
 
 #[test]
-fn live_tree_findings_equal_the_js_host_and_no_rule_a_or_b_site_is_left() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn live_tree_run_is_sound_and_no_rule_a_or_b_site_is_left() {
     let root = repo_root();
-    let js_root = root.clone();
-    let js = paddock_testkit::guarded("the JS C122 over the live tree", LIVE_STALL, move |progress| {
-        let driver = format!(
-            "import fs from 'node:fs';\nimport {{ syncBuiltinESMExports }} from 'node:module';\nconst read = fs.readFileSync;\nfs.readFileSync = (...a) => {{ process.stdout.write('.\\n'); return read(...a); }};\nsyncBuiltinESMExports();\n{JS_RUN}"
-        );
-        let env = [("RT5_ROOT", js_root.display().to_string()), ("RT5_APP", "paddock".into())];
-        serde_json::from_str::<Value>(node_ticking(&driver, &env, &progress).trim()).unwrap()
-    });
     let r = paddock_testkit::guarded("the Rust C122 over the live tree", LIVE_STALL, {
         let root = root.clone();
         move |progress| {
@@ -121,7 +95,7 @@ fn live_tree_findings_equal_the_js_host_and_no_rule_a_or_b_site_is_left() {
             run_checks_in(&tree, &options(&root, "paddock"), &registry()).unwrap()
         }
     });
-    assert_eq!(shared_part(&r.json()), shared_part(&js));
+    crate::recorded::assert_live_tree_sound("c122", &r.json());
     // The ADR's WP-3b: all sites were moved onto paddock_testkit::path, so the check starts with an empty baseline. Rule C
     // warnings are a heuristic and stay.
     let left: Vec<String> = r

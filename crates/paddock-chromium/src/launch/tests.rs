@@ -672,7 +672,13 @@ fn a_browser_without_a_start_page_gets_a_new_one_after_the_wait_on_its_clock() {
 #[test]
 fn a_start_that_does_nothing_is_stuck_on_the_clock_not_after_a_fixed_wait() {
     let d = tempfile::tempdir().unwrap();
-    let silent = script(d.path(), "silent.sh", "exec sleep 30");
+    let silent = Browser::chromium(
+        paddock_testkit::StandIn::new(d.path(), "silent")
+            .sleeps(Duration::from_secs(30))
+            .install()
+            .unwrap()
+            .program(),
+    );
     let clock = FakeClock::new();
     let mut o = opts(&d.path().join("p"));
     // No CPU at all: idle for the patience's 2 s of ticks, counted on the fake clock.
@@ -693,7 +699,13 @@ fn a_start_that_does_nothing_is_stuck_on_the_clock_not_after_a_fixed_wait() {
 #[test]
 fn a_busy_start_is_waited_for_and_a_spinning_one_is_given_up_on() {
     let d = tempfile::tempdir().unwrap();
-    let silent = script(d.path(), "silent.sh", "exec sleep 30");
+    let silent = Browser::chromium(
+        paddock_testkit::StandIn::new(d.path(), "silent")
+            .sleeps(Duration::from_secs(30))
+            .install()
+            .unwrap()
+            .program(),
+    );
     let clock = FakeClock::new();
     let mut o = opts(&d.path().join("p"));
     // CPU time grows: not idle; at 3 CPU seconds without a port it is spinning.
@@ -717,7 +729,13 @@ fn a_busy_start_is_waited_for_and_a_spinning_one_is_given_up_on() {
 #[test]
 fn a_start_that_cannot_be_observed_is_bounded_by_the_hang_guard() {
     let d = tempfile::tempdir().unwrap();
-    let silent = script(d.path(), "silent.sh", "exec sleep 30");
+    let silent = Browser::chromium(
+        paddock_testkit::StandIn::new(d.path(), "silent")
+            .sleeps(Duration::from_secs(30))
+            .install()
+            .unwrap()
+            .program(),
+    );
     let clock = FakeClock::new();
     let mut o = opts(&d.path().join("p"));
     // The OS gives no CPU time (no identity, no reading): the judge could never conclude, so the guard ends it.
@@ -739,10 +757,17 @@ fn a_start_that_cannot_be_observed_is_bounded_by_the_hang_guard() {
 fn a_browser_stopped_at_start_is_paused_and_waited_for_not_called_idle() {
     let d = tempfile::tempdir().unwrap();
     let pid_file = d.path().join("pid");
-    let stopped = script(
-        d.path(),
-        "stopped.sh",
-        &format!("echo $$ > {}\nkill -STOP $$\nsleep 30", pid_file.display()),
+    let stopped = Browser::chromium(
+        paddock_testkit::StandIn::new(d.path(), "stopped")
+            .answers(
+                paddock_testkit::Actions::new()
+                    .writes_with(&pid_file.to_string_lossy(), "{pid}\n")
+                    .stops_itself()
+                    .sleeps(Duration::from_secs(30)),
+            )
+            .install()
+            .unwrap()
+            .program(),
     );
     let clock = FakeClock::new();
     let mut o = opts(&d.path().join("p"));
@@ -785,7 +810,13 @@ fn a_browser_stopped_at_start_is_paused_and_waited_for_not_called_idle() {
 #[test]
 fn a_start_ended_by_the_callers_cap_says_it_was_the_time_limit() {
     let d = tempfile::tempdir().unwrap();
-    let silent = script(d.path(), "silent.sh", "exec sleep 300");
+    let silent = Browser::chromium(
+        paddock_testkit::StandIn::new(d.path(), "silent")
+            .sleeps(paddock_testkit::MAX_SLEEP)
+            .install()
+            .unwrap()
+            .program(),
+    );
     let clock = FakeClock::new();
     let mut o = opts(&d.path().join("p"));
     (o.clock, o.max_lifetime, o.cpu_sampler) = (
@@ -816,8 +847,7 @@ fn a_start_ended_by_the_callers_cap_says_it_was_the_time_limit() {
     );
     assert!(!e.to_string().contains("exited"), "{e}");
     assert!(
-        paddock_proc::processes_mentioning(&d.path().join("silent.sh").to_string_lossy())
-            .is_empty(),
+        paddock_proc::processes_mentioning(&silent.path.to_string_lossy()).is_empty(),
         "the browser was ended"
     );
 }
@@ -1068,7 +1098,13 @@ fn the_memory_cap_ends_the_tree() {
 fn a_browser_over_the_cap_while_it_starts_fails_to_launch_and_says_why() {
     // A browser that never gets as far as its port file, so the cap (not the start) decides, whatever the machine's speed.
     let d = tempfile::tempdir().unwrap();
-    let starting = script(d.path(), "starting.sh", "exec sleep 30");
+    let starting = Browser::chromium(
+        paddock_testkit::StandIn::new(d.path(), "starting")
+            .sleeps(Duration::from_secs(30))
+            .install()
+            .unwrap()
+            .program(),
+    );
     let mut o = opts(&d.path().join("p"));
     o.memory_cap = Some(1);
     o.memory_sampler = Some(Arc::new(|_| u64::MAX));
@@ -1097,10 +1133,19 @@ fn a_quick_browser_over_the_cap_is_caught_when_it_connects() {
 fn a_port_that_refuses_is_tried_again_until_the_start_is_judged_stuck() {
     let d = tempfile::tempdir().unwrap();
     // A port file that names a closed port (1), then the browser waits.
-    let refusing = script(
-        d.path(),
-        "refusing.sh",
-        "for a in \"$@\"; do case $a in --user-data-dir=*) p=${a#--user-data-dir=};; esac; done\nprintf '1\\n/devtools/browser/x\\n' > \"$p/DevToolsActivePort\"\nexec sleep 30",
+    let refusing = Browser::chromium(
+        paddock_testkit::StandIn::new(d.path(), "refusing")
+            .answers(
+                paddock_testkit::Actions::new()
+                    .writes_with(
+                        "{flag:--user-data-dir=}/DevToolsActivePort",
+                        "1\n/devtools/browser/x\n",
+                    )
+                    .sleeps(Duration::from_secs(30)),
+            )
+            .install()
+            .unwrap()
+            .program(),
     );
     let clock = FakeClock::new();
     let mut o = opts(&d.path().join("p"));
@@ -1157,14 +1202,14 @@ fn a_launch_without_a_memory_cap_uses_a_plain_child() {
 #[test]
 fn a_failed_start_reports_the_browsers_error_output_and_leaves_no_profile() {
     let base = tempfile::tempdir().unwrap();
-    let exe = base.path().join("fake-chrome.sh");
-    paddock_testkit::exe::write_program(
-        &exe,
-        "#!/bin/sh\necho 'Running as root without --no-sandbox is not supported' >&2\nexit 1\n",
-    )
-    .unwrap();
+    let exe = paddock_testkit::StandIn::new(base.path(), "fake-chrome")
+        .stderr("Running as root without --no-sandbox is not supported")
+        .exit(1)
+        .install()
+        .unwrap();
+    let exe = exe.program();
     let profiles = base.path().join("profiles");
-    let e = Chromium::launch(&Browser::chromium(&exe), &opts(&profiles))
+    let e = Chromium::launch(&Browser::chromium(exe), &opts(&profiles))
         .err()
         .unwrap()
         .to_string();
@@ -1173,9 +1218,10 @@ fn a_failed_start_reports_the_browsers_error_output_and_leaves_no_profile() {
         "{e}"
     );
     assert_eq!(std::fs::read_dir(&profiles).unwrap().count(), 0);
-    let quiet = base.path().join("quiet.sh");
-    paddock_testkit::exe::write_program(&quiet, "#!/bin/sh\nexit 0\n").unwrap();
-    let e = Chromium::launch(&Browser::chromium(&quiet), &opts(&profiles))
+    let quiet = paddock_testkit::StandIn::new(base.path(), "quiet")
+        .install()
+        .unwrap();
+    let e = Chromium::launch(&Browser::chromium(quiet.program()), &opts(&profiles))
         .err()
         .unwrap()
         .to_string();
@@ -1348,25 +1394,30 @@ fn a_theme_that_cannot_be_written_does_not_stop_the_launch() {
     assert!(b.close_gracefully(CLOSE_GUARD));
 }
 
-fn script(dir: &Path, name: &str, body: &str) -> Browser {
-    let exe = dir.join(name);
-    paddock_testkit::exe::write_program(&exe, format!("#!/bin/sh\n{body}\n")).unwrap();
-    Browser::chromium(exe)
-}
-
 #[test]
 fn a_garbled_port_file_or_a_silent_browser_fails_the_launch() {
     let d = tempfile::tempdir().unwrap();
-    let garbled = script(
-        d.path(),
-        "garbled.sh",
-        "for a in \"$@\"; do case $a in --user-data-dir=*) p=${a#--user-data-dir=};; esac; done\necho nonsense > \"$p/DevToolsActivePort\"",
+    let garbled = Browser::chromium(
+        paddock_testkit::StandIn::new(d.path(), "garbled")
+            .answers(
+                paddock_testkit::Actions::new()
+                    .writes_with("{flag:--user-data-dir=}/DevToolsActivePort", "nonsense\n"),
+            )
+            .install()
+            .unwrap()
+            .program(),
     );
     let e = Chromium::launch_with(&garbled, &opts(&d.path().join("p")), Sandbox::On)
         .err()
         .unwrap();
     assert!(matches!(e, Error::Launch(_)), "{e}");
-    let silent = script(d.path(), "silent.sh", "exec sleep 30");
+    let silent = Browser::chromium(
+        paddock_testkit::StandIn::new(d.path(), "silent")
+            .sleeps(Duration::from_secs(30))
+            .install()
+            .unwrap()
+            .program(),
+    );
     let clock = FakeClock::new();
     let mut o = opts(&d.path().join("p"));
     o.cpu_sampler = Some(Arc::new(|_| Some(Duration::ZERO)));
@@ -1382,8 +1433,7 @@ fn a_garbled_port_file_or_a_silent_browser_fails_the_launch() {
         "{e}"
     );
     assert!(
-        paddock_proc::processes_mentioning(&d.path().join("silent.sh").to_string_lossy())
-            .is_empty(),
+        paddock_proc::processes_mentioning(&silent.path.to_string_lossy()).is_empty(),
         "the silent browser was ended"
     );
 }
@@ -1490,18 +1540,20 @@ fn a_sweep_removes_nothing_when_the_process_table_cannot_be_read() {
 #[test]
 fn warm_up_is_the_shared_first_run_and_a_failure_is_a_launch_error() {
     let base = tempfile::tempdir().unwrap();
-    let write = |name: &str, body: &str| {
-        let path = base.path().join(name);
-        paddock_testkit::exe::write_program(&path, body).unwrap();
-        Browser {
-            flavor: crate::discover::Flavor::Chromium,
-            path,
-        }
+    let write = |stand_in: paddock_testkit::StandIn| Browser {
+        flavor: crate::discover::Flavor::Chromium,
+        path: stand_in.install().unwrap().program().to_path_buf(),
     };
-    assert!(warm_up(&write("good.sh", "#!/bin/sh\necho 'Fake Chrome 1.0'\n")).is_ok());
+    assert!(
+        warm_up(&write(
+            paddock_testkit::StandIn::new(base.path(), "good").stdout("Fake Chrome 1.0")
+        ))
+        .is_ok()
+    );
     let e = warm_up(&write(
-        "bad.sh",
-        "#!/bin/sh\necho 'bundle damaged' >&2\nexit 5\n",
+        paddock_testkit::StandIn::new(base.path(), "bad")
+            .stderr("bundle damaged")
+            .exit(5),
     ))
     .unwrap_err();
     assert!(matches!(e, Error::Launch(_)), "{e:?}");
@@ -1526,4 +1578,61 @@ fn warm_up_starts_nothing_off_macos() {
         path: std::path::PathBuf::from("/no/such/browser"),
     };
     assert_eq!(warm_up(&missing).unwrap(), Duration::ZERO);
+}
+
+/// Launches a stand-in that records the browser's temp folder (`MAC_CHROMIUM_TMPDIR`) and its profile, writes into that temp
+/// folder (so it must exist) and exits; returns (temp, profile) as the stand-in saw them.
+fn temp_folder_seen(o: &LaunchOptions, d: &Path) -> (String, String) {
+    let seen = d.join("seen.txt");
+    let exe = Browser::chromium(
+        paddock_testkit::StandIn::new(d, "temp-chrome")
+            .when_args(
+                &[],
+                paddock_testkit::Actions::new()
+                    .writes_with("{env:MAC_CHROMIUM_TMPDIR|/nonexistent}/written", "x")
+                    .writes_with(
+                        &seen.to_string_lossy(),
+                        "{env:MAC_CHROMIUM_TMPDIR|unset}\n{flag:--user-data-dir=}\n",
+                    )
+                    .exit(1),
+            )
+            .install()
+            .unwrap()
+            .program(),
+    );
+    let e = Chromium::launch_with(&exe, o, Sandbox::On)
+        .err()
+        .unwrap()
+        .to_string();
+    let seen = std::fs::read_to_string(&seen).unwrap_or_else(|_| {
+        panic!("the stand-in did not get to write its record (no temp folder?): {e}")
+    });
+    assert!(
+        !e.contains("nonexistent"),
+        "the temp folder did not exist: {e}"
+    );
+    let mut lines = seen.lines().map(str::to_string);
+    (
+        lines.next().unwrap_or_default(),
+        lines.next().unwrap_or_default(),
+    )
+}
+
+/// The browser's own temp folder is a fresh folder inside its profile (`MAC_CHROMIUM_TMPDIR`), never the user's temp
+/// folder: Chrome reads through that folder when it quits, and with 900,000 leftover entries in it the quit outlasted the
+/// close grace and the browser was killed (Spotter's copy, CI 8334, 8341, 8346).
+#[test]
+fn the_browser_gets_a_fresh_temp_folder_inside_its_profile() {
+    let d = tempfile::tempdir().unwrap();
+    let (temp, profile) = temp_folder_seen(&opts(&d.path().join("p")), d.path());
+    assert!(!profile.is_empty());
+    assert_eq!(Path::new(&temp), Path::new(&profile).join(BROWSER_TEMP));
+    // A kept profile gets the same folder, emptied at each start.
+    let kept = d.path().join("kept");
+    std::fs::create_dir_all(kept.join(BROWSER_TEMP).join("old")).unwrap();
+    let mut o = opts(&d.path().join("p"));
+    o.profile = Profile::Persistent(kept.clone());
+    let (temp, _) = temp_folder_seen(&o, d.path());
+    assert_eq!(Path::new(&temp), kept.join(BROWSER_TEMP));
+    assert!(!kept.join(BROWSER_TEMP).join("old").exists());
 }

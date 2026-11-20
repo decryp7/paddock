@@ -1,0 +1,110 @@
+{
+ "app": "fixture",
+ "checks": [
+  "C125"
+ ],
+ "findings": [
+  {
+   "check": "C125",
+   "severity": "warn",
+   "rule": 40,
+   "file": ".claude/hooks/worktree-guard.py",
+   "line": 2,
+   "message": "hard-codes the machine disk path `\u002fVolumes\u002fd8sst7/dev.decryptology.net/paddock`: it goes stale when the disk is renamed or replaced",
+   "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+  },
+  {
+   "check": "C125",
+   "severity": "warn",
+   "rule": 40,
+   "file": "apps/d/src/vol.rs",
+   "line": 2,
+   "message": "hard-codes the machine disk path `\u002fVolumes\u002fd7sst7`: it goes stale when the disk is renamed or replaced",
+   "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+  },
+  {
+   "check": "C125",
+   "severity": "warn",
+   "rule": 40,
+   "file": "apps/d/src/vol.rs",
+   "line": 3,
+   "message": "hard-codes the machine disk path `\u002fVolumes\u002fDatabase`: it goes stale when the disk is renamed or replaced",
+   "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+  },
+  {
+   "check": "C125",
+   "severity": "warn",
+   "rule": 40,
+   "file": "apps/d/src/vol.rs",
+   "line": 4,
+   "message": "hard-codes the machine disk path `\u002fVolumes\u002fData` beyond the count of its allow entry",
+   "fix": "Derive it, or raise the entry's `count` in conformance/c125-allow.json if it is invented data too."
+  },
+  {
+   "check": "C125",
+   "severity": "warn",
+   "rule": 40,
+   "file": "docs/adr/run.sh",
+   "line": 1,
+   "message": "hard-codes the machine disk path `\u002fVolumes\u002fd7sst7/x`: it goes stale when the disk is renamed or replaced",
+   "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+  },
+  {
+   "check": "C125",
+   "severity": "warn",
+   "rule": 40,
+   "file": "scripts/x.sh",
+   "line": 2,
+   "message": "hard-codes the machine disk path `\u002fVolumes\u002fUSB/b` beyond the count of its allow entry",
+   "fix": "Derive it, or raise the entry's `count` in conformance/c125-allow.json if it is invented data too."
+  },
+  {
+   "check": "C125",
+   "severity": "warn",
+   "rule": 40,
+   "file": "scripts/y.sh",
+   "line": 1,
+   "message": "hard-codes the machine disk path `\u002fVolumes\u002fMedia`: it goes stale when the disk is renamed or replaced",
+   "fix": "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason."
+  },
+  {
+   "check": "C125",
+   "severity": "warn",
+   "rule": 40,
+   "file": "conformance/c125-allow.json",
+   "line": 1,
+   "message": "stale history entry (docs/gone/) skipped no disk path",
+   "fix": "Remove it from conformance/c125-allow.json."
+  },
+  {
+   "check": "C125",
+   "severity": "warn",
+   "rule": 40,
+   "file": "conformance/c125-allow.json",
+   "line": 1,
+   "message": "stale history entry (docs/quiet/) skipped no disk path",
+   "fix": "Remove it from conformance/c125-allow.json."
+  },
+  {
+   "check": "C125",
+   "severity": "warn",
+   "rule": 40,
+   "file": "conformance/c125-allow.json",
+   "line": 1,
+   "message": "stale allow entry (apps/d/src/vol.rs: \u002fVolumes\u002fGone) matches no site",
+   "fix": "Remove it from conformance/c125-allow.json."
+  },
+  {
+   "check": "C125",
+   "severity": "warn",
+   "rule": 40,
+   "file": "conformance/c125-allow.json",
+   "line": 1,
+   "message": "stale allow entry (scripts/y.sh: \u002fVolumes\u002fM) matches no site",
+   "fix": "Remove it from conformance/c125-allow.json."
+  }
+ ],
+ "waived": [],
+ "errors": 0,
+ "warnings": 11
+}

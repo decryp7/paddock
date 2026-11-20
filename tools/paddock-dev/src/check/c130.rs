@@ -18,9 +18,9 @@
 //! entry's count is reported at its own line, an unreadable list makes the check broken. Convert a site to `StandIn` and delete its
 //! entry. The check's own files are not read ([`IMPLEMENTATION`]).
 //!
-//! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet.
+//! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: pending (2026-11-19): the train integrator records the run id of the first green run on the real tree here, in c130.rs and in docs/gates.toml, and only then is `mode` switched to blocking.
 //!
-//! Rust host; `conformance/src/checks/C130-stand-in-fixtures.mjs` is the port and `tests/it/check_c130.rs` compares them.
+//! Rust host; the JavaScript port was retired with pair P3 (ADR 0022 amendment 2026-11-19) and `tests/it/check_c130.rs` holds the check to the answers it recorded.
 
 use super::allow_list::{self, Admit, Entry, Spec};
 use super::finding::Finding;
@@ -33,9 +33,7 @@ use std::sync::LazyLock;
 pub const ALLOW: &str = "conformance/c130-allow.json";
 
 /// The check's own files: they name the pattern, their invented lines are test data.
-pub const IMPLEMENTATION: [&str; 5] = [
-    "conformance/src/checks/C130-stand-in-fixtures.mjs",
-    "conformance/test/c130-stand-in-fixtures.test.mjs",
+pub const IMPLEMENTATION: [&str; 3] = [
     "tools/paddock-dev/src/check/c130.rs",
     "tools/paddock-dev/tests/it/check_c130.rs",
     ALLOW,
@@ -46,6 +44,7 @@ static SHEBANG: LazyLock<Regex> = LazyLock::new(|| rx(r"#!/(?:usr/)?bin/(?:env[ 
 static WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*stand-in\s*([—–-]+)"));
 static TEST_PATH: LazyLock<Regex> = LazyLock::new(|| rx(r"(?:^|/)tests?/|(?:^|/)tests\.rs$|_tests?\.rs$"));
 static NOT_READ: LazyLock<Regex> = LazyLock::new(|| rx(r"(?:^|/)(?:target|vendor|fixtures|node_modules)/"));
+static WRITES_PROGRAM: LazyLock<Regex> = LazyLock::new(|| rx(r"\bwrite_program\("));
 static CFG_TEST: LazyLock<Regex> = LazyLock::new(|| rx(r"^[ \t]*#\[cfg\((?:test|(?:all|any)\([^\]]*\btest\b[^\]]*)\)\]"));
 
 const WAIVER_FIX: &str = "Waivers are counted, so none is free: list it in conformance/c130-allow.json (path, site `conformance: stand-in`, a reason and the file's count), which the user approves, or convert the fixture to `StandIn`.";
@@ -66,7 +65,7 @@ pub fn sites(path: &str, text: &str) -> Vec<(usize, String, bool)> {
         return Vec::new();
     }
     let lines: Vec<&str> = text.split('\n').collect();
-    let from = if TEST_PATH.is_match(path) {
+    let from = if TEST_PATH.is_match(path) || WRITES_PROGRAM.is_match(text) {
         0
     } else {
         match lines.iter().position(|l| CFG_TEST.is_match(l)) {

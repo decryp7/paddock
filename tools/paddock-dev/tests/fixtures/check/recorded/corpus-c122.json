@@ -1,0 +1,227 @@
+{
+ "plain": {
+  "findings": [
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/bad.rs",
+    "line": 2,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   },
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/first.rs",
+    "line": 1,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "bom": {
+  "findings": [
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/bad.rs",
+    "line": 2,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   },
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/first.rs",
+    "line": 1,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "crlf": {
+  "findings": [
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/bad.rs",
+    "line": 2,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   },
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/first.rs",
+    "line": 1,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "astral-and-emoji": {
+  "findings": [
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/bad.rs",
+    "line": 3,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   },
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/first.rs",
+    "line": 2,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "case-fold-letters": {
+  "findings": [
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/bad.rs",
+    "line": 3,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   },
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/first.rs",
+    "line": 2,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "no-break-space": {
+  "findings": [
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/bad.rs",
+    "line": 2,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   },
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/first.rs",
+    "line": 1,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "line-separators": {
+  "findings": [
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/bad.rs",
+    "line": 3,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   },
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/first.rs",
+    "line": 2,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "long-line": {
+  "findings": [
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/bad.rs",
+    "line": 2,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   },
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/first.rs",
+    "line": 1,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "no-final-newline": {
+  "findings": [
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/bad.rs",
+    "line": 2,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   },
+   {
+    "check": "C122",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/tests/it/first.rs",
+    "line": 1,
+    "message": "joins a `.display()` argument with a literal `/` or `\\`: Windows spells the result `C:\\a/x` (rule A: the same place is spelled differently on Windows)",
+    "fix": "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ }
+}

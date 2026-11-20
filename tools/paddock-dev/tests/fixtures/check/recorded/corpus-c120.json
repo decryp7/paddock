@@ -1,0 +1,227 @@
+{
+ "plain": {
+  "findings": [
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/bad.rs",
+    "line": 2,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   },
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/first.rs",
+    "line": 1,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "bom": {
+  "findings": [
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/bad.rs",
+    "line": 2,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   },
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/first.rs",
+    "line": 1,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "crlf": {
+  "findings": [
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/bad.rs",
+    "line": 2,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   },
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/first.rs",
+    "line": 1,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "astral-and-emoji": {
+  "findings": [
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/bad.rs",
+    "line": 3,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   },
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/first.rs",
+    "line": 2,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "case-fold-letters": {
+  "findings": [
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/bad.rs",
+    "line": 3,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   },
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/first.rs",
+    "line": 2,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "no-break-space": {
+  "findings": [
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/bad.rs",
+    "line": 2,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   },
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/first.rs",
+    "line": 1,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "line-separators": {
+  "findings": [
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/bad.rs",
+    "line": 3,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   },
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/first.rs",
+    "line": 2,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "long-line": {
+  "findings": [
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/bad.rs",
+    "line": 2,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   },
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/first.rs",
+    "line": 1,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ },
+ "no-final-newline": {
+  "findings": [
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/bad.rs",
+    "line": 2,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   },
+   {
+    "check": "C120",
+    "severity": "warn",
+    "rule": 40,
+    "file": "crates/c/src/first.rs",
+    "line": 1,
+    "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+    "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+   }
+  ],
+  "errors": 0,
+  "warnings": 2,
+  "waived": []
+ }
+}

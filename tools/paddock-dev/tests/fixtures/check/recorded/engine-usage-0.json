@@ -1,0 +1,7 @@
+{
+ "code": 2,
+ "stdout": "",
+ "stderr": "paddock-conformance: the app name is needed: --app <name> or \"app\" in paddock.conformance.json\n",
+ "out": null,
+ "summary": null
+}

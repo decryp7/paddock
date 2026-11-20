@@ -1,10 +1,12 @@
-//! `./dev check run` (RT-5): the Rust host and its first two checks against the JavaScript ones, the oracle.
+//! `./dev check run` (RT-5): the Rust host and its first checks, held to the answers the JavaScript host gave before C39, C53 and
+//! C124 were retired from it (pair P3, ADR 0022 amendment 2026-11-19).
 //!
-//! - `fixture_*`: the recorded answers of the JS runner on `tests/fixtures/check/cases` (`expected.json`, `masked.json`, made by
-//!   `generate.mjs`); these need no node, so they outlive the JS host.
-//! - `live_*`: the JS host itself as the oracle, on the fixtures and on this working tree (every tracked `.rs` file masked, and the
-//!   findings of C39 and C53). When node is missing: a note on a workstation, a failure in CI on Linux (so a missing oracle cannot
-//!   let the comparison pass unseen), a `::notice::` on the other CI legs (the Linux leg runs it).
+//! - `fixture_*`: the recorded answers of the JS runner on `tests/fixtures/check/cases` (`expected.json`, written by `generate.mjs`
+//!   before the JS modules were retired, and `masked.json`); these need no node.
+//! - the recorded cases of `tests/fixtures/check/recorded` (`c39-c53-*`, `c124-*`): token soup, baselines against a merge base, this
+//!   tree's findings as a ceiling. `live_mask_*` still runs the JS `maskRust` helper (`conformance/src/util/mask-rust.mjs`, which the
+//!   checks left on the JS host share) over every tracked `.rs` file; when node is missing: a note on a workstation, a failure in CI on
+//!   Linux (so a missing oracle cannot let the comparison pass unseen), a `::notice::` on the other CI legs.
 //! - the host: `--only`, `--files`, run records, `not measured`, `check broken`, the report shape and the CLI.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::check::mask::mask_rust;
@@ -92,6 +94,14 @@ fn fixture_findings_equal_the_recorded_js_findings_exactly() {
     let tree = materialize();
     let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
     let got = shared_part(&r.json());
+    if crate::golden::bless() {
+        // A reviewed bless (refused in CI): the recorded answer becomes what the Rust host answers now, in the file's own format.
+        std::fs::write(
+            fixtures().join("expected.json"),
+            format!("{}\n", serde_json::to_string_pretty(&got).unwrap()),
+        )
+        .unwrap();
+    }
     let want = shared_part(&read_json(&fixtures().join("expected.json")));
     // Same values and, as text, the same key order and finding order.
     assert_eq!(got, want);
@@ -204,58 +214,9 @@ pub(crate) fn node_ticking(driver: &str, env: &[(&str, String)], progress: &padd
     answer
 }
 
-/// [`JS_RUN`] printing a `.` line for every file the conformance runner reads (it reads the tree through `readFileSync`, which
-/// the prefix wraps before the runner is imported), so [`node_ticking`] sees the JS host at work, as it does the Rust one.
-const JS_RUN_TICKING: &str = r#"
-import fs from 'node:fs';
-import { syncBuiltinESMExports } from 'node:module';
-const read = fs.readFileSync;
-fs.readFileSync = (...args) => { process.stdout.write('.\n'); return read(...args); };
-syncBuiltinESMExports();
-"#;
-
-const JS_RUN: &str = r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const now = process.env.RT5_NOW ? new Date(process.env.RT5_NOW) : undefined;
-const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C39', 'C53'], options: { now } });
-process.stdout.write(JSON.stringify(r));
-"#;
-
 #[test]
-fn live_fixture_findings_equal_the_js_host() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
-    let tree = materialize();
-    let js: Value = serde_json::from_str(&node(
-        JS_RUN,
-        &[
-            ("RT5_ROOT", tree.path().display().to_string()),
-            ("RT5_APP", "fixture".into()),
-            ("RT5_NOW", "2026-11-10T12:00:00Z".into()),
-        ],
-    ))
-    .unwrap();
-    let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
-    assert_eq!(shared_part(&r.json()), shared_part(&js));
-}
-
-#[test]
-fn live_tree_findings_equal_the_js_host() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn live_tree_run_is_sound() {
     let root = repo_root();
-    // The JS host prints a line per file it reads and the Rust host ticks per file: both are judged on progress.
-    let js_root = root.clone();
-    let js = paddock_testkit::guarded("the JS check host over the live tree", LIVE_STALL, move |progress| {
-        let driver = format!("{JS_RUN_TICKING}{JS_RUN}");
-        let env = [("RT5_ROOT", js_root.display().to_string()), ("RT5_APP", "paddock".into())];
-        let answer = node_ticking(&driver, &env, &progress);
-        serde_json::from_str::<Value>(answer.trim()).unwrap()
-    });
     // The Rust host reports every file it reads: a slow disk passes, a run that reads nothing for LIVE_STALL does not.
     let r = paddock_testkit::guarded("the Rust check host over the live tree", LIVE_STALL, {
         let root = root.clone();
@@ -272,13 +233,7 @@ fn live_tree_findings_equal_the_js_host() {
             run_checks_in(&tree, &opts, &legacy_registry()).unwrap()
         }
     });
-    let (got, want) = (shared_part(&r.json()), shared_part(&js));
-    assert_eq!(
-        got["findings"], want["findings"],
-        "findings of C39, C53 and the waiver engine on this tree"
-    );
-    assert_eq!(got["waived"], want["waived"]);
-    assert_eq!(got, want);
+    crate::recorded::assert_live_tree_sound("c39-c53", &r.json());
     assert!(r.waived.len() > 5, "the tree's own waivers must be exercised");
 }
 
@@ -312,7 +267,7 @@ fn live_mask_equals_the_js_mask_on_every_tracked_rust_file() {
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { readFileSync, writeFileSync } from 'node:fs';
-const { maskRust } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/checks/C39-freed-port.mjs')).href);
+const { maskRust } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/util/mask-rust.mjs')).href);
 const files = JSON.parse(readFileSync(process.env.RT5_LIST, 'utf8'));
 files.forEach((f, i) => { writeFileSync(join(process.env.RT5_OUT, `${i}.txt`), maskRust(readFileSync(f, 'utf8')), 'utf8'); process.stdout.write('.\n'); });
 "#;
@@ -907,21 +862,14 @@ fn soup(seed: u64, files: usize, root: &Path) {
 }
 
 #[test]
-fn live_token_soup_findings_equal_the_js_host() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn live_token_soup_findings_equal_the_recorded_js_answers() {
     for seed in [1u64, 2, 3] {
         let d = tempfile::tempdir().unwrap();
         soup(seed, 250, d.path());
-        let js: Value = serde_json::from_str(&node(
-            JS_RUN,
-            &[("RT5_ROOT", d.path().display().to_string()), ("RT5_APP", "soup".into())],
-        ))
-        .unwrap();
         let mut o = options(d.path());
         o.config = paddock_dev::check::config::Config::bare("soup");
         let r = run_checks(&o, &legacy_registry()).unwrap();
+        let js = crate::recorded::expect(&format!("c39-c53-soup-{seed}"), &shared_part(&r.json()));
         assert_eq!(shared_part(&r.json())["findings"], js["findings"], "seed {seed}");
         assert!(
             js["findings"].as_array().unwrap().len() > 20,
@@ -989,21 +937,11 @@ fn baseline_findings(r: &paddock_dev::check::RunResult) -> Vec<String> {
 
 #[test]
 fn live_baseline_growth_equals_the_js_host_in_a_git_repository() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
     let tree = grown_baseline_repo();
-    let js: Value = serde_json::from_str(&node(
-        JS_RUN,
-        &[
-            ("RT5_ROOT", tree.path().display().to_string()),
-            ("RT5_APP", "fixture".into()),
-            ("RT5_NOW", "2026-11-10T12:00:00Z".into()),
-        ],
-    ))
-    .unwrap();
     let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
-    assert_eq!(shared_part(&r.json()), shared_part(&js));
+    let got = crate::recorded::scrub(shared_part(&r.json()));
+    let want = crate::recorded::expect("c39-c53-baseline-grown", &got);
+    assert_eq!(got, want);
     let grew = baseline_findings(&r);
     assert_eq!(grew.len(), 1, "{grew:?}");
     assert!(grew[0].contains("the baseline grew: 1 entry is"), "{grew:?}");
@@ -1012,9 +950,6 @@ fn live_baseline_growth_equals_the_js_host_in_a_git_repository() {
 /// The merge base lists the first site under another file (the code moved since): same hash, so not growth, on both hosts.
 #[test]
 fn a_moved_site_is_not_growth_on_either_host_but_a_new_one_beside_it_is() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
     let move_first = |sites: &mut Vec<Value>| sites[0]["file"] = json!("crates/a/src/old_home.rs");
     for (name, tree, grew) in [
         ("moved only", baseline_repo(move_first), 0),
@@ -1027,17 +962,10 @@ fn a_moved_site_is_not_growth_on_either_host_but_a_new_one_beside_it_is() {
             1,
         ),
     ] {
-        let js: Value = serde_json::from_str(&node(
-            JS_RUN,
-            &[
-                ("RT5_ROOT", tree.path().display().to_string()),
-                ("RT5_APP", "fixture".into()),
-                ("RT5_NOW", "2026-11-10T12:00:00Z".into()),
-            ],
-        ))
-        .unwrap();
         let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
-        assert_eq!(shared_part(&r.json()), shared_part(&js), "{name}: the hosts agree");
+        let got = crate::recorded::scrub(shared_part(&r.json()));
+        let want = crate::recorded::expect(&format!("c39-c53-baseline-{}", name.replace(' ', "-")), &got);
+        assert_eq!(got, want, "{name}: the hosts agree");
         let msgs = baseline_findings(&r);
         let grown: Vec<_> = msgs.iter().filter(|m| m.contains("the baseline grew")).collect();
         assert_eq!(grown.len(), grew, "{name}: {msgs:?}");
@@ -1055,9 +983,6 @@ fn a_moved_site_is_not_growth_on_either_host_but_a_new_one_beside_it_is() {
 /// one file, added in a new one, is an error); an entry whose file is gone does, as a warning that names both files. Both hosts agree.
 #[test]
 fn a_site_moved_from_a_live_file_is_an_error_and_from_a_gone_file_a_warning_on_both_hosts() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
     for (name, from, errors) in [
         ("old file still exists", "crates/a/src/c53_good.rs", true),
         ("old file is gone", "crates/a/src/renamed_away.rs", false),
@@ -1066,17 +991,10 @@ fn a_site_moved_from_a_live_file_is_an_error_and_from_a_gone_file_a_warning_on_b
         let mut doc: Value = read_json(&tree.path().join(BASELINE));
         doc["sites"][0]["file"] = json!(from);
         std::fs::write(tree.path().join(BASELINE), serde_json::to_string_pretty(&doc).unwrap()).unwrap();
-        let js: Value = serde_json::from_str(&node(
-            JS_RUN,
-            &[
-                ("RT5_ROOT", tree.path().display().to_string()),
-                ("RT5_APP", "fixture".into()),
-                ("RT5_NOW", "2026-11-10T12:00:00Z".into()),
-            ],
-        ))
-        .unwrap();
         let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
-        assert_eq!(shared_part(&r.json()), shared_part(&js), "{name}: the hosts agree");
+        let got = crate::recorded::scrub(shared_part(&r.json()));
+        let want = crate::recorded::expect(&format!("c39-c53-moved-{}", if errors { "live-file" } else { "gone-file" }), &got);
+        assert_eq!(got, want, "{name}: the hosts agree");
         let site = r
             .findings
             .iter()
@@ -1127,23 +1045,16 @@ fn a_scoped_run_over_the_baseline_catches_growth_and_reports_stale_as_not_measur
 #[test]
 fn an_invalid_baseline_fails_closed_with_one_error_on_both_hosts() {
     let tree = materialize();
-    for bad in ["{ not json", "{\"sites\": 3}", "[]"] {
+    for (i, bad) in ["{ not json", "{\"sites\": 3}", "[]"].into_iter().enumerate() {
         std::fs::write(tree.path().join(BASELINE), bad).unwrap();
         let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
         let msgs = baseline_findings(&r);
         assert_eq!(msgs.len(), 1, "{bad}: {msgs:?}");
         assert!(msgs[0].contains("is not JSON with a `sites` list"), "{msgs:?}");
-        if has_node() {
-            let js: Value = serde_json::from_str(&node(
-                JS_RUN,
-                &[
-                    ("RT5_ROOT", tree.path().display().to_string()),
-                    ("RT5_APP", "fixture".into()),
-                    ("RT5_NOW", "2026-11-10T12:00:00Z".into()),
-                ],
-            ))
-            .unwrap();
-            assert_eq!(shared_part(&r.json()), shared_part(&js), "{bad}");
+        {
+            let got = crate::recorded::scrub(shared_part(&r.json()));
+            let want = crate::recorded::expect(&format!("c39-c53-invalid-baseline-{i}"), &got);
+            assert_eq!(got, want, "{bad}");
         }
     }
 }
@@ -1198,14 +1109,6 @@ fn c124_tree() -> tempfile::TempDir {
     }
     d
 }
-
-const JS_RUN_C124: &str = r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C124'], options: {} });
-process.stdout.write(JSON.stringify(r));
-"#;
 
 fn c124_options(root: &Path, app: &str) -> RunOptions {
     RunOptions {
@@ -1264,20 +1167,12 @@ fn c124_without_its_allow_list_cannot_look() {
 }
 
 #[test]
-fn live_c124_findings_equal_the_js_original_on_a_fixture_tree_and_on_this_tree() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn live_c124_findings_equal_the_recorded_js_answers_on_a_fixture_tree_and_on_this_tree() {
     let tree = c124_tree();
-    for (root, app) in [(tree.path().to_path_buf(), "fixture"), (repo_root(), "paddock")] {
-        let js: Value = serde_json::from_str(&node(
-            JS_RUN_C124,
-            &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", app.into())],
-        ))
-        .unwrap();
-        let r = run_checks(&c124_options(&root, app), &registry()).unwrap();
-        let (got, want) = (shared_part(&r.json()), shared_part(&js));
-        assert_eq!(got["findings"], want["findings"], "C124 on {app}");
-        assert_eq!(got, want, "C124 on {app}");
-    }
+    let r = run_checks(&c124_options(tree.path(), "fixture"), &registry()).unwrap();
+    let got = shared_part(&r.json());
+    assert_eq!(got, crate::recorded::expect("c124-fixture", &got), "C124 on the fixture tree");
+    let root = repo_root();
+    let r = run_checks(&c124_options(&root, "paddock"), &registry()).unwrap();
+    crate::recorded::assert_live_tree_sound("c124", &r.json());
 }

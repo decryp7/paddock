@@ -86,7 +86,15 @@ impl JobCentre {
         let spec = validated(spec)?;
         let ctx = {
             let mut book = lock(&self.book);
-            if let Some((id, _)) = book.active.iter().find(|(_, s)| *s == spec) {
+            // A rebuild of the match index that is running covers a second request only while it is still in its loop; one that has
+            // decided to end does not, and a new job starts beside it (Dyno ADR 0034).
+            let covered = !matches!(spec, JobSpec::RebuildIntel)
+                || !book.active.iter().any(|(_, s)| *s == spec)
+                || shared.intel.coalesce_into_running();
+            if !covered {
+                log::info!(target: "dyno::jobs", "the running index rebuild is ending; starting another");
+            }
+            if let Some((id, _)) = book.active.iter().find(|(_, s)| *s == spec).filter(|_| covered) {
                 let id = *id;
                 drop(book);
                 return self
@@ -94,7 +102,10 @@ impl JobCentre {
                     .ok_or_else(|| AgentError::new(ErrorCode::Internal, "The job vanished."));
             }
             // A file hash and a wake are per item: several may run at once (two computers woken together).
-            if !matches!(spec.kind(), JobKind::FileHash | JobKind::WolWake) && book.active.iter().any(|(_, s)| s.kind() == spec.kind()) {
+            if covered
+                && !matches!(spec.kind(), JobKind::FileHash | JobKind::WolWake)
+                && book.active.iter().any(|(_, s)| s.kind() == spec.kind())
+            {
                 return Err(AgentError::new(
                     ErrorCode::Busy,
                     format!("{} is already running; wait for it or cancel it.", spec.kind().title()),

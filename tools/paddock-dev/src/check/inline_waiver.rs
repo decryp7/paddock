@@ -2,7 +2,7 @@
 //! above waives that site. The engine recognises the comment ([`recognise`]) and lists every waived site in the report's `waived`
 //! with the reason, the file and the line (`expires` is `inline`: there is no date), so suppressions stay visible. A check no
 //! longer carries its own waiver regexes: it passes the lines it considers "near" the site and its tag, and builds its finding
-//! through [`InlineWaiver::apply`]. The port of `conformance/src/util/inline-waiver.mjs`; the parity test compares the two.
+//! through [`InlineWaiver::apply`]. The JavaScript `inline-waiver.mjs` was retired with the JS checks that used it (pair P3); `tests/it/check_lex.rs` holds this to the language's answers.
 //!
 //! The marker, the tag, the dashes and the reason are on one line (spaces and tabs only between them): a dash at the end of a line
 //! does not take the next line as its reason, and a list dash on the next line is no dash. A marker without a reason is not a waiver: the site stays a finding, with the check's own text.
@@ -175,6 +175,8 @@ mod tests {
         assert_eq!(recognise("conformance: t -- a", "t"), InlineWaiver::Reason("- a".into()));
         assert_eq!(recognise("conformance: t — ab", "t"), InlineWaiver::NoReason);
         assert_eq!(recognise("conformance: t", "t"), InlineWaiver::NoReason);
+        // The next line's text is no reason (a case of the retired JS parity test, review of pair P3).
+        assert_eq!(recognise("# conformance: t\n- run: ./dev x", "t"), InlineWaiver::NoReason);
         assert_eq!(recognise("nothing", "t"), InlineWaiver::No);
         assert_eq!(recognise("conformance: other — because", "t"), InlineWaiver::No);
     }

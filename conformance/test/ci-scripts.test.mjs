@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { buildEnv } from '../ci/build-env.mjs';
 import { checkPin, defaultGrant, executableIn, grantCommand, install, parseArgs, parseRustPin, platformId, urlFor } from '../ci/install-test-browser.mjs';
 import { decide, tagFor } from '../ci/plan.mjs';
+import { isTagRun } from '../src/util/is-tag-run.mjs';
 import { firstLaunch, releaseNotes } from '../ci/release-notes.mjs';
 import { makeApp, PADDOCK, pe } from './helpers.mjs';
 
@@ -259,6 +261,61 @@ test('tauri-bundle: on a tag the key reaches tauri build only, in its environmen
   assert.deepEqual(log.filter((x) => /SECRETKEY|SECRETPW/.test(x)), [log[3]], 'only in the build\'s environment, never in any recorded argv');
   assert.doesNotMatch(r.stdout + r.stderr, /SECRETKEY|SECRETPW/, 'never printed');
 });
+
+// Dyno's macOS helper is signed by `--pre-sign <script>` (ADR 0085 amendment item 9): its `sign` half and `tauri build` get the key, and nothing
+// else does (npm ci, --prepare, the app's beforeBuildCommand, the script's `build` half). A stub `uname` says Darwin, since the step is macOS-only.
+for (const [label, extra, key] of [['on a tag', { ...TAG, TAURI_SIGNING_PRIVATE_KEY: 'SECRETKEY' }, 'SECRETKEY'], ['on a dispatch', { GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/main' }, 'THROWAWAY-SK']]) {
+  test(`tauri-bundle --pre-sign ${label}: only the script's sign half and tauri build see the key`, () => {
+    const root = signedRepo();
+    const seen = '[key=${TAURI_SIGNING_PRIVATE_KEY:-unset}]';
+    writeFileSync(join(root, 'bin/npm'), `#!/bin/bash\necho "npm $* ${seen}" >> "$BIN_LOG"\n`);
+    writeFileSync(join(root, 'bin/uname'), '#!/bin/bash\necho Darwin\n');
+    chmodSync(join(root, 'bin/uname'), 0o755);
+    writeFileSync(join(root, 'app/src-tauri/tauri.conf.json'), JSON.stringify({ version: '1.2.3', build: { beforeBuildCommand: `echo "hook ${seen}" >> "$BIN_LOG"` } }));
+    writeFileSync(join(root, 'presign.mjs'), "import { appendFileSync } from 'node:fs';\nappendFileSync(process.env.BIN_LOG, `presign-${process.argv[2]} [key=${process.env.TAURI_SIGNING_PRIVATE_KEY ?? 'unset'}]\\n`);\n");
+    const r = bundle(root, ['deb', '--prepare', `echo "prepare ${seen}" >> "$BIN_LOG"`, '--pre-sign', join(root, 'presign.mjs')], { ...extra, TAURI_UPDATER_PUBKEY: PUB });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const log = logOf(root).split('\n').filter((l) => l !== '' && !l.startsWith('npx-args') && !l.startsWith('env-args'));
+    const at = (prefix) => log.find((l) => l.startsWith(prefix));
+    for (const unkeyed of ['npm ci', 'prepare', 'presign-build', 'hook']) assert.match(at(unkeyed), /\[key=unset\]$/, `${unkeyed} sees no key: ${log.join(' | ')}`);
+    assert.equal(at('presign-sign'), `presign-sign [key=${key}]`);
+    assert.match(at('npx-env'), new RegExp(`^npx-env key=${key}\\|`));
+    assert.deepEqual(log.map((l) => l.split(' ')[0]), ['npm', 'prepare', 'presign-build', 'presign-sign', 'hook', 'npx-env'], 'the order: install, prepare, build half, sign half, hook, tauri build');
+  });
+}
+
+// "A tag run" is defined once (is-tag-run.mjs). Its shell callers fail closed: any status but 0 (a tag) and 3 (not a tag) stops the step, so a crash
+// can never read as "not a tag" and skip the guard that a tag has a private key (or make a throw-away key on a tag).
+test('is-tag-run: the ref, or either ref type on its own; both ref types set is not "tagtag"; the CLI says 0 for a tag and 3 for none', () => {
+  assert.equal(isTagRun({ GITHUB_REF: 'refs/tags/dyno-v1.0.0' }), true);
+  assert.equal(isTagRun({ GITEA_REF: 'refs/tags/dyno-v1.0.0' }), true);
+  assert.equal(isTagRun({ GITHUB_REF_TYPE: 'tag' }), true);
+  assert.equal(isTagRun({ GITEA_REF_TYPE: 'tag' }), true);
+  assert.equal(isTagRun({ GITHUB_REF_TYPE: 'tag', GITEA_REF_TYPE: 'tag' }), true, 'both set: each is checked, not their join "tagtag"');
+  assert.equal(isTagRun({ GITHUB_REF_TYPE: 'branch', GITEA_REF_TYPE: 'tag' }), true);
+  assert.equal(isTagRun({ GITHUB_REF_TYPE: 'branch', GITEA_REF_TYPE: 'branch', GITHUB_REF: 'refs/heads/main' }), false);
+  assert.equal(isTagRun({}), false);
+  const cli = (env) => spawnSync(process.execPath, [join(CI, '..', 'src', 'util', 'is-tag-run.mjs')], { env, encoding: 'utf8' }).status;
+  assert.equal(cli({ GITHUB_REF: 'refs/tags/x-v1' }), 0);
+  assert.equal(cli({ GITHUB_REF: 'refs/heads/main' }), 3);
+});
+
+for (const [label, stub] of [['exits 1', 'process.exit(1);'], ['throws', "throw new Error('boom');"], ['is a syntax error', 'this is not javascript']]) {
+  for (const [where, env] of [['a tag', { ...TAG, TAURI_SIGNING_PRIVATE_KEY: 'SECRETKEY', TAURI_UPDATER_PUBKEY: PUB }], ['a non-tag run', { GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/main', TAURI_UPDATER_PUBKEY: PUB }]]) {
+    test(`tauri-bundle: an is-tag-run.mjs that ${label} fails the step on ${where} before anything runs`, () => {
+      const root = signedRepo();
+      const ci = join(mkdtempSync(join(tmpdir(), 'paddock-bundle-ci-')), 'conformance');
+      for (const d of ['ci', 'release', 'src/util']) cpSync(join(CI, '..', d), join(ci, d), { recursive: true });
+      writeFileSync(join(ci, 'src/util/is-tag-run.mjs'), `${stub}\n`);
+      const r = spawnSync('bash', [join(ci, 'ci', 'tauri-bundle.sh'), 'deb'], {
+        cwd: root, encoding: 'utf8', env: { PATH: `${join(root, 'bin')}:${dirname(process.execPath)}:/usr/bin:/bin`, CARGO_TARGET_DIR: join(root, 'target'), BIN_LOG: join(root, 'calls.log'), ...env },
+      });
+      assert.notEqual(r.status, 0, r.stdout + r.stderr);
+      assert.match(r.stdout, /::error::is-tag-run\.mjs exited [1-9]\d* \(0 is a tag, 3 is not\)/);
+      assert.equal(existsSync(join(root, 'calls.log')), false, 'nothing ran: no npm ci, no throw-away key, no build');
+    });
+  }
+}
 
 test('tauri-bundle: a CI run that is not a tag refuses a real key, and signs with a throw-away key with no password in argv', () => {
   const leaked = signedRepo();

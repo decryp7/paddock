@@ -100,7 +100,7 @@ case "$(uname -s)" in
     ident="$(codesign -dv "$app/Contents/MacOS/dyno-helper" 2>&1 | sed -n 's/^Identifier=//p')"
     [[ "$ident" == net.decryptology.dyno.helper ]] || err "dyno-helper has the code-signing identifier '${ident:-none}', not net.decryptology.dyno.helper (ADR 0027)"
     # Security review F2: the helper in the bundle must be the bytes the release signed (the elevated install verifies them with the
-    # family key and refuses anything else). sidecar.mjs wrote the hash it signed; an unsigned build (no key) has none and says so.
+    # family key and refuses anything else). sign-helper.mjs (the release's own signing step) wrote the hash it signed; an unsigned build (no key) has none and says so.
     signed_hash="$(cat "$(dirname "$0")/../app/src-tauri/binaries/dyno-helper.sha256" 2>/dev/null || true)"
     sig_file="$app/Contents/Resources/dyno-helper.minisig"
     if [[ -n "$signed_hash" ]]; then
@@ -111,11 +111,11 @@ case "$(uname -s)" in
     else
       # A release (a tag) or a build made with the updater key is meant to be installed by users: an unsigned helper there is a broken
       # release, so it fails. Pull-request and dev builds have no key and only warn.
-      release=0
-      case "${GITHUB_REF:-}${GITEA_REF:-}" in refs/tags/*) release=1 ;; esac
-      [[ "${GITHUB_REF_TYPE:-}${GITEA_REF_TYPE:-}" == tag ]] && release=1
+      release=0 # "A tag run" is defined once, in is-tag-run.mjs: exit 0 is a tag, 3 is not, anything else a failure to tell
+      tag_rc=0; node "$(dirname "$0")/../../../conformance/src/util/is-tag-run.mjs" || tag_rc=$?
+      case "$tag_rc" in 0) release=1 ;; 3) ;; *) err "is-tag-run.mjs exited $tag_rc (0 is a tag, 3 is not): cannot tell a release from a branch. Next step: run node conformance/src/util/is-tag-run.mjs and read its error" ;; esac
       if (( release )) || [[ -n "${TAURI_UPDATER_PUBKEY:-}" ]]; then
-        err "the bundled dyno-helper is not signed (TAURI_SIGNING_PRIVATE_KEY was not available to sidecar.mjs, release=$release, updater key set=$([[ -n "${TAURI_UPDATER_PUBKEY:-}" ]] && echo yes || echo no)): turning the helper on would be refused. Next step: give the release job the signing key and rebuild"
+        err "the bundled dyno-helper is not signed (the signing step (sign-helper.mjs, --pre-sign) left no signature, release=$release, updater key set=$([[ -n "${TAURI_UPDATER_PUBKEY:-}" ]] && echo yes || echo no)): turning the helper on would be refused. Next step: check that the release job passes pre-sign and the signing key reaches tauri-bundle.sh, and rebuild"
       else
         echo "::warning::the bundled dyno-helper is not signed (no signing key in this build): turning the helper on will be refused"
       fi

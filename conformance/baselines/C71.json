@@ -3,17 +3,17 @@
  "sites": [
   {
    "file": "apps/debrief/app/e2e/activity-errors.e2e.ts",
-   "line": 49,
+   "line": 50,
    "hash": "3dc7b574344af5e8"
   },
   {
    "file": "apps/debrief/app/e2e/activity-report.e2e.ts",
-   "line": 19,
+   "line": 21,
    "hash": "1133341f068e0f3a"
   },
   {
    "file": "apps/debrief/app/e2e/app.ts",
-   "line": 79,
+   "line": 81,
    "hash": "1ca8abafcfaa7000"
   },
   {
@@ -23,47 +23,42 @@
   },
   {
    "file": "apps/debrief/app/e2e/browser-scripts.e2e.ts",
-   "line": 154,
+   "line": 155,
    "hash": "bb92dac1c07fac8b"
   },
   {
    "file": "apps/debrief/app/e2e/dock-float.e2e.ts",
-   "line": 159,
+   "line": 160,
    "hash": "df1ed6aaf4310034"
   },
   {
    "file": "apps/debrief/app/e2e/dock-panels.e2e.ts",
-   "line": 45,
+   "line": 46,
    "hash": "4edc13f2277d3a67"
   },
   {
    "file": "apps/debrief/app/e2e/error-snapshots.e2e.ts",
-   "line": 13,
+   "line": 16,
    "hash": "17cb6cf49dfdd8f8"
   },
   {
    "file": "apps/debrief/app/e2e/home-narrow.e2e.ts",
-   "line": 25,
+   "line": 26,
    "hash": "27f38a8ce590d2bf"
   },
   {
-   "file": "apps/debrief/app/e2e/i18n-pseudo.e2e.ts",
-   "line": 75,
-   "hash": "f98d49048bc13eb5"
-  },
-  {
    "file": "apps/debrief/app/e2e/main-layout.e2e.ts",
-   "line": 31,
+   "line": 32,
    "hash": "76f566c13a340666"
   },
   {
    "file": "apps/debrief/app/e2e/main-layout.e2e.ts",
-   "line": 157,
+   "line": 158,
    "hash": "124cb5498dd4d240"
   },
   {
    "file": "apps/debrief/app/e2e/main-layout.e2e.ts",
-   "line": 169,
+   "line": 170,
    "hash": "e1fd20482c6b752c"
   },
   {
@@ -78,12 +73,12 @@
   },
   {
    "file": "apps/debrief/app/e2e/native-feel.e2e.ts",
-   "line": 116,
+   "line": 117,
    "hash": "27323be34a0005e1"
   },
   {
    "file": "apps/debrief/app/e2e/navigation-history.e2e.ts",
-   "line": 23,
+   "line": 24,
    "hash": "23168f3397fdadfa"
   },
   {
@@ -93,17 +88,17 @@
   },
   {
    "file": "apps/debrief/app/e2e/tools-monitor-charts.e2e.ts",
-   "line": 58,
+   "line": 59,
    "hash": "008ef4ffa34e854e"
   },
   {
    "file": "apps/debrief/app/e2e/ux-home.e2e.ts",
-   "line": 66,
+   "line": 68,
    "hash": "bb92dac1c07fac8b"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/activity/report.rs",
-   "line": 1373,
+   "line": 1376,
    "hash": "5b49960b70255439"
   },
   {
@@ -178,12 +173,12 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/snapshots.rs",
-   "line": 952,
+   "line": 959,
    "hash": "df443114a9da3e79"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/snapshots.rs",
-   "line": 973,
+   "line": 980,
    "hash": "df443114a9da3e79"
   },
   {
@@ -348,7 +343,7 @@
   },
   {
    "file": "apps/debrief/app/src/app/core/mock/mock-options.spec.ts",
-   "line": 62,
+   "line": 67,
    "hash": "6460a11b205cdcd7"
   },
   {
@@ -473,7 +468,7 @@
   },
   {
    "file": "apps/debrief/app/src/app/grid/events-grid.spec.ts",
-   "line": 571,
+   "line": 578,
    "hash": "ac61110a874b0754"
   },
   {
@@ -498,27 +493,27 @@
   },
   {
    "file": "apps/debrief/app/src/app/live/live-feed.spec.ts",
-   "line": 55,
+   "line": 56,
    "hash": "00c57e832606ed62"
   },
   {
    "file": "apps/debrief/app/src/app/live/live-feed.spec.ts",
-   "line": 58,
+   "line": 59,
    "hash": "a6216afc9af9efed"
   },
   {
    "file": "apps/debrief/app/src/app/live/live-feed.spec.ts",
-   "line": 102,
+   "line": 103,
    "hash": "a6216afc9af9efed"
   },
   {
    "file": "apps/debrief/app/src/app/live/live-feed.spec.ts",
-   "line": 114,
+   "line": 115,
    "hash": "a6216afc9af9efed"
   },
   {
    "file": "apps/debrief/app/src/app/live/live-feed.spec.ts",
-   "line": 135,
+   "line": 136,
    "hash": "a6216afc9af9efed"
   },
   {
@@ -1443,57 +1438,57 @@
   },
   {
    "file": "apps/dyno/app/e2e/flows.spec.ts",
-   "line": 288,
+   "line": 290,
    "hash": "7bba35e4f6072e4b"
   },
   {
    "file": "apps/dyno/app/e2e/flows.spec.ts",
-   "line": 342,
+   "line": 344,
    "hash": "7bba35e4f6072e4b"
   },
   {
    "file": "apps/dyno/app/e2e/row-actions.spec.ts",
-   "line": 33,
+   "line": 34,
    "hash": "812c3fa30b7f8bf0"
   },
   {
    "file": "apps/dyno/app/e2e/row-actions.spec.ts",
-   "line": 45,
+   "line": 46,
    "hash": "33046128e6ab59e9"
   },
   {
    "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 20,
+   "line": 21,
    "hash": "58bc5f6c17c7dc29"
   },
   {
    "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 29,
+   "line": 30,
    "hash": "767f0cb771c9e849"
   },
   {
    "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 42,
+   "line": 43,
    "hash": "7ea17622a91efd03"
   },
   {
    "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
-   "line": 148,
+   "line": 146,
    "hash": "cb140ea841063684"
   },
   {
    "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
-   "line": 345,
+   "line": 343,
    "hash": "ad246e7f5236447e"
   },
   {
    "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
-   "line": 820,
+   "line": 818,
    "hash": "c0f7df0977a37afe"
   },
   {
    "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
-   "line": 833,
+   "line": 831,
    "hash": "c0f7df0977a37afe"
   },
   {
@@ -1503,12 +1498,12 @@
   },
   {
    "file": "apps/dyno/app/src/app/core/mock-backend.spec.ts",
-   "line": 18,
+   "line": 19,
    "hash": "6460a11b205cdcd7"
   },
   {
    "file": "apps/dyno/app/src/app/core/mock-backend.spec.ts",
-   "line": 625,
+   "line": 626,
    "hash": "cc501dc96ff7a6de"
   },
   {
@@ -1523,12 +1518,12 @@
   },
   {
    "file": "apps/dyno/app/src/app/features/alarms/alarms-page.spec.ts",
-   "line": 21,
+   "line": 22,
    "hash": "fab39cd8206d4975"
   },
   {
    "file": "apps/dyno/app/src/app/features/alarms/alarms-page.spec.ts",
-   "line": 22,
+   "line": 23,
    "hash": "e226e1510bfa8756"
   },
   {
@@ -1723,7 +1718,7 @@
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/term.rs",
-   "line": 67,
+   "line": 68,
    "hash": "c0f7df0977a37afe"
   },
   {
@@ -1748,12 +1743,12 @@
   },
   {
    "file": "apps/dyno/crates/dyno-platform/src/process.rs",
-   "line": 388,
+   "line": 379,
    "hash": "855cc4dd1d9f922c"
   },
   {
    "file": "apps/dyno/crates/dyno-platform/src/process.rs",
-   "line": 438,
+   "line": 429,
    "hash": "090f4447a438ed17"
   },
   {
@@ -1778,17 +1773,17 @@
   },
   {
    "file": "apps/pitcrew/app/e2e/screenshots.spec.ts",
-   "line": 90,
+   "line": 91,
    "hash": "124cb5498dd4d240"
   },
   {
    "file": "apps/pitcrew/app/e2e/screenshots.spec.ts",
-   "line": 205,
+   "line": 206,
    "hash": "767f0cb771c9e849"
   },
   {
    "file": "apps/pitcrew/app/e2e/screenshots.spec.ts",
-   "line": 207,
+   "line": 208,
    "hash": "4551282862261b15"
   },
   {
@@ -1823,12 +1818,12 @@
   },
   {
    "file": "apps/pitcrew/crates/pitcrew-service/src/probe.rs",
-   "line": 305,
+   "line": 302,
    "hash": "4aac62194072eaf4"
   },
   {
    "file": "apps/pitcrew/crates/pitcrew-service/src/process.rs",
-   "line": 407,
+   "line": 398,
    "hash": "c0f7df0977a37afe"
   },
   {
@@ -2053,7 +2048,7 @@
   },
   {
    "file": "apps/spotter/app/e2e/screenshots.spec.ts",
-   "line": 15,
+   "line": 16,
    "hash": "cd9a9c3c550c9a1a"
   },
   {
@@ -2298,77 +2293,77 @@
   },
   {
    "file": "ui/e2e/contact-sheet-x21.spec.ts",
-   "line": 24,
+   "line": 25,
    "hash": "4551282862261b15"
   },
   {
    "file": "ui/e2e/contact-sheet-x21.spec.ts",
-   "line": 95,
+   "line": 96,
    "hash": "e1fd20482c6b752c"
   },
   {
    "file": "ui/e2e/data.spec.ts",
-   "line": 263,
+   "line": 280,
    "hash": "4551282862261b15"
   },
   {
    "file": "ui/e2e/gallery.spec.ts",
-   "line": 13,
+   "line": 14,
    "hash": "124cb5498dd4d240"
   },
   {
    "file": "ui/e2e/material.spec.ts",
-   "line": 170,
+   "line": 174,
    "hash": "9e2d480bbadca745"
   },
   {
    "file": "ui/e2e/shell-demo-channels.spec.ts",
-   "line": 113,
+   "line": 114,
    "hash": "58bc5f6c17c7dc29"
   },
   {
    "file": "ui/e2e/shell-demo-locale.spec.ts",
-   "line": 92,
+   "line": 93,
    "hash": "f98d49048bc13eb5"
-  },
-  {
-   "file": "ui/e2e/shell-demo-locale.spec.ts",
-   "line": 100,
-   "hash": "17383b7125192a2b"
   },
   {
    "file": "ui/e2e/shell-demo-locale.spec.ts",
    "line": 101,
+   "hash": "17383b7125192a2b"
+  },
+  {
+   "file": "ui/e2e/shell-demo-locale.spec.ts",
+   "line": 102,
    "hash": "b43a663ea302b6b3"
   },
   {
    "file": "ui/e2e/shell-demo-locale.spec.ts",
-   "line": 107,
+   "line": 108,
    "hash": "f98d49048bc13eb5"
   },
   {
    "file": "ui/e2e/shell-demo-pages.spec.ts",
-   "line": 120,
+   "line": 110,
    "hash": "db3498fbec4cf17e"
   },
   {
    "file": "ui/e2e/shell-demo-pages.spec.ts",
-   "line": 122,
+   "line": 112,
    "hash": "d88056c1497b8c1e"
   },
   {
    "file": "ui/e2e/shell-demo-theme.spec.ts",
-   "line": 81,
+   "line": 82,
    "hash": "7bba35e4f6072e4b"
   },
   {
    "file": "ui/e2e/sunburst.spec.ts",
-   "line": 23,
+   "line": 24,
    "hash": "81c9bdcb95680af4"
   },
   {
    "file": "ui/e2e/workbench-demo.spec.ts",
-   "line": 327,
+   "line": 328,
    "hash": "b9493258497f2913"
   },
   {
@@ -2483,7 +2478,7 @@
   },
   {
    "file": "ui/projects/paddock-ui/table/src/table.spec.ts",
-   "line": 496,
+   "line": 507,
    "hash": "6460a11b205cdcd7"
   },
   {

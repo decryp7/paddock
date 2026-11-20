@@ -4,6 +4,7 @@ import { openApp } from './app';
 import { openAppWith } from './mock-url';
 import { expectNoSeriousViolations } from './axe';
 import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
+import { anchoredMenu } from './menu-support';
 
 // The left activity bar: every major area one click (or a few keys) away, built from the activity-item registry.
 
@@ -27,8 +28,7 @@ test.describe('activity bar', () => {
 
   test('opens Patterns from the Analysis fly-out, which checks it afterwards', async ({ page }, testInfo) => {
     await barButton(page, 'Analysis').click();
-    const menu = page.getByRole('menu', { name: 'Analysis' });
-    await expect(menu).toBeVisible();
+    const menu = await anchoredMenu(page, barButton(page, 'Analysis'), 'Analysis', 'popup');
     // The fly-out opens to the right of the bar.
     await expectNotMoving(menu, 'the fly-out');
     await expectNotMoving(barButton(page, 'Analysis'), 'the Analysis button');
@@ -44,7 +44,7 @@ test.describe('activity bar', () => {
     await expect(tab(page, 'patterns')).toBeVisible();
     await expect(barButton(page, 'Analysis')).toHaveClass(/\bon\b/);
     await barButton(page, 'Analysis').click();
-    await expect(page.getByRole('menu', { name: 'Analysis' }).getByRole('menuitemcheckbox', { name: 'Patterns' })).toHaveAttribute('aria-checked', 'true');
+    await expect((await anchoredMenu(page, barButton(page, 'Analysis'), 'Analysis', 'popup')).getByRole('menuitemcheckbox', { name: 'Patterns' })).toHaveAttribute('aria-checked', 'true');
     await page.keyboard.press('Escape');
   });
 
@@ -70,7 +70,7 @@ test.describe('activity bar', () => {
 
   test('opens Process Monitor from the Tools fly-out', async ({ page }) => {
     await barButton(page, 'Tools').click();
-    const menu = page.getByRole('menu', { name: 'Tools' });
+    const menu = await anchoredMenu(page, barButton(page, 'Tools'), 'Tools', 'popup');
     await expect(menu.getByRole('menuitemcheckbox', { name: 'Process Monitor' })).toBeVisible();
     await menu.getByRole('menuitemcheckbox', { name: 'Process Monitor' }).click();
     await expect(tab(page, 'process-monitor')).toBeVisible();
@@ -83,7 +83,7 @@ test.describe('activity bar', () => {
     await analysis.focus();
     await expect(analysis).toBeFocused();
     await page.keyboard.press('ArrowRight');
-    const menu = page.getByRole('menu', { name: 'Analysis' });
+    const menu = await anchoredMenu(page, analysis, 'Analysis', 'popup');
     await expect(menu.getByRole('menuitemcheckbox', { name: 'Query results' })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);
@@ -116,7 +116,7 @@ test.describe('activity bar', () => {
     await expect(barButton(page, 'Settings')).toBeVisible();
     await expect(barButton(page, 'Profile editor')).toHaveCount(0);
     await more.click();
-    const menu = page.getByRole('menu', { name: 'More' });
+    const menu = await anchoredMenu(page, more, 'More', 'popup');
     await menu.getByRole('menuitem', { name: 'Profile editor' }).click();
     await expect(tab(page, 'profile')).toBeVisible();
     await page.setViewportSize({ width: 1440, height: 900 });

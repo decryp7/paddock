@@ -1,0 +1,364 @@
+{
+ "findings": [
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_bad.rs",
+   "line": 2,
+   "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_bad.rs",
+   "line": 6,
+   "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_bad.rs",
+   "line": 14,
+   "message": "reaches the profile folder by two or more `..` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_bad.rs",
+   "line": 15,
+   "message": "reaches the profile folder by two or more `..` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_bad.rs",
+   "line": 19,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_bad.rs",
+   "line": 20,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_bad.rs",
+   "line": 21,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_bad.rs",
+   "line": 23,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_bad.rs",
+   "line": 27,
+   "message": "reaches the profile folder by `.ancestors().nth(n)` with n of 2 or more from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_bad.rs",
+   "line": 28,
+   "message": "reaches the profile folder by `.ancestors().nth(n)` with n of 2 or more from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_bad.rs",
+   "line": 29,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_bad.rs",
+   "line": 30,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_bare_file_waiver.rs",
+   "line": 3,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_file_waiver.rs",
+   "line": 3,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_file_waiver.rs",
+   "line": 18,
+   "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_unicode.rs",
+   "line": 3,
+   "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_unicode.rs",
+   "line": 4,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_unused_waivers.rs",
+   "line": 10,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_unused_waivers.rs",
+   "line": 1,
+   "message": "this layout-guess waiver waives no site: the guess it was for is gone or moved",
+   "fix": "Remove the comment, or move it to the line it is for; an unused waiver would waive a new guess written under it."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_unused_waivers.rs",
+   "line": 3,
+   "message": "this layout-guess waiver waives no site: the guess it was for is gone or moved",
+   "fix": "Remove the comment, or move it to the line it is for; an unused waiver would waive a new guess written under it."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_unused_waivers.rs",
+   "line": 8,
+   "message": "this layout-guess waiver waives no site: the guess it was for is gone or moved",
+   "fix": "Remove the comment, or move it to the line it is for; an unused waiver would waive a new guess written under it."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_waivers.rs",
+   "line": 6,
+   "message": "the layout-guess waiver gives no reason",
+   "fix": "Write `// conformance: layout-guess — <why this cannot be the other cargo layout>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_waivers.rs",
+   "line": 7,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "scripts/c120_bad.sh",
+   "line": 3,
+   "message": "reaches the profile folder by two or more hops from `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "scripts/c120_bad.sh",
+   "line": 4,
+   "message": "reaches the profile folder by two or more hops from `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "scripts/c120_bad.sh",
+   "line": 5,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "scripts/c120_bad.sh",
+   "line": 8,
+   "message": "reaches the profile folder by two or more hops from `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "scripts/c120_bad.sh",
+   "line": 9,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
+  }
+ ],
+ "waived": [
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_file_waiver.rs",
+   "line": 10,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+   "waiver": {
+    "reason": "the tests here use deps only as filler data",
+    "expires": "inline"
+   }
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_file_waiver.rs",
+   "line": 12,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+   "waiver": {
+    "reason": "this one has its own reason",
+    "expires": "inline"
+   }
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_file_waiver.rs",
+   "line": 13,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+   "waiver": {
+    "reason": "the tests here use deps only as filler data",
+    "expires": "inline"
+   }
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_unused_waivers.rs",
+   "line": 14,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+   "waiver": {
+    "reason": "on its own line",
+    "expires": "inline"
+   }
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_waivers.rs",
+   "line": 3,
+   "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+   "waiver": {
+    "reason": "the cargo version is pinned to the old layout by this fixture",
+    "expires": "inline"
+   }
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/src/c120_waivers.rs",
+   "line": 4,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+   "waiver": {
+    "reason": "a docs link, not a build folder",
+    "expires": "inline"
+   }
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/a/tests/c120_tests_dir.rs",
+   "line": 3,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+   "waiver": {
+    "reason": "everything under tests/ only uses deps as filler data",
+    "expires": "inline"
+   }
+  },
+  {
+   "check": "C120",
+   "severity": "warn",
+   "rule": 40,
+   "file": "scripts/c120_bad.sh",
+   "line": 7,
+   "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
+   "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`.",
+   "waiver": {
+    "reason": "a fixture of the old layout",
+    "expires": "inline"
+   }
+  }
+ ],
+ "errors": 0,
+ "warnings": 28
+}

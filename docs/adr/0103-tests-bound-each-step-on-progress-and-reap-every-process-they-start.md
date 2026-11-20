@@ -325,6 +325,38 @@ product's phase code reads it, behind a test-only variable, because the bound un
 | This amendment: the mark in both implementations, per-phase state and its abandoned guard, the tests, the parity tests moved to the mark | about 0.75 |
 | A virtual clock through `bounded.sh`, the Rust phase and `ToolCall`'s per-command timeout | about 2 (not chosen) |
 
+## Amendment (2026-11-19): the mark bounds every call of the phase, not only the phase
+
+Fourth sighting of the class "work before the hang point of a hung-phase test meets its limit under load" (earlier: fe1bd861d,
+e0fdd0286, the 2026-11-15 amendment above): `ci_host::kept_clone::tests::a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase`
+failed once at a 1-minute load of about 31; the stand-in git recorded no call, because the git's own 1 s limit, counted from its
+spawn, ended it before it ran (a stand-in that is slow to start under load). The first amendment left exactly this open ("a single
+command before the hang taking longer than the phase's own limit"); it is closed here, for the whole class.
+
+**Decision.**
+
+- **A git command inside a phase that has a clock mark has the general limit** (`Flow::phase`: `IN_PHASE` is the general limit when
+  `PADDOCK_KEPT_CLONE_CLOCK_MARK` is set), as the shell's commands have. The phase's own limit counts from the mark only, and it is the
+  phase's bound that ends the hanging git: `Held::end_all` (added after the first amendment) ends the abandoned phase's programs by
+  identity, so the reason the first amendment gave for not doing this (no cancel for a captured run) no longer holds. Unset, nothing
+  changes. The abandoned git then ends as `signal 9` where it used to end as `timed out after N s`; the parity normaliser treats both as
+  the same "ended git" line.
+- **Every hung-phase test uses the mark.** `a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase` (its stand-in writes the
+  mark), the new `a_hung_phase_counts_its_limit_from_the_hang_mark_not_from_its_first_git_call` (the stand-in takes 1.5 s, past the 1 s
+  limit, before it writes its mark and hangs: red before, the phase ended at 1 s with "did not finish within 20 s" and no mark), and
+  `a_phase_abandoned_at_its_bound_leaves_no_program_of_its_own_running` (found by the review; with its 2.5 s slow-start control `..._ends_its_programs_when_the_git_was_slow_to_start`, red without the mark), and
+  `stable_workspace::a_hung_git_of_an_abandoned_phase_is_ended_with_the_programs_below_it` (`run_with` takes an optional `ClockMark`,
+  `None` in the product, used by that phase only; its stand-in sleeps 1.5 s, spawns its helper, writes the mark, hangs; red before:
+  no pid file after 40 s). The shared mechanism is `phase::bounded_marked`; no test has its own copy of the timing. Tests that
+  already used the mark (`phase.rs`, the parity tests of `host_steps.rs`) are unchanged. Tests of other shapes were looked at and left:
+  `host_steps::kept_clone_reads_of_the_work_folder_are_not_bound_by_the_phase_limit` (the sleep is the thing under test),
+  `paddock-testkit`'s `a_git_that_does_not_answer_its_exec_path_in_time_is_no_answer` (any outcome of a start that is slow is the same
+  `TimedOut`).
+- **The class is checked (ER-21):** `phase::tests::no_source_file_times_a_phase_test_from_its_start_without_a_clock_mark_or_a_reason` (a source audit, selected by the member gate as every `no_source_file_*`) fails on a test of the phase machinery that bounds work with a phase and neither uses a `ClockMark` nor carries `// conformance: no-clock-mark - <reason>`; positive control `the_audit_of_unmarked_phase_tests_sees_one_and_accepts_a_mark_or_a_reason`. `phase::HUNG_TEST_GENERAL_LIMIT` (20 s) is the one general limit of the hung-phase tests.
+- **Stress (ER-28):** 200 runs x 4 processes x 1 thread (1,000 test executions, 0 failed); lessons.md, "A slow-to-start stand-in git met the phase limit".
+
+**Cost (ER-37).** About 0.4 agent-day, on the mark and `Held` this ADR already has; a virtual clock stays not chosen.
+
 ## Incident while building it
 
 On 2026-11-15 between 00:12:04 and 00:12:40 (+08), the red run of a test for the first version's marker minimum called

@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import { openAppWith } from './tools-support';
 import { expectNoSeriousViolations } from './axe';
 import { gridRows } from './app';
+import { heldToast } from './toast-support';
 
 async function runCommand(page: Page, title: string): Promise<void> {
   await page.keyboard.press('ControlOrMeta+k');
@@ -64,6 +65,6 @@ test('exports can be redacted with a preview of what is masked', async ({ page }
   await dialog.getByLabel("Redact with the profile's rules").check();
   await expect(dialog.locator('debrief-redaction-summary')).toContainText('events change');
   await dialog.getByRole('button', { name: 'Export…' }).click();
-  const done = page.getByTestId('notification').filter({ hasText: 'Finished: Export events' });
-  await expect(done).toContainText('(redacted,', { timeout: 15_000 });
+  const done = await heldToast(page, 'Finished: Export events', { timeout: 15_000 });
+  await expect(done).toContainText('(redacted,');
 });

@@ -140,9 +140,16 @@ fn turning_on_and_off_asks_once_through_the_os_prompt() {
 fn only_a_protocol_or_minimum_version_change_asks_the_user() {
     let here = env!("CARGO_PKG_VERSION");
     assert_eq!(assess(None), Assessment::NotInstalled);
-    assert_eq!(assess(Some(("1.1.0", HELPER_API))), Assessment::Ready { newer_available: false });
+    // A helper at the minimum with this build's protocol is ready; it is offered the bundled one only when this build is newer
+    // (ER-13: both versions are read from their sources, never typed, so a release bump does not break the test).
     assert_eq!(
-        assess(Some(("1.1.0", HELPER_API + 1))),
+        assess(Some((MIN_HELPER_VERSION, HELPER_API))),
+        Assessment::Ready {
+            newer_available: MIN_HELPER_VERSION != here
+        }
+    );
+    assert_eq!(
+        assess(Some((MIN_HELPER_VERSION, HELPER_API + 1))),
         Assessment::UpdateRequired(UpdateReason::Protocol {
             installed: HELPER_API + 1,
             bundled: HELPER_API
@@ -156,7 +163,7 @@ fn only_a_protocol_or_minimum_version_change_asks_the_user() {
     let ready = assess(Some((here, HELPER_API)));
     assert!(matches!(
         ready,
-        Assessment::Ready { .. } | Assessment::UpdateRequired(UpdateReason::BelowMinimum { .. })
+        Assessment::Ready { newer_available: false } | Assessment::UpdateRequired(UpdateReason::BelowMinimum { .. })
     ));
 }
 
@@ -421,6 +428,7 @@ fn the_polkit_rule_allows_starting_the_helpers_unit_from_a_local_active_session_
 fn the_maintainer_scripts_are_posix_sh_skip_without_systemd_and_touch_only_the_helpers_own_things() {
     for script in ["postinst", "prerm", "postrm"] {
         let text = package_file(script);
+        // conformance: stand-in — the shipped maintainer scripts are the product under test: their shebang is what is asserted
         assert!(text.starts_with("#!/bin/sh\n"), "{script}");
         assert!(text.contains("\nset -e\n"), "{script}");
         assert!(text.contains("/run/systemd/system"), "{script} skips where systemd is not running");
@@ -465,16 +473,17 @@ fn run_maintainer_script(tmp: &std::path::Path, script: &str, args: &[&str], ena
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::create_dir_all(&systemd).unwrap();
     let calls = tmp.join("calls");
-    let fake = bin.join("systemctl");
-    paddock_testkit::exe::write_program(
-        &fake,
-        format!(
-            "#!/bin/sh\necho \"$*\" >> '{}'\ncase \"$1\" in is-enabled) exit {} ;; esac\nexit 0\n",
-            calls.display(),
-            if enabled { 0 } else { 1 }
-        ),
-    )
-    .unwrap();
+    let log = calls.display().to_string();
+    paddock_testkit::StandIn::new(&bin, "systemctl")
+        .answers(paddock_testkit::Actions::new().appends_with(&log, "{args}\n"))
+        .when_args(
+            &["is-enabled"],
+            paddock_testkit::Actions::new()
+                .appends_with(&log, "{args}\n")
+                .exit(if enabled { 0 } else { 1 }),
+        )
+        .install()
+        .unwrap();
     let text = package_file(script);
     assert!(text.contains("/run/systemd/system"), "{script} looks for a running systemd");
     let copy = tmp.join(script);

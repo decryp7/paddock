@@ -1,6 +1,6 @@
-//! C129 (no new shell): the Rust host against the conformance host as the oracle, on a fixture tree and on this working tree.
+//! C129 (no new shell): the Rust host against the answers the JavaScript check gave (recorded in `tests/fixtures/check/recorded`; the JS module is retired, pair P3), on a fixture tree and on this working tree.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{LIVE_STALL, has_node, node, node_ticking, repo_root, skip};
+use super::check::{LIVE_STALL, repo_root};
 use paddock_dev::check::tree::Tree;
 use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
 use serde_json::{Value, json};
@@ -22,18 +22,18 @@ fn cases() -> Vec<(&'static str, String)> {
             EXCEPTIONS,
             "{\"exceptions\":[{\"path\":\"dev\",\"id\":\"E1\",\"reason\":\"it must start first\",\"owner\":\"plan\"},{\"path\":\"vm/a.ps1\",\"id\":\"E5\",\"reason\":\"runs in the guest\",\"owner\":\"plan\"},{\"path\":\"gone/x.sh\",\"id\":\"E6\",\"reason\":\"names no file\",\"owner\":\"plan\"}]}".into(),
         ),
-        ("dev", "#!/bin/sh\necho\n".into()),
+        ("dev", "#!/bin/sh\necho\n".into()), // conformance: stand-in — shell-file data for the C129 check, never run
         ("vm/a.ps1", "x\n".into()),
         ("vm/sub/b.ps1", "x\n".into()),
         ("new.sh", "a\nb\nc\n".into()),
         ("new.PY", "print(1)".into()),
         ("grew.sh", "1\n2\n3\n".into()),
         ("shrank.sh", "1\n".into()),
-        ("bin/env-bash", "#!/usr/bin/env bash\necho\n".into()),
+        ("bin/env-bash", "#!/usr/bin/env bash\necho\n".into()), // conformance: stand-in — shell-file data for the C129 check, never run
         ("bin/py", "#!/usr/bin/env -S python3 -I\n".into()),
         ("bin/node", "#!/usr/bin/env node\n".into()),
         ("bin/plain", "echo hi\n".into()),
-        ("bin/blob", "#!/bin/sh\0\n".into()),
+        ("bin/blob", "#!/bin/sh\0\n".into()), // conformance: stand-in — shell-file data for the C129 check, never run
         ("é/ü.bat", "echo é\r\nexit\r\n".into()),
         ("apps/d/scripts/in-app.sh", "x\n".into()),
         ("scripts/keep.txt", "a top-level folder the callers' paths start in\n".into()),
@@ -43,7 +43,7 @@ fn cases() -> Vec<(&'static str, String)> {
         ),
         ("apps/d/paddock.ci.json", "{\"prepare\": [\"scripts/in-app.sh\", \"scripts/nope.ps1\"]}".into()),
         ("lefthook.yml", "pre-push:\n  run: ./new.sh\n".into()),
-        ("icons/a.png", "#!/bin/sh bytes".into()),
+        ("icons/a.png", "#!/bin/sh bytes".into()), // conformance: stand-in — shell-file data for the C129 check, never run
     ]
 }
 
@@ -64,14 +64,6 @@ fn shared_part(v: &Value) -> Value {
     json!({"app": v["app"], "checks": v["checks"], "findings": v["findings"], "waived": v["waived"], "errors": v["errors"], "warnings": v["warnings"]})
 }
 
-const JS_RUN: &str = r#"
-import { pathToFileURL } from 'node:url';
-import { join } from 'node:path';
-const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C129'], options: {} });
-process.stdout.write(JSON.stringify(r));
-"#;
-
 fn tree_of<T: AsRef<str>>(files: &[(&str, T)]) -> tempfile::TempDir {
     let d = tempfile::tempdir().unwrap();
     for (rel, text) in files {
@@ -82,14 +74,19 @@ fn tree_of<T: AsRef<str>>(files: &[(&str, T)]) -> tempfile::TempDir {
     d
 }
 
-fn both(root: &Path) -> (Value, Value) {
-    let js: Value = serde_json::from_str(&node(
-        JS_RUN,
-        &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", "fixture".into())],
-    ))
-    .unwrap();
+/// The Rust host over `root` and the answer recorded for `case`: the shared part of each report, the Rust one first.
+fn both(case: &str, root: &Path) -> (Value, Value) {
     let r = run_checks(&options(root, "fixture"), &registry()).unwrap();
-    (shared_part(&r.json()), shared_part(&js))
+    let got = shared_part(&r.json());
+    // The JS host named its own regeneration tool in the fixes; the tool is now `./dev check shell-baseline` (pair P3).
+    let want = crate::recorded::expect(case, &got);
+    let want = serde_json::from_str(
+        &want
+            .to_string()
+            .replace("node conformance/bin/paddock-shell-baseline.mjs", "./dev check shell-baseline"),
+    )
+    .unwrap();
+    (got, want)
 }
 
 #[test]
@@ -138,7 +135,7 @@ fn c129_flags_new_and_grown_shell_and_names_stale_entries_as_warnings() {
 fn c129_with_a_broken_list_is_one_check_broken_finding_on_both_hosts() {
     let good_b = "{\"files\":[]}";
     let good_e = "{\"exceptions\":[]}";
-    for (which, text) in [
+    for (i, (which, text)) in [
         (BASELINE, None),
         (BASELINE, Some("nope")),
         (BASELINE, Some("{}")),
@@ -157,7 +154,10 @@ fn c129_with_a_broken_list_is_one_check_broken_finding_on_both_hosts() {
             EXCEPTIONS,
             Some("{\"exceptions\":[{\"path\":\"a\",\"id\":\"E1\",\"reason\":\"short\",\"owner\":\"x\"}]}"),
         ),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let mut files = vec![("a.sh", "x\n".to_string())];
         for (path, good) in [(BASELINE, good_b), (EXCEPTIONS, good_e)] {
             if path != which {
@@ -170,18 +170,16 @@ fn c129_with_a_broken_list_is_one_check_broken_finding_on_both_hosts() {
         let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
         let got: Vec<(&str, Option<&str>)> = r.findings.iter().map(|f| (f.file.as_str(), f.outcome.map(|o| o.name()))).collect();
         assert_eq!(got, [(which, Some("check-broken"))], "{which} {text:?}");
-        if has_node() {
-            // The JSON parsers word their own error differently (serde_json and V8): the message is compared up to that text.
-            let cut = |mut v: Value| {
-                for f in v["findings"].as_array_mut().unwrap() {
-                    let m = f["message"].as_str().unwrap().to_string();
-                    f["message"] = Value::from(m.split(" is not JSON: ").next().unwrap());
-                }
-                v
-            };
-            let (rust, js) = both(tree.path());
-            assert_eq!(cut(rust), cut(js), "{which} {text:?}");
-        }
+        // The JSON parsers word their own error differently (serde_json and V8): the message is compared up to that text.
+        let cut = |mut v: Value| {
+            for f in v["findings"].as_array_mut().unwrap() {
+                let m = f["message"].as_str().unwrap().to_string();
+                f["message"] = Value::from(m.split(" is not JSON: ").next().unwrap());
+            }
+            v
+        };
+        let (rust, js) = both(&format!("c129-broken-list-{i}"), tree.path());
+        assert_eq!(cut(rust), cut(js), "{which} {text:?}");
     }
 }
 
@@ -207,7 +205,7 @@ fn c129_an_unreadable_file_is_not_measured_on_both_hosts() {
         return;
     }
     let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
-    let parity = has_node().then(|| both(tree.path()));
+    let parity = Some(both("c129-unreadable", tree.path()));
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
     let got: Vec<(&str, Option<&str>)> = r
         .findings
@@ -250,30 +248,16 @@ fn c129_a_files_run_judges_only_the_files_it_looked_at() {
 }
 
 #[test]
-fn live_c129_fixture_findings_equal_the_js_host() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn live_c129_fixture_findings_equal_the_recorded_js_answer() {
     let tree = tree_of(&cases());
-    let (got, want) = both(tree.path());
+    let (got, want) = both("c129-fixture", tree.path());
     assert_eq!(got["findings"], want["findings"]);
     assert_eq!(got, want);
 }
 
 #[test]
-fn live_c129_tree_findings_equal_the_js_host() {
-    if !has_node() {
-        return skip("node is not installed");
-    }
+fn live_c129_tree_run_is_sound() {
     let root = repo_root();
-    let js_root = root.clone();
-    let js = paddock_testkit::guarded("the JS C129 over the live tree", LIVE_STALL, move |progress| {
-        let driver = format!(
-            "import fs from 'node:fs';\nimport {{ syncBuiltinESMExports }} from 'node:module';\nconst read = fs.readFileSync;\nfs.readFileSync = (...a) => {{ process.stdout.write('.\\n'); return read(...a); }};\nsyncBuiltinESMExports();\n{JS_RUN}"
-        );
-        let env = [("RT5_ROOT", js_root.display().to_string()), ("RT5_APP", "paddock".into())];
-        serde_json::from_str::<Value>(node_ticking(&driver, &env, &progress).trim()).unwrap()
-    });
     let r = paddock_testkit::guarded("the Rust C129 over the live tree", LIVE_STALL, {
         let root = root.clone();
         move |progress| {
@@ -281,9 +265,7 @@ fn live_c129_tree_findings_equal_the_js_host() {
             run_checks_in(&tree, &options(&root, "paddock"), &registry()).unwrap()
         }
     });
-    let (got, want) = (shared_part(&r.json()), shared_part(&js));
-    assert_eq!(got["findings"], want["findings"]);
-    assert_eq!(got, want);
+    crate::recorded::assert_live_tree_sound("c129", &r.json());
 }
 
 // Plain `git` in a scratch repository, started and awaited here; nothing is killed by pid.
@@ -312,7 +294,7 @@ fn c129_an_added_or_widened_exception_is_a_finding_against_the_merge_base() {
     let tree = tree_of(&[
         (BASELINE, "{\"files\":[]}".to_string()),
         (EXCEPTIONS, list(&[("dev", "E1"), ("scripts/b.sh", "E5")])),
-        ("dev", "#!/bin/sh\n".to_string()),
+        ("dev", "#!/bin/sh\n".to_string()), // conformance: stand-in — shell-file data for the C129 check, never run
         ("scripts/a.sh", "x\n".to_string()),
         ("scripts/b.sh", "x\n".to_string()),
     ]);
@@ -382,4 +364,61 @@ fn a_control_holds_in_a_repository_whose_lists_differ_from_its_own() {
             "{id}'s control read the repository the process stands in"
         );
     }
+}
+
+/// The regeneration tool (`./dev check shell-baseline`, the port of the retired `paddock-shell-baseline.mjs`): no flag lists and writes
+/// nothing, `--shrink` removes stale entries and lowers counts and never adds or raises, `--init` writes from every file.
+#[test]
+#[allow(clippy::disallowed_methods, reason = "a test starts the built binary; it ends it itself")]
+fn the_shell_baseline_tool_lists_shrinks_and_inits() {
+    let tree = tree_of(&[
+        (
+            BASELINE,
+            "{\"files\":[{\"path\":\"a.sh\",\"lines\":4},{\"path\":\"gone.sh\",\"lines\":9},{\"path\":\"b.sh\",\"lines\":2}]}".to_string(),
+        ),
+        (EXCEPTIONS, "{\"exceptions\":[]}".to_string()),
+        ("a.sh", "x\n".repeat(2)),
+        ("b.sh", "x\n".repeat(5)),
+        ("new.sh", "x\n".to_string()),
+    ]);
+    let run = |flag: Option<&str>| {
+        let mut c = crate::dev_bin::command();
+        c.args(["check", "shell-baseline", "--root"]).arg(tree.path());
+        if let Some(f) = flag {
+            c.arg(f);
+        }
+        let o = c.output().unwrap();
+        assert!(
+            o.status.success(),
+            "{flag:?}: {}{}",
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        );
+        String::from_utf8_lossy(&o.stdout).into_owned()
+    };
+    let before = std::fs::read_to_string(tree.path().join(BASELINE)).unwrap();
+    let listed = run(None);
+    assert!(
+        listed.contains("2\ta.sh") && listed.contains("1\tnew.sh") && listed.contains("3 shell files, 8 lines"),
+        "{listed}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(tree.path().join(BASELINE)).unwrap(),
+        before,
+        "listing writes nothing"
+    );
+    let shrunk = run(Some("--shrink"));
+    assert!(
+        shrunk.contains("removed: gone.sh") && shrunk.contains("1 removed; 1 shell files are not in the baseline and were not added"),
+        "{shrunk}"
+    );
+    let after: Value = serde_json::from_str(&std::fs::read_to_string(tree.path().join(BASELINE)).unwrap()).unwrap();
+    assert_eq!(
+        after["files"],
+        json!([{"path": "a.sh", "lines": 2}, {"path": "b.sh", "lines": 2}]),
+        "a.sh is lowered from 4 to 2, b.sh is not raised from 2 to 5, new.sh is not added, gone.sh is removed"
+    );
+    run(Some("--init"));
+    let init: Value = serde_json::from_str(&std::fs::read_to_string(tree.path().join(BASELINE)).unwrap()).unwrap();
+    assert_eq!(init["files"].as_array().unwrap().len(), 3, "--init writes every shell file");
 }

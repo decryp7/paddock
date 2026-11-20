@@ -1,0 +1,21 @@
+{
+ "app": "fixture",
+ "checks": [
+  "C130"
+ ],
+ "findings": [
+  {
+   "check": "C130",
+   "severity": "warn",
+   "rule": 42,
+   "file": "conformance/c130-allow.json",
+   "line": 1,
+   "message": "the allow list grew: 1 entry is (counting each `count`) not in conformance/c130-allow.json at the merge base <sha>; it may only shrink",
+   "fix": "Remove the added entries or lower the raised counts and fix the sites. Growing the list needs the user's approval.",
+   "unwaivable": true
+  }
+ ],
+ "waived": [],
+ "errors": 0,
+ "warnings": 1
+}

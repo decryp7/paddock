@@ -1,0 +1,10 @@
+{
+ "app": "fixture",
+ "checks": [
+  "C130"
+ ],
+ "findings": [],
+ "waived": [],
+ "errors": 0,
+ "warnings": 0
+}

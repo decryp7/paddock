@@ -277,7 +277,14 @@ fn wake_schedule_lists_adds_and_cancels_through_the_agent_and_sets_nothing_real(
     };
     let mut s = *s;
     s.power.wake.enabled = true;
-    dyno_agent::cli::ask(&c, dyno_core::protocol::Request::SaveSettings { settings: Box::new(s) }).unwrap();
+    dyno_agent::cli::ask(
+        &c,
+        dyno_core::protocol::Request::SaveSettings {
+            settings: Box::new(s),
+            base_revision: None,
+        },
+    )
+    .unwrap();
     let (code, out, err) = h.dyno("wake-schedule add Morning --at 07:30 --stay 30m --repeat weekdays");
     assert_eq!(code, 0, "{err}");
     assert!(out.contains("Morning") && out.contains("07:30") && out.contains("armed"), "{out}");

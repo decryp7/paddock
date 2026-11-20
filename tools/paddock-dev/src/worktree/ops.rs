@@ -769,12 +769,15 @@ mod tests {
     fn the_runner_calls_npm_ci_for_the_conformance_member_from_the_root_and_reports_its_failure() {
         let d = tempfile::tempdir().unwrap();
         let log = d.path().join("log");
-        let fake = d.path().join("npm");
-        paddock_testkit::exe::write_program(
-            &fake,
-            format!("#!/bin/sh\necho \"$PWD $*\" >> '{}'\nexit ${{FAKE_NPM_EXIT:-0}}\n", log.display()),
-        )
-        .unwrap();
+        let fake = paddock_testkit::StandIn::new(d.path(), "npm")
+            .answers(
+                paddock_testkit::Actions::new()
+                    .appends_with(&log.display().to_string(), "{cwd} {args}\n")
+                    .exits_with_env("FAKE_NPM_EXIT", 0),
+            )
+            .install()
+            .unwrap();
+        let fake = fake.program();
         let root = d.path().join("wt");
         std::fs::create_dir(&root).unwrap();
         assert!(super::npm_ci_with(fake.to_str().unwrap(), &root).is_ok());

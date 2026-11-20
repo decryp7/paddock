@@ -204,6 +204,7 @@ export function demoPlugins(): PluginInfo[] {
 export function demoSettings(): Settings {
   return {
     version: 1,
+    revision: 0,
     launchAtLogin: true,
     sampling: { intervalMs: 1000, processIntervalMs: 2000, helperSweepMs: null },
     retention: { rawHours: 24, minuteDays: 14, quarterHourDays: 90, hourDays: 730 },

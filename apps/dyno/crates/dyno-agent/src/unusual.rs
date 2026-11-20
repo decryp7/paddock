@@ -64,6 +64,15 @@ impl UnusualCentre {
 
     /// One look at the process table.
     pub fn look(&self, shared: &Shared) {
+        self.look_with(shared, &|| {});
+    }
+
+    /// [`look`](Self::look) with `during` run after the baseline observed and before its changes are stored: the moment a "forget"
+    /// can come in (tests start one there). The core lock and the baseline lock are held from the observation through the store and
+    /// the overview, in the order `forget` takes them (core, then baseline): a forget comes before the look or after it, never
+    /// between, so the store never keeps rows of a baseline that was forgotten (Dyno ADR 0034).
+    #[doc(hidden)]
+    pub fn look_with(&self, shared: &Shared, during: &dyn Fn()) {
         let settings = lock(&shared.core).settings.unusual;
         if !settings.enabled {
             return;
@@ -75,7 +84,9 @@ impl UnusualCentre {
         }
         let seen = observed(&processes, &shared.network.connection_counts());
         let startup = self.startup_entries(shared);
-        // Signatures of programs the baseline has not seen, outside the baseline's lock (a check can take seconds).
+        // Signatures of programs the baseline has not seen, outside the baseline's lock (a check can take seconds), in one call
+        // of the shared signature port: never through the details port, whose lock a person's process details wait on (rule 85;
+        // ADR 0108 DY-5).
         let learning = lock(&self.state).baseline.learning(t, &settings).active;
         let mut signatures: HashMap<String, Signing> = HashMap::new();
         if !learning {
@@ -89,22 +100,23 @@ impl UnusualCentre {
                     .take(MAX_SIGNATURE_CHECKS)
                     .collect()
             };
-            for (key, p) in fresh {
-                let sig = lock(&shared.ports.details)
-                    .details(p.reference())
-                    .map_or(Signing::Unknown, |d| Signing::from(&d.signature));
-                signatures.insert(key, sig);
-            }
+            signatures = signatures_of(shared.ports.signatures.as_ref(), &fresh);
         }
-        let outcome = {
-            let mut st = lock(&self.state);
-            st.baseline.observe(t, &settings, current_os(), &seen, &startup, &signatures)
-        };
         let mut core = lock(&shared.core);
-        if let Err(e) = core.store.apply_baseline(&outcome.changes) {
-            log::error!("dyno-agent: could not store the program baseline: {e}");
-        }
-        let overview = lock(&self.state).baseline.overview(t, &settings);
+        let (outcome, overview) = {
+            let mut st = lock(&self.state);
+            let baseline_before = st.baseline.clone();
+            let outcome = st.baseline.observe(t, &settings, current_os(), &seen, &startup, &signatures);
+            during();
+            if let Err(e) = core.store.apply_baseline(&outcome.changes) {
+                // Not stored, so not kept or announced (Dyno ADR 0008, "Store writers"): the next look sees the same programs again.
+                log::error!("dyno-agent: could not store the program baseline: {e}; this look is dropped");
+                st.baseline = baseline_before;
+                return;
+            }
+            let overview = st.baseline.overview(t, &settings);
+            (outcome, overview)
+        };
         for key in outcome.newly_unusual.iter().take(MAX_LINES_PER_LOOK) {
             let Some(item) = overview.items.iter().find(|i| &i.key == key) else {
                 continue;
@@ -156,11 +168,27 @@ impl UnusualCentre {
         core.store
             .clear_baseline()
             .map_err(|e| AgentError::new(ErrorCode::Internal, e.to_string()))?;
-        lock(&self.state).baseline.forget();
-        let settings = core.settings.unusual;
-        drop(core);
-        Ok(lock(&self.state).baseline.overview(now(), &settings))
+        let mut st = lock(&self.state);
+        st.baseline.forget();
+        Ok(st.baseline.overview(now(), &core.settings.unusual))
     }
+}
+
+/// The signing verdict of each new program, from one call of `probe` for those with a known file; one without a file is
+/// [`Signing::Unknown`].
+fn signatures_of(probe: &dyn dyno_core::ports::SignatureProbe, fresh: &[(String, &ProcessSample)]) -> HashMap<String, Signing> {
+    let with_file: Vec<(&String, &std::path::Path)> = fresh
+        .iter()
+        .filter_map(|(k, p)| p.exe.as_deref().map(|e| (k, std::path::Path::new(e))))
+        .collect();
+    let mut out: HashMap<String, Signing> = fresh.iter().map(|(k, _)| (k.clone(), Signing::Unknown)).collect();
+    if !with_file.is_empty() {
+        let files: Vec<&std::path::Path> = with_file.iter().map(|(_, f)| *f).collect();
+        for ((key, _), info) in with_file.iter().zip(probe.signatures(&files)) {
+            out.insert((*key).clone(), Signing::from(&info));
+        }
+    }
+    out
 }
 
 /// The programs in a process table: one per program, with the most children one process has and the connections of all
@@ -265,5 +293,136 @@ mod tests {
         let os = current_os();
         assert_eq!(os == Os::Macos, cfg!(target_os = "macos"));
         assert_eq!(os == Os::Windows, cfg!(windows));
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+    use dyno_core::ports::{PlatformError, ProcessSource};
+    use dyno_core::process::{ProcessDetails, ProcessRef};
+    use dyno_core::time::Timestamp;
+    use dyno_core::unusual::baseline::Baseline;
+    use dyno_platform::fake::{process, Fake};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// A details port that counts its calls (each one held the details lock for a whole `details()`).
+    struct CountingDetails(Arc<AtomicUsize>);
+    impl ProcessSource for CountingDetails {
+        fn processes(&mut self) -> Vec<ProcessSample> {
+            Vec::new()
+        }
+        fn details(&mut self, _: ProcessRef) -> Result<ProcessDetails, PlatformError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(PlatformError::Unsupported("counted".into()))
+        }
+    }
+
+    /// The store-writer contract (Dyno ADR 0008): a look whose baseline changes are refused keeps none of them, so the next look
+    /// sees the same programs as new again.
+    #[test]
+    fn a_look_whose_baseline_is_not_stored_keeps_none_of_it() {
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let fake = Fake::new();
+        let (shared, _, _) = Shared::build(
+            crate::paths::Dirs::at(tmp.path().join("data")),
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+        )
+        .unwrap();
+        let fresh = process(100, "fresh", 1.0);
+        let key = program_key(&fresh.name, fresh.exe.as_deref());
+        lock(&shared.core).latest.processes = vec![fresh];
+        let centre = UnusualCentre {
+            state: Mutex::new(State {
+                baseline: Baseline::restore(Some(Timestamp(0)), vec![], vec![]),
+                startup: Some((Instant::now(), vec![])),
+            }),
+        };
+        let core_store = |f: &dyn Fn(&crate::store::Store)| f(&lock(&shared.core).store);
+        let mut result = Ok(());
+        core_store(&|store| store.refuse_writes_for_test(true));
+        centre.look(&shared);
+        core_store(&|store| store.refuse_writes_for_test(false));
+        if !lock(&centre.state).baseline.is_new(&key) {
+            result = Err("the look kept a program in its baseline that it did not store");
+        }
+        assert_eq!(result, Ok(()));
+        centre.look(&shared);
+        assert!(!lock(&centre.state).baseline.is_new(&key), "a stored look keeps it");
+    }
+
+    /// DY-5 (ADR 0108, guard D): a look that finds N new programs checks their signatures in one call of the signature port,
+    /// and never through the details port (whose lock a person's "process details" waits on).
+    #[test]
+    fn new_programs_are_checked_in_one_signature_call_without_the_details_port() {
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let fake = Fake::new();
+        let details = Arc::new(AtomicUsize::new(0));
+        let (shared, _, _) = Shared::build(
+            crate::paths::Dirs::at(tmp.path().join("data")),
+            fake.platform(),
+            Box::new(CountingDetails(details.clone())),
+            Box::new(|_| Ok(())),
+        )
+        .unwrap();
+        lock(&shared.core).latest.processes = (0..3)
+            .map(|i| {
+                let mut p = process(100 + i, &format!("new{i}"), 1.0);
+                p.exe = Some(format!("/opt/new{i}/new{i}"));
+                p
+            })
+            .collect();
+        // A baseline that finished learning long ago, so new programs are checked.
+        let centre = UnusualCentre {
+            state: Mutex::new(State {
+                baseline: Baseline::restore(Some(Timestamp(0)), vec![], vec![]),
+                startup: Some((Instant::now(), vec![])),
+            }),
+        };
+        centre.look(&shared);
+        assert_eq!(details.load(Ordering::SeqCst), 0, "the look never takes the details port");
+        assert_eq!(fake.signature_counts(), (1, 3), "three new programs, one signature call");
+    }
+
+    /// Whether `m` is locked by someone (a `try_lock` that would block).
+    fn lock_is_held<T>(m: &Mutex<T>) -> bool {
+        matches!(m.try_lock(), Err(std::sync::TryLockError::WouldBlock))
+    }
+
+    /// Dyno ADR 0034: between the look's observation and its store, nothing else may change the store or the baseline: the look holds the
+    /// core lock and the baseline lock across both, in the order `forget` takes them, so a "forget" comes before the look or after
+    /// it. A look that let go of them in between could store rows of a baseline that a forget had just cleared.
+    #[test]
+    fn a_look_holds_the_core_and_baseline_locks_from_its_observation_to_its_store() {
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let fake = Fake::new();
+        let (shared, _, _) = Shared::build(
+            crate::paths::Dirs::at(tmp.path().join("data")),
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+        )
+        .unwrap();
+        lock(&shared.core).latest.processes = vec![process(100, "newcomer", 1.0)];
+        let centre = UnusualCentre {
+            state: Mutex::new(State {
+                baseline: Baseline::restore(Some(Timestamp(0)), vec![], vec![]),
+                startup: Some((Instant::now(), vec![])),
+            }),
+        };
+        let held = std::cell::Cell::new(None);
+        centre.look_with(&shared, &|| {
+            held.set(Some((lock_is_held(&shared.core), lock_is_held(&centre.state))));
+        });
+        assert_eq!(
+            held.get(),
+            Some((true, true)),
+            "(core, baseline) were held while the observed programs were stored"
+        );
+        let (_, entries, _) = lock(&shared.core).store.load_baseline().unwrap();
+        assert_eq!(entries.len(), 1, "the look stored what it observed");
     }
 }

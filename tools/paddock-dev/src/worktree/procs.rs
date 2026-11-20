@@ -5,8 +5,28 @@
 
 use std::path::{Path, PathBuf};
 
-/// The current folders of the processes this user can see, or why they cannot be read.
+/// The current folders of the processes this user can see, or why they cannot be read: the one scan every caller uses
+/// (`safe_remove`, `worktree clean`, `disk clean`). In this crate's own unit tests it answers an empty list at once: the real
+/// scan is `lsof` on macOS, which took 60 s and more on a loaded machine and made tests that only delete a folder slow and flaky
+/// (train 16: the slot test, `a_download_that_does_not_match_its_pin...`). A test that needs the real scan says so by name
+/// ([`real_process_folders`]) with a reasoned exemption comment; the audit `no_source_file_calls_the_real_process_scan_in_a_test`
+/// checks that.
+/// Only where a scan exists (Linux, macOS): elsewhere the platform's own answer stays, which on Windows is the immediate "not
+/// implemented on this OS" refusal that `disk clean` and its Windows test rely on (an empty list there would read as "no folder in use";
+/// CI run 8346, windows-latest).
 pub fn process_folders() -> Result<Vec<PathBuf>, String> {
+    #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+    {
+        Ok(Vec::new())
+    }
+    #[cfg(not(all(test, any(target_os = "linux", target_os = "macos"))))]
+    {
+        imp::process_folders()
+    }
+}
+
+/// The real scan, whatever the build: production's and the one test of the scan itself.
+pub fn real_process_folders() -> Result<Vec<PathBuf>, String> {
     imp::process_folders()
 }
 
@@ -78,7 +98,8 @@ mod tests {
     #[test]
     fn this_process_is_found_in_its_own_folder() {
         let here = paddock_env::winpath::real(&std::env::current_dir().unwrap()).unwrap();
-        let folders = process_folders().unwrap();
+        // conformance: real-scan — this test is the scan's own: it must find this very process through the real lsof or /proc
+        let folders = real_process_folders().unwrap();
         assert!(any_inside(&folders, &here), "{here:?} not among {} folders", folders.len());
     }
 }

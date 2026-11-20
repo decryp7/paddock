@@ -398,3 +398,212 @@ fn a_container_run_held_by_a_single_slot_binary_keeps_the_load_aware_ones_from_s
     );
     assert_eq!(rig.count("pitcrew-heavy-v2.lock"), 2);
 }
+
+/// The deadlock of 2026-11-18 (train 16): the head of the queue waits for a container run's drain, and the container run (the drain's
+/// owner) sits behind that head in the queue. The drain's owner must be able to take a slot whatever its place in the queue.
+#[test]
+fn a_drain_owner_behind_the_head_still_takes_the_machine_when_it_is_free() {
+    let (rig, mut cfg) = rig_with(5);
+    cfg.drain_after = std::time::Duration::from_secs(300);
+    let (a, h, c) = (
+        rig.agent_with(141, cfg.clone()),
+        rig.agent_with(142, cfg.clone()),
+        rig.agent_with(143, cfg),
+    );
+    // A busy machine (the load keeps it to one step at a time): A runs, the head H and, behind it, a container run C wait.
+    rig.load.set(15.0);
+    let mut ha = Acquirer::new(&a.h, req("A")).unwrap();
+    assert_eq!(ha.poll(), Poll::Held);
+    let mut hh = Acquirer::new(&h.h, req("H")).unwrap();
+    rig.clock.advance(std::time::Duration::from_millis(5));
+    let mut hc = Acquirer::new(&c.h, req_cmd("C", "bash tools/linux-container.sh x")).unwrap();
+    assert_eq!(hh.poll(), Poll::Waiting);
+    assert_eq!(hc.poll(), Poll::Waiting);
+    // C has waited long enough to ask for the drain.
+    rig.clock.advance(std::time::Duration::from_secs(301));
+    assert_eq!(hc.poll(), Poll::Waiting);
+    assert_eq!(rig.count("pitcrew-heavy.drain."), 1, "{}", c.said());
+    // A ends: nothing runs. The head must not wait for a drain owner that is behind it.
+    ha.release();
+    let mut got = (hh.poll(), hc.poll());
+    for _ in 0..3 {
+        if got.0 == Poll::Held || got.1 == Poll::Held {
+            break;
+        }
+        got = (hh.poll(), hc.poll());
+    }
+    assert!(
+        got.0 == Poll::Held || got.1 == Poll::Held,
+        "nobody runs on a free machine: {got:?} / {} / {}",
+        h.said(),
+        c.said()
+    );
+    assert_eq!(got.1, Poll::Held, "the drain owner goes first, whatever its place in the queue");
+}
+
+/// A model of the queue: random agents (normal, high-priority, container) arrive at random rounds, run a few rounds once they hold a
+/// slot, and the load flips between low and high. Every agent must finish (no wait cycle between the queue, the drain, the high markers
+/// and the step-back), no more than the maximum hold slots at the end of a round, and a container run is never beside another step then.
+/// 400 seeds. The control: with the drain owner's queue bypass taken out the model finds a stuck agent (`model_stuck_with`).
+fn model_stuck_with(seed: u64, max: u32) -> Option<String> {
+    let mut x = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    let mut rnd = |n: u64| {
+        x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (x >> 33) % n
+    };
+    let rig = Rig::new();
+    let mut cfg = rig.cfg();
+    cfg.slots = max;
+    cfg.drain_after = std::time::Duration::from_secs(4);
+    let n = 3 + rnd(5) as usize;
+    let kinds: Vec<u64> = (0..n).map(|_| rnd(4)).collect(); // 0,1 normal, 2 high, 3 container
+    let arrive: Vec<u64> = (0..n).map(|_| rnd(6)).collect();
+    let agents: Vec<_> = (0..n).map(|i| rig.agent_with(200 + i as u32, cfg.clone())).collect();
+    let mut acq: Vec<Option<Acquirer<'_>>> = (0..n).map(|_| None).collect();
+    let mut ran_for: Vec<Option<u64>> = vec![None; n];
+    let mut done = vec![false; n];
+    for round in 0..500u64 {
+        rig.load.set(if rnd(3) == 0 { 15.0 } else { 1.0 });
+        let mut order: Vec<usize> = (0..n).collect();
+        for i in (1..n).rev() {
+            order.swap(i, rnd(i as u64 + 1) as usize);
+        }
+        for &i in &order {
+            if done[i] || round < arrive[i] {
+                continue;
+            }
+            if acq[i].is_none() {
+                let r = match kinds[i] {
+                    2 => req_high(&format!("a{i}")),
+                    3 => req_cmd(&format!("a{i}"), "docker run --rm x"),
+                    _ => req(&format!("a{i}")),
+                };
+                acq[i] = Some(Acquirer::new(&agents[i].h, r).unwrap());
+            }
+            if let Some(since) = ran_for[i] {
+                if round >= since + 1 + (i as u64 % 3) {
+                    acq[i].as_mut().unwrap().release();
+                    done[i] = true;
+                    acq[i] = None;
+                }
+                continue;
+            }
+            if acq[i].as_mut().unwrap().poll() == Poll::Held {
+                ran_for[i] = Some(round);
+            }
+        }
+        let holders = rig.count("pitcrew-heavy-v2.lock");
+        if holders > max as usize {
+            return Some(format!("seed {seed}: {holders} holders, max {max}"));
+        }
+        let container_holding = (0..n).any(|i| kinds[i] == 3 && ran_for[i].is_some() && !done[i]);
+        if container_holding && holders > 1 {
+            return Some(format!(
+                "seed {seed}: a container run beside {} other holder(s) in round {round}",
+                holders - 1
+            ));
+        }
+        if done.iter().all(|d| *d) {
+            return None;
+        }
+        rig.clock.advance(std::time::Duration::from_secs(1));
+    }
+    Some(format!(
+        "seed {seed}: stuck after 500 rounds: kinds {kinds:?} arrive {arrive:?} done {done:?} ran {ran_for:?}; said: {}",
+        agents
+            .iter()
+            .map(|a| a.said())
+            .collect::<Vec<_>>()
+            .join(" | ")
+            .chars()
+            .take(600)
+            .collect::<String>()
+    ))
+}
+
+#[test]
+fn the_queue_model_has_no_wait_cycle_and_never_exceeds_the_maximum() {
+    for max in [1u32, 3, 5] {
+        for seed in 0..400u64 {
+            if let Some(why) = model_stuck_with(seed, max) {
+                panic!("{why}");
+            }
+        }
+    }
+}
+
+/// The wait-for detector (C2 of docs/research/2026-11-19-gate-hang-detection.md) on the real folder: the deadlock of 2026-11-18 cannot
+/// happen any more (7a4aafbee), so the old rule is switched on in the detector only, and the head and the drain owner see the cycle,
+/// name both members, and the drain owner withdraws its marker. The control: with the rule as it is, nobody reports anything.
+#[test]
+fn a_wait_for_cycle_is_reported_naming_its_members_and_the_drain_owner_withdraws_its_marker() {
+    for old_rule in [false, true] {
+        let (rig, mut cfg) = rig_with(5);
+        cfg.drain_after = std::time::Duration::from_secs(300);
+        let (a, h, c) = (
+            rig.agent_with(341, cfg.clone()),
+            rig.agent_with(342, cfg.clone()),
+            rig.agent_with(343, cfg),
+        );
+        for ag in [&h, &c] {
+            ag.h.faults.old_drain_rule.store(old_rule, std::sync::atomic::Ordering::SeqCst);
+        }
+        rig.load.set(15.0);
+        let mut ha = Acquirer::new(&a.h, req("A")).unwrap();
+        assert_eq!(ha.poll(), Poll::Held);
+        let mut hh = Acquirer::new(&h.h, req("H")).unwrap();
+        rig.clock.advance(std::time::Duration::from_millis(5));
+        let mut hc = Acquirer::new(&c.h, req_cmd("C", "bash tools/linux-container.sh x")).unwrap();
+        assert_eq!(hh.poll(), Poll::Waiting);
+        assert_eq!(hc.poll(), Poll::Waiting);
+        rig.clock.advance(std::time::Duration::from_secs(301));
+        assert_eq!(hc.poll(), Poll::Waiting);
+        if old_rule {
+            // The drain owner sees the cycle in the very poll that made its marker, says so naming both members, and withdraws it.
+            assert!(c.said().contains("wait-for cycle"), "{}", c.said());
+            assert!(c.said().contains("H -> C -> H") || c.said().contains("C -> H -> C"), "{}", c.said());
+            assert_eq!(
+                rig.count("pitcrew-heavy.drain."),
+                0,
+                "the drain owner withdrew its marker: {}",
+                c.said()
+            );
+            assert!(
+                !h.h.status().contains("WAIT-FOR CYCLE"),
+                "the cycle is gone once the marker is withdrawn"
+            );
+        } else {
+            assert_eq!(rig.count("pitcrew-heavy.drain."), 1, "{}", c.said());
+            assert!(!h.h.status().contains("WAIT-FOR CYCLE"));
+            assert_eq!(hh.poll(), Poll::Waiting);
+            assert_eq!(hc.poll(), Poll::Waiting);
+            let said = format!("{}\n{}", h.said(), c.said());
+            assert!(!said.contains("wait-for cycle"), "no cycle under the rules as they are: {said}");
+        }
+    }
+}
+
+/// Review (b): the queue's wait-for graph knows a container run from its ticket, before it asks for a drain: the container ticket has
+/// a fifth line, every other ticket keeps the shell plock's four.
+#[test]
+fn a_container_run_is_known_to_the_wait_for_graph_from_its_ticket() {
+    let (rig, cfg) = rig_with(5);
+    let (a, c) = (rig.agent_with(351, cfg.clone()), rig.agent_with(352, cfg));
+    let _ha = Acquirer::new(&a.h, req("A")).unwrap();
+    let _hc = Acquirer::new(&c.h, req_cmd("C", "bash tools/linux-container.sh x")).unwrap();
+    let w = a.h.waiters();
+    let by = |n: &str| w.iter().find(|x| x.name == n).unwrap_or_else(|| panic!("no waiter {n}: {w:?}"));
+    assert!(by("C").container && !by("C").drain_owner, "a container run without a drain marker");
+    assert!(!by("A").container);
+    let lines = |prefix: &str, who: &str| -> usize {
+        std::fs::read_dir(rig.root())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with(prefix))
+            .map(|e| std::fs::read_to_string(e.path()).unwrap())
+            .find(|t| t.lines().nth(2) == Some(who))
+            .map_or(0, |t| t.lines().count())
+    };
+    assert_eq!(lines("pitcrew-heavy.ticket.", "A"), 4, "a normal ticket keeps its four lines");
+    assert_eq!(lines("pitcrew-heavy.ticket.", "C"), 5, "a container ticket says so");
+}

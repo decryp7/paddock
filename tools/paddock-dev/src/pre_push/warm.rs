@@ -4,7 +4,7 @@
 //! the workspace itself is reported (exit 5) but the dependencies are warm either way.
 
 use super::budget::with_heavy_flags;
-use super::exec::{Done, Row};
+use super::exec::{Done, Ending, Row};
 use super::exec::{docker_answers, heavy_command_for, on_path};
 use super::gates::{self, Gate, LinuxTarget};
 use super::linux_inputs::{ImageProbe, PROBE_NEXT, WsCrates, ci_version, image_probe, left_out};
@@ -93,6 +93,7 @@ fn step(root: &Path, id: &str, argv: &[String], what: &str) -> (String, Row, boo
                 tail: String::new(),
                 log: None,
                 timing: None,
+                ending: Ending::Exited,
             },
             if s.success() { "done" } else { "failed" },
         ),
@@ -103,6 +104,7 @@ fn step(root: &Path, id: &str, argv: &[String], what: &str) -> (String, Row, boo
                 tail: String::new(),
                 log: None,
                 timing: None,
+                ending: Ending::Exited,
             },
             "could not start",
         ),
