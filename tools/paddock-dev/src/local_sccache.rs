@@ -385,9 +385,12 @@ pub fn choose(env: &HashMap<String, String>, probe: &dyn Fn(&S3) -> Result<(), S
         }
         Err(e) => return local(e, true),
     }
+    // The environment first, then the credentials file, then the defaults.
+    let from_file = file_settings(env);
+    let setting = |k: &str| get(k).or_else(|| from_file.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str()));
     let s3 = S3 {
-        bucket: get("PADDOCK_SCCACHE_S3_BUCKET").unwrap_or(DEFAULT_S3_BUCKET).to_string(),
-        endpoint: get("PADDOCK_SCCACHE_S3_ENDPOINT")
+        bucket: setting("PADDOCK_SCCACHE_S3_BUCKET").unwrap_or(DEFAULT_S3_BUCKET).to_string(),
+        endpoint: setting("PADDOCK_SCCACHE_S3_ENDPOINT")
             .unwrap_or(DEFAULT_S3_ENDPOINT)
             .trim_start_matches("http://")
             .trim_end_matches('/')
@@ -466,6 +469,29 @@ pub fn parse_env_file(text: &str) -> Vec<(String, String)> {
             (matches!(k, "AWS_ACCESS_KEY_ID" | "AWS_SECRET_ACCESS_KEY") && !v.is_empty()).then(|| (k.to_string(), v.to_string()))
         })
         .collect()
+}
+
+/// The store's own settings in the credentials file: the optional lines `PADDOCK_SCCACHE_S3_ENDPOINT` and `PADDOCK_SCCACHE_S3_BUCKET`
+/// (not secret; any other line is left to [`parse_env_file`] or ignored). They rank after the environment and before the defaults.
+pub fn parse_env_settings(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|l| {
+            let l = l.trim().strip_prefix("export ").unwrap_or(l.trim());
+            let (k, v) = l.split_once('=')?;
+            let (k, v) = (k.trim(), v.trim().trim_matches(['"', '\'']));
+            (matches!(k, "PADDOCK_SCCACHE_S3_ENDPOINT" | "PADDOCK_SCCACHE_S3_BUCKET") && !v.is_empty())
+                .then(|| (k.to_string(), v.to_string()))
+        })
+        .collect()
+}
+
+/// [`parse_env_settings`] of the credentials file; none when there is no file or it cannot be read (the credentials check says why).
+fn file_settings(env: &HashMap<String, String>) -> Vec<(String, String)> {
+    env_file(env)
+        .ok()
+        .and_then(|f| std::fs::read_to_string(f).ok())
+        .map(|t| parse_env_settings(&t))
+        .unwrap_or_default()
 }
 
 /// Reads the credentials: the caller's `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (for example exported from the macOS
@@ -1541,7 +1567,7 @@ mod tests {
         let e = env(&[
             ("PADDOCK_SCCACHE_BACKEND", "s3"),
             ("PADDOCK_SCCACHE_S3_BUCKET", "sccache-paddock"),
-            ("PADDOCK_SCCACHE_S3_ENDPOINT", "172.16.1.220:15000"),
+            ("PADDOCK_SCCACHE_S3_ENDPOINT", "192.0.2.10:15000"),
         ]);
         let vars = backend(&e).unwrap().vars();
         assert!(vars.contains(&("SCCACHE_BUCKET".into(), "sccache-paddock".into())));
@@ -2011,6 +2037,37 @@ mod tests {
             panic!("not ready")
         };
         assert!(dir(&plain).ends_with("cache"), "{plain:?}");
+    }
+
+    /// The store's endpoint and bucket may come from the credentials file (optional `PADDOCK_SCCACHE_S3_ENDPOINT` and
+    /// `PADDOCK_SCCACHE_S3_BUCKET` lines), after the environment and before the defaults.
+    #[test]
+    fn the_credentials_file_may_name_the_store_and_the_environment_wins() {
+        let home = tempfile::tempdir().unwrap();
+        let mut e = s3_env(home.path(), 1);
+        e.remove("PADDOCK_SCCACHE_S3_ENDPOINT");
+        let file = e["PADDOCK_SCCACHE_ENV_FILE"].clone();
+        let keys = std::fs::read_to_string(&file).unwrap();
+        std::fs::write(
+            &file,
+            format!("{keys}PADDOCK_SCCACHE_S3_ENDPOINT=http://198.51.100.7:9000\nPADDOCK_SCCACHE_S3_BUCKET=from-file\nOTHER=ignored\n"),
+        )
+        .unwrap();
+        let store = |e: &HashMap<String, String>| match choose(e, &|_| Ok(())).unwrap().0 {
+            Backend::Tiered { s3, .. } => (s3.endpoint, s3.bucket),
+            other => panic!("expected the tiered backend, got {other:?}"),
+        };
+        assert_eq!(
+            store(&e),
+            ("198.51.100.7:9000".to_string(), "from-file".to_string()),
+            "the file names the store"
+        );
+        e.insert("PADDOCK_SCCACHE_S3_BUCKET".into(), "from-env".into());
+        assert_eq!(store(&e).1, "from-env", "the environment outranks the file");
+        // Neither: the defaults.
+        std::fs::write(&file, keys).unwrap();
+        e.remove("PADDOCK_SCCACHE_S3_BUCKET");
+        assert_eq!(store(&e), (DEFAULT_S3_ENDPOINT.to_string(), DEFAULT_S3_BUCKET.to_string()));
     }
 
     /// The keys reach the server's start call and nothing else.
