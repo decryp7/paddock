@@ -2,7 +2,8 @@
 //! `./dev gen check` use ([`crate::pre_push::exec::heavy_command_for`]: `PADDOCK_HEAVY` or `heavy` on PATH, else the
 //! `heavy` built from tools/heavy). When none can be found it is an error with the next step: never an unthrottled run.
 
-use crate::pre_push::exec::{BUDGET, heavy_command_for, on_path};
+use crate::pre_push::exec::{heavy_command_for, on_path};
+use crate::pre_push::heavy_tool::BUILD_LIMIT;
 use crate::tool_cache::Held;
 use clap::Args;
 use paddock_cli::{CliError, Report};
@@ -27,7 +28,7 @@ pub fn plan(
     root: &Path,
     built: &OnceLock<Result<Held, String>>,
 ) -> Result<Vec<String>, String> {
-    let prefix = heavy_command_for(root, env, has, built, BUDGET).map_err(|why| {
+    let prefix = heavy_command_for(root, env, has, built, BUILD_LIMIT).map_err(|why| {
         format!("dev heavy: no machine-wide heavy slot, so `{}` was not started: {why}. Next: put `heavy` on PATH, set PADDOCK_HEAVY, or fix the build of tools/heavy", command[0])
     })?;
     Ok(prefix.into_iter().chain(command.iter().cloned()).collect())

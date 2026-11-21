@@ -5,7 +5,7 @@
 
 use super::budget::with_heavy_flags;
 use super::exec::{Done, Ending, Row};
-use super::exec::{docker_answers, heavy_command_for, on_path};
+use super::exec::{QUEUE_STALL, docker_answers, heavy_command_for, on_path};
 use super::gates::{self, Gate, LinuxTarget};
 use super::linux_inputs::{ImageProbe, PROBE_NEXT, WsCrates, ci_version, image_probe, left_out};
 use super::outcome::subject_of;
@@ -20,9 +20,6 @@ use std::time::{Duration, Instant};
 /// The hang backstop of one workspace's run (ER-12, ER-32): about twice the largest cold run measured on the native image
 /// (apps/dyno, 173.7 s; docs/benchmarks.md, "Pre-push Linux Clippy, native"), so a hung container ends, a loaded machine still fits.
 const RUN_MAX: Duration = Duration::from_secs(360);
-/// The wait for the machine-wide slot: one full `--warm-linux` of another agent holds it for the sum of the seven cold runs
-/// measured (767.6 s), rounded up to 15 minutes.
-const QUEUE_MAX: Duration = Duration::from_secs(15 * 60);
 /// The hang backstop of the local CI image build (`linux-container.sh --ci-image`: the garage stage and ci-image/Dockerfile): about
 /// twice the cold build measured with `--no-cache`, 379 s (docs/benchmarks.md, "Pre-push Linux Clippy, native"): 760 s.
 const IMAGE_MAX: Duration = Duration::from_secs(760);
@@ -168,7 +165,7 @@ pub fn command(root: &Option<PathBuf>, named: &[String]) -> Result<Report, CliEr
             ));
         }
     };
-    let prefix = with_heavy_flags(&base_prefix, false, QUEUE_MAX, RUN_MAX);
+    let prefix = with_heavy_flags(&base_prefix, false, QUEUE_STALL, RUN_MAX);
     let mut rows: Vec<(String, Row)> = Vec::new();
     // The local CI image is its own step with its own bound: it is minutes and gigabytes, and neither a workspace's run limit nor
     // the push budget may cut it off. Built once per change to ci-image/; the probe decides, and a broken probe is not "missing".
@@ -190,7 +187,7 @@ pub fn command(root: &Option<PathBuf>, named: &[String]) -> Result<Report, CliEr
             return Ok(not_measured(&format!("image probe broken ({how})"), PROBE_NEXT));
         }
         ImageProbe::Missing => {
-            let mut argv = with_heavy_flags(&base_prefix, false, QUEUE_MAX, IMAGE_MAX);
+            let mut argv = with_heavy_flags(&base_prefix, false, QUEUE_STALL, IMAGE_MAX);
             argv.extend(["bash", "tools/linux-container.sh", "--id", "paddock", "--ci-image", "--", "true"].map(String::from));
             let what = format!("local CI image, once per change to ci-image/; limit {} s", IMAGE_MAX.as_secs());
             let (id, row, ok) = step(&root, "local CI image", &argv, &what);
