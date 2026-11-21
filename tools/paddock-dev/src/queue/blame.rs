@@ -64,6 +64,7 @@ mod tests {
             projects: set(projects),
             files: files.iter().map(|s| s.to_string()).collect(),
             blame: Blame::New,
+            retried: false,
         }
     }
 
