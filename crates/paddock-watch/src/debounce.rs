@@ -3,9 +3,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// How long a watch may stay silent before it looks at the folder anyway (one hour, Syncthing's default full-scan
-/// interval beside its watcher). The OS can drop change events without telling us: `notify` 8.2 discards an FSEvents
-/// dropped-events notice whose path is outside the watched folder, and passes no notice for a Windows
-/// `ReadDirectoryChangesW` overflow or `ERROR_NOTIFY_ENUM_DIR`. This bounds how stale a missed change can stay.
+/// interval beside its watcher). A backstop: notify 9 reports the drops it can see as a rescan (an inotify queue overflow,
+/// an FSEvents dropped-events notice, a Windows `ReadDirectoryChangesW` overflow), but notify 8 lost the last two
+/// silently, and a watch that ended after an error is not started again here. This bounds how stale a missed change can
+/// stay.
 pub const DEFAULT_RESYNC: Duration = Duration::from_secs(60 * 60);
 
 /// What [`Debouncer::poll`] found.

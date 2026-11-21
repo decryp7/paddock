@@ -12,9 +12,9 @@ use std::sync::mpsc::Sender;
 pub struct NotifySource;
 
 impl NotifySource {
-    /// What one `notify` result means for the watch. An event flagged `Rescan` (notify 8.2 sets it for a Linux inotify
-    /// `IN_Q_OVERFLOW` and for an FSEvents `MustScanSubDirs` notice inside the watched folder) and any error (the watch
-    /// may have stopped seeing changes) both ask for a [`Change::Rescan`] with their cause; every other event is a
+    /// What one `notify` result means for the watch. An event flagged `Rescan` (notify 9 sets it for a Linux inotify
+    /// `IN_Q_OVERFLOW`, an FSEvents `MustScanSubDirs` notice and a Windows `ReadDirectoryChangesW` overflow or
+    /// `ERROR_NOTIFY_ENUM_DIR`) and any error (the watch may have stopped seeing changes, or ended) both ask for a [`Change::Rescan`] with their cause; every other event is a
     /// [`Change::Changed`].
     pub fn change_from(res: &notify::Result<notify::Event>) -> Change {
         match res {
