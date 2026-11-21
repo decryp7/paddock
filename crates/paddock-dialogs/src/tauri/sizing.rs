@@ -345,10 +345,10 @@ pub(super) fn resized<R: Runtime>(window: &Window<R>, size: PhysicalSize<u32>) {
         Phase::Resized,
         |s| {
             format!(
-                "{}x{} physical, pending {}",
+                "{}x{} physical, {}",
                 size.width,
                 size.height,
-                s.pending()
+                s.queue_note()
             )
         },
         |s, _| s.on_resized(size.width, size.height),

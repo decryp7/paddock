@@ -177,6 +177,28 @@ impl SizeState {
         self.pending.len()
     }
 
+    /// The requests still expected to echo, physical px, oldest first, for the log: the queue and the requests a later
+    /// equal-sized echo took off it (ADR 0043 §3: an unexplained `Resized` is logged with the pending queue). At most
+    /// [`LATE_ECHOES`] of each are listed; a longer queue says how many more.
+    pub fn queue_note(&self) -> String {
+        fn list<'a>(rs: impl ExactSizeIterator<Item = &'a Request>) -> String {
+            let n = rs.len();
+            let mut out: Vec<String> = rs
+                .take(LATE_ECHOES)
+                .map(|r| format!("{}x{}", r.width, r.height))
+                .collect();
+            if n > LATE_ECHOES {
+                out.push(format!("+{} more", n - LATE_ECHOES));
+            }
+            format!("[{}]", out.join(", "))
+        }
+        format!(
+            "pending {} late {}",
+            list(self.pending.iter()),
+            list(self.late.iter())
+        )
+    }
+
     /// The OS minimum now, logical px.
     pub fn min(&self) -> Size {
         self.min
@@ -307,22 +329,22 @@ impl SizeState {
         let grace = std::mem::take(&mut self.scale_grace);
         match matched {
             Some(i) => {
-                // An echo equal to several queued requests takes the newest off the queue (the OS may have merged the ones in
-                // between), but it may be the echo of the oldest of them: the equal ones after the oldest, and what lies between,
-                // can still echo in order, so they are remembered for that.
+                // `late` then `pending` is one queue in request order: every late request was asked before every pending one.
+                // An echo equal to several requests in it takes the newest off the queue (the OS may have merged the ones in
+                // between), but it may be the echo of the oldest of them: the requests after the oldest equal one, up to and
+                // including the newest, can still echo in order, so they are remembered for that; the ones before it have
+                // echoed or were merged.
                 let first = self
-                    .pending
+                    .late
                     .iter()
+                    .chain(self.pending.iter())
                     .position(|r| r.matches(width, height))
-                    .unwrap_or(i);
-                for (n, still) in self.pending.drain(..=i).enumerate() {
-                    if n > first {
-                        if self.late.len() == LATE_ECHOES {
-                            self.late.pop_front();
-                        }
-                        self.late.push_back(still);
-                    }
-                }
+                    .unwrap_or(self.late.len() + i);
+                let taken: Vec<Request> = self.pending.drain(..=i).collect();
+                let queue: Vec<Request> = self.late.drain(..).chain(taken).collect();
+                let keep = &queue[first + 1..];
+                self.late
+                    .extend(&keep[keep.len().saturating_sub(LATE_ECHOES)..]);
             }
             None if self.current.matches(width, height) => {}
             None if self.late.iter().any(|r| r.matches(width, height)) => {
@@ -731,6 +753,87 @@ mod tests {
             assert!(!plan.unexplained && plan.mode_change.is_none(), "{plan:?}");
         }
         assert_eq!(s.mode(), before);
+    }
+
+    /// CI run 8466 (2026-11-21, ci.yml coverage job, proptest's minimal input): requests A, B, C (C equal to A) queue up as
+    /// the work area shrinks and grows; the echo of A matches the newest C, so B and C wait in `late`; D is asked; B echoes;
+    /// E (equal to C) is asked; the echo of C then matched E in `pending` and took D off with it while C stayed in `late`,
+    /// so D's own echo arrived with nothing pending and was taken for the user on X11 and Wayland. Every one of these
+    /// `Resized` is Rust's own request (ADR 0043 check 2: a `Resized` that matches a request never yields `Manual`).
+    #[test]
+    fn an_echo_equal_to_a_late_request_and_a_pending_one_keeps_the_requests_between_them() {
+        let e = Env {
+            scale: 1.0,
+            work: size(800.0, 3606.610418189248),
+            frame: size(0.0, 0.0),
+        };
+        let p = Kind::Decision.policy();
+        let mut s = SizeState::new(
+            p.size_mode,
+            size(320.0, 200.0),
+            p.default_height.unwrap_or(0.0),
+            true,
+            e,
+            Request {
+                width: physical(400.0, 1.0),
+                height: physical(520.0, 1.0),
+            },
+        );
+        let mut os = VecDeque::new();
+        let m = Measured {
+            content: size(400.0, 1393.4943707900418),
+            min_content: size(320.0, 50.0),
+            overflow: false,
+        };
+        os.extend(s.on_measure(1, 0, m).request);
+        let moved = |h: f64| Env {
+            work: size(800.0, h),
+            ..e
+        };
+        os.extend(s.on_moved(moved(600.0)).request);
+        os.extend(s.on_moved(moved(4299.692332787084)).request);
+        let echo = |s: &mut SizeState, os: &mut VecDeque<Request>| {
+            let r: Request = os.pop_front().expect("an echo is due");
+            let plan = s.on_resized(r.width, r.height);
+            assert!(
+                !plan.unexplained && plan.mode_change.is_none(),
+                "{r:?} {plan:?}"
+            );
+        };
+        echo(&mut s, &mut os);
+        os.extend(s.on_moved(moved(1534.7558700051957)).request);
+        echo(&mut s, &mut os);
+        os.extend(s.on_moved(moved(2930.269793495181)).request);
+        while !os.is_empty() {
+            echo(&mut s, &mut os);
+        }
+        assert_eq!(s.mode(), p.size_mode);
+        assert_eq!(
+            s.queue_note(),
+            "pending [] late []",
+            "every echo has arrived"
+        );
+    }
+
+    #[test]
+    fn the_queue_note_lists_pending_and_late_requests_oldest_first_and_bounded() {
+        let mut s = state(Kind::Form, 1.0, true);
+        assert_eq!(s.queue_note(), "pending [] late []");
+        let a = s.on_measure(1, 0, measured(300.0)).request.unwrap();
+        s.on_measure(1, 1, measured(400.0));
+        s.on_measure(1, 2, measured(300.0));
+        // The echo of the first request matches the newest equal one: the two after the first wait in `late`.
+        s.on_resized(a.width, a.height);
+        assert_eq!(s.queue_note(), "pending [] late [400x400, 400x300]");
+        for seq in 3..(3 + LATE_ECHOES as u64 + 2) {
+            s.on_measure(1, seq, measured(200.0 + seq as f64));
+        }
+        let note = s.queue_note();
+        assert!(
+            note.starts_with("pending [400x203, ")
+                && note.contains("+2 more] late [400x400, 400x300]"),
+            "{note}"
+        );
     }
 
     #[derive(Debug, Clone)]
