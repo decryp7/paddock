@@ -3431,3 +3431,26 @@ about 45 ms a start on that runner plus a fork per command substitution. **Fix:*
   merge, which conflicts and is loud, never a silent drop). Tested with a real three-way merge (`conformance/test/lessons-merge.test.mjs`,
   with the plain union as the control that reproduces the drop); C145 stays as the net.
 - **Class: a merge driver that works on lines damages a file whose meaning is in its blank lines** (9ec43be3c, b9bf5fc4b, 75ce0d2c8, 5c241d93f).
+
+## Fix items from train 18's rounds (ci.yml 8495, 8509, 8546, 8554; debrief.yml 8511, 8547; dyno-release.yml 8549), not its features (2026-11-22)
+- **paddock-dev `golden::workflow_action_and_script_edits_narrow_the_plan` on Windows** (ci.yml run 8509, job 43734; FLAKY: try 1
+  killed at 240 s, try 2 passed in 110 s; again in run 8546, job 44099: try 1 killed at 240 s, try 2 passed in 231 s, on
+  fa3397043; it passed in 179 s in the green run 8554, still close to its 240 s limit). The train does not touch the planner. The time is git starts on the Windows runner (about
+  45 ms each, ER-20). Next: count the test's git starts and batch them (the shared batched reader), with a spawn budget that a test
+  guards; a failing reproduction first.
+- **dyno-agent `disk::centre::tests::the_cached_volumes_never_list_on_the_request` on macOS** (ci.yml run 8495, job 43528; FLAKY: "a
+  cached read within the freshness window never asks the system again" failed once, passed on retry). A time-window assertion under
+  load, likely reading the wall clock. Next: inject the clock (ER-12), a failing reproduction first.
+- **debrief webkit `e2e/ai-chat.e2e.ts:12` streams an answer with a tool chip, and a cited event jumps to the grid** (debrief.yml run
+  8511, job 43736, shard 3/4; FLAKY: 16.5 s, then passed in 22.2 s). Train 18 does not touch Debrief's app. Next: a failing
+  reproduction first; check whether the progress-based stream wait (95c7e4722) also covers this test's citation step.
+- **debrief webkit `e2e/home-narrow.e2e.ts:70` nothing overflows at 720 px** (debrief.yml run 8511, job 43736; FLAKY). A layout check:
+  check it reads no live value (the class of the Dyno 900x600 item). Next: a failing reproduction first.
+- **Debrief WebKit e2e FLAKYs on train 18** (debrief.yml run 8547 on fa3397043; each failed try 1 and passed its retry, WebKit only):
+  `e2e/a11y.e2e.ts:6` "main screen has no serious accessibility violations (dark)" (shard 3/4, job 44075; the fourth sighting, after 8373, 8426);
+  `e2e/resilience-context-live.e2e.ts:88` "the status bar Live toggle keeps the selection, passes axe while on ..." and
+  `e2e/ux-shortcuts-editor.e2e.ts:21` "rebinds a command, warns about a conflict ..." (shard 4/4, job 44076). Train 18 changes no
+  file under apps/debrief or ui, so none blocks (ER-12). Next: a failing reproduction per spec under the pinned clock, then the fix.
+- **Dyno WebKit e2e FLAKY** `e2e/flows.spec.ts:743` "startup filter › hides the system and signed entries, shows the counts and
+  remembers the choice" (dyno-release.yml run 8549 on fa3397043, job 44142, app dyno ubuntu e2e-webkit; try 1 failed, retry passed).
+  Train 18 changes no file under apps/dyno or ui. Next: a failing reproduction first.
