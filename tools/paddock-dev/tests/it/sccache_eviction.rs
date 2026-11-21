@@ -25,6 +25,24 @@ fn free_port() -> u16 {
     base.wrapping_add(n) % 20_000 + 30_000
 }
 
+/// Whether sccache's `--start-server` error says the port, not the setup, is the problem, so another port is worth a try: "Address in use"
+/// (EADDRINUSE; Windows words it "Only one usage of each socket address", os error 10048) or Windows' WSAEACCES, "forbidden by its
+/// access permissions" (os error 10013): Windows reserves port ranges (Hyper-V, WSL, `netsh int ipv4 show excludedportrange`) and a
+/// bind inside one fails like that (run 8555, port 49316). A plain "Permission denied" is not listed: it is as likely the cache folder.
+fn port_is_unusable(stderr: &str) -> bool {
+    [
+        "Address in use",
+        "Address already in use",
+        "os error 98",
+        "os error 48",
+        "os error 10048",
+        "os error 10013",
+        "forbidden by its access permissions",
+    ]
+    .iter()
+    .any(|needle| stderr.contains(needle))
+}
+
 /// sccache with its own server on a private port, a 1 MiB cap and `cache_dir` as its folder; the server stops with the value.
 struct Cache {
     cache_dir: PathBuf,
@@ -78,7 +96,7 @@ impl Cache {
             }
             // Only a port another server holds is worth another try: sccache's own "Address in use", or a server that started
             // here but answers with another folder. Any other failure (a panic, a refused port, a storage error) fails now.
-            let taken = String::from_utf8_lossy(&started.stderr).contains("Address in use") || started.status.success();
+            let taken = port_is_unusable(&String::from_utf8_lossy(&started.stderr)) || started.status.success();
             tries.push(format!(
                 "port {port}: --start-server {s1}, stdout {o1:?}, stderr {e1:?}; --show-stats {s2}, location {loc:?}, stderr {e2:?}; \
                  listener: {who}; server log ({log}): {tail}",
@@ -300,4 +318,24 @@ fn control_the_same_file_beside_the_sccache_folder_survives() {
         std::fs::read_dir(mount.join("sccache-s1")).unwrap().next().is_some(),
         "the cache itself holds the entry"
     );
+}
+
+#[test]
+fn a_taken_or_refused_port_is_worth_another_try_and_other_failures_are_not() {
+    for taken in [
+        "error: Address in use (os error 98)",
+        "Failed to start server: Address already in use (os error 48)",
+        "An attempt was made to access a socket in a way forbidden by its access permissions. (os error 10013)",
+        "bind failed (os error 10013)",
+        "Only one usage of each socket address (os error 10048)",
+    ] {
+        assert!(port_is_unusable(taken), "{taken}");
+    }
+    for other in [
+        "thread 'main' panicked at src/config.rs:103",
+        "Failed to create the cache folder (os error 5)",
+        "",
+    ] {
+        assert!(!port_is_unusable(other), "{other}");
+    }
 }
