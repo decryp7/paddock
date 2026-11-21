@@ -21,10 +21,13 @@ is a real full run that `tag.yml`'s reader can use (a train that was red only wi
 read (the list, a job, a log, the token) runs the commit (fail open to running, never to skipping).
 
 **"Complete" is one scope: a push to main's (ER-15, 2026-11-21).** `plan verdict: complete=true` of `ci.yml` means the run had the scope
-of a push to main, WebKit included: a push, a dispatch with the `webkit` input, or an app's own gates. A train's full dispatch
+of a push to main, WebKit included: a push, or a dispatch with the `webkit` input and no `app`. A dispatch with `app` is that app only
+and never complete. A train's full dispatch
 without WebKit logs `complete=false`, so `./dev ci verdict` does not count it and `ci reuse` does not skip the main push run for it;
 otherwise a tag could read a green verdict that never ran WebKit (the same class as run 8335 and the schedule-skipped and
-rerun-only runs counted green on 2026-11-12). Dispatch trains with `webkit=true` to have them reused. `./dev ci verdict`'s hint of
+rerun-only runs counted green on 2026-11-12). `./dev ci dispatch ci.yml --ref train/...` therefore adds `webkit=true` itself for a full dispatch (no `base`, no `since_run`); an explicit
+`--input webkit=false` wins, and a member run or a rerun is sent as asked. That is what lets a landed train's push to main reuse the
+train's run (ER-49). `./dev ci verdict`'s hint of
 the last fully tested commit asks the same reader about each of main's newest commits, so a push that reused a train run
 (partial itself) still names the commit the train tested.
 

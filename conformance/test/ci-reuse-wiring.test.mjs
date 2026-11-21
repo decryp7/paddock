@@ -65,7 +65,7 @@ test('a reused debrief.yml run plans nothing and is never complete', () => {
 // P1 (2026-11-21): "complete" has one meaning for ci.yml, the scope of a push to main, WebKit included (plan_ci::wants_webkit). A full
 // dispatch without the webkit input logged complete=true, so reuse could skip the main push run for it and the tag gate would read a
 // green verdict that never ran WebKit. The marker now needs the push, the webkit input, or an app's own gates.
-test('a full ci.yml dispatch without WebKit is not complete; with WebKit, a push or an app gate it is', () => {
+test('a full ci.yml dispatch without WebKit is not complete; with WebKit or as a push to main it is; an app-only dispatch never is', () => {
   const ci = text('ci.yml');
   const say = (env) =>
     spawnSync('bash', ['-c', verdictSnippet(ci)], {
@@ -74,10 +74,12 @@ test('a full ci.yml dispatch without WebKit is not complete; with WebKit, a push
     }).stdout.trim();
   // The train dispatch with no base and no webkit input: a smaller scope than a push to main.
   assert.equal(say({}), 'plan verdict: complete=false');
-  // Positive controls: the same run with the webkit input, a push to main, an app's own gates.
+  // Positive controls: the same run with the webkit input, and a push to main.
   assert.equal(say({ PLAN_WEBKIT: '1' }), 'plan verdict: complete=true');
   assert.equal(say({ EVENT: 'push' }), 'plan verdict: complete=true');
-  assert.equal(say({ PLAN_APP: 'dyno' }), 'plan verdict: complete=true');
+  // A dispatch with app=X is that app only: not complete, with or without WebKit, so it is never reused for a push to main.
+  assert.equal(say({ PLAN_APP: 'dyno' }), 'plan verdict: complete=false');
+  assert.equal(say({ PLAN_APP: 'dyno', PLAN_WEBKIT: '1' }), 'plan verdict: complete=false');
   // A rerun or a reused run is never complete, with WebKit or not.
   assert.equal(say({ PLAN_WEBKIT: '1', PLAN_SINCE_RUN: '8001' }), 'plan verdict: complete=false');
   assert.equal(say({ EVENT: 'push', PLAN_REUSE: 'true' }), 'plan verdict: complete=false');

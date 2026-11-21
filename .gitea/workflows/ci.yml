@@ -158,8 +158,9 @@ jobs:
           complete=false
           # One meaning of "complete" (ER-15): the scope of a push to main, WebKit included (plan_ci::wants_webkit). A full dispatch
           # without the webkit input, or a rerun, is a smaller scope, so the tag gate never reads it as the tested commit, and a
-          # push to main is never skipped for it (ci_runs::reuse). An app's own gates (PLAN_APP) are scoped to that app.
-          if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ] && [ "$PLAN_REUSE" != true ] && { [ "$EVENT" = push ] || [ -n "$PLAN_WEBKIT" ] || [ -n "$PLAN_APP" ]; }; then complete=true; fi
+          # push to main is never skipped for it (ci_runs::reuse). A dispatch with `app` is that app only, with no exemption: it is a
+          # smaller scope than a push to main, whatever the webkit input says of the rest.
+          if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ] && [ "$PLAN_REUSE" != true ] && [ -z "$PLAN_APP" ] && { [ "$EVENT" = push ] || [ -n "$PLAN_WEBKIT" ]; }; then complete=true; fi
           echo "plan verdict: complete=$complete"
 
   # C102 (ADR 0072): every listen site of the Rust sources is in docs/ipc-endpoints.toml with an ending test or a reason, and the
