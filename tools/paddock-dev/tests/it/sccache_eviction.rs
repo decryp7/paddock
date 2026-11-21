@@ -45,16 +45,21 @@ impl Cache {
 
     /// Starts the server on a port of its own and checks that the server answering there is this one: its "Cache location" must be
     /// `cache_dir`. A port some other sccache already serves answers with another folder, and is skipped without stopping that
-    /// server (it is not ours); after five tries the test fails rather than run on a server it does not own.
+    /// server (it is not ours); after five tries the test fails rather than run on a server it does not own. The failure names, for
+    /// every try, the port, both exit codes, what sccache printed, the server's own log and who listens on the port (ER-27).
     fn start(cache_dir: &Path, work: &Path) -> Cache {
+        let mut tries = Vec::new();
         for _ in 0..5 {
             let c = Cache {
                 cache_dir: cache_dir.to_path_buf(),
                 port: free_port(),
                 work: work.to_path_buf(),
             };
+            let log = c.work.join(format!("sccache-server-{}.log", c.port));
             let started = c
                 .command("sccache")
+                .env("SCCACHE_ERROR_LOG", &log)
+                .env("SCCACHE_LOG", "debug")
                 .arg("--start-server")
                 .output()
                 .expect("sccache is on PATH (the CI image has it): not measured otherwise");
@@ -65,12 +70,33 @@ impl Cache {
             if started.status.success() && ours {
                 return c;
             }
+            tries.push(format!(
+                "port {port}: --start-server {s1}, stdout {o1:?}, stderr {e1:?}; --show-stats {s2}, location {loc:?}, stderr {e2:?}; \
+                 listener: {who}; server log ({log}): {tail}",
+                port = c.port,
+                s1 = started.status,
+                o1 = tail(&started.stdout),
+                e1 = tail(&started.stderr),
+                s2 = stats.status,
+                loc = String::from_utf8_lossy(&stats.stdout)
+                    .lines()
+                    .find(|l| l.starts_with("Cache location"))
+                    .unwrap_or("<no Cache location line>")
+                    .to_string(),
+                e2 = tail(&stats.stderr),
+                who = listener(c.port),
+                log = log.display(),
+                tail = std::fs::read(&log).map_or_else(|e| format!("<none: {e}>"), |b| tail(&b)),
+            ));
             // Not ours (a taken port, or a server of another folder): forget it without stopping anything.
             std::mem::forget(c);
         }
         panic!(
-            "no port in five tries served this test's own sccache server (a Cache location other than {})",
-            cache_dir.display()
+            "no port in five tries served this test's own sccache server (a Cache location other than {}); env passed: \
+             SCCACHE_DIR={}, SCCACHE_CACHE_SIZE=1M, SCCACHE_SERVER_PORT=<port>, SCCACHE_IGNORE_SERVER_IO_ERROR=1; tries:\n{}",
+            cache_dir.display(),
+            cache_dir.display(),
+            tries.join("\n")
         );
     }
 
@@ -102,6 +128,37 @@ impl Cache {
                 .any(|l| l.starts_with("Cache misses ") && !l.trim_end().ends_with(" 0")),
             "the compile was not cached, so the test saw no insert: {stats}"
         );
+    }
+}
+
+/// The last 2000 bytes of a program's output, as text.
+fn tail(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let start = text.len().saturating_sub(2000);
+    let start = (start..=text.len()).find(|i| text.is_char_boundary(*i)).unwrap_or(text.len());
+    text[start..].trim().to_string()
+}
+
+/// Who listens on `port`, with its pid, from the OS's own tool (`netstat -ano` on Windows, `lsof` elsewhere); diagnostics only.
+fn listener(port: u16) -> String {
+    let out = if cfg!(windows) {
+        TestCommand::new("netstat").args(["-ano", "-p", "TCP"]).output()
+    } else {
+        TestCommand::new("lsof")
+            .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN"])
+            .output()
+    };
+    match out {
+        Ok(o) => {
+            let needle = format!(":{port} ");
+            let lines: Vec<String> = String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter(|l| cfg!(not(windows)) || l.contains(&needle))
+                .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+                .collect();
+            if lines.is_empty() { "nobody".into() } else { lines.join(" | ") }
+        }
+        Err(e) => format!("<not measured: {e}>"),
     }
 }
 
