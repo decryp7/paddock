@@ -3296,3 +3296,21 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   `RUSTUP_AUTO_INSTALL=0` for `heavy`, `ci run` lines and the generators; `.claude/hooks/no-local-installs.sh` refuses an agent's
   `cargo llvm-cov`, rustup installs and updates, and `cargo install cargo-llvm-cov`. Each has a test that fails without it.
 - **Class: a tool that waits on something it cannot see.** Earlier: run 8060 (rustup auto-install), `pgrep -f` loops (ER-32).
+
+## Fix items from Train A's full rounds (ci.yml 8389, 8425; debrief.yml 8426; dyno-release.yml 8446), not its features (2026-11-21)
+- **paddock-ipc `endings::ipc_link_server_ends_every_connection_right_or_is_in_the_ratchet` on Windows** (ci.yml run 8425, job 43164,
+  crate (windows-latest); FLAKY: try 1 "ipc-link-server busy: RIG FAILURE (write)", try 2 passed). Second Windows instance after run
+  8174. Next: a failing reproduction first, then the cause.
+- **debrief webkit `e2e/a11y.e2e.ts:6` main screen has no serious accessibility violations (dark)** (debrief.yml run 8426, job 43195,
+  shard 3/4; FLAKY, third sighting after 8373). Next: a failing reproduction first.
+- **dyno webkit `e2e/layout.spec.ts:224` settings pages at 900x600 with the advanced fields** (dyno-release.yml run 8446, job 43252;
+  FLAKY: `span.dy-pw-muted "Memory 24.8 of 48 GB": text needs 135px, has 132px, no accepted ellipsis`). A product bug, not only a test:
+  a live value can overflow the popup-widget preview at 900x600. Next: a failing reproduction that pins the longest value, then an
+  accepted ellipsis or a width that fits it.
+- **paddock-watch `native::a_real_folder_change_reaches_the_action_and_a_recursive_watch_sees_sub_folders` on macOS** (ci.yml run 8389,
+  job 42837, d7-mac-mini; FLAKY: try 1 timed out at 30 s "the watcher did not report the change", try 2 passed in 4.5 s). First run
+  with three concurrent macOS jobs on one runner. Next: a failing reproduction first; check job interference on the shared runner.
+- **The pre-push `conformance-tests` row failed once under load without naming the failing test** (2026-11-21, reported by the
+  coordinator). Two items: the hook output does not say which conformance test failed (ER-27: a failing step names its cause), and
+  an unknown conformance test is flaky under load. Next: make the row print the failing test's name and its last lines, then a
+  failing reproduction under load.
