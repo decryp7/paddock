@@ -1949,7 +1949,16 @@ mod tests {
 
     #[test]
     fn the_health_check_wants_a_2xx_answer_and_not_just_a_connect() {
-        let e = env(&[("PATH", "/usr/bin:/bin")]);
+        // curl on Windows cannot open a socket without SystemRoot (Winsock loads its providers from it): the child gets what the
+        // caller has (ER-47), so the test's caller has it, as production's does. Without it every connect failed at once, "exit 7
+        // after 0 ms", against a listener that was already bound (train 19 trial, run 8560).
+        let mut e = env(&[("PATH", "/usr/bin:/bin")]);
+        e.extend(
+            paddock_proc::KEPT_ENV
+                .iter()
+                .filter(|k| **k != "PATH")
+                .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v))),
+        );
         let probe = |port: u16| {
             s3_alive(
                 &S3 {
