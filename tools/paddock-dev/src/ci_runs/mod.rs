@@ -579,7 +579,7 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     }
     let mut http = CurlHttp;
     let mut clock = dispatch::system_clock();
-    let result = dispatch::run(
+    let result = dispatch::run_with_id(
         &mut http,
         &dispatch::Target {
             server: &a.server,
@@ -593,22 +593,23 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     );
     // A trial that was not dispatched leaves no `trial/<branch>` behind (best effort; `ci trial-prune` catches the rest).
     if let Some((g, trial_ref)) = &trial
-        && !matches!(result, Ok(dispatch::Dispatched::Yes { .. }))
+        && !matches!(result, Ok((dispatch::Dispatched::Yes { .. }, _)))
         && let Err(e) = trial::delete(g, trial_ref)
     {
         eprintln!("::warning::trial: {trial_ref} could not be deleted after the dispatch failed ({e}); run `./dev ci trial-prune`");
     }
     match result {
-        Ok(dispatch::Dispatched::Yes { waited }) => Ok(Report::new(
-            serde_json::json!({"dispatched": true, "waitedMs": waited.as_millis() as u64}),
+        Ok((dispatch::Dispatched::Yes { waited }, run)) => Ok(Report::new(
+            serde_json::json!({"dispatched": true, "waitedMs": waited.as_millis() as u64, "run": run}),
             format!(
-                "Dispatched {} on {} after waiting {}.",
+                "Dispatched {} on {} after waiting {}{}.",
                 req.workflow,
                 req.git_ref,
-                crate::wait::fmt_duration(waited)
+                crate::wait::fmt_duration(waited),
+                run.map_or(String::new(), |id| format!("; run {id}"))
             ),
         )),
-        Ok(dispatch::Dispatched::StillBusy { last }) => Err(CliError::failure(format!("not dispatched: the runner stayed busy ({last})."))
+        Ok((dispatch::Dispatched::StillBusy { last }, _)) => Err(CliError::failure(format!("not dispatched: the runner stayed busy ({last})."))
             .with_hint("Wait for that run with `./dev wait --ci-run <id> --max <duration>`, then dispatch again.")),
         Err(e) => {
             eprintln!("::error::dispatch: {e}");

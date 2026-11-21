@@ -330,6 +330,20 @@ pub fn run(
     clock: &mut dyn Clock,
     log: &mut dyn Write,
 ) -> Result<Dispatched, String> {
+    run_with_id(http, target, req, read, clock, log).map(|(d, _)| d)
+}
+
+/// [`run`], and the id of the run the dispatch created when Gitea's answer names it (newer servers answer the dispatch with the run;
+/// older ones with an empty 204, then `None`). A caller that judges a run it started keeps this handle and judges only that id
+/// (ER-51); with `None` it must find the run another way and prove it is its own (`other_os::pick_run`).
+pub fn run_with_id(
+    http: &mut dyn Http,
+    target: &Target<'_>,
+    req: &Request,
+    read: ReadWorkflow<'_>,
+    clock: &mut dyn Clock,
+    log: &mut dyn Write,
+) -> Result<(Dispatched, Option<u64>), String> {
     let Target { server, repo, token } = *target;
     let wanted = classes_of(&req.workflow, read)?;
     let mut waited = Duration::ZERO;
@@ -359,7 +373,7 @@ pub fn run(
                         req.workflow,
                         fmt_duration(max)
                     );
-                    return Ok(Dispatched::StillBusy { last });
+                    return Ok((Dispatched::StillBusy { last }, None));
                 }
                 Outcome::Broken { error, .. } => return Err(format!("the run list could not be read: {error}")),
                 Outcome::Failed { detail, .. } => return Err(detail),
@@ -391,7 +405,7 @@ pub fn run(
                     fmt_duration(max),
                     probe.next_step()
                 );
-                return Ok(Dispatched::StillBusy { last });
+                return Ok((Dispatched::StillBusy { last }, None));
             }
             Outcome::Broken { error, .. } => return Err(format!("the run list could not be read: {error}")),
             Outcome::Failed { detail, .. } => return Err(detail),
@@ -401,7 +415,13 @@ pub fn run(
 }
 
 /// Sends the dispatch.
-fn send(http: &mut dyn Http, target: &Target<'_>, req: &Request, waited: Duration, log: &mut dyn Write) -> Result<Dispatched, String> {
+fn send(
+    http: &mut dyn Http,
+    target: &Target<'_>,
+    req: &Request,
+    waited: Duration,
+    log: &mut dyn Write,
+) -> Result<(Dispatched, Option<u64>), String> {
     let url = format!(
         "{}/api/v1/repos/{}/actions/workflows/{}/dispatches",
         target.server.trim_end_matches('/'),
@@ -409,7 +429,8 @@ fn send(http: &mut dyn Http, target: &Target<'_>, req: &Request, waited: Duratio
         req.workflow
     );
     let inputs: serde_json::Map<String, Value> = req.inputs.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
-    http.post_json(&url, target.token, &json!({"ref": req.git_ref, "inputs": inputs}))?;
+    let answer = http.post_json(&url, target.token, &json!({"ref": req.git_ref, "inputs": inputs}))?;
+    let run = run_id_of(&answer);
     let _ = writeln!(
         log,
         "dispatch: dispatched {} on {} after waiting {}",
@@ -417,7 +438,25 @@ fn send(http: &mut dyn Http, target: &Target<'_>, req: &Request, waited: Duratio
         req.git_ref,
         fmt_duration(waited)
     );
-    Ok(Dispatched::Yes { waited })
+    match run {
+        Some(id) => {
+            let _ = writeln!(log, "dispatch: the server created run {id}");
+        }
+        None => {
+            let _ = writeln!(log, "dispatch: the server did not name the run it created (an empty answer)");
+        }
+    }
+    Ok((Dispatched::Yes { waited }, run))
+}
+
+/// The run id in the server's answer to a dispatch: `id`, `run_id` or `workflow_run_id` (also under `workflow_run`), a positive
+/// whole number; `None` for the empty answer of older servers.
+pub fn run_id_of(answer: &Value) -> Option<u64> {
+    ["id", "run_id", "workflow_run_id"]
+        .iter()
+        .find_map(|k| answer.get(k).and_then(Value::as_u64))
+        .or_else(|| answer.get("workflow_run").and_then(run_id_of))
+        .filter(|n| *n > 0)
 }
 
 /// The file that declares how many jobs each runner class runs at once (`{"linux": 3}`), relative to the repository root.
@@ -1231,5 +1270,18 @@ mod tests {
         );
         assert!(parse_request("a.yml", "main", &[], "0s", None).is_err());
         assert!(parse_request("../a.yml", "main", &[], "1m", None).is_err());
+    }
+
+    /// ER-51: the dispatch hands back the run it created when the server names it; the empty answer of an older server is `None`
+    /// (the caller then proves a run is its own), and a zero or a malformed id is never a handle.
+    #[test]
+    fn the_run_a_dispatch_created_is_read_from_the_servers_answer() {
+        assert_eq!(run_id_of(&json!({"id": 8512})), Some(8512));
+        assert_eq!(run_id_of(&json!({"run_id": 7})), Some(7));
+        assert_eq!(run_id_of(&json!({"workflow_run": {"id": 9}})), Some(9));
+        assert_eq!(run_id_of(&Value::Null), None);
+        assert_eq!(run_id_of(&json!({})), None);
+        assert_eq!(run_id_of(&json!({"id": 0})), None);
+        assert_eq!(run_id_of(&json!({"id": "12"})), None);
     }
 }

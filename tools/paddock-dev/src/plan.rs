@@ -210,6 +210,10 @@ enum Marks {
     Reviewed,
 }
 
+/// The reason the plan gives for the conformance project that is in every plan (user decision 2026-11-12); a reader that asks whether
+/// a change reaches conformance itself looks for any other reason (ER-22: one copy of the text).
+pub const CONFORMANCE_ALWAYS: &str = "conformance always runs";
+
 /// Whether `path` is documentation (it marks only the link check unless it is a declared input).
 pub fn is_docs(path: &str) -> bool {
     DOCS.iter().any(|r| r.is_match(path))
@@ -739,7 +743,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
     }
 
     // The conformance job is in every plan, whatever changed (user decision 2026-11-12); as `affected` of the retired scripts/affected.mjs did.
-    st.mark(Some("conformance".to_string()), "conformance always runs".to_string());
+    st.mark(Some("conformance".to_string()), CONFORMANCE_ALWAYS.to_string());
     let has = |p: &str| st.why.contains_key(p);
     let mut packages: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for d in &crates {

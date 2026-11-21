@@ -1439,6 +1439,21 @@ mod member_gate {
         assert!(out.contains("GITEA_TOKEN is not set") && out.contains("Next step"), "{out}");
     }
 
+    /// P3: a member whose fast gates already failed is not dispatched: the other-OS row says so (not measured, exit 6) and never
+    /// reaches the token or the folder.
+    #[test]
+    fn a_member_whose_fast_gates_failed_is_not_dispatched() {
+        let t = train(true);
+        StandIn::new(t.gates.path(), "plan")
+            .answers(Actions::new().stdout(r#"{"crates":true}"#))
+            .install()
+            .unwrap();
+        let (code, out) = t.run(&["--gates", "HEAD"], "5");
+        assert_eq!(code, 6, "{out}");
+        assert!(out.contains("fast gates already failed"), "{out}");
+        assert!(!out.contains("GITEA_TOKEN is not set"), "no dispatch was attempted: {out}");
+    }
+
     #[test]
     fn a_member_that_passes_the_gates_on_the_combined_tree_is_reported_passed() {
         let t = train(false);

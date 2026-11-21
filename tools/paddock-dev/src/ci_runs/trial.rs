@@ -44,10 +44,10 @@ pub fn valid_branch(name: &str) -> bool {
 }
 
 /// The folder a trial's scratch folders live in (ER-14: a data drive, never inside the home folder; one place for `ci dispatch
-/// --trial`, `ci trial-prune` and the member gate of `merge check`, rule 55). In this order: `PADDOCK_TRIAL_DIR` (the user's own
-/// explicit choice, taken as it is), git config `paddock.trialRoot`, then `trials` beside the worktree root (git config
-/// `paddock.worktreeRoot`, else `PADDOCK_WORKTREE_ROOT`). A configured or derived folder must be absolute and not inside `home`.
-/// `Err` names the cause and the next step.
+/// --trial`, `ci trial-prune` and the member gate of `merge check`, rule 55). In this order: `PADDOCK_TRIAL_DIR`, git config
+/// `paddock.trialRoot`, then `trials` beside the worktree root (git config `paddock.worktreeRoot`, else `PADDOCK_WORKTREE_ROOT`).
+/// Whichever gives the folder, it must be absolute, without `..`, and not inside `home` (ER-14). `Err` names the cause and the next
+/// step.
 pub fn trial_root(
     env: &dyn Fn(&str) -> Option<String>,
     config: &dyn Fn(&str) -> Option<String>,
@@ -55,10 +55,9 @@ pub fn trial_root(
 ) -> Result<std::path::PathBuf, String> {
     use std::path::PathBuf;
     let nonempty = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    if let Some(v) = nonempty(env("PADDOCK_TRIAL_DIR")) {
-        return Ok(PathBuf::from(v));
-    }
-    let (path, from) = if let Some(v) = nonempty(config("paddock.trialRoot")) {
+    let (path, from) = if let Some(v) = nonempty(env("PADDOCK_TRIAL_DIR")) {
+        (PathBuf::from(v), "PADDOCK_TRIAL_DIR".to_string())
+    } else if let Some(v) = nonempty(config("paddock.trialRoot")) {
         (PathBuf::from(v), "git config paddock.trialRoot".to_string())
     } else if let Some(w) = nonempty(config("paddock.worktreeRoot")).or_else(|| nonempty(env("PADDOCK_WORKTREE_ROOT"))) {
         let parent = PathBuf::from(&w).parent().map(Path::to_path_buf).filter(|p| p.parent().is_some());
@@ -75,13 +74,13 @@ pub fn trial_root(
     };
     if !path.is_absolute() || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
         return Err(format!(
-            "the trial folder {} ({from}) is not an absolute folder without `..`. Next step: set `git config paddock.trialRoot` to one",
+            "the trial folder {} ({from}) is not an absolute folder without `..`. Next step: set `git config paddock.trialRoot` (or PADDOCK_TRIAL_DIR) to one",
             path.display()
         ));
     }
     if home.is_some_and(|h| path.starts_with(h)) {
         return Err(format!(
-            "the trial folder {} ({from}) is inside your home folder (ER-14). Next step: set `git config paddock.trialRoot` to a folder on a data drive",
+            "the trial folder {} ({from}) is inside your home folder (ER-14). Next step: set `git config paddock.trialRoot` (or PADDOCK_TRIAL_DIR) to a folder on a data drive",
             path.display()
         ));
     }
@@ -352,6 +351,11 @@ mod tests {
             root_of(&[("PADDOCK_TRIAL_DIR", "/d/t")], &[("paddock.trialRoot", "/d/x")], home).unwrap(),
             PathBuf::from("/d/t")
         );
+        // The variable is checked like the config: inside HOME, relative or with `..` it is refused.
+        for bad in ["/home/me/t", "rel/t", "/d/../home/me"] {
+            let e = root_of(&[("PADDOCK_TRIAL_DIR", bad)], &[], home).unwrap_err();
+            assert!(e.contains("PADDOCK_TRIAL_DIR") && e.contains("Next step"), "{bad}: {e}");
+        }
         assert_eq!(root_of(&[], &[("paddock.trialRoot", "/d/x")], home).unwrap(), PathBuf::from("/d/x"));
         assert_eq!(
             root_of(&[], &[("paddock.worktreeRoot", "/data/dev-targets/wt")], home).unwrap(),

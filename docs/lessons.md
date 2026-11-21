@@ -3267,4 +3267,9 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   2026-11-16, "Enforced since 2026-11-21".
 - **Class: a gate that needs a setting nobody set reports and goes on.** Earlier: ER-41's report-only start with no date on which
   it turns blocking (C130, C137, C139 stayed report-only after their first green run).
+- **Review round (2026-11-21):** the first version found its run by "any ci.yml run on the sha" (it could judge an older train run), let
+  a run whose plan job failed read as clean (all jobs skipped), accepted failures also on main as known, and ignored Linux jobs
+  that name no OS. Fix: judge only the run the dispatch made (the handle, ER-51), and make a row measured only when the plan job
+  succeeded. **Class: a check judges something it did not start or did not see run.** Earlier: run 8139's verdict on a rerun-only run
+  (ER-15), a "clean" Linux row over unjudged jobs (this fix).
 

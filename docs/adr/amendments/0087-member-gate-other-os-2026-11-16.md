@@ -68,14 +68,36 @@ was found only after the merge. Now `ENFORCED = true`:
 
 - `merge check --gates` on a merge commit dispatches the trial itself whenever `GITEA_TOKEN` is set, with the same code path as
   `ci dispatch` (reservation, `Sent::Busy` bound), and waits on the run id with a bound (ER-32).
-- What it could not measure (no token, no trial folder, the runner reservation not had within 45 minutes, a run that did not end
-  in 2 hours, a failure triage cannot blame) is `not measured` and exits 6; a NEW failure on one OS exits 5. The output names
+- What it could not measure (no token, no trial folder, a train reservation with no progress for 45 minutes, a run that did not end
+  in 2 hours, a run that never reached its tests, a failure triage cannot blame) is `not measured` and exits 6; a failing test on
+  one OS exits 5. The output names
   the cause and the next step. A member the plan says reaches no project is `not run`, with no token needed.
-- Judged per test by the train's rules (ER-12): a test that failed both tries blocks. A FLAKY test (failed, then passed on its
-  one retry) blocks only when the member's change touches its feature (`feature_touched`: a changed file or folder named like
-  one of the test's modules; a test whose module cannot be told counts as touched, so the rule errs toward blocking); in an
-  untouched feature the row passes and the flake is listed as `FLAKY (recorded, not blocking ...)` and in `flakyRecorded`, a fix
-  item for the next train.
+- **The handle (ER-51).** The gate judges only the run its own dispatch made. `ci dispatch` returns the run id when Gitea's
+  answer names it (`dispatch::run_with_id`; `ci dispatch --json` prints `run`). When the server answers with an empty 204, the
+  gate records the highest run id before the dispatch and accepts only a newer `ci.yml` run on the commit from a
+  `workflow_dispatch` on exactly the trial ref (`pick_run`); an older run on the same commit (a train's, a rerun, an earlier
+  trial of the same merge) is never taken, and two candidates are `not measured`. The wait for it is the shared bounded wait.
+- **A row is measured only when the run reached its tests.** The plan job must have succeeded and the run must not be cancelled
+  or unfinished, else every row is `not measured`; a row whose jobs were all skipped is `not applicable` only after that. Jobs
+  are put on an OS by their name's matrix label, else by their runner label (conformance, tools, ui on `ubuntu-latest`); jobs on
+  another machine (macOS) are listed as `not judged` in the output and in `notJudged`, never counted as clean.
+- **Judged per test by the train's rules (ER-12, user 2026-11-20).** A test that failed both tries blocks, also when it fails on
+  main too (the label "also failing on main" stays, as a failing finding). A FLAKY test (failed, then passed on its one retry;
+  `Failure.retried`) blocks only when the member touches its feature (`feature_touched`): first through the plan's own graph (a
+  test whose project the plan for the member does not reach is untouched), then within a reached project through the files the
+  test drives, a Playwright or Vitest test by its spec file's feature (the spec, or any file or folder named like it), a Rust test
+  by the files of its own crate or app named like its modules. A change only in a dependency of the test's crate is not its
+  feature (ER-12 names "the files it drives, not any file of the same crate"); a test whose feature cannot be told counts as
+  touched. In an untouched feature the row passes and the flake is listed as `FLAKY (recorded, not blocking ...)` and in
+  `flakyRecorded`, a fix item for the next train.
+- **Reach is read from the plan's own output**, with no list of its project keys: any true flag other than `docs` and
+  `conformance`, `all`, an app, or conformance reached for a reason beyond its standing one (`plan::CONFORMANCE_ALWAYS`, read
+  from `why`). A plan that does not say why reaches projects (when unsure the gate runs).
+- **The train goes first, and the wait ends on stall, not on a clock.** A member trial waits for the train's reservation while
+  the train's CI progresses (the unfinished runs change) and is `not measured` only after 45 minutes with no progress, or at an
+  8-hour hard limit (ER-32). It is not dispatched when the fast gates of `merge check --gates` already failed (the row says so:
+  not measured, exit 6). `PADDOCK_TRIAL_DIR`, like the config, must be absolute and outside HOME. The test seam
+  `PADDOCK_MERGE_CHECK_PLAN` exists in debug builds only.
 - Logged (ER-27): the run id, the verdict per OS and the run's wall time split into queue wait (run created to job start), setup,
   compile and tests (the jobs' step timings, by step name; job-seconds summed per OS, the queue wait the longest) in the step's
   text and `data.rows[].phases`.
