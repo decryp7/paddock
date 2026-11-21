@@ -545,6 +545,9 @@ a smaller work area and back asks for the same height twice. The class has come 
   then take a newer entry of the same size early, so the queue may drain while that entry's echo is still on its way:
   after a loss the user is not inferred for the rest of the opening (until a scale change clears the queue), and such
   echoes may be logged as unexplained but never make the window `Manual`. The property's bursts found this case.
+  Note (final review, P3): if X11 or Wayland do not echo the resizes of a window that is not mapped yet, a dialog
+  whose content changes more than 64 times before it is shown reaches the limit and loses inference for that opening
+  (the OS's own resize signals still count where they exist, and the next opening starts with a fresh queue).
 - **Logs (ER-27).** Each transition's line names the event (described from the state before it), the merged count,
   and the queue before and after it (`pending [..] maybe [..]`). The unexplained warning carries the size and the
   queue it was judged against.
