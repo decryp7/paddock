@@ -1,7 +1,7 @@
 use crate::{
-    audit, brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_setup_rust,
-    disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, load, local_sccache, locks,
-    merge_check, places, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
+    audit, brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_s3_guard,
+    ci_setup_rust, disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, load, local_sccache,
+    locks, merge_check, places, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -342,6 +342,12 @@ enum CiCommand {
     /// the setup-rust action's shell steps. The action keeps CARGO_BUILD_JOBS and the toolchain install in YAML (./dev needs
     /// rustc first). Messages and `::warning::` lines on standard output, one `::error::` line on failure.
     SetupRust(ci_setup_rust::SetupRustArgs),
+    /// The localhost proxy in front of CI's S3 compile cache that cuts a request the store does not answer (user decision
+    /// 2026-11-20): `ci setup-rust` starts it, `ci sccache-stats` stops it.
+    S3Guard {
+        #[command(subcommand)]
+        command: ci_s3_guard::GuardCommand,
+    },
     /// The compiler a release job builds with is the exact version `rust-toolchain.toml` pins (`rustc --version` against its `channel`, read
     /// with the TOML parser): one `::error::` line naming both versions when they differ or the channel floats.
     RustPin(ci_rust_pin::RustPinArgs),
@@ -596,6 +602,13 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         return ci_setup_rust::run(a, out, err);
     }
     if let Command::Ci {
+        command: CiCommand::S3Guard { command },
+    } = &cli.command
+    {
+        // The guard is a long-running process with its own contract: one `PORT <n>` line, then silence.
+        return ci_s3_guard::run(command, out, err);
+    }
+    if let Command::Ci {
         command: CiCommand::BuildJobs(a),
     } = &cli.command
     {
@@ -685,6 +698,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::SetupRust(_),
         } => Err(CliError::failure("`ci setup-rust` was dispatched through the report path.")),
+        Command::Ci {
+            command: CiCommand::S3Guard { .. },
+        } => Err(CliError::failure("`ci s3-guard` was dispatched through the report path.")),
         Command::Ci {
             command: CiCommand::BuildJobs(_),
         } => Err(CliError::failure("`ci build-jobs` was dispatched through the report path.")),

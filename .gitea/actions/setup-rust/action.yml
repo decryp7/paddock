@@ -14,14 +14,26 @@ inputs:
     description: "Install the Linux libraries Tauri needs (webkit2gtk, gtk, rsvg, appindicator); ignored on other systems."
     default: "false"
   sccache-backend:
-    description: "local (default: sccache's disk cache, the job slot's kept folder sccache-s<n> on a host runner, /sccache in a container when that mount exists), auto (Redis when an endpoint is set, else local) or redis (the endpoint is required)."
-    default: local
+    description: "local (default: sccache's disk cache, the job slot's kept folder sccache-s<n> on a host runner, /sccache in a container when that mount exists), auto (Redis when an endpoint is set, else local), redis (the endpoint is required) or s3 (the local disk first, the shared RustFS store behind it; the local disk alone when S3 cannot be used). The default is the dispatch input `sccache_backend` of ci.yml (one run), else the Gitea variable PADDOCK_CI_SCCACHE_BACKEND, local when both are unset (docs/research/2026-11-19-sccache.md section 8)."
+    default: ${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}
   sccache-redis-endpoint:
     description: "Shared sccache backend, e.g. redis://172.16.1.188:6379 (no path: sccache ignores it). Used on every OS; empty means sccache's local disk."
     default: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
   sccache-redis-db:
     description: "Redis database number for sccache. The shared server gives sccache database 5 (docs/dev-setup.md); never another number."
     default: ${{ vars.SCCACHE_REDIS_DB }}
+  sccache-s3-access-key-id:
+    description: "The RustFS key's id: pass the repository secret PADDOCK_SCCACHE_S3_ACCESS_KEY_ID. Used only with sccache-backend s3, and only by the one step that runs ./dev ci setup-rust (conformance C141 checks every use passes it)."
+    default: ""
+  sccache-s3-secret-access-key:
+    description: "The RustFS key's secret: pass the repository secret PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY. Never reaches $GITHUB_ENV or a later step."
+    default: ""
+  sccache-s3-endpoint:
+    description: "The S3 store's URL, http://host:port."
+    default: ${{ vars.PADDOCK_SCCACHE_S3_ENDPOINT }}
+  sccache-s3-bucket:
+    description: "The S3 bucket."
+    default: ${{ vars.PADDOCK_SCCACHE_S3_BUCKET }}
 runs:
   using: composite
   steps:
@@ -145,6 +157,16 @@ runs:
         kit="$(bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" which)"
         echo "kit=$kit" >> "$GITHUB_OUTPUT"
         echo "setup-rust: compile cache through the $kit implementation"
+    # ./dev builds itself from source when no pinned copy exists (cargo, build scripts): that runs here, in a step that holds no S3 key.
+    # The step below then only runs the built tool, which hands the key to the sccache server and to nothing else.
+    - name: Build ./dev
+      if: steps.kit.outputs.kit == 'dev'
+      shell: bash
+      run: |
+        if [ -z "${PADDOCK_DEV:-}" ]; then
+          if [ -z "${PADDOCK_DEV_TOKEN-}${GITHUB_TOKEN-}" ]; then export PADDOCK_DEV_DOWNLOAD=0; fi
+          bash "${{ github.action_path }}/../../../dev" ci setup-rust --help >/dev/null
+        fi
     - name: Compile cache and Tauri libraries
       if: steps.kit.outputs.kit == 'dev'
       shell: bash
@@ -153,6 +175,11 @@ runs:
         PADDOCK_SCCACHE_REDIS_ENDPOINT: ${{ inputs.sccache-redis-endpoint }}
         REDIS_DB: ${{ inputs.sccache-redis-db }}
         TAURI_LINUX_DEPS: ${{ inputs.tauri-linux-deps }}
+        # The S3 key goes to this step only (never $GITHUB_ENV): ./dev masks it and hands it to the sccache server it starts.
+        PADDOCK_SCCACHE_S3_ACCESS_KEY_ID: ${{ inputs.sccache-s3-access-key-id }}
+        PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ inputs.sccache-s3-secret-access-key }}
+        PADDOCK_SCCACHE_S3_ENDPOINT: ${{ inputs.sccache-s3-endpoint }}
+        PADDOCK_SCCACHE_S3_BUCKET: ${{ inputs.sccache-s3-bucket }}
       run: |
         # Without the read credential ./dev builds itself from source and never takes a binary from the store (ADR 0022 section 3.3).
         if bash "${{ github.action_path }}/../../../conformance/ci/dev-tool-cache.sh" no-download; then export PADDOCK_DEV_DOWNLOAD=0; fi
@@ -217,7 +244,11 @@ runs:
           echo "::warning::sccache is not available on this runner; building without the compile cache."
           exit 0
         fi
-        case "$BACKEND" in auto|redis|local) ;; *) echo "::error::sccache-backend must be auto, redis or local (got '$BACKEND')"; exit 1 ;; esac
+        if [ "$BACKEND" = s3 ]; then
+          echo "::notice::sccache-backend s3 is not used by this shell path (a release, rule 54 or tag run); the local disk is used until the release lane runs ./dev ci setup-rust."
+          BACKEND=local
+        fi
+        case "$BACKEND" in auto|redis|local) ;; *) echo "::error::sccache-backend must be auto, redis, local or s3 (got '$BACKEND')"; exit 1 ;; esac
         if [ "$BACKEND" = redis ] && [ -z "$REDIS_ENDPOINT" ]; then
           echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"; exit 1
         fi
@@ -239,6 +270,8 @@ runs:
           # LRU evicts any file below its folder and its local storage "only supports a single sccache server at a time" (docs/Local.md),
           # so a Linux lane never gets the mount itself: its folder is <mount>/sccache-<lane>. A host runner's slot folder outlives
           # the job; a container without the mount keeps the cache in the job (with a notice: every job then starts cold).
+          # This path never uses the S3 level (see the notice above); the Rust command's S3 local tier is the sibling folder
+          # <mount>/sccache-<lane>-s3 (ci_setup_rust::lane_s3_dir), never a folder inside the lane's, so a shell twin would name it the same.
           SIZE=20G
           if [ "$RUNNER_OS" = Linux ]; then
             MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"  # overridable so the step's test does not depend on the runner's real mount

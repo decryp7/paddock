@@ -2947,6 +2947,17 @@ tools/paddock-dev/Cargo.toml --profile ci --no-tests=fail -E 'test(/^contracts::
 paddock-ci, `tools/linux-container.sh --ci-image`, 4 CPUs, 2 jobs, a new empty build volume, host load 27): cold 71 s, warm 1 s (the 12
 tests run in 1.2 s). Under the limits set for the choice (30 s warm, 3 min cold), so the step stays a nextest step. Not measured: a
 real amd64 CI runner; read the step's timing from the next train run and revisit if the cold time passes 3 min.
+
+## Fix item: sccache with `SCCACHE_BASEDIRS` once a release ships it (2026-11-19)
+
+sccache 0.19.0 (2026-10-24, the pin in `tools/paddock-dev/src/ci_setup_rust.rs`) keys every Rust compile on the checkout path
+(`CARGO_MANIFEST_DIR`, the working folder), so the workspace's own crates never hit across worktrees and 18% of third-party crates
+(those with `OUT_DIR`) miss too (docs/research/2026-11-19-sccache.md). The fix, PRs #2918 and #3022 (`SCCACHE_BASEDIRS` for rustc and
+`SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS`), was merged on 2026-11-02 and is in no release yet. **To do (user decision 2026-11-19, WP-6):**
+when a release contains both, bump `SCCACHE_VERSION` and the four checksums, start the agents' server with
+`SCCACHE_BASEDIRS=<worktree root>` and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH`
+(`local_sccache.rs`), and measure workspace-crate hits across worktrees with incremental off in the push gates. Check
+<https://github.com/mozilla/sccache/releases> at each train.
 ## A slow-to-start stand-in git met the phase limit: the mark now bounds every call of a hung-phase test (2026-11-19)
 `ci_host::kept_clone::tests::a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase` failed once at a 1-minute load of
 about 31 (integrator-train16, m2-nextest.log): the stand-in git recorded no call, because the git's own 1 s limit, counted from its
@@ -3233,6 +3244,11 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   `paddock-job-tmpdir-*` and more). The planned redesign is a shared per-run scratch root for tests, plus a report-only conformance
   check with a positive control (ER-21, ER-41).
 
+## cargo-llvm-cov asks to install into ~/.rustup and waits on stdin (sccache work, 2026-11-20)
+
+- **What happened:** a local `cargo llvm-cov nextest -p paddock-net` stopped at "I will run `rustup component add llvm-tools-preview` ... Proceed? [Y/n]" and sat there for 4 hours, because a background run has no stdin to answer it. Answering yes would have installed a component into the user's `~/.rustup` (ER-14, ER-45).
+- **Rule of thumb:** never run `cargo llvm-cov` locally. Coverage is measured by CI's llvm-cov gate (`./dev ci run crates coverage`, `scripts/coverage-gate.mjs`), whose image has the component. A shared crate's coverage is "not measured" in a branch report and read from the first CI run.
+- **Recurring class:** a tool that starts an installer or a prompt when a probe runs (ER-45; earlier instance: rustup 1.28.1 installing a missing pinned toolchain, run 8060). Any local tool step that can prompt gets stdin from /dev/null so it ends with an error instead of waiting.
 ## A streamed answer that was still arriving failed its wait: the wait bounded the whole stream, not a stall (Debrief, 2026-11-20, train A)
 - **Failure:** Debrief WebKit `ai-chat.e2e.ts:116` "the conversation is busy from the moment its turn is drawn until the answer is
   done" red on both tries in debrief.yml run 8377 job 42784 (shard 3/4, Linux), at `expectStreamDone` (paddock-e2e `ready.ts:85`):

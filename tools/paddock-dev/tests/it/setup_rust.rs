@@ -207,7 +207,7 @@ fn write_shim(path: &Path, calls: &Path, fail: Fail) {
             .appends_with(&calls.with_file_name("tokens").display().to_string(), "tok={env:PADDOCK_DEV_TOKEN}\n")
             .appends_with(
                 &calls.display().to_string(),
-                "{args} port={env:SCCACHE_SERVER_PORT} io={env:SCCACHE_IGNORE_SERVER_IO_ERROR} dir={env:SCCACHE_DIR} size={env:SCCACHE_CACHE_SIZE} redis={env:SCCACHE_REDIS_ENDPOINT} db={env:SCCACHE_REDIS_DB}\n",
+                "{args} port={env:SCCACHE_SERVER_PORT} io={env:SCCACHE_IGNORE_SERVER_IO_ERROR} dir={env:SCCACHE_DIR} size={env:SCCACHE_CACHE_SIZE} redis={env:SCCACHE_REDIS_ENDPOINT} db={env:SCCACHE_REDIS_DB} chain={env:SCCACHE_MULTILEVEL_CHAIN} bucket={env:SCCACHE_BUCKET} idle={env:SCCACHE_IDLE_TIMEOUT} meta={env:AWS_EC2_METADATA_DISABLED} key={env:AWS_ACCESS_KEY_ID} secret={env:AWS_SECRET_ACCESS_KEY} errlog={env:SCCACHE_ERROR_LOG} endpoint={env:SCCACHE_ENDPOINT} ssl={env:SCCACHE_S3_USE_SSL}\n",
             )
     };
     let mut shim = StandIn::new(path.parent().unwrap(), path.file_name().unwrap().to_str().unwrap())
@@ -514,7 +514,7 @@ fn wrong_inputs_fail_the_step_with_the_shells_message() {
     assert_eq!(rs.code, 1);
     assert!(
         rs.out
-            .contains("::error::sccache-backend must be auto, redis or local (got 'disk')"),
+            .contains("::error::sccache-backend must be auto, redis, local or s3 (got 'disk')"),
         "{}",
         rs.out
     );
@@ -758,4 +758,269 @@ fn in_a_container_a_pinned_copy_in_the_tool_cache_is_put_on_path() {
         rs.calls
     );
     assert_eq!(rest, sh.calls);
+}
+
+const S3_INPUT: Input = Input {
+    backend: "s3",
+    endpoint: "",
+    db: "",
+    tauri: false,
+};
+
+const S3_ENV: [(&str, &str); 4] = [
+    ("PADDOCK_SCCACHE_S3_BUCKET", "sccache-paddock"),
+    ("PADDOCK_SCCACHE_S3_ENDPOINT", "http://192.0.2.10:15000"),
+    ("PADDOCK_SCCACHE_S3_ACCESS_KEY_ID", "test-key-id"),
+    ("PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY", "test-secret"),
+];
+
+/// A `curl` that answers the S3 health check as `status` says (0: healthy) and logs its arguments.
+fn health_curl(r: &Runner, status: i32) {
+    let calls = r.calls.display().to_string();
+    StandIn::new(&r.bin, "curl")
+        .answers(Actions::new().appends_with(&calls, "curl {args}\n").exit(status))
+        .install()
+        .unwrap();
+}
+
+/// ADR 0111: no writable folder is shared between concurrent lanes. The S3 level's local disk is a sibling of the lane's folder
+/// (`<mount>/sccache-<lane>-s3`, named by `lane_sccache_dir`), never inside it (sccache's LRU evicts any file below its folder) and
+/// never the same folder for two lanes (`/sccache/s3` was shared by all 6 lanes).
+#[test]
+fn a_container_jobs_s3_tier_is_a_sibling_of_its_lane_folder_and_never_shared_between_lanes() {
+    let r = Runner::new(Some(Fail::Never));
+    health_curl(&r, 0);
+    let mount = r.root.join("mount");
+    std::fs::create_dir_all(&mount).unwrap();
+    let mount = mount.display().to_string();
+    let mut tiers = Vec::new();
+    for lane in ["s4", "s5"] {
+        let mut env: Vec<(&str, &str)> = S3_ENV.to_vec();
+        env.extend([
+            ("RUNNER_OS", "Linux"),
+            ("PADDOCK_SCCACHE_MOUNT", mount.as_str()),
+            ("PADDOCK_CI_SLOT", lane),
+        ]);
+        let rs = r.rust(&S3_INPUT, &env);
+        assert_eq!(rs.code, 0, "{}", rs.out);
+        let dir = rs
+            .env
+            .lines()
+            .find_map(|l| l.strip_prefix("SCCACHE_DIR="))
+            .expect("SCCACHE_DIR in the job env")
+            .to_string();
+        let lane_dir = paddock_dev::ci_setup_rust::lane_sccache_dir(&mount, lane);
+        assert_eq!(dir, format!("{lane_dir}-s3"), "{}", rs.env);
+        assert!(
+            !dir.starts_with(&format!("{lane_dir}/")) && dir != mount && !dir.starts_with(&format!("{mount}/s3")),
+            "the S3 tier is inside the LRU-evicted lane folder or shared: {dir}"
+        );
+        assert!(Path::new(&dir).is_dir(), "{dir} was made");
+        stop_guard(guard_port(&rs.env));
+        tiers.push(dir);
+    }
+    assert_ne!(tiers[0], tiers[1], "two lanes must not share a writable folder");
+}
+
+/// The chain, the bucket and the keys are the server's alone. A server a later rustc starts (ours ended) gets `$GITHUB_ENV`, which
+/// holds the local disk only: with the chain and no keys it failed the build after 10 s (review of 534918839, exit 2 in 2 of 2 runs).
+#[test]
+fn the_s3_chain_and_keys_reach_the_servers_start_and_nothing_a_later_step_sees() {
+    let r = Runner::new(Some(Fail::Never));
+    health_curl(&r, 0);
+    let rs = r.rust(&S3_INPUT, &S3_ENV);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    let start = rs
+        .calls
+        .lines()
+        .find(|l| l.starts_with("--start-server"))
+        .expect("the server is started");
+    for want in [
+        "chain=disk,s3",
+        "bucket=sccache-paddock",
+        "idle=0",
+        "meta=true",
+        "key=test-key-id",
+        "secret=test-secret",
+        "errlog=",
+    ] {
+        assert!(start.contains(want), "the server's start lacks `{want}`: {start}");
+    }
+    assert!(
+        !start.ends_with("errlog="),
+        "the server writes its errors to the job's temp folder: {start}"
+    );
+    for gone in [
+        "MULTILEVEL",
+        "SCCACHE_BUCKET",
+        "SCCACHE_ENDPOINT",
+        "AWS_ACCESS",
+        "AWS_SECRET",
+        "test-secret",
+        "test-key-id",
+    ] {
+        assert!(!rs.env.contains(gone), "$GITHUB_ENV holds `{gone}`:\n{}", rs.env);
+    }
+    for want in [
+        "SCCACHE_IDLE_TIMEOUT=0\n",
+        "AWS_EC2_METADATA_DISABLED=true\n",
+        "SCCACHE_DIR=",
+        "SCCACHE_ERROR_LOG=",
+    ] {
+        assert!(rs.env.contains(want), "$GITHUB_ENV lacks `{want}`:\n{}", rs.env);
+    }
+    assert!(
+        rs.calls.contains("curl ") && rs.calls.contains("/minio/health/live"),
+        "the health check is an HTTP request: {}",
+        rs.calls
+    );
+    // sccache talks to the timeout guard on 127.0.0.1, never to the store itself (user decision 2026-11-20).
+    assert!(
+        start.contains("endpoint=127.0.0.1:") && !start.contains("192.0.2.10") && start.contains("ssl=false"),
+        "{start}"
+    );
+    // The S3 level's local disk is a folder of its own: what S3 backfills never reaches the plain folder a release build reads.
+    assert!(
+        start.contains("dir=") && start.contains("-s3 "),
+        "the server's L0 is the sibling s3 folder: {start}"
+    );
+    assert!(
+        rs.env.lines().any(|l| l.starts_with("SCCACHE_DIR=") && l.ends_with("-s3")),
+        "a server a later rustc starts uses it too: {}",
+        rs.env
+    );
+    assert!(
+        !rs.env.lines().any(|l| l.starts_with("SCCACHE_DIR=") && !l.ends_with("-s3")),
+        "no plain folder in the job env: {}",
+        rs.env
+    );
+    let port = guard_port(&rs.env);
+    stop_guard(port);
+    assert!(!rs.out.contains("test-secret") && !rs.out.contains("test-key-id"), "{}", rs.out);
+}
+
+/// A release or tag run holds no key in practice; with one it still stays on the plain local disk and never starts the S3 level.
+#[test]
+fn a_tag_run_with_a_key_stays_on_the_plain_local_disk() {
+    let r = Runner::new(Some(Fail::Never));
+    health_curl(&r, 0);
+    let mut env = S3_ENV.to_vec();
+    env.push(("GITHUB_REF", "refs/tags/dyno-v1.2.0"));
+    let rs = r.rust(&S3_INPUT, &env);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    assert!(
+        rs.out.contains("a release or tag build never reads the shared S3 cache"),
+        "{}",
+        rs.out
+    );
+    assert!(!rs.env.contains("PADDOCK_S3_GUARD_PORT") && !rs.env.contains("-s3\n"), "{}", rs.env);
+    let start = rs
+        .calls
+        .lines()
+        .find(|l| l.starts_with("--start-server"))
+        .expect("the server is started");
+    assert!(start.contains("chain= ") && start.contains("key= "), "no chain and no key: {start}");
+}
+
+/// A store whose health check fails is not used: the job warns and runs on its local disk (never fails the build).
+#[test]
+fn a_store_that_fails_its_health_check_leaves_the_job_on_its_local_disk() {
+    let r = Runner::new(Some(Fail::Never));
+    health_curl(&r, 22);
+    let rs = r.rust(&S3_INPUT, &S3_ENV);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    assert!(rs.out.contains("::warning::sccache: the S3 health check"), "{}", rs.out);
+    let start = rs
+        .calls
+        .lines()
+        .find(|l| l.starts_with("--start-server"))
+        .expect("the server is started");
+    assert!(start.contains("chain= ") && start.contains("key= "), "no chain and no key: {start}");
+    assert!(
+        rs.env.contains("RUSTC_WRAPPER=sccache\n") && !rs.env.contains("MULTILEVEL"),
+        "{}",
+        rs.env
+    );
+}
+
+/// The port of the timeout guard that setup-rust started, from `$GITHUB_ENV`.
+fn guard_port(env: &str) -> u16 {
+    env.lines()
+        .find_map(|l| l.strip_prefix("PADDOCK_S3_GUARD_PORT="))
+        .unwrap_or_else(|| panic!("the job env names the guard's port:\n{env}"))
+        .parse()
+        .unwrap()
+}
+
+/// What `ci sccache-stats` sends: the guard ends.
+fn stop_guard(port: u16) {
+    use std::io::Write;
+    let mut c = std::net::TcpStream::connect(("127.0.0.1", port)).expect("the guard listens");
+    c.write_all(b"PADDOCK-STALL-GUARD-STOP\n").unwrap();
+}
+
+/// The guard setup-rust starts outlives the step, forwards nothing a later step could see a key in, and the job's log and env name it.
+#[test]
+fn the_s3_guard_is_started_for_the_job_and_named_in_its_env() {
+    let r = Runner::new(Some(Fail::Never));
+    health_curl(&r, 0);
+    let rs = r.rust(&S3_INPUT, &S3_ENV);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    assert!(rs.env.contains("PADDOCK_S3_GUARD_LOG="), "{}", rs.env);
+    assert!(rs.out.contains("through the timeout guard on 127.0.0.1:"), "{}", rs.out);
+    let port = guard_port(&rs.env);
+    // It is alive after the step ended: a connection is accepted (and then ends the guard).
+    stop_guard(port);
+}
+
+/// A store behind TLS cannot be guarded (the stream is opaque and the certificate would not match 127.0.0.1): the job stays on its disk.
+#[test]
+fn an_https_store_is_not_used_because_the_guard_cannot_sit_in_front_of_it() {
+    let r = Runner::new(Some(Fail::Never));
+    health_curl(&r, 0);
+    let https = [
+        ("PADDOCK_SCCACHE_S3_BUCKET", "sccache-paddock"),
+        ("PADDOCK_SCCACHE_S3_ENDPOINT", "https://192.0.2.10:15000"),
+        ("PADDOCK_SCCACHE_S3_ACCESS_KEY_ID", "test-key-id"),
+        ("PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY", "test-secret"),
+    ];
+    let rs = r.rust(&S3_INPUT, &https);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    assert!(
+        rs.out.contains("::warning::sccache: the timeout guard") && rs.out.contains("https"),
+        "{}",
+        rs.out
+    );
+    assert!(
+        !rs.env.contains("PADDOCK_S3_GUARD_PORT") && !rs.env.contains("MULTILEVEL"),
+        "{}",
+        rs.env
+    );
+}
+
+/// `ci s3-guard serve` by itself: one `PORT <n>` line, forwards, and ends on the stop request.
+#[test]
+#[allow(clippy::disallowed_methods)]
+fn the_guard_command_announces_its_port_and_ends_on_the_stop_request() {
+    use std::io::BufRead;
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("guard.log");
+    let mut child = crate::dev_bin::command()
+        .args(["ci", "s3-guard", "serve", "--upstream", "127.0.0.1:9", "--log"])
+        .arg(&log)
+        .current_dir(repo())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    std::io::BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+    let port: u16 = line
+        .trim()
+        .strip_prefix("PORT ")
+        .expect("the first line is PORT <n>")
+        .parse()
+        .unwrap();
+    stop_guard(port);
+    let status = child.wait().unwrap();
+    assert!(status.success(), "{status:?}");
 }

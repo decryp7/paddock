@@ -10,6 +10,18 @@ Conventional Commits; one semver tag for the whole repo.
   away while it is still finishing the step (Debrief's popout.e2e.ts:62, run 8338). A step that fails while the page stays open, or
   that leaves it open, still fails. Debrief's pop-out specs use it; a selftest (`selftest/close-click.spec.ts`) reproduces the race.
 
+### CI's S3 compile cache: `paddock_net::stall_guard`, a localhost proxy that cuts a request the store does not answer, and `paddock_testkit::net::broken_server`
+- New `paddock_net::stall_guard` (std only, no TLS stack): `Guard` forwards the bytes of every connection to a store and closes one
+  that has had no byte for `Limits::stall`; a cut with the request unanswered, or a failed connect, opens a breaker so new connections
+  are refused for `Limits::cooldown` and a dead store costs one stall. The rules are pure (`Limits`, `Breaker`, `Watch`, `Verdict`,
+  every time passed in), the sockets are a thin adapter, errors are `StallGuardError`, at most `MAX_CONNECTIONS` connections at once.
+  First user: `./dev ci s3-guard`, started by `./dev ci setup-rust` in front of RustFS so sccache 0.19.0 (a fixed 60 s read timeout,
+  none for a write) goes on with its local disk when the store hangs (docs/research/2026-11-19-sccache.md section 8).
+- New `paddock_testkit::net::broken_server(Mode)`: a loopback server that breaks on purpose (`BlackHole`: accepts and never answers,
+  `Drip`, `CutMidResponse`, `Refuse`, and `Answer` as the healthy control), bounded in connections and body size, joined on drop.
+- CI's `setup-rust` gets the `s3` backend (the local disk first, RustFS behind it, switched on by the Gitea variable
+  `PADDOCK_CI_SCCACHE_BACKEND`; the key goes to the setup step only; conformance C141 checks that).
+
 ### `@decryp7/paddock-conformance`: C39, C53, C119-C125 and C129-C131 left the package (pair P3, ADR 0022 amendment 2026-11-19)
 - Breaking: these 12 checks have no JavaScript module any more, so `paddock-conformance --only C39` (and the others) is an `unknown
   check` error that points to `./dev conformance --only <ids>`. The Rust host runs them (`conformance.rust` of

@@ -2299,6 +2299,43 @@ save more, on each OS? And did the user's Defender process exclusions for git ch
 
 - **Result:** the shim gives 270 C/C++ hits (libsqlite3-sys, zstd-sys, ring and the like) where the first version gave none, and the run took 95 s against 112 s. **Not measured:** a repeat (one run per row, so the 17 s difference is inside this machine's noise at that load; the hit counts are not), and a Linux or Windows host. A `cargo xwin` build is as uncached for C as before; ring's C is a few seconds.
 
+## CI's sccache on RustFS: the `s3` backend on the three runner classes (2026-11-19, perf/sccache-hit-rate, docs/research/2026-11-19-sccache.md WP-8)
+
+- **Question:** does each CI runner class reach the user's RustFS S3 store, write to it and read from it through `./dev ci setup-rust --sccache-backend s3` (sccache's chain `disk,s3`, the local disk first), and what does it save?
+- **Method:** the workflow `sccache-s3-trial.yml` of the branch `diag/sccache-s3-trial` (not for landing), merged onto `origin/train/2026-11-19-16` (7af38a878) by `./dev ci dispatch --trial`, on the real runners: the Mac mini runners (macOS arm64), the Linux job in the `paddock-ci:v3` container and the Windows runner (x86_64). Each job: `cargo clippy --all-targets --locked` and `cargo nextest run --profile ci --locked --no-run` in `tools/paddock-dev`, sccache 0.19.0, per-level numbers from `sccache --show-stats`. From run 8312 on, the local disk was emptied before the server started and the build folder was new (its name has the run id), so every compile went through sccache and every hit came from S3 (L1). One run per row; the three runner classes ran at the same time, each on its own machine or slot. The S3 key was never printed.
+- **Reach:** the unauthenticated health check `GET /minio/health/live` answered 200 on every runner: Mac 4 to 7 ms connect, 10 to 119 ms total; Linux 0.3 to 0.5 ms connect, 0.8 to 1.2 ms total; Windows 3 to 23 ms connect, 5 to 24 ms total.
+
+  | Run | What | Mac | Linux | Windows |
+  | --- | --- | --- | --- | --- |
+  | 8305 | first run, S3 empty | 4 of 319 hits (1.3%); L1 writes 312, 0 failures; clippy 37 s + test build 33 s | 163 of 337 hits (48.8%, all from the container's `/sccache` mount, L1 hits 0); L1 writes 171, 0 failures; 22 s + 24 s | 2 of 325 hits (0.6%); L1 writes 320, 0 failures; 73 s + 76 s |
+  | 8306 | second run, nothing emptied | 0 compile requests (the kept build folder; cargo ran no rustc) | 334 of 337 hits, all L0; L1 hits 0; 14 s + 17 s | 0 compile requests (kept build folder) |
+  | 8312 | local disk emptied, new build folder | not run: the job was refused for disk (39.7 GiB free, below the runner's 50 GiB refusal level) | 171 of 337 hits (50.7%), all L1; 18 s + 19 s | 243 of 325 hits (74.8%), all L1; 38 s + 39 s |
+  | 8323 | the same as 8312, after the Mac volume was freed | 237 of 319 hits (74.3%), all L1; 0 L1 write failures; 25 s + 25 s | not read | not read |
+
+- **Result:** all three runner classes reach RustFS, write to it (S3 writes equal local writes, 0 failures) and read from it with a cold local disk. With S3 warm and the local disk empty, clippy plus test build took 77 s on Windows against 149 s cold (48% less) and 50 s on the Mac against 70 s cold (29% less); on Linux 37 s against 46 s with 49% local hits already (there is no fully cold Linux baseline in these runs). The L1 hit rate of 50 to 75% is lower than the 99 to 100% a warm local disk gives (run 8306, Linux): the misses are probably cache keys that contain the per-run build folder path (`paddock-trial-<run id>`); that is a guess, not investigated.
+- **Not measured:** a store that hangs in the middle of a job (closed by the timeout guard, measured in the next section); a large workspace (Spotter, Debrief) and a whole train's CI; a repeat of each row (one run each, so a 10% difference in seconds is inside the noise of a shared machine); the Linux and Windows rows of run 8323.
+
+## The S3 timeout guard against a store that stops answering (2026-11-20, perf/sccache-hit-rate)
+
+- **Question:** does the stall guard (`paddock_net::stall_guard`, `./dev ci s3-guard`) keep a compile on the local disk when the S3 store hangs, where sccache 0.19.0 alone waits 60 s per read and has no timeout for a write?
+- **Measured, guard against a broken server:** the guard's tests in `crates/paddock-net` (`stall_guard/tests.rs`) run it against `paddock_testkit::net::broken_server` with a 300 ms stall and a 600 ms cooldown: a store that accepts and never answers is cut after one stall (at least 250 ms, under 5 s), the next request is refused at once and the store is not asked again during the cooldown, the store is tried again after it; a healthy store is forwarded unchanged and a slow store that keeps sending is never cut (each test has the healthy server as its positive control).
+- **Measured, sccache against a store that never answers from the start (macOS arm64, sccache 0.19.0, chain `disk,s3`, dummy key, scratch folders, port 4238):** `sccache --start-server` fails after 10 s (exit 2) both straight at the black hole and through the guard (the guard cuts the startup request at its 10 s stall, the server's startup limit is also 10 s), and the compile then runs without the cache (rc 0, 1 s and 5 s). In CI that case does not arise: `ci setup-rust` checks the store with an HTTP health check first and uses the local disk alone when it fails.
+- **Not measured:** the case the guard is for, a store that answers at the start and then hangs in the middle of a compile, against the real sccache. The local attempt (a fake S3 that answers PUT 200 and GET 404 and then goes silent) did not exercise the S3 level: the server reported 0 compile requests, so no number comes from it. The first measurement against the real store on the three runner classes is the trial run of this branch (the guard's log line `did not answer within` shows a cut); a real hang there is not expected, so the trial shows the guard in the path and its cost, not a cut.
+
+## ci.yml with the S3 level and the stall guard on every Rust job: the first full run on the real runners (2026-11-20, run 8363, perf/sccache-hit-rate at 5a776327e)
+
+- **Question:** with `sccache_backend=s3` for one run of ci.yml (the dispatch input; the repository variable stays unset), do all three runner classes use the S3 level through the stall guard, and what does a first run show?
+- **Method:** `./dev ci dispatch ci.yml --ref perf/sccache-hit-rate --input sccache_backend=s3`, dispatched after train 17's round (run 8361) ended; numbers are the `sccache --show-adv-stats` of each job's stats step (jobs with 0 compile requests left out). One run; the S3 prefix of each class held what the earlier trial runs (8305 to 8323, `tools/paddock-dev` only) had written, so this is almost a cold fill.
+
+  | Class | Jobs with compiles | Compile requests | Hits (L0 disk / L1 S3) | L1 misses | L1 writes (failures) | Cache timeouts |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | Linux (container) | 7 | 3,720 | 560 (393 / 167) | 3,160 | 3,138 (0) | 0 |
+  | macOS | 4 | 676 | 208 (0 / 208) | 468 | 465 (0) | 0 |
+  | Windows | 4 | 1,655 | 10 (0 / 10) | 1,645 | 1,637 (0) | 0 |
+
+- **Result:** the dispatch input switched the S3 level on in every job (`sccache: local disk .../s3, then S3 bucket ... (through the timeout guard on 127.0.0.1:<port>)` on all 15 jobs that compile or start the server); all three classes reached RustFS, wrote to it (5,240 writes, 0 failures) and read from it (385 L1 hits, 208 of them on macOS in the `paddock-dev` job, whose crates the earlier trials had stored). The guard cut **no** request: its logs held 185 lines `was quiet for 10 s and is closed` (idle keep-alive connections, routine) and no `did not answer`. One guard ended by its 15-minute idle limit in a job whose compiles were more than 15 minutes apart; from then on that job used its local disk alone (a connect to the guard is refused, which sccache's `l0` policy ignores). That is the measured cause for the change of the idle limit to 6 hours (`Limits::default`); the job's own end stops the guard. The hit rate of a first run is low by construction (macOS 31%, Linux 15%, Windows 0.6%); the second run of the same head is the measurement of the shared cache, and was not made (one run per head).
+- **Not measured:** a second run's hit rate, the time saved on a full ci.yml run, and a store that hangs on the real runners (none did).
+
 ## CI job cost, step by step (2026-11-20, docs/ci-job-cost-research)
 
 Quoted by [docs/research/2026-11-20-ci-job-cost.md](research/2026-11-20-ci-job-cost.md).

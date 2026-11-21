@@ -26,6 +26,7 @@
 
 use crate::ci_isolation::{self, Ctx, Sinks, home};
 use crate::ci_tool::{NETWORK_ENV, Output, TAIL_LINES, ToolCall, error_line, tail};
+use crate::local_sccache::server_env;
 use clap::Args;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -97,7 +98,8 @@ const TAURI_LINUX_PACKAGES: [&str; 6] = [
 /// `dev ci setup-rust`.
 #[derive(Args, Debug)]
 pub struct SetupRustArgs {
-    /// local (sccache's disk cache), auto (Redis when PADDOCK_SCCACHE_REDIS_ENDPOINT is set, else local) or redis.
+    /// local (sccache's disk cache), auto (Redis when PADDOCK_SCCACHE_REDIS_ENDPOINT is set, else local), redis, or s3 (the local
+    /// disk first and the shared S3 store behind it, falling back to the local disk alone when S3 cannot be used).
     #[arg(long, default_value = "local")]
     pub sccache_backend: String,
     /// The Redis database number for sccache (empty: 5, the shared server's database for sccache).
@@ -159,13 +161,205 @@ pub enum Backend {
     },
     /// sccache's disk cache.
     Local,
+    /// The job's local disk cache first, the shared S3 store behind it ([`s3_server_settings`]); resolved when the step runs, and
+    /// the local disk alone when S3 cannot be used ([`S3Ci::from_env`]).
+    S3,
+}
+
+/// The shared S3 store as the second cache level of a CI job (user decision 2026-11-19, docs/research/2026-11-19-sccache.md WP-8).
+///
+/// Designed against the Redis failure of 2026-10-25 (commit 1383e9898: the shared Dragonfly filled up, the Mac job's server failed
+/// to start and every rustc call failed): the job's own disk stays level 0 and decides alone whether a compile is stored
+/// (`SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY=l0`: an S3 write or startup check that fails is logged, never fatal, and does not latch
+/// the server read-only; sccache v0.19.0 docs/MultiLevel.md); S3 is used only when this step was given its runner class's key
+/// (`PADDOCK_SCCACHE_S3_ACCESS_KEY_ID` and `PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY`, Gitea repository secrets passed through the
+/// setup-rust inputs to this step's environment only and never to `$GITHUB_ENV`; user decision 2026-11-19, least privilege) and its endpoint answers a TCP connect
+/// by its health check ([`S3_HEALTH_PATH`]); the store's size is the store's job (the bucket quota and a lifecycle expiry rule set by the user on
+/// RustFS, since sccache never evicts from S3).
+#[derive(Clone, PartialEq, Eq)]
+pub struct S3Ci {
+    /// `PADDOCK_SCCACHE_S3_BUCKET`.
+    pub bucket: String,
+    /// The `host:port` of `PADDOCK_SCCACHE_S3_ENDPOINT`.
+    pub endpoint: String,
+    /// The endpoint is `https://`.
+    pub ssl: bool,
+    /// One key prefix per runner class: `paddock-ci/<RUNNER_OS>-<arch>`, so one OS's objects can be dropped or expired alone.
+    pub prefix: String,
+    /// The access key id and secret, for the sccache server's start only.
+    pub key: (String, String),
+}
+
+impl std::fmt::Debug for S3Ci {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("S3Ci")
+            .field("bucket", &self.bucket)
+            .field("endpoint", &self.endpoint)
+            .field("prefix", &self.prefix)
+            .field("key", &"<hidden>")
+            .finish()
+    }
+}
+
+/// Why a job does not use S3, and how loudly: a job whose workflow passes no key is not wired yet (a notice); a key that is
+/// passed but wrong, or a store that does not answer, is a warning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct S3Off {
+    /// `::warning::` rather than `::notice::`.
+    pub warn: bool,
+    /// One sentence, never with a key in it.
+    pub why: String,
+}
+
+/// The suffix of the S3 level's local disk: a SIBLING of the job's plain sccache folder (`<folder>-s3`), never a folder inside it
+/// (sccache's LRU evicts any file below its folder) and never one a second lane can reach (ADR 0111). Jobs without the S3 level and
+/// release builds use the plain folder and never see what S3 backfilled.
+const S3_TIER_SUFFIX: &str = "-s3";
+
+/// The S3 level's local disk of lane `lane` on the kept `mount` (`<mount>/sccache-<lane>-s3`), derived from [`lane_sccache_dir`], the
+/// one function that names lane folders.
+pub fn lane_s3_dir(mount: &str, lane: &str) -> String {
+    s3_tier_of(&lane_sccache_dir(mount, lane))
+}
+
+/// The S3 tier beside any job-private sccache folder.
+fn s3_tier_of(plain: &str) -> String {
+    format!("{plain}{S3_TIER_SUFFIX}")
+}
+
+/// The longest the timeout guard may take to report its port.
+const GUARD_START: Duration = Duration::from_secs(5);
+
+/// The timeout guard that was started.
+struct GuardStarted {
+    port: u16,
+    log: String,
+}
+
+/// The health check of the S3 store before a job uses it: an HTTP GET of [`S3_HEALTH_PATH`] that must answer 2xx. A TCP connect proved
+/// only that something listens (a store that accepts connections and then hangs passed it). curl's own limits end a dead or slow
+/// store at [`S3_HEALTH_CONNECT`] / [`S3_HEALTH_MAX`] seconds, the DNS lookup included. On the LAN the health check took 1 to 119 ms
+/// (measured 2026-11-19 from the Mac, Linux and Windows runners, docs/benchmarks.md).
+pub const S3_HEALTH_PATH: &str = "/minio/health/live";
+/// curl `--connect-timeout`, in seconds.
+pub const S3_HEALTH_CONNECT: u64 = 3;
+/// curl `--max-time`, in seconds: the whole check.
+pub const S3_HEALTH_MAX: u64 = 5;
+
+impl S3Ci {
+    /// The S3 level from the step's environment, or why it cannot be used. The key is `PADDOCK_SCCACHE_S3_ACCESS_KEY_ID` and
+    /// `PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY` (repository secrets, one key for every runner class, its policy scoped to
+    /// `<bucket>/paddock-ci/*`); their values never appear in an error. The endpoint is a URL, `http://host:port` or
+    /// `https://host:port` (a bare `host:port` is read as http).
+    pub fn from_env(get: &dyn Fn(&str) -> Option<String>, os: &str, arch: &str) -> Result<S3Ci, S3Off> {
+        let warn = |why: String| S3Off { warn: true, why };
+        let value = |k: &str| get(k).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+        // A release or tag build never reads the shared store: one key serves every branch, so a branch could write the entries a
+        // release build then trusts (review of 534918839, P2: cache poisoning). Release workflows hold no key either (C141's
+        // NO_SECRET list); this is the second wall, for a key that reaches such a job by another way.
+        if value("GITHUB_REF").is_some_and(|r| r.starts_with("refs/tags/")) || value("PADDOCK_DEV_DOWNLOAD").as_deref() == Some("0") {
+            return Err(S3Off {
+                warn: false,
+                why: "a release or tag build never reads the shared S3 cache (any branch could have written to it)".into(),
+            });
+        }
+        let (id, secret) = match (
+            value("PADDOCK_SCCACHE_S3_ACCESS_KEY_ID"),
+            value("PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY"),
+        ) {
+            (Some(i), Some(s)) => (i, s),
+            (None, None) => {
+                return Err(S3Off {
+                    warn: false,
+                    why: "this workflow passes no S3 key to setup-rust (`sccache-s3-access-key-id`, `sccache-s3-secret-access-key`)".into(),
+                });
+            }
+            (None, Some(_)) => return Err(warn("the secret PADDOCK_SCCACHE_S3_ACCESS_KEY_ID is empty or not passed".into())),
+            (Some(_), None) => {
+                return Err(warn(
+                    "the secret PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY is empty or not passed".into(),
+                ));
+            }
+        };
+        let need = |k: &str| value(k).ok_or_else(|| warn(format!("the variable {k} is not set")));
+        let bucket = need("PADDOCK_SCCACHE_S3_BUCKET")?;
+        let endpoint = need("PADDOCK_SCCACHE_S3_ENDPOINT")?;
+        let (ssl, host_port) = if let Some(rest) = endpoint.strip_prefix("https://") {
+            (true, rest)
+        } else {
+            (false, endpoint.strip_prefix("http://").unwrap_or(&endpoint))
+        };
+        let host_port = host_port.trim_end_matches('/').to_string();
+        if host_port.contains('@') {
+            // `user:password@host` would put a credential into a variable that is logged and into the health check's URL.
+            return Err(warn(
+                "PADDOCK_SCCACHE_S3_ENDPOINT holds `@`; it is http://host:port with no user or password (the key is the two secrets)"
+                    .into(),
+            ));
+        }
+        if host_port.contains("://") || host_port.contains('/') || !host_port.contains(':') {
+            return Err(warn(format!(
+                "PADDOCK_SCCACHE_S3_ENDPOINT is `{endpoint}`; it is http://host:port (or https://), with no path"
+            )));
+        }
+        Ok(S3Ci {
+            bucket,
+            endpoint: host_port,
+            ssl,
+            prefix: format!("paddock-ci/{os}-{arch}"),
+            key: (id, secret),
+        })
+    }
+}
+
+impl S3Ci {
+    /// The URL of the health check.
+    pub fn health_url(&self) -> String {
+        format!("{}://{}{S3_HEALTH_PATH}", if self.ssl { "https" } else { "http" }, self.endpoint)
+    }
+}
+
+/// The settings the sccache SERVER starts with (never a build's environment): the multi-level chain `disk,s3` behind the local disk
+/// (`dir`, `size`) and the S3 store. Only the start call gets these; `$GITHUB_ENV` gets [`s3_build_settings`].
+pub fn s3_server_settings(s3: &S3Ci, dir: &str, size: &str) -> Vec<(String, String)> {
+    [
+        ("SCCACHE_DIR", dir),
+        ("SCCACHE_CACHE_SIZE", size),
+        ("SCCACHE_MULTILEVEL_CHAIN", "disk,s3"),
+        ("SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY", "l0"),
+        ("SCCACHE_BUCKET", &s3.bucket),
+        ("SCCACHE_ENDPOINT", &s3.endpoint),
+        ("SCCACHE_REGION", "auto"),
+        ("SCCACHE_S3_USE_SSL", if s3.ssl { "true" } else { "false" }),
+        ("SCCACHE_S3_KEY_PREFIX", &s3.prefix),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect()
+}
+
+/// The settings every later step of the job gets in `$GITHUB_ENV` when the S3 level is on: the local disk only, the two that keep
+/// a server a build starts itself alive and off the metadata lookup, and where the server writes its errors. No chain, no bucket, no
+/// key: a server started by a later rustc (ours ended) then serves from the local disk instead of failing 10 s into the build for
+/// lack of keys (measured in review of 534918839: exit 2 in 2 of 2 runs).
+pub fn s3_build_settings(dir: &str, size: &str, error_log: &str) -> Vec<(String, String)> {
+    let mut v = vec![
+        ("SCCACHE_DIR".to_string(), dir.to_string()),
+        ("SCCACHE_CACHE_SIZE".to_string(), size.to_string()),
+        ("SCCACHE_ERROR_LOG".to_string(), error_log.to_string()),
+    ];
+    v.extend(crate::local_sccache::survival_vars(true));
+    v
 }
 
 /// The backend the inputs ask for, or the `::error::` text when they are wrong.
 pub fn choose_backend(backend: &str, endpoint: &str, db: &str) -> Result<Backend, String> {
+    if backend == "s3" {
+        return Ok(Backend::S3);
+    }
     if !matches!(backend, "auto" | "redis" | "local") {
         return Err(error_line(
-            &format!("sccache-backend must be auto, redis or local (got '{backend}')."),
+            &format!("sccache-backend must be auto, redis, local or s3 (got '{backend}')."),
             "fix the input of the setup-rust action.",
         ));
     }
@@ -549,7 +743,14 @@ impl Step<'_> {
         } else {
             self.isolation(&["port", "sccache"])?
         };
+        // `settings` go to $GITHUB_ENV (every later step); `server_settings` only to the server's own start. They differ for S3: the
+        // chain, the bucket and the keys belong to the server alone.
         let mut settings: Vec<(String, String)> = Vec::new();
+        let mut server_settings: Option<Vec<(String, String)>> = None;
+        // The timeout guard's port and log (S3 only; `ci sccache-stats` stops it and prints its log).
+        let mut guard_port: Option<u16> = None;
+        // The S3 keys, for the server's start only: never in `settings`, which go to $GITHUB_ENV.
+        let mut s3_keys: Vec<(String, String)> = Vec::new();
         match &backend {
             Backend::Redis { endpoint, db } => {
                 settings.push(("SCCACHE_REDIS_ENDPOINT".into(), endpoint.clone()));
@@ -557,10 +758,69 @@ impl Step<'_> {
                 self.say(format!("sccache: shared backend {} db {db}", shown_endpoint(endpoint)));
             }
             Backend::Local => {
-                let (dir, size) = self.local_cache()?;
+                let (dir, size, _) = self.local_cache()?;
                 settings.push(("SCCACHE_DIR".into(), dir.clone()));
                 settings.push(("SCCACHE_CACHE_SIZE".into(), size));
                 self.say(format!("sccache: local disk {dir}"));
+            }
+            Backend::S3 => {
+                let (plain_dir, size, tier) = self.local_cache()?;
+                // The S3 level's local disk is a sibling folder of the job's own: entries backfilled from S3 never reach the
+                // plain folder that release builds and jobs without S3 read (review of 534918839, P2: cache poisoning), and no
+                // other lane can reach it (ADR 0111).
+                let dir = tier;
+                if let Err(e) = std::fs::create_dir_all(&dir) {
+                    return Err(self.fail(error_line(
+                        &format!("cannot make the sccache folder {dir}: {e}."),
+                        "check the disk of the runner.",
+                    )));
+                }
+                let get = |k: &str| self.get(k).map(str::to_string);
+                let level = S3Ci::from_env(&get, self.os(), std::env::consts::ARCH)
+                    .and_then(|s3| self.health(&s3).map(|()| s3))
+                    .and_then(|s3| self.start_guard(&s3).map(|g| (s3, g)));
+                match level {
+                    Ok((real, guard)) => {
+                        // sccache talks to the guard on 127.0.0.1, which cuts a request the store does not answer (ci_s3_guard.rs).
+                        let s3 = S3Ci {
+                            endpoint: format!("127.0.0.1:{}", guard.port),
+                            ssl: false,
+                            ..real.clone()
+                        };
+                        guard_port = Some(guard.port);
+                        let guard_env = [
+                            ("PADDOCK_S3_GUARD_PORT".to_string(), guard.port.to_string()),
+                            ("PADDOCK_S3_GUARD_LOG".to_string(), guard.log),
+                        ];
+                        // Gitea masks secrets it passes itself; masking them again here also covers a value reaching the step another way.
+                        if self.get("GITHUB_ACTIONS") == Some("true") {
+                            self.say(format!("::add-mask::{}", s3.key.0));
+                            self.say(format!("::add-mask::{}", s3.key.1));
+                        }
+                        s3_keys.push(("AWS_ACCESS_KEY_ID".into(), s3.key.0.clone()));
+                        s3_keys.push(("AWS_SECRET_ACCESS_KEY".into(), s3.key.1.clone()));
+                        self.say(format!(
+                            "sccache: local disk {dir}, then S3 bucket {} at {} (through the timeout guard on {}) under {} (credentials configured)",
+                            s3.bucket, real.endpoint, s3.endpoint, s3.prefix
+                        ));
+                        let error_log = self.temp_base().join("sccache-error.log").display().to_string();
+                        let mut full = s3_server_settings(&s3, &dir, &size);
+                        // The server writes its errors into the job's temp folder, so `sccache-stats` can show them (ER-27).
+                        full.push(("SCCACHE_ERROR_LOG".into(), error_log.clone()));
+                        server_settings = Some(full);
+                        settings.extend(s3_build_settings(&dir, &size, &error_log));
+                        settings.extend(guard_env.iter().cloned());
+                    }
+                    Err(off) => {
+                        self.say(format!(
+                            "::{}::sccache: {}; this job uses its local disk cache only. Next: docs/research/2026-11-19-sccache.md, section 8.",
+                            if off.warn { "warning" } else { "notice" },
+                            off.why
+                        ));
+                        settings.push(("SCCACHE_DIR".into(), plain_dir.clone()));
+                        settings.push(("SCCACHE_CACHE_SIZE".into(), size));
+                    }
+                }
             }
         }
         let secret = endpoint
@@ -569,18 +829,16 @@ impl Step<'_> {
             .unwrap_or_default();
         let password = endpoint_password(&endpoint).unwrap_or_default();
         let call = |a: &str| {
-            let mut c = ToolCall::new(sccache.to_string_lossy())
+            let c = ToolCall::new(sccache.to_string_lossy())
                 .args([a])
                 .env("SCCACHE_SERVER_PORT", port.as_str())
-                .env("SCCACHE_IGNORE_SERVER_IO_ERROR", "1")
                 .secret(secret.clone())
                 .secret(password.clone())
                 .pass(SCCACHE_PASS)
                 .timeout(Duration::from_secs(60));
-            for (k, v) in &settings {
-                c = c.env(k.as_str(), v.as_str());
-            }
-            c
+            // One shared way to start a server that may serve S3 (local_sccache.rs, also the agents' server).
+            let s3 = !s3_keys.is_empty();
+            server_env(c, server_settings.as_deref().unwrap_or(&settings), s3, s3, &s3_keys)
         };
         if let Ok(r) = self.run(&call("--version")) {
             let v = r.stdout.trim().to_string();
@@ -604,6 +862,9 @@ impl Step<'_> {
                 self.say(t);
             }
             let _ = self.run(&call("--stop-server"));
+            if let Some(port) = guard_port {
+                crate::ci_s3_guard::stop(port);
+            }
             self.say("::warning::the sccache server did not start; the build runs without the compile cache.");
             return Ok(());
         }
@@ -613,18 +874,91 @@ impl Step<'_> {
         self.append("GITHUB_ENV", &env_lines(&port, &settings, windows))
     }
 
+    /// The S3 store's health check: an HTTP GET that answers 2xx within curl's own limits ([`S3_HEALTH_CONNECT`], [`S3_HEALTH_MAX`]).
+    /// A store that accepts a connection and then hangs (or answers an error) is not used: this job runs on its local disk alone.
+    fn health(&mut self, s3: &S3Ci) -> Result<(), S3Off> {
+        let call = ToolCall::new("curl")
+            .args(["-fsS", "--noproxy", "*", "--connect-timeout"])
+            .args([
+                S3_HEALTH_CONNECT.to_string(),
+                "--max-time".to_string(),
+                S3_HEALTH_MAX.to_string(),
+                s3.health_url(),
+            ])
+            .timeout(Duration::from_secs(S3_HEALTH_MAX + 5));
+        match self.run(&call) {
+            Ok(r) if r.success => Ok(()),
+            Ok(r) => Err(S3Off {
+                warn: true,
+                why: format!(
+                    "the S3 health check {} failed ({}): {}",
+                    s3.health_url(),
+                    r.how,
+                    r.stderr.trim().lines().last().unwrap_or("no message")
+                ),
+            }),
+            Err(e) => Err(S3Off {
+                warn: true,
+                why: format!("the S3 health check could not run curl: {e}"),
+            }),
+        }
+    }
+
+    /// Starts the timeout guard in front of the store ([`crate::ci_s3_guard`]): detached, so it outlives this step; its port comes on
+    /// its standard output. No guard, no S3: the job runs on its local disk alone (a store that hangs would hold its compiles).
+    fn start_guard(&mut self, s3: &S3Ci) -> Result<GuardStarted, S3Off> {
+        let off = |why: String| S3Off { warn: true, why };
+        if s3.ssl {
+            return Err(off(
+                "the timeout guard in front of the S3 store speaks http only, and the endpoint is https".to_string(),
+            ));
+        }
+        let exe = crate::tool_cache::self_exe().map_err(|e| off(format!("the timeout guard cannot find this program to start it: {e}")))?;
+        let log = self.temp_base().join("s3-guard.log").display().to_string();
+        let mut cmd = paddock_proc::command(&exe);
+        cmd.args(["ci", "s3-guard", "serve", "--upstream", &s3.endpoint, "--log", &log])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        // Detached and without this step's handles: the runner ends every process that keeps a pipe of the step (run 8019).
+        let mut child = paddock_proc::spawn_detached_clearing_handles(&mut cmd)
+            .map_err(|e| off(format!("the timeout guard could not be started: {e}")))?;
+        let line = crate::slots::first_line(&mut child, GUARD_START);
+        let port = line
+            .as_deref()
+            .and_then(|l| l.trim().strip_prefix("PORT "))
+            .and_then(|p| p.trim().parse::<u16>().ok());
+        match port {
+            Some(port) => {
+                // The guard lives on by itself; reap nothing, wait for nothing.
+                drop(child);
+                Ok(GuardStarted { port, log })
+            }
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                Err(off(format!(
+                    "the timeout guard did not report its port within {} s",
+                    GUARD_START.as_secs()
+                )))
+            }
+        }
+    }
+
     /// The local disk cache: a job slot's own folder with its share of the budget, on every OS (ADR 0111). On Linux the slot is
     /// a lane of the host's kept mount: the folder is `<mount>/sccache-<lane>`, never the mount itself, because sccache's LRU
     /// evicts any file below its folder, whoever put it there, and two sccache servers on one folder race ("The local storage only
     /// supports a single sccache server at a time", sccache docs/Local.md). A container without the mount keeps the cache in the
     /// job (with a notice), never in a folder another job can see.
-    fn local_cache(&mut self) -> Result<(String, String), i32> {
-        let (dir, size) = if self.os() == "Linux" {
+    fn local_cache(&mut self) -> Result<(String, String, String), i32> {
+        let (dir, size, tier) = if self.os() == "Linux" {
             let mount = self.path_var("PADDOCK_SCCACHE_MOUNT").unwrap_or_else(|| "/sccache".to_string());
             let own = |s: &mut Self, why: &str| {
                 let temp = s.path_var("RUNNER_TEMP").unwrap_or_else(|| "/tmp".to_string());
                 s.say(format!("::notice::{why}; the compile cache lives and dies with the job."));
-                (format!("{temp}/sccache"), "20G".to_string())
+                let plain = format!("{temp}/sccache");
+                let tier = s3_tier_of(&plain);
+                (plain, "20G".to_string(), tier)
             };
             if Path::new(&mount).is_dir() && dir_writable(Path::new(&mount)) {
                 let slots = self.lane_count();
@@ -632,6 +966,7 @@ impl Step<'_> {
                     Ok(lane) => (
                         lane_sccache_dir(&mount, &lane),
                         slot_cache_size_or(self.get("PADDOCK_CI_SCCACHE_GB"), slots, LINUX_SCCACHE_GB),
+                        lane_s3_dir(&mount, &lane),
                     ),
                     Err(why) => {
                         self.summary_line(&format!("- sccache lane: NOT taken ({why}); job-private folder"));
@@ -647,7 +982,9 @@ impl Step<'_> {
             let slots = self.isolation(&["slots"])?;
             let slots: u64 = slots.parse().unwrap_or(1);
             let size = slot_cache_size(self.get("PADDOCK_CI_SCCACHE_GB"), slots);
-            (paddock_env::winpath::from_git_bash(&dir, home::os_of(self.ctx.windows)), size)
+            let dir = paddock_env::winpath::from_git_bash(&dir, home::os_of(self.ctx.windows));
+            let tier = s3_tier_of(&dir);
+            (dir, size, tier)
         };
         if let Err(e) = std::fs::create_dir_all(&dir) {
             return Err(self.fail(error_line(
@@ -655,8 +992,12 @@ impl Step<'_> {
                 "check the disk of the runner.",
             )));
         }
-        let dir = if self.os() == "Windows" { home::native(&dir) } else { dir };
-        Ok((dir, size))
+        let (dir, tier) = if self.os() == "Windows" {
+            (home::native(&dir), home::native(&tier))
+        } else {
+            (dir, tier)
+        };
+        Ok((dir, size, tier))
     }
 
     /// One line for the job summary (`$GITHUB_STEP_SUMMARY`), where a notice alone would scroll away; a missing file is not an error.
@@ -903,7 +1244,7 @@ mod tests {
         assert_eq!(choose_backend("redis", "redis://h:6379", "7"), Ok(redis("7")));
         let bad = choose_backend("disk", "", "").unwrap_err();
         assert!(
-            bad.starts_with("::error::sccache-backend must be auto, redis or local (got 'disk')"),
+            bad.starts_with("::error::sccache-backend must be auto, redis, local or s3 (got 'disk')"),
             "{bad}"
         );
         assert!(
@@ -912,6 +1253,151 @@ mod tests {
                 .contains("sccache-backend is redis but sccache-redis-endpoint is empty")
         );
         assert!(choose_backend("", "", "").is_err(), "an empty input is refused, as in the shell");
+    }
+
+    fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let m: HashMap<String, String> = pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        move |k: &str| m.get(k).cloned()
+    }
+
+    const S3_VARS: [(&str, &str); 4] = [
+        ("PADDOCK_SCCACHE_S3_BUCKET", "sccache-paddock"),
+        ("PADDOCK_SCCACHE_S3_ENDPOINT", "http://192.0.2.10:15000"),
+        ("PADDOCK_SCCACHE_S3_ACCESS_KEY_ID", "test-key-id"),
+        ("PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY", "test-secret"),
+    ];
+
+    #[test]
+    fn s3_is_its_own_backend_and_has_one_key_prefix_per_runner_class() {
+        assert_eq!(choose_backend("s3", "", ""), Ok(Backend::S3));
+        let s3 = S3Ci::from_env(&vars(&S3_VARS), "Windows", "x86_64").unwrap();
+        assert_eq!(s3.prefix, "paddock-ci/Windows-x86_64");
+        let linux = S3Ci::from_env(&vars(&S3_VARS), "Linux", "aarch64").unwrap();
+        assert_ne!(s3.prefix, linux.prefix);
+        assert_eq!((s3.endpoint.as_str(), s3.ssl), ("192.0.2.10:15000", false));
+    }
+
+    #[test]
+    fn the_endpoint_is_a_url_or_host_and_port_with_no_path() {
+        let with = |e: &'static str| {
+            let mut v = S3_VARS.to_vec();
+            v[1] = ("PADDOCK_SCCACHE_S3_ENDPOINT", e);
+            S3Ci::from_env(&vars(&v), "Linux", "x86_64")
+        };
+        let tls = with("https://s3.example.test:443/").unwrap();
+        assert_eq!((tls.endpoint.as_str(), tls.ssl), ("s3.example.test:443", true));
+        assert_eq!(with("192.0.2.10:15000").unwrap().endpoint, "192.0.2.10:15000");
+        for bad in ["http://192.0.2.10:15000/bucket", "192.0.2.10", "ftp://192.0.2.10:21"] {
+            let off = with(bad).unwrap_err();
+            assert!(off.warn && off.why.contains("http://host:port"), "{bad}: {off:?}");
+        }
+    }
+
+    #[test]
+    fn without_its_key_or_variables_s3_is_not_used_and_the_reason_names_no_value() {
+        let without =
+            |ks: &[&str]| -> Vec<(&'static str, &'static str)> { S3_VARS.iter().copied().filter(|(n, _)| !ks.contains(n)).collect() };
+        // No key passed at all: a workflow not wired yet, a notice only.
+        let off = S3Ci::from_env(
+            &vars(&without(&[
+                "PADDOCK_SCCACHE_S3_ACCESS_KEY_ID",
+                "PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY",
+            ])),
+            "macOS",
+            "aarch64",
+        )
+        .unwrap_err();
+        assert!(!off.warn && off.why.contains("passes no S3 key"), "{off:?}");
+        for missing in [
+            "PADDOCK_SCCACHE_S3_ACCESS_KEY_ID",
+            "PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY",
+            "PADDOCK_SCCACHE_S3_BUCKET",
+            "PADDOCK_SCCACHE_S3_ENDPOINT",
+        ] {
+            let off = S3Ci::from_env(&vars(&without(&[missing])), "macOS", "aarch64").unwrap_err();
+            assert!(off.warn && off.why.contains(missing), "{off:?}");
+            assert!(!off.why.contains("test-secret") && !off.why.contains("test-key-id"), "{off:?}");
+        }
+        let s3 = S3Ci::from_env(&vars(&S3_VARS), "macOS", "aarch64").unwrap();
+        assert_eq!(s3.key, ("test-key-id".to_string(), "test-secret".to_string()));
+        let shown = format!("{s3:?}");
+        assert!(!shown.contains("test-secret") && !shown.contains("test-key-id"), "{shown}");
+    }
+
+    #[test]
+    fn the_server_gets_the_chain_and_the_job_only_the_disk() {
+        let s3 = S3Ci::from_env(&vars(&S3_VARS), "Linux", "x86_64").unwrap();
+        let server = s3_server_settings(&s3, "/sccache", "20G");
+        let get = |s: &[(String, String)], k: &str| s.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+        assert_eq!(
+            get(&server, "SCCACHE_MULTILEVEL_CHAIN").as_deref(),
+            Some("disk,s3"),
+            "the local disk is level 0"
+        );
+        assert_eq!(
+            get(&server, "SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY").as_deref(),
+            Some("l0"),
+            "an S3 failure never fails a compile"
+        );
+        assert_eq!(get(&server, "SCCACHE_S3_KEY_PREFIX").as_deref(), Some("paddock-ci/Linux-x86_64"));
+        // What every later step gets: no chain, no bucket, no key; the survival settings and the error log.
+        let build = s3_build_settings("/sccache", "20G", "/tmp/sccache-error.log");
+        let lines = env_lines("4227", &build, false).join("\n");
+        for gone in [
+            "MULTILEVEL",
+            "SCCACHE_BUCKET",
+            "SCCACHE_ENDPOINT",
+            "SCCACHE_S3",
+            "AWS_ACCESS",
+            "AWS_SECRET",
+            "test-secret",
+            "test-key-id",
+        ] {
+            assert!(!lines.contains(gone), "`{gone}` in {lines}");
+        }
+        for want in [
+            "SCCACHE_DIR=/sccache",
+            "SCCACHE_IDLE_TIMEOUT=0",
+            "AWS_EC2_METADATA_DISABLED=true",
+            "SCCACHE_ERROR_LOG=/tmp/sccache-error.log",
+        ] {
+            assert!(lines.contains(want), "`{want}` missing in {lines}");
+        }
+    }
+
+    #[test]
+    fn a_release_or_tag_run_never_reads_the_shared_cache_even_with_a_key() {
+        let with = |extra: &[(&'static str, &'static str)]| {
+            let mut v = S3_VARS.to_vec();
+            v.extend_from_slice(extra);
+            S3Ci::from_env(&vars(&v), "macOS", "aarch64")
+        };
+        assert!(with(&[]).is_ok(), "the control: the same inputs on a branch run are accepted");
+        for extra in [("GITHUB_REF", "refs/tags/dyno-v1.2.0"), ("PADDOCK_DEV_DOWNLOAD", "0")] {
+            let off = with(&[extra]).unwrap_err();
+            assert!(!off.warn && off.why.contains("release or tag"), "{extra:?}: {off:?}");
+        }
+        assert!(with(&[("GITHUB_REF", "refs/heads/main")]).is_ok(), "main is not a tag");
+    }
+
+    #[test]
+    fn the_health_check_is_an_http_get_of_the_stores_own_endpoint() {
+        let s3 = S3Ci::from_env(&vars(&S3_VARS), "Linux", "x86_64").unwrap();
+        assert_eq!(s3.health_url(), "http://192.0.2.10:15000/minio/health/live");
+        let mut v = S3_VARS.to_vec();
+        v[1] = ("PADDOCK_SCCACHE_S3_ENDPOINT", "https://s3.example.test:443");
+        assert_eq!(
+            S3Ci::from_env(&vars(&v), "Linux", "x86_64").unwrap().health_url(),
+            "https://s3.example.test:443/minio/health/live"
+        );
+    }
+
+    #[test]
+    fn an_endpoint_with_a_user_or_password_is_refused() {
+        let mut v = S3_VARS.to_vec();
+        v[1] = ("PADDOCK_SCCACHE_S3_ENDPOINT", "http://user:pw@192.0.2.10:15000");
+        let off = S3Ci::from_env(&vars(&v), "Linux", "x86_64").unwrap_err();
+        assert!(off.warn && off.why.contains('@') && !off.why.contains("pw"), "{off:?}");
     }
 
     #[test]

@@ -188,6 +188,20 @@ calls = ["std::net::TcpListener::bind"]
 sites = 1
 
 [[out_of_scope]]
+path = "crates/paddock-testkit/src/broken_server.rs"
+reason = "Test support: a loopback server that breaks on purpose (accepts and never answers, drips, cuts mid-answer) for tests of code that talks to a service; bounded in connections and joined on drop."
+owner = "paddock-testkit"
+calls = ["std::net::TcpListener::bind"]
+sites = 1
+
+[[out_of_scope]]
+path = "crates/paddock-net/src/stall_guard/proxy.rs"
+reason = "A loopback TCP proxy in front of one store (CI's S3 compile cache): it forwards opaque bytes and keeps TCP's own connection semantics, so the paddock-ipc endings scenarios do not apply; its endings (cut after a stall, breaker, stop request, idle exit) have their own tests in stall_guard/tests.rs."
+owner = "paddock-net"
+calls = ["std::net::TcpListener::bind"]
+sites = 1
+
+[[out_of_scope]]
 path = "crates/paddock-ipc/src/bin/test_child.rs"
 reason = "paddock-ipc's own test child process, never shipped by an app."
 owner = "paddock-ipc"

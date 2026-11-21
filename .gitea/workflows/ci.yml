@@ -28,6 +28,10 @@ on:
         description: "Also run the WebKit tests (the WebKit job, and an app's WebKit lines)"
         type: boolean
         default: false
+      sccache_backend:
+        description: "The compile cache of this run's Rust jobs: local, s3 (the local disk first, RustFS behind it) or empty (the repository variable PADDOCK_CI_SCCACHE_BACKEND, local when unset). For a trial of the shared cache without changing the variable for every run."
+        required: false
+        default: ""
       since_run:
         description: "Rerun only what failed in this finished ci.yml run (its API id, as ./dev ci dispatch and ./dev wait --ci-run print it; not its run number): the failed jobs, and inside a job that failed only in nextest only its failed tests (./dev plan --since-run; ER-10). Passed jobs do not run; a full run before landing catches the rest."
         required: false
@@ -160,6 +164,9 @@ jobs:
 
       # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
       - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - name: Every listen site is registered
         run: ./dev check ipc-endpoints
@@ -192,6 +199,9 @@ jobs:
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - uses: ./.gitea/actions/node-caches
 
@@ -285,6 +295,9 @@ jobs:
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       # Playwright's browsers and Chrome for Testing are baked into the image (ci-image/): nothing is downloaded per job.
       - uses: ./.gitea/actions/node-caches
@@ -393,6 +406,9 @@ jobs:
 
       # Before the first ./dev of the job (the commands below are ./dev ci run steps).
       - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - name: Install (yaml for C111, from the root package-lock.json)
         working-directory: .
@@ -477,6 +493,9 @@ jobs:
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
@@ -599,6 +618,8 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy,rustfmt
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       # The engineering rules are optional input of the lint; say loudly when they are missing instead of skipping quietly.
       - name: Engineering rules present
@@ -712,6 +733,8 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy,rustfmt
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - name: Lockfile is current
         run: |
@@ -759,6 +782,9 @@ jobs:
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - uses: ./.gitea/actions/node-caches
 
@@ -799,6 +825,9 @@ jobs:
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - uses: ./.gitea/actions/node-caches
         with:
@@ -834,6 +863,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
       - run: ./dev ci run crates fmt
 
       # cargo-hakari and cargo-machete come with the image (ci-image/).
@@ -977,6 +1009,8 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - name: Toolchain present
         run: |
@@ -1124,6 +1158,9 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
       - name: Audit against the merge base
         run: |
           enforce=()
@@ -1282,6 +1319,8 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy rustfmt
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - uses: ./.gitea/actions/host-tools
         if: runner.os != 'Linux'
@@ -1456,6 +1495,8 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy,rustfmt
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - uses: ./.gitea/actions/host-tools
 
