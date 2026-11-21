@@ -19,7 +19,7 @@ fn sequential_walk(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: if std::env::var_os("PROPTEST_CASES").is_some() { ProptestConfig::default().cases } else { 48 }, ..ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig::with_cases(paddock_env::proptest_cases(48)))]
 
     #[test]
     fn map_equals_sequential_map(items in proptest::collection::vec(any::<u32>(), 0..200), workers in 1usize..12) {

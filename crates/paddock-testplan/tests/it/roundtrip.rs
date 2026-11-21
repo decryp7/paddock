@@ -128,7 +128,7 @@ fn plan() -> impl Strategy<Value = Plan> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: if std::env::var_os("PROPTEST_CASES").is_some() { ProptestConfig::default().cases } else { 64 }, ..ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig::with_cases(paddock_testkit::proptest_cases(64)))]
 
     #[test]
     fn a_plan_reads_back_equal(p in plan()) {

@@ -1691,7 +1691,7 @@ fn nested_documents_stop_the_decoder_before_the_stack_does() {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: if std::env::var_os("PROPTEST_CASES").is_some() { ProptestConfig::default().cases } else { 512 }, ..ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig::with_cases(paddock_testkit::proptest_cases(512)))]
 
     #[test]
     fn decoding_and_validating_arbitrary_input_never_panics(bytes in proptest::collection::vec(any::<u8>(), 0..2048), text in ".{0,512}") {

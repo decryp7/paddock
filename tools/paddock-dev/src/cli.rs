@@ -321,6 +321,9 @@ enum SelfCommand {
 struct ProptestSeedsArgs {
     /// The nextest output of the step, as a file.
     log: PathBuf,
+    /// The repository root the printed paths are made relative to (default: PADDOCK_WORKSPACE, then GITHUB_WORKSPACE).
+    #[arg(long)]
+    root: Option<String>,
 }
 
 #[derive(Args)]
@@ -745,9 +748,11 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
                     ),
                 )
             })?;
-            let seeds = crate::proptest_seeds::find(&log);
-            let text = seeds.iter().map(crate::proptest_seeds::annotation).collect::<Vec<_>>().join("\n");
-            let json: Vec<_> = seeds
+            let root = a.root.clone().or_else(|| ["PADDOCK_WORKSPACE", "GITHUB_WORKSPACE"].iter().find_map(|k| std::env::var(k).ok()));
+            let lines = crate::proptest_seeds::report(&log, root.as_deref());
+            let text = lines.join("\n");
+            let json: Vec<_> = crate::proptest_seeds::find(&log)
+                .seeds
                 .iter()
                 .map(|s| serde_json::json!({ "crate": s.krate, "test": s.test, "cc": s.cc, "file": s.file }))
                 .collect();

@@ -3264,7 +3264,10 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **Fix (rule 89):** the fix for a CI-found proptest failure commits the `cc` line to the crate's `proptest-regressions/` file (four crates
   already do). A failed test step now prints the line, the crate, the test and the file as one `::error::` annotation
   (`./dev ci proptest-seeds`, tested on a recorded nextest log with a positive control: no proptest failure, no annotation). The
-  nightly runs the proptest crates with `PROPTEST_CASES=10000` (report-only) to find cases before a gate does.
+  nightly runs the proptest crates of `crates/` with `PROPTEST_CASES=10000` (report-only) to find cases before a gate does. A real
+  proptest log showed two things the first version missed: an integration test saves to `tests/<file>.proptest-regressions` (the
+  annotation now prints the path proptest printed, relative to the repository root, instead of cutting it), and one of two failing
+  tests of a binary printed no seed text at all (two tests saving to one file), so a log can hold a failure with no line to read.
 - **Why the logs did not show it:** the seed line was in the step's output only; nothing pointed at it as the thing to keep.
 - **Class: a failure that only the random input found is not kept.** Earlier: none recorded for proptest; the same shape as a flaky test
   whose reproduction is lost (rule 50 (k), ER-12).

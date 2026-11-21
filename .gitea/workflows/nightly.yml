@@ -561,7 +561,9 @@ jobs:
   # not in a gate (ci.yml 8425 green, 8466 red on one sha). The crates are those whose Cargo.toml asks for proptest (read from the
   # manifests, no hand list). A failing case is one `::error::` with its `cc` seed line and the file to commit it to
   # (`./dev ci proptest-seeds`). Report-only (ER-41): `continue-on-error`, and not in `mark`, until its first green run on the
-  # real tree (record run id: not yet; docs/ci-schedules.md). Time: docs/benchmarks.md, "Proptest with 10000 cases".
+  # real tree (record run id: not yet; docs/ci-schedules.md). Time: docs/benchmarks.md, "Proptest with 10000 cases"; the nextest
+  # profile `nightly-proptest` (crates/.config/nextest.toml) holds the measured per-test limit. The filter is the package list: a
+  # property test has no name or binary marker, so the proptest crates' other tests run too (ordinary tests, small next to the properties).
   proptest-deep:
     name: proptest (10000 cases, report-only)
     timeout-minutes: 60
@@ -577,6 +579,8 @@ jobs:
       PROPTEST_CASES: "10000"
     steps:
       - uses: actions/checkout@v4
+      # CARGO_BUILD_JOBS and NEXTEST_TEST_THREADS: this job's share of the host (ER-48; `./dev ci build-jobs` through conformance/ci/kit.sh).
+      - uses: ./.gitea/actions/build-jobs
       - uses: ./.gitea/actions/setup-rust
       - name: Property tests, 10000 cases
         working-directory: crates
@@ -589,7 +593,7 @@ jobs:
           if [ "${#pkgs[@]}" -eq 0 ]; then echo "::error::no crate asks for proptest: the manifest scan found none. Next step: check the scan in nightly.yml (proptest-deep)."; exit 1; fi
           echo "::notice::proptest crates: ${pkgs[*]}"
           log=$(mktemp)
-          if cargo nextest run "${pkgs[@]}" --all-features --profile ci --no-fail-fast 2>&1 | tee "$log"; then rc=0; else rc=${PIPESTATUS[0]}; fi
+          if cargo nextest run "${pkgs[@]}" --all-features --profile nightly-proptest --no-fail-fast 2>&1 | tee "$log"; then rc=0; else rc=${PIPESTATUS[0]}; fi
           if [ "$rc" -ne 0 ]; then ../dev ci proptest-seeds "$log" || true; echo "::error::proptest with 10000 cases failed (exit $rc). Next step: commit each cc line above to its file, then fix the code (rule 89)."; fi
           exit "$rc"
 

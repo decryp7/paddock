@@ -779,7 +779,7 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: if std::env::var_os("PROPTEST_CASES").is_some() { ProptestConfig::default().cases } else { 400 }, ..ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig::with_cases(paddock_testkit::proptest_cases(400)))]
 
         /// ADR 0043 check 2: whatever order events come in, the plans keep the window inside its limits, only a user
         /// resize makes it manual, and the window is shown only after its ready.

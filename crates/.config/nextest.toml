@@ -48,6 +48,19 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 # Written to <target>/nextest/ci/junit.xml.
 path = "junit.xml"
 
+# The nightly's property tests (rule 89, `nightly.yml` job `proptest-deep`): the ci profile with a longer time budget, because
+# PROPTEST_CASES=10000 makes one property run for over a minute.
+# waiver: measured 2026-11-21 (docs/benchmarks.md, "Proptest with 10000 cases"): the slowest property test,
+# paddock-jobs properties::walk_equals_sequential_reference, took 78.8 s at 10000 cases (the default 400 or fewer: under 1 s), at a
+# 1-minute load of about 35 on a Mac mini with 2 build jobs; every other one under 20 s. 60 s periods, stopped after 240 s: three
+# times the slowest measured, so a hung property is still stopped.
+[profile.nightly-proptest]
+inherits = "ci"
+slow-timeout = { period = "60s", terminate-after = 4 }
+
+[profile.nightly-proptest.junit]
+path = "junit.xml"
+
 # waiver: a real browser's start is judged on its run state (ADR 0031): a working start on a loaded runner is waited for, and
 # only a stuck one fails, after up to 120 s of CPU without becoming ready (the spin patience); 60 s would stop the test first.
 [[profile.ci.overrides]]

@@ -269,7 +269,7 @@ fn execute(
         ran += 1;
         if let Some(file) = &capture {
             if code != 0 {
-                annotate_proptest_seeds(file, out);
+                annotate_proptest_seeds(file, root, out);
             }
             let _ = std::fs::remove_file(file);
         }
@@ -315,10 +315,10 @@ fn tee_to(text: &str, file: &Path) -> String {
 
 /// One `::error::` per failing proptest case in the kept output of a failed nextest line (a log that cannot be read says nothing:
 /// the line's own error follows).
-fn annotate_proptest_seeds(file: &Path, out: &mut dyn Write) {
+fn annotate_proptest_seeds(file: &Path, root: &Path, out: &mut dyn Write) {
     let Ok(bytes) = std::fs::read(file) else { return };
-    for seed in crate::proptest_seeds::find(&String::from_utf8_lossy(&bytes)) {
-        let _ = writeln!(out, "{}", crate::proptest_seeds::annotation(&seed));
+    for line in crate::proptest_seeds::report(&String::from_utf8_lossy(&bytes), root.to_str()) {
+        let _ = writeln!(out, "{line}");
     }
 }
 

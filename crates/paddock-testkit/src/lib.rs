@@ -66,6 +66,7 @@ pub use cases::{both, case, run_cases};
 pub use env::{EnvLock, env_lock};
 pub use golden::{Golden, GoldenError, GoldenMode, assert_golden, check_golden};
 pub use hostile::{assert_never_panics, corpus, never_panics};
+pub use paddock_env::proptest_cases;
 pub use paddock_env::winpath::{real_or_given, same};
 pub use paddock_jobs::time::{Clock, FakeClock};
 pub use private_temp::{PrivateTemp, private_tempdir};

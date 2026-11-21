@@ -1,0 +1,164 @@
+captured from a real run: cargo-nextest 0.9.x --retries 1, proptest 1.x, a scratch crate ptdemo (never in this repo): two failing lib properties and one failing integration property, each tried twice; paths made repo-neutral
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+────────────
+ Nextest run ID 82c8e84e-9126-4784-a92d-4cab65aad23b with nextest profile: default
+    Starting 3 tests across 2 binaries
+  TRY 1 FAIL [   0.015s] (───) ptdemo tests::always_tiny
+  stdout ───
+
+    running 1 test
+    test tests::always_tiny ... FAILED
+
+    failures:
+
+    failures:
+        tests::always_tiny
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+  stderr ───
+    proptest: Saving this and future failures in /work/ptdemo/proptest-regressions/lib.txt
+    proptest: If this test was run on a CI system, you may wish to add the following line to your copy of the file. (You may need to create it.)
+    cc 8929a0faa835fc59e37ef7dae5b8ce283a05e55cd46dbaaa09f5cf3762523955
+
+    thread 'tests::always_tiny' (300795072) panicked at src/lib.rs:5:5:
+    Test failed: assertion failed: x < 2 at src/lib.rs:9.
+    minimal failing input: x = 2
+    successes: 0
+    local rejects: 0
+    global rejects: 0
+
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  TRY 1 FAIL [   0.018s] (───) ptdemo tests::always_small
+  stdout ───
+
+    running 1 test
+    test tests::always_small ... FAILED
+
+    failures:
+
+    failures:
+        tests::always_small
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'tests::always_small' (300795073) panicked at src/lib.rs:5:5:
+    Test failed: assertion failed: x < 3 at src/lib.rs:7.
+    minimal failing input: x = 3
+    successes: 0
+    local rejects: 0
+    global rejects: 0
+
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  TRY 1 FAIL [   0.018s] (───) ptdemo::props it_fails
+  stdout ───
+
+    running 1 test
+    test it_fails ... FAILED
+
+    failures:
+
+    failures:
+        it_fails
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+  stderr ───
+    proptest: FileFailurePersistence::SourceParallel set, but failed to find lib.rs or main.rs
+    proptest: FileFailurePersistence::SourceParallel set, but failed to find lib.rs or main.rs
+    proptest: Saving this and future failures in /work/ptdemo/tests/props.proptest-regressions
+    proptest: If this test was run on a CI system, you may wish to add the following line to your copy of the file. (You may need to create it.)
+    cc d768bcdb4e99c949f7887e93577986c0f83d312593bc2d52f935c5e2f1d0617a
+
+    thread 'it_fails' (300795071) panicked at tests/props.rs:2:1:
+    Test failed: assertion failed: x < 3 at tests/props.rs:4.
+    minimal failing input: x = 3
+    successes: 0
+    local rejects: 0
+    global rejects: 0
+
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  TRY 2 FAIL [   0.012s] (1/3) ptdemo::props it_fails
+  stdout ───
+
+    running 1 test
+    test it_fails ... FAILED
+
+    failures:
+
+    failures:
+        it_fails
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+  stderr ───
+    proptest: FileFailurePersistence::SourceParallel set, but failed to find lib.rs or main.rs
+
+    thread 'it_fails' (300795081) panicked at tests/props.rs:2:1:
+    Test failed: assertion failed: x < 3 at tests/props.rs:4.
+    minimal failing input: x = 3
+    successes: 0
+    local rejects: 0
+    global rejects: 0
+
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  TRY 2 FAIL [   0.013s] (2/3) ptdemo tests::always_small
+  stdout ───
+
+    running 1 test
+    test tests::always_small ... FAILED
+
+    failures:
+
+    failures:
+        tests::always_small
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'tests::always_small' (300795082) panicked at src/lib.rs:5:5:
+    Test failed: assertion failed: x < 3 at src/lib.rs:7.
+    minimal failing input: x = 3
+    successes: 0
+    local rejects: 0
+    global rejects: 0
+
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+  TRY 2 FAIL [   0.014s] (3/3) ptdemo tests::always_tiny
+  stdout ───
+
+    running 1 test
+    test tests::always_tiny ... FAILED
+
+    failures:
+
+    failures:
+        tests::always_tiny
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'tests::always_tiny' (300795083) panicked at src/lib.rs:5:5:
+    Test failed: assertion failed: x < 2 at src/lib.rs:9.
+    minimal failing input: x = 2
+    successes: 0
+    local rejects: 0
+    global rejects: 0
+
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+────────────
+     Summary [   0.034s] 3 tests run: 0 passed, 3 failed, 0 skipped
+  TRY 2 FAIL [   0.012s] (1/3) ptdemo::props it_fails
+  TRY 2 FAIL [   0.013s] (2/3) ptdemo tests::always_small
+  TRY 2 FAIL [   0.014s] (3/3) ptdemo tests::always_tiny
+error: test run failed
