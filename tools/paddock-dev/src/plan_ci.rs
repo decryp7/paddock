@@ -64,16 +64,20 @@ pub fn member_run(event: &str, input_base: &str, since_run: &str, plan_app: Opti
     event == "workflow_dispatch" && !input_base.trim().is_empty() && since_run.trim().is_empty() && plan_app.is_none()
 }
 
-/// The nextest filterset (`package(=a) | package(=b)`) of the packages of one Cargo workspace that a change reaches, when `narrow`;
-/// empty (every test) when not narrowing, when the plan says everything, when it names no package, or when it names them all.
-pub fn package_filter(plan: &Value, graph: &RepoGraph, cargo_dir: &str, narrow: bool) -> String {
+/// The nextest filterset (`package(=a) | package(=b)`) of the packages of one Cargo workspace (`cargo_dir`, owned by `project`:
+/// `crates`, `paddock-dev` or `app:<name>`) that a change reaches, when `narrow`; empty (every test) when not narrowing, when the
+/// plan says everything, when it names no package, when it names them all, or when the project has a reason beyond Cargo.
+pub fn package_filter(plan: &Value, graph: &RepoGraph, cargo_dir: &str, project: &str, narrow: bool) -> String {
     let members = graph.cargo.iter().filter(|(_, n)| n.workspace == cargo_dir).count();
     let hit: Vec<String> = plan["packages"][cargo_dir]
         .as_array()
         .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
         .unwrap_or_default();
     let all = plan["all"].as_bool().unwrap_or(false);
-    if narrow && !all && !hit.is_empty() && hit.len() < members {
+    // Only when every reason the plan gave for the project is a Cargo reach (`cargoOnly`): a UI file, an installer file, a lockfile
+    // or a script reaches tests that no package list names, so the project then runs whole. A plan without the list narrows nothing.
+    let cargo_only = plan["cargoOnly"].as_array().is_some_and(|a| a.iter().any(|p| p == project));
+    if narrow && !all && cargo_only && !hit.is_empty() && hit.len() < members {
         hit.iter().map(|n| format!("package(={n})")).collect::<Vec<_>>().join(" | ")
     } else {
         String::new()
@@ -86,8 +90,8 @@ pub fn package_filter(plan: &Value, graph: &RepoGraph, cargo_dir: &str, narrow: 
 /// narrowed run would not be the workspace's.
 pub fn package_filters(plan: &Value, graph: &RepoGraph, narrow: bool) -> Value {
     json!({
-        "crates": package_filter(plan, graph, "crates", narrow),
-        "paddockDev": package_filter(plan, graph, "tools/paddock-dev", narrow),
+        "crates": package_filter(plan, graph, "crates", "crates", narrow),
+        "paddockDev": package_filter(plan, graph, "tools/paddock-dev", "paddock-dev", narrow),
     })
 }
 
@@ -127,7 +131,7 @@ pub fn matrix(plan: &Value, graph: &RepoGraph, opts: MatrixOpts) -> Result<Vec<V
         let filter = if cargo_dir.is_empty() {
             String::new()
         } else {
-            package_filter(plan, graph, &cargo_dir, opts.narrow)
+            package_filter(plan, graph, &cargo_dir, &format!("app:{name}"), opts.narrow)
         };
         let kinds = kinds_of(plan, name);
         let rust = kinds.iter().any(|k| k == "rust");
@@ -253,6 +257,7 @@ pub fn only_app(plan: &Value, app: &str) -> Value {
     out["apps"] = json!([app]);
     out["kinds"] = json!({ app: ["rust", "ui"] });
     out["packages"] = json!({});
+    out["cargoOnly"] = json!([]);
     out
 }
 
@@ -655,7 +660,12 @@ mod tests {
     }
 
     fn plan(apps: &[&str], kinds: Value, packages: Value) -> Value {
-        json!({"all": false, "apps": apps, "kinds": kinds, "packages": packages})
+        // Every project reached only through Cargo, as a plan of source changes in crates is.
+        let cargo_only: Vec<String> = ["crates".to_string(), "paddock-dev".to_string()]
+            .into_iter()
+            .chain(apps.iter().map(|a| format!("app:{a}")))
+            .collect();
+        json!({"all": false, "apps": apps, "kinds": kinds, "packages": packages, "cargoOnly": cargo_only})
     }
 
     fn row(l: &Value, keys: &[&str]) -> Vec<Value> {
@@ -695,18 +705,32 @@ mod tests {
         }
         let g = graph_with(vec![], cargo);
         let some = plan(&[], json!({}), json!({"crates": ["p-a", "p-c"]}));
-        assert_eq!(package_filter(&some, &g, "crates", true), "package(=p-a) | package(=p-c)");
+        assert_eq!(package_filter(&some, &g, "crates", "crates", true), "package(=p-a) | package(=p-c)");
         // Positive control: the same plan not narrowing, a plan that says everything, none reached, all reached, another workspace.
-        assert_eq!(package_filter(&some, &g, "crates", false), "");
+        assert_eq!(package_filter(&some, &g, "crates", "crates", false), "");
+        // A reason beyond Cargo for the project (an installer file, a UI file, a lockfile): it runs whole. The positive control is the
+        // same plan with the project in `cargoOnly`, which narrows.
+        let mut mixed = some.clone();
+        mixed["cargoOnly"] = json!(["paddock-dev"]);
+        assert_eq!(package_filter(&mixed, &g, "crates", "crates", true), "");
+        let mut bare = some.clone();
+        bare.as_object_mut().unwrap().remove("cargoOnly");
+        assert_eq!(package_filter(&bare, &g, "crates", "crates", true), "");
         let mut everything = some.clone();
         everything["all"] = json!(true);
-        assert_eq!(package_filter(&everything, &g, "crates", true), "");
-        assert_eq!(package_filter(&plan(&[], json!({}), json!({})), &g, "crates", true), "");
+        assert_eq!(package_filter(&everything, &g, "crates", "crates", true), "");
+        assert_eq!(package_filter(&plan(&[], json!({}), json!({})), &g, "crates", "crates", true), "");
         assert_eq!(
-            package_filter(&plan(&[], json!({}), json!({"crates": ["p-a", "p-b", "p-c"]})), &g, "crates", true),
+            package_filter(
+                &plan(&[], json!({}), json!({"crates": ["p-a", "p-b", "p-c"]})),
+                &g,
+                "crates",
+                "crates",
+                true
+            ),
             ""
         );
-        assert_eq!(package_filter(&some, &g, "tools/paddock-dev", true), "");
+        assert_eq!(package_filter(&some, &g, "tools/paddock-dev", "paddock-dev", true), "");
         let mut with = some.clone();
         with["filters"] = package_filters(&some, &g, true);
         let out: std::collections::BTreeMap<String, String> = ci_outputs(&with, &[], None).into_iter().collect();

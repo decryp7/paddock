@@ -148,6 +148,7 @@ jobs:
           PLAN_MODE_FULL: ${{ github.event_name == 'push' || inputs.app != '' || (github.event_name == 'workflow_dispatch' && github.event.inputs.base == '' && github.event.inputs.since_run == '') }}
           # A reused run (the step above): no job runs and the run is not complete; the reused run decides the commit.
           PLAN_REUSE: ${{ steps.reuse.outputs.reuse }}
+          EVENT: ${{ github.event_name }}
         run: |
           echo "plan mode: full=$PLAN_MODE_FULL"
           if [ "$PLAN_REUSE" = true ]; then echo 'rerun_jobs=[]' >> "$GITHUB_OUTPUT"; else ./dev plan --ci; fi
@@ -155,7 +156,10 @@ jobs:
           grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           # After the plan decided: complete only for a full run that is not a rerun of failures (plan_since::COMPLETE_LINE).
           complete=false
-          if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ] && [ "$PLAN_REUSE" != true ]; then complete=true; fi
+          # One meaning of "complete" (ER-15): the scope of a push to main, WebKit included (plan_ci::wants_webkit). A full dispatch
+          # without the webkit input, or a rerun, is a smaller scope, so the tag gate never reads it as the tested commit, and a
+          # push to main is never skipped for it (ci_runs::reuse). An app's own gates (PLAN_APP) are scoped to that app.
+          if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ] && [ "$PLAN_REUSE" != true ] && { [ "$EVENT" = push ] || [ -n "$PLAN_WEBKIT" ] || [ -n "$PLAN_APP" ]; }; then complete=true; fi
           echo "plan verdict: complete=$complete"
 
   # C102 (ADR 0072): every listen site of the Rust sources is in docs/ipc-endpoints.toml with an ending test or a reason, and the

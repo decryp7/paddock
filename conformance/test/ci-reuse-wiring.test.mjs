@@ -40,7 +40,7 @@ test('a reused ci.yml run runs no job and is never complete', () => {
   const plan = jobText(ci, 'plan');
   // Every job reads `rerun_jobs`: an empty list is none of them, so a reused run runs nothing.
   assert.match(plan, /if \[ "\$PLAN_REUSE" = true \]; then echo 'rerun_jobs=\[\]' >> "\$GITHUB_OUTPUT"; else \.\/dev plan --ci; fi/);
-  const say = (env) => spawnSync('bash', ['-c', verdictSnippet(ci)], { encoding: 'utf8', env: { PATH: process.env.PATH, PLAN_SINCE_RUN: '', PLAN_MODE_FULL: 'true', ...env } }).stdout.trim();
+  const say = (env) => spawnSync('bash', ['-c', verdictSnippet(ci)], { encoding: 'utf8', env: { PATH: process.env.PATH, PLAN_SINCE_RUN: '', PLAN_MODE_FULL: 'true', EVENT: 'push', ...env } }).stdout.trim();
   assert.equal(say({}), 'plan verdict: complete=true');
   assert.equal(say({ PLAN_REUSE: 'false' }), 'plan verdict: complete=true');
   assert.equal(say({ PLAN_REUSE: 'true' }), 'plan verdict: complete=false');
@@ -60,4 +60,25 @@ test('a reused debrief.yml run plans nothing and is never complete', () => {
   const say = (run) => spawnSync('bash', ['-c', snippet], { encoding: 'utf8', env: { PATH: process.env.PATH, run, PLAN_SINCE_RUN: '', PLAN_MODE_FULL: 'true' } }).stdout.trim();
   assert.equal(say('false'), 'plan verdict: complete=false');
   assert.equal(say('true'), 'plan verdict: complete=true');
+});
+
+// P1 (2026-11-21): "complete" has one meaning for ci.yml, the scope of a push to main, WebKit included (plan_ci::wants_webkit). A full
+// dispatch without the webkit input logged complete=true, so reuse could skip the main push run for it and the tag gate would read a
+// green verdict that never ran WebKit. The marker now needs the push, the webkit input, or an app's own gates.
+test('a full ci.yml dispatch without WebKit is not complete; with WebKit, a push or an app gate it is', () => {
+  const ci = text('ci.yml');
+  const say = (env) =>
+    spawnSync('bash', ['-c', verdictSnippet(ci)], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, PLAN_SINCE_RUN: '', PLAN_MODE_FULL: 'true', PLAN_REUSE: '', PLAN_WEBKIT: '', PLAN_APP: '', EVENT: 'workflow_dispatch', ...env },
+    }).stdout.trim();
+  // The train dispatch with no base and no webkit input: a smaller scope than a push to main.
+  assert.equal(say({}), 'plan verdict: complete=false');
+  // Positive controls: the same run with the webkit input, a push to main, an app's own gates.
+  assert.equal(say({ PLAN_WEBKIT: '1' }), 'plan verdict: complete=true');
+  assert.equal(say({ EVENT: 'push' }), 'plan verdict: complete=true');
+  assert.equal(say({ PLAN_APP: 'dyno' }), 'plan verdict: complete=true');
+  // A rerun or a reused run is never complete, with WebKit or not.
+  assert.equal(say({ PLAN_WEBKIT: '1', PLAN_SINCE_RUN: '8001' }), 'plan verdict: complete=false');
+  assert.equal(say({ EVENT: 'push', PLAN_REUSE: 'true' }), 'plan verdict: complete=false');
 });

@@ -404,24 +404,35 @@ fn fixture_with_origin() -> (tempfile::TempDir, PathBuf) {
 
 #[test]
 fn recorded_command_line_cases_match_the_planners_answers_on_the_fixture_repository() {
-    let (_keep, root) = fixture_with_origin();
+    let (_keep, shared_root) = fixture_with_origin();
     let mut failures = Vec::new();
     let cases = cli_cases();
     assert!(cases.len() >= 25, "the recorded command line cases");
     for case in &cases {
         let name = case["name"].as_str().unwrap();
-        let expected: Value =
-            serde_json::from_str(&std::fs::read_to_string(golden_dir().join("expected/cli").join(format!("{name}.json"))).unwrap())
-                .unwrap();
+        // A case with an `edit` ({path: text}) runs on its own copy of the fixture with one more commit that writes those files, the
+        // change of a member's branch.
+        let own = case.get("edit").and_then(Value::as_object).map(|edit| {
+            let (keep, root) = fixture_with_origin();
+            for (path, text) in edit {
+                std::fs::write(root.join(path), text.as_str().unwrap()).unwrap();
+            }
+            git(&root, &["add", "-A"]);
+            git(&root, &["commit", "-q", "-m", "member"]);
+            (keep, root)
+        });
+        let root = own.as_ref().map_or(&shared_root, |(_, r)| r);
+        let recorded = std::fs::read_to_string(golden_dir().join("expected/cli").join(format!("{name}.json"))).ok();
         let mut program = crate::dev_bin::command();
         program.arg("plan");
-        let got = run_cli(&mut program, &root, case);
+        let got = run_cli(&mut program, root, case);
         if bless() {
             record(&golden_dir().join("expected/cli").join(format!("{name}.json")), &got);
             continue;
         }
-        if got != expected {
-            failures.push(format!("{name}:\n  expected {expected}\n  got      {got}"));
+        let expected: Option<Value> = recorded.map(|t| serde_json::from_str(&t).unwrap());
+        if expected.as_ref() != Some(&got) {
+            failures.push(format!("{name}:\n  expected {expected:?}\n  got      {got}"));
         }
     }
     assert!(failures.is_empty(), "{}\n{REGENERATE}", failures.join("\n"));
@@ -436,7 +447,11 @@ fn package_filters(event: &str, base: &str, app: Option<&str>) -> (String, Strin
     git(&root, &["commit", "-q", "-m", "member"]);
     let mut env = serde_json::Map::new();
     env.insert("GITHUB_EVENT_NAME".into(), json!(event));
-    env.insert("GITHUB_REF".into(), json!("refs/heads/topic"));
+    // A push is a push to main (the ref ci.yml's reuse and full-run rules read); the others run on a branch.
+    env.insert(
+        "GITHUB_REF".into(),
+        json!(if event == "push" { "refs/heads/main" } else { "refs/heads/topic" }),
+    );
     if !base.is_empty() {
         env.insert("PLAN_BASE".into(), json!(base));
     }

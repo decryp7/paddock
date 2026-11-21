@@ -20,11 +20,21 @@ that was red, partial (a base or `since_run` dispatch), or green with a FLAKY te
 is a real full run that `tag.yml`'s reader can use (a train that was red only with FLAKY tests needs it). Anything that cannot be
 read (the list, a job, a log, the token) runs the commit (fail open to running, never to skipping).
 
+**"Complete" is one scope: a push to main's (ER-15, 2026-11-21).** `plan verdict: complete=true` of `ci.yml` means the run had the scope
+of a push to main, WebKit included: a push, a dispatch with the `webkit` input, or an app's own gates. A train's full dispatch
+without WebKit logs `complete=false`, so `./dev ci verdict` does not count it and `ci reuse` does not skip the main push run for it;
+otherwise a tag could read a green verdict that never ran WebKit (the same class as run 8335 and the schedule-skipped and
+rerun-only runs counted green on 2026-11-12). Dispatch trains with `webkit=true` to have them reused. `./dev ci verdict`'s hint of
+the last fully tested commit asks the same reader about each of main's newest commits, so a push that reused a train run
+(partial itself) still names the commit the train tested.
+
 **Member runs test only the reached packages (2026-11-21).** A dispatch with a `base` and no `since_run` (a member or a fix round)
 passes `./dev plan --ci` the event, and the plan narrows nextest to the packages the change reaches: the app legs' `filter`, and
 `crates_filter` and `paddock_dev_filter` for the host legs of `crate` and the tests of `paddock-dev`. The Linux crate tests run
 whole under coverage in `crates`. A push to main, a tag, the nightly, a manual run with no base and an app's own gates are never
-narrowed: the full run on the final head catches what the narrowed ones missed (ER-8).
+narrowed: the full run on the final head catches what the narrowed ones missed (ER-8). A project is narrowed only when every reason the plan
+gives for it is a Cargo reach (`cargoOnly` in the plan): a UI, installer, lockfile or script reason runs its tests whole. A half of an app's
+nextest that selects no test is skipped with a notice, never passed.
 
 **Proxmox backup window.** Starts at 00:00 local (UTC+8; 16:00 UTC), stated by the user on 2026-11-10. The end is not
 known; 04:00 local (20:00 UTC) is assumed until evidence says otherwise. The Windows CI VM crawled from 00:52 local on

@@ -121,7 +121,7 @@ test('the verdict is complete=true only for a plan that ran, a full mode and no 
     const snippet = verdictSnippet(text(w));
     assert.ok(snippet, `${w}: no verdict snippet`);
     const decides = snippet.includes('"$run"');
-    const say = (env) => runSnippet(snippet, { run: 'true', PLAN_MODE_FULL: 'true', PLAN_SINCE_RUN: '', ...env });
+    const say = (env) => runSnippet(snippet, { run: 'true', PLAN_MODE_FULL: 'true', PLAN_SINCE_RUN: '', EVENT: 'push', ...env });
     assert.equal(say({}), 'plan verdict: complete=true', w);
     // A since_run rerun (debrief: with bundles, so the scope line says full=true) is not complete.
     assert.equal(say({ PLAN_SINCE_RUN: '8001' }), 'plan verdict: complete=false', `${w}: since_run`);

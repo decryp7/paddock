@@ -9,6 +9,12 @@
 //! - anything that cannot be read (the runs, the jobs, a log) means "run": the step fails open to the full run, never to a
 //!   skipped one.
 //!
+//! - "complete" has one meaning (ER-15), the scope of a push to main: ci.yml logs `complete=true` only for a push, a dispatch that
+//!   asked for WebKit (`webkit` input, the scope of `plan_ci::wants_webkit`) or an app's own gates. A train's full dispatch without
+//!   WebKit logs `complete=false`, so it is neither reused here nor counted by the verdict reader: the push to main runs, WebKit
+//!   included, and `tag.yml` never reads a green verdict that skipped it (run 8335; the 2026-11-12 schedule-skipped and
+//!   rerun-only runs counted green were the same class).
+//!
 //! A run that reuses another ends with `plan verdict: complete=false`, so the reader never counts it; the reused run is the one
 //! that decides the commit.
 
@@ -186,6 +192,27 @@ mod tests {
             "{note}"
         );
         assert!(r.summary("ci.yml").contains("run 7"));
+    }
+
+    #[test]
+    fn a_full_green_dispatch_without_webkit_is_not_reused_and_one_with_webkit_is() {
+        // ci.yml logs complete=false for a full dispatch that did not run WebKit (a smaller scope than a push to main): run 7 below.
+        let mut f = server(
+            vec![run(7, "workflow_dispatch", "train/x", "success")],
+            &[],
+            7,
+            &[(71, Some("ok\n"))],
+        );
+        let r = ask(&mut f, Some(9));
+        assert!(matches!(&r, Reuse::Run(why) if why.contains("full run")), "{r:?}");
+        // The same run with the WebKit scope logged complete=true is reused.
+        let mut f = server(
+            vec![run(7, "workflow_dispatch", "train/x", "success")],
+            &[7],
+            7,
+            &[(71, Some("ok\n"))],
+        );
+        assert!(ask(&mut f, Some(9)).skip());
     }
 
     #[test]
