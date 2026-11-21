@@ -489,6 +489,79 @@ fn a_member_run_narrows_nextest_to_the_reached_packages_and_a_full_run_never_doe
     }
 }
 
+/// The scope declaration `./dev plan --ci` printed (ADR 0113) for the given workflow environment, and its `GITHUB_OUTPUT`, on the
+/// fixture repository.
+fn declared_scope(env: &[(&str, &str)]) -> (paddock_dev::run_scope::Declared, String) {
+    let (_keep, root) = fixture_with_origin();
+    let dir = tempfile::tempdir().unwrap();
+    let mut program = crate::dev_bin::command();
+    program.arg("plan").current_dir(&root);
+    for (k, _) in paddock_dev::process_env::vars() {
+        if k.starts_with("GITHUB_") || k.starts_with("PLAN_") {
+            program.env_remove(k);
+        }
+    }
+    program
+        .env("GITHUB_OUTPUT", dir.path().join("out"))
+        .env("GITHUB_STEP_SUMMARY", dir.path().join("summary"));
+    for (k, v) in env {
+        program.env(k, v);
+    }
+    let out = program.arg("--ci").output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let log = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let declared = paddock_dev::run_scope::read(&log)
+        .unwrap_or_else(|| panic!("no `plan scope:` line in the log of {env:?}:\n{log}"))
+        .unwrap();
+    (declared, std::fs::read_to_string(dir.path().join("out")).unwrap_or_default())
+}
+
+/// ADR 0113: what a ci.yml plan declares for each kind of run, read back by the one reader. A push to main, a full dispatch with
+/// WebKit and a tag are complete; every smaller scope is not, each missing one dimension (positive controls: the same tree).
+#[test]
+fn ci_plan_declares_a_scope_that_is_complete_only_when_it_covers_a_push_to_main() {
+    let push = [("GITHUB_EVENT_NAME", "push"), ("GITHUB_REF", "refs/heads/main")];
+    let dispatch = |extra: &[(&'static str, &'static str)]| {
+        let mut e = vec![("GITHUB_EVENT_NAME", "workflow_dispatch"), ("GITHUB_REF", "refs/heads/topic")];
+        e.extend_from_slice(extra);
+        declared_scope(&e).0
+    };
+    // Complete: a push to main (WebKit always), a full dispatch with the webkit input, a tag.
+    let main = declared_scope(&push).0;
+    assert_eq!(main.complete(), Ok(()), "{}", main.line());
+    assert!(
+        main.need.engines.contains("webkit") && main.ran.engines.contains("webkit"),
+        "{}",
+        main.line()
+    );
+    assert_eq!(dispatch(&[("PLAN_WEBKIT", "1")]).complete(), Ok(()));
+    assert_eq!(
+        declared_scope(&[("GITHUB_EVENT_NAME", "push"), ("GITHUB_REF", "refs/tags/v1.0.0")])
+            .0
+            .complete(),
+        Ok(())
+    );
+    // One engine missing: the same full dispatch without the webkit input (the D4 hole).
+    let no_webkit = dispatch(&[]);
+    assert!(no_webkit.complete().unwrap_err().contains("engines webkit"), "{}", no_webkit.line());
+    // One app (and its legs) missing: a dispatch with `app` is that app only, with or without WebKit.
+    let app_only = dispatch(&[("PLAN_APP", "x"), ("PLAN_WEBKIT", "1")]);
+    assert!(app_only.complete().unwrap_err().contains("apps "), "{}", app_only.line());
+    // A member run (a base) covers less than the whole tree even with WebKit.
+    let member = dispatch(&[("PLAN_BASE", "fixture-head"), ("PLAN_WEBKIT", "1")]);
+    assert!(member.complete().is_err(), "{}", member.line());
+    // A reused run ran nothing; it also switches every job off.
+    let (reused, outputs) = declared_scope(&[
+        ("GITHUB_EVENT_NAME", "push"),
+        ("GITHUB_REF", "refs/heads/main"),
+        ("PLAN_REUSE", "true"),
+    ]);
+    assert!(reused.complete().is_err() && reused.ran.jobs.is_empty(), "{}", reused.line());
+    assert!(outputs.lines().any(|l| l == "rerun_jobs=[]"), "{outputs}");
+    // Every run names its workflow, so the reader ignores it for another.
+    assert_eq!(main.workflow, "ci.yml");
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // The per-job narrowing of `.gitea/` and `conformance/ci` changes, made deterministic (the recorded cases and the history
 // sample do not reach every job): uncommitted edits in a copy of this repository, the script as the oracle.

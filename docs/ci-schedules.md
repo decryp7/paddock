@@ -15,21 +15,23 @@ most one skipped night. When the Actions API cannot be read the run proceeds (fa
 **A push to main reuses a green train run (ER-49, user, 2026-11-21).** `ci.yml` and `debrief.yml` ask `./dev ci reuse` first for a push
 to main: when `./dev ci verdict`'s reader finds a complete green run of the same workflow on that exact commit (the train's
 dispatch, when main fast-forwards to its head) and no job log of it has a FLAKY test, the push run ends early, runs no job and
-logs `plan verdict: complete=false`; its summary names the reused run. The asking run is left out of the runs it reads. A run
+declares that it ran nothing (`PLAN_REUSE`; ADR 0113), so no reader counts it; its summary names the reused run. The asking run is left out of the runs it reads. A run
 that was red, partial (a base or `since_run` dispatch), or green with a FLAKY test is not reused, so the post-landing run on main
 is a real full run that `tag.yml`'s reader can use (a train that was red only with FLAKY tests needs it). Anything that cannot be
 read (the list, a job, a log, the token) runs the commit (fail open to running, never to skipping).
 
-**"Complete" is one scope: a push to main's (ER-15, 2026-11-21).** `plan verdict: complete=true` of `ci.yml` means the run had the scope
-of a push to main, WebKit included: a push, or a dispatch with the `webkit` input and no `app`. A dispatch with `app` is that app only
-and never complete. A train's full dispatch
-without WebKit logs `complete=false`, so `./dev ci verdict` does not count it and `ci reuse` does not skip the main push run for it;
-otherwise a tag could read a green verdict that never ran WebKit (the same class as run 8335 and the schedule-skipped and
-rerun-only runs counted green on 2026-11-12). `./dev ci dispatch ci.yml --ref train/...` therefore adds `webkit=true` itself for a full dispatch (no `base`, no `since_run`); an explicit
-`--input webkit=false` wins, and a member run or a rerun is sent as asked. That is what lets a landed train's push to main reuse the
-train's run (ER-49). `./dev ci verdict`'s hint of
-the last fully tested commit asks the same reader about each of main's newest commits, so a push that reused a train run
-(partial itself) still names the commit the train tested.
+**"Complete" is a declared scope, compared by one reader (ER-15, ADR 0113, 2026-11-21).** Each plan job prints one line,
+`plan scope: {json}`: what the run did (`ran`: jobs, the crate and paddock-dev jobs on each runner, app legs, browser engines, whole
+or narrowed tests) and what a push to main does for the same tree (`need`), both written by the planner (`./dev plan --ci` for
+ci.yml, `./dev ci scope` for debrief.yml and the shared plan action). `./dev ci verdict` counts a run only when `ran` covers `need`
+and the run is not a rerun; `ci reuse` asks it, so nothing else decides. A full dispatch without WebKit is an engine short, a dispatch
+with `app` is one app only, a member run is narrowed, a reused or skipped run ran nothing: none is complete. The reason is printed
+("it did not cover what a push to main does: engines webkit; apps ..."). `./dev ci dispatch ci.yml --ref train/...` adds
+`webkit=true` itself for a full dispatch (no `base`, no `since_run`); an explicit `--input webkit=false` wins, and a member run or a
+rerun is sent as asked. That is what lets a landed train's push to main reuse the train's run (ER-49). `./dev ci verdict`'s hint
+of the last fully tested commit asks the same reader about each of main's newest commits, so a push that reused a train run
+(partial itself) still names the commit the train tested. Runs from before the scope line have none and are partial: a tag needs a
+run on a commit made after it.
 
 **Member runs test only the reached packages (2026-11-21).** A dispatch with a `base` and no `since_run` (a member or a fix round)
 passes `./dev plan --ci` the event, and the plan narrows nextest to the packages the change reaches: the app legs' `filter`, and

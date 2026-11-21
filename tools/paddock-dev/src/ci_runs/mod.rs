@@ -262,6 +262,59 @@ pub fn schedule_skip(a: &ScheduleSkipArgs) -> Result<Report, CliError> {
     ))
 }
 
+/// Arguments of `ci scope`: the scope line of an app's own workflow (ADR 0113).
+#[derive(Args)]
+pub struct ScopeArgs {
+    /// The workflow file whose plan job declares the scope (`debrief.yml`, `dyno-release.yml`).
+    #[arg(long)]
+    workflow: String,
+    /// The app the workflow gates.
+    #[arg(long)]
+    app: String,
+    /// Whether the run has the workflow's full scope (`true` or `false`: a tag, a push to main, a dispatch with its full input).
+    #[arg(long)]
+    full: String,
+    /// Whether the plan ran its jobs at all (`true` or `false`; a schedule skipped for a train or an unchanged main ran none).
+    #[arg(long, default_value = "true")]
+    run: String,
+    /// The `since_run` input of a rerun of failures (empty: not a rerun).
+    #[arg(long, default_value = "")]
+    since_run: String,
+    /// The engines a full run tests, comma separated (a run that is not full tests the first only).
+    #[arg(long, default_value = "chromium")]
+    full_engines: String,
+}
+
+/// `ci scope`: prints the scope line (`plan scope: {json}`) of an app's own workflow; the one reader (`ci verdict`) compares it
+/// with a push to main's. A value other than `true` or `false` is a usage error, never a default (ER-33).
+pub fn scope(a: &ScopeArgs) -> Result<Report, CliError> {
+    let flag = |name: &str, v: &str| match v {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        other => Err(CliError::usage(format!("--{name} {other:?} is not `true` or `false`."))
+            .with_hint("Pass the workflow's own expression for it.")),
+    };
+    let engines: Vec<String> = a
+        .full_engines
+        .split(',')
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .map(str::to_string)
+        .collect();
+    if engines.is_empty() {
+        return Err(CliError::usage("--full-engines names no engine.").with_hint("Pass `chromium` or `chromium,webkit`."));
+    }
+    let d = crate::run_scope::app_scope(
+        &a.workflow,
+        &a.app,
+        flag("full", &a.full)?,
+        flag("run", &a.run)?,
+        !a.since_run.trim().is_empty(),
+        &engines,
+    );
+    Ok(Report::new(serde_json::json!({ "complete": d.complete().is_ok() }), d.line()))
+}
+
 /// Arguments of `ci reuse` (the server, repository and token come from the CI environment: `GITHUB_SERVER_URL`,
 /// `GITHUB_REPOSITORY`, `PLAN_TOKEN`).
 #[derive(Args)]

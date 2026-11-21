@@ -156,8 +156,8 @@ state in the PR labels and the train branch, so a tick can stop anywhere and the
 
 ## Landing prerequisites
 
-- **Verdicts.** `./dev ci verdict` counts a run only with the plan job's `plan verdict: complete=` line, which ci.yml and
-  debrief.yml print after the plan decides: `fix/ci-verdict-reader-review` (177b0663c) must be on main before the queue lands
+- **Verdicts.** `./dev ci verdict` counts a run only when the plan job's `plan scope:` line (ADR 0113) covers a push to main's scope, which ci.yml
+  (`./dev plan --ci`) and debrief.yml (`./dev ci scope`) print after the plan decides: `fix/ci-verdict-reader-review` (177b0663c) must be on main before the queue lands
   anything, or every verdict is red or not measured.
 - **Approval.** The queue accepts an approval only from `review-bot`: an official, undismissed, approving Gitea review of the
   pull request's current head, never from the pull request's own author, queue-bot or release-bot. Reviewer agents post their
