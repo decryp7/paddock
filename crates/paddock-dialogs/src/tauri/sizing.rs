@@ -104,7 +104,9 @@ fn new_state<R: Runtime>(
 }
 
 /// Runs one transition of the window's size state: `f` gets the state and the environment now and returns the plan,
-/// which is then carried out and logged. Nothing happens for a window that is not an open dialog.
+/// which is then carried out and logged. `note` describes the event from the state before it, and the line carries the
+/// echo queue before and after, so a bundle shows what an unexplained `Resized` was judged against (ADR 0043 §3).
+/// Nothing happens for a window that is not an open dialog.
 fn transition<R: Runtime>(
     app: &AppHandle<R>,
     window: &Window<R>,
@@ -127,8 +129,10 @@ fn transition<R: Runtime>(
         None => new_state(window, kind, env, os)?,
     };
     let mode_before = state.mode();
-    let plan = f(&mut state, env);
     let text = note(&state);
+    let queue_before = state.queue_note();
+    let plan = f(&mut state, env);
+    let queue_after = state.queue_note();
     let queue = state.pending();
     let shown = state.is_shown();
     let mode = state.mode();
@@ -141,11 +145,14 @@ fn transition<R: Runtime>(
         Dialog = dialog.as_str(), Phase = phase.name(), Mode = mode.as_str(), Queue = queue, Shown = shown,
         Scale = scale, Frame = env.frame.height, MinHeight = min.height,
         Requested = plan.inner.map_or(0.0, |s| s.height), ModeChange = (mode_before != mode),
-        Unexplained = plan.unexplained, Stale = plan.stale;
-        "Dialog window {}: {text}", phase.name()
+        Unexplained = plan.unexplained, Merged = plan.merged, Stale = plan.stale;
+        "Dialog window {}: {text}; queue before {queue_before}, after {queue_after}", phase.name()
     );
     if plan.unexplained {
-        log::warn!(target: TARGET, Dialog = dialog.as_str(), Queue = queue; "Dialog window resized to a size this layer did not ask for");
+        log::warn!(
+            target: TARGET, Dialog = dialog.as_str(), Queue = queue;
+            "Dialog window resized to a size this layer did not ask for: {text}; expected echoes {queue_before}"
+        );
     }
     Ok(())
 }
@@ -343,14 +350,7 @@ pub(super) fn resized<R: Runtime>(window: &Window<R>, size: PhysicalSize<u32>) {
         window,
         std::env::consts::OS,
         Phase::Resized,
-        |s| {
-            format!(
-                "{}x{} physical, {}",
-                size.width,
-                size.height,
-                s.queue_note()
-            )
-        },
+        |_| format!("{}x{} physical", size.width, size.height),
         |s, _| s.on_resized(size.width, size.height),
     );
 }
@@ -404,7 +404,7 @@ pub(super) fn scale_now<R: Runtime>(window: &Window<R>) {
         window,
         std::env::consts::OS,
         Phase::Scale,
-        |s| format!("refit at the new scale, pending {}", s.pending()),
+        |_| "refit at the new scale".into(),
         |s, env| s.on_scale_changed(env),
     );
 }
