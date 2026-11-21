@@ -184,8 +184,17 @@ const WATCHER_ERROR_INTERVAL: Duration = Duration::from_secs(10);
 /// Logs a file watcher error: its kind only (the message may name paths), throttled, with how many were
 /// left out since the last entry. Returns whether it logged.
 fn log_watcher_error(e: &notify::Error, now: std::time::Instant) -> bool {
-    static LAST: std::sync::Mutex<(Option<std::time::Instant>, u64)> = std::sync::Mutex::new((None, 0));
-    let mut last = crate::sync::lock(&LAST);
+    static LAST: ErrorThrottle = std::sync::Mutex::new((None, 0));
+    log_watcher_error_in(&LAST, e, now)
+}
+
+/// When the last watcher error was logged, and how many were left out since.
+type ErrorThrottle = std::sync::Mutex<(Option<std::time::Instant>, u64)>;
+
+/// [`log_watcher_error`] over a given throttle: the process has one, a test its own (a test sharing the process's one counted
+/// another test's real watcher errors as its own suppressed ones).
+fn log_watcher_error_in(throttle: &ErrorThrottle, e: &notify::Error, now: std::time::Instant) -> bool {
+    let mut last = crate::sync::lock(throttle);
     if last.0.is_some_and(|t| now.duration_since(t) < WATCHER_ERROR_INTERVAL) {
         last.1 += 1;
         return false;
@@ -1027,24 +1036,29 @@ mod tests {
     #[test]
     fn watcher_errors_are_logged_by_kind_and_throttled() {
         let _g = crate::activity::test_capture();
-        let t0 = std::time::Instant::now() + Duration::from_secs(3600);
+        // Its own throttle: other tests' real watchers may log errors into the process's one meanwhile.
+        let throttle: ErrorThrottle = std::sync::Mutex::new((None, 0));
+        let t0 = std::time::Instant::now();
         let e = notify::Error::path_not_found().add_path(PathBuf::from("/secret/dir/a.log"));
-        assert!(log_watcher_error(&e, t0));
-        assert!(!log_watcher_error(&e, t0 + Duration::from_secs(1)));
+        assert!(log_watcher_error_in(&throttle, &e, t0));
+        assert!(!log_watcher_error_in(&throttle, &e, t0 + Duration::from_secs(1)));
         let io = notify::Error::io(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "/secret/dir"));
-        assert!(log_watcher_error(&io, t0 + WATCHER_ERROR_INTERVAL * 2));
+        assert!(log_watcher_error_in(&throttle, &io, t0 + WATCHER_ERROR_INTERVAL * 2));
+        // The capture is the process's: another test's watcher may add its own lines, so ours are found in order among them.
         let logged: Vec<_> = crate::activity::captured()
             .into_iter()
             .filter(|c| c.message.starts_with("File watcher error"))
             .collect();
-        assert_eq!(logged.len(), 2);
-        assert_eq!(
-            (logged[0].level, logged[0].props["ErrorKind"].as_str()),
-            (log::Level::Warn, "PathNotFound")
-        );
-        assert_eq!(
-            (logged[1].props["ErrorKind"].as_str(), logged[1].props["Suppressed"].as_str()),
-            ("Io(PermissionDenied)", "1")
+        let ours = |c: &crate::activity::Captured, kind: &str, suppressed: &str| {
+            c.level == log::Level::Warn && c.props["ErrorKind"] == kind && c.props["Suppressed"] == suppressed
+        };
+        let first = logged
+            .iter()
+            .position(|c| ours(c, "PathNotFound", "0"))
+            .expect("the first error is logged");
+        assert!(
+            logged[first + 1..].iter().any(|c| ours(c, "Io(PermissionDenied)", "1")),
+            "the next one after the interval, counting the one left out: {logged:?}"
         );
         assert!(logged.iter().all(|c| !format!("{:?}", c.props).contains("secret")));
     }
