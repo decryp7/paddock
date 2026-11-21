@@ -78,6 +78,8 @@ tracing-log = { version = "0.2", default-features = false, features = ["std"] }
 tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls", "system-proxy"] }
 semver.workspace = true
 notify-debouncer-mini = "=0.8.0"
+# The shared reading of notify results (`NotifySource::change_from`): a Rescan or an error means look at every root (C146).
+paddock-watch = { path = "../../../../crates/paddock-watch", features = ["notify"] }
 base64.workspace = true
 sysinfo = { workspace = true, features = ["system"] }
 zip.workspace = true

@@ -1675,6 +1675,7 @@ dependencies = [
  "paddock-proc",
  "paddock-testkit",
  "paddock-testkit-start",
+ "paddock-watch",
  "semver",
  "serde",
  "serde_json",
@@ -5411,6 +5412,16 @@ version = "0.1.0"
 dependencies = [
  "paddock-proc",
  "paddock-testkit",
+ "paddock-workspace-hack",
+]
+
+[[package]]
+name = "paddock-watch"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "notify",
+ "paddock-jobs",
  "paddock-workspace-hack",
 ]
 

@@ -17,6 +17,7 @@ use debrief_core::workspace::{
     WatchSignal, WatchSink, WatcherFactory,
 };
 use notify_debouncer_mini::notify;
+use paddock_watch::{Change, NotifySource};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -144,13 +145,9 @@ impl<W: notify::Watcher + Send> FileWatcher for Notified<W> {
 
 impl WatcherFactory for NotifyFactory {
     fn create(&self, mode: WatchMode, poll: Duration, sink: WatchSink) -> anyhow::Result<Box<dyn FileWatcher>> {
-        let handler = move |res: notify::Result<notify::Event>| match res {
-            // Opening or reading a file changes nothing.
-            Ok(ev) if matches!(ev.kind, notify::EventKind::Access(_)) => {}
-            Ok(ev) => sink(WatchSignal::Paths(ev.paths)),
-            Err(e) => {
-                log_watcher_error(&e, std::time::Instant::now());
-                sink(WatchSignal::Error(e.to_string()))
+        let handler = move |res: notify::Result<notify::Event>| {
+            if let Some(signal) = watch_signal(res) {
+                sink(signal);
             }
         };
         Ok(match mode {
@@ -160,6 +157,22 @@ impl WatcherFactory for NotifyFactory {
             )?)),
             WatchMode::Events | WatchMode::Off => Box::new(Notified(notify::recommended_watcher(handler)?)),
         })
+    }
+}
+
+/// What one `notify` result tells the engine, if anything. Whether changes may have been lost is decided by paddock-watch's shared
+/// mapping ([`NotifySource::change_from`], conformance C146): a Rescan flag becomes [`WatchSignal::Rescan`] (look at every root), an
+/// error stays [`WatchSignal::Error`] (fall back to polling, then look at every root).
+fn watch_signal(res: notify::Result<notify::Event>) -> Option<WatchSignal> {
+    match (NotifySource::change_from(&res), res) {
+        (_, Err(e)) => {
+            log_watcher_error(&e, std::time::Instant::now());
+            Some(WatchSignal::Error(e.to_string()))
+        }
+        (Change::Rescan(cause), Ok(_)) => Some(WatchSignal::Rescan(cause)),
+        // Opening or reading a file changes nothing.
+        (Change::Changed, Ok(ev)) if matches!(ev.kind, notify::EventKind::Access(_)) => None,
+        (Change::Changed, Ok(ev)) => Some(WatchSignal::Paths(ev.paths)),
     }
 }
 
@@ -607,6 +620,52 @@ mod tests {
             let mut w = NotifyFactory.create(mode, Duration::from_millis(100), sink.clone()).unwrap();
             w.watch(&dir, false).unwrap();
         }
+    }
+
+    /// Regression (ER-21 class "a watcher adapter loses notify's Rescan"): notify sends an inotify or ReadDirectoryChangesW
+    /// overflow as a Rescan flag with no path, which became an empty batch that looked at nothing. It must look at every root,
+    /// and it is not a watcher failure: the roots keep their events.
+    #[test]
+    fn a_rescan_notice_with_no_path_rescans_every_root() {
+        // A factory whose watchers report nothing, so the notice below is the only signal (a real watcher on a fresh folder can
+        // report the folder itself, which named every root and hid the bug).
+        struct Quiet;
+        impl FileWatcher for Quiet {
+            fn watch(&mut self, _: &Path, _: bool) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
+        struct QuietFactory;
+        impl WatcherFactory for QuietFactory {
+            fn create(&self, _: WatchMode, _: Duration, _: WatchSink) -> anyhow::Result<Box<dyn FileWatcher>> {
+                Ok(Box::new(Quiet))
+            }
+        }
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let roots = [a.path().to_path_buf(), b.path().to_path_buf()];
+        let batches = Arc::new(Mutex::new(Vec::<Vec<PathBuf>>::new()));
+        let seen = batches.clone();
+        let live = LiveTail::start(
+            &roots,
+            WatchSettings {
+                tick_ms: 60_000,
+                ..WatchSettings::default()
+            },
+            Arc::new(QuietFactory),
+            Box::new(move |x| seen.lock().unwrap().push(x)),
+            Box::new(|_, _| {}),
+        );
+        assert!(live.roots().iter().all(|r| r.mode == WatchMode::Events), "{:?}", live.roots());
+        let overflow = notify::Event::new(notify::EventKind::Other).set_flag(notify::event::Flag::Rescan);
+        live.signal(watch_signal(Ok(overflow)).expect("a rescan notice is passed on"));
+        paddock_testkit::wait_until_within("a batch that names every root", LOADED_CI, || {
+            batches.lock().unwrap().iter().any(|b| roots.iter().all(|r| b.contains(r)))
+        });
+        assert!(
+            live.roots().iter().all(|r| r.mode == WatchMode::Events),
+            "a rescan is no fallback: {:?}",
+            live.roots()
+        );
     }
 
     use crate::test_support::{block, main_window, test_app, window, TempDir};
