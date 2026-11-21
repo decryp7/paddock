@@ -43,10 +43,18 @@ pub const CAP_GRACE: Duration = Duration::from_secs(stacks::TOTAL_LIMIT.as_secs(
 /// longest gap seen; a holder that really runs longer is ended by its own row cap, which is the owner's guard, not this wait's.
 pub const QUEUE_STALL: Duration = Duration::from_secs(30 * 60);
 
-/// The outer process limit on one step's whole wait for the heavy slot, so that no call runs unbounded (ER-32): a queue that keeps moving
-/// is waited for, and the stall judgement of `heavy` ends one that does not, so this only ends a `heavy` client that is itself hung.
-/// 8 hours is a working day, over twenty times the longest wait measured (1,187 s, docs/benchmarks.md, "Pre-push heavy queue times").
-pub const WAIT_BACKSTOP: Duration = Duration::from_secs(8 * 60 * 60);
+/// The most steps seen waiting in heavy's queue at once: the longest queue in heavy's activity log, 2026-11-14 to 2026-11-21 ("position 7
+/// of 13"; docs/benchmarks.md, "Pre-push heavy queue progress gaps").
+const QUEUE_LENGTH_SEEN: u64 = 13;
+
+/// The slowest healthy row measured, in seconds: a cold doctest build, 1,122 s (docs/benchmarks.md, "Doctest row of the push gate").
+const SLOWEST_HEALTHY_ROW: u64 = 1122;
+
+/// The outer process limit on one step's whole wait for the heavy slot, so that no call runs unbounded (ER-32). It is a backstop and not
+/// the judgement: a queue that keeps moving is waited for and `heavy`'s stall judgement ends one that does not, so this only ends a
+/// `heavy` client that is itself hung. Derived from data: the longest queue seen ([`QUEUE_LENGTH_SEEN`], 13) times the slowest healthy
+/// row ([`SLOWEST_HEALTHY_ROW`]), 4 h 5 min, doubled for a queue longer than any seen: 8 h 10 min.
+pub const WAIT_BACKSTOP: Duration = Duration::from_secs(2 * QUEUE_LENGTH_SEEN * SLOWEST_HEALTHY_ROW);
 
 /// What one step may wait: `stall` is how long the queue may show no progress (heavy's `--queue-stall`). Its run time has no limit
 /// here: that is [`ROW_CAP`], from the moment it starts.
@@ -1164,13 +1172,13 @@ impl Exec for RealExec {
         // is taken, counted as queue time and bounded by the same stall limit (a file lock names no holder, so the row says "another
         // run of this checkout"); the lock is held until the step ends.
         let (build_lock, lock_wait) = match gate.build_dir.as_deref().filter(|_| gate.heavy) {
-            Some(dir) => match self.lock_build_folder(dir, limits.stall) {
+            Some(dir) => match self.lock_build_folder(dir, &gate.id, limits.stall) {
                 Ok(held) => held,
                 Err(waited) => {
                     return Ok(Done {
                         success: false,
                         how: format!(
-                            "queue stalled: no progress for {} s; held by another run of this checkout (the build folder is in use)",
+                            "queue stalled: no progress for {} s; held by another run of this checkout (the build folder is in use, its holder is past its row cap or unknown)",
                             waited.as_secs()
                         ),
                         tail: String::new(),
@@ -1366,6 +1374,37 @@ fn row_cap_verdict(active_for: Duration, cap: Duration) -> Option<Stuck> {
     })
 }
 
+/// Seconds since the Unix epoch.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// Writes `pid`, the time and the step into the lock file just taken, for the waiters to read. Best effort: a waiter that finds no record
+/// sees a holder it knows nothing about, which is not live.
+fn write_holder_record(file: &std::fs::File, id: &str) {
+    use std::io::Write;
+    let _ = file.set_len(0);
+    let _ = (&*file).write_all(format!("{}\n{}\n{}\n", std::process::id(), unix_now(), id).as_bytes());
+}
+
+/// The picture a waiter has of a build folder's holder from its record (`pid`, start time, step id): the holder is live while it is
+/// inside `cap`, the bound its own row lives under. An empty or unreadable record is a holder nobody knows (not live, no change).
+fn build_holder_view(record: &str, now: u64, cap: Duration) -> paddock_proc::queue_stall::QueueView {
+    use paddock_proc::queue_stall::{Holder, QueueView, within_cap};
+    let mut lines = record.lines();
+    let pid = lines.next().and_then(|l| l.trim().parse::<u32>().ok());
+    let epoch = lines.next().and_then(|l| l.trim().parse::<u64>().ok());
+    let name = lines.next().unwrap_or("another run of this checkout").to_string();
+    let Some(pid) = pid else { return QueueView::default() };
+    QueueView {
+        position: 0,
+        holders: vec![Holder { name, pid, epoch }],
+        live: within_cap(epoch, now, cap),
+    }
+}
+
 /// A held advisory lock on a build folder; dropping it (or the process ending) releases it.
 pub struct BuildLock {
     /// The locked file: held for its lock, never read.
@@ -1381,11 +1420,12 @@ impl RealExec {
             .join(format!("{}.lock", log_name(&self.root.join(dir).to_string_lossy())))
     }
 
-    /// Takes the lock of build folder `dir`, waiting at most `stall` while another run holds it (the wait is queue time, never run
-    /// time: [`Slot::Queued`]). `Ok` carries the lock and how long it waited; `Err` how long it waited before giving up (the stall
-    /// limit, or the person stopped the push). A lock file that cannot be made is not a reason to stop: the step runs unlocked and
-    /// cargo's own lock still serialises it.
-    fn lock_build_folder(&self, dir: &str, stall: Duration) -> Result<(BuildLock, Duration), Duration> {
+    /// Takes the lock of build folder `dir` for step `id`, waiting while another run holds it (the wait is queue time, never run
+    /// time: [`Slot::Queued`]). The holder writes who it is and when it took the lock into the file, and the waiter judges the wait
+    /// like every other wait of the gate ([`paddock_proc::queue_stall`]): a holder inside its own row cap is progress, a new holder is
+    /// progress, and the same holder past its cap for `stall` ends the wait. `Ok` carries the lock and how long it waited; `Err` how
+    /// long it waited before giving up (a stall, or the person stopped the push).
+    fn lock_build_folder(&self, dir: &str, id: &str, stall: Duration) -> Result<(BuildLock, Duration), Duration> {
         let path = self.build_lock_path(dir);
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -1398,6 +1438,7 @@ impl RealExec {
             return Ok((BuildLock { _held: None }, Duration::ZERO));
         };
         let began = Instant::now();
+        let mut clock = paddock_proc::queue_stall::StallClock::new(stall, 0);
         let mut said = false;
         loop {
             match file.try_lock() {
@@ -1407,6 +1448,7 @@ impl RealExec {
                         eprintln!("pre-push: the build folder {dir} is free after {:.1} s", waited.as_secs_f64());
                         self.set_slot(Slot::Unknown);
                     }
+                    write_holder_record(&file, id);
                     return Ok((BuildLock { _held: Some(file) }, if said { waited } else { Duration::ZERO }));
                 }
                 Err(std::fs::TryLockError::WouldBlock) => {}
@@ -1418,7 +1460,9 @@ impl RealExec {
                 eprintln!("pre-push: the build folder {dir} is in use by another run; waiting for it before taking a heavy slot (ER-43)");
                 self.set_slot(Slot::Queued { since: began });
             }
-            if began.elapsed() >= stall || self.stop.load(Ordering::SeqCst) {
+            let view = build_holder_view(&std::fs::read_to_string(&path).unwrap_or_default(), unix_now(), ROW_CAP + CAP_GRACE);
+            let quiet = u64::try_from(began.elapsed().as_micros()).unwrap_or(u64::MAX);
+            if clock.observe(&view, quiet).is_some() || self.stop.load(Ordering::SeqCst) {
                 self.set_slot(Slot::Unknown);
                 return Err(began.elapsed());
             }
@@ -1632,6 +1676,27 @@ mod tests {
             "{}",
             row.reason()
         );
+    }
+
+    /// The build folder's holder is read from its record: live while inside the row cap, unknown (not live, no holder) for an empty or
+    /// unreadable record, and not live past the cap.
+    #[test]
+    fn the_build_folder_holder_is_read_from_its_record() {
+        let cap = ROW_CAP + CAP_GRACE;
+        let fresh = build_holder_view("4242\n1000\nclippy apps/dyno\n", 1000 + 3000, cap);
+        assert!(
+            fresh.live && fresh.holders[0].pid == 4242 && fresh.holders[0].name == "clippy apps/dyno",
+            "{fresh:?}"
+        );
+        let old = build_holder_view("4242\n1000\nclippy apps/dyno\n", 1000 + cap.as_secs(), cap);
+        assert!(
+            !old.live && old.holders.len() == 1,
+            "past its cap the holder is not trusted: {old:?}"
+        );
+        for none in ["", "not a pid\n", "\n\n"] {
+            let v = build_holder_view(none, 5000, cap);
+            assert!(!v.live && v.holders.is_empty(), "{none:?}: {v:?}");
+        }
     }
 
     /// Heavy's own line names the holder of a stalled queue; the failure line after it (the same words without the closing phrase) is

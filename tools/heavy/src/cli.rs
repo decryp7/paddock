@@ -53,7 +53,7 @@ pub struct RunArgs {
 }
 
 /// Usage text.
-pub const USAGE: &str = "usage: heavy run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--run-max S] [--verbose] [--log-file FILE] <agent-name> -- <command...>\n       heavy status\n       heavy mark [--remove] ci-<name> --pid P   (a CI job on this host: normal runs yield while it lives, up to HEAVY_CI_MAX)\nExit codes: the command's own; 64 usage, 75 lock not taken, 78 refused (home guard), 79 queue limit or stalled queue, 80 run limit, 126/127 cannot run it, 129/130/143 stopped by a signal.\n";
+pub const USAGE: &str = "usage: heavy run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--queue-stall S] [--run-max S] [--verbose] [--log-file FILE] <agent-name> -- <command...>\n       heavy status\n       heavy mark [--remove] ci-<name> --pid P   (a CI job on this host: normal runs yield while it lives, up to HEAVY_CI_MAX)\nExit codes: the command's own; 64 usage, 75 lock not taken, 78 refused (home guard), 79 queue limit or stalled queue, 80 run limit, 126/127 cannot run it, 129/130/143 stopped by a signal.\n";
 
 /// Parses the arguments after the program name. Err is the message to print (exit 64).
 pub fn parse(args: &[String]) -> Result<Cli, String> {

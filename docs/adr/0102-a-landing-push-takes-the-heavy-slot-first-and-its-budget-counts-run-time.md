@@ -197,8 +197,14 @@ change on 2026-11-21 (part of the gate-hang design, `docs/research/2026-11-19-ga
    held by <who>" with the next step; the old per-push `QUEUE_MAX` and `PADDOCK_QUEUE_MAX` are replaced by `PADDOCK_QUEUE_STALL`.
    A closed load gate behind a taken slot counts as no progress after the same time; a wait for a build folder (a file lock, no named
    holder) ends after the same time with "another run of this checkout".
-4. **Outer bounds.** Because a wait has no total any more, the process limit of a step is the run limit plus `WAIT_BACKSTOP` (8 h), and the member
-   gate's outer bound is 24 h: both only end a hung `heavy` client or gate, never a healthy run.
+   Every wait is judged by one mechanism, `paddock_proc::queue_stall` (a changed picture of the queue, or a live holder inside its own
+   cap, is progress; the same picture with nobody live for the limit is a stall), so a waiter behind a healthy 31 to 60 minute holder is
+   not stalled: the holder's record younger than the waiter's own run limit counts as live. The build-folder lock uses it too (its holder
+   writes its pid, start and step into the lock file). The load gate is waited for BEFORE a slot is taken (ER-43): the run keeps its
+   ticket, and a slot taken just as the load rose is given back (a new ticket at the back).
+4. **Outer bounds.** Because a wait has no total any more, the process limit of a step is the run limit plus `WAIT_BACKSTOP` (derived: twice
+   the longest queue seen times the slowest healthy row, about 8 h), and the member gate's outer bound is 24 h (19 times the longest push gate
+   run seen): both only end a hung `heavy` client or gate, never a healthy run (docs/benchmarks.md, "Pre-push heavy queue progress gaps").
 5. **Linux Clippy, cold volume.** Not changed to a separate warm-up phase. A cold run of one workspace was measured at 39.7 to 173.7 s
    (docs/benchmarks.md, "Pre-push Linux Clippy, native"), far inside the row cap, and the row's command is the one `./dev check
    --warm-linux` runs (`gates::linux_gate`), so a warm-up phase would run the same command twice and need a volume probe (one more

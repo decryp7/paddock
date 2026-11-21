@@ -3,8 +3,8 @@
 use crate::exit::{self, describe_exit, tail_text as tail_of};
 use crate::lock::{Acquirer, Heavy, Poll, Request};
 use crate::mask::mask_text;
-use crate::stall::{QueueView, StallClock};
 use crate::timefmt::clock_text;
+use paddock_proc::queue_stall::StallClock;
 use paddock_proc::{ProcessId, command, kill_tree, lower_priority};
 use serde_json::json;
 #[cfg(unix)]
@@ -24,7 +24,7 @@ pub struct RunOpts {
     pub low: bool,
     /// Give up with [`exit::QUEUE_LIMIT`] when no slot was taken (queue and load gate included) within this long.
     pub queue_max: Option<Duration>,
-    /// Give up with [`exit::QUEUE_LIMIT`] when the queue (or the load gate) made no progress for this long ([`crate::stall`]): the
+    /// Give up with [`exit::QUEUE_LIMIT`] when the queue (or the load gate) made no progress for this long ([`paddock_proc::queue_stall`]): the
     /// wait is bounded by progress, not by its length, so a queue that keeps moving is waited for.
     pub queue_stall: Option<Duration>,
     /// End the command with [`exit::RUN_LIMIT`] once it has run this long (queue time is not counted).
@@ -125,7 +125,7 @@ pub fn run(h: &Heavy, req: Request, args: &[String], opts: RunOpts, stop: Stop<'
         );
         exit::QUEUE_LIMIT
     };
-    // A stalled queue ends the wait ([`crate::stall`]): the same exit as the queue limit, but the line names who holds the slot and
+    // A stalled queue ends the wait ([`paddock_proc::queue_stall`]): the same exit as the queue limit, but the line names who holds the slot and
     // for how long nothing moved, so a wrapper can tell a busy machine that keeps moving (waited for) from one that does not.
     let mut stall = opts.queue_stall.map(|d| StallClock::new(d, h.clock.now_micros()));
     let queue_stalled = |quiet: f64, holders: &str| {
@@ -154,6 +154,18 @@ pub fn run(h: &Heavy, req: Request, args: &[String], opts: RunOpts, stop: Stop<'
         );
         exit::QUEUE_LIMIT
     };
+    // The load gate is waited for BEFORE a slot is taken (ER-43: a waiter never holds the capacity the work it waits for needs): a
+    // run keeps its ticket and place while the load is high, and takes a slot only when the load lets it start. The gate is read once
+    // more after the take, and a slot taken just as the load rose is given back.
+    let gate_on = opts.gate && h.load.load().is_some();
+    if opts.gate && !gate_on {
+        (h.say)("load gate skipped: this platform has no load average");
+        h.log.info("heavy.gate", "load gate skipped: no load average on this platform", &[]);
+    }
+    let mut gate_logged = false;
+    let mut gate_said = h.now();
+    let mut gate_wait_start: Option<Instant> = None;
+    let mut gate_waited = Duration::ZERO;
     loop {
         if over_queue_limit() {
             return queue_limit("taken");
@@ -169,8 +181,63 @@ pub fn run(h: &Heavy, req: Request, args: &[String], opts: RunOpts, stop: Stop<'
             );
             return code;
         }
+        if gate_on && let Some(msg) = h.gate_closed() {
+            gate_wait_start.get_or_insert_with(Instant::now);
+            if let Some(sc) = stall.as_mut() {
+                let view = acq.queue_view(opts.run_max);
+                if let Some(quiet) = sc.observe(&view, h.clock.now_micros()) {
+                    acq.release();
+                    return queue_stalled(quiet, &format!("the load gate ({msg})"));
+                }
+            }
+            if !gate_logged {
+                gate_logged = true;
+                h.log.info(
+                    "heavy.gate",
+                    &format!("waiting: {msg}"),
+                    &[("Load", json!(h.load_now())), ("Threshold", json!(h.cfg.gate_load))],
+                );
+            }
+            if h.now().saturating_sub(gate_said) as f64 >= h.cfg.wait_log.as_secs_f64() {
+                let w = h.now().saturating_sub(acq.t0());
+                (h.say)(&format!("{name} waiting {w}s: {msg}"));
+                h.alog(&format!("{name} waiting {w}s: {msg}"));
+                h.log
+                    .info("heavy.gate", &format!("still waiting: {msg}"), &[("Load", json!(h.load_now()))]);
+                gate_said = h.now();
+            }
+            if !h.nap(h.cfg.gate_poll, &|| stop().is_some()) {
+                let code = stop().unwrap_or(130);
+                h.log.warn("heavy.run", "stopped at the load gate", &[("ExitCode", json!(code))]);
+                acq.release();
+                ci_error(
+                    h,
+                    code,
+                    "stopped by a signal at the load gate",
+                    "run it again when the load is lower",
+                );
+                return code;
+            }
+            continue;
+        }
+        if let Some(t) = gate_wait_start.take() {
+            gate_waited += t.elapsed();
+            h.log.info(
+                "heavy.phase",
+                "gate over",
+                &[("Phase", json!("gate_wait")), ("DurationMs", json!(gate_waited.as_millis() as u64))],
+            );
+        }
         match acq.poll() {
-            Poll::Held => break,
+            Poll::Held => {
+                if gate_on && h.gate_closed().is_some() {
+                    // The load rose between the check and the take: the slot goes back, the run waits for the load again.
+                    acq.step_back();
+                    h.log.info("heavy.gate", "took a slot as the load rose; gave it back", &[]);
+                    continue;
+                }
+                break;
+            }
             Poll::GaveUp(e) => {
                 (h.say)(&e);
                 h.log.event(crate::log::Level::Error, "heavy.run", &e, &[]);
@@ -184,7 +251,7 @@ pub fn run(h: &Heavy, req: Request, args: &[String], opts: RunOpts, stop: Stop<'
             }
             Poll::Waiting => {
                 if let Some(sc) = stall.as_mut() {
-                    let view = acq.queue_view();
+                    let view = acq.queue_view(opts.run_max);
                     if let Some(quiet) = sc.observe(&view, h.clock.now_micros()) {
                         return queue_stalled(quiet, &view.holders_text());
                     }
@@ -213,59 +280,8 @@ pub fn run(h: &Heavy, req: Request, args: &[String], opts: RunOpts, stop: Stop<'
         h.load_now()
     ));
     h.alog(&format!("{name} took the lock after {waited}s: {} (cwd {})", req.cmdline, req.cwd));
-
-    if opts.gate {
-        let t_gate = Instant::now();
-        if h.load.load().is_none() {
-            (h.say)("load gate skipped: this platform has no load average");
-            h.log.info("heavy.gate", "load gate skipped: no load average on this platform", &[]);
-        } else {
-            let mut last = h.now();
-            let mut closed_once = false;
-            // Behind a closed load gate nobody moves, whatever the queue does: it stalls after the same limit, counted from here.
-            let mut gate_stall = opts.queue_stall.map(|d| StallClock::new(d, h.clock.now_micros()));
-            while let Some(msg) = h.gate_closed() {
-                if let Some(sc) = gate_stall.as_mut()
-                    && let Some(quiet) = sc.observe(&QueueView::default(), h.clock.now_micros())
-                {
-                    acq.release();
-                    return queue_stalled(quiet, &format!("the load gate ({msg})"));
-                }
-                if !closed_once {
-                    closed_once = true;
-                    h.log.info(
-                        "heavy.gate",
-                        &format!("waiting: {msg}"),
-                        &[("Load", json!(h.load_now())), ("Threshold", json!(h.cfg.gate_load))],
-                    );
-                }
-                if h.now().saturating_sub(last) as f64 >= h.cfg.wait_log.as_secs_f64() {
-                    let w = h.now().saturating_sub(acq.t0());
-                    (h.say)(&format!("{name} waiting {w}s: {msg}"));
-                    h.alog(&format!("{name} waiting {w}s: {msg}"));
-                    h.log
-                        .info("heavy.gate", &format!("still waiting: {msg}"), &[("Load", json!(h.load_now()))]);
-                    last = h.now();
-                }
-                if !h.nap(h.cfg.gate_poll, &|| stop().is_some()) {
-                    let code = stop().unwrap_or(130);
-                    h.log.warn("heavy.run", "stopped at the load gate", &[("ExitCode", json!(code))]);
-                    ci_error(
-                        h,
-                        code,
-                        "stopped by a signal at the load gate",
-                        "run it again when the load is lower",
-                    );
-                    return code;
-                }
-            }
-            (h.say)(&format!("gate ok, load {}", h.load_now()));
-        }
-        h.log.info(
-            "heavy.phase",
-            "gate over",
-            &[("Phase", json!("gate_wait")), ("DurationMs", json!(ms(t_gate)))],
-        );
+    if gate_on {
+        (h.say)(&format!("gate ok, load {}", h.load_now()));
     }
     if over_queue_limit() {
         // The slot came, but only after the limit (the load gate took the time): the limit is about waiting, not about running.
