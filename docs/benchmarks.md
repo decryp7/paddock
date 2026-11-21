@@ -170,10 +170,19 @@ failing mode.
   `pre-push done` line: queue time = `waited` (lock) + `held` - `ran` (the load gate, which runs while the lock is held)
 - **Command:** `grep " done rc=" pitcrew-lock-activity.log | perl -ne 'print "$1 ",$4+$3-$2,"\n" if /Z (\S+) done rc=\S+, ran (\d+)s \(held (\d+)s, waited (\d+)s\)/'`, sorted
 - **Numbers:** 145 steps, all `pre-push`: p50 21 s, p90 386 s, p95 703 s, p99 993 s, max 1,187 s
-- **Notes:** the basis of `QUEUE_MAX` (30 min) as the whole push's queue allowance (tools/paddock-dev/src/pre_push/exec.rs, ADR
+- **Notes:** (superseded 2026-11-21 by the stall limit below) the basis of `QUEUE_MAX` (30 min) as the whole push's queue allowance (tools/paddock-dev/src/pre_push/exec.rs, ADR
   0102 amendment 2026-11-15): one step's worst wait (about 20 min) fits; a push whose heavy steps wait 30 min in all is a busy
   machine's finding, reported "not measured" with the time queued and the load. Not measured: the queue time per push (the log
   does not say which push a step belonged to).
+
+### 2026-11-21, pre-push heavy queue progress gaps (fix/push-gate-queue-stall)
+
+- **Commit:** 3d776b605 (main when measured)
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2; the shared machine with other agents running
+- **Source:** heavy's activity log (`pitcrew-lock-activity.log` in heavy's lock folder), 2026-11-14 13:02Z to 2026-11-21 10:12Z, 22,646 lines
+- **Method:** the queue's progress events are the `took the lock` and `done rc=` lines; a gap is the time between two consecutive events with at least one `waiting` line inside it (somebody was waiting, nothing moved). A short Python script over the log (not kept; the log is in the machine's temp folder).
+- **Numbers:** 1,386 gaps: p50 81 s, p90 314 s, p95 453 s, p99 813 s, max 1,446 s (the five longest: 1,112, 1,143, 1,182, 1,443 and 1,446 s)
+- **Notes:** the basis of `QUEUE_STALL` (30 min, 1,800 s) in `tools/paddock-dev/src/pre_push/exec.rs`: over the longest gap seen, so a queue that moves is never ended. A holder that runs longer is ended by its own row cap. The per-push totals it replaces (15 min of run, 30 min of queue) were exceeded by three pushes on 2026-11-21 with no row running too long: 13, 14 and 15 rows, and 5 rows, were not measured. Not measured: the gaps of a quiet machine.
 
 ### 2026-11-12, SVG drift check: font metrics (ci/svg-drift-check)
 

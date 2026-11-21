@@ -3,6 +3,7 @@
 use crate::exit::{self, describe_exit, tail_text as tail_of};
 use crate::lock::{Acquirer, Heavy, Poll, Request};
 use crate::mask::mask_text;
+use crate::stall::{QueueView, StallClock};
 use crate::timefmt::clock_text;
 use paddock_proc::{ProcessId, command, kill_tree, lower_priority};
 use serde_json::json;
@@ -23,6 +24,9 @@ pub struct RunOpts {
     pub low: bool,
     /// Give up with [`exit::QUEUE_LIMIT`] when no slot was taken (queue and load gate included) within this long.
     pub queue_max: Option<Duration>,
+    /// Give up with [`exit::QUEUE_LIMIT`] when the queue (or the load gate) made no progress for this long ([`crate::stall`]): the
+    /// wait is bounded by progress, not by its length, so a queue that keeps moving is waited for.
+    pub queue_stall: Option<Duration>,
     /// End the command with [`exit::RUN_LIMIT`] once it has run this long (queue time is not counted).
     pub run_max: Option<Duration>,
 }
@@ -121,6 +125,35 @@ pub fn run(h: &Heavy, req: Request, args: &[String], opts: RunOpts, stop: Stop<'
         );
         exit::QUEUE_LIMIT
     };
+    // A stalled queue ends the wait ([`crate::stall`]): the same exit as the queue limit, but the line names who holds the slot and
+    // for how long nothing moved, so a wrapper can tell a busy machine that keeps moving (waited for) from one that does not.
+    let mut stall = opts.queue_stall.map(|d| StallClock::new(d, h.clock.now_micros()));
+    let queue_stalled = |quiet: f64, holders: &str| {
+        let q = queued_secs();
+        let msg = format!(
+            "{name} queue stalled: the queue made no progress for {quiet:.0} s (queued {q:.1} s, held by {holders}), so the command never ran"
+        );
+        (h.say)(&msg);
+        h.alog(&msg);
+        timing(q, 0.0);
+        h.log.event(
+            crate::log::Level::Error,
+            "heavy.run",
+            &msg,
+            &[
+                ("QueuedSeconds", json!(q)),
+                ("QuietSeconds", json!(quiet)),
+                ("HeldBy", json!(holders)),
+            ],
+        );
+        ci_error(
+            h,
+            exit::QUEUE_LIMIT,
+            &format!("queue stalled: no progress for {quiet:.0} s, held by {holders} (queued {q:.1} s); the command never ran"),
+            "look at `heavy status` for the holder, and re-run when it moves; this is not a pass",
+        );
+        exit::QUEUE_LIMIT
+    };
     loop {
         if over_queue_limit() {
             return queue_limit("taken");
@@ -150,6 +183,12 @@ pub fn run(h: &Heavy, req: Request, args: &[String], opts: RunOpts, stop: Stop<'
                 return exit::LOCK_NOT_TAKEN;
             }
             Poll::Waiting => {
+                if let Some(sc) = stall.as_mut() {
+                    let view = acq.queue_view();
+                    if let Some(quiet) = sc.observe(&view, h.clock.now_micros()) {
+                        return queue_stalled(quiet, &view.holders_text());
+                    }
+                }
                 if !h.nap(h.cfg.poll, &|| stop().is_some()) {
                     let code = stop().unwrap_or(130);
                     h.log
@@ -183,7 +222,15 @@ pub fn run(h: &Heavy, req: Request, args: &[String], opts: RunOpts, stop: Stop<'
         } else {
             let mut last = h.now();
             let mut closed_once = false;
+            // Behind a closed load gate nobody moves, whatever the queue does: it stalls after the same limit, counted from here.
+            let mut gate_stall = opts.queue_stall.map(|d| StallClock::new(d, h.clock.now_micros()));
             while let Some(msg) = h.gate_closed() {
+                if let Some(sc) = gate_stall.as_mut()
+                    && let Some(quiet) = sc.observe(&QueueView::default(), h.clock.now_micros())
+                {
+                    acq.release();
+                    return queue_stalled(quiet, &format!("the load gate ({msg})"));
+                }
                 if !closed_once {
                     closed_once = true;
                     h.log.info(

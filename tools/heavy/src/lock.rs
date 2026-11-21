@@ -19,6 +19,7 @@ use crate::log::{Level, Logger};
 use crate::probe::file_id;
 use crate::procs::{Presence, Procs, evidence, pid_alive};
 use crate::record::{self, Owner, OwnerRead};
+use crate::stall::QueueView;
 use crate::timefmt::{clock_text, day_text, mins, oneline, utc_text};
 use crate::waitfor::{self, Break, Role, Rules, Waiter};
 use serde_json::{Value, json};
@@ -1233,6 +1234,25 @@ impl<'a> Acquirer<'a> {
             }
             return Poll::Waiting;
         }
+    }
+
+    /// The queue as this run sees it now (its place and who holds the slots): what [`crate::stall::StallClock`] judges progress by.
+    pub fn queue_view(&self) -> QueueView {
+        let position = if self.ticket.is_file() {
+            self.h.queue(&self.ticket, &self.req.name).0
+        } else {
+            0
+        };
+        let holders = self
+            .h
+            .held_dirs()
+            .iter()
+            .filter_map(|d| match self.h.read_owner(d) {
+                OwnerRead::Ok(o) => Some((o.name, o.pid, o.epoch)),
+                _ => None,
+            })
+            .collect();
+        QueueView { position, holders }
     }
 
     /// Records the command this run started (pid and OS start time) as line 7 of the owner record, atomically, so a heavy

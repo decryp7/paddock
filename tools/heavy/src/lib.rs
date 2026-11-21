@@ -21,5 +21,6 @@ pub mod probe;
 pub mod procs;
 pub mod record;
 pub mod runner;
+pub mod stall;
 pub mod timefmt;
 pub mod waitfor;

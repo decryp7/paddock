@@ -5,7 +5,7 @@ One heavy step (cargo, npm, ng, playwright, llvm-cov, xwin) at a time per machin
 workspace and lockfile (`tools/heavy/`, ADR 0014's third kind).
 
 ```sh
-heavy run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--run-max S] [--verbose] [--log-file FILE] <agent> -- <command...>
+heavy run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--queue-stall S] [--run-max S] [--verbose] [--log-file FILE] <agent> -- <command...>
 heavy status
 ```
 
@@ -17,7 +17,7 @@ tree is ended then).
 ## Exit codes (the wrapper rule)
 
 The command's own code is passed through. heavy's own failures use codes that do not look like a usual command failure (1, 2):
-**64** usage, **75** the lock could not be taken, **78** refused (the home guard), **79** no slot within `--queue-max` (the command never ran), **80** the command was ended at `--run-max`, **126/127** the command could not be started,
+**64** usage, **75** the lock could not be taken, **78** refused (the home guard), **79** no slot within `--queue-max`, or a queue that made no progress for `--queue-stall` (the command never ran), **80** the command was ended at `--run-max`, **126/127** the command could not be started,
 **129/130/143** stopped by SIGHUP/SIGINT/SIGTERM (128 + the signal). A command can return these too, so a wrapper that must
 tell them apart reads the failure line (`heavy <version> (<os>) exit 0x<hex>: <cause>. Next: <step>.`, printed once on stderr,
 as a `::error::` annotation when `CI` is set) or the log (`SessionId`, `Exit`, the `heavy.run` events). On Windows the exit
@@ -199,5 +199,5 @@ killed on drop). `tests/it/ported.rs` ports the shell plock.test.sh checks onto 
 itself with a marker and every normal run yields while the marker is live: queued, and (with several slots) running too, because
 the marker then stays until the high run releases. Running steps are never killed. The yielding is bounded by
 `HEAVY_PRIORITY_MAX` (1800 s): a marker older than that, or a waiter that has itself waited that long, stops counting, and the
-log says so (`heavy.priority`). `--queue-max S` ends a run that took no slot in S seconds (exit 79); `--run-max S` ends a command
+log says so (`heavy.priority`). `--queue-max S` ends a run that took no slot in S seconds (exit 79); `--queue-stall S` ends one only when the queue showed the same picture for S seconds (the same slot holders and the same place in the queue: a queue that keeps moving is waited for), and its line names the holders; a closed load gate counts as no progress from when it closed; `--run-max S` ends a command
 after S seconds of running (exit 80). Every run prints `<agent> timing queued Q s, ran R s` (queue and load gate, then the run).
