@@ -13,11 +13,12 @@ publish = ["decryp7"]
 notify = ["dep:notify"]
 
 [dependencies]
+log = "0.4"
 paddock-jobs = { workspace = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 notify = { version = "8", optional = true, default-features = false, features = ["macos_fsevent"] }
 
 [dev-dependencies]
-# The bounded retry of the real-folder test (`wait::retry_within`).
+# The bounded retry of the real-folder test (`wait::retry_within`) and the hang guard of the rescan tests (`wait::HANG_GUARD`).
 paddock-testkit = { workspace = true }
 tempfile = "3"

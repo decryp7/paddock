@@ -4868,6 +4868,7 @@ dependencies = [
 name = "paddock-watch"
 version = "0.1.0"
 dependencies = [
+ "log",
  "notify",
  "paddock-jobs",
  "paddock-testkit",
