@@ -1,7 +1,7 @@
 # Amendment to ADR 0087 (2026-11-16, draft): the other-OS member gate runs on the real CI runners
 
 - Status: Proposed 2026-11-16. **Decided by the user on 2026-11-16: real runners**, as merge queues and merge trains do. The step
-  is built and report-only (ER-41).
+  is built and report-only (ER-41); enforced 2026-11-21 (see below).
 - Trigger: train 12 spent about 17 hours in three red CI rounds, and every failure was Linux- or Windows-only: run 8138 (23
   failures: a hidden PATH, `/srv` paths that are not absolute on Windows, a lost Git-bash PATH, slow process starts, ext4 folder
   blocks), run 8147 (a `#!/bin/sh` fixture Windows cannot run), run 8152 (TestCommand 6x slower on Windows). All of them passed
@@ -37,7 +37,7 @@ own planner already selects the jobs.
 
 ## The gate: `other-os`, a row of `./dev merge check --gates`
 
-`tools/paddock-dev/src/merge_check/other_os.rs`, after the fast gates, for a merge commit (report-only, `ENFORCED = false`):
+`tools/paddock-dev/src/merge_check/other_os.rs`, after the fast gates, for a merge commit (`ENFORCED = true` since 2026-11-21):
 
 1. **Selection is the plan's.** `./dev plan <train before> <merge>`; a member that reaches no project is `not run (<why>)`.
    There is no second copy of "what does a change reach" (rule 55); the earlier path heuristic and `select()` are gone.
@@ -56,8 +56,29 @@ own planner already selects the jobs.
 "never counts"). The pass or fail of a partial member run is this step's, built on the same `Client` and `triage` readers the train
 queue uses.
 
-Needs `GITEA_TOKEN` (write access: it pushes the scratch ref) and `PADDOCK_TRIAL_DIR` (a folder for the askpass program, as
-`ci dispatch --trial`); either missing is `not measured` with what to set.
+Needs `GITEA_TOKEN` (write access: it pushes the scratch ref and dispatches `ci.yml`). The trial's scratch folder is
+`<trial root>/<branch>-<sha12>`: the trial root is `PADDOCK_TRIAL_DIR`, else git config `paddock.trialRoot`, else `trials` beside
+`paddock.worktreeRoot` (never inside HOME, ER-14); the step makes the folder and removes it at the end (ER-51).
+
+### Enforced since 2026-11-21 (user: "member checks on real runners, build it next")
+
+The gate was report-only (ER-41) and, with `PADDOCK_TRIAL_DIR` unset, printed "NOT MEASURED" and let the merge go on, so no
+train 18 member was ever checked on Windows or Linux; a Windows-only failure (the `sccache_eviction` tests, runs 8495 and 8509)
+was found only after the merge. Now `ENFORCED = true`:
+
+- `merge check --gates` on a merge commit dispatches the trial itself whenever `GITEA_TOKEN` is set, with the same code path as
+  `ci dispatch` (reservation, `Sent::Busy` bound), and waits on the run id with a bound (ER-32).
+- What it could not measure (no token, no trial folder, the runner reservation not had within 45 minutes, a run that did not end
+  in 2 hours, a failure triage cannot blame) is `not measured` and exits 6; a NEW failure on one OS exits 5. The output names
+  the cause and the next step. A member the plan says reaches no project is `not run`, with no token needed.
+- Judged per test by the train's rules (ER-12): a test that failed both tries blocks. A FLAKY test (failed, then passed on its
+  one retry) blocks only when the member's change touches its feature (`feature_touched`: a changed file or folder named like
+  one of the test's modules; a test whose module cannot be told counts as touched, so the rule errs toward blocking); in an
+  untouched feature the row passes and the flake is listed as `FLAKY (recorded, not blocking ...)` and in `flakyRecorded`, a fix
+  item for the next train.
+- Logged (ER-27): the run id, the verdict per OS and the run's wall time split into queue wait (run created to job start), setup,
+  compile and tests (the jobs' step timings, by step name; job-seconds summed per OS, the queue wait the longest) in the step's
+  text and `data.rows[].phases`.
 
 ## What stays of the VM work
 

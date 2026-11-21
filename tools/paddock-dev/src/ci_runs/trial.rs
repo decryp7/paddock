@@ -43,6 +43,64 @@ pub fn valid_branch(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || "._-/".contains(c))
 }
 
+/// The folder a trial's scratch folders live in (ER-14: a data drive, never inside the home folder; one place for `ci dispatch
+/// --trial`, `ci trial-prune` and the member gate of `merge check`, rule 55). In this order: `PADDOCK_TRIAL_DIR` (the user's own
+/// explicit choice, taken as it is), git config `paddock.trialRoot`, then `trials` beside the worktree root (git config
+/// `paddock.worktreeRoot`, else `PADDOCK_WORKTREE_ROOT`). A configured or derived folder must be absolute and not inside `home`.
+/// `Err` names the cause and the next step.
+pub fn trial_root(
+    env: &dyn Fn(&str) -> Option<String>,
+    config: &dyn Fn(&str) -> Option<String>,
+    home: Option<&Path>,
+) -> Result<std::path::PathBuf, String> {
+    use std::path::PathBuf;
+    let nonempty = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    if let Some(v) = nonempty(env("PADDOCK_TRIAL_DIR")) {
+        return Ok(PathBuf::from(v));
+    }
+    let (path, from) = if let Some(v) = nonempty(config("paddock.trialRoot")) {
+        (PathBuf::from(v), "git config paddock.trialRoot".to_string())
+    } else if let Some(w) = nonempty(config("paddock.worktreeRoot")).or_else(|| nonempty(env("PADDOCK_WORKTREE_ROOT"))) {
+        let parent = PathBuf::from(&w).parent().map(Path::to_path_buf).filter(|p| p.parent().is_some());
+        match parent {
+            Some(p) => (p.join("trials"), format!("`trials` beside the worktree root {w}")),
+            None => {
+                return Err(format!(
+                    "the worktree root {w} has no parent folder to put `trials` in. Next step: run `git config paddock.trialRoot <folder on a data drive>` once, or set PADDOCK_TRIAL_DIR"
+                ));
+            }
+        }
+    } else {
+        return Err("no trial folder is set: PADDOCK_TRIAL_DIR is empty, git config `paddock.trialRoot` and `paddock.worktreeRoot` are not set. Next step: run `git config paddock.trialRoot <folder on a data drive, not under your home>` once in the main checkout".into());
+    };
+    if !path.is_absolute() || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err(format!(
+            "the trial folder {} ({from}) is not an absolute folder without `..`. Next step: set `git config paddock.trialRoot` to one",
+            path.display()
+        ));
+    }
+    if home.is_some_and(|h| path.starts_with(h)) {
+        return Err(format!(
+            "the trial folder {} ({from}) is inside your home folder (ER-14). Next step: set `git config paddock.trialRoot` to a folder on a data drive",
+            path.display()
+        ));
+    }
+    Ok(path)
+}
+
+/// [`trial_root`] with the process environment, the repository's git config (read from `repo`) and the home folder.
+pub fn trial_root_real(repo: &Path) -> Result<std::path::PathBuf, String> {
+    let git_config = |key: &str| {
+        crate::worktree::git::Repo::discover(repo)
+            .ok()
+            .and_then(|r| r.git().text(&["config", "--get", key]).ok())
+    };
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from);
+    trial_root(&|k| std::env::var(k).ok(), &git_config, home.as_deref())
+}
+
 fn git(g: &GitTrain, kind: Child, args: &[&str]) -> Result<String, String> {
     let (ok, out) = g.run_git(kind, args)?;
     if ok {
@@ -280,6 +338,45 @@ pub fn prune(g: &GitTrain, dry: bool) -> Result<Vec<Stale>, String> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    fn root_of(env: &[(&str, &str)], cfg: &[(&str, &str)], home: Option<&str>) -> Result<PathBuf, String> {
+        let e = |k: &str| env.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        let c = |k: &str| cfg.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        trial_root(&e, &c, home.map(Path::new))
+    }
+
+    #[test]
+    fn the_trial_root_is_the_variable_then_the_config_then_trials_beside_the_worktree_root() {
+        let home = Some("/home/me");
+        assert_eq!(
+            root_of(&[("PADDOCK_TRIAL_DIR", "/d/t")], &[("paddock.trialRoot", "/d/x")], home).unwrap(),
+            PathBuf::from("/d/t")
+        );
+        assert_eq!(root_of(&[], &[("paddock.trialRoot", "/d/x")], home).unwrap(), PathBuf::from("/d/x"));
+        assert_eq!(
+            root_of(&[], &[("paddock.worktreeRoot", "/data/dev-targets/wt")], home).unwrap(),
+            PathBuf::from("/data/dev-targets/trials")
+        );
+        assert_eq!(
+            root_of(&[("PADDOCK_WORKTREE_ROOT", "/data/dev-targets/wt")], &[], home).unwrap(),
+            PathBuf::from("/data/dev-targets/trials")
+        );
+    }
+
+    #[test]
+    fn a_trial_root_that_cannot_be_used_says_why_and_the_next_step() {
+        let home = Some("/home/me");
+        for (cfg, want) in [
+            (vec![], "no trial folder is set"),
+            (vec![("paddock.trialRoot", "/home/me/trials")], "inside your home folder"),
+            (vec![("paddock.worktreeRoot", "/home/me/wt")], "inside your home folder"),
+            (vec![("paddock.trialRoot", "relative/dir")], "not an absolute folder"),
+            (vec![("paddock.trialRoot", "/d/../home/me")], "not an absolute folder"),
+        ] {
+            let e = root_of(&[], &cfg, home).unwrap_err();
+            assert!(e.contains(want) && e.contains("Next step"), "{e}");
+        }
+    }
 
     #[allow(clippy::disallowed_methods, reason = "a test starts git in its own scratch repositories")]
     fn git_in(dir: &Path, args: &[&str]) -> String {

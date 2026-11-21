@@ -621,9 +621,9 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
 /// its `::error::` line and nothing is pushed.
 fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(crate::queue::real::GitTrain, String, String), CliError> {
     use crate::queue::real::GitTrain;
-    let scratch = std::env::var_os("PADDOCK_TRIAL_DIR").map(PathBuf::from).ok_or_else(|| {
-        CliError::usage("PADDOCK_TRIAL_DIR is not set.")
-            .with_hint("Set it to a folder on a data drive for the trial's scratch clone (not under your home).")
+    let scratch = trial::trial_root_real(&std::env::current_dir().unwrap_or_default()).map_err(|why| {
+        CliError::usage(format!("no trial folder: {why}"))
+            .with_hint("Set PADDOCK_TRIAL_DIR or git config paddock.trialRoot to a folder on a data drive for the trial's scratch clone (not under your home).")
     })?;
     let url = format!("{}/{}.git", a.server.trim_end_matches('/'), a.repo);
     let fail = |why: String| {
@@ -699,9 +699,10 @@ pub struct TrialPruneArgs {
 pub fn trial_prune(a: &TrialPruneArgs) -> Result<Report, CliError> {
     use crate::queue::real::GitTrain;
     let token = token()?;
-    let scratch = std::env::var_os("PADDOCK_TRIAL_DIR")
-        .map(PathBuf::from)
-        .ok_or_else(|| CliError::usage("PADDOCK_TRIAL_DIR is not set.").with_hint("Set it to the folder of the trial's scratch clone."))?;
+    let scratch = trial::trial_root_real(&std::env::current_dir().unwrap_or_default()).map_err(|why| {
+        CliError::usage(format!("no trial folder: {why}"))
+            .with_hint("Set PADDOCK_TRIAL_DIR or git config paddock.trialRoot to the folder of the trial's scratch clone.")
+    })?;
     let url = format!("{}/{}.git", a.server.trim_end_matches('/'), a.repo);
     let fail = |why: String| {
         CliError::failure(format!("::error::trial-prune: {why}")).with_hint("Check GITEA_TOKEN's write scope and the network.")

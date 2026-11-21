@@ -3254,3 +3254,17 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **Class: an end-to-end wait bounds a streamed result by one expect timeout.** Earlier: debrief.yml run 8300, where six streamed
   answers ran past the wait (64f8165ae, fixed for that spec only by sending answers in one piece). It is fixed for every caller of
   `waitAnswered` here.
+
+## The other-OS member gate printed "not measured" and let every train 18 member merge (2026-11-21)
+
+- **What happened:** `./dev merge check --gates` has an other-OS row (068186e2d) that runs a trial on the real Windows and Linux
+  runners. With `PADDOCK_TRIAL_DIR` unset it printed "NOT MEASURED" and the merge went on, because the row was report-only
+  (ER-41) and its exit never changed. No train 18 member was checked on Windows or Linux; a deterministic Windows-only failure
+  (the `sccache_eviction` tests, runs 8495 and 8509) was found only after the merge (ER-9, ER-33).
+- **Fix:** the gate dispatches the trial itself whenever `GITEA_TOKEN` is set, the trial folder has a configured default
+  (`paddock.trialRoot`, else `trials` beside the worktree root) and is removed at the end, what it cannot measure exits 6, a NEW
+  failure exits 5, and a FLAKY test blocks only when the member touches its feature (ER-12). Details: the ADR 0087 amendment of
+  2026-11-16, "Enforced since 2026-11-21".
+- **Class: a gate that needs a setting nobody set reports and goes on.** Earlier: ER-41's report-only start with no date on which
+  it turns blocking (C130, C137, C139 stayed report-only after their first green run).
+

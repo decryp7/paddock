@@ -39,6 +39,7 @@ and links here.
 | Name | What is there | How the tools find it |
 | --- | --- | --- |
 | `<dev-targets>` | worktrees (`wt/`), build folders, agent scratch (`scratch/<agent id>`), `sccache`, `paddock-dev-home`, the disk index `.paddock-disk.sqlite` | `PADDOCK_DEV_TARGETS`, else the parent of `paddock.worktreeRoot`, else of `PADDOCK_WORKTREE_ROOT` |
+| `<trial root>` | the scratch folders of `ci dispatch --trial`, `ci trial-prune` and the member gate of `merge check --gates` (one subfolder per merge, removed at the end) | `PADDOCK_TRIAL_DIR`, else git config `paddock.trialRoot`, else `trials` beside `paddock.worktreeRoot`; never inside HOME |
 | `<dev disk>` | the folder that holds `<dev-targets>` | the parent of `<dev-targets>` |
 | `<dev disk>/vm-data` | the test VMs: the Windows test VM `paddock-win11-test`, the Tart images `tart-from-home` | `PADDOCK_VM_DATA`, else derived; the Windows VM's guard reads git config only, with an empty environment |
 | `<dev disk>/ci/locks/test-machines` | the lock of the test machines (`scripts/vm-lock.sh`) | `PADDOCK_VM_LOCK_ROOT`, else derived |

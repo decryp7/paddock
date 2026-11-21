@@ -16,7 +16,17 @@
 //!
 //! Every OS gets a row made with the shared [`measure`] and [`Outcome`] types (C124): `Clean` with evidence for this run, `Findings`
 //! (the NEW failures), `NotMeasured` (the reason) or `NotApplicable` (no job of the plan ran on that OS). Never a silent skip
-//! (ER-33). **Report-only until its first green run is recorded (ER-41)**: [`ENFORCED`] is false, so the exit code is unchanged.
+//! (ER-33). **Enforced** ([`ENFORCED`], user, 2026-11-21: "member checks on real runners, build it next"): a train merge whose
+//! other-OS tests could not be measured (no token, no trial folder, a busy runner, a run that never ended) exits 6, and a NEW
+//! failure on one OS exits 5. The step dispatches the trial itself whenever `GITEA_TOKEN` is set; the trial's scratch folder is
+//! `<trial root>/<branch>-<sha>` (see [`crate::ci_runs::trial::trial_root`]) and is removed at the end (ER-14, ER-51).
+//!
+//! **Judging (ER-12):** a test that failed both tries blocks; a FLAKY test (failed, then passed on its one retry) blocks only when
+//! the member's change touches its feature ([`feature_touched`]: a changed file named like one of the test's modules, or a test
+//! whose module cannot be told); otherwise the row passes and the flake is listed as a record, a fix item for the next train.
+//!
+//! **Logging (ER-27):** the run id, the verdict per OS and the run's wall time split into queue wait, setup, compile and tests
+//! (from the job step timings, [`Phases`]) are in the step's text and data.
 //! The pass/fail reading of a PARTIAL run is this module's; `ci verdict` stays the one reader of FULL runs (it refuses a base
 //! dispatch by design), so it is not asked here.
 
@@ -34,9 +44,9 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Whether a failing or unmeasured row changes the exit code. False until the first green report-only run on a real train is
-/// recorded in the ADR 0087 amendment of 2026-11-16 (ER-41); the change that records it flips this.
-pub const ENFORCED: bool = false;
+/// Whether a failing or unmeasured row changes the exit code. True since 2026-11-21 (user: member checks on real runners): the gate
+/// never prints "not measured" and lets the merge go on (ER-9, ER-33). The ADR 0087 amendment of 2026-11-16 records the decision.
+pub const ENFORCED: bool = true;
 
 /// The workflow the member's run uses: the plan's own jobs.
 pub const WORKFLOW: &str = "ci.yml";
@@ -85,6 +95,82 @@ pub struct JobRow {
     pub name: String,
     /// `success`, `failure`, `cancelled`, `skipped` or empty while unfinished.
     pub conclusion: String,
+    /// Where its time went, when the server gave step timings.
+    pub phases: Option<Phases>,
+}
+
+/// Where a job's wall time went, in seconds (ER-27). The split is read from the step names, for the log only: no verdict depends on it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Phases {
+    /// From the run's creation to the job's start (waiting for a runner).
+    pub queue: u64,
+    /// Checkout, runner and toolchain setup, caches.
+    pub setup: u64,
+    /// Build, lint and format steps.
+    pub compile: u64,
+    /// Test steps.
+    pub tests: u64,
+}
+
+impl Phases {
+    /// Jobs of one OS run side by side: the queue wait is the longest, the other phases add up (job-seconds).
+    pub fn combine(self, o: Phases) -> Phases {
+        Phases {
+            queue: self.queue.max(o.queue),
+            setup: self.setup + o.setup,
+            compile: self.compile + o.compile,
+            tests: self.tests + o.tests,
+        }
+    }
+
+    /// `queue 12s, setup 40s, compile 8m00s, tests 2m00s`.
+    pub fn text(&self) -> String {
+        let f = |s: u64| {
+            if s >= 60 {
+                format!("{}m{:02}s", s / 60, s % 60)
+            } else {
+                format!("{s}s")
+            }
+        };
+        format!(
+            "queue {}, setup {}, compile {}, tests {}",
+            f(self.queue),
+            f(self.setup),
+            f(self.compile),
+            f(self.tests)
+        )
+    }
+}
+
+/// Which phase a step belongs to, from its name (the shared actions show as `Run ./.gitea/actions/<name>`).
+fn phase_of(step: &str) -> usize {
+    let n = step.to_ascii_lowercase();
+    if n.contains("test") {
+        2
+    } else if (n.contains("build") && !n.contains("build-jobs") && !n.contains("build-folder"))
+        || ["clippy", "compile", "cargo check", "lint", "fmt"].iter().any(|k| n.contains(k))
+    {
+        1
+    } else {
+        0
+    }
+}
+
+/// The phases of one job: the queue wait from the run's creation to the job's start, then the steps' seconds by phase.
+pub fn phases_of(run_created_ms: Option<f64>, job_start_ms: Option<f64>, steps: &[(String, Option<f64>)]) -> Phases {
+    let mut by = [0u64; 3];
+    for (name, secs) in steps {
+        by[phase_of(name)] += secs.unwrap_or(0.0).max(0.0).round() as u64;
+    }
+    let queue = run_created_ms
+        .zip(job_start_ms)
+        .map_or(0, |(c, s)| ((s - c) / 1000.0).max(0.0).round() as u64);
+    Phases {
+        queue,
+        setup: by[0],
+        compile: by[1],
+        tests: by[2],
+    }
 }
 
 /// How the wait on the run ended.
@@ -109,6 +195,8 @@ pub enum Reach {
 pub trait Runs {
     /// Whether the plan reaches any project for `base..head`; `Err` when it could not be asked.
     fn reaches(&mut self, base: &str, head: &str) -> Result<Reach, String>;
+    /// The files the member changes (`base..head`), to tell whether a flaky test's feature is touched.
+    fn changed_files(&mut self, base: &str, head: &str) -> Result<Vec<String>, String>;
     /// Pushes `commit` to `git_ref` (a short-lived scratch ref).
     fn publish(&mut self, commit: &str, git_ref: &str) -> Result<(), String>;
     /// Dispatches [`WORKFLOW`] on `git_ref` with `base`.
@@ -157,6 +245,11 @@ pub struct Row {
     pub jobs: Vec<String>,
     /// Failures that triage found also on main: listed, not blamed.
     pub known: Vec<String>,
+    /// FLAKY tests (failed, then passed on their one retry) whose feature the member does not touch: recorded as fix items, not
+    /// blamed (ER-12).
+    pub flaky: Vec<String>,
+    /// Where the jobs' time went, summed over the OS's jobs; `None` when no job had step timings.
+    pub phases: Option<Phases>,
 }
 
 fn tool() -> ToolVersion {
@@ -168,10 +261,38 @@ fn job_of(f: &Failure) -> &str {
     f.what.split(": ").next().unwrap_or("")
 }
 
+/// Whether the member's change touches the feature of a failed test (ER-12: "the test itself or the source it exercises"). `what` is
+/// `<job>: <test>`. The test's modules (`a::b::name` gives `a` and `b`, without `tests`, `test` and `it`) are looked for as the
+/// name of a changed file or folder (`a.rs`, `a/mod.rs`, `tests/it/a.rs`, `a-b` is `a_b`). A test whose module cannot be told
+/// (no `::`, a whole-job failure, an unreadable test) counts as touched: when unsure it blocks.
+pub fn feature_touched(what: &str, changed: &[String]) -> bool {
+    let test = what.split_once(": ").map_or(what, |(_, t)| t);
+    let test = test.split_whitespace().last().unwrap_or("");
+    let mut segs: Vec<&str> = test.split("::").collect();
+    if segs.len() < 2 {
+        return true;
+    }
+    segs.pop();
+    let mods: Vec<String> = segs
+        .into_iter()
+        .map(|m| m.to_ascii_lowercase().replace('-', "_"))
+        .filter(|m| !matches!(m.as_str(), "tests" | "test" | "it" | ""))
+        .collect();
+    if mods.is_empty() {
+        return true;
+    }
+    changed.iter().any(|f| {
+        f.split('/').any(|c| {
+            let stem = c.rsplit_once('.').map_or(c, |(a, _)| a).to_ascii_lowercase().replace('-', "_");
+            mods.contains(&stem)
+        })
+    })
+}
+
 /// The rows of a finished run: for each OS, `NotApplicable` when the plan ran no job there, `NotMeasured` when a job did not finish
 /// or a failure cannot be blamed, `Findings` for NEW (and flaky: still red, ER-12) failures only, and `Clean` otherwise (failures
 /// also on main are `known`).
-pub fn rows(run: u64, sha: &str, jobs: &[JobRow], failures: &[Failure]) -> Vec<Row> {
+pub fn rows(run: u64, sha: &str, jobs: &[JobRow], failures: &[Failure], changed: &[String]) -> Vec<Row> {
     let subject = || Subject::CiRun {
         workflow: WORKFLOW.into(),
         run: RunId(run),
@@ -188,6 +309,13 @@ pub fn rows(run: u64, sha: &str, jobs: &[JobRow], failures: &[Failure]) -> Vec<R
                 .filter(|f| matches!(f.blame, Blame::OnMain))
                 .map(|f| f.what.clone())
                 .collect();
+            // A FLAKY test whose feature the member does not touch is a record, not a finding (ER-12).
+            let flaky: Vec<String> = fails
+                .iter()
+                .filter(|f| matches!(f.blame, Blame::Flaky) && !feature_touched(&f.what, changed))
+                .map(|f| f.what.clone())
+                .collect();
+            let phases = mine.iter().filter_map(|j| j.phases).reduce(Phases::combine);
             let outcome = if mine.is_empty() {
                 Outcome::NotApplicable(Reason::new(format!("the plan ran no job on {} for this member", os.name())))
             } else if let Some(j) = mine
@@ -216,7 +344,7 @@ pub fn rows(run: u64, sha: &str, jobs: &[JobRow], failures: &[Failure]) -> Vec<R
             } else {
                 let new: Vec<Finding> = fails
                     .iter()
-                    .filter(|f| matches!(f.blame, Blame::New | Blame::Flaky))
+                    .filter(|f| matches!(f.blame, Blame::New | Blame::Flaky) && !flaky.contains(&f.what))
                     .map(|f| Finding::failing(f.what.clone()))
                     .collect();
                 measure(
@@ -232,6 +360,8 @@ pub fn rows(run: u64, sha: &str, jobs: &[JobRow], failures: &[Failure]) -> Vec<R
                 outcome,
                 jobs: names,
                 known,
+                flaky,
+                phases,
             }
         })
         .collect()
@@ -283,7 +413,18 @@ pub fn step_of(rows: &[Row], run: u64, git_ref: &str, base: &str, enforced: bool
         } else {
             format!("; {} failure(s) also on main, not blamed", r.known.len())
         };
-        text.push(format!("  {}: {} ({} jobs){also}", r.os.name(), r.outcome.name(), r.jobs.len()));
+        let split = r.phases.map_or(String::new(), |p| format!(", {}", p.text()));
+        text.push(format!(
+            "  {}: {} ({} jobs{split}){also}",
+            r.os.name(),
+            r.outcome.name(),
+            r.jobs.len()
+        ));
+        for t in &r.flaky {
+            text.push(format!(
+                "    FLAKY (recorded, not blocking: the member does not touch its feature, ER-12; fix item for the next train, with a failing reproduction first): {t}"
+            ));
+        }
         match &r.outcome {
             Outcome::Findings(f) => {
                 for x in f.findings().as_slice() {
@@ -307,6 +448,8 @@ pub fn step_of(rows: &[Row], run: u64, git_ref: &str, base: &str, enforced: bool
             "outcome": r.outcome.json(),
             "jobs": r.jobs,
             "alsoOnMain": r.known,
+            "flakyRecorded": r.flaky,
+            "phases": r.phases.map(|p| json!({"queueSecs": p.queue, "setupSecs": p.setup, "compileSecs": p.compile, "testSecs": p.tests})),
         }));
     }
     let word = if rows.iter().any(|r| matches!(r.outcome, Outcome::Findings(_))) {
@@ -342,7 +485,7 @@ pub fn unmeasured(enforced: bool, why: &str) -> Step {
     let (level, report_only) = wording(enforced);
     Step {
         text: vec![format!(
-            "{level}::member gate other-os NOT MEASURED: {why}. Next step: dispatch `ci.yml` on the member yourself (`./dev ci dispatch ci.yml --trial <branch> --max 45m`); a member whose other-OS tests did not run is not a member that passed.{report_only}"
+            "{level}::member gate other-os NOT MEASURED: {why}. Next step: fix that cause and run `./dev merge check --gates <merge-commit>` again (it dispatches `ci.yml` on the member itself when GITEA_TOKEN is set), or run `./dev ci dispatch ci.yml --trial <branch> --max 45m` by hand and read the run; a member whose other-OS tests did not run is not a member that passed.{report_only}"
         )],
         data: json!({"outcome": "not measured", "why": why, "enforced": enforced}),
         exit: if enforced { Exit::NotMeasured } else { Exit::Ok },
@@ -371,6 +514,10 @@ pub fn run(merge: &Merge, runs: &mut dyn Runs, enforced: bool) -> Step {
 }
 
 fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &str, enforced: bool) -> Step {
+    let changed = match runs.changed_files(base, commit) {
+        Ok(c) => c,
+        Err(e) => return unmeasured(enforced, &format!("the member's changed files could not be listed: {e}")),
+    };
     if let Err(e) = runs.publish(commit, git_ref) {
         return unmeasured(enforced, &format!("the merge could not be pushed to {git_ref}: {e}"));
     }
@@ -389,6 +536,10 @@ fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &s
         Ok(None) => return unmeasured(enforced, &format!("no run of ci.yml appeared for {git_ref}")),
         Err(e) => return unmeasured(enforced, &format!("the run could not be found: {e}")),
     };
+    eprintln!(
+        "other-os: ci.yml run {run} on {git_ref} (base {}); waiting at most {MAX_RUN_WAIT}",
+        short(base)
+    );
     match runs.wait(run) {
         Err(e) => return unmeasured(enforced, &format!("run {run} could not be waited for: {e}")),
         Ok(RunEnd::StillRunning) => return unmeasured(enforced, &format!("run {run} was still going after {MAX_RUN_WAIT}")),
@@ -402,7 +553,16 @@ fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &s
         Ok(f) => f,
         Err(e) => return unmeasured(enforced, &format!("the failures of run {run} could not be triaged: {e}")),
     };
-    step_of(&rows(run, commit, &jobs, &failures), run, git_ref, short(base), enforced)
+    let rows = rows(run, commit, &jobs, &failures, &changed);
+    for r in &rows {
+        eprintln!(
+            "other-os: run {run} {}: {}{}",
+            r.os.name(),
+            r.outcome.name(),
+            r.phases.map_or(String::new(), |p| format!(" ({})", p.text()))
+        );
+    }
+    step_of(&rows, run, git_ref, short(base), enforced)
 }
 
 /// The real CI: Gitea's API with `GITEA_TOKEN`, the tool's own git for the push, the tool's own planner and waiter.
@@ -411,27 +571,60 @@ pub struct Gitea {
     server: String,
     repo: String,
     token: String,
+    /// The trial root and this merge's own folder below it (`<root>/<name>`): made here, removed at the end (ER-51).
+    trial_root: PathBuf,
     scratch: PathBuf,
     http: CurlHttp,
 }
 
+/// The folder name of one merge's trial: its label (cleaned to letters, digits, `.`, `_`, `-`) and the commit's short id.
+pub fn trial_folder_name(label: &str, commit: &str) -> String {
+    let clean: String = label
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || "._-".contains(c) { c } else { '-' })
+        .collect();
+    let clean = clean.trim_matches(['-', '.']);
+    let clean = clean.get(..clean.len().min(60)).unwrap_or(clean);
+    format!(
+        "{}-{}",
+        if clean.is_empty() { "member" } else { clean },
+        commit.get(..12).unwrap_or(commit)
+    )
+}
+
 impl Gitea {
-    /// Reads the settings from the environment: `GITEA_TOKEN` (write access: it pushes the scratch ref) and `PADDOCK_TRIAL_DIR`
-    /// (a folder for the askpass program, like `ci dispatch --trial`). `Err` says what is missing.
-    pub fn from_env(root: &Path) -> Result<Gitea, String> {
-        let token = std::env::var("GITEA_TOKEN")
-            .ok()
+    /// Reads the settings: `GITEA_TOKEN` (write access: it pushes the scratch ref) from the environment, and the trial root from
+    /// [`trial::trial_root_real`] (`PADDOCK_TRIAL_DIR`, git config `paddock.trialRoot`, or `trials` beside the worktree root). It
+    /// makes this merge's own folder below the root. `Err` says what is missing and the next step.
+    pub fn open(root: &Path, label: &str, commit: &str) -> Result<Gitea, String> {
+        Self::open_with(root, label, commit, std::env::var("GITEA_TOKEN").ok(), trial::trial_root_real(root))
+    }
+
+    /// [`Gitea::open`] with the token and the trial root given (tests).
+    pub fn open_with(
+        root: &Path,
+        label: &str,
+        commit: &str,
+        token: Option<String>,
+        trial_root: Result<PathBuf, String>,
+    ) -> Result<Gitea, String> {
+        let token = token
             .filter(|t| !t.is_empty())
-            .ok_or("GITEA_TOKEN is not set (it needs write access)")?;
-        let scratch = std::env::var_os("PADDOCK_TRIAL_DIR")
-            .map(PathBuf::from)
-            .ok_or("PADDOCK_TRIAL_DIR is not set (a folder on a data drive, like `ci dispatch --trial`)")?;
-        std::fs::create_dir_all(&scratch).map_err(|e| format!("cannot create {}: {e}", scratch.display()))?;
+            .ok_or("GITEA_TOKEN is not set (it needs write access: it pushes the trial ref and dispatches ci.yml); run `source ~/.zshenv` or export it")?;
+        let trial_root = trial_root?;
+        let scratch = trial_root.join(trial_folder_name(label, commit));
+        std::fs::create_dir_all(&scratch).map_err(|e| {
+            format!(
+                "cannot create {}: {e}. Next step: check the trial folder is writable",
+                scratch.display()
+            )
+        })?;
         Ok(Gitea {
             root: root.to_path_buf(),
             server: "https://dev.decryptology.net".into(),
             repo: "decryp7/paddock".into(),
             token,
+            trial_root,
             scratch,
             http: CurlHttp,
         })
@@ -457,21 +650,33 @@ impl Gitea {
     }
 }
 
-impl Runs for Gitea {
-    fn reaches(&mut self, base: &str, head: &str) -> Result<Reach, String> {
-        let mut cmd = command(Self::me()?);
-        cmd.args(["plan", base, head]).current_dir(&self.root);
-        let out = run_bounded(cmd, Limits::new(Duration::from_secs(300))).map_err(|e| format!("`dev plan` could not run: {e}"))?;
-        if !out.success() {
-            return Err(format!("`dev plan {base} {head}` failed: {}", out.stderr_text().trim()));
+impl Drop for Gitea {
+    /// Removes this merge's folder (never the root), through the one safe-remove rule, whatever way the step ended.
+    fn drop(&mut self) {
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(PathBuf::from);
+        if let Err(e) = crate::safe_remove::remove_under(&self.trial_root, &self.scratch, home.as_deref()) {
+            eprintln!(
+                "::warning::other-os: {} could not be removed ({e}); delete it by hand",
+                self.scratch.display()
+            );
         }
-        let text = out.stdout_text();
-        let plan: Value = text
-            .lines()
-            .find(|l| l.starts_with('{'))
-            .and_then(|l| serde_json::from_str(l).ok())
-            .ok_or("`dev plan` printed no JSON")?;
-        Ok(reach_of(&plan))
+    }
+}
+
+impl Runs for Gitea {
+    fn changed_files(&mut self, base: &str, head: &str) -> Result<Vec<String>, String> {
+        let (ok, out) = self.git().run_git(Child::Local, &["diff", "--name-only", base, head])?;
+        if ok {
+            Ok(out.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
+        } else {
+            Err(out.trim().to_string())
+        }
+    }
+
+    fn reaches(&mut self, base: &str, head: &str) -> Result<Reach, String> {
+        ask_plan(&self.root, base, head)
     }
 
     fn publish(&mut self, commit: &str, git_ref: &str) -> Result<(), String> {
@@ -541,10 +746,12 @@ impl Runs for Gitea {
     fn jobs(&mut self, run: u64) -> Result<Vec<JobRow>, String> {
         let mut c = Client::new(&mut self.http, &self.server, &self.repo, &self.token);
         let jobs: Vec<TimedJob> = c.timed_jobs(run)?.ok_or_else(|| format!("run {run} has no job list"))?;
+        let created = c.run(run)?.and_then(|r| time::parse_ms(&r.created_at));
         Ok(jobs
             .into_iter()
             .filter(|j| !j.is_caller())
             .map(|j| JobRow {
+                phases: (!j.steps.is_empty()).then(|| phases_of(created, j.start, &j.steps)),
                 name: j.name,
                 conclusion: j.conclusion,
             })
@@ -576,10 +783,40 @@ impl Runs for Gitea {
     }
 }
 
-/// The real step for `merge check --gates`: a missing token or scratch folder is `not measured`, with what to set.
+/// Asks the tool's own planner (`dev plan <base> <head>`) what the member reaches: the selection CI uses (rule 55).
+fn ask_plan(root: &Path, base: &str, head: &str) -> Result<Reach, String> {
+    // The planner is this tool, or `PADDOCK_MERGE_CHECK_PLAN` (tests point it at a stand-in, as `PADDOCK_MERGE_CHECK_GATES` does for the
+    // fast gates); its answer still decides whether the member reaches anything.
+    let program = match std::env::var_os("PADDOCK_MERGE_CHECK_PLAN") {
+        Some(p) => PathBuf::from(p),
+        None => Gitea::me()?,
+    };
+    let mut cmd = command(program);
+    cmd.args(["plan", base, head]).current_dir(root);
+    let out = run_bounded(cmd, Limits::new(Duration::from_secs(300))).map_err(|e| format!("`dev plan` could not run: {e}"))?;
+    if !out.success() {
+        return Err(format!("`dev plan {base} {head}` failed: {}", out.stderr_text().trim()));
+    }
+    let text = out.stdout_text();
+    let plan: Value = text
+        .lines()
+        .find(|l| l.starts_with('{'))
+        .and_then(|l| serde_json::from_str(l).ok())
+        .ok_or("`dev plan` printed no JSON")?;
+    Ok(reach_of(&plan))
+}
+
+/// The real step for `merge check --gates`: a missing token or trial folder is `not measured` (the exit 6 when enforced), with what
+/// to set. The plan decides first whether the member reaches anything, so a documentation-only member needs no token.
 pub fn run_real(root: &Path, _git: &Git, merge: &Merge, enforced: bool) -> Step {
-    match Gitea::from_env(root) {
-        Err(why) => unmeasured(enforced, &why),
+    let Some(commit) = merge.commit.as_deref() else {
+        return not_run("the merge has no commit");
+    };
+    match Gitea::open(root, &merge.label, commit) {
+        Err(why) => match merge.parents.first().map(|b| ask_plan(root, b, commit)) {
+            Some(Ok(Reach::Nothing)) => not_run("the plan reaches no project for this member (documentation only)"),
+            _ => unmeasured(enforced, &why),
+        },
         Ok(mut g) => run(merge, &mut g, enforced),
     }
 }
@@ -589,13 +826,15 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
-    // Flip ENFORCED only in the change that records the first green report-only run (ER-41); this fails the build until it is decided.
-    const _: () = assert!(!ENFORCED);
+    // The gate is enforced since 2026-11-21 (user): a train merge it could not measure must not go on. Un-enforcing it is a decision of
+    // the user, so this fails the build until that is decided.
+    const _: () = assert!(ENFORCED);
 
     fn job(name: &str, conclusion: &str) -> JobRow {
         JobRow {
             name: name.into(),
             conclusion: conclusion.into(),
+            phases: None,
         }
     }
 
@@ -631,7 +870,13 @@ mod tests {
 
     #[test]
     fn a_green_run_is_clean_with_evidence_and_an_os_without_jobs_is_not_applicable() {
-        let r = rows(7, "abc", &[job("crates (ubuntu-latest)", "success"), job("plan", "success")], &[]);
+        let r = rows(
+            7,
+            "abc",
+            &[job("crates (ubuntu-latest)", "success"), job("plan", "success")],
+            &[],
+            &[],
+        );
         assert!(matches!(row(&r, Os::Linux).outcome, Outcome::Clean(_)));
         assert!(matches!(row(&r, Os::Windows).outcome, Outcome::NotApplicable(_)));
     }
@@ -648,7 +893,7 @@ mod tests {
             fail("paddock-dev (windows-latest)", "wrapper::b", Blame::OnMain),
             fail("crates (ubuntu-latest)", "proc::c", Blame::New),
         ];
-        let r = rows(7, "abc", &jobs, &fails);
+        let r = rows(7, "abc", &jobs, &fails, &[]);
         let win = row(&r, Os::Windows);
         assert!(matches!(win.outcome, Outcome::Clean(_)), "{:?}", win.outcome);
         assert_eq!(win.known.len(), 2);
@@ -666,13 +911,14 @@ mod tests {
             "a",
             &[job("x (windows-latest)", "failure")],
             &[fail("x (windows-latest)", "t", Blame::Unknown)],
+            &[],
         );
         assert!(matches!(row(&r, Os::Windows).outcome, Outcome::NotMeasured(_)));
-        let r = rows(1, "a", &[job("x (windows-latest)", "failure")], &[]);
+        let r = rows(1, "a", &[job("x (windows-latest)", "failure")], &[], &[]);
         assert!(matches!(row(&r, Os::Windows).outcome, Outcome::NotMeasured(_)));
-        let r = rows(1, "a", &[job("x (ubuntu-latest)", "cancelled")], &[]);
+        let r = rows(1, "a", &[job("x (ubuntu-latest)", "cancelled")], &[], &[]);
         assert!(matches!(row(&r, Os::Linux).outcome, Outcome::NotMeasured(_)));
-        let r = rows(1, "a", &[job("x (ubuntu-latest)", "")], &[]);
+        let r = rows(1, "a", &[job("x (ubuntu-latest)", "")], &[], &[]);
         assert!(matches!(row(&r, Os::Linux).outcome, Outcome::NotMeasured(_)));
     }
 
@@ -684,6 +930,7 @@ mod tests {
         end: RunEnd,
         jobs: Vec<JobRow>,
         failures: Vec<Failure>,
+        changed: Vec<String>,
         asked: Vec<String>,
     }
 
@@ -696,12 +943,16 @@ mod tests {
                 end: RunEnd::Finished,
                 jobs: vec![job("crates (ubuntu-latest)", "success"), job("crates (windows-latest)", "success")],
                 failures: Vec::new(),
+                changed: vec!["crates/paddock-view/src/lib.rs".into()],
                 asked: Vec::new(),
             }
         }
     }
 
     impl Runs for Fake {
+        fn changed_files(&mut self, _base: &str, _head: &str) -> Result<Vec<String>, String> {
+            Ok(self.changed.clone())
+        }
         fn reaches(&mut self, base: &str, head: &str) -> Result<Reach, String> {
             self.asked.push(format!("plan {base}..{head}"));
             self.reach.clone()
@@ -807,6 +1058,187 @@ mod tests {
         let mut f = Fake::green();
         f.reach = Err("no plan".into());
         assert_eq!(run(&merge(), &mut f, true).data["outcome"], "not measured");
+    }
+
+    // ---- Self-dispatch, judging and logging (2026-11-21) ----
+
+    /// A test that failed both tries (blame New) blocks, whatever the member touched (ER-12).
+    #[test]
+    fn a_test_that_fails_both_tries_blocks_and_exits_with_findings() {
+        let mut f = Fake::green();
+        f.jobs = vec![
+            job("paddock-dev (windows-latest)", "failure"),
+            job("crates (ubuntu-latest)", "success"),
+        ];
+        f.failures = vec![fail("paddock-dev (windows-latest)", "sccache_eviction::evicts_oldest", Blame::New)];
+        f.changed = vec!["docs/rules.md".into()];
+        let s = run(&merge(), &mut f, ENFORCED);
+        assert_eq!(s.exit, Exit::Findings);
+        assert_eq!(s.data["outcome"], "failed");
+        assert!(s.text.join("\n").contains("NEW: "), "{:?}", s.text);
+    }
+
+    /// A FLAKY test in a feature the member does not touch passes and is recorded; one in a touched feature blocks.
+    #[test]
+    fn a_flaky_test_blocks_only_when_the_member_touches_its_feature() {
+        let mut f = Fake::green();
+        f.jobs = vec![
+            job("paddock-dev (windows-latest)", "failure"),
+            job("crates (ubuntu-latest)", "success"),
+        ];
+        f.failures = vec![fail("paddock-dev (windows-latest)", "home_dashboard::refreshes", Blame::Flaky)];
+        f.changed = vec!["tools/paddock-dev/src/sccache_eviction.rs".into()];
+        let s = run(&merge(), &mut f, ENFORCED);
+        assert_eq!(s.exit, Exit::Ok, "{:?}", s.text);
+        assert_eq!(s.data["outcome"], "passed");
+        assert_eq!(
+            s.data["rows"][1]["flakyRecorded"][0],
+            "paddock-dev (windows-latest): home_dashboard::refreshes"
+        );
+        assert!(s.text.join("\n").contains("FLAKY (recorded, not blocking"), "{:?}", s.text);
+        // The same flake, now with the member touching `home_dashboard`.
+        f.changed = vec!["tools/paddock-dev/src/home_dashboard/mod.rs".into()];
+        let s = run(&merge(), &mut f, ENFORCED);
+        assert_eq!(s.exit, Exit::Findings);
+        assert_eq!(s.data["rows"][1]["flakyRecorded"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn the_feature_of_a_test_is_its_module_and_an_unknown_one_counts_as_touched() {
+        let c = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let t = "j (windows-latest): sccache_eviction::tests::evicts";
+        assert!(feature_touched(t, &c(&["tools/paddock-dev/tests/it/sccache_eviction.rs"])));
+        assert!(feature_touched(t, &c(&["crates/sccache-eviction/src/lib.rs"])));
+        assert!(feature_touched(t, &c(&["a/sccache_eviction/mod.rs"])));
+        assert!(!feature_touched(t, &c(&["docs/rules.md", "tools/paddock-dev/src/plan.rs"])));
+        // A binary id before the name (`paddock-service per_machine::tests::x`) is not a module.
+        assert!(feature_touched(
+            "j: paddock-service per_machine::tests::x",
+            &c(&["a/per_machine.rs"])
+        ));
+        assert!(!feature_touched(
+            "j: paddock-service per_machine::tests::x",
+            &c(&["a/paddock_service.rs"])
+        ));
+        // Unknown module: no `::`, or only `tests`: blocks.
+        assert!(feature_touched("j: some spec name", &c(&["docs/a.md"])));
+        assert!(feature_touched("j: tests::x", &c(&["docs/a.md"])));
+        assert!(feature_touched("j: the job failed outside any test", &[]));
+    }
+
+    /// Positive control (ER-33): a run the gate never dispatched cannot pass. Without the dispatch there is no run to find, and the
+    /// row is `not measured` with the exit 6; with it, the dispatch is the one the gate asked for.
+    #[test]
+    fn without_the_dispatch_the_row_cannot_pass() {
+        let mut f = Fake::green();
+        f.run = None; // what no dispatch gives: no run of ci.yml on the ref
+        let s = run(&merge(), &mut f, ENFORCED);
+        assert_eq!(s.data["outcome"], "not measured");
+        assert_eq!(s.exit, Exit::NotMeasured);
+        let mut f = Fake::green();
+        let s = run(&merge(), &mut f, ENFORCED);
+        assert_eq!(s.data["outcome"], "passed");
+        assert!(
+            f.asked.iter().any(|a| a.starts_with("dispatch ")),
+            "a pass needs the gate's own dispatch: {:?}",
+            f.asked
+        );
+    }
+
+    #[test]
+    fn a_busy_runner_and_a_missing_token_or_folder_are_not_measured_with_exit_6() {
+        let mut f = Fake::green();
+        f.sent = Ok(Sent::Busy("run 8200".into()));
+        assert_eq!(run(&merge(), &mut f, ENFORCED).exit, Exit::NotMeasured);
+        // No token: nothing is dispatched; the cause and the next step are named.
+        let err = Gitea::open_with(Path::new("/x"), "m", "abcdef0123456789", None, Ok(PathBuf::from("/d/trials")))
+            .err()
+            .unwrap();
+        assert!(err.contains("GITEA_TOKEN is not set"), "{err}");
+        let s = unmeasured(ENFORCED, &err);
+        assert_eq!(s.exit, Exit::NotMeasured);
+        let text = s.text.join("\n");
+        assert!(
+            text.contains("::error::member gate other-os NOT MEASURED") && text.contains("Next step"),
+            "{text}"
+        );
+        // No trial folder: the same.
+        let err = Gitea::open_with(
+            Path::new("/x"),
+            "m",
+            "abcdef0123456789",
+            Some("t".into()),
+            Err("no trial folder is set".into()),
+        )
+        .err()
+        .unwrap();
+        assert!(err.contains("no trial folder"), "{err}");
+    }
+
+    #[test]
+    fn the_trial_folder_is_one_per_merge_and_is_removed_without_touching_the_root() {
+        assert_eq!(
+            trial_folder_name("fix/member gate", "abcdef0123456789"),
+            "fix-member-gate-abcdef012345"
+        );
+        assert_eq!(trial_folder_name("", "abcdef0123456789"), "member-abcdef012345");
+        assert_ne!(
+            trial_folder_name("a", "1111111111111111"),
+            trial_folder_name("a", "2222222222222222")
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("trials");
+        std::fs::create_dir_all(&root).unwrap();
+        let g = Gitea::open_with(Path::new("/x"), "m", "abcdef0123456789", Some("t".into()), Ok(root.clone())).unwrap();
+        let mine = root.join("m-abcdef012345");
+        assert!(mine.is_dir());
+        std::fs::write(root.join("keep"), "other merge").unwrap();
+        drop(g);
+        assert!(!mine.exists(), "its own folder is removed at the end");
+        assert!(root.join("keep").exists(), "the root and other merges' folders stay");
+    }
+
+    #[test]
+    fn the_run_is_logged_with_its_phases_and_a_verdict_per_os() {
+        // queue = job start - run creation; steps split by name.
+        let steps = vec![
+            ("Set up job".to_string(), Some(5.0)),
+            ("Run ./.gitea/actions/build-jobs".to_string(), Some(1.0)),
+            ("Run ./.gitea/actions/setup-rust".to_string(), Some(30.0)),
+            ("Build".to_string(), Some(120.0)),
+            ("Clippy".to_string(), Some(60.0)),
+            ("Tests (nextest)".to_string(), Some(300.0)),
+        ];
+        let p = phases_of(Some(1_000.0), Some(13_000.0), &steps);
+        assert_eq!(
+            p,
+            Phases {
+                queue: 12,
+                setup: 36,
+                compile: 180,
+                tests: 300
+            }
+        );
+        assert_eq!(p.text(), "queue 12s, setup 36s, compile 3m00s, tests 5m00s");
+        let mut j = job("crates (ubuntu-latest)", "success");
+        j.phases = Some(p);
+        let mut w = job("crates (windows-latest)", "success");
+        w.phases = Some(Phases {
+            queue: 600,
+            setup: 10,
+            compile: 20,
+            tests: 30,
+        });
+        let r = rows(77, "abc", &[j, w], &[], &[]);
+        let s = step_of(&r, 77, "trial/member-x", "1111111", true);
+        let text = s.text.join("\n");
+        assert!(text.contains("run 77 on trial/member-x"), "{text}");
+        assert!(
+            text.contains("linux: clean (1 jobs, queue 12s, setup 36s, compile 3m00s, tests 5m00s)"),
+            "{text}"
+        );
+        assert!(text.contains("windows: clean (1 jobs, queue 10m00s"), "{text}");
+        assert_eq!(s.data["rows"][1]["phases"]["queueSecs"], 600);
     }
 
     #[test]
