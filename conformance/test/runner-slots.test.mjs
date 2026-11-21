@@ -13,6 +13,11 @@ test('the declared Linux slot count is a whole number above one', () => {
   assert.ok(Number.isInteger(slots.linux) && slots.linux >= 2, `linux = ${slots.linux}`);
 });
 
+test('the train waiters cap is its own declared number below the lane count, with a reason', () => {
+  assert.ok(Number.isInteger(slots.trainWaiters) && slots.trainWaiters >= 1 && slots.trainWaiters < slots.linux, `trainWaiters = ${slots.trainWaiters}`);
+  assert.ok(typeof slots.trainWaitersWhy === 'string' && slots.trainWaitersWhy.length > 40, 'trainWaiters carries its reason');
+});
+
 test('docs/ci-schedules.md states the declared count, and no schedule takes more slots than there are', () => {
   const doc = readFileSync(join(PADDOCK, 'docs', 'ci-schedules.md'), 'utf8');
   const stated = /The Linux runner runs (\d+) jobs at once \((\d+) Linux slots, declared in `conformance\/ci\/runner-slots\.json`\)/.exec(doc);

@@ -257,7 +257,7 @@ pub struct Request {
     pub max: Duration,
     /// How often to look.
     pub interval: Duration,
-    /// At most this many train runs may wait for their runner at once (the Linux slots less one, [`train_waiters`]); 0 when
+    /// At most this many train runs may wait for their runner at once (the declared `trainWaiters` cap, [`train_waiters`]); 0 when
     /// unknown, and then a train dispatch waits here like any other.
     pub train_waiters: usize,
 }
@@ -478,15 +478,20 @@ pub fn restrict_to_os_input(wanted: &mut BTreeSet<RunnerClass>, inputs: &[(Strin
 /// The file that declares how many jobs each runner class runs at once (`{"linux": 3}`), relative to the repository root.
 pub const RUNNER_SLOTS: &str = "conformance/ci/runner-slots.json";
 
-/// How many train runs may wait in their runner-wait job at once: the Linux slots of [`RUNNER_SLOTS`] less one, so one slot
-/// stays free for the older runs' own Linux jobs (a Mac job that needs them would otherwise never start, and every waiter would
-/// stall to its limit). `Err` when the file cannot be read or holds no `linux` count of at least 2.
+/// How many train runs may wait in their runner-wait job at once: the `trainWaiters` cap of [`RUNNER_SLOTS`] (its own declared number
+/// with its reason, not derived from the lane count: the cap was measured at 2, and a bigger host does not change that, ER-12), so
+/// slots stay free for the older runs' own Linux jobs (a Mac job that needs them would otherwise never start, and every waiter would
+/// stall to its limit). `Err` when the file cannot be read, holds no `trainWaiters`, or it is not below the `linux` count.
 pub fn train_waiters(root: &std::path::Path) -> Result<usize, String> {
-    match linux_slots(root)? {
-        n if n >= 2 => Ok(n - 1),
+    let path = root.join(RUNNER_SLOTS);
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{} cannot be read: {e}", path.display()))?;
+    let v: Value = serde_json::from_str(&text).map_err(|e| format!("{} is not JSON: {e}", path.display()))?;
+    let linux = v["linux"].as_u64().unwrap_or(0);
+    match v["trainWaiters"].as_u64() {
+        Some(n) if n >= 1 && n < linux => Ok(n as usize),
         _ => Err(format!(
-            "{} has no `linux` slot count of at least 2",
-            root.join(RUNNER_SLOTS).display()
+            "{} has no `trainWaiters` cap of at least 1 and below its `linux` count ({linux})",
+            path.display()
         )),
     }
 }
@@ -880,8 +885,7 @@ mod tests {
     fn go_ref(http: &mut Script, wf: &str, git_ref: &str) -> (Result<Dispatched, String>, String) {
         let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
         let mut req = parse_request(wf, git_ref, &[], "10m", Some("15s")).unwrap();
-        // The scenarios below are a host with 3 Linux slots (two waiters); the declared count is checked on its own.
-        req.train_waiters = 2;
+        req.train_waiters = train_waiters(&repo_root()).unwrap();
         let r = run(
             http,
             &Target {
@@ -950,8 +954,8 @@ mod tests {
         assert_eq!(http.posts.len(), 1);
         assert_eq!(
             train_waiters(&repo_root()),
-            linux_slots(&repo_root()).map(|n| n - 1),
-            "the waiters are the declared Linux slots less one, whatever the count is"
+            Ok(2),
+            "conformance/ci/runner-slots.json declares the cap of 2 train waiters (measured at 3 slots, kept at 6 lanes)"
         );
     }
 
@@ -960,9 +964,19 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         assert!(train_waiters(d.path()).unwrap_err().contains("cannot be read"));
         std::fs::create_dir_all(d.path().join("conformance/ci")).unwrap();
-        std::fs::write(d.path().join(RUNNER_SLOTS), r#"{"linux": 1}"#).unwrap();
-        assert!(train_waiters(d.path()).unwrap_err().contains("at least 2"));
-        std::fs::write(d.path().join(RUNNER_SLOTS), r#"{"linux": 5}"#).unwrap();
+        // The cap is its own number: absent, zero, or not below the lanes is refused; 2 of 6 is 2, whatever the lane count is.
+        for bad in [
+            r#"{"linux": 6}"#,
+            r#"{"linux": 6, "trainWaiters": 0}"#,
+            r#"{"linux": 2, "trainWaiters": 2}"#,
+            r#"{"linux": 1, "trainWaiters": 1}"#,
+        ] {
+            std::fs::write(d.path().join(RUNNER_SLOTS), bad).unwrap();
+            assert!(train_waiters(d.path()).unwrap_err().contains("trainWaiters"), "{bad}");
+        }
+        std::fs::write(d.path().join(RUNNER_SLOTS), r#"{"linux": 6, "trainWaiters": 2}"#).unwrap();
+        assert_eq!(train_waiters(d.path()), Ok(2));
+        std::fs::write(d.path().join(RUNNER_SLOTS), r#"{"linux": 5, "trainWaiters": 4}"#).unwrap();
         assert_eq!(train_waiters(d.path()), Ok(4));
         // Unknown (0): the train dispatch waits in the dispatcher, as before runner-wait.
         let mut http = Script::new(vec![

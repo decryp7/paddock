@@ -100,7 +100,7 @@ was found only after the merge. Now `ENFORCED = true`:
   lanes first), and with as many free lanes as its own Linux jobs (read from the plan, capped at the lanes there are): a trial never
   jumps a running train (ER-24). The lanes are `conformance/ci/runner-slots.json`'s `linux` (one place, `dispatch::linux_slots`;
   corrected from 3 to 6, the Linux host's lanes since 2026-11-20, and checked against `conformance/ci/build-jobs.sh` by a
-  conformance test; this also lets `train_waiters` allow 5 waiting train runs instead of 2); every job keeps its lanes-times-threads
+  conformance test); the train waiters keep their own declared cap of 2 (`trainWaiters` in the same file, with its reason: no measured cause to raise it, ER-12); every job keeps its lanes-times-threads
   share (ER-48). The Windows part (`os=windows`) waits for the
   train's reservation by progress (below). The Mac runner is not judged by the gate, so no run asks for it; the output and `data.macos` say so (`macos: not judged (dev OS; covered by the local pre-push run, not a CI-like clone)`). The gate looks at both
   parts on every tick: the Linux verdict is reported the moment its run ends ("linux clean (the member stays pending until the
