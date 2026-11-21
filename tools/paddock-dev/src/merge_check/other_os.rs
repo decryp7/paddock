@@ -748,9 +748,11 @@ pub fn not_dispatched_after_failed_gates(enforced: bool) -> Step {
     )
 }
 
-/// The scratch ref of a merge commit.
-pub fn scratch_ref(commit: &str) -> String {
-    format!("trial/member-{}", commit.get(..12).unwrap_or(commit))
+/// The scratch ref of one part of a merge's trial: `trial/member-<sha12>-linux` or `-windows`. Each part has its own ref, so a run
+/// found by its ref (the fallback when the server does not name the run it created) is the part's own and never the other OS's
+/// (ER-51: the simplest identity of a run is a ref only its part pushed).
+pub fn scratch_ref(commit: &str, os: Os) -> String {
+    format!("trial/member-{}-{}", commit.get(..12).unwrap_or(commit), os.name())
 }
 
 /// Runs the gate for a merge: plan, push, dispatch, wait, read, rows. The scratch ref is deleted whatever happens.
@@ -765,9 +767,10 @@ pub fn run(merge: &Merge, runs: &mut dyn Runs, enforced: bool) -> Step {
     if reach_of(&plan) == Reach::Nothing {
         return not_run("the plan reaches no project for this member (documentation only)");
     }
-    let git_ref = scratch_ref(commit);
-    let step = measure_on_runners(runs, commit, base, &git_ref, &plan, enforced);
-    runs.delete(&git_ref);
+    let step = measure_on_runners(runs, commit, base, &plan, enforced);
+    for os in [Os::Linux, Os::Windows] {
+        runs.delete(&scratch_ref(commit, os));
+    }
     step
 }
 
@@ -854,15 +857,18 @@ fn api_error(runs: &mut dyn Runs, why: String, run: Option<u64>) -> Move {
 /// Runs the two parts side by side and returns the step. The loop looks at both on every tick, so the Linux part runs and is judged
 /// while the Windows part still waits for the train; it ends when both are judged or cannot be measured, and every wait inside it has
 /// its own bound (a stall limit for a part not started, [`MAX_RUN_WAIT`] for a started one). The member is clean only after both.
-fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &str, plan: &Value, enforced: bool) -> Step {
+fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, plan: &Value, enforced: bool) -> Step {
     let changed = match runs.changed_files(base, commit) {
         Ok(c) => c,
         Err(e) => return unmeasured(enforced, &format!("the member's changed files could not be listed: {e}")),
     };
-    if let Err(e) = runs.publish(commit, git_ref) {
-        return unmeasured(enforced, &format!("the merge could not be pushed to {git_ref}: {e}"));
-    }
     let order = [Os::Linux, Os::Windows];
+    for os in order {
+        let git_ref = scratch_ref(commit, os);
+        if let Err(e) = runs.publish(commit, &git_ref) {
+            return unmeasured(enforced, &format!("the merge could not be pushed to {git_ref}: {e}"));
+        }
+    }
     let mut parts: Vec<Part> = order.iter().map(|_| Part::Todo).collect();
     let mut waiting_said = [false; 2];
     let mut elapsed = Duration::ZERO;
@@ -903,6 +909,8 @@ fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &s
             }
         }
         for (i, os) in order.iter().copied().enumerate() {
+            let git_ref = scratch_ref(commit, os);
+            let git_ref = git_ref.as_str();
             let mv = match &parts[i] {
                 Part::Done { .. } => Move::Stay,
                 Part::Todo => match runs.try_dispatch(os, git_ref, base) {
@@ -1005,7 +1013,8 @@ fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &s
     }
     judged_not.sort();
     judged_not.dedup();
-    step_of(&rows, &judged_not, &handles, git_ref, short(base), enforced)
+    let refs = order.iter().map(|os| scratch_ref(commit, *os)).collect::<Vec<_>>().join(", ");
+    step_of(&rows, &judged_not, &handles, &refs, short(base), enforced)
 }
 
 /// The real CI: Gitea's API with `GITEA_TOKEN`, the tool's own git for the push, the tool's own planner and waiter.
@@ -1815,6 +1824,31 @@ mod tests {
         assert_eq!(pick_run(&only_first, 102, r, sha), None);
     }
 
+    /// P1 (re-check 3): both parts dispatched on the same tick and the server names no run. The run list holds both runs; each part must
+    /// judge its own. With one shared ref the Linux part would take the newest run, the Windows one, and pass without Linux judged.
+    #[test]
+    fn two_parts_dispatched_together_with_no_run_id_each_take_their_own_run() {
+        let sha = "abc";
+        let (l, w) = (scratch_ref(sha, Os::Linux), scratch_ref(sha, Os::Windows));
+        let list = [
+            run_info(101, "workflow_dispatch", &l, sha),
+            run_info(102, "workflow_dispatch", &w, sha),
+        ];
+        assert_eq!(pick_run(&list, 100, &l, sha), Some(101));
+        assert_eq!(pick_run(&list, 100, &w, sha), Some(102));
+        // Positive control: on one shared ref the Linux part would have taken the Windows run (the newest).
+        let shared = "trial/member-abc";
+        let both = [
+            run_info(101, "workflow_dispatch", shared, sha),
+            run_info(102, "workflow_dispatch", shared, sha),
+        ];
+        assert_eq!(
+            pick_run(&both, 100, shared, sha),
+            Some(102),
+            "the old identity cannot tell the parts apart"
+        );
+    }
+
     // ---- The feature of a test ----
 
     #[test]
@@ -2001,9 +2035,13 @@ mod tests {
             }
             Ok(t)
         }
-        fn find_run(&mut self, part: Os, _git_ref: &str, _commit: &str, started: &Started) -> Result<Option<u64>, String> {
+        fn find_run(&mut self, part: Os, git_ref: &str, _commit: &str, started: &Started) -> Result<Option<u64>, String> {
             let up = !self.down;
             self.asked.push(format!("find {} up={up}", part.name()));
+            // Each part looks on its own ref: the run list of the other OS's ref is not its own.
+            if !git_ref.ends_with(&format!("-{}", part.name())) {
+                return Ok(None);
+            }
             Ok(match started {
                 Started::Run(id) => Some(*id),
                 Started::After(_) if self.ticks < self.found_from.get(&part).copied().unwrap_or(0) => None,
@@ -2103,8 +2141,22 @@ mod tests {
         assert_eq!(s.data["runs"], json!({"linux": 101, "windows": 102}));
         assert_eq!(s.data["rows"][0]["run"], 101);
         assert_eq!(s.data["rows"][1]["run"], 102);
-        let sref = "trial/member-abcdef012345";
-        assert_eq!(a.last().unwrap(), &format!("delete {sref}"));
+        // Each part has its own ref, pushed, dispatched on and deleted: identity by ref (ER-51).
+        let (lref, wref) = ("trial/member-abcdef012345-linux", "trial/member-abcdef012345-windows");
+        assert!(
+            a.contains(&format!("publish abcdef0123456789abcdef0123456789abcdef01 {lref}")),
+            "{a:?}"
+        );
+        assert!(
+            a.contains(&format!("publish abcdef0123456789abcdef0123456789abcdef01 {wref}")),
+            "{a:?}"
+        );
+        assert!(a.iter().any(|x| x.starts_with("dispatch linux ") && x.contains(lref)), "{a:?}");
+        assert!(a.iter().any(|x| x.starts_with("dispatch windows ") && x.contains(wref)), "{a:?}");
+        assert!(
+            a.contains(&format!("delete {lref}")) && a.contains(&format!("delete {wref}")),
+            "{a:?}"
+        );
     }
 
     /// Positive control (ER-33): Linux done alone never passes. When the train never gives the Windows runner back (nothing progresses
@@ -2549,7 +2601,8 @@ mod tests {
 
     #[test]
     fn the_scratch_ref_is_in_the_trial_namespace_that_trial_prune_cleans() {
-        assert_eq!(scratch_ref("abcdef0123456789"), "trial/member-abcdef012345");
-        assert!(scratch_ref("ab").starts_with("trial/"));
+        assert_eq!(scratch_ref("abcdef0123456789", Os::Linux), "trial/member-abcdef012345-linux");
+        assert_eq!(scratch_ref("abcdef0123456789", Os::Windows), "trial/member-abcdef012345-windows");
+        assert!(scratch_ref("ab", Os::Linux).starts_with("trial/"));
     }
 }

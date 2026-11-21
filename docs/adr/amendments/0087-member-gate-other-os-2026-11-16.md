@@ -76,7 +76,10 @@ was found only after the merge. Now `ENFORCED = true`:
   answer names it (`dispatch::run_with_id`; `ci dispatch --json` prints `run`). When the server answers with an empty 204, the
   gate records the highest run id before the dispatch and accepts only a newer `ci.yml` run on the commit from a
   `workflow_dispatch` on exactly the trial ref (`pick_run`); an older run on the same commit (a train's, a rerun, an earlier
-  trial of the same merge) is never taken, and two candidates are `not measured`. The wait for it is the shared bounded wait.
+  trial of the same merge) is never taken. Each part has its own ref (`trial/member-<sha12>-linux` and `-windows`), so a part
+  can never take the other OS's run (ER-51: identity by a ref only the part pushed); when the same part's POST was retried after a 502
+  and made two runs, the newest on its ref is judged, compared with the id before the FIRST attempt. (The run list of this Gitea does
+  not expose a run's `os` input, so the ref is the identity.) The loop looks once per tick, only while Gitea answers.
 - **A row is measured only when the run reached its tests.** The plan job must have succeeded and the run must not be cancelled
   or unfinished, else every row is `not measured`; a row whose jobs were all skipped is `not applicable` only after that. Jobs
   are put on an OS by their name's matrix label, else by their runner label (conformance, tools, ui on `ubuntu-latest`); jobs on
