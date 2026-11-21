@@ -13,6 +13,7 @@ publish = ["decryp7"]
 notify = ["dep:notify"]
 
 [dependencies]
+log = "0.4"
 paddock-jobs = { workspace = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 notify = { version = "8", optional = true, default-features = false, features = ["macos_fsevent"] }
