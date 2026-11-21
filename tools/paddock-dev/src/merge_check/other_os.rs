@@ -63,6 +63,8 @@ pub const WORKFLOW: &str = "ci.yml";
 
 /// How long a part's run may take once it is dispatched (a full affected plan of one OS on the real runners).
 const MAX_RUN_WAIT: Duration = Duration::from_secs(2 * 3600);
+/// How long the gate looks for the run of a dispatch whose answer did not name it (gate time, holds left out).
+pub const FIND_WINDOW: Duration = Duration::from_secs(180);
 /// How often the gate looks at its two parts.
 pub const TICK: Duration = Duration::from_secs(15);
 
@@ -257,7 +259,9 @@ pub trait Runs {
     /// One try to dispatch [`WORKFLOW`] on `git_ref` with `base` and the `os` input of `part`: Linux at once on a spare lane, Windows
     /// after the train's reservation. Never blocks for long: a part that cannot start yet is [`TryStart::Wait`].
     fn try_dispatch(&mut self, part: Os, git_ref: &str, base: &str) -> Result<TryStart, String>;
-    /// The id of the run this step dispatched for `part`: the handle of `started`, or the one run newer than it that is ours.
+    /// One look for the run this step dispatched for `part`: the handle of `started`, or the newest run on the trial ref newer than it
+    /// ([`pick_run`]). It never waits: the gate's loop calls it every tick, so the one mechanism that waits (the loop, with its `hold`
+    /// and its bounds) also owns the wait for the run to appear. `Ok(None)` is "not yet".
     fn find_run(&mut self, part: Os, git_ref: &str, commit: &str, started: &Started) -> Result<Option<u64>, String>;
     /// Whether the run has ended (any conclusion); one look.
     fn finished(&mut self, run: u64) -> Result<bool, String>;
@@ -280,11 +284,12 @@ pub trait Runs {
 }
 
 /// The run among `runs` that this step's dispatch made, when the server did not say: newer than `after` (the highest id before the
-/// dispatch), `ci.yml`, on the commit, from a `workflow_dispatch` on exactly `git_ref`. An older run on the same commit (a train's,
-/// a rerun, an earlier trial of the same merge) never counts. More than one is an error (nothing proves which is ours).
-pub fn pick_run(runs: &[RunInfo], after: u64, git_ref: &str, commit: &str) -> Result<Option<u64>, String> {
-    let ours: Vec<u64> = runs
-        .iter()
+/// FIRST attempt of the dispatch), `ci.yml`, on the commit, from a `workflow_dispatch` on exactly `git_ref` (a ref only this gate
+/// pushed). An older run on the same commit (a train's, a rerun, an earlier trial of the same merge) never counts. When a retried
+/// POST made two runs (the server created the first before a 502 reached us) the newest is the one judged: both are this gate's
+/// own runs of the same commit and inputs, and the retry is the one it knows it asked for last.
+pub fn pick_run(runs: &[RunInfo], after: u64, git_ref: &str, commit: &str) -> Option<u64> {
+    runs.iter()
         .filter(|r| {
             r.id > after
                 && r.workflow() == WORKFLOW
@@ -293,14 +298,18 @@ pub fn pick_run(runs: &[RunInfo], after: u64, git_ref: &str, commit: &str) -> Re
                 && (r.head_branch == git_ref || r.git_ref() == format!("refs/heads/{git_ref}"))
         })
         .map(|r| r.id)
-        .collect();
-    match ours.as_slice() {
-        [] => Ok(None),
-        [one] => Ok(Some(*one)),
-        many => Err(format!(
-            "runs {many:?} all look like this dispatch (newer than run {after}, {WORKFLOW} on {git_ref} at {}), so none is proven to be ours",
-            short(commit)
-        )),
+        .max()
+}
+
+/// The highest run id before each part's FIRST dispatch attempt: a retry (after a 502 whose POST the server had already accepted) must
+/// not move it, or the run the first attempt created would look older than the retry and be missed.
+#[derive(Debug, Default)]
+pub struct FirstAfter(std::collections::BTreeMap<Os, u64>);
+
+impl FirstAfter {
+    /// The id to compare with for `part`: the first one seen, whatever `fresh` is now.
+    pub fn keep(&mut self, part: Os, fresh: u64) -> u64 {
+        *self.0.entry(part).or_insert(fresh)
     }
 }
 
@@ -766,6 +775,9 @@ pub fn run(merge: &Merge, runs: &mut dyn Runs, enforced: bool) -> Step {
 enum Part {
     /// Not dispatched yet.
     Todo,
+    /// Dispatched, but the server did not name the run: looked for on every tick (one look each, only while Gitea answers) for at most
+    /// [`FIND_WINDOW`] of the gate's time, which does not count holds.
+    Finding { started: Started, since: Duration },
     /// Dispatched: the handle and when (the gate's elapsed time).
     Running { run: u64, since: Duration },
     /// Judged (or not measurable): its row, its run and the jobs nothing judges.
@@ -824,6 +836,8 @@ enum Move {
     Stay,
     /// The run was found: the part is running.
     Start(u64),
+    /// Dispatched without a named run: look for it on the next ticks.
+    Find(Started),
     /// The part ended: `Ok` its row and the jobs nothing judges, or why it cannot be measured; and its run, when it had one.
     Finish(Result<(Box<Row>, Vec<String>), String>, Option<u64>),
 }
@@ -872,21 +886,18 @@ fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &s
                 continue;
             }
             Hold::GaveUp(why) => {
+                // Every part that is not judged cannot be measured: never dropped, never a pass (ER-33).
                 for (i, os) in order.iter().copied().enumerate() {
-                    if let Part::Running { run, .. } = &parts[i] {
-                        let run = Some(*run);
-                        parts[i] = Part::Done {
-                            row: Box::new(unmeasured_row(os, why.clone())),
-                            run,
-                            not_judged: Vec::new(),
-                        };
-                    } else if matches!(parts[i], Part::Todo) {
-                        parts[i] = Part::Done {
-                            row: Box::new(unmeasured_row(os, why.clone())),
-                            run: None,
-                            not_judged: Vec::new(),
-                        };
-                    }
+                    let run = match &parts[i] {
+                        Part::Done { .. } => continue,
+                        Part::Running { run, .. } => Some(*run),
+                        Part::Todo | Part::Finding { .. } => None,
+                    };
+                    parts[i] = Part::Done {
+                        row: Box::new(unmeasured_row(os, why.clone())),
+                        run,
+                        not_judged: Vec::new(),
+                    };
                 }
                 break;
             }
@@ -908,18 +919,26 @@ fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &s
                         }
                         Move::Stay
                     }
-                    Ok(TryStart::Started(started)) => match runs.find_run(os, git_ref, commit, &started) {
+                    Ok(TryStart::Started(Started::Run(run))) => Move::Start(run),
+                    Ok(TryStart::Started(started)) => Move::Find(started),
+                },
+                Part::Finding { started, since } => {
+                    let since = *since;
+                    // One look per tick, and only on a tick where Gitea answered (the hold at the top of the loop): the window can end
+                    // only after a look made with Gitea up found nothing.
+                    match runs.find_run(os, git_ref, commit, started) {
                         Ok(Some(run)) => Move::Start(run),
-                        Ok(None) => Move::Finish(
+                        Ok(None) if elapsed.saturating_sub(since) >= FIND_WINDOW => Move::Finish(
                             Err(format!(
                                 "no run of ci.yml that this dispatch made appeared for the {} part on {git_ref}",
                                 os.name()
                             )),
                             None,
                         ),
+                        Ok(None) => Move::Stay,
                         Err(e) => api_error(runs, format!("the {} part's run could not be found: {e}", os.name()), None),
-                    },
-                },
+                    }
+                }
                 Part::Running { run, since } => {
                     let (run, since) = (*run, *since);
                     match runs.finished(run) {
@@ -941,6 +960,7 @@ fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &s
             };
             match mv {
                 Move::Stay => {}
+                Move::Find(started) => parts[i] = Part::Finding { started, since: elapsed },
                 Move::Start(run) => {
                     runs.report(&format!(
                         "other-os: the {} part is ci.yml run {run} on {git_ref} (base {}); waiting at most {}",
@@ -1010,6 +1030,8 @@ pub struct Gitea {
     /// Whether the last look found a service down, and the time spent holding for one (left out of every bound).
     down: bool,
     held: Duration,
+    /// Per part, the highest run id before its first dispatch attempt ([`FirstAfter`]).
+    first_after: FirstAfter,
 }
 
 /// The folder name of one merge's trial: its label (cleaned to letters, digits, `.`, `_`, `-`) and the commit's short id.
@@ -1071,6 +1093,7 @@ impl Gitea {
             ),
             down: false,
             held: Duration::ZERO,
+            first_after: FirstAfter::default(),
         })
     }
 
@@ -1132,10 +1155,12 @@ impl Gitea {
     /// runner guard is asked for at most a few seconds, so a busy Windows runner is `Err(why)` for this tick, not a long block of the
     /// loop that judges the other part. `Ok(Ok(started))` carries the handle.
     fn dispatch_part(&mut self, part: Os, git_ref: &str, base: &str) -> Result<Dispatch, String> {
-        let after = {
+        let fresh = {
             let mut c = Client::new(&mut self.http, &self.server, &self.repo, &self.token);
             c.runs_page(1)?.runs.iter().map(|r| r.id).max().unwrap_or(0)
         };
+        // A retry after a 502 may find the first attempt's run already made: compare with the id before the FIRST attempt.
+        let after = self.first_after.keep(part, fresh);
         let os = match part {
             Os::Linux => plan_os::OsPart::Linux,
             Os::Windows => plan_os::OsPart::Windows,
@@ -1347,40 +1372,9 @@ impl Runs for Gitea {
             Started::Run(id) => return Ok(Some(*id)),
             Started::After(a) => *a,
         };
-        // The run exists within seconds of the dispatch; wait for it with the shared bounded wait (ER-32).
-        let mut probe = FindRun {
-            http: &mut self.http,
-            server: &self.server,
-            repo: &self.repo,
-            token: &self.token,
-            after,
-            git_ref,
-            commit,
-        };
-        let mut clock = crate::wait::SystemClock::new();
-        // The shared bounded wait with train 18's hold: while Gitea is down the probe is not polled (a 502 is not "no run yet"), and
-        // the hold goes on past each 3 minute window (up to the hold limit); only a window with Gitea up that finds nothing ends it.
-        let mut held_for = Duration::ZERO;
-        loop {
-            match crate::health::wait_held(
-                &mut probe,
-                Some(&mut self.health),
-                &mut clock,
-                Duration::from_secs(180),
-                Duration::from_secs(5),
-                &mut std::io::stderr(),
-            ) {
-                crate::wait::Outcome::Done { detail, .. } => {
-                    return detail.parse::<u64>().map(Some).map_err(|e| format!("run id `{detail}`: {e}"));
-                }
-                crate::wait::Outcome::TimedOut { .. } if !self.health.down_now().is_empty() && held_for < HOLD_MAX => {
-                    held_for += Duration::from_secs(180);
-                }
-                crate::wait::Outcome::TimedOut { .. } => return Ok(None),
-                crate::wait::Outcome::Failed { detail, .. } => return Err(detail),
-                crate::wait::Outcome::Broken { error, .. } => return Err(error),
-            }
-        }
+        let mut c = Client::new(&mut self.http, &self.server, &self.repo, &self.token);
+        let page = c.runs_page_where(1, "event=workflow_dispatch")?;
+        Ok(pick_run(&page.runs, after, git_ref, commit))
     }
 
     fn finished(&mut self, run: u64) -> Result<bool, String> {
@@ -1480,43 +1474,6 @@ fn progress_signature(http: &mut dyn Http, server: &str, repo: &str, token: &str
     let mut ids: Vec<u64> = c.runs_page(1)?.runs.iter().filter(|r| !r.finished()).map(|r| r.id).collect();
     ids.sort_unstable();
     Ok(format!("{ids:?}"))
-}
-
-/// The probe of [`Runs::find_run`]: the one run newer than `after` that this dispatch made ([`pick_run`]).
-struct FindRun<'a> {
-    http: &'a mut dyn Http,
-    server: &'a str,
-    repo: &'a str,
-    token: &'a str,
-    after: u64,
-    git_ref: &'a str,
-    commit: &'a str,
-}
-
-impl crate::wait::Probe for FindRun<'_> {
-    fn describe(&self) -> String {
-        format!(
-            "the {WORKFLOW} run this dispatch made on {} (newer than run {})",
-            self.git_ref, self.after
-        )
-    }
-
-    fn poll(&mut self) -> Result<crate::wait::Poll, String> {
-        let mut c = Client::new(self.http, self.server, self.repo, self.token);
-        let page = c.runs_page_where(1, "event=workflow_dispatch")?;
-        Ok(match pick_run(&page.runs, self.after, self.git_ref, self.commit) {
-            Ok(Some(id)) => crate::wait::Poll::Done(id.to_string()),
-            Ok(None) => crate::wait::Poll::Pending(format!("no run newer than {} on {} yet", self.after, self.git_ref)),
-            Err(e) => crate::wait::Poll::Failed(e),
-        })
-    }
-
-    fn next_step(&self) -> String {
-        format!(
-            "read the runs of {WORKFLOW} on {} in Gitea; the dispatch may not have been accepted",
-            self.git_ref
-        )
-    }
 }
 
 /// Asks the tool's own planner (`dev plan <base> <head>`) what the member reaches: the selection CI uses (rule 55).
@@ -1822,26 +1779,40 @@ mod tests {
         let r = "trial/member-abcdef012345";
         let sha = "abc";
         // Stale: an older run on the same commit and ref.
-        assert_eq!(pick_run(&[run_info(90, "workflow_dispatch", r, sha)], 100, r, sha), Ok(None));
+        assert_eq!(pick_run(&[run_info(90, "workflow_dispatch", r, sha)], 100, r, sha), None);
         // A newer run of another event (a push), another ref (the train), another commit.
-        assert_eq!(pick_run(&[run_info(101, "push", r, sha)], 100, r, sha), Ok(None));
-        assert_eq!(
-            pick_run(&[run_info(101, "workflow_dispatch", "train/x", sha)], 100, r, sha),
-            Ok(None)
-        );
-        assert_eq!(pick_run(&[run_info(101, "workflow_dispatch", r, "other")], 100, r, sha), Ok(None));
+        assert_eq!(pick_run(&[run_info(101, "push", r, sha)], 100, r, sha), None);
+        assert_eq!(pick_run(&[run_info(101, "workflow_dispatch", "train/x", sha)], 100, r, sha), None);
+        assert_eq!(pick_run(&[run_info(101, "workflow_dispatch", r, "other")], 100, r, sha), None);
         // Ours, among stale ones.
         let all = [
             run_info(90, "workflow_dispatch", r, sha),
             run_info(101, "workflow_dispatch", r, sha),
         ];
-        assert_eq!(pick_run(&all, 100, r, sha), Ok(Some(101)));
-        // Two that look like ours: nothing proves which, so none.
+        assert_eq!(pick_run(&all, 100, r, sha), Some(101));
+    }
+
+    /// A dispatch POST retried after a 502 whose request the server had already accepted makes two runs of the same commit and inputs on
+    /// the trial ref: the newest is judged, not "none is proven" (that was not measured for a harmless duplicate). And the id to compare
+    /// with is the one before the FIRST attempt: a retry does not move it, or the first attempt's run would look stale.
+    #[test]
+    fn a_retried_dispatch_that_made_two_runs_judges_the_newest_and_the_first_attempts_id_is_kept() {
+        let r = "trial/member-abcdef012345";
+        let sha = "abc";
         let two = [
             run_info(101, "workflow_dispatch", r, sha),
-            run_info(102, "workflow_dispatch", r, sha),
+            run_info(103, "workflow_dispatch", r, sha),
         ];
-        assert!(pick_run(&two, 100, r, sha).unwrap_err().contains("none is proven"));
+        assert_eq!(pick_run(&two, 100, r, sha), Some(103));
+        // The first attempt created run 101 before the 502; the retry (after more runs appeared, highest id 102) must still see 101.
+        let mut first = FirstAfter::default();
+        assert_eq!(first.keep(Os::Windows, 100), 100);
+        assert_eq!(first.keep(Os::Windows, 102), 100, "a retry keeps the first id");
+        assert_eq!(first.keep(Os::Linux, 102), 102, "each part has its own");
+        let only_first = [run_info(101, "workflow_dispatch", r, sha)];
+        assert_eq!(pick_run(&only_first, first.keep(Os::Windows, 102), r, sha), Some(101));
+        // Positive control: comparing with the retry's id would miss the first attempt's run.
+        assert_eq!(pick_run(&only_first, 102, r, sha), None);
     }
 
     // ---- The feature of a test ----
@@ -1959,6 +1930,8 @@ mod tests {
         windows: Vec<TryStart>,
         /// What `find_run` answers per part when the server named no run.
         found: BTreeMap<Os, Option<u64>>,
+        /// The wall tick from which `find_run` sees a part's run (it is not there before: the server is slow to list it).
+        found_from: BTreeMap<Os, u64>,
         /// The tick at which each run is over.
         ends: BTreeMap<u64, u64>,
         conclusion: BTreeMap<u64, String>,
@@ -1987,6 +1960,7 @@ mod tests {
                     TryStart::Started(Started::After(100)),
                 ],
                 found: [(Os::Linux, Some(101)), (Os::Windows, Some(102))].into(),
+                found_from: BTreeMap::new(),
                 ends: [(101, 1), (102, 4)].into(),
                 conclusion: BTreeMap::new(),
                 jobs: [(101, ok("crates (ubuntu-latest)")), (102, ok("crates (windows-latest)"))].into(),
@@ -2028,8 +2002,11 @@ mod tests {
             Ok(t)
         }
         fn find_run(&mut self, part: Os, _git_ref: &str, _commit: &str, started: &Started) -> Result<Option<u64>, String> {
+            let up = !self.down;
+            self.asked.push(format!("find {} up={up}", part.name()));
             Ok(match started {
                 Started::Run(id) => Some(*id),
+                Started::After(_) if self.ticks < self.found_from.get(&part).copied().unwrap_or(0) => None,
                 Started::After(_) => self.found.get(&part).copied().flatten(),
             })
         }
@@ -2248,6 +2225,57 @@ mod tests {
             "{:?}",
             f.asked
         );
+    }
+
+    /// P1 (re-check): an outage while the gate is looking for a part's run. The loop's one `hold` owns the waiting: no look for the run is
+    /// made while Gitea is down, the other part (Linux, already running) keeps its bounds (the hold is left out of gate time), the
+    /// first look after Gitea answers finds the run (the window cannot end on a tick with Gitea down), and the member passes.
+    #[test]
+    fn an_outage_while_looking_for_a_run_is_held_by_the_loop_and_the_window_waits_for_one_look_with_gitea_up() {
+        let mut f = Fake::green();
+        f.windows = vec![TryStart::Started(Started::After(100))];
+        // Windows is dispatched at tick 0 but listed only from tick 654, just after Gitea is back (it is down for ticks 2 to 651).
+        f.found_from.insert(Os::Windows, 654);
+        f.ends.insert(102, 660);
+        f.ends.insert(101, 2); // Linux ends early in the outage
+        f.holds = vec![Hold::Up, Hold::Up]
+            .into_iter()
+            .chain(std::iter::repeat_n(down("Gitea is down"), 650))
+            .chain([Hold::Up])
+            .collect();
+        let s = run(&merge(), &mut f, ENFORCED);
+        assert_eq!(s.data["outcome"], "passed", "{:?}", s.text);
+        let a = &f.asked;
+        // No look for the run while Gitea was down.
+        assert!(
+            a.iter().filter(|x| x.starts_with("find windows")).all(|x| x.ends_with("up=true")),
+            "{a:?}"
+        );
+        // At least one look with Gitea up, after it came back, found the run.
+        assert!(a.iter().any(|x| x == "jobs 102"), "{a:?}");
+        // One budget: the hold is bounded by HOLD_MAX in all (a longer outage gives up, naming the service).
+        let mut g = Fake::green();
+        g.holds = vec![
+            Hold::Up,
+            down("Gitea is down"),
+            Hold::GaveUp("Gitea is down for the whole hold limit (8h)".into()),
+        ];
+        g.found_from.insert(Os::Windows, u64::MAX);
+        g.windows = vec![TryStart::Started(Started::After(100))];
+        let s = run(&merge(), &mut g, ENFORCED);
+        assert_eq!(s.exit, Exit::NotMeasured, "{:?}", s.text);
+    }
+
+    /// A look for the run that comes after the window but with Gitea up finds nothing: only then is it "no run appeared".
+    #[test]
+    fn the_window_for_a_run_that_never_appears_ends_with_not_measured_after_looks_with_gitea_up() {
+        let mut f = Fake::green();
+        f.windows = vec![TryStart::Started(Started::After(100))];
+        f.found.insert(Os::Windows, None);
+        let s = run(&merge(), &mut f, ENFORCED);
+        assert_eq!(s.data["rows"][1]["outcome"]["status"], "not-measured", "{:?}", s.text);
+        let looks = f.asked.iter().filter(|x| x.starts_with("find windows")).count();
+        assert!(looks >= 2, "looked on every tick of the window: {looks}");
     }
 
     /// ER-51: when the server names the run it created, that id and no other is judged for the part.
