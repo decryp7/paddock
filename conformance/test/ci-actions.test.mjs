@@ -161,6 +161,9 @@ test('setup-rust declares the sccache backend inputs: s3 by default, Redis only 
   for (const i of ['sccache-backend', 'sccache-redis-endpoint', 'sccache-redis-db', 'sccache-s3-access-key-id', 'sccache-s3-secret-access-key', 'sccache-s3-endpoint', 'sccache-s3-bucket']) assert.ok(declared.includes(i), `${i} is declared`);
   // s3 is the default (user decision 2026-11-21); the dispatch input of ci.yml is the only one-run override, no Gitea variable.
   assert.match(text, /sccache-backend:\n(?:.*\n)*?\s+default: \$\{\{ github\.event\.inputs\.sccache_backend \|\| 's3' \}\}/);
+  // The S3 guard asks the release condition itself (kit.sh release-path), never PADDOCK_DEV_DOWNLOAD, which the same step sets for a job with no read token.
+  assert.match(text, /echo "release=\$\(bash "[^"\n]*kit\.sh" release-path\)" >> "\$GITHUB_OUTPUT"/);
+  assert.match(text, /PADDOCK_CI_RELEASE: \$\{\{ steps\.kit\.outputs\.release \}\}/);
   // The S3 key reaches the one step that runs ./dev ci setup-rust, never $GITHUB_ENV or another step (conformance C141 checks the callers).
   assert.equal(text.split('PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ inputs.sccache-s3-secret-access-key }}').length - 1, 1, 'one step receives the secret');
   assert.doesNotMatch(text, /GITHUB_ENV.*S3_SECRET/);

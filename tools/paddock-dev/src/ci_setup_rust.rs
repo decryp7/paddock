@@ -247,6 +247,38 @@ pub const S3_HEALTH_CONNECT: u64 = 3;
 /// curl `--max-time`, in seconds: the whole check.
 pub const S3_HEALTH_MAX: u64 = 5;
 
+/// The one health check of the S3 store, CI's step and the developer's `./dev sccache env` alike (ER-22): curl with a connect limit of
+/// [`S3_HEALTH_CONNECT`] seconds (the DNS lookup included) and a total limit of [`S3_HEALTH_MAX`], proxies off, a non-2xx answer a failure.
+pub fn s3_health_call(url: &str) -> ToolCall {
+    ToolCall::new("curl")
+        .args(["-fsS", "--noproxy", "*", "--connect-timeout"])
+        .args([
+            S3_HEALTH_CONNECT.to_string(),
+            "--max-time".to_string(),
+            S3_HEALTH_MAX.to_string(),
+            url.to_string(),
+        ])
+        .timeout(Duration::from_secs(S3_HEALTH_MAX + 5))
+}
+
+/// What [`s3_health_call`] says: `Ok` for a 2xx answer, else one sentence with the cause (never a key).
+pub fn s3_health_verdict(url: &str, ran: Result<crate::ci_tool::Ran, String>) -> Result<(), String> {
+    match ran {
+        Ok(r) if r.success => Ok(()),
+        Ok(r) => Err(format!(
+            "the S3 health check {url} failed ({}): {}",
+            r.how,
+            r.stderr.trim().lines().last().unwrap_or("no message")
+        )),
+        Err(e) => Err(format!("the S3 health check could not run curl: {e}")),
+    }
+}
+
+/// The store's health URL for `host:port` and the scheme.
+pub fn s3_health_url(ssl: bool, endpoint: &str) -> String {
+    format!("{}://{endpoint}{S3_HEALTH_PATH}", if ssl { "https" } else { "http" })
+}
+
 impl S3Ci {
     /// The S3 level from the step's environment, or why it cannot be used. The key is `PADDOCK_SCCACHE_S3_ACCESS_KEY_ID` and
     /// `PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY` (repository secrets, one key for every runner class, its policy scoped to
@@ -257,11 +289,28 @@ impl S3Ci {
         let value = |k: &str| get(k).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
         // A release or tag build never reads the shared store: one key serves every branch, so a branch could write the entries a
         // release build then trusts (review of 534918839, P2: cache poisoning). Release workflows hold no key either (C141's
-        // NO_SECRET list); this is the second wall, for a key that reaches such a job by another way.
-        if value("GITHUB_REF").is_some_and(|r| r.starts_with("refs/tags/")) || value("PADDOCK_DEV_DOWNLOAD").as_deref() == Some("0") {
+        // NO_SECRET list); this is the second wall, for a key that reaches such a job by another way. The trigger is the release
+        // condition itself: a tag ref, a tag rehearsal, or `PADDOCK_CI_RELEASE` (setup-rust sets it from `kit.sh release-path`, the one
+        // definition). Never PADDOCK_DEV_DOWNLOAD: setup-rust sets that one for any job with no read token too.
+        let truthy = |k: &str| value(k).is_some_and(|v| !matches!(v.as_str(), "0" | "false"));
+        let trigger = if let Some(r) = value("GITHUB_REF").filter(|r| r.starts_with("refs/tags/")) {
+            Some(format!("a tag run (GITHUB_REF is {r})"))
+        } else if value("PADDOCK_TAG_REHEARSAL").as_deref() == Some("1") {
+            Some("a tag rehearsal (PADDOCK_TAG_REHEARSAL=1)".to_string())
+        } else if truthy("PADDOCK_CI_RELEASE") {
+            Some(format!(
+                "a release or rule 54 run (PADDOCK_CI_RELEASE={})",
+                value("PADDOCK_CI_RELEASE").unwrap_or_default()
+            ))
+        } else {
+            None
+        };
+        if let Some(trigger) = trigger {
             return Err(S3Off {
                 warn: false,
-                why: "a release or tag build never reads the shared S3 cache (any branch could have written to it)".into(),
+                why: format!(
+                    "a release or tag build never reads the shared S3 cache (any branch could have written to it); this is {trigger}"
+                ),
             });
         }
         let (id, secret) = match (
@@ -316,7 +365,7 @@ impl S3Ci {
 impl S3Ci {
     /// The URL of the health check.
     pub fn health_url(&self) -> String {
-        format!("{}://{}{S3_HEALTH_PATH}", if self.ssl { "https" } else { "http" }, self.endpoint)
+        s3_health_url(self.ssl, &self.endpoint)
     }
 }
 
@@ -865,31 +914,9 @@ impl Step<'_> {
     /// The S3 store's health check: an HTTP GET that answers 2xx within curl's own limits ([`S3_HEALTH_CONNECT`], [`S3_HEALTH_MAX`]).
     /// A store that accepts a connection and then hangs (or answers an error) is not used: this job runs on its local disk alone.
     fn health(&mut self, s3: &S3Ci) -> Result<(), S3Off> {
-        let call = ToolCall::new("curl")
-            .args(["-fsS", "--noproxy", "*", "--connect-timeout"])
-            .args([
-                S3_HEALTH_CONNECT.to_string(),
-                "--max-time".to_string(),
-                S3_HEALTH_MAX.to_string(),
-                s3.health_url(),
-            ])
-            .timeout(Duration::from_secs(S3_HEALTH_MAX + 5));
-        match self.run(&call) {
-            Ok(r) if r.success => Ok(()),
-            Ok(r) => Err(S3Off {
-                warn: true,
-                why: format!(
-                    "the S3 health check {} failed ({}): {}",
-                    s3.health_url(),
-                    r.how,
-                    r.stderr.trim().lines().last().unwrap_or("no message")
-                ),
-            }),
-            Err(e) => Err(S3Off {
-                warn: true,
-                why: format!("the S3 health check could not run curl: {e}"),
-            }),
-        }
+        let url = s3.health_url();
+        let ran = self.run(&s3_health_call(&url));
+        s3_health_verdict(&url, ran).map_err(|why| S3Off { warn: true, why })
     }
 
     /// Starts the timeout guard in front of the store ([`crate::ci_s3_guard`]): detached, so it outlives this step; its port comes on
@@ -1374,10 +1401,27 @@ mod tests {
             S3Ci::from_env(&vars(&v), "macOS", "aarch64")
         };
         assert!(with(&[]).is_ok(), "the control: the same inputs on a branch run are accepted");
-        for extra in [("GITHUB_REF", "refs/tags/dyno-v1.2.0"), ("PADDOCK_DEV_DOWNLOAD", "0")] {
+        // The log names the real trigger (ER-27).
+        for (extra, named) in [
+            (("GITHUB_REF", "refs/tags/dyno-v1.2.0"), "GITHUB_REF is refs/tags/dyno-v1.2.0"),
+            (("PADDOCK_TAG_REHEARSAL", "1"), "PADDOCK_TAG_REHEARSAL=1"),
+            (("PADDOCK_CI_RELEASE", "true"), "PADDOCK_CI_RELEASE=true"),
+        ] {
             let off = with(&[extra]).unwrap_err();
-            assert!(!off.warn && off.why.contains("release or tag"), "{extra:?}: {off:?}");
+            assert!(
+                !off.warn && off.why.contains("release or tag") && off.why.contains(named),
+                "{extra:?}: {off:?}"
+            );
         }
+        // PADDOCK_DEV_DOWNLOAD=0 is not a release signal: setup-rust sets it for any job without a read token (ER-33: one flag, one meaning).
+        assert!(
+            with(&[("PADDOCK_DEV_DOWNLOAD", "0")]).is_ok(),
+            "a job with no read token still uses the store"
+        );
+        assert!(
+            with(&[("PADDOCK_CI_RELEASE", "false")]).is_ok(),
+            "the release flag false is a branch run"
+        );
         assert!(with(&[("GITHUB_REF", "refs/heads/main")]).is_ok(), "main is not a tag");
     }
 

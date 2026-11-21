@@ -243,15 +243,46 @@ impl Backend {
     /// (`Local disk: "<dir>"`), and for S3 `s3, name: <bucket>, prefix: /<prefix>/`. A prefix of its own never matches another's, and
     /// the folder `/a/b` never matches `/a/b2` or `/x/a/b`. (sccache's stats do not print the S3 endpoint.)
     pub fn matches_stats(&self, stats: &str) -> bool {
+        if let Backend::Tiered { dir, s3, .. } = self {
+            // The location line alone names no setup (any chain says it): the disk folder and the second level are read from the level
+            // lines, so another folder, bucket or prefix is not reported as ours (ER-33).
+            return location(stats).as_deref() == Some(MULTILEVEL_LOCATION)
+                && level(stats, "L0 (disk)").as_deref() == Some(format!("Local disk: \"{dir}\"").as_str())
+                && level(stats, "L1 (s3)").as_deref()
+                    == Some(format!("s3, name: {}, prefix: /{}/", s3.bucket, s3.prefix.trim_matches('/')).as_str());
+        }
         let want = match self {
-            Backend::Tiered { .. } => MULTILEVEL_LOCATION.to_string(),
+            Backend::Tiered { .. } => unreachable!("answered above"),
             Backend::Local { dir, .. } => format!("Local disk: \"{dir}\""),
             Backend::S3(s) => format!("s3, name: {}, prefix: /{}/", s.bucket, s.prefix.trim_matches('/')),
         };
-        stats
-            .lines()
-            .any(|l| l.strip_prefix("Cache location").is_some_and(|rest| rest.trim() == want))
+        location(stats).as_deref() == Some(want.as_str())
     }
+}
+
+/// The `Cache location` line of `--show-adv-stats`.
+fn location(stats: &str) -> Option<String> {
+    stats
+        .lines()
+        .find_map(|l| l.strip_prefix("Cache location"))
+        .map(|r| r.trim().to_string())
+}
+
+/// The line of one level of a multi-level server (`  L0 (disk)   Local disk: "<dir>"`), without its label.
+fn level(stats: &str, label: &str) -> Option<String> {
+    stats
+        .lines()
+        .find_map(|l| l.trim_start().strip_prefix(label))
+        .map(|r| r.trim().to_string())
+}
+
+/// Whether the stats are those of a server of ours that runs the chain on `plain_dir`'s sibling folder (what an `auto` run that fell back
+/// to the disk keeps while the store is down: its second level fails soft). Another disk folder, or a chain whose second level is not an
+/// S3 bucket, is not ours.
+fn chain_on(stats: &str, plain_dir: &str) -> bool {
+    location(stats).as_deref() == Some(MULTILEVEL_LOCATION)
+        && level(stats, "L0 (disk)").as_deref() == Some(format!("Local disk: \"{}\"", crate::ci_setup_rust::s3_tier_of(plain_dir)).as_str())
+        && level(stats, "L1 (s3)").is_some_and(|l| l.starts_with("s3, name: "))
 }
 
 /// The backend the environment asks for, or the cause and next step.
@@ -305,55 +336,12 @@ pub(crate) fn multilevel_settings(dir: &str, size: &str, bucket: &str, endpoint:
     .collect()
 }
 
-/// The health check of the store before a run uses it, as CI's: an HTTP GET of [`crate::ci_setup_rust::S3_HEALTH_PATH`] that must
-/// answer 2xx within [`crate::ci_setup_rust::S3_HEALTH_MAX`] seconds (a connect alone proved nothing, a half-up store accepts one).
-/// Plain http only, as the timeout guard CI puts in front of the store.
-pub fn s3_alive(s3: &S3) -> Result<(), String> {
-    use crate::ci_setup_rust::{S3_HEALTH_CONNECT, S3_HEALTH_MAX, S3_HEALTH_PATH};
-    use std::io::{Read, Write};
-    use std::net::ToSocketAddrs;
-    if s3.ssl {
-        return Err("the endpoint is https and the health check speaks http only".into());
-    }
-    let url = format!("http://{}{S3_HEALTH_PATH}", s3.endpoint);
-    let addr = s3
-        .endpoint
-        .to_socket_addrs()
-        .map_err(|e| format!("the S3 endpoint {} does not resolve: {e}", s3.endpoint))?
-        .next()
-        .ok_or_else(|| format!("the S3 endpoint {} has no address", s3.endpoint))?;
-    let mut conn = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(S3_HEALTH_CONNECT))
-        .map_err(|e| format!("the S3 health check {url} could not connect: {e}"))?;
-    let max = Some(Duration::from_secs(S3_HEALTH_MAX));
-    let _ = conn.set_read_timeout(max);
-    let _ = conn.set_write_timeout(max);
-    conn.write_all(
-        format!(
-            "GET {S3_HEALTH_PATH} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
-            s3.endpoint
-        )
-        .as_bytes(),
-    )
-    .map_err(|e| format!("the S3 health check {url} could not send: {e}"))?;
-    let mut head = [0u8; 32];
-    let mut got = 0;
-    while got < head.len() && !head[..got].contains(&b'\n') {
-        match conn.read(&mut head[got..]) {
-            Ok(0) => break,
-            Ok(n) => got += n,
-            Err(e) => return Err(format!("the S3 health check {url} got no answer: {e}")),
-        }
-    }
-    let line = String::from_utf8_lossy(&head[..got]);
-    let status = line.split_whitespace().nth(1).unwrap_or("");
-    if status.starts_with('2') && status.len() == 3 {
-        Ok(())
-    } else {
-        Err(format!(
-            "the S3 health check {url} answered `{}`, not 2xx",
-            line.lines().next().unwrap_or("").trim()
-        ))
-    }
+/// The health check of the store before a run uses it: CI's own ([`crate::ci_setup_rust::s3_health_call`]), so the two never differ. It
+/// is bounded in full (connect, DNS included, and total time) by curl's limits.
+pub fn s3_alive(s3: &S3, env: &HashMap<String, String>) -> Result<(), String> {
+    let url = crate::ci_setup_rust::s3_health_url(s3.ssl, &s3.endpoint);
+    let ran = crate::ci_setup_rust::s3_health_call(&url).run(env, &mut std::io::sink());
+    crate::ci_setup_rust::s3_health_verdict(&url, ran)
 }
 
 /// The backend this run uses. `auto` (the default) is the local disk first with the shared store behind it ([`Backend::Tiered`])
@@ -417,6 +405,8 @@ pub fn choose(env: &HashMap<String, String>, probe: &dyn Fn(&S3) -> Result<(), S
 #[derive(Clone, PartialEq, Eq)]
 pub struct Creds {
     pairs: Vec<(String, String)>,
+    /// The key file was used while the caller's environment also held `AWS_*` variables, which are ignored for sccache.
+    env_ignored: bool,
 }
 
 impl std::fmt::Debug for Creds {
@@ -426,6 +416,11 @@ impl std::fmt::Debug for Creds {
 }
 
 impl Creds {
+    /// Whether the caller's own `AWS_*` variables were left out because the key file's keys were used (said once by [`prepare`]).
+    pub fn env_ignored(&self) -> bool {
+        self.env_ignored
+    }
+
     /// `configured` or `missing`: the only thing ever printed about them.
     pub fn status(&self) -> &'static str {
         if self.pairs.iter().any(|(k, v)| k == "AWS_ACCESS_KEY_ID" && !v.is_empty())
@@ -494,22 +489,23 @@ fn file_settings(env: &HashMap<String, String>) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-/// Reads the credentials: the caller's `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (for example exported from the macOS
-/// keychain by the user: `security find-generic-password -s paddock-sccache-s3 -w`), else the env file. A file that group or others
-/// can read is refused (it holds a secret).
+/// Reads the credentials: the key file first (the machine's declared key: `~/.config/paddock/sccache-s3.env`; a file that group or others
+/// can read is refused, it holds a secret), and only when it holds none the caller's `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (for
+/// example exported from the macOS keychain: `security find-generic-password -s paddock-sccache-s3 -w`). A stray `AWS_*` in the
+/// caller's shell, another project's login, never outranks the file ([`Creds::env_ignored`]).
 pub fn read_creds(env: &HashMap<String, String>) -> Result<Creds, String> {
     let from_env: Vec<(String, String)> = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
         .iter()
         .filter_map(|k| env.get(*k).filter(|v| !v.is_empty()).map(|v| (k.to_string(), v.clone())))
         .collect();
-    let c = Creds { pairs: from_env };
-    if c.status() == "configured" {
-        return Ok(c);
-    }
+    let from_env = Creds {
+        pairs: from_env,
+        env_ignored: false,
+    };
     let file = env_file(env)?;
     let text = match std::fs::read_to_string(&file) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Creds { pairs: Vec::new() }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(from_env),
         Err(e) => return Err(format!("cannot read the credentials file {}: {e}", file.display())),
     };
     #[cfg(unix)]
@@ -524,9 +520,11 @@ pub fn read_creds(env: &HashMap<String, String>) -> Result<Creds, String> {
             ));
         }
     }
-    Ok(Creds {
+    let from_file = Creds {
         pairs: parse_env_file(&text),
-    })
+        env_ignored: !from_env.pairs.is_empty(),
+    };
+    Ok(if from_file.status() == "configured" { from_file } else { from_env })
 }
 
 /// The folder the server runs in, uses as its temporary folder and writes its error log in: `<tool cache>/sccache-run`, tool-owned and
@@ -836,7 +834,7 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
         return off(why, false);
     }
     let started = std::time::Instant::now();
-    let (backend, fallback) = match choose(env, &s3_alive) {
+    let (backend, fallback) = match choose(env, &|s3| s3_alive(s3, env)) {
         Ok(b) => b,
         Err(e) => {
             return off(
@@ -854,7 +852,14 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
     }
     let creds = match &backend {
         Backend::S3(_) | Backend::Tiered { .. } => match read_creds(env) {
-            Ok(c) if c.status() == "configured" => Some(c),
+            Ok(c) if c.status() == "configured" => {
+                if c.env_ignored() {
+                    eprintln!(
+                        "::notice::local-sccache: AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in your environment are ignored for sccache; the key file's keys are used (docs/dev-setup.md, \"Local sccache\")"
+                    );
+                }
+                Some(c)
+            }
             Ok(_) => {
                 return off(
                     "the S3 credentials are missing (AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in the environment or in ~/.config/paddock/sccache-s3.env). Next: see docs/dev-setup.md, \"Local sccache\", or use PADDOCK_SCCACHE_BACKEND=local".to_string(),
@@ -915,6 +920,7 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
     // At most two starts: a server whose startup write check failed once stays read-only for its whole life (sccache 0.19.0
     // `RemoteStorage::check`), so it is stopped and started once more; still read-only, the wrapper is off.
     let mut restarted = false;
+    let mut upgraded = false;
     loop {
         let start_log = run.join(format!("start-{}.log", std::process::id()));
         // The server outlives this process and would hold a pipe open, so its starter writes to a file.
@@ -922,7 +928,7 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
         // A server already listening is not started again: the start would only fail with "Address in use" and write that to the
         // running server's error log, the log every warning names (247 times in two days, docs/research/2026-11-19-sccache.md).
         // After a restart of our own server the port is started without asking.
-        let start = if !restarted && listening(env) {
+        let start = if !restarted && !upgraded && listening(env) {
             Ok(crate::ci_tool::Ran {
                 success: true,
                 how: "already listening".into(),
@@ -963,13 +969,24 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
             }
         };
         let _ = start;
+        // A plain-disk server on this tool's own folder, while this run wants the chain: it was started when the store was down (an `auto`
+        // run that fell back), so it is replaced once, now that the store answers; left alone, every later build would be uncached
+        // for good (the server never exits on its own).
+        if !upgraded
+            && let Backend::Tiered { dir, .. } = &backend
+            && location(&stats.stdout) == Some(format!("Local disk: \"{}\"", dir.strip_suffix("-s3").unwrap_or(dir)))
+        {
+            upgraded = true;
+            eprintln!(
+                "::notice::local-sccache: the server on port {} runs the plain local disk (it was started while the shared store was down); stopping it and starting it with the store behind the disk",
+                server_port(env)
+            );
+            let _ = server.call("--stop-server").run(env, &mut std::io::sink());
+            continue;
+        }
         // An `auto` run that fell back to the disk (the store is down now) keeps a server of ours that already runs the chain: its
         // second level fails soft (`l0`), and stopping it would throw away a working cache.
-        let keeps_chain = fallback.is_some()
-            && stats
-                .stdout
-                .lines()
-                .any(|l| l.strip_prefix("Cache location").is_some_and(|r| r.trim() == MULTILEVEL_LOCATION));
+        let keeps_chain = matches!(&backend, Backend::Local { dir, .. } if fallback.is_some() && chain_on(&stats.stdout, dir));
         if !backend.matches_stats(&stats.stdout) && !keeps_chain {
             return off(
                 format!(
@@ -1583,11 +1600,21 @@ mod tests {
         let text = "# keys\nexport AWS_ACCESS_KEY_ID=\"AKIAEXAMPLE\"\nAWS_SECRET_ACCESS_KEY='s3cr3t'\nSCCACHE_REDIS=redis://x\n";
         let got = parse_env_file(text);
         assert_eq!(got.len(), 2, "no other line reaches the server: {got:?}");
-        let c = Creds { pairs: got };
+        let c = Creds {
+            pairs: got,
+            env_ignored: false,
+        };
         assert_eq!(c.status(), "configured");
         let shown = format!("{c:?}");
         assert!(!shown.contains("AKIAEXAMPLE") && !shown.contains("s3cr3t"), "{shown}");
-        assert_eq!(Creds { pairs: Vec::new() }.status(), "missing");
+        assert_eq!(
+            Creds {
+                pairs: Vec::new(),
+                env_ignored: false
+            }
+            .status(),
+            "missing"
+        );
     }
 
     #[cfg(unix)]
@@ -1913,6 +1940,7 @@ mod tests {
             std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
         }
         env(&[
+            ("PATH", "/usr/bin:/bin"),
             ("PADDOCK_SCCACHE_ENV_FILE", file.to_str().unwrap()),
             ("PADDOCK_SCCACHE_S3_ENDPOINT", format!("127.0.0.1:{port}").as_str()),
             ("SCCACHE_DIR", home.join("cache").to_str().unwrap()),
@@ -1921,24 +1949,25 @@ mod tests {
 
     #[test]
     fn the_health_check_wants_a_2xx_answer_and_not_just_a_connect() {
+        let e = env(&[("PATH", "/usr/bin:/bin")]);
         let probe = |port: u16| {
-            s3_alive(&S3 {
-                bucket: "b".into(),
-                endpoint: format!("127.0.0.1:{port}"),
-                region: "auto".into(),
-                ssl: false,
-                prefix: "p".into(),
-            })
+            s3_alive(
+                &S3 {
+                    bucket: "b".into(),
+                    endpoint: format!("127.0.0.1:{port}"),
+                    region: "auto".into(),
+                    ssl: false,
+                    prefix: "p".into(),
+                },
+                &e,
+            )
         };
         let (up, served_up) = health_server("200 OK");
         let (half, served_half) = health_server("503 Service Unavailable");
         assert_eq!(probe(up), Ok(()));
         let why = probe(half).unwrap_err();
         assert!(why.contains("503"), "{why}");
-        assert!(
-            probe(free_port()).unwrap_err().contains("could not connect"),
-            "nothing listens there"
-        );
+        assert!(probe(free_port()).is_err(), "nothing listens there");
         served_up.join().unwrap();
         served_half.join().unwrap();
     }
@@ -2012,7 +2041,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn sccache_env_uses_the_shared_store_when_the_file_is_there_and_the_disk_alone_when_not() {
-        let (home, mut e, bin) = fake(0, Some(MULTILEVEL_LOCATION));
+        let chain = format!(
+            "{MULTILEVEL_LOCATION}\n  L0 (disk)                     Local disk: \"{{env:SCCACHE_DIR}}\"\n  L1 (s3)                       s3, name: {{env:SCCACHE_BUCKET}}, prefix: /{{env:SCCACHE_S3_KEY_PREFIX}}/"
+        );
+        let (home, mut e, bin) = fake(0, Some(&chain));
         let (port, served) = health_server("200 OK");
         e.extend(s3_env(home.path(), port));
         let Outcome::Ready(ready) = prepare(&e, Install::Never) else {
@@ -2037,6 +2069,101 @@ mod tests {
             panic!("not ready")
         };
         assert!(dir(&plain).ends_with("cache"), "{plain:?}");
+    }
+
+    /// The stats of a server started with the two-level chain, as sccache 0.19.0 prints them (measured): the location line, then one
+    /// line per level.
+    fn chain_stats(l0_dir: &str, bucket: &str, prefix: &str) -> String {
+        format!(
+            "Cache location                  Multi-level (2 levels)\n  L0 (disk)                     Local disk: \"{l0_dir}\"\n  L1 (s3)                       s3, name: {bucket}, prefix: /{prefix}/\n"
+        )
+    }
+
+    /// A multi-level server is ours only when its disk folder, bucket and prefix are ours (ER-33): the location line alone names no setup.
+    #[test]
+    fn a_two_level_server_is_ours_only_with_this_folder_bucket_and_prefix() {
+        let home = tempfile::tempdir().unwrap();
+        let e = s3_env(home.path(), 1);
+        let (b, _) = choose(&e, &|_| Ok(())).unwrap();
+        let Backend::Tiered { dir, s3, .. } = &b else {
+            panic!("tiered expected")
+        };
+        assert!(
+            b.matches_stats(&chain_stats(dir, &s3.bucket, &s3.prefix)),
+            "the control: all three are ours"
+        );
+        assert!(
+            !b.matches_stats(&chain_stats("/elsewhere", &s3.bucket, &s3.prefix)),
+            "another disk folder"
+        );
+        assert!(!b.matches_stats(&chain_stats(dir, "other-bucket", &s3.prefix)), "another bucket");
+        assert!(!b.matches_stats(&chain_stats(dir, &s3.bucket, "other")), "another prefix");
+        assert!(
+            !b.matches_stats("Cache location                  Multi-level (2 levels)\n"),
+            "the location line alone says nothing"
+        );
+        assert!(
+            !b.matches_stats(&format!("Cache location                  Multi-level (2 levels)\n  L0 (disk)                     Local disk: \"{dir}\"\n  L1 (redis)                    Redis: x\n")),
+            "another second level"
+        );
+    }
+
+    /// RustFS was down at the first `sccache env`, so a plain-disk server was started; once it is back the next call replaces that server
+    /// (it is this tool's own: its folder is the plain one this tool uses) instead of leaving every build uncached for good.
+    #[cfg(unix)]
+    #[test]
+    fn a_plain_disk_server_started_while_the_store_was_down_is_replaced_when_it_is_back() {
+        use paddock_testkit::{Actions, Case, StandIn};
+        let home = tempfile::tempdir().unwrap();
+        let mut e = s3_env(home.path(), free_port());
+        e.insert("PADDOCK_DEV_HOME".into(), home.path().to_str().unwrap().into());
+        e.insert("PATH".into(), "/usr/bin:/bin".into());
+        e.insert("SCCACHE_SERVER_PORT".into(), free_port().to_string());
+        let plain = home.path().join("cache").display().to_string();
+        let bin = install_path(&e).unwrap();
+        let dir = bin.parent().unwrap();
+        std::fs::create_dir_all(dir).unwrap();
+        let stopped = dir.join("stopped");
+        let rw = |a: Actions| a.stdout("Effective cache mode            ReadWrite");
+        let installed = StandIn::new(dir, "sccache")
+            .records_args()
+            .stdout("sccache 0.19.0")
+            .when_args(&["--start-server"], Actions::new())
+            .when_args(&["--stop-server"], Actions::new().writes(&stopped, ""))
+            .when(
+                &Case::new().args_start_with(&["--show-adv-stats"]).file_missing(&stopped),
+                rw(Actions::new().stdout_with(&format!("Cache location                  Local disk: \"{plain}\""))),
+            )
+            .when(
+                &Case::new().args_start_with(&["--show-adv-stats"]).file_exists(&stopped),
+                rw(Actions::new()
+                    .stdout("Cache location                  Multi-level (2 levels)")
+                    .stdout_with("  L0 (disk)                     Local disk: \"{env:SCCACHE_DIR}\"")
+                    .stdout_with("  L1 (s3)                       s3, name: {env:SCCACHE_BUCKET}, prefix: /{env:SCCACHE_S3_KEY_PREFIX}/")),
+            )
+            .install()
+            .unwrap();
+        write_shim(installed.program()).unwrap();
+        let dir_of = |o: &Outcome| match o {
+            Outcome::Ready(r) => r.vars.iter().find(|(k, _)| k == "SCCACHE_DIR").map(|(_, v)| v.clone()).unwrap(),
+            other => panic!("not ready: {other:?}"),
+        };
+        // 1. The store is down: the plain disk, and a server on it.
+        assert_eq!(dir_of(&prepare(&e, Install::Never)), plain);
+        assert!(!calls(&installed).contains(&"--stop-server".to_string()));
+        // 2. The store is back: the plain server is stopped and started again with the chain.
+        let (port, served) = health_server("200 OK");
+        e.insert("PADDOCK_SCCACHE_S3_ENDPOINT".into(), format!("127.0.0.1:{port}"));
+        let up = prepare(&e, Install::Never);
+        assert_eq!(dir_of(&up), format!("{plain}-s3"), "now the chain's disk folder");
+        let c = calls(&installed);
+        assert_eq!(c.iter().filter(|a| *a == "--stop-server").count(), 1, "one stop: {c:?}");
+        assert_eq!(
+            &c[c.len() - 2..],
+            ["--stop-server", "--start-server"],
+            "stopped, then started with the chain: {c:?}"
+        );
+        served.join().unwrap();
     }
 
     /// The store's endpoint and bucket may come from the credentials file (optional `PADDOCK_SCCACHE_S3_ENDPOINT` and
@@ -2068,6 +2195,38 @@ mod tests {
         std::fs::write(&file, keys).unwrap();
         e.remove("PADDOCK_SCCACHE_S3_BUCKET");
         assert_eq!(store(&e), (DEFAULT_S3_ENDPOINT.to_string(), DEFAULT_S3_BUCKET.to_string()));
+    }
+
+    /// The key file is the machine's declared key: a stray `AWS_*` in the caller's shell (another project's login) never outranks it, and
+    /// is said once; with no file the caller's variables are still used.
+    #[test]
+    fn the_key_files_keys_outrank_the_callers_aws_variables() {
+        let home = tempfile::tempdir().unwrap();
+        let mut e = s3_env(home.path(), 1);
+        e.insert("AWS_ACCESS_KEY_ID".into(), "stray-id".into());
+        e.insert("AWS_SECRET_ACCESS_KEY".into(), "stray-secret".into());
+        let c = read_creds(&e).unwrap();
+        assert_eq!(
+            c.pairs(),
+            [
+                ("AWS_ACCESS_KEY_ID".to_string(), "fake-id-1".to_string()),
+                ("AWS_SECRET_ACCESS_KEY".to_string(), "fake-secret-1".to_string())
+            ]
+        );
+        assert!(c.env_ignored(), "the stray variables are said to be ignored");
+        assert!(!format!("{c:?}").contains("stray"), "no value in Debug");
+        let mut none = e.clone();
+        none.insert(
+            "PADDOCK_SCCACHE_ENV_FILE".into(),
+            home.path().join("absent.env").display().to_string(),
+        );
+        let c = read_creds(&none).unwrap();
+        assert_eq!(
+            c.pairs()[0],
+            ("AWS_ACCESS_KEY_ID".to_string(), "stray-id".to_string()),
+            "no file: the caller's variables"
+        );
+        assert!(!c.env_ignored());
     }
 
     /// The keys reach the server's start call and nothing else.

@@ -12,6 +12,9 @@ Conventional Commits; one semver tag for the whole repo.
 - `./dev sccache env` and the tools that start builds default to `PADDOCK_SCCACHE_BACKEND=auto`: the local disk first and RustFS behind it
   when `~/.config/paddock/sccache-s3.env` is there and the store answers (docs/dev-setup.md, "Local sccache"); `local` and `s3` are as before. The keys reach
   the server's environment only.
+- Review fixes: a plain-disk server started while RustFS was down is replaced once the store is back; a two-level server is ours only with
+  this disk folder, bucket and prefix; the S3 guard tests the release condition itself (`kit.sh release-path`, named in the log), not
+  `PADDOCK_DEV_DOWNLOAD`; CI and the Mac share one bounded health check; the key file outranks a stray `AWS_*`; the doubled disk use is documented.
 - `conformance/ci/dev-tool-cache.sh` read lines 2 and 3 of `./dev --wrapper-hash` (it prints the hash and the state on lines 1 and 2), so
   every Linux job missed the cache silently and built `./dev` (run 8509). It reads the right lines, and a missing or misshapen hash fails the step.
 

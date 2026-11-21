@@ -116,10 +116,16 @@ tools and never by your shell profile (user decision 2026-11-16; docs/research/s
   `PADDOCK_SCCACHE_S3_PREFIX` (default `paddock`) and, for `s3`, `PADDOCK_SCCACHE_S3_REGION` (default `auto`) and
   `PADDOCK_SCCACHE_S3_SSL` (`true`; default `false`). With `auto` the first level is the sibling folder `<SCCACHE_DIR>-s3` (what S3
   backfills never reaches the plain folder, as in CI, ADR 0111): the first build after the switch starts from the store, not from
-  the old folder. The keys go to the server's environment only; builds see the disk setting alone.
-- **S3 credentials are never in the repository, a log or a message.** They are read from `AWS_ACCESS_KEY_ID` and
-  `AWS_SECRET_ACCESS_KEY` in the environment, else from `~/.config/paddock/sccache-s3.env` (`$XDG_CONFIG_HOME/paddock/sccache-s3.env`,
-  or the file `PADDOCK_SCCACHE_ENV_FILE` names): two `NAME=value` lines, mode 600 (a file others can read is refused). The tools
+  the old folder, and the two folders together use up to twice `SCCACHE_CACHE_SIZE` on the Mac's disk (each is capped at that size; lower
+  the size, or delete the plain folder once the shared cache is in use). The store's health check is CI's own (`curl` with a 3 s connect
+  limit, DNS included, and a 5 s total limit). If the store was down at the first `sccache env`, the plain-disk server that call started
+  is stopped and started again with the store behind the disk at the next call that finds the store up (one `::notice::`); a server on
+  another folder or setup is never touched. The keys go to the server's environment only; builds see the disk setting alone.
+- **S3 credentials are never in the repository, a log or a message.** They are read from the key file
+  `~/.config/paddock/sccache-s3.env` (`$XDG_CONFIG_HOME/paddock/sccache-s3.env`, or the file `PADDOCK_SCCACHE_ENV_FILE` names): two
+  `NAME=value` lines, mode 600 (a file others can read is refused), and only when it holds none from `AWS_ACCESS_KEY_ID` and
+  `AWS_SECRET_ACCESS_KEY` in the environment. A stray `AWS_*` in your shell (another project's login) never outranks the file: it is
+  ignored for sccache, with one `::notice::`. The tools
   print only `credentials configured` or `credentials missing`. The macOS keychain is not read by the tools (it would raise a
   dialog); export the key from it into the file yourself.
 - One server takes one cache at a time. To switch the backend, run `sccache --stop-server` once, then the next build starts the
@@ -182,8 +188,10 @@ shared backend on 2026-10-28 and again on 2026-11-17 (CI keeps its per-slot cach
   `sccache-paddock/paddock-ci/*`). The key reaches only the `setup-rust` step (each use passes it; conformance C141
   checks that, and that the gates job and the release workflows hold none); the sccache server gets the chain and the key, every
   later step only the local disk. **A release, rule 54 or tag run never reads the shared store** (any branch could have written to
-  it: cache poisoning): its workflows hold no key (C141), `./dev ci setup-rust` refuses S3 for `refs/tags/*` and `PADDOCK_DEV_DOWNLOAD=0`
-  with a `::notice::`, and the action's shell path takes `s3` as `local`; tests: `the_default_on_a_tag_or_release_run_is_the_plain_local_disk`,
+  it: cache poisoning): its workflows hold no key (C141), `./dev ci setup-rust` refuses S3 for a tag ref, a tag rehearsal and `PADDOCK_CI_RELEASE=true` (setup-rust sets it from
+  `conformance/ci/kit.sh release-path`, the one definition: tag, rehearsal, or the `PADDOCK_DEV_DOWNLOAD=0` that release and rule 54
+  workflows set; the guard never reads that flag itself, since setup-rust sets it for any job without a read token too) with a
+  `::notice::` that names the trigger, and the action's shell path takes `s3` as `local`; tests: `the_default_on_a_tag_or_release_run_is_the_plain_local_disk`,
   `the_release_paths_shell_steps_never_use_s3`. A job with no secret passed gets one `::notice::` naming that, and its local disk. A job falls back to its local disk, with a `::warning::`, when the store's HTTP health check
   (`/minio/health/live`, 5 s at most) fails, and a failed S3 write never fails a build. A store that hangs in the middle of a job
   is cut by the **timeout guard** (`paddock_net::stall_guard`, a localhost proxy `setup-rust` starts in front of the store: a request with no

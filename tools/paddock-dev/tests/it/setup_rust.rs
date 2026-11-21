@@ -963,7 +963,7 @@ fn the_default_without_a_secret_falls_back_to_the_disk_with_a_notice() {
 /// A release or tag run with the default backend: the local disk, whatever key it holds.
 #[test]
 fn the_default_on_a_tag_or_release_run_is_the_plain_local_disk() {
-    for extra in [("GITHUB_REF", "refs/tags/dyno-v1.2.0"), ("PADDOCK_DEV_DOWNLOAD", "0")] {
+    for extra in [("GITHUB_REF", "refs/tags/dyno-v1.2.0"), ("PADDOCK_CI_RELEASE", "true")] {
         let r = Runner::new(Some(Fail::Never));
         health_curl(&r, 0);
         let mut env = S3_ENV.to_vec();
