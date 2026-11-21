@@ -54,6 +54,8 @@ path = "junit.xml"
 # paddock-jobs properties::walk_equals_sequential_reference, took 78.8 s at 10000 cases (the default 400 or fewer: under 1 s), at a
 # 1-minute load of about 35 on a Mac mini with 2 build jobs; every other one under 20 s. 60 s periods, stopped after 240 s: three
 # times the slowest measured, so a hung property is still stopped.
+# The 240 s comes from the Mac mini only and counts as not measured for the Linux runner: replace it with the first CI run's slowest
+# test (times three) when that run exists (ER-12).
 [profile.nightly-proptest]
 inherits = "ci"
 slow-timeout = { period = "60s", terminate-after = 4 }

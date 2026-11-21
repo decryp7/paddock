@@ -128,20 +128,25 @@ fn default_file(test: &str) -> String {
 /// The file to name in the annotation, relative to the repository root: the path proptest printed with `root` taken off; a path that
 /// is relative (to the crate) or outside `root` is named under the crate (`<crate>/<path>`), as far as the log says.
 fn shown_file(s: &Seed, root: Option<&str>) -> String {
-    let root = root.map(|r| r.trim_end_matches('/')).filter(|r| !r.is_empty());
-    if let Some(rest) = root.and_then(|r| s.file.strip_prefix(r)).and_then(|r| r.strip_prefix('/')) {
+    // A Windows runner prints backslashes: the annotation always names a path with `/`.
+    let file = s.file.replace('\\', "/");
+    let root = root.map(|r| r.replace('\\', "/"));
+    let root = root.as_deref().map(|r| r.trim_end_matches('/')).filter(|r| !r.is_empty());
+    if let Some(rest) = root.and_then(|r| file.strip_prefix(r)).and_then(|r| r.strip_prefix('/')) {
         return rest.to_string();
     }
-    if s.file.starts_with('/') || s.file.get(1..3) == Some(":\\") {
+    if file.starts_with('/') || file.get(1..2) == Some(":") {
         // Absolute but not under the root: the part below the crate folder, which is `tests/` or `proptest-regressions/` first.
-        let at = s
-            .file
+        let at = file
             .find("/tests/")
             .map(|i| i + 1)
-            .or_else(|| s.file.find("/proptest-regressions/").map(|i| i + 1));
-        return format!("{}/{}", s.krate, at.map_or(s.file.as_str(), |i| &s.file[i..]));
+            .or_else(|| file.find("/proptest-regressions/").map(|i| i + 1));
+        return match at {
+            Some(i) => format!("{}/{}", s.krate, &file[i..]),
+            None => file,
+        };
     }
-    format!("{}/{}", s.krate, s.file)
+    format!("{}/{}", s.krate, file)
 }
 
 /// The annotation for one case: the cause and the next step (ER-27). `root`: the repository root the printed path is made relative to.
@@ -219,8 +224,7 @@ mod tests {
             "{:?}",
             f.seeds
         );
-        // Real proptest printed no seed text at all for `always_small` (two tests of one binary save to the same file at once, and the
-        // text shows for one of them), so there is nothing to read and no warning: that case is in the file the log's other test names.
+        // Real proptest printed no seed text at all for `always_small` (probably its seed was already in the file; not confirmed), so there is nothing to read and no warning: that case is in the file the log's other test names.
         // The retries printed no second line, and a repeated line would be kept once.
         assert!(f.seeds.iter().all(|s| s.cc.starts_with("cc ") && !s.guessed));
     }
@@ -249,6 +253,30 @@ mod tests {
         );
         // Without the root it falls back to the crate name and the part below the crate folder.
         assert!(annotation(&app, None).contains("to debrief-core/tests/proptest-regressions/properties.txt in"));
+    }
+
+    #[test]
+    fn a_windows_path_is_named_with_forward_slashes_under_the_root_or_below_the_crate() {
+        let win = |file: &str| Seed {
+            krate: "pitcrew-core".into(),
+            test: "t".into(),
+            cc: "cc ab".into(),
+            file: file.into(),
+            guessed: false,
+        };
+        let under = win(r"D:\ws\apps\pitcrew\crates\pitcrew-core\proptest-regressions\yaml_patch.txt");
+        assert!(
+            annotation(&under, Some(r"D:\ws"))
+                .contains("commit this line to apps/pitcrew/crates/pitcrew-core/proptest-regressions/yaml_patch.txt in"),
+            "{}",
+            annotation(&under, Some(r"D:\ws"))
+        );
+        let outside = annotation(&under, Some(r"E:\other"));
+        assert!(
+            outside.contains("to pitcrew-core/proptest-regressions/yaml_patch.txt in"),
+            "{outside}"
+        );
+        assert!(!outside.contains('\\') && !outside.contains("pitcrew-core/D:"), "{outside}");
     }
 
     #[test]

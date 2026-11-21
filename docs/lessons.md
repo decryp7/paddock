@@ -3267,7 +3267,9 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   nightly runs the proptest crates of `crates/` with `PROPTEST_CASES=10000` (report-only) to find cases before a gate does. A real
   proptest log showed two things the first version missed: an integration test saves to `tests/<file>.proptest-regressions` (the
   annotation now prints the path proptest printed, relative to the repository root, instead of cutting it), and one of two failing
-  tests of a binary printed no seed text at all (two tests saving to one file), so a log can hold a failure with no line to read.
+  tests of a binary printed no seed text at all (probably because its seed was already in the file: committed, or saved earlier in the run by another
+  test; not confirmed), so a log can hold a failure with no line to read. Such a failure, and a property test that ends in TIMEOUT or a signal, is
+  reproduced locally with `PROPTEST_CASES` set and never closed as "no seed".
 - **Why the logs did not show it:** the seed line was in the step's output only; nothing pointed at it as the thing to keep.
 - **Class: a failure that only the random input found is not kept.** Earlier: none recorded for proptest; the same shape as a flaky test
   whose reproduction is lost (rule 50 (k), ER-12).
