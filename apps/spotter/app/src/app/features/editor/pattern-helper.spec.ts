@@ -27,22 +27,26 @@ describe('PatternHelper', () => {
     return f;
   }
   const el = (f: ReturnType<typeof make>, sel: string) => f.nativeElement.querySelector(sel) as HTMLElement;
-  const wait = async (f: ReturnType<typeof make>) => {
-    await flush(TEST_DEBOUNCE_MS + 20);
-    await settle(f);
+  /** Waits on the condition (rule 49), never on a fixed time: under load the debounce plus the engine call take longer than any guess. */
+  const until = async (f: ReturnType<typeof make>, done: () => boolean) => {
+    while (!done()) {
+      await flush(10);
+      await settle(f);
+    }
   };
+  const resultText = (f: ReturnType<typeof make>) => text(el(f, '[data-testid=test-result]'));
 
   it('fills the pattern and a name from a ready-made one, then reads the name through the engine', async () => {
     const f = make();
     const select = el(f, '#scheme-preset') as HTMLSelectElement;
     typeInto(select, 'product-letters-build', 'change');
-    await wait(f);
+    await until(f, () => (el(f, '#pattern-test') as HTMLInputElement).value !== '' && f.componentInstance.pattern() !== '');
     expect(f.componentInstance.pattern()).toContain('(?<id>[A-Z]+)');
     expect((el(f, '#pattern-test') as HTMLInputElement).value).toBe('Acme-PRO-R3.10.00T32.zip');
     typeInto(select, 'unknown-id', 'change');
     expect(f.componentInstance.pattern()).toContain('(?<id>');
     typeInto(el(f, '#pattern-test') as HTMLInputElement, NAME);
-    await wait(f);
+    await until(f, () => resultText(f).includes('R3.10.00T32'));
     const result = el(f, '[data-testid=test-result]');
     expect(text(result)).toContain('R3.10.00T32');
     expect(text(result)).toContain('PRO');
@@ -54,12 +58,26 @@ describe('PatternHelper', () => {
     const f = make();
     f.componentInstance.pattern.set('Acme-(?<major>\\d+)');
     typeInto(el(f, '#pattern-test') as HTMLInputElement, 'other.txt');
-    await wait(f);
-    expect(text(el(f, '[data-testid=test-result]'))).toContain('no match');
+    await until(f, () => resultText(f).includes('no match'));
+    expect(resultText(f)).toContain('no match');
     f.componentInstance.pattern.set('(unclosed');
-    await wait(f);
+    await until(f, () => el(f, '[data-testid=pattern-error]') !== null);
     expect(text(el(f, '[data-testid=pattern-error]'))).toContain('not a valid regular expression');
     expect(el(f, '#pattern').getAttribute('aria-invalid')).toBe('true');
+  });
+
+  it('waits for a slow engine answer instead of a fixed time', async () => {
+    const f = make();
+    const real = backend.testPattern.bind(backend);
+    // The engine answers after longer than the old fixed wait (debounce + 20 ms), as on a loaded runner.
+    vi.spyOn(backend, 'testPattern').mockImplementation(async (...a) => {
+      await new Promise((r) => setTimeout(r, TEST_DEBOUNCE_MS + 150));
+      return real(...a);
+    });
+    f.componentInstance.pattern.set('Acme-(?<major>\\d+)');
+    typeInto(el(f, '#pattern-test') as HTMLInputElement, 'other.txt');
+    await until(f, () => resultText(f).includes('no match'));
+    expect(resultText(f)).toContain('no match');
   });
 
   it('builds a pattern from a selection in an example name', async () => {
