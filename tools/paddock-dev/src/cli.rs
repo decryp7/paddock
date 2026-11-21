@@ -318,6 +318,12 @@ enum SelfCommand {
 }
 
 #[derive(Args)]
+struct ProptestSeedsArgs {
+    /// The nextest output of the step, as a file.
+    log: PathBuf,
+}
+
+#[derive(Args)]
 struct ConformanceArgsArgs {
     /// The repository root (default: the folder containing .git, found from the current folder).
     #[arg(long)]
@@ -394,6 +400,10 @@ enum CiCommand {
     /// The first job of a train run (the runner-wait action): wait, at most --max, until no older run has an unfinished job on this run's
     /// single-machine runner (macOS, Windows). Fails open when the runs cannot be read; ends with an `::error::` at --max.
     RunnerWait(ci_runs::RunnerWaitArgs),
+    /// The failing proptest cases in a nextest log (a file): one `::error::` line each with the crate, the test, the `cc <hex>`
+    /// seed line and the file of `proptest-regressions/` to commit it to (rule 89). Prints nothing when no proptest failed; exit 0 either
+    /// way (the step that ran nextest already failed), 6 when the log cannot be read.
+    ProptestSeeds(ProptestSeedsArgs),
     /// Delete the `trial/*` refs (`ci dispatch --trial`) of branches that are gone or landed on main (ADR 0098 WP-4).
     TrialPrune(ci_runs::TrialPruneArgs),
 }
@@ -723,6 +733,26 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             })?;
             Ok(paddock_cli::Report::new(serde_json::json!({ "args": args }), args.join(" ")))
         }),
+        Command::Ci {
+            command: CiCommand::ProptestSeeds(a),
+        } => {
+            let log = std::fs::read_to_string(&a.log).map_err(|e| {
+                paddock_cli::CliError::new(
+                    paddock_cli::Exit::NotMeasured,
+                    format!(
+                        "::error::proptest seeds NOT MEASURED: cannot read {}: {e}. Next step: give the file the step's nextest output was kept in.",
+                        a.log.display()
+                    ),
+                )
+            })?;
+            let seeds = crate::proptest_seeds::find(&log);
+            let text = seeds.iter().map(crate::proptest_seeds::annotation).collect::<Vec<_>>().join("\n");
+            let json: Vec<_> = seeds
+                .iter()
+                .map(|s| serde_json::json!({ "crate": s.krate, "test": s.test, "cc": s.cc, "file": s.file }))
+                .collect();
+            Ok(paddock_cli::Report::new(serde_json::json!({ "seeds": json }), text))
+        }
         Command::Ci {
             command: CiCommand::Triage(a),
         } => ci_runs::triage(&a),

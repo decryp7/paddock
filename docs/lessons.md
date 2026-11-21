@@ -3254,3 +3254,17 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **Class: an end-to-end wait bounds a streamed result by one expect timeout.** Earlier: debrief.yml run 8300, where six streamed
   answers ran past the wait (64f8165ae, fixed for that spec only by sending answers in one piece). It is fixed for every caller of
   `waitAnswered` here.
+
+## A property test failed on one run and passed on the next of the same commit: its seed was random and the failing case died with CI's checkout (2026-11-21)
+
+- **What happened:** ci.yml 8425 was green and 8466 was red on one sha. `paddock-dialogs` `size::tests::any_interleaving_keeps_the_size_rules`
+  hit a rare case on the second run.
+- **Root cause:** proptest uses a random seed on every run. It records a failing case as a `cc <hex>` line in
+  `proptest-regressions/<module>.txt`, but only in the job's throwaway checkout, so the case was lost and nothing replays it.
+- **Fix (rule 89):** the fix for a CI-found proptest failure commits the `cc` line to the crate's `proptest-regressions/` file (four crates
+  already do). A failed test step now prints the line, the crate, the test and the file as one `::error::` annotation
+  (`./dev ci proptest-seeds`, tested on a recorded nextest log with a positive control: no proptest failure, no annotation). The
+  nightly runs the proptest crates with `PROPTEST_CASES=10000` (report-only) to find cases before a gate does.
+- **Why the logs did not show it:** the seed line was in the step's output only; nothing pointed at it as the thing to keep.
+- **Class: a failure that only the random input found is not kept.** Earlier: none recorded for proptest; the same shape as a flaky test
+  whose reproduction is lost (rule 50 (k), ER-12).

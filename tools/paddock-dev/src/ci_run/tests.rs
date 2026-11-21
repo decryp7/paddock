@@ -578,3 +578,28 @@ fn a_cargo_nextest_line_gets_the_gates_build_folder_as_configuration_and_other_l
         "cargo clippy --all-targets"
     );
 }
+
+#[test]
+fn a_failed_nextest_line_with_a_proptest_case_is_annotated_with_its_seed_and_a_plain_failure_is_not() {
+    let r = Repo::new("ui", &json(&[": nextest; cat log; exit 1"]));
+    std::fs::write(r.root().join("log"), include_str!("../../tests/ci-runs/nextest-proptest-fail.log")).unwrap();
+    let (code, log) = r.run("ui", "checks", |_| {}, &[]);
+    assert_eq!(code, 1, "{log}");
+    assert!(
+        log.contains(
+            "::error::proptest case failed in paddock-demo size::tests::any_interleaving_keeps_the_size_rules: cc 7b2f0c1de45a9a1c"
+        ),
+        "{log}"
+    );
+    assert!(log.contains("paddock-demo/proptest-regressions/size.txt"), "{log}");
+    // Positive control: a nextest failure without a proptest case, and a pass that prints a seed line, give no annotation.
+    std::fs::write(r.root().join("log"), include_str!("../../tests/ci-runs/nextest-r0-fail.log")).unwrap();
+    let (code, log) = r.run("ui", "checks", |_| {}, &[]);
+    assert_eq!(code, 1, "{log}");
+    assert!(!log.contains("proptest case failed"), "{log}");
+    let r = Repo::new("ui", &json(&[": nextest; cat log"]));
+    std::fs::write(r.root().join("log"), include_str!("../../tests/ci-runs/nextest-proptest-fail.log")).unwrap();
+    let (code, log) = r.run("ui", "checks", |_| {}, &[]);
+    assert_eq!(code, 0, "{log}");
+    assert!(!log.contains("proptest case failed"), "a passing line is never annotated: {log}");
+}

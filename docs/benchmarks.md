@@ -2393,3 +2393,22 @@ Quoted by [docs/research/2026-11-20-ci-job-cost.md](research/2026-11-20-ci-job-c
   and 3,878 (8346), macOS 2,545 and 1,680, Linux 814 (8346); `merge_check` 1,089 / 303 / 53, `golden` 643 / 189, `queue`
   637 / 388 / 58; queue tests 7.3 s median on Windows.
 - **Fixed waits:** `waitForTimeout` 10 in Debrief's specs, 3 in Dyno's, 5 in `ui/e2e`, 0 in Pitwall's.
+
+## Proptest with 10000 cases: what the nightly's `proptest-deep` job costs (2026-11-21, feat/ci-proptest-seed-policy)
+
+Rule 89; `nightly.yml` job `proptest-deep` (report-only, ER-41). `PROPTEST_CASES=10000` reaches every property test: the six
+that fixed their count (`with_cases`) now take the variable when it is set and keep their own count otherwise.
+
+- **Method.** Mac mini, debug test profile (CI's), `CARGO_BUILD_JOBS=2`, one run each of the test with and without the variable,
+  `cargo test -p <crate> ... <test>`; load 1-minute 18 to 68 during the runs (indication only, rule 48 point 2).
+- **paddock-dialogs** `size::tests::any_interleaving_keeps_the_size_rules` (the test of runs 8425/8466): 400 cases 0.27 s,
+  10,000 cases 7.1 s (0.7 ms a case). **paddock-widgets** `grid` properties (1000 cases by default): the whole filter 0.14 s,
+  10,000 cases 0.97 s.
+- **Extrapolation.** 12 files hold `proptest!` in 11 crates; the two measured are the largest counts. Even at 10 ms a case and 10
+  properties in a crate, a crate takes 17 minutes; none measured comes near it, so the run time is estimated at under 5 minutes
+  for all of them, and the compile of the 11 crates (all features, debug, a cold runner) at 10 to 15 minutes (paddock-dialogs
+  alone 1 min 40 s at load 40 with 2 jobs). The job's limit is 60 minutes, the one per-job cap that fits the Linux slot window
+  of the nightly (docs/ci-schedules.md); replace it with the first run's duration plus 50 % (ER-12: a limit changes only with a
+  measurement).
+- **Not measured.** The three app workspaces that commit regression files (`debrief-core`, `dyno-agent`, `pitcrew-core`) and
+  `tools/heavy` are not in the job yet; they run in their own workspaces and their counts are the default 256.

@@ -1,0 +1,27 @@
+2026-11-21T10:00:00.1234567Z captured shape of a cargo-nextest 0.9.149 run with a failing proptest (invented data; the status lines are those of nextest-r0-fail.log)
+2026-11-21T10:00:01.1234567Z [1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+2026-11-21T10:00:02.1234567Z [32;1m Nextest run[0m ID [1m11111111-2222-3333-4444-555555555555[0m with nextest profile: [1mci[0m
+2026-11-21T10:00:03.1234567Z [32;1m    Starting[0m [1m3[0m tests across [1m1[0m binary
+2026-11-21T10:00:04.1234567Z [32;1m        PASS[0m [   0.011s] (1/3) [35;1mpaddock-demo[0m size::tests::fits
+2026-11-21T10:00:05.1234567Z [31;1m        FAIL[0m [   0.412s] (2/3) [35;1mpaddock-demo[0m size::tests::any_interleaving_keeps_the_size_rules
+2026-11-21T10:00:06.1234567Z [31;1m [0m [31;1mstdout[0m [31;1m───[0m
+2026-11-21T10:00:07.1234567Z 
+2026-11-21T10:00:08.1234567Z     running 1 test
+2026-11-21T10:00:09.1234567Z     test size::tests::any_interleaving_keeps_the_size_rules ... FAILED
+2026-11-21T10:00:10.1234567Z 
+2026-11-21T10:00:11.1234567Z [31;1m [0m [31;1mstderr[0m [31;1m───[0m
+2026-11-21T10:00:12.1234567Z 
+2026-11-21T10:00:13.1234567Z     proptest: Saving this and future failures in proptest-regressions/size.txt
+2026-11-21T10:00:14.1234567Z     proptest: If this test was run on a CI system, you may wish to add the following line to your copy of the file. (You may need to create it.)
+2026-11-21T10:00:15.1234567Z     cc 7b2f0c1de45a9a1c0f3e8d6b5a4c3d2e1f0a9b8c7d6e5f40312233445566778 # shrinks to ops = [Grow(3), Shrink(9)]
+2026-11-21T10:00:16.1234567Z     thread 'size::tests::any_interleaving_keeps_the_size_rules' panicked at src/size.rs:210:5:
+2026-11-21T10:00:17.1234567Z     Test failed: the size went below zero; minimal failing input: ops = [Grow(3), Shrink(9)]
+2026-11-21T10:00:18.1234567Z 
+2026-11-21T10:00:19.1234567Z [31;1m        FAIL[0m [   0.020s] (3/3) [35;1mpaddock-demo[0m size::tests::plain_failure
+2026-11-21T10:00:20.1234567Z [31;1m [0m [31;1mstderr[0m [31;1m───[0m
+2026-11-21T10:00:21.1234567Z 
+2026-11-21T10:00:22.1234567Z     thread 'size::tests::plain_failure' panicked at src/size.rs:230:9:
+2026-11-21T10:00:23.1234567Z     no
+2026-11-21T10:00:24.1234567Z 
+2026-11-21T10:00:25.1234567Z [31;1m────────────[0m
+2026-11-21T10:00:26.1234567Z [32;1m     Summary[0m [   0.500s] [1m3[0m tests run: [1m1[0m passed, [31;1m2[0m failed, 0 skipped
