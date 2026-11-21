@@ -36,8 +36,9 @@ impl Cache {
     fn command(&self, program: &str) -> TestCommand {
         let mut c = TestCommand::new_in(program, &self.work);
         // Every config file sccache reads is named, inside the test's own folder (they need not exist: a missing file is the
-        // default config). Unset, sccache asks the OS for its config folder, which a cleared Windows environment does not give, and
-        // panics "Unable to get config directory" (run 8529); elsewhere it would read the machine's config (ER-14).
+        // default config), so it never reads the machine's (ER-14). sccache still asks the OS for its folders elsewhere (the disk
+        // and dist cache defaults, src/config.rs:103 and :110); TestCommand makes the folders it redirects to, without which every
+        // start panicked on Windows (runs 8529, 8532).
         c.env("SCCACHE_CONF", self.work.join("sccache-config.toml"))
             .env("SCCACHE_CACHED_CONF", self.work.join("sccache-cached-config.toml"))
             .env("SCCACHE_DIR", &self.cache_dir)
@@ -243,9 +244,9 @@ fn the_location_check_reads_windows_forms_of_one_folder_as_the_same() {
 #[test]
 fn every_config_file_sccache_reads_is_named_inside_the_tests_scratch() {
     // Run 8529 (job 43889, Windows): with neither variable set, sccache looks its config folder up through the `directories` crate,
-    // which finds none in the test's cleared environment, and every `--start-server` and `--show-stats` panicked with "Unable to get
-    // config directory" (src/config.rs:1300, v0.19.0) before any server existed. Both variables short-circuit that lookup, and keep
-    // the test off any machine config on every OS (ER-14).
+    // and every `--start-server` and `--show-stats` panicked with "Unable to get config directory" (src/config.rs:1300, v0.19.0).
+    // Both variables keep the test off any machine config on every OS (ER-14); the folder lookups sccache makes anyway are
+    // TestCommand's to make work (its redirected folders exist, run 8532).
     let scratch = tempfile::tempdir().unwrap();
     let cache = Cache {
         cache_dir: scratch.path().join("mount"),
