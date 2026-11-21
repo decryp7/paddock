@@ -3366,6 +3366,7 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **Why the logs did not show it:** the seed line was in the step's output only; nothing pointed at it as the thing to keep.
 - **Class: a failure that only the random input found is not kept.** Earlier: none recorded for proptest; the same shape as a flaky test
   whose reproduction is lost (rule 50 (k), ER-12).
+
 ## The test browser must not touch the removable volume (macOS TCC prompt, 2026-11-21)
 - **Symptom:** `chrome-headless-shell` on the Mac runner and on dev machines made macOS ask for access to a removable volume (a window on
   the desktop, ER-14, and a possible hang). The browsers, the checkouts and the build folders live on `/Volumes/vault-dev`, which macOS
