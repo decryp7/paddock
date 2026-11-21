@@ -1862,33 +1862,19 @@ mod tests {
         }
     }
 
-    /// A stand-in S3 health endpoint: answers every connection with `status` and ends when the returned flag is set. Returns its port.
-    fn health_server(status: &'static str) -> (u16, std::sync::Arc<std::sync::atomic::AtomicBool>) {
+    /// A stand-in S3 health endpoint that answers exactly one connection with `status` (a blocking accept: nothing sleeps and nothing
+    /// polls). Returns its port and the thread, which the test joins after the one check it is for.
+    fn health_server(status: &'static str) -> (u16, std::thread::JoinHandle<()>) {
         use std::io::{Read, Write};
-        use std::sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        };
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        l.set_nonblocking(true).unwrap();
         let port = l.local_addr().unwrap().port();
-        let stop = Arc::new(AtomicBool::new(false));
-        let flag = stop.clone();
-        std::thread::spawn(move || {
-            while !flag.load(Ordering::Relaxed) {
-                match l.accept() {
-                    Ok((mut c, _)) => {
-                        let _ = c.set_nonblocking(false);
-                        let _ = c.set_read_timeout(Some(Duration::from_secs(2)));
-                        let mut buf = [0u8; 256];
-                        let _ = c.read(&mut buf);
-                        let _ = c.write_all(format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes());
-                    }
-                    Err(_) => std::thread::sleep(Duration::from_millis(10)),
-                }
-            }
+        let thread = std::thread::spawn(move || {
+            let (mut c, _) = l.accept().unwrap();
+            let mut buf = [0u8; 256];
+            let _ = c.read(&mut buf);
+            let _ = c.write_all(format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes());
         });
-        (port, stop)
+        (port, thread)
     }
 
     /// An environment with a credentials file of invented keys (mode 600) and the store at `port`.
@@ -1918,8 +1904,8 @@ mod tests {
                 prefix: "p".into(),
             })
         };
-        let (up, stop_up) = health_server("200 OK");
-        let (half, stop_half) = health_server("503 Service Unavailable");
+        let (up, served_up) = health_server("200 OK");
+        let (half, served_half) = health_server("503 Service Unavailable");
         assert_eq!(probe(up), Ok(()));
         let why = probe(half).unwrap_err();
         assert!(why.contains("503"), "{why}");
@@ -1927,8 +1913,8 @@ mod tests {
             probe(free_port()).unwrap_err().contains("could not connect"),
             "nothing listens there"
         );
-        stop_up.store(true, std::sync::atomic::Ordering::Relaxed);
-        stop_half.store(true, std::sync::atomic::Ordering::Relaxed);
+        served_up.join().unwrap();
+        served_half.join().unwrap();
     }
 
     /// The default (user decision 2026-11-21): the local disk first, RustFS behind it, when the file is there and the store answers.
@@ -2001,7 +1987,7 @@ mod tests {
     #[test]
     fn sccache_env_uses_the_shared_store_when_the_file_is_there_and_the_disk_alone_when_not() {
         let (home, mut e, bin) = fake(0, Some(MULTILEVEL_LOCATION));
-        let (port, stop) = health_server("200 OK");
+        let (port, served) = health_server("200 OK");
         e.extend(s3_env(home.path(), port));
         let Outcome::Ready(ready) = prepare(&e, Install::Never) else {
             panic!("not ready")
@@ -2014,7 +2000,7 @@ mod tests {
             "the keys go to the server only: {lines}"
         );
         assert!(calls(&bin).contains(&"--start-server".to_string()));
-        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        served.join().unwrap();
         // Without the file: the plain disk folder, no failure.
         let (_h2, mut e2, _bin2) = fake(0, None);
         e2.insert(
