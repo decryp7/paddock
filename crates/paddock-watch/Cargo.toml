@@ -19,4 +19,6 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 notify = { version = "8", optional = true, default-features = false, features = ["macos_fsevent"] }
 
 [dev-dependencies]
+# The hang guard of the rescan tests (`wait::HANG_GUARD`).
+paddock-testkit = { workspace = true }
 tempfile = "3"

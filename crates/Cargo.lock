@@ -4867,6 +4867,7 @@ dependencies = [
  "log",
  "notify",
  "paddock-jobs",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "tempfile",
 ]

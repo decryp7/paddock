@@ -2,6 +2,7 @@
 //! resync time, each run the action (which looks at the whole folder) and leave a log line with the cause (ER-27).
 
 use paddock_jobs::time::FakeClock;
+use paddock_testkit::wait::HANG_GUARD;
 use paddock_watch::{DEFAULT_RESYNC, Debouncer, FakeSource, spawn};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -66,7 +67,7 @@ fn a_rescan_notice_runs_the_action_and_logs_its_cause() {
         std::thread::yield_now();
     }
     clock.advance_ms(300);
-    rx.recv_timeout(Duration::from_secs(20))
+    rx.recv_timeout(HANG_GUARD)
         .expect("a rescan notice did not run the action");
     handle.stop();
     let lines = lines_with("test 7f3a");
@@ -98,7 +99,7 @@ fn a_plain_change_logs_no_rescan() {
         std::thread::yield_now();
     }
     clock.advance_ms(300);
-    rx.recv_timeout(Duration::from_secs(20)).unwrap();
+    rx.recv_timeout(HANG_GUARD).unwrap();
     handle.stop();
     let folder = dir.path().display().to_string();
     assert!(
@@ -120,13 +121,9 @@ fn a_quiet_watch_still_looks_again_after_the_resync_time() {
         let _ = tx.send(());
     })
     .unwrap();
-    clock.advance(DEFAULT_RESYNC - ms(1));
-    assert!(
-        rx.recv_timeout(ms(200)).is_err(),
-        "resynced before the resync time"
-    );
-    clock.advance_ms(1);
-    rx.recv_timeout(Duration::from_secs(20))
+    // Not before the resync time: the pure test below pins that edge on the debouncer, without a timed window here.
+    clock.advance(DEFAULT_RESYNC);
+    rx.recv_timeout(HANG_GUARD)
         .expect("no resync after the resync time of silence");
     handle.stop();
     let folder = dir.path().display().to_string();
