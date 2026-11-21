@@ -519,6 +519,7 @@ fn a_holder_lets_go_at_its_lifetime_cap_while_the_job_folder_still_exists() {
     assert!(job.exists(), "the job folder was never removed");
 }
 
+#[cfg(unix)]
 fn check(root: &Path, slot: &str, lock: Option<&str>) -> (i32, Value, String) {
     let mut args = vec!["ci", "slot", "check", "--slot", slot, "--root", root.to_str().unwrap()];
     if let Some(l) = lock {
