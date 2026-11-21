@@ -413,6 +413,9 @@ enum CiCommand {
     /// Whether a scheduled run ends early because a train's dispatch run is queued or running (skip=true|false to
     /// GITHUB_OUTPUT). Fails open: an unreadable API lets the run proceed, with a warning.
     ScheduleSkip(ci_runs::ScheduleSkipArgs),
+    /// Whether a push to main ends early because a full green run of the workflow, with no FLAKY test, already tested this exact
+    /// commit (`reuse=true|false` and `run=<id>` to GITHUB_OUTPUT; ER-49). Fails open: anything unreadable lets the run proceed.
+    Reuse(ci_runs::ReuseArgs),
     /// Dispatch a workflow once no other run is on its single-machine runner (macOS, Windows): waits like `wait --ci-run`, at
     /// most --max, then ends with an `::error::` naming the busy run. Linux-only workflows dispatch at once, and so does a train
     /// (`train/*`) whose workflow waits in its own first job (the runner-wait action), so scheduled runs see it queued.
@@ -797,6 +800,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::ScheduleSkip(a),
         } => ci_runs::schedule_skip(&a),
+        Command::Ci {
+            command: CiCommand::Reuse(a),
+        } => ci_runs::reuse(&a),
         Command::Ci {
             command: CiCommand::RustPin(a),
         } => ci_rust_pin::command(&a),

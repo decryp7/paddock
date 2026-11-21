@@ -21,6 +21,7 @@ pub mod members;
 pub mod preconditions;
 pub mod record;
 pub mod reservation;
+pub mod reuse;
 pub mod schedule_skip;
 #[cfg(test)]
 mod testutil;
@@ -259,6 +260,72 @@ pub fn schedule_skip(a: &ScheduleSkipArgs) -> Result<Report, CliError> {
         serde_json::json!({ "skip": d.skip(), "summary": d.summary() }),
         text.join("\n"),
     ))
+}
+
+/// Arguments of `ci reuse` (the server, repository and token come from the CI environment: `GITHUB_SERVER_URL`,
+/// `GITHUB_REPOSITORY`, `PLAN_TOKEN`).
+#[derive(Args)]
+pub struct ReuseArgs {
+    /// The workflow file being decided (`ci.yml`, `debrief.yml`).
+    #[arg(long)]
+    workflow: String,
+    /// The commit (default: GITHUB_SHA), the whole 40-hex id.
+    #[arg(long)]
+    sha: Option<String>,
+    /// The asking run, left out of the runs read (default: GITHUB_RUN_ID).
+    #[arg(long)]
+    run_id: Option<u64>,
+    /// The repository (default: GITHUB_REPOSITORY, then decryp7/paddock).
+    #[arg(long)]
+    repo: Option<String>,
+    /// The Gitea server (default: GITHUB_SERVER_URL, then the family's).
+    #[arg(long)]
+    server: Option<String>,
+}
+
+/// `ci reuse`: `reuse=true|false` and `run=<id>` to `GITHUB_OUTPUT` (standard output without it), one annotation, a summary line.
+/// Exit 0 whatever the API says: it fails open to running the commit (ER-49 skips only on proof).
+pub fn reuse(a: &ReuseArgs) -> Result<Report, CliError> {
+    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    let sha = a.sha.clone().or_else(|| env("GITHUB_SHA")).unwrap_or_default();
+    if sha.len() != 40 || !sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err(CliError::usage(format!("the commit {sha:?} is not a full 40-hex id."))
+            .with_hint("Pass --sha, or run it in a CI job (GITHUB_SHA)."));
+    }
+    let server = a
+        .server
+        .clone()
+        .or_else(|| env("GITHUB_SERVER_URL"))
+        .unwrap_or_else(|| SERVER.into());
+    let repo = a
+        .repo
+        .clone()
+        .or_else(|| env("GITHUB_REPOSITORY"))
+        .unwrap_or_else(|| "decryp7/paddock".into());
+    let current = a.run_id.or_else(|| env("GITHUB_RUN_ID").and_then(|v| v.parse().ok()));
+    let token = env("PLAN_TOKEN").or_else(|| env("GITEA_TOKEN")).unwrap_or_default();
+    let d = if token.is_empty() {
+        reuse::Reuse::Run("no token to read the Actions runs (PLAN_TOKEN, GITEA_TOKEN)".into())
+    } else {
+        let mut http = CurlHttp;
+        let mut client = Client::new(&mut http, &server, &repo, &token);
+        reuse::decide(&mut client, &a.workflow, &sha, current)
+    };
+    let run = if let reuse::Reuse::Skip { run, .. } = &d {
+        run.to_string()
+    } else {
+        String::new()
+    };
+    let answer = format!("reuse={}\nrun={run}", d.skip());
+    let mut text = vec![d.annotation(&a.workflow, &sha)];
+    match env("GITHUB_OUTPUT") {
+        Some(path) => append(&path, &format!("{answer}\n"))?,
+        None => text.push(answer),
+    }
+    if let Some(path) = env("GITHUB_STEP_SUMMARY") {
+        append(&path, &d.summary(&a.workflow))?;
+    }
+    Ok(Report::new(serde_json::json!({ "reuse": d.skip(), "run": run }), text.join("\n")))
 }
 
 fn append(path: &str, text: &str) -> Result<(), CliError> {

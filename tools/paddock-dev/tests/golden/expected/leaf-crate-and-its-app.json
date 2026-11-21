@@ -26,6 +26,10 @@
    "fx-b"
   ]
  },
+ "cargoOnly": [
+  "app:x",
+  "crates"
+ ],
  "why": {
   "app:x": [
    "cargo apps/x/app/src-tauri reaches crates/b"
