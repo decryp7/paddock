@@ -643,10 +643,10 @@ pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (V
                             ),
                             Start::Go(limits) => {
                                 let mut seen = |d: &Done| {
-                                    if let Some(t) = d.timing {
-                                        if let Ok(mut m) = timings.lock() {
-                                            m.insert(g.id.clone(), t);
-                                        }
+                                    if let Some(t) = d.timing
+                                        && let Ok(mut m) = timings.lock()
+                                    {
+                                        m.insert(g.id.clone(), t);
                                     }
                                 };
                                 let row = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
