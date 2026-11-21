@@ -68,7 +68,7 @@ fn a_watch_that_ends_is_started_again_and_the_folder_is_looked_at() {
     until("the restart to be logged", || {
         lines_with(&folder)
             .iter()
-            .any(|(_, m)| m.contains("started again (after 0 failed start(s))"))
+            .any(|(_, m)| m.contains("started again (strike 1)"))
     });
     clock.advance(ms(1500));
     rx.recv_timeout(HANG_GUARD)
@@ -104,7 +104,7 @@ fn a_failed_watch_is_started_again_and_a_failing_start_backs_off() {
     until("the restart to be logged", || {
         lines_with(&folder)
             .iter()
-            .any(|(_, m)| m.contains("started again (after 1 failed start(s))"))
+            .any(|(_, m)| m.contains("started again (strike 2)"))
     });
     h.stop();
 }
@@ -139,4 +139,91 @@ fn a_folder_that_is_gone_is_reported_and_watched_again_when_it_is_back() {
             .any(|(_, m)| m.contains("is back"))
     });
     h.stop();
+}
+
+/// Regression (review of b37577c23, P2 "rescan storm"): a watch that fails right after each start was started again every
+/// [`RESTART_FIRST`], because a successful start reset the back-off. The back-off resets only after the watch stayed up for
+/// [`RESTART_MAX`] (systemd's start burst limit is the same idea).
+#[test]
+fn a_watch_that_fails_right_after_each_start_backs_off_further() {
+    let t = tempfile::tempdir().unwrap();
+    let (clock, source, _rx, h) = watch(t.path());
+    let folder = t.path().display().to_string();
+    let ends = || {
+        lines_with(&folder)
+            .into_iter()
+            .filter(|(_, m)| m.contains("ended (storm (test 9e1f))"))
+            .map(|(_, m)| m)
+            .collect::<Vec<_>>()
+    };
+    for (n, wait) in [restart_delay(0), restart_delay(1), restart_delay(2)]
+        .into_iter()
+        .enumerate()
+    {
+        assert!(
+            source.fail("storm (test 9e1f)"),
+            "the watch is up before it fails"
+        );
+        until("the end to be logged", || ends().len() == n + 1);
+        let last = ends().pop().unwrap();
+        assert!(
+            last.contains(&format!("again in {wait:?}")),
+            "end {} waits {wait:?}: {last}",
+            n + 1
+        );
+        clock.advance(wait);
+        until("the next start", || source.watches() == n + 2);
+    }
+    // Up for the longest wait: the next end starts from the first wait again.
+    clock.advance(RESTART_MAX);
+    assert!(source.fail("storm (test 9e1f)"));
+    until("the fourth end", || ends().len() == 4);
+    assert!(
+        ends()
+            .pop()
+            .unwrap()
+            .contains(&format!("again in {:?}", restart_delay(0)))
+    );
+    h.stop();
+}
+
+/// Stopping (or dropping) the handle ends the thread from every state, not only while it watches.
+fn ends_within_the_guard(stop: impl FnOnce() + Send + 'static) {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        stop();
+        let _ = tx.send(());
+    });
+    rx.recv_timeout(HANG_GUARD)
+        .expect("the watcher thread did not end");
+}
+
+#[test]
+fn stop_and_drop_end_the_thread_while_restarting_and_while_the_folder_is_gone() {
+    for by_drop in [false, true] {
+        let t = tempfile::tempdir().unwrap();
+        let (_clock, source, _rx, h) = watch(t.path());
+        let folder = t.path().display().to_string();
+        source.refuse(true);
+        source.end();
+        until("the restart wait", || {
+            lines_with(&folder)
+                .iter()
+                .any(|(_, m)| m.contains("ended (the source stopped reporting)"))
+        });
+        ends_within_the_guard(move || if by_drop { drop(h) } else { h.stop() });
+
+        let t = tempfile::tempdir().unwrap();
+        let dir = t.path().join("w");
+        let (_clock, source, _rx, h) = watch(&dir);
+        let folder = dir.display().to_string();
+        std::fs::remove_dir(&dir).unwrap();
+        assert!(source.change());
+        until("the gone folder", || {
+            lines_with(&folder)
+                .iter()
+                .any(|(_, m)| m.contains("is gone"))
+        });
+        ends_within_the_guard(move || if by_drop { drop(h) } else { h.stop() });
+    }
 }

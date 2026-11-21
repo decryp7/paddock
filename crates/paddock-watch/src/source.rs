@@ -7,11 +7,16 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-/// The first wait before a watch that ended is started again; each failed start doubles it, up to [`RESTART_MAX`].
+/// The first wait before a watch that ended is started again; each quick end or failed start doubles it, up to
+/// [`RESTART_MAX`]. Why 1 s: a start is one OS call, so a transient error is over in about a second, and a broken watcher
+/// cannot spin (Kubernetes' crash-loop back-off starts at 10 s for a whole container, systemd's `RestartSec` defaults to 100 ms).
 pub const RESTART_FIRST: Duration = Duration::from_secs(1);
-/// The longest wait between two starts of a watch that keeps failing.
+/// The longest wait between two starts of a watch that keeps failing, and how long a watch must stay up before the back-off
+/// starts from [`RESTART_FIRST`] again (systemd's start burst limit is the same idea). Why 60 s: a missed change is then at most a
+/// minute old, well inside the one-hour [`crate::DEFAULT_RESYNC`].
 pub const RESTART_MAX: Duration = Duration::from_secs(60);
-/// How often a watch whose folder is gone looks for it to come back.
+/// How often a watch whose folder is gone looks for it to come back. Why 5 s: one `stat` per look, and a folder that is put back
+/// (a reinstall, a restore) is watched again within seconds, the same order as Debrief's 2 s live-tail poll.
 pub const ROOT_POLL: Duration = Duration::from_secs(5);
 
 /// Real time between looks at the cancel token and the debouncer when no event arrives. The debounce itself is decided
@@ -98,7 +103,7 @@ impl Drop for WatchHandle {
 /// event at all ([`Debouncer::resync_due`], logged), and after the watch was started again.
 ///
 /// A watch that ends (a [`Change::Failed`], or the source drops its sender) is started again after [`RESTART_FIRST`], doubling
-/// up to [`RESTART_MAX`] while starts fail; each attempt is logged. When the folder itself is gone, that is logged, `on_due`
+/// up to [`RESTART_MAX`] while starts fail or the watch ends again within [`RESTART_MAX`]; each attempt is logged. When the folder itself is gone, that is logged, `on_due`
 /// runs once, and the thread looks for the folder every [`ROOT_POLL`] and starts the watch again when it is back (it never
 /// makes the folder again: who removed it may have meant it). All waits are on the debouncer's clock.
 pub fn spawn(
@@ -122,7 +127,12 @@ pub fn spawn(
         source: source.boxed(),
         dir: dir.to_path_buf(),
         recursive,
-        state: State::Watching { rx, _guard: guard },
+        state: State::Watching {
+            rx,
+            _guard: guard,
+            since: debouncer.now(),
+            strikes: 0,
+        },
     };
     let thread = std::thread::Builder::new()
         .name("folder-watch".into())
@@ -136,15 +146,18 @@ pub fn spawn(
 
 /// Where a watch stands.
 enum State {
-    /// The source reports on `rx`; dropping the guard stops it.
+    /// The source reports on `rx`; dropping the guard stops it. It started at `since` (on the debouncer's clock), after
+    /// `strikes` quick ends or failed starts in a row.
     Watching {
         rx: Receiver<Change>,
         _guard: Box<dyn Send>,
+        since: Duration,
+        strikes: u32,
     },
-    /// The watch ended: start it again at `at` (on the debouncer's clock); `attempt` counts the starts that failed so far.
-    Restarting { at: Duration, attempt: u32 },
+    /// The watch ended: start it again at `at`; `strikes` counts the quick ends and failed starts so far.
+    Restarting { at: Duration, strikes: u32 },
     /// The folder is gone: look for it again at `at`.
-    Gone { at: Duration },
+    Gone { at: Duration, strikes: u32 },
 }
 
 struct Watch {
@@ -154,29 +167,39 @@ struct Watch {
     state: State,
 }
 
-/// The wait before start number `attempt + 1`: [`RESTART_FIRST`] doubled per failed start, at most [`RESTART_MAX`].
-pub fn restart_delay(attempt: u32) -> Duration {
+/// The wait before the next start after `strikes` quick ends or failed starts in a row: [`RESTART_FIRST`] doubled per strike, at
+/// most [`RESTART_MAX`].
+pub fn restart_delay(strikes: u32) -> Duration {
     RESTART_FIRST
-        .saturating_mul(1u32 << attempt.min(16))
+        .saturating_mul(1u32 << strikes.min(16))
         .min(RESTART_MAX)
 }
 
 impl Watch {
     /// Leaves `Watching` for a restart (the guard is dropped, which stops what is left of the old watch).
+    /// A watch that stayed up for [`RESTART_MAX`] starts the back-off afresh; one that ended sooner keeps its strikes, so a
+    /// watch that fails right after each start backs off further instead of restarting every second.
     fn ended(&mut self, debouncer: &Debouncer, why: &str) {
+        let now = debouncer.now();
+        let strikes = match &self.state {
+            State::Watching { since, strikes, .. } if now.saturating_sub(*since) < RESTART_MAX => {
+                *strikes
+            }
+            _ => 0,
+        };
+        let wait = restart_delay(strikes);
         log::warn!(
-            "folder watch: the watch of {} ended ({why}); starting it again in {:?}",
-            self.dir.display(),
-            restart_delay(0)
+            "folder watch: the watch of {} ended ({why}); starting it again in {wait:?}",
+            self.dir.display()
         );
         debouncer.note_change();
         self.state = State::Restarting {
-            at: debouncer.now() + restart_delay(0),
-            attempt: 0,
+            at: now + wait,
+            strikes: strikes + 1,
         };
     }
 
-    fn gone(&mut self, debouncer: &Debouncer) {
+    fn gone(&mut self, debouncer: &Debouncer, strikes: u32) {
         log::warn!(
             "folder watch: the watched folder {} is gone; looking for it every {:?}",
             self.dir.display(),
@@ -185,35 +208,40 @@ impl Watch {
         debouncer.note_change();
         self.state = State::Gone {
             at: debouncer.now() + ROOT_POLL,
+            strikes,
         };
     }
 
     /// Starts the watch again (state `Restarting`, due).
-    fn restart(&mut self, debouncer: &Debouncer, attempt: u32) {
+    fn restart(&mut self, debouncer: &Debouncer, strikes: u32) {
         if !self.dir.is_dir() {
-            self.gone(debouncer);
+            self.gone(debouncer, strikes);
             return;
         }
         let (tx, rx) = mpsc::channel();
         match self.source.watch(&self.dir, self.recursive, tx) {
             Ok(guard) => {
                 log::info!(
-                    "folder watch: the watch of {} started again (after {} failed start(s)); looking at the whole folder again",
-                    self.dir.display(),
-                    attempt
+                    "folder watch: the watch of {} started again (strike {strikes}); looking at the whole folder again",
+                    self.dir.display()
                 );
                 debouncer.note_change();
-                self.state = State::Watching { rx, _guard: guard };
+                self.state = State::Watching {
+                    rx,
+                    _guard: guard,
+                    since: debouncer.now(),
+                    strikes,
+                };
             }
             Err(e) => {
-                let wait = restart_delay(attempt + 1);
+                let wait = restart_delay(strikes);
                 log::warn!(
                     "folder watch: could not start the watch of {} again ({e}); trying again in {wait:?}",
                     self.dir.display()
                 );
                 self.state = State::Restarting {
                     at: debouncer.now() + wait,
-                    attempt: attempt + 1,
+                    strikes: strikes + 1,
                 };
             }
         }
@@ -250,21 +278,21 @@ impl Watch {
                     }
                 }
                 if !self.dir.is_dir() {
-                    self.gone(debouncer);
+                    self.gone(debouncer, 0);
                 } else if let Some(cause) = failed {
                     self.ended(debouncer, &cause);
                 }
             }
-            State::Restarting { at, attempt } => {
-                let (at, attempt) = (*at, *attempt);
+            State::Restarting { at, strikes } => {
+                let (at, strikes) = (*at, *strikes);
                 if now >= at {
-                    self.restart(debouncer, attempt);
+                    self.restart(debouncer, strikes);
                 } else {
                     std::thread::sleep(WAKE);
                 }
             }
-            State::Gone { at } => {
-                let at = *at;
+            State::Gone { at, strikes } => {
+                let (at, strikes) = (*at, *strikes);
                 if now < at {
                     std::thread::sleep(WAKE);
                 } else if self.dir.is_dir() {
@@ -272,10 +300,11 @@ impl Watch {
                         "folder watch: the watched folder {} is back",
                         self.dir.display()
                     );
-                    self.restart(debouncer, 0);
+                    self.restart(debouncer, strikes);
                 } else {
                     self.state = State::Gone {
                         at: now + ROOT_POLL,
+                        strikes,
                     };
                 }
             }

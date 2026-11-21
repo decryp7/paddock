@@ -5,12 +5,14 @@
 //! `ReadDirectoryChangesW` page both say a dropped-events notice means a full scan; share first (rule 42): one mapping, written once.
 //!
 //! Flagged, one finding per line, in Rust code outside `crates/paddock-watch/` (comments and string literals are not read): a line
-//! that starts a watcher (`recommended_watcher(`, `RecommendedWatcher::new(`, `PollWatcher::new(`, `new_debouncer(`,
-//! `new_debouncer_opt(`) or implements notify's `EventHandler`, in a file that never calls `change_from(`. A site that has to read
+//! that starts a watcher (`recommended_watcher(`, `RecommendedWatcher::new(`, `PollWatcher::new(`, `INotifyWatcher::new(`,
+//! `FsEventWatcher::new(`, `KqueueWatcher::new(`, `ReadDirectoryChangesWatcher::new(`, `<_ as Watcher>::new(`, `new_debouncer(`,
+//! `new_debouncer_opt(`) or implements notify's `EventHandler`, in a file that never calls `NotifySource::change_from(` (a
+//! function of another type that is also called `change_from` does not count). A site that has to read
 //! notify's results another way carries `// conformance: notify-direct — <why>` on its line or the line above (listed as waived).
 //!
-//! Not flagged, said out loud: a watcher started through a helper of another file (the helper's file is the one read), and a file that
-//! calls `change_from(` but still drops a Rescan somewhere else (the check sees the call, not every path through the handler). The
+//! Not flagged, said out loud: a watcher started through a helper of another file (the helper's file is the one read), a
+//! `NotifySource` imported under another name, and a file that calls `NotifySource::change_from(` but still drops a Rescan elsewhere (the check sees the call, not every path through the handler). The
 //! check's own files are not read ([`IMPLEMENTATION`]).
 //!
 //! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: pending (2026-11-21): the
@@ -33,11 +35,16 @@ pub const IMPLEMENTATION: [&str; 2] = ["tools/paddock-dev/src/check/c146.rs", "t
 pub const TAG: &str = "notify-direct";
 
 static SITE: LazyLock<Regex> = LazyLock::new(|| {
-    rx(
-        r"\brecommended_watcher\s*\(|\bRecommendedWatcher::new\s*\(|\bPollWatcher::new\s*\(|\bnew_debouncer(?:_opt)?\s*\(|\bimpl\b[^{;]*\bEventHandler\s+for\b",
-    )
+    rx(concat!(
+        r"\brecommended_watcher\s*\(",
+        r"|\b(?:Recommended|Poll|INotify|FsEvent|Kqueue|ReadDirectoryChanges)Watcher::new\s*\(",
+        r"|<\s*\w+\s+as\s+(?:notify::)?Watcher\s*>::new\s*\(",
+        r"|\bnew_debouncer(?:_opt)?\s*\(",
+        r"|\bimpl\b[^{;]*\bEventHandler\s+for\b",
+    ))
 });
-static SHARED: LazyLock<Regex> = LazyLock::new(|| rx(r"\bchange_from\s*\("));
+/// The shared mapping, named through its type: another function called `change_from` is not it.
+static SHARED: LazyLock<Regex> = LazyLock::new(|| rx(r"\bNotifySource::change_from\s*\("));
 static NOT_READ: LazyLock<Regex> = LazyLock::new(|| rx(r"(?:^|/)(?:target|vendor|node_modules)/|^crates/paddock-watch/"));
 
 const FIX: &str = "Read each notify result through `paddock_watch::NotifySource::change_from` (feature `notify`): a `Change::Rescan` means look at everything the watch covers, with its cause in the log. A site that has to read notify's results another way carries `// conformance: notify-direct — <why>`.";

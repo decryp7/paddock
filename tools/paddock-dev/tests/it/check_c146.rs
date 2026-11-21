@@ -13,6 +13,16 @@ fn a_watcher_without_the_shared_mapping_is_a_site_and_one_with_it_is_not() {
     assert_eq!(sites("apps/x/src/h.rs", handler), [2]);
     let debouncer = "fn d() { let d = new_debouncer(Duration::from_secs(1), tx); }\n";
     assert_eq!(sites("apps/x/src/d.rs", debouncer), [1]);
+    let backends = "fn b() {\n    INotifyWatcher::new(h, c)?;\n    notify::FsEventWatcher::new(h, c)?;\n    <W as Watcher>::new(h, c)?;\n    <_ as notify::Watcher>::new(h, c)?;\n}\n";
+    assert_eq!(sites("apps/x/src/b.rs", backends), [2, 3, 4, 5]);
+}
+
+#[test]
+fn only_paddock_watchs_mapping_counts_not_any_function_called_change_from() {
+    let other = "fn a() {\n    let w = notify::recommended_watcher(move |r| tx.send(mine::change_from(&r)))?;\n}\n";
+    assert_eq!(sites("apps/x/src/live.rs", other), [2]);
+    let shared = "fn a() {\n    let w = notify::recommended_watcher(move |r| tx.send(paddock_watch::NotifySource::change_from(&r)))?;\n}\n";
+    assert!(sites("apps/x/src/live.rs", shared).is_empty());
 }
 
 #[test]
