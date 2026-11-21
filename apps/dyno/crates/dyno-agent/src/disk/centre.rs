@@ -590,7 +590,7 @@ impl DiskCentre {
         }
         if self.space_ticks.fetch_add(1, Ordering::SeqCst) % RELIST_EVERY == RELIST_EVERY - 1 {
             // On a thread of its own and inside the single-flight guard, like every other listing.
-            self.refresh_in_background_for("timer");
+            self.refresh_in_background_for("timer", false);
         } else {
             self.read_space("timer");
         }
@@ -687,19 +687,23 @@ impl DiskCentre {
     /// Asks the system for the volumes on a thread of its own and remembers the answer; does nothing while such a call is
     /// already running. Never blocks the caller (the system can take seconds when a share has gone away).
     pub fn refresh_in_background(self: &Arc<Self>) {
-        self.refresh_in_background_for("start");
+        self.refresh_in_background_for("start", false);
     }
 
     /// The OS said the mounts changed (a volume came or went, or the computer woke): lists them again at once on a thread of its
     /// own. An event that arrives while a listing runs makes that listing run once more, so the last change is never missed.
     pub fn on_system_event(self: &Arc<Self>, trigger: &'static str) {
         log::info!("disk volumes: system event trigger={trigger}");
-        self.refresh_in_background_for(trigger);
+        self.refresh_in_background_for(trigger, true);
     }
 
-    fn refresh_in_background_for(self: &Arc<Self>, trigger: &'static str) {
+    /// `relist_if_running`: a listing already running is followed by one more (a system event may have changed the mounts after
+    /// the running listing read them); a plain ask for the cached list needs no second listing.
+    fn refresh_in_background_for(self: &Arc<Self>, trigger: &'static str, relist_if_running: bool) {
         if self.refreshing.swap(true, Ordering::SeqCst) {
-            self.relist_again.store(true, Ordering::SeqCst);
+            if relist_if_running {
+                self.relist_again.store(true, Ordering::SeqCst);
+            }
             return;
         }
         let me = self.clone();
@@ -1617,6 +1621,71 @@ mod tests {
             r.lister.1.load(Ordering::SeqCst),
             after,
             "a cached read within the freshness window never asks the system again"
+        );
+    }
+
+    /// A lister whose `list` blocks until the test opens the gate, so a listing can be held running.
+    struct Gated {
+        asked: AtomicUsize,
+        open: (Mutex<bool>, std::sync::Condvar),
+        volumes: Vec<ListedVolume>,
+    }
+
+    impl VolumeLister for Gated {
+        fn list(&self) -> Vec<ListedVolume> {
+            self.asked.fetch_add(1, Ordering::SeqCst);
+            let mut open = lock(&self.open.0);
+            while !*open {
+                open = self.open.1.wait(open).unwrap_or_else(|p| p.into_inner());
+            }
+            self.volumes.clone()
+        }
+    }
+
+    /// Reads that arrive while the first listing runs do not queue a second listing (only a system event does). The flaky
+    /// form of this was a test that spun on `cached_volumes` until the first listing finished: each spin set the relist flag, so
+    /// a second listing ran at a time that depended on the machine's load.
+    #[test]
+    fn reads_during_the_first_listing_do_not_queue_another_listing() {
+        let fs = Arc::new(FakeFs::new());
+        let lister = Arc::new(Gated {
+            asked: AtomicUsize::new(0),
+            open: (Mutex::new(false), std::sync::Condvar::new()),
+            volumes: vec![vol("Macintosh HD", &fs.root(), VolumeLocation::Internal)],
+        });
+        let centre = DiskCentre::new(
+            fs,
+            lister.clone(),
+            Arc::new(Events::default()),
+            Arc::new(Manual::default()),
+            Arc::new(Access::default()),
+            8,
+            ScanLimits {
+                max_nodes: 10_000,
+                notable_bytes: MB,
+                max_hard_links: 100,
+            },
+        );
+        let centre = Arc::new(centre);
+        assert_eq!(centre.cached_volumes(), None);
+        let began = std::time::Instant::now();
+        while lister.asked.load(Ordering::SeqCst) == 0 {
+            assert!(began.elapsed() < std::time::Duration::from_secs(60), "the listing never started");
+            std::thread::yield_now();
+        }
+        for _ in 0..5 {
+            assert_eq!(centre.cached_volumes(), None, "the listing is still running");
+        }
+        *lock(&lister.open.0) = true;
+        lister.open.1.notify_all();
+        while centre.refreshing.load(Ordering::SeqCst) {
+            assert!(began.elapsed() < std::time::Duration::from_secs(60), "the listing never ended");
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            lister.asked.load(Ordering::SeqCst),
+            1,
+            "plain reads never ask the system a second time"
         );
     }
 
