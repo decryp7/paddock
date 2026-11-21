@@ -39,7 +39,7 @@ Never edit generated files by hand (ER-40): `./dev gen check` runs both checks (
 `docs/generators.toml`) and prints the command when one is stale. A Rust port of a check (`tools/paddock-dev/src/check/c<n>.rs`)
 adds its line to `register_checks!` in `tools/paddock-dev/src/check/mod.rs`; the registry test prints the block to paste when the
 macro and the module files disagree, and `tests/it/main.rs` prints the `mod` line a new test file needs. A check with a Rust port
-and no module here (C39, C53, C119-C125, C129-C131 since 2026-11-19, ADR 0022; C145 since 2026-11-21) is listed in `conformance.rust` of
+and no module here (C39, C53, C119-C125, C129-C131 since 2026-11-19, ADR 0022; C145 and C146 since 2026-11-21) is listed in `conformance.rust` of
 `conformance/paddock.ci.json` and runs as `./dev conformance --only <ids>`; `./dev conformance list` lists the Rust host's checks, and
 the index below holds only the JavaScript ones.
 

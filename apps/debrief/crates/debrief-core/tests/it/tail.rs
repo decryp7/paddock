@@ -1202,6 +1202,33 @@ fn watchers_fall_back_to_polling() {
 }
 
 #[test]
+fn a_rescan_signal_looks_at_every_root_and_keeps_their_mode() {
+    let d = Dir::new("rescan");
+    std::fs::create_dir_all(d.0.join("a")).unwrap();
+    std::fs::create_dir_all(d.0.join("b")).unwrap();
+    let roots = [d.0.join("a"), d.0.join("b")];
+    let batches = Arc::new(Mutex::new(Vec::<Vec<PathBuf>>::new()));
+    let seen = batches.clone();
+    let live = LiveTail::start(
+        &roots,
+        WatchSettings {
+            tick_ms: 60_000,
+            ..WatchSettings::default()
+        },
+        Arc::new(FakeFactory::default()),
+        Box::new(move |x| seen.lock().unwrap().push(x)),
+        Box::new(|_, _| panic!("a rescan is no watcher failure")),
+    );
+    live.signal(WatchSignal::Rescan("rescan: kernel dropped".into()));
+    assert!(wait_until(|| batches
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|b| roots.iter().all(|r| b.contains(r)))));
+    assert!(live.roots().iter().all(|r| r.mode == WatchMode::Events), "{:?}", live.roots());
+}
+
+#[test]
 fn ticks_flush_partial_lines() {
     let factory = Arc::new(FakeFactory::default());
     let ticks = Arc::new(AtomicUsize::new(0));

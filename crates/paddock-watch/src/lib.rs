@@ -28,4 +28,7 @@ pub use settle::{
     MAX_SCAN_DEPTH, MAX_SCAN_ENTRIES, Ready, Scan, Settle, SettleConfig, Skipped,
     is_temporary_name, scan_folder, scan_folder_limited,
 };
-pub use source::{Change, ChangeSource, FakeSource, WatchError, WatchHandle, spawn};
+pub use source::{
+    Change, ChangeSource, FakeSource, RESTART_FIRST, RESTART_MAX, ROOT_POLL, WatchError,
+    WatchHandle, restart_delay, spawn,
+};

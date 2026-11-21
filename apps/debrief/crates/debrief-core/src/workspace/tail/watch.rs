@@ -62,8 +62,11 @@ impl Default for WatchSettings {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WatchSignal {
     Paths(Vec<PathBuf>),
-    /// The watcher failed (e.g. the event queue overflowed or the share disconnected).
+    /// The watcher failed (e.g. the share disconnected): its roots fall back to polling and every root is looked at.
     Error(String),
+    /// Changes may have been lost while the watcher keeps working (an inotify or `ReadDirectoryChangesW` overflow, an FSEvents
+    /// dropped-events notice): every root is looked at, and the roots keep their mode. The text says why, for the log.
+    Rescan(String),
 }
 
 pub type WatchSink = Arc<dyn Fn(WatchSignal) + Send + Sync>;
@@ -276,6 +279,10 @@ impl LiveTail {
                             let mut w = lock(&worker_watchers);
                             fall_back(&mut w, &e, factory.as_ref(), poll, &sink, &on_fallback);
                             // Something may have been missed: look at everything.
+                            co.push(all_roots.iter().cloned(), Instant::now());
+                        }
+                        Ok(Msg::Signal(WatchSignal::Rescan(cause))) => {
+                            log::warn!("live tail: changes may have been missed ({cause}); looking at every root again");
                             co.push(all_roots.iter().cloned(), Instant::now());
                         }
                         Ok(Msg::Stop) | Err(RecvTimeoutError::Disconnected) => break,
