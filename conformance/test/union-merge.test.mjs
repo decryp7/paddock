@@ -1,18 +1,16 @@
-// The append-only docs merge with git's union driver (.gitattributes): two branches that each add a section at the end of
-// docs/lessons.md merge without a conflict. The attribute is read through git itself (`git check-attr`), and the merge runs in a
-// scratch repository that carries the repository's own .gitattributes.
+// The append-only docs merge with the lessons driver (.gitattributes `merge=lessons`: git's union merge, then the blank line before each
+// heading restored by `./dev merge lessons-driver`). The attribute is read through git itself (`git check-attr`); the real three-way
+// merge is tools/paddock-dev/tests/it/lessons_merge.rs (it needs the driver, a `./dev` command).
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-/** The append-only log: new sections are added, earlier ones are not rewritten. Only its git attribute is read, never its text
- * (the planner's DOC_INPUTS, tools/paddock-dev/src/plan.rs, lists this file as not reading docs). */
+/** The append-only log: new sections are added, earlier ones are not rewritten. Only its git attribute is read here (conformance C145 reads its text;
+ * the planner's DOC_INPUTS, tools/paddock-dev/src/plan.rs, lists it). */
 const APPEND_ONLY = ['docs/lessons.md'];
 /** Edited in place (a corrected results block): union would keep both versions silently. */
 const EDITED_IN_PLACE = ['docs/benchmarks.md', 'apps/dyno/docs/performance.md', 'docs/gates.toml'];
@@ -26,40 +24,12 @@ function git(cwd, ...args) {
   return { status: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') };
 }
 
-test('the append-only docs use the union merge driver', () => {
+test('the append-only docs use the lessons merge driver', () => {
   for (const file of APPEND_ONLY) {
     const r = git(root, 'check-attr', 'merge', '--', file);
     assert.equal(r.status, 0, r.out);
-    assert.match(r.out, /: merge: union$/m, `${file} has no merge=union in .gitattributes: ${r.out}`);
+    assert.match(r.out, /: merge: lessons$/m, `${file} has no merge=lessons in .gitattributes: ${r.out}`);
   }
   // Files edited in place must conflict on two edits of one line, not keep both.
   for (const file of EDITED_IN_PLACE) assert.match(git(root, 'check-attr', 'merge', '--', file).out, /: merge: unspecified$/m, file);
-});
-
-test('two branches that each add a lesson at the end merge without a conflict and keep both', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'union-merge-'));
-  try {
-    assert.equal(git(dir, 'init', '-q', '-b', 'main').status, 0);
-    copyFileSync(join(root, '.gitattributes'), join(dir, '.gitattributes'));
-    mkdirSync(join(dir, 'docs'));
-    const lessons = join(dir, 'docs', 'lessons.md');
-    writeFileSync(lessons, '# Lessons\n\n## First (2026-11-01)\n\n- One.\n');
-    git(dir, 'add', '-A');
-    assert.equal(git(dir, 'commit', '-qm', 'base').status, 0);
-    git(dir, 'checkout', '-qb', 'a');
-    writeFileSync(lessons, readFileSync(lessons, 'utf8') + '\n## From a (2026-11-15)\n\n- Lesson a.\n');
-    git(dir, 'commit', '-qam', 'a');
-    git(dir, 'checkout', '-q', 'main');
-    git(dir, 'checkout', '-qb', 'b');
-    writeFileSync(lessons, readFileSync(lessons, 'utf8') + '\n## From b (2026-11-15)\n\n- Lesson b.\n');
-    git(dir, 'commit', '-qam', 'b');
-    const m = git(dir, 'merge', '--no-edit', 'a');
-    assert.equal(m.status, 0, `the merge conflicted: ${m.out}`);
-    const merged = readFileSync(lessons, 'utf8');
-    assert.match(merged, /## From a[\s\S]*- Lesson a\./);
-    assert.match(merged, /## From b[\s\S]*- Lesson b\./);
-    assert.doesNotMatch(merged, /^(<<<<<<<|>>>>>>>|=======)/m);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
 });
