@@ -3314,3 +3314,36 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   coordinator). Two items: the hook output does not say which conformance test failed (ER-27: a failing step names its cause), and
   an unknown conformance test is flaky under load. Next: make the row print the failing test's name and its last lines, then a
   failing reproduction under load.
+
+## Two real-folder watcher tests timed out on the Mac: fseventsd was saturated, and the tests assumed a prompt, lossless watch (2026-11-21)
+- **Failure:** ci.yml run 8466 job 43338 (`crate (macos-latest)`, d7-mac-mini): `paddock-packs::it native::the_real_watcher_applies_an_added_a_broken_and_a_deleted_pack`
+  and `paddock-watch::it native::a_real_folder_change_reaches_the_action_and_a_recursive_watch_sees_sub_folders` timed out at 30 s
+  on try 1 and passed on try 2 (3.6 s, 2.3 s); run 8389 job 42837 had the same paddock-watch failure. Both waited on one FSEvents
+  event after `notify` started a stream.
+- **Hypotheses and what refuted them:** the watched folder on the external volume, or TCC Removable Volumes: both jobs logged
+  `job-tmpdir: temp folder /Users/***/gitea-runner/tmp/<job> on the internal disk`, and the TCC log had no request from cargo,
+  nextest or a test binary in the failure window (the two Removable Volumes requests that day, at 00:03Z and 00:27Z, came
+  through sandboxd and were answered in about 2 ms; the user saw the prompt from `chrome-headless-shell`, whose copy lives in
+  `/Volumes/vault-dev/caches/ms-playwright`). The macOS job share (8 test threads per job at capacity 3) and load: not ruled out
+  at load 60 or more, but with fseventsd healthy at load 15 to 20 every event took about 10 ms.
+- **Root cause (host):** fseventsd had run 6.5 days and sat at 100% to 130% CPU with 12.7 GB resident. A probe on the same Mac
+  (a new watch, a write at once, a second write after the first event or 30 s) measured, with fseventsd saturated: the first event
+  in a median 912 ms (up to 4.1 s), the second in a median 119 ms, and 5 of 50 waits saw nothing for 30 s. fseventsd restarted at
+  02:37:54Z (not by the agent); after that, 0 of 100 waits were lost and each took about 10 ms, whether the test wrote at once or
+  after a readiness probe. Not reproduced: putting the saturation back (it cannot be made on purpose without loading the user's Mac).
+- **Contributing (tests):** the tests wrote the change right after the watch started and waited for exactly one event, so a late
+  start or one dropped event failed them, and a late event from an earlier write (seen: one arrived 0 ms after the drain) could
+  have passed a wait for a later change. Apple documents dropped events (`kFSEventStreamEventFlagKernelDropped`/`UserDropped`,
+  with `MustScanSubDirs`: "you must do a full scan"), so a test of a real watch cannot assume none.
+- **Fix:** both tests prove the watch live first: a probe file (one the pack loader ignores) is rewritten every 250 ms until the
+  action has run once (`paddock_testkit::wait::retry_within`, 30 s guard as before). The paddock-watch action reports which of the
+  test's paths existed when it ran, so a late event cannot stand in for the change; the packs waits already checked the store's
+  content. A timeout names the likely host state (a saturated fseventsd) and the command to see it. A change the watch still drops
+  fails, as it should on a sick host. Host: restart fseventsd or reboot when it sits at 100% CPU.
+- **Why the logs did not show it:** the failure said only "Timeout", nothing about the host. fseventsd's CPU and memory were found
+  with `ps`; the probe needed the event times.
+- **Open (not verified):** whether `notify` 8.2's FSEvents callback drops a dropped-events notice whose path is outside the watched
+  folder (it filters by path before it turns flags into a `Rescan` event, `fsevent.rs` callback); if so, a product watch never
+  learns it lost events. What grew fseventsd to 12.7 GB (a client that stopped reading, or the 690k leaked test folders and their
+  paused delete) is not known.
+- **Class:** a test of an OS notification assumes it is prompt and lossless. Earlier instances: none recorded.
