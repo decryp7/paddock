@@ -174,6 +174,12 @@ jobs:
           # The scope this run declares, printed after every decision above (ADR 0113): what the run did against what a push to main
           # does, which `./dev ci verdict` compares. A run skipped for a train, an unchanged main, a tagged commit or a reuse ran
           # nothing (run=false); a since_run dispatch is a rerun; a run that is not full tests one engine, a full run both.
+          # REPORT-ONLY PHASE (ER-41, ADR 0113): until docs/ci-scope-first-runs.toml names debrief.yml, `./dev ci verdict` still decides on
+          # the line below and prints the scope view as a notice. Recording the first green scope run (`./dev ci scope-record`) switches
+          # the reader; the block is deleted in the same change.
+          complete=false
+          if [ "$run" = true ] && [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
+          echo "plan verdict: complete=$complete"
           ./dev ci scope --workflow debrief.yml --app debrief --full "$PLAN_MODE_FULL" --run "$run" --since-run "$PLAN_SINCE_RUN" --full-engines chromium,webkit
 
       # ADR 0060 3.2: the lint-adoption ratchet of Debrief (docs/gates.toml [[ratchet]] C13) must be empty before the release it names

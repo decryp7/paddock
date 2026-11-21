@@ -95,6 +95,12 @@ runs:
         # which `./dev ci verdict` compares. The caller names its workflow file and says whether the mode is full; a run that
         # ran nothing (run=false) declares an empty scope. Without a workflow or an app (the nightly) there is no verdict to give.
         # First real run that printed a scope line from a release workflow: not yet (ER-33, ER-41); the first run id goes here.
+        # REPORT-ONLY PHASE (ER-41, ADR 0113): until docs/ci-scope-first-runs.toml names `plan-action`, `./dev ci verdict` still decides on
+        # this line and prints the scope view as a notice; the first green release run is recorded with `./dev ci scope-record` and the
+        # block is deleted in the same change.
+        complete=false
+        if [ "$run" = true ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
+        echo "plan verdict: complete=$complete"
         if [ -n "$WORKFLOW" ] && [ -n "$APP" ]; then
           bash "${{ github.action_path }}/../../../dev" ci scope --workflow "$WORKFLOW" --app "$APP" --full "$PLAN_MODE_FULL" --run "$run"
         fi

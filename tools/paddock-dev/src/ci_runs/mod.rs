@@ -315,6 +315,49 @@ pub fn scope(a: &ScopeArgs) -> Result<Report, CliError> {
     Ok(Report::new(serde_json::json!({ "complete": d.complete().is_ok() }), d.line()))
 }
 
+/// Arguments of `ci scope-record`: ER-41 for ADR 0113.
+#[derive(Args)]
+pub struct ScopeRecordArgs {
+    /// The workflow file whose run is recorded (`ci.yml`, `debrief.yml`, or one release workflow for the plan action).
+    #[arg(long)]
+    workflow: String,
+    /// The run: a finished, green run whose plan job declared a complete scope.
+    #[arg(long)]
+    run: u64,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// `ci scope-record`: records the first green scope run of a producer in `docs/ci-scope-first-runs.toml` (of the current repository)
+/// and so switches `ci verdict` from the old line to the declared scope for that producer, in the one step (ER-41). Refuses a run
+/// that is not a first green, complete, ran scope, and a producer already recorded. The token is read from `GITEA_TOKEN`.
+pub fn scope_record(a: &ScopeRecordArgs) -> Result<Report, CliError> {
+    let root = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
+    let file = root.join(crate::run_scope::REGISTER);
+    let text = std::fs::read_to_string(&file)
+        .map_err(|e| CliError::failure(format!("{} cannot be read: {e}.", file.display())).with_hint("Run it from the repository root."))?;
+    let producer = crate::run_scope::producer_of(&a.workflow);
+    let updated = crate::run_scope::with_first_run(&text, producer, a.run).map_err(CliError::failure)?;
+    let token = token()?;
+    let mut http = CurlHttp;
+    let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
+    let checked = verdict::first_green_scope(&mut client, &a.workflow, a.run).map_err(|why| {
+        CliError::failure(format!("run {} of {} cannot be recorded: {why}.", a.run, a.workflow))
+            .with_hint("Record a finished green run whose plan job printed a complete `plan scope:` line.")
+    })?;
+    std::fs::write(&file, updated).map_err(|e| CliError::failure(format!("{} cannot be written: {e}.", file.display())))?;
+    let text = format!(
+        "recorded {producer} at run {} in {}: {checked}. The reader now decides on the declared scope for it; delete the producer's old `plan verdict:` block in the same commit.",
+        a.run,
+        crate::run_scope::REGISTER
+    );
+    Ok(Report::new(serde_json::json!({ "producer": producer, "run": a.run }), text))
+}
+
 /// Arguments of `ci reuse` (the server, repository and token come from the CI environment: `GITHUB_SERVER_URL`,
 /// `GITHUB_REPOSITORY`, `PLAN_TOKEN`).
 #[derive(Args)]

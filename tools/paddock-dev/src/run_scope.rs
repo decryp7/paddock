@@ -2,7 +2,7 @@
 //! (the one reader, [`crate::ci_runs::verdict`]) decides "complete" by comparing what the run did (`ran`) with what a push to main
 //! does for the same tree (`need`): complete means `ran` covers `need`, jobs, engines, apps and whole-workspace tests alike.
 //! No workflow decides it any more, so a smaller scope cannot be written as "complete" by a shell line that forgot a dimension
-//! (run 8335; the schedule-skipped and rerun-only runs counted green on 2026-11-12; the WebKit hole of the D4 reuse).
+//! (the schedule-skipped and rerun-only runs counted green on 2026-11-12; the WebKit hole of the D4 reuse).
 //!
 //! Producers: `./dev plan --ci` for ci.yml ([`ci_scope`]), `./dev ci scope` for the app workflows ([`app_scope`]).
 //! The reader: [`read`] and [`Declared::complete`].
@@ -172,6 +172,13 @@ pub fn scope_of(plan: &Value, legs: &[Value], webkit: bool, os_legs: &[String], 
             jobs.extend(os_legs.iter().map(|os| format!("{job}@{os}")));
         }
     }
+    // The reference-app jobs of ci.yml: Chromium whenever a UI is reached, WebKit with it when the planner says so.
+    if plan["ui"].as_bool() == Some(true) {
+        jobs.insert("e2e".to_string());
+        if webkit {
+            jobs.insert("e2e-webkit".to_string());
+        }
+    }
     let ui_leg = legs
         .iter()
         .any(|l| l["ui"].as_bool() == Some(true) || l["e2e_leg"].as_str().is_some_and(|e| e.starts_with("e2e")));
@@ -190,6 +197,102 @@ pub fn scope_of(plan: &Value, legs: &[Value], webkit: bool, os_legs: &[String], 
         apps: legs.iter().map(leg_id).collect(),
         whole,
     }
+}
+
+/// How a declared job is found among a run's jobs by display name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobName {
+    /// The whole name (a matrix leg: `crate (macos-latest)`).
+    Exact(String),
+    /// The start of the name (a job with a long or sharded name: `ui (`, `reference apps (shard`).
+    Prefix(&'static str),
+}
+
+impl JobName {
+    fn matches(&self, name: &str) -> bool {
+        match self {
+            JobName::Exact(n) => name == n,
+            JobName::Prefix(p) => name.starts_with(p),
+        }
+    }
+}
+
+/// The display names of the ci.yml jobs each project flag of a plan switches on (`plan_gitea::CI_JOBS` lists them by id; a test reads
+/// ci.yml and checks each prefix names a job there). Jobs whose `if` reads more than the plan (`commits`, `train-gates`, `audit`) are
+/// not here: a skipped one is not a scope that was not covered.
+pub const PROJECT_JOBS: &[(&str, &[&str])] = &[
+    ("crates", &["crates ("]),
+    ("ui", &["ui ("]),
+    ("eslint", &["eslint preset"]),
+    ("conformance", &["conformance ("]),
+    ("c99", &["C99 ("]),
+    (
+        "tools",
+        &["tools and shared scripts", "VM tooling tests", "wiki tool", "heavy tool"],
+    ),
+    ("icons", &["icons ("]),
+    ("e2e", &["reference apps (shard"]),
+    ("e2e-webkit", &["reference apps in WebKit"]),
+];
+
+/// The job names of one declared job of ci.yml, empty for a key no single job stands for (`paddockDev`: its jobs are the
+/// `paddock-dev@os` legs).
+fn names_of_job(key: &str) -> Vec<JobName> {
+    if let Some((_, prefixes)) = PROJECT_JOBS.iter().find(|(k, _)| *k == key) {
+        return prefixes.iter().map(|p| JobName::Prefix(p)).collect();
+    }
+    match key.split_once('@') {
+        Some(("crate", os)) => vec![JobName::Exact(format!("crate ({os})"))],
+        Some(("paddock-dev", os)) => vec![JobName::Exact(format!("paddock-dev ({os})"))],
+        _ => Vec::new(),
+    }
+}
+
+/// The job name of an app leg (`dyno@ubuntu-latest:e2e-1`): `app dyno (ubuntu-latest, e2e-1)`, as ci.yml's `app` job names it.
+fn name_of_leg(leg: &str) -> JobName {
+    let (app_os, e2e) = leg.split_once(':').map_or((leg, None), |(a, e)| (a, Some(e)));
+    let (app, os) = app_os.split_once('@').unwrap_or((app_os, ""));
+    JobName::Exact(match e2e {
+        Some(e) => format!("app {app} ({os}, {e})"),
+        None => format!("app {app} ({os})"),
+    })
+}
+
+/// What `check_ran` found wrong with a run's jobs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RanProblem {
+    /// A declared job did not succeed because it never ran or was cancelled: the run did not do what it declared (partial).
+    NotRun(String),
+    /// A declared job has no job of that name in the run: the declaration cannot be checked (not measured).
+    Missing(String),
+}
+
+/// "Ran means ran": every job the run declared in `ran` has a job in the run with a matching name, and none of them was skipped or
+/// cancelled. A failed one is left to the run's own conclusion (red). Only ci.yml's jobs are mapped; another workflow's declaration
+/// has no job names and passes (its `gates` job is not one job). `jobs` are `(display name, conclusion)`.
+pub fn check_ran(d: &Declared, jobs: &[(String, String)]) -> Result<(), RanProblem> {
+    if d.workflow != "ci.yml" {
+        return Ok(());
+    }
+    let declared = d
+        .ran
+        .jobs
+        .iter()
+        .map(|k| (k.as_str(), names_of_job(k)))
+        .chain(d.ran.apps.iter().map(|a| (a.as_str(), vec![name_of_leg(a)])));
+    for (key, names) in declared {
+        for name in names {
+            let found: Vec<&(String, String)> = jobs.iter().filter(|(n, _)| name.matches(n)).collect();
+            if found.is_empty() {
+                return Err(RanProblem::Missing(format!("{key}: the run has no job named like {name:?}")));
+            }
+            if let Some((n, c)) = found.iter().find(|(_, c)| !matches!(c.as_str(), "success" | "failure")) {
+                let c = if c.is_empty() { "not finished" } else { c.as_str() };
+                return Err(RanProblem::NotRun(format!("{key}: its job {n:?} was {c}, not success")));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// What a ci.yml plan job declares. `ran` is the scope the run's own plan switched on (empty for a reused run, which runs no job,
@@ -234,6 +337,68 @@ pub fn app_scope(workflow: &str, app: &str, full: bool, run: bool, since_run: bo
         rerun: since_run,
         ran,
         need,
+    }
+}
+
+// ---- the report-only phase (ER-41) ---------------------------------------------------------------------------------------------
+
+/// The register of producers whose first green scope run is recorded, relative to the repository root (`docs/ci-scope-first-runs.toml`).
+pub const REGISTER: &str = "docs/ci-scope-first-runs.toml";
+
+/// The producer that prints a workflow's scope line: `ci.yml` (`./dev plan --ci`), `debrief.yml` (`./dev ci scope`), and the shared
+/// plan action for every release workflow.
+pub fn producer_of(workflow: &str) -> &str {
+    match workflow {
+        "ci.yml" | "debrief.yml" => workflow,
+        _ => "plan-action",
+    }
+}
+
+/// The run id recorded for `producer` in the register text, `None` when it is not recorded; `Err` for a text that is not the
+/// register's shape.
+pub fn recorded(text: &str, producer: &str) -> Result<Option<u64>, String> {
+    let v: toml::Table = text.parse().map_err(|e| format!("{REGISTER} is not TOML: {e}"))?;
+    let Some(table) = v.get("first_green") else {
+        return Err(format!("{REGISTER} has no [first_green] table"));
+    };
+    let Some(table) = table.as_table() else {
+        return Err(format!("{REGISTER}: first_green is not a table"));
+    };
+    match table.get(producer) {
+        None => Ok(None),
+        Some(id) => id
+            .as_integer()
+            .filter(|n| *n > 0)
+            .map(|n| Some(n as u64))
+            .ok_or_else(|| format!("{REGISTER}: first_green.{producer} is not a run id")),
+    }
+}
+
+/// Whether the reader decides on the declared scope for `workflow`: its producer is recorded in the register of `root`. An absent or
+/// unreadable register is report-only (the old basis), with the reason: never a switch by accident.
+pub fn decisive_in(root: &std::path::Path, workflow: &str) -> (bool, Option<String>) {
+    match std::fs::read_to_string(root.join(REGISTER)) {
+        Err(e) => (false, Some(format!("{REGISTER} cannot be read ({e}): the scope is report-only"))),
+        Ok(text) => match recorded(&text, producer_of(workflow)) {
+            Ok(id) => (id.is_some(), None),
+            Err(e) => (false, Some(format!("{e}: the scope is report-only"))),
+        },
+    }
+}
+
+/// The register text with `producer` recorded at `run`; an error when it already is (the first run is the first).
+pub fn with_first_run(text: &str, producer: &str, run: u64) -> Result<String, String> {
+    if let Some(id) = recorded(text, producer)? {
+        return Err(format!(
+            "{producer} is already recorded at run {id}: the first green run is recorded once"
+        ));
+    }
+    let mut out = text.trim_end().to_string();
+    out.push_str(&format!("\n\"{producer}\" = {run}\n"));
+    // The result must read back as what was asked.
+    match recorded(&out, producer)? {
+        Some(id) if id == run => Ok(out),
+        _ => Err(format!("{REGISTER} could not take the record for {producer}")),
     }
 }
 
@@ -359,6 +524,139 @@ mod tests {
             },
         };
         assert!(nothing.complete().unwrap_err().contains("empty"));
+    }
+
+    fn run_jobs(d: &Declared, conclusion: &str) -> Vec<(String, String)> {
+        // One job per declared key, named as ci.yml names it, all with `conclusion`.
+        let mut jobs: Vec<(String, String)> = Vec::new();
+        for k in &d.ran.jobs {
+            for n in names_of_job(k) {
+                jobs.push((
+                    match n {
+                        JobName::Exact(n) => n,
+                        JobName::Prefix(p) => format!("{p}x)"),
+                    },
+                    conclusion.into(),
+                ));
+            }
+        }
+        for a in &d.ran.apps {
+            if let JobName::Exact(n) = name_of_leg(a) {
+                jobs.push((n, conclusion.into()));
+            }
+        }
+        jobs
+    }
+
+    #[test]
+    fn ran_means_ran_a_skipped_or_cancelled_declared_job_is_partial_and_a_missing_one_is_not_measured() {
+        let d = declared(true, &[]);
+        let all = run_jobs(&d, "success");
+        assert!(all.len() > 8, "a positive control: the declaration has jobs ({})", all.len());
+        assert_eq!(check_ran(&d, &all), Ok(()));
+        // The WebKit job skipped (the plan's webkit output dropped): the run declared WebKit and did not run it.
+        let mut skipped = all.clone();
+        let webkit = skipped.iter_mut().find(|(n, _)| n.starts_with("reference apps in WebKit")).unwrap();
+        webkit.1 = "skipped".into();
+        assert!(
+            matches!(check_ran(&d, &skipped), Err(RanProblem::NotRun(m)) if m.contains("e2e-webkit")),
+            "{:?}",
+            check_ran(&d, &skipped)
+        );
+        // A cancelled app leg, a job that never finished.
+        let mut cancelled = all.clone();
+        cancelled.iter_mut().find(|(n, _)| n == "app dyno (macos-latest)").unwrap().1 = "cancelled".into();
+        assert!(matches!(check_ran(&d, &cancelled), Err(RanProblem::NotRun(m)) if m.contains("cancelled")));
+        let mut going = all.clone();
+        going.iter_mut().find(|(n, _)| n == "crate (windows-latest)").unwrap().1 = String::new();
+        assert!(matches!(check_ran(&d, &going), Err(RanProblem::NotRun(m)) if m.contains("not finished")));
+        // A declared job with no job of that name: the declaration cannot be checked.
+        let gone: Vec<_> = all
+            .iter()
+            .filter(|(n, _)| !n.starts_with("reference apps in WebKit"))
+            .cloned()
+            .collect();
+        assert!(matches!(check_ran(&d, &gone), Err(RanProblem::Missing(m)) if m.contains("e2e-webkit")));
+        let no_leg: Vec<_> = all
+            .iter()
+            .filter(|(n, _)| n != "app dyno (ubuntu-latest, e2e-webkit)")
+            .cloned()
+            .collect();
+        assert!(matches!(check_ran(&d, &no_leg), Err(RanProblem::Missing(m)) if m.contains("dyno@ubuntu-latest:e2e-webkit")));
+        // A failed job is the run's own red, not a partial scope.
+        let mut failed = all.clone();
+        failed[0].1 = "failure".into();
+        assert_eq!(check_ran(&d, &failed), Ok(()));
+        // Another workflow's declaration has no job names to check.
+        let other = app_scope("debrief.yml", "debrief", true, true, false, &["chromium".to_string()]);
+        assert_eq!(check_ran(&other, &[]), Ok(()));
+    }
+
+    #[test]
+    fn every_job_name_the_scope_maps_is_a_job_of_the_real_ci_yml() {
+        // The mapping from declared keys to display names is read against ci.yml through the planner's own accessor of its jobs, so a
+        // renamed job fails here and not in a tag gate (ER-42).
+        let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitea/workflows/ci.yml")).unwrap();
+        let wf = crate::plan_gitea::workflow_jobs(&text).unwrap();
+        let name_of = |id: &str| -> String {
+            let job = &wf
+                .jobs
+                .iter()
+                .find(|(k, _)| k == id)
+                .unwrap_or_else(|| panic!("ci.yml has no job {id}"))
+                .1;
+            job.lines().find_map(|l| l.trim().strip_prefix("name: ")).unwrap().to_string()
+        };
+        for (key, prefixes) in PROJECT_JOBS {
+            assert!(!prefixes.is_empty(), "{key}");
+            for p in *prefixes {
+                assert!(
+                    wf.jobs.iter().any(|(id, _)| name_of(id).starts_with(p)),
+                    "no job of ci.yml is named like {p:?} (the key {key})"
+                );
+            }
+        }
+        // The matrix legs: the `name:` templates the exact names are built from.
+        assert_eq!(name_of("crate"), "crate (${{ matrix.os }})");
+        assert_eq!(name_of("paddock-dev"), "paddock-dev (${{ matrix.os }})");
+        assert_eq!(
+            name_of("app"),
+            "app ${{ matrix.app }} (${{ matrix.os }}${{ matrix.e2e_leg != \'\' && format(\', {0}\', matrix.e2e_leg) || \'\' }})"
+        );
+        // Positive control: a prefix that names no job is not found.
+        assert!(!wf.jobs.iter().any(|(id, _)| name_of(id).starts_with("no such job")));
+    }
+
+    #[test]
+    fn the_register_decides_per_producer_and_a_missing_one_is_report_only() {
+        let empty = "[first_green]\n";
+        assert_eq!(recorded(empty, "ci.yml"), Ok(None));
+        let with = with_first_run(empty, "ci.yml", 8400).unwrap();
+        assert_eq!(recorded(&with, "ci.yml"), Ok(Some(8400)));
+        assert_eq!(recorded(&with, "debrief.yml"), Ok(None), "another producer stays report-only");
+        // Release workflows share the plan action's producer.
+        assert_eq!(producer_of("dyno-release.yml"), "plan-action");
+        assert_eq!(producer_of("spotter-release.yml"), producer_of("pitwall-release.yml"));
+        assert_eq!(producer_of("ci.yml"), "ci.yml");
+        // The first run is recorded once; a register of another shape is an error.
+        assert!(
+            with_first_run(&with, "ci.yml", 9000)
+                .unwrap_err()
+                .contains("already recorded at run 8400")
+        );
+        assert!(recorded("x = 1\n", "ci.yml").unwrap_err().contains("first_green"));
+        assert!(recorded("[first_green]\n\"ci.yml\" = \"x\"\n", "ci.yml").is_err());
+        // On disk: the real register, then a temp copy that names a producer, then a missing one.
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let (real, why) = decisive_in(&repo, "unknown-workflow.yml");
+        assert!(why.is_none(), "{why:?}");
+        let _ = real;
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!decisive_in(dir.path(), "ci.yml").0 && decisive_in(dir.path(), "ci.yml").1.is_some());
+        std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+        std::fs::write(dir.path().join(REGISTER), &with).unwrap();
+        assert!(decisive_in(dir.path(), "ci.yml").0, "a recorded producer is decisive");
+        assert!(!decisive_in(dir.path(), "debrief.yml").0);
     }
 
     #[test]

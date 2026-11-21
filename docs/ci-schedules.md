@@ -30,8 +30,13 @@ with `app` is one app only, a member run is narrowed, a reused or skipped run ra
 `webkit=true` itself for a full dispatch (no `base`, no `since_run`); an explicit `--input webkit=false` wins, and a member run or a
 rerun is sent as asked. That is what lets a landed train's push to main reuse the train's run (ER-49). `./dev ci verdict`'s hint
 of the last fully tested commit asks the same reader about each of main's newest commits, so a push that reused a train run
-(partial itself) still names the commit the train tested. Runs from before the scope line have none and are partial: a tag needs a
-run on a commit made after it.
+(partial itself) still names the commit the train tested. The reader also checks that the run **ran what it declared** ("ran means ran", as GitHub's required checks:
+a skipped one blocks): each declared job and app leg has a job of its name that succeeded; a skipped or cancelled one makes the run
+partial, a missing one not measured, a failed one is the run's own red. **Report-only first (ER-41):** until
+`docs/ci-scope-first-runs.toml` names a producer (`ci.yml`, `debrief.yml`, `plan-action`), `./dev ci verdict` still decides on the old
+`plan verdict: complete=` line that producer keeps printing and prints the scope view as a `::notice::`; `./dev ci scope-record
+--workflow <file> --run <id>` records the first green scope run and switches that producer in one step, and its old block is deleted in
+the same change. Runs from before the scope line have none: they stay valid on the old basis, and partial after the switch.
 
 **Member runs test only the reached packages (2026-11-21).** A dispatch with a `base` and no `since_run` (a member or a fix round)
 passes `./dev plan --ci` the event, and the plan narrows nextest to the packages the change reaches: the app legs' `filter`, and

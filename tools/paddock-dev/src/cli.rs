@@ -390,6 +390,9 @@ enum CiCommand {
     /// The scope line of an app's own workflow (`plan scope: {json}`, ADR 0113): what the run did and what a push to main does, which
     /// `ci verdict` compares. ci.yml's plan prints its own (`dev plan --ci`).
     Scope(ci_runs::ScopeArgs),
+    /// Records the first green run of a scope producer in docs/ci-scope-first-runs.toml, which switches `ci verdict` from the producer's
+    /// old line to its declared scope (ER-41, ADR 0113). Refuses a run that is not green, complete and run.
+    ScopeRecord(ci_runs::ScopeRecordArgs),
     /// Whether a push to main ends early because a full green run of the workflow, with no FLAKY test, already tested this exact
     /// commit (`reuse=true|false` and `run=<id>` to GITHUB_OUTPUT; ER-49). Fails open: anything unreadable lets the run proceed.
     Reuse(ci_runs::ReuseArgs),
@@ -744,6 +747,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Scope(a),
         } => ci_runs::scope(&a),
+        Command::Ci {
+            command: CiCommand::ScopeRecord(a),
+        } => ci_runs::scope_record(&a),
         Command::Ci {
             command: CiCommand::RustPin(a),
         } => ci_rust_pin::command(&a),
