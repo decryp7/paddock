@@ -647,7 +647,14 @@ jobs:
 
       - name: Tests
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        run: cargo nextest run --profile ci --locked --no-fail-fast
+        run: |
+          # The output is kept so that a failing proptest case is annotated with its seed line (rule 89).
+          log=$(mktemp)
+          if cargo nextest run --profile ci --locked --no-fail-fast 2>&1 | tee "$log"; then rc=0; else rc=${PIPESTATUS[0]}; fi
+          if [ "$rc" -ne 0 ]; then
+            if grep -q 'proptest: ' "$log"; then "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci proptest-seeds "$log" || true; fi
+            exit "$rc"
+          fi
 
       - name: Deny
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
@@ -751,7 +758,14 @@ jobs:
 
       - name: Tests
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        run: cargo nextest run --profile ci --locked --no-fail-fast
+        run: |
+          # The output is kept so that a failing proptest case is annotated with its seed line (rule 89).
+          log=$(mktemp)
+          if cargo nextest run --profile ci --locked --no-fail-fast 2>&1 | tee "$log"; then rc=0; else rc=${PIPESTATUS[0]}; fi
+          if [ "$rc" -ne 0 ]; then
+            if grep -q 'proptest: ' "$log"; then "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci proptest-seeds "$log" || true; fi
+            exit "$rc"
+          fi
 
       - name: Deny
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
@@ -1056,7 +1070,13 @@ jobs:
         run: |
           filter=()
           if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn); fi
-          cargo nextest run --workspace --all-features --profile ci ${filter[@]+"${filter[@]}"}
+          # The output is kept so that a failing proptest case is annotated with its seed line (rule 89).
+          log=$(mktemp)
+          if cargo nextest run --workspace --all-features --profile ci ${filter[@]+"${filter[@]}"} 2>&1 | tee "$log"; then rc=0; else rc=${PIPESTATUS[0]}; fi
+          if [ "$rc" -ne 0 ]; then
+            if grep -q 'proptest: ' "$log"; then "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci proptest-seeds "$log" || true; fi
+            exit "$rc"
+          fi
 
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
         if: failure() && runner.os == 'Windows'

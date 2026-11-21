@@ -688,7 +688,7 @@ fn assert_gravity(items: &[Item]) {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #![proptest_config(ProptestConfig::with_cases(paddock_testkit::proptest_cases(1000)))]
     #[test]
     fn arrangements_stay_valid_compact_and_deterministic(
         items in arbitrary_items(),

@@ -3347,3 +3347,22 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   learns it lost events. What grew fseventsd to 12.7 GB (a client that stopped reading, or the 690k leaked test folders and their
   paused delete) is not known.
 - **Class:** a test of an OS notification assumes it is prompt and lossless. Earlier instances: none recorded.
+
+## A property test failed on one run and passed on the next of the same commit: its seed was random and the failing case died with CI's checkout (2026-11-21)
+
+- **What happened:** ci.yml 8425 was green and 8466 was red on one sha. `paddock-dialogs` `size::tests::any_interleaving_keeps_the_size_rules`
+  hit a rare case on the second run.
+- **Root cause:** proptest uses a random seed on every run. It records a failing case as a `cc <hex>` line in
+  `proptest-regressions/<module>.txt`, but only in the job's throwaway checkout, so the case was lost and nothing replays it.
+- **Fix (rule 89):** the fix for a CI-found proptest failure commits the `cc` line to the crate's `proptest-regressions/` file (four crates
+  already do). A failed test step now prints the line, the crate, the test and the file as one `::error::` annotation
+  (`./dev ci proptest-seeds`, tested on a recorded nextest log with a positive control: no proptest failure, no annotation). The
+  nightly runs the proptest crates of `crates/` with `PROPTEST_CASES=10000` (report-only) to find cases before a gate does. A real
+  proptest log showed two things the first version missed: an integration test saves to `tests/<file>.proptest-regressions` (the
+  annotation now prints the path proptest printed, relative to the repository root, instead of cutting it), and one of two failing
+  tests of a binary printed no seed text at all (probably because its seed was already in the file: committed, or saved earlier in the run by another
+  test; not confirmed), so a log can hold a failure with no line to read. Such a failure, and a property test that ends in TIMEOUT or a signal, is
+  reproduced locally with `PROPTEST_CASES` set and never closed as "no seed".
+- **Why the logs did not show it:** the seed line was in the step's output only; nothing pointed at it as the thing to keep.
+- **Class: a failure that only the random input found is not kept.** Earlier: none recorded for proptest; the same shape as a flaky test
+  whose reproduction is lost (rule 50 (k), ER-12).

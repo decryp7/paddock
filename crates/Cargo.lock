@@ -4111,6 +4111,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "paddock-commands",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "proptest",
  "serde",
@@ -4488,6 +4489,7 @@ dependencies = [
  "getrandom 0.3.4",
  "paddock-env",
  "paddock-ipc",
+ "paddock-testkit",
  "paddock-view",
  "paddock-workspace-hack",
  "postcard",
@@ -4811,6 +4813,7 @@ dependencies = [
 name = "paddock-testplan"
 version = "0.1.0"
 dependencies = [
+ "paddock-testkit",
  "paddock-workspace-hack",
  "proptest",
  "serde",
@@ -4876,6 +4879,7 @@ name = "paddock-widgets"
 version = "0.1.0"
 dependencies = [
  "paddock-commands",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "proptest",
  "serde",

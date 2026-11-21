@@ -259,8 +259,20 @@ fn execute(
             Some(folder) => with_build_folder(text, folder),
             None => text.clone(),
         };
+        // A nextest line also goes to a file, read when it failed: a failing proptest case is annotated with its seed (rule 89).
+        let capture = run_text.contains("nextest").then(|| capture_file(env, ran)).flatten();
+        let run_text = match &capture {
+            Some(file) => tee_to(&run_text, file),
+            None => run_text,
+        };
         let (code, how) = run_line(&run_text, &dir, env, heavy, args.max_secs, stop, out);
         ran += 1;
+        if let Some(file) = &capture {
+            if code != 0 {
+                annotate_proptest_seeds(file, root, out);
+            }
+            let _ = std::fs::remove_file(file);
+        }
         if code != 0 {
             failed += 1;
             if first_code == 0 {
@@ -286,6 +298,28 @@ fn execute(
         started.elapsed().as_secs_f64()
     );
     if failed == 0 { 0 } else { 1 }
+}
+
+/// Where a nextest line's output is also kept: the job's own temp folder (`RUNNER_TEMP`, else `TMPDIR`; none: no capture, no seed
+/// annotation, the line's own error still comes).
+fn capture_file(env: &HashMap<String, String>, n: usize) -> Option<PathBuf> {
+    let dir = env.get("RUNNER_TEMP").or_else(|| env.get("TMPDIR")).filter(|d| !d.is_empty())?;
+    Some(Path::new(dir).join(format!("paddock-ci-run-{}-{n}.log", std::process::id())))
+}
+
+/// `text` with its output also written to `file` (a group, so a `cd` or an `&&` list is one command; `pipefail` keeps the exit code).
+fn tee_to(text: &str, file: &Path) -> String {
+    let quoted = file.to_string_lossy().replace('\'', "'\\''");
+    format!("{{ {text}\n}} 2>&1 | tee '{quoted}'")
+}
+
+/// One `::error::` per failing proptest case in the kept output of a failed nextest line (a log that cannot be read says nothing:
+/// the line's own error follows).
+fn annotate_proptest_seeds(file: &Path, root: &Path, out: &mut dyn Write) {
+    let Ok(bytes) = std::fs::read(file) else { return };
+    for line in crate::proptest_seeds::report(&String::from_utf8_lossy(&bytes), root.to_str()) {
+        let _ = writeln!(out, "{line}");
+    }
 }
 
 /// The variable through which the push gate hands the executor the build folder of the `cargo nextest run` line of a phase. Not a

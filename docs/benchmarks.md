@@ -2430,3 +2430,31 @@ Quoted by [docs/research/2026-11-20-ci-job-cost.md](research/2026-11-20-ci-job-c
   and 3,878 (8346), macOS 2,545 and 1,680, Linux 814 (8346); `merge_check` 1,089 / 303 / 53, `golden` 643 / 189, `queue`
   637 / 388 / 58; queue tests 7.3 s median on Windows.
 - **Fixed waits:** `waitForTimeout` 10 in Debrief's specs, 3 in Dyno's, 5 in `ui/e2e`, 0 in Pitwall's.
+
+## Proptest with 10000 cases: what the nightly's `proptest-deep` job costs (2026-11-21, feat/ci-proptest-seed-policy)
+
+Rule 89; `nightly.yml` job `proptest-deep` (report-only, ER-41). `PROPTEST_CASES=10000` reaches every property test: the six
+that fixed their count (`with_cases`) now take the variable when it is set and keep their own count otherwise.
+
+- **Method.** Mac mini, debug test profile (CI's), `CARGO_BUILD_JOBS=2`, one run each of the test with and without the variable,
+  `cargo test -p <crate> ... <test>`; load 1-minute 18 to 68 during the runs (indication only, rule 48 point 2).
+- **paddock-dialogs** `size::tests::any_interleaving_keeps_the_size_rules` (the test of runs 8425/8466): 400 cases 0.27 s,
+  10,000 cases 7.1 s (0.7 ms a case). **paddock-widgets** `grid` properties (1000 cases by default): the whole filter 0.14 s,
+  10,000 cases 0.97 s.
+- **paddock-jobs** `--test it` (143 tests; the property tests are in `properties.rs` and the walk, pool and parallel groups): 0.66 s
+  at the default counts, 71.4 s at 10000 (cargo test, one process). With nextest at 10000 (79 s in all) the slowest test is
+  `properties::walk_equals_sequential_reference`, 78.8 s, then `pipeline_delivers_in_order_for_any_window` 16.1 s and
+  `map_equals_sequential_map` 10.7 s. **paddock-plugin-package** `--test it` (5 tests): 0.11 s default, 5.0 s at 10000.
+  **paddock-view** `--lib` (44 tests): 0.25 s default, 4.95 s at 10000. Load 1-minute 28 to 37 during these runs, `CARGO_BUILD_JOBS=2`,
+  one crate at a time, debug profile.
+- **Limit.** nextest profile `nightly-proptest` (`crates/.config/nextest.toml`): 60 s periods, a test is stopped after 240 s,
+  three times the slowest measured (78.8 s); the ci profile's 60 s would have stopped the walk test (ER-12: the cause and the
+  measurement are recorded next to the setting). The job is given its share of the host with the `build-jobs` action (ER-48).
+- **Filter.** None by test: a property test has no name or binary marker, so the job runs the proptest crates' whole test
+  binaries (the ordinary tests are small next to the properties). The scope is the package list read from the manifests.
+- **Total.** Run time of all 11 crates: the three above sum to about 100 s of the slowest tests (they run in parallel under
+  nextest, so about 80 s), paddock-dialogs 7 s and paddock-widgets 1 s, so under 5 minutes in the worst case at this load; the
+  compile of the 11 crates (all features, debug, a cold runner) is the larger part, 10 to 15 minutes (paddock-dialogs alone 1 min
+  40 s at load 40 with 2 jobs). The job's 60 minutes stay until the first run (then the duration plus 50 %).
+- **Not measured.** The three app workspaces that commit regression files (`debrief-core`, `dyno-agent`, `pitcrew-core`) and
+  `tools/heavy` are not in the job; they run in their own workspaces and their counts are the default 256.

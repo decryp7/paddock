@@ -964,7 +964,7 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(400))]
+        #![proptest_config(ProptestConfig::with_cases(paddock_testkit::proptest_cases(400)))]
 
         /// ADR 0043 check 2: whatever order events come in, the plans keep the window inside its limits, only a user
         /// resize makes it manual, and the window is shown only after its ready. Both directions of the user rule are

@@ -128,7 +128,7 @@ fn plan() -> impl Strategy<Value = Plan> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(64))]
+    #![proptest_config(ProptestConfig::with_cases(paddock_testkit::proptest_cases(64)))]
 
     #[test]
     fn a_plan_reads_back_equal(p in plan()) {

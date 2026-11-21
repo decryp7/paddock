@@ -583,6 +583,46 @@ jobs:
           if [ "${PADDOCK_AUDIT_ENFORCE:-}" = "1" ]; then enforce=(--enforce); fi
           ./dev audit nightly ${enforce[@]+"${enforce[@]}"}
 
+  # Rule 89: the crates' property tests with 10000 cases instead of their usual 48 to 1000, so a rare case shows in the night and
+  # not in a gate (ci.yml 8425 green, 8466 red on one sha). The crates are those whose Cargo.toml asks for proptest (read from the
+  # manifests, no hand list). A failing case is one `::error::` with its `cc` seed line and the file to commit it to
+  # (`./dev ci proptest-seeds`). Report-only (ER-41): `continue-on-error`, and not in `mark`, until its first green run on the
+  # real tree (record run id: not yet; docs/ci-schedules.md). Time: docs/benchmarks.md, "Proptest with 10000 cases"; the nextest
+  # profile `nightly-proptest` (crates/.config/nextest.toml) holds the measured per-test limit. The filter is the package list: a
+  # property test has no name or binary marker, so the proptest crates' other tests run too (ordinary tests, small next to the properties).
+  proptest-deep:
+    name: proptest (10000 cases, report-only)
+    timeout-minutes: 60
+    continue-on-error: true
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+      PROPTEST_CASES: "10000"
+    steps:
+      - uses: actions/checkout@v4
+      # CARGO_BUILD_JOBS and NEXTEST_TEST_THREADS: this job's share of the host (ER-48; `./dev ci build-jobs` through conformance/ci/kit.sh).
+      - uses: ./.gitea/actions/build-jobs
+      - uses: ./.gitea/actions/setup-rust
+      - name: Property tests, 10000 cases
+        working-directory: crates
+        run: |
+          set -uo pipefail
+          pkgs=()
+          for m in */Cargo.toml; do
+            if grep -qE '^proptest *=' "$m"; then pkgs+=(-p "$(basename "$(dirname "$m")")"); fi
+          done
+          if [ "${#pkgs[@]}" -eq 0 ]; then echo "::error::no crate asks for proptest: the manifest scan found none. Next step: check the scan in nightly.yml (proptest-deep)."; exit 1; fi
+          echo "::notice::proptest crates: ${pkgs[*]}"
+          log=$(mktemp)
+          if cargo nextest run "${pkgs[@]}" --all-features --profile nightly-proptest --no-fail-fast 2>&1 | tee "$log"; then rc=0; else rc=${PIPESTATUS[0]}; fi
+          if [ "$rc" -ne 0 ]; then ../dev ci proptest-seeds "$log" || true; echo "::error::proptest with 10000 cases failed (exit $rc). Next step: commit each cc line above to its file, then fix the code (rule 89)."; fi
+          exit "$rc"
+
   # `generators` and `audit` join this list after their first green nightly run (docs/ci-schedules.md).
   # A night the gate skipped (main unchanged, or a train in CI) measured nothing and is never marked.
   mark:

@@ -90,6 +90,7 @@ pub mod plan_since;
 pub mod pr;
 pub mod pre_push;
 pub mod process_env;
+pub mod proptest_seeds;
 pub mod queue;
 pub mod release_isolation;
 pub mod safe_remove;

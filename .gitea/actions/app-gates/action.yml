@@ -126,6 +126,8 @@ runs:
             status=1
             names=$(sed $'s/\x1b\\[[0-9;]*m//g' "$log" | sed -nE 's/^ *(FAIL|TIMEOUT|SIGABRT|SIGSEGV|SIGKILL|LEAK-FAIL) +\[[^]]*\] +(\([^)]*\) +)?//p' | sort -u | sed -n '1,10p' | paste -sd ';' - | sed 's/;/; /g')
             echo "::error::failed (exit $rc): $*${names:+ | failing tests: $names}"
+            # A failing proptest case: one annotation with its `cc` seed line and the file to commit it to (rule 89).
+            if grep -q 'proptest: ' "$log"; then "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci proptest-seeds "$log" || true; fi
           fi
           rm -f "$log"
           echo "::endgroup::"

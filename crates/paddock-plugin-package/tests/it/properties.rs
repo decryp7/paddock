@@ -55,7 +55,7 @@ fn build_package(signed: bool) -> (Vec<u8>, String) {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(256))]
+    #![proptest_config(ProptestConfig::with_cases(paddock_testkit::proptest_cases(256)))]
 
     #[test]
     fn arbitrary_bytes_never_panic(bytes in proptest::collection::vec(any::<u8>(), 0..4096)) {

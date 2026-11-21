@@ -38,6 +38,7 @@ mod folder;
 pub mod home_guard;
 pub mod private;
 mod process_vars;
+pub mod prop;
 pub mod starts;
 pub mod text_busy;
 mod versioned;
@@ -59,6 +60,7 @@ pub use private::{
     private_fallback_dir_as,
 };
 pub use process_vars::{vars, vars_skipping};
+pub use prop::proptest_cases;
 pub use versioned::{
     DEFAULT_KEEP_CORRUPT, DEFAULT_MAX_BYTES, FIRST_VERSION, Loaded, Migration, Problem,
     VersionedFile,
