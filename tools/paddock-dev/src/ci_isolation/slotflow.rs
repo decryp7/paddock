@@ -5,7 +5,7 @@
 use super::folders::{due, max_slots as folders_max_slots};
 use super::home::{ci_home, is_linux, job_temp, native, slot_number, valid_slot};
 use super::table::Kept;
-use super::{Ctx, R, Sinks, Stop, tmpdir};
+use super::{Ctx, R, Sinks, Stop, processes, tmpdir};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, SystemTime};
@@ -390,6 +390,8 @@ pub fn acquire(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
     io.say(format!(
         "job-isolation: slot {slot} (kept folders end in -{slot}); temp folders in {temp}"
     ));
+    // Report (never end) what an earlier job left running after its folder was removed (the 2026-11-20 vm-lock.sh).
+    let _ = processes::sweep(ctx, io, false);
     sweep(ctx, &kept, &home, false, None, io)?;
     let floor: u64 = ctx.digits("PADDOCK_CI_MIN_FREE_GB").unwrap_or(30);
     let not_measured = |io: &mut Sinks<'_>, why: &str| {
@@ -520,6 +522,8 @@ pub fn release(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
     let Ok(home) = ci_home(ctx).inspect_err(|e| io.say(&e.text)) else {
         return Ok(());
     };
+    // Every process this job left running ends with it (processes.rs); never a failure of the job.
+    let _ = processes::stop_job(ctx, io);
     let mut ok = true;
     match held_by_us(ctx, &home, &s, &token) {
         Err(()) => {

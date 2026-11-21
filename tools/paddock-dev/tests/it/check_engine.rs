@@ -520,7 +520,10 @@ fn a_new_rust_check_file_is_named_in_the_registry_message() {
 
 /// Every check the Rust host has and the JavaScript host does not has recorded JS answers to be held to: at least one file in
 /// `tests/fixtures/check/recorded`, `units` or the `expected.json` of C39 and C53, named after it (a check with none was ported without
-/// a parity proof).
+/// a parity proof). A check written in Rust from the start has no JavaScript answers to be held to: it is named in [`BORN_IN_RUST`]
+/// (with its own fixtures in `tests/it/check_c<n>.rs`), and a check that is listed there and also has a JS module is an error.
+const BORN_IN_RUST: [&str; 1] = ["C145"];
+
 #[test]
 fn every_rust_only_check_has_recorded_js_answers() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/check");
@@ -532,6 +535,18 @@ fn every_rust_only_check_has_recorded_js_answers() {
     for c in check::registry() {
         let id = c.id();
         if js.iter().any(|j| j["id"] == id) {
+            assert!(
+                !BORN_IN_RUST.contains(&id),
+                "{id} has a JS module, so it was not born in Rust: take it off BORN_IN_RUST"
+            );
+            continue;
+        }
+        if BORN_IN_RUST.contains(&id) {
+            assert!(
+                dir.join("../../it").join(format!("check_{}.rs", id.to_lowercase())).is_file(),
+                "{id} is born in Rust and has no tests/it/check_{}.rs",
+                id.to_lowercase()
+            );
             continue;
         }
         let low = id.to_lowercase();

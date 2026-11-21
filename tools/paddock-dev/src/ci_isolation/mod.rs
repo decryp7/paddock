@@ -6,6 +6,7 @@
 //! dev ci isolation path <kind> [<name>] [--source <dir>] | source-key <dir>
 //! dev ci isolation owns <folder> [<kind>] | port <name> | pattern <regex> | sweep-slot [all]
 //! dev ci isolation tmpdir setup | remove | sweep
+//! dev ci isolation processes stop | sweep [--end]
 //! ```
 //!
 //! The contract is the shell script's, case for case (`conformance/test/job-isolation.test.mjs` runs against both): a value
@@ -25,6 +26,7 @@
 pub mod folders;
 pub mod home;
 pub mod pattern;
+pub mod processes;
 pub mod slotflow;
 pub mod table;
 pub mod tmpdir;
@@ -171,7 +173,7 @@ impl Sinks<'_> {
     }
 }
 
-const USAGE: &str = "usage: dev ci isolation acquire|release|status|slots|path <kind> [<name>] [--source <dir>]|temp|owns <folder> [<kind>]|source-key <dir>|port <name>|pattern <regex>|sweep-slot [all]|tmpdir setup|remove|sweep";
+const USAGE: &str = "usage: dev ci isolation acquire|release|status|slots|path <kind> [<name>] [--source <dir>]|temp|owns <folder> [<kind>]|source-key <dir>|port <name>|pattern <regex>|sweep-slot [all]|tmpdir setup|remove|sweep|processes stop|sweep [--end]";
 
 /// The tables folder: the flag, `PADDOCK_CI_TABLES`, else `conformance/ci` of the repository above the current folder.
 pub fn find_tables(flag: Option<PathBuf>, env: &HashMap<String, String>, cwd: &std::path::Path) -> PathBuf {
@@ -233,6 +235,7 @@ fn run_command(ctx: &Ctx, args: &[String], io: &mut Sinks<'_>) -> R<()> {
         Some("port") => pattern::cmd_port(ctx, rest, io),
         Some("pattern") => pattern::cmd_pattern(ctx, rest, io),
         Some("tmpdir") => tmpdir::command(ctx, rest.first().map(String::as_str), io),
+        Some("processes") => processes::command(ctx, rest, io),
         _ => Err(Stop::line(2, USAGE)),
     }
 }

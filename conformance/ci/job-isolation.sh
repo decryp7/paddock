@@ -5,8 +5,9 @@
 #
 #   job-isolation.sh acquire                 the job's slot (first bash step); exports PADDOCK_CI_SLOT, PADDOCK_CI_SLOT_TOKEN,
 #                                            PADDOCK_JOB_TEMP, TMPDIR; sweeps idle slots and checks the free-disk floor
-#   job-isolation.sh release                 gives the slot back (last step, if: always()); fails when the slot's holder
-#                                            died during the job (its isolation was then not guaranteed)
+#   job-isolation.sh release                 ends every process the job left running (they carry PADDOCK_JOB_TEMP), gives the
+#                                            slot back (last step, if: always()); fails when the slot's holder died during the
+#                                            job (its isolation was then not guaranteed)
 #   job-isolation.sh status                  which slots are held, by which job folder (the stalled-holder recovery)
 #   job-isolation.sh slots                   PADDOCK_CI_SLOTS with its default (setup-rust divides sccache's cap by it)
 #   job-isolation.sh path <kind> [<name>]    a kept folder of kept-folders.txt (created, its time stamp renewed), for this slot
@@ -401,6 +402,8 @@ cmd_acquire() {
     echo "::warning::job-isolation: the tool could not be pinned (no cached binary: uncommitted inputs, or no build); the release step will run ./dev again, and fails if that needs a build after the job's temp folder is gone. PADDOCK_DEV is not set." >&2
   fi
   echo "job-isolation: slot $slot (kept folders end in -$slot); temp folders in $temp" >&2
+  # Report (never end) the processes an earlier job left running after its folder was removed (the 2026-11-20 vm-lock.sh).
+  dev_tool ci isolation processes sweep >&2 || echo "::warning::job-isolation: the sweep for processes of finished jobs did not run (see above)." >&2
   sweep "$home"
   floor="${PADDOCK_CI_MIN_FREE_GB:-30}"
   case "$floor" in '' | *[!0-9]*) floor=30 ;; esac
@@ -444,6 +447,10 @@ cmd_release() {
   local s="${PADDOCK_CI_SLOT:-}" token="${PADDOCK_CI_SLOT_TOKEN:-}" home ok=1
   [[ "$s" =~ ^s[1-9][0-9]*$ ]] || { echo "job-isolation: this job holds no slot" >&2; return 0; }
   home="$(ci_home)" || return 0
+  # Every process this job started ends with it (ER-14; docs/lessons.md, 2026-11-21): a step's background script, a process that
+  # ignores SIGTERM, a grandchild, a detached one. They are told by PADDOCK_JOB_TEMP, which every step of the job carries (the Rust
+  # tool is the one implementation: tools/paddock-dev/src/ci_isolation/processes.rs). Never fails the job.
+  dev_tool ci isolation processes stop >&2 || echo "::warning::job-isolation: the job's leftover processes could not be listed or ended (see above). Next step: run './dev ci isolation processes sweep' on the runner." >&2
   local held=0
   held_by_us "$home" "$s" "$token" || held=$?
   if [ "$held" = 2 ]; then

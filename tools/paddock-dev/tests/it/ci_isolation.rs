@@ -396,3 +396,118 @@ fn git_bash_paths_drive_path_and_owns_and_source_key_end_to_end() {
         "another slot"
     );
 }
+
+/// ER-14 (the 2026-11-20 `vm-lock.sh` that outlived its job by four days): `release` ends what the job's steps left running. A step's
+/// script that ignores SIGTERM, one with a grandchild that does too and one that detached into a session of its own are started
+/// with what a later step of the job carries (`PADDOCK_JOB_TEMP`, from the acquire step's env file); a second job's process, which
+/// carries another job's folder, is the positive control: it must still run afterwards. Every stand-in is started under a `Reaper`,
+/// which ends what a failing test leaves; nothing but a stand-in of this test is ended.
+#[test]
+#[allow(
+    clippy::zombie_processes,
+    reason = "every stand-in is owned by a Reaper, which ends it and waits for it when the test ends"
+)]
+fn release_ends_every_process_the_job_left_running_and_no_other_jobs() {
+    use paddock_testkit_start::Reaper;
+    let reaper = Reaper::new("release ends the job's processes");
+    let d = tempfile::tempdir().unwrap();
+    let h = Host::new(d.path(), "tools tools shared\n");
+    let acq = h.run(&["acquire"], &[], false);
+    assert!(acq.status.success(), "{}", text(&acq.stderr));
+    let env = h.exported();
+    let marks = d.path().join("marks");
+    std::fs::create_dir_all(&marks).unwrap();
+    let up = |name: &str, body: &str| format!("echo $$ > '{}'; {body}", paddock_testkit::path::text(marks.join(name)));
+    #[allow(clippy::disallowed_methods, reason = "a test starts its own stand-in processes under a Reaper")]
+    let start = |job: &str, script: &str| {
+        // As a step's script has it: the job's folder is the current folder (macOS shows no environment of /bin/sh, so the token alone
+        // would not find it; the other job's stand-in has its own folder and token).
+        let folder = Path::new(job).parent().unwrap();
+        let mut cmd = std::process::Command::new("sh");
+        cmd.args(["-c", script])
+            .current_dir(folder)
+            .env("PADDOCK_JOB_TEMP", job)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        reaper.spawn(&mut cmd).unwrap()
+    };
+    let job = env.get("PADDOCK_JOB_TEMP").expect("acquire exports the job's temp folder").clone();
+    let _a = start(&job, &up("ignores", "trap '' TERM; while :; do sleep 1; done"));
+    let _b = start(
+        &job,
+        &up(
+            "grand",
+            &format!(
+                "(echo $$ > '{}'; trap '' TERM; while :; do sleep 1; done) & wait",
+                paddock_testkit::path::text(marks.join("grandchild"))
+            ),
+        ),
+    );
+    let _c = start(
+        &job,
+        &up(
+            "detached",
+            "exec perl -e 'use POSIX; POSIX::setsid(); $SIG{TERM}=\"IGNORE\"; sleep 300'",
+        ),
+    );
+    let other_job = d.path().join("work/fedcba9876543210/tmp");
+    std::fs::create_dir_all(&other_job).unwrap();
+    let _other = start(other_job.to_str().unwrap(), &up("other", "while :; do sleep 1; done"));
+    let pid = |name: &str| -> u32 {
+        paddock_testkit::wait::wait_for_within(name, std::time::Duration::from_secs(20), || {
+            std::fs::read_to_string(marks.join(name)).ok().and_then(|t| t.trim().parse().ok())
+        })
+    };
+    let mine: Vec<paddock_proc::ProcessId> = ["ignores", "grand", "grandchild", "detached"]
+        .iter()
+        .map(|n| paddock_proc::ProcessId::of(pid(n)).unwrap())
+        .collect();
+    let other = paddock_proc::ProcessId::of(pid("other")).unwrap();
+    assert!(mine.iter().all(|p| p.confirmed_running()) && other.confirmed_running());
+
+    let rel = h.run(&["release"], &[], true);
+    assert!(rel.status.success(), "{}", text(&rel.stderr));
+    let said = text(&rel.stderr);
+    assert!(
+        said.contains("ended") && said.contains("process(es) the job left running"),
+        "{said}"
+    );
+    for p in &mine {
+        assert!(
+            paddock_proc::own::has_ended(*p),
+            "pid {} is still running after the release\n{said}",
+            p.pid()
+        );
+    }
+    assert!(other.confirmed_running(), "release ended another job's process");
+}
+
+/// The same release with the token of another job (what a test or a shell inside a job inherits) ends nothing.
+#[test]
+#[allow(
+    clippy::zombie_processes,
+    reason = "the stand-in is owned by a Reaper, which ends it and waits for it when the test ends"
+)]
+fn release_ends_nothing_for_a_token_that_is_not_the_jobs_own_temp_folder() {
+    use paddock_testkit_start::Reaper;
+    let reaper = Reaper::new("release with a foreign token");
+    let d = tempfile::tempdir().unwrap();
+    let h = Host::new(d.path(), "tools tools shared\n");
+    assert!(h.run(&["acquire"], &[], false).status.success());
+    let foreign = d.path().join("someone-elses-job/tmp");
+    #[allow(clippy::disallowed_methods, reason = "a test starts its own stand-in process under a Reaper")]
+    let mut cmd = std::process::Command::new("sh");
+    cmd.args(["-c", "sleep 300"])
+        .env("PADDOCK_JOB_TEMP", &foreign)
+        .stdin(std::process::Stdio::null());
+    let stand_in = reaper.spawn(&mut cmd).unwrap();
+    let id = paddock_proc::ProcessId::of(stand_in.id()).unwrap();
+    let rel = h.run(&["release"], &[("PADDOCK_JOB_TEMP", foreign.to_str().unwrap())], true);
+    assert!(rel.status.success(), "{}", text(&rel.stderr));
+    assert!(text(&rel.stderr).contains("nothing is ended"), "{}", text(&rel.stderr));
+    assert!(
+        id.confirmed_running(),
+        "a token that is not the job's own temp folder ended a process"
+    );
+}

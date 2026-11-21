@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Job processes end with the job, and conformance C145 checks the lessons file's format (2026-11-21)
+- `release` of the job-isolation step (shell and Rust) ends every process the job left running: they carry `PADDOCK_JOB_TEMP`, so a
+  script that ignores SIGTERM, a grandchild and a detached process are found; each is ended by identity through `paddock_proc` after
+  5 s. `acquire` reports processes that carry the token of a finished job (`dev ci isolation processes sweep [--end]`). New
+  `paddock_proc::own::carriers(name)`. Windows reports "not measured" (another process's environment is not read there).
+- New report-only conformance check C145 (Rust host): `docs/lessons.md` has a blank line before every `## ` heading, one title, no
+  repeated heading and one final newline. The file's 35 headings that had lost their blank line to a union merge have it again.
+
 ### `@decryp7/paddock-e2e`: `untilItsPageCloses` and `clickThatClosesItsPage`, for a step that closes its own window
 - A test step whose action ends the page it acts on (a pop-out's Dock back, the pointer-up that docks a dragged pop-out) counts as done
   when that page closed: Playwright can reject such a step with "Target page, context or browser has been closed" when the window goes

@@ -86,6 +86,87 @@ pub fn look(carry: Option<(&str, &str)>, names: &[&str]) -> Vec<Seen> {
         .collect()
 }
 
+/// One process of this user as [`survey`] saw it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    /// Its identity (pid and start time).
+    pub id: ProcessId,
+    /// Its parent's pid, when known.
+    pub parent: Option<u32>,
+    /// Whether it has ended and only waits to be collected.
+    pub zombie: bool,
+    /// The value of the variable [`survey`] was asked for in its environment, when it has one and the environment can be read.
+    pub value: Option<String>,
+    /// Its current folder, when it can be read.
+    pub cwd: Option<String>,
+    /// Its command line, arguments joined by a space and cut to [`ARGS_CHARS`] characters.
+    pub args: String,
+}
+
+/// The longest command line [`Row::args`] keeps.
+pub const ARGS_CHARS: usize = 4096;
+
+/// Every process of this user, with what tells it from others after its parent is gone: the value of the environment variable `name`,
+/// its current folder and its command line (one read of the process table). A child inherits its parent's environment, so a process a
+/// job started carries what the job exported, also a detached grandchild that left the job's process tree. **macOS shows no
+/// environment of a program Apple ships** (`/bin/bash`, `/bin/sh`, `/bin/sleep`: `ps eww` and `KERN_PROCARGS2` leave it out, measured
+/// 2026-11-21), so the value alone finds a Homebrew or Rust program, and the folder and the command line (which are readable) find the
+/// scripts: a caller matches all three. The identities are read first, as in [`look`]: a pid handed on in between keeps the first
+/// process's identity, so acting on a row finds the new holder and leaves it alone. Processes of other users are left out (nothing of
+/// theirs is read); on Windows the result is empty (another process's folder and environment are not read there).
+pub fn survey(name: &str) -> Vec<Row> {
+    let identities = crate::usage::snapshot();
+    let Ok(mut sys) = System::new() else {
+        return Vec::new();
+    };
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing()
+            .with_cmd(UpdateKind::Always)
+            .with_cwd(UpdateKind::Always)
+            .with_environ(UpdateKind::Always)
+            .with_user(UpdateKind::Always),
+    );
+    let prefix = format!("{name}=");
+    sys.processes()
+        .iter()
+        .filter(|(_, p)| p.thread_kind().is_none())
+        .filter_map(|(pid, p)| {
+            let pid = pid.as_u32();
+            if !same_user(p.user_id()) {
+                return None;
+            }
+            let id = crate::usage::identity(&identities, pid)?;
+            if ProcessId::of(pid) != Some(id) {
+                return None;
+            }
+            let value = p.environ().iter().find_map(|e| {
+                e.to_string_lossy()
+                    .strip_prefix(&prefix)
+                    .map(str::to_string)
+            });
+            let args: String = p
+                .cmd()
+                .iter()
+                .map(|a| a.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(ARGS_CHARS)
+                .collect();
+            Some(Row {
+                id,
+                parent: p.parent().map(Pid::as_u32),
+                zombie: matches!(p.status(), ProcessStatus::Zombie | ProcessStatus::Dead),
+                value,
+                cwd: p.cwd().map(|c| c.to_string_lossy().into_owned()),
+                args,
+            })
+        })
+        .collect()
+}
+
 /// The start time of a process starting now, for "started after" comparisons with [`ProcessId::started`].
 pub fn now() -> StartTime {
     let micros = std::time::SystemTime::now()
