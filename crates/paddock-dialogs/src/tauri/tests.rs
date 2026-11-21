@@ -554,6 +554,51 @@ fn a_measure_sizes_the_window_and_is_refused_when_it_is_not_a_size() {
     assert_eq!(state(&app).take_size("main"), None);
 }
 
+/// ER-27: an unexplained `Resized` is logged with the size and the echoes it was judged against (the queue before the
+/// transition), so a bundle shows why it was not taken as an echo; the phase line carries the queue before and after.
+#[test]
+fn an_unexplained_resize_is_logged_with_the_echoes_it_was_judged_against() {
+    let app = app();
+    let h = app.handle().clone();
+    open(&h, "main", request("about")).unwrap();
+    let dialog = os_window(&app, "d-main-1");
+    sizing::measure(&h, &dialog, 1, next_seq(), measure(700.0, 200.0), "linux").unwrap();
+    let asked = match state(&app).take_size("d-main-1") {
+        Some(Some(s)) => {
+            let r = s.last_request().expect("the measure asked for a size");
+            state(&app).put_size("d-main-1", s);
+            r
+        }
+        other => panic!("no size state: {other:?}"),
+    };
+    let expected = format!("{}x{}", asked.width, asked.height);
+    sizing::resized(&dialog, PhysicalSize::new(1234, 987));
+    let logged = logged_for("about");
+    let warn = logged
+        .iter()
+        .find(|r| r.0 == log::Level::Warn && r.1.contains("1234x987 physical"))
+        .unwrap_or_else(|| panic!("no unexplained warning: {logged:?}"));
+    assert!(
+        warn.1
+            .contains(&format!("expected echoes pending [{expected}] maybe []")),
+        "{}",
+        warn.1
+    );
+    let line = logged
+        .iter()
+        .find(|r| {
+            r.0 == log::Level::Info && r.1.starts_with("Dialog window resized: 1234x987 physical")
+        })
+        .unwrap_or_else(|| panic!("no phase line: {logged:?}"));
+    assert!(
+        line.1.ends_with(&format!(
+            "queue before pending [{expected}] maybe [], after pending [{expected}] maybe []"
+        )),
+        "{}",
+        line.1
+    );
+}
+
 /// Runs the show deadline's job by hand: the tests never sleep (ER-12).
 #[derive(Default)]
 struct Manual(Mutex<Vec<Job>>);

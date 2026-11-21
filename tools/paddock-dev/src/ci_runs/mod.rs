@@ -601,6 +601,8 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     }
     let mut http = CurlHttp;
     let mut clock = dispatch::system_clock();
+    let mut reach = crate::health::CurlReach;
+    let mut health = crate::health::Health::new(crate::health::real_services(&a.server, "dispatch", false), &mut reach);
     let result = dispatch::run_with_id(
         &mut http,
         &dispatch::Target {
@@ -612,6 +614,7 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         &read,
         &mut clock,
         &mut std::io::stderr(),
+        Some(&mut health),
     );
     // A trial that was not dispatched leaves no `trial/<branch>` behind (best effort; `ci trial-prune` catches the rest).
     if let Some((g, trial_ref)) = &trial
@@ -631,6 +634,8 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
                 run.map_or(String::new(), |id| format!("; run {id}"))
             ),
         )),
+        Ok((dispatch::Dispatched::ServiceDown { last }, _)) => Err(CliError::failure(format!("not dispatched: {last}."))
+            .with_hint("Wait until Gitea answers (the ::error:: line above names it), then dispatch again.")),
         Ok((dispatch::Dispatched::StillBusy { last }, _)) => {
             Err(CliError::failure(format!("not dispatched: the runner stayed busy ({last})."))
                 .with_hint("Wait for that run with `./dev wait --ci-run <id> --max <duration>`, then dispatch again."))
@@ -655,7 +660,9 @@ fn trial_merge(a: &DispatchArgs, members: &[String], token: &str) -> Result<(cra
         eprintln!("::error::trial: {why}");
         CliError::failure(why).with_hint("Check the branch names, GITEA_TOKEN's write scope and the network.")
     };
-    let g = GitTrain::open(&url, &scratch, Some(token.to_string()), true, false).map_err(fail)?;
+    let mut g = GitTrain::open(&url, &scratch, Some(token.to_string()), true, false).map_err(fail)?;
+    // The trial's push holds while Gitea is down for at most this command's own --max (already validated by parse_request).
+    g.push_hold = crate::wait::parse_duration(&a.max).ok();
     let check = |root: &std::path::Path, head: &str| {
         crate::merge_check::command(&crate::merge_check::Request {
             root: Some(root.to_path_buf()),

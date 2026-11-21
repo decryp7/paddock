@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 // The root-and-link guard of the CI host steps (`remove_under`): any path under an explicit root, no owner record needed.
-pub use guard::{RemoveError, Rules, check_root, check_root_for, children, remove_under, strictly_under};
+pub use guard::{RemoveError, Rules, check_root, check_root_for, children, remove_in_mount, remove_under, strictly_under};
 
 /// The longest the walk for nested repositories runs for one folder.
 pub const WALK_LIMIT: Duration = Duration::from_secs(300);

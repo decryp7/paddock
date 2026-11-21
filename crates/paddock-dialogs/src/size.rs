@@ -5,9 +5,10 @@
 //!
 //! * Measures arrive as `(epoch, seq, measure)` in **logical px** (the glue has already applied the page's zoom). A lower
 //!   `seq` in the same epoch changes nothing; a new epoch (a reloaded page) is accepted and restarts the order.
-//! * Rust asks the OS for a **physical** inner size, rounded up once (`ceil(logical * scale)`). Every request is queued; a
-//!   `Resized` equal to a queued request (within one physical px a side) takes it and every older one off the queue, so an
-//!   echo of our own `set_size` is never mistaken for the user.
+//! * Rust asks the OS for a **physical** inner size, rounded up once (`ceil(logical * scale)`). Every request goes into
+//!   one [`EchoQueue`] in request order; a `Resized` equal to a queued request (within one physical px a side) is ours, so
+//!   an echo of our own `set_size` is never mistaken for the user (amendment 2026-11-21: which entries it takes, what
+//!   proves a merge, and the cap).
 //! * Only [`SizeState::on_user_resize_started`] (the OS says "the user is resizing": `WM_SIZING`, live resize), or an
 //!   unexplained `Resized` on a platform that has no such signal, makes the window [`SizeMode::Manual`] for the rest of
 //!   the opening, as does the OS saying the window is snapped ([`SizeState::on_snapped`], which a snap that changes no size
@@ -15,8 +16,10 @@
 //! * The window is shown once the measure named by `dialog_ready` has been applied and its `Resized` has arrived, or at
 //!   the show deadline.
 
+mod echo;
+
 use crate::contract::{CAP_FRACTION, Shrink, Size, SizeMode};
-use std::collections::VecDeque;
+pub use echo::{ECHO_CAP, ECHO_LIMIT, Echo, EchoQueue};
 
 /// A page measure in logical px, as the glue hands it over.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -82,6 +85,8 @@ pub struct Plan {
     pub remeasure: bool,
     /// A `Resized` that matches no request and was not a user resize (logged with the queue).
     pub unexplained: bool,
+    /// Older requests a `Resized` proved merged by the OS (it echoed a newer one first); logged.
+    pub merged: usize,
     /// The measure was older than one already applied.
     pub stale: bool,
 }
@@ -99,9 +104,6 @@ pub enum Missing {
     Nothing,
 }
 
-/// How many requests taken off the queue by a later equal-sized echo are remembered for their own late echoes.
-const LATE_ECHOES: usize = 8;
-
 /// The state of one dialog window's size.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SizeState {
@@ -117,10 +119,8 @@ pub struct SizeState {
     last_seq: Option<u64>,
     last: Option<Measured>,
     ready: Option<(u64, u64)>,
-    pending: VecDeque<Request>,
-    /// Requests taken off `pending` by a later, equal-sized echo (it matched the newest of them): their own echoes are still on
-    /// the way, in order, and are neither unexplained nor the user. Bounded by [`LATE_ECHOES`].
-    late: VecDeque<Request>,
+    /// The requests whose echoes are still expected.
+    echoes: EchoQueue,
     current: Request,
     min: Size,
     shown: bool,
@@ -154,8 +154,7 @@ impl SizeState {
             last_seq: None,
             last: None,
             ready: None,
-            pending: VecDeque::new(),
-            late: VecDeque::new(),
+            echoes: EchoQueue::default(),
             current: created,
             min: floor,
             shown: false,
@@ -174,7 +173,13 @@ impl SizeState {
 
     /// Requests not yet echoed by a `Resized`.
     pub fn pending(&self) -> usize {
-        self.pending.len()
+        self.echoes.pending()
+    }
+
+    /// The requests still expected to echo, for the log ([`EchoQueue::note`]; ADR 0043 §3: an unexplained `Resized` is
+    /// logged with the queue).
+    pub fn queue_note(&self) -> String {
+        self.echoes.note()
     }
 
     /// The OS minimum now, logical px.
@@ -184,12 +189,12 @@ impl SizeState {
 
     /// The newest request still waiting for its `Resized`.
     pub fn last_request(&self) -> Option<Request> {
-        self.pending.back().copied()
+        self.echoes.newest_pending()
     }
 
     /// The inner size the window has or will have once every queued request is applied, logical px.
     pub fn effective(&self) -> Size {
-        let r = self.pending.back().copied().unwrap_or(self.current);
+        let r = self.echoes.newest_pending().unwrap_or(self.current);
         Size {
             width: f64::from(r.width) / self.env.scale,
             height: f64::from(r.height) / self.env.scale,
@@ -241,9 +246,9 @@ impl SizeState {
             width: physical(size.width, self.env.scale),
             height: physical(size.height, self.env.scale),
         };
-        let have = self.pending.back().copied().unwrap_or(self.current);
+        let have = self.echoes.newest_pending().unwrap_or(self.current);
         if request != have {
-            self.pending.push_back(request);
+            self.echoes.push(request);
             plan.request = Some(request);
             plan.inner = Some(size);
         }
@@ -265,7 +270,7 @@ impl SizeState {
         let ready_ok = self.ready.is_some_and(|(epoch, seq)| {
             epoch == self.epoch && self.last_seq.is_some_and(|l| l >= seq)
         });
-        if !self.shown && ready_ok && self.pending.is_empty() {
+        if !self.shown && ready_ok && self.echoes.pending() == 0 {
             self.shown = true;
             return true;
         }
@@ -303,40 +308,14 @@ impl SizeState {
     /// The OS reports the inner size `width` by `height` (physical px).
     pub fn on_resized(&mut self, width: u32, height: u32) -> Plan {
         let mut plan = Plan::default();
-        let matched = self.pending.iter().rposition(|r| r.matches(width, height));
         let grace = std::mem::take(&mut self.scale_grace);
-        match matched {
-            Some(i) => {
-                // An echo equal to several queued requests takes the newest off the queue (the OS may have merged the ones in
-                // between), but it may be the echo of the oldest of them: the equal ones after the oldest, and what lies between,
-                // can still echo in order, so they are remembered for that.
-                let first = self
-                    .pending
-                    .iter()
-                    .position(|r| r.matches(width, height))
-                    .unwrap_or(i);
-                for (n, still) in self.pending.drain(..=i).enumerate() {
-                    if n > first {
-                        if self.late.len() == LATE_ECHOES {
-                            self.late.pop_front();
-                        }
-                        self.late.push_back(still);
-                    }
-                }
-            }
-            None if self.current.matches(width, height) => {}
-            None if self.late.iter().any(|r| r.matches(width, height)) => {
-                if let Some(k) = self.late.iter().position(|r| r.matches(width, height)) {
-                    self.late.drain(..=k);
-                }
-                // The window now has this older size; the newer requests are already off the queue, so nothing is asked again.
-                self.current = Request { width, height };
-                plan.show = self.try_show();
-                return plan;
-            }
-            None => {
+        match self.echoes.echo(width, height) {
+            Echo::Own { merged } => plan.merged = merged,
+            Echo::Unknown if self.current.matches(width, height) => {}
+            Echo::Unknown => {
                 plan.unexplained = true;
-                if self.pending.is_empty()
+                if self.echoes.pending() == 0
+                    && self.echoes.infers()
                     && self.infer_user_resize
                     && !grace
                     && self.mode != SizeMode::Manual
@@ -387,8 +366,7 @@ impl SizeState {
         let keep = self.effective();
         self.env = env;
         let _ = old;
-        self.pending.clear();
-        self.late.clear();
+        self.echoes.clear();
         self.current = Request {
             width: physical(keep.width, env.scale),
             height: physical(keep.height, env.scale),
@@ -426,6 +404,7 @@ mod tests {
     use super::*;
     use crate::contract::Kind;
     use proptest::prelude::*;
+    use std::collections::VecDeque;
 
     fn size(width: f64, height: f64) -> Size {
         Size { width, height }
@@ -733,6 +712,182 @@ mod tests {
         assert_eq!(s.mode(), before);
     }
 
+    /// CI run 8466 (2026-11-21, ci.yml coverage job, proptest's minimal input): requests A, B, C (C equal to A) queue up as
+    /// the work area shrinks and grows; the echo of A matches the newest C, so B and C may still echo; D is asked; B echoes;
+    /// E (equal to C) is asked; the echo of C then matched E among the pending requests and took D off with it while C stayed,
+    /// so D's own echo arrived with nothing pending and was taken for the user on X11 and Wayland. Every one of these
+    /// `Resized` is Rust's own request (ADR 0043 check 2: a `Resized` that matches a request never yields `Manual`).
+    #[test]
+    fn an_echo_equal_to_a_late_request_and_a_pending_one_keeps_the_requests_between_them() {
+        let e = Env {
+            scale: 1.0,
+            work: size(800.0, 3606.610418189248),
+            frame: size(0.0, 0.0),
+        };
+        let p = Kind::Decision.policy();
+        let mut s = SizeState::new(
+            p.size_mode,
+            size(320.0, 200.0),
+            p.default_height.unwrap_or(0.0),
+            true,
+            e,
+            Request {
+                width: physical(400.0, 1.0),
+                height: physical(520.0, 1.0),
+            },
+        );
+        let mut os = VecDeque::new();
+        let m = Measured {
+            content: size(400.0, 1393.4943707900418),
+            min_content: size(320.0, 50.0),
+            overflow: false,
+        };
+        os.extend(s.on_measure(1, 0, m).request);
+        let moved = |h: f64| Env {
+            work: size(800.0, h),
+            ..e
+        };
+        os.extend(s.on_moved(moved(600.0)).request);
+        os.extend(s.on_moved(moved(4299.692332787084)).request);
+        let echo = |s: &mut SizeState, os: &mut VecDeque<Request>| {
+            let r: Request = os.pop_front().expect("an echo is due");
+            let plan = s.on_resized(r.width, r.height);
+            assert!(
+                !plan.unexplained && plan.mode_change.is_none(),
+                "{r:?} {plan:?}"
+            );
+        };
+        echo(&mut s, &mut os);
+        os.extend(s.on_moved(moved(1534.7558700051957)).request);
+        echo(&mut s, &mut os);
+        os.extend(s.on_moved(moved(2930.269793495181)).request);
+        while !os.is_empty() {
+            echo(&mut s, &mut os);
+        }
+        assert_eq!(s.mode(), p.size_mode);
+        assert_eq!(
+            s.queue_note(),
+            "pending [] maybe []",
+            "every echo has arrived"
+        );
+    }
+
+    #[test]
+    fn the_queue_note_lists_pending_and_late_requests_oldest_first_and_bounded() {
+        let mut s = state(Kind::Form, 1.0, true);
+        assert_eq!(s.queue_note(), "pending [] maybe []");
+        let a = s.on_measure(1, 0, measured(300.0)).request.unwrap();
+        s.on_measure(1, 1, measured(400.0));
+        s.on_measure(1, 2, measured(300.0));
+        // The echo of the first request matches the newest equal one: the two after the first may still echo.
+        s.on_resized(a.width, a.height);
+        assert_eq!(s.queue_note(), "pending [] maybe [400x400, 400x300]");
+        for seq in 3..(3 + ECHO_CAP as u64 + 2) {
+            s.on_measure(1, seq, measured(200.0 + seq as f64));
+        }
+        let note = s.queue_note();
+        assert!(
+            note.starts_with("pending [400x203, ")
+                && note.contains("+2 more] maybe [400x400, 400x300]"),
+            "{note}"
+        );
+    }
+
+    /// Asks for the heights in order (a form whose content is each height) and returns the requests.
+    fn ask_heights(s: &mut SizeState, heights: &[f64]) -> Vec<Request> {
+        let mut asked = Vec::new();
+        for (seq, h) in heights.iter().enumerate() {
+            asked.extend(s.on_measure(1, seq as u64, measured(*h)).request);
+        }
+        assert_eq!(
+            asked.len(),
+            heights.len(),
+            "one request per height: {asked:?}"
+        );
+        asked
+    }
+
+    /// Review of 989a479b4, P2-1: requests 300, 400, 300; the OS merged them and echoed only 300. A later echo of a newer
+    /// request proves the 400 was merged (its echo would have come first), so a drag to 400 after that is the user.
+    #[test]
+    fn an_echo_of_a_newer_request_proves_the_older_ones_merged_and_a_drag_to_their_size_is_the_user()
+     {
+        let mut s = state(Kind::Form, 1.0, true);
+        let asked = ask_heights(&mut s, &[300.0, 400.0, 300.0]);
+        let merged = s.on_resized(asked[2].width, asked[2].height);
+        assert!(
+            !merged.unexplained && merged.mode_change.is_none(),
+            "{merged:?}"
+        );
+        let newer = s.on_measure(1, 3, measured(500.0)).request.unwrap();
+        let echo = s.on_resized(newer.width, newer.height);
+        assert!(!echo.unexplained && echo.mode_change.is_none(), "{echo:?}");
+        let drag = s.on_resized(asked[1].width, asked[1].height);
+        assert!(drag.unexplained, "{drag:?}");
+        assert_eq!(drag.mode_change, Some(SizeMode::Manual));
+    }
+
+    /// Review of 989a479b4, P2-1, the drag that comes straight after the merged echo: its first size equal to the 400 still
+    /// on its way is indistinguishable from that request's own echo (ADR 0043 amendment 2026-11-21, D-A), so it is taken as
+    /// the echo; the drag's next size, which no request explains, is the user.
+    #[test]
+    fn right_after_a_merged_echo_a_drag_is_the_user_at_its_first_size_no_request_explains() {
+        let mut s = state(Kind::Form, 1.0, true);
+        let asked = ask_heights(&mut s, &[300.0, 400.0, 300.0]);
+        s.on_resized(asked[2].width, asked[2].height);
+        let first = s.on_resized(asked[1].width, asked[1].height);
+        assert!(
+            !first.unexplained && first.mode_change.is_none(),
+            "taken as the 400's own echo: {first:?}"
+        );
+        let next = s.on_resized(asked[1].width, asked[1].height + 10);
+        assert_eq!(next.mode_change, Some(SizeMode::Manual), "{next:?}");
+    }
+
+    /// Review of 989a479b4, P2-2: eleven requests, the last equal to the first, so the first echo matches the newest and the
+    /// ten after the first wait for their own echoes. Past the queue's cap none of them may be dropped: their echoes come
+    /// next, in order, and none is unexplained or the user; the user is inferred again once the queue has drained.
+    #[test]
+    fn past_the_cap_in_order_echoes_are_never_unexplained_and_inference_resumes_once_drained() {
+        let mut s = state(Kind::Form, 1.0, true);
+        let heights: Vec<f64> = (0..10)
+            .map(|i| 300.0 + 10.0 * f64::from(i))
+            .chain([300.0])
+            .collect();
+        let asked = ask_heights(&mut s, &heights);
+        assert!(asked.len() > ECHO_CAP, "over the cap: {}", asked.len());
+        for r in &asked {
+            let plan = s.on_resized(r.width, r.height);
+            assert!(
+                !plan.unexplained && plan.mode_change.is_none(),
+                "{r:?} {plan:?}"
+            );
+        }
+        assert_eq!(s.queue_note(), "pending [] maybe []");
+        let user = s.on_resized(asked[0].width + 50, asked[0].height);
+        assert_eq!(user.mode_change, Some(SizeMode::Manual), "{user:?}");
+    }
+
+    /// While the queue is over its cap the user is not inferred (the OS is far behind; an unmatched size may be the echo
+    /// of a request already given up on), as after a scale change; a resize the OS reports as the user's still counts.
+    #[test]
+    fn over_the_cap_an_unmatched_resize_is_not_inferred_as_the_user_but_the_os_signal_still_counts()
+    {
+        let mut s = state(Kind::Form, 1.0, true);
+        let heights: Vec<f64> = (0..10)
+            .map(|i| 300.0 + 10.0 * f64::from(i))
+            .chain([300.0])
+            .collect();
+        let asked = ask_heights(&mut s, &heights);
+        s.on_resized(asked[0].width, asked[0].height);
+        let odd = s.on_resized(777, 777);
+        assert!(odd.unexplained && odd.mode_change.is_none(), "{odd:?}");
+        assert_eq!(
+            s.on_user_resize_started().mode_change,
+            Some(SizeMode::Manual)
+        );
+    }
+
     #[derive(Debug, Clone)]
     enum Op {
         Measure {
@@ -750,9 +905,39 @@ mod tests {
         Reload,
     }
 
+    /// A content height: mostly any, sometimes one of a few fixed heights, so that equal requests queue up (the clamps
+    /// make them common in a real window: a move to a smaller work area and back).
+    fn content() -> impl Strategy<Value = f64> {
+        prop_oneof![
+            2 => 50.0..4000.0f64,
+            1 => prop_oneof![Just(300.0), Just(400.0), Just(500.0), Just(640.0)],
+        ]
+    }
+
+    /// One event, or a burst: several measures with no echo between them (the OS behind, past the echo queue's cap),
+    /// or a run of echoes (the OS catching up, so the queue drains).
+    fn ops() -> impl Strategy<Value = Vec<Op>> {
+        let burst = proptest::collection::vec(content(), 6..14).prop_map(|cs| {
+            cs.into_iter()
+                .map(|content| Op::Measure {
+                    seq_step: 1,
+                    content,
+                    min_h: 50.0,
+                })
+                .collect::<Vec<_>>()
+        });
+        let echoes = (4usize..16).prop_map(|n| vec![Op::OsResize; n]);
+        let chunk = prop_oneof![
+            6 => op().prop_map(|o| vec![o]),
+            2 => burst,
+            2 => echoes,
+        ];
+        proptest::collection::vec(chunk, 1..24).prop_map(|cs| cs.into_iter().flatten().collect())
+    }
+
     fn op() -> impl Strategy<Value = Op> {
         prop_oneof![
-            (-2i8..4, 50.0..4000.0f64, 50.0..900.0f64).prop_map(|(seq_step, content, min_h)| {
+            (-2i8..4, content(), 50.0..900.0f64).prop_map(|(seq_step, content, min_h)| {
                 Op::Measure {
                     seq_step,
                     content,
@@ -782,7 +967,10 @@ mod tests {
         #![proptest_config(ProptestConfig::with_cases(400))]
 
         /// ADR 0043 check 2: whatever order events come in, the plans keep the window inside its limits, only a user
-        /// resize makes it manual, and the window is shown only after its ready.
+        /// resize makes it manual, and the window is shown only after its ready. Both directions of the user rule are
+        /// checked: the echo of a request is never unexplained and never makes the window manual, and where the OS gives
+        /// no signal (`infer`) a foreign size with every echo delivered does (amendment 2026-11-21). The modelled OS
+        /// echoes every request once, in order, and never merges.
         #[test]
         fn any_interleaving_keeps_the_size_rules(
             kind in prop_oneof![Just(Kind::Decision), Just(Kind::Form), Just(Kind::Viewer), Just(Kind::Tool)],
@@ -790,7 +978,7 @@ mod tests {
             work in (800.0..7680.0f64, 600.0..4320.0f64),
             frame in (0.0..60.0f64, 0.0..60.0f64),
             infer in any::<bool>(),
-            ops in proptest::collection::vec(op(), 1..40),
+            ops in ops(),
         ) {
             let e = Env { scale, work: size(work.0, work.1), frame: size(frame.0, frame.1) };
             let p = kind.policy();
@@ -801,10 +989,18 @@ mod tests {
             let mut os: VecDeque<Request> = VecDeque::new();
             let mut ready_sent: Option<(u64, u64)> = None;
             let mut manual_expected = p.size_mode == SizeMode::Manual;
+            // The window's size as the OS last reported it, and whether the one resize after a scale change is excused.
+            let mut win = Request { width: physical(400.0, scale), height: physical(520.0, scale) };
+            let mut grace = false;
+            // More than `ECHO_LIMIT` echoes were outstanding since the last scale change: the queue dropped some, so an echo
+            // may be unexplained (never the user: inference is off for the opening) and no user is inferred.
+            let mut lost = false;
             for o in ops {
                 let before_mode = s.mode();
                 let eff_before = s.effective();
                 let mut user_signal = false;
+                let mut must_be_user = false;
+                let mut echo = false;
                 let measured_now = if let Op::Measure { content, .. } = &o { Some(*content) } else { None };
                 let plan = match o {
                     Op::Measure { seq_step, content, min_h } => {
@@ -823,12 +1019,22 @@ mod tests {
                     }
                     Op::Ready => { ready_sent = Some((epoch, seq)); s.on_ready(epoch, seq) }
                     Op::OsResize => match os.pop_front() {
-                        Some(r) => s.on_resized(r.width, r.height),
+                        Some(r) => {
+                            echo = true;
+                            win = r;
+                            grace = false;
+                            s.on_resized(r.width, r.height)
+                        }
                         None => Plan::default(),
                     },
+                    // A size equal to a request whose echo is still on its way cannot be told from that echo (ADR 0043
+                    // §3, amendment D-A): it is not generated as a user resize.
+                    Op::Foreign(w, h) if os.iter().any(|r| r.matches(w, h)) => Plan::default(),
                     Op::Foreign(w, h) => {
-                        // The OS echoes older requests first; a foreign size only counts when nothing is queued.
-                        user_signal = infer && s.pending() == 0 && !os.iter().any(|r| r.matches(w, h));
+                        user_signal = infer;
+                        must_be_user = infer && os.is_empty() && !win.matches(w, h) && !grace && !lost;
+                        win = Request { width: w, height: h };
+                        grace = false;
                         s.on_resized(w, h)
                     }
                     Op::UserStart => { user_signal = true; s.on_user_resize_started() }
@@ -839,6 +1045,9 @@ mod tests {
                     Op::Scale(sc) => {
                         env_now = Env { scale: sc, ..env_now };
                         os.clear();
+                        lost = false;
+                        win = Request { width: physical(eff_before.width, sc), height: physical(eff_before.height, sc) };
+                        grace = true;
                         let plan = s.on_scale_changed(env_now);
                         prop_assert!(plan.refit_posted && plan.remeasure);
                         plan
@@ -848,6 +1057,7 @@ mod tests {
                 };
                 if let Some(r) = plan.request {
                     os.push_back(r);
+                    lost |= os.len() > ECHO_LIMIT;
                     let inner = plan.inner.unwrap();
                     let avail = env_now.avail();
                     let min = s.min();
@@ -871,8 +1081,17 @@ mod tests {
                         }
                     }
                 }
+                if echo && lost {
+                    prop_assert!(plan.mode_change.is_none(), "an echo made the window manual after a loss: {:?} {}", plan, s.queue_note());
+                } else if echo {
+                    prop_assert!(!plan.unexplained && plan.mode_change.is_none(), "an echo of a request was taken as foreign: {:?} {}", plan, s.queue_note());
+                }
                 if before_mode != s.mode() {
                     prop_assert!(user_signal, "mode changed without a user resize: {:?}", plan);
+                    manual_expected = true;
+                }
+                if must_be_user {
+                    prop_assert_eq!(s.mode(), SizeMode::Manual, "a user resize with every echo delivered was not the user: {:?}", plan);
                     manual_expected = true;
                 }
                 if manual_expected {

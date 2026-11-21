@@ -64,20 +64,29 @@ fn forward(p: &Path) -> String {
 }
 
 #[test]
-fn a_linux_container_leaves_the_workspace_and_a_missing_mount_is_a_notice() {
+fn a_linux_container_leaves_the_workspace_and_keeps_its_node_caches_in_the_jobs_temp_folder() {
     let (_d, root) = scratch();
     let linux = [("RUNNER_OS", "Linux".to_string()), ("GITHUB_WORKSPACE", forward(&root))];
     let r = dev(&root, &["stable-workspace", "--name", "x"], &linux);
     assert_eq!((r.code, r.stdout.as_str()), (0, ""));
     let mut vars = linux.to_vec();
-    vars.push(("PADDOCK_CI_MOUNT", forward(&root.join("no-mount"))));
-    let r = dev(&root, &["node-caches", "--angular-dir", "ui", "--name", "e2e-1"], &vars);
-    assert_eq!(r.code, 0);
-    assert_eq!(
-        r.stdout,
-        "::notice::no /sccache mount in this container; the npm and Angular caches live and die with the job.\n"
+    vars.push(("RUNNER_TEMP", forward(&root.join("temp"))));
+    let r = dev(&root, &["node-caches", "--name", "e2e-1"], &vars);
+    assert_eq!(r.code, 0, "{}", r.stdout);
+    assert_eq!(r.stdout, format!("node-caches: npm {}/temp/node-caches/npm\n", forward(&root)));
+    // $GITHUB_ENV holds the native form (backslashes on Windows, where the tools want them): the same folder, compared by the shared
+    // rule (`winpath::same`), not as text.
+    let value = r
+        .github_env
+        .strip_prefix("npm_config_cache=")
+        .and_then(|v| v.strip_suffix('\n'))
+        .expect("one npm_config_cache line");
+    let expected = root.join("temp").join("node-caches").join("npm");
+    assert!(
+        paddock_env::winpath::same(Path::new(value), &expected, paddock_env::Os::current()),
+        "{value} is not {}",
+        expected.display()
     );
-    assert_eq!(r.github_env, "", "nothing is exported without the mount");
 }
 
 #[test]

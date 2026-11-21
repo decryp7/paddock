@@ -24,6 +24,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMain } from '../conformance/src/util/is-main.mjs';
+import { isTagRun } from '../conformance/src/util/is-tag-run.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -32,9 +33,9 @@ export function cleanKey(key) {
   return String(key ?? '').replace(/\s+/g, '');
 }
 
-/** A release build: a tag ref, or `--require-key` from the job that builds installers for one. */
+/** A release build: a tag run (conformance/src/util/is-tag-run.mjs, which also answers "tag" in the tag rehearsal and throws on a rehearsal on a real tag), or `--require-key` from the job that builds installers for one. */
 export function isRelease(env, requireKey) {
-  return requireKey || /^refs\/tags\//.test(env.GITHUB_REF ?? env.GITEA_REF ?? '');
+  return requireKey || isTagRun(env);
 }
 
 /** The `PADDOCK_SETUP_*` build environment from the app's Tauri configuration and the updater's public key. */

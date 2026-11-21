@@ -77,6 +77,10 @@ test('the key is stripped of every whitespace like the bundle action does, and a
   assert.equal(isRelease({ GITEA_REF: 'refs/tags/x' }, false), true);
   assert.equal(isRelease({ GITHUB_REF: 'refs/heads/main' }, false), false);
   assert.equal(isRelease({}, true), true, '--require-key');
+  // the tag rehearsal is a release decision too (it rehearses the public-key requirement); on a real tag it fails closed
+  assert.equal(isRelease({ PADDOCK_TAG_REHEARSAL: '1', GITHUB_REF: 'refs/heads/main' }, false), true);
+  assert.throws(() => isRelease({ PADDOCK_TAG_REHEARSAL: '1', GITHUB_REF: 'refs/tags/dyno-v1.1.0' }, false), /never runs on a tag/);
+  assert.equal(isRelease({ GITHUB_REF_TYPE: 'tag' }, false), true);
   assert.deepEqual(parseArgs(['--app', 'dyno', '--require-key']).requireKey, true);
   const root = mkdtempSync(join(tmpdir(), 'stage-'));
   const src = join(root, 'apps/dyno/app/src-tauri');

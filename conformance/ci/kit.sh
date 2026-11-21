@@ -86,6 +86,8 @@ fi
 kit_choice() {
   if [ "${PADDOCK_CI_KIT:-}" = shell ]; then echo "shell PADDOCK_CI_KIT=shell"; return; fi
   case "${GITHUB_REF:-}" in refs/tags/*) echo "shell a tag run"; return ;; esac
+  # The tag rehearsal takes the tag's path (is-tag-run.mjs; a rehearsal on a real tag never gets here: the build step refuses it first).
+  if [ "${PADDOCK_TAG_REHEARSAL:-}" = 1 ]; then echo "shell a tag rehearsal"; return; fi
   if [ "${PADDOCK_DEV_DOWNLOAD:-}" = 0 ]; then echo "shell PADDOCK_DEV_DOWNLOAD=0 (a release or rule 54 run)"; return; fi
   # ./dev runs the tool of the checkout it is started in (as setup-rust does): another repository using these actions, or a
   # sparse checkout without tools/, has none.

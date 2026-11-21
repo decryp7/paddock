@@ -507,3 +507,82 @@ The user accepted the reviewer's answers to the open decisions. The numbers stay
 - **Tell a user resize from our own by size comparison alone** (the first draft). Async commands, late Linux
   configures and moves (`WM_ENTERSIZEMOVE` fires for both) make it misfire; the OS's own resize signals are used where
   they exist and the comparison only where none does (review round 1).
+
+## Amendment (2026-11-21): one echo queue, a merge proof, and a cap that drops nothing
+
+- Status: accepted. The user approved this redesign and decided D-A and D-B below (user, 2026-11-21, relayed by the
+  coordinator).
+- Evidence read at `origin/main` `3d776b605` and `origin/fix/dialogs-size-mode-unexplained` `989a479b4` (2026-11-21).
+  The late-echo list this replaces came with `b4dda40d5` and is in `dyno-v1.1.0` (`git tag --contains b4dda40d5`).
+
+**What happened.** §3 matched a `Resized` against the pending requests and took it "and every older one" off the
+queue. That misjudges an echo when several queued requests have the same size, which the clamps make common: a move to
+a smaller work area and back asks for the same height twice. The class has come twice:
+
+1. CI proptest seed `ef445c8e` (2026-11-04, fixed in `b4dda40d5`): requests A, B, A; A's echo took the newest A and B
+   with it, so B's own echo was taken for the user. The fix kept the requests between in a second list (`late`),
+   capped at 8 by dropping the oldest.
+2. ci.yml run 8466 (2026-11-21, coverage job 43337, red on both tries; run 8425 green on the same sha because
+   proptest's seed is random): an echo equal to a `late` request and to a newer pending one matched only the pending
+   one and dropped the pending request between them, whose echo then made the window `Manual` on X11 and Wayland.
+   The review of the instance fix `989a479b4` also found that the cap of 8 dropped the very entries whose echoes come
+   next (P2-2), and that the log line held only the queue length (P3).
+
+**Decision.** The requests whose echoes are expected are one queue in request order (`paddock_dialogs::size::EchoQueue`,
+`crates/paddock-dialogs/src/size/echo.rs`); `SizeState` keeps no other list. A `Resized`:
+
+- that matches no entry is not ours (unexplained); it is taken for the user only where the OS gives no signal
+  (D4, D6), with no request pending, outside the scale grace, and while the queue is not over its cap (below);
+- that matches entries takes the oldest match. The entries before it are **proved merged**: had the OS sent them,
+  their echoes would have come first, so they go, and the plan says how many (`Plan::merged`, logged). The entries after
+  the oldest match, up to the newest match, stay as `Maybe`: their echoes may still come in order and are then ours, but
+  the window no longer waits for them (they do not hold the show, the effective size or inference back). The next echo
+  of a newer entry proves them merged in turn.
+- **Cap.** While more than `ECHO_CAP` (8, the old list's bound) echoes are expected, the OS is far behind, and the
+  user is not inferred from an unmatched `Resized` until the queue drains, as after a scale change. Nothing is dropped at
+  the cap, so in-order echoes always match. The queue's hard bound is `ECHO_LIMIT` (64; it was unbounded for pending
+  requests): past it the oldest entry goes, which happens only if the OS stopped echoing. A dropped request's echo can
+  then take a newer entry of the same size early, so the queue may drain while that entry's echo is still on its way:
+  after a loss the user is not inferred for the rest of the opening (until a scale change clears the queue), and such
+  echoes may be logged as unexplained but never make the window `Manual`. The property's bursts found this case.
+  Note (final review, P3): if X11 or Wayland do not echo the resizes of a window that is not mapped yet, a dialog
+  whose content changes more than 64 times before it is shown reaches the limit and loses inference for that opening
+  (the OS's own resize signals still count where they exist, and the next opening starts with a fresh queue).
+- **Logs (ER-27).** Each transition's line names the event (described from the state before it), the merged count,
+  and the queue before and after it (`pending [..] maybe [..]`). The unexplained warning carries the size and the
+  queue it was judged against.
+
+**The check.** Check 2's property is two-sided now: on an OS that echoes every request once, in order, an echo is
+never unexplained and never makes the window `Manual`; with `infer`, a foreign size arriving with every echo
+delivered, not equal to the window's size and outside the scale grace, does make it `Manual`. A foreign size equal to
+an echo still on its way is not generated (D-A). After a loss past `ECHO_LIMIT` only "never `Manual`" is checked
+for echoes. The generator draws some contents from a few fixed heights (equal requests) and makes bursts of measures
+and runs of echoes (the queue over its cap, then drained); matching the newest entry instead of the oldest, and never
+resetting the cap, each fail it without the seed file (10 of 10 and 9 of 10 runs of 400 cases, 2026-11-21). The CI seed of run 8466 is kept in
+`crates/paddock-dialogs/proptest-regressions/size.txt`, and both review probes are unit tests.
+
+**What a size alone cannot tell (D-A).** Requests 300, 400, 300 and one echo of 300: either the OS sent the first 300
+and the 400 and second 300 still echo, or it merged them. A `Resized` of 400 right after is then the 400's echo or a
+user's drag, and nothing in the event says which. This design takes it as the echo; the drag's next size, which no
+request explains, is the user, and any later echo of a newer request proves the 400 merged, after which a drag to 400
+is the user. The review's probe P2-1 asked for the first 400 to be the user; that contradicts seed `ef445c8e` (the same
+events, where the 400 is an echo), so it is tested in the two decidable forms above.
+
+**Comparable practice (read 2026-11-21).**
+- Electron emits `will-resize` ("only emitted when the window is being resized manually") and `resized` on macOS and
+  Windows only; on Linux there is only `resize`, with no user-or-program distinction
+  (<https://www.electronjs.org/docs/latest/api/browser-window>). Electron does not infer a user resize on Linux at all.
+- Wayland's xdg-shell numbers each configure with a serial the client acks, lets a client "discard all but the last"
+  of several configures (merging is in the protocol), and has a `resizing` state on `xdg_toplevel` while the user drags
+  (<https://wayland.app/protocols/xdg-shell>). tao, which Tauri uses, exposes neither the serial nor the state.
+
+**Cost.** This amendment and its code: about 1 agent-day, done. The common-practice alternative is D-B (a).
+
+**Decisions (user, 2026-11-21).**
+- **D-A, decided: the echo.** A single resize to exactly the size of a request whose echo may still come is taken as that echo
+  (recommended: a false `Manual` stops sizing for the whole opening, a missed one is corrected at the drag's next size)
+  or as the user (breaks the in-order echo case of seed `ef445c8e`). The user chose the echo, as built.
+- **D-B, decided: (b), keep inferring.** On X11 and Wayland: (a) do as Electron and never infer a user resize there (a user's resize is then undone by
+  the next content change; about 0.25 agent-day, cheaper than this design); (b) keep inferring through this queue
+  (recommended, as built); (c) later, read the Wayland `resizing` state and configure serials through a tao change
+  (several agent-days upstream; beyond common practice). The user chose (b), as built.

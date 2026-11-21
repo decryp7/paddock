@@ -231,6 +231,21 @@ pub enum TryStart {
     Stalled(String),
 }
 
+/// What one look at the services the gate talks to found (train 18's health gate, `crate::health`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Hold {
+    /// Gitea answers: go on.
+    Up,
+    /// A service is down: hold (do nothing, count nothing against any bound) and look again next tick; the text names it.
+    Down(String),
+    /// The hold cannot go on (it reached its limit, or the address can never work): the parts that are not judged cannot be measured.
+    GaveUp(String),
+}
+
+/// The longest the gate holds for a service that is down, in all (ER-32: every wait ends). An outage is not time any other bound
+/// counts: the stall limit and the run limit run on the gate's time less its holds.
+pub const HOLD_MAX: Duration = Duration::from_secs(8 * 3600);
+
 /// The real CI as this step needs it. The real one is [`Gitea`]; tests give a table.
 pub trait Runs {
     /// The plan (`dev plan <base> <head> --explain`) as JSON; `Err` when it could not be asked.
@@ -252,7 +267,11 @@ pub trait Runs {
     fn jobs(&mut self, run: u64) -> Result<Vec<JobRow>, String>;
     /// The failures of the finished run, each blamed by `ci triage`.
     fn failures(&mut self, run: u64) -> Result<Vec<Failure>, String>;
-    /// Waits one tick (the shared clock) and says how long the gate has been going; the gate's loop is bounded by it (ER-32).
+    /// Looks at the services (Gitea answers `/api/v1/version`). A service that is down is held for, not a failure: the gate's loop does
+    /// nothing else on that tick and its bounds do not count it.
+    fn hold(&mut self) -> Hold;
+    /// Waits one tick (the shared clock) and says how long the gate has been going, less the time it held for a service that was
+    /// down; the gate's loop is bounded by it (ER-32).
     fn tick(&mut self) -> Duration;
     /// Says a line now (progress: the Linux verdict as soon as it is in).
     fn report(&mut self, line: &str);
@@ -809,6 +828,15 @@ enum Move {
     Finish(Result<(Box<Row>, Vec<String>), String>, Option<u64>),
 }
 
+/// A failed call to Gitea: if a service is down now it is an outage to hold for (try again next tick), else the part cannot be measured.
+fn api_error(runs: &mut dyn Runs, why: String, run: Option<u64>) -> Move {
+    if matches!(runs.hold(), Hold::Down(_)) {
+        Move::Stay
+    } else {
+        Move::Finish(Err(why), run)
+    }
+}
+
 /// Runs the two parts side by side and returns the step. The loop looks at both on every tick, so the Linux part runs and is judged
 /// while the Windows part still waits for the train; it ends when both are judged or cannot be measured, and every wait inside it has
 /// its own bound (a stall limit for a part not started, [`MAX_RUN_WAIT`] for a started one). The member is clean only after both.
@@ -824,13 +852,52 @@ fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &s
     let mut parts: Vec<Part> = order.iter().map(|_| Part::Todo).collect();
     let mut waiting_said = [false; 2];
     let mut elapsed = Duration::ZERO;
+    let mut holding = false;
     while parts.iter().any(|p| !matches!(p, Part::Done { .. })) {
+        // A service that is down is held for: nothing is polled, dispatched or judged, and no bound counts the hold (`tick` leaves it
+        // out of `elapsed`), so an outage is never "not measured" or "stalled".
+        match runs.hold() {
+            Hold::Up => {
+                if holding {
+                    runs.report("other-os: the service answers again; going on");
+                    holding = false;
+                }
+            }
+            Hold::Down(why) => {
+                if !holding {
+                    runs.report(&format!("other-os: holding: {why}"));
+                    holding = true;
+                }
+                elapsed = runs.tick();
+                continue;
+            }
+            Hold::GaveUp(why) => {
+                for (i, os) in order.iter().copied().enumerate() {
+                    if let Part::Running { run, .. } = &parts[i] {
+                        let run = Some(*run);
+                        parts[i] = Part::Done {
+                            row: Box::new(unmeasured_row(os, why.clone())),
+                            run,
+                            not_judged: Vec::new(),
+                        };
+                    } else if matches!(parts[i], Part::Todo) {
+                        parts[i] = Part::Done {
+                            row: Box::new(unmeasured_row(os, why.clone())),
+                            run: None,
+                            not_judged: Vec::new(),
+                        };
+                    }
+                }
+                break;
+            }
+        }
         for (i, os) in order.iter().copied().enumerate() {
             let mv = match &parts[i] {
                 Part::Done { .. } => Move::Stay,
                 Part::Todo => match runs.try_dispatch(os, git_ref, base) {
-                    Err(e) => Move::Finish(
-                        Err(format!("ci.yml could not be dispatched for {} on {git_ref}: {e}", os.name())),
+                    Err(e) => api_error(
+                        runs,
+                        format!("ci.yml could not be dispatched for {} on {git_ref}: {e}", os.name()),
                         None,
                     ),
                     Ok(TryStart::Stalled(why)) => Move::Finish(Err(format!("the {} part was not started: {why}", os.name())), None),
@@ -850,13 +917,16 @@ fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &s
                             )),
                             None,
                         ),
-                        Err(e) => Move::Finish(Err(format!("the {} part's run could not be found: {e}", os.name())), None),
+                        Err(e) => api_error(runs, format!("the {} part's run could not be found: {e}", os.name()), None),
                     },
                 },
                 Part::Running { run, since } => {
                     let (run, since) = (*run, *since);
                     match runs.finished(run) {
-                        Ok(true) => Move::Finish(judge_part(runs, os, run, commit, &changed, plan), Some(run)),
+                        Ok(true) => match judge_part(runs, os, run, commit, &changed, plan) {
+                            Ok(done) => Move::Finish(Ok(done), Some(run)),
+                            Err(e) => api_error(runs, e, Some(run)),
+                        },
                         Ok(false) if elapsed.saturating_sub(since) >= MAX_RUN_WAIT => Move::Finish(
                             Err(format!(
                                 "run {run} was still going after {}",
@@ -865,7 +935,7 @@ fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &s
                             Some(run),
                         ),
                         Ok(false) => Move::Stay,
-                        Err(e) => Move::Finish(Err(format!("run {run} could not be read: {e}")), Some(run)),
+                        Err(e) => api_error(runs, format!("run {run} could not be read: {e}"), Some(run)),
                     }
                 }
             };
@@ -935,6 +1005,11 @@ pub struct Gitea {
     /// How many Linux jobs the member's own Linux part will run (from the plan, set by [`Runs::plan`]); the Linux part starts beside a
     /// running train only when that many lanes are spare.
     linux_need: usize,
+    /// Train 18's health gate over Gitea (`crate::health`): the reacher is leaked once per gate (a few bytes, the process is short).
+    health: crate::health::Health<'static>,
+    /// Whether the last look found a service down, and the time spent holding for one (left out of every bound).
+    down: bool,
+    held: Duration,
 }
 
 /// The folder name of one merge's trial: its label (cleaned to letters, digits, `.`, `_`, `-`) and the commit's short id.
@@ -990,6 +1065,12 @@ impl Gitea {
             clock: crate::wait::SystemClock::new(),
             stalls: std::collections::BTreeMap::new(),
             linux_need: usize::MAX,
+            health: crate::health::Health::new(
+                crate::health::real_services("https://dev.decryptology.net", "other-os", false),
+                Box::leak(Box::new(crate::health::CurlReach)),
+            ),
+            down: false,
+            held: Duration::ZERO,
         })
     }
 
@@ -1005,6 +1086,7 @@ impl Gitea {
             merge_check: crate::merge_check::command,
             planner: crate::queue::real::run_planner,
             timeout: crate::queue::real::GIT_TIMEOUT,
+            push_hold: None,
         }
     }
 
@@ -1014,6 +1096,11 @@ impl Gitea {
 }
 
 impl Gitea {
+    /// The gate's time less the time it held for a service that was down: what every bound counts.
+    fn now(&self) -> Duration {
+        self.clock.elapsed().saturating_sub(self.held)
+    }
+
     /// The Linux lanes in use now across the unfinished runs, and whether a train is working: `(use, train_running, lanes)`. The lanes
     /// are `conformance/ci/runner-slots.json`'s (one place, ER-48). A job counts as using a lane while it is running, queued or
     /// waiting for its turn; a train is working when an unfinished run on `train/*` has a job in progress.
@@ -1044,7 +1131,7 @@ impl Gitea {
     /// One dispatch of `ci.yml` with the `os` input of `part` (the planner narrows the run to it, `src/plan_os.rs`). The dispatch's own
     /// runner guard is asked for at most a few seconds, so a busy Windows runner is `Err(why)` for this tick, not a long block of the
     /// loop that judges the other part. `Ok(Ok(started))` carries the handle.
-    fn dispatch_part(&mut self, part: Os, git_ref: &str, base: &str) -> Result<Result<Started, String>, String> {
+    fn dispatch_part(&mut self, part: Os, git_ref: &str, base: &str) -> Result<Dispatch, String> {
         let after = {
             let mut c = Client::new(&mut self.http, &self.server, &self.repo, &self.token);
             c.runs_page(1)?.runs.iter().map(|r| r.id).max().unwrap_or(0)
@@ -1063,11 +1150,21 @@ impl Gitea {
             repo: &self.repo,
             token: &self.token,
         };
+        // The dispatch holds while Gitea is down (train 18's health gate): a service that stays down for its short bound is `Down`, not busy.
         Ok(
-            match dispatch::run_with_id(&mut self.http, &target, &req, &read, &mut clock, &mut std::io::stderr())? {
-                (dispatch::Dispatched::Yes { .. }, Some(id)) => Ok(Started::Run(id)),
-                (dispatch::Dispatched::Yes { .. }, None) => Ok(Started::After(after)),
-                (dispatch::Dispatched::StillBusy { last }, _) => Err(format!("the {} runner is busy ({last})", part.name())),
+            match dispatch::run_with_id(
+                &mut self.http,
+                &target,
+                &req,
+                &read,
+                &mut clock,
+                &mut std::io::stderr(),
+                Some(&mut self.health),
+            )? {
+                (dispatch::Dispatched::Yes { .. }, Some(id)) => Dispatch::Started(Started::Run(id)),
+                (dispatch::Dispatched::Yes { .. }, None) => Dispatch::Started(Started::After(after)),
+                (dispatch::Dispatched::StillBusy { last }, _) => Dispatch::Busy(format!("the {} runner is busy ({last})", part.name())),
+                (dispatch::Dispatched::ServiceDown { last }, _) => Dispatch::Down(last),
             },
         )
     }
@@ -1090,6 +1187,16 @@ impl LaneUse {
             pending: self.pending + o.pending,
         }
     }
+}
+
+/// How one dispatch of a part ended.
+enum Dispatch {
+    /// Dispatched: the handle.
+    Started(Started),
+    /// The runner is busy: wait, and end only on a stall.
+    Busy(String),
+    /// Gitea is down: hold (not busy, not stalled).
+    Down(String),
 }
 
 /// The Linux jobs of a run's jobs that use or will use a lane: running (`in_progress`) and pending (`queued`, `waiting`).
@@ -1211,13 +1318,15 @@ impl Runs for Gitea {
         };
         let why = match blocked {
             None => match self.dispatch_part(part, git_ref, base)? {
-                Ok(started) => return Ok(TryStart::Started(started)),
-                Err(busy) => busy,
+                Dispatch::Started(started) => return Ok(TryStart::Started(started)),
+                Dispatch::Busy(busy) => busy,
+                // An outage is held for, never counted toward the stall: the stall tracker is not looked at.
+                Dispatch::Down(why) => return Ok(TryStart::Wait(format!("{why}; holding until it answers"))),
             },
             Some(why) => why,
         };
         // Held or busy: wait while the train's CI makes progress; end only after the stall limit with none (ER-32).
-        let now = self.clock.elapsed();
+        let now = self.now();
         let signature = format!(
             "{}|{}",
             holder.as_deref().unwrap_or(""),
@@ -1249,17 +1358,28 @@ impl Runs for Gitea {
             commit,
         };
         let mut clock = crate::wait::SystemClock::new();
-        match crate::wait::wait_for(
-            &mut probe,
-            &mut clock,
-            Duration::from_secs(180),
-            Duration::from_secs(5),
-            &mut std::io::stderr(),
-        ) {
-            crate::wait::Outcome::Done { detail, .. } => detail.parse::<u64>().map(Some).map_err(|e| format!("run id `{detail}`: {e}")),
-            crate::wait::Outcome::TimedOut { .. } => Ok(None),
-            crate::wait::Outcome::Failed { detail, .. } => Err(detail),
-            crate::wait::Outcome::Broken { error, .. } => Err(error),
+        // The shared bounded wait with train 18's hold: while Gitea is down the probe is not polled (a 502 is not "no run yet"), and
+        // the hold goes on past each 3 minute window (up to the hold limit); only a window with Gitea up that finds nothing ends it.
+        let mut held_for = Duration::ZERO;
+        loop {
+            match crate::health::wait_held(
+                &mut probe,
+                Some(&mut self.health),
+                &mut clock,
+                Duration::from_secs(180),
+                Duration::from_secs(5),
+                &mut std::io::stderr(),
+            ) {
+                crate::wait::Outcome::Done { detail, .. } => {
+                    return detail.parse::<u64>().map(Some).map_err(|e| format!("run id `{detail}`: {e}"));
+                }
+                crate::wait::Outcome::TimedOut { .. } if !self.health.down_now().is_empty() && held_for < HOLD_MAX => {
+                    held_for += Duration::from_secs(180);
+                }
+                crate::wait::Outcome::TimedOut { .. } => return Ok(None),
+                crate::wait::Outcome::Failed { detail, .. } => return Err(detail),
+                crate::wait::Outcome::Broken { error, .. } => return Err(error),
+            }
         }
     }
 
@@ -1307,9 +1427,36 @@ impl Runs for Gitea {
         Ok(failures_of(&report, run, http, &self.server, &self.repo, &self.token))
     }
 
+    fn hold(&mut self) -> Hold {
+        let look = self.health.check();
+        for note in &look.notes {
+            eprintln!("::notice::other-os: {note}");
+        }
+        if let Some(fatal) = look.fatal {
+            return Hold::GaveUp(fatal);
+        }
+        if look.down.is_empty() {
+            self.down = false;
+            return Hold::Up;
+        }
+        self.down = true;
+        let text = look.down.join("; ");
+        if self.held >= HOLD_MAX {
+            let next = self.health.next_step().unwrap_or_else(|| "run the command again".into());
+            return Hold::GaveUp(format!(
+                "{text} for the whole hold limit ({}). Next: {next}",
+                crate::wait::fmt_duration(HOLD_MAX)
+            ));
+        }
+        Hold::Down(text)
+    }
+
     fn tick(&mut self) -> Duration {
         self.clock.sleep(TICK);
-        self.clock.elapsed()
+        if self.down {
+            self.held += TICK;
+        }
+        self.now()
     }
 
     fn report(&mut self, line: &str) {
@@ -1820,6 +1967,10 @@ mod tests {
         changed: Vec<String>,
         ticks: u64,
         asked: Vec<String>,
+        /// The answers of `hold` per tick, in order; the last repeats (`Up` once the script ends).
+        holds: Vec<Hold>,
+        down: bool,
+        held_ticks: u64,
     }
 
     impl Fake {
@@ -1843,6 +1994,9 @@ mod tests {
                 changed: strs(&["tools/paddock-dev/src/x.rs"]),
                 ticks: 0,
                 asked: Vec::new(),
+                holds: vec![Hold::Up],
+                down: false,
+                held_ticks: 0,
             }
         }
 
@@ -1894,9 +2048,22 @@ mod tests {
         fn failures(&mut self, run: u64) -> Result<Vec<Failure>, String> {
             Ok(self.failures.get(&run).cloned().unwrap_or_default())
         }
+        fn hold(&mut self) -> Hold {
+            let h = if self.holds.len() > 1 {
+                self.holds.remove(0)
+            } else {
+                self.holds[0].clone()
+            };
+            self.down = matches!(h, Hold::Down(_));
+            self.asked.push(format!("hold {h:?}"));
+            h
+        }
         fn tick(&mut self) -> Duration {
             self.ticks += 1;
-            Duration::from_secs(15 * self.ticks)
+            if self.down {
+                self.held_ticks += 1;
+            }
+            Duration::from_secs(15 * (self.ticks - self.held_ticks))
         }
         fn report(&mut self, line: &str) {
             self.asked.push(format!("report {line}"));
@@ -2005,6 +2172,79 @@ mod tests {
             f.asked
                 .iter()
                 .any(|a| a.contains("the linux part waits") && a.contains("no Linux lane is spare")),
+            "{:?}",
+            f.asked
+        );
+    }
+
+    fn down(why: &str) -> Hold {
+        Hold::Down(why.into())
+    }
+
+    /// Train 18's health gate (user, 2026-11-22): a Gitea outage is held for, never "not measured" or "stalled". While Gitea is down
+    /// nothing is dispatched, polled or judged (no `finished`, `jobs` or `try_dispatch` is asked), and when it answers again the
+    /// gate goes on and ends as if nothing had happened. The hold is not counted by any bound: a hold of 150 minutes, longer than the
+    /// 2 hour run limit, still gives a passing member.
+    #[test]
+    fn a_gitea_outage_is_held_for_never_not_measured_or_stalled() {
+        let mut f = Fake::green();
+        // Down for 600 ticks (150 minutes) at the start, then up. The Linux run is already over by then (it ends at tick 1).
+        f.holds = std::iter::repeat_n(down("Gitea (https://dev.decryptology.net) is down: HTTP 502"), 600)
+            .chain([Hold::Up])
+            .collect();
+        let s = run(&merge(), &mut f, ENFORCED);
+        assert_eq!(s.data["outcome"], "passed", "{:?}", s.text);
+        assert_eq!(s.exit, Exit::Ok);
+        let a = &f.asked;
+        // Nothing but the looks happened while it was down: the first dispatch comes after the 600th look.
+        let first_dispatch = at(a, "dispatch linux");
+        assert!(
+            a[..first_dispatch].iter().filter(|x| x.starts_with("hold Down")).count() == 600,
+            "{}",
+            a[..first_dispatch].len()
+        );
+        assert!(
+            !a[..first_dispatch]
+                .iter()
+                .any(|x| x.starts_with("finished") || x.starts_with("jobs")),
+            "nothing was polled while down"
+        );
+        assert!(a.iter().any(|x| x.contains("holding: Gitea")), "said once: {a:?}");
+        assert_eq!(
+            a.iter().filter(|x| x.contains("other-os: holding")).count(),
+            1,
+            "one line per change of state"
+        );
+        assert!(a.iter().any(|x| x.contains("answers again")), "{a:?}");
+    }
+
+    /// An outage in the middle of a run: the part's run is not read while Gitea is down, the run bound does not count the hold, and the
+    /// verdict comes after Gitea answers. A hold that cannot go on (its limit, or an address that can never work) cannot measure the
+    /// parts that are not judged: not measured, with the service named, exit 6.
+    #[test]
+    fn an_outage_in_the_middle_is_held_and_a_hold_that_gives_up_is_not_measured() {
+        let mut f = Fake::green();
+        f.holds = vec![Hold::Up, Hold::Up]
+            .into_iter()
+            .chain(std::iter::repeat_n(down("Gitea is down"), 700))
+            .chain([Hold::Up])
+            .collect();
+        f.ends.insert(102, 1000); // the Windows run ends after the outage
+        let s = run(&merge(), &mut f, ENFORCED);
+        assert_eq!(s.data["outcome"], "passed", "{:?}", s.text);
+        // Gave up: the unjudged parts are not measured and name the service.
+        let mut f = Fake::green();
+        f.holds = vec![
+            Hold::Up,
+            down("Gitea is down"),
+            Hold::GaveUp("Gitea (https://x) is down for the whole hold limit (8h). Next: wait for it".into()),
+        ];
+        f.ends.insert(101, 5);
+        let s = run(&merge(), &mut f, ENFORCED);
+        assert_eq!(s.exit, Exit::NotMeasured, "{:?}", s.text);
+        assert!(s.text.join("\n").contains("hold limit"), "{:?}", s.text);
+        assert!(
+            f.asked.iter().any(|a| a == "dispatch linux" || a.starts_with("dispatch linux ")),
             "{:?}",
             f.asked
         );

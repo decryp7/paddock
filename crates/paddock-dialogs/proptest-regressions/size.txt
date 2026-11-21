@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 38854e60ba20e3c58d70da5898dc7b92d28cccd1d1d57d7d185ace91273fe393 # CI run 8466 (2026-11-21): kind = Decision, scale = 1.0, work = (800.0, 3606.6), frame = (0.0, 0.0), infer = true; the echo of a late request matched a newer pending one (size.rs, an_echo_equal_to_a_late_request_and_a_pending_one_keeps_the_requests_between_them)
