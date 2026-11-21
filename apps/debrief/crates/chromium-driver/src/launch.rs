@@ -304,6 +304,9 @@ impl Chromium {
         // The one constructor, as paddock-chromium launches it: counted for budget tests.
         let mut cmd = paddock_proc::command(&exe.path);
         cmd.env(MAC_TEMP_ENV, &temp);
+        // Start in the browser's own temp folder, never the caller's working folder: one on an external volume makes macOS ask the user for
+        // access to a removable volume (ER-14).
+        cmd.current_dir(&temp);
         cmd.args(command_line(exe.flavor, &dir, opts, sandbox))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -697,6 +700,46 @@ mod tests {
         let (temp, profile) = (lines.next().unwrap_or(""), lines.next().unwrap_or(""));
         assert!(!profile.is_empty(), "{seen:?}");
         assert_eq!(Path::new(temp), Path::new(profile).join(BROWSER_TEMP), "{seen:?}");
+    }
+
+    /// The browser starts in its own temp folder, not in the caller's working folder: one on an external volume makes macOS
+    /// ask the user for access to a removable volume, a window on the desktop (ER-14).
+    #[cfg(unix)]
+    #[test]
+    fn the_browser_starts_in_its_own_temp_folder_not_the_callers() {
+        let base = tempfile::tempdir().unwrap();
+        let seen = base.path().join("cwd.txt");
+        let exe = Browser {
+            flavor: crate::discover::Flavor::Chromium,
+            path: paddock_testkit::StandIn::new(base.path(), "cwd-chrome")
+                .when_args(
+                    &[],
+                    paddock_testkit::Actions::new()
+                        .writes_with(&seen.to_string_lossy(), "{cwd}\n{env:MAC_CHROMIUM_TMPDIR|unset}\n")
+                        .exit(1),
+                )
+                .install()
+                .unwrap()
+                .program()
+                .to_path_buf(),
+        };
+        let _ = Chromium::launch(&exe, &opts_in(base.path())).err();
+        let text = std::fs::read_to_string(&seen).expect("the stand-in did not record its folder");
+        let mut lines = text.lines();
+        let (cwd, temp) = (lines.next().unwrap(), lines.next().unwrap());
+        // The throwaway profile is gone by now, so compare the last two names (profile, browser-temp).
+        let tail = |p: &str| -> Vec<String> {
+            let mut v: Vec<String> = Path::new(p)
+                .components()
+                .rev()
+                .take(2)
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            v.reverse();
+            v
+        };
+        assert_eq!(tail(cwd), tail(temp), "the browser started in {cwd}, not in its temp folder {temp}");
+        assert_eq!(tail(cwd)[1], BROWSER_TEMP);
     }
 
     /// A throwaway profile lives below the folder the caller names (its own cache folder), never in the shared temp folder.

@@ -6,7 +6,7 @@ import { CHROME_ENV, CHROMIUM_TEST_ENV } from './browser.ts';
 import { paddockConfig, SCREENSHOT_SPECS } from './config.ts';
 import { repoRoot, worktreePort } from './env.ts';
 
-const base = { app: 'demo', defaultPort: 4390 };
+const base = { app: 'demo', defaultPort: 4390, launcher: 'off' } as const;
 const names = (c: { projects?: readonly { name?: string }[] }) => (c.projects ?? []).map((p) => p.name);
 
 test('the preset: chromium and webkit, the port from the variable, no retries, traces on failure, one worker', () => {

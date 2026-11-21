@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { assertChromeForTesting, e2ePort, isOn, paddockServers, reuseServer, SCREENSHOT_SPECS, uiConfigGuard } from './projects/paddock-e2e/src/index.ts';
+import { assertChromeForTesting, internalBrowserUse, e2ePort, isOn, paddockServers, reuseServer, SCREENSHOT_SPECS, uiConfigGuard } from './projects/paddock-e2e/src/index.ts';
 
 /**
  * Browser checks of the reference apps (`npx playwright test`): the gallery (`ng serve gallery`) and the shell demo
@@ -38,7 +38,7 @@ export default assertChromeForTesting(
     reporter: [['list']],
     timeout: 120_000,
     use: {
-      ...devices['Desktop Chrome'],
+      ...devices['Desktop Chrome'], ...internalBrowserUse(),
       viewport: { width: 1280, height: 900 },
       deviceScaleFactor: 1,
     },

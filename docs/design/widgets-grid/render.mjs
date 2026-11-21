@@ -14,6 +14,8 @@ import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// Every folder the browser writes goes to the internal disk (ER-14).
+import { internalBrowserUse } from '../../../ui/projects/paddock-e2e/src/browser-launcher.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../../..');
@@ -33,7 +35,7 @@ if (process.argv.includes('--open')) {
 } else {
   const out = join(here, 'renders');
   mkdirSync(out, { recursive: true });
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(internalBrowserUse().launchOptions);
   try {
     for (const theme of ['light', 'dark']) {
       const p = await browser.newPage({ viewport: { width: 2000, height: 1200 }, deviceScaleFactor: 2, colorScheme: theme });

@@ -3366,3 +3366,40 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **Why the logs did not show it:** the seed line was in the step's output only; nothing pointed at it as the thing to keep.
 - **Class: a failure that only the random input found is not kept.** Earlier: none recorded for proptest; the same shape as a flaky test
   whose reproduction is lost (rule 50 (k), ER-12).
+## The test browser must not touch the removable volume (macOS TCC prompt, 2026-11-21)
+- **Symptom:** `chrome-headless-shell` on the Mac runner and on dev machines made macOS ask for access to a removable volume (a window on
+  the desktop, ER-14, and a possible hang). The browsers, the checkouts and the build folders live on `/Volumes/vault-dev`, which macOS
+  treats as removable.
+- **Found by reading, not measured against the prompt:** the Rust launchers (paddock-chromium and the Debrief and Spotter copies) started
+  the browser in the caller's working folder, which is the checkout on `/Volumes` (a stand-in that prints `{cwd}` showed it: red before the
+  fix). Playwright does the same: it passes no `cwd` (playwright-core `launchProcess`), so the browser inherits the worker's.
+- **Fix, Rust:** the launchers start the browser in its own `browser-temp` folder (inside the profile, on the internal disk).
+- **Fix, Playwright:** `paddock-e2e` has one helper (`internalBrowserUse`, `internalBrowserLaunch`) that names the temp folder
+  (`MAC_CHROMIUM_TMPDIR`), downloads, crash dumps and disk cache under `$PADDOCK_JOB_TEMP` (the runner's internal job temp) or the OS temp
+  folder. `browserProblems` refuses any of them, and the process's own TMPDIR, on `/Volumes/`. Every Chromium project of every Playwright
+  config spreads the helper and runs `assertChromeForTesting`; the four doc-render scripts launch with it. browser.test.ts has the
+  positive controls, including one that runs `playwright test --list` on every config.
+- **Playwright's `launchOptions.env` replaces the browser's whole environment** (it is used instead of `process.env`). The helper therefore
+  passes `{ ...process.env, MAC_CHROMIUM_TMPDIR }` (ER-47); a test checks PATH (and SystemRoot on Windows) survive. A
+  `test.use({ launchOptions })` replaces the config's whole object (Playwright merges `use` one level deep), so a spec that sets one spreads
+  `internalBrowserUse().launchOptions` into it. `tracesDir` is not set: @playwright/test overwrites it.
+- **The browser's working folder under Playwright: fixed with a wrapper launcher (macOS), measured.** `launchOptions` has no `cwd`, and a
+  `globalSetup` `process.chdir` would change every worker's cwd (`repoRoot()`, `e2ePort`, `doc-screens` and specs read it). So
+  `browser-launcher.ts` writes a small `sh` script into the scratch root (`cd '<root>/cwd' && exec '<real browser>' "$@"`; `exec`, so the
+  pid stays the browser's), and `internalBrowserUse` sets it as `executablePath`. The script is written when the config loads but looks
+  for the real browser only when a browser starts (the first version looked at config load and threw in ci.yml's WebKit-only macOS job,
+  which installs no Chromium, and on a headless-shell version mismatch). It takes the pinned `CHROMIUM_TEST_PATH` (baked in), else
+  decides by the arguments Playwright passes: `--headless` or `--headless=old` is the headless shell, found with
+  `playwright install --dry-run chromium-headless-shell` (`chromium.executablePath()` names the full Chromium, a different browser);
+  anything else (a headed run, `--headless=new`) is the full Chromium through `chromium.executablePath()`. The answer is kept in the
+  scratch root per Playwright version and browsers folder, so only the first launch pays the 0.4 s of the dry run. The script is written
+  to a private file and renamed (its name holds a hash of its text), so workers that start together never run a half-written one. A
+  missing browser or an unwritable root prints an `::error::` line with the cause and next step and starts nothing; it never falls back
+  to the checkout. The guard in browser.ts accepts as `executablePath` only the exact path the launcher returned. Measured with a stand-in
+  browser under a real `playwright test`: with the wrapper `pwd` is `<scratch>/cwd`, without it the checkout (`ui/`); arguments and
+  environment arrive unchanged (browser-launcher.test.ts). Only macOS has the prompt, so only macOS gets the wrapper: a Windows `.cmd`
+  cannot be spawned without a shell, which Playwright does not use, and Linux gains nothing. The Playwright preset's own unit tests pass
+  `launcher: 'off'`.
+- **Not measured:** whether the browser binary on `/Volumes/vault-dev/caches/ms-playwright` still prompts once everything else is internal,
+  and whether the working folder is the prompt's only source (measuring risks the desktop prompt). The user checks with a run under the
+  new code from a checkout on `/Volumes`; if it prompts, `PLAYWRIGHT_BROWSERS_PATH` moves to the internal disk too.

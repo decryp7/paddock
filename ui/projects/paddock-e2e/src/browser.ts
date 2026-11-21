@@ -5,6 +5,20 @@
  * (`assertChromeForTesting`) and again when a worker starts (the kit's `test`).
  */
 
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+/** The prefix of the launcher wrapper's file name (browser-launcher.ts). */
+export const LAUNCHER_PREFIX = 'paddock-browser-launcher-';
+
+/** The wrappers this process wrote (browser-launcher.ts): the guard accepts as `executablePath` exactly these paths, not a file by its name. */
+const launchers = new Set<string>();
+
+/** Records a wrapper the launcher module just wrote, so the guard accepts that exact path. */
+export function registerLauncher(path: string): void {
+  launchers.add(path);
+}
+
 /** The variable that may name a pinned browser binary (Chrome for Testing) for `launchOptions.executablePath`. */
 export const CHROME_ENV = 'PADDOCK_E2E_CHROME';
 
@@ -42,7 +56,68 @@ const INSTALLED_PATHS: readonly RegExp[] = [
 /** The parts of Playwright's `use` the guard reads. */
 export interface BrowserUse {
   readonly channel?: string;
-  readonly launchOptions?: { readonly channel?: string; readonly executablePath?: string };
+  readonly launchOptions?: {
+    readonly channel?: string;
+    readonly executablePath?: string;
+    readonly downloadsPath?: string;
+    readonly args?: string[];
+    readonly env?: Record<string, string | undefined>;
+  };
+}
+
+/**
+ * Whether `path` is on a removable or external volume. On macOS everything under `/Volumes/` is (the dev machine's
+ * `/Volumes/vault-dev` included, though `/` itself shows there as a symlink to the boot disk, which is not matched), and a
+ * browser that writes there makes macOS ask the user for access to a removable volume (a TCC window on the desktop, ER-14).
+ */
+export function isRemovableVolume(path: string): boolean {
+  return /^\/Volumes\/[^/]+/.test(path.replace(/\\/g, '/'));
+}
+
+/** Switches whose value is a folder the browser writes to. */
+const FOLDER_SWITCHES: readonly string[] = ['--user-data-dir=', '--crash-dumps-dir=', '--disk-cache-dir=', '--download-default-directory='];
+
+/** Variables Chrome reads its temp folder from (`MAC_CHROMIUM_TMPDIR` on macOS, which ignores `TMPDIR`; lessons.md, Chrome slow to quit). */
+const TEMP_VARIABLES: readonly string[] = ['MAC_CHROMIUM_TMPDIR', 'TMPDIR', 'TMP', 'TEMP'];
+
+/** The internal root for a test browser's writable folders: the job's own temp folder (`PADDOCK_JOB_TEMP`), else the OS temp folder. */
+export function browserScratchRoot(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  return join(env['PADDOCK_JOB_TEMP'] || tmpdir(), 'paddock-e2e-browser');
+}
+
+/**
+ * The launch options that keep the folders the test browser writes under the internal temp root (`root`): its temp folder
+ * (`MAC_CHROMIUM_TMPDIR`), downloads, crash dumps and disk cache. The profile itself is Playwright's own (a folder in the OS
+ * temp folder). Folders are named, not created: the browser and Playwright make them. Playwright starts the browser with
+ * `launchOptions.env` INSTEAD of `process.env`, so the environment is the caller's whole `env` plus the one variable (ER-47: no
+ * PATH, HOME, LANG or, on Windows, SystemRoot lost). Not covered here: the browser's working folder (Playwright passes no cwd, so it is
+ * the folder `playwright test` runs in; see browser-launcher.ts) and `tracesDir` (@playwright/test overwrites it).
+ */
+export function internalBrowserLaunch(
+  root: string = browserScratchRoot(),
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): NonNullable<BrowserUse['launchOptions']> {
+  return {
+    env: { ...env, MAC_CHROMIUM_TMPDIR: join(root, 'tmp') },
+    downloadsPath: join(root, 'downloads'),
+    args: [`--crash-dumps-dir=${join(root, 'crashpad')}`, `--disk-cache-dir=${join(root, 'cache')}`],
+  };
+}
+
+/** Every writable browser folder `launchOptions` names that is on a removable volume. */
+export function removableFolderProblems(launchOptions: BrowserUse['launchOptions'], env: Readonly<Record<string, string | undefined>> = process.env): string[] {
+  const named: [string, string | undefined][] = [
+    ['downloadsPath', launchOptions?.downloadsPath],
+    ...TEMP_VARIABLES.map((v): [string, string | undefined] => [`env ${v}`, launchOptions?.env ? launchOptions.env[v] : env[v]]),
+    // Playwright makes the browser's profile in the OS temp folder of its own process, whatever `launchOptions.env` says.
+    ...['TMPDIR', 'TMP', 'TEMP'].map((v): [string, string | undefined] => [`process env ${v}`, env[v]]),
+    ...(launchOptions?.args ?? []).flatMap((arg): [string, string | undefined][] =>
+      FOLDER_SWITCHES.filter((sw) => arg.startsWith(sw)).map((sw): [string, string | undefined] => [sw.slice(0, -1), arg.slice(sw.length)]),
+    ),
+  ];
+  return named
+    .filter(([, path]) => path !== undefined && isRemovableVolume(path))
+    .map(([what, path]) => `${what} ${path} is on a removable volume; macOS asks the user for access to it (ER-14). Set PADDOCK_JOB_TEMP (or TMPDIR) to a folder on the internal disk; the browser's folders go under it (internalBrowserLaunch)`);
 }
 
 /** Whether `path` is an installed Chrome or Edge. */
@@ -58,9 +133,12 @@ export function browserProblems(use: BrowserUse | undefined, env: Readonly<Recor
       problems.push(`channel "${channel}" launches the installed browser; use Playwright's Chromium (Chrome for Testing) or name a pinned binary in ${CHROMIUM_TEST_ENV}`);
     }
   }
+  problems.push(...removableFolderProblems(use?.launchOptions, env));
   const path = use?.launchOptions?.executablePath;
   if (path) {
-    if (isInstalledBrowser(path)) problems.push(`executablePath ${path} is the installed browser; tests never use it (rule 7)`);
+    if (launchers.has(path)) {
+      // Our own wrapper, written by browser-launcher.ts around the pinned or Playwright's browser.
+    } else if (isInstalledBrowser(path)) problems.push(`executablePath ${path} is the installed browser; tests never use it (rule 7)`);
     else if (path !== pinnedChrome(env)) problems.push(`executablePath ${path} is not the pinned browser named in ${CHROMIUM_TEST_ENV} (or ${CHROME_ENV})`);
   }
   return problems;

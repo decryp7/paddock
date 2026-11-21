@@ -1,5 +1,6 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
+import { internalBrowserUse } from '../../../../ui/projects/paddock-e2e/src/browser-launcher.ts';
 import { openAppWith } from './mock-url';
 import { viewport } from './mock-url';
 import { gridRows } from './app';
@@ -11,7 +12,8 @@ const URL = '?mockTotal=5000&mockLive=1&mockLiveRate=20&mockLiveMs=50&mockLiveRo
 const SCALED = '?mockTotal=3000000&mockLive=1&mockLiveRate=20&mockLiveMs=50&mockLiveRotateMs=0&mockLiveAlertMs=0&mockPageStaggerMs=10';
 
 // Headless browsers hide the scrollbar: the real-mouse scrollbar drag needs it drawn (`--hide-scrollbars` is a default argument of headless Chromium).
-test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
+// A `launchOptions` here replaces the config's whole object (Playwright merges `use` one level deep), so the internal folders are spread in.
+test.use({ launchOptions: { ...internalBrowserUse().launchOptions, ignoreDefaultArgs: ['--hide-scrollbars'] } });
 
 type Order = 'oldest first' | 'newest first';
 const ORDERS: Order[] = ['oldest first', 'newest first'];
