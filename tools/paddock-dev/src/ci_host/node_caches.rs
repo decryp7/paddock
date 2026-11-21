@@ -63,9 +63,17 @@ pub fn run_with(env: &HashMap<String, String>, windows: bool, args: &Args, links
                 "check the free space of the job's temp folder.",
             );
         }
-        npm_cache = npm.display().to_string();
+        // Printed and passed on in the one shared spelling (`winpath::for_tools`: `/` only, also on Windows, where `Path::join` adds `\`);
+        // `$GITHUB_ENV` below gets the native form where the OS wants it.
+        let os = home::os_of(windows);
+        let plain = |p: &Path| paddock_env::winpath::for_tools(p, os).map_err(|e| e.to_string());
+        let (npm_text, ng_text) = match (plain(&npm), plain(&base.join("angular"))) {
+            (Ok(n), Ok(a)) => (n, a),
+            (Err(e), _) | (_, Err(e)) => return step.fail(e, "use a shorter RUNNER_TEMP."),
+        };
+        npm_cache = npm_text;
         // One per job already (the folder is the job's own), so the action names it without the job's name.
-        ng_cache = base.join("angular").display().to_string();
+        ng_cache = ng_text;
     } else {
         // The host's kept folders (job-isolation): npm's cache and the Angular cache are the job slot's own.
         npm_cache = match step.isolation(&["path", "npm"]) {
@@ -136,6 +144,7 @@ fn isolation_failed(step: &mut Step<'_>, text: &str) -> i32 {
 mod tests {
     use super::super::links::fake::RecordingLinks;
     use super::*;
+    use paddock_env::Os;
 
     fn env_in(dir: &Path, os: &str) -> HashMap<String, String> {
         [
@@ -226,6 +235,17 @@ mod tests {
         let (code, _) = go(&env, false, "ui", &links);
         assert_eq!(code, 0);
         assert_eq!(links.made.lock().unwrap()[0].1, under(d.path(), "clone/ui/.angular/cache"));
+    }
+
+    #[test]
+    fn a_containers_folders_are_printed_in_the_one_tools_spelling() {
+        // `Path::join` on Windows gave `C:/x/temp\\node-caches\\npm` (run 8495, job 43574): the shared spelling for anything printed is
+        // `winpath::for_tools`, tested here for the Windows rules on any OS.
+        let joined = Path::new(r"C:/x/temp").join("node-caches").join("npm");
+        let spelled = |p: &Path| paddock_env::winpath::for_tools(p, Os::Windows).unwrap();
+        assert_eq!(spelled(Path::new(r"C:/x/temp\node-caches\npm")), "C:/x/temp/node-caches/npm");
+        assert_eq!(spelled(&Path::new(r"C:\x\temp").join("node-caches")), "C:/x/temp/node-caches");
+        assert_eq!(spelled(&joined), "C:/x/temp/node-caches/npm");
     }
 
     #[test]

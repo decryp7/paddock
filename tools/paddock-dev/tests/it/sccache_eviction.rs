@@ -9,6 +9,7 @@
 //! it, survives, so the test can tell eviction from a file that was never there.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use paddock_env::{Os, winpath};
 use paddock_testkit::TestCommand;
 use std::path::{Path, PathBuf};
 
@@ -60,7 +61,7 @@ impl Cache {
             let stats = c.command("sccache").arg("--show-stats").output().unwrap();
             let ours = String::from_utf8_lossy(&stats.stdout)
                 .lines()
-                .any(|l| l.starts_with("Cache location") && l.contains(&cache_dir.display().to_string()));
+                .any(|l| l.starts_with("Cache location") && location_names(l, cache_dir, paddock_env::Os::current()));
             if started.status.success() && ours {
                 return c;
             }
@@ -108,6 +109,59 @@ impl Drop for Cache {
     fn drop(&mut self) {
         let _ = self.command("sccache").arg("--stop-server").output();
     }
+}
+
+/// Whether sccache's `Cache location  Local disk: "<dir>"` line names `dir`. sccache prints the folder with Rust's `{:?}`, so on
+/// Windows every backslash is doubled; that escaping is undone, and the two folders are compared with `winpath::same` (the shared
+/// rule: verbatim prefix stripped, `/` and `\` one separator, case ignored on Windows), never as strings.
+fn location_names(line: &str, dir: &Path, os: Os) -> bool {
+    let Some((_, quoted)) = line.split_once("Local disk: \"") else {
+        return false;
+    };
+    let printed = quoted.trim_end().trim_end_matches('"');
+    let printed = if os == Os::Windows {
+        printed.replace("\\\\", "\\")
+    } else {
+        printed.to_string()
+    };
+    winpath::same(Path::new(&printed), dir, os)
+}
+
+#[test]
+fn the_location_check_reads_windows_forms_of_one_folder_as_the_same() {
+    // What the Windows runner printed (run 8495, job 43574): the folder as `{:?}` escapes it, against the folder as the test holds it.
+    let dir = Path::new(r"C:\gitea-runner\work\8a221e7c66bab078\tmp\.tmpoYlqSG\mount");
+    let line = r#"Cache location                  Local disk: "C:\\gitea-runner\\work\\8a221e7c66bab078\\tmp\\.tmpoYlqSG\\mount""#;
+    let win = Os::Windows;
+    assert!(location_names(line, dir, win), "doubled backslashes are the same folder");
+    assert!(
+        location_names(
+            line,
+            Path::new(r"\\?\C:\gitea-runner\work\8a221e7c66bab078\tmp\.tmpoYlqSG\mount"),
+            win
+        ),
+        "verbatim prefix"
+    );
+    assert!(location_names(&line.replace("gitea-runner", "GITEA-Runner"), dir, win), "case");
+    // Positive controls: another folder, and one that only starts like ours, are not ours.
+    assert!(!location_names(line, Path::new(r"C:\gitea-runner\work\other\mount"), win));
+    assert!(!location_names(
+        r#"Cache location  Local disk: "C:\\x\\y""#,
+        Path::new(r"C:\x\z"),
+        win
+    ));
+    assert!(!location_names("Cache location  Remote: redis", dir, win));
+    // Unix: exact, nothing unescaped.
+    assert!(location_names(
+        r#"Cache location  Local disk: "/tmp/a/mount""#,
+        Path::new("/tmp/a/mount"),
+        Os::Linux
+    ));
+    assert!(!location_names(
+        r#"Cache location  Local disk: "/tmp/a/Mount""#,
+        Path::new("/tmp/a/mount"),
+        Os::Linux
+    ));
 }
 
 fn big_file(path: &Path) {

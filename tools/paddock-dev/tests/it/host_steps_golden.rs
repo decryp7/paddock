@@ -74,7 +74,19 @@ fn a_linux_container_leaves_the_workspace_and_keeps_its_node_caches_in_the_jobs_
     let r = dev(&root, &["node-caches", "--name", "e2e-1"], &vars);
     assert_eq!(r.code, 0, "{}", r.stdout);
     assert_eq!(r.stdout, format!("node-caches: npm {}/temp/node-caches/npm\n", forward(&root)));
-    assert_eq!(r.github_env, format!("npm_config_cache={}/temp/node-caches/npm\n", forward(&root)));
+    // $GITHUB_ENV holds the native form (backslashes on Windows, where the tools want them): the same folder, compared by the shared
+    // rule (`winpath::same`), not as text.
+    let value = r
+        .github_env
+        .strip_prefix("npm_config_cache=")
+        .and_then(|v| v.strip_suffix('\n'))
+        .expect("one npm_config_cache line");
+    let expected = root.join("temp").join("node-caches").join("npm");
+    assert!(
+        paddock_env::winpath::same(Path::new(value), &expected, paddock_env::Os::current()),
+        "{value} is not {}",
+        expected.display()
+    );
 }
 
 #[test]
