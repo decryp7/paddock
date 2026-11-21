@@ -415,38 +415,48 @@ mod tests {
         trial_root(&e, &c, home.map(Path::new))
     }
 
+    /// An absolute folder on this platform: a bare `/d/t` has no drive on Windows and is not absolute there, so the tests that need
+    /// an absolute path build it here (`C:/d/t` on Windows, `/d/t` elsewhere).
+    fn abs(p: &str) -> String {
+        if cfg!(windows) { format!("C:{p}") } else { p.to_string() }
+    }
+
     #[test]
     fn the_trial_root_is_the_variable_then_the_config_then_trials_beside_the_worktree_root() {
-        let home = Some("/home/me");
+        let (home_dir, t, x) = (abs("/home/me"), abs("/d/t"), abs("/d/x"));
+        let (inside, dotdot) = (abs("/home/me/t"), abs("/d/../home/me"));
+        let (wt, trials) = (abs("/data/dev-targets/wt"), abs("/data/dev-targets/trials"));
+        let home = Some(home_dir.as_str());
         assert_eq!(
-            root_of(&[("PADDOCK_TRIAL_DIR", "/d/t")], &[("paddock.trialRoot", "/d/x")], home).unwrap(),
-            PathBuf::from("/d/t")
+            root_of(&[("PADDOCK_TRIAL_DIR", &t)], &[("paddock.trialRoot", &x)], home).unwrap(),
+            PathBuf::from(&t)
         );
         // The variable is checked like the config: inside HOME, relative or with `..` it is refused.
-        for bad in ["/home/me/t", "rel/t", "/d/../home/me"] {
+        for bad in [inside.as_str(), "rel/t", dotdot.as_str()] {
             let e = root_of(&[("PADDOCK_TRIAL_DIR", bad)], &[], home).unwrap_err();
             assert!(e.contains("PADDOCK_TRIAL_DIR") && e.contains("Next step"), "{bad}: {e}");
         }
-        assert_eq!(root_of(&[], &[("paddock.trialRoot", "/d/x")], home).unwrap(), PathBuf::from("/d/x"));
+        assert_eq!(root_of(&[], &[("paddock.trialRoot", &x)], home).unwrap(), PathBuf::from(&x));
         assert_eq!(
-            root_of(&[], &[("paddock.worktreeRoot", "/data/dev-targets/wt")], home).unwrap(),
-            PathBuf::from("/data/dev-targets/trials")
+            root_of(&[], &[("paddock.worktreeRoot", &wt)], home).unwrap(),
+            PathBuf::from(&trials)
         );
         assert_eq!(
-            root_of(&[("PADDOCK_WORKTREE_ROOT", "/data/dev-targets/wt")], &[], home).unwrap(),
-            PathBuf::from("/data/dev-targets/trials")
+            root_of(&[("PADDOCK_WORKTREE_ROOT", &wt)], &[], home).unwrap(),
+            PathBuf::from(&trials)
         );
     }
 
     #[test]
     fn a_trial_root_that_cannot_be_used_says_why_and_the_next_step() {
-        let home = Some("/home/me");
+        let (home_dir, in_trials, in_wt, dotdot) = (abs("/home/me"), abs("/home/me/trials"), abs("/home/me/wt"), abs("/d/../home/me"));
+        let home = Some(home_dir.as_str());
         for (cfg, want) in [
             (vec![], "no trial folder is set"),
-            (vec![("paddock.trialRoot", "/home/me/trials")], "inside your home folder"),
-            (vec![("paddock.worktreeRoot", "/home/me/wt")], "inside your home folder"),
+            (vec![("paddock.trialRoot", in_trials.as_str())], "inside your home folder"),
+            (vec![("paddock.worktreeRoot", in_wt.as_str())], "inside your home folder"),
             (vec![("paddock.trialRoot", "relative/dir")], "not an absolute folder"),
-            (vec![("paddock.trialRoot", "/d/../home/me")], "not an absolute folder"),
+            (vec![("paddock.trialRoot", dotdot.as_str())], "not an absolute folder"),
         ] {
             let e = root_of(&[], &cfg, home).unwrap_err();
             assert!(e.contains(want) && e.contains("Next step"), "{e}");
