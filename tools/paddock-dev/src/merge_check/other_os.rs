@@ -22,9 +22,10 @@
 //! `<trial root>/<branch>-<sha>` (see [`crate::ci_runs::trial::trial_root`]) and is removed at the end (ER-14, ER-51).
 //!
 //! **Two parts, two runs (user, 2026-11-21: trials use spare lanes).** The trial is one `ci.yml` run per OS, each its own handle: the
-//! Linux part (`os=linux`) is dispatched at once, also while a train's CI holds the runners, as long as a Linux lane is spare (the
-//! host's lanes from `conformance/ci/runner-slots.json` less the Linux jobs running now; every job keeps its lanes-times-threads
-//! share, ER-48); the Windows part (`os=windows`) waits for the train's reservation by progress. Each OS's row is judged from its
+//! Linux part (`os=linux`) is dispatched at once, also while a train's CI holds the runners, only beside a train
+//! that is working, with no Linux job queued or waiting and as many lanes free as the member's own Linux jobs ([`linux_may_start`]:
+//! a trial never jumps a running train, ER-24; the lanes are `conformance/ci/runner-slots.json`'s, six since 2026-11-20; every job
+//! keeps its lanes-times-threads share, ER-48); the Windows part (`os=windows`) waits for the train's reservation by progress. Each OS's row is judged from its
 //! own run as soon as that run ends and the Linux verdict is reported at once, but the member stays pending (the command has not
 //! returned) until the Windows part is judged: a row is never "clean" for the member before both parts are in. The Mac runner is
 //! not judged here, so no run asks for it. The split is ci.yml's `os` input, handled by the planner (`src/plan_os.rs`).
@@ -64,6 +65,9 @@ pub const WORKFLOW: &str = "ci.yml";
 const MAX_RUN_WAIT: Duration = Duration::from_secs(2 * 3600);
 /// How often the gate looks at its two parts.
 pub const TICK: Duration = Duration::from_secs(15);
+
+/// Why the Mac has no row: it is the developer's own machine, and its tests are the local pre-push run (not a CI-like clone).
+pub const MAC_NOT_JUDGED: &str = "dev OS; covered by the local pre-push run, not a CI-like clone";
 
 /// An operating system a row is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -660,6 +664,8 @@ pub fn step_of(rows: &[Row], not_judged: &[String], runs: &[(Os, Option<u64>)], 
             "phases": r.phases.map(|p| json!({"queueSecs": p.queue, "setupSecs": p.setup, "compileSecs": p.compile, "testSecs": p.tests})),
         }));
     }
+    // The Mac is the dev OS: no run asks for it, and the row says so, so its absence is never read as a pass.
+    text.push(format!("  macos: not judged ({MAC_NOT_JUDGED})"));
     if !not_judged.is_empty() {
         text.push(format!(
             "  not judged (no Linux or Windows runner: macOS is the integrator's own machine, or the job names no runner): {}",
@@ -680,7 +686,7 @@ pub fn step_of(rows: &[Row], not_judged: &[String], runs: &[(Os, Option<u64>)], 
     };
     Step {
         text,
-        data: json!({"outcome": word, "base": base, "runs": {"linux": run_of(Os::Linux), "windows": run_of(Os::Windows)}, "ref": git_ref, "enforced": enforced, "rows": data, "notJudged": not_judged}),
+        data: json!({"outcome": word, "base": base, "runs": {"linux": run_of(Os::Linux), "windows": run_of(Os::Windows)}, "ref": git_ref, "enforced": enforced, "rows": data, "macos": {"outcome": "not judged", "why": MAC_NOT_JUDGED}, "notJudged": not_judged}),
         exit,
     }
 }
@@ -926,6 +932,9 @@ pub struct Gitea {
     clock: crate::wait::SystemClock,
     /// Per part, whether the train's CI still moves while the part waits for it ([`reservation::Stall`]).
     stalls: std::collections::BTreeMap<Os, reservation::Stall>,
+    /// How many Linux jobs the member's own Linux part will run (from the plan, set by [`Runs::plan`]); the Linux part starts beside a
+    /// running train only when that many lanes are spare.
+    linux_need: usize,
 }
 
 /// The folder name of one merge's trial: its label (cleaned to letters, digits, `.`, `_`, `-`) and the commit's short id.
@@ -980,6 +989,7 @@ impl Gitea {
             http: CurlHttp,
             clock: crate::wait::SystemClock::new(),
             stalls: std::collections::BTreeMap::new(),
+            linux_need: usize::MAX,
         })
     }
 
@@ -1004,19 +1014,31 @@ impl Gitea {
 }
 
 impl Gitea {
-    /// The Linux lanes no running job uses: `(spare, busy, lanes)`. The lanes are `conformance/ci/runner-slots.json`'s (one place,
-    /// ER-48); busy is the Linux jobs in progress across the unfinished runs (the train's, and this gate's own).
-    fn spare_linux_lanes(&mut self) -> Result<(usize, usize, usize), String> {
+    /// The Linux lanes in use now across the unfinished runs, and whether a train is working: `(use, train_running, lanes)`. The lanes
+    /// are `conformance/ci/runner-slots.json`'s (one place, ER-48). A job counts as using a lane while it is running, queued or
+    /// waiting for its turn; a train is working when an unfinished run on `train/*` has a job in progress.
+    fn linux_lane_use(&mut self) -> Result<(LaneUse, bool, usize), String> {
         let lanes = dispatch::linux_slots(&self.root)?;
         let mut c = Client::new(&mut self.http, &self.server, &self.repo, &self.token);
-        let unfinished: Vec<u64> = c.runs_page(1)?.runs.iter().filter(|r| !r.finished()).map(|r| r.id).collect();
-        let mut busy = 0;
-        for id in unfinished {
+        let unfinished: Vec<(u64, bool)> = c
+            .runs_page(1)?
+            .runs
+            .iter()
+            .filter(|r| !r.finished())
+            .map(|r| (r.id, r.git_ref().starts_with("refs/heads/train/")))
+            .collect();
+        let mut total = LaneUse::default();
+        let mut train_running = false;
+        for (id, is_train) in unfinished {
+            // per-item: this Gitea's Actions API lists jobs per run (`/runs/<id>/jobs`, the only jobs call the tool uses); a
+            // repository-wide jobs list is not part of it. Unfinished runs are few (a train's, this gate's own two), and this is
+            // read only while a train holds the runners, once per 15 s tick (ER-20).
             if let Some(jobs) = c.timed_jobs(id)? {
-                busy += busy_linux_jobs(&jobs);
+                total = total.plus(busy_linux_jobs(&jobs));
+                train_running |= is_train && jobs.iter().any(|j| j.status == "in_progress");
             }
         }
-        Ok((lanes.saturating_sub(busy), busy, lanes))
+        Ok((total, train_running, lanes))
     }
 
     /// One dispatch of `ci.yml` with the `os` input of `part` (the planner narrows the run to it, `src/plan_os.rs`). The dispatch's own
@@ -1051,12 +1073,83 @@ impl Gitea {
     }
 }
 
-/// The Linux jobs running now among a run's jobs (the lanes they use).
-pub fn busy_linux_jobs(jobs: &[TimedJob]) -> usize {
-    jobs.iter()
-        .filter(|j| j.status == "in_progress")
+/// The Linux lanes in use: jobs running, and jobs queued or waiting for their turn (they will take a lane the moment one is free,
+/// ahead of anything dispatched later).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LaneUse {
+    /// Linux jobs in progress.
+    pub running: usize,
+    /// Linux jobs queued or waiting.
+    pub pending: usize,
+}
+
+impl LaneUse {
+    fn plus(self, o: LaneUse) -> LaneUse {
+        LaneUse {
+            running: self.running + o.running,
+            pending: self.pending + o.pending,
+        }
+    }
+}
+
+/// The Linux jobs of a run's jobs that use or will use a lane: running (`in_progress`) and pending (`queued`, `waiting`).
+pub fn busy_linux_jobs(jobs: &[TimedJob]) -> LaneUse {
+    let mut u = LaneUse::default();
+    for j in jobs
+        .iter()
         .filter(|j| Os::of_job(&j.name).or_else(|| j.labels.iter().find_map(|l| Os::of_job(l))) == Some(Os::Linux))
-        .count()
+    {
+        match j.status.as_str() {
+            "in_progress" => u.running += 1,
+            "queued" | "waiting" => u.pending += 1,
+            _ => {}
+        }
+    }
+    u
+}
+
+/// How many Linux jobs the member's Linux part will run, read from the plan's own output: the plan job, one per project flag that is
+/// true (any flag but `docs`, `all` and `conformance`'s standing one counts, as in [`reach_of`]), one per app, and the conformance
+/// job; every lane when the plan says `all`. At least 1. An estimate on the high side: the gate then waits rather than jumps.
+pub fn own_linux_jobs(plan: &Value) -> usize {
+    let Some(obj) = plan.as_object() else {
+        return usize::MAX;
+    };
+    if obj.get("all").and_then(Value::as_bool) == Some(true) {
+        return usize::MAX;
+    }
+    let flags = obj
+        .iter()
+        .filter(|(k, v)| !matches!(k.as_str(), "docs" | "all" | "conformance") && v.as_bool() == Some(true))
+        .count();
+    let apps = obj.get("apps").and_then(Value::as_array).map_or(0, Vec::len);
+    1 + flags + apps + usize::from(conformance_reached(plan)) + 1
+}
+
+/// Whether the member's Linux part may start beside a train that holds the runners (ER-24: a trial never jumps a running train).
+/// `Err(why)` waits. It starts only when (1) a train is working right now: between two stages of its sequence nothing of it runs while
+/// the next stage may start any moment, so the gate waits; (2) none of the Linux jobs of any unfinished run is queued or waiting,
+/// since those take the lanes first; and (3) at least as many lanes are free as the member's own Linux jobs (`need`, capped at the
+/// lanes there are).
+pub fn linux_may_start(lanes: usize, in_use: &LaneUse, train_running: bool, need: usize) -> Result<(), String> {
+    if !train_running {
+        return Err("nothing of the train is running now (between two stages of its sequence the next stage may start any moment)".into());
+    }
+    if in_use.pending > 0 {
+        return Err(format!(
+            "{} Linux job(s) are queued or waiting and take the lanes first ({} running of {lanes})",
+            in_use.pending, in_use.running
+        ));
+    }
+    let need = need.clamp(1, lanes.max(1));
+    let spare = lanes.saturating_sub(in_use.running);
+    if spare < need {
+        return Err(format!(
+            "no room for the member's {need} Linux job(s): {} of {lanes} Linux lanes are in use",
+            in_use.running
+        ));
+    }
+    Ok(())
 }
 
 impl Drop for Gitea {
@@ -1085,7 +1178,9 @@ impl Runs for Gitea {
     }
 
     fn plan(&mut self, base: &str, head: &str) -> Result<Value, String> {
-        ask_plan(&self.root, base, head)
+        let plan = ask_plan(&self.root, base, head)?;
+        self.linux_need = own_linux_jobs(&plan);
+        Ok(plan)
     }
 
     fn publish(&mut self, commit: &str, git_ref: &str) -> Result<(), String> {
@@ -1108,8 +1203,10 @@ impl Runs for Gitea {
             (None, _) => None,
             (Some(h), Os::Windows) => Some(format!("a train's CI sequence holds the runners ({h})")),
             (Some(h), Os::Linux) => {
-                let (spare, busy, lanes) = self.spare_linux_lanes()?;
-                (spare == 0).then(|| format!("a train's CI holds the runners ({h}) and no Linux lane is spare ({busy} of {lanes} in use)"))
+                let (lanes_in_use, train_running, lanes) = self.linux_lane_use()?;
+                linux_may_start(lanes, &lanes_in_use, train_running, self.linux_need)
+                    .err()
+                    .map(|why| format!("a train's CI holds the runners ({h}); {why}"))
             }
         };
         let why = match blocked {
@@ -2015,10 +2112,8 @@ mod tests {
         assert!(err.contains("no trial folder"), "{err}");
     }
 
-    /// The lanes a running job uses: only Linux jobs in progress count (a queued or finished job, or a Windows job, does not).
-    #[test]
-    fn busy_lanes_are_the_linux_jobs_in_progress() {
-        let tj = |name: &str, status: &str, labels: &[&str]| TimedJob {
+    fn tj(name: &str, status: &str, labels: &[&str]) -> TimedJob {
+        TimedJob {
             id: 1,
             name: name.into(),
             runner_id: 1,
@@ -2029,16 +2124,77 @@ mod tests {
             steps: Vec::new(),
             status: status.into(),
             labels: labels.iter().map(|l| l.to_string()).collect(),
-        };
+        }
+    }
+
+    /// A lane is in use by a Linux job that runs, and also by one that is queued or waiting (it takes the lane first); a Windows or Mac
+    /// job, or a finished one, uses none.
+    #[test]
+    fn lanes_in_use_are_the_linux_jobs_running_queued_or_waiting() {
         let jobs = [
             tj("crate (ubuntu-latest)", "in_progress", &[]),
             tj("conformance", "in_progress", &["ubuntu-latest"]),
             tj("ui", "queued", &["ubuntu-latest"]),
+            tj("tools", "waiting", &["ubuntu-latest"]),
             tj("paddock-dev (windows-latest)", "in_progress", &[]),
-            tj("tools-macos", "in_progress", &["macos-latest"]),
+            tj("tools-macos", "queued", &["macos-latest"]),
             tj("gitleaks", "completed", &["ubuntu-latest"]),
         ];
-        assert_eq!(busy_linux_jobs(&jobs), 2);
+        assert_eq!(busy_linux_jobs(&jobs), LaneUse { running: 2, pending: 2 });
+    }
+
+    /// ER-24 (P1): a member trial never jumps a running train. Between two stages (nothing in progress, the next stage queued) it does not
+    /// dispatch; nor while any Linux job is queued or waiting, nor without room for its own jobs; it goes only beside a working train
+    /// with the lanes free for its own jobs.
+    #[test]
+    fn the_linux_part_never_jumps_a_running_train() {
+        let lanes = 6;
+        let idle = LaneUse::default();
+        // Between two stages: nothing running, the next stage queued.
+        let gap = LaneUse { running: 0, pending: 3 };
+        let e = linux_may_start(lanes, &gap, false, 3).unwrap_err();
+        assert!(e.contains("between two stages"), "{e}");
+        // The gap with nothing queued yet is the same.
+        assert!(linux_may_start(lanes, &idle, false, 1).unwrap_err().contains("between two stages"));
+        // The train works but a Linux job of it is queued or waiting.
+        let e = linux_may_start(lanes, &LaneUse { running: 2, pending: 1 }, true, 1).unwrap_err();
+        assert!(e.contains("queued or waiting"), "{e}");
+        // No room for the member's own jobs: 4 of 6 lanes in use, the member needs 3.
+        let e = linux_may_start(lanes, &LaneUse { running: 4, pending: 0 }, true, 3).unwrap_err();
+        assert!(e.contains("no room for the member's 3"), "{e}");
+        // Room: 3 of 6 in use, the member needs 3; and a member bigger than the host is capped at the lanes (all must be free).
+        assert_eq!(linux_may_start(lanes, &LaneUse { running: 3, pending: 0 }, true, 3), Ok(()));
+        assert!(linux_may_start(lanes, &LaneUse { running: 1, pending: 0 }, true, usize::MAX).is_err());
+        assert_eq!(linux_may_start(lanes, &idle, true, usize::MAX), Ok(()));
+    }
+
+    /// The member's own Linux job count comes from the plan's own output.
+    #[test]
+    fn the_members_own_linux_jobs_are_read_from_the_plan() {
+        assert_eq!(own_linux_jobs(&json!({"all": true})), usize::MAX);
+        assert_eq!(own_linux_jobs(&json!("x")), usize::MAX);
+        // paddock-dev only: the plan job, its flag, and conformance's own job (plus one for the matrix leg's setup margin).
+        let n = own_linux_jobs(&plan_paddock_dev());
+        assert!((3..=4).contains(&n), "{n}");
+        // More projects reached, more jobs.
+        let bigger = json!({"crates": true, "ui": true, "tools": true, "apps": ["a", "b"], "conformance": true, "why": {"conformance": ["conformance always runs"]}});
+        assert!(own_linux_jobs(&bigger) > n, "{} {n}", own_linux_jobs(&bigger));
+    }
+
+    /// The Mac is said out loud, never silent: a row in the text and the data (it is the dev OS and not judged by the trial).
+    #[test]
+    fn the_mac_is_said_out_loud_as_not_judged() {
+        let r = rows_ok(&[job("plan", "success"), job("crates (ubuntu-latest)", "success")], &[]);
+        let s = step_of(&r, &[], &[(Os::Linux, Some(1))], "trial/x", "1111111", true);
+        let text = s.text.join("\n");
+        assert!(
+            text.contains("macos: not judged (dev OS; covered by the local pre-push run, not a CI-like clone)"),
+            "{text}"
+        );
+        assert_eq!(s.data["macos"]["outcome"], "not judged");
+        assert!(s.data["macos"]["why"].as_str().unwrap().contains("local pre-push run"));
+        // It is a statement, not a pass: it changes neither the outcome word nor the exit.
+        assert_eq!(s.data["outcome"], "passed");
     }
 
     /// P3: a member whose fast gates failed is not dispatched; the row is not measured (never a pass).

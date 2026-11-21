@@ -50,3 +50,10 @@ test('every workflow or action comment that names "the N Linux slots" uses the d
   assert.ok(seen >= 3, `the comments are found (${seen})`);
   assert.deepEqual(wrong, [], `these name another count than conformance/ci/runner-slots.json (${slots.linux})`);
 });
+
+test('conformance/ci/build-jobs.sh documents the same Linux jobs per host as the declared slot count (ER-48: the layout is one number)', () => {
+  const text = readFileSync(join(PADDOCK, 'conformance', 'ci', 'build-jobs.sh'), 'utf8');
+  const row = /^#\s+Linux\s+(\d+)\s+\d+\s+\d+ GB/m.exec(text);
+  assert.ok(row, 'the Linux row of the layout table in build-jobs.sh is found');
+  assert.equal(Number(row[1]), slots.linux, 'build-jobs.sh and runner-slots.json name different Linux lane counts');
+});

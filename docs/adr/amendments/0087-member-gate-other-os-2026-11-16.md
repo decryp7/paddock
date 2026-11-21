@@ -94,10 +94,15 @@ was found only after the merge. Now `ENFORCED = true`:
   `conformance`, `all`, an app, or conformance reached for a reason beyond its standing one (`plan::CONFORMANCE_ALWAYS`, read
   from `why`). A plan that does not say why reaches projects (when unsure the gate runs).
 - **Two parts, two runs: trials use spare lanes (user, 2026-11-21).** The trial is one `ci.yml` run per OS, each with its own handle.
-  The Linux part (`os=linux`) is dispatched at once, also while a train's CI holds the runners, whenever a Linux lane is spare:
-  the lanes are `conformance/ci/runner-slots.json`'s `linux` (one place, `dispatch::linux_slots`) less the Linux jobs in progress
-  across the unfinished runs; every job keeps its lanes-times-threads share (ER-48). The Windows part (`os=windows`) waits for the
-  train's reservation by progress (below). The Mac runner is not judged by the gate, so no run asks for it. The gate looks at both
+  The Linux part (`os=linux`) is dispatched at once when no train holds the runners. While a train holds them it goes only beside a
+  train that is working (a job of an unfinished `train/*` run is in progress: between two stages of the sequence nothing runs and
+  the next stage may start any moment, so it waits), with no Linux job of any unfinished run queued or waiting (those take the
+  lanes first), and with as many free lanes as its own Linux jobs (read from the plan, capped at the lanes there are): a trial never
+  jumps a running train (ER-24). The lanes are `conformance/ci/runner-slots.json`'s `linux` (one place, `dispatch::linux_slots`;
+  corrected from 3 to 6, the Linux host's lanes since 2026-11-20, and checked against `conformance/ci/build-jobs.sh` by a
+  conformance test; this also lets `train_waiters` allow 5 waiting train runs instead of 2); every job keeps its lanes-times-threads
+  share (ER-48). The Windows part (`os=windows`) waits for the
+  train's reservation by progress (below). The Mac runner is not judged by the gate, so no run asks for it; the output and `data.macos` say so (`macos: not judged (dev OS; covered by the local pre-push run, not a CI-like clone)`). The gate looks at both
   parts on every tick: the Linux verdict is reported the moment its run ends ("linux clean (the member stays pending until the
   other OS part is judged)"), but the command returns, and the row is "passed", only after the Windows part is judged; Linux
   alone never passes (not measured, exit 6, when Windows cannot be had).

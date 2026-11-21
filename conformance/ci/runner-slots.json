@@ -1,4 +1,4 @@
 {
-  "about": "How many jobs each CI runner class runs at once (the runners' `capacity`). The one place this is declared: ./dev ci dispatch reads it (at most linux - 1 train runs wait for their Mac or Windows runner at once, docs/rules.md rule 41) and conformance/test/runner-slots.test.mjs checks the docs and workflow comments that state it.",
-  "linux": 3
+  "about": "How many jobs each CI runner class runs at once (the runners' `capacity`). Linux is 6 since 2026-11-20 (d-gtr9 raised to 30 CPUs and 64 GiB, runner capacity 6: conformance/ci/build-jobs.sh and ci_build_jobs.rs give each job its share, ER-48; it was 3 before, and a conformance test checks that build-jobs.sh says the same). The one place this is declared: ./dev ci dispatch reads it (at most linux - 1 train runs wait for their Mac or Windows runner at once, docs/rules.md rule 41) and conformance/test/runner-slots.test.mjs checks the docs and workflow comments that state it.",
+  "linux": 6
 }
