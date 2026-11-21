@@ -964,3 +964,91 @@ fn a_toolchains_own_bin_goes_on_the_path_as_it_is_and_rustc_starts_from_it() {
         "rustc.exe was linked away from its DLLs: {report}"
     );
 }
+
+/// Every folder variable a fresh command carries names a folder inside its private folder that exists before the child starts:
+/// Windows' known-folder lookup fails for an absent one, and sccache then panicked "Unable to get config directory" (run 8529).
+#[test]
+fn every_redirected_folder_exists_inside_the_private_folder() {
+    let c = TestCommand::new(if cfg!(windows) { "cmd" } else { "env" });
+    let private = c.private_dir().to_path_buf();
+    let mut checked = 0;
+    for name in [
+        "HOME",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_STATE_HOME",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+    ] {
+        let value = c
+            .get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new(name))
+            .and_then(|(_, v)| v)
+            .unwrap_or_else(|| panic!("{name} is not set"));
+        let folder = Path::new(value);
+        assert!(
+            folder.starts_with(&private),
+            "{name}={folder:?} is outside the private folder {private:?}"
+        );
+        assert!(
+            folder.is_dir(),
+            "{name}={folder:?} does not exist, so a known-folder lookup through it fails"
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 11, "the list above is not empty");
+}
+
+/// The marker under which this test binary, started again as a child, resolves its folders instead of testing.
+const KNOWN_FOLDERS_CHILD: &str = "PADDOCK_TESTKIT_KNOWN_FOLDERS_CHILD";
+
+/// The child half of [`a_child_that_asks_the_os_for_its_config_folder_gets_one_inside_the_private_folder`]: prints the folders the
+/// `dirs` crate resolves (Windows: `SHGetKnownFolderPath`; elsewhere `HOME` and the `XDG_*` folders). Does nothing as a plain test.
+#[test]
+fn known_folders_child() {
+    if std::env::var_os(KNOWN_FOLDERS_CHILD).is_none() {
+        return;
+    }
+    let show = |p: Option<std::path::PathBuf>| {
+        p.map_or_else(|| "<none>".to_string(), |p| p.display().to_string())
+    };
+    println!("config={}", show(dirs::config_dir()));
+    println!("local={}", show(dirs::data_local_dir()));
+}
+
+/// A real child that resolves its config folder the way sccache does (the `dirs` crate) gets one, inside the private folder, on
+/// every OS (run 8529: on Windows it got none under the redirected profile, and sccache panicked).
+#[test]
+fn a_child_that_asks_the_os_for_its_config_folder_gets_one_inside_the_private_folder() {
+    let mut c = TestCommand::new(std::env::current_exe().unwrap());
+    c.env(KNOWN_FOLDERS_CHILD, "1").args([
+        "--exact",
+        "process::known_folders_child",
+        "--nocapture",
+        "--test-threads=1",
+    ]);
+    let private = c.private_dir().to_path_buf();
+    let out = c.output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for key in ["config=", "local="] {
+        let line = stdout
+            .lines()
+            .find_map(|l| l.split_once(key).map(|(_, v)| v.trim()))
+            .unwrap_or_else(|| panic!("the child printed no {key} line: {stdout}"));
+        assert_ne!(line, "<none>", "the child got no {key} folder: {stdout}");
+        assert!(
+            Path::new(line).starts_with(&private),
+            "{key}{line} is outside the private folder {private:?}"
+        );
+    }
+}
