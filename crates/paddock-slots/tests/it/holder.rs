@@ -512,3 +512,55 @@ fn a_holder_with_a_lifetime_cap_lets_go_when_it_is_reached() {
         "the slot is free again"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn a_holder_whose_lock_file_was_deleted_ends_with_lock_lost() {
+    // An old job's cache cleanup (sccache's LRU over a folder that held the lock files) can delete `sN.lock` while it is held: the
+    // lock then keeps nobody out, and a new holder would take "the same" slot on a new file. The holder must notice and say so.
+    let _gate = crate::share_gate();
+    let dir = tempfile::tempdir().unwrap();
+    let owner = dir.path().join("job");
+    std::fs::create_dir(&owner).unwrap();
+    let locks = FsLocks::new(dir.path().join("ci"));
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let t = {
+        let (locks, owner) = (locks.clone(), owner.clone());
+        let mut writer = ChannelWriter(tx);
+        std::thread::spawn(move || hold(&locks, 1, &owner, POLL, Some(LONG), &mut writer))
+    };
+    rx.recv_timeout(LONG).unwrap();
+    std::fs::remove_file(locks.lock_file(id(1))).unwrap();
+    assert_eq!(t.join().unwrap().unwrap(), Some((id(1), HoldEnd::LockLost)));
+}
+
+#[cfg(unix)]
+#[test]
+fn control_a_holder_whose_lock_file_is_untouched_keeps_its_slot() {
+    let _gate = crate::share_gate();
+    let dir = tempfile::tempdir().unwrap();
+    let owner = dir.path().join("job");
+    std::fs::create_dir(&owner).unwrap();
+    let locks = FsLocks::new(dir.path().join("ci"));
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let t = {
+        let (locks, owner) = (locks.clone(), owner.clone());
+        let mut writer = ChannelWriter(tx);
+        std::thread::spawn(move || {
+            hold(
+                &locks,
+                1,
+                &owner,
+                POLL,
+                Some(Duration::from_millis(300)),
+                &mut writer,
+            )
+        })
+    };
+    rx.recv_timeout(LONG).unwrap();
+    assert_eq!(
+        t.join().unwrap().unwrap(),
+        Some((id(1), HoldEnd::Expired)),
+        "only the cap ends it"
+    );
+}

@@ -2,10 +2,10 @@
 # ./dev: runs paddock-dev, the Paddock developer and CI tool (ADR 0022). Works from any subfolder: it finds the repository
 # root with git and runs the tool in the folder you are in. The tool is a content-addressed binary: the hash of its inputs
 # (tools/paddock-dev/inputs.txt, from git, plus the compiler cargo will use) names it. Order: the per-user cache (on a CI runner the
-# kept mount, see below), the prebuilt download (R0b: on a CI runner by default, elsewhere with PADDOCK_DEV_DOWNLOAD=1), then a local build. A build also happens whenever an input has
+# job's own home, see below), the prebuilt download (R0b: on a CI runner by default, elsewhere with PADDOCK_DEV_DOWNLOAD=1), then a local build. A build also happens whenever an input has
 # uncommitted changes, because then HEAD's hash cannot describe it. `./dev --wrapper-hash` prints the hash and stops.
 # Environment: PADDOCK_DEV_TARGET_DIR (build folder, default tools/paddock-dev/target, which is ignored by git),
-# PADDOCK_DEV_HOME (cache, default ~/.paddock-dev), PADDOCK_CI_MOUNT (a CI runner's kept mount, default /sccache),
+# PADDOCK_DEV_HOME (cache, default ~/.paddock-dev),
 # PADDOCK_DEV_FRESH=1 (build from source in a fresh folder without a compiler wrapper, as release jobs do).
 # Download: PADDOCK_DEV_DOWNLOAD (1 on, 0 off; default on only when GITHUB_ACTIONS=true), PADDOCK_DEV_PACKAGES (the Gitea generic
 # package base, default https://dev.decryptology.net/api/packages/paddock-build-inputs/generic), PADDOCK_DEV_TOKEN (read token, else the job's
@@ -164,22 +164,17 @@ tool="$root/tools/paddock-dev"
 }
 inputs=$(grep -v '^[[:space:]]*#' "$tool/inputs.txt" | grep -v '^[[:space:]]*$' | tr '\n' ' ')
 
-# runs <file>: an executable that answers --version with some text (an empty or truncated file is not a tool; sh would run an
-# empty file as an empty script and call that success).
-runs() { [ -x "$1" ] && v=$("$1" --version 2>/dev/null) && [ -n "$v" ]; }
+# is_for_hash <file>: it is an executable that was built for this wrapper hash: `self hash` prints the hash embedded at build time. One
+# start is the whole probe (a second `--version` start cost a process per call, ER-20): an empty or truncated file prints nothing, so it
+# is not a tool (sh would run an empty file as an empty script and call that success), and a binary that a cache restored under a key
+# but that holds other bytes (a flipped byte, a tool of another hash) is rebuilt, never run (ER-33).
+is_for_hash() { [ -x "$1" ] && "$1" self hash 2>/dev/null | grep -q "^embedded $hash\$"; }
 
-# On a CI runner with a kept mount (a Linux container's /sccache, which the node-caches action also uses) the tool and its build
-# folder live there, so a plan job compiles the tool once per hash and not on every run. An explicit PADDOCK_DEV_HOME or
-# PADDOCK_DEV_TARGET_DIR wins.
-ci_mount="${PADDOCK_CI_MOUNT:-/sccache}"
-kept_target=
-if [ "${GITHUB_ACTIONS:-}" = true ] && [ -d "$ci_mount" ] && [ -w "$ci_mount" ]; then
-  if [ -z "${PADDOCK_DEV_HOME:-}" ]; then
-    PADDOCK_DEV_HOME="$ci_mount/paddock-dev"
-    # One build folder per hash (below): jobs of other hashes on the same mount never replace the binary this job just built.
-    [ -n "${PADDOCK_DEV_TARGET_DIR:-}" ] || kept_target=1
-  fi
-fi
+# No folder is shared between concurrent CI jobs (ADR 0111): on a CI runner the tool and its build folder live in the job's own home
+# (~/.paddock-dev in a Linux container, which dies with the job), never on the runner's kept /sccache mount, where sccache's LRU
+# evicted cargo's rlibs (run 8373) and another lane's build could replace the binary a job was running (ER-26's cousin, run 8027).
+# What is kept between jobs is the restored dev-tool cache (setup-rust's steps), keyed by this hash. An explicit
+# PADDOCK_DEV_HOME or PADDOCK_DEV_TARGET_DIR wins.
 home="${PADDOCK_DEV_HOME:-${HOME:-/nonexistent}/.paddock-dev}"
 # A run that never downloads (PADDOCK_DEV_DOWNLOAD=0: release and tag jobs) keeps its tools in its own folder, bin-source, which the
 # download path never writes: what it runs was built from source by a run that also did not download.
@@ -572,8 +567,8 @@ cache="$home/$binroot/$hash"
 # replaces it by an atomic rename, and a failed probe is no proof (a slow `--version` on a loaded machine), while another run may
 # have pinned this path (`--print-binary`) or be about to start it.
 stale=
-if [ -e "$cache/$name" ] && ! runs "$cache/$name"; then
-  echo "dev: the cached tool binary $cache/$name does not run; rebuilding it." >&2
+if [ -e "$cache/$name" ] && ! is_for_hash "$cache/$name"; then
+  echo "dev: the cached tool binary $cache/$name does not run or is not for hash $hash; rebuilding it." >&2
   stale=1
 fi
 if [ -n "$stale" ] || [ ! -x "$cache/$name" ]; then
@@ -582,10 +577,10 @@ if [ -n "$stale" ] || [ ! -x "$cache/$name" ]; then
   if [ -z "$fetched" ]; then
     # One build folder per compiler (never one that spans two): cargo's own lock on it serialises builds of one compiler, a
     # change to an input rebuilds only the tool's own crate (warm), and a build of another compiler cannot meet its rlibs (run 8027:
-    # E0514). It sits next to the cache in a kept mount, else inside PADDOCK_DEV_TARGET_DIR (or the tool's own target folder).
-    if [ -n "$kept_target" ]; then tbase=$home; else tbase=${PADDOCK_DEV_TARGET_DIR:-$tool/target}; fi
-    if [ -z "$kept_target" ] && [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${PADDOCK_DEV_HOME:-}" ]; then
-      echo "::notice::./dev builds paddock-dev in this job: the runner has no writable $ci_mount, so nothing is kept between runs (cold build, about a minute or two)." >&2
+    # E0514). It sits inside PADDOCK_DEV_TARGET_DIR (or the tool's own target folder).
+    tbase=${PADDOCK_DEV_TARGET_DIR:-$tool/target}
+    if [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${PADDOCK_DEV_HOME:-}" ]; then
+      echo "::notice::./dev builds paddock-dev in this job (cold build, about a minute or two): nothing here is kept between jobs; the dev-tool cache restores it by its hash." >&2
     fi
     target=$tbase/rustc-$ckey
     if ! mkdir -p "$target"; then
@@ -617,7 +612,7 @@ if [ -n "$stale" ] || [ ! -x "$cache/$name" ]; then
     if ! mv -f "$tmp" "$cache/$name"; then
       # Windows cannot replace a tool that another job is running: the same hash, so that tool is as good as ours.
       rm -f "$tmp"
-      if runs "$cache/$name" && "$cache/$name" self hash 2>/dev/null | grep -q "^embedded $hash\$"; then
+      if is_for_hash "$cache/$name"; then
         echo "dev: another run published paddock-dev $hash first; using it." >&2
       else
         echo "::error::./dev could not publish paddock-dev $hash into $cache. Close programs that use it or delete the folder, then run ./dev again." >&2

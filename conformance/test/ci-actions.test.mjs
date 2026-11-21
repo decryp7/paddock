@@ -174,8 +174,10 @@ test('the sccache step uses the local disk: the runner home on a host, /sccache 
   assert.match(linux, /^SCCACHE_DIR=.*paddock-nomount\/sccache$/m, 'no mount: a folder of the container');
   const mount = mkdtempSync(join(tmpdir(), 'paddock-mount-'));
   const mounted = runSccacheStep({ RUNNER_OS: 'Linux', RUNNER_TEMP: nomount, PADDOCK_SCCACHE_MOUNT: mount });
-  assert.match(mounted, new RegExp(`^SCCACHE_DIR=${mount.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'), 'a writable mount is used');
-  assert.match(mounted, /^SCCACHE_CACHE_SIZE=20G$/m);
+  const escaped = mount.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  assert.match(mounted, new RegExp(`^SCCACHE_DIR=${escaped}/sccache-s1$`, 'm'), 'a writable mount gives the job its lane folder (ADR 0111)');
+  assert.doesNotMatch(mounted, new RegExp(`^SCCACHE_DIR=${escaped}$`, 'm'), 'never the mount itself: sccache evicts any file below its folder');
+  assert.match(mounted, /^SCCACHE_CACHE_SIZE=10G$/m, 'the 60 GB budget divided between the 6 lanes');
   const redis = runSccacheStep({ BACKEND: 'auto', REDIS_ENDPOINT: 'redis://h:6379', REDIS_DB: '' });
   assert.match(redis, /^SCCACHE_REDIS_ENDPOINT=redis:\/\/h:6379$/m);
   assert.match(redis, /^SCCACHE_REDIS_DB=5$/m);
@@ -1223,7 +1225,7 @@ function runNodeCaches(os, env = {}) {
   mkdirSync(join(root, 'ws', 'ui', '.angular', 'cache'), { recursive: true });
   writeFileSync(join(root, 'ws', 'ui', '.angular', 'cache', 'stale'), '');
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(PADDOCK, 'conformance', 'ci', 'host', 'node-caches.sh')], {
-    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, PADDOCK_CI_SLOT: 's1', GITHUB_WORKSPACE: join(root, 'ws'), GITHUB_ENV: join(root, 'github-env'), ANGULAR_DIR: 'ui', NAME: 'e2e-1', PADDOCK_CI_MOUNT: join(root, 'no-mount'), ...env },
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, PADDOCK_CI_SLOT: 's1', GITHUB_WORKSPACE: join(root, 'ws'), GITHUB_ENV: join(root, 'github-env'), ANGULAR_DIR: 'ui', NAME: 'e2e-1', RUNNER_TEMP: join(root, 'temp'), PADDOCK_CI_MOUNT: join(root, 'no-mount'), ...env },
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr + r.stdout);
@@ -1231,19 +1233,29 @@ function runNodeCaches(os, env = {}) {
   return { root, stdout: r.stdout, written };
 }
 
-test('node-caches keeps the npm and Angular caches on the host or the container mount, never failing a job', () => {
+test('node-caches keeps the caches in the host slot\'s folders, or in a container\'s own job folders, and never writes the shared mount', () => {
   const host = runNodeCaches('macOS');
   const kept = join(host.root, 'home', '.paddock-ci');
   assert.match(host.written, new RegExp(`^npm_config_cache=${kept}/npm-s1$`, 'm'));
   assert.equal(realpathSync(join(host.root, 'ws', 'ui', '.angular', 'cache')), join(kept, 'angular', 'e2e-1-s1'), 'one Angular cache per job, shard and job slot');
+  // A container: the runner's old mount exists and is writable, and is not used (ADR 0111); actions/cache fills the job's own folders.
   const mount = join(host.root, 'mount');
   mkdirSync(mount);
   const linux = runNodeCaches('Linux', { PADDOCK_CI_MOUNT: mount });
-  assert.match(linux.written, /^npm_config_cache=.*\/mount\/npm$/m);
-  const bare = runNodeCaches('Linux');
-  assert.equal(bare.written, '');
-  assert.match(bare.stdout, /::notice::no \/sccache mount/);
+  assert.match(linux.written, new RegExp(`^npm_config_cache=${linux.root}/temp/node-caches/npm$`, 'm'));
+  assert.equal(realpathSync(join(linux.root, 'ws', 'ui', '.angular', 'cache')), join(linux.root, 'temp', 'node-caches', 'angular'));
+  assert.deepEqual(readdirSync(mount), [], 'nothing is written to the shared mount');
   assert.match(read(join(PADDOCK, 'ui', 'angular.json')), /"cache": \{ "enabled": true, "environment": "all" \}/, 'Angular keeps its cache in CI too');
+});
+
+test('the node-caches action keys npm by OS, Node and the lockfile and Angular by the lockfile and the sources, each cache pinned and summarised', () => {
+  const action = read(join(ACTIONS, 'node-caches', 'action.yml'));
+  assert.match(action, /key: npm-v1-\$\{\{ runner\.os \}\}-\$\{\{ runner\.arch \}\}-node-\$\{\{ steps\.node\.outputs\.version \}\}-\$\{\{ hashFiles\('package-lock\.json'\) \}\}\n\s+restore-keys:/, 'npm may fall back to an older cache');
+  const ng = (/id: angular-cache[\s\S]*?(?=\n    - name:)/.exec(action)?.[0] ?? '').replace(/^\s*#.*$/gm, '');
+  assert.match(ng, /hashFiles\('package-lock\.json'\)[\s\S]*hashFiles\(format\('\{0\}\/projects\/\*\*'/, 'the Angular key holds the lockfile and the sources');
+  assert.match(ng, /restore-keys: \|\n\s+ng-v1-[^\n]*hashFiles\('package-lock\.json'\) \}\}-(?:\n|$)/, 'the Angular cache is content-addressed: an entry of the same lockfile may be restored partly, one of another lockfile never');
+  assert.doesNotMatch(action.replace(/^(\s*#.*|description:.*)$/gm, ''), /\/sccache/, 'no use of the shared mount');
+  assert.match(action, /Cache summary[\s\S]*GITHUB_STEP_SUMMARY/, 'key and hit or miss in the job summary');
 });
 
 // Debrief's workflow (.gitea/workflows/debrief.yml) on the same speed rules as ci.yml (Paddock lessons, "Test and build speed").
@@ -2460,4 +2472,43 @@ test('a workflow that runs runner-wait runs it in a first job that every macOS o
     }
   }
   assert.ok(users.includes('ci.yml') && users.includes('debrief.yml') && users.includes('dyno-release.yml'), `the train workflows wait in their first job: ${users}`);
+});
+
+/** The workflow, action and template files under .gitea, each with its text. */
+function giteaYaml() {
+  const out = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.ya?ml$/.test(e.name)) out.push([relative(PADDOCK, p), read(p)]);
+    }
+  };
+  walk(join(PADDOCK, '.gitea'));
+  return out;
+}
+
+// ER-26: a floating `@v4` follows whatever the tag points at; the digest is what was verified (v4.3.0, 2026-11-20).
+const CACHE_USE = /^\s*(?:-\s+)?uses:\s*actions\/cache(?:\/restore|\/save)?@(\S+)(.*)$/gm;
+test('every actions/cache use under .gitea is pinned to the verified digest, with its version in a comment', () => {
+  let uses = 0;
+  for (const [file, text] of giteaYaml()) {
+    for (const m of text.matchAll(CACHE_USE)) {
+      uses++;
+      assert.equal(m[1], '0057852bfaa89a56745cba8c7296529d2fc39830', `${file}: actions/cache is pinned to the v4.3.0 digest, not '${m[1]}'`);
+      assert.match(m[2], /#\s*v4\.3\.0\s*$/, `${file}: the version is in a comment`);
+    }
+  }
+  assert.ok(uses >= 25, `the pattern saw ${uses} uses: a pattern that sees none passes on nothing (ER-12)`);
+  // Positive control: the pattern does see a floating tag.
+  assert.equal([...'      - uses: actions/cache/save@v4\n'.matchAll(CACHE_USE)][0][1], 'v4');
+});
+
+test('no setup action or workflow uses the shared /sccache mount as a writable folder of its own, except the lanes setup-rust makes below it', () => {
+  const offenders = [];
+  for (const [file, text] of giteaYaml()) {
+    const code = text.split('\n').filter((l) => !/^\s*(#|description:)/.test(l)).join('\n');
+    if (/["'\s=]\/sccache(?!-)[\w/.-]*/.test(code) && file !== '.gitea/actions/setup-rust/action.yml') offenders.push(file);
+  }
+  assert.deepEqual(offenders, [], 'ADR 0111: shared state goes through a keyed cache or an artifact');
 });

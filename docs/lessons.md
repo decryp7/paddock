@@ -3254,3 +3254,15 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **Class: an end-to-end wait bounds a streamed result by one expect timeout.** Earlier: debrief.yml run 8300, where six streamed
   answers ran past the wait (64f8165ae, fixed for that spec only by sending answers in one piece). It is fixed for every caller of
   `waitAnswered` here.
+
+## A folder shared between concurrent CI lanes (2026-11-21, ADR 0111)
+
+- **Run 8373 (debrief.yml, job 42677): E0463 "can't find crate for `foldhash`".** Linux CI had set `SCCACHE_DIR` to the whole `/sccache`
+  mount, where `./dev` kept its build folder. sccache's local cache is one LRU over every file below its folder, so an insert that took
+  it over `SCCACHE_CACHE_SIZE` deleted cargo's rlibs. Six lanes also meant six sccache servers on one folder, which sccache documents
+  as unsupported. Reproduction: `tools/paddock-dev/tests/it/sccache_eviction.rs` (the file survives beside the cache folder, not in it).
+- **Fix:** a lane folder per job (`<mount>/sccache-<lane>`, the slot holder the hosts use), `./dev` in the job's own home with its binary
+  kept through `actions/cache` and verified for its hash, npm and Angular through `actions/cache`, every `actions/cache` use pinned to a digest.
+- **Class: concurrent jobs write one folder.** Earlier: run 8027 (E0514, one build folder for two compilers), the heavy binary vanishing
+  (2026-11-14), the Windows running-tool replace (`dev`, the `mv -f` fallback). The rule is drafted in ADR 0111: no writable folder is
+  shared between concurrent CI lanes; shared state goes through a keyed cache or an artifact.

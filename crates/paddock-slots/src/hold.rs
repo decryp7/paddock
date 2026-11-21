@@ -13,6 +13,9 @@ pub enum HoldEnd {
     OwnerGone,
     /// The holder reached its lifetime cap (a job that never ended and never released).
     Expired,
+    /// The slot's lock file was deleted or replaced while the holder held it (a cache cleanup of an old job): the lock no longer
+    /// keeps other jobs out, so the holder says so and ends.
+    LockLost,
 }
 
 /// What a holder watches. Injected so the loop is testable without files or sleeping.
@@ -23,6 +26,10 @@ pub trait HoldProbe {
     fn owner_present(&mut self) -> bool;
     /// The holder has lived as long as it may.
     fn expired(&mut self) -> bool;
+    /// The lock file is still the one this holder locked.
+    fn lock_intact(&mut self) -> bool {
+        true
+    }
     /// Wait until the next look.
     fn pause(&mut self);
 }
@@ -32,6 +39,9 @@ pub fn hold_until(probe: &mut impl HoldProbe) -> HoldEnd {
     loop {
         if probe.release_requested() {
             return HoldEnd::Released;
+        }
+        if !probe.lock_intact() {
+            return HoldEnd::LockLost;
         }
         if !probe.owner_present() {
             return HoldEnd::OwnerGone;
@@ -50,9 +60,13 @@ struct FsProbe<'a> {
     owner: &'a Path,
     poll: Duration,
     until: Option<Instant>,
+    guard: &'a crate::FsGuard,
 }
 
 impl HoldProbe for FsProbe<'_> {
+    fn lock_intact(&mut self) -> bool {
+        self.guard.lock_intact(&self.locks.lock_file(self.id))
+    }
     fn release_requested(&mut self) -> bool {
         self.locks.release_requested(self.id, self.token)
     }
@@ -192,6 +206,7 @@ pub fn hold_with(
         owner,
         poll,
         until: max_hold.map(|d| Instant::now() + d),
+        guard: &guard,
     });
     locks.clear_owner(id);
     locks.withdraw_release(id, &token);

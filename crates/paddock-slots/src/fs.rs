@@ -19,6 +19,26 @@ pub struct FsGuard {
     _live: File,
 }
 
+impl FsGuard {
+    /// The lock file at `path` is still the file this guard holds (the same device and inode on Unix; elsewhere: it exists, since
+    /// Windows does not delete an open file). An old job's cache cleanup that deleted the file leaves the holder with a lock on a
+    /// file no one else can see, and a new holder would then take "the same" slot on a new file.
+    pub fn lock_intact(&self, path: &Path) -> bool {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            match (self._file.metadata(), std::fs::metadata(path)) {
+                (Ok(held), Ok(now)) => held.dev() == now.dev() && held.ino() == now.ino(),
+                _ => false,
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            path.exists()
+        }
+    }
+}
+
 /// Who holds a slot, as written next to its lock for `status`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnerInfo {
@@ -74,6 +94,11 @@ impl FsLocks {
             Err(TryLockError::WouldBlock) => Ok(None),
             Err(TryLockError::Error(e)) => Err(io(&p)(e)),
         }
+    }
+
+    /// The path of slot `id`'s lock file.
+    pub fn lock_file(&self, id: SlotId) -> PathBuf {
+        self.file(id, "lock")
     }
 
     fn file(&self, id: SlotId, ext: &str) -> PathBuf {
