@@ -14,8 +14,8 @@ pub struct NotifySource;
 impl NotifySource {
     /// What one `notify` result means for the watch. An event flagged `Rescan` (notify 9 sets it for a Linux inotify
     /// `IN_Q_OVERFLOW`, an FSEvents `MustScanSubDirs` notice and a Windows `ReadDirectoryChangesW` overflow or
-    /// `ERROR_NOTIFY_ENUM_DIR`) and any error (the watch may have stopped seeing changes, or ended) both ask for a [`Change::Rescan`] with their cause; every other event is a
-    /// [`Change::Changed`].
+    /// `ERROR_NOTIFY_ENUM_DIR`) asks for a [`Change::Rescan`]; an error (the watch may have stopped, or ended) is a
+    /// [`Change::Failed`], after which the watch is started again; every other event is a [`Change::Changed`].
     pub fn change_from(res: &notify::Result<notify::Event>) -> Change {
         match res {
             Ok(event) if event.need_rescan() => Change::Rescan(format!(
@@ -23,7 +23,7 @@ impl NotifySource {
                 event.info().unwrap_or("its event queue overflowed")
             )),
             Ok(_) => Change::Changed,
-            Err(e) => Change::Rescan(format!("the watch reported an error: {e}")),
+            Err(e) => Change::Failed(format!("the watch reported an error: {e}")),
         }
     }
 }
@@ -47,5 +47,9 @@ impl ChangeSource for NotifySource {
         };
         watcher.watch(dir, mode).map_err(fail)?;
         Ok(Box::new(watcher))
+    }
+
+    fn boxed(&self) -> Box<dyn ChangeSource> {
+        Box::new(*self)
     }
 }

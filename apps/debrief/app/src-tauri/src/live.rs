@@ -170,6 +170,8 @@ fn watch_signal(res: notify::Result<notify::Event>) -> Option<WatchSignal> {
             Some(WatchSignal::Error(e.to_string()))
         }
         (Change::Rescan(cause), Ok(_)) => Some(WatchSignal::Rescan(cause)),
+        // The mapping calls only an error a failure, and errors are handled above; kept total for a future source.
+        (Change::Failed(cause), Ok(_)) => Some(WatchSignal::Error(cause)),
         // Opening or reading a file changes nothing.
         (Change::Changed, Ok(ev)) if matches!(ev.kind, notify::EventKind::Access(_)) => None,
         (Change::Changed, Ok(ev)) => Some(WatchSignal::Paths(ev.paths)),

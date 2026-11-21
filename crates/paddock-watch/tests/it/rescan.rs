@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 /// Every record the crate logged in this test binary, as `(level, message)`.
-fn logged() -> &'static Mutex<Vec<(log::Level, String)>> {
+pub(crate) fn logged() -> &'static Mutex<Vec<(log::Level, String)>> {
     struct Capture;
     impl log::Log for Capture {
         fn enabled(&self, _: &log::Metadata<'_>) -> bool {
@@ -35,7 +35,7 @@ fn logged() -> &'static Mutex<Vec<(log::Level, String)>> {
     RECORDS.get_or_init(Mutex::default)
 }
 
-fn lines_with(text: &str) -> Vec<(log::Level, String)> {
+pub(crate) fn lines_with(text: &str) -> Vec<(log::Level, String)> {
     logged()
         .lock()
         .unwrap_or_else(|p| p.into_inner())
@@ -181,10 +181,10 @@ mod notify_results {
     }
 
     #[test]
-    fn an_error_asks_for_a_rescan_and_a_plain_event_is_a_change() {
+    fn an_error_is_a_failed_watch_and_a_plain_event_is_a_change() {
         let err = notify::Error::generic("the watch broke");
         match NotifySource::change_from(&Err(err)) {
-            Change::Rescan(cause) => assert!(cause.contains("the watch broke"), "{cause}"),
+            Change::Failed(cause) => assert!(cause.contains("the watch broke"), "{cause}"),
             other => panic!("an error was {other:?}"),
         }
         let plain = notify::Event::new(EventKind::Create(notify::event::CreateKind::File));

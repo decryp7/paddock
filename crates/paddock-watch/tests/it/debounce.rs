@@ -113,6 +113,9 @@ fn a_source_that_cannot_start_or_a_folder_that_cannot_be_made_is_reported() {
         ) -> Result<Box<dyn Send>, paddock_watch::WatchError> {
             Err(paddock_watch::WatchError("no watches left".into()))
         }
+        fn boxed(&self) -> Box<dyn ChangeSource> {
+            Box::new(Refuses)
+        }
     }
     let (_c, d) = debouncer();
     let dir = tempfile::tempdir().unwrap();
@@ -143,27 +146,4 @@ fn a_source_that_cannot_start_or_a_folder_that_cannot_be_made_is_reported() {
     .unwrap();
     assert!(dir.path().join("made/here").is_dir());
     drop(h);
-}
-
-#[test]
-fn a_source_that_goes_away_ends_the_thread() {
-    struct Drops;
-    impl ChangeSource for Drops {
-        fn watch(
-            &self,
-            _: &std::path::Path,
-            _: bool,
-            tx: mpsc::Sender<paddock_watch::Change>,
-        ) -> Result<Box<dyn Send>, paddock_watch::WatchError> {
-            drop(tx);
-            Ok(Box::new(()))
-        }
-    }
-    let (_c, d) = debouncer();
-    let dir = tempfile::tempdir().unwrap();
-    let h = spawn(d, &Drops, dir.path(), false, || {}).unwrap();
-    while !h.is_finished() {
-        std::thread::yield_now(); // the thread leaves by itself: every sender is gone
-    }
-    h.stop();
 }

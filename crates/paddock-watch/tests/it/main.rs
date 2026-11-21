@@ -4,4 +4,5 @@
 mod debounce;
 mod native;
 mod rescan;
+mod restart;
 mod settle;

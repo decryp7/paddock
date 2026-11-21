@@ -89,6 +89,11 @@ impl Debouncer {
         self.pending.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// The debouncer's clock, now.
+    pub(crate) fn now(&self) -> Duration {
+        self.clock.monotonic()
+    }
+
     /// A change happened (any number of times).
     pub fn note_change(&self) {
         let now = self.clock.monotonic();
