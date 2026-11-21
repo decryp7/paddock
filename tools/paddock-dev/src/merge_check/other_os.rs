@@ -21,6 +21,14 @@
 //! failure on one OS exits 5. The step dispatches the trial itself whenever `GITEA_TOKEN` is set; the trial's scratch folder is
 //! `<trial root>/<branch>-<sha>` (see [`crate::ci_runs::trial::trial_root`]) and is removed at the end (ER-14, ER-51).
 //!
+//! **Two parts, two runs (user, 2026-11-21: trials use spare lanes).** The trial is one `ci.yml` run per OS, each its own handle: the
+//! Linux part (`os=linux`) is dispatched at once, also while a train's CI holds the runners, as long as a Linux lane is spare (the
+//! host's lanes from `conformance/ci/runner-slots.json` less the Linux jobs running now; every job keeps its lanes-times-threads
+//! share, ER-48); the Windows part (`os=windows`) waits for the train's reservation by progress. Each OS's row is judged from its
+//! own run as soon as that run ends and the Linux verdict is reported at once, but the member stays pending (the command has not
+//! returned) until the Windows part is judged: a row is never "clean" for the member before both parts are in. The Mac runner is
+//! not judged here, so no run asks for it. The split is ci.yml's `os` input, handled by the planner (`src/plan_os.rs`).
+//!
 //! **Judging (ER-12):** a test that failed both tries blocks; a FLAKY test (failed, then passed on its one retry) blocks only when
 //! the member's change touches its feature ([`feature_touched`]: a changed file named like one of the test's modules, or a test
 //! whose module cannot be told); otherwise the row passes and the flake is listed as a record, a fix item for the next train.
@@ -34,9 +42,10 @@ use super::generator_step::Step;
 use super::{Merge, git::Git, short};
 use crate::ci_runs::client::{Client, RunInfo, TimedJob};
 use crate::ci_runs::{dispatch, reservation, time, triage, trial};
+use crate::plan_os;
 use crate::queue::ports::{Blame, Failure};
 use crate::queue::real::{Child, GitTrain, failures_of};
-use crate::wait::{CurlHttp, Http};
+use crate::wait::{Clock, CurlHttp, Http};
 use paddock_cli::outcome::{CheckId, Finding, Outcome, Reason, RunId, Sha, Subject, ToolVersion, UnixSeconds, measure};
 use paddock_cli::{Exit, Severity};
 use paddock_proc::{Limits, command, run_bounded};
@@ -51,10 +60,10 @@ pub const ENFORCED: bool = true;
 /// The workflow the member's run uses: the plan's own jobs.
 pub const WORKFLOW: &str = "ci.yml";
 
-/// How long the dispatch may wait for a busy single-machine runner (ER-24).
-const MAX_DISPATCH_WAIT: &str = "45m";
-/// How long the run may take once it is dispatched (a full affected plan on the real runners).
-const MAX_RUN_WAIT: &str = "2h";
+/// How long a part's run may take once it is dispatched (a full affected plan of one OS on the real runners).
+const MAX_RUN_WAIT: Duration = Duration::from_secs(2 * 3600);
+/// How often the gate looks at its two parts.
+pub const TICK: Duration = Duration::from_secs(15);
 
 /// An operating system a row is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -189,15 +198,6 @@ pub fn phases_of(run_created_ms: Option<f64>, job_start_ms: Option<f64>, steps: 
     }
 }
 
-/// How the wait on the run ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunEnd {
-    /// The run finished (any conclusion).
-    Finished,
-    /// The run was still going when the bound ended.
-    StillRunning,
-}
-
 /// What the plan said about the member's own change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reach {
@@ -207,15 +207,24 @@ pub enum Reach {
     Nothing,
 }
 
-/// How a trial was started: the run the dispatch created (its id came back), or only the highest run id before it.
+/// How a part's run was started: the run the dispatch created (its id came back), or only the highest run id before it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Started {
     /// The server named the run it created: judge only this id (ER-51).
     Run(u64),
     /// The server did not: the run to judge is the one newer than this id that proves it is ours ([`pick_run`]).
     After(u64),
-    /// A shared runner stayed busy: nothing was dispatched.
-    Busy(String),
+}
+
+/// What one try to start a part gave. The gate tries again on every tick, so a part waits without blocking the other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TryStart {
+    /// Dispatched.
+    Started(Started),
+    /// Not yet (a train holds the runner, or no Linux lane is spare); the text says what.
+    Wait(String),
+    /// Nothing progressed for the limit: the part cannot be measured; the text says why.
+    Stalled(String),
 }
 
 /// The real CI as this step needs it. The real one is [`Gitea`]; tests give a table.
@@ -226,18 +235,23 @@ pub trait Runs {
     fn changed_files(&mut self, base: &str, head: &str) -> Result<Vec<String>, String>;
     /// Pushes `commit` to `git_ref` (a short-lived scratch ref).
     fn publish(&mut self, commit: &str, git_ref: &str) -> Result<(), String>;
-    /// Dispatches [`WORKFLOW`] on `git_ref` with `base`, and says which run it made, or what to compare with to find it.
-    fn dispatch(&mut self, git_ref: &str, base: &str) -> Result<Started, String>;
-    /// The id of the run this step dispatched, once it exists: the handle of `started`, or the one run newer than it that is ours.
-    fn find_run(&mut self, git_ref: &str, commit: &str, started: &Started) -> Result<Option<u64>, String>;
-    /// Waits for the run, at most [`MAX_RUN_WAIT`].
-    fn wait(&mut self, run: u64) -> Result<RunEnd, String>;
+    /// One try to dispatch [`WORKFLOW`] on `git_ref` with `base` and the `os` input of `part`: Linux at once on a spare lane, Windows
+    /// after the train's reservation. Never blocks for long: a part that cannot start yet is [`TryStart::Wait`].
+    fn try_dispatch(&mut self, part: Os, git_ref: &str, base: &str) -> Result<TryStart, String>;
+    /// The id of the run this step dispatched for `part`: the handle of `started`, or the one run newer than it that is ours.
+    fn find_run(&mut self, part: Os, git_ref: &str, commit: &str, started: &Started) -> Result<Option<u64>, String>;
+    /// Whether the run has ended (any conclusion); one look.
+    fn finished(&mut self, run: u64) -> Result<bool, String>;
     /// The run's own overall conclusion (`success`, `failure`, `cancelled`...).
     fn conclusion(&mut self, run: u64) -> Result<String, String>;
     /// The jobs of the run.
     fn jobs(&mut self, run: u64) -> Result<Vec<JobRow>, String>;
     /// The failures of the finished run, each blamed by `ci triage`.
     fn failures(&mut self, run: u64) -> Result<Vec<Failure>, String>;
+    /// Waits one tick (the shared clock) and says how long the gate has been going; the gate's loop is bounded by it (ER-32).
+    fn tick(&mut self) -> Duration;
+    /// Says a line now (progress: the Linux verdict as soon as it is in).
+    fn report(&mut self, line: &str);
     /// Deletes the scratch ref (best effort: `ci trial-prune` catches the rest).
     fn delete(&mut self, git_ref: &str);
 }
@@ -587,10 +601,16 @@ fn wording(enforced: bool) -> (&'static str, &'static str) {
 }
 
 /// The step for the rows of a run.
-pub fn step_of(rows: &[Row], not_judged: &[String], run: u64, git_ref: &str, base: &str, enforced: bool) -> Step {
+pub fn step_of(rows: &[Row], not_judged: &[String], runs: &[(Os, Option<u64>)], git_ref: &str, base: &str, enforced: bool) -> Step {
     let (level, report_only) = wording(enforced);
+    let run_of = |os: Os| runs.iter().find(|(o, _)| *o == os).and_then(|(_, r)| *r);
+    let named: Vec<String> = runs
+        .iter()
+        .map(|(os, r)| format!("{} {}", os.name(), r.map_or("not dispatched".to_string(), |id| format!("run {id}"))))
+        .collect();
     let mut text = vec![format!(
-        "member gate other-os (base {base}, run {run} on {git_ref}, real CI runners):"
+        "member gate other-os (base {base}, {} on {git_ref}, real CI runners):",
+        named.join(", ")
     )];
     let mut exit = Exit::Ok;
     let mut data = Vec::new();
@@ -623,7 +643,7 @@ pub fn step_of(rows: &[Row], not_judged: &[String], run: u64, git_ref: &str, bas
                 ));
             }
             Outcome::NotMeasured(why) | Outcome::CheckBroken(why) => text.push(format!(
-                "{level}::member gate other-os NOT MEASURED on {}: {}. Next step: read run {run} yourself (`./dev ci triage {run}`); a member whose other-OS tests did not give a verdict is not a member that passed.{report_only}",
+                "{level}::member gate other-os NOT MEASURED on {}: {}. Next step: read the run yourself (`./dev ci triage <run>`); a member whose other-OS tests did not give a verdict is not a member that passed.{report_only}",
                 r.os.name(),
                 why.as_str()
             )),
@@ -632,6 +652,7 @@ pub fn step_of(rows: &[Row], not_judged: &[String], run: u64, git_ref: &str, bas
         exit = worst(exit, cost(enforced, &r.outcome));
         data.push(json!({
             "os": r.os.name(),
+            "run": run_of(r.os),
             "outcome": r.outcome.json(),
             "jobs": r.jobs,
             "alsoOnMain": r.known,
@@ -659,7 +680,7 @@ pub fn step_of(rows: &[Row], not_judged: &[String], run: u64, git_ref: &str, bas
     };
     Step {
         text,
-        data: json!({"outcome": word, "base": base, "run": run, "ref": git_ref, "enforced": enforced, "rows": data, "notJudged": not_judged}),
+        data: json!({"outcome": word, "base": base, "runs": {"linux": run_of(Os::Linux), "windows": run_of(Os::Windows)}, "ref": git_ref, "enforced": enforced, "rows": data, "notJudged": not_judged}),
         exit,
     }
 }
@@ -716,6 +737,75 @@ pub fn run(merge: &Merge, runs: &mut dyn Runs, enforced: bool) -> Step {
     step
 }
 
+/// One part's progress through the gate.
+enum Part {
+    /// Not dispatched yet.
+    Todo,
+    /// Dispatched: the handle and when (the gate's elapsed time).
+    Running { run: u64, since: Duration },
+    /// Judged (or not measurable): its row, its run and the jobs nothing judges.
+    Done {
+        row: Box<Row>,
+        run: Option<u64>,
+        not_judged: Vec<String>,
+    },
+}
+
+/// A row for an OS that could not be measured, with the cause.
+fn unmeasured_row(os: Os, why: String) -> Row {
+    Row {
+        os,
+        outcome: Outcome::NotMeasured(Reason::new(why)),
+        jobs: Vec::new(),
+        known: Vec::new(),
+        flaky: Vec::new(),
+        phases: None,
+    }
+}
+
+/// What an OS part's run says: its row (from the run's own jobs, failures and conclusion) and the jobs no row judges.
+fn judge_part(
+    runs: &mut dyn Runs,
+    os: Os,
+    run: u64,
+    commit: &str,
+    changed: &[String],
+    plan: &Value,
+) -> Result<(Box<Row>, Vec<String>), String> {
+    let conclusion = runs
+        .conclusion(run)
+        .map_err(|e| format!("the conclusion of run {run} could not be read: {e}"))?;
+    let jobs = runs
+        .jobs(run)
+        .map_err(|e| format!("the jobs of run {run} could not be read: {e}"))?;
+    let failures = runs
+        .failures(run)
+        .map_err(|e| format!("the failures of run {run} could not be triaged: {e}"))?;
+    let ctx = Ctx {
+        changed,
+        plan,
+        run_conclusion: &conclusion,
+    };
+    let row = rows(run, commit, &jobs, &failures, &ctx)
+        .into_iter()
+        .find(|r| r.os == os)
+        .ok_or_else(|| format!("no row for {}", os.name()))?;
+    Ok((Box::new(row), not_judged(&jobs)))
+}
+
+/// What a tick does to one part.
+enum Move {
+    /// Nothing yet.
+    Stay,
+    /// The run was found: the part is running.
+    Start(u64),
+    /// The part ended: `Ok` its row and the jobs nothing judges, or why it cannot be measured; and its run, when it had one.
+    Finish(Result<(Box<Row>, Vec<String>), String>, Option<u64>),
+}
+
+/// Runs the two parts side by side and returns the step. The loop looks at both on every tick, so the Linux part runs and is judged
+/// while the Windows part still waits for the train; it ends when both are judged or cannot be measured, and every wait inside it has
+/// its own bound (a stall limit for a part not started, [`MAX_RUN_WAIT`] for a started one). The member is clean only after both.
 fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &str, plan: &Value, enforced: bool) -> Step {
     let changed = match runs.changed_files(base, commit) {
         Ok(c) => c,
@@ -724,65 +814,102 @@ fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &s
     if let Err(e) = runs.publish(commit, git_ref) {
         return unmeasured(enforced, &format!("the merge could not be pushed to {git_ref}: {e}"));
     }
-    let started = match runs.dispatch(git_ref, base) {
-        Err(e) => return unmeasured(enforced, &format!("ci.yml could not be dispatched on {git_ref}: {e}")),
-        Ok(Started::Busy(last)) => {
-            return unmeasured(
-                enforced,
-                &format!(
-                    "the runners stayed busy or held by a train with no progress ({last}); one train's CI per runner class at a time (ER-24)"
-                ),
-            );
+    let order = [Os::Linux, Os::Windows];
+    let mut parts: Vec<Part> = order.iter().map(|_| Part::Todo).collect();
+    let mut waiting_said = [false; 2];
+    let mut elapsed = Duration::ZERO;
+    while parts.iter().any(|p| !matches!(p, Part::Done { .. })) {
+        for (i, os) in order.iter().copied().enumerate() {
+            let mv = match &parts[i] {
+                Part::Done { .. } => Move::Stay,
+                Part::Todo => match runs.try_dispatch(os, git_ref, base) {
+                    Err(e) => Move::Finish(
+                        Err(format!("ci.yml could not be dispatched for {} on {git_ref}: {e}", os.name())),
+                        None,
+                    ),
+                    Ok(TryStart::Stalled(why)) => Move::Finish(Err(format!("the {} part was not started: {why}", os.name())), None),
+                    Ok(TryStart::Wait(why)) => {
+                        if !waiting_said[i] {
+                            runs.report(&format!("other-os: the {} part waits: {why}", os.name()));
+                            waiting_said[i] = true;
+                        }
+                        Move::Stay
+                    }
+                    Ok(TryStart::Started(started)) => match runs.find_run(os, git_ref, commit, &started) {
+                        Ok(Some(run)) => Move::Start(run),
+                        Ok(None) => Move::Finish(
+                            Err(format!(
+                                "no run of ci.yml that this dispatch made appeared for the {} part on {git_ref}",
+                                os.name()
+                            )),
+                            None,
+                        ),
+                        Err(e) => Move::Finish(Err(format!("the {} part's run could not be found: {e}", os.name())), None),
+                    },
+                },
+                Part::Running { run, since } => {
+                    let (run, since) = (*run, *since);
+                    match runs.finished(run) {
+                        Ok(true) => Move::Finish(judge_part(runs, os, run, commit, &changed, plan), Some(run)),
+                        Ok(false) if elapsed.saturating_sub(since) >= MAX_RUN_WAIT => Move::Finish(
+                            Err(format!(
+                                "run {run} was still going after {}",
+                                crate::wait::fmt_duration(MAX_RUN_WAIT)
+                            )),
+                            Some(run),
+                        ),
+                        Ok(false) => Move::Stay,
+                        Err(e) => Move::Finish(Err(format!("run {run} could not be read: {e}")), Some(run)),
+                    }
+                }
+            };
+            match mv {
+                Move::Stay => {}
+                Move::Start(run) => {
+                    runs.report(&format!(
+                        "other-os: the {} part is ci.yml run {run} on {git_ref} (base {}); waiting at most {}",
+                        os.name(),
+                        short(base),
+                        crate::wait::fmt_duration(MAX_RUN_WAIT)
+                    ));
+                    parts[i] = Part::Running { run, since: elapsed };
+                }
+                Move::Finish(result, run) => {
+                    let (row, not_judged) = result.unwrap_or_else(|why| (Box::new(unmeasured_row(os, why)), Vec::new()));
+                    let others_pending = parts.iter().enumerate().any(|(j, p)| j != i && !matches!(p, Part::Done { .. }));
+                    // The verdict of the part that is in is said at once; the member is not clean until the others are judged too.
+                    runs.report(&format!(
+                        "other-os: {} {}{}{}",
+                        os.name(),
+                        row.outcome.name(),
+                        row.phases.map_or(String::new(), |p| format!(" ({})", p.text())),
+                        if others_pending {
+                            " (the member stays pending until the other OS part is judged)"
+                        } else {
+                            ""
+                        }
+                    ));
+                    parts[i] = Part::Done { row, run, not_judged };
+                }
+            }
         }
-        Ok(s) => s,
-    };
-    // The handle: the run this dispatch made, and only it is judged (ER-51).
-    let run = match runs.find_run(git_ref, commit, &started) {
-        Ok(Some(id)) => id,
-        Ok(None) => {
-            return unmeasured(
-                enforced,
-                &format!("no run of ci.yml that this dispatch made appeared for {git_ref}"),
-            );
+        if parts.iter().any(|p| !matches!(p, Part::Done { .. })) {
+            elapsed = runs.tick();
         }
-        Err(e) => return unmeasured(enforced, &format!("the run could not be found: {e}")),
-    };
-    eprintln!(
-        "other-os: ci.yml run {run} on {git_ref} (base {}); waiting at most {MAX_RUN_WAIT}",
-        short(base)
-    );
-    match runs.wait(run) {
-        Err(e) => return unmeasured(enforced, &format!("run {run} could not be waited for: {e}")),
-        Ok(RunEnd::StillRunning) => return unmeasured(enforced, &format!("run {run} was still going after {MAX_RUN_WAIT}")),
-        Ok(RunEnd::Finished) => {}
     }
-    let conclusion = match runs.conclusion(run) {
-        Ok(c) => c,
-        Err(e) => return unmeasured(enforced, &format!("the conclusion of run {run} could not be read: {e}")),
-    };
-    let jobs = match runs.jobs(run) {
-        Ok(j) => j,
-        Err(e) => return unmeasured(enforced, &format!("the jobs of run {run} could not be read: {e}")),
-    };
-    let failures = match runs.failures(run) {
-        Ok(f) => f,
-        Err(e) => return unmeasured(enforced, &format!("the failures of run {run} could not be triaged: {e}")),
-    };
-    let ctx = Ctx {
-        changed: &changed,
-        plan,
-        run_conclusion: &conclusion,
-    };
-    let rows = rows(run, commit, &jobs, &failures, &ctx);
-    for r in &rows {
-        eprintln!(
-            "other-os: run {run} {}: {}{}",
-            r.os.name(),
-            r.outcome.name(),
-            r.phases.map_or(String::new(), |p| format!(" ({})", p.text()))
-        );
+    let mut rows = Vec::new();
+    let mut handles = Vec::new();
+    let mut judged_not = Vec::new();
+    for (os, p) in order.iter().copied().zip(parts) {
+        if let Part::Done { row, run, not_judged } = p {
+            rows.push(*row);
+            handles.push((os, run));
+            judged_not.extend(not_judged);
+        }
     }
-    step_of(&rows, &not_judged(&jobs), run, git_ref, short(base), enforced)
+    judged_not.sort();
+    judged_not.dedup();
+    step_of(&rows, &judged_not, &handles, git_ref, short(base), enforced)
 }
 
 /// The real CI: Gitea's API with `GITEA_TOKEN`, the tool's own git for the push, the tool's own planner and waiter.
@@ -795,6 +922,10 @@ pub struct Gitea {
     trial_root: PathBuf,
     scratch: PathBuf,
     http: CurlHttp,
+    /// The gate's own clock: [`Runs::tick`] sleeps on it and reports how long the gate has been going.
+    clock: crate::wait::SystemClock,
+    /// Per part, whether the train's CI still moves while the part waits for it ([`reservation::Stall`]).
+    stalls: std::collections::BTreeMap<Os, reservation::Stall>,
 }
 
 /// The folder name of one merge's trial: its label (cleaned to letters, digits, `.`, `_`, `-`) and the commit's short id.
@@ -847,6 +978,8 @@ impl Gitea {
             trial_root,
             scratch,
             http: CurlHttp,
+            clock: crate::wait::SystemClock::new(),
+            stalls: std::collections::BTreeMap::new(),
         })
     }
 
@@ -868,6 +1001,62 @@ impl Gitea {
     fn me() -> Result<PathBuf, String> {
         crate::tool_cache::self_exe().map_err(|e| format!("this program cannot be found: {e}"))
     }
+}
+
+impl Gitea {
+    /// The Linux lanes no running job uses: `(spare, busy, lanes)`. The lanes are `conformance/ci/runner-slots.json`'s (one place,
+    /// ER-48); busy is the Linux jobs in progress across the unfinished runs (the train's, and this gate's own).
+    fn spare_linux_lanes(&mut self) -> Result<(usize, usize, usize), String> {
+        let lanes = dispatch::linux_slots(&self.root)?;
+        let mut c = Client::new(&mut self.http, &self.server, &self.repo, &self.token);
+        let unfinished: Vec<u64> = c.runs_page(1)?.runs.iter().filter(|r| !r.finished()).map(|r| r.id).collect();
+        let mut busy = 0;
+        for id in unfinished {
+            if let Some(jobs) = c.timed_jobs(id)? {
+                busy += busy_linux_jobs(&jobs);
+            }
+        }
+        Ok((lanes.saturating_sub(busy), busy, lanes))
+    }
+
+    /// One dispatch of `ci.yml` with the `os` input of `part` (the planner narrows the run to it, `src/plan_os.rs`). The dispatch's own
+    /// runner guard is asked for at most a few seconds, so a busy Windows runner is `Err(why)` for this tick, not a long block of the
+    /// loop that judges the other part. `Ok(Ok(started))` carries the handle.
+    fn dispatch_part(&mut self, part: Os, git_ref: &str, base: &str) -> Result<Result<Started, String>, String> {
+        let after = {
+            let mut c = Client::new(&mut self.http, &self.server, &self.repo, &self.token);
+            c.runs_page(1)?.runs.iter().map(|r| r.id).max().unwrap_or(0)
+        };
+        let os = match part {
+            Os::Linux => plan_os::OsPart::Linux,
+            Os::Windows => plan_os::OsPart::Windows,
+        };
+        let inputs = [format!("base={base}"), format!("os={}", os.input())];
+        let req = dispatch::parse_request(WORKFLOW, git_ref, &inputs, "2s", Some("1s"))?;
+        let root = self.root.clone();
+        let read = move |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
+        let mut clock = dispatch::system_clock();
+        let target = dispatch::Target {
+            server: &self.server,
+            repo: &self.repo,
+            token: &self.token,
+        };
+        Ok(
+            match dispatch::run_with_id(&mut self.http, &target, &req, &read, &mut clock, &mut std::io::stderr())? {
+                (dispatch::Dispatched::Yes { .. }, Some(id)) => Ok(Started::Run(id)),
+                (dispatch::Dispatched::Yes { .. }, None) => Ok(Started::After(after)),
+                (dispatch::Dispatched::StillBusy { last }, _) => Err(format!("the {} runner is busy ({last})", part.name())),
+            },
+        )
+    }
+}
+
+/// The Linux jobs running now among a run's jobs (the lanes they use).
+pub fn busy_linux_jobs(jobs: &[TimedJob]) -> usize {
+    jobs.iter()
+        .filter(|j| j.status == "in_progress")
+        .filter(|j| Os::of_job(&j.name).or_else(|| j.labels.iter().find_map(|l| Os::of_job(l))) == Some(Os::Linux))
+        .count()
 }
 
 impl Drop for Gitea {
@@ -908,44 +1097,48 @@ impl Runs for Gitea {
         if ok { Ok(()) } else { Err(out.trim().to_string()) }
     }
 
-    fn dispatch(&mut self, git_ref: &str, base: &str) -> Result<Started, String> {
-        // The train always goes first: a member run never takes the gap between two workflows of a train's CI sequence. It waits while
-        // the train's CI makes progress (the unfinished runs change) and ends "busy" only when nothing moved for the stall, or at the
-        // hard limit (ER-32), not after a short fixed time while the train is still working.
-        let free = {
-            let (server, repo, token) = (&self.server, &self.repo, &self.token);
-            let http = &mut self.http;
-            let mut signature = || progress_signature(http, server, repo, token);
-            reservation::wait_real_progress(RESERVATION_STALL, RESERVATION_HARD_MAX, &mut signature, &mut std::io::stderr())?
+    fn try_dispatch(&mut self, part: Os, git_ref: &str, base: &str) -> Result<TryStart, String> {
+        // The train always goes first: its CI sequence holds the reservation for its whole duration. The Windows part waits for it. The
+        // Linux part goes on Linux lanes the train is not using (spare lanes), whether or not a train holds the runners.
+        let holder = {
+            let root = reservation::lock_root().ok_or("the train reservation folder cannot be derived (set PADDOCK_TRAIN_CI_LOCK_ROOT)")?;
+            reservation::Held::holder(&mut reservation::LockSlots::new(root))?
         };
-        if let reservation::Free::StillHeld { holder } = free {
-            return Ok(Started::Busy(format!("a train's CI sequence holds the runners: {holder}")));
-        }
-        // The highest run id before the dispatch: the fallback handle when the server does not name the run it creates.
-        let after = {
-            let mut c = Client::new(&mut self.http, &self.server, &self.repo, &self.token);
-            c.runs_page(1)?.runs.iter().map(|r| r.id).max().unwrap_or(0)
+        let blocked: Option<String> = match (&holder, part) {
+            (None, _) => None,
+            (Some(h), Os::Windows) => Some(format!("a train's CI sequence holds the runners ({h})")),
+            (Some(h), Os::Linux) => {
+                let (spare, busy, lanes) = self.spare_linux_lanes()?;
+                (spare == 0).then(|| format!("a train's CI holds the runners ({h}) and no Linux lane is spare ({busy} of {lanes} in use)"))
+            }
         };
-        let req = dispatch::parse_request(WORKFLOW, git_ref, &[format!("base={base}")], MAX_DISPATCH_WAIT, None)?;
-        let root = self.root.clone();
-        let read = move |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
-        let mut clock = dispatch::system_clock();
-        let target = dispatch::Target {
-            server: &self.server,
-            repo: &self.repo,
-            token: &self.token,
+        let why = match blocked {
+            None => match self.dispatch_part(part, git_ref, base)? {
+                Ok(started) => return Ok(TryStart::Started(started)),
+                Err(busy) => busy,
+            },
+            Some(why) => why,
         };
-        match dispatch::run_with_id(&mut self.http, &target, &req, &read, &mut clock, &mut std::io::stderr())? {
-            (dispatch::Dispatched::Yes { .. }, Some(id)) => Ok(Started::Run(id)),
-            (dispatch::Dispatched::Yes { .. }, None) => Ok(Started::After(after)),
-            (dispatch::Dispatched::StillBusy { last }, _) => Ok(Started::Busy(last)),
-        }
+        // Held or busy: wait while the train's CI makes progress; end only after the stall limit with none (ER-32).
+        let now = self.clock.elapsed();
+        let signature = format!(
+            "{}|{}",
+            holder.as_deref().unwrap_or(""),
+            progress_signature(&mut self.http, &self.server, &self.repo, &self.token).unwrap_or_default()
+        );
+        let stall = self
+            .stalls
+            .entry(part)
+            .or_insert_with(|| reservation::Stall::new(RESERVATION_STALL, RESERVATION_HARD_MAX, now));
+        Ok(match stall.observe(now, signature) {
+            Err(limit) => TryStart::Stalled(format!("{why}; {limit}")),
+            Ok(_) => TryStart::Wait(why),
+        })
     }
 
-    fn find_run(&mut self, git_ref: &str, commit: &str, started: &Started) -> Result<Option<u64>, String> {
+    fn find_run(&mut self, _part: Os, git_ref: &str, commit: &str, started: &Started) -> Result<Option<u64>, String> {
         let after = match started {
             Started::Run(id) => return Ok(Some(*id)),
-            Started::Busy(_) => return Ok(None),
             Started::After(a) => *a,
         };
         // The run exists within seconds of the dispatch; wait for it with the shared bounded wait (ER-32).
@@ -973,17 +1166,9 @@ impl Runs for Gitea {
         }
     }
 
-    fn wait(&mut self, run: u64) -> Result<RunEnd, String> {
-        let mut cmd = command(Self::me()?);
-        cmd.args(["wait", "--ci-run", &run.to_string(), "--max", MAX_RUN_WAIT]);
-        // The wait ends at its own --max; the outer bound only ends a hang (ER-32). What decides is the run's own state.
-        let _ = run_bounded(cmd, Limits::new(Duration::from_secs(2 * 3600 + 300))).map_err(|e| format!("`dev wait` could not run: {e}"))?;
+    fn finished(&mut self, run: u64) -> Result<bool, String> {
         let mut c = Client::new(&mut self.http, &self.server, &self.repo, &self.token);
-        match c.run(run)? {
-            Some(r) if r.finished() => Ok(RunEnd::Finished),
-            Some(_) => Ok(RunEnd::StillRunning),
-            None => Err(format!("run {run} is not listed")),
-        }
+        c.run(run)?.map(|r| r.finished()).ok_or_else(|| format!("run {run} is not listed"))
     }
 
     fn conclusion(&mut self, run: u64) -> Result<String, String> {
@@ -1023,6 +1208,15 @@ impl Runs for Gitea {
         };
         let http: &mut dyn Http = &mut self.http;
         Ok(failures_of(&report, run, http, &self.server, &self.repo, &self.token))
+    }
+
+    fn tick(&mut self) -> Duration {
+        self.clock.sleep(TICK);
+        self.clock.elapsed()
+    }
+
+    fn report(&mut self, line: &str) {
+        eprintln!("{line}");
     }
 
     fn delete(&mut self, git_ref: &str) {
@@ -1137,7 +1331,7 @@ pub fn run_real(root: &Path, _git: &Git, merge: &Merge, enforced: bool, gates_fa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
     // The gate is enforced since 2026-11-21 (user): a train merge it could not measure must not go on. Un-enforcing it is a decision of
     // the user, so this fails the build until that is decided.
@@ -1352,7 +1546,7 @@ mod tests {
         }
         assert_eq!(row(&r, Os::Linux).jobs, vec!["conformance", "ui"]);
         assert_eq!(not_judged(&jobs), vec!["app dyno (macos-latest)"]);
-        let s = step_of(&r, &not_judged(&jobs), 7, "trial/x", "1111111", true);
+        let s = step_of(&r, &not_judged(&jobs), &[(Os::Linux, Some(7))], "trial/x", "1111111", true);
         assert!(
             s.text.join("\n").contains("not judged") && s.text.join("\n").contains("app dyno (macos-latest)"),
             "{:?}",
@@ -1512,36 +1706,51 @@ mod tests {
         assert!(matches!(row(&r, Os::Windows).outcome, Outcome::Findings(_)));
     }
 
-    /// A table CI: records what was asked, answers from fields.
+    /// A table CI: records what was asked, answers from fields. Time is a counter: `tick` is one step, and a run finishes at the tick its
+    /// table names.
     struct Fake {
         plan: Result<Value, String>,
-        started: Result<Started, String>,
-        run: Option<u64>,
-        end: RunEnd,
-        conclusion: String,
-        jobs: Vec<JobRow>,
-        failures: Vec<Failure>,
+        /// The answers of `try_dispatch` per part, in order; the last one repeats.
+        linux: Vec<TryStart>,
+        windows: Vec<TryStart>,
+        /// What `find_run` answers per part when the server named no run.
+        found: BTreeMap<Os, Option<u64>>,
+        /// The tick at which each run is over.
+        ends: BTreeMap<u64, u64>,
+        conclusion: BTreeMap<u64, String>,
+        jobs: BTreeMap<u64, Vec<JobRow>>,
+        failures: BTreeMap<u64, Vec<Failure>>,
         changed: Vec<String>,
+        ticks: u64,
         asked: Vec<String>,
     }
 
     impl Fake {
+        /// The Linux part starts at once (run 101, over at tick 1); the Windows part waits two ticks for the train, then runs
+        /// (run 102, over at tick 4). Both are green.
         fn green() -> Fake {
+            let ok = |os_job: &str| vec![job("plan", "success"), job(os_job, "success")];
             Fake {
                 plan: Ok(plan_paddock_dev()),
-                started: Ok(Started::After(100)),
-                run: Some(101),
-                end: RunEnd::Finished,
-                conclusion: "success".into(),
-                jobs: vec![
-                    job("plan", "success"),
-                    job("crates (ubuntu-latest)", "success"),
-                    job("crates (windows-latest)", "success"),
+                linux: vec![TryStart::Started(Started::After(100))],
+                windows: vec![
+                    TryStart::Wait("a train's CI sequence holds the runners".into()),
+                    TryStart::Wait("a train's CI sequence holds the runners".into()),
+                    TryStart::Started(Started::After(100)),
                 ],
-                failures: Vec::new(),
+                found: [(Os::Linux, Some(101)), (Os::Windows, Some(102))].into(),
+                ends: [(101, 1), (102, 4)].into(),
+                conclusion: BTreeMap::new(),
+                jobs: [(101, ok("crates (ubuntu-latest)")), (102, ok("crates (windows-latest)"))].into(),
+                failures: BTreeMap::new(),
                 changed: strs(&["tools/paddock-dev/src/x.rs"]),
+                ticks: 0,
                 asked: Vec::new(),
             }
+        }
+
+        fn answer(list: &mut Vec<TryStart>) -> TryStart {
+            if list.len() > 1 { list.remove(0) } else { list[0].clone() }
         }
     }
 
@@ -1557,32 +1766,43 @@ mod tests {
             self.asked.push(format!("publish {commit} {git_ref}"));
             Ok(())
         }
-        fn dispatch(&mut self, git_ref: &str, base: &str) -> Result<Started, String> {
-            self.asked.push(format!("dispatch {git_ref} base={base}"));
-            self.started.clone()
+        fn try_dispatch(&mut self, part: Os, git_ref: &str, base: &str) -> Result<TryStart, String> {
+            let t = match part {
+                Os::Linux => Fake::answer(&mut self.linux),
+                Os::Windows => Fake::answer(&mut self.windows),
+            };
+            if let TryStart::Started(_) = t {
+                self.asked.push(format!("dispatch {} {git_ref} base={base}", part.name()));
+            }
+            Ok(t)
         }
-        fn find_run(&mut self, _git_ref: &str, _commit: &str, started: &Started) -> Result<Option<u64>, String> {
+        fn find_run(&mut self, part: Os, _git_ref: &str, _commit: &str, started: &Started) -> Result<Option<u64>, String> {
             Ok(match started {
                 Started::Run(id) => Some(*id),
-                Started::After(_) => self.run,
-                Started::Busy(_) => None,
+                Started::After(_) => self.found.get(&part).copied().flatten(),
             })
         }
-        fn wait(&mut self, run: u64) -> Result<RunEnd, String> {
-            self.asked.push(format!("wait {run}"));
-            Ok(self.end)
+        fn finished(&mut self, run: u64) -> Result<bool, String> {
+            let done = self.ticks >= self.ends.get(&run).copied().unwrap_or(0);
+            self.asked.push(format!("finished {run} {done}"));
+            Ok(done)
         }
         fn conclusion(&mut self, run: u64) -> Result<String, String> {
-            self.asked.push(format!("conclusion {run}"));
-            Ok(self.conclusion.clone())
+            Ok(self.conclusion.get(&run).cloned().unwrap_or_else(|| "success".into()))
         }
         fn jobs(&mut self, run: u64) -> Result<Vec<JobRow>, String> {
             self.asked.push(format!("jobs {run}"));
-            Ok(self.jobs.clone())
+            Ok(self.jobs.get(&run).cloned().unwrap_or_default())
         }
         fn failures(&mut self, run: u64) -> Result<Vec<Failure>, String> {
-            self.asked.push(format!("failures {run}"));
-            Ok(self.failures.clone())
+            Ok(self.failures.get(&run).cloned().unwrap_or_default())
+        }
+        fn tick(&mut self) -> Duration {
+            self.ticks += 1;
+            Duration::from_secs(15 * self.ticks)
+        }
+        fn report(&mut self, line: &str) {
+            self.asked.push(format!("report {line}"));
         }
         fn delete(&mut self, git_ref: &str) {
             self.asked.push(format!("delete {git_ref}"));
@@ -1601,6 +1821,13 @@ mod tests {
         .with_commit(Some("abcdef0123456789abcdef0123456789abcdef01".into()))
     }
 
+    fn at(asked: &[String], prefix: &str) -> usize {
+        asked
+            .iter()
+            .position(|a| a.starts_with(prefix))
+            .unwrap_or_else(|| panic!("`{prefix}` is not in {asked:?}"))
+    }
+
     #[test]
     fn a_member_the_plan_does_not_reach_is_not_run_and_nothing_is_pushed() {
         let mut f = Fake::green();
@@ -1612,81 +1839,125 @@ mod tests {
         assert_eq!(f.asked.len(), 1, "{:?}", f.asked);
     }
 
+    /// The user's rule (2026-11-21): while a train holds the Windows runner, the Linux part runs and is judged at once, Windows waits
+    /// and is judged after, and the member is clean only after both. The Linux verdict is said the moment it is in, before the
+    /// Windows part is even dispatched.
     #[test]
-    fn the_merge_is_pushed_dispatched_with_the_train_before_as_base_and_the_scratch_ref_is_always_deleted() {
+    fn linux_runs_and_is_judged_while_windows_waits_and_the_member_is_clean_only_after_both() {
         let mut f = Fake::green();
         let s = run(&merge(), &mut f, true);
         assert_eq!(s.data["outcome"], "passed", "{:?}", s.text);
         assert_eq!(s.exit, Exit::Ok);
-        let sref = "trial/member-abcdef012345";
-        assert_eq!(
-            f.asked,
-            vec![
-                "plan 1111111111111111111111111111111111111111..abcdef0123456789abcdef0123456789abcdef01".to_string(),
-                format!("publish abcdef0123456789abcdef0123456789abcdef01 {sref}"),
-                format!("dispatch {sref} base=1111111111111111111111111111111111111111"),
-                "wait 101".to_string(),
-                "conclusion 101".to_string(),
-                "jobs 101".to_string(),
-                "failures 101".to_string(),
-                format!("delete {sref}"),
-            ]
+        let a = &f.asked;
+        // Order: Linux dispatched first, its verdict reported (member pending) before Windows is dispatched, Windows judged last.
+        let (l_dispatch, l_verdict) = (at(a, "dispatch linux"), at(a, "report other-os: linux clean"));
+        let (w_dispatch, w_jobs) = (at(a, "dispatch windows"), at(a, "jobs 102"));
+        assert!(l_dispatch < l_verdict && l_verdict < w_dispatch && w_dispatch < w_jobs, "{a:?}");
+        assert!(a[l_verdict].contains("stays pending"), "{}", a[l_verdict]);
+        assert!(
+            !a[at(a, "report other-os: windows")].contains("stays pending"),
+            "windows is the last part in: {a:?}"
         );
-        // Also when the dispatch did not happen.
-        let mut f = Fake::green();
-        f.started = Ok(Started::Busy("run 8200".into()));
-        let s = run(&merge(), &mut f, true);
-        assert_eq!(s.data["outcome"], "not measured");
-        assert!(f.asked.last().unwrap().starts_with("delete "));
+        // Each part was judged from its own run.
+        assert_eq!(s.data["runs"], json!({"linux": 101, "windows": 102}));
+        assert_eq!(s.data["rows"][0]["run"], 101);
+        assert_eq!(s.data["rows"][1]["run"], 102);
+        let sref = "trial/member-abcdef012345";
+        assert_eq!(a.last().unwrap(), &format!("delete {sref}"));
     }
 
-    /// P1 (ER-51): when the server names the run it created, that id and no other is waited for and judged, whatever else is on the commit.
+    /// Positive control (ER-33): Linux done alone never passes. When the train never gives the Windows runner back (nothing progresses
+    /// for the stall limit), the Linux row is reported clean but the member is `not measured`, exit 6; and a Windows failure after a
+    /// clean Linux fails the member.
     #[test]
-    fn the_run_the_dispatch_named_is_the_only_one_judged() {
+    fn linux_done_alone_never_passes() {
         let mut f = Fake::green();
-        f.started = Ok(Started::Run(777));
-        f.run = Some(101); // another run on the commit: never asked about
+        f.windows = vec![
+            TryStart::Wait("a train's CI sequence holds the runners".into()),
+            TryStart::Stalled("a train's CI sequence holds the runners; nothing progressed for 45m".into()),
+        ];
+        let s = run(&merge(), &mut f, ENFORCED);
+        assert_eq!(s.data["rows"][0]["outcome"]["status"], "clean", "Linux itself was judged");
+        assert_eq!(s.data["rows"][1]["outcome"]["status"], "not-measured", "{:?}", s.data["rows"][1]);
+        assert_eq!(s.data["outcome"], "not measured");
+        assert_eq!(s.exit, Exit::NotMeasured);
+        assert!(!f.asked.iter().any(|a| a.starts_with("dispatch windows")), "{:?}", f.asked);
+        // Windows judged and red after a clean Linux: the member fails.
+        let mut f = Fake::green();
+        f.jobs
+            .insert(102, vec![job("plan", "success"), job("crates (windows-latest)", "failure")]);
+        f.failures
+            .insert(102, vec![fail("crates (windows-latest)", "sccache_eviction::x", Blame::New)]);
+        let s = run(&merge(), &mut f, ENFORCED);
+        assert_eq!(s.data["rows"][0]["outcome"]["status"], "clean");
+        assert_eq!(s.data["rows"][1]["outcome"]["status"], "findings");
+        assert_eq!(s.exit, Exit::Findings);
+    }
+
+    /// No Linux lane is spare while the train works: the Linux part waits too (it never takes a lane the train uses), then goes.
+    #[test]
+    fn the_linux_part_waits_for_a_spare_lane_and_then_goes() {
+        let mut f = Fake::green();
+        f.linux = vec![
+            TryStart::Wait("a train's CI holds the runners and no Linux lane is spare (3 of 3 in use)".into()),
+            TryStart::Started(Started::After(100)),
+        ];
         let s = run(&merge(), &mut f, true);
-        assert_eq!(s.data["run"], 777);
+        assert_eq!(s.data["outcome"], "passed", "{:?}", s.text);
         assert!(
-            f.asked.contains(&"wait 777".to_string()) && !f.asked.iter().any(|a| a.ends_with(" 101")),
+            f.asked
+                .iter()
+                .any(|a| a.contains("the linux part waits") && a.contains("no Linux lane is spare")),
             "{:?}",
             f.asked
         );
     }
 
-    /// Positive control (ER-33): a run this step did not make cannot pass. With no run of ours (only stale runs on the commit, which
-    /// `pick_run` refuses), the row is `not measured` with the exit 6; with the dispatch's own run, it is judged.
+    /// ER-51: when the server names the run it created, that id and no other is judged for the part.
     #[test]
-    fn without_a_run_of_its_own_the_row_cannot_pass() {
+    fn the_run_the_dispatch_named_is_the_only_one_judged() {
         let mut f = Fake::green();
-        f.run = None; // the stale run on the sha is not ours: find_run finds nothing
-        let s = run(&merge(), &mut f, ENFORCED);
-        assert_eq!(s.data["outcome"], "not measured");
-        assert_eq!(s.exit, Exit::NotMeasured);
-        assert!(!f.asked.iter().any(|a| a.starts_with("jobs ")), "nothing was judged: {:?}", f.asked);
-        let mut f = Fake::green();
-        let s = run(&merge(), &mut f, ENFORCED);
-        assert_eq!(s.data["outcome"], "passed");
+        f.linux = vec![TryStart::Started(Started::Run(777))];
+        f.found.insert(Os::Linux, Some(101)); // another run on the commit: never asked about
+        f.ends.insert(777, 1);
+        f.jobs
+            .insert(777, vec![job("plan", "success"), job("crates (ubuntu-latest)", "success")]);
+        let s = run(&merge(), &mut f, true);
+        assert_eq!(s.data["runs"]["linux"], 777);
         assert!(
-            f.asked.iter().any(|a| a.starts_with("dispatch ")),
-            "a pass needs the gate's own dispatch: {:?}",
+            f.asked.contains(&"jobs 777".to_string()) && !f.asked.contains(&"jobs 101".to_string()),
+            "{:?}",
             f.asked
         );
     }
 
-    /// A planted new failure on Windows is red there and green on Linux; a busy runner or a still-running run is not measured; and
-    /// the exit changes only when enforced.
+    /// Positive control (ER-33): a run this step did not make cannot pass. With no run of ours for a part (only stale runs on the
+    /// commit, which `pick_run` refuses), that part is `not measured` with the exit 6 and nothing of it is judged.
+    #[test]
+    fn without_a_run_of_its_own_the_part_cannot_pass() {
+        let mut f = Fake::green();
+        f.found.insert(Os::Linux, None);
+        let s = run(&merge(), &mut f, ENFORCED);
+        assert_eq!(s.data["rows"][0]["outcome"]["status"], "not-measured");
+        assert_eq!(s.exit, Exit::NotMeasured);
+        assert!(
+            !f.asked.iter().any(|a| a == "jobs 101"),
+            "nothing of an unmade run was judged: {:?}",
+            f.asked
+        );
+        assert_ne!(s.data["outcome"], "passed");
+    }
+
+    /// A planted new failure on Windows is red there and green on Linux; a still-running run is not measured; a cancelled or failed
+    /// plan is not measured; and the exit changes only when enforced.
     #[test]
     fn a_new_failure_on_one_os_is_red_there_and_the_exit_changes_only_when_enforced() {
         for (enforced, want) in [(false, Exit::Ok), (true, Exit::Findings)] {
             let mut f = Fake::green();
-            f.jobs = vec![
-                job("plan", "success"),
-                job("crates (ubuntu-latest)", "success"),
-                job("crates (windows-latest)", "failure"),
-            ];
-            f.failures = vec![fail("crates (windows-latest)", "sh_fixture", Blame::New)];
+            f.jobs
+                .insert(102, vec![job("plan", "success"), job("crates (windows-latest)", "failure")]);
+            f.failures
+                .insert(102, vec![fail("crates (windows-latest)", "sh_fixture", Blame::New)]);
             let s = run(&merge(), &mut f, enforced);
             assert_eq!(s.exit, want, "enforced={enforced}");
             assert_eq!(s.data["outcome"], "failed");
@@ -1701,21 +1972,23 @@ mod tests {
             };
             assert!(text.contains(want_line), "{text}");
         }
+        // A run still going at the bound: not measured (its part).
         let mut f = Fake::green();
-        f.end = RunEnd::StillRunning;
+        f.ends.insert(102, u64::MAX);
         assert_eq!(run(&merge(), &mut f, true).exit, Exit::NotMeasured);
         let mut f = Fake::green();
         f.plan = Err("no plan".into());
         assert_eq!(run(&merge(), &mut f, true).data["outcome"], "not measured");
         let mut f = Fake::green();
-        f.conclusion = "cancelled".into();
-        assert_eq!(run(&merge(), &mut f, true).data["outcome"], "not measured");
+        f.conclusion.insert(101, "cancelled".into());
+        let s = run(&merge(), &mut f, true);
+        assert_eq!(s.data["rows"][0]["outcome"]["status"], "not-measured");
     }
 
     #[test]
     fn a_busy_runner_and_a_missing_token_or_folder_are_not_measured_with_exit_6() {
         let mut f = Fake::green();
-        f.started = Ok(Started::Busy("run 8200".into()));
+        f.windows = vec![TryStart::Stalled("the windows runner is busy; nothing progressed for 45m".into())];
         assert_eq!(run(&merge(), &mut f, ENFORCED).exit, Exit::NotMeasured);
         // No token: nothing is dispatched; the cause and the next step are named.
         let err = Gitea::open_with(Path::new("/x"), "m", "abcdef0123456789", None, Ok(PathBuf::from("/d/trials")))
@@ -1740,6 +2013,32 @@ mod tests {
         .err()
         .unwrap();
         assert!(err.contains("no trial folder"), "{err}");
+    }
+
+    /// The lanes a running job uses: only Linux jobs in progress count (a queued or finished job, or a Windows job, does not).
+    #[test]
+    fn busy_lanes_are_the_linux_jobs_in_progress() {
+        let tj = |name: &str, status: &str, labels: &[&str]| TimedJob {
+            id: 1,
+            name: name.into(),
+            runner_id: 1,
+            runner: None,
+            conclusion: String::new(),
+            start: None,
+            end: None,
+            steps: Vec::new(),
+            status: status.into(),
+            labels: labels.iter().map(|l| l.to_string()).collect(),
+        };
+        let jobs = [
+            tj("crate (ubuntu-latest)", "in_progress", &[]),
+            tj("conformance", "in_progress", &["ubuntu-latest"]),
+            tj("ui", "queued", &["ubuntu-latest"]),
+            tj("paddock-dev (windows-latest)", "in_progress", &[]),
+            tj("tools-macos", "in_progress", &["macos-latest"]),
+            tj("gitleaks", "completed", &["ubuntu-latest"]),
+        ];
+        assert_eq!(busy_linux_jobs(&jobs), 2);
     }
 
     /// P3: a member whose fast gates failed is not dispatched; the row is not measured (never a pass).
@@ -1806,9 +2105,16 @@ mod tests {
             tests: 30,
         });
         let r = rows_ok(&[job("plan", "success"), j, w], &[]);
-        let s = step_of(&r, &[], 77, "trial/member-x", "1111111", true);
+        let s = step_of(
+            &r,
+            &[],
+            &[(Os::Linux, Some(77)), (Os::Windows, Some(78))],
+            "trial/member-x",
+            "1111111",
+            true,
+        );
         let text = s.text.join("\n");
-        assert!(text.contains("run 77 on trial/member-x"), "{text}");
+        assert!(text.contains("linux run 77, windows run 78 on trial/member-x"), "{text}");
         assert!(
             text.contains("linux: clean (1 jobs, queue 12s, setup 36s, compile 3m00s, tests 5m00s)"),
             "{text}"

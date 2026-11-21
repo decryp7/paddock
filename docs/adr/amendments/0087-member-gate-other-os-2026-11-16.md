@@ -93,11 +93,31 @@ was found only after the merge. Now `ENFORCED = true`:
 - **Reach is read from the plan's own output**, with no list of its project keys: any true flag other than `docs` and
   `conformance`, `all`, an app, or conformance reached for a reason beyond its standing one (`plan::CONFORMANCE_ALWAYS`, read
   from `why`). A plan that does not say why reaches projects (when unsure the gate runs).
-- **The train goes first, and the wait ends on stall, not on a clock.** A member trial waits for the train's reservation while
-  the train's CI progresses (the unfinished runs change) and is `not measured` only after 45 minutes with no progress, or at an
-  8-hour hard limit (ER-32). It is not dispatched when the fast gates of `merge check --gates` already failed (the row says so:
-  not measured, exit 6). `PADDOCK_TRIAL_DIR`, like the config, must be absolute and outside HOME. The test seam
+- **Two parts, two runs: trials use spare lanes (user, 2026-11-21).** The trial is one `ci.yml` run per OS, each with its own handle.
+  The Linux part (`os=linux`) is dispatched at once, also while a train's CI holds the runners, whenever a Linux lane is spare:
+  the lanes are `conformance/ci/runner-slots.json`'s `linux` (one place, `dispatch::linux_slots`) less the Linux jobs in progress
+  across the unfinished runs; every job keeps its lanes-times-threads share (ER-48). The Windows part (`os=windows`) waits for the
+  train's reservation by progress (below). The Mac runner is not judged by the gate, so no run asks for it. The gate looks at both
+  parts on every tick: the Linux verdict is reported the moment its run ends ("linux clean (the member stays pending until the
+  other OS part is judged)"), but the command returns, and the row is "passed", only after the Windows part is judged; Linux
+  alone never passes (not measured, exit 6, when Windows cannot be had).
+- **How the classes are told apart.** ci.yml has a new `os` input (`linux`, `windows`, `macos`, empty for all), handled by the
+  planner like every other narrowing (`src/plan_os.rs`, `PLAN_OS`): the plan job narrows the matrix legs it writes (`apps`,
+  `crate_legs`, `paddock_dev_legs`) to the OS and writes `rerun_jobs`, the list every job's `if` already reads, as the jobs that can
+  run on the OS (read from ci.yml's own `runs-on`; matrix jobs for every OS, their legs filtered). No job of ci.yml changed; a run
+  with `os` set is never a complete run (`plan verdict: complete=false`). `ci dispatch` narrows the runners a run waits for by the
+  same input (`restrict_to_os_input`: `os=linux` waits for neither the Mac nor the Windows runner).
+- **The train goes first, and the wait ends on stall, not on a clock.** A part waits for the train's reservation while the train's
+  CI progresses (the unfinished runs change; `reservation::Stall`) and is `not measured` only after 45 minutes with no progress,
+  or at an 8-hour hard limit (ER-32). It is not dispatched when the fast gates of `merge check --gates` already failed (the row
+  says so: not measured, exit 6). `PADDOCK_TRIAL_DIR`, like the config, must be absolute and outside HOME. The test seam
   `PADDOCK_MERGE_CHECK_PLAN` exists in debug builds only.
+- **A trial of several members that are already on origin.** `./dev ci dispatch ci.yml --trial-members a,b,c --onto <train ref> --max
+  <bound>` merges them in the trial clone in the order given (merge commits with the members' own commits, never a rebase), pushes
+  `trial/members-<head12>` from there (the existing trial path: no local, hook-gated push of an unproven head) and dispatches it. A
+  member that is not on origin is refused before anything is merged (`not on origin: <names>`); the first merge conflict stops
+  the trial and names its member and the members merged before it. The answer carries the run id (`run`), the one run to judge
+  (ER-51). At most 10 members.
 - Logged (ER-27): the run id, the verdict per OS and the run's wall time split into queue wait (run created to job start), setup,
   compile and tests (the jobs' step timings, by step name; job-seconds summed per OS, the queue wait the longest) in the step's
   text and `data.rows[].phases`.

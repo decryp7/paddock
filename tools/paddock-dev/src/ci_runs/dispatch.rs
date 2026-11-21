@@ -345,7 +345,8 @@ pub fn run_with_id(
     log: &mut dyn Write,
 ) -> Result<(Dispatched, Option<u64>), String> {
     let Target { server, repo, token } = *target;
-    let wanted = classes_of(&req.workflow, read)?;
+    let mut wanted = classes_of(&req.workflow, read)?;
+    restrict_to_os_input(&mut wanted, &req.inputs);
     let mut waited = Duration::ZERO;
     if wanted.is_empty() {
         let _ = writeln!(
@@ -459,6 +460,21 @@ pub fn run_id_of(answer: &Value) -> Option<u64> {
         .filter(|n| *n > 0)
 }
 
+/// An `os` input (ci.yml's: `linux`, `windows`, `macos`) narrows the single-machine classes the run needs to that one OS: an `os=linux`
+/// run asks for neither the Mac nor the Windows runner, so it does not wait for them (the member gate's Linux part runs at once on
+/// spare lanes), and `os=windows` waits for Windows only. No `os` input, or an empty one: unchanged.
+pub fn restrict_to_os_input(wanted: &mut BTreeSet<RunnerClass>, inputs: &[(String, String)]) {
+    let Some((_, os)) = inputs.iter().rev().find(|(k, _)| k == "os") else {
+        return;
+    };
+    match os.trim() {
+        "linux" => wanted.clear(),
+        "windows" => wanted.retain(|c| *c == RunnerClass::Windows),
+        "macos" => wanted.retain(|c| *c == RunnerClass::Macos),
+        _ => {}
+    }
+}
+
 /// The file that declares how many jobs each runner class runs at once (`{"linux": 3}`), relative to the repository root.
 pub const RUNNER_SLOTS: &str = "conformance/ci/runner-slots.json";
 
@@ -466,13 +482,25 @@ pub const RUNNER_SLOTS: &str = "conformance/ci/runner-slots.json";
 /// stays free for the older runs' own Linux jobs (a Mac job that needs them would otherwise never start, and every waiter would
 /// stall to its limit). `Err` when the file cannot be read or holds no `linux` count of at least 2.
 pub fn train_waiters(root: &std::path::Path) -> Result<usize, String> {
+    match linux_slots(root)? {
+        n if n >= 2 => Ok(n - 1),
+        _ => Err(format!(
+            "{} has no `linux` slot count of at least 2",
+            root.join(RUNNER_SLOTS).display()
+        )),
+    }
+}
+
+/// The Linux lanes the runners run at once, as [`RUNNER_SLOTS`] declares them (the one place; ER-48). `Err` when the file cannot be read
+/// or holds no `linux` count.
+pub fn linux_slots(root: &std::path::Path) -> Result<usize, String> {
     let path = root.join(RUNNER_SLOTS);
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{} cannot be read: {e}", path.display()))?;
     let v: Value = serde_json::from_str(&text).map_err(|e| format!("{} is not JSON: {e}", path.display()))?;
-    match v["linux"].as_u64() {
-        Some(n) if n >= 2 => Ok(n as usize - 1),
-        _ => Err(format!("{} has no `linux` slot count of at least 2", path.display())),
-    }
+    v["linux"]
+        .as_u64()
+        .map(|n| n as usize)
+        .ok_or_else(|| format!("{} has no `linux` slot count of at least 2", path.display()))
 }
 
 /// The display name of a workflow's runner-wait job (the first job whose steps use [`RUNNER_WAIT_ACTION`]): its `name`, else its id.
@@ -700,6 +728,8 @@ mod tests {
         own_errors: usize,
         /// `GET .../runs/<id>/jobs`: the job lists in order per run (the last one repeats).
         jobs: Vec<(u64, VecDeque<Value>)>,
+        /// What the server answers to the dispatch (`Null`: Gitea's empty 204).
+        post_answer: Value,
     }
 
     impl Script {
@@ -711,6 +741,7 @@ mod tests {
                 own: Vec::new(),
                 own_errors: 0,
                 jobs: Vec::new(),
+                post_answer: Value::Null,
             }
         }
     }
@@ -747,7 +778,7 @@ mod tests {
         }
         fn post_json(&mut self, url: &str, _token: &str, body: &Value) -> Result<Value, String> {
             self.posts.push((url.to_string(), body.clone()));
-            Ok(Value::Null)
+            Ok(self.post_answer.clone())
         }
     }
 
@@ -1283,5 +1314,54 @@ mod tests {
         assert_eq!(run_id_of(&json!({})), None);
         assert_eq!(run_id_of(&json!({"id": 0})), None);
         assert_eq!(run_id_of(&json!({"id": "12"})), None);
+    }
+
+    /// The `os` input of ci.yml narrows what a run waits for: Linux waits for no single-machine runner, Windows and macOS for their own.
+    #[test]
+    fn an_os_input_narrows_the_runners_a_dispatch_waits_for() {
+        let both: BTreeSet<RunnerClass> = [RunnerClass::Macos, RunnerClass::Windows].into();
+        let input = |v: &str| vec![("base".to_string(), "x".to_string()), ("os".to_string(), v.to_string())];
+        let mut w = both.clone();
+        restrict_to_os_input(&mut w, &input("linux"));
+        assert!(w.is_empty());
+        let mut w = both.clone();
+        restrict_to_os_input(&mut w, &input("windows"));
+        assert_eq!(w, [RunnerClass::Windows].into());
+        let mut w = both.clone();
+        restrict_to_os_input(&mut w, &input("macos"));
+        assert_eq!(w, [RunnerClass::Macos].into());
+        for none in [vec![], input(""), input("all")] {
+            let mut w = both.clone();
+            restrict_to_os_input(&mut w, &none);
+            assert_eq!(w, both);
+        }
+    }
+
+    /// ER-51 through the whole dispatch: the run id the server answers with comes back from `run_with_id` (and `run` is unchanged);
+    /// with the empty answer of an older server there is no handle.
+    #[test]
+    fn run_with_id_hands_back_the_run_the_dispatch_created() {
+        for (answer, want) in [(json!({"id": 8512}), Some(8512)), (Value::Null, None)] {
+            let mut http = Script::new(vec![runs(&[])]);
+            http.post_answer = answer;
+            let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
+            let target = Target {
+                server: SERVER,
+                repo: REPO,
+                token: "secret-token",
+            };
+            let (d, id) = run_with_id(&mut http, &target, &request("linux.yml", "1m"), &files, &mut clock, &mut log).unwrap();
+            assert_eq!(d, Dispatched::Yes { waited: Duration::ZERO });
+            assert_eq!(id, want);
+            let log = String::from_utf8(log).unwrap();
+            assert!(
+                log.contains(if want.is_some() {
+                    "the server created run 8512"
+                } else {
+                    "did not name the run"
+                }),
+                "{log}"
+            );
+        }
     }
 }

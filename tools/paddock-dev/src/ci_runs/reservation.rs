@@ -77,64 +77,42 @@ pub fn wait_free(
     }
 }
 
-/// Waits while the train reservation is held, and ends "still held" only when **nothing progresses** (the member gate's wait: a
-/// train's CI sequence can hold the runners for hours, so a fixed short bound would end "not measured" while the train is moving).
-/// `signature` reads what moves while the train is working (for example the ids of the unfinished runs); the holder is part of it.
-/// The wait ends when the signature has not changed for `stall`, or at `hard_max` (ER-32: always bounded). A signature that cannot
-/// be read counts as no progress, never as free.
-pub fn wait_free_progress(
-    held: &mut dyn Held,
-    clock: &mut dyn Clock,
+/// The "nothing progresses" rule of a wait on the train's CI: a signature of what moves (the holder, the ids of the unfinished runs)
+/// is looked at again and again; the wait is over when it has not changed for `stall`, or at `hard_max` (ER-32: always bounded).
+#[derive(Debug, Clone)]
+pub struct Stall {
     stall: Duration,
     hard_max: Duration,
-    interval: Duration,
-    signature: &mut dyn FnMut() -> Result<String, String>,
-    log: &mut dyn Write,
-) -> Result<Free, String> {
-    let mut said = false;
-    let mut last_sig: Option<String> = None;
-    let mut moved_at = clock.elapsed();
-    loop {
-        let Some(holder) = held.holder()? else {
-            let waited = if said { clock.elapsed() } else { Duration::ZERO };
-            if said {
-                let _ = writeln!(
-                    log,
-                    "reservation: the train's CI sequence is done; going on after {}",
-                    fmt_duration(waited)
-                );
-            }
-            return Ok(Free::Yes { waited });
-        };
-        let sig = format!("{holder}|{}", signature().unwrap_or_default());
-        if last_sig.as_ref() != Some(&sig) {
-            if last_sig.is_some() {
-                let _ = writeln!(log, "reservation: the train's CI is progressing ({holder}); waiting on");
-            }
-            last_sig = Some(sig);
-            moved_at = clock.elapsed();
+    last: Option<String>,
+    moved_at: Duration,
+}
+
+impl Stall {
+    /// A tracker that starts at `now` (the clock's elapsed time).
+    pub fn new(stall: Duration, hard_max: Duration, now: Duration) -> Stall {
+        Stall {
+            stall,
+            hard_max,
+            last: None,
+            moved_at: now,
         }
-        let now = clock.elapsed();
-        if now >= hard_max {
-            return Ok(Free::StillHeld {
-                holder: format!("{holder}; still held after the hard limit of {}", fmt_duration(hard_max)),
-            });
+    }
+
+    /// Looks once at `signature` at time `now`. `Err(why)` when the wait must end now (the stall or the hard limit passed); `Ok(true)`
+    /// when the signature changed since the last look (progress), `Ok(false)` otherwise.
+    pub fn observe(&mut self, now: Duration, signature: String) -> Result<bool, String> {
+        let moved = self.last.as_ref().is_some_and(|l| *l != signature);
+        if self.last.as_ref() != Some(&signature) {
+            self.last = Some(signature);
+            self.moved_at = now;
         }
-        if now.saturating_sub(moved_at) >= stall {
-            return Ok(Free::StillHeld {
-                holder: format!("{holder}; nothing progressed for {}", fmt_duration(stall)),
-            });
+        if now >= self.hard_max {
+            return Err(format!("still held after the hard limit of {}", fmt_duration(self.hard_max)));
         }
-        if !said {
-            let _ = writeln!(
-                log,
-                "reservation: a train's CI sequence holds the runners ({holder}); this run goes after it (it ends only after {} with no progress, at most {})",
-                fmt_duration(stall),
-                fmt_duration(hard_max)
-            );
-            said = true;
+        if now.saturating_sub(self.moved_at) >= self.stall {
+            return Err(format!("nothing progressed for {}", fmt_duration(self.stall)));
         }
-        clock.sleep(interval.min(hard_max.saturating_sub(now)).max(Duration::from_millis(1)));
+        Ok(moved)
     }
 }
 
@@ -199,26 +177,6 @@ pub fn wait_real(max: Duration, log: &mut dyn Write) -> Result<Free, String> {
     let root = lock_root().ok_or("the train reservation folder cannot be derived (set PADDOCK_TRAIN_CI_LOCK_ROOT)")?;
     let mut clock = SystemClock::new();
     wait_free(&mut LockSlots::new(root), &mut clock, max, Duration::from_secs(15), log)
-}
-
-/// [`wait_free_progress`] on the real reservation with the real clock (see [`wait_real`]).
-pub fn wait_real_progress(
-    stall: Duration,
-    hard_max: Duration,
-    signature: &mut dyn FnMut() -> Result<String, String>,
-    log: &mut dyn Write,
-) -> Result<Free, String> {
-    let root = lock_root().ok_or("the train reservation folder cannot be derived (set PADDOCK_TRAIN_CI_LOCK_ROOT)")?;
-    let mut clock = SystemClock::new();
-    wait_free_progress(
-        &mut LockSlots::new(root),
-        &mut clock,
-        stall,
-        hard_max,
-        Duration::from_secs(15),
-        signature,
-        log,
-    )
 }
 
 #[cfg(test)]
@@ -334,94 +292,32 @@ mod tests {
         assert_eq!(holder_of(&json!({})), None);
     }
 
-    /// Always held.
-    struct Forever;
-    impl Held for Forever {
-        fn holder(&mut self) -> Result<Option<String>, String> {
-            Ok(Some("train 19's sequence".into()))
-        }
-    }
-
-    /// The member gate's wait goes on while the train moves, past any fixed short bound, and ends "still held" only when nothing
-    /// progressed for the stall (or at the hard limit).
+    /// The member gate's wait goes on while the train moves, past any fixed short bound, and ends only when nothing progressed for the
+    /// stall (or at the hard limit).
     #[test]
-    fn the_progress_wait_ends_only_when_nothing_progresses() {
+    fn the_stall_tracker_ends_only_when_nothing_progresses() {
         let stall = Duration::from_secs(600);
-        // The signature changes every minute for two hours: far past the stall, still waiting; then the train is done.
-        let mut t = Table {
-            polls_held: 480,
-            reads: 0,
-            broken: false,
-        };
-        let mut n = 0u32;
-        let mut sig = || {
-            n += 1;
-            Ok(format!("run {}", n / 4))
-        };
-        let mut clock = Fake(Duration::ZERO);
-        let r = wait_free_progress(
-            &mut t,
-            &mut clock,
-            stall,
-            Duration::from_secs(86_400),
-            EVERY,
-            &mut sig,
-            &mut Vec::new(),
-        )
-        .unwrap();
-        assert!(matches!(r, Free::Yes { waited } if waited >= Duration::from_secs(3600)), "{r:?}");
+        let hard = Duration::from_secs(86_400);
+        let at = |s: u64| Duration::from_secs(s);
+        // The signature changes every minute for two hours: far past the stall, still going.
+        let mut t = Stall::new(stall, hard, at(0));
+        for minute in 0..120u64 {
+            assert!(t.observe(at(minute * 60), format!("run {minute}")).is_ok(), "minute {minute}");
+        }
         // Nothing moves: it ends after the stall, naming it.
-        let mut clock = Fake(Duration::ZERO);
-        let mut same = || Ok("run 7".to_string());
-        let r = wait_free_progress(
-            &mut Forever,
-            &mut clock,
-            stall,
-            Duration::from_secs(86_400),
-            EVERY,
-            &mut same,
-            &mut Vec::new(),
-        )
-        .unwrap();
-        match r {
-            Free::StillHeld { holder } => assert!(holder.contains("nothing progressed"), "{holder}"),
-            other => panic!("{other:?}"),
-        }
-        assert!(clock.0 >= stall && clock.0 < stall + Duration::from_secs(60), "{:?}", clock.0);
-        // A signature that cannot be read is no progress, not free.
-        let mut clock = Fake(Duration::ZERO);
-        let mut dead = || Err("api down".to_string());
-        let r = wait_free_progress(
-            &mut Forever,
-            &mut clock,
-            stall,
-            Duration::from_secs(86_400),
-            EVERY,
-            &mut dead,
-            &mut Vec::new(),
-        )
-        .unwrap();
-        assert!(matches!(r, Free::StillHeld { .. }));
-        // The hard limit always ends it, even while it moves.
-        let mut clock = Fake(Duration::ZERO);
-        let mut n = 0u32;
-        let mut moving = || {
-            n += 1;
-            Ok(n.to_string())
-        };
-        let r = wait_free_progress(
-            &mut Forever,
-            &mut clock,
-            stall,
-            Duration::from_secs(1800),
-            EVERY,
-            &mut moving,
-            &mut Vec::new(),
-        )
-        .unwrap();
-        match r {
-            Free::StillHeld { holder } => assert!(holder.contains("hard limit"), "{holder}"),
-            other => panic!("{other:?}"),
-        }
+        let mut t = Stall::new(stall, hard, at(0));
+        assert_eq!(t.observe(at(0), "run 7".into()), Ok(false));
+        assert_eq!(t.observe(at(599), "run 7".into()), Ok(false));
+        assert!(t.observe(at(600), "run 7".into()).unwrap_err().contains("nothing progressed"));
+        // A change is progress and moves the deadline.
+        let mut t = Stall::new(stall, hard, at(0));
+        assert_eq!(t.observe(at(0), "a".into()), Ok(false));
+        assert_eq!(t.observe(at(500), "b".into()), Ok(true));
+        assert_eq!(t.observe(at(1000), "b".into()), Ok(false));
+        assert!(t.observe(at(1100), "b".into()).is_err());
+        // The hard limit ends it even while it moves.
+        let mut t = Stall::new(stall, at(1800), at(0));
+        assert!(t.observe(at(1799), "x".into()).is_ok());
+        assert!(t.observe(at(1800), "y".into()).unwrap_err().contains("hard limit"));
     }
 }
