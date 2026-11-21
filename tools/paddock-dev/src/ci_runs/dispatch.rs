@@ -321,6 +321,22 @@ pub struct Request {
     pub train_waiters: usize,
 }
 
+/// A full dispatch of ci.yml on a `train/*` ref (no `base`, no `since_run`) gets `webkit=true` unless the caller set `webkit`: ci.yml
+/// logs `complete=true` only for the scope of a push to main, WebKit included, so the train's run is the one the main push reuses
+/// after the landing (`ci reuse`, ER-49). An explicit `webkit=false` still wins; a member run (a base) and a rerun stay as asked.
+pub fn with_default_webkit(workflow: &str, git_ref: &str, mut inputs: Vec<(String, String)>) -> Vec<(String, String)> {
+    let set = |k: &str, inputs: &[(String, String)]| inputs.iter().any(|(key, v)| key == k && !v.trim().is_empty());
+    if workflow == "ci.yml"
+        && is_train(git_ref)
+        && !inputs.iter().any(|(k, _)| k == "webkit")
+        && !set("base", &inputs)
+        && !set("since_run", &inputs)
+    {
+        inputs.push(("webkit".into(), "true".into()));
+    }
+    inputs
+}
+
 /// Parses `--max` and `--input k=v`.
 pub fn parse_request(workflow: &str, git_ref: &str, inputs: &[String], max: &str, interval: Option<&str>) -> Result<Request, String> {
     let max = parse_duration(max)?;
@@ -344,6 +360,7 @@ pub fn parse_request(workflow: &str, git_ref: &str, inputs: &[String], max: &str
     if workflow.contains('/') || workflow.is_empty() {
         return Err("the workflow is a file name in .gitea/workflows, like dyno-release.yml".into());
     }
+    let inputs = with_default_webkit(workflow, git_ref, inputs);
     Ok(Request {
         workflow: workflow.to_string(),
         git_ref: git_ref.to_string(),
@@ -1930,5 +1947,36 @@ mod tests {
         .unwrap();
         assert!(matches!(d, Dispatched::ServiceDown { .. }) && id.is_none(), "{d:?}");
         assert!(http.posts.is_empty());
+    }
+
+    #[test]
+    fn a_full_ci_dispatch_on_a_train_defaults_to_webkit_and_an_explicit_value_wins() {
+        let inputs = |wf: &str, r: &str, i: &[&str]| {
+            let i: Vec<String> = i.iter().map(|s| s.to_string()).collect();
+            parse_request(wf, r, &i, "10m", None).unwrap().inputs
+        };
+        let webkit = vec![("webkit".to_string(), "true".to_string())];
+        assert_eq!(inputs("ci.yml", "train/2026-11-21-1", &[]), webkit);
+        assert_eq!(inputs("ci.yml", "refs/heads/train/x", &[]), webkit);
+        // An explicit webkit=false (or true) is kept as given, not doubled.
+        assert_eq!(
+            inputs("ci.yml", "train/x", &["webkit=false"]),
+            vec![("webkit".to_string(), "false".to_string())]
+        );
+        // Positive controls: a member run (a base), a rerun, another ref, another workflow and the other inputs are left alone.
+        assert!(
+            inputs("ci.yml", "train/x", &["base=origin/main"])
+                .iter()
+                .all(|(k, _)| k != "webkit")
+        );
+        assert!(inputs("ci.yml", "train/x", &["since_run=8001"]).iter().all(|(k, _)| k != "webkit"));
+        assert!(inputs("ci.yml", "feat/x", &[]).is_empty());
+        assert!(inputs("ci.yml", "main", &[]).is_empty());
+        assert!(inputs("debrief.yml", "train/x", &[]).is_empty());
+        // An empty base is a full run (the workflow's default is empty), so it still gets WebKit.
+        assert_eq!(
+            inputs("ci.yml", "train/x", &["base="]).last(),
+            Some(&("webkit".to_string(), "true".to_string()))
+        );
     }
 }

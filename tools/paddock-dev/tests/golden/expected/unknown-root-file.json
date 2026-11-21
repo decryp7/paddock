@@ -30,6 +30,7 @@
   ]
  },
  "packages": {},
+ "cargoOnly": [],
  "why": {
   "app:x": [
    "unknown root file Mystery"

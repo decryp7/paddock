@@ -30,6 +30,7 @@
   ]
  },
  "packages": {},
+ "cargoOnly": [],
  "why": {
   "app:x": [
    "global .gitea/actions/unused/action.yml"

@@ -31,7 +31,8 @@
     "ui"
    ]
   },
-  "packages": {}
+  "packages": {},
+  "cargoOnly": []
  },
  "outputs": null,
  "summary": null,

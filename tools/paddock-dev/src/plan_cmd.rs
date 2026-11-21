@@ -23,8 +23,8 @@
 
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_ci::{
-    BaseInput, LintInput, MatrixOpts, USAGE, choose_base, ci_outputs, commit_lint_range, is_ci_yml, matrix, only_app, parse_args, summary,
-    wants_webkit,
+    BaseInput, LintInput, MatrixOpts, USAGE, choose_base, ci_outputs, commit_lint_range, is_ci_yml, matrix, member_run, only_app,
+    package_filters, parse_args, summary, wants_webkit,
 };
 use crate::plan_os;
 use crate::plan_repo::git_text;
@@ -228,11 +228,18 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         Some(p) => only_app(&planned, p),
         None => planned,
     };
+    let narrow = (event == "pull_request" && plan_app.is_none())
+        || member_run(
+            &event,
+            &env("PLAN_BASE").unwrap_or_default(),
+            &env("PLAN_SINCE_RUN").unwrap_or_default(),
+            plan_app.as_deref(),
+        );
     let legs = matrix(
         &plan,
         &graph,
         MatrixOpts {
-            narrow: event == "pull_request" && plan_app.is_none(),
+            narrow,
             webkit: wants_webkit(env),
         },
     )
@@ -266,6 +273,8 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         }
         return Ok(Report::new(serde_json::json!({ "affected": runs_it }), runs_it.to_string()));
     }
+    let mut plan = plan;
+    plan["filters"] = package_filters(&plan, &graph, narrow);
     // The `os` input (ci.yml `os`, PLAN_OS): only that operating system's part of the plan (src/plan_os.rs).
     let os_part = plan_os::parse(&env("PLAN_OS").unwrap_or_default()).map_err(fail)?;
     let legs = match os_part {
@@ -281,6 +290,9 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
             .unwrap_or_else(|| serde_json::to_string(&[serde_json::json!({"os": os.label()})]).unwrap_or_default());
         outputs.extend(plan_os::outputs(&text, os, &default_legs).map_err(fail)?);
         log(&format!("os: only {} (rerun_jobs and the legs are narrowed to it)", os.input()));
+    }
+    if narrow {
+        log("narrowed to the packages the change reaches (a member run; the final head's full run tests the rest)");
     }
     if let Some(path) = env("GITHUB_OUTPUT") {
         append(&path, &outputs.iter().map(|(k, v)| format!("{k}={v}\n")).collect::<String>())?;

@@ -23,6 +23,9 @@
    "x"
   ]
  },
+ "cargoOnly": [
+  "app:x"
+ ],
  "why": {
   "app:x": [
    "apps/x/app/src-tauri/src/main.rs"
