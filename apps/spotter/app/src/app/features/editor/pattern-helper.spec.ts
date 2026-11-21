@@ -1,6 +1,6 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { PatternHelper, TEST_DEBOUNCE_MS } from './pattern-helper';
+import { PatternHelper } from './pattern-helper';
 import { MockBackend } from '../../core/mock-backend';
 import { MOCK_SCHEMES } from '../../core/mock/mock-extraction';
 import { appProviders, flush, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
@@ -69,14 +69,20 @@ describe('PatternHelper', () => {
   it('waits for a slow engine answer instead of a fixed time', async () => {
     const f = make();
     const real = backend.testPattern.bind(backend);
-    // The engine answers after longer than the old fixed wait (debounce + 20 ms), as on a loaded runner.
+    // The engine answers only after the wait has already polled a few times: as slow as a loaded runner, with no timer in the test.
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
     vi.spyOn(backend, 'testPattern').mockImplementation(async (...a) => {
-      await new Promise((r) => setTimeout(r, TEST_DEBOUNCE_MS + 150));
+      await gate;
       return real(...a);
     });
     f.componentInstance.pattern.set('Acme-(?<major>\\d+)');
     typeInto(el(f, '#pattern-test') as HTMLInputElement, 'other.txt');
-    await until(f, () => resultText(f).includes('no match'));
+    let polls = 0;
+    await until(f, () => {
+      if (++polls === 5) release();
+      return resultText(f).includes('no match');
+    });
     expect(resultText(f)).toContain('no match');
   });
 
