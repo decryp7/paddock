@@ -1191,7 +1191,7 @@ impl Exec for RealExec {
                     });
                 }
             },
-            None => (BuildLock { _held: None }, Duration::ZERO),
+            None => (BuildLock { held: None }, Duration::ZERO),
         };
         let call = self.call(gate, limits, &log, label.as_deref(), &name);
         let _ = std::fs::File::create(&log);
@@ -1232,6 +1232,7 @@ impl Exec for RealExec {
                                 since: began,
                                 at: Instant::now(),
                             });
+                            build_lock.restamp(&gate.id, unix_now());
                             return;
                         }
                         if Instant::now() >= said {
@@ -1383,10 +1384,10 @@ fn unix_now() -> u64 {
 
 /// Writes `pid`, the time and the step into the lock file just taken, for the waiters to read. Best effort: a waiter that finds no record
 /// sees a holder it knows nothing about, which is not live.
-fn write_holder_record(file: &std::fs::File, id: &str) {
+fn write_holder_record(file: &std::fs::File, id: &str, now: u64) {
     use std::io::Write;
     let _ = file.set_len(0);
-    let _ = (&*file).write_all(format!("{}\n{}\n{}\n", std::process::id(), unix_now(), id).as_bytes());
+    let _ = (&*file).write_all(format!("{}\n{}\n{}\n", std::process::id(), now, id).as_bytes());
 }
 
 /// The picture a waiter has of a build folder's holder from its record (`pid`, start time, step id): the holder is live while it is
@@ -1407,8 +1408,19 @@ fn build_holder_view(record: &str, now: u64, cap: Duration) -> paddock_proc::que
 
 /// A held advisory lock on a build folder; dropping it (or the process ending) releases it.
 pub struct BuildLock {
-    /// The locked file: held for its lock, never read.
-    _held: Option<std::fs::File>,
+    /// The locked file: held for its lock, and where the holder's record is kept.
+    held: Option<std::fs::File>,
+}
+
+impl BuildLock {
+    /// Writes the holder's record again with `now` as its start: called when the step's heavy slot is taken, so the cap a waiter
+    /// counts is the one the step runs under, from when it runs and not from when it took the folder (it may have queued for the
+    /// slot for longer than the cap).
+    fn restamp(&self, id: &str, now: u64) {
+        if let Some(f) = &self.held {
+            write_holder_record(f, id, now);
+        }
+    }
 }
 
 impl RealExec {
@@ -1435,7 +1447,7 @@ impl RealExec {
                 "pre-push: no lock file for the build folder {dir} ({}): the step runs without it",
                 path.display()
             );
-            return Ok((BuildLock { _held: None }, Duration::ZERO));
+            return Ok((BuildLock { held: None }, Duration::ZERO));
         };
         let began = Instant::now();
         let mut clock = paddock_proc::queue_stall::StallClock::new(stall, 0);
@@ -1448,12 +1460,12 @@ impl RealExec {
                         eprintln!("pre-push: the build folder {dir} is free after {:.1} s", waited.as_secs_f64());
                         self.set_slot(Slot::Unknown);
                     }
-                    write_holder_record(&file, id);
-                    return Ok((BuildLock { _held: Some(file) }, if said { waited } else { Duration::ZERO }));
+                    write_holder_record(&file, id, unix_now());
+                    return Ok((BuildLock { held: Some(file) }, if said { waited } else { Duration::ZERO }));
                 }
                 Err(std::fs::TryLockError::WouldBlock) => {}
                 // The OS does not do advisory locks here: cargo's own lock serialises, as before.
-                Err(std::fs::TryLockError::Error(_)) => return Ok((BuildLock { _held: None }, Duration::ZERO)),
+                Err(std::fs::TryLockError::Error(_)) => return Ok((BuildLock { held: None }, Duration::ZERO)),
             }
             if !said {
                 said = true;
@@ -1697,6 +1709,28 @@ mod tests {
             let v = build_holder_view(none, 5000, cap);
             assert!(!v.live && v.holders.is_empty(), "{none:?}: {v:?}");
         }
+    }
+
+    /// P2 of the re-review: the holder's stamp is when it started to RUN, not when it took the folder. A holder that waited 70 minutes in
+    /// heavy's queue after taking the build folder is not past its cap when its heavy slot is taken: the record is written again then.
+    #[test]
+    fn a_holder_that_waited_in_heavys_queue_is_stamped_again_when_its_slot_is_taken() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("f.lock");
+        let file = std::fs::OpenOptions::new().create(true).append(true).open(&path).unwrap();
+        let t0 = 1_000_000u64;
+        write_holder_record(&file, "clippy a", t0);
+        let held = BuildLock { held: Some(file) };
+        let cap = ROW_CAP + CAP_GRACE;
+        let later = t0 + 70 * 60;
+        let before = build_holder_view(&std::fs::read_to_string(&path).unwrap(), later, cap);
+        assert!(
+            !before.live,
+            "stamped at the folder lock, 70 minutes old: past the cap, the bug: {before:?}"
+        );
+        held.restamp("clippy a", later);
+        let after = build_holder_view(&std::fs::read_to_string(&path).unwrap(), later + 60, cap);
+        assert!(after.live && after.holders.len() == 1, "stamped when its slot was taken: {after:?}");
     }
 
     /// Heavy's own line names the holder of a stalled queue; the failure line after it (the same words without the closing phrase) is
