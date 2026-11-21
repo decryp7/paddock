@@ -26,14 +26,12 @@ allow = [
   "Zlib",
   "0BSD",
   "CC0-1.0",
+  "BSL-1.0",
   "Unicode-3.0",
   "Unlicense",
   "MPL-2.0",
   "CDLA-Permissive-2.0",
 ]
-# xxhash-rust (a dependency of notify 9, under dyno-helper's folder watch) is under the permissive Boost licence, which the
-# family template (templates/repo/deny.toml), Debrief and Pitwall allow outright.
-exceptions = [{ crate = "xxhash-rust", allow = ["BSL-1.0"] }]
 
 [bans]
 # Duplicate versions are reported, not fatal: most come from the Tauri stack (wry, tao, gtk-rs on Linux), which pins
