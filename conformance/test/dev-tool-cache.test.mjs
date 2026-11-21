@@ -13,12 +13,17 @@ const SCRIPT = join(PADDOCK, 'conformance', 'ci', 'dev-tool-cache.sh');
 const HASH = 'a'.repeat(40);
 
 /** A repository root whose `dev` answers --wrapper-hash and `self hash` as the test says. */
-function fixture({ state = 'clean', selfHash = `embedded ${HASH}`, stderr = '' } = {}) {
+function fixture({ state = 'clean', embedded = HASH, stderr = '' } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-dev-tool-cache-')));
   const dev = `#!/bin/sh
 case "$1" in
   --wrapper-hash) { printf 'dev: hash ${HASH} inputs: stand-in\\n' >&2; printf '${HASH}\\n${state}\\n'; } ;;
-  self) printf '%s\\n' '${stderr}' >&2; printf '%s\\n' '${selfHash}' ;;
+  self) printf '%s\\n' '${stderr}' >&2
+    # The real tool's two shapes (tools/paddock-dev/src/input_hash.rs, \`dev self hash\`): four text lines, or one JSON object with --json.
+    case "$*" in
+      *--json*) printf '{"ok":true,"hash":"${HASH}","wrapper":"${HASH}","embedded":"${embedded}","dirty":false,"compiler":[],"inputs":[]}\\n' ;;
+      *) printf 'hash     ${HASH}\\nwrapper  ${HASH}\\nembedded ${embedded}\\ndirty    false\\n' ;;
+    esac ;;
 esac
 `;
   writeFileSync(join(root, 'dev'), dev);
@@ -93,9 +98,9 @@ test('a restored binary that ./dev had to rebuild is rejected, said aloud and no
 });
 
 test('a tool that reports another hash fails the step and is never saved', () => {
-  const r = run(fixture({ selfHash: `embedded ${'b'.repeat(40)}` }), ['verify', 'false']);
+  const r = run(fixture({ embedded: 'b'.repeat(40) }), ['verify', 'false']);
   assert.notEqual(r.status, 0);
-  assert.match(r.text, /::error::dev-tool-cache: the tool reports 'embedded b+', not 'embedded a+'/);
+  assert.match(r.text, /::error::dev-tool-cache: the tool embeds 'b+', not 'a+'/);
   assert.equal(r.out.save, undefined);
 });
 
@@ -119,6 +124,21 @@ test('the key reads the real wrapper contract: hash and state on standard output
   assert.match(lines[0], /^[0-9a-f]{40}$/);
   assert.match(lines[1], /^(clean|dirty)$/);
   assert.match(r.stderr, /^dev: hash [0-9a-f]{40} inputs:/m);
+});
+
+test('verify reads the real `dev self hash --json` shape: an embedded hash equal to the launcher hash (train 18 run 8560)', () => {
+  const r = spawnSync('sh', [join(PADDOCK, 'dev'), 'self', 'hash', '--json'], { encoding: 'utf8', env: { ...process.env, RUSTUP_AUTO_INSTALL: '0' } });
+  assert.equal(r.status, 0, `the real ./dev self hash needs a Rust compiler here: ${r.stderr}`);
+  const j = JSON.parse(r.stdout);
+  assert.match(j.hash, /^[0-9a-f]{40}$/);
+  assert.equal(j.embedded, j.hash, 'a binary the launcher built or fetched for this hash embeds it');
+});
+
+test('a tool that reports no embedded hash (a binary built outside the launcher) fails the step', () => {
+  const root = fixture({ embedded: '-' });
+  const r = run(root, ['verify', 'false']);
+  assert.notEqual(r.status, 0);
+  assert.match(r.text, /::error::dev-tool-cache: the tool embeds '-', not 'a+'/);
 });
 
 test('a wrapper that gives no hash fails the step loudly, never a silent miss (ER-33)', () => {

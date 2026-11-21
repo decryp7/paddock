@@ -64,15 +64,19 @@ cmd_key() {
 }
 
 cmd_verify() {
-  local hit="${1:-}" hash log said state save=false
+  local hit="${1:-}" hash log said embedded state save=false
   hash="$("${dev[@]}" --wrapper-hash 2>/dev/null | sed -n 1p)"
   [[ "$hash" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::dev-tool-cache: ./dev gave no hash. Next step: run ./dev --wrapper-hash in the job to see why."; exit 1; }
   log="$(mktemp)"
   # ./dev runs the binary only when it runs and is for this hash; otherwise it downloads or builds one (and says so).
-  said="$("${dev[@]}" self hash 2>"$log")" || { cat "$log" >&2; echo "::error::dev-tool-cache: ./dev self hash failed (above). Next step: ./dev cannot build the tool in this job; fix that first."; exit 1; }
+  said="$("${dev[@]}" self hash --json 2>"$log")" || { cat "$log" >&2; echo "::error::dev-tool-cache: ./dev self hash failed (above). Next step: ./dev cannot build the tool in this job; fix that first."; exit 1; }
   cat "$log" >&2
-  if [ "$said" != "embedded $hash" ]; then
-    echo "::error::dev-tool-cache: the tool reports '$said', not 'embedded $hash'. It is not saved. Next step: bump PADDOCK_DEV_TOOL_CACHE_VERSION if a restored copy keeps being wrong."
+  # `dev self hash` has a text form of several lines (hash, wrapper, embedded, dirty) and a JSON form; the JSON field is its contract
+  # (tools/paddock-dev/src/input_hash.rs), so it is read by that key (no node or jq is needed on the runner), never matched in the text (ER-42; the text shape grew and broke this, run 8560).
+  embedded="$(printf '%s' "$said" | sed -n 's/.*"embedded":"\([0-9a-f]*\)".*/\1/p')"
+  [ -n "$embedded" ] || embedded=-   # null: a binary built outside the launcher
+  if [ "$embedded" != "$hash" ]; then
+    echo "::error::dev-tool-cache: the tool embeds '$embedded', not '$hash'. It is not saved. Next step: bump PADDOCK_DEV_TOOL_CACHE_VERSION if a restored copy keeps being wrong."
     exit 1
   fi
   if grep -qE '^dev: (building|downloaded) paddock-dev' "$log"; then
