@@ -12,6 +12,20 @@ writes no green marker; it runs again on the next schedule after the train lands
 nor when its last measured scheduled run is older than 36 h (`debrief-mutants`, weekly: 192 h), so a long train costs at
 most one skipped night. When the Actions API cannot be read the run proceeds (fail open) and says so in its summary. A run still listed as running after 24 h is named but not counted, so a lost runner cannot stop every schedule.
 
+**A push to main reuses a green train run (ER-49, user, 2026-11-21).** `ci.yml` and `debrief.yml` ask `./dev ci reuse` first for a push
+to main: when `./dev ci verdict`'s reader finds a complete green run of the same workflow on that exact commit (the train's
+dispatch, when main fast-forwards to its head) and no job log of it has a FLAKY test, the push run ends early, runs no job and
+logs `plan verdict: complete=false`; its summary names the reused run. The asking run is left out of the runs it reads. A run
+that was red, partial (a base or `since_run` dispatch), or green with a FLAKY test is not reused, so the post-landing run on main
+is a real full run that `tag.yml`'s reader can use (a train that was red only with FLAKY tests needs it). Anything that cannot be
+read (the list, a job, a log, the token) runs the commit (fail open to running, never to skipping).
+
+**Member runs test only the reached packages (2026-11-21).** A dispatch with a `base` and no `since_run` (a member or a fix round)
+passes `./dev plan --ci` the event, and the plan narrows nextest to the packages the change reaches: the app legs' `filter`, and
+`crates_filter` and `paddock_dev_filter` for the host legs of `crate` and the tests of `paddock-dev`. The Linux crate tests run
+whole under coverage in `crates`. A push to main, a tag, the nightly, a manual run with no base and an app's own gates are never
+narrowed: the full run on the final head catches what the narrowed ones missed (ER-8).
+
 **Proxmox backup window.** Starts at 00:00 local (UTC+8; 16:00 UTC), stated by the user on 2026-11-10. The end is not
 known; 04:00 local (20:00 UTC) is assumed until evidence says otherwise. The Windows CI VM crawled from 00:52 local on
 2026-11-09/10 (memory note `windows-ci-proxmox-backup`). Rules:

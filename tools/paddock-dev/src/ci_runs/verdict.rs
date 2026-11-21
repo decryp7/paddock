@@ -203,6 +203,13 @@ fn read_mode(client: &mut Client, run: &RunInfo) -> Mode {
 
 /// Reads the runs listed for `sha` (up to four pages of 50) and decides.
 pub fn verdict(client: &mut Client, workflow: &str, sha: &str) -> Verdict {
+    verdict_excluding(client, workflow, sha, None)
+}
+
+/// [`verdict`] without one run of the list: the run that is asking (a push to main asking whether an earlier full green run
+/// already tested its commit, `ci reuse`). That run is still going, so its plan log is not final and it is never evidence for
+/// itself.
+pub fn verdict_excluding(client: &mut Client, workflow: &str, sha: &str, exclude: Option<u64>) -> Verdict {
     let query = format!("head_sha={sha}");
     let mut runs = Vec::new();
     for page in 1..=4 {
@@ -220,6 +227,7 @@ pub fn verdict(client: &mut Client, workflow: &str, sha: &str) -> Verdict {
             Err(e) => return Verdict::NotMeasured(format!("the runs of {} could not be listed: {e}", short(sha))),
         }
     }
+    runs.retain(|r| Some(r.id) != exclude);
     // A run's jobs and log are read only for a run whose mode is needed.
     let client = std::cell::RefCell::new(client);
     let mut modes = |r: &RunInfo| read_mode(&mut client.borrow_mut(), r);

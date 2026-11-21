@@ -427,6 +427,53 @@ fn recorded_command_line_cases_match_the_planners_answers_on_the_fixture_reposit
     assert!(failures.is_empty(), "{}\n{REGENERATE}", failures.join("\n"));
 }
 
+/// The `crates_filter` and `paddock_dev_filter` lines `./dev plan --ci` wrote for `event` with `base`, on the fixture after one more
+/// commit that touches only the leaf crate `crates/b`.
+fn package_filters(event: &str, base: &str, app: Option<&str>) -> (String, String, String) {
+    let (_keep, root) = fixture_with_origin();
+    std::fs::write(root.join("crates/b/src/lib.rs"), "// a member's one change\npub fn b() {}\n").unwrap();
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "member"]);
+    let mut env = serde_json::Map::new();
+    env.insert("GITHUB_EVENT_NAME".into(), json!(event));
+    env.insert("GITHUB_REF".into(), json!("refs/heads/topic"));
+    if !base.is_empty() {
+        env.insert("PLAN_BASE".into(), json!(base));
+    }
+    if let Some(app) = app {
+        env.insert("PLAN_APP".into(), json!(app));
+    }
+    let mut program = crate::dev_bin::command();
+    program.arg("plan");
+    let got = run_cli(&mut program, &root, &json!({"args": ["--ci"], "env": env}));
+    assert_eq!(got["code"], 0, "{got}");
+    let out = got["outputs"].as_str().unwrap_or_default().to_string();
+    let line = |k: &str| out.lines().find_map(|l| l.strip_prefix(&format!("{k}="))).map(str::to_string);
+    (
+        line("crates_filter").expect("the output crates_filter is always written"),
+        line("paddock_dev_filter").expect("the output paddock_dev_filter is always written"),
+        out,
+    )
+}
+
+/// D-member (2026-11-21): a member run (a dispatch with a base) narrows nextest to the packages the change reaches; every full run
+/// (a push to main, a tag, the nightly, a manual run with no base, an app's gates) tests the whole workspace.
+#[test]
+fn a_member_run_narrows_nextest_to_the_reached_packages_and_a_full_run_never_does() {
+    let (crates, _, out) = package_filters("workflow_dispatch", "fixture-head", None);
+    assert_eq!(crates, "package(=fx-b)", "{out}");
+    // Positive control: the same change, the full runs. A missing narrowing would show here as the filter on a run that must be whole.
+    for (event, base, app) in [
+        ("push", "", None),
+        ("schedule", "", None),
+        ("workflow_dispatch", "", None),
+        ("workflow_dispatch", "fixture-head", Some("x")),
+    ] {
+        let (crates, paddock_dev, out) = package_filters(event, base, app);
+        assert_eq!((crates.as_str(), paddock_dev.as_str()), ("", ""), "{event} {base:?} {app:?}: {out}");
+    }
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // The per-job narrowing of `.gitea/` and `conformance/ci` changes, made deterministic (the recorded cases and the history
 // sample do not reach every job): uncommitted edits in a copy of this repository, the script as the oracle.

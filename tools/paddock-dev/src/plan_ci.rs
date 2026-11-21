@@ -13,7 +13,8 @@ pub const LINUX: &str = "ubuntu-latest";
 /// What `matrix` was asked.
 #[derive(Default, Clone, Copy)]
 pub struct MatrixOpts {
-    /// A pull request: narrow nextest to the reached crates of the app's workspace.
+    /// A member run (a pull request, or a dispatch with a `base`, see [`member_run`]): narrow nextest to the reached crates of
+    /// the app's workspace.
     pub narrow: bool,
     /// The run wants the WebKit tests.
     pub webkit: bool,
@@ -55,6 +56,41 @@ fn kinds_of(plan: &Value, app: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Whether a run is a member's or a fix round's (not the final head's): a manual dispatch with a `base` (a branch run: the
+/// diff from the base is what it tests) and no `since_run`. A push to main, a tag, the nightly, a manual run with no base and an
+/// app's own gates (`PLAN_APP`) are full runs and are never narrowed (ER-8: the full run on the final head catches what the
+/// narrowed ones missed). `since_run` reruns narrow themselves by failed tests ([`crate::plan_since`]).
+pub fn member_run(event: &str, input_base: &str, since_run: &str, plan_app: Option<&str>) -> bool {
+    event == "workflow_dispatch" && !input_base.trim().is_empty() && since_run.trim().is_empty() && plan_app.is_none()
+}
+
+/// The nextest filterset (`package(=a) | package(=b)`) of the packages of one Cargo workspace that a change reaches, when `narrow`;
+/// empty (every test) when not narrowing, when the plan says everything, when it names no package, or when it names them all.
+pub fn package_filter(plan: &Value, graph: &RepoGraph, cargo_dir: &str, narrow: bool) -> String {
+    let members = graph.cargo.iter().filter(|(_, n)| n.workspace == cargo_dir).count();
+    let hit: Vec<String> = plan["packages"][cargo_dir]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default();
+    let all = plan["all"].as_bool().unwrap_or(false);
+    if narrow && !all && !hit.is_empty() && hit.len() < members {
+        hit.iter().map(|n| format!("package(={n})")).collect::<Vec<_>>().join(" | ")
+    } else {
+        String::new()
+    }
+}
+
+/// The package filters of the two workspaces that are not apps, as the plan's `filters` object (`crates`, `paddockDev`; empty: every
+/// test): [`ci_outputs`] writes them as `crates_filter` and `paddock_dev_filter`, read by the host legs of the `crate` job and the
+/// tests of the `paddock-dev` job. The Linux crate tests run whole under coverage in the `crates` job: a coverage figure of a
+/// narrowed run would not be the workspace's.
+pub fn package_filters(plan: &Value, graph: &RepoGraph, narrow: bool) -> Value {
+    json!({
+        "crates": package_filter(plan, graph, "crates", narrow),
+        "paddockDev": package_filter(plan, graph, "tools/paddock-dev", narrow),
+    })
+}
+
 /// The matrix legs of the affected apps: one object per app and operating system (paddock.ci.json `os`, default Linux only)
 /// with the app's contract, the halves to run and the nextest filter (only when `narrow`: a pull request whose change reaches
 /// part of the app's Cargo workspace; '' runs it all). The Linux leg runs everything the change reaches; a Windows or macOS leg
@@ -88,16 +124,10 @@ pub fn matrix(plan: &Value, graph: &RepoGraph, opts: MatrixOpts) -> Result<Vec<V
         } else {
             String::new()
         };
-        let members = graph.cargo.iter().filter(|(_, n)| n.workspace == cargo_dir).count();
-        let hit: Vec<String> = plan["packages"][&cargo_dir]
-            .as_array()
-            .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
-            .unwrap_or_default();
-        let all = plan["all"].as_bool().unwrap_or(false);
-        let filter = if opts.narrow && !all && !hit.is_empty() && hit.len() < members {
-            hit.iter().map(|n| format!("package(={n})")).collect::<Vec<_>>().join(" | ")
-        } else {
+        let filter = if cargo_dir.is_empty() {
             String::new()
+        } else {
+            package_filter(plan, graph, &cargo_dir, opts.narrow)
         };
         let kinds = kinds_of(plan, name);
         let rust = kinds.iter().any(|k| k == "rust");
@@ -311,6 +341,11 @@ pub fn ci_outputs(plan: &Value, legs: &[Value], base: Option<&str>) -> Vec<(Stri
         ("tools".into(), b("tools")),
         ("icons".into(), b("icons")),
         ("paddock_dev".into(), b("paddockDev")),
+        ("crates_filter".into(), plan["filters"]["crates"].as_str().unwrap_or("").to_string()),
+        (
+            "paddock_dev_filter".into(),
+            plan["filters"]["paddockDev"].as_str().unwrap_or("").to_string(),
+        ),
         ("apps".into(), serde_json::to_string(legs).unwrap_or_default()),
         ("any_app".into(), (!legs.is_empty()).to_string()),
         // The commit lint's range start (empty: no base, only the head commit is linted).
@@ -625,6 +660,61 @@ mod tests {
 
     fn row(l: &Value, keys: &[&str]) -> Vec<Value> {
         keys.iter().map(|k| l[*k].clone()).collect()
+    }
+
+    #[test]
+    fn only_a_dispatch_with_a_base_and_no_rerun_is_a_member_run() {
+        // The member run (and a fix round that is not a failed-test rerun) narrows; every full run does not.
+        assert!(member_run("workflow_dispatch", "origin/main", "", None));
+        // The final head's runs and the gates of a tag stay whole: a push to main, a tag, the nightly, a manual run with no base,
+        // an app's own gates, and a since_run rerun (which narrows by failed tests itself).
+        for (event, base, since, app) in [
+            ("push", "origin/main", "", None),
+            ("schedule", "", "", None),
+            ("workflow_dispatch", "", "", None),
+            ("workflow_dispatch", "  ", "", None),
+            ("workflow_dispatch", "origin/main", "8001", None),
+            ("workflow_dispatch", "origin/main", "", Some("dyno")),
+        ] {
+            assert!(!member_run(event, base, since, app), "{event} {base:?} {since:?} {app:?}");
+        }
+    }
+
+    #[test]
+    fn the_package_filter_names_the_reached_packages_of_one_workspace_and_never_all_or_none() {
+        let mut cargo = Graph::new();
+        for n in ["a", "b", "c"] {
+            cargo.insert(
+                &format!("crates/{n}"),
+                Node {
+                    name: format!("p-{n}"),
+                    workspace: "crates".into(),
+                    deps: vec![],
+                },
+            );
+        }
+        let g = graph_with(vec![], cargo);
+        let some = plan(&[], json!({}), json!({"crates": ["p-a", "p-c"]}));
+        assert_eq!(package_filter(&some, &g, "crates", true), "package(=p-a) | package(=p-c)");
+        // Positive control: the same plan not narrowing, a plan that says everything, none reached, all reached, another workspace.
+        assert_eq!(package_filter(&some, &g, "crates", false), "");
+        let mut everything = some.clone();
+        everything["all"] = json!(true);
+        assert_eq!(package_filter(&everything, &g, "crates", true), "");
+        assert_eq!(package_filter(&plan(&[], json!({}), json!({})), &g, "crates", true), "");
+        assert_eq!(
+            package_filter(&plan(&[], json!({}), json!({"crates": ["p-a", "p-b", "p-c"]})), &g, "crates", true),
+            ""
+        );
+        assert_eq!(package_filter(&some, &g, "tools/paddock-dev", true), "");
+        let mut with = some.clone();
+        with["filters"] = package_filters(&some, &g, true);
+        let out: std::collections::BTreeMap<String, String> = ci_outputs(&with, &[], None).into_iter().collect();
+        assert_eq!(out["crates_filter"], "package(=p-a) | package(=p-c)");
+        assert_eq!(out["paddock_dev_filter"], "");
+        // Without a `filters` object (a rerun, an app's gates) both outputs are still written, empty.
+        let bare: std::collections::BTreeMap<String, String> = ci_outputs(&some, &[], None).into_iter().collect();
+        assert_eq!((bare["crates_filter"].as_str(), bare["paddock_dev_filter"].as_str()), ("", ""));
     }
 
     #[test]
