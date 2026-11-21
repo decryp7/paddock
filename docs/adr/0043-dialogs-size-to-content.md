@@ -541,7 +541,10 @@ a smaller work area and back asks for the same height twice. The class has come 
 - **Cap.** While more than `ECHO_CAP` (8, the old list's bound) echoes are expected, the OS is far behind, and the
   user is not inferred from an unmatched `Resized` until the queue drains, as after a scale change. Nothing is dropped at
   the cap, so in-order echoes always match. The queue's hard bound is `ECHO_LIMIT` (64; it was unbounded for pending
-  requests): past it the oldest entry goes, which happens only if the OS stopped echoing, with inference already off.
+  requests): past it the oldest entry goes, which happens only if the OS stopped echoing. A dropped request's echo can
+  then take a newer entry of the same size early, so the queue may drain while that entry's echo is still on its way:
+  after a loss the user is not inferred for the rest of the opening (until a scale change clears the queue), and such
+  echoes may be logged as unexplained but never make the window `Manual`. The property's bursts found this case.
 - **Logs (ER-27).** Each transition's line names the event (described from the state before it), the merged count,
   and the queue before and after it (`pending [..] maybe [..]`). The unexplained warning carries the size and the
   queue it was judged against.
@@ -549,7 +552,10 @@ a smaller work area and back asks for the same height twice. The class has come 
 **The check.** Check 2's property is two-sided now: on an OS that echoes every request once, in order, an echo is
 never unexplained and never makes the window `Manual`; with `infer`, a foreign size arriving with every echo
 delivered, not equal to the window's size and outside the scale grace, does make it `Manual`. A foreign size equal to
-an echo still on its way is not generated (D-A). The CI seed of run 8466 is kept in
+an echo still on its way is not generated (D-A). After a loss past `ECHO_LIMIT` only "never `Manual`" is checked
+for echoes. The generator draws some contents from a few fixed heights (equal requests) and makes bursts of measures
+and runs of echoes (the queue over its cap, then drained); matching the newest entry instead of the oldest, and never
+resetting the cap, each fail it without the seed file (10 of 10 and 9 of 10 runs of 400 cases, 2026-11-21). The CI seed of run 8466 is kept in
 `crates/paddock-dialogs/proptest-regressions/size.txt`, and both review probes are unit tests.
 
 **What a size alone cannot tell (D-A).** Requests 300, 400, 300 and one echo of 300: either the OS sent the first 300

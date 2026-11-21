@@ -14,7 +14,8 @@
 //! * while more than [`ECHO_CAP`] echoes are expected, the OS is far behind and an unmatched size may be the echo of
 //!   a request already given up on: the user is not inferred from it until the queue drains, as after a scale change.
 //!   Nothing is dropped at the cap, so in-order echoes still match. Past [`ECHO_LIMIT`] (the OS stopped echoing) the
-//!   oldest entry goes, with inference already off.
+//!   oldest entry goes; its echo may then take a newer entry of the same size early, so matching is not trusted again
+//!   and the user is not inferred for the rest of the opening (until [`EchoQueue::clear`], a scale change).
 
 use super::Request;
 use std::collections::VecDeque;
@@ -22,8 +23,8 @@ use std::collections::VecDeque;
 /// Past this many expected echoes the user is not inferred from an unmatched `Resized` until the queue drains.
 pub const ECHO_CAP: usize = 8;
 
-/// The most expected echoes kept (the bound on the queue): past it the oldest entry goes. Reached only when the OS has
-/// stopped echoing; inference is already off from [`ECHO_CAP`] on.
+/// The most expected echoes kept (the bound on the queue): past it the oldest entry goes and the user is not inferred
+/// again until [`EchoQueue::clear`]. Reached only when the OS has stopped echoing.
 pub const ECHO_LIMIT: usize = 8 * ECHO_CAP;
 
 /// What an entry still expects.
@@ -56,6 +57,8 @@ pub struct EchoQueue {
     entries: VecDeque<Entry>,
     /// More than [`ECHO_CAP`] echoes were expected since the queue was last empty.
     over_cap: bool,
+    /// An entry was dropped past [`ECHO_LIMIT`] since the last [`EchoQueue::clear`].
+    lost: bool,
 }
 
 impl EchoQueue {
@@ -70,6 +73,7 @@ impl EchoQueue {
         }
         if self.entries.len() > ECHO_LIMIT {
             self.entries.pop_front();
+            self.lost = true;
         }
     }
 
@@ -108,15 +112,16 @@ impl EchoQueue {
     }
 
     /// Whether an unmatched `Resized` may be taken for the user: not while the queue is, or was since it last drained,
-    /// over [`ECHO_CAP`].
+    /// over [`ECHO_CAP`], and not after it lost an entry past [`ECHO_LIMIT`] until it is cleared.
     pub fn infers(&self) -> bool {
-        !self.over_cap
+        !self.over_cap && !self.lost
     }
 
     /// Forgets every request (a scale change: the OS resizes the window itself).
     pub fn clear(&mut self) {
         self.entries.clear();
         self.over_cap = false;
+        self.lost = false;
     }
 
     /// The expected echoes for the log, physical px, oldest first: `pending [..] maybe [..]`, at most [`ECHO_CAP`] of
@@ -139,7 +144,9 @@ impl EchoQueue {
             }
             format!("[{}]", out.join(", "))
         };
-        let off = if self.over_cap {
+        let off = if self.lost {
+            format!(", no inference this opening (over {ECHO_LIMIT})")
+        } else if self.over_cap {
             format!(", no inference until drained (over {ECHO_CAP})")
         } else {
             String::new()
@@ -242,6 +249,28 @@ mod tests {
             "{}",
             q.note()
         );
+    }
+
+    /// Found by the proptest's bursts (2026-11-21): past the limit a dropped request's echo can match a newer entry of the
+    /// same size and take it early, so the queue can drain while that entry's own echo is still on its way. Matching is not
+    /// trusted again for the opening: inference stays off after the queue drains, until a scale change clears it.
+    #[test]
+    fn past_the_limit_inference_stays_off_after_the_queue_drains_until_it_is_cleared() {
+        let heights: Vec<u32> = (0..ECHO_LIMIT as u32 + 1).map(|i| 300 + 10 * i).collect();
+        let mut q = queue(&heights);
+        for h in &heights[1..] {
+            assert_eq!(q.echo(400, *h), Echo::Own { merged: 0 });
+        }
+        assert_eq!(q.pending(), 0);
+        assert!(!q.infers(), "lost an entry this opening: {}", q.note());
+        assert!(
+            q.note()
+                .ends_with(&format!(", no inference this opening (over {ECHO_LIMIT})")),
+            "{}",
+            q.note()
+        );
+        q.clear();
+        assert!(q.infers());
     }
 
     #[test]

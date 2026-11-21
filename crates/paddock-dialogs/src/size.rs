@@ -905,9 +905,39 @@ mod tests {
         Reload,
     }
 
+    /// A content height: mostly any, sometimes one of a few fixed heights, so that equal requests queue up (the clamps
+    /// make them common in a real window: a move to a smaller work area and back).
+    fn content() -> impl Strategy<Value = f64> {
+        prop_oneof![
+            2 => 50.0..4000.0f64,
+            1 => prop_oneof![Just(300.0), Just(400.0), Just(500.0), Just(640.0)],
+        ]
+    }
+
+    /// One event, or a burst: several measures with no echo between them (the OS behind, past the echo queue's cap),
+    /// or a run of echoes (the OS catching up, so the queue drains).
+    fn ops() -> impl Strategy<Value = Vec<Op>> {
+        let burst = proptest::collection::vec(content(), 6..14).prop_map(|cs| {
+            cs.into_iter()
+                .map(|content| Op::Measure {
+                    seq_step: 1,
+                    content,
+                    min_h: 50.0,
+                })
+                .collect::<Vec<_>>()
+        });
+        let echoes = (4usize..16).prop_map(|n| vec![Op::OsResize; n]);
+        let chunk = prop_oneof![
+            6 => op().prop_map(|o| vec![o]),
+            2 => burst,
+            2 => echoes,
+        ];
+        proptest::collection::vec(chunk, 1..24).prop_map(|cs| cs.into_iter().flatten().collect())
+    }
+
     fn op() -> impl Strategy<Value = Op> {
         prop_oneof![
-            (-2i8..4, 50.0..4000.0f64, 50.0..900.0f64).prop_map(|(seq_step, content, min_h)| {
+            (-2i8..4, content(), 50.0..900.0f64).prop_map(|(seq_step, content, min_h)| {
                 Op::Measure {
                     seq_step,
                     content,
@@ -948,7 +978,7 @@ mod tests {
             work in (800.0..7680.0f64, 600.0..4320.0f64),
             frame in (0.0..60.0f64, 0.0..60.0f64),
             infer in any::<bool>(),
-            ops in proptest::collection::vec(op(), 1..40),
+            ops in ops(),
         ) {
             let e = Env { scale, work: size(work.0, work.1), frame: size(frame.0, frame.1) };
             let p = kind.policy();
@@ -962,6 +992,9 @@ mod tests {
             // The window's size as the OS last reported it, and whether the one resize after a scale change is excused.
             let mut win = Request { width: physical(400.0, scale), height: physical(520.0, scale) };
             let mut grace = false;
+            // More than `ECHO_LIMIT` echoes were outstanding since the last scale change: the queue dropped some, so an echo
+            // may be unexplained (never the user: inference is off for the opening) and no user is inferred.
+            let mut lost = false;
             for o in ops {
                 let before_mode = s.mode();
                 let eff_before = s.effective();
@@ -999,7 +1032,7 @@ mod tests {
                     Op::Foreign(w, h) if os.iter().any(|r| r.matches(w, h)) => Plan::default(),
                     Op::Foreign(w, h) => {
                         user_signal = infer;
-                        must_be_user = infer && os.is_empty() && !win.matches(w, h) && !grace;
+                        must_be_user = infer && os.is_empty() && !win.matches(w, h) && !grace && !lost;
                         win = Request { width: w, height: h };
                         grace = false;
                         s.on_resized(w, h)
@@ -1012,6 +1045,7 @@ mod tests {
                     Op::Scale(sc) => {
                         env_now = Env { scale: sc, ..env_now };
                         os.clear();
+                        lost = false;
                         win = Request { width: physical(eff_before.width, sc), height: physical(eff_before.height, sc) };
                         grace = true;
                         let plan = s.on_scale_changed(env_now);
@@ -1023,6 +1057,7 @@ mod tests {
                 };
                 if let Some(r) = plan.request {
                     os.push_back(r);
+                    lost |= os.len() > ECHO_LIMIT;
                     let inner = plan.inner.unwrap();
                     let avail = env_now.avail();
                     let min = s.min();
@@ -1046,7 +1081,9 @@ mod tests {
                         }
                     }
                 }
-                if echo {
+                if echo && lost {
+                    prop_assert!(plan.mode_change.is_none(), "an echo made the window manual after a loss: {:?} {}", plan, s.queue_note());
+                } else if echo {
                     prop_assert!(!plan.unexplained && plan.mode_change.is_none(), "an echo of a request was taken as foreign: {:?} {}", plan, s.queue_note());
                 }
                 if before_mode != s.mode() {
