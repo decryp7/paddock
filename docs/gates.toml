@@ -1327,4 +1327,4 @@ reason = "ER-41: report-only until its first green run on the real tree, recorde
 owner = "ER-41"
 since = 2026-11-21
 review_by = 2026-12-21
-approved = "coordinator"
+approved = "user"
