@@ -6,7 +6,10 @@
  */
 
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+
+/** The prefix of the launcher wrapper's file name (browser-launcher.ts); the guard accepts it as `executablePath`: it only ever starts the pinned or Playwright's own browser. */
+export const LAUNCHER_PREFIX = 'paddock-browser-launcher-';
 
 /** The variable that may name a pinned browser binary (Chrome for Testing) for `launchOptions.executablePath`. */
 export const CHROME_ENV = 'PADDOCK_E2E_CHROME';
@@ -79,8 +82,8 @@ export function browserScratchRoot(env: Readonly<Record<string, string | undefin
  * (`MAC_CHROMIUM_TMPDIR`), downloads, crash dumps and disk cache. The profile itself is Playwright's own (a folder in the OS
  * temp folder). Folders are named, not created: the browser and Playwright make them. Playwright starts the browser with
  * `launchOptions.env` INSTEAD of `process.env`, so the environment is the caller's whole `env` plus the one variable (ER-47: no
- * PATH, HOME, LANG or, on Windows, SystemRoot lost). Not covered: the browser's working folder (Playwright passes no cwd, so it is
- * the folder `playwright test` runs in; see docs/lessons.md) and `tracesDir` (@playwright/test overwrites it).
+ * PATH, HOME, LANG or, on Windows, SystemRoot lost). Not covered here: the browser's working folder (Playwright passes no cwd, so it is
+ * the folder `playwright test` runs in; see browser-launcher.ts) and `tracesDir` (@playwright/test overwrites it).
  */
 export function internalBrowserLaunch(
   root: string = browserScratchRoot(),
@@ -91,11 +94,6 @@ export function internalBrowserLaunch(
     downloadsPath: join(root, 'downloads'),
     args: [`--crash-dumps-dir=${join(root, 'crashpad')}`, `--disk-cache-dir=${join(root, 'cache')}`],
   };
-}
-
-/** The Playwright `use` for a Chromium project that keeps the browser's writable folders on the internal disk (spread it in). */
-export function internalBrowserUse(env: Readonly<Record<string, string | undefined>> = process.env): { launchOptions: NonNullable<BrowserUse['launchOptions']> } {
-  return { launchOptions: internalBrowserLaunch(browserScratchRoot(env), env) };
 }
 
 /** Every writable browser folder `launchOptions` names that is on a removable volume. */
@@ -130,7 +128,9 @@ export function browserProblems(use: BrowserUse | undefined, env: Readonly<Recor
   problems.push(...removableFolderProblems(use?.launchOptions, env));
   const path = use?.launchOptions?.executablePath;
   if (path) {
-    if (isInstalledBrowser(path)) problems.push(`executablePath ${path} is the installed browser; tests never use it (rule 7)`);
+    if (basename(path).startsWith(LAUNCHER_PREFIX)) {
+      // Our own wrapper, written by browser-launcher.ts around the pinned or Playwright's browser.
+    } else if (isInstalledBrowser(path)) problems.push(`executablePath ${path} is the installed browser; tests never use it (rule 7)`);
     else if (path !== pinnedChrome(env)) problems.push(`executablePath ${path} is not the pinned browser named in ${CHROMIUM_TEST_ENV} (or ${CHROME_ENV})`);
   }
   return problems;

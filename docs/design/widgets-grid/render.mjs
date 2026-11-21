@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // Every folder the browser writes goes to the internal disk (ER-14).
-import { internalBrowserUse } from '../../../ui/projects/paddock-e2e/src/browser.ts';
+import { internalBrowserUse } from '../../../ui/projects/paddock-e2e/src/browser-launcher.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../../..');

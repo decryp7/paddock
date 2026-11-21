@@ -4,8 +4,9 @@ import { join, normalize, posix } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { internalBrowserUse } from './browser-launcher.ts';
 import { paddockConfig } from './config.ts';
-import { assertChromeForTesting, browserProblems, browserScratchRoot, type BrowserUse, internalBrowserLaunch, internalBrowserUse, isRemovableVolume, CHROME_ENV, CHROMIUM_TEST_ENV, isInstalledBrowser, pinnedChrome } from './browser.ts';
+import { assertChromeForTesting, browserProblems, browserScratchRoot, type BrowserUse, internalBrowserLaunch, isRemovableVolume, CHROME_ENV, CHROMIUM_TEST_ENV, isInstalledBrowser, pinnedChrome } from './browser.ts';
 
 const PINNED = '/Users/me/.cache/chrome-for-testing/mac_arm-131/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 
@@ -92,9 +93,9 @@ test('the browser keeps the caller’s environment: Playwright starts it with la
   const launch = internalBrowserLaunch('/r', env);
   for (const [k, v] of Object.entries(env)) assert.equal(launch.env?.[k], v, k);
   assert.equal(launch.env?.['MAC_CHROMIUM_TMPDIR'], join('/r', 'tmp'));
-  assert.deepEqual(internalBrowserUse(env).launchOptions.env?.['PATH'], '/usr/bin');
+  assert.deepEqual(internalBrowserUse(env, 'off').launchOptions.env?.['PATH'], '/usr/bin');
   // Positive control: the real process environment passes through the config too.
-  const config = paddockConfig({ app: 'x', defaultPort: 4999 });
+  const config = paddockConfig({ app: 'x', launcher: 'off', defaultPort: 4999 });
   const passed = config.projects?.find((p) => p.name === 'chromium')?.use?.launchOptions?.env;
   assert.equal(passed?.['PATH'], process.env['PATH']);
   if (process.platform === 'win32') assert.equal(passed?.['SystemRoot'], process.env['SystemRoot']);
@@ -102,10 +103,10 @@ test('the browser keeps the caller’s environment: Playwright starts it with la
 
 test('the scratch root is the job’s temp folder, else the OS temp folder, and the config uses it', () => {
   assert.equal(browserScratchRoot({ PADDOCK_JOB_TEMP: '/home/r/tmp/job' }), join('/home/r/tmp/job', 'paddock-e2e-browser'));
-  const config = paddockConfig({ app: 'x', defaultPort: 4999, env: { PADDOCK_JOB_TEMP: '/home/r/tmp/job' } });
+  const config = paddockConfig({ app: 'x', launcher: 'off', defaultPort: 4999, env: { PADDOCK_JOB_TEMP: '/home/r/tmp/job' } });
   const chromium = config.projects?.find((p) => p.name === 'chromium')?.use?.launchOptions;
   assert.equal(chromium?.downloadsPath, join('/home/r/tmp/job', 'paddock-e2e-browser', 'downloads'));
-  assert.throws(() => paddockConfig({ app: 'x', defaultPort: 4999, env: { PADDOCK_JOB_TEMP: '/Volumes/vault-dev/tmp' } }), /removable volume/);
+  assert.throws(() => paddockConfig({ app: 'x', launcher: 'off', defaultPort: 4999, env: { PADDOCK_JOB_TEMP: '/Volumes/vault-dev/tmp' } }), /removable volume/);
 });
 
 test('every Playwright config spreads the internal folders and runs the guard: a removable PADDOCK_JOB_TEMP stops each (positive control: a good one loads)', () => {
@@ -124,7 +125,7 @@ test('every Playwright config spreads the internal folders and runs the guard: a
   const list = (rel: string, jobTemp: string) =>
     spawnSync('npx', ['playwright', 'test', '--list', '--config', join(root, rel)], {
       cwd: join(root, 'ui'),
-      env: { ...process.env, PW_SKIP_BUILD_GUARD: '1', PW_PORT: '4999', PADDOCK_JOB_TEMP: jobTemp },
+      env: { ...process.env, PW_SKIP_BUILD_GUARD: '1', PW_PORT: '4999', PADDOCK_JOB_TEMP: jobTemp, CHROMIUM_TEST_PATH: process.execPath },
       encoding: 'utf8',
       shell: process.platform === 'win32',
       timeout: 120_000,

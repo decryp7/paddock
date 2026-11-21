@@ -1,6 +1,6 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
-import { internalBrowserUse } from '../../../../ui/projects/paddock-e2e/src/browser.ts';
+import { internalBrowserUse } from '../../../../ui/projects/paddock-e2e/src/browser-launcher.ts';
 import { openAppWith } from './mock-url';
 import { viewport } from './mock-url';
 import { gridRows } from './app';

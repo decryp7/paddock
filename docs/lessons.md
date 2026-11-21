@@ -3272,11 +3272,17 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   passes `{ ...process.env, MAC_CHROMIUM_TMPDIR }` (ER-47); a test checks PATH (and SystemRoot on Windows) survive. A
   `test.use({ launchOptions })` replaces the config's whole object (Playwright merges `use` one level deep), so a spec that sets one spreads
   `internalBrowserUse().launchOptions` into it. `tracesDir` is not set: @playwright/test overwrites it.
-- **NOT fixed: the browser's working folder under Playwright.** Measured with a stand-in browser (a script that records `pwd` and exits):
-  default, the checkout (`.../ui`); with a `globalSetup` that calls `process.chdir` into a temp folder, the temp folder (workers are forked
-  from the runner and inherit its cwd). It is not applied because the workers then load every config with a changed cwd, and
-  `repoRoot()`, `e2ePort` (worktree path), `doc-screens` and relative reads in specs use `process.cwd()`. A wrapper executable
-  that `cd`s first needs the path of the headless shell, which Playwright does not export (and one wrapper per OS). Both need a decision.
+- **The browser's working folder under Playwright: fixed with a wrapper launcher (macOS), measured.** `launchOptions` has no `cwd`, and a
+  `globalSetup` `process.chdir` would change every worker's cwd (`repoRoot()`, `e2ePort`, `doc-screens` and specs read it). So
+  `browser-launcher.ts` writes a small `sh` script into the scratch root (`cd '<root>/cwd' && exec '<real browser>' "$@"`; `exec`, so the
+  pid stays the browser's), and `internalBrowserUse` sets it as `executablePath`. The real browser is the pinned `CHROMIUM_TEST_PATH`, else
+  the headless shell, found with `playwright install --dry-run chromium-headless-shell`: `chromium.executablePath()` names the full
+  Chromium, a different browser. The script is written to a private file and renamed (its name holds a hash of its text), so workers that
+  start together never run a half-written one. A missing browser or an unwritable root stops the config with an `::error::` line; it never
+  falls back to the checkout. Measured with a stand-in browser under a real `playwright test`: with the wrapper `pwd` is
+  `<scratch>/cwd`, without it the checkout (`ui/`); arguments and environment arrive unchanged (browser-launcher.test.ts and that run).
+  Only macOS has the prompt, so only macOS gets the wrapper: a Windows `.cmd` cannot be spawned without a shell, which Playwright does not
+  use, and Linux gains nothing. The Playwright preset's own unit tests pass `launcher: 'off'` so they need no installed browser.
 - **Not measured:** whether the browser binary on `/Volumes/vault-dev/caches/ms-playwright` still prompts once everything else is internal,
   and whether the working folder is the prompt's only source (measuring risks the desktop prompt). The user checks with a run under the
   new code from a checkout on `/Volumes`; if it prompts, `PLAYWRIGHT_BROWSERS_PATH` moves to the internal disk too.

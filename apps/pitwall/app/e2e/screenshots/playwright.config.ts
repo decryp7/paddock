@@ -2,7 +2,8 @@ import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 import { appBuildGuard } from '../../../../../ui/projects/paddock-e2e/src/build-guard.ts';
 import { paddockServers } from '../../../../../ui/projects/paddock-e2e/src/servers.ts';
-import { assertChromeForTesting, internalBrowserUse } from '../../../../../ui/projects/paddock-e2e/src/browser.ts';
+import { assertChromeForTesting } from '../../../../../ui/projects/paddock-e2e/src/browser.ts';
+import { internalBrowserUse } from '../../../../../ui/projects/paddock-e2e/src/browser-launcher.ts';
 import { e2ePortOrCiDefault } from '../../../../../ui/projects/paddock-e2e/src/env.ts';
 
 // Fails fast, before any server starts, when what the app consumes of ui (ui/dist, the css) is stale (build-guard.ts).
