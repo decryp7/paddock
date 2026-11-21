@@ -49,7 +49,6 @@ export interface BrowserUse {
     readonly channel?: string;
     readonly executablePath?: string;
     readonly downloadsPath?: string;
-    readonly tracesDir?: string;
     readonly args?: string[];
     readonly env?: Record<string, string | undefined>;
   };
@@ -70,43 +69,49 @@ const FOLDER_SWITCHES: readonly string[] = ['--user-data-dir=', '--crash-dumps-d
 /** Variables Chrome reads its temp folder from (`MAC_CHROMIUM_TMPDIR` on macOS, which ignores `TMPDIR`; lessons.md, Chrome slow to quit). */
 const TEMP_VARIABLES: readonly string[] = ['MAC_CHROMIUM_TMPDIR', 'TMPDIR', 'TMP', 'TEMP'];
 
-/** The internal root for a test browser's writable folders: the job's own temp folder, else the OS temp folder. */
+/** The internal root for a test browser's writable folders: the job's own temp folder (`PADDOCK_JOB_TEMP`), else the OS temp folder. */
 export function browserScratchRoot(env: Readonly<Record<string, string | undefined>> = process.env): string {
   return join(env['PADDOCK_JOB_TEMP'] || tmpdir(), 'paddock-e2e-browser');
 }
 
 /**
- * The launch options that keep every folder the test browser writes under the internal temp root (`root`): its temp folder
- * (`MAC_CHROMIUM_TMPDIR`, `TMPDIR`), downloads, traces, crash dumps and disk cache. The profile itself is Playwright's own
- * (a folder in the OS temp folder). Folders are named, not created: the browser and Playwright make them.
+ * The launch options that keep the folders the test browser writes under the internal temp root (`root`): its temp folder
+ * (`MAC_CHROMIUM_TMPDIR`), downloads, crash dumps and disk cache. The profile itself is Playwright's own (a folder in the OS
+ * temp folder). Folders are named, not created: the browser and Playwright make them. Playwright starts the browser with
+ * `launchOptions.env` INSTEAD of `process.env`, so the environment is the caller's whole `env` plus the one variable (ER-47: no
+ * PATH, HOME, LANG or, on Windows, SystemRoot lost). Not covered: the browser's working folder (Playwright passes no cwd, so it is
+ * the folder `playwright test` runs in; see docs/lessons.md) and `tracesDir` (@playwright/test overwrites it).
  */
-export function internalBrowserLaunch(root: string = browserScratchRoot()): NonNullable<BrowserUse['launchOptions']> {
+export function internalBrowserLaunch(
+  root: string = browserScratchRoot(),
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): NonNullable<BrowserUse['launchOptions']> {
   return {
-    env: { MAC_CHROMIUM_TMPDIR: join(root, 'tmp') },
+    env: { ...env, MAC_CHROMIUM_TMPDIR: join(root, 'tmp') },
     downloadsPath: join(root, 'downloads'),
-    tracesDir: join(root, 'traces'),
     args: [`--crash-dumps-dir=${join(root, 'crashpad')}`, `--disk-cache-dir=${join(root, 'cache')}`],
   };
 }
 
 /** The Playwright `use` for a Chromium project that keeps the browser's writable folders on the internal disk (spread it in). */
 export function internalBrowserUse(env: Readonly<Record<string, string | undefined>> = process.env): { launchOptions: NonNullable<BrowserUse['launchOptions']> } {
-  return { launchOptions: internalBrowserLaunch(browserScratchRoot(env)) };
+  return { launchOptions: internalBrowserLaunch(browserScratchRoot(env), env) };
 }
 
 /** Every writable browser folder `launchOptions` names that is on a removable volume. */
 export function removableFolderProblems(launchOptions: BrowserUse['launchOptions'], env: Readonly<Record<string, string | undefined>> = process.env): string[] {
   const named: [string, string | undefined][] = [
     ['downloadsPath', launchOptions?.downloadsPath],
-    ['tracesDir', launchOptions?.tracesDir],
-    ...TEMP_VARIABLES.map((v): [string, string | undefined] => [`env ${v}`, launchOptions?.env?.[v] ?? (launchOptions?.env ? undefined : env[v])]),
+    ...TEMP_VARIABLES.map((v): [string, string | undefined] => [`env ${v}`, launchOptions?.env ? launchOptions.env[v] : env[v]]),
+    // Playwright makes the browser's profile in the OS temp folder of its own process, whatever `launchOptions.env` says.
+    ...['TMPDIR', 'TMP', 'TEMP'].map((v): [string, string | undefined] => [`process env ${v}`, env[v]]),
     ...(launchOptions?.args ?? []).flatMap((arg): [string, string | undefined][] =>
       FOLDER_SWITCHES.filter((sw) => arg.startsWith(sw)).map((sw): [string, string | undefined] => [sw.slice(0, -1), arg.slice(sw.length)]),
     ),
   ];
   return named
     .filter(([, path]) => path !== undefined && isRemovableVolume(path))
-    .map(([what, path]) => `${what} ${path} is on a removable volume; macOS asks the user for access to it (ER-14). Keep it under the job's internal temp folder (internalBrowserLaunch)`);
+    .map(([what, path]) => `${what} ${path} is on a removable volume; macOS asks the user for access to it (ER-14). Set PADDOCK_JOB_TEMP (or TMPDIR) to a folder on the internal disk; the browser's folders go under it (internalBrowserLaunch)`);
 }
 
 /** Whether `path` is an installed Chrome or Edge. */

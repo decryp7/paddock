@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 import { appBuildGuard } from '../../../ui/projects/paddock-e2e/src/build-guard.ts';
 import { paddockServers } from '../../../ui/projects/paddock-e2e/src/servers.ts';
-import { internalBrowserUse } from '../../../ui/projects/paddock-e2e/src/browser.ts';
+import { assertChromeForTesting, internalBrowserUse } from '../../../ui/projects/paddock-e2e/src/browser.ts';
 import { e2ePortOrCiDefault } from '../../../ui/projects/paddock-e2e/src/env.ts';
 
 // Fails fast, before any server starts, when what the app consumes of ui (ui/dist, the css) is stale (build-guard.ts).
@@ -29,7 +29,8 @@ const BASELINE = !!process.env['DEBRIEF_SHELL_BASELINE'];
 // The baseline projects keep the snapshot names of the browser they run in (`<name>-chromium-darwin.png`).
 const baselineSnapshots = (browser: string) => `{snapshotDir}/{testFileDir}/{testFileName}-snapshots/{arg}-${browser}{-platform}{ext}`;
 
-export default defineConfig({
+// The guard refuses an installed browser (rule 7) and a browser folder on a removable volume (ER-14).
+export default assertChromeForTesting(defineConfig({
   testDir: 'e2e',
   testMatch: '**/*.e2e.ts',
   fullyParallel: true,
@@ -76,4 +77,4 @@ export default defineConfig({
       timeoutMs: 300_000,
     },
   ]),
-});
+}));

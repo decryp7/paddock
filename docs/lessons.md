@@ -3259,14 +3259,24 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **Symptom:** `chrome-headless-shell` on the Mac runner and on dev machines made macOS ask for access to a removable volume (a window on
   the desktop, ER-14, and a possible hang). The browsers, the checkouts and the build folders live on `/Volumes/vault-dev`, which macOS
   treats as removable.
-- **Found by reading, not measured:** the Rust launchers (paddock-chromium and the Debrief and Spotter copies) started the browser in the
-  caller's working folder, which is the checkout on `/Volumes` (a stand-in that prints `{cwd}` showed it: red before the fix). The
-  Playwright configs left downloads and traces to defaults and a `test.use({ launchOptions })` replaces the config's whole object
-  (Playwright merges `use` one level deep).
-- **Fix:** the Rust launchers start the browser in its own `browser-temp` folder (inside the profile, on the internal disk).
-  `paddock-e2e` has one helper (`internalBrowserUse`, `internalBrowserLaunch`) that names the temp folder, downloads, traces, crash dumps and disk cache under
-  `$PADDOCK_JOB_TEMP` (the runner's internal job temp) or the OS temp folder, and `browserProblems` refuses any of them on `/Volumes/` (positive
-  control in browser.test.ts). Every Chromium project of every Playwright config spreads the helper.
-- **Not measured:** whether a browser binary that stays on `/Volumes/vault-dev/caches/ms-playwright` still prompts once all of this is
-  internal (measuring it risks the desktop prompt). The user checks with a run under the new code; if it prompts, the browser binary
-  folder (`PLAYWRIGHT_BROWSERS_PATH`) moves to the internal disk.
+- **Found by reading, not measured against the prompt:** the Rust launchers (paddock-chromium and the Debrief and Spotter copies) started
+  the browser in the caller's working folder, which is the checkout on `/Volumes` (a stand-in that prints `{cwd}` showed it: red before the
+  fix). Playwright does the same: it passes no `cwd` (playwright-core `launchProcess`), so the browser inherits the worker's.
+- **Fix, Rust:** the launchers start the browser in its own `browser-temp` folder (inside the profile, on the internal disk).
+- **Fix, Playwright:** `paddock-e2e` has one helper (`internalBrowserUse`, `internalBrowserLaunch`) that names the temp folder
+  (`MAC_CHROMIUM_TMPDIR`), downloads, crash dumps and disk cache under `$PADDOCK_JOB_TEMP` (the runner's internal job temp) or the OS temp
+  folder. `browserProblems` refuses any of them, and the process's own TMPDIR, on `/Volumes/`. Every Chromium project of every Playwright
+  config spreads the helper and runs `assertChromeForTesting`; the four doc-render scripts launch with it. browser.test.ts has the
+  positive controls, including one that runs `playwright test --list` on every config.
+- **Playwright's `launchOptions.env` replaces the browser's whole environment** (it is used instead of `process.env`). The helper therefore
+  passes `{ ...process.env, MAC_CHROMIUM_TMPDIR }` (ER-47); a test checks PATH (and SystemRoot on Windows) survive. A
+  `test.use({ launchOptions })` replaces the config's whole object (Playwright merges `use` one level deep), so a spec that sets one spreads
+  `internalBrowserUse().launchOptions` into it. `tracesDir` is not set: @playwright/test overwrites it.
+- **NOT fixed: the browser's working folder under Playwright.** Measured with a stand-in browser (a script that records `pwd` and exits):
+  default, the checkout (`.../ui`); with a `globalSetup` that calls `process.chdir` into a temp folder, the temp folder (workers are forked
+  from the runner and inherit its cwd). It is not applied because the workers then load every config with a changed cwd, and
+  `repoRoot()`, `e2ePort` (worktree path), `doc-screens` and relative reads in specs use `process.cwd()`. A wrapper executable
+  that `cd`s first needs the path of the headless shell, which Playwright does not export (and one wrapper per OS). Both need a decision.
+- **Not measured:** whether the browser binary on `/Volumes/vault-dev/caches/ms-playwright` still prompts once everything else is internal,
+  and whether the working folder is the prompt's only source (measuring risks the desktop prompt). The user checks with a run under the
+  new code from a checkout on `/Volumes`; if it prompts, `PLAYWRIGHT_BROWSERS_PATH` moves to the internal disk too.

@@ -77,7 +77,7 @@ export function paddockConfig(options: PaddockConfigOptions): PlaywrightTestConf
   const shots = options.screenshotSpecs ?? SCREENSHOT_SPECS;
   const executablePath = pinnedChrome(env);
   // Every folder the browser writes goes to the internal temp root: a removable volume makes macOS ask the user (ER-14).
-  const launchOptions = { ...internalBrowserLaunch(browserScratchRoot(env)), ...(executablePath ? { executablePath } : {}) };
+  const launchOptions = { ...internalBrowserLaunch(browserScratchRoot(env), env), ...(executablePath ? { executablePath } : {}) };
   const chromium = { ...devices['Desktop Chrome'], viewport, launchOptions };
   const reporter: PlaywrightTestConfig['reporter'] = isOn(env['PADDOCK_E2E_BLOB'])
     ? [['blob', { outputDir: 'blob-report', fileName: `${options.app}-${env['PADDOCK_E2E_SHARD'] ?? 'all'}.zip` }], ['list']]
